@@ -72,6 +72,15 @@
   font-size: var(--text-sm, 0.875rem);
   white-space: nowrap;
 }
+.fy-queue-group-next {
+  margin-inline-start: auto;
+  color: var(--muted);
+  font-size: var(--text-sm, 0.875rem);
+  white-space: nowrap;
+}
+.fy-queue-group-next + .fy-queue-group-count {
+  margin-inline-start: 12px;
+}
 .fy-queue-list {
   display: flex;
   flex-direction: column;

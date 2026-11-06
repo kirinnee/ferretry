@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { QueuePageView, type QueueRowHandlers } from '../../src/components/queue-page.tsx';
-import { outboxRowOf, queueRowOf, type QueueGroup } from '../../src/lib/queue-view.ts';
+import { clockOfInstant } from '../../src/lib/message-clock.ts';
+import { outboxRowOf, type QueueGroup, queueRowOf } from '../../src/lib/queue-view.ts';
 import { QueueActionError } from '../../src/lib/send-queue.ts';
 import { render, run, runAsync } from '../support/react.ts';
 
@@ -260,5 +261,61 @@ describe('QueuePageView', () => {
       buttons(mounted!.root.findByProps({ 'data-queue-row': 'o1' }), 'Cancel message')[0]?.props.onClick(),
     );
     expect(JSON.stringify(mounted.toJSON())).toContain('That did not work.');
+  });
+});
+
+describe('QueuePageView send times', () => {
+  const NOW = Date.parse('2026-11-04T11:00:00.000Z');
+  const clock = (instant: string): string => clockOfInstant(instant)?.short ?? '';
+
+  test('each held row says when it sends and the ferret shows the earliest', () => {
+    mounted = view({
+      now: NOW,
+      groups: [
+        group([
+          queued('q1', 'queued', { holdUntil: '2026-11-04T11:30:00.000Z' }),
+          queued('q22', 'queued', { holdUntil: '2026-11-04T11:20:00.000Z' }),
+        ]),
+      ],
+    });
+    const { root } = mounted;
+    expect(
+      text(root.findByProps({ 'data-queue-row': 'q1' }).findByProps({ 'data-queue-send': '2026-11-04T11:30:00.000Z' })),
+    ).toBe(`sends by ${clock('2026-11-04T11:30:00.000Z')}`);
+    expect(text(root.findByProps({ 'data-queue-group-send': '2026-11-04T11:20:00.000Z' }))).toBe(
+      `next send ${clock('2026-11-04T11:20:00.000Z')}`,
+    );
+  });
+
+  test('a hold that is up says due now, on the row and on the ferret, whatever a later hold says', () => {
+    mounted = view({
+      now: NOW,
+      groups: [
+        group([
+          queued('q1', 'queued', { holdUntil: '2026-11-04T11:20:00.000Z' }),
+          queued('q22', 'queued', { holdUntil: '2026-11-04T10:59:00.000Z' }),
+          queued('q3', 'queued', { holdUntil: '2026-11-04T11:00:00.000Z' }),
+        ]),
+      ],
+    });
+    const { root } = mounted;
+    for (const id of ['q22', 'q3']) {
+      expect(text(root.findByProps({ 'data-queue-row': id }).findByProps({ 'data-queue-send': 'due' }))).toBe(
+        'due now',
+      );
+    }
+    expect(text(root.findByProps({ 'data-queue-group-send': 'due' }))).toBe('due now');
+  });
+
+  test('a row waiting on a busy ferret with no hold says when its turn ends; one on this device says nothing', () => {
+    mounted = view({ now: NOW, groups: [group([saved, queued('q1', 'queued', { waitReason: 'busy' })])] });
+    const { root } = mounted;
+    expect(text(root.findByProps({ 'data-queue-row': 'q1' }).findByProps({ 'data-queue-send': 'turn' }))).toBe(
+      'when its turn ends',
+    );
+    expect(text(root.findByProps({ 'data-queue-group-send': 'turn' }))).toBe('when its turn ends');
+    expect(
+      root.findByProps({ 'data-queue-row': 'o1' }).findAll(n => n.props['data-queue-send'] !== undefined),
+    ).toHaveLength(0);
   });
 });

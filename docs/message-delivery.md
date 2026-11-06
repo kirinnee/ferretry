@@ -135,7 +135,16 @@ this page, which is still how a message reaches the pane.
 - **Queue views** — the chat header's ⋯ menu has **Message queue** (that ferret: `/d/<id>/queue/<session>`), and
   **All queues** (`/d/<id>/queue`, also in Find / ⌘K) lists every ferret with something waiting across every
   paired machine, longest-waiting first. Both read `GET …/queue` every five seconds plus the outbox, one row per
-  message with its tick, sender chip (never tag text in a body) and reason, with Edit and Cancel.
+  message with its tick, sender (only when it is not you; never tag text in a body) and reason, with Edit and Cancel. **When it
+  goes** (`rowSend` / `groupNextSend` in `queue-view.ts`): a queued row whose `holdUntil` is still ahead says
+  `sends by 11:20` (the reader's clock), and its ferret's heading shows the earliest as `next send 11:20`; a
+  queued row with no hold left, or none, waiting on a busy ferret says `when its turn ends`; a row waiting for
+  something else (a stopped ferret, an open question) and a row still on this device say only their own reason.
+  A message still **waiting** (saved on this device, or `queued` here, owner's or a ferret's, held or not) is
+  **not drawn in the chat at all** — this page is the only place it shows (`hideWaiting`,
+  `lib/waiting-fold.ts`, applied to the Transcript's rows only) — and it appears in the chat once it is typed
+  or delivered. A message that needs the person (failed, refused, unconfirmed, typed but not sent) is not
+  waiting and stays in the chat.
 
 - **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
 - **Edit or cancel** — only while `queued`: `PATCH /v1/sessions/:sessionId/queue/:messageId` `{ "text" }` and
