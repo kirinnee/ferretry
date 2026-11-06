@@ -1121,6 +1121,23 @@ describe('the tmux send terminal, as the tracker reads it', () => {
     should(await subject([], 'held', prompted).submitComposer(ID, 'please rerun the suite')).equal('absent');
     should([joined.keys, busy.keys, prompted.keys]).deepEqual([[], [], []]);
   });
+
+  it('should press for a strict submit only when the composer is the whole text, never a clipped drawing (&B153)', async () => {
+    const whole = new FrameTmux([typed('please rerun the whole suite now'), PLACEHOLDER]);
+    const clipped = new FrameTmux([typed('please rerun the whole…')]);
+    const empty = new FrameTmux([typed('')]);
+
+    should(await subject([], 'held', whole).submitComposer(ID, 'please rerun the whole suite now', true)).equal(
+      'submitted',
+    );
+    should(await subject([], 'held', clipped).submitComposer(ID, 'please rerun the whole suite now', true)).equal(
+      'absent',
+    );
+    should(await subject([], 'held', empty).submitComposer(ID, 'please rerun the whole suite now', true)).equal(
+      'absent',
+    );
+    should([whole.keys, clipped.keys, empty.keys]).deepEqual([['Enter'], [], []]);
+  });
 });
 
 /**
