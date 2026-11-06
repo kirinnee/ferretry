@@ -63,7 +63,6 @@ import { type CatalogInstallSubsystem, catalogInstallRoutes } from './catalog-in
 import { type CatalogLinkSubsystem, catalogLinkRoutes } from './catalog-links.ts';
 import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
-import { cgroupRoutes, type LimitsSubsystem } from './cgroups.ts';
 import { type ConfigFilesSubsystem, configFilesRoutes } from './config-files.ts';
 import { type ConversationImportSubsystem, conversationImportRoutes } from './conversation-import.ts';
 import { daemonUpdateRoutes } from './daemon-update.ts';
@@ -251,13 +250,6 @@ export interface MountedSubsystems {
   /** The account model's first run and clone: the setup scan, tool install and the export bundle
    *  (docs/design/account-model.md §7). */
   readonly fleetSetup: FleetSetupSubsystem;
-  /** How much of this machine the managed fleet may take: the aggregate every agent shares, the
-   *  ceiling on any one of them, and whether either is enforced. It is the read side of the same
-   *  seam the session launch uses — one saved document, one conversion to host-manager properties —
-   *  so what the settings panel reports is what the next launch will write. This daemon and the
-   *  supervision it runs are outside the capped slice, and the surface PROVES both from placements
-   *  rather than repeating the claim. */
-  readonly cgroups: LimitsSubsystem;
   /** The configuration files (docs/config-files.md): what is in effect and what is wrong, an edit, the
    *  owner's confirmation of an edit that loosens, and the agent's `config.*` tools. The subsystem owns
    *  the WATCHER as well as the routes, for the reason the warden owns its sweep. */
@@ -629,11 +621,6 @@ export function legacyModule(
               // `/v1/mcp` and `/v1/mcp/check` are fixed literals no other route uses; the per-session list ends in
               // `mcp/servers`, a literal pair the session MCP routes below do not use, so none can shadow another.
               ...mcpInventoryRoutes(subsystems.mcpInventory),
-              // Resource limits register beside the fleet they bound, and are governed by the same capability
-              // for the same reason: this is a machine-wide setting about the agents this daemon runs. Both
-              // paths are the one fixed literal `/v1/cgroups/config`, which no other subsystem uses, so this
-              // table can neither shadow nor be shadowed by anything around it.
-              ...cgroupRoutes(subsystems.cgroups),
               // The configuration files, beside the machine-wide settings they hold. Every path is under
               // `/v1/config` or is the one literal `/v1/agent/config`, which no other subsystem uses, so this
               // table can neither shadow nor be shadowed by anything around it.

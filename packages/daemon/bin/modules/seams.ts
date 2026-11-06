@@ -1,6 +1,6 @@
 import type { BuiltModule } from '../../src/lib/runtime/modules.ts';
 import type { DaemonWorld } from '../fyd.ts';
-import type { LearningSubsystem } from '../../src/lib/index.ts';
+import type { LearningSubsystem, LimitsService } from '../../src/lib/index.ts';
 import type { LearningSeams } from './learning.ts';
 
 /**
@@ -15,6 +15,8 @@ import type { LearningSeams } from './learning.ts';
 type SeamReaders = Readonly<Record<string, (world: DaemonWorld) => unknown>>;
 
 export const seamsOf = {
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the measured host is a `buildWorld` seam, a need). */
+  cgroups: (_world: DaemonWorld): void => undefined,
   learning: (world: DaemonWorld): LearningSeams => ({ userHome: world.userHome }),
 } as const satisfies SeamReaders;
 
@@ -24,5 +26,6 @@ export const seamsOf = {
  * and `jobs`. Deleted in the same tidy-up PR as {@link seamsOf}.
  */
 export interface ModuleHandles {
+  readonly cgroups: BuiltModule<LimitsService>;
   readonly learning: BuiltModule<LearningSubsystem>;
 }

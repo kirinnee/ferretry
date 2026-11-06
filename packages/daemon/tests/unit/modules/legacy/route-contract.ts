@@ -83,7 +83,6 @@ export const callers: readonly string[] = [
   'GET /v1/catalog-members operator any',
   'GET /v1/catalog-shares operator any',
   'GET /v1/catalogs operator any',
-  'GET /v1/cgroups/config operator any',
   'GET /v1/config/file operator any',
   'GET /v1/config/status operator any',
   'GET /v1/copy-plans operator person',
