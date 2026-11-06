@@ -111,8 +111,8 @@ describe('conservativeChanges', () => {
     should(changes.entries).eql([
       { label: 'Skill file run.sh', change: 'changed', document: true, hidden: true, flag: 'script' },
     ]);
-    const other = conservativeChanges(skill(['a.md', 'password: abc\n']), skill(['a.md', 'hello\n']));
-    should(JSON.stringify(other)).not.match(/abc/u);
+    const other = conservativeChanges(skill(['a.md', 'password: plain.word.one\n']), skill(['a.md', 'hello\n']));
+    should(JSON.stringify(other)).not.match(/plain\.word\.one/u);
   });
 
   it('should leave an unchanged entry unchanged even when it would trip', () => {
