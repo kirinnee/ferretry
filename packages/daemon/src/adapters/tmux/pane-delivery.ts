@@ -16,6 +16,8 @@
 import {
   classifySubmit,
   composerHoldsOtherText,
+  composerInput,
+  countlessPasteOf,
   draftBlockingReadiness,
   frameCursor,
   type InjectionOutcome,
@@ -25,6 +27,7 @@ import {
   paneBlockingPermission,
   paneBlockingPrompt,
   paneResponded,
+  readComposer,
   retryDelays,
   startupSettleStep,
   type StartupDialogAction,
@@ -263,15 +266,26 @@ export class TmuxPaneDelivery {
    * bounded attempts on a pane that was always going to submit.
    */
   private async submit(session: string, text: string, evidence: LandingEvidence): Promise<InjectionOutcome> {
+    // &B153: the countless chip (`[Pasted text #30]`) this fill's own one-line paste was drawn as, by its counter,
+    // pinned on the first look after landing. Every later Enter needs the SAME counter: a person who cleared our
+    // paste and pasted their own line draws a new one.
+    let ownChip: string | undefined;
     for (let attempt = 0; attempt < this.settings.submitAttempts; attempt++) {
       const before = await captureFrame(this.tmux, session);
       // A person who typed after the fill shares the composer with the payload now: Enter would submit their
       // words with it. Nothing is pressed; the send is typed and unconfirmed, and never typed again.
-      if (composerHoldsOtherText(before.visible, frameCursor(before), text))
-        throw new ComposerUnconfirmedError(
-          `the turn was typed into tmux session ${session}, and other text joined it in the composer before Enter; Enter was not pressed`,
-          1,
-        );
+      if (composerHoldsOtherText(before.visible, frameCursor(before), text)) {
+        const chip =
+          evidence === 'placeholder'
+            ? countlessPasteOf(composerInput(readComposer(before.visible, frameCursor(before))), text)
+            : undefined;
+        if (chip === undefined || (attempt > 0 && chip !== ownChip))
+          throw new ComposerUnconfirmedError(
+            `the turn was typed into tmux session ${session}, and other text joined it in the composer before Enter; Enter was not pressed`,
+            1,
+          );
+        ownChip = chip;
+      }
       await this.tmux.sendKey(session, 'Enter');
       // Polls counted from the pane's first repaint after this Enter; until then, time against the ceiling.
       let sinceResponse: number | undefined;

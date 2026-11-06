@@ -48,24 +48,30 @@ export function strandablePointer(record: SendRecord): string | undefined {
  * Claude rewinds a prompt cancelled before its first answer into the box). The ledger said `delivered`, so
  * nothing could ever claim the text again: the ferret sat three hours with its own turn in its box.
  *
- * Such a pointer is claimed only while it is the NEWEST send this session typed: once anything was typed
- * after it, the conversation moved on, and that pointer seen in the box again is something else (a history
- * recall, say), which is left alone. The pointer's path names this session's own turn or queued file, so no
- * person's draft can be exactly it by accident.
+ * This is only the CANDIDATE rule, from the ledger: the NEWEST send this session typed (by when it was last
+ * typed), so once anything was typed after it the pointer seen again is something else and is left alone. It
+ * cannot tell a harness's rewind from a person pressing Up to recall the last prompt, so the send path never
+ * presses on it without the transcript's proof that its user record was never answered (`retraction.ts`).
  */
+/** When a send was last typed: its current attempt, else its acceptance. */
+function lastTypedMs(record: SendRecord): number {
+  return Date.parse(record.attemptAt ?? record.acceptedAt);
+}
+
 export function retractedPointer(record: SendRecord, records: readonly SendRecord[]): string | undefined {
   if (record.fate !== 'delivered' || record.held === true || record.untyped === true || !POINTER_PATHS.has(record.path))
     return undefined;
   const pointer = record.matchText;
   if (pointer === undefined || parseHandoffPointer(pointer) === null) return undefined;
-  const typedAt = Date.parse(record.acceptedAt);
+  // Ordered by when each was last TYPED: a send retried after a later one was delivered is newer than it.
+  const typedAt = lastTypedMs(record);
   const newer = records.some(
     other =>
       other.sendId !== record.sendId &&
       other.held !== true &&
       other.untyped !== true &&
       other.fate !== 'withdrawn' &&
-      Date.parse(other.acceptedAt) >= typedAt,
+      lastTypedMs(other) >= typedAt,
   );
   return newer ? undefined : pointer;
 }

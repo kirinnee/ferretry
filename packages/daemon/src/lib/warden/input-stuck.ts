@@ -26,8 +26,9 @@
  * &B153: ALSO A SEND THE HARNESS TOOK BACK. A delivered turn pointer can reappear in the box after its user
  * record was written (Claude rewinds a prompt cancelled before its first answer into the composer), and the
  * tracker no longer watches a delivered send. So for a ferret idle that long whose newest send is a delivered
- * pointer, the send path reads the box once per sweep; exactly that pointer there is flagged and handled the
- * same way — one verified Enter, then the notice.
+ * pointer, the send path reads the box once per sweep; exactly that pointer there, with the transcript proving
+ * its user record was never answered (a person's Up-arrow recall of an answered one is not), is flagged and
+ * handled the same way — one verified Enter, then the notice.
  *
  * ═══ WHAT IS DONE ═══
  *
@@ -127,7 +128,7 @@ export function mayHoldRetractedPointer(sends: readonly StuckInputSend[], nowMs:
   let newest: StuckInputSend | undefined;
   for (const send of sends) {
     if (send.held === true || send.untyped === true || send.fate === 'withdrawn') continue;
-    if (newest === undefined || Date.parse(send.acceptedAt) >= Date.parse(newest.acceptedAt)) newest = send;
+    if (newest === undefined || typedAtMs(send) >= typedAtMs(newest)) newest = send;
   }
   if (newest === undefined || newest.fate !== 'delivered' || !POINTER_PATHS.has(newest.path)) return false;
   // Past the horizon it is history, like any stuck send: an old ferret's box is not read every sweep for good.

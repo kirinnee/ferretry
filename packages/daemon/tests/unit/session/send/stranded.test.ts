@@ -236,20 +236,36 @@ describe('&B153: a pointer the harness took back after it was delivered', () => 
   });
 });
 
-describe('&B153: Claude’s countless paste chip is a paste with no line break', () => {
+describe('&B153: Claude’s countless paste chip is never claimed after the fact', () => {
   const ONE_LINE = `approve — ${'third-round review of the change, all threads answered; '.repeat(30)}`;
   const inline = (overrides: Partial<SendRecord> = {}) =>
     record({ path: 'direct', message: ONE_LINE, matchText: ONE_LINE, turn: undefined, ...overrides });
 
-  it('claims `[Pasted text #N]` for a one-line message that travelled as a paste', () => {
-    should(showsOwnText('[Pasted text #30]', ONE_LINE)).be.true();
-    should(strandedSend('[Pasted text #30]', [inline()])?.sendId).equal('send-1');
+  it('leaves `[Pasted text #N]` alone: a person who cleared ours and pasted their own line draws one too', () => {
+    should(showsOwnText('[Pasted text #30]', ONE_LINE)).be.false();
+    should(showsOwnText('[Pasted text #31]', ONE_LINE)).be.false();
+    should(strandedSend('[Pasted text #30]', [inline()])).be.undefined();
   });
+});
 
-  it('never claims it for a message with line breaks, beside other text, or as a Codex chip', () => {
-    should(showsOwnText('[Pasted text #30]', 'first line of it\nsecond line of it')).be.false();
-    should(showsOwnText('see [Pasted text #30]', ONE_LINE)).be.false();
-    should(showsOwnText('[Pasted Content]', ONE_LINE)).be.false();
-    should(showsOwnText('[Pasted text #30 extra]', ONE_LINE)).be.false();
+describe('&B153: ordering by when a send was last typed (review)', () => {
+  it('counts a pointer retried after a later send as the newest, and the later send as older', () => {
+    // A accepted 09:00, timed out; B delivered 09:05; A retried and delivered 09:10, then taken back.
+    const pointerA = record({
+      fate: 'delivered',
+      acceptedAt: '2026-10-22T09:00:00.000Z',
+      attemptAt: '2026-10-22T09:10:00.000Z',
+    });
+    const inlineB = record({
+      sendId: 'b',
+      path: 'direct',
+      fate: 'delivered',
+      acceptedAt: '2026-10-22T09:05:00.000Z',
+      message: 'a message typed as itself',
+      matchText: 'a message typed as itself',
+    });
+
+    should(retractedPointer(pointerA, [pointerA, inlineB])).equal(OURS);
+    should(strandedSend(OURS, [pointerA, inlineB])?.sendId).equal('send-1');
   });
 });

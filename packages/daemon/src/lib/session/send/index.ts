@@ -2,6 +2,7 @@ export * from './handoff.ts';
 export * from './notifier.ts';
 export * from './policy.ts';
 export * from './reproof.ts';
+export * from './retraction.ts';
 export * from './send-id.ts';
 export * from './service.ts';
 export * from './settings.ts';

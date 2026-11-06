@@ -58,6 +58,16 @@ export class FakeTmuxServer implements TmuxCommandPort {
    */
   swallowEnters = 0;
   /**
+   * What a swallowed Enter leaves in the composer, when a test needs more than the trailing line break it
+   * leaves by default — a person who cleared our paste and pasted their own, say (&B153).
+   */
+  afterSwallow: ((composer: string) => string) | undefined = undefined;
+  /**
+   * Claude's real chip for a paste with no line break: `[Pasted text #N]`, with no `+N lines` (&B153). Off by
+   * default, where every paste draws a count.
+   */
+  countlessOneLinePaste = false;
+  /**
    * Until this virtual time the harness is still starting: Codex 0.166 has taken a submission and parks it under a
    * last line of `Waiting for startup · esc cancel`, so the composer is not the last thing on screen.
    */
@@ -162,7 +172,7 @@ export class FakeTmuxServer implements TmuxCommandPort {
     if (key === 'BSpace') this.composer = this.composer.slice(0, -1);
     if (key === 'Enter' && this.composer.length > 0 && this.swallowEnters > 0) {
       this.swallowEnters -= 1;
-      this.composer += '\n';
+      this.composer = this.afterSwallow === undefined ? `${this.composer}\n` : this.afterSwallow(this.composer);
       return result('');
     }
     if (key === 'Enter' && this.composer.length > 0) {
@@ -185,7 +195,10 @@ export class FakeTmuxServer implements TmuxCommandPort {
   private pastePayload(payload: string): TmuxCommandResult {
     // Both harnesses collapse a bracketed paste and render NONE of its characters.
     this.pasteCount += 1;
-    this.composer = `[Pasted text #${this.pasteCount} +${payload.split('\n').length} lines]`;
+    this.composer =
+      this.countlessOneLinePaste && !payload.includes('\n')
+        ? `[Pasted text #${this.pasteCount}]`
+        : `[Pasted text #${this.pasteCount} +${payload.split('\n').length} lines]`;
     this.pastedPayloads.set(this.composer, payload);
     return result('');
   }

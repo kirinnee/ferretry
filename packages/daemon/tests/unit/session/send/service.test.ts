@@ -32,6 +32,7 @@ import {
   type SendSettlement,
   type SendTarget,
   type SendTerminal,
+  type SendRetractionProof,
   type SendTracking,
   type SendTransition,
   type SendTurnStore,
@@ -350,6 +351,7 @@ function parts(
   frames: SendPaneObservation[] = [pane({ promptReady: true })],
   senders: Readonly<Record<string, SendTarget>> = {},
   pause?: (ms: number) => Promise<void>,
+  retraction?: SendRetractionProof,
 ): Parts {
   const repository = new FakeRepository(current ?? undefined, senders);
   const ledger = new FakeLedger();
@@ -363,7 +365,21 @@ function parts(
   const tracked: string[] = [];
   const tracking: SendTracking = { track: id => void tracked.push(id) };
   const service = new SessionSendService(
-    { repository, ledger, terminal, turns, channel, gate, reviver, peerWaits, serial, clock, tracking, pause },
+    {
+      repository,
+      ledger,
+      terminal,
+      turns,
+      channel,
+      gate,
+      reviver,
+      peerWaits,
+      serial,
+      clock,
+      tracking,
+      pause,
+      retraction,
+    },
     defaultSessionSendSettings,
   );
   return { service, repository, ledger, terminal, turns, channel, gate, reviver, peerWaits, serial, tracked };
@@ -2385,21 +2401,72 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
     });
   });
 
-  describe('&B153: a delivered pointer the harness took back, and a one-line paste', () => {
+  describe('&B153: a delivered pointer the harness took back', () => {
     const delivered = (overrides: Partial<SendRecord> = {}): SendRecord =>
       unconfirmed({
         fate: 'delivered',
         unaccountedReason: undefined,
         fateAt: '2026-08-01T11:59:03.000Z',
+        evidence: {
+          key: 'aeeeefa4-973d-452a-aff6-c7cde97456e8',
+          harness: 'claude',
+          kind: 'chat.user',
+          proof: 'normal-user-record',
+          observedAt: '2026-08-01T11:59:01.000Z',
+          shapeVersion: 1,
+          matchedTurn: 5,
+          tier: 'turn-instruction',
+        },
         ...overrides,
       });
-    const ONE_LINE = `approve — ${'every review thread is answered and CI is green. '.repeat(30)}`;
+    /** The transcript's answer, recorded: `true` is "its user record was never answered". */
+    class FakeRetraction implements SendRetractionProof {
+      readonly asked: string[] = [];
+      constructor(private readonly unansweredAnswer: boolean | Error) {}
+      async unanswered(_id: SessionId, record: SendRecord): Promise<boolean> {
+        this.asked.push(record.sendId);
+        if (this.unansweredAnswer instanceof Error) throw this.unansweredAnswer;
+        return this.unansweredAnswer;
+      }
+    }
+    function taken(
+      frames: SendPaneObservation[],
+      proof: SendRetractionProof | undefined,
+      ...records: SendRecord[]
+    ): Parts {
+      const built = parts(target({ status: 'running', turn: 5 }), frames, {}, undefined, proof);
+      for (const record of records) built.ledger.records.set(record.sendId, record);
+      return built;
+    }
 
-    it('tells the Warden which delivered pointer an idle box holds, pressing nothing', async () => {
-      const built = idle([pane({ draft: POINTER })], delivered());
+    it('tells the Warden which delivered pointer an idle box holds once the transcript proves it unanswered', async () => {
+      const proof = new FakeRetraction(true);
+      const built = taken([pane({ draft: POINTER })], proof, delivered());
 
       should(await built.service.retractedDraft(ID)).equal('send-0');
+      should(proof.asked).eql(['send-0']);
       should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('never claims a delivered pointer the transcript shows answered: a person recalled it (review blocker)', async () => {
+      for (const proof of [new FakeRetraction(false), new FakeRetraction(new Error('unreadable')), undefined]) {
+        const built = taken([pane({ draft: POINTER })], proof, delivered());
+
+        should(await built.service.retractedDraft(ID)).be.undefined();
+        should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
+        should(await built.service.finishOwnDraft(ID)).eql({ kind: 'foreign' });
+        should(built.terminal.calls).not.containEql('submitComposer');
+      }
+    });
+
+    it('refuses a new send behind a recalled pointer as a person’s draft, pressing nothing', async () => {
+      const built = taken([pane({ draft: POINTER })], new FakeRetraction(false), delivered());
+
+      const refusal = await built.service.send(request()).catch((error: unknown) => error);
+
+      should(refusal).be.instanceof(SendRefused);
+      should(built.terminal.calls).not.containEql('submitComposer');
+      should(built.terminal.typed).be.empty();
     });
 
     it('tells the Warden nothing for a busy or dialogued pane, a person’s draft, or a pointer something followed', async () => {
@@ -2407,23 +2474,25 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
         sendId: 'send-1',
         path: 'direct',
         acceptedAt: '2026-08-01T12:00:00.000Z',
+        attemptAt: '2026-08-01T12:00:00.000Z',
         message: 'a later message typed as itself',
         matchText: 'a later message typed as itself',
         fate: 'delivered',
       });
+      const proof = new FakeRetraction(true);
       const cases = [
-        idle([pane({ draft: POINTER, activeWork: true })], delivered()),
-        idle([pane({ draft: POINTER, blockingPrompt: 'Do you want to proceed?' })], delivered()),
-        idle([pane({ draft: 'my own half-written words' })], delivered()),
-        idle([pane({ draft: POINTER })], delivered(), later),
-        idle([pane({})], delivered()),
+        taken([pane({ draft: POINTER, activeWork: true })], proof, delivered()),
+        taken([pane({ draft: POINTER, blockingPrompt: 'Do you want to proceed?' })], proof, delivered()),
+        taken([pane({ draft: 'my own half-written words' })], proof, delivered()),
+        taken([pane({ draft: POINTER })], proof, delivered(), later),
+        taken([pane({})], proof, delivered()),
       ];
 
       for (const built of cases) should(await built.service.retractedDraft(ID)).be.undefined();
     });
 
-    it('lets the Warden press it once, keeping the send delivered and starting no second turn', async () => {
-      const built = idle([pane({ draft: POINTER })], delivered());
+    it('lets the Warden press a proven one once, keeping it delivered and starting no second turn', async () => {
+      const built = taken([pane({ draft: POINTER })], new FakeRetraction(true), delivered());
 
       should(await built.service.resubmitStuck(ID, 'send-0')).equal('submitted');
 
@@ -2436,28 +2505,40 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
       should(built.repository.transitions).be.empty();
     });
 
-    it('lets the queue finish it rather than wait behind it as a draft', async () => {
-      const built = idle([pane({ draft: POINTER })], delivered());
+    it('lets the queue finish a proven one rather than wait behind it as a draft', async () => {
+      const built = taken([pane({ draft: POINTER })], new FakeRetraction(true), delivered());
 
       should(await built.service.finishOwnDraft(ID)).eql({ kind: 'clear' });
       should(built.ledger.records.get('send-0')).match({ fate: 'delivered', submitNudges: 1 });
     });
 
     it('presses nothing past the limit, so a harness that keeps taking it back is escalated', async () => {
-      const built = idle([pane({ draft: POINTER })], delivered({ submitNudges: STRANDED_ENTER_LIMIT + 1 }));
+      const built = taken(
+        [pane({ draft: POINTER })],
+        new FakeRetraction(true),
+        delivered({ submitNudges: STRANDED_ENTER_LIMIT + 1 }),
+      );
 
       should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
       should(built.terminal.calls).not.containEql('submitComposer');
     });
 
-    it('finishes a one-line message Claude drew as a countless paste chip (ryu, 2026-11-06)', async () => {
+    it('never lets the tracker’s nudge press a delivered send', async () => {
+      const built = taken([pane({ draft: POINTER })], new FakeRetraction(true), delivered());
+
+      should(await built.service.resubmit(ID, 'send-0')).match({ fate: 'delivered' });
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('never claims a countless paste chip after the fact: it could be a person’s replacement paste', async () => {
+      const ONE_LINE = `approve — ${'every review thread is answered and CI is green. '.repeat(30)}`;
       const built = idle(
         [pane({ draft: '[Pasted text #30]' })],
         unconfirmed({ path: 'direct', message: ONE_LINE, matchText: ONE_LINE, turn: 5, senderKind: 'human' }),
       );
 
-      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'clear' });
-      should(built.terminal.calls).containEql('submitComposer');
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'foreign' });
+      should(built.terminal.calls).not.containEql('submitComposer');
     });
   });
 });

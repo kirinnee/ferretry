@@ -339,4 +339,23 @@ describe('tmux pane queue', () => {
     // Assert
     should(pane.queued).be.true();
   });
+
+  it('should submit the countless chip Claude draws for its own one-line paste, as it lands (&B153)', async () => {
+    const pane = new (class extends BusyPane {
+      override async execute(argv: readonly string[]): Promise<TmuxCommandResult> {
+        if (argv[0] === 'load-buffer') return ok('');
+        if (argv[0] === 'paste-buffer') {
+          this.composer = '[Pasted text #30]';
+          return ok('');
+        }
+        return await super.execute(argv);
+      }
+    })(true);
+    const { subject } = queue(pane);
+
+    await subject.queue(SESSION, `approve — ${'every review thread is answered and CI is green. '.repeat(30)}`);
+
+    should(pane.keysSent()).deepEqual(['Enter']);
+    should(pane.queued).be.true();
+  });
 });

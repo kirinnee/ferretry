@@ -12,10 +12,13 @@
 
 import {
   composerHoldsOtherText,
+  composerInput,
+  countlessPasteOf,
   frameCursor,
   type LandingEvidence,
   needsQueueKey,
   queuedWhere,
+  readComposer,
   type TmuxController,
 } from '../../lib/tmux/index.ts';
 import { ComposerUnconfirmedError, captureFrame, type DeliverySleep, fillComposer } from './composer-fill.ts';
@@ -91,7 +94,12 @@ export class TmuxPaneQueue {
     const evidence = await this.fill(session, text);
     // Somebody typed beside the payload after the fill: Enter would queue their words with it (B144).
     const before = await captureFrame(this.tmux, session);
-    if (composerHoldsOtherText(before.visible, frameCursor(before), text))
+    // &B153: except the countless chip (`[Pasted text #30]`) Claude draws a one-line paste as, on the frame right after
+    // this fill proved its own paste landed in an empty composer — the chip carries no count to agree with.
+    const ownChip =
+      evidence === 'placeholder' &&
+      countlessPasteOf(composerInput(readComposer(before.visible, frameCursor(before))), text) !== undefined;
+    if (!ownChip && composerHoldsOtherText(before.visible, frameCursor(before), text))
       throw new ComposerUnconfirmedError(
         `the message was typed into tmux session ${session}, and other text joined it in the composer before Enter; Enter was not pressed`,
         1,

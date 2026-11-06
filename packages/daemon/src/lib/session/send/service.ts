@@ -33,6 +33,7 @@ import {
   strandableText,
   strandedSend,
 } from './stranded.ts';
+import type { SendRetractionProof } from './retraction.ts';
 import { isOpenSend } from './tracking.ts';
 import {
   type ComposerDraftAction,
@@ -90,6 +91,11 @@ export interface SessionSendPorts {
   readonly pause?: ((ms: number) => Promise<void>) | undefined;
   /** Told after every transport, so the send's true fate is looked for rather than assumed. */
   readonly tracking: SendTracking;
+  /**
+   * &B153: proves a delivered pointer seen back in the box was taken back by the harness, unanswered, rather than
+   * recalled by a person. Without it no delivered send is ever pressed.
+   */
+  readonly retraction?: SendRetractionProof | undefined;
 }
 
 /** One ferret's message inside a combined delivery (`SendMessageRequest.parts`). */
@@ -1059,7 +1065,8 @@ export class SessionSendService {
       const pane = await this.ports.terminal.observe(id);
       if (pane.draft === undefined) return { kind: 'clear' as const };
       const stranded = strandedSend(pane.draft, await this.ports.ledger.list(id));
-      if (stranded === undefined) return { kind: 'foreign' as const };
+      // A delivered pointer nothing proves the harness took back is a person's to deal with (&B153): a recall.
+      if (stranded === undefined || !(await this.provablyStranded(id, stranded))) return { kind: 'foreign' as const };
       const outcome = await this.enterOwnText(id, stranded, 'queue', STRANDED_ENTER_LIMIT, pane);
       return outcome.outcome === 'submitted'
         ? { kind: 'clear' as const }
@@ -1108,6 +1115,7 @@ export class SessionSendService {
     // The same uniqueness every caller gets: when another unsettled send could equally be what the box holds
     // (two pastes whose placeholders read alike), neither is provably this one, and nothing is pressed.
     if (strandedSend(pane.draft, records)?.sendId !== record.sendId) return { outcome: 'refused', record };
+    if (!(await this.provablyStranded(id, record))) return { outcome: 'refused', record };
     const counted = await this.ports.ledger.settle(id, record.sendId, { submitNudges: (record.submitNudges ?? 0) + 1 });
     return await this.finishStranded(await this.require(id), counted ?? record, by);
   }
@@ -1221,6 +1229,18 @@ export class SessionSendService {
   }
 
   /**
+   * Whether a send the box holds may be finished by the daemon: any unsettled send of ours, and a DELIVERED pointer
+   * only when the transcript proves its user record was never answered — the harness took it back (&B153). A
+   * delivered pointer that was answered and sits there again was put there by a person (a history recall), and an
+   * unprovable one is treated the same: nothing is pressed.
+   */
+  private async provablyStranded(id: SessionId, record: SendRecord): Promise<boolean> {
+    if (record.fate !== 'delivered') return true;
+    const proof = this.ports.retraction;
+    return proof !== undefined && (await proof.unanswered(id, record).catch(() => false));
+  }
+
+  /**
    * &B153: the delivered pointer of this session that the harness has put back in its composer, if an idle,
    * undialogued pane shows exactly that (`retractedPointer`) — for the Warden's input-stuck sweep, which
    * otherwise only sees sends the tracker still watches. Reads the pane; presses nothing.
@@ -1232,7 +1252,9 @@ export class SessionSendService {
       const pane = await this.ports.terminal.observe(id);
       if (!this.finishable(pane) || pane.draft === undefined) return undefined;
       const stranded = strandedSend(pane.draft, records);
-      return stranded?.fate === 'delivered' ? stranded.sendId : undefined;
+      return stranded?.fate === 'delivered' && (await this.provablyStranded(id, stranded))
+        ? stranded.sendId
+        : undefined;
     });
   }
 
