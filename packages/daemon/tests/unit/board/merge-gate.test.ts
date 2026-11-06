@@ -96,13 +96,30 @@ describe('mergeGateOf', () => {
     should(answer?.waits).eql([]);
   });
 
-  it('should leave closed and dropped cards linking the PR out of the unit', () => {
+  it('should keep a finished card in the unit, and leave a dropped one out', () => {
+    // Arrange — a sub-card closes itself when its ferret finishes, while its lead's PR is still open.
     const cards = [
       card({ id: 'F18' }),
-      card({ id: 'F20', laneId: 'closed', ...linking(prLink(42)), ...waitsOn('F18') }),
+      card({ id: 'F1', ...linking(prLink(42)) }),
+      card({ id: 'F2', parent: { id: 'F1' }, laneId: 'closed', ...waitsOn('F18') }),
       card({ id: 'F21', dropped: { reason: 'gone', at: NOW }, ...linking(prLink(42)), ...waitsOn('F18') }),
     ];
-    should(gate(cards)).eql({ pr: PR, unit: [], waits: [], unreadable: [] });
+
+    // Act
+    const answer = gate(cards);
+
+    // Assert
+    should(answer?.unit).eql([{ id: 'F1' }, { id: 'F2' }]);
+    should(answer?.waits).eql([{ task: { id: 'F2' }, on: { id: 'F18' }, until: 'shipped' }]);
+  });
+
+  it("should hold every child PR on an umbrella lead's wait: the lead's area merges in them", () => {
+    const cards = [
+      card({ id: 'F18' }),
+      card({ id: 'F1', ...waitsOn('F18') }),
+      card({ id: 'F2', parent: { id: 'F1' }, ...linking(prLink(42)) }),
+    ];
+    should(gate(cards)?.waits).eql([{ task: { id: 'F1' }, on: { id: 'F18' }, until: 'shipped' }]);
   });
 
   it('should name the cards it could not read', () => {

@@ -20,6 +20,7 @@ import {
   type TaskRef,
 } from '@ferretry/protocol';
 import { type BoardIndex, cardCategory, dependencyCycle, type LaneSets } from './graph.ts';
+import { ShippingUnits } from './shipping-unit.ts';
 
 /** How much of each path a note quotes, so two long paths still fit in one note. */
 const QUOTED_PATH_LENGTH = 400;
@@ -52,7 +53,7 @@ export const claimsClash = (a: string, b: string): boolean => {
 
 /** One card a claim queues behind, and the first pair of paths that clash. */
 interface Clash {
-  /** The card to wait on: the one whose PR ships the clashing work ({@link shippingCard}). */
+  /** The card to wait on: the one whose PR ships the clashing work (`ShippingUnits.shippingCard`). */
   readonly task: TaskRef;
   /** The card that claims the clashing path, when it is not {@link task} itself (a helper of it). */
   readonly via?: TaskRef;
@@ -68,58 +69,12 @@ export interface ClashPlan {
   readonly unqueued: readonly (Clash & { readonly why: string })[];
 }
 
-const ancestorIds = (card: BoardTask, index: BoardIndex): ReadonlySet<string> => {
-  const seen = new Set<string>();
-  let parent = card.parent === null ? undefined : index.get(card.parent);
-  while (parent !== undefined && !seen.has(parent.id)) {
-    seen.add(parent.id);
-    parent = parent.parent === null ? undefined : index.get(parent.parent);
-  }
-  return seen;
-};
-
-const descendantIds = (card: BoardTask, index: BoardIndex): ReadonlySet<string> => {
-  const seen = new Set<string>();
-  const pending = [...index.children(card.id)];
-  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-    if (seen.has(next.id)) continue;
-    seen.add(next.id);
-    pending.push(...index.children(next.id));
-  }
-  return seen;
-};
-
-/** Whether a card can hold another back: open, not dropped, and its work not shipped yet. */
+/** Whether a card can hold another back: not dropped, and its work not shipped yet. */
 const inQueue = (card: BoardTask, laneSets: LaneSets): boolean => {
   if (card.dropped !== null) return false;
   const category = cardCategory(card, laneSets);
   return category !== undefined && !isBlockerDone(category, 'shipped');
 };
-
-/**
- * The card whose PR ships a card's work: the card itself when it links a PR or has no parent here, else its parent's
- * shipping card. A helper sub-card with no PR of its own closes when its ferret finishes, long before its lead's PR
- * merges, so waiting on the helper would release the queue too early.
- */
-const shippingCard = (card: BoardTask, index: BoardIndex): BoardTask => {
-  const seen = new Set<string>();
-  let current = card;
-  while (current.links.prs.length === 0 && current.parent !== null && !seen.has(current.id)) {
-    seen.add(current.id);
-    const parent = index.get(current.parent);
-    if (parent === undefined) break;
-    current = parent;
-  }
-  return current;
-};
-
-/** Whether two cards link a PR in common: they ship in the same merge, so neither may wait on the other. */
-const sharePr = (left: BoardTask, right: BoardTask): boolean =>
-  left.links.prs.some(mine =>
-    right.links.prs.some(
-      theirs => theirs.number === mine.number && theirs.repo.toLowerCase() === mine.repo.toLowerCase(),
-    ),
-  );
 
 /** Whether the card's ferret already took this card out of its queue on purpose (`fy task undepend`). */
 const releasedOnPurpose = (card: BoardTask, other: TaskRef): boolean =>
@@ -133,12 +88,51 @@ const firstClash = (claimed: readonly string[], theirs: readonly string[]): Omit
   return undefined;
 };
 
+const addEdge = (edges: Map<string, Set<string>>, from: string, to: string): void => {
+  const out = edges.get(from) ?? new Set<string>();
+  out.add(to);
+  edges.set(from, out);
+};
+
 /**
- * The cards a claim queues this card behind: for each open, unshipped card on the same board whose claims clash, its
- * {@link shippingCard}. Skipped: the card's own family (itself, its ancestors and descendants: a sub-card overlaps its
- * lead's claims by design), a shipping card in that family or sharing a PR with the card (they merge together), one
- * not in the queue, and one it already depends on or took out of its queue on purpose. A clash whose dependency would
- * close a cycle, or would pass the most dependencies a card may hold, is reported, not added.
+ * The waits between shipping units, as the board stands: an edge from every unit a card rides to the unit of each
+ * card it still waits on. A blocker whose lanes are unknown still counts, so a cycle is over-reported, never missed.
+ */
+const unitWaits = (index: BoardIndex, laneSets: LaneSets, units: ShippingUnits): Map<string, Set<string>> => {
+  const edges = new Map<string, Set<string>>();
+  for (const card of index.cards) {
+    if (card.dropped !== null) continue;
+    for (const dependency of card.dependsOn) {
+      const blocker = index.get(dependency.task);
+      if (dependency.override !== undefined || blocker === undefined) continue;
+      const category = cardCategory(blocker, laneSets);
+      if (category !== undefined && isBlockerDone(category, dependency.until)) continue;
+      for (const from of units.rides(card)) addEdge(edges, from, units.key(blocker));
+    }
+  }
+  return edges;
+};
+
+/** Whether the unit `to` already waits, however indirectly, on one of the units in `from`. */
+const reaches = (edges: ReadonlyMap<string, ReadonlySet<string>>, to: string, from: ReadonlySet<string>): boolean => {
+  const seen = new Set<string>();
+  const pending = [to];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    if (from.has(next)) return true;
+    if (seen.has(next)) continue;
+    seen.add(next);
+    pending.push(...(edges.get(next) ?? []));
+  }
+  return false;
+};
+
+/**
+ * The cards a claim queues this card behind (docs/design/clash-queue.md § Detecting a clash): for each card on the same
+ * board whose claims clash, not dropped and whose shipping card has not shipped (a helper that already closed still
+ * counts while its lead's PR is open), that card's SHIPPING CARD (`ShippingUnits`). Skipped: a card in the same
+ * shipping unit (they merge together), and a shipping card it already depends on or took out of its queue on purpose.
+ * A clash whose wait would close a cycle between units — or between cards — or would pass the most dependencies a card
+ * may hold, is reported, not added.
  */
 export const planClashes = (
   card: BoardTask,
@@ -147,21 +141,21 @@ export const planClashes = (
   laneSets: LaneSets,
 ): ClashPlan => {
   if (claimed.length === 0) return { waits: [], unqueued: [] };
-  const family = new Set([card.id, ...ancestorIds(card, index), ...descendantIds(card, index)]);
+  const units = new ShippingUnits(index);
+  const decided = new Set<string>();
   const waits: Clash[] = [];
   const unqueued: (Clash & { why: string })[] = [];
-  const ours = shippingCard(card, index);
-  const decided = new Set<string>();
+  let edges: Map<string, Set<string>> | undefined;
   let room = MAX_BOARD_DEPENDENCIES - card.dependsOn.length;
   for (const other of index.cards) {
-    if (family.has(other.id) || other.projectId !== card.projectId || other.files.length === 0) continue;
-    if (!inQueue(other, laneSets)) continue;
+    if (other.id === card.id || other.dropped !== null) continue;
+    if (other.projectId !== card.projectId || other.files.length === 0) continue;
     const pair = firstClash(claimed, other.files);
     if (pair === undefined) continue;
-    const target = shippingCard(other, index);
-    if (decided.has(target.id) || family.has(target.id) || !inQueue(target, laneSets)) continue;
+    const target = units.shippingCard(other);
+    if (decided.has(target.id) || target.id === card.id || !inQueue(target, laneSets)) continue;
     decided.add(target.id);
-    if (sharePr(card, target) || sharePr(ours, target) || sharePr(card, other)) continue;
+    if (units.sameUnit(card, other)) continue;
     if (card.dependsOn.some(dependency => dependency.task.id === target.id && index.isLocal(dependency.task))) continue;
     if (releasedOnPurpose(card, target)) continue;
     const clash: Clash = {
@@ -169,14 +163,19 @@ export const planClashes = (
       ...(target.id === other.id ? {} : { via: { id: other.id } }),
       ...pair,
     };
+    edges ??= unitWaits(index, laneSets, units);
     const cycle = dependencyCycle(index, card.id, clash.task);
     if (cycle !== null) {
       unqueued.push({ ...clash, why: `${formatTaskRef(target)} already waits on this card (${cycle})` });
+    } else if (reaches(edges, units.key(target), units.rides(card))) {
+      unqueued.push({ ...clash, why: `${formatTaskRef(target)}'s PR already waits on this card's PR` });
     } else if (room <= 0) {
       unqueued.push({ ...clash, why: `this card already has the most dependencies a card may hold` });
     } else {
       waits.push(clash);
       room -= 1;
+      // The waits this claim adds count for the next clash in the same claim: two of them may close a cycle together.
+      for (const from of units.rides(card)) addEdge(edges, from, units.key(target));
     }
   }
   return { waits, unqueued };

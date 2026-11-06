@@ -245,6 +245,84 @@ describe('planClashes and merge units', () => {
   });
 });
 
+describe('planClashes across shipping units (review round 2)', () => {
+  const prLink = (number: number, state: 'open' | 'merged' = 'open'): PrLink =>
+    PrLinkSchema.parse({
+      url: `https://github.com/kirinnee/ferretry/pull/${String(number)}`,
+      number,
+      repo: 'kirinnee/ferretry',
+      state,
+      draft: false,
+      checks: 'passing',
+      mergedAt: state === 'merged' ? NOW : null,
+      mergeSha: state === 'merged' ? 'a'.repeat(40) : null,
+      releasedIn: null,
+      polledAt: NOW,
+    });
+  const linking = (...prs: PrLink[]): Pick<BoardTask, 'links'> => ({
+    links: { prs, branch: null, commits: [], docs: [] },
+  });
+
+  it("should count a finished helper's claims while its lead's PR is open", () => {
+    // Arrange
+    const lead = card({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) });
+    const helper = card({ id: 'F2', parent: { id: 'F1' }, laneId: 'closed', files: ['knip.json'] });
+
+    // Act
+    const result = plan(card({ id: 'F3' }), ['knip.json'], [lead, helper]);
+
+    // Assert
+    should(result.waits.map(wait => wait.task.id)).eql(['F1']);
+  });
+
+  it('should refuse a wait that would close a cycle between two PRs through their helpers', () => {
+    // Arrange — F2 (a helper of F1, PR 42) already waits on F3 (PR 43); F4, a helper of F3, now claims what F2 claims.
+    const cards = [
+      card({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) }),
+      card({ id: 'F2', parent: { id: 'F1' }, files: ['x.ts'], dependsOn: [{ task: { id: 'F3' }, until: 'shipped' }] }),
+      card({ id: 'F3', laneId: 'implement', ...linking(prLink(43)) }),
+    ];
+    const subject = card({ id: 'F4', parent: { id: 'F3' } });
+
+    // Act
+    const result = plan(subject, ['x.ts'], cards);
+
+    // Assert
+    should(result.waits).eql([]);
+    should(result.unqueued[0]?.why).containEql("PR already waits on this card's PR");
+  });
+
+  it('should queue a child with its own PR behind the PR that ships its sibling helper', () => {
+    // Arrange
+    const lead = card({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) });
+    const helper = card({ id: 'F2', parent: { id: 'F1' }, files: ['x.ts'] });
+    const subject = card({ id: 'F3', parent: { id: 'F1' }, ...linking(prLink(43)) });
+
+    // Act
+    const result = plan(subject, ['x.ts'], [lead, helper]);
+
+    // Assert
+    should(result.waits).eql([{ task: { id: 'F1' }, via: { id: 'F2' }, ours: 'x.ts', theirs: 'x.ts' }]);
+  });
+
+  it('should still queue two cards that only share an old, merged PR', () => {
+    // Arrange
+    const first = card({
+      id: 'F1',
+      laneId: 'implement',
+      files: ['x.ts'],
+      ...linking(prLink(40, 'merged'), prLink(42)),
+    });
+    const subject = card({ id: 'F2', ...linking(prLink(40, 'merged'), prLink(43)) });
+
+    // Act
+    const result = plan(subject, ['x.ts'], [first]);
+
+    // Assert
+    should(result.waits.map(wait => wait.task.id)).eql(['F1']);
+  });
+});
+
 describe('queueBehindClashes', () => {
   it("should add the dependency and a note, both the daemon's, for the claiming session", () => {
     // Arrange

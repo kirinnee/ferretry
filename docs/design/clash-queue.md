@@ -44,26 +44,36 @@ One pure function, `claimsClash(a, b)` in `src/lib/board/clash-queue.ts`:
   repository, which clashes with every path;
 - clash when the paths are equal, or one starts with the other followed by `/`.
 
-A card is **in the queue** (can hold another card back) when it is on the same board, is not dropped, and its
-work has not shipped: `isBlockerDone(category, 'shipped', …)` is false. A backlog card counts: it claimed the area
+A card's claims **count** when it is on the same board and not dropped, and its shipping card (below) has not
+shipped: `isBlockerDone(category, 'shipped', …)` is false. A backlog card counts: it claimed the area
 first, and a lead who wants the other card first removes the dependency (§4).
 
-**Who is waited on: the shipping card.** A clashing card's work ships in its own PR, or — for a helper sub-card
-with no PR — in its lead's. So the dependency goes on the clashing card's shipping card: itself when it links a PR
-or has no parent, else its parent's shipping card. Waiting on the helper would end the wait when the helper closes
-(as soon as its ferret finishes), not when the work merges.
+**Shipping units** (`src/lib/board/shipping-unit.ts`, the ONE definition the queue and the gate share):
+
+- A card **ships its own work** when it links a PR that is open, not polled yet, or merged. Otherwise it is PR-free
+  (the test `isPrFreeHelper` closes a helper by, plus a just-linked PR): a helper, or an umbrella lead.
+- Its **shipping card** is itself when it ships its own work or has no parent, else its parent's shipping card: a
+  helper's work merges in its lead's PR. Waiting on the helper instead would end the wait when the helper closes (as
+  soon as its ferret finishes), not when the work merges.
+- A card **rides** its shipping card's unit; a PR-free card also rides the units of everything under it, because an
+  umbrella lead's claims are touched by whichever child PR merges.
+- Two cards are in the **same unit** when they ride a unit in common, or their shipping cards link a PR in common that
+  is still in flight. A merged or closed PR both kept from earlier says nothing about the next merge. Ancestry alone
+  is not a unit: a child with its own PR is a separate merge from its lead's.
+
+**Who is waited on:** the clashing card's shipping card. A helper that already closed still counts while that shipping
+card has not shipped.
 
 Skipped, so the rule never deadlocks:
 
-- the card itself, its ancestors and its descendants (a sub-card overlaps its lead's claims by design, and the
-  lead ships through it), and a shipping card in that family (siblings under one lead ship together);
-- a shipping card that links a PR the card (or the card's own shipping card) links: they merge together, and the gate
-  would hold the PR on itself;
+- the card itself, and any card in the same shipping unit (they merge together, and the gate would hold the PR on
+  itself);
 - a card it already depends on (no second entry), and a card it took out of its queue with `fy task undepend`
   (a re-claim does not put back what the lead removed on purpose);
 - a card past the most dependencies a card may hold (128): noted, not added;
-- a card whose dependency on it would close a cycle (`dependencyCycle`): the history notes the clash instead, so a
-  lead still sees it.
+- a wait that would close a cycle, between cards (`dependencyCycle`) or between shipping units (one unit's PR already
+  waits, through any card riding it, on this card's unit — two helpers of two PRs crossing their claims): the history
+  notes the clash instead, so a lead still sees it. The waits a claim adds count for its next clash.
 
 ## 3. Who adds the depends-on, and when
 
@@ -97,8 +107,8 @@ move it, so the card shows its real progress while it waits.
 `fy task merge-gate <pr-url>` asks the daemon, `GET /v1/board/merge-gate?pr=<url>` (`src/lib/board/merge-gate.ts`),
 which answers from ONE read of the board — paging through the board view could miss a card that moved between pages:
 
-1. the PR's **merge unit**: the open cards linking it, and their open sub-cards that link no PR of their own (a
-   helper's dependency is its lead's PR's dependency);
+1. the PR's **merge unit**: every card not dropped that links it, and every card not dropped that rides one of those
+   cards' shipping units (§2): a helper of a linking card, finished or not, and an umbrella lead above one;
 2. the unit's **waits**: each unfinished `blockedBy` of a unit card on a card outside the unit that does not link
    the same PR (a card merging in the same PR never holds it, even when its link arrived after the claim queued it);
 3. the **unreadable** cards: quarantined cards could link the PR, so the gate cannot call it free.
@@ -132,11 +142,16 @@ and would hold every PR.
 - **Another machine's cards** are not seen (the board's existing GAP).
 - **A queued helper keeps waiting on its lead's shipping card** even if it later opens a PR of its own: the
   dependency was decided at claim time. Its lead removes it with `fy task undepend` when that matters.
+- **A hand-made dependency can still cross two PRs into a cycle.** The unit cycle check guards the daemon's own
+  waits; `fy task depend` keeps its card-level check. The merger then names both waits and the lead undepends one.
+- **An umbrella lead's wait holds every child PR**, and a finished helper's wait holds its lead's next PR too: the
+  board cannot tell which PR carried a helper's work, so it keeps the wait until the blocker ships.
 - **One unreadable card holds every PR.** Fail closed is the point; the merger's note names the card.
 
 ## 8. The build (one PR)
 
-- `src/lib/board/clash-queue.ts`: `claimsClash`, `shippingCard`, `planClashes`, `queueBehindClashes` (pure).
+- `src/lib/board/shipping-unit.ts`: `ShippingUnits` (pure), the one definition of what merges together.
+- `src/lib/board/clash-queue.ts`: `claimsClash`, `planClashes` (with the unit cycle check), `queueBehindClashes`.
 - `src/lib/board/merge-gate.ts`: `mergeGateOf` (pure); `BoardService.mergeGate` and the `GET /v1/board/merge-gate`
   route (`runtime/mounts/board.ts`); `BoardMergeGateResponseSchema` in `packages/protocol`.
 - `src/lib/board/card-actions.ts`: the `file` action queues; `service.ts`: a claim runs in the dependency section,

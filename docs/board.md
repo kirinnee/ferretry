@@ -1383,18 +1383,21 @@ for that feature to be built before merging."_ (&I38; the design is
 - **The daemon queues the later claim.** In the same write as the claim, the claiming card gets a `dependsOn`
   (`until: shipped`) for every open card on the same board that already claims a clashing path and has not shipped
   (backlog included), plus a note: `queued behind &F18 to merge: both claim knip.json …`. The dependency is on the
-  card whose PR **ships** the clashing work: the claiming card itself when it links a PR or has no parent, else its
-  parent's shipping card, because a helper sub-card with no PR closes when its ferret finishes, long before its lead's
-  PR merges. Both are recorded as the
+  card whose PR **ships** the clashing work — the clashing card itself when it has a PR of its own (open, not polled
+  yet, or merged) or no parent, else its parent's shipping card — because a helper sub-card with no PR closes when
+  its ferret finishes, long before its lead's PR merges. A finished helper's claims keep counting until then. Both are recorded as the
   daemon's, acting for the session that claimed. The command prints the note back. Claims and dependency writes
   share one board-wide section, so two clashing claims cannot miss each other.
-- **Never queued:** the card's ancestors and descendants (a sub-card overlaps its lead by design), a card that ships
-  in the same PR or under the same lead, a card it already depends on, a card it took out of its queue with
-  `fy task undepend`, and a card that already waits on it (that clash leaves a note instead of closing a cycle).
+- **Never queued:** a card in the same shipping unit — the same shipping card, an umbrella lead and the cards under
+  it, or a PR in flight they both link (an old merged PR they both kept does not count, and a child with its own PR
+  is a separate merge from its lead's) — a card it already depends on, one it took out of its queue with
+  `fy task undepend`, and a wait that would close a cycle between cards or between two PRs' units (that clash leaves
+  a note instead). The rule is `ShippingUnits` in `packages/daemon/src/lib/board/shipping-unit.ts`.
 - **Only the merge waits**, as the owner put it: _"wait for that feature to be built before merging"_. Both cards are built at once; the later one's PR
   merges after the first ships, then rebases. `fy task merge-gate <pr-url>` (over `GET /v1/board/merge-gate?pr=`)
-  answers for the merger from ONE read of the board. A PR ships a **merge unit**: the open cards linking it and
-  their open sub-cards that link no PR of their own. Exit 0 when no card of the unit waits on a card outside it that
+  answers for the merger from ONE read of the board. A PR ships a **merge unit**: every card not dropped that links
+  it, and every card not dropped riding one of those cards' units (its helpers, finished or not, and an umbrella lead
+  above it). Exit 0 when no card of the unit waits on a card outside it that
   is not done; 1 (printing `&F20 waits on &F18 (until shipped)`) when one does; 2 when it cannot tell — the daemon
   is down or predates the gate, a card on the machine is unreadable (it might link the PR), or the URL is not a PR.
   The merger treats 2 as "do not merge". A card inside the unit, or one linking the same PR, never holds it.
