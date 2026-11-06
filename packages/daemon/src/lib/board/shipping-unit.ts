@@ -8,7 +8,8 @@
  *   helper's work merges in its lead's PR. Shipping cards that link a PR in common that is still in flight merge
  *   together, so they are ONE unit: its KEY is the first such card's id (store order), the same for every one of them.
  * - A card RIDES its own key, and a PR-free card also rides the keys of everything under it that is not dropped: an
- *   umbrella lead's claims are touched by whichever child PR merges, and a dropped child merges nothing.
+ *   umbrella lead's claims are touched by whichever child PR merges. A dropped child merges nothing, though the live
+ *   cards under it still do.
  * - Two cards are in the SAME UNIT when they ride a key in common. A merged or closed PR two cards both kept from
  *   earlier says nothing about the next merge, so only PRs in flight join units.
  */
@@ -93,9 +94,10 @@ export class ShippingUnits {
       const seen = new Set<string>([card.id]);
       const pending = [...this.index.children(card.id)];
       for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-        if (seen.has(next.id) || next.dropped !== null) continue;
+        if (seen.has(next.id)) continue;
         seen.add(next.id);
-        keys.add(this.key(next));
+        // A dropped card merges nothing itself, but dropping it leaves the cards under it alive.
+        if (next.dropped === null) keys.add(this.key(next));
         pending.push(...this.index.children(next.id));
       }
     }

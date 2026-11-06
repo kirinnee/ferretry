@@ -323,6 +323,19 @@ describe('mergeGateOf', () => {
       });
     }
 
+    it("should keep an umbrella lead's claim on a live grandchild's PR when the child between them was dropped", () => {
+      // Arrange — F9 (PR 43) claimed x.ts first; PR-free F1 claimed it next; F2 under F1 was dropped; F3 under F2 ships PR 42.
+      const cards = [
+        claiming('F9', [['x.ts', 1]], linking(prLink(43))),
+        claiming('F1', [['x.ts', 2]], { laneId: 'implement' }),
+        card({ id: 'F2', parent: { id: 'F1' }, dropped: { reason: 'gone', at: NOW } }),
+        claiming('F3', [['z.ts', 3]], { parent: { id: 'F2' }, ...linking(prLink(42)) }),
+      ];
+
+      // Act / Assert
+      should(gateFor(42, cards)?.waits).eql([{ task: { id: 'F1' }, on: { id: 'F9' }, until: 'shipped' }]);
+    });
+
     it('should not hold a PR on a unit that already shipped', () => {
       const cards = [
         claiming('F2', [['x.ts', 1]], { laneId: 'merged', ...linking(prLink(42)) }),
