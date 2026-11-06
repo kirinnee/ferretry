@@ -3,6 +3,7 @@ import { queuedMessageInstruction, turnFileInstruction } from '@ferretry/protoco
 import should from 'should';
 import {
   type SendRecord,
+  retractedPointer,
   sameComposerText,
   showsOwnPointer,
   strandablePointer,
@@ -173,5 +174,82 @@ describe('B144: a message of ours typed as itself', () => {
     should(strandedSend(OURS, records)?.sendId).equal('pointer');
     should(strandedSend('[Pasted text #41 +3 lines]', [...records, inline({ sendId: 'paste-2' })])).be.undefined();
     should(strandedSend('a person’s words', records)).be.undefined();
+  });
+});
+
+describe('&B153: a pointer the harness took back after it was delivered', () => {
+  const delivered = (overrides: Partial<SendRecord> = {}) =>
+    record({ fate: 'delivered', fateAt: '2026-10-22T09:00:03.000Z', ...overrides });
+
+  it('claims the newest delivered pointer when the box holds exactly it', () => {
+    const records = [
+      record({ sendId: 'older', acceptedAt: '2026-10-22T08:00:00.000Z', fate: 'delivered' }),
+      delivered(),
+    ];
+    should(retractedPointer(delivered(), records)).equal(OURS);
+    should(strandableText(delivered(), records)).equal(OURS);
+    should(strandedSend(wrapped(OURS, 40), records)?.sendId).equal('send-1');
+  });
+
+  it('leaves a delivered pointer alone once anything was typed after it: the conversation moved on', () => {
+    const later = record({
+      sendId: 'later',
+      path: 'direct',
+      acceptedAt: '2026-10-22T09:05:00.000Z',
+      message: 'a later message typed as itself',
+      matchText: 'a later message typed as itself',
+      fate: 'delivered',
+    });
+    should(retractedPointer(delivered(), [delivered(), later])).be.undefined();
+    should(strandedSend(OURS, [delivered(), later])).be.undefined();
+  });
+
+  it('is not moved by a later send that was never typed: held for a revive, untyped, or withdrawn', () => {
+    const at = '2026-10-22T09:05:00.000Z';
+    for (const other of [
+      record({ sendId: 'held', acceptedAt: at, held: true }),
+      record({ sendId: 'untyped', acceptedAt: at, untyped: true }),
+      record({ sendId: 'withdrawn', acceptedAt: at, fate: 'withdrawn' }),
+    ])
+      should(retractedPointer(delivered(), [delivered(), other])).equal(OURS);
+  });
+
+  it('claims only a delivered POINTER — never a message typed as itself, nor any other fate', () => {
+    const ENVELOPE = '[message from ferret lizzette — not from the owner]\nplease rerun the whole suite';
+    const inline = delivered({ path: 'native-inline', message: ENVELOPE, matchText: ENVELOPE, turn: undefined });
+    should(retractedPointer(inline, [inline])).be.undefined();
+    should(strandableText(inline, [inline])).be.undefined();
+    for (const fate of ['cancelled', 'timed_out', 'withdrawn'] as const)
+      should(retractedPointer(record({ fate }), [record({ fate })])).be.undefined();
+    should(retractedPointer(delivered({ held: true }), [delivered({ held: true })])).be.undefined();
+    should(retractedPointer(delivered({ matchText: 'Read the file now' }), [delivered()])).be.undefined();
+  });
+
+  it('keeps the tracker’s single-record reading unchanged: a delivered send is not watched', () => {
+    should(strandableText(delivered())).be.undefined();
+  });
+
+  it('never takes a person’s draft, an edited pointer or another session’s pointer for the taken-back one', () => {
+    should(strandedSend('half a question', [delivered()])).be.undefined();
+    should(strandedSend(`${OURS} and also this`, [delivered()])).be.undefined();
+    should(strandedSend(THEIRS, [delivered()])).be.undefined();
+  });
+});
+
+describe('&B153: Claude’s countless paste chip is a paste with no line break', () => {
+  const ONE_LINE = `approve — ${'third-round review of the change, all threads answered; '.repeat(30)}`;
+  const inline = (overrides: Partial<SendRecord> = {}) =>
+    record({ path: 'direct', message: ONE_LINE, matchText: ONE_LINE, turn: undefined, ...overrides });
+
+  it('claims `[Pasted text #N]` for a one-line message that travelled as a paste', () => {
+    should(showsOwnText('[Pasted text #30]', ONE_LINE)).be.true();
+    should(strandedSend('[Pasted text #30]', [inline()])?.sendId).equal('send-1');
+  });
+
+  it('never claims it for a message with line breaks, beside other text, or as a Codex chip', () => {
+    should(showsOwnText('[Pasted text #30]', 'first line of it\nsecond line of it')).be.false();
+    should(showsOwnText('see [Pasted text #30]', ONE_LINE)).be.false();
+    should(showsOwnText('[Pasted Content]', ONE_LINE)).be.false();
+    should(showsOwnText('[Pasted text #30 extra]', ONE_LINE)).be.false();
   });
 });

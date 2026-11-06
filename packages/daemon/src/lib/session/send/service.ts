@@ -25,7 +25,14 @@ import {
 } from './policy.ts';
 import { sameSendId } from './send-id.ts';
 import type { SessionSendSettings } from './settings.ts';
-import { sameComposerText, showsOwnText, strandablePointer, strandableText, strandedSend } from './stranded.ts';
+import {
+  retractedPointer,
+  sameComposerText,
+  showsOwnText,
+  strandablePointer,
+  strandableText,
+  strandedSend,
+} from './stranded.ts';
 import { isOpenSend } from './tracking.ts';
 import {
   type ComposerDraftAction,
@@ -1022,6 +1029,9 @@ export class SessionSendService {
     const record = await this.ports.serial.run(id, async () => {
       const current = (await this.ports.ledger.list(id)).find(entry => entry.sendId === sendId);
       if (current === undefined) return undefined;
+      // The tracker watches open sends only; a delivered pointer the harness took back is the Warden's, the
+      // queue's and the next send's to finish (&B153), never a nudge's.
+      if (current.fate === 'delivered') return current;
       const outcome = await this.enterOwnText(id, current, 'daemon', STRANDED_ENTER_LIMIT);
       return outcome.record;
     });
@@ -1089,15 +1099,15 @@ export class SessionSendService {
     limit: number,
     observed?: SendPaneObservation,
   ): Promise<{ readonly outcome: StrandedEnterOutcome; readonly record: SendRecord }> {
-    const text = strandableText(record);
+    const records = await this.ports.ledger.list(id);
+    const text = strandableText(record, records);
     if (text === undefined || (record.submitNudges ?? 0) >= limit) return { outcome: 'refused', record };
     const pane = observed ?? (await this.ports.terminal.observe(id));
     if (!this.finishable(pane) || pane.draft === undefined || !showsOwnText(pane.draft, text))
       return { outcome: 'refused', record };
     // The same uniqueness every caller gets: when another unsettled send could equally be what the box holds
     // (two pastes whose placeholders read alike), neither is provably this one, and nothing is pressed.
-    if (strandedSend(pane.draft, await this.ports.ledger.list(id))?.sendId !== record.sendId)
-      return { outcome: 'refused', record };
+    if (strandedSend(pane.draft, records)?.sendId !== record.sendId) return { outcome: 'refused', record };
     const counted = await this.ports.ledger.settle(id, record.sendId, { submitNudges: (record.submitNudges ?? 0) + 1 });
     return await this.finishStranded(await this.require(id), counted ?? record, by);
   }
@@ -1194,13 +1204,36 @@ export class SessionSendService {
     by: 'send' | 'daemon' | 'queue' | 'warden',
   ): Promise<{ readonly outcome: ComposerSubmitOutcome; readonly record: SendRecord }> {
     const outcome = await this.ports.terminal.submitComposer(target.id, record.matchText ?? record.message);
+    // &B153: a delivered pointer the harness took back keeps its fate — it did reach the conversation once, and
+    // the turn it started is already counted — so it is not re-opened as `entered` would; the journal says why.
+    const retracted = record.fate === 'delivered';
     await this.ports.repository.journal(target.id, 'control.send_resubmitted', {
       sendId: record.sendId,
       outcome,
       by,
-      reason: strandablePointer(record) === undefined ? 'typed but not submitted' : 'pointer typed but not submitted',
+      reason: retracted
+        ? 'pointer taken back into the composer by the harness'
+        : strandablePointer(record) === undefined
+          ? 'typed but not submitted'
+          : 'pointer typed but not submitted',
     });
-    return { outcome, record: outcome === 'submitted' ? await this.entered(target, record) : record };
+    return { outcome, record: outcome === 'submitted' && !retracted ? await this.entered(target, record) : record };
+  }
+
+  /**
+   * &B153: the delivered pointer of this session that the harness has put back in its composer, if an idle,
+   * undialogued pane shows exactly that (`retractedPointer`) — for the Warden's input-stuck sweep, which
+   * otherwise only sees sends the tracker still watches. Reads the pane; presses nothing.
+   */
+  async retractedDraft(id: SessionId): Promise<string | undefined> {
+    return await this.ports.serial.run(id, async () => {
+      const records = await this.ports.ledger.list(id);
+      if (!records.some(record => retractedPointer(record, records) !== undefined)) return undefined;
+      const pane = await this.ports.terminal.observe(id);
+      if (!this.finishable(pane) || pane.draft === undefined) return undefined;
+      const stranded = strandedSend(pane.draft, records);
+      return stranded?.fate === 'delivered' ? stranded.sendId : undefined;
+    });
   }
 
   /**

@@ -2384,6 +2384,82 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
       should(built.terminal.typed).have.length(1);
     });
   });
+
+  describe('&B153: a delivered pointer the harness took back, and a one-line paste', () => {
+    const delivered = (overrides: Partial<SendRecord> = {}): SendRecord =>
+      unconfirmed({
+        fate: 'delivered',
+        unaccountedReason: undefined,
+        fateAt: '2026-08-01T11:59:03.000Z',
+        ...overrides,
+      });
+    const ONE_LINE = `approve — ${'every review thread is answered and CI is green. '.repeat(30)}`;
+
+    it('tells the Warden which delivered pointer an idle box holds, pressing nothing', async () => {
+      const built = idle([pane({ draft: POINTER })], delivered());
+
+      should(await built.service.retractedDraft(ID)).equal('send-0');
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('tells the Warden nothing for a busy or dialogued pane, a person’s draft, or a pointer something followed', async () => {
+      const later = unconfirmed({
+        sendId: 'send-1',
+        path: 'direct',
+        acceptedAt: '2026-08-01T12:00:00.000Z',
+        message: 'a later message typed as itself',
+        matchText: 'a later message typed as itself',
+        fate: 'delivered',
+      });
+      const cases = [
+        idle([pane({ draft: POINTER, activeWork: true })], delivered()),
+        idle([pane({ draft: POINTER, blockingPrompt: 'Do you want to proceed?' })], delivered()),
+        idle([pane({ draft: 'my own half-written words' })], delivered()),
+        idle([pane({ draft: POINTER })], delivered(), later),
+        idle([pane({})], delivered()),
+      ];
+
+      for (const built of cases) should(await built.service.retractedDraft(ID)).be.undefined();
+    });
+
+    it('lets the Warden press it once, keeping the send delivered and starting no second turn', async () => {
+      const built = idle([pane({ draft: POINTER })], delivered());
+
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('submitted');
+
+      should(built.terminal.calls.filter(call => call === 'submitComposer')).have.length(1);
+      should(built.ledger.records.get('send-0')).match({ fate: 'delivered', submitNudges: 1 });
+      should(built.repository.journal_.at(0)).match({
+        event: 'control.send_resubmitted',
+        data: { by: 'warden', reason: 'pointer taken back into the composer by the harness' },
+      });
+      should(built.repository.transitions).be.empty();
+    });
+
+    it('lets the queue finish it rather than wait behind it as a draft', async () => {
+      const built = idle([pane({ draft: POINTER })], delivered());
+
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'clear' });
+      should(built.ledger.records.get('send-0')).match({ fate: 'delivered', submitNudges: 1 });
+    });
+
+    it('presses nothing past the limit, so a harness that keeps taking it back is escalated', async () => {
+      const built = idle([pane({ draft: POINTER })], delivered({ submitNudges: STRANDED_ENTER_LIMIT + 1 }));
+
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('finishes a one-line message Claude drew as a countless paste chip (ryu, 2026-11-06)', async () => {
+      const built = idle(
+        [pane({ draft: '[Pasted text #30]' })],
+        unconfirmed({ path: 'direct', message: ONE_LINE, matchText: ONE_LINE, turn: 5, senderKind: 'human' }),
+      );
+
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'clear' });
+      should(built.terminal.calls).containEql('submitComposer');
+    });
+  });
 });
 
 describe('labels and combined deliveries', () => {

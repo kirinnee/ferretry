@@ -42,6 +42,35 @@ export function strandablePointer(record: SendRecord): string | undefined {
 }
 
 /**
+ * &B153 — A POINTER THE HARNESS TOOK BACK. On 2026-11-06 a lead's turn-007 pointer was typed, its Enter took,
+ * and Claude Code wrote the user record the tracker settles `delivered` on — then, a second later and before
+ * any reply, put the text back into the composer (a background agent's permission prompt was still pending;
+ * Claude rewinds a prompt cancelled before its first answer into the box). The ledger said `delivered`, so
+ * nothing could ever claim the text again: the ferret sat three hours with its own turn in its box.
+ *
+ * Such a pointer is claimed only while it is the NEWEST send this session typed: once anything was typed
+ * after it, the conversation moved on, and that pointer seen in the box again is something else (a history
+ * recall, say), which is left alone. The pointer's path names this session's own turn or queued file, so no
+ * person's draft can be exactly it by accident.
+ */
+export function retractedPointer(record: SendRecord, records: readonly SendRecord[]): string | undefined {
+  if (record.fate !== 'delivered' || record.held === true || record.untyped === true || !POINTER_PATHS.has(record.path))
+    return undefined;
+  const pointer = record.matchText;
+  if (pointer === undefined || parseHandoffPointer(pointer) === null) return undefined;
+  const typedAt = Date.parse(record.acceptedAt);
+  const newer = records.some(
+    other =>
+      other.sendId !== record.sendId &&
+      other.held !== true &&
+      other.untyped !== true &&
+      other.fate !== 'withdrawn' &&
+      Date.parse(other.acceptedAt) >= typedAt,
+  );
+  return newer ? undefined : pointer;
+}
+
+/**
  * Whether `draft` is exactly `pointer` as a TUI may draw it: re-wrapped, or clipped with `…` after the
  * whole path.
  */
@@ -99,9 +128,12 @@ export const OWN_TEXT_MIN = 12;
  * The text a send typed that may still be sitting in the composer: its pointer, or — for a message typed as
  * itself — the message, when it is long enough to be told from a person's word. `undefined` when the send is
  * settled, held for a revive, was never typed, or is too short to claim.
+ *
+ * Given the session's whole ledger, a delivered pointer the harness took back counts too ({@link retractedPointer});
+ * without it only unsettled sends do, which is what the tracker's own watch wants.
  */
-export function strandableText(record: SendRecord): string | undefined {
-  const pointer = strandablePointer(record);
+export function strandableText(record: SendRecord, records?: readonly SendRecord[]): string | undefined {
+  const pointer = strandablePointer(record) ?? (records === undefined ? undefined : retractedPointer(record, records));
   if (pointer !== undefined) return pointer;
   if (record.held === true || record.untyped === true || !UNSETTLED.has(record.fate)) return undefined;
   if (!INLINE_PATHS.has(record.path)) return undefined;
@@ -133,7 +165,7 @@ export function showsOwnText(draft: string, text: string): boolean {
  */
 export function strandedSend(draft: string, records: readonly SendRecord[]): SendRecord | undefined {
   const matches = records.filter(record => {
-    const text = strandableText(record);
+    const text = strandableText(record, records);
     return text !== undefined && showsOwnText(draft, text);
   });
   return matches.length === 1 ? matches[0] : undefined;

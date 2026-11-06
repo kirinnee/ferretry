@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   detectStuckInput,
+  mayHoldRetractedPointer,
   planStuckInput,
   STUCK_INPUT_HORIZON_MS,
   STUCK_INPUT_MS,
@@ -194,5 +195,87 @@ describe('what the Warden does about it', () => {
     should(stuckInputNoticeLine({ sessionId: 'annabeth' }, 'send-63', undefined)).match(
       /^annabeth: send send-63 stuck since unknown/,
     );
+  });
+});
+
+describe('&B153: a delivered pointer the harness took back into the box', () => {
+  /** marge's turn-007: typed, recorded, then rewound into the composer by Claude a second later. */
+  const delivered = (over: Partial<StuckInputSend> = {}): StuckInputSend => ({
+    sendId: 'turn-007',
+    path: 'turn-file',
+    fate: 'delivered',
+    acceptedAt: iso(NOW - 3 * 60 * MINUTE),
+    attemptAt: iso(NOW - 3 * 60 * MINUTE),
+    fateAt: iso(NOW - 3 * 60 * MINUTE + 3_000),
+    fromName: 'ryu',
+    ...over,
+  });
+
+  it('should read the box only where the newest typed send is a delivered pointer inside the horizon', () => {
+    should(mayHoldRetractedPointer([delivered()], NOW)).be.true();
+    should(mayHoldRetractedPointer([delivered({ path: 'native-file' })], NOW)).be.true();
+    should(
+      mayHoldRetractedPointer([delivered(), delivered({ sendId: 'later', acceptedAt: iso(NOW - MINUTE) })], NOW),
+    ).be.true();
+    // Something typed after it: the conversation moved on.
+    should(
+      mayHoldRetractedPointer(
+        [delivered(), delivered({ sendId: 'later', path: 'direct', acceptedAt: iso(NOW - MINUTE) })],
+        NOW,
+      ),
+    ).be.false();
+    // A later send that was never typed does not count.
+    should(
+      mayHoldRetractedPointer([delivered(), pointer({ untyped: true, acceptedAt: iso(NOW - MINUTE) })], NOW),
+    ).be.true();
+    should(mayHoldRetractedPointer([delivered({ fate: 'queued' })], NOW)).be.false();
+    should(mayHoldRetractedPointer([delivered({ path: 'direct' })], NOW)).be.false();
+    should(
+      mayHoldRetractedPointer(
+        [delivered({ acceptedAt: iso(NOW - STUCK_INPUT_HORIZON_MS - MINUTE), attemptAt: undefined })],
+        NOW,
+      ),
+    ).be.false();
+    should(mayHoldRetractedPointer([], NOW)).be.false();
+  });
+
+  it('should flag the send the box was read holding, anchored on the idle time rather than its old typing', () => {
+    const [flag] = detectStuckInput(
+      [ferret('marge')],
+      new Map([['marge', [delivered()]]]),
+      NOW,
+      undefined,
+      new Map([['marge', 'turn-007']]),
+    );
+
+    should(flag).match({
+      kind: 'input_stuck',
+      sessionId: 'marge',
+      since: iso(NOW - 21 * MINUTE),
+      idleMinutes: 21,
+      subject: 'input:marge:turn-007',
+      sendId: 'turn-007',
+    });
+  });
+
+  it('should flag nothing when the box was not read holding it, and prefer a send the tracker sees stuck', () => {
+    should(detectStuckInput([ferret('marge')], new Map([['marge', [delivered()]]]), NOW)).be.empty();
+    should(
+      detectStuckInput(
+        [ferret('marge')],
+        new Map([['marge', [delivered()]]]),
+        NOW,
+        undefined,
+        new Map([['marge', 'gone']]),
+      ),
+    ).be.empty();
+    const [flag] = detectStuckInput(
+      [ferret('marge')],
+      new Map([['marge', [delivered(), pointer()]]]),
+      NOW,
+      undefined,
+      new Map([['marge', 'turn-007']]),
+    );
+    should(flag?.sendId).equal('send-63');
   });
 });

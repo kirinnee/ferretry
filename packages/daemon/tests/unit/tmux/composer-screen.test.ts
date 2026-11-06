@@ -672,6 +672,13 @@ describe('B144: whether the composer holds text that is not the payload, right b
     should(composerHoldsOtherText(...typedAt('[Pasted text #999 +30 lines]'), PASTE)).be.true();
     should(composerHoldsOtherText(...typedAt('[Pasted text #3 +2 lines]'), 'a literal message')).be.true();
   });
+
+  it('&B153: should take Claude’s countless chip as a one-line paste, and only that', () => {
+    const oneLine = `approve — ${'every review thread is answered and CI is green. '.repeat(10)}`;
+    should(composerHoldsOtherText(...typedAt('[Pasted text #30]'), oneLine)).be.false();
+    should(composerHoldsOtherText(...typedAt('[Pasted text #30]'), PASTE)).be.true();
+    should(composerHoldsOtherText(...typedAt('[Pasted text #30] and my words'), oneLine)).be.true();
+  });
 });
 
 describe('a submission Codex 0.166 parked until its startup ends', () => {

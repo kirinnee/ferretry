@@ -220,12 +220,14 @@ import {
 } from './report-overdue.ts';
 import {
   detectStuckInput,
+  mayHoldRetractedPointer,
   planStuckInput,
   type StuckInputPress,
   type StuckInputSend,
   type StuckInputTold,
   stuckInputCandidates,
   stuckInputNoticeLine,
+  stuckSendOf,
 } from './input-stuck.ts';
 import type { StuckInputNotice } from './input-stuck-list.ts';
 import {
@@ -463,6 +465,11 @@ export interface WardenStuckInputPort {
   sends(sessionId: string): Promise<readonly StuckInputSend[]>;
   /** One verified Enter on that send's own text, through the send path; what it did. */
   resubmit(sessionId: string, sendId: string): Promise<StuckInputPress>;
+  /**
+   * &B153: the delivered pointer the harness took back into this session's box, when an idle, undialogued pane
+   * shows exactly it (the send path reads the pane and presses nothing). Absent where no send path is wired.
+   */
+  retracted?(sessionId: string): Promise<string | undefined>;
   /** Marks the session `stalled`, so nothing reads it as healthy while its message sits there. */
   markStalled(sessionId: string, reason: string): Promise<void>;
   /** Takes that mark off a session that recovered, when it still carries it. */
@@ -2725,11 +2732,22 @@ export class WardenSweepService {
     if (port === undefined) return [];
     const candidates = stuckInputCandidates(fleet, nowMs);
     const ledgers = new Map<string, readonly StuckInputSend[]>();
+    const retracted = new Map<string, string>();
     for (const candidate of candidates) {
       const sends = await port.sends(candidate.config.id).catch(() => undefined);
-      if (sends !== undefined) ledgers.set(candidate.config.id, sends);
+      if (sends === undefined) continue;
+      ledgers.set(candidate.config.id, sends);
+      // &B153: a delivered pointer the harness took back is invisible to the ledger; only its box shows it.
+      if (
+        port.retracted === undefined ||
+        stuckSendOf(sends, nowMs) !== undefined ||
+        !mayHoldRetractedPointer(sends, nowMs)
+      )
+        continue;
+      const sendId = await port.retracted(candidate.config.id).catch(() => undefined);
+      if (sendId !== undefined) retracted.set(candidate.config.id, sendId);
     }
-    return detectStuckInput(candidates, ledgers, nowMs);
+    return detectStuckInput(candidates, ledgers, nowMs, undefined, retracted);
   }
 
   /**

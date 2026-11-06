@@ -44,6 +44,8 @@ class FakeStuckInput implements WardenStuckInputPort {
   readonly notices = new Map<string, StuckInputNotice>();
   sendsBy: Record<string, readonly StuckInputSend[]> = { annabeth: [pointer] };
   press: StuckInputPress = 'holding';
+  readonly boxRead: string[] = [];
+  takenBack: Record<string, string> = {};
   noticeFails = false;
   removeFails = false;
 
@@ -54,6 +56,11 @@ class FakeStuckInput implements WardenStuckInputPort {
   async resubmit(sessionId: string, sendId: string): Promise<StuckInputPress> {
     this.pressed.push(`${sessionId}:${sendId}`);
     return this.press;
+  }
+
+  async retracted(sessionId: string): Promise<string | undefined> {
+    this.boxRead.push(sessionId);
+    return this.takenBack[sessionId];
   }
 
   async markStalled(sessionId: string): Promise<void> {
@@ -215,5 +222,56 @@ describe('a ferret stuck behind its own unsent message (B144)', () => {
     should(run.stuckInput?.map(anomaly => anomaly.kind)).eql(['input_stuck']);
     should(stuckInput.pressed).be.empty();
     should(stuckInput.notices.size).equal(0);
+  });
+});
+
+describe('&B153: a delivered pointer the harness took back into the box', () => {
+  const delivered: StuckInputSend = {
+    sendId: 'turn-007',
+    path: 'turn-file',
+    fate: 'delivered',
+    acceptedAt: iso(NOW - 180 * MINUTE),
+    attemptAt: iso(NOW - 180 * MINUTE),
+    fateAt: iso(NOW - 180 * MINUTE + 3_000),
+  };
+
+  it('should read the box, press once for the pointer it holds, then notice it if it is taken back again', async () => {
+    let now = NOW;
+    const stuckInput = new FakeStuckInput();
+    stuckInput.sendsBy = { annabeth: [delivered] };
+    stuckInput.takenBack = { annabeth: 'turn-007' };
+    stuckInput.press = 'submitted';
+    const subject = harness({ config: enabled(), fleet: [idle()], stuckInput, now: () => now });
+
+    const first = await subject.service.run({ force: false });
+    now = NOW + 5 * MINUTE;
+    await subject.service.run({ force: false });
+
+    should(first.stuckInput?.map(anomaly => anomaly.sessionId)).eql(['annabeth']);
+    should(stuckInput.boxRead).eql(['annabeth', 'annabeth']);
+    // One press per episode; the same pointer back in the box a sweep later is escalated, not pressed again.
+    should(stuckInput.pressed).eql(['annabeth:turn-007']);
+    should(stuckInput.stalled).eql(['annabeth']);
+    should(stuckInput.notices.get('annabeth')?.line).match(/send turn-007 .* Enter was pressed and it is still idle/);
+  });
+
+  it('should not read the box when the newest send is not a delivered pointer, nor flag an empty box', async () => {
+    const stuckInput = new FakeStuckInput();
+    stuckInput.sendsBy = {
+      annabeth: [delivered, { ...delivered, sendId: 'later', path: 'direct', acceptedAt: iso(NOW - MINUTE) }],
+    };
+    const quiet = new FakeStuckInput();
+    quiet.sendsBy = { annabeth: [delivered] };
+
+    const first = await harness({ config: enabled(), fleet: [idle()], stuckInput }).service.run({ force: false });
+    const second = await harness({ config: enabled(), fleet: [idle()], stuckInput: quiet }).service.run({
+      force: false,
+    });
+
+    should(stuckInput.boxRead).be.empty();
+    should(first.stuckInput ?? []).be.empty();
+    should(quiet.boxRead).eql(['annabeth']);
+    should(second.stuckInput ?? []).be.empty();
+    should(quiet.pressed).be.empty();
   });
 });

@@ -113,18 +113,30 @@ export function composerHolds(frame: string, text: string, evidence: LandingEvid
 /** One collapsed-paste placeholder and nothing else around it. */
 const LONE_PASTE_PLACEHOLDER = /^\[(?:Pasted text|Pasted Content)[^\]\n]*\]$/iu;
 
+/** Claude's chip for a paste with no line break: its counter and nothing else (`[Pasted text #30]`). */
+const COUNTLESS_CLAUDE_PASTE = /^\[Pasted text #\d+\]$/iu;
+
 /**
  * Whether a composer showing ONLY a collapsed-paste placeholder can be this payload's paste (B144).
  *
  * A placeholder hides the text, so "a placeholder is there" proves nothing about whose paste it is: a person
  * who cleared our paste and pasted their own draft shows one too. The placeholder's own count is the only
  * thing it says about what it holds, so it must agree with the payload: Claude's `+N lines` (the payload's
- * line breaks, or its lines — the two readings of the counter, both accepted) or Codex's `N chars`. A
- * placeholder with no count, an image or audio placeholder, or one beside any other text is never claimed.
+ * line breaks, or its lines — the two readings of the counter, both accepted) or Codex's `N chars`. An image
+ * or audio placeholder, or one beside any other text, is never claimed.
+ *
+ * &B153: CLAUDE'S COUNTLESS CHIP IS A COUNT OF ZERO. Claude draws `+N lines` only when the paste has line
+ * breaks; a paste with none — a long one-line message, which travels as a paste past
+ * {@link PASTE_TRANSPORT_CHARS} — is drawn `[Pasted text #N]` with no count at all. Refusing that chip left a
+ * 1,550-character owner decision typed in a lead's box for 40 minutes on 2026-11-06: the fill would not press
+ * Enter on it (`composerHoldsOtherText`), and nothing afterwards could prove it ours. So a countless Claude
+ * chip agrees with exactly the payloads that have no line break, and with no other. A countless Codex chip
+ * is still never claimed: Codex always draws its count.
  */
 export function lonePasteOf(composer: string, text: string): boolean {
   const shown = composer.trim();
   if (!LONE_PASTE_PLACEHOLDER.test(shown)) return false;
+  if (COUNTLESS_CLAUDE_PASTE.test(shown)) return !text.includes('\n');
   const lines = /\+(\d+)\s+lines?\b/iu.exec(shown);
   if (lines !== null) {
     const breaks = text.split('\n').length - 1;

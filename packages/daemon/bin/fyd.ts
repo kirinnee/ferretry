@@ -12678,6 +12678,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           stuckInput: {
             sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)),
             resubmit: async (sessionId, sendId) => await sends.resubmitStuck(parseSessionId(sessionId), sendId),
+            retracted: async sessionId => await sends.retractedDraft(parseSessionId(sessionId)),
             markStalled: async (sessionId, reason) => {
               await sendRepository.transition(parseSessionId(sessionId), {
                 event: 'control.input_stuck',
