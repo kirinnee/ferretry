@@ -324,6 +324,13 @@ export const queueCountLine = (waiting: number, failed: number = 0): string => {
   return waiting === 0 ? `${failed} failed` : `${waiting} waiting · ${failed} failed`;
 };
 
+/**
+ * The header while a search is active: how many of the list's messages match, in the same "N of M" the tab shows.
+ * "0 of 3 not sent match"; the unfiltered header keeps `queueCountLine`.
+ */
+export const queueMatchLine = (matching: number, total: number, listing: QueueListing): string =>
+  `${matching} of ${total} ${listing === 'sent' ? 'sent' : 'not sent'} match`;
+
 /** What a queued message with no time says it waits for. */
 export const TURN_ENDS_COPY = 'when its turn ends';
 

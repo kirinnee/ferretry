@@ -10,6 +10,9 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* A scroll settles on a row's top edge just under the sticky bar (its height is measured into --fy-queue-bar). */
+  scroll-snap-type: y proximity;
+  scroll-padding-top: var(--fy-queue-bar, 0px);
   padding: 0 var(--pad-panel, 16px) var(--pad-panel, 16px);
 }
 .fy-queue-column {
@@ -38,10 +41,12 @@
   align-items: center;
   gap: 8px 12px;
   padding: 8px 0 10px;
-  /* Solid, so a row scrolling under it is hidden, never half-seen; a firm line marks where the list begins. */
-  background: var(--bg);
+  /* Solid, so a row scrolling under it is hidden, never half-seen; a firm line marks where the list begins. The
+     opaque cover also reaches UP past the bar (a hard, unblurred shadow in the page colour, clipped by the scroll
+     container), so no row can show above it however the scroll lands; no soft shadow blurs the first row beneath it. */
+  background-color: var(--bg);
   border-bottom: var(--divider-width, 1px) solid var(--border-strong);
-  box-shadow: var(--shadow-panel);
+  box-shadow: 0 -100vh 0 0 var(--bg);
 }
 .fy-queue-toggle {
   display: inline-flex;
@@ -153,8 +158,9 @@
 }
 .fy-queue-group-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 10px;
+  gap: 2px 10px;
   margin: 0;
   padding: 0 0 8px;
   border-bottom: var(--divider-width, 1px) solid var(--divider-color, var(--border));
@@ -177,20 +183,16 @@
   color: var(--muted);
   font-size: var(--text-xs, 0.75rem);
 }
-.fy-queue-group-count {
+/* The quieter facts (next send, how many): at the far end of the heading on a desktop, line two on a phone. */
+.fy-queue-group-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0 12px;
   margin-inline-start: auto;
   color: var(--muted);
   font-size: var(--text-sm, 0.875rem);
+  font-weight: normal;
   white-space: nowrap;
-}
-.fy-queue-group-next {
-  margin-inline-start: auto;
-  color: var(--muted);
-  font-size: var(--text-sm, 0.875rem);
-  white-space: nowrap;
-}
-.fy-queue-group-next + .fy-queue-group-count {
-  margin-inline-start: 12px;
 }
 .fy-queue-list {
   display: flex;
@@ -201,6 +203,7 @@
 }
 .fy-queue-row {
   min-width: 0;
+  scroll-snap-align: start;
   border-bottom: var(--divider-width, 1px) solid var(--border-soft);
 }
 .fy-queue-row:last-child {
@@ -224,8 +227,14 @@
 .fy-queue-words {
   display: flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
+}
+/* The row's far end: the Next chip, then the time. Words never carry the chip, so they start at one x on every row. */
+.fy-queue-end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .fy-queue-line:hover {
   background: var(--surface-2, transparent);
@@ -273,7 +282,7 @@
 .fy-queue-snippet {
   flex: 1 1 0;
 }
-/* The message that goes next says so, in a word, right before its words. */
+/* The message that goes next says so, in a word, beside its time. */
 .fy-queue-next-chip {
   flex: none;
   padding: 0 6px;
@@ -427,15 +436,9 @@
   .fy-queue-words {
     display: contents;
   }
-  .fy-queue-next-chip {
-    grid-column: 3;
+  .fy-queue-end {
+    grid-column: 3 / -1;
     grid-row: 1;
-    margin-inline-start: 8px;
-  }
-  .fy-queue-ago {
-    grid-column: 4;
-    grid-row: 1;
-    justify-self: end;
     padding-inline-start: 8px;
   }
   .fy-queue-snippet {
@@ -451,13 +454,37 @@
   .fy-queue-detail {
     padding-inline: 4px;
   }
+  /* ONE slim row: the tabs compact, the search taking the rest; they wrap to two rows only when they cannot fit. */
+  .fy-queue-controls {
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    padding: 6px 0 8px;
+  }
+  .fy-queue-toggle-button {
+    min-height: 36px;
+    gap: 4px;
+    padding: 0 8px;
+    font-size: 0.8125rem;
+  }
+  .fy-queue-toggle-count {
+    padding: 0 5px;
+  }
+  .fy-queue-search {
+    flex: 1 1 8rem;
+  }
   .fy-queue-search-input {
     /* 16px keeps iOS from zooming the page when the box is focused. */
     font-size: 1rem;
     min-height: 44px;
+    text-overflow: ellipsis;
   }
-  .fy-queue-toggle-button {
-    min-height: 40px;
+  .fy-queue-group-head {
+    row-gap: 1px;
+  }
+  .fy-queue-group-meta {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+    font-size: var(--text-xs, 0.75rem);
   }
   .fy-queue-search-clear {
     width: 44px;

@@ -9,7 +9,7 @@ import type { QueuedMessage } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
 import { AlertTriangle, Check, CheckCheck, Clock, Search, Send, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { Fragment, useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { daemonQueuePath, daemonSessionPath } from '../lib/pages/routes.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
@@ -36,6 +36,7 @@ import {
   STATUS_LABEL,
   TURN_ENDS_COPY,
   queueCountLine,
+  queueMatchLine,
 } from '../lib/queue-view.ts';
 import { useRouter } from '../lib/router.tsx';
 import { absoluteTime } from '../lib/session-screens.ts';
@@ -150,20 +151,23 @@ function QueueRowView({
           {fromLabel(row)}
         </span>
         <span className="fy-queue-words">
+          <span className="fy-queue-snippet" data-queue-snippet="">
+            {firstLine(row.text)}
+          </span>
+        </span>
+        {/* The row's far end: the Next chip, then the time — never in the words, so they start at one x on every row. */}
+        <span className="fy-queue-end">
           {next ? (
             <span className="fy-queue-next-chip" data-queue-chip="next">
               Next<span className="sr-only"> up</span>
             </span>
           ) : null}
-          <span className="fy-queue-snippet" data-queue-snippet="">
-            {firstLine(row.text)}
-          </span>
+          {ago === '' ? null : (
+            <time className="fy-queue-ago" dateTime={row.at} title={absoluteTime(row.at)}>
+              {ago}
+            </time>
+          )}
         </span>
-        {ago === '' ? null : (
-          <time className="fy-queue-ago" dateTime={row.at} title={absoluteTime(row.at)}>
-            {ago}
-          </time>
-        )}
       </button>
       {expanded ? (
         <div className="fy-queue-detail" data-queue-detail="" id={detailId}>
@@ -309,6 +313,31 @@ export function QueuePageView({
     sent: countRows(lists.sent),
   };
   const searching = query.trim() !== '';
+  // The sticky bar's height, handed to the page's scroll-padding: a scroll comes to rest with a whole row (never a
+  // half-hidden one) just under the bar's line.
+  const pageRef = useRef<HTMLElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const page = pageRef.current;
+    const bar = barRef.current;
+    if (page === null || bar === null) return;
+    const measure = () => page.style.setProperty('--fy-queue-bar', `${bar.offsetHeight}px`);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(bar);
+    return () => watch.disconnect();
+  }, []);
+  // While a search is on, a count reads "N of M" — what matches, of what the list holds — in the tab AND the header.
+  const totals = useMemo<Readonly<Record<QueueListing, number>>>(
+    () => ({
+      unsent: countRows(listingGroups(groups, 'unsent', '')),
+      sent: countRows(listingGroups(groups, 'sent', '')),
+    }),
+    [groups],
+  );
+  const countText = (item: QueueListing): string =>
+    searching ? `${counts[item]} of ${totals[item]}` : String(counts[item]);
   const other: QueueListing = listing === 'unsent' ? 'sent' : 'unsent';
   const total = counts[listing];
   const shown = listing === 'sent' ? limitRows(lists.sent, limit) : lists.unsent;
@@ -321,18 +350,24 @@ export function QueuePageView({
     setLimit(SENT_STEP);
   };
   return (
-    <main aria-label={title} className="fy-queue-page scroll-thin" data-queue-page="">
+    <main aria-label={title} className="fy-queue-page scroll-thin" data-queue-page="" ref={pageRef}>
       <div className="fy-queue-column">
         <header className="fy-queue-head">
           <h1 className="fy-queue-title">{title}</h1>
-          <span className="fy-queue-count">{loading ? 'Reading the queues…' : queueCountLine(waiting, failed)}</span>
+          <span className="fy-queue-count">
+            {loading
+              ? 'Reading the queues…'
+              : searching
+                ? queueMatchLine(counts[listing], totals[listing], listing)
+                : queueCountLine(waiting, failed)}
+          </span>
           {onShowAll === undefined ? null : (
             <button className="kt-btn kt-btn--sm" onClick={onShowAll} type="button">
               All queues
             </button>
           )}
         </header>
-        <div className="fy-queue-controls">
+        <div className="fy-queue-controls" ref={barRef}>
           <fieldset aria-label="Which messages" className="fy-queue-toggle">
             {(['unsent', 'sent'] as const).map(item => (
               <button
@@ -345,7 +380,7 @@ export function QueuePageView({
               >
                 <span>{LISTING_LABEL[item]}</span>
                 <span className="fy-queue-toggle-count" data-queue-listing-count={item}>
-                  {counts[item]}
+                  {countText(item)}
                 </span>
               </button>
             ))}
@@ -358,7 +393,7 @@ export function QueuePageView({
               className="fy-queue-search-input"
               data-queue-search=""
               onChange={event => search(event.target.value)}
-              placeholder="Search messages or senders"
+              placeholder="Search"
               type="search"
               value={query}
             />
@@ -419,10 +454,13 @@ export function QueuePageView({
                       {group.ferret}
                     </button>
                     {showMachine ? <span className="fy-queue-machine">{group.machine}</span> : null}
-                    {listing === 'unsent' ? <GroupNextSend group={whole} now={now} /> : null}
-                    {shown.length > 1 ? (
-                      <span className="fy-queue-group-count">{`${group.rows.length} ${listing === 'sent' ? 'sent' : 'not sent'}`}</span>
-                    ) : null}
+                    {/* Line two (on a phone; the far end on a desktop): the quieter facts about this ferret. */}
+                    <span className="fy-queue-group-meta">
+                      {listing === 'unsent' ? <GroupNextSend group={whole} now={now} /> : null}
+                      {shown.length > 1 ? (
+                        <span className="fy-queue-group-count">{`${group.rows.length} ${listing === 'sent' ? 'sent' : 'not sent'}`}</span>
+                      ) : null}
+                    </span>
                   </h2>
                   <ul className="fy-queue-list">
                     {group.rows.map(row => (

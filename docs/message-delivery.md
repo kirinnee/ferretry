@@ -146,7 +146,7 @@ this page, which is still how a message reaches the pane.
     (drawn as the chat draws them), the reason, the kind when it is not an `action`, **Next up**, the send time,
     and Edit / Cancel. No separator characters are drawn between the parts, so a line can never start with one.
   - **Search** filters the list on screen by message text _and_ sender, any case (`matchesSearch`); the toggles
-    count what each list holds for the search, "no matches" points at the other list when it has some, and a clear
+    read "N of M" while a search is on (tab and header alike: `0 of 3 not sent match`), "no matches" points at the other list when it has some, and a clear
     control empties the box. **Next up** is still decided on the ferret's whole queue, not on the matching rows.
   - **It scrolls.** `.fy-queue-page` takes the pane's height (`height: 100%`) and scrolls inside it — the pane
     around a page is a plain block, so a flex-basis alone left it as tall as its content, clipped by the shell.

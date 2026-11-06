@@ -184,14 +184,14 @@ describe('QueuePageView', () => {
       groups: [group([queued('q1', 'queued', { text: long, sender: 'agent', by: { kind: 'ferret', name: 'Mira' } })])],
     });
     const parts = (line('q1').children as ReactTestInstance[]).map(child => text(child));
-    // Four cells — status, sender, words (the Next chip, then the first line), time — so the grid can fix the first two
-    // columns on a desktop and re-flow all four into two lines on a phone.
-    expect(parts).toEqual(['Waiting', 'Mira', 'Next upFirst line of the note', '15m ago']);
+    // Four cells — status, sender, words, the far end (the Next chip, then the time) — so the grid can fix the first
+    // two columns on a desktop and re-flow all four into two lines on a phone. The chip is NOT in the words, so the
+    // words start at the same x on every row.
+    expect(parts).toEqual(['Waiting', 'Mira', 'First line of the note', 'Next up15m ago']);
     const words = line('q1').findByProps({ className: 'fy-queue-words' });
-    expect((words.children as ReactTestInstance[]).map(child => text(child))).toEqual([
-      'Next up',
-      'First line of the note',
-    ]);
+    expect((words.children as ReactTestInstance[]).map(child => text(child))).toEqual(['First line of the note']);
+    const end = line('q1').findByProps({ className: 'fy-queue-end' });
+    expect((end.children as ReactTestInstance[]).map(child => text(child))).toEqual(['Next up', '15m ago']);
     // The sender cell is a fixed-width column that ellipsizes, so its full name stays reachable.
     expect(line('q1').findByProps({ 'data-queue-meta': 'from' }).props.title).toBe('Mira');
     expect(line('q1').type).toBe('button');
@@ -215,7 +215,7 @@ describe('QueuePageView', () => {
     mounted = view({ groups: [group([queued('q1', 'queued', { enqueuedAt: 'not a time' })])] });
     expect(row('q1').findAllByType('time')).toHaveLength(0);
     const parts = (line('q1').children as ReactTestInstance[]).map(child => text(child));
-    expect(parts).toEqual(['Waiting', 'You', 'Next uptext q1']);
+    expect(parts).toEqual(['Waiting', 'You', 'text q1', 'Next up']);
   });
 
   test('the line shows your own messages as You, the owner of a ferret message by name, and only the first line of a heading', () => {
@@ -321,13 +321,40 @@ describe('QueuePageView', () => {
     searchFor('mIrA');
     expect(rowIds(mounted.root)).toEqual(['q22']);
     // The toggles count what each list holds for this search.
-    expect(text(mounted.root.findByProps({ 'data-queue-listing-count': 'sent' }))).toBe('1');
+    expect(text(mounted.root.findByProps({ 'data-queue-listing-count': 'sent' }))).toBe('1 of 2');
     toggle('sent');
     expect(rowIds(mounted.root)).toEqual(['q4444']);
     searchFor('ci');
     expect(rowIds(mounted.root)).toEqual(['q333']);
     searchFor('you');
     expect(rowIds(mounted.root)).toEqual(['q333']);
+  });
+
+  test('while a search is active the tab counts and the header both read "N of M"', () => {
+    mounted = view({
+      groups: [
+        group([
+          queued('q1', 'queued', { text: 'alpha' }),
+          queued('q22', 'queued', { text: 'beta' }),
+          queued('q333', 'failed', { text: 'gamma' }),
+          queued('q4444', 'read', { text: 'alpha old' }),
+          queued('q55555', 'read', { text: 'delta' }),
+        ]),
+      ],
+    });
+    const header = () => text(mounted!.root.findByProps({ className: 'fy-queue-count' }));
+    const tab = (listing: 'unsent' | 'sent') =>
+      text(mounted!.root.findByProps({ 'data-queue-listing-count': listing }));
+    // No search: plain numbers, and the header explains the tab.
+    expect([tab('unsent'), tab('sent'), header()]).toEqual(['3', '2', '2 waiting · 1 failed']);
+    searchFor('alpha');
+    expect([tab('unsent'), tab('sent'), header()]).toEqual(['1 of 3', '1 of 2', '1 of 3 not sent match']);
+    searchFor('nothing like it');
+    expect([tab('unsent'), tab('sent'), header()]).toEqual(['0 of 3', '0 of 2', '0 of 3 not sent match']);
+    toggle('sent');
+    expect(header()).toBe('0 of 2 sent match');
+    searchFor('');
+    expect([tab('unsent'), tab('sent'), header()]).toEqual(['3', '2', '2 waiting · 1 failed']);
   });
 
   test('a search with no match says so, points to the other list, and the clear control brings the rows back', () => {

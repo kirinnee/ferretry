@@ -14,6 +14,7 @@ import {
   queueRowOf,
   rowSend,
   queueCountLine,
+  queueMatchLine,
   countRows,
   firstLine,
   limitRows,
@@ -159,6 +160,11 @@ describe('waiting', () => {
     expect(queueCountLine(2, 1)).toBe('2 waiting · 1 failed');
     expect(queueCountLine(0, 3)).toBe('3 failed');
     expect(queueCountLine(1, 1)).toBe('1 waiting · 1 failed');
+  });
+
+  test('the match line says N of M for the list on screen', () => {
+    expect(queueMatchLine(0, 3, 'unsent')).toBe('0 of 3 not sent match');
+    expect(queueMatchLine(12, 60, 'sent')).toBe('12 of 60 sent match');
   });
 
   test('a failed row, and only a failed row, is a failed row', () => {
