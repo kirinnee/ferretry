@@ -2,7 +2,6 @@ import { randomBytes } from 'node:crypto';
 import {
   type AccountSummary,
   type LoginEntryId,
-  type LoginEntrySummary,
   type LoginRecipeProposal,
   type LoginRecipeProposed,
   type SignInId,
@@ -19,7 +18,6 @@ import type { AgendaActor } from '../agenda/state-machine.ts';
 import type { AuditSink } from '../audit/types.ts';
 import type { ClockPort } from '../ports.ts';
 import { type AccountDirectory, type AccountListing, LoginEntryError } from './accounts.ts';
-import type { LoginDirectory } from './logins.ts';
 import { proposalTarget } from './proposal-target.ts';
 
 /**
@@ -35,12 +33,6 @@ import { proposalTarget } from './proposal-target.ts';
  *   changes a recipe. Only an owner who turned auto-apply on for that ONE sign-in lets a proposal apply at once, and
  *   that is audited. Every applied change bumps the sign-in's `recipeVersion`.
  */
-
-/**
- * Which sign-in a proposal is for: named (`{ signIn }`), or an account's ONLY sign-in (the older `{ login }`, from
- * `login.propose` and `account.propose { login }`). Both go through {@link LoginRecipeService.propose}, ONE path.
- */
-export type RecipeProposalTarget = { readonly signIn: SignInId } | { readonly login: LoginEntryId };
 
 /** Whether a text holds any value the daemon masks: the redactor would change it. Rejects when it cannot tell. */
 export interface RecipeValueCheck {
@@ -62,8 +54,6 @@ export interface RecipeAgendaPort {
 }
 
 export interface LoginRecipePorts {
-  /** The saved-login projection, for an older client's answer to a proposal by account (`/v1/secrets/logins/…`). */
-  readonly logins: Pick<LoginDirectory, 'list' | 'decide'>;
   /** The account store: where a proposal is filed (on one sign-in) and where the owner answers one. */
   readonly accounts: Pick<AccountDirectory, 'list' | 'proposeSignIn' | 'proposalCardSignIn' | 'decideSignIn'>;
   readonly values: RecipeValueCheck;
@@ -73,7 +63,7 @@ export interface LoginRecipePorts {
   readonly newId?: () => string;
 }
 
-/** What carries a recipe a route serves: a saved login, or a sign-in. */
+/** What carries a recipe a route serves: a sign-in. */
 interface RecipeBearing {
   readonly recipe?: string | undefined;
   readonly recipeBy?: 'ferret' | undefined;
@@ -104,34 +94,24 @@ export class LoginRecipeService {
     if (scrubbed !== recipe) throw new RecipeValueError(HOLDS_VALUE);
   }
 
-  /**
-   * WHICH SIGN-IN a proposal is for, and its account: the one named, or — for the older `{ login }` — the account's ONLY
-   * sign-in. An account that signs in nowhere, or at several places, is refused: the ferret names the sign-in.
-   */
-  async resolve(
-    target: RecipeProposalTarget,
-  ): Promise<{ readonly signIn: SignInSummary; readonly account: AccountSummary }> {
-    const found = proposalTarget(
-      await this.ports.accounts.list(),
-      'signIn' in target ? { signIn: target.signIn } : { login: target.login },
-    );
+  /** WHICH SIGN-IN a proposal is for, and its account. A sign-in that does not exist is refused. */
+  async resolve(signInId: SignInId): Promise<{ readonly signIn: SignInSummary; readonly account: AccountSummary }> {
+    const found = proposalTarget(await this.ports.accounts.list(), signInId);
     if (!found.ok) throw new LoginEntryError(found.refusal, found.words);
     return { signIn: found.signIn, account: found.account };
   }
 
   /**
-   * A FERRET proposes a recipe for one SIGN-IN after signing in there: the older `{ login }` is resolved to the
-   * account's only sign-in FIRST ({@link resolve}), and every check below runs once, on that canonical sign-in. The text
-   * is checked for values; then it applies at once only if the owner allowed that for THIS sign-in, and otherwise
-   * waits on a card.
+   * A FERRET proposes a recipe for one SIGN-IN after signing in there. The text is checked for values; then it applies
+   * at once only if the owner allowed that for THIS sign-in, and otherwise waits on a card.
    */
   async propose(
     sessionId: string,
-    target: RecipeProposalTarget,
+    signInId: SignInId,
     recipe: string,
     why: string,
   ): Promise<LoginRecipeProposed & { readonly signIn: SignInId }> {
-    const { signIn, account } = await this.resolve(target);
+    const { signIn, account } = await this.resolve(signInId);
     await this.assertNoValue(recipe);
     await this.assertNoValue(why);
     const proposal: LoginRecipeProposal = {
@@ -163,14 +143,10 @@ export class LoginRecipeService {
   }
 
   /**
-   * The entries as they may be SERVED: every recipe, proposal and reason masked through the redactor NOW, so a value
-   * kept after the text was written is a mask, never the value. A redactor that fails drops the texts (fail closed).
+   * An account listing as it may be SERVED: every sign-in's recipe, proposal and reason masked through the redactor NOW,
+   * so a value kept after the text was written is a mask, never the value. A redactor that fails drops the texts (fail
+   * closed).
    */
-  async scrubbed(entries: readonly LoginEntrySummary[]): Promise<readonly LoginEntrySummary[]> {
-    return await Promise.all(entries.map(async entry => await this.scrubbedEntry(entry)));
-  }
-
-  /** An account listing as it may be SERVED: every sign-in's recipe and proposals masked, as {@link scrubbed}. */
   async scrubbedAccounts(listing: AccountListing): Promise<AccountListing> {
     return {
       accounts: listing.accounts,
@@ -213,25 +189,8 @@ export class LoginRecipeService {
   }
 
   /**
-   * The OWNER answers a proposal; its card closes either way. An approval is checked for values again: one the owner
-   * kept after the proposal was made must not become the recipe.
-   */
-  async decide(id: LoginEntryId, proposalId: string, decision: 'approve' | 'decline'): Promise<LoginEntrySummary> {
-    if (decision === 'approve') {
-      const waiting = (await this.ports.logins.list())
-        .find(each => each.id === id)
-        ?.proposals?.find(proposal => proposal.id === proposalId);
-      if (waiting !== undefined) await this.assertNoValue(waiting.recipe);
-    }
-    const { entry, proposal } = await this.ports.logins.decide(id, proposalId, decision);
-    await this.closeCard(proposal, decision === 'approve' ? 'Approved: the recipe was updated.' : 'Declined.');
-    const [served] = await this.scrubbed([entry]);
-    return served ?? entry;
-  }
-
-  /**
-   * The OWNER answers a proposal on one sign-in; its card closes either way. An approval is checked for values again,
-   * as {@link decide} does.
+   * The OWNER answers a proposal on one sign-in; its card closes either way. An approval is checked for values again: one the
+   * owner kept after the proposal was made must not become the recipe.
    */
   async decideSignIn(id: SignInId, proposalId: string, decision: 'approve' | 'decline'): Promise<SignInSummary> {
     const accounts = this.ports.accounts;

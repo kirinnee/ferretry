@@ -54,7 +54,7 @@ import {
   InputSensitivitySchema,
   InputSubmitModeSchema,
 } from './input-request.ts';
-import { LoginEntryIdSchema, LoginHintListSchema } from './login-entries.ts';
+import { LoginEntryIdSchema } from './login-entries.ts';
 import {
   PHONE_APPROVAL_MAX_WAIT_SECONDS,
   PHONE_APPROVAL_MIN_WAIT_SECONDS,
@@ -67,24 +67,14 @@ import { SecretNameSchema } from './secrets.ts';
 import {
   COPY_MAX_LIFETIME_SECONDS,
   COPY_MAX_LIVE_PER_SESSION,
-  COPY_PLAN_MAX_ITEMS,
-  COPY_PLAN_MAX_LIFETIME_SECONDS,
   CopyCommandReportSchema,
   CopyHandleSchema,
   CopyMetaSchema,
   CopyNameSchema,
-  CopyPlanItemSchema,
-  CopyPlanSchema,
   CopySourceSchema,
 } from './secure-copy.ts';
 import { SurfaceKeySchema, SurfaceKindSchema, SurfaceNameSchema } from './surface-names.ts';
-import {
-  TASK_PLAN_MIN_LIFETIME_SECONDS,
-  type TaskPlanCall,
-  TaskPlanAgentViewSchema,
-  TaskPlanCallSchema,
-  taskPlanLinesOfCopyItems,
-} from './task-plan.ts';
+import { TaskPlanAgentViewSchema, TaskPlanCallSchema } from './task-plan.ts';
 
 export * from './surface-names.ts';
 
@@ -277,7 +267,7 @@ const BrowserPushApprovalCallSchema = z.strictObject({
   ...PushApprovalShape,
 });
 
-const AgentToolCallBodySchema = z.discriminatedUnion('tool', [
+export const AgentToolCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('terminal.list') }),
   z.strictObject({
     tool: z.literal('terminal.open'),
@@ -711,51 +701,11 @@ const AgentToolCallBodySchema = z.discriminatedUnion('tool', [
     submit: InputSubmitModeSchema.optional(),
     expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
   }),
-  z.strictObject({
-    tool: z.literal('secure.preapprove'),
-    /** The pastes the agent plans, before it starts: one card, the owner ticks what it allows. */
-    items: z.array(CopyPlanItemSchema).min(1).max(COPY_PLAN_MAX_ITEMS),
-    expiresInSeconds: z
-      .number()
-      .int()
-      .min(TASK_PLAN_MIN_LIFETIME_SECONDS)
-      .max(COPY_PLAN_MAX_LIFETIME_SECONDS)
-      .optional(),
-  }),
   /** The widened plan (docs/agent-tools.md, `task_plan`): sign-ins, terminal sign-ins and pastes on one card. */
   TaskPlanCallSchema,
 ]);
-
-/** Names an older client still sends, read as the tool they became: every check downstream sees only the new name. */
-const LEGACY_TOOL_NAMES: Readonly<Record<string, string>> = {
-  'login.hint': 'account.hint',
-  'login.propose': 'account.propose',
-};
-
-export const AgentToolCallSchema = z.preprocess(
-  (raw: unknown) =>
-    typeof raw === 'object' &&
-    raw !== null &&
-    'tool' in raw &&
-    typeof raw.tool === 'string' &&
-    Object.hasOwn(LEGACY_TOOL_NAMES, raw.tool)
-      ? { ...raw, tool: LEGACY_TOOL_NAMES[raw.tool] }
-      : raw,
-  AgentToolCallBodySchema,
-);
 export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 export type AgentToolName = AgentToolCall['tool'];
-
-/**
- * `secure.preapprove` read as the `task.plan` it is (task-plan.ts): each planned paste a paste line with one use, the
- * same expiry. The kept tool's handler translates its body with this and proposes through the one task-plan path, then
- * answers the old `plan` shape (`copyPlanOf`), so a pane running an older `fy mcp serve` keeps working.
- */
-export const taskPlanCallOf = (call: Extract<AgentToolCall, { readonly tool: 'secure.preapprove' }>): TaskPlanCall => ({
-  tool: 'task.plan',
-  lines: [...taskPlanLinesOfCopyItems(call.items)],
-  ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
-});
 
 /**
  * The tools that change nothing — they list, read, wait or look — plus the config tools that only read.
@@ -770,7 +720,6 @@ const REPEATABLE_AGENT_TOOLS: ReadonlySet<string> = new Set<string>([
   'terminal.wait',
   'input.wait',
   'account.hint',
-  'login.hint',
   'secure.list',
   'browser.list',
   'browser.read',
@@ -835,13 +784,6 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'task.plan',
 ];
 
-/**
- * Tools the daemon still answers though no agent is shown them: `secure.preapprove` is read as the `task.plan` it
- * became ({@link taskPlanCallOf}) and answers in its old shape, so a pane running an older `fy mcp serve` keeps working.
- * `LEGACY_TOOL_NAMES` cannot do this: it renames a tool but can translate neither its body nor its answer.
- */
-export const ACCEPTED_UNLISTED_TOOLS: readonly AgentToolName[] = ['secure.preapprove'];
-
 /** One surface as a list call shows it. An unnamed surface is still listed, by id. */
 export const AgentSurfaceSchema = z.strictObject({
   id: z.string().min(1).max(128),
@@ -888,12 +830,8 @@ export const AgentToolResultSchema = z.strictObject({
     .optional(),
   /** `secure.copy` from a command: how it ended and its masked stderr, never its stdout. */
   command: CopyCommandReportSchema.optional(),
-  /** `secure.preapprove` only: the plan card raised for the owner. */
-  plan: CopyPlanSchema.optional(),
   /** `task.plan` only: the plan card raised for the owner, as the ferret may know it (`taskPlanAgentView`). */
   taskPlan: TaskPlanAgentViewSchema.optional(),
-  /** `account.hint` only: the saved logins for the site, by their non-secret metadata. */
-  logins: LoginHintListSchema.optional(),
   /** `account.propose` only: whether the recipe waits on the owner or was applied. */
   recipe: LoginRecipeProposedSchema.optional(),
 });

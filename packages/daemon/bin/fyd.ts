@@ -7454,7 +7454,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   });
   const secrets: SecretSubsystem = {
     directory: secretDirectory,
-    logins: loginDirectory,
     accounts: accountDirectory,
     // Only the look-alike answer (handles), as a closure: the route table holds nothing that opens a value.
     lookAlike: narrowVault.lookAlike,
@@ -10815,7 +10814,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Login recipes (docs/input-requests.md): every recipe text is checked against every value the daemon masks, and a
       // ferret's proposal waits on a card the owner answers in Settings or with `fy account site recipe`.
       const loginRecipes = new LoginRecipeService({
-        logins: loginDirectory,
         accounts: accountDirectory,
         values: { redact: async text => await secretRedactor.redact(text) },
         agenda: new RecipeAgendaAdapter(agenda),

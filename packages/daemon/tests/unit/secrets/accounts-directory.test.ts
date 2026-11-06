@@ -1,15 +1,10 @@
 import { describe, it } from 'bun:test';
-import { type Place, PutLoginEntryRequestSchema, TotpParametersSchema } from '@ferretry/protocol';
+import { type Place, TotpParametersSchema } from '@ferretry/protocol';
 import should from 'should';
-import {
-  AccountVault,
-  LoginDirectory,
-  LoginRecipeService,
-  narrowAccountVault,
-  totpCode,
-} from '../../../src/lib/secrets/index.ts';
+import { AccountVault, LoginDirectory, narrowAccountVault, totpCode } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, plantSeed } from '../runtime/mounts/support.ts';
 import { CLOCK, CountingSealed, daemonOver, SEED } from './accounts-fixtures.ts';
+import { putSavedLogin } from './saved-login-fixture.ts';
 
 /**
  * The account store's own rules (r1-plan §1.3, §2.5; invariants 16, 17 and the compat writes of §1.5): one account
@@ -270,7 +265,7 @@ describe('merging two accounts', () => {
   });
 });
 
-describe('an older client writes a saved login', () => {
+describe('a sign-in keeps facts only for its own places', () => {
   async function twoPlaces() {
     const w = world();
     const logins = new LoginDirectory(w.index, w.sealed, new FakeSecretCipher(), CLOCK, {
@@ -280,82 +275,10 @@ describe('an older client writes a saved login', () => {
         return () => `si_${(++n).toString(16).padStart(16, '0')}`;
       })(),
     });
-    // What `fy secret entry add` sent: one body with a website and an ssh host. It becomes two sign-ins.
-    await logins.put(
-      'GITHUB',
-      PutLoginEntryRequestSchema.parse({ label: 'GitHub', match: ['github.com', 'ssh@build.example.com'] }),
-    );
+    // A website and an ssh host: two sign-ins.
+    await putSavedLogin(logins, 'GITHUB', { label: 'GitHub', match: ['github.com', 'ssh@build.example.com'] });
     return { ...w, logins };
   }
-
-  it('should refuse a change to where or how it signs in once it signs in at several places', async () => {
-    const w = await twoPlaces();
-    should((await w.directory.list()).signIns).have.length(2);
-    const before = JSON.stringify(w.index.document);
-    for (const body of [
-      { match: ['github.com'] },
-      { domains: ['github.com'] },
-      { method: { kind: 'github' } },
-      { recipe: 'Open github.com' },
-      { autoApplyRecipe: true },
-    ])
-      should(await refusal(w.logins.put('GITHUB', PutLoginEntryRequestSchema.parse(body)))).equal(
-        'account_has_sign_ins',
-      );
-    should(JSON.stringify(w.index.document)).equal(before);
-    // The account's own fields are not a sign-in's: they still change.
-    should((await w.logins.put('GITHUB', PutLoginEntryRequestSchema.parse({ username: 'kirin' }))).username).equal(
-      'kirin',
-    );
-    // The older { login } spelling of a proposal names no place, so it is refused too (the recipe service resolves it).
-    const recipes = new LoginRecipeService({
-      logins: w.logins,
-      accounts: w.logins.accounts,
-      values: { redact: async text => text },
-      agenda: { raise: async () => ({ ok: false, message: 'none' }), close: async () => undefined },
-      audit: { record: async () => undefined },
-      clock: CLOCK,
-    });
-    should(await refusal(recipes.propose('session-1', { login: 'GITHUB' }, 'Open github.com', 'it moved'))).equal(
-      'account_has_sign_ins',
-    );
-    should(JSON.stringify(w.index.document)).not.containEql('rp_');
-  });
-
-  it('should refuse a method or recipe for an account that signs in nowhere, never answering it saved (secrev-r1-2 L5)', async () => {
-    const w = world();
-    const logins = new LoginDirectory(w.index, w.sealed, new FakeSecretCipher(), CLOCK);
-    await logins.put('GOOGLE', PutLoginEntryRequestSchema.parse({ label: 'Google' }));
-    const before = JSON.stringify(w.index.document);
-    for (const body of [
-      { match: [], method: { kind: 'sso', name: 'Okta' } },
-      { match: [], recipe: 'Open accounts.google.com' },
-      { match: [], autoApplyRecipe: true },
-      { label: 'New', match: [], recipe: 'Open it' },
-    ])
-      should(
-        await refusal(logins.put(body.label === undefined ? 'GOOGLE' : 'NEW', PutLoginEntryRequestSchema.parse(body))),
-      ).equal('no_sign_in');
-    should(JSON.stringify(w.index.document)).equal(before);
-    // Back to a password, with nowhere to sign in, loses nothing: it is not refused.
-    should(
-      (await logins.put('GOOGLE', PutLoginEntryRequestSchema.parse({ match: [], method: { kind: 'password' } }))).id,
-    ).equal('GOOGLE');
-  });
-
-  it('should map a change 1:1 onto the one sign-in, keeping its id', async () => {
-    const w = world();
-    const logins = new LoginDirectory(w.index, w.sealed, new FakeSecretCipher(), CLOCK);
-    await logins.put('VERCEL', PutLoginEntryRequestSchema.parse({ label: 'Vercel', match: ['vercel.com'] }));
-    const [first] = (await w.directory.list()).signIns;
-    const changed = await logins.put('VERCEL', PutLoginEntryRequestSchema.parse({ recipe: 'Open vercel.com' }));
-    should(changed.recipe).equal('Open vercel.com');
-    const [after] = (await w.directory.list()).signIns;
-    should(after?.id).equal(first?.id as string);
-    should(after?.recipeVersion).equal(1);
-    await logins.put('VERCEL', PutLoginEntryRequestSchema.parse({ recipe: 'Open vercel.com/login' }));
-    should((await w.directory.list()).signIns[0]?.recipeVersion).equal(2);
-  });
 
   it('should keep a fact only on the sign-in it is for, at one of its own places, never misfiled', async () => {
     const w = await twoPlaces();

@@ -40,7 +40,7 @@ describe('account.propose', () => {
     should(calls).deepEqual([
       [
         's1',
-        { signIn: SI_VERCEL },
+        SI_VERCEL,
         'Open vercel.com → Continue with Google → [[GOOGLE_KIRIN]]',
         'the first sign-in needed the Google step',
       ],
@@ -55,34 +55,6 @@ describe('account.propose', () => {
     should(result.summary).containEql('!A4').and.containEql(SI_VERCEL);
     // The audit names the sign-in, never the ferret's text.
     should(JSON.stringify(world.audit)).containEql(SI_VERCEL).and.not.containEql('Continue with Google');
-  });
-
-  it('should resolve the older { login } through the SAME path, and audit the sign-in it resolved to', async () => {
-    const calls: unknown[] = [];
-    const world = agentToolWorld({
-      recipes: {
-        scrubbedAccounts: async listing => listing,
-        propose: async (...parameters) => {
-          calls.push(parameters);
-          return PENDING;
-        },
-      },
-    });
-
-    await world.service.call(agent, { tool: 'account.propose', login: 'VERCEL', recipe: 'x', why: 'y' });
-    // The route parses every call with the one schema: the older name and spelling arrive as account.propose { login }.
-    await world.service.call(
-      agent,
-      AgentToolCallSchema.parse({ tool: 'login.propose', login: 'VERCEL', recipe: 'x', why: 'y' }),
-    );
-
-    should(calls).deepEqual([
-      ['s1', { login: 'VERCEL' }, 'x', 'y'],
-      ['s1', { login: 'VERCEL' }, 'x', 'y'],
-    ]);
-    const audit = JSON.stringify(world.audit);
-    should(audit).containEql(`"signIn":"${SI_VERCEL}"`).and.containEql('"tool":"account.propose"');
-    should(audit).not.containEql('login.propose');
   });
 
   it('should say when the owner let it apply at once', async () => {
@@ -101,27 +73,16 @@ describe('account.propose', () => {
     should(result.summary).containEql('was updated').and.containEql('this sign-in');
   });
 
-  it('should refuse an unknown sign-in or login, a recipe holding a value, and a daemon without recipes', async () => {
+  it('should refuse an unknown sign-in, a recipe holding a value, and a daemon without recipes', async () => {
     const refusing = (error: Error) =>
       agentToolWorld({
         recipes: { scrubbedAccounts: async listing => listing, propose: async () => await Promise.reject(error) },
       });
-    const call = { tool: 'account.propose', login: 'VERCEL', recipe: 'x', why: 'y' } as const;
-    const unknown = (await refusing(new LoginEntryError('unknown_login', 'there is no saved login VERCEL'))
+    const call = { tool: 'account.propose', signIn: SI_VERCEL, recipe: 'x', why: 'y' } as const;
+    const unknown = (await refusing(new LoginEntryError('unknown_sign_in', `there is no sign-in ${SI_VERCEL}`))
       .service.call(agent, call)
       .catch((caught: unknown) => caught)) as AgentToolError;
     should(unknown.code).equal('not_found');
-    const noSignIn = (await refusing(new LoginEntryError('unknown_sign_in', `there is no sign-in ${SI_VERCEL}`))
-      .service.call(agent, { ...call, login: undefined, signIn: SI_VERCEL })
-      .catch((caught: unknown) => caught)) as AgentToolError;
-    should(noSignIn.code).equal('not_found');
-    const several = (await refusing(
-      new LoginEntryError('account_has_sign_ins', 'name the sign-in: Vercel signs in at 2 places'),
-    )
-      .service.call(agent, call)
-      .catch((caught: unknown) => caught)) as AgentToolError;
-    should(several.code).equal('bad_request');
-    should(several.message).containEql('name the sign-in');
     const holding = (await refusing(new RecipeValueError('a recipe never holds a value'))
       .service.call(agent, call)
       .catch((caught: unknown) => caught)) as AgentToolError;
@@ -197,7 +158,7 @@ describe('account.propose with preapprove (a suggestion of a standing rule)', ()
     });
 
     // Assert
-    should(rules.asked).deepEqual([['s1', { signIn: SI_VERCEL, login: undefined, why: 'I sign in here every day.' }]]);
+    should(rules.asked).deepEqual([['s1', { signIn: SI_VERCEL, why: 'I sign in here every day.' }]]);
     should(result.summary)
       .containEql('Suggested a standing rule for vercel.com (!A9)')
       .and.containEql('Do not ask again');

@@ -1,18 +1,7 @@
 import { describe, it } from 'bun:test';
-import {
-  type AccountIndexDocument,
-  type LoginRecipeProposal,
-  type Place,
-  PutLoginEntryRequestSchema,
-  TotpParametersSchema,
-} from '@ferretry/protocol';
+import type { AccountIndexDocument, LoginRecipeProposal, Place } from '@ferretry/protocol';
 import should from 'should';
-import {
-  AccountDirectory,
-  LoginDirectory,
-  LoginRecipeService,
-  SecretStoreError,
-} from '../../../src/lib/secrets/index.ts';
+import { AccountDirectory, LoginRecipeService, SecretStoreError } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, plantSeed } from '../runtime/mounts/support.ts';
 import { CLOCK, CountingSealed, daemonOver, SEED } from './accounts-fixtures.ts';
 
@@ -22,7 +11,6 @@ import { CLOCK, CountingSealed, daemonOver, SEED } from './accounts-fixtures.ts'
  */
 
 const site = (...domains: string[]): Place => ({ kind: 'site', domains, match: domains });
-const terminal = (tool: string, host: string): Place => ({ kind: 'terminal', tool, host });
 const keyOf = (n: number) => `L${n.toString(16).toUpperCase().padStart(24, '0')}`;
 
 function world(options: { readonly seals?: boolean } = {}) {
@@ -39,8 +27,7 @@ function world(options: { readonly seals?: boolean } = {}) {
     options.seals === false
       ? new AccountDirectory(index, sealed, new FakeSecretCipher(), CLOCK, ids)
       : daemon.directory;
-  const logins = new LoginDirectory(index, sealed, new FakeSecretCipher(), CLOCK, ids);
-  return { index, sealed, vault: daemon.vault, directory, logins };
+  return { index, sealed, vault: daemon.vault, directory };
 }
 
 const failure = async (work: Promise<unknown>) =>
@@ -169,7 +156,7 @@ describe('a merge, the rest of its rules', () => {
     await w.directory.putAccount('KEEP', { label: 'Keep' });
     await w.directory.putAccount('FROM', { label: 'From' });
     await w.directory.putAccount('OTHER', { label: 'Other' });
-    for (const id of ['KEEP', 'FROM']) await plantSeed(w.logins.accounts, id, SEED);
+    for (const id of ['KEEP', 'FROM']) await plantSeed(w.directory, id, SEED);
     const from = w.index.accounts.accounts.FROM as NonNullable<AccountIndexDocument['accounts']['FROM']>;
     w.index.document = {
       ...w.index.accounts,
@@ -249,8 +236,7 @@ describe('a recipe proposal on one sign-in', () => {
   it('should refuse an owner answer on a sign-in that is not there', async () => {
     const w = world();
     const recipes = new LoginRecipeService({
-      logins: w.logins,
-      accounts: w.logins.accounts,
+      accounts: w.directory,
       values: { redact: async text => text },
       agenda: { raise: async () => ({ ok: false, message: 'none' }), close: async () => undefined },
       audit: { record: async () => undefined },
@@ -259,68 +245,6 @@ describe('a recipe proposal on one sign-in', () => {
     should(
       (await failure(recipes.decideSignIn('si_0000000000000001', 'rp_0000000000000001', 'approve'))).refusal,
     ).equal('unknown_sign_in');
-  });
-});
-
-describe('an older client over the account store, the rest of its refusals', () => {
-  it('should refuse removing seeds by the older route where the account keeps two', async () => {
-    const w = world();
-    w.index.document = {
-      v: 2,
-      accounts: {
-        TWO: {
-          key: keyOf(1),
-          label: 'Two seeds',
-          seals: {},
-          factors: [1, 2].map(n => ({
-            id: `tf_${n.toString(16).padStart(12, '0')}`,
-            kind: 'totp' as const,
-            label: `Phone ${String(n)}`,
-            seal: `${keyOf(1)}_TOTP_0000000${String(n)}`,
-            params: TotpParametersSchema.parse({}),
-            addedAt: 't',
-            addedBy: 'owner' as const,
-          })),
-          createdAt: 't',
-          updatedAt: 't',
-        },
-      },
-      signIns: {},
-    };
-    const refused = await failure(w.logins.put('TWO', PutLoginEntryRequestSchema.parse({ totp: null })));
-    should(refused.refusal).equal('account_has_2fa_keys');
-  });
-
-  it('should refuse a saved login that would sign in at more places than an account may', async () => {
-    const w = world();
-    const match = Array.from({ length: 16 }, (_, n) => `sudo@host${String(n)}`);
-    const refused = await failure(
-      w.logins.put('WIDE', PutLoginEntryRequestSchema.parse({ label: 'Wide', match, domains: ['wide.example'] })),
-    );
-    should(refused.refusal).equal('invalid_change');
-    should(w.index.document).be.undefined();
-  });
-
-  it('should refuse a proposal by account for one that signs in nowhere', async () => {
-    const w = world();
-    await w.logins.put('NOWHERE', PutLoginEntryRequestSchema.parse({ label: 'Nowhere' }));
-    const recipes = new LoginRecipeService({
-      logins: w.logins,
-      accounts: w.logins.accounts,
-      values: { redact: async text => text },
-      agenda: { raise: async () => ({ ok: false, message: 'none' }), close: async () => undefined },
-      audit: { record: async () => undefined },
-      clock: CLOCK,
-    });
-    should((await failure(recipes.propose('session-1', { login: 'NOWHERE' }, 'x', 'y'))).refusal).equal('no_sign_in');
-  });
-
-  it('should keep a terminal-only saved login when an older client resends it as it is', async () => {
-    const w = world();
-    await w.directory.putAccount('SUDO', { label: 'sudo' });
-    const { id } = await w.directory.addSignIn('SUDO', { place: terminal('sudo', 'kirin-box') });
-    await w.logins.put('SUDO', PutLoginEntryRequestSchema.parse({ match: ['sudo@kirin-box'] }));
-    should((await w.directory.list()).signIns.map(signIn => signIn.id)).deepEqual([id]);
   });
 });
 

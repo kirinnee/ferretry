@@ -239,10 +239,6 @@ describe('pasting, rules and plans', () => {
 
     should(CopyPlanItemSchema.safeParse({ ...item, why: 'two\nlines' }).success).be.false();
     should(CopyPlanItemSchema.safeParse({ ...item, why: 'x'.repeat(141) }).success).be.false();
-    should(
-      AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items: Array.from({ length: 11 }, () => item) })
-        .success,
-    ).be.false();
     should(CopyPlanApproveSchema.safeParse({ items: [10] }).success).be.false();
   });
 
@@ -264,21 +260,6 @@ describe('pasting, rules and plans', () => {
       should(names(schema).filter(name => VALUE_LIKE.test(name))).eql([]);
     should(InputActorSchema.safeParse({ kind: 'rule', ruleId: 'a'.repeat(32) }).success).be.true();
     should(InputActorSchema.safeParse({ kind: 'rule', ruleId: 'x' }).success).be.false();
-  });
-});
-
-describe('a plan the agent asks for', () => {
-  it('should last at most a day, however long the agent asks', () => {
-    const items = [
-      { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'token' },
-    ];
-
-    should(
-      AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items, expiresInSeconds: 86_400 }).success,
-    ).be.true();
-    should(
-      AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items, expiresInSeconds: 86_401 }).success,
-    ).be.false();
   });
 });
 

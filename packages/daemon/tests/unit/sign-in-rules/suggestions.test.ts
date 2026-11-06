@@ -414,7 +414,7 @@ describe('SignInRuleSuggestions — the ferret learns nothing about rules', () =
     should(w.suggestions.list(HOST_OWNER).suggestions[0]?.surface).equal('terminal');
   });
 
-  it('should say a missing sign-in is missing, and an ambiguous account is ambiguous', async () => {
+  it('should say a missing sign-in is missing', async () => {
     // Arrange
     const w = world();
 
@@ -422,11 +422,9 @@ describe('SignInRuleSuggestions — the ferret learns nothing about rules', () =
     const missing = await refusal(
       w.suggestions.suggest('s-one', { signIn: 'si_ffffffffffffffff' as SignInId, why: 'x' }),
     );
-    const noAccount = await refusal(w.suggestions.suggest('s-one', { login: 'NOBODY' as never, why: 'x' }));
 
     // Assert
     should(missing.code).equal('not_found');
-    should(noAccount.code).equal('not_found');
   });
 });
 
@@ -457,38 +455,5 @@ describe('SignInRuleSuggestions — refusals in words the ferret can act on', ()
     should(failed.message).not.containEql('vault locked');
     should(w.cards).have.length(1);
     should(fine.signIn).equal(GITHUB);
-  });
-
-  it('should name no account that does not exist, and no sign-in that is not one of its own', async () => {
-    // Arrange
-    const w = world();
-
-    // Act
-    const none = await refusal(w.suggestions.suggest('s-one', { login: 'NOBODY' as never, why: 'daily' }));
-
-    // Assert
-    should(none.code).equal('not_found');
-    should(w.cards).eql([]);
-  });
-
-  it('should ask an account with several sign-ins to name one', async () => {
-    // Arrange
-    const w = world({
-      listing: async () => {
-        const all = listing();
-        all.signIns.push(signInSummary({ id: FOURTH } as never));
-        return all;
-      },
-    });
-
-    // Act
-    const many = await refusal(w.suggestions.suggest('s-one', { login: 'GITHUB_WORK' as never, why: 'daily' }));
-    const only = await w.suggestions.suggest('s-one', { login: 'SUDO' as never, why: 'daily' }).catch(error => error);
-
-    // Assert
-    should(many.code).equal('bad_request');
-    should(many.message).match(/^That account signs in at \d places; name one as signIn \(si_/u);
-    should(only).be.instanceOf(SignInRuleSuggestionError);
-    should(w.cards).eql([]);
   });
 });

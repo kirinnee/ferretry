@@ -16,7 +16,6 @@ import { LoginVault, type TwoFactorSeedStagesDeps, totpCode } from '../../../../
 import { StepUpRegistry } from '../../../../src/lib/step-up/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
-  agentIn,
   CREDENTIALS,
   FakeSecretCipher,
   FERRET_ARRIVAL,
@@ -561,97 +560,7 @@ describe('a confirm card for the owner at their own shell (C57)', () => {
   });
 });
 
-describe('the old seed path and the other 2FA key routes', () => {
-  it('should refuse a seed on the old saved-login route with where to go, and still remove one there', async () => {
-    // Arrange
-    const r = await rig();
-
-    // Act
-    const refused = await r.call('PUT', '/v1/secrets/logins/GITHUB', { totp: { seed: SEED }, totpAcknowledged: true });
-    await plantSeed(r.subsystem.accounts as NonNullable<SecretSubsystem['accounts']>, 'GITHUB', SEED);
-    const removed = await r.call('PUT', '/v1/secrets/logins/GITHUB', { totp: null });
-
-    // Assert
-    should(refused.status).equal(403);
-    should(refused.body).match({ code: 'add_2fa_key_needs_passkey', error: /fy account factor add/u });
-    should(JSON.stringify(refused.body)).not.containEql(SEED);
-    should(removed.status).equal(200);
-    should(seeds(r)).equal(0);
-  });
-
-  it('should add, relabel and remove a key with no passkey, sweeping a removed seed and its mask', async () => {
-    // Arrange
-    const r = await rig();
-    await plantSeed(r.subsystem.accounts as NonNullable<SecretSubsystem['accounts']>, 'GITHUB', SEED);
-    const seeded = r.index.accounts.accounts.GITHUB?.factors?.[0];
-
-    // Act
-    const sms = await r.call('POST', '/v1/accounts/GITHUB/factors', { kind: 'sms', label: 'Phone', endsWith: '42' });
-    const relabelled = await r.call('PATCH', `/v1/accounts/GITHUB/factors/${(sms.body as { id: string }).id}`, {
-      label: 'Pixel',
-      endsWith: null,
-    });
-    const removed = await r.call('DELETE', `/v1/accounts/GITHUB/factors/${seeded?.id ?? ''}`, undefined, asDevice);
-
-    // Assert
-    should(sms.status).equal(201);
-    should(relabelled.body).match({ kind: 'sms', label: 'Pixel', automatic: false });
-    should(relabelled.body).not.have.property('endsWith');
-    should(removed.status).equal(200);
-    should(removed.body).deepEqual({ account: 'GITHUB', factor: seeded?.id, removed: true });
-    should(seeds(r)).equal(0);
-    should(JSON.stringify((await r.sealed.read())?.entries ?? {})).not.containEql('_TOTP_');
-    should([...(await r.vault.values()).values()]).not.containEql(SEED);
-  });
-
-  it('should take no seed, seal or code parameters on the add route, and no foreign fact on a relabel', async () => {
-    // Arrange
-    const r = await rig();
-    const sms = (await r.call('POST', '/v1/accounts/GITHUB/factors', { kind: 'sms', label: 'Phone' })).body as {
-      id: string;
-    };
-
-    // Act + Assert
-    for (const extra of [{ seed: SEED }, { seal: 'x' }, { params: {} }])
-      should(
-        (await r.call('POST', '/v1/accounts/GITHUB/factors', { kind: 'totp', label: 'App', ...extra })).status,
-      ).equal(400);
-    should((await r.call('PATCH', `/v1/accounts/GITHUB/factors/${sms.id}`, { app: 'duo' })).status).equal(409);
-    should((await r.call('POST', '/v1/accounts/GITHUB/factors', { kind: 'push', label: 'phone' })).status).equal(409);
-    should((await r.call('DELETE', '/v1/accounts/GITHUB/factors/tf_000000000000')).status).equal(404);
-  });
-
-  it('should refuse a ferret on every 2FA key route, before its body is read', async () => {
-    // Arrange
-    const r = await rig();
-    const staged = await stage(r);
-    // On the admin token naming its session (an older fy), and on its own session credential.
-    const ferrets = [{ headers: agentIn('ferret-1') }, { headers: { ...ferretOwn }, pane: true as const }];
-    const base = `/v1/accounts/GITHUB/factors`;
-
-    // Act
-    const answers = [];
-    for (const ferret of ferrets)
-      answers.push(
-        await r.call('POST', base, { kind: 'sms', label: 'x' }, ferret),
-        await r.call('PATCH', `${base}/tf_000000000000`, { label: 'x' }, ferret),
-        await r.call('DELETE', `${base}/tf_000000000000`, undefined, ferret),
-        await r.call('POST', `${base}/seed`, stageBody(SEED), ferret),
-        await r.call('GET', `${base}/seed/${staged.stage}`, undefined, ferret),
-        await r.call('POST', `${base}/seed/${staged.stage}/commit`, undefined, ferret),
-        await r.call('POST', `${base}/seed/${staged.stage}/confirm-in-app`, { session: 'x' }, ferret),
-        await r.call('DELETE', `${base}/seed/${staged.stage}`, undefined, ferret),
-      );
-
-    // Assert
-    should(answers).have.length(16);
-    for (const answer of answers) {
-      should(answer.status).equal(403);
-      should(answer.body).match({ code: 'owner_only' });
-      should(answer.consumed).be.false();
-    }
-  });
-
+describe('the 2FA key routes', () => {
   it('should answer the seed, its base32 or its link nowhere', async () => {
     // Arrange
     const r = await rig();
@@ -665,7 +574,6 @@ describe('the old seed path and the other 2FA key routes', () => {
       (await commit(r, staged)).body,
       (await r.call('GET', '/v1/accounts')).body,
       (await r.call('GET', '/v1/accounts/hint?site=github.com')).body,
-      (await r.call('GET', '/v1/secrets/logins')).body,
       (await r.call('DELETE', `/v1/accounts/GITHUB/factors/seed/${staged.stage}`)).body,
     ];
 
@@ -676,24 +584,6 @@ describe('the old seed path and the other 2FA key routes', () => {
     }
     should((answers[3] as AccountList).accounts.find(account => account.id === 'GITHUB')?.fields.totp).be.true();
     should(JSON.stringify(r.index.document)).not.containEql(SEED);
-  });
-});
-
-describe('the old seed path, below the route', () => {
-  it('should refuse a seed in the store itself, whoever calls it, and change nothing', async () => {
-    // Arrange — the saved-login projection called directly, as a future import or tool would
-    const r = await rig();
-    const before = JSON.stringify(r.index.document);
-
-    // Act
-    const refused = await (r.subsystem.logins as NonNullable<SecretSubsystem['logins']>)
-      .put('GITHUB', { totp: { seed: SEED, parameters: TotpParametersSchema.parse({}) }, totpAcknowledged: true })
-      .catch((error: { refusal?: string }) => error.refusal);
-
-    // Assert
-    should(refused).equal('add_2fa_key_needs_passkey');
-    should(JSON.stringify(r.index.document)).equal(before);
-    should(r.sealed.writes).equal(0);
   });
 });
 

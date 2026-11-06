@@ -165,9 +165,8 @@ export interface AgentPhoneApprovalPort {
 }
 
 /**
- * What `task.plan` asks, and `secure.preapprove` too once its items are read as paste lines: raise one card for the
- * lines the agent plans. The one path both names take. Nothing in the call is a value, a place or a program; the port
- * throws `SecureCopyError` for a refusal.
+ * What `task.plan` asks: raise one card for the lines the agent plans. Nothing in the call is a value, a place or a
+ * program; the port throws `SecureCopyError` for a refusal.
  */
 export interface AgentPlanPort {
   propose(sessionId: string, call: TaskPlanCall): Promise<TaskPlan>;

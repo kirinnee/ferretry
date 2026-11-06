@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AccountIndexDocument, PutLoginEntryRequestSchema, type SecretName } from '@ferretry/protocol';
+import type { AccountIndexDocument, SecretName } from '@ferretry/protocol';
 import should from 'should';
 import {
   combinedValues,
@@ -9,6 +9,7 @@ import {
   type SecretVaultDocument,
 } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments } from '../runtime/mounts/support.ts';
+import { putSavedLogin, savedLogins } from './saved-login-fixture.ts';
 
 /**
  * F4 of the #1094 review: a change to a saved login is ALL OR NOTHING. New ciphertext is staged under fresh
@@ -70,10 +71,7 @@ async function withOldPair() {
   const index = new FailingIndex();
   const sealed = new FailingSealed();
   const daemon = boot(index, sealed);
-  await daemon.directory.put(
-    'GITHUB',
-    PutLoginEntryRequestSchema.parse({ label: 'GitHub', username: OLD_USER, password: OLD_PASSWORD }),
-  );
+  await putSavedLogin(daemon.directory, 'GITHUB', { label: 'GitHub', username: OLD_USER, password: OLD_PASSWORD });
   return { index, sealed, daemon };
 }
 
@@ -184,8 +182,8 @@ describe('a saved login changed all or nothing', () => {
   it('should remove a login at its commit even when the sweep after it fails, leaving the orphan masked', async () => {
     const { sealed, daemon } = await withOldPair();
     sealed.failOn(1);
-    should(await daemon.directory.remove('GITHUB')).be.true();
-    should(await daemon.directory.list()).deepEqual([]);
+    should(await daemon.directory.accounts.removeAccount('GITHUB')).be.true();
+    should(await savedLogins(daemon.directory)).deepEqual([]);
     should(await daemon.masked(OLD_PASSWORD)).be.true();
   });
 });
@@ -220,7 +218,7 @@ describe('the boot sweep against a damaged index (F6)', () => {
       ...document,
       entries: { ...rest, L000000000000000000000009_PASSWORD_DEADBEEF: document.entries[committed] as never },
     });
-    await daemon.directory.put('OTHER', PutLoginEntryRequestSchema.parse({ label: 'other', password: NEW_PASSWORD }));
+    await putSavedLogin(daemon.directory, 'OTHER', { label: 'other', password: NEW_PASSWORD });
 
     should(Object.keys((await sealed.read())?.entries ?? {})).containEql('L000000000000000000000009_PASSWORD_DEADBEEF');
   });
@@ -231,10 +229,7 @@ describe('the boot sweep and a change in flight', () => {
     const index = new GatedIndex();
     const sealed = new FailingSealed();
     const daemon = boot(index, sealed);
-    await daemon.directory.put(
-      'GITHUB',
-      PutLoginEntryRequestSchema.parse({ label: 'GitHub', username: OLD_USER, password: OLD_PASSWORD }),
-    );
+    await putSavedLogin(daemon.directory, 'GITHUB', { label: 'GitHub', username: OLD_USER, password: OLD_PASSWORD });
     index.hold();
     const saving = daemon.directory.saveFields('GITHUB', 'GitHub', undefined, {
       username: NEW_USER,

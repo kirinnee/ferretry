@@ -352,35 +352,6 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'name',
     detail: { action: 'delete' },
   },
-  // Saved logins (docs/input-requests.md) are the secret store too: every change is kept, by handle only.
-  {
-    method: 'PUT',
-    path: '/v1/secrets/logins/:id',
-    event: 'secrets.changed',
-    subject: 'id',
-    detail: { action: 'login-put' },
-  },
-  {
-    method: 'POST',
-    path: '/v1/secrets/logins/:id/rename',
-    event: 'secrets.changed',
-    subject: 'id',
-    detail: { action: 'login-rename' },
-  },
-  {
-    method: 'POST',
-    path: '/v1/secrets/logins/:id/recipe/proposals/:proposalId',
-    event: 'secrets.changed',
-    subject: 'id',
-    detail: { action: 'login-recipe-decide' },
-  },
-  {
-    method: 'DELETE',
-    path: '/v1/secrets/logins/:id',
-    event: 'secrets.changed',
-    subject: 'id',
-    detail: { action: 'login-delete' },
-  },
   // Accounts and sign-ins (docs/secrets.md) are the same store: every change is kept, by handle or sign-in id only.
   // The default account for a place: the subject is the file, never the place or the account (a place can be a folder).
   {

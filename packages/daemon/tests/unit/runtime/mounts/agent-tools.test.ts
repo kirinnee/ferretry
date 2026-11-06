@@ -331,40 +331,6 @@ describe('a person’s tool routes', () => {
     should(wrong.status).equal(400);
   });
 
-  it('should hold the old login.hint name to the same rule: it is read as account.hint', async () => {
-    const { dispatch } = served();
-    const wrong = await dispatch.dispatch(
-      personCall('/v1/sessions/s1/surfaces/browser/tools', { tool: 'login.hint', site: 'vercel.com' }),
-    );
-    should(wrong.status).equal(400);
-    should(jsonBody(wrong)).match({ error: 'this route takes browser tools; account.hint is not one' });
-  });
-
-  it('should treat the old login.propose name as account.propose on the agent route', async () => {
-    const filed: unknown[] = [];
-    const { world, dispatch } = served({
-      recipes: {
-        scrubbedAccounts: async listing => listing,
-        propose: async (...parameters) => {
-          filed.push(parameters);
-          return {
-            id: 'rp_0000000000000001',
-            login: 'VERCEL',
-            signIn: 'si_00000000000000c1',
-            state: 'pending',
-            agendaItemId: 'A4',
-          };
-        },
-      },
-    });
-    const answered = await dispatch.dispatch(
-      agentCall({ tool: 'login.propose', login: 'VERCEL', recipe: 'Open vercel.com', why: 'first sign-in' }),
-    );
-    should(answered.status).equal(200);
-    should(filed).deepEqual([['s1', { login: 'VERCEL' }, 'Open vercel.com', 'first sign-in']]);
-    should(world.audit.entries.at(-1)?.detail).match({ tool: 'account.propose', signIn: 'si_00000000000000c1' });
-  });
-
   it('should refuse a session id that cannot be one', async () => {
     const { dispatch } = served();
     const bad = await dispatch.dispatch(

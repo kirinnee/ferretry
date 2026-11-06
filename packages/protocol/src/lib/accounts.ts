@@ -903,8 +903,6 @@ export type TwoFactorSeedConfirming = z.infer<typeof TwoFactorSeedConfirmingSche
 
 /** The refusals a 2FA key route answers with, each a different next step for the person. */
 export const TWO_FACTOR_ERROR_CODES = {
-  /** The old seed path (`PUT /v1/secrets/logins/:id` with `totp`): it has no passkey, so it is closed. */
-  needsPasskey: 'add_2fa_key_needs_passkey',
   /** No device has a passkey yet, so no seed can be saved. */
   passkeyRequired: 'passkey_required',
   /** The card the stage names was matched to another account (or is closed). */
@@ -920,10 +918,6 @@ export const TWO_FACTOR_ERROR_CODES = {
   /** No such 2FA key on this account. */
   unknownFactor: 'unknown_2fa_key',
 } as const;
-
-/** Where to add a 2FA key now that the old path is closed: the sentence the 403 says. */
-export const ADD_TWO_FACTOR_KEY_WHERE =
-  'saving a 2FA key needs a passkey now: add it from Settings › Accounts in the app, or run `fy account factor add <account> --totp` and confirm it there';
 
 // ── `config/account-defaults.yaml`───────────────────────────────────────────────────────────────
 
@@ -1458,17 +1452,12 @@ export function accountHintSummary(site: string, hints: readonly AccountHint[]):
 
 /**
  * A ferret's recipe proposal, keyed by the SIGN-IN it is for. It changes nothing until the owner approves it, unless
- * the owner turned auto-apply on for that one sign-in. THE ONE SCHEMA of the tool (agent-tools.ts uses this arm): the
- * older `{ login }` spelling (an account handle, and `login.propose`) is accepted here, and the daemon resolves it to
- * that account's ONLY sign-in, refusing one that signs in at several places, before any check runs on the canonical
- * `{ signIn }` call. Exactly one of the two names it.
+ * the owner turned auto-apply on for that one sign-in. THE ONE SCHEMA of the tool (agent-tools.ts uses this arm).
  */
 export const AccountProposeCallSchema = z
   .strictObject({
     tool: z.literal('account.propose'),
-    signIn: SignInIdSchema.optional(),
-    /** Older clients: the account's handle. Resolves to its only sign-in. */
-    login: AccountIdSchema.optional(),
+    signIn: SignInIdSchema,
     /** The recipe to suggest. Optional only when the call suggests a standing rule instead (`preapprove`). */
     recipe: LoginRecipeSchema.optional(),
     /**
@@ -1477,10 +1466,6 @@ export const AccountProposeCallSchema = z
      */
     preapprove: z.boolean().optional(),
     why: LoginRecipeProposeRequestSchema.shape.why,
-  })
-  .refine(call => (call.signIn === undefined) !== (call.login === undefined), {
-    message: 'name the sign-in (signIn), as account_hint lists it',
-    path: ['signIn'],
   })
   .refine(call => call.recipe !== undefined || call.preapprove === true, {
     message: 'suggest a recipe, a standing rule (preapprove: true), or both',
@@ -1601,7 +1586,7 @@ function placesOf(
 
 /**
  * The places a saved login's `match` and `domains` make, primary first, exactly as {@link migrateLoginIndex} makes
- * them: what an older client's write to `/v1/secrets/logins/:id` changes an account's one sign-in into.
+ * them: what "Save as" on a card adds to an account.
  */
 export function savedLoginPlaces(login: Pick<LoginRecordV1, 'match' | 'domains'>, hostName: string): readonly Place[] {
   return placesOf(login, shortHostOf(hostName)).places;

@@ -1,5 +1,4 @@
 import {
-  type AccountId,
   type AccountList,
   AGENT_TOOL_DEFAULT_READ_LINES,
   AGENT_TOOL_DEFAULT_WAIT_MS,
@@ -26,7 +25,6 @@ import {
   COPY_HANDLE_PREFIX,
   type CopyMeta,
   copyHandle,
-  copyPlanOf,
   durationWords,
   INPUT_QUARANTINE_SECONDS,
   INPUT_SINGLE_FIELD_ID,
@@ -44,7 +42,6 @@ import {
   type SurfaceOpener,
   strongestSensitivity,
   taskPlanAgentView,
-  taskPlanCallOf,
 } from '@ferretry/protocol';
 import { AGENT_FILE_LIMITS, AgentFileError, type AgentFiles, extensionOf, sizeWords } from '../agent-files/index.ts';
 import type { AuditSink } from '../audit/types.ts';
@@ -64,7 +61,7 @@ import { InputRequestError } from '../input-requests/errors.ts';
 import type { ActedPage } from '../input-requests/login-observer.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
 import { LoginEntryError } from '../secrets/accounts.ts';
-import { type RecipeProposalTarget, RecipeValueError } from '../secrets/login-recipes.ts';
+import { RecipeValueError } from '../secrets/login-recipes.ts';
 import type { TextRedactor } from '../secrets/redaction.ts';
 import { SecureCopyError } from '../secure-copy/errors.ts';
 import { SignInRuleSuggestionError } from '../sign-in-rules/suggestions.ts';
@@ -163,7 +160,7 @@ export interface AgentToolPorts {
   readonly quarantinedUntil?: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
   /** Secure copies (docs/secure-copy.md); absent where none are wired, which refuses the `secure.*` tools. */
   readonly copy?: AgentCopyPort;
-  /** A ferret's paste plans, for `secure.preapprove`; absent where none are wired. */
+  /** A ferret's task plans, for `task.plan`; absent where none are wired. */
   readonly plans?: AgentPlanPort;
   /** What secure copy knows about pages: not pictured while showing a copied document, and what the agent read. */
   readonly copyPages?: AgentCopyPagesPort;
@@ -221,14 +218,14 @@ export interface AgentToolPorts {
   readonly ruleSuggestions?: {
     suggest(
       sessionId: string,
-      ask: { readonly signIn?: SignInId | undefined; readonly login?: AccountId | undefined; readonly why: string },
+      ask: { readonly signIn: SignInId; readonly why: string },
     ): Promise<{ readonly signIn: string; readonly host: string; readonly agenda: string }>;
   };
   readonly recipes?: {
-    /** Files a proposal on ONE sign-in: `{ login }` is resolved to the account's only sign-in first. */
+    /** Files a proposal on ONE sign-in. */
     propose(
       sessionId: string,
-      target: RecipeProposalTarget,
+      signIn: SignInId,
       recipe: string,
       why: string,
     ): Promise<LoginRecipeProposed & { readonly signIn: string }>;
@@ -386,7 +383,6 @@ const LEAVES_SURFACES: ReadonlySet<string> = new Set<AgentToolCall['tool']>([
   'secure.list',
   'secure.discard',
   'secure.copy',
-  'secure.preapprove',
   'task.plan',
 ]);
 
@@ -658,15 +654,6 @@ export class AgentToolService {
           input: view,
         };
       }
-      case 'secure.preapprove': {
-        const plans = this.planPort(caller);
-        const planned = copyPlanOf(await plans.propose(sessionId, taskPlanCallOf(call)));
-        if (planned === undefined) throw new AgentToolError('bad_request', 'A plan lists 1 to 10 pastes.');
-        return {
-          summary: `Asked the owner to approve ${plural(planned.items.length, 'paste')} in advance (!${planned.agendaItemId}). Until they answer, each paste asks them.`,
-          plan: planned,
-        };
-      }
       case 'task.plan': {
         const plan = await this.planPort(caller).propose(sessionId, call);
         return {
@@ -750,7 +737,6 @@ export class AgentToolService {
           | 'secure.list'
           | 'secure.discard'
           | 'secure.paste'
-          | 'secure.preapprove'
           | 'task.plan';
       }
     >,
@@ -1746,9 +1732,8 @@ export class AgentToolService {
   }
 
   /**
-   * A ferret's suggested recipe for one SIGN-IN (`account.propose`). The older `{ login }` is resolved to that
-   * account's only sign-in first, so every check runs on the canonical sign-in, and the audit record names it. It changes
-   * nothing the owner has not allowed: it waits on a card, unless the owner turned auto-apply on for that sign-in.
+   * A ferret's suggested recipe for one SIGN-IN (`account.propose`). It changes nothing the owner has not allowed: it
+   * waits on a card, unless the owner turned auto-apply on for that sign-in.
    */
   private async loginPropose(
     caller: AgentToolCaller,
@@ -1760,29 +1745,23 @@ export class AgentToolService {
       throw new AgentToolError('unavailable', 'This daemon keeps no recipes.');
     if (call.preapprove === true && this.ports.ruleSuggestions === undefined)
       throw new AgentToolError('unavailable', 'This daemon keeps no standing-rule suggestions.');
-    const target: RecipeProposalTarget =
-      call.signIn === undefined ? { login: call.login as string } : { signIn: call.signIn };
     let filed: string | undefined;
     let recipeSignIn: string | undefined;
     let recipeResult: Pick<AgentToolResult, 'recipe'> = {};
     if (call.recipe !== undefined && recipes !== undefined) {
       let proposed: LoginRecipeProposed & { readonly signIn: string };
       try {
-        proposed = await recipes.propose(caller.sessionId, target, call.recipe, call.why);
+        proposed = await recipes.propose(caller.sessionId, call.signIn, call.recipe, call.why);
       } catch (error) {
         if (error instanceof LoginEntryError || error instanceof RecipeValueError)
           throw new AgentToolError(
-            error instanceof LoginEntryError &&
-              (error.refusal === 'unknown_login' || error.refusal === 'unknown_sign_in')
-              ? 'not_found'
-              : 'bad_request',
+            error instanceof LoginEntryError && error.refusal === 'unknown_sign_in' ? 'not_found' : 'bad_request',
             error.message,
           );
         throw new AgentToolError('unavailable', 'The recipe could not be filed right now; try again later.');
       }
       const { signIn, ...recipe } = proposed;
       recipeSignIn = signIn;
-      facts.detail = { ...facts.detail, signIn };
       const where = `${proposed.login} [${signIn}]`;
       filed =
         proposed.state === 'applied'
@@ -1809,7 +1788,7 @@ export class AgentToolService {
     const port = this.ports.ruleSuggestions;
     if (port === undefined) return { words: '' };
     try {
-      const made = await port.suggest(sessionId, { signIn: call.signIn, login: call.login, why: call.why });
+      const made = await port.suggest(sessionId, { signIn: call.signIn, why: call.why });
       return {
         signIn: made.signIn,
         words: `Suggested a standing rule for ${made.host} (!${made.agenda}); the owner decides, and you will not hear back. Do not ask again.`,
@@ -2128,9 +2107,8 @@ function callFacts(call: AgentToolCall): AuditDetail {
     case 'account.hint':
       return { from: call.name === undefined ? 'site' : 'page' };
     case 'account.propose':
-      // The sign-in (or the older account handle) only; the recipe is the ferret's text and stays out of the record.
-      // A resolved handle's sign-in is added once it is known (loginPropose).
-      return call.signIn === undefined ? { login: call.login ?? '' } : { signIn: call.signIn };
+      // The sign-in only; the recipe is the ferret's text and stays out of the record.
+      return { signIn: call.signIn };
     case 'secure.copy':
       // The copy's name and where it came from; never a command's arguments, which may hold anything.
       return {
@@ -2142,8 +2120,6 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return { copy: copyHandle(bareCopyName(call.handle)) };
     case 'secure.paste':
       return { copy: copyHandle(bareCopyName(call.handle)) };
-    case 'secure.preapprove':
-      return { items: call.items.length };
     case 'task.plan':
       // The count only: a site, a sign-in or a reason is the plan's own record, not the tool audit's.
       return { lines: call.lines.length };

@@ -124,7 +124,7 @@ describe('agent tool schemas', () => {
       { tool: 'terminal.request_input', name: 'dev', prompt: 'sudo password for deploy', sensitivity: 'secret' },
       { tool: 'input.wait', id: '!A7', timeoutMs: 5_000 },
       { tool: 'account.hint', site: 'vercel.com' },
-      { tool: 'account.propose', login: 'VERCEL', recipe: 'Open vercel.com', why: 'first sign-in' },
+      { tool: 'account.propose', signIn: 'si_0123456789abcdef', recipe: 'Open vercel.com', why: 'first sign-in' },
       { tool: 'browser.list' },
       { tool: 'browser.open', name: 'app', url: 'http://localhost:5173/', incognito: true, askOwner: 'Sign in.' },
       { tool: 'browser.navigate', name: 'app', url: 'https://example.test/' },
@@ -179,73 +179,6 @@ describe('agent tool schemas', () => {
       ...tools.AGENT_TOOL_NAMES.slice(0, 5),
       'terminal.wait',
       ...tools.AGENT_TOOL_NAMES.slice(5),
-    ]);
-  });
-
-  it('should keep secure.preapprove accepted but unlisted, read as the task.plan it became', () => {
-    const call = {
-      tool: 'secure.preapprove',
-      items: [{ from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'token' }],
-    };
-
-    const parsed = tools.AgentToolCallSchema.parse(call);
-
-    should(tools.ACCEPTED_UNLISTED_TOOLS).deepEqual(['secure.preapprove']);
-    should(tools.AGENT_TOOL_NAMES).not.containEql('secure.preapprove');
-    should(tools.AGENT_TOOL_NAMES).containEql('task.plan');
-    should(parsed.tool).equal('secure.preapprove');
-    if (parsed.tool !== 'secure.preapprove') throw new Error('unreachable');
-    should(tools.taskPlanCallOf(parsed)).eql({
-      tool: 'task.plan',
-      lines: [
-        {
-          kind: 'paste',
-          from: { kind: 'command', program: 'gh' },
-          to: { kind: 'terminal', program: 'vercel' },
-          uses: 1,
-          why: 'token',
-        },
-      ],
-    });
-  });
-
-  it('should read the legacy secure.preapprove body strictly: no uses, no sign-in, no extra key, at most a day', () => {
-    const item = {
-      from: { kind: 'command', program: 'gh' },
-      to: { kind: 'terminal', program: 'vercel' },
-      why: 'token',
-    };
-    const accepts = (body: object) =>
-      tools.AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items: [item], ...body }).success;
-    const accepted = (items: unknown) =>
-      tools.AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items }).success;
-
-    const table: readonly (readonly [string, boolean])[] = [
-      ['plain item', accepted([item])],
-      ['uses on an item', accepted([{ ...item, uses: 5 }])],
-      ['uses beside the items', accepts({ uses: 5 })],
-      ['a sign-in item', accepted([{ kind: 'sign-in', site: 'github.com', fields: ['password'], uses: 1, why: 'x' }])],
-      ['a sign-in item with a place', accepted([{ ...item, kind: 'sign-in', site: 'github.com' }])],
-      ['a terminal sign-in item', accepted([{ kind: 'terminal-sign-in', place: 'sudo@box', why: 'x' }])],
-      ['an extra key on an item', accepted([{ ...item, password: 'hunter2' }])],
-      ['an extra key on the body', accepts({ sessionId: 's2' })],
-      ['299 seconds', accepts({ expiresInSeconds: 299 })],
-      ['a day', accepts({ expiresInSeconds: 86_400 })],
-      ['a day and a second', accepts({ expiresInSeconds: 86_401 })],
-    ];
-
-    should(table).eql([
-      ['plain item', true],
-      ['uses on an item', false],
-      ['uses beside the items', false],
-      ['a sign-in item', false],
-      ['a sign-in item with a place', false],
-      ['a terminal sign-in item', false],
-      ['an extra key on an item', false],
-      ['an extra key on the body', false],
-      ['299 seconds', false],
-      ['a day', true],
-      ['a day and a second', false],
     ]);
   });
 
@@ -608,39 +541,21 @@ describe('the account hint tool', () => {
     should(tools.AgentToolCallSchema.safeParse({ tool: 'account.hint' }).success).be.false();
   });
 
-  it('should answer metadata only: a hint carrying a password is not a result', () => {
-    const logins = {
-      v: 1,
-      site: 'github.com',
-      passkeys: 'off',
-      hints: [{ id: 'GITHUB', label: 'GitHub', role: 'site', method: { kind: 'password' }, domains: ['github.com'] }],
-    };
-    should(tools.AgentToolResultSchema.safeParse({ summary: 'ok', logins }).success).be.true();
-    should(
-      tools.AgentToolResultSchema.safeParse({
-        summary: 'ok',
-        logins: { ...logins, hints: [{ ...logins.hints[0], password: 'hunter2-UNIQUE' }] },
-      }).success,
-    ).be.false();
-  });
-
   it('should be repeatable after a dropped request: it changes nothing', () => {
     should(tools.isRepeatableAgentTool('account.hint')).be.true();
   });
 
-  it('should read the old login tool names as the account tools', () => {
-    should(tools.AgentToolCallSchema.parse({ tool: 'login.hint', site: 'vercel.com' })).eql({
-      tool: 'account.hint',
-      site: 'vercel.com',
-    });
+  it('should refuse the old login tool names', () => {
+    should(tools.AgentToolCallSchema.safeParse({ tool: 'login.hint', site: 'vercel.com' }).success).be.false();
     should(
-      tools.AgentToolCallSchema.parse({ tool: 'login.propose', login: 'VERCEL', recipe: 'Open vercel.com', why: 'x' })
-        .tool,
-    ).equal('account.propose');
-    should(
-      tools.AgentToolCallSchema.safeParse({ tool: 'login.hint', name: 'app', site: 'vercel.com' }).success,
+      tools.AgentToolCallSchema.safeParse({
+        tool: 'login.propose',
+        login: 'VERCEL',
+        recipe: 'Open vercel.com',
+        why: 'x',
+      }).success,
     ).be.false();
-    should(tools.isRepeatableAgentTool('login.hint')).be.true();
+    should(tools.isRepeatableAgentTool('login.hint')).be.false();
   });
 });
 

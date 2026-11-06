@@ -340,7 +340,7 @@ export class TaskPlanService {
     return plan;
   }
 
-  /** A paste plan (`secure.preapprove`), through the same {@link propose}: paste lines of one use each. */
+  /** A paste plan (the paste-plan routes), through the same {@link propose}: paste lines of one use each. */
   async proposePastes(sessionId: string, items: readonly CopyPlanItem[], expiresInSeconds?: number): Promise<CopyPlan> {
     if (items.length === 0) throw new SecureCopyError('bad_request', 'a plan lists 1 to 10 pastes');
     const plan = await this.propose(sessionId, {
