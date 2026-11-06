@@ -8,6 +8,12 @@ import {
   FleetAccountChangeViewSchema,
   type FleetCloneBundle,
   FleetCloneBundleSchema,
+  FleetCloneForgetRequestSchema,
+  FleetCloneForgetResultSchema,
+  type FleetCloneReview,
+  type FleetCloneReviewRequest,
+  FleetCloneReviewRequestSchema,
+  FleetCloneReviewSchema,
   type FleetComponentCatalog,
   FleetComponentCatalogSchema,
   FleetCredentialCheckRequestSchema,
@@ -54,6 +60,8 @@ const FLEET_PROPOSALS_PATH = '/v1/fleet/proposals';
 const FLEET_SETUP_SCAN_PATH = '/v1/fleet/setup/scan';
 const FLEET_TOOLS_INSTALL_PATH = '/v1/fleet/machine/tools/install';
 const FLEET_EXPORT_PATH = '/v1/fleet/export';
+const FLEET_CLONE_REVIEW_PATH = '/v1/fleet/clone/review';
+const FLEET_CLONE_FORGET_PATH = '/v1/fleet/clone/forget';
 const FLEET_LOGIN_PATH = '/v1/fleet/login';
 
 /**
@@ -159,6 +167,23 @@ export class ProtocolAccountGateway implements IAccountGateway {
 
   async exportBundle(): Promise<FleetCloneBundle> {
     return await this.client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema, GET);
+  }
+
+  async reviewClone(request: FleetCloneReviewRequest): Promise<FleetCloneReview> {
+    return await this.client.request(
+      FLEET_CLONE_REVIEW_PATH,
+      FleetCloneReviewSchema,
+      post(FleetCloneReviewRequestSchema.parse(request)),
+    );
+  }
+
+  async forgetCloneSource(source: string): Promise<boolean> {
+    const result = await this.client.request(
+      FLEET_CLONE_FORGET_PATH,
+      FleetCloneForgetResultSchema,
+      post(FleetCloneForgetRequestSchema.parse({ source })),
+    );
+    return result.forgotten;
   }
 
   async startSignIn(

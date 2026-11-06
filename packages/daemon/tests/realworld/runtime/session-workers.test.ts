@@ -17,6 +17,7 @@ import { afterAll, describe, it } from 'bun:test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { PerformanceProfileView, PerformanceReport } from '@ferretry/protocol';
+import { DAEMON_RUNTIME_TUNING } from '@ferretry/protocol/daemon-runtime-tuning';
 import should from 'should';
 import { OS_CHOSEN_PORT, recordedPort } from '../../integration/support/os-port.ts';
 import { cleanupTempDirectories, tempDirectory } from '../../integration/support/repository.ts';
@@ -63,7 +64,14 @@ async function profiled(sessionWorkers: Record<string, unknown>): Promise<Perfor
     }),
   );
   const daemon = Bun.spawn([process.execPath, FYD_ENTRY], {
-    env: { ...process.env, FY_HOME: fleet.home, HOME: fleet.userHome, FYD_WATCHDOG_SECONDS: '0' },
+    // `DAEMON_RUNTIME_TUNING`: the options the service definition hands the real daemon.
+    env: {
+      ...process.env,
+      ...DAEMON_RUNTIME_TUNING,
+      FY_HOME: fleet.home,
+      HOME: fleet.userHome,
+      FYD_WATCHDOG_SECONDS: '0',
+    },
     stdin: 'ignore',
     stdout: 'ignore',
     stderr: Bun.file(join(fleet.home, 'fyd.err')),

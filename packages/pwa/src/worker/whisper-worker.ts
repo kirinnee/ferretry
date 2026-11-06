@@ -34,7 +34,8 @@
  * NO WEBGPU. The WebGPU-capable build's binary (`ort-wasm-simd-threaded.asyncify.wasm`, ~27 MB) is over
  * Cloudflare Pages' 25 MiB per-file limit, so the app cannot ship it. This runtime has no WebGPU
  * provider, so the `gpu` port answers `false` and the core builds every model on WebAssembly.
- * Single-threaded: the app sends no cross-origin isolation headers, so there is no `SharedArrayBuffer`.
+ * THREADS are the page's call (`lib/stt/speed-plan.ts`): it asks for more than one only on a
+ * cross-origin isolated page, and the app sends no isolation headers today, so it asks for one.
  *
  * The page's policy must allow `'wasm-unsafe-eval'` for the runtime to compile (`public/_headers`).
  */
@@ -42,6 +43,7 @@
 import { env, pipeline } from '@huggingface/transformers';
 import * as ort from 'onnxruntime-web/wasm';
 import { onDeviceModel, type WhisperCatalogModel } from '../lib/stt/model-catalog.ts';
+import { allowSpeechThreads, type ThreadScopeLike } from '../lib/stt/pthread-workers.ts';
 import { WhisperModelStore } from '../lib/stt/whisper-store.ts';
 import { type WhisperLoadedModel, WhisperWorkerCore, type WhisperWorkerReply } from '../lib/stt/whisper-worker-core.ts';
 
@@ -52,6 +54,8 @@ interface WorkerScope {
 }
 
 const scope = globalThis as unknown as WorkerScope;
+// Lets ONNX Runtime's thread pool start its sub-workers under Trusted Types; a single-thread run never needs it.
+allowSpeechThreads(globalThis as unknown as ThreadScopeLike);
 
 const SAMPLE_RATE = 16_000;
 /** Whisper hears 30 s at a time; a longer take is read in overlapping 30 s windows. */
@@ -93,11 +97,11 @@ const core = new WhisperWorkerCore({
   // This runtime has no WebGPU provider (see the header), so there is no adapter worth asking for.
   gpu: async () => false,
   runtime: {
-    load: async (id, bytes) => {
+    load: async (id, bytes, _backend, threads) => {
       const model = whisperModel(id);
       ort.env.wasm.wasmBinary = bytes.runtime;
       (ort.env.wasm as { wasmPaths?: unknown }).wasmPaths = undefined;
-      ort.env.wasm.numThreads = 1;
+      ort.env.wasm.numThreads = threads;
       ort.env.wasm.proxy = false;
       env.allowLocalModels = false;
       env.allowRemoteModels = true;

@@ -19,10 +19,14 @@
  *
  * BOUNDED BY OBSERVATIONS, NOT BY A DEADLINE, for the reason picker cleanup is: a wall clock makes
  * the number of keys sent into a live pane depend on how loaded the host is, and turns "Codex never
- * opened its picker" and "the box was busy for four seconds" into the same failure.
+ * opened its picker" and "the box was busy for four seconds" into the same failure. Frames showing Codex's
+ * startup park (`Waiting for startup`) are not charged to that budget: they have their own per-await ceiling
+ * (`CODEX_STARTUP_WAIT_OBSERVATIONS`), intentionally per await, because each stage can only be parked once
+ * Codex is still starting, and the ceiling only has to outlast Codex's own startup timeout.
  */
 
 import type { InjectionOutcome } from '../../tmux/delivery.ts';
+import { paneShowsStartupWait } from '../../tmux/pane.ts';
 import { type CodexPickerRow, type CodexPickerScreen, parseCodexPickerScreen, pickerRowFor } from './picker-screen.ts';
 import { ADVANCED_EFFORTS, type CodexPickerTarget } from './runtime-switch.ts';
 
@@ -54,9 +58,29 @@ export interface CodexPickerDrivePort {
 export interface PickerDrivePolicy {
   readonly settleMs: number;
   readonly maxObservations: number;
+  /**
+   * The ceiling on frames in which Codex says it is still STARTING (`paneShowsStartupWait`), which are
+   * not charged to `maxObservations`. Defaults to {@link CODEX_STARTUP_WAIT_OBSERVATIONS}.
+   */
+  readonly maxStartupWaitObservations?: number;
 }
 
 export const defaultPickerDrivePolicy: PickerDrivePolicy = { settleMs: 50, maxObservations: 80 };
+
+/**
+ * How many frames of "Codex is still starting" a drive sits through before it counts them.
+ *
+ * NOT a larger picker budget. `maxObservations` measures how long a picker takes to draw once Codex
+ * can draw it, and that stays bounded by observations for the reason given above. A `/model` typed
+ * while Codex 0.166 is still starting is parked behind `Waiting for startup` until an `account/read`
+ * round trip to chatgpt.com returns, and that wait is the NETWORK's: the host being idle does not
+ * shorten it, so charging it to the picker budget failed drives on a slow link ("did not reach a model
+ * list"). Codex bounds that wait itself — it exits with "workspace routing discovery timed out" about
+ * fifteen seconds in (measured on 0.166.0), which ends the drive as an exit — so this ceiling only has
+ * to outlast that: 400 frames at the default 50 ms settle is at least twenty seconds, and a loaded host
+ * only makes each frame slower, never the ceiling shorter.
+ */
+export const CODEX_STARTUP_WAIT_OBSERVATIONS = 400;
 
 /** Sleeping is a capability, not a decision. */
 export interface PickerSleeper {
@@ -235,16 +259,30 @@ export class CodexModelPickerDriver {
     stage: string,
   ): Promise<CodexPickerScreen> {
     let last = 'no picker';
-    for (let observation = 0; observation < this.policy.maxObservations; observation++) {
+    const parkedCeiling = this.policy.maxStartupWaitObservations ?? CODEX_STARTUP_WAIT_OBSERVATIONS;
+    let parked = 0;
+    for (let observation = 0; observation < this.policy.maxObservations; ) {
       const frame = await this.transport.readPane();
       if (!frame.alive || frame.dead) throw new CodexPickerDriveError(`Codex exited while reaching ${stage}`);
+      // Codex has not started yet, so nothing it could draw is late: wait without spending the budget.
+      const starting = paneShowsStartupWait(frame.visible);
+      if (starting && parked < parkedCeiling) {
+        parked++;
+        await this.sleeper.sleep(this.policy.settleMs);
+        continue;
+      }
+      observation++;
       const screen = parseCodexPickerScreen(frame.visible);
-      last = screen.title ?? (frame.promptReady ? 'idle prompt' : 'unknown screen');
+      last = starting
+        ? 'Codex still starting'
+        : (screen.title ?? (frame.promptReady ? 'idle prompt' : 'unknown screen'));
       if (accept(screen, frame)) return screen;
       await this.sleeper.sleep(this.policy.settleMs);
     }
     throw new CodexPickerDriveError(
-      `Codex did not reach ${stage} within ${this.policy.maxObservations} observations (last: ${last})`,
+      `Codex did not reach ${stage} within ${this.policy.maxObservations} observations${
+        parked === 0 ? '' : ` after ${parked} frames of Codex still starting`
+      } (last: ${last})`,
     );
   }
 

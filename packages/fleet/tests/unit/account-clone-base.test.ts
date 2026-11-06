@@ -13,6 +13,7 @@ import {
   cloneSourceIdentity,
   CloneSourceMismatch,
   EMPTY_CLONE_BASE,
+  findCloneSources,
   forgetCloneSource,
   SELF_REPORTED_PREFIX,
   linkedKeys,
@@ -202,6 +203,7 @@ describe('cloneSourceIdentity', () => {
       id: `${SELF_REPORTED_PREFIX}daemon-source`,
       name: 'studio-mac',
       verified: 'self',
+      machine: 'studio-mac',
     });
   });
 
@@ -287,6 +289,11 @@ describe('cloneSourceIdentity', () => {
   it('should cut a display name to 120 characters', () => {
     should(cloneSourceIdentity(V2(), undefined, 'x'.repeat(300))?.name).have.length(120);
   });
+
+  it('should name the machine only for a source filed from its own word, and only when the record can hold it', () => {
+    should(cloneSourceIdentity(V2(), 'daemon-source', 'Studio')?.machine).be.undefined();
+    should(cloneSourceIdentity(V2({ machine: 'm'.repeat(121) }), undefined, undefined)?.machine).be.undefined();
+  });
 });
 
 describe('cloneOriginKeys', () => {
@@ -364,6 +371,73 @@ describe('planClone stamping and base', () => {
     const plan = planClone(emptyTarget(), V2(), options({ skip: ['instructions/main'] }));
     should(plan.base.some(each => each.key === KEY_A)).be.false();
     should(plan.sourceKeys.has(KEY_A)).be.true();
+  });
+});
+
+describe('the per-key settings digests', () => {
+  const D1 = '1'.repeat(64);
+  const D2 = '2'.repeat(64);
+  const D3 = '3'.repeat(64);
+
+  it('should be filed per document, replace only the documents a copy decided, and keep the rest', () => {
+    const previous: CloneBase = {
+      version: 1,
+      sources: {
+        'daemon-source': {
+          ...source({ [KEY_A]: item() }),
+          settings: { 'warden.yaml': { 'layers.jev': D1 }, 'voice.yaml': { 'postProcessing.provider': D2 } },
+        },
+      },
+    };
+    const next = applyCloneToBase(
+      previous,
+      update({
+        copied: [entry(KEY_A)],
+        sourceKeys: new Set([KEY_A]),
+        model: linkedModel(KEY_A),
+        settings: { 'warden.yaml': { 'layers.jev': D3, intervalMinutes: D1 } },
+      }),
+    );
+    should(next.sources['daemon-source']?.settings).deepEqual({
+      'warden.yaml': { 'layers.jev': D3, intervalMinutes: D1 },
+      'voice.yaml': { 'postProcessing.provider': D2 },
+    });
+  });
+
+  it('should keep a source alive on its settings alone, and start over on Replace', () => {
+    const settingsOnly = update({ settings: { controls: { defaultRuntime: D1 } } });
+    const first = applyCloneToBase(EMPTY_CLONE_BASE, settingsOnly);
+    should(first.sources['daemon-source']?.settings).deepEqual({ controls: { defaultRuntime: D1 } });
+    // Not a different source's: another source's settings never reach this one.
+    const other = applyCloneToBase(first, update({ source: { id: 'daemon-two', name: 'two', verified: 'self' } }));
+    should(Object.keys(other.sources)).deepEqual(['daemon-source']);
+    const replaced = applyCloneToBase(first, update({ replace: true, settings: { 'voice.yaml': { x: D2 } } }));
+    should(replaced.sources['daemon-source']?.settings).deepEqual({ 'voice.yaml': { x: D2 } });
+  });
+
+  it('should drop a source with no items and no settings, as before', () => {
+    should(applyCloneToBase(EMPTY_CLONE_BASE, update({})).sources).deepEqual({});
+    should(applyCloneToBase(EMPTY_CLONE_BASE, update({ settings: { 'warden.yaml': {} } })).sources).deepEqual({});
+  });
+
+  it('should read back what serializeCloneBase wrote, in order, and hold only digests', () => {
+    const base: CloneBase = {
+      version: 1,
+      sources: { s: { ...source({}), settings: { 'warden.yaml': { b: D2, a: D1 }, controls: { z: D3 } } } },
+    };
+    const text = serializeCloneBase(base);
+    should(parseCloneBase(text)).deepEqual(base);
+    should(serializeCloneBase(parseCloneBase(text))).equal(text);
+    should(Object.keys(JSON.parse(text).sources.s.settings['warden.yaml'])).deepEqual(['a', 'b']);
+  });
+
+  it.each([
+    ['a value instead of a digest', { 'warden.yaml': { a: 'enabled: true' } }],
+    ['a document that is not one a copy merges', { 'machine.yaml': { a: D1 } }],
+    ['an empty key', { 'warden.yaml': { '': D1 } }],
+  ])('should read a record holding %s as absent', (_name, settings) => {
+    const text = JSON.stringify({ version: 1, sources: { s: { ...source({}), settings } } });
+    should(parseCloneBase(text)).deepEqual(EMPTY_CLONE_BASE);
   });
 });
 
@@ -579,6 +653,41 @@ describe('forgetCloneSource', () => {
     const base: CloneBase = { version: 1, sources: { a: source({}), b: source({}) } };
     should(Object.keys(forgetCloneSource(base, 'a').sources)).deepEqual(['b']);
     should(Object.keys(forgetCloneSource(base, 'nobody').sources)).deepEqual(['a', 'b']);
+  });
+});
+
+describe('findCloneSources', () => {
+  const base: CloneBase = {
+    version: 1,
+    sources: {
+      'daemon-a': { ...source({}), name: 'Studio' },
+      'self:daemon-b': { ...source({}), name: 'Laptop', machine: 'studio-mac' },
+      'self:daemon-c': { ...source({}), name: 'Studio' },
+    },
+  };
+
+  it('should find a source by the id as filed, or by the bare id an export carries', () => {
+    should(findCloneSources(base, 'daemon-a')).deepEqual(['daemon-a']);
+    should(findCloneSources(base, 'self:daemon-b')).deepEqual(['self:daemon-b']);
+    should(findCloneSources(base, 'daemon-b')).deepEqual(['self:daemon-b']);
+  });
+
+  it('should find a source by the name it was copied under or the machine name its export gave', () => {
+    should(findCloneSources(base, 'Laptop')).deepEqual(['self:daemon-b']);
+    should(findCloneSources(base, 'studio-mac')).deepEqual(['self:daemon-b']);
+  });
+
+  it('should answer every source a name fits, and none for a word that fits nothing', () => {
+    should(findCloneSources(base, 'Studio')).deepEqual(['daemon-a', 'self:daemon-c']);
+    should(findCloneSources(base, 'nobody')).deepEqual([]);
+  });
+
+  it('should take an exact id over a name that happens to be the same word', () => {
+    const tricky: CloneBase = {
+      version: 1,
+      sources: { Studio: source({}), other: { ...source({}), name: 'Studio' } },
+    };
+    should(findCloneSources(tricky, 'Studio')).deepEqual(['Studio']);
   });
 });
 
@@ -833,6 +942,65 @@ describe('applyCloneToBase: a source is only ever its own entry', () => {
 
     // Assert
     should(Object.keys(next.sources)).deepEqual(['a']);
+  });
+
+  describe('two sources copied from a file, sharing a key (#1383 nit 6)', () => {
+    /** A components-only bundle from `machine`, copied from a file (no id a browser verified). */
+    const fromFile = (machine: string) => {
+      const bundle = V2({
+        daemon: machine,
+        machine,
+        credentials: [],
+        profiles: {},
+        runtimes: {},
+        keys: { 'instructions/main': KEY_A },
+      });
+      const identity = cloneSourceIdentity(bundle, undefined, undefined);
+      if (identity === undefined) throw new Error('a version 2 bundle has an identity');
+      return { bundle, identity };
+    };
+    const copy = (previous: CloneBase, model: AccountModel, machine: string, mode: 'alongside' | 'replace') => {
+      const { bundle, identity } = fromFile(machine);
+      const plan = planClone(model, bundle, options({ mode }));
+      return {
+        model: plan.model,
+        record: applyCloneToBase(
+          previous,
+          update({
+            source: identity,
+            replace: mode === 'replace',
+            copied: plan.base,
+            sourceKeys: plan.sourceKeys,
+            model: plan.model,
+          }),
+        ),
+      };
+    };
+
+    it('should keep only the source a Replace copied from, not the one it replaced', () => {
+      // Arrange: a copy from a, then a Replace from b whose bundle carries the same key.
+      const first = copy(EMPTY_CLONE_BASE, emptyTarget(), 'a', 'alongside');
+      should(Object.keys(first.record.sources)).deepEqual([`${SELF_REPORTED_PREFIX}a`]);
+
+      // Act
+      const next = copy(first.record, first.model, 'b', 'replace');
+
+      // Assert
+      should(Object.keys(next.model.components.instructions)).deepEqual(['main']);
+      should(next.model.components.instructions.main?.clonedFrom).equal('b');
+      should(Object.keys(next.record.sources)).deepEqual([`${SELF_REPORTED_PREFIX}b`]);
+      should(next.record.sources[`${SELF_REPORTED_PREFIX}b`]?.machine).equal('b');
+    });
+
+    it('should keep both when both copies are still here', () => {
+      const first = copy(EMPTY_CLONE_BASE, emptyTarget(), 'a', 'alongside');
+      const next = copy(first.record, first.model, 'b', 'alongside');
+      should(Object.keys(next.model.components.instructions).toSorted()).deepEqual(['main', 'main-2']);
+      should(Object.keys(next.record.sources).toSorted()).deepEqual([
+        `${SELF_REPORTED_PREFIX}a`,
+        `${SELF_REPORTED_PREFIX}b`,
+      ]);
+    });
   });
 
   it('should keep another source whose own items are still linked here', () => {

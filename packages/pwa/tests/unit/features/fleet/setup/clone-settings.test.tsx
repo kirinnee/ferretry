@@ -130,7 +130,8 @@ describe('CloneNeedsList', () => {
     expect(text(view)).toContain('Everything the copied settings need is already on studio-mac.');
     const row = must(q(view, '[data-clone-need="secret:JEV_API_KEY"]'), 'row');
     expect(row.getAttribute('data-held')).toBe('yes');
-    expect(row.textContent).toContain('set ✓');
+    expect(row.textContent).toContain('set');
+    expect(row.textContent).not.toContain('✓');
     expect(q(view, '[data-clone-need-value]')).toBeNull();
   });
 
@@ -145,7 +146,8 @@ describe('CloneNeedsList', () => {
     expect(text(view)).toContain('The copied settings need: JEV_API_KEY, Claude Code login (claude-work).');
     expect(text(view)).toContain('studio-mac’s secret store and is never shown again');
     expect(must(q(view, '[data-clone-need="secret:JEV_API_KEY"]'), 'secret row').getAttribute('data-held')).toBe('no');
-    expect(must(q(view, '[data-clone-need="secret:HELD"]'), 'held row').textContent).toContain('set ✓');
+    expect(must(q(view, '[data-clone-need="secret:HELD"]'), 'held row').textContent).toContain('set');
+    expect(must(q(view, '[data-clone-need="secret:HELD"]'), 'held row').textContent).not.toContain('✓');
   });
 
   it('tells a sign-in row to sign in after copying when there is no sign-in action yet', async () => {
@@ -206,6 +208,8 @@ describe('CloneNeedsList', () => {
     const input = must(q(view, '[data-clone-need-value="JEV_API_KEY"]'), 'field') as HTMLInputElement;
     const add = must(q(view, '[data-clone-need-add="JEV_API_KEY"]'), 'add') as HTMLButtonElement;
     expect(input.type).toBe('password');
+    expect(add.className).toContain('min-h-[44px]');
+    expect(input.className).toContain('min-h-[44px]');
     expect(add.disabled).toBe(true);
     await type(input, '   ');
     expect(add.disabled).toBe(true);
@@ -275,6 +279,7 @@ describe('CloneOutcomes', () => {
           { item: item('learning'), outcome: { kind: 'copied' } },
           { item: item('voice'), outcome: { kind: 'refused', reason: 'voice.yaml does not check.' } },
         ]}
+        machineName="studio"
         onConfirm={async () => null}
       />,
     );
@@ -293,6 +298,54 @@ describe('CloneOutcomes', () => {
     expect(must(q(view, '[data-setup-note="clone-outcome-voice"]'), 'note').getAttribute('data-tone')).toBe('err');
   });
 
+  it('marks a held merge with the same loosens badge the settings rows carry', async () => {
+    const view = await show(
+      <CloneOutcomes
+        outcomes={[
+          { item: item('warden'), outcome: pending('warden.yaml') },
+          { item: item('learning'), outcome: { kind: 'copied' } },
+          { item: item('voice'), outcome: { kind: 'refused', reason: 'no' } },
+        ]}
+        machineName="studio"
+        onConfirm={async () => null}
+      />,
+    );
+    const badges = view.container.querySelectorAll('[data-clone-outcome-loosens]');
+    expect(badges).toHaveLength(1);
+    expect(badges[0]?.textContent).toBe('Loosens what studio may spend or do');
+    expect(must(q(view, '[data-setup-note="clone-outcome-warden"]'), 'note').contains(badges[0] ?? null)).toBe(true);
+    // The badge is its own element: the sentence above it still reads exactly as it did.
+    expect(must(q(view, '[data-clone-outcome="warden"]'), 'warden').textContent).not.toContain('Loosens what');
+  });
+
+  it('drops the loosens badge once the merge is confirmed', async () => {
+    const view = await show(
+      <CloneOutcomes
+        outcomes={[{ item: item('warden'), outcome: pending('warden.yaml') }]}
+        machineName="studio"
+        onConfirm={async () => null}
+      />,
+    );
+    await interact(() => (must(q(view, '[data-clone-confirm]'), 'confirm') as HTMLElement).click());
+    expect(q(view, '[data-clone-outcome-loosens]')).toBeNull();
+  });
+
+  it('gives Confirm a touch-sized button with room above it', async () => {
+    const view = await show(
+      <CloneOutcomes
+        outcomes={[{ item: item('warden'), outcome: pending('warden.yaml') }]}
+        machineName="studio"
+        onConfirm={async () => null}
+      />,
+    );
+    const confirm = must(q(view, '[data-clone-confirm]'), 'confirm');
+    expect(confirm.tagName).toBe('BUTTON');
+    expect(confirm.getAttribute('type')).toBe('button');
+    expect(confirm.textContent).toBe('Confirm');
+    expect(confirm.className).toContain('min-h-[44px]');
+    expect(must(confirm.parentElement, 'actions').className).toContain('mt-2');
+  });
+
   it('offers Confirm only on the one waiting for the owner', async () => {
     const view = await show(
       <CloneOutcomes
@@ -301,11 +354,13 @@ describe('CloneOutcomes', () => {
           { item: item('learning'), outcome: { kind: 'copied' } },
           { item: item('voice'), outcome: { kind: 'refused', reason: 'no' } },
         ]}
+        machineName="studio"
         onConfirm={async () => null}
       />,
     );
     expect(view.container.querySelectorAll('[data-clone-confirm]')).toHaveLength(1);
     expect(q(view, '[data-clone-confirm="warden.yaml"]')).not.toBeNull();
+    expect(q(view, '[data-clone-confirm="warden.yaml"]')?.className).toContain('min-h-[44px]');
     expect(text(view)).toContain('Or run fy config confirm on the machine.');
   });
 
@@ -314,6 +369,7 @@ describe('CloneOutcomes', () => {
     const view = await show(
       <CloneOutcomes
         outcomes={[{ item: item('warden'), outcome: pending('warden.yaml') }]}
+        machineName="studio"
         onConfirm={async (path, etag) => {
           confirmed.push([path, etag]);
           return null;
@@ -333,18 +389,52 @@ describe('CloneOutcomes', () => {
     const view = await show(
       <CloneOutcomes
         outcomes={[{ item: item('warden'), outcome: pending('warden.yaml') }]}
+        machineName="studio"
         onConfirm={async () => 'A passkey is needed to confirm.'}
       />,
     );
     await interact(() => (must(q(view, '[data-clone-confirm]'), 'confirm') as HTMLElement).click());
     expect(must(q(view, '[role="alert"]'), 'alert').textContent).toBe('A passkey is needed to confirm.');
     expect(q(view, '[data-clone-confirm="warden.yaml"]')).not.toBeNull();
+    expect(q(view, '[data-clone-confirm="warden.yaml"]')?.className).toContain('min-h-[44px]');
     expect(must(q(view, '[data-clone-outcome="warden"]'), 'warden').getAttribute('data-outcome')).toBe('pending');
     expect(text(view)).not.toContain('Or run fy config confirm');
   });
 });
 
 describe('CloneLoginsSection', () => {
+  const newerSection = (write: (value: string) => Promise<void>) => (
+    <CloneLoginsSection
+      logins={[]}
+      machineName="studio-mac"
+      sourceName="work-mac"
+      keys={[]}
+      copyKeys={false}
+      onCopyKeys={() => undefined}
+      newer={[{ name: 'DEMO_API_KEY', outcome: 'newer' }]}
+      write={write}
+    />
+  );
+
+  it('shows the command to replace a newer key as code with a copy button that copies it', async () => {
+    const written: string[] = [];
+    const view = await show(
+      newerSection(async value => {
+        written.push(value);
+      }),
+    );
+    const row = must(q(view, '[data-clone-newer-key="DEMO_API_KEY"]'), 'newer key');
+    expect(must(row.querySelector('code'), 'command').textContent).toBe('fy secret set DEMO_API_KEY');
+    expect(row.querySelector('input')).toBeNull();
+
+    await interact(() => {
+      (must(row.querySelector('button[aria-label="Copy command"]'), 'copy') as HTMLButtonElement).click();
+    });
+
+    expect(written).toEqual(['fy secret set DEMO_API_KEY']);
+    expect(must(row.querySelector('[data-onboarding-copy-status]'), 'status').textContent).toBe('Copied');
+  });
+
   const apiKey = (id: string, keys: Array<{ name: string; held: boolean }>): CloneLogin => ({
     kind: 'api-key',
     id,

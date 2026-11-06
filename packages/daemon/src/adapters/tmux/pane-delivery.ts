@@ -16,16 +16,17 @@
 import {
   classifySubmit,
   composerHoldsOtherText,
+  draftBlockingReadiness,
   frameCursor,
   type InjectionOutcome,
   type LandingEvidence,
   nextReadinessStep,
-  occupiedComposer,
   paneBlockingDialog,
   paneBlockingPermission,
   paneBlockingPrompt,
   paneResponded,
   retryDelays,
+  startupSettleStep,
   type StartupDialogAction,
   type StartupDialogOptions,
   type TmuxController,
@@ -57,6 +58,11 @@ export interface PaneDeliveryOptions {
   readonly submitPolls?: number;
   /** How long to wait between composer and submit observations. */
   readonly pollMs?: number;
+  /**
+   * The longest `waitStartupSettled` watches a parked first turn, counted in `pollMs` steps. Past it the
+   * wait ends without failing, answering `timed-out`: a harness that is merely slow is not a failed start.
+   */
+  readonly startupSettleMs?: number;
 }
 
 const DEFAULTS = {
@@ -72,6 +78,7 @@ const DEFAULTS = {
   submitAttempts: 3,
   submitPolls: 12,
   pollMs: 250,
+  startupSettleMs: 30_000,
 } as const;
 
 /** A payload could not be delivered, and the message says which half failed. */
@@ -104,6 +111,20 @@ export class PaneNotReadyError extends PaneDeliveryError {
 
 /** Why a pane never came to a prompt. */
 export type PaneNotReadyCause = 'busy' | 'dialog' | 'exited';
+
+/**
+ * The pane died while `waitStartupSettled` was watching it. `parked` is whether a frame showed the first turn
+ * parked behind the harness's startup before it died: only then is the turn known never to have run.
+ */
+export class PaneStartupExitedError extends PaneDeliveryError {
+  constructor(
+    message: string,
+    readonly parked: boolean,
+  ) {
+    super(message);
+    this.name = 'PaneStartupExitedError';
+  }
+}
 
 /**
  * The payload is in the composer and every bounded Enter left it there: typed, and not sent.
@@ -158,7 +179,8 @@ export class TmuxPaneDelivery {
         );
       // A composer holding typed input will never become ready by waiting, and the wait is long. Two
       // frames in a row, so a repaint caught halfway through clearing a submit is not mistaken for one.
-      const draft = step.kind === 'wait' ? occupiedComposer(frame) : undefined;
+      // Text parked behind Codex's startup wait is not a draft: Codex accepted it, so just keep waiting.
+      const draft = step.kind === 'wait' ? draftBlockingReadiness(frame) : undefined;
       occupied = draft === undefined ? 0 : occupied + 1;
       if (draft !== undefined && occupied >= 2)
         throw new ComposerOccupiedError(
@@ -199,6 +221,30 @@ export class TmuxPaneDelivery {
     await beforeWrite?.();
     const evidence = await this.fill(session, text);
     return await this.submit(session, text, evidence);
+  }
+
+  /**
+   * Wait, boundedly, until the harness has finished its OWN startup after a first turn was delivered.
+   *
+   * Codex 0.166 takes a submission before its startup ends and parks it under `Waiting for startup`
+   * (`paneShowsStartupWait`), so delivery is already proven while the harness is not yet running. Any
+   * other pane answers on the first frame. A pane that dies meanwhile fails the wait with the harness's
+   * own exit reason (a `PaneStartupExitedError` saying whether the park was seen first), so the start reports it instead of a session that dies later; a bound that passes
+   * answers `timed-out` rather than failing, because a slow harness is not a failed one and the caller
+   * must not mistake the bound for a measured startup time.
+   */
+  async waitStartupSettled(session: string): Promise<'settled' | 'timed-out'> {
+    // A step below one millisecond would never advance `waited`, so the bound could not end the loop.
+    const step = Math.max(1, this.settings.pollMs);
+    let parked = false;
+    for (let waited = 0; ; waited += step) {
+      const frame = startupSettleStep(await captureFrame(this.tmux, session));
+      if (frame.kind === 'settled') return 'settled';
+      if (frame.kind === 'exited') throw new PaneStartupExitedError(`${frame.reason}; tmux session ${session}`, parked);
+      parked = true;
+      if (waited >= this.settings.startupSettleMs) return 'timed-out';
+      await this.sleep(step);
+    }
   }
 
   private async fill(session: string, text: string): Promise<LandingEvidence> {

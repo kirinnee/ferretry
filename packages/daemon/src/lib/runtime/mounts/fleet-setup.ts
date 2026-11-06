@@ -17,6 +17,12 @@
  */
 import {
   FleetCloneBundleSchema,
+  FleetCloneForgetRequestSchema,
+  FleetCloneForgetResultSchema,
+  FleetCloneKeysRecordRequestSchema,
+  FleetCloneKeysRecordResultSchema,
+  FleetCloneReviewRequestSchema,
+  FleetCloneReviewSchema,
   FleetSetupScanSchema,
   FleetToolInstallRequestSchema,
   FleetToolInstallResultSchema,
@@ -29,8 +35,11 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import { FleetSetupRefusal, type FleetSetupService } from '../../fleet/setup-service.ts';
 
-/** First-run scan, tool install and the clone export. */
-export type FleetSetupSubsystem = Pick<FleetSetupService, 'scan' | 'installTools' | 'exportBundle' | 'executors'>;
+/** First-run scan, tool install, the clone export and the clone review. */
+export type FleetSetupSubsystem = Pick<
+  FleetSetupService,
+  'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'recordCloneKeys' | 'executors'
+>;
 
 /** `403` for a caller the grants refuse; `409` for every other refusal, as the fleet's own answer. */
 function refusal(error: FleetSetupRefusal): ApiError {
@@ -80,6 +89,50 @@ export function fleetSetupRoutes(subsystem: FleetSetupSubsystem): readonly ApiRo
       capability: CONFIGURE,
       noStore: true,
       handle: async () => await answer(FleetCloneBundleSchema, () => subsystem.exportBundle()),
+    },
+    {
+      // A review reads this machine's own setup against a bundle and writes nothing; `person` because what
+      // it answers is the diff of a configuration the caller is about to change.
+      method: 'POST',
+      path: '/v1/fleet/clone/review',
+      minimum: 'operator',
+      caller: 'person',
+      capability: CONFIGURE,
+      noStore: true,
+      handle: async context => {
+        const request = await parseBody(context.request, FleetCloneReviewRequestSchema);
+        return await answer(FleetCloneReviewSchema, () => subsystem.reviewClone(request, context.governance));
+      },
+    },
+    {
+      // Forgetting writes the "last copied" record and nothing else: no copied item, no login, no secret.
+      // `person` for the same reason the review is: it changes what a copy will do next.
+      method: 'POST',
+      path: '/v1/fleet/clone/forget',
+      minimum: 'operator',
+      caller: 'person',
+      capability: CONFIGURE,
+      noStore: true,
+      handle: async context => {
+        const request = await parseBody(context.request, FleetCloneForgetRequestSchema);
+        return await answer(FleetCloneForgetResultSchema, async () => ({
+          forgotten: await subsystem.forgetCloneSource(request.source),
+        }));
+      },
+    },
+    {
+      // The sealed copy of the keys has landed here; this remembers when each side last changed them. It
+      // writes only `keys` of the record (timestamps), and person-only like the review it follows.
+      method: 'POST',
+      path: '/v1/fleet/clone/keys',
+      minimum: 'operator',
+      caller: 'person',
+      capability: CONFIGURE,
+      noStore: true,
+      handle: async context => {
+        const request = await parseBody(context.request, FleetCloneKeysRecordRequestSchema);
+        return await answer(FleetCloneKeysRecordResultSchema, () => subsystem.recordCloneKeys(request));
+      },
     },
   ];
 }

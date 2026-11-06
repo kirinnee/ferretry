@@ -9,6 +9,10 @@
  * Each voice has its own engine and so its own worker, told which catalog model it is for in every
  * message. Every answer says which backend produced it — WebGPU or WebAssembly — so a dictation can
  * say where it ran.
+ *
+ * THREADS (`speed-plan.ts`) work as in `parakeet-engine.ts`: `speed.threads()` is a request; a worker
+ * that answers `threads-failed` is replaced by a fresh one on one thread, the page is told once
+ * (`onThreadsFailed`), and everything still waiting is repeated there.
  */
 
 import type {
@@ -47,6 +51,17 @@ interface Pending {
   reject(error: WhisperEngineError): void;
 }
 
+/** What the page decides about speed; every part optional. */
+export interface WhisperEngineSpeed {
+  /** Threads to ask the WebAssembly runtime for. 1 (the default) means no threads. */
+  threads?(): number;
+  /** Several threads did not work; the engine is now on one. `reason` is the runtime's own sentence, for a log line. */
+  onThreadsFailed?(reason: string): void;
+}
+
+/** The `threads` field of a request: present only when more than one is asked for. */
+const threadsField = (threads: number): { readonly threads?: number } => (threads > 1 ? { threads } : {});
+
 const isReply = (data: unknown): data is WhisperWorkerReply =>
   typeof data === 'object' &&
   data !== null &&
@@ -63,17 +78,47 @@ export class WhisperEngine {
   #loadStartedAt: number | null = null;
   #loadMs: number | null = null;
 
-  constructor(model: string, spawn: () => WhisperWorkerLike, now: () => number = () => globalThis.performance.now()) {
+  readonly #speed: WhisperEngineSpeed;
+  readonly #replay = new Map<number, Float32Array>();
+  /** Set once several threads failed: this engine asks for one from then on. */
+  #oneThread = false;
+  /** The thread count the current worker was configured with; `null` while there is no worker. */
+  #pinned: number | null = null;
+
+  constructor(
+    model: string,
+    spawn: () => WhisperWorkerLike,
+    now: () => number = () => globalThis.performance.now(),
+    speed: WhisperEngineSpeed = {},
+  ) {
     this.#model = model;
     this.#spawn = spawn;
     this.#now = now;
+    this.#speed = speed;
+  }
+
+  /**
+   * The thread count of the CURRENT worker. The first message a worker gets fixes it, because a worker
+   * keeps the model it loaded: a later planner answer (another tab recorded a failure, say) changes
+   * what the NEXT worker is asked for, never what this one is already running. Every message to this
+   * worker repeats the pinned count, and replay is kept exactly while it is above one.
+   */
+  #threads(): number {
+    if (this.#pinned !== null) return this.#pinned;
+    let threads = 1;
+    if (!this.#oneThread) {
+      const asked = this.#speed.threads?.() ?? 1;
+      threads = Number.isSafeInteger(asked) && asked > 1 ? asked : 1;
+    }
+    this.#pinned = threads;
+    return threads;
   }
 
   /** Start loading the model now, so the first utterance does not wait for it. */
   preload(): void {
     const worker = this.#ensure();
     this.#loadStartedAt ??= this.#now();
-    worker.postMessage({ type: 'load', model: this.#model });
+    worker.postMessage({ type: 'load', model: this.#model, ...threadsField(this.#threads()) });
   }
 
   /**
@@ -96,6 +141,7 @@ export class WhisperEngine {
       const onAbort = (): void => {
         // ONNX cannot interrupt a decode in flight; the answer is simply not waited for.
         this.#pending.delete(id);
+        this.#replay.delete(id);
         reject(new WhisperEngineError('cancelled', 'Transcription was cancelled.'));
       };
       if (signal?.aborted) {
@@ -113,7 +159,11 @@ export class WhisperEngine {
           reject(error);
         },
       });
-      worker.postMessage({ type: 'transcribe', id, model: this.#model, samples }, [samples.buffer]);
+      const threads = this.#threads();
+      if (threads > 1) this.#replay.set(id, samples.slice());
+      worker.postMessage({ type: 'transcribe', id, model: this.#model, samples, ...threadsField(threads) }, [
+        samples.buffer,
+      ]);
     });
   }
 
@@ -123,6 +173,8 @@ export class WhisperEngine {
     this.#worker = null;
     this.#loadStartedAt = null;
     this.#loadMs = null;
+    this.#replay.clear();
+    this.#pinned = null;
     worker?.terminate();
     this.#failAll(new WhisperEngineError('cancelled', 'The speech model was unloaded.'));
   }
@@ -139,6 +191,7 @@ export class WhisperEngine {
       // The worker script itself failed — refused by the page's policy, or a runtime that would not
       // start. Nothing it was asked will be answered, so every caller hears it now.
       this.#worker = null;
+      this.#pinned = null;
       this.#loadStartedAt = null;
       worker.terminate();
       this.#failAll(
@@ -160,13 +213,58 @@ export class WhisperEngine {
       this.#loadStartedAt = null;
       const pending = this.#pending.get(data.id);
       this.#pending.delete(data.id);
+      this.#replay.delete(data.id);
       pending?.resolve({ text: data.text, backend: data.backend === 'webgpu' ? 'webgpu' : 'wasm' });
+      return;
+    }
+    if (data.code === 'threads-failed') {
+      this.#retryOnOneThread(data.message);
       return;
     }
     if (data.id === null) return;
     const pending = this.#pending.get(data.id);
     this.#pending.delete(data.id);
+    this.#replay.delete(data.id);
     pending?.reject(new WhisperEngineError(data.code, data.message));
+  }
+
+  /**
+   * Threads did not work: tell the page, start a fresh worker on one thread, and repeat what is waiting.
+   * Every request to a threaded worker kept its audio (retention follows the worker's pinned thread
+   * count), so every waiting one is repeated. A one-thread worker that reports a thread failure cannot be
+   * retried, so everything waiting is SETTLED with a clear error rather than left waiting forever.
+   */
+  #retryOnOneThread(reason: string): void {
+    if (this.#oneThread || this.#pinned === 1) {
+      this.#failAll(new WhisperEngineError('worker-failed', 'The on-device speech engine failed on one thread.'));
+      return;
+    }
+    this.#oneThread = true;
+    this.#speed.onThreadsFailed?.(reason);
+    const stale = this.#worker;
+    this.#worker = null;
+    this.#pinned = null;
+    stale?.terminate();
+    let worker: WhisperWorkerLike | null = null;
+    try {
+      worker = this.#ensure();
+      this.#pinned = 1;
+      worker.postMessage({ type: 'load', model: this.#model });
+      const jobs = [...this.#replay];
+      this.#replay.clear();
+      for (const [id, samples] of jobs)
+        worker.postMessage({ type: 'transcribe', id, model: this.#model, samples }, [samples.buffer]);
+    } catch {
+      // The replacement could not start (a runtime out of workers or memory) or could not be given the
+      // audio. Nothing waiting can be answered now, so release the partial worker and settle every caller.
+      this.#worker = null;
+      this.#pinned = null;
+      this.#loadStartedAt = null;
+      worker?.terminate();
+      this.#failAll(
+        new WhisperEngineError('worker-failed', 'The on-device speech engine could not restart on one thread.'),
+      );
+    }
   }
 
   #loaded(): void {
@@ -176,6 +274,7 @@ export class WhisperEngine {
   }
 
   #failAll(error: WhisperEngineError): void {
+    this.#replay.clear();
     const waiting = [...this.#pending.values()];
     this.#pending.clear();
     for (const pending of waiting) pending.reject(error);

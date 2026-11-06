@@ -17,7 +17,7 @@ import { composerHolds } from './composer.ts';
 import type { ComposerInk } from './composer-ink.ts';
 import type { ComposerCursor } from './composer-screen.ts';
 import { composerContains, readComposer, showsPayload } from './composer-screen.ts';
-import { paneShowsActiveWork } from './pane.ts';
+import { paneShowsActiveWork, paneShowsStartupWait } from './pane.ts';
 import type { StartupDialogAction, StartupDialogOptions } from './startup.ts';
 import { startupDialogAction } from './startup.ts';
 
@@ -132,6 +132,31 @@ export function nextReadinessStep(
   return frame.promptReady ? { kind: 'ready' } : { kind: 'wait' };
 }
 
+/** What the startup-settle loop should do about this frame. */
+export type StartupSettleStep =
+  /** The harness has finished its own startup: nothing is parked behind it any more. */
+  | { readonly kind: 'settled' }
+  /** Codex is still holding the submission (`Waiting for startup`); look again. */
+  | { readonly kind: 'wait' }
+  /** The pane died while startup was running; `reason` is the harness's own last words. */
+  | { readonly kind: 'exited'; readonly reason: string };
+
+/**
+ * Decide, from one frame taken AFTER the first turn was delivered, whether the harness has finished
+ * its own startup.
+ *
+ * Codex 0.166 draws its composer before startup ends and PARKS a submission until an `account/read`
+ * round trip to chatgpt.com answers, so a delivered first turn does not yet mean a started harness.
+ * A dead pane is answered first and with the harness's own reason: Codex exits with
+ * `account/read failed during TUI bootstrap … timed out` when that round trip never answers, and the
+ * start that was waiting for it should say so rather than report a session that dies later. Every
+ * other harness never draws the line, so for them this is `settled` on the first frame.
+ */
+export function startupSettleStep(frame: DeliveryFrame): StartupSettleStep {
+  if (!frame.alive || frame.dead) return { kind: 'exited', reason: harnessExitReason(frame) };
+  return paneShowsStartupWait(frame.visible) ? { kind: 'wait' } : { kind: 'settled' };
+}
+
 /**
  * What happened after a proven composer delivery was submitted.
  *
@@ -159,6 +184,20 @@ export function classifySubmit(frame: DeliveryFrame, text: string, evidence: Lan
   // A pane that died or started working took the payload with it either way.
   if (!frame.alive || frame.dead || paneShowsActiveWork(frame.visible))
     return { kind: 'delivered', outcome: 'turn-started' };
+  // Codex took the submission and parked it until its startup ends (`paneShowsStartupWait`). The
+  // payload is still DRAWN in the composer, so the composer reading below would call it held and press
+  // Enter again — into a harness that has already accepted it, and that may open a picker or start the
+  // turn between that frame and the key. What follows is what the payload would have done unparked: a
+  // slash command is the TUI's own, anything else is a turn.
+  //
+  // A parked slash command is reported handled-local BEFORE Codex has run it. A new session's start no
+  // longer types a command into a booting Codex (its level rides the argv), but a FORK still does: it
+  // types `/model` through the startup picker hook, and that drive's own exit/timeout is what surfaces a
+  // parked `/model` that never ran — Codex exiting on its startup timeout, or the picker never opening
+  // within the drive's budget. The same goes for a live control on a session that is still starting,
+  // which is rare. Reporting handled-local here only stops THIS delivery pressing Enter again.
+  if (paneShowsStartupWait(frame.visible))
+    return { kind: 'delivered', outcome: text.trimStart().startsWith('/') ? 'handled-local' : 'turn-started' };
   // Exact `/model` opens Codex's native picker. The pane often keeps `› /model` above it, which
   // `composerHolds` cannot tell from an occupied composer — an OPEN picker proves the first Enter
   // was consumed, and a second one would make a choice on the user's behalf.
@@ -225,6 +264,16 @@ export function composerState(frame: DeliveryFrame): ComposerState {
 export function occupiedComposer(frame: DeliveryFrame): string | undefined {
   const composer = readComposer(frame.visible, frameCursor(frame));
   return composer?.placeholder === false && composer.text !== '' ? composer.text : undefined;
+}
+
+/**
+ * The unsent draft that makes a pane a lost cause to wait on, or `undefined` when waiting may still help.
+ *
+ * A composer under Codex's `Waiting for startup` line (`paneShowsStartupWait`) is not a draft: its text is a
+ * submission Codex already accepted and will send when startup ends, so the wait just goes on.
+ */
+export function draftBlockingReadiness(frame: DeliveryFrame): string | undefined {
+  return paneShowsStartupWait(frame.visible) ? undefined : occupiedComposer(frame);
 }
 
 /**

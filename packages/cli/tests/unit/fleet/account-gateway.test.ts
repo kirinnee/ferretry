@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { z } from 'zod';
 import { ProtocolAccountGateway, TOOL_INSTALL_TIMEOUT_MS } from '../../../src/lib/fleet/account-gateway.ts';
-import { bundle, changeView, committed, credential, flow, machine, scan } from './account-fakes.ts';
+import { bundle, changeView, cloneReview, committed, credential, flow, machine, scan } from './account-fakes.ts';
 
 interface Sent {
   readonly path: string;
@@ -97,6 +97,56 @@ describe('ProtocolAccountGateway', () => {
     should(fake.sent[0]?.init?.method).equal('GET');
     should(body(fake.sent[1])).eql({ harnesses: ['codex'] });
     should(fake.sent[1]?.timeoutMs).equal(TOOL_INSTALL_TIMEOUT_MS);
+  });
+
+  it('should post the clone review and forget routes, parsing the request and the answer', async () => {
+    // Arrange
+    const fake = client({
+      '/v1/fleet/clone/review': cloneReview({ mode: 'update', fingerprint: 'fp-9' }),
+      '/v1/fleet/clone/forget': { forgotten: true },
+    });
+    const gateway = new ProtocolAccountGateway(fake);
+    const exported = { machine: 'laptop' };
+
+    // Act
+    const review = await gateway.reviewClone({ bundle: exported });
+    const forgotten = await gateway.forgetCloneSource('self:laptop');
+
+    // Assert
+    should(review.fingerprint).equal('fp-9');
+    should(forgotten).be.true();
+    should(fake.sent.map(sent => [sent.path, sent.init?.method])).eql([
+      ['/v1/fleet/clone/review', 'POST'],
+      ['/v1/fleet/clone/forget', 'POST'],
+    ]);
+    should(body(fake.sent[0])).eql({ bundle: exported });
+    should(body(fake.sent[1])).eql({ source: 'self:laptop' });
+  });
+
+  it('should report a forget that found no record to drop', async () => {
+    // Arrange
+    const gateway = new ProtocolAccountGateway(client({ '/v1/fleet/clone/forget': { forgotten: false } }));
+
+    // Act
+    const forgotten = await gateway.forgetCloneSource('nobody');
+
+    // Assert
+    should(forgotten).be.false();
+  });
+
+  it('should refuse a clone request that the route would refuse, before sending it', async () => {
+    // Arrange
+    const fake = client({});
+    const gateway = new ProtocolAccountGateway(fake);
+
+    // Act
+    const review = gateway.reviewClone({ bundle: {}, extra: 1 } as never);
+    const forget = gateway.forgetCloneSource('');
+
+    // Assert
+    await should(review).rejected();
+    await should(forget).rejected();
+    should(fake.sent).have.length(0);
   });
 
   it('should start, read, answer and cancel a sign-in by credential', async () => {

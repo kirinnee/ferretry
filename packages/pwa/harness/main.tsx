@@ -240,7 +240,7 @@ import type { QrScanHost } from '../src/lib/pair-scan.ts';
 import type { PairingArrival } from '../src/lib/pairing.ts';
 import { type DaemonProjectsPort, type DaemonProjectsSlice, DaemonProjectsStore } from '../src/lib/projects-store.ts';
 import { AppOutdatedError, DaemonOutdatedError } from '../src/lib/relay-carrier.ts';
-import type { DaemonFetch } from '../src/lib/runtime-models.ts';
+import { type DaemonFetch, DaemonResponseError } from '../src/lib/runtime-models.ts';
 import { unlockStaysSentence } from '../src/lib/security-settings-client.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
@@ -2178,6 +2178,8 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
     const setup = machineSetupAnswer(String(connection.daemonId), setUp, path, init);
     if (setup !== undefined) return setup;
     if (path === '/v1/fleet/export') return HARNESS_CLONE_EXPORT;
+    // A machine that predates the review: no such route, so a clone copies its settings whole (and says so).
+    if (path === '/v1/fleet/clone/review') throw new FyHttpError('no route POST ' + path, 404, 'unknown_route');
     if (path === '/v1/fleet/setup/scan') return setUp ? HARNESS_SETUP_SCAN : HARNESS_FIRST_RUN_SCAN;
     // The Browser tab: a running browser behind a proxy, and a Test proxy that reaches it.
     if (path === '/v1/browser/state')
@@ -4319,8 +4321,25 @@ const ANALYTICS_RAW: AnalyticsResponse = {
 };
 
 /** Stable injected requests prevent parent harness renders from restarting either analytics surface. */
-const HARNESS_GLOBAL_ANALYTICS_REQUEST: AnalyticsRequest = async (connection, query) =>
-  answerAnalyticsFixture(query ?? 'sum by (day)', connection.daemonId);
+/**
+ * `?analytics-older-machine`: the second machine runs an OLDER Ferretry (4.270.0, fake), so every query
+ * reaches it as the bare 500 a pre-4.278.0 daemon answered, and a `by (id)` query is too wide for the
+ * current machine (B149: the owner's `sum(cost_usd) by (id)` across two machines).
+ */
+const HARNESS_GLOBAL_ANALYTICS_REQUEST: AnalyticsRequest = async (connection, query) => {
+  if (new URLSearchParams(window.location.search).has('analytics-older-machine')) {
+    if (connection.daemonId === ANALYTICS_FIXTURE_MACHINES[1].daemonId)
+      throw new DaemonResponseError(500, 'the daemon failed to handle this request', 'internal_error', '4.270.0');
+    if (/by \(id\)/u.test(query ?? ''))
+      throw new DaemonResponseError(
+        400,
+        'analytics query produces more than 100 groups; add a matcher',
+        'too_many_groups',
+        '4.278.0',
+      );
+  }
+  return answerAnalyticsFixture(query ?? 'sum by (day)', connection.daemonId);
+};
 const HARNESS_SESSION_ANALYTICS_REQUEST: SessionAnalyticsRequest = async (connection, _scope, query) =>
   answerAnalyticsFixture(query ?? 'sum by (model)', connection.daemonId);
 /** The second machine the analytics fixture answers for. */

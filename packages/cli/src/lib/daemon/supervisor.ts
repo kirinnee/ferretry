@@ -1,4 +1,5 @@
 import { dirname, resolve } from 'node:path';
+import { DAEMON_RUNTIME_TUNING } from '@ferretry/protocol/daemon-runtime-tuning';
 import type { DaemonLayout } from './layout.ts';
 import { isBinaryPlist } from './plist.ts';
 import type {
@@ -12,7 +13,6 @@ import type {
   StopRequest,
 } from './ports.ts';
 import { parseLaunchdPrint, parseSystemdProperties, readLaunchdReport, readSystemdReport } from './probe.ts';
-import { DAEMON_RUNTIME_TUNING } from './runtime-tuning.ts';
 import {
   launchAgentProcessType,
   launchAgentStateHome,

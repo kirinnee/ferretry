@@ -1,6 +1,7 @@
 import {
   type AnalyticsAggregateResult,
   AnalyticsGroupLimitError,
+  AnalyticsQueryError,
   type AnalyticsIndexStatus,
   type AnalyticsLabel,
   type AnalyticsMeasure,
@@ -12,6 +13,7 @@ import {
   type ParsedAnalyticsQuery,
 } from '@ferretry/protocol';
 import { parseAnalyticsQuery } from './query.ts';
+import { utcDateOf, zonedDay, zonedMidnight, zonedWeek } from './time-zone.ts';
 
 export interface AnalyticsQueryRecordsOptions {
   readonly index: AnalyticsIndexStatus;
@@ -24,6 +26,11 @@ export interface AnalyticsQueryRecordsOptions {
   readonly machine?: string | null;
   readonly rawLimit?: number;
   readonly groupLimit?: number;
+  /**
+   * The IANA zone whose calendar the `day` and `week` labels, and the dates of an absolute range, are
+   * read in. Absent, they are UTC's — the day each row was stored with. The caller has validated it.
+   */
+  readonly timeZone?: string;
 }
 
 const DEFAULT_RAW_LIMIT = 100;
@@ -57,7 +64,9 @@ const metrics = {
 
 type LabelValues = Record<AnalyticsLabel, string | null>;
 
-function labelValues(record: AnalyticsRawSession): LabelValues {
+function labelValues(record: AnalyticsRawSession, timeZone: string | undefined): LabelValues {
+  // A session with no creation instant keeps the day it was stored with (null) rather than inventing one.
+  const zoned = timeZone !== undefined && record.createdAt !== null;
   return {
     id: record.id,
     agent: record.agent,
@@ -72,8 +81,8 @@ function labelValues(record: AnalyticsRawSession): LabelValues {
     repo: record.cwd,
     parent: record.parent,
     tree: record.tree ?? null,
-    day: record.day,
-    week: record.week,
+    day: zoned ? zonedDay(record.createdAt!, timeZone) : record.day,
+    week: zoned ? zonedWeek(record.createdAt!, timeZone) : record.week,
     token_data: record.tokens === null ? 'unknown' : 'known',
     runtime: record.agent,
     project: record.cwd,
@@ -93,8 +102,14 @@ function glob(value: string, pattern: string): boolean {
   return new RegExp(`^${escaped}$`).test(value);
 }
 
-function matches(record: AnalyticsRawSession, parsed: ParsedAnalyticsQuery): boolean {
-  const values = labelValues(record);
+/** A raw row as the zone reads it: the same session, on the `day` and `week` the reader's clock gives it. */
+function inZone(record: AnalyticsRawSession, timeZone: string | undefined): AnalyticsRawSession {
+  if (timeZone === undefined || record.createdAt === null) return record;
+  return { ...record, day: zonedDay(record.createdAt, timeZone), week: zonedWeek(record.createdAt, timeZone) };
+}
+
+function matches(record: AnalyticsRawSession, parsed: ParsedAnalyticsQuery, timeZone: string | undefined): boolean {
+  const values = labelValues(record, timeZone);
   return parsed.matchers.every(matcher => {
     const value = values[matcher.label];
     if (value === null) return false;
@@ -134,10 +149,11 @@ function aggregate(
   records: readonly AnalyticsRawSession[],
   parsed: ParsedAnalyticsQuery,
   groupLimit: number,
+  timeZone: string | undefined,
 ): AnalyticsAggregateResult[] {
   const grouped = new Map<string, { labels: Record<string, string | null>; rows: AnalyticsRawSession[] }>();
   for (const record of records) {
-    const values = labelValues(record);
+    const values = labelValues(record, timeZone);
     const labels = Object.fromEntries(parsed.groupBy.map(label => [label, values[label]]));
     const key = JSON.stringify(parsed.groupBy.map(label => values[label]));
     const group = grouped.get(key);
@@ -190,13 +206,42 @@ function costGapCounts(rows: readonly AnalyticsRawSession[]): Record<string, num
 }
 
 /**
+ * An absolute range, with a WHOLE-DAY bound read on the zone's clock.
+ *
+ * The parsed range says which bounds were WRITTEN as dates (`[2026-10-01..2026-10-20]`): in a zone, only
+ * those open (or close) at THAT zone's midnight, so the range covers the days the reader sees. A bound
+ * written as an instant — a midnight one included — is exactly what it names. A range with one date bound
+ * and one instant bound cannot be ordered until the zone is applied, so the order is checked HERE: a
+ * window that ends before it starts is the caller's mistake (400), never a different window. One that
+ * starts and ends together is empty (a day the zone skipped, such as Pacific/Apia 2011-12-30), and matches
+ * nothing rather than a UTC day the reader never asked for.
+ */
+function absoluteWindow(
+  range: Extract<NonNullable<ParsedAnalyticsQuery['range']>, { kind: 'absolute' }>,
+  timeZone: string | undefined,
+): { from: number; to: number } {
+  const start = Date.parse(range.from);
+  const end = Date.parse(range.to);
+  const onZoneClock = (at: number, date: boolean | undefined): number =>
+    timeZone !== undefined && date === true ? zonedMidnight(utcDateOf(at), timeZone) : at;
+  const from = onZoneClock(start, range.dates?.from);
+  const to = onZoneClock(end, range.dates?.to);
+  if (from > to) throw new AnalyticsQueryError('a range must end after it starts');
+  return { from, to };
+}
+
+/**
  * The half-open window a range selects, in epoch milliseconds, or `undefined` when it selects everything.
  * A relative range ends when the daemon answers; an absolute one is exactly what it names.
  */
-function rangeWindow(parsed: ParsedAnalyticsQuery, now: string | undefined): { from: number; to: number } | undefined {
+function rangeWindow(
+  parsed: ParsedAnalyticsQuery,
+  now: string | undefined,
+  timeZone: string | undefined,
+): { from: number; to: number } | undefined {
   const { range } = parsed;
   if (range === undefined) return undefined;
-  if (range.kind === 'absolute') return { from: Date.parse(range.from), to: Date.parse(range.to) };
+  if (range.kind === 'absolute') return absoluteWindow(range, timeZone);
   const end = now === undefined ? Number.NaN : Date.parse(now);
   if (!Number.isFinite(end)) throw new Error('a relative analytics range needs the instant the daemon answers at');
   return { from: end - range.seconds * 1_000, to: end };
@@ -209,7 +254,7 @@ export function queryAnalyticsRecords(
   options: AnalyticsQueryRecordsOptions,
 ): AnalyticsResponse {
   const parsed = parseAnalyticsQuery(source);
-  const window = rangeWindow(parsed, options.now);
+  const window = rangeWindow(parsed, options.now, options.timeZone);
   const stamped =
     options.machine === undefined ? records : records.map(record => ({ ...record, machine: options.machine ?? null }));
   const matched = stamped.filter(record => {
@@ -218,7 +263,7 @@ export function queryAnalyticsRecords(
       const created = record.createdAt === null ? Number.NaN : Date.parse(record.createdAt);
       if (!(created >= window.from && created < window.to)) return false;
     }
-    return matches(record, parsed);
+    return matches(record, parsed, options.timeZone);
   });
   const responseBase = {
     query: parsed.canonical,
@@ -247,13 +292,13 @@ export function queryAnalyticsRecords(
       kind: 'raw',
       limit,
       truncated: ordered.length > limit,
-      results: ordered.slice(0, limit),
+      results: ordered.slice(0, limit).map(row => inZone(row, options.timeZone)),
     };
   }
   return {
     ...responseBase,
     kind: 'aggregate',
     aggregation: parsed.aggregation,
-    results: aggregate(matched, parsed, options.groupLimit ?? DEFAULT_GROUP_LIMIT),
+    results: aggregate(matched, parsed, options.groupLimit ?? DEFAULT_GROUP_LIMIT, options.timeZone),
   };
 }

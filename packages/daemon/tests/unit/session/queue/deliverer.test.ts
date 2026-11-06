@@ -665,6 +665,11 @@ describe('when a message may go', () => {
     should(waitReasonOf(view({ pane: pane({ dead: true, blockingPrompt: 'x' }) }))).be.undefined();
     should(waitReasonOf(view({ pane: pane({ draft: '   ' }) }))).be.undefined();
   });
+
+  it('should wait as launching while Codex holds a submission until its startup ends', () => {
+    should(waitReasonOf(view({ pane: pane({ startupParked: true, draft: 'say hello' }) }))).equal('launching');
+    should(waitReasonOf(view({ pane: pane({ startupParked: true, blockingPrompt: 'x' }) }))).equal('dialog');
+  });
 });
 
 describe('settling a hand-over from the send ledger', () => {

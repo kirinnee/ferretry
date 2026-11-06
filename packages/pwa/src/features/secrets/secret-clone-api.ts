@@ -56,7 +56,10 @@ export async function exportSecrets(
   );
 }
 
-/** On the TARGET: file the bundle into its store, once. */
+/**
+ * On the TARGET: file the bundle into its store, once. A copy only ADDS: a key this machine already holds is
+ * kept as it is (the answer's `kept`), and there is nothing on this wire that could ask otherwise.
+ */
 export async function completeSecretImport(
   target: SecretCloneClient,
   bundle: SealedSecretBundle,

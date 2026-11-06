@@ -12,6 +12,10 @@
  *     built again on WebAssembly, and a decode that fails on WebGPU drops the model so the next one
  *     loads on WebAssembly. Every answer says which backend produced it, so Settings can say which ran;
  *   - a failed load is not remembered, so the next utterance genuinely retries;
+ *   - THREADS ARE A REQUEST, NEVER A DEMAND (`speed-plan.ts`). On WebAssembly the page may ask for
+ *     several; if the runtime will not start with them, or a decode fails with them, the answer is
+ *     `threads-failed` and the PAGE starts a fresh worker on one thread (`whisper-engine.ts`) — ONNX
+ *     Runtime Web initialises its backend once per worker, so the core cannot retry in place;
  *   - one decode at a time, in arrival order, on one queue.
  */
 
@@ -22,10 +26,22 @@ export type WhisperBackend = 'webgpu' | 'wasm';
 
 /** Messages the page sends the worker. `model` is the catalog id the voice is for. */
 export type WhisperWorkerRequest =
-  | { readonly type: 'load'; readonly model: string }
-  | { readonly type: 'transcribe'; readonly id: number; readonly model: string; readonly samples: Float32Array };
+  | { readonly type: 'load'; readonly model: string; readonly threads?: number }
+  | {
+      readonly type: 'transcribe';
+      readonly id: number;
+      readonly model: string;
+      readonly samples: Float32Array;
+      readonly threads?: number;
+    };
 
-export type WhisperWorkerFailure = 'not-installed' | 'integrity' | 'load-failed' | 'transcribe-failed';
+export type WhisperWorkerFailure =
+  | 'not-installed'
+  | 'integrity'
+  | 'load-failed'
+  | 'transcribe-failed'
+  /** Several threads were asked for and did not work; the page retries on one. */
+  | 'threads-failed';
 
 /** Messages the worker sends back. */
 export type WhisperWorkerReply =
@@ -48,7 +64,8 @@ export interface WhisperLoadedModel {
 
 /** Turns verified bytes into a model on one backend. The worker entry implements it over transformers.js. */
 interface WhisperRuntime<Bytes> {
-  load(model: string, bytes: Bytes, backend: WhisperBackend): Promise<WhisperLoadedModel>;
+  /** `threads` applies to the WebAssembly backend only; 1 is the floor. */
+  load(model: string, bytes: Bytes, backend: WhisperBackend, threads: number): Promise<WhisperLoadedModel>;
 }
 
 export interface WhisperWorkerCoreOptions<Bytes> {
@@ -68,13 +85,25 @@ const KNOWN_MODELS: ReadonlySet<string> = new Set(
 );
 
 /** Parse a message from the page; anything else is ignored rather than trusted. */
+/** Threads asked for, clamped to something the runtime can take; absent (one) unless more than one was asked. */
+const threadsOf = (value: unknown): { readonly threads?: number } => {
+  const asked = typeof value === 'number' && Number.isSafeInteger(value) ? Math.min(8, value) : 1;
+  return asked > 1 ? { threads: asked } : {};
+};
+
 export const parseWhisperRequest = (data: unknown): WhisperWorkerRequest | null => {
   if (typeof data !== 'object' || data === null) return null;
   const message = data as Record<string, unknown>;
   if (typeof message.model !== 'string' || !KNOWN_MODELS.has(message.model)) return null;
-  if (message.type === 'load') return { type: 'load', model: message.model };
+  if (message.type === 'load') return { type: 'load', model: message.model, ...threadsOf(message.threads) };
   if (message.type === 'transcribe' && Number.isSafeInteger(message.id) && message.samples instanceof Float32Array)
-    return { type: 'transcribe', id: message.id as number, model: message.model, samples: message.samples };
+    return {
+      type: 'transcribe',
+      id: message.id as number,
+      model: message.model,
+      samples: message.samples,
+      ...threadsOf(message.threads),
+    };
   return null;
 };
 
@@ -89,6 +118,8 @@ const codeOf = (error: unknown): string | undefined => {
 interface Loaded {
   readonly model: string;
   readonly backend: WhisperBackend;
+  /** Threads the WebAssembly model was built with; 1 on WebGPU. */
+  readonly threads: number;
   readonly instance: WhisperLoadedModel;
 }
 
@@ -117,13 +148,18 @@ export class WhisperWorkerCore<Bytes> {
     const id = request.type === 'transcribe' ? request.id : null;
     let loaded: Loaded;
     try {
-      loaded = await this.#load(request.model);
+      loaded = await this.#load(request.model, request.threads ?? 1);
     } catch (error) {
       const code = codeOf(error);
       this.#options.post({
         type: 'failed',
         id,
-        code: code === 'not-installed' || code === 'integrity' ? code : 'load-failed',
+        code:
+          code === 'not-installed' || code === 'integrity'
+            ? code
+            : (request.threads ?? 1) > 1
+              ? 'threads-failed'
+              : 'load-failed',
         message: messageOf(error, 'The on-device speech model could not be loaded.'),
       });
       return;
@@ -143,29 +179,37 @@ export class WhisperWorkerCore<Bytes> {
         this.#wasmOnly = true;
         await this.#drop();
       }
+      const threaded = loaded.backend === 'wasm' && loaded.threads > 1;
+      // A model that failed on several threads is not trusted again in this worker.
+      if (threaded) await this.#drop();
       this.#options.post({
         type: 'failed',
         id: request.id,
-        code: 'transcribe-failed',
+        code: threaded ? 'threads-failed' : 'transcribe-failed',
         message: messageOf(error, 'The on-device speech model could not transcribe that.'),
       });
     }
   }
 
-  async #load(model: string): Promise<Loaded> {
+  async #load(model: string, threads: number): Promise<Loaded> {
     if (this.#loaded?.model === model) return this.#loaded;
     await this.#drop();
     const bytes = await this.#options.read(model);
     const { runtime } = this.#options;
     if (!this.#wasmOnly && (await this.#hasGpu())) {
       try {
-        return this.#keep({ model, backend: 'webgpu', instance: await runtime.load(model, bytes, 'webgpu') });
+        return this.#keep({
+          model,
+          backend: 'webgpu',
+          threads: 1,
+          instance: await runtime.load(model, bytes, 'webgpu', 1),
+        });
       } catch (error) {
         this.#options.warn?.(`WebGPU could not load the model; using WebAssembly (${messageOf(error, 'no reason')})`);
         this.#wasmOnly = true;
       }
     }
-    return this.#keep({ model, backend: 'wasm', instance: await runtime.load(model, bytes, 'wasm') });
+    return this.#keep({ model, backend: 'wasm', threads, instance: await runtime.load(model, bytes, 'wasm', threads) });
   }
 
   #hasGpu(): Promise<boolean> {

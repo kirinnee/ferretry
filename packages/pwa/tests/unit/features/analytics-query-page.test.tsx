@@ -5,6 +5,7 @@ import { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-
 import { ANALYTICS_QUERY_DEFAULT } from '../../../src/features/analytics/analytics-custom-query.tsx';
 import type { FleetAnswer } from '../../../src/features/analytics/analytics-fanout.ts';
 import { ANALYTICS_QUERY_EXAMPLES } from '../../../src/features/analytics/analytics-query-examples.ts';
+import { queryViewPreference } from '../../../src/features/analytics/analytics-query-view-preference.ts';
 import { AnalyticsQueryPage } from '../../../src/features/analytics/analytics-query-page.tsx';
 import {
   SAVED_QUERIES_KEY,
@@ -18,6 +19,7 @@ import { render, run, runAsync } from '../../support/react.ts';
 
 const renderers: ReactTestRenderer[] = [];
 afterEach(() => {
+  queryViewPreference.write('single');
   act(() => {
     for (const renderer of renderers) renderer.unmount();
   });
@@ -332,7 +334,314 @@ describe('AnalyticsQueryPage', () => {
       await Promise.resolve();
     });
     await settle();
-    expect(text(renderer)).toContain('kirin-box did not answer: asleep Its sessions are not in this result.');
+    expect(text(renderer)).toContain('kirin-box did not answer: asleep. Its sessions are not in this result.');
+  });
+
+  it('asks the answer on screen again when the reader changes the time zone', async () => {
+    const asked: Array<string | undefined> = [];
+    const requestRun = async (query: string | undefined): Promise<FleetAnswer> => {
+      asked.push(query);
+      return { response: answer(query ?? 'sum by (day)'), failed: [], daemonOf: () => undefined };
+    };
+    const page = (timeZone: string) => (
+      <AnalyticsQueryPage
+        connection={daemonA}
+        requestAnalytics={fleet([])}
+        requestRun={requestRun}
+        timeZone={timeZone}
+        initialQuery="sum by (day)"
+      />
+    );
+    const renderer = mount(page('UTC'));
+    await settle();
+    expect(asked).toEqual(['sum by (day)']);
+
+    await runAsync(async () => {
+      renderer.update(page('Asia/Singapore'));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(asked).toEqual(['sum by (day)', 'sum by (day)']);
+
+    // The same zone again is not a change.
+    await runAsync(async () => {
+      renderer.update(page('Asia/Singapore'));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(asked).toHaveLength(2);
+  });
+
+  it('never shows a stale zone’s answer when the zone changes while the first run is pending', async () => {
+    // Arrange — each zone's requests are held until the test settles them
+    const asked: Array<{ zone: string; query: string | undefined; settle: () => void }> = [];
+    const requestRunIn =
+      (zone: string) =>
+      (query: string | undefined): Promise<FleetAnswer> =>
+        new Promise(resolve => {
+          const response = aggregateResponse(query ?? 'sum by (day)', [group({ model: `${zone}-model` })], {
+            groupBy: ['model'],
+            metric: 'cost_usd',
+          });
+          asked.push({
+            zone,
+            query,
+            settle: () => resolve({ response, failed: [], daemonOf: () => undefined }),
+          });
+        });
+    const page = (zone: string) => (
+      <AnalyticsQueryPage
+        connection={daemonA}
+        requestAnalytics={fleet([])}
+        requestRun={requestRunIn(zone)}
+        timeZone={zone}
+        initialQuery="sum by (day)"
+      />
+    );
+    const renderer = mount(page('UTC'));
+    await settle();
+    expect(asked.map(call => call.zone)).toEqual(['UTC']);
+
+    // Act — the zone changes while the first query is still unanswered
+    await runAsync(async () => {
+      renderer.update(page('Asia/Singapore'));
+      await Promise.resolve();
+    });
+    await settle();
+
+    // Assert — the new zone is asked the same query
+    expect(asked.map(call => [call.zone, call.query])).toEqual([
+      ['UTC', 'sum by (day)'],
+      ['Asia/Singapore', 'sum by (day)'],
+    ]);
+
+    // The old zone's answer arrives late and is dropped; the new zone's is the one shown.
+    await runAsync(async () => {
+      asked[0]!.settle();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(text(renderer)).not.toContain('UTC-model');
+    await runAsync(async () => {
+      asked[1]!.settle();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(text(renderer)).toContain('Asia/Singapore-model');
+    expect(text(renderer)).not.toContain('UTC-model');
+  });
+
+  it('asks nothing on a zone change when no query was ever submitted', async () => {
+    const asked: Array<string | undefined> = [];
+    const requestRun = async (query: string | undefined): Promise<FleetAnswer> => {
+      asked.push(query);
+      return { response: answer(query ?? 'sum by (day)'), failed: [], daemonOf: () => undefined };
+    };
+    const page = (timeZone: string) => (
+      <AnalyticsQueryPage
+        connection={daemonA}
+        requestAnalytics={fleet([])}
+        requestRun={requestRun}
+        timeZone={timeZone}
+      />
+    );
+    const renderer = mount(page('UTC'));
+    await settle();
+    await runAsync(async () => {
+      renderer.update(page('Asia/Singapore'));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(asked).toEqual([]);
+  });
+
+  describe('single result or trend', () => {
+    const choose = async (renderer: ReactTestRenderer, group: string, segment: string) => {
+      const target = renderer.root
+        .findByProps({ 'data-segmented': group })
+        .find(node => node.type === 'button' && node.props['data-segment'] === segment);
+      await runAsync(async () => {
+        target.props.onClick();
+        await Promise.resolve();
+      });
+      await settle();
+    };
+    const asking =
+      (asked: string[]) =>
+      async (query: string | undefined): Promise<FleetAnswer> => {
+        asked.push(query ?? '');
+        return { response: answer(query ?? ''), failed: [], daemonOf: () => undefined };
+      };
+
+    it('asks the text as written in Single, and the same question by day in Trend, keeping the reader\u2019s text', async () => {
+      const asked: string[] = [];
+      const renderer = mount(
+        <AnalyticsQueryPage
+          connection={daemonA}
+          requestAnalytics={fleet([])}
+          requestRun={asking(asked)}
+          initialQuery="sum(cost_usd) by (model) [7d]"
+        />,
+      );
+      await settle();
+      expect(asked).toEqual(['sum(cost_usd) by (model) [7d]']);
+
+      await choose(renderer, 'analytics-result-view', 'trend');
+      expect(asked.at(-1)).toBe('sum(cost_usd) by (model, day) [7d]');
+      // The editor still holds the reader\u2019s own query, not the derived one.
+      expect(input(renderer).props.value).toBe('sum(cost_usd) by (model) [7d]');
+
+      await choose(renderer, 'analytics-trend-bucket', 'week');
+      expect(asked.at(-1)).toBe('sum(cost_usd) by (model, week) [7d]');
+
+      await choose(renderer, 'analytics-result-view', 'single');
+      expect(asked.at(-1)).toBe('sum(cost_usd) by (model) [7d]');
+      expect(asked).toHaveLength(4);
+    });
+
+    it('keeps an unsubmitted draft when the view or bucket changes, and asks the submitted query again', async () => {
+      const asked: string[] = [];
+      const renderer = mount(
+        <AnalyticsQueryPage
+          connection={daemonA}
+          requestAnalytics={fleet([])}
+          requestRun={asking(asked)}
+          initialQuery="sum(tokens) [7d]"
+        />,
+      );
+      await settle();
+      expect(asked).toEqual(['sum(tokens) [7d]']);
+
+      type(renderer, 'sum(turns) [30d]');
+      await choose(renderer, 'analytics-result-view', 'trend');
+      expect(asked.at(-1)).toBe('sum(tokens) by (day) [7d]');
+      expect(input(renderer).props.value).toBe('sum(turns) [30d]');
+
+      await choose(renderer, 'analytics-trend-bucket', 'week');
+      expect(asked.at(-1)).toBe('sum(tokens) by (week) [7d]');
+      expect(input(renderer).props.value).toBe('sum(turns) [30d]');
+
+      // Submitting the draft is what makes it the query that is asked.
+      await submit(renderer);
+      expect(asked.at(-1)).toBe('sum(turns) by (week) [30d]');
+      expect(input(renderer).props.value).toBe('sum(turns) [30d]');
+    });
+
+    it('keeps the choice on this device', async () => {
+      const first = mount(
+        <AnalyticsQueryPage connection={daemonA} requestAnalytics={fleet([])} requestRun={asking([])} />,
+      );
+      await choose(first, 'analytics-result-view', 'trend');
+      expect(queryViewPreference.read()).toBe('trend');
+      const second = mount(
+        <AnalyticsQueryPage connection={daemonA} requestAnalytics={fleet([])} requestRun={asking([])} />,
+      );
+      const pressed = second.root
+        .findByProps({ 'data-segmented': 'analytics-result-view' })
+        .findAll(node => node.type === 'button' && node.props['aria-pressed'] === true);
+      expect(pressed.map(node => node.props['data-segment'])).toEqual(['trend']);
+    });
+
+    it('says when a window was added, and why there is no trend when there is none, without calling it a failure', async () => {
+      queryViewPreference.write('trend');
+      const asked: string[] = [];
+      const renderer = mount(
+        <AnalyticsQueryPage
+          connection={daemonA}
+          requestAnalytics={fleet([])}
+          requestRun={asking(asked)}
+          initialQuery="sum(tokens)"
+        />,
+      );
+      await settle();
+      expect(asked).toEqual(['sum(tokens) by (day) [30d]']);
+      expect(text(renderer)).toContain('No range was given, so this trend covers the last 30d');
+
+      type(renderer, 'cost_usd [7d]');
+      await submit(renderer);
+      expect(asked).toHaveLength(1);
+      expect(text(renderer)).toContain('A trend needs a total to follow');
+      expect(text(renderer)).not.toContain('The query failed');
+    });
+
+    it('re-asks an empty query when the view changes: empty is a query that was run, not a page that never ran', async () => {
+      const asked: string[] = [];
+      const renderer = mount(
+        <AnalyticsQueryPage connection={daemonA} requestAnalytics={fleet([])} requestRun={asking(asked)} />,
+      );
+      type(renderer, '');
+      await submit(renderer);
+      expect(asked).toEqual(['']);
+
+      await choose(renderer, 'analytics-result-view', 'trend');
+      // The blank query is the protocol's default, which already groups by day.
+      expect(asked).toEqual(['', 'sum by (day) [30d]']);
+      await choose(renderer, 'analytics-result-view', 'single');
+      expect(asked).toEqual(['', 'sum by (day) [30d]', 'sum by (day)']);
+    });
+
+    const bucketButton = (renderer: ReactTestRenderer, segment: string) =>
+      renderer.root
+        .findByProps({ 'data-segmented': 'analytics-trend-bucket' })
+        .find(node => node.type === 'button' && node.props['data-segment'] === segment);
+
+    it('shows the day or week a query groups by as the chosen bucket and does not offer the other', async () => {
+      queryViewPreference.write('trend');
+      const asked: string[] = [];
+      const renderer = mount(
+        <AnalyticsQueryPage
+          connection={daemonA}
+          requestAnalytics={fleet([])}
+          requestRun={asking(asked)}
+          initialQuery="sum(turns) by (day) [7d]"
+        />,
+      );
+      await settle();
+      expect(asked).toEqual(['sum(turns) by (day) [7d]']);
+      expect(bucketButton(renderer, 'day').props['aria-pressed']).toBe(true);
+      expect(bucketButton(renderer, 'week').props).toMatchObject({
+        'aria-pressed': false,
+        disabled: true,
+        title: 'The query groups by day itself',
+      });
+      expect(bucketButton(renderer, 'day').props.disabled).toBeUndefined();
+      expect(text(renderer)).toContain('The query groups by day itself.');
+
+      // The control follows the SUBMITTED query, so a draft being typed neither unlocks it ...
+      type(renderer, 'sum(turns) [7d]');
+      expect(bucketButton(renderer, 'week').props.disabled).toBe(true);
+      expect(text(renderer)).toContain('The query groups by day itself.');
+
+      // ... nor does it lock it the other way: only submitting changes what the control describes.
+      await submit(renderer);
+      expect(bucketButton(renderer, 'week').props.disabled).toBeUndefined();
+      expect(bucketButton(renderer, 'day').props['aria-pressed']).toBe(true);
+      expect(text(renderer)).not.toContain('groups by day itself');
+    });
+
+    it('keeps the bucket control and the request in agreement while a different draft is being typed', async () => {
+      queryViewPreference.write('trend');
+      const asked: string[] = [];
+      const renderer = mount(
+        <AnalyticsQueryPage
+          connection={daemonA}
+          requestAnalytics={fleet([])}
+          requestRun={asking(asked)}
+          initialQuery="sum(turns) [7d]"
+        />,
+      );
+      await settle();
+      type(renderer, 'sum(tokens) by (day) [30d]');
+      // The draft names its own bucket, but it is not what a rerun asks, so the control stays the reader's.
+      expect(bucketButton(renderer, 'week').props.disabled).toBeUndefined();
+      expect(text(renderer)).not.toContain('groups by day itself');
+
+      await choose(renderer, 'analytics-trend-bucket', 'week');
+      expect(asked.at(-1)).toBe('sum(turns) by (week) [7d]');
+      expect(bucketButton(renderer, 'week').props['aria-pressed']).toBe(true);
+      expect(bucketButton(renderer, 'day').props['aria-pressed']).toBe(false);
+      expect(input(renderer).props.value).toBe('sum(tokens) by (day) [30d]');
+    });
   });
 
   it('reads through the paired carrier by default', async () => {

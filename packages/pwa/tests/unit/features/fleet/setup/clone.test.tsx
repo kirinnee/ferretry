@@ -71,6 +71,11 @@ const SLOTS = credentials([
 
 type Answers = Record<string, unknown>;
 
+const REVIEW_PATH = '/v1/fleet/clone/review';
+
+/** A machine that predates the review: it has no such route, which is the one thing that lets settings copy whole. */
+const NO_REVIEW_ROUTE = new FyHttpError(`no route POST ${REVIEW_PATH}`, 404, 'unknown_route');
+
 interface Daemons {
   readonly target?: Answers;
   readonly work?: Answers;
@@ -88,7 +93,12 @@ const daemons = ({ target = {}, work = {}, empty = {}, workGate }: Daemons) => {
   const calls: Calls = { target: [], work: [] };
   const clients: Record<string, FleetClient> = {
     studio: scriptedClient(
-      { '/v1/fleet/machine': machineAnswer(), '/v1/fleet/profiles': stacks(0), ...target },
+      {
+        '/v1/fleet/machine': machineAnswer(),
+        '/v1/fleet/profiles': stacks(0),
+        [REVIEW_PATH]: NO_REVIEW_ROUTE,
+        ...target,
+      },
       calls.target,
     ),
     work: scriptedClient(
@@ -374,7 +384,9 @@ describe('CloneMachine · Preview', () => {
     try {
       await toPreview(screen);
       const preview = screen.text('[data-clone-step="preview"]');
-      expect(preview).toContain('This is a one-time copy. Later changes on work-linux don’t follow.');
+      expect(preview).toContain(
+        'This copies work-linux’s setup now. Later changes on it don’t follow by themselves: copy again to see just what changed.',
+      );
 
       const copies = screen.text('[data-setup-section="copies"]');
       expect(copies).toContain('2 components');
@@ -505,6 +517,9 @@ describe('CloneMachine · Preview', () => {
       const signIn = must(screen.q('[data-clone-sign-in]'), 'sign in');
       expect(signIn.getAttribute('data-clone-sign-in')).toBe('claude-work');
       expect(signIn.textContent).toBe('Sign in once for 2 runtimes');
+      expect(signIn.className).toContain('min-h-[44px]');
+      expect(screen.q('[data-clone-finish]')?.className).toContain('min-h-[44px]');
+      expect(screen.q('[data-clone-slot]')?.className).toContain('min-h-[44px]');
 
       await click(screen.q('[data-clone-finish]'), 'Go to Runtimes');
       expect(finished).toBe(1);
@@ -826,7 +841,17 @@ const copying = (before: ReturnType<typeof credentials>, after: ReturnType<typeo
   };
 };
 
+/** `GET /v1/config/status`: the edits this machine holds for its owner. */
+const configStatus = (pending: { path: string; etag: string; changes: string[] }[] = []) => ({
+  directory: '/home/me/.fy/config',
+  files: [],
+  issues: [],
+  pending,
+  checkedAt: '2026-11-05T10:00:00.000Z',
+});
+
 const fullTarget = (extra: Answers = {}): Answers => ({
+  '/v1/config/status': configStatus(),
   '/v1/fleet/proposals': STAGED,
   ...copying(credentials([]), SLOTS),
   '/v1/speedups': SPEEDUPS,
@@ -1024,7 +1049,8 @@ describe('CloneMachine · what the copy needs here', () => {
       expect(row('secret:JEV_API_KEY')?.textContent).toContain('for the Warden’s Jev guard');
       expect(row('secret:LESSON_TOKEN')?.textContent).toContain('for Learning defaults');
       expect(row('secret:GROQ_API_KEY')?.getAttribute('data-held')).toBe('yes');
-      expect(row('secret:GROQ_API_KEY')?.textContent).toContain('set ✓');
+      expect(row('secret:GROQ_API_KEY')?.textContent).toContain('set');
+      expect(row('secret:GROQ_API_KEY')?.textContent).not.toContain('✓');
       expect(row('secret:GROQ_API_KEY')?.querySelector('input')).toBeNull();
       expect(row('sign-in:claude-work')?.textContent).toContain('Sign in after copying');
     } finally {
@@ -1091,7 +1117,8 @@ describe('CloneMachine · what the copy needs here', () => {
       expect(calls.work.some(call => call.path === '/v1/secrets' && call.body !== undefined)).toBe(false);
       const row = must(screen.q('[data-clone-need="secret:JEV_API_KEY"]'), 'row');
       expect(row.getAttribute('data-held')).toBe('yes');
-      expect(row.textContent).toContain('set ✓');
+      expect(row.textContent).toContain('set');
+      expect(row.textContent).not.toContain('✓');
       expect(screen.q('[data-clone-need-value="JEV_API_KEY"]')).toBeNull();
       expect(screen.view.container.textContent).not.toContain('test-value-not-a-key');
       expect(screen.text('[data-setup-section="clone-needs"]')).toContain(
@@ -1646,7 +1673,8 @@ const IMPORTED = {
   importId: IMPORT_ID,
   sourceDaemonId: SEALED.sourceDaemonId,
   imported: ['ZAI_API_KEY'],
-  replaced: [],
+  filedAt: '2026-10-21T08:00:00.000Z',
+  kept: [],
 };
 
 /** A GLM API-key login beside a Claude Code sign-in: the one copies with its key, the other cannot. */
@@ -1777,6 +1805,189 @@ describe('CloneMachine · API keys and sign-ins', () => {
     } finally {
       await screen.view.unmount();
     }
+  });
+
+  describe('a key that is newer on the source', () => {
+    const OLDER = '2026-10-10T08:00:00.000Z';
+    const NEWER = '2026-10-20T08:00:00.000Z';
+    const stamped = (names: readonly string[], updatedAt: string) => ({
+      ...secretList(names),
+      secrets: names.map(name => ({ name, createdAt: OLDER, updatedAt })),
+    });
+    const review = (outcome: 'missing' | 'newer' | 'both' | 'same') => ({
+      mode: 'first',
+      source: { name: 'work', verified: 'browser' },
+      items: [],
+      settings: [],
+      logins: [],
+      keys: [{ name: 'ZAI_API_KEY', outcome }],
+      same: { count: 0, probable: 0 },
+      fingerprint: 'f'.repeat(64),
+    });
+
+    /** The source holds the key under a newer instant; `held` says whether this machine holds one too. */
+    const setup = (outcome: 'missing' | 'newer' | 'both' | 'same', held = true, answer: unknown = IMPORTED) => {
+      const imports: Call[] = [];
+      const recorded: Call[] = [];
+      const reviews: Call[] = [];
+      return {
+        imports,
+        recorded,
+        reviews,
+        work: {
+          '/v1/fleet/export': MIXED_LOGINS(),
+          '/v1/secrets': stamped(['ZAI_API_KEY'], NEWER),
+          [`/v1/secrets/exports/${IMPORT_ID}`]: { bundle: SEALED, names: ['ZAI_API_KEY'] },
+        },
+        target: fullTarget({
+          '/v1/secrets': held ? stamped(['ZAI_API_KEY'], OLDER) : secretList([]),
+          '/v1/fleet/clone/review': (call: Call) => {
+            reviews.push(call);
+            return review(outcome);
+          },
+          '/v1/fleet/clone/keys': (call: Call) => {
+            recorded.push(call);
+            return { recorded: 1 };
+          },
+          '/v1/secrets/imports': OFFER,
+          [`/v1/secrets/imports/${IMPORT_ID}`]: (call: Call) => {
+            imports.push(call);
+            return answer;
+          },
+        }),
+      };
+    };
+
+    it('asks for the review with the source’s names and instants, and nothing else about the keys', async () => {
+      const w = setup('newer');
+      const { createClient } = daemons({ work: sourceFiles(w.work), target: w.target });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        // The one review of the settings (key by key, PR 7) carries the keys too: no second question about them.
+        expect(w.reviews).toHaveLength(1);
+        expect(w.reviews[0]?.body).toMatchObject({ sourceSecrets: [{ name: 'ZAI_API_KEY', updatedAt: NEWER }] });
+        expect(w.reviews[0]?.body).toHaveProperty('settings');
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    for (const outcome of ['newer', 'both'] as const) {
+      it(`only reports a ${outcome} key, with the command to replace it by hand, and copies and writes nothing`, async () => {
+        const w = setup(outcome);
+        const { calls, createClient } = daemons({ work: sourceFiles(w.work), target: w.target });
+        const screen = await render({ createClient });
+        try {
+          await toPreview(screen);
+          const row = screen.text('[data-clone-newer-key]');
+          expect(row).toContain('A newer ZAI_API_KEY exists on');
+          expect(row).toContain('Clone does not replace a key studio-mac already has');
+          expect(row).toContain('fy secret set ZAI_API_KEY');
+          expect(row.includes('You changed it on studio-mac too')).toBe(outcome === 'both');
+          // A report: nothing in it can be ticked, and there is no passkey to ask for.
+          expect(screen.q('[data-clone-newer-key] input')).toBeNull();
+          expect(row).not.toContain('passkey');
+          await click(screen.q('[data-change-submit]'), 'Copy');
+
+          expect(screen.step()).toBe('done');
+          expect(w.imports).toEqual([]);
+          expect(w.recorded).toEqual([]);
+          expect(calls.work.some(call => call.path.startsWith('/v1/secrets/exports/'))).toBe(false);
+          expect(secretCalls(calls.target)).toEqual([]);
+        } finally {
+          await screen.view.unmount();
+        }
+      });
+    }
+
+    it('asks a review of just the keys when the settings review cannot be made, and still reports the newer one', async () => {
+      const w = setup('newer');
+      const { createClient } = daemons({
+        work: sourceFiles(w.work),
+        target: {
+          ...w.target,
+          '/v1/fleet/clone/review': (call: Call) => {
+            w.reviews.push(call);
+            return 'settings' in (call.body as object) ? new Error('network down') : review('newer');
+          },
+        },
+      });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        expect(w.reviews.map(call => 'settings' in (call.body as object))).toEqual([true, false]);
+        expect(w.reviews[1]?.body).toMatchObject({ sourceSecrets: [{ name: 'ZAI_API_KEY', updatedAt: NEWER }] });
+        expect(screen.text('[data-clone-newer-key]')).toContain('A newer ZAI_API_KEY exists on');
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('says nothing about a key that is the same', async () => {
+      const w = setup('same');
+      const { createClient } = daemons({ work: sourceFiles(w.work), target: w.target });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        expect(screen.q('[data-clone-newer-key]')).toBeNull();
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('copies a key this machine lacks as it always did, naming no key to replace, and remembers when it was filed', async () => {
+      const w = setup('missing', false);
+      const { createClient } = daemons({ work: sourceFiles(w.work), target: w.target });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        expect(screen.q('[data-clone-newer-key]')).toBeNull();
+        await click(screen.q('[data-change-submit]'), 'Copy');
+
+        expect(w.imports.map(call => call.body)).toEqual([{ bundle: SEALED }]);
+        expect(w.recorded.map(call => call.body)).toEqual([
+          {
+            source: { daemonId: 'work' },
+            filedAt: '2026-10-21T08:00:00.000Z',
+            keys: [{ name: 'ZAI_API_KEY', sourceUpdatedAt: NEWER }],
+          },
+        ]);
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('remembers nothing for a key the import kept because it appeared meanwhile', async () => {
+      const w = setup('missing', false, { ...IMPORTED, imported: [], filedAt: undefined, kept: ['ZAI_API_KEY'] });
+      const { createClient } = daemons({ work: sourceFiles(w.work), target: w.target });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        await click(screen.q('[data-change-submit]'), 'Copy');
+
+        expect(w.imports).toHaveLength(1);
+        expect(w.recorded).toEqual([]);
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('carries no secret value in anything it sends to the target', async () => {
+      const w = setup('missing', false);
+      const { calls, createClient } = daemons({ work: sourceFiles(w.work), target: w.target });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        await click(screen.q('[data-change-submit]'), 'Copy');
+        const sent = JSON.stringify(
+          calls.target.filter(call => call.path === '/v1/fleet/clone/review' || call.path === '/v1/fleet/clone/keys'),
+        );
+        expect(sent).not.toMatch(/sk-|value|digest/u);
+      } finally {
+        await screen.view.unmount();
+      }
+    });
   });
 
   it('keeps the copy and says so when the passkey was not confirmed', async () => {
@@ -1966,5 +2177,445 @@ describe('CloneMachine · default runtime for new agents', () => {
     } finally {
       await screen.view.unmount();
     }
+  });
+});
+
+describe('CloneMachine · settings merged key by key', () => {
+  const FINGERPRINT = 'a'.repeat(64);
+  const WARDEN_KEYS = [
+    { key: 'intervalMinutes', outcome: 'both', mine: '5', theirs: '10' },
+    { key: 'caps.jevUsdPerDay', outcome: 'theirs', choice: 'take', mine: '1', theirs: '5', loosens: true },
+  ];
+
+  /** The review this machine answers for the documents the browser sent: one entry each, keys only for the warden. */
+  const reviewing =
+    (options: { refuseWarden?: string; controlsKeys?: object[] } = {}) =>
+    (call: Call): unknown => {
+      const sent = (call.body as { settings: { path: string }[] }).settings.map(document => document.path);
+      return {
+        mode: 'first',
+        source: { name: 'work-linux', verified: 'browser' },
+        items: [],
+        settings: sent.map(path =>
+          path === 'warden.yaml'
+            ? options.refuseWarden === undefined
+              ? { path, keys: WARDEN_KEYS }
+              : { path, refused: options.refuseWarden, keys: [] }
+            : { path, keys: path === 'controls' ? (options.controlsKeys ?? []) : [] },
+        ),
+        logins: [],
+        keys: [],
+        same: { count: 1, probable: 0 },
+        fingerprint: FINGERPRINT,
+      };
+    };
+
+  const radios = (screen: Screen, key: string) =>
+    [
+      ...screen.view.container.querySelectorAll(`[data-clone-key="warden.yaml:${key}"] input[type="radio"]`),
+    ] as HTMLInputElement[];
+  const submit = (screen: Screen) => screen.q('[data-change-submit]') as HTMLButtonElement;
+
+  it('sends the documents for review, shows each differing key, and chooses nothing for a key both machines changed', async () => {
+    const { calls, createClient } = daemons({
+      work: sourceFiles(),
+      target: fullTarget({ [REVIEW_PATH]: reviewing() }),
+    });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+
+      const reviewed = calls.target.find(call => call.path === REVIEW_PATH);
+      expect(((reviewed?.body ?? { settings: [] }) as { settings: unknown[] }).settings).toEqual([
+        { path: 'warden.yaml', text: WARDEN_TEXT },
+        { path: 'learning.yaml', text: LEARNING_TEXT },
+        { path: 'voice.yaml', text: VOICE_TEXT },
+        { path: 'controls', text: expect.stringContaining('agentControl') },
+      ]);
+      expect(screen.q('[data-clone-key="warden.yaml:caps.jevUsdPerDay"] [data-clone-key-loosens]')).not.toBeNull();
+      expect(radios(screen, 'intervalMinutes').map(radio => radio.checked)).toEqual([false, false]);
+      expect(submit(screen).disabled).toBe(true);
+      expect(screen.text('[data-setup-note="settings-undecided"]')).toContain('warden.yaml: intervalMinutes');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('applies the per-key decisions in one update, names the review it was shown, and writes no settings file whole', async () => {
+    const { calls, createClient } = daemons({
+      work: sourceFiles(),
+      target: fullTarget({ [REVIEW_PATH]: reviewing() }),
+    });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      await click(radios(screen, 'intervalMinutes')[0] ?? null, 'keep mine');
+      expect(submit(screen).disabled).toBe(false);
+      await click(submit(screen), 'Copy');
+
+      const [update, fleet] = changeBodies(calls.target).map(body => body.change as Record<string, unknown>);
+      expect(update).toMatchObject({
+        kind: 'clone.import',
+        mode: 'update',
+        reviewed: FINGERPRINT,
+        decisions: {},
+        source: { daemonId: 'work' },
+        settingsDecisions: { 'warden.yaml': { intervalMinutes: 'keep', 'caps.jevUsdPerDay': 'take' } },
+      });
+      expect(((update?.settings ?? []) as { path: string }[]).map(document => document.path)).toEqual([
+        'warden.yaml',
+        'learning.yaml',
+        'voice.yaml',
+        'controls',
+      ]);
+      expect(fleet).toMatchObject({ kind: 'clone.import', mode: 'alongside' });
+      // What the update handled is not written a second way.
+      expect(putCalls(calls.target)).toEqual([]);
+      expect(changeKinds(calls.target)).toEqual(['clone.import', 'clone.import']);
+      expect(outcomes(screen)).toEqual([
+        'warden:copied',
+        'learning:copied',
+        'voice:copied',
+        'controls:copied',
+        'fleet:copied',
+      ]);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('sends exactly the choice made for a both-changed key, either way', async () => {
+    for (const [index, expected] of [
+      [0, 'keep'],
+      [1, 'take'],
+    ] as const) {
+      const { calls, createClient } = daemons({
+        work: sourceFiles(),
+        target: fullTarget({ [REVIEW_PATH]: reviewing() }),
+      });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        await click(radios(screen, 'intervalMinutes')[index] ?? null, `choice ${expected}`);
+        await click(submit(screen), 'Copy');
+        const [update] = changeBodies(calls.target).map(body => body.change as { settingsDecisions: unknown });
+        expect(update?.settingsDecisions).toEqual({
+          'warden.yaml': { intervalMinutes: expected, 'caps.jevUsdPerDay': 'take' },
+        });
+      } finally {
+        await screen.view.unmount();
+      }
+    }
+  });
+
+  it('reviews again for exactly the settings that remain when one is unticked', async () => {
+    const { calls, createClient } = daemons({
+      work: sourceFiles(),
+      target: fullTarget({ [REVIEW_PATH]: reviewing() }),
+    });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      await click(tick(screen, 'warden'), 'untick warden');
+
+      const reviews = calls.target.filter(call => call.path === REVIEW_PATH);
+      expect(reviews).toHaveLength(2);
+      expect(
+        ((reviews[1]?.body ?? { settings: [] }) as { settings: { path: string }[] }).settings.map(
+          document => document.path,
+        ),
+      ).toEqual(['learning.yaml', 'voice.yaml', 'controls']);
+      // Nothing is left to decide, so Copy is ready.
+      expect(screen.q('[data-clone-key]')).toBeNull();
+      expect(submit(screen).disabled).toBe(false);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('says why a document cannot be copied, and keeps Copy off until it is left out', async () => {
+    const { createClient } = daemons({
+      work: sourceFiles(),
+      target: fullTarget({ [REVIEW_PATH]: reviewing({ refuseWarden: 'this device may not change warden.yaml' }) }),
+    });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      expect(screen.text('[data-setup-note="refused-warden.yaml"]')).toContain(
+        'this device may not change warden.yaml',
+      );
+      expect(submit(screen).disabled).toBe(true);
+      await click(tick(screen, 'warden'), 'untick warden');
+      expect(submit(screen).disabled).toBe(false);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('stays on the preview, copying nothing more, when this machine refuses the settings update', async () => {
+    const { calls, createClient } = daemons({
+      work: sourceFiles(),
+      target: fullTarget({
+        [REVIEW_PATH]: reviewing(),
+        '/v1/fleet/proposals': new FyHttpError(
+          'warden.yaml changed on this machine after it was reviewed; review it again',
+          409,
+          'fleet_change_stale',
+        ),
+      }),
+    });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      await click(radios(screen, 'intervalMinutes')[0] ?? null, 'keep mine');
+      await click(submit(screen), 'Copy');
+
+      expect(screen.step()).toBe('preview');
+      expect(screen.text('[data-change-refusal]')).toContain('warden.yaml changed on this machine');
+      // Only the settings update was tried: no setup copy, no file written, and Copy is there to try again.
+      expect(changeKinds(calls.target)).toEqual(['clone.import']);
+      expect(putCalls(calls.target)).toEqual([]);
+      expect(submit(screen).disabled).toBe(false);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('copies whole, as before, when this machine positively has no review route, and says so first', async () => {
+    const { calls, createClient } = daemons({
+      work: sourceFiles(),
+      target: fullTarget(),
+    });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      expect(screen.q('[data-clone-key]')).toBeNull();
+      expect(screen.text('[data-setup-note="settings-whole"]')).toContain('copied whole');
+      expect(screen.text('[data-setup-note="settings-whole"]')).toContain(
+        'including any change you made on studio-mac',
+      );
+      expect(submit(screen).disabled).toBe(false);
+      await click(submit(screen), 'Copy');
+      expect(putCalls(calls.target)).toHaveLength(3);
+      expect(changeKinds(calls.target)).toEqual(['clone.import', 'machine.settings']);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  describe('a review that failed', () => {
+    const failures: [string, Error][] = [
+      ['a dropped connection', new Error('network down')],
+      ['a refusal from the current daemon', new FyHttpError('this device may not review settings', 403, 'forbidden')],
+      ['a stale refusal', new FyHttpError('what this would add changed; review it again', 409, 'fleet_change_stale')],
+      ['a not-found that is not the missing route', new FyHttpError('no such source', 404, 'not_found')],
+    ];
+
+    for (const [name, failure] of failures) {
+      it(`copies none of the settings after ${name}, says why, and reviews again on request`, async () => {
+        let answers = 0;
+        const { calls, createClient } = daemons({
+          work: sourceFiles(),
+          target: fullTarget({
+            [REVIEW_PATH]: (call: Call) => {
+              answers += 1;
+              return answers === 1 ? failure : reviewing()(call);
+            },
+          }),
+        });
+        const screen = await render({ createClient });
+        try {
+          await toPreview(screen);
+          // Blocked, with the reason and a way to try again: no settings file is written, whole or otherwise.
+          expect(submit(screen).disabled).toBe(true);
+          expect(screen.text('[data-setup-note="settings-undecided"]')).toContain('none of them is copied yet');
+          // The message closes with a full stop, and the retry is a real touch target a little apart from it.
+          expect(screen.text('[data-setup-note="settings-undecided"] span')).toMatch(/copied yet: .+[.!?]$/u);
+          const retry = screen.q('[data-clone-review-retry]');
+          expect(retry?.tagName).toBe('BUTTON');
+          expect(retry?.textContent).toBe('Check again');
+          expect(retry?.className).toContain('min-h-[44px]');
+          expect(retry?.className).toContain('mt-2');
+          expect(screen.q('[data-setup-note="settings-whole"]')).toBeNull();
+          expect(putCalls(calls.target)).toEqual([]);
+          expect(changeKinds(calls.target)).toEqual([]);
+
+          await click(screen.q('[data-clone-review-retry]'), 'Check again');
+          expect(calls.target.filter(call => call.path === REVIEW_PATH)).toHaveLength(2);
+          // The review is back: the keys both machines changed are shown, and nothing is chosen for them.
+          expect(radios(screen, 'intervalMinutes')).toHaveLength(2);
+          expect(screen.q('[data-clone-review-retry]')).toBeNull();
+          expect(submit(screen).disabled).toBe(true);
+          await click(radios(screen, 'intervalMinutes')[0] ?? null, 'keep mine');
+          expect(submit(screen).disabled).toBe(false);
+        } finally {
+          await screen.view.unmount();
+        }
+      });
+    }
+
+    it('lets the rest be copied once the settings that could not be reviewed are unticked', async () => {
+      const { calls, createClient } = daemons({
+        work: sourceFiles(),
+        target: fullTarget({ [REVIEW_PATH]: new Error('network down') }),
+      });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        for (const id of ['warden', 'learning', 'voice', 'controls']) await click(tick(screen, id), `untick ${id}`);
+        expect(submit(screen).disabled).toBe(false);
+        await click(submit(screen), 'Copy');
+        expect(putCalls(calls.target)).toEqual([]);
+        expect(changeKinds(calls.target)).toEqual(['clone.import']);
+        expect(outcomes(screen)).toEqual(['fleet:copied']);
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+  });
+
+  describe('the default runtime on a first copy', () => {
+    const DEFAULT_ROW = { key: 'defaultRuntime', outcome: 'new', choice: 'take', theirs: '"claude-default"' };
+
+    it('is left to the picker while the fleet is copied: the settings-only update keeps it, and no row asks twice', async () => {
+      const { calls, createClient } = daemons({
+        work: sourceFiles(),
+        target: fullTarget({ [REVIEW_PATH]: reviewing({ controlsKeys: [DEFAULT_ROW] }) }),
+      });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        expect(screen.q('[data-clone-key="controls:defaultRuntime"]')).toBeNull();
+        await click(radios(screen, 'intervalMinutes')[0] ?? null, 'keep mine');
+        await click(submit(screen), 'Copy');
+        const [update, fleet] = changeBodies(calls.target).map(body => body.change as Record<string, unknown>);
+        expect(update?.settingsDecisions).toEqual({
+          'warden.yaml': { intervalMinutes: 'keep', 'caps.jevUsdPerDay': 'take' },
+          controls: { defaultRuntime: 'keep' },
+        });
+        // The fleet copy is what decides the default, with the runtime it brings.
+        expect(fleet).toMatchObject({ kind: 'clone.import', mode: 'alongside' });
+        expect(outcomes(screen)).toContain('controls:copied');
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('forgets an explicit Take on the hidden row once the fleet is ticked again', async () => {
+      const { calls, createClient } = daemons({
+        work: sourceFiles(),
+        target: fullTarget({ [REVIEW_PATH]: reviewing({ controlsKeys: [DEFAULT_ROW] }) }),
+      });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        await click(tick(screen, 'fleet'), 'untick fleet');
+        const runtime = screen.q('[data-clone-key="controls:defaultRuntime"] input[type="checkbox"]');
+        expect(runtime).not.toBeNull();
+        await click(runtime, 'keep the default');
+        await click(runtime, 'take the default explicitly');
+        await click(tick(screen, 'fleet'), 'tick fleet again');
+        expect(screen.q('[data-clone-key="controls:defaultRuntime"]')).toBeNull();
+        await click(radios(screen, 'intervalMinutes')[0] ?? null, 'keep mine');
+        await click(submit(screen), 'Copy');
+        const [update] = changeBodies(calls.target).map(body => body.change as { settingsDecisions: unknown });
+        expect(update?.settingsDecisions).toMatchObject({ controls: { defaultRuntime: 'keep' } });
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('is a row of its own when the fleet is not copied, where the machine already has the runtime', async () => {
+      const { calls, createClient } = daemons({
+        work: sourceFiles(),
+        target: fullTarget({ [REVIEW_PATH]: reviewing({ controlsKeys: [DEFAULT_ROW] }) }),
+      });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        await click(tick(screen, 'fleet'), 'untick fleet');
+        expect(screen.q('[data-clone-key="controls:defaultRuntime"]')).not.toBeNull();
+        await click(radios(screen, 'intervalMinutes')[0] ?? null, 'keep mine');
+        await click(submit(screen), 'Copy');
+        const [update] = changeBodies(calls.target).map(body => body.change as { settingsDecisions: unknown });
+        expect(update?.settingsDecisions).toMatchObject({ controls: { defaultRuntime: 'take' } });
+        expect(changeKinds(calls.target)).toEqual(['clone.import']);
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+  });
+
+  describe('a merge the machine holds', () => {
+    const HELD = {
+      path: 'warden.yaml',
+      etag: 'etag-held',
+      changes: ['the Warden may spend more', 'agents may act alone'],
+    };
+
+    it('shows the held file as waiting, with a working Confirm, even when the fleet copy follows', async () => {
+      const confirms: Call[] = [];
+      const { createClient } = daemons({
+        work: sourceFiles(),
+        target: fullTarget({
+          [REVIEW_PATH]: reviewing(),
+          '/v1/config/status': configStatus([HELD]),
+          '/v1/config/confirm': (call: Call) => {
+            confirms.push(call);
+            return { path: 'warden.yaml', confirmed: true };
+          },
+        }),
+      });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        await click(radios(screen, 'intervalMinutes')[0] ?? null, 'keep mine');
+        await click(submit(screen), 'Copy');
+
+        expect(screen.step()).toBe('done');
+        expect(outcomes(screen)).toEqual([
+          'warden:pending',
+          'learning:copied',
+          'voice:copied',
+          'controls:copied',
+          'fleet:copied',
+        ]);
+        expect(screen.text('[data-clone-outcome="warden"]')).toContain('waiting for your confirmation');
+        await click(screen.q('[data-clone-confirm="warden.yaml"]'), 'Confirm');
+        expect(confirms.map(call => call.body)).toEqual([{ path: 'warden.yaml', etag: 'etag-held' }]);
+        expect(screen.q('[data-clone-outcome="warden"]')?.getAttribute('data-outcome')).toBe('copied');
+      } finally {
+        await screen.view.unmount();
+      }
+    });
+
+    it('does not call it copied when the machine cannot say whether it is held', async () => {
+      const { createClient } = daemons({
+        work: sourceFiles(),
+        target: fullTarget({
+          [REVIEW_PATH]: reviewing(),
+          '/v1/config/status': new FyHttpError('the config service is busy', 503, 'unavailable'),
+        }),
+      });
+      const screen = await render({ createClient });
+      try {
+        await toPreview(screen);
+        await click(radios(screen, 'intervalMinutes')[0] ?? null, 'keep mine');
+        await click(submit(screen), 'Copy');
+
+        expect(outcomes(screen)).toEqual([
+          'warden:unchecked',
+          'learning:unchecked',
+          'voice:unchecked',
+          'controls:copied',
+          'fleet:copied',
+        ]);
+        expect(screen.text('[data-clone-outcome="warden"]')).toContain('could not check whether it is waiting');
+        expect(screen.text('[data-clone-outcome="warden"]')).toContain('fy config confirm');
+        expect(screen.q('[data-clone-confirm]')).toBeNull();
+      } finally {
+        await screen.view.unmount();
+      }
+    });
   });
 });

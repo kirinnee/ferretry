@@ -59,7 +59,7 @@ import {
 } from '@ferretry/relay';
 import { z } from 'zod';
 import type { ClockPort } from '../ports.ts';
-import { SecretStoreError, UnknownSecretError } from './types.ts';
+import { UnknownSecretError } from './types.ts';
 import type { SecretDirectory, SecretVault } from './vault.ts';
 
 /** Domain separation: an offer signature can never be replayed as a relay claim, or the reverse. */
@@ -288,22 +288,23 @@ export class SecretImportService {
     return parsed.data.entries;
   }
 
-  /** Files every value, after checking ALL of them fit — a half-copied set is worse than none. */
+  /**
+   * Files every value this machine does not hold yet, after checking ALL of them fit — a half-copied set is
+   * worse than none.
+   *
+   * A COPY ONLY ADDS (docs/secrets.md, "A key that is newer on the source"): a name this machine already holds
+   * is never written — not its value, not its `updatedAt` — and comes back in `kept`. The check and the write
+   * are one turn of the directory ({@link SecretDirectory.putMissing}), so a name that is created between this
+   * import's start and its filing is kept too, and is reported as kept rather than as filed. Replacing a held
+   * key is the person's own act, `fy secret set NAME`.
+   */
   async #file(
     importId: SecretImportId,
     sourceDaemonId: DaemonId,
     entries: readonly [CloneableSecretName, string][],
   ): Promise<SecretImportResult> {
-    const held = new Set((await this.deps.directory.list()).map(secret => secret.name));
-    const added = entries.filter(([name]) => !held.has(name)).length;
-    if (held.size + added > MAX_SECRETS_PER_DAEMON)
-      throw new SecretStoreError(
-        'full',
-        `copying these would take this machine past ${MAX_SECRETS_PER_DAEMON} secrets; nothing was copied`,
-      );
-    for (const [name, value] of entries) await this.deps.directory.put(name, value);
-    const imported = entries.map(([name]) => name);
-    return { importId, sourceDaemonId, imported, replaced: imported.filter(name => held.has(name)) };
+    const { stored, kept, at } = await this.deps.directory.putMissing(entries);
+    return { importId, sourceDaemonId, imported: stored, ...(stored.length === 0 ? {} : { filedAt: at }), kept };
   }
 
   /** Forgets expired imports, and spent ids that could no longer be presented. */

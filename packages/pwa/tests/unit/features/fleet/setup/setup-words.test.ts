@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  closedSentence,
   countWords,
   fileName,
   listWords,
@@ -69,5 +70,22 @@ describe('fileName', () => {
   it('returns the input when no name remains', () => {
     expect(fileName('/')).toBe('/');
     expect(fileName('')).toBe('');
+  });
+});
+
+describe('closedSentence', () => {
+  it('closes a reason that has no stop', () => {
+    expect(closedSentence('the machine could not be reached')).toBe('the machine could not be reached.');
+  });
+
+  it('leaves a reason that is already closed, whichever mark closes it', () => {
+    expect(closedSentence('review it again.')).toBe('review it again.');
+    expect(closedSentence('is it awake?')).toBe('is it awake?');
+    expect(closedSentence('try again!')).toBe('try again!');
+    expect(closedSentence('and so on…')).toBe('and so on…');
+  });
+
+  it('drops the space around a reason before closing it', () => {
+    expect(closedSentence('  no answer \n')).toBe('no answer.');
   });
 });

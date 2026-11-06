@@ -339,23 +339,71 @@ describe('the analytics mount', () => {
       should(jsonBody(response)).have.property('code', 'invalid_query');
     });
 
-    it('should refuse a query over the group limit as a typed 400 that says to add a matcher', async () => {
-      // THE BUG: a plain Error past the limit fell through to the 500 "failed to handle this request",
-      // which tells the caller the daemon is broken when the question is merely too wide.
-      // Arrange
-      const sessions = Array.from({ length: 101 }, (_, n) => finishedSession({ id: `s${n}` }));
+    // The owner's own query (B149, reopened) is pinned beside the first one: `cost_usd` and `by (id)` take
+    // the same aggregate path, so a 500 for it can only come from a machine older than this build.
+    it.each(['sum(tokens) by (id)', 'sum(cost_usd) by (id)'])(
+      'should refuse %s over the group limit as a typed 400 that says to add a matcher',
+      async q => {
+        // THE BUG: a plain Error past the limit fell through to the 500 "failed to handle this request",
+        // which tells the caller the daemon is broken when the question is merely too wide.
+        // Arrange
+        const sessions = Array.from({ length: 101 }, (_, n) => finishedSession({ id: `s${n}` }));
+
+        // Act
+        const response = await dispatcher(sessions).dispatch(
+          request({ path: '/v1/analytics', headers: human, query: [['q', q]] }),
+        );
+
+        // Assert
+        should(response.status).equal(400);
+        should(jsonBody(response)).have.properties({
+          code: 'too_many_groups',
+          error: 'analytics query produces more than 100 groups; add a matcher',
+        });
+      },
+    );
+
+    it('should group days on the calendar of the zone the caller names', async () => {
+      // Arrange: 20:30Z is 04:30 the NEXT day in Singapore.
+      const sessions = [finishedSession({ id: 'late', createdAt: '2026-10-14T20:30:00.000Z' })];
+      const ask = async (query: ReadonlyArray<readonly [string, string]>) =>
+        await dispatcher(sessions).dispatch(request({ path: '/v1/analytics', headers: human, query }));
 
       // Act
-      const response = await dispatcher(sessions).dispatch(
-        request({ path: '/v1/analytics', headers: human, query: [['q', 'sum(tokens) by (id)']] }),
+      const utc = await ask([['q', 'count by (day)']]);
+      const singapore = await ask([
+        ['q', 'count by (day)'],
+        ['tz', 'Asia/Singapore'],
+      ]);
+
+      // Assert
+      const days = (response: Awaited<ReturnType<typeof ask>>): unknown[] =>
+        (jsonBody(response) as { results: { labels: { day: string } }[] }).results.map(row => row.labels.day);
+      should(days(utc)).deepEqual(['2026-10-14']);
+      should(days(singapore)).deepEqual(['2026-10-15']);
+    });
+
+    it('should refuse a time zone it does not know rather than read it as UTC', async () => {
+      // Arrange / Act
+      const unknown = await dispatcher().dispatch(
+        request({ path: '/v1/analytics', headers: human, query: [['tz', 'SGT']] }),
+      );
+      const repeated = await dispatcher().dispatch(
+        request({
+          path: '/v1/analytics',
+          headers: human,
+          query: [
+            ['tz', 'UTC'],
+            ['tz', 'Asia/Singapore'],
+          ],
+        }),
       );
 
       // Assert
-      should(response.status).equal(400);
-      should(jsonBody(response)).have.properties({
-        code: 'too_many_groups',
-        error: 'analytics query produces more than 100 groups; add a matcher',
-      });
+      should(unknown.status).equal(400);
+      should(jsonBody(unknown)).have.property('code', 'invalid_time_zone');
+      should(repeated.status).equal(400);
+      should(jsonBody(repeated)).have.property('code', 'repeated_parameter');
     });
 
     it('should refuse a parameter it does not implement rather than answer the whole fleet', async () => {

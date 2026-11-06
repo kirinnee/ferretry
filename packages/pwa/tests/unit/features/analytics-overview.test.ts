@@ -55,6 +55,13 @@ describe('the analytics window', () => {
     expect(analyticsRangeDays(30, NOW)[0]).toBe('2026-09-17');
   });
 
+  it('ends on the day now falls on in the reader\u2019s zone', () => {
+    // 2026-10-16T12:00Z is already the 17th at 05:00 in Auckland (+13) and still the 16th in Honolulu (-10).
+    expect(analyticsRangeDays(3, NOW, 'Pacific/Auckland')).toEqual(['2026-10-15', '2026-10-16', '2026-10-17']);
+    expect(analyticsRangeDays(3, NOW, 'Pacific/Honolulu')).toEqual(['2026-10-14', '2026-10-15', '2026-10-16']);
+    expect(analyticsRangeDays(3, NOW, 'UTC')).toEqual(analyticsRangeDays(3, NOW));
+  });
+
   it('reads one month glob per month the window touches', () => {
     expect(analyticsMonthGlobs(analyticsRangeDays(7, NOW))).toEqual(['2026-10-*']);
     expect(analyticsMonthGlobs(analyticsRangeDays(30, NOW))).toEqual(['2026-09-*', '2026-10-*']);

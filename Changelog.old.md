@@ -1,3 +1,56 @@
+## [4.283.0](https://github.com/kirinnee/ferretry/compare/v4.282.0...v4.283.0) (2026-11-05)
+
+### Features
+
+* **pwa:** pick the fastest safe speech path per device, finish a take early, and measure it (F137 3b) ([#1495](https://github.com/kirinnee/ferretry/issues/1495)) ([444c44e](https://github.com/kirinnee/ferretry/commit/444c44e7d43aadb1662fd6234a7d658a9c8e3ca3))
+
+## [4.282.0](https://github.com/kirinnee/ferretry/compare/v4.281.0...v4.282.0) (2026-11-05)
+
+### Features
+
+* **clone:** merge repeat-copy settings key by key ([#1482](https://github.com/kirinnee/ferretry/issues/1482)) ([9d01d27](https://github.com/kirinnee/ferretry/commit/9d01d27ce296099d79cfecff06e5776b0a6b6ce0))
+* **fleet:** offer a newer API key from the source, replacing only what is named ([#1476](https://github.com/kirinnee/ferretry/issues/1476)) ([7d58a8f](https://github.com/kirinnee/ferretry/commit/7d58a8f461649b9bb775fe2541785c98d7ab027b))
+
+## [4.281.0](https://github.com/kirinnee/ferretry/compare/v4.280.0...v4.281.0) (2026-11-05)
+
+### Features
+
+* **pwa:** voice turn endpointer, shared energy math and noise measurements (F137 s3) ([#1489](https://github.com/kirinnee/ferretry/issues/1489)) ([fef1b15](https://github.com/kirinnee/ferretry/commit/fef1b159c73d88eb59bbb387f7111e815326cfa5))
+
+## [4.280.0](https://github.com/kirinnee/ferretry/compare/v4.279.0...v4.280.0) (2026-11-05)
+
+### Features
+
+* **cli:** fy machine clone updates by default, diff --dry-run, choice flags, --forget ([#1478](https://github.com/kirinnee/ferretry/issues/1478)) ([b3aa97f](https://github.com/kirinnee/ferretry/commit/b3aa97fa4b2556a334c0b76c242e345541d73b8f))
+* **insights:** show a query as one result or as a trend over time ([#1475](https://github.com/kirinnee/ferretry/issues/1475)) ([7bf5987](https://github.com/kirinnee/ferretry/commit/7bf598770a91f8b88dd7ffcc0fcb02a0a443fa24))
+
+## [4.279.0](https://github.com/kirinnee/ferretry/compare/v4.278.0...v4.279.0) (2026-11-05)
+
+### Features
+
+* **fleet:** three-way clone update planner, review route, clone.import update ([#1386](https://github.com/kirinnee/ferretry/issues/1386)) ([b4edfc0](https://github.com/kirinnee/ferretry/commit/b4edfc0abb6a862ce15a8fcebff0dff83e0a2366)), closes [#F544](https://github.com/kirinnee/ferretry/issues/F544) [#F544](https://github.com/kirinnee/ferretry/issues/F544) [#1383](https://github.com/kirinnee/ferretry/issues/1383) [#1383](https://github.com/kirinnee/ferretry/issues/1383)
+* **insights:** count Insights days in a time zone the reader picks ([#1471](https://github.com/kirinnee/ferretry/issues/1471)) ([e0e361e](https://github.com/kirinnee/ferretry/commit/e0e361e6070dd8d49aeb95e155cd8003652d829a))
+
+### Fixes
+
+* **analytics:** name each machine and what to do when a fleet query fails (B149) ([#1487](https://github.com/kirinnee/ferretry/issues/1487)) ([c63a443](https://github.com/kirinnee/ferretry/commit/c63a4436afedfc7805812b48ece3b084a605fd1e))
+* **daemon:** stop flagging restarted ferrets as out of date on hypermedia ([#1463](https://github.com/kirinnee/ferretry/issues/1463)) ([dec9e5b](https://github.com/kirinnee/ferretry/commit/dec9e5b90461c92ed12cfb93b79e1fd2e73acae5))
+* **pwa:** open the queue page without crashing, and let Find answer Queue (B160) ([#1481](https://github.com/kirinnee/ferretry/issues/1481)) ([b0d806f](https://github.com/kirinnee/ferretry/commit/b0d806f4924f7618e7e17ff4e998dd6e6032b1e2))
+
+## [4.278.0](https://github.com/kirinnee/ferretry/compare/v4.277.0...v4.278.0) (2026-11-05)
+
+### Features
+
+* **pwa:** compact Settings rows for Appearance and This device ([#1412](https://github.com/kirinnee/ferretry/issues/1412)) ([29e86c0](https://github.com/kirinnee/ferretry/commit/29e86c08dab04e06d6af7ef2b84cdee5370e9bfe))
+
+### Fixes
+
+* **analytics:** refuse an over-wide query with a typed, readable 400 ([#1464](https://github.com/kirinnee/ferretry/issues/1464)) ([1e25bb7](https://github.com/kirinnee/ferretry/commit/1e25bb7d873f0d2826e88b3d7498cefab102806a))
+* **board:** a done card with an open PR waits in review until it merges ([#1462](https://github.com/kirinnee/ferretry/issues/1462)) ([e866312](https://github.com/kirinnee/ferretry/commit/e866312f083635a1c5e2f671297a87ffb00e8f6a))
+* **pwa:** draw fy-render blocks authored with CRLF, trailing spaces or leading blank lines ([#1467](https://github.com/kirinnee/ferretry/issues/1467)) ([bd615d9](https://github.com/kirinnee/ferretry/commit/bd615d96fc34369662cd3bcf905f36a85b753791))
+* **pwa:** let a hypermedia block go fullscreen inside the agenda swipe-deck card ([#1466](https://github.com/kirinnee/ferretry/issues/1466)) ([e794f27](https://github.com/kirinnee/ferretry/commit/e794f27a9bbb4d4188bc06e1382ac22b9f3a1ff6))
+* **pwa:** make the Inbox step checkboxes clickable ([#1465](https://github.com/kirinnee/ferretry/issues/1465)) ([d02c49b](https://github.com/kirinnee/ferretry/commit/d02c49b30a47b6fb1bc2d9a23364c1d94f81b22a))
+
 ## [4.277.0](https://github.com/kirinnee/ferretry/compare/v4.276.0...v4.277.0) (2026-11-05)
 
 ### Features

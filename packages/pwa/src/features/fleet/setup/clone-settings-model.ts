@@ -384,6 +384,37 @@ export const keysToCopy = (needs: readonly CloneNeed[], source: readonly string[
         )
         .map(need => need.secretName);
 
+// ── Keys that are newer on the source ───────────────────────────────────────────────────────────
+
+/** A key the source changed since the last copy: `both` means this machine changed it too. */
+export interface NewerKey {
+  readonly name: string;
+  readonly outcome: 'newer' | 'both';
+}
+
+/**
+ * The keys to REPORT again, from the review's outcomes (decided on this machine from `updatedAt` timestamps
+ * alone — no value is compared). `missing` keys are not here: they are copied with the logins, as always. A
+ * reported key is never copied over the one held here, ticked or not: there is nothing to tick.
+ */
+export const newerKeys = (keys: readonly { readonly name: string; readonly outcome: string }[]): readonly NewerKey[] =>
+  keys.flatMap(key =>
+    key.outcome === 'newer' || key.outcome === 'both' ? [{ name: key.name, outcome: key.outcome }] : [],
+  );
+
+/**
+ * The instants to remember for the keys a sealed copy filed: the source's `updatedAt` for each, when it listed one.
+ * Only a key the copy really filed (the import's `imported`) is here; a key this machine already held is not.
+ */
+export const filedKeyStamps = (
+  filed: readonly string[],
+  stamps: ReadonlyMap<string, string>,
+): readonly { readonly name: string; readonly sourceUpdatedAt: string }[] =>
+  filed.flatMap(name => {
+    const sourceUpdatedAt = stamps.get(name);
+    return sourceUpdatedAt === undefined ? [] : [{ name, sourceUpdatedAt }];
+  });
+
 /** "JEV_API_KEY, GROQ_API_KEY, Claude Code login (claude-work)" — what is not held yet, or `null`. */
 export const needsSentence = (needs: readonly CloneNeed[]): string | null => {
   const missing = needs.filter(need => !need.held);
@@ -409,7 +440,9 @@ export type CloneItemOutcome =
   | { readonly kind: 'copied' }
   /** Written, but it loosens something, so it waits for the owner; the tighter version is in effect. */
   | { readonly kind: 'pending'; readonly path: string; readonly etag: string; readonly changes: readonly string[] }
-  | { readonly kind: 'refused'; readonly reason: string };
+  | { readonly kind: 'refused'; readonly reason: string }
+  /** Written, but this app could not read back whether it is waiting for the owner. */
+  | { readonly kind: 'unchecked'; readonly reason: string };
 
 /** The Done line for one item's outcome. */
 export const outcomeSentence = (item: CloneOutcomeItem, outcome: CloneItemOutcome): string => {
@@ -420,5 +453,7 @@ export const outcomeSentence = (item: CloneOutcomeItem, outcome: CloneItemOutcom
       return `${item.label}: copied, and waiting for your confirmation because it loosens something: ${outcome.changes.join('; ')}.`;
     case 'refused':
       return `${item.label}: not copied. ${outcome.reason}`;
+    case 'unchecked':
+      return `${item.label}: copied, but this app could not check whether it is waiting for your confirmation. ${outcome.reason} Run fy config confirm on the machine if it is.`;
   }
 };

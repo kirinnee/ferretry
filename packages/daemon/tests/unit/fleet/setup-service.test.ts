@@ -9,12 +9,16 @@
 import { describe, it } from 'bun:test';
 import {
   type AccountModel,
+  accountModelFiles,
+  assembleAccountModel,
   buildCloneBundle,
   builtInModelCatalogs,
   builtInPresets,
   CLONE_BASE_FILE,
+  checkConfigFile,
   EXPORT_KEYS_FILE,
   parseCloneBase,
+  serializeCloneBase,
   originKeyOfId,
   parseExportKeys,
   FleetApplyFailureError,
@@ -25,21 +29,42 @@ import {
   parseAccountModel,
   RETIRED_FLEET_CONFIG_SENTENCE,
   RetiredFleetConfigError,
+  renderConfigFile,
 } from '@ferretry/fleet';
 import {
   CLONE_BUNDLE_KEYS_LIMIT,
+  DEFAULT_LEARNING_CONFIG,
+  DEFAULT_VOICE_CONFIG,
+  DEFAULT_WARDEN_CONFIG,
+  CloneableSecretNameSchema,
+  mcpOAuthSecretNames,
   type FleetAccountChange,
   FleetCloneBundleSchema,
   type FleetCredentialView,
+  type GrantRefusal,
+  SecretImportCompleteRequestSchema,
   ORIGIN_KEY_PATTERN,
+  sha256Hex,
   FleetSetupScanSchema,
   FleetToolInstallResultSchema,
 } from '@ferretry/protocol';
+import { type DaemonIdentity } from '@ferretry/relay';
+import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
+import { FakeSecretCipher, MemorySecretDocuments } from '../runtime/mounts/support.ts';
+import { SecretDirectory, SecretVault } from '../../../src/lib/secrets/vault.ts';
+import { SecretExportService, SecretImportService } from '../../../src/lib/secrets/clone.ts';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
-import { type AccountDocumentReading, FleetCatalogRefusal } from '../../../src/lib/fleet/catalog-service.ts';
+import { ConfigFileConflictError, ConfigFileInvalidError } from '../../../src/lib/config-files/index.ts';
+import {
+  type AccountDocumentReading,
+  type ExecutorCaller,
+  FleetCatalogFreshStepUpRequired,
+  FleetCatalogRefusal,
+} from '../../../src/lib/fleet/catalog-service.ts';
 import {
   CLONE_BUNDLE_MAX_BYTES,
+  type CloneConfigFiles,
   createFleetSetupSubsystem,
   FleetSetupRefusal,
   FleetSetupService,
@@ -150,6 +175,10 @@ interface World {
     folders: Record<string, FolderReading>;
     skillItems: () => Promise<readonly string[]>;
     secretNames: () => Promise<readonly string[]>;
+    /** When each secret last changed, by name; one fixed instant for a name not listed. */
+    secretUpdatedAt: Record<string, string>;
+    /** When each secret was made, by name; its `updatedAt` for a name not listed (never edited). */
+    secretCreatedAt: Record<string, string>;
     putSecret: (name: string, value: string) => Promise<void>;
     apply: () => Promise<unknown>;
     emails: () => Promise<FleetCredentialView[]>;
@@ -165,6 +194,8 @@ interface World {
     keysWriteError: unknown;
     keysWrites: number;
     baseWrites: string[];
+    /** Called with the documents each apply is handed, so a test can make the fake apply write them. */
+    commit?: (documents: readonly FleetDocumentWrite[]) => void;
   };
 }
 
@@ -186,6 +217,8 @@ function world(
     },
     skillItems: async () => [],
     secretNames: async () => [...secrets.keys()],
+    secretUpdatedAt: {},
+    secretCreatedAt: {},
     putSecret: async (name, value) => {
       secrets.set(name, value);
     },
@@ -218,6 +251,7 @@ function world(
     baseWrites: [],
   };
   let drawn = 0;
+  let baseTurn: Promise<unknown> = Promise.resolve();
   const deps: FleetSetupServiceDeps = {
     catalog: {
       document: async () => {
@@ -241,6 +275,7 @@ function world(
         },
         apply: async (plan, documents = []) => {
           applied.push({ plan, documents });
+          state.commit?.(documents);
           return (await state.apply()) as never;
         },
       },
@@ -262,6 +297,11 @@ function world(
     },
     secrets: {
       names: async () => await state.secretNames(),
+      held: async () =>
+        (await state.secretNames()).map(name => {
+          const updatedAt = state.secretUpdatedAt[name] ?? '2026-11-01T00:00:00.000Z';
+          return { name, createdAt: state.secretCreatedAt[name] ?? updatedAt, updatedAt };
+        }),
       put: async (name, value) => await state.putSecret(name, value),
     },
     readFolder: async path => state.folders[path] ?? { files: [], skipped: [] },
@@ -286,10 +326,23 @@ function world(
     },
     cloneBase: {
       read: async path => state.assets[path],
-      write: async (path, text) => {
-        should(path).equal(BASE_PATH);
-        state.baseWrites.push(text);
-        state.assets[path] = text;
+      // One update at a time, each handed the record as it is when its turn comes (a microtask later, so two
+      // started together do interleave if the service lets them).
+      update: async (path, change) => {
+        const run = baseTurn.then(async () => {
+          await Promise.resolve();
+          should(path).equal(BASE_PATH);
+          const next = change(state.assets[path]);
+          if (next === undefined) return false;
+          state.baseWrites.push(next);
+          state.assets[path] = next;
+          return true;
+        });
+        baseTurn = run.then(
+          () => undefined,
+          () => undefined,
+        );
+        return await run;
       },
     },
     ...options.overrides,
@@ -1282,6 +1335,369 @@ describe('the clone.import executor', () => {
   });
 });
 
+// ── The update copy ──────────────────────────────────────────────────────────────────────────────
+
+describe('the clone.import executor in update mode', () => {
+  const MAIN_COPY = '/state/fleet/assets/components/instructions/main.md';
+
+  const sourceAt = async (content: string): Promise<Record<string, unknown>> => {
+    const source = world({
+      catalog: { machineName: () => 'work-mac' },
+      overrides: { daemonId: () => 'daemon-source' },
+    });
+    source.state.reading = configReading(SET_UP_MODEL(), 'r');
+    source.state.assets[MAIN_DOCUMENT] = content;
+    return (await source.service.exportBundle()) as unknown as Record<string, unknown>;
+  };
+  const request = (bundle: unknown, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'clone.import', mode: 'update', bundle, ...extra }) as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+
+  /** A target that already took its first copy from the source, as it stands afterwards. */
+  const copied = async (): Promise<World> => {
+    const first = world({ overrides: { daemonId: () => 'daemon-target' } });
+    const alongside = {
+      kind: 'clone.import',
+      mode: 'alongside',
+      bundle: await sourceAt('Main.\n'),
+    } as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+    await first.service.executors.clone.describe(alongside);
+    await first.service.executors.clone.execute(alongside);
+    const documents = first.applied[0]?.documents ?? [];
+    const target = world({ overrides: { daemonId: () => 'daemon-target' } });
+    target.state.reading = configReading(modelOfWrites(documents), 'r');
+    for (const document of documents) target.state.assets[document.path] = document.content;
+    target.state.emails = async () => [];
+    return target;
+  };
+
+  const batchRecord = (w: World) => (w.applied[0]?.documents ?? []).find(document => document.path === BASE_PATH);
+
+  it('should list nothing and write nothing for a copy that has not changed', async () => {
+    const w = await copied();
+    const review = await w.service.reviewClone({ bundle: await sourceAt('Main.\n') });
+    should(review.mode).equal('update');
+    should(review.items).deepEqual([]);
+    should(review.same.count).be.above(0);
+  });
+
+  it('should take a change made on the source, and record it as the new last-copied in the same batch', async () => {
+    // Arrange
+    const w = await copied();
+    const bundle = await sourceAt('Main, changed on the source.\n');
+    const review = await w.service.reviewClone({ bundle });
+    const item = review.items.find(row => row.ref === 'instructions/main');
+    should(item?.outcome).equal('theirs');
+    should(item?.choice).equal('take');
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: {} });
+
+    // Act
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+
+    // Assert
+    const written = (w.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY);
+    should(written?.content).equal('Main, changed on the source.\n');
+    should(batchRecord(w)?.path).equal(BASE_PATH);
+    for (const document of w.applied[0]?.documents ?? []) w.state.assets[document.path] = document.content;
+    const after = await w.service.reviewClone({ bundle });
+    should(after.items.map(row => row.ref)).not.containEql('instructions/main');
+  });
+
+  it('should refuse an apply whose review has moved since the person saw it', async () => {
+    const w = await copied();
+    const bundle = await sourceAt('Main, changed on the source.\n');
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(request(bundle, { reviewed: 'stale', decisions: {} })),
+      'fleet_change_refused',
+    );
+    should(refusal.message).equal('Something changed since you reviewed. Review again.');
+    should(w.applied).deepEqual([]);
+  });
+
+  it('should leave an item changed here alone when the source did not change it', async () => {
+    const w = await copied();
+    w.state.assets[MAIN_COPY] = 'Main, edited here.\n';
+    const bundle = await sourceAt('Main.\n');
+    const review = await w.service.reviewClone({ bundle });
+    should(review.items.find(row => row.ref === 'instructions/main')?.outcome).equal('mine');
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: {} });
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    should((w.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY)).be.undefined();
+  });
+
+  it('should refuse an item changed on both sides until the person chooses, then honour either choice', async () => {
+    const w = await copied();
+    w.state.assets[MAIN_COPY] = 'Main, edited here.\n';
+    const bundle = await sourceAt('Main, edited there.\n');
+    const review = await w.service.reviewClone({ bundle });
+    const item = review.items.find(row => row.ref === 'instructions/main');
+    should(item?.outcome).equal('both');
+    should(item?.choice).be.undefined();
+
+    const unchosen = request(bundle, { reviewed: review.fingerprint, decisions: {} });
+    const refusal = await catalogRefusal(w.service.executors.clone.describe(unchosen), 'fleet_change_refused');
+    should(refusal.message).containEql('instructions/main');
+
+    const take = request(bundle, { reviewed: review.fingerprint, decisions: { 'instructions/main': 'take' } });
+    await w.service.executors.clone.describe(take);
+    await w.service.executors.clone.execute(take);
+    should((w.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY)?.content).equal(
+      'Main, edited there.\n',
+    );
+
+    const keep = await copied();
+    keep.state.assets[MAIN_COPY] = 'Main, edited here.\n';
+    const keeping = request(bundle, { reviewed: review.fingerprint, decisions: { 'instructions/main': 'keep' } });
+    await keep.service.executors.clone.describe(keeping);
+    await keep.service.executors.clone.execute(keeping);
+    should((keep.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY)).be.undefined();
+  });
+
+  it('should never write a login or a secret, whatever the person chose (account-model §14.4)', async () => {
+    // Arrange: a target holding a signed-in login and a stored secret.
+    const w = await copied();
+    w.secrets.set('NOTES_TOKEN', 'ghp_do_not_touch');
+    w.state.assets[MAIN_COPY] = 'Main, edited here.\n';
+    const bundle = await sourceAt('Main, edited there.\n');
+    const review = await w.service.reviewClone({ bundle });
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: { 'instructions/main': 'take' } });
+
+    // Act
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+
+    // Assert
+    should(configTextOf(w.applied[0]?.documents ?? [])).not.containEql('claude-you');
+    should([...w.secrets]).deepEqual([['NOTES_TOKEN', 'ghp_do_not_touch']]);
+  });
+
+  it('should refuse a review of a setup exported from this very machine', async () => {
+    const w = await copied();
+    const bundle = { ...(await sourceAt('Main.\n')), machine: 'studio' };
+    const refusal = await setupRefusal(w.service.reviewClone({ bundle }), 'fleet_setup_refused');
+    should(refusal.message).containEql('itself');
+  });
+
+  it('should let an unexpected failure through, in a review and in an apply, rather than call it a refusal', async () => {
+    const broken = world({
+      overrides: {
+        cloneBase: {
+          read: async () => {
+            throw new Error('disk gone');
+          },
+          update: async () => false,
+        },
+      },
+    });
+    broken.state.reading = configReading(SET_UP_MODEL(), 'r');
+    const bundle = await sourceAt('Main.\n');
+    await broken.service.reviewClone({ bundle }).then(
+      () => should.fail('resolved', 'rejected'),
+      (error: unknown) => should((error as Error).message).equal('disk gone'),
+    );
+    await broken.service.executors.clone.describe(request(bundle, { reviewed: 'x', decisions: {} })).then(
+      () => should.fail('resolved', 'rejected'),
+      (error: unknown) => should((error as Error).message).equal('disk gone'),
+    );
+  });
+
+  it('should record nothing for a source that carries no identity, but still write what was chosen', async () => {
+    const w = await copied();
+    const { daemon: _daemon, keys: _keys, ...rest } = await sourceAt('Main, changed on the source.\n');
+    const bundle = { ...rest, version: 1 };
+    const review = await w.service.reviewClone({ bundle });
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: { 'instructions/main': 'take' } });
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    should(batchRecord(w)).be.undefined();
+  });
+});
+
+// ── The update copy: security review regressions (#F544) ─────────────────────────────────────────
+
+describe('the clone.import executor in update mode refuses what the review did not say', () => {
+  const KEY_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const KEY_API = 'cccccccccccccccccccccccccc';
+  // A copy made from a file: no id a browser verified is stamped on it.
+  const FROM_SOURCE = { clonedFrom: 'source' };
+  const bundleOf = (patch: Record<string, unknown> = {}) =>
+    FleetCloneBundleSchema.parse({
+      format: 'ferretry-clone',
+      version: 2,
+      daemon: 'daemon-source',
+      keys: {},
+      machine: 'source',
+      exportedAt: '2026-10-13T07:00:00.000Z',
+      credentials: [],
+      components: {},
+      profiles: {},
+      runtimes: {},
+      files: [],
+      notCopied: [],
+      ...patch,
+    }) as unknown as Record<string, unknown>;
+  const update = (bundle: unknown, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'clone.import', mode: 'update', bundle, ...extra }) as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+  const run = async (w: World, change: Extract<FleetAccountChange, { kind: 'clone.import' }>) => {
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    return w.applied[0]?.documents ?? [];
+  };
+
+  it('should honour skip: a left-out new component is not written, and a contradicting decision is refused', async () => {
+    // Arrange
+    const w = world();
+    const bundle = bundleOf({
+      keys: { 'mcp/skip-me': KEY_A },
+      components: { mcp: { 'skip-me': { command: 'not-supposed-to-copy' } } },
+    });
+    const review = await w.service.reviewClone({ bundle });
+
+    // Act
+    const documents = await run(w, update(bundle, { skip: ['mcp/skip-me'], reviewed: review.fingerprint }));
+
+    // Assert
+    should(documents.map(document => document.path).filter(path => path.includes('skip-me'))).eql([]);
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(
+        update(bundle, {
+          skip: ['mcp/skip-me'],
+          decisions: { 'mcp/skip-me': 'add' },
+          reviewed: review.fingerprint,
+        }),
+      ),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('mcp/skip-me is left out');
+  });
+
+  it('should refuse an environment login changed after the review, writing nothing', async () => {
+    // Arrange
+    const environment = (value: string) =>
+      bundleOf({
+        keys: { 'login/api': KEY_API },
+        credentials: [{ id: 'api', harness: 'claude', store: 'environment', env: { NODE_OPTIONS: value } }],
+        profiles: { default: { layers: [] } },
+        runtimes: { agent: { credential: 'api', profile: 'default', agent: false } },
+      });
+    const w = world();
+    const review = await w.service.reviewClone({ bundle: environment('--trace-warnings') });
+    should(review.logins[0]?.runnable?.entries).containEql({
+      label: 'Environment NODE_OPTIONS',
+      text: '--trace-warnings',
+      document: false,
+    });
+
+    // Act
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(
+        update(environment('--require /tmp/other-module.cjs'), { reviewed: review.fingerprint }),
+      ),
+      'fleet_change_refused',
+    );
+
+    // Assert
+    should(refusal.message).equal('Something changed since you reviewed. Review again.');
+    should(w.applied).eql([]);
+  });
+
+  it('should refuse a bundle that carries a script and also says it could not, on review and on apply', async () => {
+    const masked = bundleOf({
+      keys: { 'hooks/a': KEY_A },
+      components: { hooks: { a: { harness: 'claude', directory: 'components/hooks/a' } } },
+      files: [{ path: 'components/hooks/a/run.sh', content: 'different script' }],
+      notCopied: [{ path: 'components/hooks/a/run.sh', reason: 'too large' }],
+    });
+    const w = world();
+    const reviewing = await setupRefusal(w.service.reviewClone({ bundle: masked }), 'fleet_setup_refused');
+    should(reviewing.message).containEql('also says it could not carry it');
+    const applying = await catalogRefusal(
+      w.service.executors.clone.describe(update(masked, { reviewed: 'any' })),
+      'fleet_change_refused',
+    );
+    should(applying.message).containEql('also says it could not carry it');
+    should(w.applied).eql([]);
+  });
+
+  /** A target whose hooks/a, copied before from the source, owns a folder holding `files`. */
+  const withHooks = (directory: string, files: string[], layout = LAYOUT): World => {
+    const w = world({ catalog: { layout } });
+    w.state.reading = configReading(
+      parseAccountModel({
+        version: 2,
+        components: { hooks: { a: { harness: 'claude', directory, ...FROM_SOURCE, clonedFromKey: KEY_A } } },
+      }),
+      'r',
+    );
+    const folder = `${layout.assetsDirectory}/${directory}`;
+    w.state.folders[folder] = { files: files.map(path => ({ path, content: `${path} here` })), skipped: [] };
+    for (const path of files) w.state.assets[`${folder}/${path}`] = `${path} here`;
+    return w;
+  };
+  const keepOnly = bundleOf({
+    keys: { 'hooks/a': KEY_A },
+    components: { hooks: { a: { harness: 'claude', directory: 'components/hooks/a' } } },
+    files: [{ path: 'components/hooks/a/keep.sh', content: 'keep, from the source' }],
+  });
+
+  it('should remove a file the review listed as removed, in the same batch and only if unchanged', async () => {
+    // Arrange
+    const w = withHooks('components/hooks/a', ['keep.sh', 'gone.sh']);
+    const review = await w.service.reviewClone({ bundle: keepOnly });
+    should(review.items[0]?.files).containEql({
+      path: 'components/hooks/a/gone.sh',
+      change: 'removed',
+      lines: { added: 0, removed: 1 },
+    });
+
+    // Act
+    const documents = await run(
+      w,
+      update(keepOnly, { reviewed: review.fingerprint, decisions: { 'hooks/a': 'take' } }),
+    );
+
+    // Assert
+    should(documents.find(document => document.path.endsWith('/gone.sh'))).eql({
+      path: '/state/fleet/assets/components/hooks/a/gone.sh',
+      content: '',
+      mode: 0o600,
+      expect: 'digest:/state/fleet/assets/components/hooks/a/gone.sh',
+      remove: true,
+    });
+    should(documents.find(document => document.path.endsWith('/keep.sh'))?.content).equal('keep, from the source');
+  });
+
+  it('should refuse to remove anything inside a credential store, even if the planner named it (§14.4)', async () => {
+    // Arrange: a layout whose asset tree holds the credential store, and a folder pointed into it.
+    const w = withHooks('credentials/claude-you', ['keep.sh', '.credentials.json'], {
+      ...LAYOUT,
+      assetsDirectory: '/state/fleet',
+    });
+    const review = await w.service.reviewClone({ bundle: keepOnly });
+
+    // Act
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(
+        update(keepOnly, { reviewed: review.fingerprint, decisions: { 'hooks/a': 'take' } }),
+      ),
+      'fleet_change_refused',
+    );
+
+    // Assert
+    should(refusal.message).equal(
+      "credentials/claude-you/.credentials.json is not one of this machine's own setup documents, so an update never removes it. Nothing was changed.",
+    );
+    should(w.applied).eql([]);
+  });
+});
+
 // ── The "last copied" record ─────────────────────────────────────────────────────────────────────
 
 describe('the clone-base record', () => {
@@ -1439,7 +1855,7 @@ describe('the clone-base record', () => {
           read: async () => {
             throw denied;
           },
-          write: async () => {
+          update: async () => {
             throw new Error('must not write over a record that could not be read');
           },
         },
@@ -1469,6 +1885,34 @@ describe('the clone-base record', () => {
     should(await w.service.forgetCloneSource('self:daemon-source')).equal(true);
     should(parseCloneBase(w.state.baseWrites[0]).sources).deepEqual({});
     should(w.applied).have.length(1);
+  });
+
+  it('should forget a source named by its bare id or its machine name, and refuse a name that fits two', async () => {
+    const w = target();
+    const change = clone(await sourceBundle());
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    const recorded = parseCloneBase(batchRecord(w)?.content);
+    const filed = recorded.sources['self:daemon-source'];
+    should(filed).not.be.undefined();
+
+    // By the bare id the export carries, and by the machine name the source gave itself.
+    w.state.assets[BASE_PATH] = batchRecord(w)?.content ?? '';
+    should(await w.service.forgetCloneSource('daemon-source')).equal(true);
+    should(Object.keys(parseCloneBase(w.state.baseWrites[0]).sources)).deepEqual([]);
+
+    // Two sources under one name: nothing is forgotten, and the answer names both ids.
+    const twice = serializeCloneBase({
+      version: 1,
+      sources: { 'self:one': filed as never, 'self:two': filed as never },
+    });
+    w.state.assets[BASE_PATH] = twice;
+    w.state.baseWrites.length = 0;
+    const name = (filed as { name: string }).name;
+    await should(w.service.forgetCloneSource(name)).be.rejectedWith(
+      `More than one source is called ${name}: self:one, self:two. Name one by its id.`,
+    );
+    should(w.state.baseWrites).deepEqual([]);
   });
 });
 
@@ -1513,8 +1957,1507 @@ describe('parseImportRecord', () => {
   });
 });
 
+describe('the clone.import executor merging settings key by key', () => {
+  const MAIN_COPY = '/state/fleet/assets/components/instructions/main.md';
+  const WARDEN = `# yaml-language-server: $schema=../schema/warden.json
+# Mine: Jev stays off until I have read the bill.
+enabled: true # keep on
+layers:
+  jev: false # off on purpose
+  llm: false
+intervalMinutes: 5
+`;
+  const withInterval = (text: string, minutes: number): string =>
+    text.replace('intervalMinutes: 5', `intervalMinutes: ${String(minutes)}`);
+
+  const asking = (
+    verdicts: Partial<Record<'fleet' | 'warden', GrantRefusal>> = {},
+    governed = true,
+  ): CallerGovernance =>
+    ({
+      governed,
+      decide: demand => {
+        const refusal = verdicts[demand.capability as 'fleet' | 'warden'] ?? 'granted';
+        return { allowed: refusal === 'granted', refusal };
+      },
+    }) as CallerGovernance;
+  const AT_THE_MACHINE = asking({}, false);
+  const REMOTE = asking({}, true);
+  const WITHOUT_WARDEN = asking({ warden: 'not-granted' }, true);
+
+  interface Spent {
+    count: number;
+  }
+  const callerFor = (
+    governance: CallerGovernance | undefined,
+    extra: { freshStepUp?: boolean; agent?: boolean } = {},
+    spent: Spent = { count: 0 },
+  ): ExecutorCaller => ({
+    governance,
+    freshStepUp: extra.freshStepUp === true,
+    agent: extra.agent === true,
+    spend: () => {
+      spent.count += 1;
+    },
+  });
+
+  /** This machine's configuration files, in memory: what `PUT /v1/config/file` would read and write. */
+  function files(initial: Record<string, string>) {
+    const held = new Map(Object.entries(initial));
+    const writes: { path: string; text: string; ifMatch: string; mayLoosen: boolean }[] = [];
+    const etag = (path: string): string => (held.has(path) ? `etag:${Bun.hash(held.get(path) as string)}` : 'absent');
+    const state = { pending: false, invalid: false };
+    const port: CloneConfigFiles = {
+      file: async path => ({ exists: held.has(path), text: held.get(path) ?? '', etag: etag(path) }),
+      effective: async () => ({
+        warden: DEFAULT_WARDEN_CONFIG,
+        learning: DEFAULT_LEARNING_CONFIG,
+        voice: DEFAULT_VOICE_CONFIG,
+      }),
+      validate: async () =>
+        state.invalid ? [{ severity: 'error' as const, message: 'caps.jevUsdPerDay: must be a number', line: 3 }] : [],
+      write: async (path, text, ifMatch, mayLoosen) => {
+        writes.push({ path, text, ifMatch, mayLoosen });
+        if (ifMatch !== etag(path)) throw new ConfigFileConflictError(path);
+        held.set(path, text);
+        return { outcome: state.pending && !mayLoosen ? 'pending' : 'applied' };
+      },
+    };
+    return { held, writes, port, state };
+  }
+  type Files = ReturnType<typeof files>;
+
+  const sourceAt = async (content = 'Main.\n'): Promise<Record<string, unknown>> => {
+    const source = world({
+      catalog: { machineName: () => 'work-mac' },
+      overrides: { daemonId: () => 'daemon-source' },
+    });
+    source.state.reading = configReading(SET_UP_MODEL(), 'r');
+    source.state.assets[MAIN_DOCUMENT] = content;
+    return (await source.service.exportBundle()) as unknown as Record<string, unknown>;
+  };
+
+  /** A target that already took its first copy from the source, with these configuration files. */
+  const copied = async (own: Files): Promise<World> => {
+    const first = world({ overrides: { daemonId: () => 'daemon-target' } });
+    const alongside = { kind: 'clone.import', mode: 'alongside', bundle: await sourceAt() } as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+    await first.service.executors.clone.describe(alongside);
+    await first.service.executors.clone.execute(alongside);
+    const documents = first.applied[0]?.documents ?? [];
+    const target = world({ overrides: { daemonId: () => 'daemon-target', configFiles: own.port } });
+    target.state.reading = configReading(modelOfWrites(documents), 'r');
+    for (const document of documents) target.state.assets[document.path] = document.content;
+    target.state.emails = async () => [];
+    return target;
+  };
+
+  const request = (bundle: unknown, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'clone.import', mode: 'update', bundle, ...extra }) as Extract<
+      FleetAccountChange,
+      { kind: 'clone.import' }
+    >;
+
+  /** Review with the given settings, then apply with these decisions, as the catalogue's flow does. */
+  async function apply(
+    w: World,
+    bundle: unknown,
+    settings: { path: 'warden.yaml' | 'learning.yaml' | 'voice.yaml' | 'controls'; text: string }[],
+    settingsDecisions: Record<string, Record<string, 'take' | 'keep'>> | undefined,
+    caller: ExecutorCaller | undefined,
+  ): Promise<string> {
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, caller?.governance);
+    const change = request(bundle, {
+      reviewed: review.fingerprint,
+      decisions: {},
+      settings,
+      ...(settingsDecisions === undefined ? {} : { settingsDecisions }),
+    });
+    await w.service.executors.clone.describe(change, caller);
+    return await w.service.executors.clone.execute(change, caller);
+  }
+
+  /** The machine settings as the batch's `machine.yaml` says them. */
+  const machineOf = (documents: readonly FleetDocumentWrite[]) => {
+    const document = documents.find(candidate => candidate.path.endsWith('/machine.yaml'));
+    const checked = checkConfigFile('machine.yaml', document?.content ?? '');
+    if (!checked.ok) throw new Error('machine.yaml does not check');
+    return (checked.value as { machine: AccountModel['machine'] }).machine;
+  };
+
+  const recordOf = (w: World) =>
+    parseCloneBase((w.applied.at(-1)?.documents ?? []).find(document => document.path === BASE_PATH)?.content);
+  const settingsOf = (w: World, doc: string): Record<string, string> =>
+    Object.values(recordOf(w).sources)[0]?.settings?.[doc as 'warden.yaml'] ?? {};
+
+  it('should list the keys that differ, per file, and bind the review to them', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const items = await w.service.reviewClone({ bundle: bundle as never });
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+    should(review.settings).deepEqual([
+      {
+        path: 'warden.yaml',
+        keys: [{ key: 'intervalMinutes', outcome: 'both', mine: '5', theirs: '10' }],
+      },
+    ]);
+    // Bound: the same items with other settings is another review.
+    should(review.fingerprint).not.equal(items.fingerprint);
+    const other = await w.service.reviewClone(
+      { bundle: bundle as never, settings: [{ path: 'warden.yaml', text: withInterval(WARDEN, 12) }] },
+      REMOTE,
+    );
+    should(other.fingerprint).not.equal(review.fingerprint);
+  });
+
+  it('should refuse a both-changed key until it has a choice, writing nothing', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const refusal = await catalogRefusal(
+      apply(w, bundle, settings, undefined, callerFor(REMOTE)),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('warden.yaml: intervalMinutes');
+    should(own.writes).deepEqual([]);
+    should(w.applied).deepEqual([]);
+  });
+
+  it('should write the merged file against the version it compared with, held for a remote caller and live at the machine', async () => {
+    for (const [governance, mayLoosen] of [
+      [REMOTE, false],
+      [AT_THE_MACHINE, true],
+    ] as const) {
+      const own = files({ 'warden.yaml': WARDEN });
+      const w = await copied(own);
+      const bundle = await sourceAt();
+      const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+      await apply(w, bundle, settings, { 'warden.yaml': { intervalMinutes: 'take' } }, callerFor(governance));
+      should(own.writes).have.length(1);
+      const [write] = own.writes;
+      should(write?.mayLoosen).equal(mayLoosen);
+      should(write?.ifMatch).equal(`etag:${String(Bun.hash(WARDEN))}`);
+      // Exactly this machine's file with the one value changed: its comments and key order survive.
+      should(write?.text).equal(withInterval(WARDEN, 10));
+      // The record moves on in the copy's own batch: digests only, B := theirs.
+      const digests = settingsOf(w, 'warden.yaml');
+      should(Object.keys(digests).toSorted()).deepEqual(['enabled', 'intervalMinutes', 'layers.jev', 'layers.llm']);
+      should(JSON.stringify(recordOf(w))).not.containEql('Jev stays off');
+    }
+  });
+
+  it('should keep a key the person keeps, write nothing for it, and still file the source’s value as the base', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    await apply(w, bundle, settings, { 'warden.yaml': { intervalMinutes: 'keep' } }, callerFor(REMOTE));
+    should(own.writes).deepEqual([]);
+    should(own.held.get('warden.yaml')).equal(WARDEN);
+    should(settingsOf(w, 'warden.yaml').intervalMinutes).equal(sha256Hex('10'));
+    // Next time it is "changed here (kept)", not a conflict again.
+    for (const document of w.applied[0]?.documents ?? []) w.state.assets[document.path] = document.content;
+    const again = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+    should(again.settings[0]?.keys.map(key => [key.key, key.outcome])).deepEqual([['intervalMinutes', 'mine']]);
+  });
+
+  it('should take a key changed only on the source by default, with nothing for the person to decide', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    // First copy: the person keeps theirs, which files the source's 5 as the base.
+    await apply(w, bundle, [{ path: 'warden.yaml', text: WARDEN }], undefined, callerFor(REMOTE));
+    for (const document of w.applied[0]?.documents ?? []) w.state.assets[document.path] = document.content;
+    w.applied.length = 0;
+    // The source then changes the value.
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 20) }];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+    should(review.settings[0]?.keys).deepEqual([
+      { key: 'intervalMinutes', outcome: 'theirs', choice: 'take', mine: '5', theirs: '20' },
+    ]);
+    await apply(w, bundle, settings, undefined, callerFor(REMOTE));
+    should(own.writes.at(-1)?.text).equal(withInterval(WARDEN, 20));
+  });
+
+  it('should refuse a settings file the caller may not write, at review, at staging and at apply', async () => {
+    const own = files({ 'warden.yaml': WARDEN, 'learning.yaml': 'enabled: true\n' });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [
+      { path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) },
+      { path: 'learning.yaml' as const, text: 'enabled: false\n' },
+    ];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, WITHOUT_WARDEN);
+    should(review.settings.map(entry => [entry.path, entry.refused !== undefined, entry.keys.length])).deepEqual([
+      ['warden.yaml', true, 0],
+      ['learning.yaml', false, 1],
+    ]);
+    should(review.settings[0]?.refused).containEql('may not change warden.yaml');
+    const change = request(bundle, {
+      reviewed: review.fingerprint,
+      decisions: {},
+      settings,
+      settingsDecisions: { 'warden.yaml': { intervalMinutes: 'take' }, 'learning.yaml': { enabled: 'take' } },
+    });
+    const staged = await catalogRefusal(
+      w.service.executors.clone.describe(change, callerFor(WITHOUT_WARDEN)),
+      'fleet_change_refused',
+    );
+    should(staged.message).containEql('may not change warden.yaml');
+    await catalogRefusal(w.service.executors.clone.execute(change, callerFor(WITHOUT_WARDEN)), 'fleet_change_refused');
+    // Not one file was written, not even the one this caller may write.
+    should(own.writes).deepEqual([]);
+    should(w.applied).deepEqual([]);
+  });
+
+  it('should refuse settings carried on a copy that is not a repeat copy, rather than ignore them', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const change = {
+      kind: 'clone.import',
+      mode: 'alongside',
+      bundle,
+      settings: [{ path: 'warden.yaml', text: withInterval(WARDEN, 10) }],
+    } as unknown as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(change, callerFor(REMOTE)),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('only when a copy is repeated');
+    should(own.writes).deepEqual([]);
+  });
+
+  it('should refuse every settings file when the daemon cannot say what the caller may do', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, undefined);
+    should(review.settings[0]?.refused).containEql('daemon bug');
+    const change = request(bundle, { reviewed: review.fingerprint, decisions: {}, settings });
+    await catalogRefusal(w.service.executors.clone.describe(change), 'fleet_change_refused');
+    should(own.writes).deepEqual([]);
+  });
+
+  it('should let a device that needs a passkey stage the copy, and refuse the apply until it has one', async () => {
+    const needsPasskey = asking({ warden: 'step-up-required' }, true);
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, needsPasskey);
+    should(review.settings[0]?.refused).be.undefined();
+    const change = request(bundle, {
+      reviewed: review.fingerprint,
+      decisions: {},
+      settings,
+      settingsDecisions: { 'warden.yaml': { intervalMinutes: 'take' } },
+    });
+    await w.service.executors.clone.describe(change, callerFor(needsPasskey));
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.execute(change, callerFor(needsPasskey)),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('needs a passkey');
+    should(own.writes).deepEqual([]);
+  });
+
+  it('should refuse an apply whose file moved after the review', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+    own.held.set('warden.yaml', withInterval(WARDEN, 7));
+    const change = request(bundle, {
+      reviewed: review.fingerprint,
+      decisions: {},
+      settings,
+      settingsDecisions: { 'warden.yaml': { intervalMinutes: 'take' } },
+    });
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(change, callerFor(REMOTE)),
+      'fleet_change_refused',
+    );
+    should(refusal.message).equal('Something changed since you reviewed. Review again.');
+    should(own.writes).deepEqual([]);
+  });
+
+  it('should refuse a merged file that would not check, before anything is written', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    own.state.invalid = true;
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const refusal = await catalogRefusal(
+      apply(w, bundle, settings, { 'warden.yaml': { intervalMinutes: 'take' } }, callerFor(REMOTE)),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('line 3: caps.jevUsdPerDay: must be a number');
+    should(own.writes).deepEqual([]);
+    should(w.applied).deepEqual([]);
+  });
+
+  it('should say a held write was held, and still record it', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    own.state.pending = true;
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+    const summary = await apply(w, bundle, settings, { 'warden.yaml': { intervalMinutes: 'take' } }, callerFor(REMOTE));
+    should(summary).containEql('1 settings file held until you confirm it');
+    should(settingsOf(w, 'warden.yaml').intervalMinutes).equal(sha256Hex('10'));
+  });
+
+  it('should add a file this machine does not have as the source wrote it', async () => {
+    const own = files({});
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    const settings = [{ path: 'voice.yaml' as const, text: 'postProcessing:\n  provider: off\n' }];
+    const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+    should(review.settings[0]).containEql({ path: 'voice.yaml', isNew: true });
+    await apply(w, bundle, settings, undefined, callerFor(REMOTE));
+    should(own.writes).have.length(1);
+    should(own.writes[0]).containEql({ path: 'voice.yaml', ifMatch: 'absent', text: settings[0]?.text });
+  });
+
+  it('should refuse a settings file when this machine cannot merge settings, naming the file', async () => {
+    const w = world();
+    w.state.reading = configReading(SET_UP_MODEL(), 'r');
+    const bundle = await sourceAt();
+    const refusal = await setupRefusal(
+      w.service.reviewClone({ bundle: bundle as never, settings: [{ path: 'warden.yaml', text: WARDEN }] }),
+      'fleet_setup_refused',
+    );
+    should(refusal.message).containEql('warden.yaml');
+  });
+
+  describe('a write that fails between the review and the write', () => {
+    /** A target whose file port fails the write with this error, as a file that moved or broke in that instant would. */
+    async function failing(error: Error) {
+      const own = files({ 'warden.yaml': WARDEN });
+      own.port.write = async () => {
+        throw error;
+      };
+      return { own, w: await copied(own) };
+    }
+    const take = { 'warden.yaml': { intervalMinutes: 'take' as const } };
+    const interval = () => [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+
+    it('should refuse as stale when the file moved, changing nothing else', async () => {
+      const { w } = await failing(new ConfigFileConflictError('warden.yaml'));
+      const refusal = await catalogRefusal(
+        apply(w, await sourceAt(), interval(), take, callerFor(REMOTE)),
+        'fleet_change_stale',
+      );
+      should(refusal.message).containEql('warden.yaml changed on this machine after it was reviewed');
+      should(w.applied).deepEqual([]);
+    });
+
+    it('should refuse naming the file when the write finds it does not check', async () => {
+      const { w } = await failing(
+        new ConfigFileInvalidError([
+          { path: 'warden.yaml', severity: 'error', message: 'intervalMinutes is wrong', fix: 'Use 5 or 10.' },
+        ]),
+      );
+      const refusal = await catalogRefusal(
+        apply(w, await sourceAt(), interval(), take, callerFor(REMOTE)),
+        'fleet_change_refused',
+      );
+      should(refusal.message).containEql('warden.yaml would not check on this machine, so it was not written');
+      should(refusal.message).containEql('intervalMinutes is wrong');
+      should(w.applied).deepEqual([]);
+    });
+
+    it('should let any other failure through as it is', async () => {
+      const broken = new Error('disk full');
+      const { w } = await failing(broken);
+      should(await thrown(apply(w, await sourceAt(), interval(), take, callerFor(REMOTE)))).equal(broken);
+      should(w.applied).deepEqual([]);
+    });
+  });
+
+  describe('what the confirm card says of a loosening', () => {
+    const loosening = [{ path: 'warden.yaml' as const, text: WARDEN.replace('jev: false', 'jev: true') }];
+    const describing = async (caller: ExecutorCaller): Promise<string> => {
+      const w = await copied(files({ 'warden.yaml': WARDEN }));
+      const bundle = await sourceAt();
+      const review = await w.service.reviewClone({ bundle: bundle as never, settings: loosening }, caller.governance);
+      const change = request(bundle, {
+        reviewed: review.fingerprint,
+        decisions: {},
+        settings: loosening,
+        settingsDecisions: { 'warden.yaml': { 'layers.jev': 'take' } },
+      });
+      return await w.service.executors.clone.describe(change, caller);
+    };
+
+    it('should say a device away from the machine writes it but holds it until confirmed', async () => {
+      should(await describing(callerFor(REMOTE))).containEql(
+        'warden.yaml would loosen what studio may spend or do; it is written but held until you confirm it.',
+      );
+    });
+
+    it('should say at the machine it takes effect now', async () => {
+      should(await describing(callerFor(AT_THE_MACHINE))).containEql('you are at the machine, so it takes effect now.');
+    });
+  });
+
+  it('should refuse settings decisions when no settings were sent', async () => {
+    const w = await copied(files({ 'warden.yaml': WARDEN }));
+    const bundle = await sourceAt();
+    const review = await w.service.reviewClone({ bundle: bundle as never });
+    const change = request(bundle, {
+      reviewed: review.fingerprint,
+      decisions: {},
+      settingsDecisions: { 'warden.yaml': { intervalMinutes: 'take' } },
+    });
+    const refusal = await catalogRefusal(
+      w.service.executors.clone.describe(change, callerFor(REMOTE)),
+      'fleet_change_refused',
+    );
+    should(refusal.message).containEql('Settings were decided, but no settings were sent');
+  });
+
+  describe('review findings on the merge', () => {
+    const SIGNED_IN_SECRETS = { CLAUDE_TOKEN: 'sk-ant-oat01-fixture-not-real', JEV_API_KEY: 'jev-fixture-not-real' };
+    /** The fixture secret store as bytes, to prove a settings merge leaves a signed-in login's secrets alone (§14.4). */
+    const secretBytes = (w: World): string => JSON.stringify([...w.secrets].toSorted());
+    const writesLogins = (w: World): boolean =>
+      w.applied.some(batch => batch.documents.some(document => document.path.includes('/logins/')));
+    const EMPTIED = WARDEN.replace(/layers:\n {2}jev: false # off on purpose\n {2}llm: false\n/u, 'layers: {}\n');
+
+    it('should list an emptied mapping as ONE row and keep the children unless the person takes it', async () => {
+      const own = files({ 'warden.yaml': WARDEN });
+      const w = await copied(own);
+      for (const [name, value] of Object.entries(SIGNED_IN_SECRETS)) w.secrets.set(name, value);
+      const before = secretBytes(w);
+      const bundle = await sourceAt();
+      const settings = [{ path: 'warden.yaml' as const, text: EMPTIED }];
+      const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+      should(review.settings[0]?.keys.map(key => [key.key, key.outcome])).deepEqual([['layers', 'both']]);
+      // Nothing chosen for it: the apply is refused until the person decides.
+      await catalogRefusal(apply(w, bundle, settings, undefined, callerFor(REMOTE)), 'fleet_change_refused');
+      await apply(w, bundle, settings, { 'warden.yaml': { layers: 'keep' } }, callerFor(REMOTE));
+      should(own.writes).deepEqual([]);
+      should(own.held.get('warden.yaml')).equal(WARDEN);
+      await apply(w, bundle, settings, { 'warden.yaml': { layers: 'take' } }, callerFor(AT_THE_MACHINE));
+      should(own.writes).have.length(1);
+      should(own.held.get('warden.yaml')).containEql('layers: {}');
+      // §14.4: a signed-in login and its secrets are byte-identical across the keep and the take.
+      should(secretBytes(w)).equal(before);
+      should(writesLogins(w)).equal(false);
+    });
+
+    it('should refuse a configuration file of THIS machine that holds a raw secret, and show and record none of it', async () => {
+      const token = 'sk-ant-api03-EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE';
+      const own = files({ 'warden.yaml': `${WARDEN}investigation:\n  token: ${token}\n` });
+      const w = await copied(own);
+      for (const [name, value] of Object.entries(SIGNED_IN_SECRETS)) w.secrets.set(name, value);
+      const before = secretBytes(w);
+      const bundle = await sourceAt();
+      const settings = [{ path: 'warden.yaml' as const, text: withInterval(WARDEN, 10) }];
+      const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+      should(review.settings[0]?.refused).containEql('Your warden.yaml');
+      should(review.settings[0]?.keys).deepEqual([]);
+      should(JSON.stringify(review)).not.containEql(token);
+      should(JSON.stringify(review)).not.containEql(sha256Hex(token));
+      const refusal = await catalogRefusal(
+        apply(w, bundle, settings, undefined, callerFor(REMOTE)),
+        'fleet_change_refused',
+      );
+      should(refusal.message).not.containEql(token);
+      should(own.writes).deepEqual([]);
+      should(own.held.get('warden.yaml')).containEql(token);
+      should(secretBytes(w)).equal(before);
+      should(w.applied).deepEqual([]);
+    });
+  });
+
+  describe('the controls', () => {
+    const controls = (patch: object) => [
+      {
+        path: 'controls' as const,
+        text: JSON.stringify({ agentPermissions: 'auto', agentControl: { files: true }, ...patch }),
+      },
+    ];
+
+    it('should apply only the fields taken, in the copy’s own batch', async () => {
+      const own = files({});
+      const w = await copied(own);
+      const bundle = await sourceAt();
+      const settings = controls({ agentPermissions: 'skip', agentControl: { files: false, browsers: false } });
+      const review = await w.service.reviewClone({ bundle: bundle as never, settings }, REMOTE);
+      const keys = Object.fromEntries(review.settings[0]?.keys.map(key => [key.key, key.outcome]) ?? []);
+      should(keys).deepEqual({
+        agentPermissions: 'both',
+        'agentControl.browsers': 'both',
+        'agentControl.files': 'both',
+      });
+      await apply(
+        w,
+        bundle,
+        settings,
+        { controls: { 'agentControl.files': 'take', 'agentControl.browsers': 'keep', agentPermissions: 'keep' } },
+        callerFor(REMOTE),
+      );
+      const machine = machineOf(w.applied[0]?.documents ?? []);
+      should(machine.agentControl.files).equal(false);
+      should(machine.agentControl.browsers).equal(true);
+      should(machine.agentPermissions).equal('auto');
+      should(own.writes).deepEqual([]);
+      should(Object.keys(settingsOf(w, 'controls')).toSorted()).containEql('agentControl.files');
+    });
+
+    it('should need a passkey to turn what agents may control back on from a remote device, and keep the change to retry', async () => {
+      const own = files({});
+      const w = await copied(own);
+      const bundle = await sourceAt();
+      const settings = controls({ agentControl: { pageScripts: true } });
+      const decisions = { controls: { 'agentControl.pageScripts': 'take' as const } };
+      const spent: Spent = { count: 0 };
+      const thrownError = await thrown(apply(w, bundle, settings, decisions, callerFor(REMOTE, {}, spent)));
+      should(thrownError).be.instanceOf(FleetCatalogFreshStepUpRequired);
+      should(w.applied).deepEqual([]);
+      // With a passkey proved for the act it goes through, and the proof is spent once.
+      await apply(w, bundle, settings, decisions, callerFor(REMOTE, { freshStepUp: true }, spent));
+      should(spent.count).equal(1);
+      should(machineOf(w.applied[0]?.documents ?? []).agentControl.pageScripts).equal(true);
+    });
+
+    it('should refuse to widen what agents may control when the daemon cannot say what the caller may do', async () => {
+      const w = await copied(files({}));
+      const settings = controls({ agentControl: { pageScripts: true } });
+      const refusal = await catalogRefusal(
+        apply(
+          w,
+          await sourceAt(),
+          settings,
+          { controls: { 'agentControl.pageScripts': 'take' } },
+          callerFor(undefined),
+        ),
+        'fleet_change_refused',
+      );
+      should(refusal.message).containEql('cannot say whether this caller may widen what agents may control');
+      should(w.applied).deepEqual([]);
+    });
+
+    /** The app's settings-only update: every item the review lists is left to the fleet copy (new ones skipped). */
+    async function settingsOnlyUpdate(
+      w: World,
+      bundle: unknown,
+      settings: { path: 'controls'; text: string }[],
+      choice: 'take' | 'keep',
+    ): Promise<string> {
+      const review = await w.service.reviewClone({ bundle: bundle as never, settings }, undefined);
+      const change = request(bundle, {
+        reviewed: review.fingerprint,
+        decisions: Object.fromEntries(review.items.map(item => [item.ref, item.outcome === 'new' ? 'skip' : 'keep'])),
+        settings,
+        settingsDecisions: { controls: { defaultRuntime: choice } },
+      });
+      const caller = callerFor(AT_THE_MACHINE);
+      await w.service.executors.clone.describe(change, caller);
+      return await w.service.executors.clone.execute(change, caller);
+    }
+
+    it('should follow the runtime to its new name when it clashes with one already here', async () => {
+      const w = await copied(files({}));
+      const bundle = await sourceAt();
+      await settingsOnlyUpdate(w, bundle, controls({ defaultRuntime: 'claude-default' }), 'keep');
+      const copy = {
+        kind: 'clone.import',
+        mode: 'alongside',
+        bundle,
+        defaultRuntime: 'claude-default',
+      } as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+      await w.service.executors.clone.describe(copy);
+      await w.service.executors.clone.execute(copy);
+      should(machineOf(w.applied.at(-1)?.documents ?? []).defaultRuntime).equal('claude-default-2');
+    });
+
+    it('should take a first copy: the settings-only update leaves the default to the fleet copy, which then sets it', async () => {
+      const own = files({});
+      const first = world({ overrides: { daemonId: () => 'daemon-target', configFiles: own.port } });
+      first.state.emails = async () => [];
+      const bundle = await sourceAt();
+      const settings = controls({ defaultRuntime: 'claude-default' });
+      const settingsOnly = (choice: 'take' | 'keep') => settingsOnlyUpdate(first, bundle, settings, choice);
+      // Taking the default now would name a runtime this machine does not have yet: the model is refused.
+      const refusal = await catalogRefusal(settingsOnly('take'), 'fleet_change_refused');
+      should(refusal.message).containEql('setup it cannot read');
+      // Kept for the picker, as the app sends it while it copies the fleet: the update goes through.
+      await settingsOnly('keep');
+      should(machineOf(first.applied[0]?.documents ?? []).defaultRuntime).be.undefined();
+      // The fleet copy that follows brings the runtime and sets the default beside it.
+      const copy = {
+        kind: 'clone.import',
+        mode: 'alongside',
+        bundle,
+        defaultRuntime: 'claude-default',
+      } as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+      await first.service.executors.clone.describe(copy);
+      await first.service.executors.clone.execute(copy);
+      should(machineOf(first.applied.at(-1)?.documents ?? []).defaultRuntime).equal('claude-default');
+    });
+
+    it('should refuse controls that would leave the machine with a setup it cannot read', async () => {
+      const w = await copied(files({}));
+      const settings = controls({ defaultRuntime: 'no-such-runtime' });
+      const refusal = await catalogRefusal(
+        apply(w, await sourceAt(), settings, { controls: { defaultRuntime: 'take' } }, callerFor(AT_THE_MACHINE)),
+        'fleet_change_refused',
+      );
+      should(refusal.message).containEql('would leave studio with a setup it cannot read');
+      should(w.applied).deepEqual([]);
+    });
+
+    it('should not ask at the machine, and never let a ferret widen', async () => {
+      const own = files({});
+      const w = await copied(own);
+      const bundle = await sourceAt();
+      const settings = controls({ agentControl: { pageScripts: true } });
+      const decisions = { controls: { 'agentControl.pageScripts': 'take' as const } };
+      await apply(w, bundle, settings, decisions, callerFor(AT_THE_MACHINE));
+      should(w.applied).have.length(1);
+      const ferret = await copied(files({}));
+      const refused = await thrown(
+        apply(ferret, bundle, settings, decisions, callerFor(AT_THE_MACHINE, { agent: true })),
+      );
+      should((refused as { status?: number }).status).equal(403);
+      should(ferret.applied).deepEqual([]);
+    });
+  });
+
+  it('should leave every login, sign-in and secret byte-identical, taking a setting or keeping it (account-model §14.4)', async () => {
+    for (const choice of ['take', 'keep'] as const) {
+      // Arrange: a signed-in login and a stored secret, and a warden file that names that secret.
+      const text = `${WARDEN}investigation:\n  note: \${secret:JEV_API_KEY}\n`;
+      const own = files({ 'warden.yaml': text });
+      const w = await copied(own);
+      w.secrets.set('JEV_API_KEY', 'sk-do-not-touch');
+      const loginsBefore = JSON.stringify(w.state.reading.model.credentials);
+      const bundle = await sourceAt();
+      const settings = [
+        { path: 'warden.yaml' as const, text: withInterval(text, 10) },
+        { path: 'controls' as const, text: JSON.stringify({ agentControl: { files: false } }) },
+      ];
+
+      // Act
+      await apply(
+        w,
+        bundle,
+        settings,
+        { 'warden.yaml': { intervalMinutes: choice }, controls: { 'agentControl.files': choice } },
+        callerFor(AT_THE_MACHINE),
+      );
+
+      // Assert: the secret store, the logins and every credential document are exactly as they were.
+      should([...w.secrets]).deepEqual([['JEV_API_KEY', 'sk-do-not-touch']]);
+      const written = w.applied[0]?.documents ?? [];
+      should(JSON.stringify(w.state.reading.model.credentials)).equal(loginsBefore);
+      should(written.map(document => document.path).filter(path => /credential|\/logins\//u.test(path))).deepEqual([]);
+      for (const write of own.writes) should(write.text).containEql('${secret:JEV_API_KEY}');
+      should(configTextOf(written)).not.containEql('sk-do-not-touch');
+    }
+  });
+
+  it('should not touch the clone’s own items when only settings are decided', async () => {
+    const own = files({ 'warden.yaml': WARDEN });
+    const w = await copied(own);
+    const bundle = await sourceAt();
+    await apply(
+      w,
+      bundle,
+      [{ path: 'warden.yaml', text: withInterval(WARDEN, 10) }],
+      { 'warden.yaml': { intervalMinutes: 'take' } },
+      callerFor(REMOTE),
+    );
+    should((w.applied[0]?.documents ?? []).find(document => document.path === MAIN_COPY)).be.undefined();
+  });
+});
+
 describe('createFleetSetupSubsystem', () => {
   it('should build the service the composition root mounts', () => {
     should(world().service).be.instanceOf(FleetSetupService);
+  });
+});
+
+// ── Re-copy never touches a login, a secret or a default (account-model §14.4) ───────────────────
+
+describe('a re-copy leaves a signed-in login, its secrets, its factors and the defaults byte-identical', () => {
+  const MAIN_COPY = '/state/fleet/assets/components/instructions/main.md';
+  const AUTH = '/state/fleet/homes/claude-you/.credentials.json';
+  const FACTORS = '/state/fleet/homes/claude-you/factors.json';
+  const SIGNED_IN_ROW = credentialRow('claude-you', 'you@example.com');
+  const SECRETS: readonly (readonly [string, string])[] = [
+    ['NOTES_TOKEN', 'ghp_do_not_touch'],
+    ['SECOND_KEY', 'sk_do_not_touch_either'],
+  ];
+  /** The account model as JSON, to patch: every section is a table of tables. */
+  interface ModelJson {
+    machine: Record<string, unknown>;
+    credentials: Record<string, Record<string, unknown>>;
+    components: Record<string, Record<string, Record<string, unknown>>>;
+    profiles: Record<string, Record<string, unknown>>;
+    runtimes: Record<string, Record<string, unknown>>;
+  }
+  const clone = (bundle: unknown, extra: Record<string, unknown>) =>
+    ({ kind: 'clone.import', bundle, ...extra }) as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+
+  /** What another machine exports: the set-up model, `content` as its main instructions, plus any model patch. */
+  const exported = async (patch: (json: ModelJson) => void = () => undefined, content = 'Main.\n') => {
+    const json = JSON.parse(JSON.stringify(SET_UP_MODEL())) as ModelJson;
+    patch(json);
+    const source = world({
+      catalog: { machineName: () => 'work-mac' },
+      overrides: { daemonId: () => 'daemon-source' },
+    });
+    source.state.reading = configReading(parseAccountModel(json), 'r');
+    source.state.assets[MAIN_DOCUMENT] = content;
+    return (await source.service.exportBundle()) as unknown as Record<string, unknown>;
+  };
+
+  const run = async (w: World, change: Extract<FleetAccountChange, { kind: 'clone.import' }>) => {
+    await w.service.executors.clone.describe(change);
+    await w.service.executors.clone.execute(change);
+    return w.applied.flatMap(applied => applied.documents);
+  };
+
+  /** A machine that took a first copy, then signed in, kept two secrets and set its defaults. */
+  const signedIn = async (
+    options: { legacy?: boolean; extraLogin?: boolean; first?: Record<string, unknown> } = {},
+  ): Promise<{ w: World; before: AccountModel }> => {
+    const first = world({ overrides: { daemonId: () => 'daemon-target' } });
+    const documents = await run(first, clone(options.first ?? (await exported()), { mode: 'alongside' }));
+    const json = JSON.parse(JSON.stringify(modelOfWrites(documents))) as ModelJson;
+    json.machine = { ...json.machine, defaultRuntime: 'claude-default' };
+    if (options.extraLogin === true) {
+      json.credentials['claude-two'] = { harness: 'claude', store: 'host', label: 'second' };
+    }
+    if (options.legacy === true) {
+      // A copy made before origin links existed: it says where it came from by name, with no key and no record.
+      for (const section of [...Object.values(json.components), json.profiles, json.credentials, json.runtimes]) {
+        for (const entry of Object.values(section)) {
+          delete entry.clonedFromKey;
+          delete entry.clonedFromDaemon;
+        }
+      }
+    }
+    const before = parseAccountModel(json);
+    const w = world({ overrides: { daemonId: () => 'daemon-target' } });
+    w.state.reading = configReading(before, 'r');
+    for (const document of documents)
+      if (document.path.startsWith('/state/fleet/')) w.state.assets[document.path] = document.content;
+    if (options.legacy === true) delete w.state.assets[BASE_PATH];
+    w.state.emails = async () => [
+      SIGNED_IN_ROW,
+      ...(options.extraLogin === true ? [credentialRow('claude-two', 'you@example.com')] : []),
+    ];
+    for (const [name, value] of SECRETS) w.secrets.set(name, value);
+    w.state.assets[AUTH] = 'sealed-refresh-token-bytes';
+    w.state.assets[FACTORS] = '{"passkeys":["credential-id-1"],"totp":"enrolled"}';
+    return { w, before };
+  };
+
+  /** The model after a set of writes: the files the model is held in, with each write or removal replayed on them. */
+  const replay = (before: AccountModel, documents: readonly FleetDocumentWrite[]): AccountModel => {
+    const files = new Map<string, string>();
+    for (const [path, { address, value }] of accountModelFiles(before)) {
+      const text = renderConfigFile(path, address, value, undefined);
+      if (text !== undefined) files.set(`/state/config/${path}`, text);
+    }
+    for (const document of documents) {
+      if (!document.path.startsWith('/state/config/')) continue;
+      if (document.remove === true) files.delete(document.path);
+      else files.set(document.path, document.content);
+    }
+    return assembleAccountModel(
+      [...files].map(([path, text]) => {
+        const checked = checkConfigFile(path.slice('/state/config/'.length), text);
+        if (!checked.ok) throw new Error(`${path} does not check`);
+        return { address: checked.address, value: checked.value };
+      }),
+    );
+  };
+
+  /** Everything a login holds that this service could have reached, and nothing it should: before against after. */
+  const proveUntouched = (w: World, before: AccountModel, documents: readonly FleetDocumentWrite[]): void => {
+    const loginFiles = [...accountModelFiles(before)]
+      .filter(([, file]) => file.address.kind === 'login')
+      .map(([path]) => `/state/config/${path}`);
+    should(loginFiles.length).be.above(0);
+    // No write or removal names a login's file, its sign-in, or its factors.
+    should(documents.map(document => document.path).filter(path => loginFiles.includes(path))).eql([]);
+    should(documents.map(document => document.path).filter(path => path.startsWith('/state/fleet/homes/'))).eql([]);
+    // The stores read back the same, byte for byte.
+    should([...w.secrets]).deepEqual([...SECRETS]);
+    should(w.state.assets[AUTH]).equal('sealed-refresh-token-bytes');
+    should(w.state.assets[FACTORS]).equal('{"passkeys":["credential-id-1"],"totp":"enrolled"}');
+    // Replayed, every login the machine had is the same login, and its default is the same default.
+    const after = replay(before, documents);
+    for (const [id, login] of Object.entries(before.credentials)) should(after.credentials[id]).deepEqual(login);
+    should(after.machine.defaultRuntime).equal(before.machine.defaultRuntime);
+  };
+
+  it('should leave every login, secret and default alone in an Update, whatever the person chose', async () => {
+    const { w, before } = await signedIn();
+    const bundle = await exported(() => undefined, 'Main, changed on the source.\n');
+    const review = await w.service.reviewClone({ bundle });
+    should(review.items.find(row => row.ref === 'instructions/main')?.outcome).equal('theirs');
+    const documents = await run(w, clone(bundle, { mode: 'update', reviewed: review.fingerprint, decisions: {} }));
+    should(documents.find(document => document.path === MAIN_COPY)?.content).equal('Main, changed on the source.\n');
+    proveUntouched(w, before, documents);
+  });
+
+  it('should leave them alone when the person names which existing login a sign-in uses', async () => {
+    const { w, before } = await signedIn({ extraLogin: true, legacy: true });
+    const bundle = await exported();
+    const review = await w.service.reviewClone({ bundle });
+    const ask = review.logins.find(login => login.sourceId === 'claude-you');
+    should(ask?.outcome).equal('ask');
+    should(ask?.candidates).deepEqual(['claude-two', 'claude-you']);
+    const change = clone(bundle, {
+      mode: 'update',
+      reviewed: review.fingerprint,
+      decisions: {},
+      logins: { 'claude-you': 'claude-two' },
+    });
+    proveUntouched(w, before, await run(w, change));
+  });
+
+  it('should leave them alone in Add alongside, which renames what clashes rather than replacing it', async () => {
+    const { w, before } = await signedIn();
+    const documents = await run(w, clone(await exported(), { mode: 'alongside' }));
+    should(documents.some(document => document.path.startsWith('/state/config/'))).be.true();
+    proveUntouched(w, before, documents);
+  });
+
+  it('should leave them alone in Start over: Replace clears the setup, never a login, a secret or a factor', async () => {
+    const { w, before } = await signedIn();
+    const documents = await run(w, clone(await exported(), { mode: 'replace' }));
+    proveUntouched(w, before, documents);
+  });
+
+  it('should leave them alone when the person removes an item the source no longer has', async () => {
+    // The first copy brought a runtime the source has since dropped.
+    const withExtra = await exported(json => {
+      json.runtimes['claude-extra'] = { credential: 'claude-you', profile: 'default' };
+    });
+    const { w, before } = await signedIn({ first: withExtra });
+    const bundle = await exported();
+    const review = await w.service.reviewClone({ bundle });
+    should(review.items.find(row => row.ref === 'runtime/claude-extra')?.outcome).equal('gone');
+    const documents = await run(
+      w,
+      clone(bundle, { mode: 'update', reviewed: review.fingerprint, decisions: { 'runtime/claude-extra': 'remove' } }),
+    );
+    should(documents.some(document => document.remove === true && document.path.includes('claude-extra'))).be.true();
+    proveUntouched(w, before, documents);
+  });
+
+  it('should link an identical old copy by name without writing a document, so the next source edit is theirs, not both', async () => {
+    // Arrange: an old copy, identical to the source, with nothing recording where it came from.
+    const { w, before } = await signedIn({ legacy: true });
+    const bundle = await exported();
+    const review = await w.service.reviewClone({ bundle });
+    should(review.items).deepEqual([]);
+    should(review.same.probable).be.above(0);
+
+    // Act: finish, as the sheet does: the reviewed fingerprint and no decision.
+    const documents = await run(w, clone(bundle, { mode: 'update', reviewed: review.fingerprint, decisions: {} }));
+
+    // Assert: only the links and the record of the copy are written; no asset document, no login, no secret.
+    should(documents.filter(document => document.path.startsWith('/state/fleet/assets/'))).eql([]);
+    should(documents.some(document => document.path === BASE_PATH)).be.true();
+    proveUntouched(w, before, documents);
+
+    // Next: the source edits a document, and this machine is shown a source-only change.
+    const linked = world({ overrides: { daemonId: () => 'daemon-target' } });
+    linked.state.reading = configReading(replay(before, documents), 'r');
+    linked.state.assets = { ...w.state.assets };
+    for (const document of documents)
+      if (document.path.startsWith('/state/fleet/')) linked.state.assets[document.path] = document.content;
+    linked.state.emails = w.state.emails;
+    const edited = await linked.service.reviewClone({
+      bundle: await exported(() => undefined, 'Main, edited on the source.\n'),
+    });
+    const main = edited.items.find(row => row.ref === 'instructions/main');
+    should(main?.outcome).equal('theirs');
+    should(main?.choice).equal('take');
+  });
+
+  it('should have called that edit a conflict had the link never been written', async () => {
+    const { w } = await signedIn({ legacy: true });
+    const edited = await w.service.reviewClone({
+      bundle: await exported(() => undefined, 'Main, edited on the source.\n'),
+    });
+    should(edited.items.find(row => row.ref === 'instructions/main')?.outcome).equal('both');
+  });
+});
+
+describe('API keys newer on the source', () => {
+  const SOURCE = 'daemon-source';
+  const KEY_API = 'cccccccccccccccccccccccccc';
+  const T0 = '2026-10-01T08:00:00.000Z';
+  const T1 = '2026-10-10T08:00:00.000Z';
+  const T2 = '2026-10-20T08:00:00.000Z';
+  const T3 = '2026-10-25T08:00:00.000Z';
+  const FAKE_VALUE = 'sk-live-0123456789abcdef';
+  const OTHER_VALUE = 'correct-horse-battery-staple';
+
+  /** A bundle whose one API-key login names GLM_API_KEY, from a source whose id the browser verified. */
+  const bundle = (): Record<string, unknown> =>
+    FleetCloneBundleSchema.parse({
+      format: 'ferretry-clone',
+      version: 2,
+      daemon: SOURCE,
+      keys: { 'login/glm': KEY_API },
+      machine: 'source',
+      exportedAt: '2026-10-13T07:00:00.000Z',
+      credentials: [
+        { id: 'glm', harness: 'claude', store: 'environment', env: { ANTHROPIC_AUTH_TOKEN: '${secret:GLM_API_KEY}' } },
+      ],
+      components: {},
+      profiles: { default: { layers: [] } },
+      runtimes: { agent: { credential: 'glm', profile: 'default', agent: false } },
+      files: [],
+      notCopied: [],
+    }) as unknown as Record<string, unknown>;
+
+  const recordOf = (keys?: Record<string, { sourceUpdatedAt: string; targetUpdatedAt: string }>) =>
+    serializeCloneBase({
+      version: 1,
+      sources: {
+        [SOURCE]: {
+          name: 'Studio Mac',
+          verified: 'browser',
+          lastCopiedAt: T0,
+          items: { [KEY_API]: { kind: 'login', sourceName: 'glm', digest: 'f'.repeat(64), bytes: 1, login: 'glm' } },
+          ...(keys === undefined ? {} : { keys }),
+        },
+      },
+    });
+
+  /**
+   * A target that holds these keys (with these `updatedAt`s; `created` says when a key was made, else it was
+   * never edited) and already has a record of the source.
+   */
+  const target = (
+    held: Record<string, string>,
+    keys?: Parameters<typeof recordOf>[0],
+    created: Record<string, string> = {},
+  ): World => {
+    const w = world({ overrides: { daemonId: () => 'daemon-target' } });
+    for (const [name, at] of Object.entries(held)) {
+      w.secrets.set(name, name === 'GLM_API_KEY' ? FAKE_VALUE : OTHER_VALUE);
+      w.state.secretUpdatedAt[name] = at;
+      const madeAt = created[name];
+      if (madeAt !== undefined) w.state.secretCreatedAt[name] = madeAt;
+    }
+    w.state.assets[BASE_PATH] = recordOf(keys);
+    return w;
+  };
+  const review = async (w: World, sourceSecrets: { name: string; updatedAt: string }[] | undefined) =>
+    await w.service.reviewClone({
+      bundle: bundle(),
+      source: { daemonId: SOURCE },
+      ...(sourceSecrets === undefined ? {} : { sourceSecrets }),
+    });
+
+  it('should call a key the bundle names, that the source holds and this machine does not, missing', async () => {
+    const answer = await review(target({}), [{ name: 'GLM_API_KEY', updatedAt: T1 }]);
+    should(answer.keys).deepEqual([{ name: 'GLM_API_KEY', outcome: 'missing' }]);
+  });
+
+  it('should call it newer when the source changed it since the last copy and this machine did not', async () => {
+    const w = target({ GLM_API_KEY: T1 }, { GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T1 } });
+    should((await review(w, [{ name: 'GLM_API_KEY', updatedAt: T2 }])).keys).deepEqual([
+      { name: 'GLM_API_KEY', outcome: 'newer' },
+    ]);
+  });
+
+  it('should call it both when this machine changed it too, and same when the source did not', async () => {
+    const w = target({ GLM_API_KEY: T2 }, { GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T1 } });
+    should((await review(w, [{ name: 'GLM_API_KEY', updatedAt: T2 }])).keys).deepEqual([
+      { name: 'GLM_API_KEY', outcome: 'both' },
+    ]);
+    should((await review(w, [{ name: 'GLM_API_KEY', updatedAt: T1 }])).keys).deepEqual([
+      { name: 'GLM_API_KEY', outcome: 'same' },
+    ]);
+  });
+
+  it('should answer no keys when the caller gave no list from the source, and never name a sign-in', async () => {
+    const w = target({ GLM_API_KEY: T1 }, { GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T1 } });
+    should((await review(w, undefined)).keys).deepEqual([]);
+    const signIn = mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access;
+    const answer = await review(w, [
+      { name: signIn, updatedAt: T2 },
+      { name: 'GLM_API_KEY', updatedAt: T1 },
+    ]);
+    should(answer.keys.map(key => key.name)).deepEqual(['GLM_API_KEY']);
+  });
+
+  it('should read no value, change nothing and answer no value or digest of one', async () => {
+    const w = target({ GLM_API_KEY: T1, OTHER_KEY: T1 }, { GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T1 } });
+    const before = recordOf({ GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T1 } });
+    const answer = await review(w, [{ name: 'GLM_API_KEY', updatedAt: T2 }]);
+    const text = JSON.stringify(answer);
+    should(text).not.containEql(FAKE_VALUE);
+    should(text).not.containEql(OTHER_VALUE);
+    should(w.state.baseWrites).deepEqual([]);
+    should(w.state.assets[BASE_PATH]).equal(before);
+  });
+
+  describe('recording the timestamps once the sealed copy has landed', () => {
+    const name = CloneableSecretNameSchema.parse('GLM_API_KEY');
+    const other = CloneableSecretNameSchema.parse('OTHER_KEY');
+
+    it("should record the source's instant and the instant the copy filed the key", async () => {
+      // Arrange — the key was made by the copy at T2 and has not been edited since
+      const w = target({ GLM_API_KEY: T2 });
+
+      // Act
+      const answer = await w.service.recordCloneKeys({
+        source: { daemonId: SOURCE },
+        filedAt: T2,
+        keys: [{ name, sourceUpdatedAt: T1 }],
+      });
+
+      // Assert
+      should(answer).deepEqual({ recorded: 1 });
+      const written = parseCloneBase(w.state.baseWrites[0]);
+      should(written.sources[SOURCE]?.keys).deepEqual({ GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T2 } });
+      should(w.state.baseWrites[0]).not.containEql(FAKE_VALUE);
+      // The rest of the record is exactly as it was.
+      should(written.sources[SOURCE]?.items).deepEqual(parseCloneBase(recordOf()).sources[SOURCE]?.items);
+    });
+
+    it('should still read a key the person edited after the copy as changed here, when the record is made late', async () => {
+      // Arrange — filed at T1, edited by the person at T2, and only THEN reported; the source moves on to T3
+      const w = target({ GLM_API_KEY: T2 }, undefined, { GLM_API_KEY: T1 });
+
+      // Act
+      const answer = await w.service.recordCloneKeys({
+        source: { daemonId: SOURCE },
+        filedAt: T1,
+        keys: [{ name, sourceUpdatedAt: T1 }],
+      });
+
+      // Assert — the baseline is the copy's instant (T1), never the edit's (T2): the next review says both
+      should(answer).deepEqual({ recorded: 1 });
+      should(parseCloneBase(w.state.baseWrites[0]).sources[SOURCE]?.keys).deepEqual({
+        GLM_API_KEY: { sourceUpdatedAt: T1, targetUpdatedAt: T1 },
+      });
+      should((await review(w, [{ name: 'GLM_API_KEY', updatedAt: T3 }])).keys).deepEqual([
+        { name: 'GLM_API_KEY', outcome: 'both' },
+      ]);
+    });
+
+    it('should leave a key unrecorded when it was not made at the instant the copy says, rather than guess', async () => {
+      // Arrange — the person deleted the key and made it again at T2; the copy said it filed at T1
+      const w = target({ GLM_API_KEY: T2 }, undefined, { GLM_API_KEY: T2 });
+
+      // Act
+      const answer = await w.service.recordCloneKeys({
+        source: { daemonId: SOURCE },
+        filedAt: T1,
+        keys: [{ name, sourceUpdatedAt: T1 }],
+      });
+
+      // Assert
+      should(answer).deepEqual({ recorded: 0 });
+      should(w.state.baseWrites).deepEqual([]);
+    });
+
+    it('should skip a key this machine does not hold, and write nothing when none is left', async () => {
+      const w = target({});
+      const answer = await w.service.recordCloneKeys({
+        source: { daemonId: SOURCE },
+        filedAt: T2,
+        keys: [{ name, sourceUpdatedAt: T1 }],
+      });
+      should(answer).deepEqual({ recorded: 0 });
+      should(w.state.baseWrites).deepEqual([]);
+    });
+
+    it('should record nothing for a source this machine has no record of, or an id that cannot be one', async () => {
+      const w = target({ GLM_API_KEY: T2 });
+      const stranger = await w.service.recordCloneKeys({
+        source: { daemonId: 'daemon-stranger' },
+        filedAt: T2,
+        keys: [{ name, sourceUpdatedAt: T1 }],
+      });
+      const invalid = await w.service.recordCloneKeys({
+        source: { daemonId: '../escape' },
+        filedAt: T2,
+        keys: [{ name, sourceUpdatedAt: T1 }],
+      });
+      should([stranger, invalid]).deepEqual([{ recorded: 0 }, { recorded: 0 }]);
+      should(w.state.baseWrites).deepEqual([]);
+    });
+
+    it('should make the next review see the key as the same, until the source changes it again', async () => {
+      const w = target({ GLM_API_KEY: T2 });
+      await w.service.recordCloneKeys({
+        source: { daemonId: SOURCE },
+        filedAt: T2,
+        keys: [{ name, sourceUpdatedAt: T1 }],
+      });
+      should((await review(w, [{ name: 'GLM_API_KEY', updatedAt: T1 }])).keys).deepEqual([
+        { name: 'GLM_API_KEY', outcome: 'same' },
+      ]);
+      should((await review(w, [{ name: 'GLM_API_KEY', updatedAt: T3 }])).keys).deepEqual([
+        { name: 'GLM_API_KEY', outcome: 'newer' },
+      ]);
+    });
+
+    it('should keep both keys when two reports are made at once, so neither is lost', async () => {
+      // Arrange
+      const w = target({ GLM_API_KEY: T2, OTHER_KEY: T2 });
+
+      // Act
+      const answers = await Promise.all([
+        w.service.recordCloneKeys({ source: { daemonId: SOURCE }, filedAt: T2, keys: [{ name, sourceUpdatedAt: T1 }] }),
+        w.service.recordCloneKeys({
+          source: { daemonId: SOURCE },
+          filedAt: T2,
+          keys: [{ name: other, sourceUpdatedAt: T1 }],
+        }),
+      ]);
+
+      // Assert
+      should(answers).deepEqual([{ recorded: 1 }, { recorded: 1 }]);
+      should(Object.keys(parseCloneBase(w.state.assets[BASE_PATH]).sources[SOURCE]?.keys ?? {}).toSorted()).deepEqual([
+        'GLM_API_KEY',
+        'OTHER_KEY',
+      ]);
+    });
+
+    it('should answer none recorded when the update was handed the record and then wrote nothing', async () => {
+      // Arrange — a change was made from the record it was handed, but the update did not commit it (a concurrent
+      // apply removed the source and the second attempt declined to write)
+      let handed = 0;
+      const w = world({
+        overrides: {
+          cloneBase: {
+            read: async () => recordOf(),
+            update: async (_path, change) => {
+              should(change(recordOf())).be.a.String();
+              handed += 1;
+              return false;
+            },
+          },
+        },
+      });
+      w.secrets.set('GLM_API_KEY', FAKE_VALUE);
+      w.state.secretUpdatedAt.GLM_API_KEY = T2;
+
+      // Act
+      const answer = await w.service.recordCloneKeys({
+        source: { daemonId: SOURCE },
+        filedAt: T2,
+        keys: [{ name, sourceUpdatedAt: T1 }],
+      });
+
+      // Assert
+      should(answer).deepEqual({ recorded: 0 });
+      should(handed).equal(1);
+    });
+
+    it('should not bring back a source that is forgotten while its report is on the way', async () => {
+      // Arrange
+      const w = target({ GLM_API_KEY: T2 });
+
+      // Act — the forget takes its turn first; the report finds no source and records nothing
+      const [forgot, answer] = await Promise.all([
+        w.service.forgetCloneSource(SOURCE),
+        w.service.recordCloneKeys({ source: { daemonId: SOURCE }, filedAt: T2, keys: [{ name, sourceUpdatedAt: T1 }] }),
+      ]);
+
+      // Assert
+      should(forgot).be.true();
+      should(answer).deepEqual({ recorded: 0 });
+      should(parseCloneBase(w.state.assets[BASE_PATH]).sources).deepEqual({});
+    });
+  });
+});
+
+// ── §14.4: a re-copy never touches a login or a held secret ─────────────────────────────────────
+
+describe('a re-copy, by every path, leaves logins and held secrets byte-identical (design §14.4)', () => {
+  const GLM_VALUE = 'glm-held-value-UNIQUE';
+  const OTHER_VALUE = 'another-held-value-UNIQUE';
+  const LOGIN_FILE = '/state/fleet/credentials/claude-you/.credentials.json';
+  const SIGN_IN = 'sign-in material that only the harness may read';
+  const DEFAULTS_FILE = '/state/config/account-defaults.yaml';
+  const DEFAULTS = 'accounts:\n  claude.ai: work\n';
+  const TOTP_SEED = 'JBSWY3DPEHPK3PXP-factor-UNIQUE';
+  const NEW_VALUE = 'the-newer-value-on-the-source';
+  const BRAND_NEW_VALUE = 'a-key-this-machine-never-held';
+  const relay = new WebCryptoRelayCrypto();
+  const identityOf = async (): Promise<DaemonIdentity> => {
+    const pair = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+      'sign',
+      'verify',
+    ])) as unknown as CryptoKeyPair;
+    const der = await crypto.subtle.exportKey('pkcs8', pair.privateKey);
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(der)));
+    return await relay.importDaemonIdentity(
+      ['-----BEGIN PRIVATE KEY-----', ...(base64.match(/.{1,64}/gu) ?? []), '-----END PRIVATE KEY-----', ''].join('\n'),
+    );
+  };
+
+  const ENV_LOGIN = { harness: 'claude', store: 'environment', env: { ANTHROPIC_AUTH_TOKEN: '${secret:GLM_API_KEY}' } };
+
+  /** A machine holding a signed-in login AND an API-key login whose secret it holds. */
+  const modelWithKeyLogin = (withExtra = true): AccountModel =>
+    parseAccountModel({
+      version: 2,
+      credentials: { 'claude-you': { harness: 'claude', store: 'host', label: 'work' }, glm: ENV_LOGIN },
+      components: {
+        instructions: {
+          main: { file: 'components/instructions/main.md' },
+          ...(withExtra ? { extra: { file: 'components/instructions/extra.md' } } : {}),
+        },
+      },
+      profiles: { default: { layers: ['instructions/main'] } },
+      runtimes: {
+        'claude-default': { credential: 'claude-you', profile: 'default', agent: true },
+        'glm-agent': { credential: 'glm', profile: 'default', agent: false },
+      },
+    });
+
+  /** One source machine: each export is version 2, and an item keeps its origin key from one export to the next. */
+  const sourceMachine = () => {
+    const source = world({
+      catalog: { machineName: () => 'work-mac' },
+      overrides: { daemonId: () => 'daemon-source' },
+    });
+    return async (model: AccountModel, content: string): Promise<Record<string, unknown>> => {
+      source.state.reading = configReading(model, 'r');
+      source.state.assets[MAIN_DOCUMENT] = content;
+      source.state.assets['/state/fleet/assets/components/instructions/extra.md'] = 'Extra.\n';
+      return (await source.service.exportBundle()) as unknown as Record<string, unknown>;
+    };
+  };
+  /** An older export, version 1: nothing in it carries a key, so a copy made from it cannot be matched by key. */
+  const oldBundle = (): Record<string, unknown> =>
+    buildCloneBundle({
+      model: modelWithKeyLogin(),
+      machine: 'work-mac',
+      exportedAt: '2026-10-13T07:00:00.000Z',
+      emails: { 'claude-you': 'you@example.com' },
+      files: [
+        { path: 'components/instructions/main.md', content: 'Main.\n' },
+        { path: 'components/instructions/extra.md', content: 'Extra.\n' },
+      ],
+      notCopied: [],
+    }) as unknown as Record<string, unknown>;
+  const change = (mode: 'alongside' | 'update' | 'replace', bundle: unknown, extra: Record<string, unknown> = {}) =>
+    ({ kind: 'clone.import', mode, bundle, ...extra }) as Extract<FleetAccountChange, { kind: 'clone.import' }>;
+
+  /** The target: an earlier copy on disk, a sign-in file, and the secret store behind a real directory. */
+  const machine = async (first: Record<string, unknown>) => {
+    const clock = { at: '2026-11-01T00:00:00.000Z', now: () => clock.at };
+    const documents = new MemorySecretDocuments();
+    const directory = new SecretDirectory(documents, new FakeSecretCipher(), clock);
+    await directory.put('GLM_API_KEY', GLM_VALUE);
+    await directory.put('OTHER_KEY', OTHER_VALUE);
+    // The account factors (a 2FA seed) rest in their own sealed document, apart from the API keys.
+    const factorDocuments = new MemorySecretDocuments();
+    await new SecretDirectory(factorDocuments, new FakeSecretCipher(), clock).put('TOTP_SEED_WORK', TOTP_SEED);
+    // The source machine: it holds NEWER values of both held keys, and one key this machine lacks.
+    const [targetIdentity, sourceIdentity] = [await identityOf(), await identityOf()];
+    const sourceDocuments = new MemorySecretDocuments();
+    const sourceKeys = new SecretDirectory(sourceDocuments, new FakeSecretCipher(), clock);
+    await sourceKeys.put('GLM_API_KEY', NEW_VALUE);
+    await sourceKeys.put('OTHER_KEY', NEW_VALUE);
+    await sourceKeys.put('BRAND_NEW_KEY', BRAND_NEW_VALUE);
+    const imports = new SecretImportService({
+      crypto: relay,
+      identity: { load: async () => targetIdentity },
+      directory,
+      clock,
+    });
+    const exports = new SecretExportService({
+      crypto: relay,
+      identity: { load: async () => sourceIdentity },
+      vault: new SecretVault(sourceDocuments, new FakeSecretCipher()),
+      clock,
+    });
+    clock.at = '2026-11-02T00:00:00.000Z';
+    const puts: string[] = [];
+    const earlier = world({ overrides: { daemonId: () => 'daemon-target' } });
+    const firstCopy = change('alongside', first, { source: { daemonId: 'daemon-source' } });
+    await earlier.service.executors.clone.describe(firstCopy);
+    await earlier.service.executors.clone.execute(firstCopy);
+    const written = earlier.applied[0]?.documents ?? [];
+    const w = world({
+      overrides: {
+        daemonId: () => 'daemon-target',
+        secrets: {
+          names: async () => (await directory.list()).map(secret => secret.name),
+          held: async () => await directory.list(),
+          put: async name => {
+            puts.push(name);
+          },
+        },
+      },
+    });
+    w.state.reading = configReading(modelOfWrites(written), 'r');
+    for (const document of written) w.state.assets[document.path] = document.content;
+    w.state.assets[LOGIN_FILE] = SIGN_IN;
+    w.state.assets[DEFAULTS_FILE] = DEFAULTS;
+    w.state.emails = async () => [];
+    // The fake apply writes what it is handed, so an untouched file below is proof and not an absent write.
+    w.state.commit = documents => {
+      for (const document of documents) {
+        if (document.remove === true) delete w.state.assets[document.path];
+        else w.state.assets[document.path] = document.content;
+      }
+    };
+    const protectedFiles = { [LOGIN_FILE]: SIGN_IN, [DEFAULTS_FILE]: DEFAULTS };
+    return {
+      w,
+      documents,
+      directory,
+      puts,
+      sealed: JSON.stringify(await documents.read()),
+      factors: JSON.stringify(await factorDocuments.read()),
+      factorDocuments,
+      imports,
+      exports,
+      protectedFiles,
+      /** The file each login is held in: an update must not write, change or remove any of them. */
+      loginFiles: [...accountModelFiles(modelOfWrites(written))]
+        .filter(([, file]) => file.address.kind === 'login')
+        .map(([file]) => `/state/config/${file}`),
+    };
+  };
+  type Machine = Awaited<ReturnType<typeof machine>>;
+
+  const reviewed = async (m: Machine, mode: 'update', bundle: Record<string, unknown>, choice?: 'keep' | 'remove') => {
+    const source = { daemonId: 'daemon-source' };
+    const review = await m.w.service.reviewClone({ bundle, source });
+    const gone = review.items.find(item => item.outcome === 'gone');
+    const decisions = gone === undefined || choice === undefined ? {} : { [gone.ref]: choice };
+    const update = change(mode, bundle, { reviewed: review.fingerprint, decisions, source });
+    await m.w.service.executors.clone.describe(update);
+    await m.w.service.executors.clone.execute(update);
+    return review;
+  };
+  const direct = async (m: Machine, mode: 'alongside' | 'replace', bundle: Record<string, unknown>) => {
+    const copy = change(mode, bundle, { source: { daemonId: 'daemon-source' } });
+    await m.w.service.executors.clone.describe(copy);
+    await m.w.service.executors.clone.execute(copy);
+  };
+
+  /**
+   * The sealed copy that follows a re-copy in the app, through the real services end to end: the target opens an
+   * import, the source seals NEWER values of both held keys and one key this machine lacks, the target files the
+   * bundle, and the browser reports the filing to the setup service.
+   */
+  const keyTail = async (m: Machine) => {
+    const offer = await m.imports.open();
+    const names = ['GLM_API_KEY', 'OTHER_KEY', 'BRAND_NEW_KEY'].map(name => CloneableSecretNameSchema.parse(name));
+    const { bundle } = await m.exports.seal(offer.importId, { offer, names });
+    const result = await m.imports.complete(offer.importId, bundle);
+    if (result.filedAt === undefined) throw new Error('the copy filed nothing');
+    const reported = await m.w.service.recordCloneKeys({
+      source: { daemonId: 'daemon-source' },
+      filedAt: result.filedAt,
+      keys: names.map(name => ({ name, sourceUpdatedAt: '2026-11-01T00:00:00.000Z' })),
+    });
+    return { result, reported };
+  };
+
+  /** Everything a re-copy must not change, after the re-copy and the sealed copy of keys that follows it. */
+  const expectUntouched = async (m: Machine) => {
+    const before = (await m.documents.read())?.entries ?? {};
+    const tail = await keyTail(m);
+    should(m.puts).deepEqual([]);
+    // Only the key this machine lacked was filed; both held keys were kept, whatever the source offered.
+    should(tail.result.imported).deepEqual(['BRAND_NEW_KEY']);
+    should(tail.result.kept.toSorted()).deepEqual(['GLM_API_KEY', 'OTHER_KEY']);
+    should(tail.reported).deepEqual({ recorded: 1 });
+    // Every held entry is byte for byte what it was; the only difference is the one key that was missing.
+    const after = (await m.documents.read())?.entries ?? {};
+    should(Object.keys(after).toSorted()).deepEqual(['BRAND_NEW_KEY', 'GLM_API_KEY', 'OTHER_KEY']);
+    should(JSON.stringify(after.GLM_API_KEY)).equal(JSON.stringify(before.GLM_API_KEY));
+    should(JSON.stringify(after.OTHER_KEY)).equal(JSON.stringify(before.OTHER_KEY));
+    should(JSON.stringify(after)).not.containEql(NEW_VALUE);
+    // The factors, the sign-in file and the account defaults are exactly as they were.
+    should(JSON.stringify(await m.factorDocuments.read())).equal(m.factors);
+    for (const [file, content] of Object.entries(m.protectedFiles)) should(m.w.state.assets[file]).equal(content);
+    const written = m.w.applied[0]?.documents;
+    if (written !== undefined) {
+      // The writes are edits to the files that differ: none of them is a file one of this machine's logins is held in.
+      should(m.loginFiles.length).equal(2);
+      should(written.filter(document => m.loginFiles.includes(document.path))).deepEqual([]);
+      should(written.map(document => document.path).join('\n')).not.containEql('/credentials/');
+      should(written.filter(document => document.path in m.protectedFiles)).deepEqual([]);
+      should(JSON.stringify(written)).not.containEql(GLM_VALUE);
+    }
+  };
+
+  it('should leave a signed-in login, an API-key login and the held secrets as they were: Update', async () => {
+    const exportFrom = sourceMachine();
+    const m = await machine(await exportFrom(modelWithKeyLogin(), 'Main.\n'));
+    await reviewed(m, 'update', await exportFrom(modelWithKeyLogin(), 'Main, changed on the source.\n'));
+    should(m.w.applied).have.length(1);
+    await expectUntouched(m);
+  });
+
+  it('should leave a signed-in login, an API-key login and the held secrets as they were: Add alongside', async () => {
+    const exportFrom = sourceMachine();
+    const m = await machine(await exportFrom(modelWithKeyLogin(), 'Main.\n'));
+    await direct(m, 'alongside', await exportFrom(modelWithKeyLogin(), 'Main, changed on the source.\n'));
+    should(m.w.applied).have.length(1);
+    await expectUntouched(m);
+  });
+
+  it('should leave a signed-in login, an API-key login and the held secrets as they were: Start over (Replace)', async () => {
+    const exportFrom = sourceMachine();
+    const m = await machine(await exportFrom(modelWithKeyLogin(), 'Main.\n'));
+    await direct(m, 'replace', await exportFrom(modelWithKeyLogin(), 'Main, changed on the source.\n'));
+    should(m.w.applied).have.length(1);
+    await expectUntouched(m);
+  });
+
+  it('should leave them as they were when the copy links an old copy that has no keys yet', async () => {
+    // Arrange — the earlier copy came from a version 1 export, so nothing on this machine carries a key
+    const m = await machine(oldBundle());
+
+    // Act
+    await reviewed(m, 'update', await sourceMachine()(modelWithKeyLogin(), 'Main.\n'));
+
+    // Assert
+    await expectUntouched(m);
+  });
+
+  for (const choice of ['keep', 'remove'] as const) {
+    it(`should leave them as they were when an item gone from the other machine is told to ${choice}`, async () => {
+      // Arrange — the source no longer has the document the earlier copy took
+      const exportFrom = sourceMachine();
+      const m = await machine(await exportFrom(modelWithKeyLogin(), 'Main.\n'));
+
+      // Act
+      const review = await reviewed(m, 'update', await exportFrom(modelWithKeyLogin(false), 'Main.\n'), choice);
+
+      // Assert
+      should(review.items.some(item => item.outcome === 'gone')).be.true();
+      await expectUntouched(m);
+    });
+  }
+
+  it('should have no request that could replace a held key: the import takes the sealed bundle and nothing else', () => {
+    should(Object.keys(SecretImportCompleteRequestSchema.shape)).deepEqual(['bundle']);
   });
 });

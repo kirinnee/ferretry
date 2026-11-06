@@ -22,6 +22,7 @@ import {
 import type { SessionTimings } from './dictation-timeline.ts';
 import { MIN_SPEECH_SAMPLES } from './near-live.ts';
 import type { OnDeviceSessionOptions } from './on-device-voice.ts';
+import { type TentativeTake, TentativeTranscriber } from './tentative-take.ts';
 import { type WhisperEngine, WhisperEngineError } from './whisper-engine.ts';
 import type { WhisperBackend } from './whisper-worker-core.ts';
 
@@ -68,10 +69,38 @@ export class WhisperRecognitionSession implements BrowserRecognitionSessionLike 
   #unwatchHidden: (() => void) | null = null;
   #finishing: Promise<string> | null = null;
   #timings: SessionTimings | undefined;
+  readonly #tentative: TentativeTranscriber;
+  /** The backend the early finish ran on, for the timing line, when its answer is the one used. */
+  #earlyBackend: WhisperBackend | null = null;
 
   constructor(ports: WhisperSessionPorts, options: OnDeviceSessionOptions) {
     this.#ports = ports;
     this.#options = options;
+    this.#tentative = new TentativeTranscriber(
+      {
+        peek: async () => {
+          if (this.#recording === null) throw new BrowserRecognitionError('aborted', 'Dictation has not started.');
+          return await (await this.#recording).peek();
+        },
+        // Whisper invents words for silence; a take too short to hold speech is not sent to it.
+        transcribe: async (samples, signal) => {
+          if (samples.length < MIN_SPEECH_SAMPLES) return '';
+          const heard = await this.#ports.engine.transcribe(samples, signal);
+          this.#earlyBackend = heard.backend;
+          return heard.text;
+        },
+      },
+      this.#abort.signal,
+    );
+  }
+
+  /**
+   * Begin an early finish (`tentative-take.ts`): the words so far are worked out while the caller
+   * confirms the pause, and `finish()` reuses them when the audio since is only quiet. `null` unless
+   * the microphone is open.
+   */
+  beginFinish(): TentativeTake | null {
+    return this.#state === 'recording' ? this.#tentative.begin() : null;
   }
 
   /** Call synchronously from the reader's gesture: the permission prompt is attributed to it. */
@@ -182,6 +211,11 @@ export class WhisperRecognitionSession implements BrowserRecognitionSessionLike 
       return '';
     }
     const transcribingAt = now();
+    const early = await this.#tentative.reuse(samples);
+    if (early !== null) {
+      measured(now() - transcribingAt, this.#earlyBackend);
+      return early;
+    }
     let backend: WhisperBackend | null = null;
     try {
       const heard = await this.#ports.engine.transcribe(samples, this.#abort.signal);
