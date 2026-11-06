@@ -3,15 +3,24 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
-import { MemberSweepTimer } from '../../../src/adapters/index.ts';
 import { releaseAcquired } from '../../../src/adapters/runtime/termination-gate.ts';
-import { AgendaResurfacer, AgendaWaker, type ExecutableResolverPort } from '../../../src/lib/index.ts';
-import { CLOUDFLARED_NOT_ON_PATH, NO_TUNNEL_SERVICE } from '../../../src/lib/tunnel/index.ts';
-import { NO_RELAY_DIRECTORY, type RelayAdvertisement } from '../../../src/lib/index.ts';
+import {
+  AgendaResurfacer,
+  AgendaWaker,
+  CatalogLinkService,
+  CatalogMemberService,
+  type ExecutableResolverPort,
+  LegacyWireUseCounter,
+  NO_RELAY_DIRECTORY,
+  type RelayAdvertisement,
+  WebRtcCarrier,
+} from '../../../src/lib/index.ts';
+import { CLOUDFLARED_NOT_ON_PATH, NO_TUNNEL_SERVICE, TunnelCarrierSwitch } from '../../../src/lib/tunnel/index.ts';
 import { OS_CHOSEN_PORT } from '../support/os-port.ts';
 import {
   BOOT_THAT_THROWS_AFTER_STORAGE_OPENS,
   CLEAN_BOOT_THEN_STOP,
+  CONSTRUCTION_WITH_THE_RESURFACER_ON,
   STOP_BEFORE_THE_WARDENS_LATE_ARM,
   STOP_DURING_BOOT,
 } from './boot-trace.expected.ts';
@@ -36,13 +45,20 @@ type Release = () => void | Promise<void>;
  *    here, every release in the order a real shutdown runs them;
  *  - the objects `createSubsystems` returns are patched IN PLACE, so `start()` reaches the very
  *    instances the routes were built over while each `arm`/`run` it calls is written down;
- *  - the timers and the sweep starts a subsystem makes WHILE it is built are written down by
- *    wrapping the globals and the three adapter classes that start them, for exactly the span of the
- *    one synchronous construction call.
+ *  - the timers, the agenda starts and the catalog sweeps a subsystem makes WHILE it is built are written
+ *    down by wrapping the globals and the real service methods, for exactly the span of the one
+ *    synchronous construction call. A sweep's immediate first run is the entry its real method writes
+ *    (`first sweep: ...`) BEFORE the `setInterval` that repeats it, so dropping or deferring that run
+ *    removes an entry rather than leaving the trace as it was;
+ *  - every release writes the name of what it really released, from the port it calls: a disarm returned by
+ *    an `arm`, a `close`/`stop`/`flush` on a mounted subsystem or a host adapter, a carrier or the
+ *    bound server, and the timer a release clears (as `clear setInterval <ms>`). Each `release #n` is
+ *    therefore followed by what it did, so two registrations swapped in `start()` swap those names and
+ *    fail the trace even though the registration numbers do not move.
  *
- * WHAT IT DOES NOT SEE. The immediate first run of a sweep is not an event of its own: it is the
- * `sweep timer starts` entry followed by the `setInterval` that repeats it, because `MemberSweepTimer.start` runs the sweep and only
- * then asks the clock to repeat it.
+ * WHAT IT DOES NOT SEE. One release has no port to name: the shutdown-begun flag (`releasing = true`) is a
+ * plain assignment, so it is named only by standing between the two disarms registered around it. Two
+ * timer clears of the SAME interval cannot be told apart either, which no release in the clean boot needs.
  */
 
 /** Set in the trace so a rename of any of these is a visible edit, not a silent one. */
@@ -67,13 +83,19 @@ function buildIntegrationWorld(): DaemonWorld {
   };
 }
 
-async function seedHome(home: string): Promise<void> {
+/** Minutes of silence after which the daemon surfaces an ask by itself; any value turns the resurfacer on. */
+const RESURFACE_AFTER_MINUTES = 15;
+
+async function seedHome(home: string, resurface: boolean): Promise<void> {
   process.env.FY_HOME = home;
   const opened = await buildIntegrationWorld().storage.open();
   await opened.storage.close();
-  await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port: OS_CHOSEN_PORT }), {
-    mode: 0o600,
-  });
+  const document = {
+    host: '127.0.0.1',
+    port: OS_CHOSEN_PORT,
+    ...(resurface ? { attention: { resurfaceAfterMinutes: RESURFACE_AFTER_MINUTES } } : {}),
+  };
+  await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify(document), { mode: 0o600 });
 }
 
 /** Replaces `target[name]` on the instance itself, so identity is kept and only this call is observed. */
@@ -111,7 +133,8 @@ const nextTurn = async (): Promise<void> => {
  * is defined, not assigned, so a prototype setter cannot see the object either. What CAN is the one
  * property the constructor reads from it: `deps.newStageId`, which `buildWorld` leaves out. A getter
  * on `Object.prototype` for exactly that name sees the object it was read from, and is removed again
- * before `buildWorld` returns. No production line knows it is asked.
+ * before `buildWorld` returns — or throws, which is why the caller restores it in a `finally`. No
+ * production line knows it is asked.
  */
 function captureEarlySeedReads(): {
   readonly answers: Array<Promise<string>>;
@@ -126,6 +149,8 @@ function captureEarlySeedReads(): {
       return `${label} throws "${error instanceof Error ? error.message : String(error)}"`;
     }
   };
+  // Whatever was on the prototype before is put back as it was, descriptor and all, and only when it was there.
+  const previous = Object.getOwnPropertyDescriptor(Object.prototype, 'newStageId');
   Object.defineProperty(Object.prototype, 'newStageId', {
     configurable: true,
     get(this: Record<string, unknown>) {
@@ -148,7 +173,8 @@ function captureEarlySeedReads(): {
   return {
     answers,
     restore: () => {
-      Reflect.deleteProperty(Object.prototype, 'newStageId');
+      if (previous === undefined) Reflect.deleteProperty(Object.prototype, 'newStageId');
+      else Object.defineProperty(Object.prototype, 'newStageId', previous);
     },
   };
 }
@@ -175,17 +201,51 @@ interface RigOptions {
   readonly duringBoot?: (rig: Rig) => Promise<void>;
   /** Makes the world throw once storage is open. */
   readonly failAfterStorage?: boolean;
+  /** Writes `attention.resurfaceAfterMinutes`, which turns the agenda resurfacer on. */
+  readonly resurface?: boolean;
 }
+
+/** Everything a rig put in place globally or on a shared prototype, undone after each case. */
+const undo: Array<() => void> = [];
+
+/** Replaces a prototype method, calling the original with the caller's `this`; returns what puts it back. */
+function spyOnPrototype<T extends object, K extends keyof T & string>(
+  prototype: T,
+  method: K,
+  before: () => void,
+): () => void {
+  const original = prototype[method] as unknown as (...args: unknown[]) => unknown;
+  Object.defineProperty(prototype, method, {
+    value: function (this: unknown, ...args: unknown[]) {
+      before();
+      return original.apply(this, args);
+    },
+    configurable: true,
+    writable: true,
+  });
+  return () => {
+    Object.defineProperty(prototype, method, { value: original, configurable: true, writable: true });
+  };
+}
+
+const isThenable = (value: unknown): value is PromiseLike<unknown> =>
+  typeof value === 'object' && value !== null && typeof (value as { then?: unknown }).then === 'function';
 
 async function rig(options: RigOptions = {}): Promise<Rig> {
   const home = await tempDirectory('fyd-boot-trace');
-  await seedHome(home);
+  await seedHome(home, options.resurface === true);
   const early = captureEarlySeedReads();
-  const base = buildIntegrationWorld();
-  early.restore();
+  let base: DaemonWorld;
+  try {
+    base = buildIntegrationWorld();
+  } finally {
+    early.restore();
+  }
   const events: string[] = [];
   const registered: Release[] = [];
   let sequence = 0;
+  /** The registration whose release is running now: a timer cleared outside a release is not a release. */
+  let running: number | undefined;
   const wrap = (release: Release, kind: string): Release => {
     sequence += 1;
     const id = sequence;
@@ -193,7 +253,12 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
     return typeof release === 'function'
       ? async () => {
           events.push(`release #${String(id)}`);
-          await release();
+          running = id;
+          try {
+            await release();
+          } finally {
+            running = undefined;
+          }
         }
       : release;
   };
@@ -215,6 +280,14 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
   const mountedWorld = base;
   const instrument = (mounted: Record<string, unknown>): void => {
     captured.mounted = mounted;
+    // A disarm is released later, by a number; this gives it the name of what it disarms.
+    const nameDisarm = (owner: string, value: unknown): unknown =>
+      typeof value === 'function'
+        ? () => {
+            events.push(`disarm ${owner}`);
+            return (value as () => unknown)();
+          }
+        : value;
     const arm = (owner: string, name: string): void => {
       const object = mounted[owner] as Record<string, unknown>;
       patch(
@@ -223,10 +296,38 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
         (original: unknown) =>
           ((...args: unknown[]) => {
             events.push(`${name} ${owner}`);
+            const result = (original as (...rest: unknown[]) => unknown)(...args);
+            return name === 'arm' && isThenable(result)
+              ? result.then(value => nameDisarm(owner, value))
+              : name === 'arm'
+                ? nameDisarm(owner, result)
+                : result;
+          }) as never,
+      );
+    };
+    // The releases that are a method on a mounted subsystem rather than a disarm: written when they run.
+    const named = (owner: string, name: string, label: string): void => {
+      const object = mounted[owner] as Record<string, unknown>;
+      patch(
+        object,
+        name,
+        (original: unknown) =>
+          ((...args: unknown[]) => {
+            events.push(label);
             return (original as (...rest: unknown[]) => unknown)(...args);
           }) as never,
       );
     };
+    for (const [owner, name] of [
+      ['harnessLogin', 'shutdown'],
+      ['sharedDrafts', 'close'],
+      ['signInRules', 'flush'],
+      ['observer', 'close'],
+      ['monitor', 'close'],
+      ['sendReproof', 'stop'],
+      ['queueDelivery', 'stop'],
+    ] as const)
+      named(owner, name, `${owner}.${name}`);
     for (const [owner, name] of [
       ['observer', 'arm'],
       ['configFiles', 'arm'],
@@ -295,14 +396,13 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
     originals.push(() => {
       AgendaResurfacer.prototype.start = resurfacerStart;
     });
-    const sweepStart = MemberSweepTimer.prototype.start;
-    MemberSweepTimer.prototype.start = function (this: MemberSweepTimer, intervalMs: number) {
-      events.push(`sweep timer starts, first run now, then every ${String(intervalMs)} ms`);
-      return sweepStart.call(this, intervalMs);
-    };
-    originals.push(() => {
-      MemberSweepTimer.prototype.start = sweepStart;
-    });
+    // The three sweeps' IMMEDIATE first runs are the real methods being called: `MemberSweepTimer.start` runs the
+    // sweep and only then asks the clock to repeat it, so each `first sweep` entry precedes its `setInterval`.
+    originals.push(
+      spyOnPrototype(CatalogMemberService.prototype, 'sweep', () => events.push('first sweep: catalog members')),
+      spyOnPrototype(CatalogLinkService.prototype, 'reconcile', () => events.push('first sweep: link reconcile')),
+      spyOnPrototype(CatalogLinkService.prototype, 'refresh', () => events.push('first sweep: link refresh')),
+    );
     globalThis.setInterval = ((callback: () => void, ms?: number, ...rest: unknown[]) => {
       events.push(`setInterval ${String(ms)}`);
       return (setInterval0 as (...a: unknown[]) => unknown)(callback, ms, ...rest);
@@ -318,6 +418,107 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
     };
   };
 
+  // THE RELEASES' OWN PORTS. A release is registered as a closure, so the trace names what it really calls: the
+  // host adapters the world owns, the carriers and counter `start()` builds itself, and the timers it clears.
+  for (const [owner, name, label] of [
+    [mountedWorld.browserLogin, 'close', 'browserLogin.close'],
+    [mountedWorld.agentBrowserDisplay, 'close', 'agentBrowserDisplay.close'],
+    [mountedWorld.fileEvents, 'close', 'fileEvents.close'],
+    [mountedWorld.tmuxControl, 'stop', 'tmuxControl.stop'],
+  ] as const)
+    patch(
+      owner as Record<string, unknown>,
+      name,
+      (original: unknown) =>
+        ((...args: unknown[]) => {
+          events.push(label);
+          return (original as (...rest: unknown[]) => unknown)(...args);
+        }) as never,
+    );
+  undo.push(spyOnPrototype(WebRtcCarrier.prototype, 'close', () => events.push('webrtc.close')));
+  undo.push(spyOnPrototype(TunnelCarrierSwitch.prototype, 'stop', () => events.push('tunnel.stop')));
+  undo.push(spyOnPrototype(LegacyWireUseCounter.prototype, 'flush', () => events.push('legacyWire.flush')));
+  patch(
+    mountedWorld.analyticsIndexes,
+    'open',
+    open =>
+      (async (...args: Parameters<typeof open>) => {
+        const analytics = await open(...args);
+        patch(
+          analytics.store,
+          'close',
+          close =>
+            (async () => {
+              events.push('analyticsStore.close');
+              return await close();
+            }) as never,
+        );
+        return analytics;
+      }) as never,
+  );
+  patch(
+    mountedWorld.boot.binder,
+    'bind',
+    bind =>
+      (async (...args: Parameters<typeof bind>) => {
+        const server = await bind(...args);
+        const handle = server as Record<string, unknown>;
+        for (const [name, label] of [
+          ['closeSockets', 'server.closeSockets'],
+          ['stop', 'server.stop'],
+        ] as const)
+          patch(
+            handle,
+            name,
+            (original: unknown) =>
+              ((...rest: unknown[]) => {
+                events.push(label);
+                return (original as (...more: unknown[]) => unknown)(...rest);
+              }) as never,
+          );
+        return server;
+      }) as never,
+  );
+  // A timer a release clears is named by the interval it was made with. Only the wiring's own timers count: one
+  // MADE in `packages/daemon/bin` (`start()`, or an adapter it declares) and CLEARED by the release itself rather
+  // than from inside a subsystem in `packages/daemon/src`, whose own timers are that subsystem's business and
+  // some of which have a delay that depends on the clock. A release written `() => clearInterval(t)` is a tail
+  // call with no frame of its own, so the clear side looks for a subsystem frame, not for the release's; the
+  // gate that runs an early release (`termination-gate.ts`) is a caller, not a subsystem.
+  {
+    const callerOutsideTheTest = (): string | undefined =>
+      (new Error().stack ?? '')
+        .split('\n')
+        .slice(1)
+        .find(frame => !frame.includes('boot-trace.test.ts') && !frame.includes('termination-gate.ts'));
+    const madeByWiring = (): boolean => callerOutsideTheTest()?.includes('/packages/daemon/bin/') === true;
+    const clearedByTheRelease = (): boolean => callerOutsideTheTest()?.includes('/packages/daemon/src/') !== true;
+    const made = new Map<unknown, string>();
+    const { setInterval: setInterval0, setTimeout: setTimeout0 } = globalThis;
+    const { clearInterval: clearInterval0, clearTimeout: clearTimeout0 } = globalThis;
+    const remember =
+      (make: (...a: unknown[]) => unknown, kind: string) =>
+      (callback: () => void, ms?: number, ...rest: unknown[]) => {
+        const handle = make(callback, ms, ...rest);
+        if (madeByWiring()) made.set(handle, `${kind} ${String(ms)}`);
+        return handle;
+      };
+    const forget = (clear: (handle: never) => void) => (handle: never) => {
+      const name = made.get(handle);
+      if (running !== undefined && name !== undefined && clearedByTheRelease()) events.push(`clear ${name}`);
+      clear(handle);
+    };
+    globalThis.setInterval = remember(setInterval0 as never, 'setInterval') as unknown as typeof setInterval;
+    globalThis.setTimeout = remember(setTimeout0 as never, 'setTimeout') as unknown as typeof setTimeout;
+    globalThis.clearInterval = forget(clearInterval0 as never) as unknown as typeof clearInterval;
+    globalThis.clearTimeout = forget(clearTimeout0 as never) as unknown as typeof clearTimeout;
+    undo.push(() => {
+      globalThis.setInterval = setInterval0;
+      globalThis.setTimeout = setTimeout0;
+      globalThis.clearInterval = clearInterval0;
+      globalThis.clearTimeout = clearTimeout0;
+    });
+  }
   // Patched on the storage factory itself: it is a class instance, so a spread of it would lose its methods.
   patch(
     mountedWorld.storage,
@@ -335,6 +536,25 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
               return await close();
             }) as never,
         );
+        // The two unsubscribes a release calls are named by what they unsubscribe from.
+        for (const [name, label] of [
+          ['subscribeStates', 'unsubscribe states'],
+          ['subscribeEvents', 'unsubscribe events'],
+        ] as const)
+          patch(
+            opened.storage,
+            name,
+            (subscribe: unknown) =>
+              ((...args: unknown[]) => {
+                const unsubscribe = (subscribe as (...rest: unknown[]) => unknown)(...args);
+                return typeof unsubscribe === 'function'
+                  ? () => {
+                      events.push(label);
+                      return (unsubscribe as () => unknown)();
+                    }
+                  : unsubscribe;
+              }) as never,
+          );
         return opened;
       }) as never,
   );
@@ -408,6 +628,7 @@ async function armWarden(r: Rig): Promise<void> {
 describe('the boot and shutdown trace', () => {
   const previousHome = process.env.FY_HOME;
   afterEach(async () => {
+    for (const restore of undo.splice(0).reverse()) restore();
     if (previousHome === undefined) delete process.env.FY_HOME;
     else process.env.FY_HOME = previousHome;
     await cleanupTempDirectories();
@@ -497,6 +718,25 @@ describe('the boot and shutdown trace', () => {
     should(r.events).deepEqual(STOP_BEFORE_THE_WARDENS_LATE_ARM);
     const landed = r.events.slice(r.events.indexOf('warden arm result lands'));
     should(landed).deepEqual(['warden arm result lands', 'warden disarm']);
+  }, 60_000);
+
+  it('should start the agenda resurfacer while the subsystems are built, before the waker and the deadline sweep, when the configuration turns it on', async () => {
+    // Arrange: no case above turns `attention.resurfaceAfterMinutes` on, so none of them would notice the start go.
+    const r = await rig({ resurface: true });
+
+    // Act
+    const exit = start(r.world, r.cleanups);
+    await untilReady(r);
+    r.stop();
+    await exit;
+    await r.runCleanups();
+
+    // Assert: the whole construction stretch, so the resurfacer is pinned relative to the waker, the deadline
+    // sweep (`setInterval 300000` then `setTimeout 30000`) and the sweeps that follow them.
+    const begins = r.events.indexOf('createSubsystems: construction begins');
+    const ends = r.events.indexOf('createSubsystems: construction ends');
+    should(r.events.slice(begins, ends + 1)).deepEqual(CONSTRUCTION_WITH_THE_RESURFACER_ON);
+    should(r.events.filter(event => event === 'agenda resurfacer starts')).have.length(1);
   }, 60_000);
 
   it('should keep the subsystems a createSubsystems override receives the very ones start() arms', async () => {
