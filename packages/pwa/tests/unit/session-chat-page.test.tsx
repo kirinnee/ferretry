@@ -76,6 +76,12 @@ import {
 } from './board-support.ts';
 import { factoryFor } from './features/fleet/mcp-sign-in-support.ts';
 import '../support/dom.ts';
+import { LiveVoiceSettingsProvider } from '../../src/hooks/use-live-voice-settings.ts';
+import { ReadAloudProvider } from '../../src/hooks/use-read-aloud.ts';
+import { LiveVoiceSettingsStore } from '../../src/lib/voice-chat/live-settings.ts';
+import { createReadAloud } from '../../src/lib/voice-chat/read-aloud.ts';
+import { createSpeechSynthesisSpeaker } from '../../src/lib/voice-chat/speech-synthesis.ts';
+import { FakeSynth, FakeUtterance } from '../support/fake-speech.ts';
 import { healthOf } from '../support/health.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -2413,6 +2419,72 @@ describe('SessionChatPage', () => {
         ),
       );
       expect(page.root.findAllByType(ApprovalCard)).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('Auto-read reads a permission prompt that parks the turn, with its options, and offers no way to answer by voice', async () => {
+    const permissionRequest: PermissionRequest = {
+      id: '0123456789abcdef',
+      harness: 'claude',
+      tool: 'Bash',
+      action: 'run',
+      what: 'npm test',
+      question: 'Do you want to proceed?',
+      options: [
+        { number: 1, label: 'Yes', kind: 'allow' },
+        { number: 2, label: 'No', kind: 'deny' },
+      ],
+      selected: 1,
+    };
+    const running = sessionView('shared', {
+      state: { status: 'running', turnState: 'working', turnStateAt: new Date(Date.now() - 5000).toISOString() },
+    });
+    const parked = sessionView('shared', {
+      state: {
+        status: 'running',
+        turnState: 'needs-input',
+        turnStateAt: new Date().toISOString(),
+        permissionRequest,
+        turnPrompt: 'Waiting for approval',
+      },
+    });
+    const synth = new FakeSynth();
+    const controller = createReadAloud({
+      speaker: createSpeechSynthesisSpeaker({ synth, createUtterance: text => new FakeUtterance(text) }),
+      language: () => 'en-US',
+    });
+    const voiceStore = new LiveVoiceSettingsStore({ getItem: () => null, setItem: () => undefined });
+    voiceStore.update({ autoRead: true });
+    const mountFor = (session: SessionView) =>
+      withSessionSearch(
+        <SessionChatPage
+          client={client([], session)}
+          connection={alpha}
+          entries={[]}
+          formFactor="desktop"
+          onSessionChange={() => undefined}
+          presentation="pane"
+          session={session}
+          workspaceLayouts={new WorkspaceLayoutStore(NO_STORAGE)}
+          workspaceRails={new WorkspaceRailPreferenceStore(NO_STORAGE)}
+        />,
+      );
+    const around = (page: ReactElement) => (
+      <LiveVoiceSettingsProvider store={voiceStore}>
+        <ReadAloudProvider controller={controller}>{page}</ReadAloudProvider>
+      </LiveVoiceSettingsProvider>
+    );
+    const page = render(around(mountFor(running)));
+    try {
+      run(() => page.update(around(mountFor(parked))));
+      await runAsync(async () => {
+        await new Promise(resolve => setTimeout(resolve, 650));
+      });
+      expect(controller.getState().segments.join(' ')).toBe(
+        'The ferret asks. Bash: Do you want to proceed? Options: one, Yes; two, No.',
+      );
     } finally {
       run(() => page.unmount());
     }

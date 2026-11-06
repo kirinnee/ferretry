@@ -8,8 +8,10 @@
  */
 
 import { createContext, createElement, type ReactNode, useContext, useEffect, useSyncExternalStore } from 'react';
+import { readOptionsOf } from '../lib/voice-chat/live-settings.ts';
 import { createReadAloud, IDLE, type ReadAloudController, type ReadAloudState } from '../lib/voice-chat/read-aloud.ts';
 import { browserSpeaker } from '../lib/voice-chat/speech-synthesis.ts';
+import { useDeviceVoiceSettingsStore } from './use-live-voice-settings.ts';
 
 let shared: ReadAloudController | null = null;
 
@@ -33,6 +35,11 @@ export function ReadAloudProvider({
   return createElement(ReadAloudContext.Provider, { value: controller }, children);
 }
 
+/** The page's one controller: the provided one, else the shared one over the device's own voice. */
+export function useReadAloudController(): ReadAloudController {
+  return useContext(ReadAloudContext) ?? browserReadAloud();
+}
+
 export interface RowReadAloud {
   readonly supported: boolean;
   /** This row's own reading state; `idle` while another message is being read. */
@@ -46,7 +53,8 @@ export interface RowReadAloud {
 }
 
 export function useReadAloud(key: string): RowReadAloud {
-  const controller = useContext(ReadAloudContext) ?? browserReadAloud();
+  const controller = useReadAloudController();
+  const settings = useDeviceVoiceSettingsStore();
   const state = useSyncExternalStore(controller.subscribe, controller.getState, () => IDLE);
   const mine = state.key === key ? state : IDLE;
   return {
@@ -54,15 +62,19 @@ export function useReadAloud(key: string): RowReadAloud {
     state: mine,
     reading: mine.status === 'reading',
     // While reading, the voice in use; before, the voice a reading would use: said BEFORE Read aloud is pressed.
-    voiceNote: () => (mine.status === 'reading' ? mine.voiceNote : controller.previewVoiceNote()),
-    read: markdown => controller.read(key, markdown),
+    voiceNote: () =>
+      mine.status === 'reading'
+        ? mine.voiceNote
+        : controller.previewVoiceNote(settings === null ? undefined : settings.get().voiceId),
+    // The voice, speed and length are read at the tap, so a change in Settings applies to the next reading.
+    read: markdown => controller.read(key, markdown, settings === null ? {} : readOptionsOf(settings.get())),
     stop: () => controller.stop(),
   };
 }
 
 /** Silence the page's reading when the surface that started it goes away. */
 export function useStopReadingOnLeave(scope: string): void {
-  const controller = useContext(ReadAloudContext) ?? browserReadAloud();
+  const controller = useReadAloudController();
   // biome-ignore lint/correctness/useExhaustiveDependencies: `scope` is the cleanup's trigger: leaving one conversation silences it.
   useEffect(() => () => controller.dismiss(), [controller, scope]);
 }

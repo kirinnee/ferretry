@@ -31,18 +31,26 @@
  */
 
 import { useMemo } from 'react';
+import { useMachineIsOlder } from '../../hooks/use-machine-dates-turns.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { useOnDeviceVoices, useParakeetVoice } from '../../lib/store.tsx';
+import { useOnDeviceVoices, useOptionalAppStore, useParakeetVoice } from '../../lib/store.tsx';
 import {
   type BrowserRecognitionProvider,
   type BrowserRecognitionSupport,
   browserRecognitionProvider,
 } from '../../lib/stt/browser-recognition.ts';
+import {
+  DEFAULT_ON_DEVICE_ENGINE,
+  type DeviceClass,
+  type DeviceClassGlobalLike,
+  deviceClassOf,
+} from '../../lib/stt/engine-defaults.ts';
 import { userContextVocabulary } from '../../lib/stt/enhancement.ts';
 import { onDeviceModel } from '../../lib/stt/model-catalog.ts';
 import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
 import type { ParakeetVoice } from '../../lib/stt/parakeet-voice.ts';
+import type { SpeedPlanner } from '../../lib/stt/speed-planner.ts';
 import {
   AFTER_DICTATION_OPTIONS,
   DEFAULT_ENHANCEMENT_MODELS,
@@ -59,16 +67,10 @@ import {
   sttDictionary,
 } from '../../lib/stt/stt-settings.ts';
 import { Badge, Textarea } from '../../shell/primitives.tsx';
+import { AutoReadSettings } from './auto-read-settings.tsx';
 import { DictationShortcutPicker } from './dictation-shortcut-picker.tsx';
-import type { SpeedPlanner } from '../../lib/stt/speed-planner.ts';
-import { SpeedLine } from './speed-line.tsx';
-import {
-  DEFAULT_ON_DEVICE_ENGINE,
-  type DeviceClass,
-  type DeviceClassGlobalLike,
-  deviceClassOf,
-} from '../../lib/stt/engine-defaults.ts';
 import { EngineCatalogList, type TrialClock } from './engine-catalog-list.tsx';
+import { SpeedLine } from './speed-line.tsx';
 import type { MachineVoiceCleanup } from './use-machine-voice-cleanup.ts';
 import { VoiceCleanupSettings } from './voice-cleanup-settings.tsx';
 
@@ -195,6 +197,7 @@ export function DictationSettings({
   voiceCleanup,
   speedPlanner,
 }: DictationSettingsProps) {
+  const olderMachine = useMachineIsOlder(useOptionalAppStore(), daemon);
   const detectedProvider = useMemo(() => browserRecognitionProvider(), []);
   const pageDeviceClass = useMemo(() => deviceClassOf(globalThis as DeviceClassGlobalLike), []);
   const provider = recognitionProvider ?? detectedProvider;
@@ -461,6 +464,9 @@ export function DictationSettings({
           Dictation is disabled. Turn it on above whenever you want the microphone available again.
         </p>
       )}
+
+      {/* ---- hearing a reply: independent of dictation, so it stays whether dictation is on or off ---- */}
+      <AutoReadSettings olderMachine={olderMachine} />
 
       {!persisted && (
         <p className="text-meta leading-base text-warn" role="status">

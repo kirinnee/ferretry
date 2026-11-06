@@ -1875,6 +1875,7 @@ function SessionRoute({
             // reference surface as a fleet with nobody in it.
             daemonSessions={fleetSlice?.sessions ?? undefined}
             entries={placedEntries}
+            sends={sends}
             history={history}
             {...(conversationSearch === undefined ? {} : { conversationSearch })}
             onRetry={retrySend}
@@ -1892,6 +1893,8 @@ function SessionRoute({
             refreshError={sessionIssue}
             transcriptUnbound={transcriptUnbound}
             updating={transcriptCached && !cacheCurrent && !catchingUp}
+            // Auto-read replies watches only the daemon's live word: neither the fleet's seeded view nor a transcript drawn from this device's cache is one.
+            authoritative={!transcriptCached && fleetSlice?.cachedAt === undefined}
             catchingUp={transcriptCached && catchingUp}
             readingPosition={readingPosition}
             session={session}

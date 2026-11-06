@@ -142,6 +142,7 @@ import { IndexedDbTranscriptionLogRecords } from './stt/transcription-log-record
 import { readTunnelService, type TunnelServiceState } from './tunnel-service.ts';
 import { keptTunnel, TunnelSwitchStore } from './tunnel-switch.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
+import { LiveVoiceSettingsStore } from './voice-chat/live-settings.ts';
 import { browserWebRtcDialer, type WebRtcDialer } from './webrtc-carrier.ts';
 import { WorkspaceLayoutStore } from './workspace-layout-store.ts';
 
@@ -425,6 +426,8 @@ export interface AppStore {
   readonly pins: DaemonPinClient;
   readonly browserLogin: DaemonBrowserLoginStore;
   readonly stt: SttSettingsStore;
+  /** This device's voice-chat settings (Auto-read replies, voice, rate), kept in this browser only. */
+  readonly liveVoice: LiveVoiceSettingsStore;
   /**
    * Parakeet on this device: whether it can run, its install, and on-device dictation sessions. One
    * per document, like the dictation settings, because the model belongs to the device.
@@ -865,6 +868,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   }));
   const browserStorage = browserControlsStorage() ?? null;
   const stt = new SttSettingsStore(browserStorage);
+  const liveVoice = new LiveVoiceSettingsStore(browserStorage);
   const speedupKeys =
     options.speedupKeys ??
     new DeviceSpeedupKeys(new IndexedDbSpeedupKeyRecords(globalThis.indexedDB), globalThis.crypto.subtle, fetcher);
@@ -1026,6 +1030,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     pins,
     browserLogin,
     stt,
+    liveVoice,
     voice,
     voices,
     speedupKeys,
@@ -1500,6 +1505,11 @@ export function useDictationDebugSnapshot(): DictationDebugSnapshot {
 /** This device's dictation settings store, or `null` outside a store. */
 export function useSttSettingsStore(): SttSettingsStore | null {
   return useContext(StoreContext)?.stt ?? null;
+}
+
+/** This device's voice-chat settings store, or `null` outside a store. */
+export function useLiveVoiceSettingsStore(): LiveVoiceSettingsStore | null {
+  return useContext(StoreContext)?.liveVoice ?? null;
 }
 
 /** This device's transcription log, or `null` outside a store. */

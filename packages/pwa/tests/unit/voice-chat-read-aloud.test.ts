@@ -97,6 +97,8 @@ describe('createReadAloud', () => {
     expect(remote.previewVoiceNote()).toBe('Google US English sends text to Google to be spoken.');
     expect(remote.getState().status).toBe('idle');
     expect(synth.spoken).toEqual([]);
+    // The voice chosen in Settings (passed at the tap) is the one named, ahead of the controller's own pick.
+    expect(device.previewVoiceNote(picked.voiceURI)).toBe('Google US English sends text to Google to be spoken.');
   });
 
   test('previewVoiceNote is null when there is no voice, or the device cannot say', () => {
@@ -316,5 +318,55 @@ describe('createReadAloud: which voice, and what the person is told', () => {
     expect(controller.getState().status).toBe('reading');
     synth.cancel();
     expect(controller.getState().status).toBe('stopped');
+  });
+});
+
+describe("createReadAloud: the person's voice settings for one reading", () => {
+  test("voice, rate and length come with the reading and win over the controller's defaults", () => {
+    const synth = new FakeSynth([voice('Samantha', 'en-US', { isDefault: true }), voice('Karen', 'en-AU')]);
+    const controller = createReadAloud({ speaker: over(synth), language: () => 'en-US', rate: () => 1 });
+    controller.read('k', 'Hello there.', { voiceId: 'uri:Karen', rate: 1.6, maxSeconds: 30 });
+    expect(synth.spoken[0]?.rate).toBe(1.6);
+    expect((synth.spoken[0]?.voice as { name: string } | undefined)?.name).toBe('Karen');
+    controller.dismiss();
+  });
+
+  test('a shorter limit stops sooner with "There\'s more on screen."; no limit reads on', () => {
+    const long = Array.from({ length: 60 }, (_, index) => `This is sentence number ${index + 1} of the reply.`).join(
+      ' ',
+    );
+    const make = (maxSeconds: number | null) => {
+      const controller = createReadAloud({ speaker: over(new FakeSynth([])), rate: () => 1 });
+      controller.read('k', long, { maxSeconds });
+      return controller.getState();
+    };
+    const thirty = make(30);
+    const sixty = make(60);
+    const unlimited = make(null);
+    expect(thirty.truncated).toBe(true);
+    expect(thirty.segments.at(-1)).toBe("There's more on screen.");
+    expect(thirty.segments.length).toBeLessThan(sixty.segments.length);
+    expect(unlimited.truncated).toBe(false);
+    expect(unlimited.segments).toHaveLength(60);
+  });
+
+  test('absent options keep the one-minute reading it always had', () => {
+    const controller = createReadAloud({ speaker: over(new FakeSynth([])), rate: () => 1 });
+    controller.read('k', 'Short.');
+    expect(controller.getState().truncated).toBe(false);
+  });
+
+  test('voices() lists what the speaker has, and is [] when the speaker throws', () => {
+    const synth = new FakeSynth([voice('Samantha', 'en-US')]);
+    expect(
+      createReadAloud({ speaker: over(synth) })
+        .voices()
+        .map(v => v.name),
+    ).toEqual(['Samantha']);
+    const broken = scripted();
+    broken.port.voices = () => {
+      throw new Error('no voices');
+    };
+    expect(createReadAloud({ speaker: broken.port }).voices()).toEqual([]);
   });
 });

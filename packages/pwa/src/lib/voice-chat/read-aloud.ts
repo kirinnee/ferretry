@@ -11,7 +11,7 @@
  */
 
 import type { SpeakerPort, SpeakerVoice } from './ports.ts';
-import { readingCapCharacters, speakableSegments } from './speakable.ts';
+import { readingCapForSeconds, speakableSegments } from './speakable.ts';
 import { chooseVoice, clampSpeechRate, DEFAULT_SPEECH_RATE, voiceNote } from './voice-choice.ts';
 
 /**
@@ -35,6 +35,15 @@ export interface ReadAloudState {
   readonly voiceNote: string | null;
 }
 
+/** What the person chose for ONE reading (their voice settings); each part falls back to the controller's default. */
+interface ReadOptions {
+  /** The chosen voice's id. */
+  readonly voiceId?: string | null;
+  readonly rate?: number;
+  /** The longest the reading runs, in seconds; null for no limit. Absent: one minute. */
+  readonly maxSeconds?: number | null;
+}
+
 export interface ReadAloudDeps {
   readonly speaker: SpeakerPort;
   /** The language to speak, read each time a reading starts (`navigator.language`). */
@@ -47,14 +56,16 @@ export interface ReadAloudDeps {
 
 export interface ReadAloudController {
   readonly supported: boolean;
+  /** The voices this device can speak with right now (may be empty at first: browsers load them late). Never throws. */
+  voices(): readonly SpeakerVoice[];
   getState(): ReadAloudState;
   subscribe(listener: () => void): () => void;
   /** Read `markdown` aloud as message `key`, replacing any reading. Call it from the tap itself (iOS). */
-  read(key: string, markdown: string): void;
+  read(key: string, markdown: string, options?: ReadOptions): void;
   /** Stop whatever is being read. */
   stop(): void;
   /** What to say about the voice a reading would use right now, before anything is read: null for a device voice. */
-  previewVoiceNote(): string | null;
+  previewVoiceNote(voiceId?: string | null): string | null;
   /** Stop and forget the message (and its sentences): the conversation it belonged to has been left. */
   dismiss(): void;
 }
@@ -79,7 +90,7 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
   };
 
   /** The voice a reading would use: the one the person picked, else the best that stays on the device; null for none. */
-  const pickVoice = (): { readonly voice: SpeakerVoice | null; readonly language: string } => {
+  const pickVoice = (voiceId?: string | null): { readonly voice: SpeakerVoice | null; readonly language: string } => {
     let language = 'en-US';
     try {
       language = deps.language?.() ?? language;
@@ -87,7 +98,7 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
       // No language to ask: English.
     }
     try {
-      return { voice: chooseVoice(speaker.voices(), language, deps.pickedVoice?.()), language };
+      return { voice: chooseVoice(speaker.voices(), language, voiceId ?? deps.pickedVoice?.()), language };
     } catch {
       return { voice: null, language };
     }
@@ -95,25 +106,34 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
 
   return {
     supported: speaker.supported,
+    voices: () => {
+      try {
+        return speaker.voices();
+      } catch {
+        return [];
+      }
+    },
     getState: () => state,
-    previewVoiceNote: () => voiceNote(pickVoice().voice),
+    previewVoiceNote: voiceId => voiceNote(pickVoice(voiceId).voice),
     subscribe: listener => {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
       };
     },
-    read: (key, markdown) => {
+    read: (key, markdown, options = {}) => {
       const mine = ++token;
-      const rate = clampSpeechRate(deps.rate?.() ?? DEFAULT_SPEECH_RATE);
-      const reading = speakableSegments(markdown, { maxCharacters: readingCapCharacters(rate) });
+      const rate = clampSpeechRate(options.rate ?? deps.rate?.() ?? DEFAULT_SPEECH_RATE);
+      const reading = speakableSegments(markdown, {
+        maxCharacters: readingCapForSeconds(rate, options.maxSeconds === undefined ? 60 : options.maxSeconds),
+      });
       const segments = reading.segments.map(segment => segment.text);
       if (segments.length === 0) {
         speaker.stop();
         set({ ...IDLE, key });
         return;
       }
-      const { voice, language } = pickVoice();
+      const { voice, language } = pickVoice(options.voiceId);
       if (voice === null) {
         // No voice that stays on the device and none picked: say so, and never hand the text to the browser's default.
         speaker.stop();
