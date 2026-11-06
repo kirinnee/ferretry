@@ -92,7 +92,9 @@ const setup = () => {
   );
   const agenda = new DaemonAgendaClient(
     undefined,
-    async (_input, init) => {
+    async (input, init) => {
+      // The roll-up is its own read; this test counts reads of the machine board.
+      if (String(input).includes('/v1/agenda/open')) return new Response('{}', { status: 404 });
       if (init?.method === 'POST') {
         reads.writes += 1;
         agendaValue = board();

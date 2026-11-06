@@ -505,17 +505,6 @@ const serviceCases: SchemaCase[] = [
     },
   },
   {
-    name: 'legacy wire use',
-    schema: service.LegacyWireUseSchema,
-    value: {
-      route: 'GET /v1/sessions/:sessionId/attention',
-      firstAt: '2026-10-30T00:00:00.000Z',
-      lastAt: '2026-10-30T01:00:00.000Z',
-      count: 3,
-      lastClientVersion: '4.108.0',
-    },
-  },
-  {
     name: 'liveness while starting',
     schema: service.LivenessViewSchema,
     value: {

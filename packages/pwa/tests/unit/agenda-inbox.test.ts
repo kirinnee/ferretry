@@ -55,7 +55,7 @@ const summary = (open: number, latest: number, first = 'A1'): SessionAgendaSumma
 });
 
 const waiting = (id: string, agenda?: SessionAgendaSummary) =>
-  sessionView(id, agenda === undefined ? {} : { state: { attention: agenda } });
+  sessionView(id, agenda === undefined ? {} : { state: { agenda: agenda } });
 
 const item = (id: string, minutes: number, ask?: AgendaItem['ask']): AgendaItem =>
   ({
@@ -689,11 +689,11 @@ describe('items in discussion', () => {
   });
 });
 
-describe('the session summary under either name', () => {
+describe('the session summary', () => {
   const agendaOnly = sessionView('new', { state: { agenda: summary(2, 7) } });
-  const both = sessionView('both', { state: { attention: summary(1, 3), agenda: summary(4, 9) } });
+  const both = sessionView('both', { state: { agenda: summary(4, 9) } });
 
-  test('reads a daemon that writes only agenda, and prefers agenda when both are written', () => {
+  test('reads the agenda summary', () => {
     expect(unreadCount(agendaOnly)).toBe(2);
     expect(unreadCount(both)).toBe(4);
     expect(unreadCount(waiting('old', summary(3, 1)))).toBe(3);
@@ -800,7 +800,7 @@ describe('parked items', () => {
 
 describe('the owner’s thread of a conversation', () => {
   const parentOf = (id: string, parent: string, agenda?: SessionAgendaSummary) =>
-    sessionView(id, { config: { parent } as never, ...(agenda === undefined ? {} : { state: { attention: agenda } }) });
+    sessionView(id, { config: { parent } as never, ...(agenda === undefined ? {} : { state: { agenda: agenda } }) });
   const top = waiting('top', summary(1, 1));
   const kid = parentOf('kid', 'top', summary(1, 9));
   const sources = [{ daemonId: STUDIO, name: 'Studio', sessions: [top, kid] }];

@@ -459,31 +459,6 @@ describe('NotificationService containment', () => {
   });
 });
 
-describe('NotificationService delivered count', () => {
-  it('should report the devices a ping reached, and zero for an unpushed notice, an error or an unreadable ledger', async () => {
-    // Arrange
-    const world = fixture();
-    world.push.result = { delivered: 2, failed: 1 };
-    const failing = fixture();
-    failing.push.notifyHook = async () => {
-      throw new Error('push failed');
-    };
-    const unreadable = fixture();
-    await unreadable.service.raised(SESSION, pinging, snapshot);
-    unreadable.ledger.failFind = true;
-
-    // Act
-    await world.service.raised(SESSION, pinging, snapshot);
-    await failing.service.raised(SESSION, pinging, snapshot);
-
-    // Assert
-    should(await world.service.agendaDelivered(SESSION, 'A4')).equal(2);
-    should(await world.service.agendaDelivered(SESSION, 'A9')).equal(0);
-    should(await failing.service.agendaDelivered(SESSION, 'A4')).equal(0);
-    should(await unreadable.service.agendaDelivered(SESSION, 'A4')).equal(0);
-  });
-});
-
 describe('NotificationService enrolled devices', () => {
   it('should count every enrolled device, zero included', async () => {
     // Arrange
@@ -560,28 +535,6 @@ describe('NotificationService across the agenda rename', () => {
 
     // Assert
     should(world.push.calls).equal(1);
-  });
-
-  it('should report the delivery of a ping recorded under the attention key', async () => {
-    // Arrange
-    const ledger = new MemoryLedger(
-      [],
-      [
-        legacyRecord(`attention:${SESSION}:A4:ping`, { agendaId: 'A4', ping: true }),
-        NotificationRecordSchema.parse({
-          v: 1,
-          phase: 'outcome',
-          key: `attention:${SESSION}:A4:ping`,
-          at: AT,
-          delivered: 2,
-          failed: 0,
-        }),
-      ],
-    );
-    const world = fixture({ ledger });
-
-    // Act / Assert
-    should(await world.service.agendaDelivered(SESSION, 'A4')).equal(2);
   });
 });
 

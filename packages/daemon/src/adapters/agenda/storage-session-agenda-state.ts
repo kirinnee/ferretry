@@ -12,10 +12,8 @@ function sameSummary(left: FrozenJsonValue | undefined, right: SessionAgendaSumm
 }
 
 /**
- * `state.agenda` and `state.attention` (the same summary under both names) in the session's own state
- * document — the document the list and the single read already serve — and one journal entry per board
- * change, which is what the fleet feed watches. An app from before `agenda.wire.1` reads only `attention`, and
- * one from after reads `agenda ?? attention`, so both are written until the agenda removal release.
+ * `state.agenda` in the session's own state document — the document the list and the single read already
+ * serve — and one journal entry per board change, which is what the fleet feed watches.
  *
  * CLEARED MEANS ABSENT, NOT `null`, for the reason `StorageSignalRepository` gives: the protocol
  * declares the field an optional object, and a `null` would make the whole document fail to parse.
@@ -34,17 +32,14 @@ export class StorageSessionAgendaState implements SessionAgendaState {
     if (id === undefined) return;
     const current = jsonObject(await this.storage.readState(id));
     if (current === undefined) return;
-    const moved = !sameSummary(current.attention, summary) || !sameSummary(current.agenda, summary);
+    const moved = !sameSummary(current.agenda, summary);
     if (moved) {
       await this.storage.updateState(id, latest => {
         const next: Record<string, FrozenJsonValue> = { ...(jsonObject(latest) ?? {}) };
-        if (summary === undefined) {
-          delete next.attention;
-          delete next.agenda;
-        } else {
-          next.attention = { ...summary };
-          next.agenda = { ...summary };
-        }
+        // `attention` was this summary's older name: a document written before the rename may still carry it.
+        delete next.attention;
+        if (summary === undefined) delete next.agenda;
+        else next.agenda = { ...summary };
         return next;
       });
     }

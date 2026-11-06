@@ -1,9 +1,4 @@
-import {
-  AgendaOpenPageSchema,
-  AgendaOpenQuerySchema,
-  legacyAgendaOpenSession,
-  readsAgendaChannel,
-} from '@ferretry/protocol';
+import { AgendaOpenPageSchema, AgendaOpenQuerySchema } from '@ferretry/protocol';
 import type { AgendaRollup } from '../../agenda/index.ts';
 import { ApiError } from '../../api/error.ts';
 import { queryValue } from '../../api/http.ts';
@@ -48,11 +43,7 @@ export function agendaOpenRoutes(rollup: AgendaRollup): readonly ApiRoute[] {
       noStore: true,
       handle: async context => {
         const page = AgendaOpenPageSchema.parse(await rollup.page(queryOf(context)));
-        return jsonResponse(
-          readsAgendaChannel(context.request.headers)
-            ? page
-            : { ...page, sessions: page.sessions.map(legacyAgendaOpenSession) },
-        );
+        return jsonResponse(page);
       },
     },
   ];

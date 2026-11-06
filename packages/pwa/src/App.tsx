@@ -2567,8 +2567,7 @@ export function AppShell() {
   const store = useAppStore();
   const connectionSnapshot = useConnectionSnapshot();
   const { route, navigate, entryKey } = useRouter();
-  const pageRoute: PageRoute =
-    route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect' ? route.to : route;
+  const pageRoute: PageRoute = route.kind === 'legacy-tasks-redirect' ? route.to : route;
   const connection = isDaemonless(pageRoute)
     ? undefined
     : connectionSnapshot.connections.find(candidate => candidate.daemonId === pageRoute.daemonId);

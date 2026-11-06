@@ -256,7 +256,7 @@
 # `/v1/warden/status`, `/v1/warden/run` and `/v1/warden/config` are all `unknown_route`, and status
 # could not be answered honestly even so: `anomalies` is a required field of `WardenStatusView`.
 #
-# LANDED (P5, the Warden's Needs-you feed): `attention.ts` is served at `GET /v1/warden/attention`. The
+# LANDED (P5, the Warden's Needs-you feed): `attention.ts` is served at `GET /v1/warden/agenda`. The
 # unwatched-fleet objection above is met by `collapseUnwatchedFleet`, which states the missing
 # monitor subsystem as ONE daemon-level fault instead of a wall of per-session `dead_monitor` rows.
 

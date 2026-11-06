@@ -4,7 +4,6 @@ import {
   type AgendaItem,
   type AgendaSnapshot,
   type AgendaListSnapshot,
-  DAEMON_FEATURES,
   LANE_PROPOSAL_ANSWERS,
   laneProposalReference,
   agendaListSnapshot,
@@ -28,7 +27,6 @@ import { inboxCardKey } from '../../../src/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
-import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { RouterProvider } from '../../../src/lib/router.tsx';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import { browserFetch } from '../../../src/lib/runtime-models.ts';
@@ -199,8 +197,10 @@ describe('opening resolved list headers', () => {
       view = mount({ snapshot: listed, focus: { target: 'A1' as AgendaId, seq: 1 } });
     });
     // Assert
-    expect(read).toHaveBeenCalledTimes(1);
-    expect(String(read.mock.calls[0]?.[0])).toContain('/v1/sessions/chat/agenda/A1');
+    const itemReads = read.mock.calls
+      .map(call => String(call[0]))
+      .filter(url => url.endsWith('/v1/sessions/chat/agenda/A1'));
+    expect(itemReads).toHaveLength(1);
     const opened = view?.root.findByType(AgendaItemView);
     expect(opened?.props.item).toEqual(document);
     expect(opened?.props.item.tabs[0].body).toContain('Fixture notes.');
@@ -416,12 +416,7 @@ describe('the full card', () => {
     view.root.findAllByType(AgendaItemView)[0]?.props.item.id;
   const withDrawer = (view: ReturnType<typeof render>) => run(() => toggle(view.root)[0]?.props.onClick());
 
-  test('draws the item’s own stored words when the machine keeps the conversation', () => {
-    const wires = new AgendaWireDirectory();
-    wires.note(connection.daemonId, {
-      kind: 'read',
-      health: { features: [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation] },
-    } as never);
+  test('draws the item’s own stored words', () => {
     const stored = item('A3', {
       conversationCount: 1,
       conversation: [{ at: '2026-07-31T11:40:00.000Z', by: 'owner', via: 'reply', text: 'Stored words' }],
@@ -429,7 +424,6 @@ describe('the full card', () => {
     const view = mount({
       snapshot: board([stored]),
       store: {
-        agendaWire: wires,
         carrier: { fetch: browserFetch },
         connections: { list: () => [] },
       } as unknown as AppStore,

@@ -43,15 +43,15 @@ const machine = (
 
 const question = sessionView('q', {
   config: { cwd: '/work/ferretry' },
-  state: { status: 'awaiting_question', turnStateAt: at(5), attention: open(5) },
+  state: { status: 'awaiting_question', turnStateAt: at(5), agenda: open(5) },
 });
 const human = sessionView('h', {
   config: { cwd: '/work/ferretry' },
-  state: { needsHuman: 'stuck', turnStateAt: at(1), attention: open(1) },
+  state: { needsHuman: 'stuck', turnStateAt: at(1), agenda: open(1) },
 });
 const you = sessionView('y', {
   config: { cwd: '/work/notes' },
-  state: { status: 'awaiting_user', turnStateAt: at(0), attention: open(0) },
+  state: { status: 'awaiting_user', turnStateAt: at(0), agenda: open(0) },
 });
 const busy = sessionView('b', { config: { cwd: '/work/ferretry' } });
 
@@ -120,7 +120,7 @@ describe('allMachinesView', () => {
   });
 
   test('ties break by machine order, then by id', () => {
-    const twin = sessionView('a', { state: { status: 'awaiting_user', turnStateAt: at(0), attention: open(0) } });
+    const twin = sessionView('a', { state: { status: 'awaiting_user', turnStateAt: at(0), agenda: open(0) } });
     const view = allMachinesView([machine(STUDIO, [you, twin]), machine(LAPTOP, [twin])]);
     expect(view.needsYou.map(entry => `${entry.daemonId}:${entry.view.config.id}`)).toEqual([
       'studio:a',
@@ -140,7 +140,7 @@ describe('allMachinesView', () => {
   test('a kind other than All shows only the machines it found something on; select narrows first', () => {
     const person = sessionView('p', {
       config: { mode: 'interactive' },
-      state: { status: 'awaiting_user', attention: open(2) },
+      state: { status: 'awaiting_user', agenda: open(2) },
     });
     const machines = [machine(STUDIO, [busy, you]), machine(LAPTOP, [person], 'offline')];
     const agents = allMachinesView(machines, { filter: { mode: 'auto', showStopped: true } });
@@ -243,7 +243,7 @@ describe('pinned ferrets across machines', () => {
   });
 
   test('a pinned ferret with open Attention is in Pinned only, and a finished one stays', () => {
-    const asking = pinned('q2', 4, { state: { status: 'awaiting_question', turnStateAt: at(5), attention: open(5) } });
+    const asking = pinned('q2', 4, { state: { status: 'awaiting_question', turnStateAt: at(5), agenda: open(5) } });
     const done = pinned('d', 6, { state: { status: 'completed' } });
     const view = allMachinesView([machine(STUDIO, [asking, done])], {
       filter: { mode: 'all', showStopped: false },

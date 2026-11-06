@@ -2,13 +2,7 @@ import { describe, it } from 'bun:test';
 import { MACHINE_AGENDA_ID } from '@ferretry/protocol';
 import should from 'should';
 import type { z } from 'zod';
-import {
-  agendaBoardPath,
-  agendaRepliesPath,
-  legacyAttentionBoardPath,
-  ProtocolAgendaGateway,
-  repliesPath,
-} from '../../../src/lib/agenda/gateway';
+import { agendaBoardPath, agendaRepliesPath, ProtocolAgendaGateway } from '../../../src/lib/agenda/gateway';
 import type { AgendaApiClient } from '../../../src/lib/agenda/ports';
 import { DAEMON_HEALTH_PATH, DaemonFeaturesUnreadable } from '../../../src/lib/daemon/features';
 import { humanItem, SESSION, snapshot } from './fixtures';
@@ -33,21 +27,18 @@ describe('attention routes', () => {
   it('should escape a session id that would otherwise break the route', () => {
     // Act + Assert
     should(agendaBoardPath('a/b')).equal('/v1/sessions/a%2Fb/agenda');
-    should(legacyAttentionBoardPath('a/b')).equal('/v1/sessions/a%2Fb/attention');
   });
 });
 
 describe('protocol attention gateway', () => {
-  it('uses the owner machine route for machine reads and actions, in both wire spellings', async () => {
+  it('uses the owner machine route for machine reads and actions', async () => {
     const calls: Call[] = [];
     const gateway = new ProtocolAgendaGateway(fakeClient({ ...snapshot([]), sessionId: MACHINE_AGENDA_ID }, calls));
     await gateway.snapshot(MACHINE_AGENDA_ID);
     await gateway.apply(MACHINE_AGENDA_ID, { action: 'dismiss', id: 'A1' });
     should(calls.map(call => call.path)).deepEqual(['/v1/machine/agenda', '/v1/machine/agenda']);
     should(() => agendaBoardPath(MACHINE_AGENDA_ID)).throw(/use \/v1\/machine\/agenda/u);
-    should(() => legacyAttentionBoardPath(MACHINE_AGENDA_ID)).throw(/use \/v1\/machine\/agenda/u);
     should(() => agendaRepliesPath(MACHINE_AGENDA_ID)).throw(/use \/v1\/machine\/agenda/u);
-    should(() => repliesPath(MACHINE_AGENDA_ID)).throw(/use \/v1\/machine\/agenda/u);
     await should(gateway.sendReplies(MACHINE_AGENDA_ID)).be.rejectedWith(/has no replies/u);
     should(calls).have.length(2);
   });
@@ -170,7 +161,6 @@ describe('protocol attention gateway send-now', () => {
 
     // Assert
     should(agendaRepliesPath('a/b')).equal('/v1/sessions/a%2Fb/agenda/replies');
-    should(repliesPath('a/b')).equal('/v1/sessions/a%2Fb/attention/replies');
     should(calls[0]?.path).equal('/v1/sessions/a%2Fb/agenda/replies');
     should(calls[0]?.init?.method).equal('POST');
     should(JSON.parse(String(calls[0]?.init?.body))).deepEqual({});

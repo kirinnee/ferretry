@@ -95,9 +95,8 @@ class FakeAgendaDaemon {
         health({ features: [DAEMON_FEATURES.agendaConversation, DAEMON_FEATURES.agendaLinkMeaning] }),
       );
     }
-    // A daemon of this build answers the agenda spelling and the older attention one alike
-    // (docs/agenda.md § Compatibility), and refuses anything else the way the real one does.
-    if (path !== `${session}/agenda` && path !== `${session}/attention`) {
+    // A daemon of this build answers the agenda route and refuses anything else the way the real one does.
+    if (path !== `${session}/agenda`) {
       return Response.json(
         { error: `no route ${request.method} ${path}`, code: 'unknown_route', method: request.method, path },
         { status: 404 },

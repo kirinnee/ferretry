@@ -4,14 +4,12 @@ import {
   AgendaItemSchema,
   agendaContentLength,
   fitAgendaItem,
-  legacyAgendaItem,
   MAX_AGENDA_CONTENT_LENGTH,
   MAX_AGENDA_GATE_HISTORY_LENGTH,
   MAX_AGENDA_ITEM_LENGTH,
   ResolvedAgendaItemSchema,
 } from '@ferretry/protocol';
 import should from 'should';
-import { AgendaSnapshotSchema as OldSnapshotSchema } from '../../../../protocol/tests/fixtures/agenda-before-channel.ts';
 import {
   type AgendaActor,
   type AgendaLedger,
@@ -117,8 +115,6 @@ describe('a long agenda item', () => {
         previous: payload(n),
       })),
     };
-    const snapshot = { ...seed.snapshot, items: [item] };
-    should(OldSnapshotSchema.safeParse(snapshot).success).be.true();
     should(JSON.stringify(item).length).be.above(MAX_AGENDA_ITEM_LENGTH);
     const raw = { ...seed.ledger, version: undefined, entries: [{ ...seed.ledger.entries[0], item }] };
     const migrated = parseAgendaLedger(raw, SESSION_ID);
@@ -303,7 +299,7 @@ describe('a long agenda item', () => {
         at: AT,
       }),
     );
-    const projected = legacyAgendaItem(open(failed.ledger)).undelivered?.reply;
+    const projected = open(failed.ledger).undelivered?.reply;
     if (projected?.action !== 'resolve' || projected.response === undefined) throw new Error('no Retry');
     const retried = ok(
       applyAgendaCommand(failed.ledger, {

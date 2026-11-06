@@ -53,7 +53,7 @@ const a9 = inboxCard(agendaItem('A9', { title: 'Keep CI?', subject: 'Keep the CI
 const stoppedView = (id: string) =>
   sessionView(id, {
     config: { teammate: 'moe', name: undefined },
-    state: { attention: { open: 1, first: 'A1', ask: 'Go?', latestAt: '2026-08-01T11:00:00.000Z', stopped: true } },
+    state: { agenda: { open: 1, first: 'A1', ask: 'Go?', latestAt: '2026-08-01T11:00:00.000Z', stopped: true } },
   } as never);
 
 describe('inboxSections', () => {

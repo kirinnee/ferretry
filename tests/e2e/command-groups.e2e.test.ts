@@ -141,8 +141,7 @@ async function startStubDaemon(): Promise<Stub> {
 
 function route(path: string): unknown {
   if (path === `/v1/sessions/${SESSION}/pins`) return pinBoard;
-  if (path === `/v1/sessions/${SESSION}/attention`) return agendaBoard;
-  if (path === `/v1/sessions/${SESSION}/notify`) return { sessionId: SESSION, delivered: 2 };
+  if (path === `/v1/sessions/${SESSION}/agenda`) return agendaBoard;
   if (path === '/v1/analytics') return analyticsFeed;
   return undefined;
 }
@@ -228,15 +227,20 @@ describe('command group journeys', () => {
 
       try {
         // Act
-        const actual = await environment.runFy(
-          ['attention', 'notify', 'the', 'build', 'is', 'green'],
-          connection(stub),
-        );
+        const actual = await environment.runFy(['notify', 'the', 'build', 'is', 'green'], connection(stub));
 
-        // Assert
+        // Assert — a notification is an agenda notice posted to the session's agenda route.
         should(actual.code).equal(0);
-        should(actual.out).containEql('notification sent to 2 devices');
-        should(stub.requests.at(-1)?.path).equal(`/v1/sessions/${SESSION}/notify`);
+        should(actual.out).containEql("Sent. The owner sees it in this ferret's Inbox.");
+        should(stub.requests.at(-1)?.method).equal('POST');
+        should(stub.requests.at(-1)?.path).equal(`/v1/sessions/${SESSION}/agenda`);
+        should(stub.requests.at(-1)?.body).containEql({
+          action: 'add',
+          source: 'agent-raised',
+          subject: 'the build is green',
+          kind: 'info',
+          notice: true,
+        });
       } finally {
         await stub.stop();
       }

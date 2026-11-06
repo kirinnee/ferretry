@@ -188,7 +188,7 @@ describe('batched answers notice', () => {
     const button = must(root.querySelector<HTMLButtonElement>('[data-agenda-send-now]'), 'send now');
     await interact(() => button.click());
     const posts = calls.filter(call => call.method === 'POST');
-    expect(posts).toEqual([{ url: 'https://studio.example.test/v1/sessions/s-1/attention/replies', method: 'POST' }]);
+    expect(posts).toEqual([{ url: 'https://studio.example.test/v1/sessions/s-1/agenda/replies', method: 'POST' }]);
     expect(root.querySelector('[data-agenda-replies]')).toBeNull();
   });
 });

@@ -21,7 +21,7 @@ const SESSIONS = [
     config: { teammate: 'maryah', name: 'Diene work', cwd: '/work/home-manager' },
     state: {
       status: 'awaiting_user',
-      attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: recent },
+      agenda: { open: 1, first: 'A1', ask: 'Ask?', latestAt: recent },
       lastActivityAt: recent,
     },
   }),
@@ -96,7 +96,7 @@ describe('SessionsBar as a column', () => {
       config: { teammate: 'asker', cwd: '/work/ferretry', mode: 'interactive' },
       state: {
         status: 'awaiting_question',
-        attention: { open: 1, first: 'A1', ask: 'Rebase onto main first?', latestAt: recent },
+        agenda: { open: 1, first: 'A1', ask: 'Rebase onto main first?', latestAt: recent },
         pendingQuestion: { toolUseId: 't1', questions: [{ question: 'Rebase onto main first?' }] },
       },
     });
@@ -670,7 +670,7 @@ describe('SessionsBar across every machine', () => {
       config: { teammate: 'ora', name: 'A question', cwd: '/work/site' },
       state: {
         status: 'awaiting_question',
-        attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: recent },
+        agenda: { open: 1, first: 'A1', ask: 'Ask?', latestAt: recent },
       },
     }),
   ];

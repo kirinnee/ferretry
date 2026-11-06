@@ -14,21 +14,17 @@ const lanes = laneSetFor();
 const F12: TaskRef = { id: 'F12' };
 
 describe('which cards an agenda item offers to close', () => {
-  it('offers the linked card only when the item asked AND the machine takes the field', () => {
-    expect(offeredCards({ offerClose: true, task: F12 }, true, 'daemon/a')).toEqual([F12]);
-    expect(offeredCards({ task: F12 }, true, 'daemon/a')).toEqual([]);
-    expect(offeredCards({ offerClose: true, task: F12 }, false, 'daemon/a')).toEqual([]);
-    expect(offeredCards({ offerClose: true, task: F12 }, undefined, 'daemon/a')).toEqual([]);
+  it('offers the linked card only when the item asked', () => {
+    expect(offeredCards({ offerClose: true, task: F12 }, 'daemon/a')).toEqual([F12]);
+    expect(offeredCards({ task: F12 }, 'daemon/a')).toEqual([]);
   });
 
   it('offers nothing without a card, for a notice, or for a card of another machine', () => {
-    expect(offeredCards({ offerClose: true }, true, 'daemon/a')).toEqual([]);
-    expect(offeredCards({ offerClose: true, task: null as never }, true, 'daemon/a')).toEqual([]);
-    expect(offeredCards({ offerClose: true, task: F12, notice: true }, true, 'daemon/a')).toEqual([]);
-    expect(offeredCards({ offerClose: true, task: { id: 'F12', machineId: 'daemon/b' } }, true, 'daemon/a')).toEqual(
-      [],
-    );
-    expect(offeredCards({ offerClose: true, task: { id: 'F12', machineId: 'daemon/a' } }, true, 'daemon/a')).toEqual([
+    expect(offeredCards({ offerClose: true }, 'daemon/a')).toEqual([]);
+    expect(offeredCards({ offerClose: true, task: null as never }, 'daemon/a')).toEqual([]);
+    expect(offeredCards({ offerClose: true, task: F12, notice: true }, 'daemon/a')).toEqual([]);
+    expect(offeredCards({ offerClose: true, task: { id: 'F12', machineId: 'daemon/b' } }, 'daemon/a')).toEqual([]);
+    expect(offeredCards({ offerClose: true, task: { id: 'F12', machineId: 'daemon/a' } }, 'daemon/a')).toEqual([
       { id: 'F12', machineId: 'daemon/a' },
     ]);
   });

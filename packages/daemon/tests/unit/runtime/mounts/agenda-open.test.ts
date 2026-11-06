@@ -33,7 +33,7 @@ function fixture(items: AgendaItem[] = []) {
 }
 
 describe('GET /v1/agenda/open', () => {
-  it('should send whole channel items only to a caller that opts in', async () => {
+  it('should send whole items', async () => {
     const item = AgendaItemSchema.parse({
       id: 'A1',
       source: 'agent-raised',
@@ -49,13 +49,10 @@ describe('GET /v1/agenda/open', () => {
       whereWeAre: 'Ready',
     });
     const { get } = fixture([item]);
-    const legacy = await get();
-    const channel = await get([], { ...human, 'x-fy-agenda-channel': '1' });
-    const items = (response: ApiResponse) => (jsonBody(response).sessions as { items: AgendaItem[] }[])[0]?.items;
-    should(items(legacy)?.[0]?.body).have.length(8_000);
-    should(items(legacy)?.[0]).not.have.property('whereWeAre');
-    should(items(channel)?.[0]?.body).have.length(50_000);
-    should(items(channel)?.[0]?.whereWeAre).equal('Ready');
+    const response = await get();
+    const items = (jsonBody(response).sessions as { items: AgendaItem[] }[])[0]?.items;
+    should(items?.[0]?.body).have.length(50_000);
+    should(items?.[0]?.whereWeAre).equal('Ready');
   });
   it('should answer the owner a page, with the query read from the URL', async () => {
     // Arrange
@@ -130,11 +127,4 @@ describe('GET /v1/agenda/open', () => {
     // Assert
     should(response.headers.get('cache-control')).equal('no-store');
   });
-});
-
-it('serves the full channel view to a caller that declares it can read it', async () => {
-  const { get } = fixture();
-  const response = await get([], { ...human, 'x-fy-agenda-channel': '1' });
-  should(response.status).equal(200);
-  should(jsonBody(response)).deepEqual({ sessions: [] });
 });

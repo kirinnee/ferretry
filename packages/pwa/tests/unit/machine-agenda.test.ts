@@ -38,7 +38,6 @@ describe('machineSessionView', () => {
     expect(view.config.id).toBe('machine-agenda');
     expect(view.config.name).toBe(MACHINE_GROUP_NAME);
     expect(view.state.agenda).toEqual({ open: 3, first: 'M1', ask: 'Subject M1', latestAt: at(20) });
-    expect(view.state.attention).toEqual(view.state.agenda);
   });
 
   it('ignores the parked items in the summary, and has none when all are parked', () => {

@@ -30,7 +30,7 @@ describe('recordingFetch', () => {
     const subject = recordingFetch(send, recorder);
 
     // Act
-    const response = await subject('https://studio.local/v1/sessions/fy_s_1/attention?x=1', {
+    const response = await subject('https://studio.local/v1/sessions/fy_s_1/agenda?x=1', {
       method: 'POST',
       body: 'héllo',
     });
@@ -42,7 +42,7 @@ describe('recordingFetch', () => {
     should(body).equal('{"sessions":[]}');
     should(recorder.report(60_000).routes).eql([
       {
-        route: 'POST /v1/sessions/:id/attention',
+        route: 'POST /v1/sessions/:id/agenda',
         count: 1,
         perMinute: 1,
         p50Ms: 40,

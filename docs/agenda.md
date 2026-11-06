@@ -178,9 +178,8 @@ plain message to its ferret — nothing here is a second path).
   the wire yields one card; the list is ready for the day it carries more.)
 - **Owner only**: the tap is the owner's in the app, and the board's own gate already refuses a ferret moving a
   card into the Closed lane (`ownerGate`, standing `owner-human`).
-- **The app ships first**: a daemon reports `agenda.offer-close.1` on `GET /v1/health`. The app offers the button
-  only for a machine that lists it AND an item with a linked card of that machine that asked for it. The CLI sends
-  `offerClose` only to a daemon that lists it; to an older one it raises the item without and says so.
+- **The button is offered** for an item with a linked card of that machine that asked for it. The CLI sends
+  `offerClose` only to a daemon that reports `agenda.offer-close.1` on `GET /v1/health`; to an older one it raises the item without and says so.
 
 ## Card asks
 
@@ -449,8 +448,8 @@ command line `fy agenda edit A5 --kind <kind> --option … --question …` compo
 - **An answer to the old ask is refused `409 ask_changed`**, never applied to the new options: an answer request
   names the `askVersion` it was given to, and one that names an older version is refused (a stale tab, the undo
   window, a held send). **The app always names it**: it stamps the version of the ask on screen when the answer
-  action is created, keeps it through the undo window and the outbox, and sends it with the dispatch (to a daemon
-  that reports `agenda.asks.1`; an older daemon never receives the field, and has no replaced asks to confuse).
+  action is created, keeps it through the undo window and the outbox, and sends it with the dispatch.
+  The CLI names none, so its answers are checked only as below.
   An answer that names none is checked only where it cannot be stale: a **human's** answer with no version is
   refused `409 ask_changed` once the ask has been replaced, so an older app is locked out of a replaced ask
   until it reloads; the answer of a ferret's own `done --choice`, and any answer to an ask never replaced, are
@@ -735,8 +734,8 @@ pure, lossless and idempotent; the next atomic write persists both the thread an
 displaces bounded history or revisions at the transport limit, `carriedEntries` retains the original valid snapshot
 in the ledger, and it becomes the first carried version on the next change. History already dropped
 by an earlier daemon cannot be recovered. The existing PWA `item-conversation.ts` continues reading session transcripts;
-the item view draws the stored thread on a machine that reports `agenda.conversation.1` (see [The item view](#the-item-view)).
-That feature stays the health flag, and the new fields are optional for older apps.
+the item view draws the stored thread (see [The item view](#the-item-view)).
+`agenda.conversation.1` stays the health flag the CLI checks, and the new fields are optional.
 
 ### `fy agenda log`
 
@@ -876,7 +875,7 @@ keeps its ask. Both conversations and all cards are kept.", and the checkbox "Ke
 survives by default, and the checkbox flips it ("Merge this item into !A2?", "This item closes; !A2 keeps its ask. …").
 The choices sit in the fixed order: Cancel on the left, **Merge** on the right; Cancel leaves the panel, and the
 picker is reopened from ⋯ with **Merge with…**. There is no grant to gate on: the daemon decides by who acts, so the app offers the button
-only when the machine reports `agenda.conversation.1`, the host can send a merge, and the item is an open plain
+only when the host can send a merge and the item is an open plain
 conversation, and a refusal from the daemon is shown in the panel in the daemon's own words. A merged item shows
 **Merged into !A2 (its title)** as a link, and the survivor shows **Merged in from !A5 (its title)**. A merged-away agenda is closed, so
 its title is read from the board's resolved records as well as its open items. An Inbox card that says it merged
@@ -963,9 +962,8 @@ list, `snoozePicks`, for both; Custom… asks for the time on a sheet); on the c
   wakes it on its own, outside that throttle: an item that woke as urgent half an hour ago still wakes for a new
   blocker.
 - Only the owner snoozes and unsnoozes; only the daemon's own timer wakes. A notice is read, not snoozed.
-- **The app ships first**: a daemon reports `agenda.snooze.1` on `GET /v1/health`, and the app sends snooze or
-  unsnooze only to a machine that lists it. To an older machine it sends nothing and says the machine needs an
-  update; a machine not yet read that refuses the request as an unknown action is told apart the same way.
+- **The app always offers it**: snooze and unsnooze go to the daemon like any other action, and whatever the
+  daemon answers is shown as it said it — the app adds no "needs an update" wording of its own for a snooze.
 
 **Migration.** Replies used to close items (`disposition: 'replied'`), and before that they left an item on the
 ferret's turn. When a board is read, an item still waiting on the ferret only because of an owner reply is
@@ -1421,8 +1419,8 @@ and a part the item does not carry is not drawn:
   where motion is reduced it ends at a whole word with "…" and a tap shows all of it (`MarqueeTitle`), so the whole
   title is always one tap away. Rows in a list may still be one line.
 - **The conversation** is read from the chat for an item that has no stored thread (`itemHistory`: the owner's words
-  that name the item and the parts of the ferret's replies about it). A machine with the stored conversation
-  (`agenda.conversation.1`) feeds the same part from the item itself: the item's own tail when it is whole, else every
+  that name the item and the parts of the ferret's replies about it). The stored conversation
+  feeds the same part from the item itself: the item's own tail when it is whole, else every
   entry read through `GET …/conversation`, in stored order. The item carries a bounded tail, so only the
   entries BEFORE the tail are read, once each, and the tail is drawn at once under one line, "Loading N earlier
   entries…". A reply that arrives reads only the entries the app does not hold yet, never the thread from the start.
@@ -1696,18 +1694,17 @@ The Inbox lists **Open, Snoozed and Replied for every conversation**, not the mo
 (each filter's badge and the page's header) is **the length of the rows listed under it** — the rows the machine,
 Ferrets and Find filters keep, never a total taken before they applied.
 
-- **`GET /v1/agenda/open`** (`agenda.open.1` in `GET /v1/health` features) answers every session's open AND parked
+- **`GET /v1/agenda/open`** answers every session's open AND parked
   (snoozed, replied) items on the machine: `{ sessions: [{ sessionId, items }], next? }`, in session-id order, paged
   with `?after=<next>&limit=` (default 200 items, at most 500; a conversation is never split across pages and one with
   nothing on its board is left out). It is read from the boards the agenda service already holds — no new store.
 - **Who may read it**: the same grants as one conversation's board (`operator`, no capability, gated by who asks —
   [grants.md](grants.md)) with one narrowing: `caller: 'person'`. A board read names one session; this names every
   session and item on the machine, which a ferret has no use for, so a ferret credential gets 403. `noStore`, as a board is.
-- **The app ships first**: the Inbox asks a machine for the roll-up only once its health lists `agenda.open.1`. It reads
+- **The Inbox reads it** for every machine. It reads
   every page on mount and when the owner opens Snoozed, Replied or Resolved, and keeps the last good read if a later one
-  fails. A board this device already holds is newer than the roll-up and wins for its conversation. An older machine
-  keeps the window it had — the 30 most recent conversations — and the list says so ("From your 30 most recent
-  conversations"); the caveat is shown only while some machine is not read to the end. Resolved stays windowed to those
+  fails. A board this device already holds is newer than the roll-up and wins for its conversation. The list says so ("From your 30 most recent
+  conversations") only while some machine is not read to the end. Resolved stays windowed to those
   30 conversations on every machine, and its footer says so.
 - **Rows name the owner's thread.** A sub-ferret is named for a piece of work ("Revive Button Flaky") or a callsign
   ("Vena"); the owner talks to the thread that started it. Every Inbox row — an agenda item, a parked item, a resolved
@@ -1732,8 +1729,7 @@ letting go does:
 A swipe down is therefore never destructive without Undo. The choices are a pure state machine
 (`agenda-compass.ts`: a drag path in, an intent out), so the thresholds are tested without a pointer. Nothing depends on the
 gesture: behind every open card's ⋯ are plain buttons — **Skip** and **Not needed** — and **Snooze** (1 h / 4 h /
-tomorrow / custom); the arrow keys are unchanged. Snooze is offered only where the machine advertises it
-(`agenda.snooze.1`), in the compass and in the menu alike. The touch rules stay: a drag never starts on a control, and the direction locks on its first move.
+tomorrow / custom); the arrow keys are unchanged. Snooze is offered in the compass and in the menu alike. The touch rules stay: a drag never starts on a control, and the direction locks on its first move.
 
 ### Card asks in the Inbox
 
@@ -1819,7 +1815,7 @@ A bare **Got it** (or Done with no words) on an `info` item is never delivered: 
    file). It is due **10 seconds after the last card action**: every further action on that ferret's cards
    restarts the countdown, and the first one never waits more than **2 minutes**. The agenda says so:
    `replies: {pending, dueAt, heldForTurn?}` on every `GET` and `POST` of the agenda route
-   (`/v1/sessions/:id/agenda`; older clients use `/attention`, see [Compatibility](#compatibility)). "Send now"
+   (`/v1/sessions/:id/agenda`). "Send now"
    (`POST /v1/sessions/:id/agenda/replies`, `fy agenda send-now`) skips the countdown.
 2. **Waiting for the turn.** A due batch waits while the ferret's `turnState` is `working`, and later
    answers join it. It is looked at again every 5 seconds and goes once the turn ends. Past 15 minutes it
@@ -1909,9 +1905,10 @@ The teaching that makes a ferret follow these rules is held to the spec by
 
 ## Compatibility
 
-The agenda was called Attention, and its wire still carries that name for older apps and CLIs. The app ships from
-`main` the moment a change merges while a daemon changes only after a release and `fy daemon update`, so for a while
-every combination of old and new meets.
+The agenda was called Attention. The app and the CLI dial the agenda names only; the `/attention` routes,
+`POST …/notify` and `SessionState.attention` are gone. The app ships from `main` the moment a change merges while a daemon
+changes only after a release and `fy daemon update`, so the CLI still checks the features below before sending a
+request an older daemon would refuse.
 
 ### The channel (`agenda.channel.1`)
 
@@ -1928,32 +1925,18 @@ answer to a replaced ask (see
 [Editable asks](#editable-asks)). `fy agenda answer` sends the edit every daemon takes (`questionAnswer`): an older one brings the
 item back fresh instead of in its old place.
 
-### An older app keeps reading the board
+### The channel header
 
-An app from before the channel parses a **whole** board with its own schema, so one item it cannot read makes the board
-unreadable. Its limits were smaller (a point-form segment 1,024, the context and every note 2,048, a step 2,000, a body
-8,000), and its revisions and history entries are strict, so an edit of `whereWeAre` or `detail` or a `response` on a
-history entry is a key it refuses. A daemon chooses the response shape by the **request header
-`x-fy-agenda-channel`**. Channel 1 corresponds to `agenda.channel.1` on `GET /v1/health`; channel 2 additionally
-accepts resolved headers in list responses:
+The CLI and the app send the request header `x-fy-agenda-channel: 2` on agenda requests, and the daemon allows it in
+its CORS preflight. The daemon reads it for one thing only, the shape of a **list** read:
 
-- **Channel 2** — active items in full and resolved headers on session agenda, legacy `/attention` and machine agenda
-  list reads. Opening a resolved item reads its full record through `GET …/agenda/:id`. The current CLI and PWA send
-  `x-fy-agenda-channel: 2` on agenda requests. Actions, Send now, roll-ups and one-item reads retain their full shapes.
-- **Channel 1** — complete active and resolved records, with all channel fields. A cached PWA or CLI that cannot
-  parse headers keeps reading its whole snapshot.
+- **Channel 2** — active items in full and resolved headers on session agenda and machine agenda list reads. Opening a
+  resolved item reads its full record through `GET …/agenda/:id`. Actions, Send now, roll-ups and one-item reads retain
+  their full shapes.
+- **Anything else** (no header, channel 1, an unknown version) — complete active and resolved records, exactly as
+  stored. A cached PWA or CLI that cannot parse headers keeps reading its whole snapshot.
 - Older daemons ignore the header (it is already allowed by CORS); a daemon that only understands channel 1 serves
-  channel 2 readers the legacy full snapshot, which they can still read.
-- **Without it, or with an unknown version** — complete records in the **legacy projection** (`legacyAgendaSnapshot`, in `@ferretry/protocol`): the same items, with
-  every widened field cut to the older bound (ending in `…`), the channel-only keys (`resting`, `ownerAnswer`, `stage`,
-  `stages`, `whereWeAre`, `detail`), a link's `meaning` (`links[].meaning`, also in a revision's `previous`) and the `response` of a history entry left out, and a revision that only changed a
-  field the older app does not know dropped. The ferret's own `tabs` are left out too, a revision that only changed
-  them dropped, and one line is added under the body naming the tabs it cannot draw: "_This item has more tabs
-  (Where we are now, Status): update the app to read them._" The projection is a view: it is never written back, so nothing is lost on
-  the machine. It covers the board, Send now, the roll-up of every conversation and the machine agenda, including
-  `questionAnswer`, revision `previous` values and nested undelivered responses and notes. If an older app retries
-  the exact clipped reply it received, the ledger transition restores the stored full reply before applying it;
-  a legacy view never replaces the owner's words with a shortened answer.
+  channel 2 readers its legacy projection — the same items with widened fields clipped — which they can still read.
 
 ### Tabs (`agenda.tabs.1`)
 
@@ -1964,8 +1947,7 @@ only, so the ledger is unchanged (no migration).
 - **GAP (downgrade):** a daemon rolled back to before the tabs drops `tabs` on its next write of that item; the
   version store still holds them, so Changes can show them, but they are not restored on the way up.
 - **GAP (cached app):** an app cached from before the tabs parses a revision that changed `tabs` with its strict
-  revision schema and cannot read it until it reloads (the projection covers only callers without the channel
-  header).
+  revision schema and cannot read it until it reloads.
 
 ### Patch (`agenda.patch.1`)
 
@@ -1984,13 +1966,11 @@ no migration.
 A daemon that stores the conversation, takes `log`, `merge` and `split`, and keeps versions reports
 `agenda.conversation.1` on `GET /v1/health`. Every new item field (`conversation`, `mergedFrom`, `mergedInto`,
 `splitFrom`, `splitInto`, `relatedTasks`) is optional, and the version routes are new, so an app or CLI from before
-reads every item; the CLI checks the feature first and says the daemon needs an update. The app ships before the daemon:
-an app talking to a daemon without the feature still reconstructs the conversation from session transcripts
-(`item-conversation.ts`) and shows no diff or merge control.
+reads every item; the CLI checks the feature first and says the daemon needs an update.
 
 ### Lists and complete items
 
-`GET /v1/sessions/:sessionId/agenda`, its legacy `/attention` spelling, and `GET /v1/machine/agenda` return
+`GET /v1/sessions/:sessionId/agenda` and `GET /v1/machine/agenda` return
 `AgendaListSnapshot`: active items (including resting and snoozed ones) in full, and every addressed item as a
 `projection: header` record. A header keeps its id, title, kind, author, resolution time and disposition,
 conversation count, card and reference links, the short reason searched by Find, and the outcome metadata the Resolved rows display. The document's
@@ -2007,19 +1987,15 @@ The Resolved lists need only header metadata; none of the last ten records needs
 Machine records open in the Inbox because they have no ferret conversation to navigate to. A failed item read keeps
 a visible retry; it never presents a header as an empty document.
 
-### Both spellings, one window
+### Older names still read
 
-| Older name (still answered)               | Agenda name                       | Today                                                                      |
-| ----------------------------------------- | --------------------------------- | -------------------------------------------------------------------------- |
-| `GET/POST /v1/sessions/:id/attention`     | `/v1/sessions/:id/agenda`         | both served, same handler and grants                                       |
-| `POST /v1/sessions/:id/attention/replies` | `/v1/sessions/:id/agenda/replies` | both served                                                                |
-| `GET /v1/warden/attention`                | `/v1/warden/agenda`               | both served                                                                |
-| `SessionState.attention`                  | `SessionState.agenda`             | both written, same value                                                   |
-| journal `attention.*` events              | `agenda.*`                        | new names written; readers accept both                                     |
-| `machine.yaml` `attentionNudge`           | `agendaNudge`                     | both read, the new one wins; config check warns                            |
-| `config/daemon.json` `attention.{…}`      | `agenda.{…}`                      | both read, key by key the new one wins; a start notice names the old block |
-| push kind `attention`, tag, `?attention=` | `agenda`, `?agenda=`              | old still SENT; apps read both                                             |
-| handover `references.attention` count     | `references.agenda`               | old still written; new accepted                                            |
+| Older name                                | Agenda name          | Today                                                                      |
+| ----------------------------------------- | -------------------- | -------------------------------------------------------------------------- |
+| journal `attention.*` events              | `agenda.*`           | new names written; readers accept both                                     |
+| `machine.yaml` `attentionNudge`           | `agendaNudge`        | both read, the new one wins; config check warns                            |
+| `config/daemon.json` `attention.{…}`      | `agenda.{…}`         | both read, key by key the new one wins; a start notice names the old block |
+| push kind `attention`, tag, `?attention=` | `agenda`, `?agenda=` | old still SENT; apps read both                                             |
+| handover `references.attention` count     | `references.agenda`  | old still written; new accepted                                            |
 
 The last two rows are still sent the old way on purpose: an older app's service worker drops a push kind it does not
 know, and the handover counts are a strict object an older reader refuses an unknown key in.
@@ -2100,26 +2076,7 @@ it):
   subject to the limit themselves, and carry the whole of it in their reason; one the agenda still refuses is
   journaled as `fleet.warden_notice_refused`, never lost silently.
 
-### How each end finds out
-
-A daemon that speaks the agenda names lists `agenda.wire.1` in `features` on `GET /v1/health`. The app reads that per
-machine and dials the agenda routes only where it is listed; until it knows, it uses the older routes, which every
-daemon answers. The CLI dials the agenda route and, on a `404` with `code: "unknown_route"`, retries the older one once
-and keeps using it for that daemon.
-
-### Watching for older clients
-
-Each older route is marked legacy. The daemon records every use of one — route, first and last time, count and the
-caller's `x-fy-version` — in `legacy-wire-use.json` in its home, reports it on `GET /v1/health` as `legacyWire`, and
-`fy doctor` prints it ("older clients still use …" or "no older clients seen for 14 days"). It counts only requests that
-passed authorization and writes the file at most once a minute (and on shutdown). `GET /v1/health` needs no
-credential, so the report — route patterns, times and client versions, never a session or a body — is public to
-anyone who can reach the daemon, like the rest of health. A server cannot see which
-field a client reads; an app that reads `state.attention` also dials the older routes, so the routes stand in for it.
-
 ### The removal release
 
-One release removes the older names and switches the rows still sent the old way (push kind, tag and link, the
-handover count). It ships no earlier than **the second minor release after the one that added `agenda.wire.1`**, and
-only once **every daemon you run shows no older-client use for 14 days** in `fy doctor`. Until then nothing here may
-be removed.
+One release removes the older names that remain and switches the rows still sent the old way (push kind, tag and link, the
+handover count). It ships only when no app or CLI you run still reads them.

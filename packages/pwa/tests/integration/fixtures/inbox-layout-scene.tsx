@@ -23,7 +23,7 @@ const stopped = inboxCard(
   agendaItem('S1', { subject: 'Pick a database for the ledger', ask: choices('Postgres', 'SQLite') }),
   sessionView('sess-6', {
     config: { teammate: 'piper', name: 'Ledger rewrite' },
-    state: { attention: { open: 1, first: 'S1', ask: 'Pick', latestAt: '2026-08-01T11:00:00.000Z', stopped: true } },
+    state: { agenda: { open: 1, first: 'S1', ask: 'Pick', latestAt: '2026-08-01T11:00:00.000Z', stopped: true } },
   } as never),
 );
 const needsYou = [

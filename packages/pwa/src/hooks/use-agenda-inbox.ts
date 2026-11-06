@@ -1,12 +1,12 @@
 /**
- * THE AGENDA INBOX, wired: every paired machine's session list read for `state.attention`, the
+ * THE AGENDA INBOX, wired: every paired machine's session list read for `state.agenda`, the
  * boards of exactly the conversations it names, and the answers held for their undo window.
  *
  * Mounted ONCE, by the shell, and handed down through `AgendaInboxContext` — so the phone's
  * Inbox tab, the sidebar's entry, the Sessions page's Needs-you deck and the inbox page all count
  * and deal the same cards, and an answer still inside its undo window survives a navigation.
  *
- * A BOARD IS READ WHEN ITS SUMMARY MOVES, and only then. The daemon rewrites `state.attention` on every
+ * A BOARD IS READ WHEN ITS SUMMARY MOVES, and only then. The daemon rewrites `state.agenda` on every
  * board change and the fleet feed re-reads the list, so a changed summary is the signal; an unchanged
  * one reads nothing. A conversation that stops being unread is not read again. A read that settles without
  * the board is the exception: it is asked again on a backoff (`inbox-board-reads.ts`), and until one lands
@@ -105,8 +105,8 @@ export interface AgendaInbox {
   /** Machines with an unread conversation whose board could not be read: counted in `total`, said on the page. */
   readonly unavailable: readonly InboxUnavailable[];
   /**
-   * Snoozed and replied items, newest parked first: of EVERY conversation on a machine that rolls them up
-   * (`agenda.open.1`), else of the conversations whose board is held.
+   * Snoozed and replied items, newest parked first: of EVERY conversation on a machine once its roll-up is read, until
+   * then of the conversations whose board is held.
    */
   readonly parked: readonly InboxCard[];
   /** True once every machine has been read to the end, so `parked` is all of it and not the recent conversations'. */
@@ -131,8 +131,6 @@ export interface AgendaInbox {
    * owner's try, snoozed or not): what a card ask inside an agenda item shows. `null` when the board holds no steps.
    */
   readonly howToTestFor?: (daemonId: DaemonId, cardId: string) => string | null;
-  /** Whether a machine can snooze (`agenda.snooze.1`): false only once its health answered without it. Absent: it can. */
-  readonly canSnooze?: (daemonId: DaemonId) => boolean;
   /** The agenda client: what an open card's merge is sent through. Absent: no merge from the Inbox. */
   readonly agendaClient?: DaemonAgendaClient;
   /** The items one conversation's board holds (or its roll-up): what a merge can join. */
@@ -258,16 +256,13 @@ export function useAgendaInboxModel(
     latest.current
       .map(
         ({ connection }) =>
-          `${connection.daemonId}=${client.wires.gateItemsOf(connection.daemonId)}/${client.wires.cardAsksOf(connection.daemonId)}/${client.wires.snoozeOf(connection.daemonId)}`,
+          `${connection.daemonId}=${client.wires.gateItemsOf(connection.daemonId)}/${client.wires.cardAsksOf(connection.daemonId)}`,
       )
       .join(',');
   const gateFlags = useSyncExternalStore(client.wires.subscribe, readGateFlags, readGateFlags);
-  // Which machines roll up every conversation's items (`agenda.open.1`): the ones asked for them.
-  const readOpenFlags = () =>
-    latest.current
-      .map(({ connection }) => `${connection.daemonId}=${client.wires.openOf(connection.daemonId)}`)
-      .join(',');
-  const openFlags = useSyncExternalStore(client.wires.subscribe, readOpenFlags, readOpenFlags);
+  // The machines on screen, as a key: a roll-up is read again when the set changes.
+  const readMachineKey = () => latest.current.map(({ connection }) => connection.daemonId).join(',');
+  const machineKey = useSyncExternalStore(client.wires.subscribe, readMachineKey, readMachineKey);
   const rollup = useSyncExternalStore(client.rollup.subscribe, client.rollup.getSnapshot, client.rollup.getSnapshot);
   const connectionFor = useMemo(
     () =>
@@ -465,12 +460,6 @@ export function useAgendaInboxModel(
         .some(entry => entry.startsWith(`${daemonId}=`) && entry.slice(daemonId.length + 1).split('/')[1] === 'true'),
     [gateFlags],
   );
-  const canSnooze = useCallback(
-    (daemonId: DaemonId): boolean =>
-      !gateFlags.includes(`${daemonId}=`) ||
-      !gateFlags.split(',').some(entry => entry.startsWith(`${daemonId}=`) && entry.endsWith('/false')),
-    [gateFlags],
-  );
   const awakeRows = useMemo(
     () => toTestBesideGates(split.awake, holders, offersGates).filter(row => !hasCardAsks(row.card.daemonId)),
     [split.awake, holders, offersGates, hasCardAsks],
@@ -527,28 +516,20 @@ export function useAgendaInboxModel(
     [sources, itemsOf, deferredState, repliedState],
   );
   const parked = useStable(freshParked, cardsKey(freshParked));
-  // Every machine that rolls up its conversations' items is read to the end on mount and whenever the owner opens
-  // a filter beyond Open; one that does not keeps the recent conversations' boards.
+  // Every machine's roll-up of its conversations' items is read to the end on mount and whenever the owner opens
+  // a filter beyond Open.
   const readRollups = useCallback(
-    (): readonly Promise<void>[] =>
-      latest.current
-        .filter(({ connection }) => client.wires.openOf(connection.daemonId) === true)
-        .map(({ connection }) => client.rollup.read(connection)),
+    (): readonly Promise<void>[] => latest.current.map(({ connection }) => client.rollup.read(connection)),
     [client],
   );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the set of machines is the signal to read again
   useEffect(() => {
-    void openFlags;
+    void machineKey;
     void readRollups();
-  }, [openFlags, readRollups]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: openFlags is the signal that a machine's health now says whether it rolls up
+  }, [machineKey, readRollups]);
   const parkedWhole = useMemo(
-    () =>
-      machines.length > 0 &&
-      machines.every(
-        ({ connection }) =>
-          client.wires.openOf(connection.daemonId) === true && rollup.complete.has(connection.daemonId),
-      ),
-    [machines, client, rollup, openFlags],
+    () => machines.length > 0 && machines.every(({ connection }) => rollup.complete.has(connection.daemonId)),
+    [machines, rollup],
   );
   // A card that says "Merged in from !A5" names it from the resolved records of its conversation, which only a held
   // board carries (a roll-up has the open items alone): read that one board, once, instead of showing the bare id.
@@ -611,7 +592,6 @@ export function useAgendaInboxModel(
       repliedState,
       connectionFor,
       howToTestFor,
-      canSnooze,
       agendaClient: client,
       boardOf,
       recordsOf,
@@ -636,7 +616,6 @@ export function useAgendaInboxModel(
       repliedState,
       connectionFor,
       howToTestFor,
-      canSnooze,
       client,
       boardOf,
       recordsOf,

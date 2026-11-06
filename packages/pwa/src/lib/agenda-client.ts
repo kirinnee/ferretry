@@ -22,13 +22,12 @@ import {
 } from '@ferretry/protocol';
 import { AgendaRollupStore } from './agenda-rollup.ts';
 import { DaemonAgendaStore } from './agenda-store.ts';
-import { type AgendaWire, AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
+import { AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
 import { ConcurrencyLimit } from './concurrency-limit.ts';
 import { ListRefresh, type ListRefreshEnvironment, browserListRefreshEnvironment } from './list-refresh.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { UPDATE_MACHINE_WHERE } from './machine-update-words.ts';
 import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
@@ -75,13 +74,12 @@ export const fetchAgendaSnapshot = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   fetcher: DaemonFetch = browserFetch,
-  wire: AgendaWire = 'attention',
 ): Promise<AgendaSnapshot> =>
   parseSnapshot(
     scope,
     await (isMachineAgendaId(scope.sessionId)
       ? fetchAgenda(daemon, scope, '/v1/machine/agenda', { method: 'GET' }, fetcher)
-      : fetchAgenda(daemon, scope, sessionAgendaPath(scope.sessionId, wire), {}, fetcher)),
+      : fetchAgenda(daemon, scope, sessionAgendaPath(scope.sessionId), {}, fetcher)),
   );
 
 /**
@@ -92,29 +90,17 @@ export const fetchAgendaCount = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   fetcher: DaemonFetch = browserFetch,
-  wire: AgendaWire = 'attention',
 ): Promise<AgendaCountResponse> => {
-  const snapshot = await fetchAgendaSnapshot(daemon, scope, fetcher, wire);
+  const snapshot = await fetchAgendaSnapshot(daemon, scope, fetcher);
   return { sessionId: snapshot.sessionId, count: snapshot.count };
 };
 
 /** Applies one protocol-validated board mutation and returns the daemon's authoritative snapshot. */
-/** What snoozing says on a machine whose daemon predates `agenda.snooze.1`. */
-export const SNOOZE_NEEDS_UPDATE = `This machine needs an update to snooze: ${UPDATE_MACHINE_WHERE}.`;
-
-/** What merging says on a machine whose daemon predates `agenda.conversation.1`. */
-export const MERGE_NEEDS_UPDATE = `This machine needs an update to merge agendas: ${UPDATE_MACHINE_WHERE}.`;
-
-/** A request the daemon's schema refused: from a machine not yet read, an unknown action reads this way. */
-const isInvalidRequest = (error: unknown): boolean =>
-  error instanceof DaemonResponseError && error.status === 400 && error.code === 'invalid_request';
-
 export const applyAgendaAction = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   action: AgendaActionRequest,
   fetcher: DaemonFetch = browserFetch,
-  wire: AgendaWire = 'attention',
 ): Promise<AgendaSnapshot> => {
   const body = AgendaActionRequestSchema.parse(action);
   const init = {
@@ -124,7 +110,7 @@ export const applyAgendaAction = async (
   };
   const value = await (isMachineAgendaId(scope.sessionId)
     ? fetchAgenda(daemon, scope, '/v1/machine/agenda', init, fetcher)
-    : fetchAgenda(daemon, scope, sessionAgendaPath(scope.sessionId, wire), init, fetcher));
+    : fetchAgenda(daemon, scope, sessionAgendaPath(scope.sessionId), init, fetcher));
   return parseSnapshot(scope, value);
 };
 
@@ -133,14 +119,13 @@ export const sendAgendaReplies = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   fetcher: DaemonFetch = browserFetch,
-  wire: AgendaWire = 'attention',
 ): Promise<AgendaSnapshot> =>
   parseSnapshot(
     scope,
     await fetchAgenda(
       daemon,
       scope,
-      sessionAgendaRepliesPath(scope.sessionId, wire),
+      sessionAgendaRepliesPath(scope.sessionId),
       {
         method: 'POST',
         headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
@@ -154,8 +139,7 @@ const itemVersionsPath = (sessionId: string, id: AgendaId): string =>
   `/v1/sessions/${encodeURIComponent(sessionId)}/agenda/${encodeURIComponent(id)}/versions`;
 
 /**
- * Every version an item has been kept as (`agenda.conversation.1`), with the one this device last opened. A daemon
- * without the feature answers 404, which the caller reads as "no versions": the app ships before the daemon.
+ * Every version an item has been kept as, with the one this device last opened.
  */
 export const fetchAgendaVersions = async (
   daemon: DaemonConnection,
@@ -198,7 +182,7 @@ export interface AgendaConversationRead {
 }
 
 /**
- * The item's stored conversation (`agenda.conversation.1`), oldest first, read through `GET …/conversation` in its
+ * The item's stored conversation, oldest first, read through `GET …/conversation` in its
  * bounded fragments, each entry's fragments joined verbatim. The item itself carries only a recent tail, so a reader
  * asks for the entries before it (`until`) and, on a later read, only the entries it does not have yet (`from`).
  * A read that stops at its limit SAYS so (`capped`) and never hands back a partial entry as a whole one.
@@ -307,7 +291,7 @@ export class DaemonAgendaClient {
   constructor(
     readonly store: DaemonAgendaStore = new DaemonAgendaStore(),
     private readonly fetcher: DaemonFetch = browserFetch,
-    /** Which spelling each machine speaks; a machine nobody has read health for is spoken to the older way. */
+    /** What each read machine offers, from the health the app already reads. */
     readonly wires: AgendaWireDirectory = new AgendaWireDirectory(),
     private readonly refreshEnvironment: ListRefreshEnvironment = browserListRefreshEnvironment,
   ) {
@@ -399,12 +383,9 @@ export class DaemonAgendaClient {
     if (this.store.status(scope) !== 'ready') this.store.beginLoad(scope);
     // Asked again once a slot is free, for the reason it is asked above: a read that waited behind others
     // may reach its turn after the machine was unpaired or re-paired, and then it sends nothing at all.
-    // The wire is read when the slot comes, so a health answer that arrived meanwhile picks the route.
     const promise = this.#readLimit(daemon.daemonId)
       .run(async () =>
-        this.#currentConnection(daemon, generation)
-          ? await fetchAgendaSnapshot(daemon, scope, this.fetcher, this.wires.wireOf(daemon.daemonId))
-          : null,
+        this.#currentConnection(daemon, generation) ? await fetchAgendaSnapshot(daemon, scope, this.fetcher) : null,
       )
       .then(snapshot => {
         if (snapshot !== null && this.#current(daemon, generation, key, revision)) {
@@ -438,7 +419,7 @@ export class DaemonAgendaClient {
     if (existing?.generation === generation) return existing.promise;
 
     const revision = this.#boardRevisions.get(key) ?? 0;
-    const promise = fetchAgendaCount(daemon, scope, this.fetcher, this.wires.wireOf(daemon.daemonId))
+    const promise = fetchAgendaCount(daemon, scope, this.fetcher)
       .then(count => {
         if (this.#current(daemon, generation, key, revision)) this.store.applyCount(scope, count);
       })
@@ -460,14 +441,8 @@ export class DaemonAgendaClient {
       action: 'resolve',
       id,
       ...(note === undefined ? {} : { note }),
-      ...this.#versioned(daemon, askVersion),
+      ...(askVersion === undefined ? {} : { askVersion }),
     });
-  }
-
-  /** The ask version, when the machine checks it (`agenda.asks.1`) or an ask was replaced (so it does): else nothing. */
-  #versioned(daemon: DaemonConnection, askVersion: number | undefined): { readonly askVersion?: number } {
-    const checked = askVersion !== undefined && (this.wires.asksOf(daemon.daemonId) === true || askVersion > 1);
-    return checked ? { askVersion } : {};
   }
 
   respond(
@@ -491,7 +466,7 @@ export class DaemonAgendaClient {
         ? { cardAsk }
         : {}),
       ...(attachments === undefined ? {} : { attachments }),
-      ...this.#versioned(daemon, askVersion),
+      ...(askVersion === undefined ? {} : { askVersion }),
     });
   }
 
@@ -506,7 +481,7 @@ export class DaemonAgendaClient {
       action: 'dismiss',
       id,
       ...(note === undefined ? {} : { note }),
-      ...this.#versioned(daemon, askVersion),
+      ...(askVersion === undefined ? {} : { askVersion }),
     });
   }
 
@@ -542,11 +517,10 @@ export class DaemonAgendaClient {
   }
 
   /**
-   * Merges `from` into `id` (`agenda.conversation.1`): both conversations and every card are kept, `id` survives and
-   * `from` closes as "merged into !id". Never sent to a machine that has not said it merges.
+   * Merges `from` into `id`: both conversations and every card are kept, `id` survives and
+   * `from` closes as "merged into !id".
    */
   merge(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, from: string): Promise<void> {
-    if (this.wires.conversationOf(daemon.daemonId) !== true) return Promise.reject(new Error(MERGE_NEEDS_UPDATE));
     return this.#mutate(daemon, scope, { action: 'merge', id, from });
   }
 
@@ -566,9 +540,7 @@ export class DaemonAgendaClient {
 
   /** Delivers the answers the daemon is holding for this ferret now. */
   sendReplies(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
-    return this.#mutate(daemon, scope, () =>
-      sendAgendaReplies(daemon, scope, this.fetcher, this.wires.wireOf(daemon.daemonId)),
-    );
+    return this.#mutate(daemon, scope, () => sendAgendaReplies(daemon, scope, this.fetcher));
   }
 
   #mutate(
@@ -577,22 +549,10 @@ export class DaemonAgendaClient {
     action: AgendaActionRequest | (() => Promise<AgendaSnapshot>),
   ): Promise<void> {
     assertScopeDaemon(daemon, scope);
-    // THE APP SHIPS FIRST: a machine older than `agenda.snooze.1` refuses snooze as an unknown action, so it is
-    // never sent there, and a refusal from a machine not yet read says the same plain thing.
-    const parks = typeof action !== 'function' && (action.action === 'snooze' || action.action === 'unsnooze');
-    if (parks && this.wires.snoozeOf(daemon.daemonId) === false) return Promise.reject(new Error(SNOOZE_NEEDS_UPDATE));
     const generation = this.#bind(daemon);
     const key = daemonSessionKey(scope);
     const revision = this.#advanceBoardRevision(key);
-    const promise = (
-      typeof action === 'function'
-        ? action()
-        : applyAgendaAction(daemon, scope, action, this.fetcher, this.wires.wireOf(daemon.daemonId)).catch(
-            (error: unknown) => {
-              throw parks && isInvalidRequest(error) ? new Error(SNOOZE_NEEDS_UPDATE) : error;
-            },
-          )
-    )
+    const promise = (typeof action === 'function' ? action() : applyAgendaAction(daemon, scope, action, this.fetcher))
       .then(snapshot => {
         if (this.#current(daemon, generation, key, revision)) {
           this.#advanceBoardRevision(key);

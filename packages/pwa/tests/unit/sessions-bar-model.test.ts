@@ -40,7 +40,7 @@ describe('pinned ferrets', () => {
 
   test('a pinned ferret that has open Attention shows once, in Pinned, not in Needs you', () => {
     const asking = sessionView('ask', {
-      state: { status: 'running', attention: { open: 1, first: 'A1', latestAt: ago(1_000) } as never },
+      state: { status: 'running', agenda: { open: 1, first: 'A1', latestAt: ago(1_000) } as never },
       pinnedAt: ago(5_000),
     });
     const result = sessionsBarView([asking], [], filter);
@@ -82,14 +82,14 @@ describe('who needs the reader', () => {
     const filter = { mode: 'all' as const, showStopped: false };
     expect(sessionsBarView([parked, asking], [], filter).needsYou).toEqual([]);
     const filed = sessionView('c', {
-      state: { status: 'awaiting_user', attention: { open: 1, first: 'A1', latestAt: ago(1_000) } as never },
+      state: { status: 'awaiting_user', agenda: { open: 1, first: 'A1', latestAt: ago(1_000) } as never },
     });
     expect(sessionsBarView([parked, filed], [], filter).needsYou.map(row => row.config.id)).toEqual(['c']);
   });
 
   test('grouping off leaves the Attention session in its project group, still unread', () => {
     const filed = sessionView('c', {
-      state: { status: 'running', attention: { open: 1, first: 'A1', latestAt: ago(1_000) } as never },
+      state: { status: 'running', agenda: { open: 1, first: 'A1', latestAt: ago(1_000) } as never },
     });
     const result = sessionsBarView([filed], [], { mode: 'all', showStopped: false }, undefined, false);
     expect(result.needsYou).toEqual([]);

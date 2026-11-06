@@ -261,7 +261,7 @@ async function profileRoutes(environment: E2eEnvironment, sessionId: string): Pr
     `/v1/sessions/${sessionId}`,
     `/v1/sessions/${sessionId}/logs`,
     `/v1/sessions/${sessionId}/sends`,
-    `/v1/sessions/${sessionId}/attention`,
+    `/v1/sessions/${sessionId}/agenda`,
     `/v1/sessions/${sessionId}/events?after=0&limit=1000`,
     '/v1/usage',
   ];

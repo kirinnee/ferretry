@@ -362,7 +362,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
   } as never,
   agendaRollup: { page: async () => ({ sessions: [] }) } as never,
   notifications: {
-    agendaDelivered: async () => 0,
     enrolledDevices: async () => 0,
   },
   sharedDrafts: sharedDraftService(['s1']),

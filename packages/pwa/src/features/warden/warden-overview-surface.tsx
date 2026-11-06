@@ -15,14 +15,13 @@ import {
   type IFyApiClient,
   type SessionView,
   type WardenLeaveDuration,
+  WARDEN_AGENDA_PATH,
   WardenAgendaViewSchema,
   wardenFlags,
 } from '@ferretry/protocol';
 import { useCallback, useState } from 'react';
 
 import { useWardenPoll, type WardenPollOptions } from '../../hooks/use-warden-poll.ts';
-import { type AgendaWire, wardenAgendaPath } from '../../lib/agenda-wire.ts';
-import { useAgendaWire } from '../../lib/agenda-wire-react.tsx';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonSettingsPath } from '../../lib/pages/routes.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
@@ -32,13 +31,11 @@ import { WardenReportDialog, type WardenReportDialogRequest } from './warden-rep
 
 export type WardenOverviewClient = Pick<
   IFyApiClient,
-  'wardenStatus' | 'wardenAgenda' | 'wardenRun' | 'wardenLeave' | 'wardenReport' | 'request'
+  'wardenStatus' | 'wardenRun' | 'wardenLeave' | 'wardenReport' | 'request'
 >;
-/** The fleet's "who needs you" view, from whichever route this machine's daemon answers. */
-const readWhoNeedsYou = async (client: WardenOverviewClient, wire: AgendaWire) =>
-  wire === 'agenda'
-    ? await client.request(wardenAgendaPath(wire), WardenAgendaViewSchema)
-    : await client.wardenAgenda();
+/** The fleet's "who needs you" view. */
+const readWhoNeedsYou = async (client: WardenOverviewClient) =>
+  await client.request(WARDEN_AGENDA_PATH, WardenAgendaViewSchema);
 
 export type WardenOverviewClientFactory = (connection: DaemonConnection) => Promise<WardenOverviewClient>;
 
@@ -84,10 +81,9 @@ function WardenOverviewBody({
     async (daemon: DaemonConnection) => await (await createClient(daemon)).wardenStatus(),
     [createClient],
   );
-  const wire = useAgendaWire(connection.daemonId);
   const readAgenda = useCallback(
-    async (daemon: DaemonConnection) => await readWhoNeedsYou(await createClient(daemon), wire),
-    [createClient, wire],
+    async (daemon: DaemonConnection) => await readWhoNeedsYou(await createClient(daemon)),
+    [createClient],
   );
   const readReport = useCallback(
     async (daemon: DaemonConnection, reportPath: string) => await (await createClient(daemon)).wardenReport(reportPath),

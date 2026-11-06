@@ -3,11 +3,16 @@ import should from 'should';
 import {
   AgendaActionRequestSchema,
   AgendaClearableFieldSchema,
+  AGENDA_CHANNEL_HEADER,
   AGENDA_URGENT_WAKE_MS,
   AgendaItemSchema,
   AgendaParkedSchema,
+  MAX_AGENDA_CONTENT_LENGTH,
+  MAX_AGENDA_RESPONSE_LENGTH,
+  ResolvedAgendaItemSchema,
   agendaBadgeCount,
   agendaWakeAt,
+  readsAgendaHeaders,
   agendaBriefRequiredProblems,
   agendaNoticeProblems,
 } from '../../src/lib/agenda.ts';
@@ -405,5 +410,68 @@ describe('parked turns and requests', () => {
     should(AgendaActionRequestSchema.safeParse({ action: 'snooze', id: 'A1', until: 'tomorrow' }).success).be.false();
     should(AgendaActionRequestSchema.safeParse({ action: 'surface', id: 'A1', now: false }).success).be.false();
     should(AgendaActionRequestSchema.safeParse({ action: 'unsnooze', id: 'A1', until: AT }).success).be.false();
+  });
+});
+
+const boundedItem = {
+  id: 'A1',
+  source: 'agent-raised',
+  sourceRef: null,
+  subject: 'Approve the plan',
+  why: 'Approve the plan',
+  waitingSince: AT,
+  howToResolve: 'Answer this item on the agenda board.',
+  ask: { kind: 'open-question' },
+  raisedBy: 'agent',
+  raisedBySession: 'session-1',
+  raisedByName: 'Olivier',
+} as const;
+
+describe('the bounds of an owner response', () => {
+  it('should refuse a response over its bound and accept one at it', () => {
+    // Arrange
+    const over = {
+      ...boundedItem,
+      resolvedAt: AT,
+      disposition: 'done',
+      resolutionNote: null,
+      resolvedBy: 'human',
+      resolvedBySession: null,
+      resolvedByName: null,
+    };
+
+    // Act
+    const refused = ResolvedAgendaItemSchema.safeParse({
+      ...over,
+      response: { kind: 'open-question', answer: 'a'.repeat(MAX_AGENDA_RESPONSE_LENGTH + 1) },
+    });
+
+    // Assert
+    should(refused.success).equal(false);
+    should(MAX_AGENDA_CONTENT_LENGTH).be.above(MAX_AGENDA_RESPONSE_LENGTH);
+  });
+});
+
+it('sheds oldest history when it crowds the transport bound, retaining gate receipts', async () => {
+  const { fitAgendaItem, MAX_AGENDA_ITEM_LENGTH } = await import('../../src/lib/agenda.ts');
+  const item = {
+    body: 'b'.repeat(MAX_AGENDA_ITEM_LENGTH - 100),
+    history: [
+      { kind: 'replied', note: 'r'.repeat(500) },
+      { kind: 'gate-answered', note: 'gate:F12' },
+    ],
+  };
+  const fitted = fitAgendaItem(item);
+  should(fitted.history).deepEqual([{ kind: 'gate-answered', note: 'gate:F12' }]);
+  should(JSON.stringify(fitted).length).be.below(MAX_AGENDA_ITEM_LENGTH);
+});
+
+describe('reading resolved agenda headers', () => {
+  it('requires channel 2 explicitly', () => {
+    for (const value of ['2', ' 2 '])
+      should(readsAgendaHeaders(new Headers({ [AGENDA_CHANNEL_HEADER]: value }))).equal(true);
+    for (const value of ['', '1', '3'])
+      should(readsAgendaHeaders(new Headers({ [AGENDA_CHANNEL_HEADER]: value }))).equal(false);
+    should(readsAgendaHeaders(new Headers())).equal(false);
   });
 });

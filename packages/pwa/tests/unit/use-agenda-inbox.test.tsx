@@ -17,7 +17,6 @@ import { type DeferredTimers, DISMISS_ACTION, DONE_ACTION, inboxOptions } from '
 import { DaemonAgendaStore } from '../../src/lib/agenda-store.ts';
 import { AgendaRollupStore } from '../../src/lib/agenda-rollup.ts';
 import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
-import type { DaemonHealthRead } from '../../src/lib/daemon-health.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { DaemonFleetStore, FleetSnapshot } from '../../src/lib/fleet-store.ts';
@@ -41,7 +40,7 @@ const summary = (open: number, latest: number): SessionAgendaSummary => ({
 });
 
 const waiting = (id: string, agenda?: SessionAgendaSummary): SessionView =>
-  sessionView(id, agenda === undefined ? {} : { state: { attention: agenda } });
+  sessionView(id, agenda === undefined ? {} : { state: { agenda: agenda } });
 
 const item = (id: string, minutes: number, ask?: AgendaItem['ask']): AgendaItem =>
   ({
@@ -85,7 +84,9 @@ const fakeClient = (
   const rollup = new AgendaRollupStore(async input => {
     const host = new URL(String(input)).host.split('.')[0] ?? '';
     rolled.push(host);
-    const held = rollups[host] ?? {};
+    const held = rollups[host];
+    // A machine the test gave no roll-up answers none, so the Inbox keeps reading that machine's boards.
+    if (held === undefined) return new Response('{}', { status: 404 });
     return new Response(
       JSON.stringify({ sessions: Object.entries(held).map(([sessionId, items]) => ({ sessionId, items })) }),
       { status: 200, headers: { 'content-type': 'application/json' } },
@@ -266,9 +267,6 @@ describe('useAgendaInboxModel', () => {
       );
       await settle();
       const read = inbox as unknown as AgendaInbox;
-      // Snoozing follows the same health: a machine whose health answered without it cannot; one unread can.
-      expect(read.canSnooze?.(boardLaptop.daemonId)).toBe(client.wires.snoozeOf(boardLaptop.daemonId) !== false);
-      expect(read.canSnooze?.(studio.daemonId)).toBe(true);
       return read;
     };
 
@@ -1040,10 +1038,6 @@ describe('useInboxMachines', () => {
 describe('the roll-up lists every conversation’s parked items', () => {
   const snoozedItem = (id: string): AgendaItem =>
     ({ ...item(id, 1), parked: { reason: 'snoozed', at: at(2), until: at(600) } }) as AgendaItem;
-  const OPEN: DaemonHealthRead = {
-    kind: 'read',
-    health: healthOf('4.140.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaOpen]),
-  };
   const mountWith = async (client: DaemonAgendaClient, machines: readonly AgendaInboxMachine[]) => {
     const { timers } = manualTimers();
     let inbox: AgendaInbox | null = null;
@@ -1051,13 +1045,8 @@ describe('the roll-up lists every conversation’s parked items', () => {
       <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} />,
     );
     await settleUntil(
-      () =>
-        machines.every(
-          ({ connection }) =>
-            client.wires.openOf(connection.daemonId) !== true ||
-            client.rollup.getSnapshot().complete.has(connection.daemonId),
-        ),
-      'all supported machine roll-ups published',
+      () => machines.every(({ connection }) => client.rollup.getSnapshot().complete.has(connection.daemonId)),
+      'all machine roll-ups published',
       interact,
     );
     return () => inbox as unknown as AgendaInbox;
@@ -1067,7 +1056,6 @@ describe('the roll-up lists every conversation’s parked items', () => {
 
   test('lists an old conversation’s snoozed item from the roll-up, named for its root, and says the list is whole', async () => {
     const { client, rolled } = fakeClient(new Map(), { studio: { old: [snoozedItem('A4')] } });
-    client.wires.note(studio.daemonId, OPEN);
     const latest = await mountWith(client, [{ connection: studio, name: 'Studio', sessions: [root, oldBoard] }]);
     await settle();
     expect(rolled).toEqual(['studio']);
@@ -1098,7 +1086,6 @@ describe('the roll-up lists every conversation’s parked items', () => {
       const { client, calls } = fakeClient(new Map([['studio/old', withRecord()]]), {
         studio: { old: [merged('A4')], other: [snoozedItem('A9')] },
       });
-      client.wires.note(studio.daemonId, OPEN);
       const latest = await mountWith(client, [
         {
           connection: studio,
@@ -1123,7 +1110,6 @@ describe('the roll-up lists every conversation’s parked items', () => {
 
     test('asks again when that read failed', async () => {
       const { client, calls } = fakeClient(new Map(), { studio: { old: [merged('A4')] } });
-      client.wires.note(studio.daemonId, OPEN);
       const asked = client.revalidate.bind(client);
       let failures = 1;
       client.revalidate = async (...args: Parameters<typeof asked>): Promise<void> => {
@@ -1145,38 +1131,14 @@ describe('the roll-up lists every conversation’s parked items', () => {
   test('prefers a board this device holds over the roll-up for the same conversation', async () => {
     const held = new Map([['studio/old', board('old', [snoozedItem('A9')])]]);
     const { client } = fakeClient(held, { studio: { old: [snoozedItem('A4')] } });
-    client.wires.note(studio.daemonId, OPEN);
     const latest = await mountWith(client, [{ connection: studio, name: 'Studio', sessions: [root, oldBoard] }]);
     await interact(async () => latest().loadResolved());
     await settle();
     expect(latest().parked.map(card => card.item.id)).toEqual(['A9']);
   });
 
-  test('asks no machine that does not roll up, and keeps the recent window', async () => {
-    const { client, rolled } = fakeClient(new Map(), { studio: { old: [snoozedItem('A4')] } });
-    client.wires.note(studio.daemonId, { kind: 'read', health: healthOf('4.100.0') });
-    const latest = await mountWith(client, [{ connection: studio, name: 'Studio', sessions: [root, oldBoard] }]);
-    await interact(async () => latest().loadResolved());
-    await settle();
-    expect(rolled).toEqual([]);
-    expect(latest().parked).toEqual([]);
-    expect(latest().parkedWhole).toBe(false);
-  });
-
-  test('is whole only when every machine rolls up and was read to the end', async () => {
-    const { client } = fakeClient(new Map(), { studio: { old: [snoozedItem('A4')] } });
-    client.wires.note(studio.daemonId, OPEN);
-    client.wires.note(laptop.daemonId, { kind: 'read', health: healthOf('4.100.0') });
-    const latest = await mountWith(client, [
-      { connection: studio, name: 'Studio', sessions: [root, oldBoard] },
-      { connection: laptop, name: 'Laptop', sessions: [] },
-    ]);
-    expect(latest().parkedWhole).toBe(false);
-  });
-
   test('reads the roll-up again when the owner opens a filter beyond Open, and says it is reading', async () => {
     const { client, rolled } = fakeClient(new Map(), { studio: { old: [snoozedItem('A4')] } });
-    client.wires.note(studio.daemonId, OPEN);
     const latest = await mountWith(client, [{ connection: studio, name: 'Studio', sessions: [root, oldBoard] }]);
     await interact(async () => latest().loadResolved());
     await settleUntil(() => !latest().resolvedReading, 'resolved roll-up read finished', interact);

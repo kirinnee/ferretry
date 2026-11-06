@@ -18,6 +18,19 @@ import { BoardReopenAttachmentsSchema, TaskRefSchema } from './board-refs.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 
 export const AGENDA_SCHEMA_VERSION = 1 as const;
+
+/**
+ * The request header a caller sends to say it reads the whole channel shape (`agenda.channel.1`); its value is the
+ * channel version. The CLI and the app send it on every agenda read. A machine that has not been updated yet serves
+ * the older, clipped shape to a caller that does not send it, so a new caller keeps sending it.
+ */
+export const AGENDA_CHANNEL_HEADER = 'x-fy-agenda-channel';
+/** Current reader version: channel fields plus resolved headers on list reads. */
+export const AGENDA_CHANNEL_VERSION = '2';
+
+/** Only channel 2 readers can parse resolved headers in list responses. */
+export const readsAgendaHeaders = (headers: { get(name: string): string | null | undefined }): boolean =>
+  headers.get(AGENDA_CHANNEL_HEADER)?.trim() === AGENDA_CHANNEL_VERSION;
 export const MAX_AGENDA_PER_SESSION = 20;
 export const MAX_AGENDA_RESOLUTIONS = 100;
 export const MAX_AGENDA_SUBJECT_LENGTH = 240;
@@ -1692,7 +1705,7 @@ export type ResolvedAgendaItem = z.infer<typeof ResolvedAgendaItemSchema>;
 /**
  * The owner's answers a machine is holding for one ferret, to deliver them as ONE message once the owner
  * stops answering (docs/agenda.md § The loop). Present on the board while anything is held, so the app
- * can say "sending in 8 s" and offer "Send now" (`POST /v1/sessions/:sessionId/attention/replies`).
+ * can say "sending in 8 s" and offer "Send now" (`POST /v1/sessions/:sessionId/agenda/replies`).
  */
 export const AgendaRepliesSchema = z.strictObject({
   pending: z.array(AgendaIdSchema).min(1).max(MAX_AGENDA_RESOLUTIONS),
@@ -2196,12 +2209,6 @@ export const AgendaCountResponseSchema = z.object({
 });
 export type AgendaCountResponse = z.infer<typeof AgendaCountResponseSchema>;
 
-export const DirectNotificationResponseSchema = z.object({
-  sessionId: z.string().min(1),
-  delivered: NonNegativeIntegerSchema,
-});
-export type DirectNotificationResponse = z.infer<typeof DirectNotificationResponseSchema>;
-
 export const AgendaErrorCodeSchema = z.enum([
   'invalid',
   'too-long',
@@ -2224,7 +2231,7 @@ export type AgendaErrorCode = z.infer<typeof AgendaErrorCodeSchema>;
  * A session's open Attention, as its list row carries it: what makes a conversation read as UNREAD
  * until the owner has dealt with it. The daemon rewrites it after every board change that moves the
  * open set, and removes it when nothing is open — so its absence means "nothing waits on the owner",
- * never "unknown". The board itself (`GET /v1/sessions/:id/attention`) has every item in full.
+ * never "unknown". The board itself (`GET /v1/sessions/:id/agenda`) has every item in full.
  */
 export const SessionAgendaSummarySchema = z.object({
   /** How many items are open. */

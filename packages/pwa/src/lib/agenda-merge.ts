@@ -30,15 +30,11 @@ export const isPlainThread = (item: AgendaItem): boolean =>
   item.phoneApproval === undefined;
 
 /**
- * Whether "Merge with…" is offered on this item: the machine says it merges (`agenda.conversation.1`), the host can
- * send it (the owner's own app, a board with this item on it), and the item is an open plain conversation. A machine
- * not yet read offers nothing.
+ * Whether "Merge with…" is offered on this item: the host can send it (the owner's own app, a board with this item
+ * on it), and the item is an open plain conversation.
  */
-export const mergeOffered = (input: {
-  readonly machineMerges: boolean | undefined;
-  readonly hostMerges: boolean;
-  readonly item: AgendaItem;
-}): boolean => input.machineMerges === true && input.hostMerges && !closed(input.item) && isPlainThread(input.item);
+export const mergeOffered = (input: { readonly hostMerges: boolean; readonly item: AgendaItem }): boolean =>
+  input.hostMerges && !closed(input.item) && isPlainThread(input.item);
 
 const numberOf = (id: AgendaId): number => Number(id.slice(1));
 

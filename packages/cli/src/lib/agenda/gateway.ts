@@ -11,7 +11,6 @@ import {
   AgendaReadItemSchema,
   isMachineAgendaId,
 } from '@ferretry/protocol';
-import { requestWithRouteFallback } from '../agenda-wire/route-fallback.ts';
 import { readDaemonFeatures } from '../daemon/features.ts';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME, FY_SESSION_ID_HEADER } from '../session/connection.ts';
 import type { AgendaApiClient, IAgendaGateway } from './ports.ts';
@@ -26,26 +25,15 @@ export function agendaRepliesPath(sessionId: string): string {
   return `${agendaBoardPath(sessionId)}/replies`;
 }
 
-/** The older spelling of the agenda route, which a daemon that predates `agenda.wire.1` still answers. */
-export function legacyAttentionBoardPath(sessionId: string): string {
-  return `/v1/sessions/${encodeURIComponent(sessionAgendaId(sessionId))}/attention`;
-}
-
-/** The older spelling of the replies route. */
-export function repliesPath(sessionId: string): string {
-  return `${legacyAttentionBoardPath(sessionId)}/replies`;
-}
-
 /** The reserved ledger has no session path, including for callers of the path builders above. */
 function sessionAgendaId(sessionId: string): string {
   if (isMachineAgendaId(sessionId)) throw new Error('use /v1/machine/agenda for the machine agenda');
   return sessionId;
 }
 
-/** The agenda route and the older one an older daemon answers instead. */
-export function boardRoutes(sessionId: string): { readonly current: string; readonly legacy: string } {
-  if (isMachineAgendaId(sessionId)) return { current: '/v1/machine/agenda', legacy: '/v1/machine/agenda' };
-  return { current: agendaBoardPath(sessionId), legacy: legacyAttentionBoardPath(sessionId) };
+/** The route that owns one board: the machine ledger's own, or the session's agenda. */
+export function boardPath(sessionId: string): string {
+  return isMachineAgendaId(sessionId) ? '/v1/machine/agenda' : agendaBoardPath(sessionId);
 }
 
 const jsonPost = (body: unknown, headers: Record<string, string>): RequestInit => ({
@@ -72,7 +60,7 @@ function attributionHeaders(ownSessionId: string | undefined): Record<string, st
 }
 
 /**
- * Speaks the agenda routes (older daemons: the agenda routes) through the protocol client.
+ * Speaks the agenda routes through the protocol client.
  *
  * Requests and responses are both parsed against the protocol schemas. kteam cast the response
  * (`response as AgendaListSnapshot`), so a daemon answering with an error envelope produced a crash
@@ -91,18 +79,14 @@ export class ProtocolAgendaGateway implements IAgendaGateway {
 
   async snapshot(sessionId: string): Promise<AgendaListSnapshot> {
     this.requireMachineOwner(sessionId);
-    return await requestWithRouteFallback(this.client, boardRoutes(sessionId), AgendaListSnapshotSchema, {
-      headers: this.#headers,
-    });
+    return await this.client.request(boardPath(sessionId), AgendaListSnapshotSchema, { headers: this.#headers });
   }
 
   async readItem(sessionId: string, id: string): Promise<AgendaReadItem> {
     this.requireMachineOwner(sessionId);
-    const item = await this.client.request(
-      `${boardRoutes(sessionId).current}/${encodeURIComponent(id)}`,
-      AgendaReadItemSchema,
-      { headers: this.#headers },
-    );
+    const item = await this.client.request(`${boardPath(sessionId)}/${encodeURIComponent(id)}`, AgendaReadItemSchema, {
+      headers: this.#headers,
+    });
     if (item.id !== id) throw new Error('daemon returned another agenda item');
     return item;
   }
@@ -110,20 +94,14 @@ export class ProtocolAgendaGateway implements IAgendaGateway {
   async apply(sessionId: string, request: AgendaActionRequest): Promise<AgendaListSnapshot> {
     this.requireMachineOwner(sessionId);
     const body = AgendaActionRequestSchema.parse(request);
-    return await requestWithRouteFallback(
-      this.client,
-      boardRoutes(sessionId),
-      AgendaListSnapshotSchema,
-      jsonPost(body, this.#headers),
-    );
+    return await this.client.request(boardPath(sessionId), AgendaListSnapshotSchema, jsonPost(body, this.#headers));
   }
 
   async sendReplies(sessionId: string): Promise<AgendaListSnapshot> {
     this.requireMachineOwner(sessionId);
     if (isMachineAgendaId(sessionId)) throw new Error('the machine agenda has no replies; use /v1/machine/agenda');
-    return await requestWithRouteFallback(
-      this.client,
-      { current: agendaRepliesPath(sessionId), legacy: repliesPath(sessionId) },
+    return await this.client.request(
+      agendaRepliesPath(sessionId),
       AgendaListSnapshotSchema,
       jsonPost({}, this.#headers),
     );

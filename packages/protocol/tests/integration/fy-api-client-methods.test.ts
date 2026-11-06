@@ -18,7 +18,6 @@ import {
   sessionAttachTarget,
   sessionView,
   usageFeedView,
-  wardenAgendaView,
   wardenConfigView,
   wardenInvestigateView,
   wardenLeaveView,
@@ -151,14 +150,6 @@ const CASES: readonly MethodCase[] = [
     body: { enabled: false, intervalMinutes: 10 },
     response: () => jsonResponse(wardenConfigView),
     expected: wardenConfigView,
-  },
-  {
-    name: 'wardenAgenda',
-    invoke: client => client.wardenAgenda(),
-    verb: 'GET',
-    path: '/v1/warden/attention',
-    response: () => jsonResponse(wardenAgendaView),
-    expected: wardenAgendaView,
   },
   {
     name: 'wardenInvestigate',

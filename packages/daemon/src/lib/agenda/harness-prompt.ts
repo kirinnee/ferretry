@@ -479,8 +479,7 @@ export class HarnessPromptAgenda {
 
 function hasOpenAgenda(state: unknown): boolean {
   if (typeof state !== 'object' || state === null) return false;
-  const { agenda, attention: legacyAttention } = state as { agenda?: unknown; attention?: unknown };
-  return (agenda ?? legacyAttention) !== undefined;
+  return (state as { agenda?: unknown }).agenda !== undefined;
 }
 
 /**

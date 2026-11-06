@@ -5,7 +5,7 @@
  * gets its quick replies; the two states that cannot be answered get this line instead:
  *
  * - PARKED (#1043): the owner snoozed it, or replied and the ferret has not picked it up yet. The line says which, and
- *   "Back to my list" brings it back (`unsnooze`, which serves both, gated by the machine's `agenda.snooze.1`).
+ *   "Back to my list" brings it back (`unsnooze`).
  * - RESOLVED: read-only. How it ended, who ended it and when — the same words the Inbox's Resolved filter uses.
  */
 

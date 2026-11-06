@@ -82,9 +82,7 @@ describe('the session agenda state adapter', () => {
     const journal = (await storage.replay(ID)).events.filter(event => event.type === AGENDA_CHANGED_EVENT);
 
     // Assert
-    should(SessionStateSchema.parse(raised).attention).deepEqual(SUMMARY);
     should(SessionStateSchema.parse(raised).agenda).deepEqual(SUMMARY);
-    should(cleared).not.have.property('attention');
     should(cleared).not.have.property('agenda');
     should(SessionStateSchema.safeParse(cleared).success).be.true();
     should(journal.map(event => event.data)).deepEqual([
@@ -107,7 +105,7 @@ describe('the session agenda state adapter', () => {
 
     // Assert
     should(journal.map(event => event.data)).deepEqual([{ change: 'reconciled', open: 2 }]);
-    should(SessionStateSchema.parse(await storage.readState(ID)).attention).deepEqual(SUMMARY);
+    should(SessionStateSchema.parse(await storage.readState(ID)).agenda).deepEqual(SUMMARY);
     await storage.close();
   });
 

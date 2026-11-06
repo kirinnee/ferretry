@@ -60,7 +60,7 @@ export const machineSessionView = (snapshot: AgendaListSnapshot): SessionView | 
       status: 'running',
       turn: 0,
       lastActivityAt: snapshot.updatedAt,
-      ...(summary === undefined ? {} : { agenda: summary, attention: summary }),
+      ...(summary === undefined ? {} : { agenda: summary }),
     },
     directory: '',
   } as unknown as SessionView;

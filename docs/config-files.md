@@ -634,7 +634,7 @@ accounts:
 
 `POST /v1/warden/investigate {sessionId, note?}` is the owner asking for an investigation: it skips Jev
 and the blessing, joins the queue ahead of the sweep's own flags, and still waits for a slot and counts
-against today's cap — even with the LLM layer off, because the owner asked. `GET /v1/warden/attention` (the Warden's notifications route, renamed in a later release) is
+against today's cap — even with the LLM layer off, because the owner asked. `GET /v1/warden/agenda` (the Warden's notifications route) is
 a thin read of the Warden's own open notifications on this machine's live ferrets — never a second list —
 with a degraded banner when a board, the reports or the sweep could not be read.
 

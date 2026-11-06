@@ -1,10 +1,9 @@
 /**
- * The agenda wire, in React: a probe that reads every paired machine's health (so the spelling is known
- * for machines that are not on screen) and a hook a surface uses to ask which spelling its machine speaks.
+ * The agenda wire, in React: a probe that reads every paired machine's health (so what it offers is known
+ * for machines that are not on screen) and the hooks a surface uses to ask.
  */
 
 import { useSyncExternalStore } from 'react';
-import type { AgendaWire } from './agenda-wire.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { useOptionalAppStore } from './store.tsx';
 import { useDaemonHealth } from './use-daemon-health.ts';
@@ -36,24 +35,4 @@ export function useWorkSearchOffered(daemonId: DaemonId | undefined): boolean | 
   );
 }
 
-/**
- * Whether this machine stores the conversation, keeps versions and takes merge (`agenda.conversation.1`), from the health
- * the app already reads: `undefined` outside the app store and until health answered.
- */
-export function useAgendaConversationOffered(daemonId: DaemonId | undefined): boolean | undefined {
-  const directory = useOptionalAppStore()?.agendaWire;
-  return useSyncExternalStore(directory?.subscribe ?? noWires.subscribe, () =>
-    daemonId === undefined ? undefined : directory?.conversationOf(daemonId),
-  );
-}
-
 const noWires = { subscribe: () => () => undefined } as const;
-
-/** The spelling this machine's daemon speaks: the older one outside the app store and until health is read. */
-export function useAgendaWire(daemonId: DaemonId): AgendaWire {
-  const directory = useOptionalAppStore()?.agendaWire;
-  return useSyncExternalStore(
-    directory?.subscribe ?? noWires.subscribe,
-    () => directory?.wireOf(daemonId) ?? 'attention',
-  );
-}

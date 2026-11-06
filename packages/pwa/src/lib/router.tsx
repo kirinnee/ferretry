@@ -155,7 +155,7 @@ export function RouterProvider({
   entryRef.current = entry;
 
   useEffect(() => {
-    if (route.kind !== 'legacy-tasks-redirect' && route.kind !== 'legacy-attention-redirect') return;
+    if (route.kind !== 'legacy-tasks-redirect') return;
     const canonicalPath = `${routePath(route)}${browser.location.search}`;
     setEntry(write(canonicalPath, true, entryRef.current));
     setRoute(route.to);

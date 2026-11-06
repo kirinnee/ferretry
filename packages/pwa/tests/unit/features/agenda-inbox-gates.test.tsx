@@ -62,12 +62,7 @@ const question = inboxCard(
   sessionView('sess-q', { config: { teammate: 'zoe', name: 'Fix the build' } as never }),
 );
 
-const page = (
-  fake: FakeInbox,
-  cards: readonly InboxCard[],
-  props: Partial<AgendaInboxPageProps> = {},
-  canSnooze?: () => boolean,
-) => (
+const page = (fake: FakeInbox, cards: readonly InboxCard[], props: Partial<AgendaInboxPageProps> = {}) => (
   <InboxHarness
     cards={cards}
     fake={fake}
@@ -75,7 +70,7 @@ const page = (
     render={inbox => (
       <AgendaInboxPage
         clock={fake.clock.now}
-        inbox={{ ...inbox, connectionFor: () => laptop, ...(canSnooze === undefined ? {} : { canSnooze }) }}
+        inbox={{ ...inbox, connectionFor: () => laptop }}
         now={NOW}
         onNavigate={() => undefined}
         phone
@@ -446,15 +441,6 @@ describe('the card’s plain buttons for the compass moves', () => {
     const action = fake.deferred.getSnapshot().pending[0]?.action;
     expect(action?.kind).toBe('snooze');
     expect(Date.parse((action as { until: string }).until)).toBe(NOW + 3_600_000);
-    await mounted.unmount();
-  });
-
-  it('offers no Snooze where the machine cannot snooze, but keeps Skip and Not needed', async () => {
-    const mounted = await mount(page(fakeInbox(), [question], { initialOpen: question.key }, () => false));
-    await openInfo(mounted);
-    expect(mounted.container.querySelector('[data-agenda-menu-group="snooze"]')).toBeNull();
-    expect(tool(mounted, 'skip')).toBeDefined();
-    expect(tool(mounted, 'not-needed')).toBeDefined();
     await mounted.unmount();
   });
 });

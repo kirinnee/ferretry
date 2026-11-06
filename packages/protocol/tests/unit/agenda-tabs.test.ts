@@ -1,6 +1,5 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AgendaSnapshotSchema as OldAgendaSnapshotSchema } from '../fixtures/agenda-before-channel.ts';
 import {
   AgendaActionRequestSchema,
   AgendaItemSchema,
@@ -13,7 +12,6 @@ import {
   MAX_AGENDA_TABS,
   MAX_AGENDA_TABS_LENGTH,
 } from '../../src/lib/agenda.ts';
-import { legacyAgendaItem, legacyAgendaOpenSession } from '../../src/lib/agenda-legacy.ts';
 import { agendaTabId, agendaTabs, applyAgendaTabEdits, findAgendaTab } from '../../src/lib/agenda-tabs.ts';
 
 const AT = '2026-11-04T09:00:00.000Z';
@@ -195,36 +193,5 @@ describe('applying an edit’s tab operations', () => {
     should(problem([{ tab: 'a=b', body: 'x' }])).containEql('"="');
     should(problem([{ tab: 'Risks', rename: 'Reasoning' }])).containEql('fixed tab');
     should(problem([{ tab: 'Risks', rename: 'status' }])).containEql('two tabs are called');
-  });
-});
-
-describe('an app before the tabs', () => {
-  it('should get the item without its tabs, and a line under the body naming them', () => {
-    const item = AgendaItemSchema.parse({
-      ...minimal,
-      whereWeAre: 'Building.',
-      body: 'The report.',
-      tabs: [tab('Status')],
-      revisions: [{ at: AT, by: 'agent', changed: ['tabs'], previous: {} }],
-    });
-    const projected = legacyAgendaItem(item);
-    should(projected).not.have.property('tabs');
-    should(projected).not.have.property('revisions');
-    should(projected.body).equal(
-      'The report.\n\n_This item has more tabs (Where we are now, Status): update the app to read them._',
-    );
-    const bare = legacyAgendaItem(AgendaItemSchema.parse({ ...minimal, tabs: [tab('Status')] }));
-    should(bare.body).equal('_This item has more tabs (Status): update the app to read them._');
-    const session = legacyAgendaOpenSession({ sessionId: 'session-1', items: [item] });
-    should(
-      OldAgendaSnapshotSchema.safeParse({
-        v: 1,
-        count: 1,
-        parseErrors: 0,
-        updatedAt: AT,
-        ...session,
-        resolved: [],
-      }).success,
-    ).be.true();
   });
 });

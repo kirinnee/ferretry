@@ -12,7 +12,6 @@ export const MODULES: Record<string, readonly string[]> = {
     'core',
     'runtime',
     'performance',
-    'legacy-wire',
     'file-events',
     'atomic-file',
     'filesystem',

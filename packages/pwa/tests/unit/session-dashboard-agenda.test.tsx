@@ -18,9 +18,7 @@ const row = (id: string, minutesAgo?: number, open = 1, first = 'A1', cwd = '/wo
     config: { teammate: id, name: `Task ${id}`, cwd },
     state: {
       lastActivityAt: ago(2),
-      ...(minutesAgo === undefined
-        ? {}
-        : { attention: { open, first, ask: `Ask of ${id}?`, latestAt: ago(minutesAgo) } }),
+      ...(minutesAgo === undefined ? {} : { agenda: { open, first, ask: `Ask of ${id}?`, latestAt: ago(minutesAgo) } }),
     },
   });
 

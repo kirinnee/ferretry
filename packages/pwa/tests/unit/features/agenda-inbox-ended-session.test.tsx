@@ -28,7 +28,7 @@ const summary = (extra: Partial<SessionAgendaSummary> = {}): SessionAgendaSummar
 const ended = (id: string, status: 'failed' | 'stopped', agenda: SessionAgendaSummary): SessionView =>
   sessionView(id, {
     config: { teammate: id, name: 'Lane proposal', cwd: `/work/${id}`, mode: 'interactive' },
-    state: { status, attention: agenda },
+    state: { status, agenda: agenda },
   } as never);
 
 const item = (id: string, extra: object = {}): AgendaItem =>

@@ -94,15 +94,6 @@ export class NotificationService implements AgendaRaisedObserver {
   }
 
   /**
-   * How many devices accepted the push a notice's `--ping` made, as the ledger recorded it; zero when
-   * nothing was pushed (no device, an unreadable ledger, or a notice that did not ask).
-   */
-  async agendaDelivered(sessionId: string, agendaId: string): Promise<number> {
-    const entry = await this.recorded(notificationKey({ sessionId, agendaId, ping: true })).catch(() => undefined);
-    return entry?.outcome?.error === undefined ? (entry?.outcome?.delivered ?? 0) : 0;
-  }
-
-  /**
    * A new item reached its board. Only a notice that asked for the phone to buzz makes a push; everything
    * else raised — an agenda item, a warden's card — waits for the stop or the deadline. Total.
    */

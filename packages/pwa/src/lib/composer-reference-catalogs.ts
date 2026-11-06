@@ -19,7 +19,7 @@ import {
   SessionSkillsSchema,
 } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type AgendaWire, sessionAgendaPath } from './agenda-wire.ts';
+import { sessionAgendaPath } from './agenda-wire.ts';
 import type { SessionCard } from './session-cards.ts';
 
 type ComposerReferenceCatalogFamily = 'tasks' | 'attention' | 'skills';
@@ -64,7 +64,7 @@ export interface ComposerReferenceCatalogSources {
 const failureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
 /**
- * One literal path per family, spelled out (the agenda family's two spellings live in `agenda-wire.ts`).
+ * One literal path per family, spelled out.
  *
  * A `${suffix}` helper reads as `/v1/sessions/*​/*` to `route-agreement.sh`, and
  * a client path the gate cannot read is a client path nothing checks against the
@@ -89,10 +89,9 @@ async function readComposerReferenceCatalogsIncrementally(
   sessionId: string,
   signal: AbortSignal,
   publish: (patch: ComposerReferenceCatalogPatch) => void,
-  wire: AgendaWire,
 ): Promise<ComposerReferenceCatalogs> {
   const agenda = client
-    .request(sessionAgendaPath(sessionId, wire), AgendaListSnapshotSchema, {
+    .request(sessionAgendaPath(sessionId), AgendaListSnapshotSchema, {
       signal,
       headers: { [AGENDA_CHANNEL_HEADER]: AGENDA_CHANNEL_VERSION },
     })
@@ -141,10 +140,9 @@ async function readComposerAgendaIncrementally(
   sessionId: string,
   signal: AbortSignal,
   publish: (patch: ComposerReferenceCatalogPatch) => void,
-  wire: AgendaWire,
 ): Promise<void> {
   const agenda = client
-    .request(sessionAgendaPath(sessionId, wire), AgendaListSnapshotSchema, {
+    .request(sessionAgendaPath(sessionId), AgendaListSnapshotSchema, {
       signal,
       headers: { [AGENDA_CHANNEL_HEADER]: AGENDA_CHANNEL_VERSION },
     })
@@ -182,8 +180,6 @@ export function useComposerReferenceCatalogs(
   client: Partial<ComposerReferenceCatalogReader>,
   sessionId: string,
   sources?: ComposerReferenceCatalogSources,
-  /** The spelling this machine's daemon speaks (`useAgendaWire`); the older one when the host names none. */
-  wire: AgendaWire = 'attention',
 ): ComposerReferenceCatalogs & {
   /**
    * All in-flight owner reads for THIS session, or nothing once they settle.
@@ -231,19 +227,12 @@ export function useComposerReferenceCatalogs(
       }));
     };
     const operation = usesSharedSources
-      ? readComposerAgendaIncrementally(
-          client as ComposerReferenceCatalogReader,
-          sessionId,
-          controller.signal,
-          publish,
-          wire,
-        )
+      ? readComposerAgendaIncrementally(client as ComposerReferenceCatalogReader, sessionId, controller.signal, publish)
       : readComposerReferenceCatalogsIncrementally(
           client as ComposerReferenceCatalogReader,
           sessionId,
           controller.signal,
           publish,
-          wire,
         );
     const read = operation
       .then(() => undefined)
@@ -259,7 +248,7 @@ export function useComposerReferenceCatalogs(
       controller.abort();
       pending.current = null;
     };
-  }, [client, sessionId, usesSharedSources, ownsAgenda, wire]);
+  }, [client, sessionId, usesSharedSources, ownsAgenda]);
 
   const owned = snapshot?.sessionId === sessionId ? snapshot.catalogs : EMPTY_CATALOGS;
   const catalogs = useMemo<ComposerReferenceCatalogs>(() => {

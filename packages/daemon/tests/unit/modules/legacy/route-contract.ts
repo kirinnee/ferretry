@@ -136,7 +136,6 @@ export const callers: readonly string[] = [
   'GET /v1/sessions/:sessionId/agenda/:id/versions/:version operator any',
   'GET /v1/sessions/:sessionId/attach operator person',
   'GET /v1/sessions/:sessionId/attachments/:attachmentId operator any',
-  'GET /v1/sessions/:sessionId/attention operator any',
   'GET /v1/sessions/:sessionId/browser operator any',
   'GET /v1/sessions/:sessionId/compact-at operator any',
   'GET /v1/sessions/:sessionId/copies operator person',
@@ -189,7 +188,6 @@ export const callers: readonly string[] = [
   'GET /v1/tunnel authenticated any',
   'GET /v1/usage authenticated any',
   'GET /v1/warden/agenda authenticated any',
-  'GET /v1/warden/attention authenticated any',
   'GET /v1/warden/config operator any',
   'GET /v1/warden/report authenticated any',
   'GET /v1/warden/status authenticated any',
@@ -298,8 +296,6 @@ export const callers: readonly string[] = [
   'POST /v1/sessions/:sessionId/answer operator person',
   'POST /v1/sessions/:sessionId/attachments operator any',
   'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock operator any',
-  'POST /v1/sessions/:sessionId/attention operator any',
-  'POST /v1/sessions/:sessionId/attention/replies operator person',
   'POST /v1/sessions/:sessionId/browser operator any',
   'POST /v1/sessions/:sessionId/composer operator person',
   'POST /v1/sessions/:sessionId/console/input operator person',
@@ -317,7 +313,6 @@ export const callers: readonly string[] = [
   'POST /v1/sessions/:sessionId/mcp/project/preview operator any',
   'POST /v1/sessions/:sessionId/migrate operator any',
   'POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs operator any',
-  'POST /v1/sessions/:sessionId/notify operator any',
   'POST /v1/sessions/:sessionId/permission operator person',
   'POST /v1/sessions/:sessionId/processes/:processId/stop operator any',
   'POST /v1/sessions/:sessionId/rename operator any',
@@ -457,9 +452,6 @@ export const notAudited: Readonly<Record<string, string>> = {
   'POST /v1/sessions/:sessionId/attachments': 'a file handed to an agent; the transcript is that history',
   'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock': 'opens an attachment to its own session only',
   'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock': 'closes an attachment again',
-  'POST /v1/sessions/:sessionId/attention': 'an agent raising attention; the agenda list is that history',
-  'POST /v1/sessions/:sessionId/attention/replies':
-    'the owner skipping the settle window for answers already recorded; the send ledger is that history',
   'POST /v1/sessions/:sessionId/agenda':
     'an agent raising an agenda item (the agenda spelling of the agenda route above); the agenda list is that history',
   'PUT /v1/sessions/:sessionId/agenda/:id/seen':
@@ -470,7 +462,6 @@ export const notAudited: Readonly<Record<string, string>> = {
     "the owner dismissing every open agenda item of the agent ferrets; each item's own history records the dismissal and its note, and it widens nobody's access",
   'POST /v1/machine/agenda':
     "the owner dismissing, snoozing or resolving a machine notice; the item's own history records it, and it widens nobody's access",
-  'POST /v1/sessions/:sessionId/notify': 'an agent notifying; its payload is labelled with the agent (see L5)',
   'POST /v1/sessions/:sessionId/shared-draft':
     "the owner's own unsent words, typed at keystroke rate; it widens nobody's access, and logging it would copy the draft into a log",
   'POST /v1/board/tasks': 'a work card on a project board; its own append-only history records who did what',

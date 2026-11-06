@@ -246,7 +246,6 @@ import {
   FileCatalogSharesStore,
   FileDaemonConfig,
   FileLaneSetStore,
-  FileLegacyWireUseStore,
   FileLinkDocumentStore,
   FileLinkKeyVault,
   FileLoginIndexStore,
@@ -319,7 +318,6 @@ import {
   SystemFrameClock,
   SystemGrantClock,
   stackSamplerEnabled,
-  systemLegacyWireTimers,
   systemSweepClock,
   TmuxPaneSnapshot,
   TranscriptFileExposure,
@@ -906,7 +904,6 @@ import {
   LaneProposalAcceptance,
   LaneSetService,
   LegacySendReproof,
-  LegacyWireUseCounter,
   LiveDeviceConnections,
   LiveMemberSessions,
   type LivenessSample,
@@ -13968,21 +13965,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     config.attention,
     config.delivery,
   );
-  // The older wire names (`legacy: true` routes) are counted into `<home>/legacy-wire-use.json` and shown on
-  // `GET /v1/health`, so the release that removes them can wait for a quiet fortnight. A file that cannot be
-  // read starts the counter again; nothing here can fail a request or the boot.
-  const legacyWireDiagnostics = { warn: (message: string) => world.notices.state(message) };
-  const legacyWire = new LegacyWireUseCounter(
-    new FileLegacyWireUseStore(join(opened.paths.home, 'legacy-wire-use.json'), legacyWireDiagnostics),
-    systemLegacyWireTimers,
-    legacyWireDiagnostics,
-  );
-  await legacyWire.load();
-  cleanups.push(async () => await legacyWire.flush());
   const subsystems: typeof createdSubsystems = {
     ...createdSubsystems,
-    health: { ...createdSubsystems.health, legacyWire: () => legacyWire.snapshot() },
-    legacyWire,
     compressor: new NodeGzip(),
   };
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can

@@ -1681,9 +1681,9 @@ describe('daemon boot lifecycle', () => {
     // session registry, so each answer is the registry's answer rather than the ledger file's — and
     // none of these sessions has ever written an `attention.json`, so a ledger-only check would have
     // served all three the same empty board.
-    const liveBoard = await fetch(`${sessions}/wire-one/attention`, { headers });
-    const absentBoard = await fetch(`${sessions}/wire-ghost/attention`, { headers });
-    const unusableBoard = await fetch(`${sessions}/wire-bad/attention`, { headers });
+    const liveBoard = await fetch(`${sessions}/wire-one/agenda`, { headers });
+    const absentBoard = await fetch(`${sessions}/wire-ghost/agenda`, { headers });
+    const unusableBoard = await fetch(`${sessions}/wire-bad/agenda`, { headers });
     const listedBody = SessionListSchema.parse(await listed.json());
     const oneBody = SessionViewSchema.parse(await one.json());
     release();

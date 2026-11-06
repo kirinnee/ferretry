@@ -313,7 +313,7 @@ export interface AgendaSwipeDeckProps {
   readonly onDismiss?: (card: InboxCard) => void;
   /** ↓↓↓ on the compass: snooze the card until this instant. Absent (or `canSnooze` false): the compass has no Snooze. */
   readonly onSnooze?: (card: InboxCard, until: string) => void;
-  /** Whether the card's machine can snooze (`agenda.snooze.1`); the compass draws Snooze only then. Default: it can. */
+  /** Whether the card can be snoozed; the compass draws Snooze only then. Default: it can. */
   readonly canSnooze?: (card: InboxCard) => boolean;
   /**
    * The host takes an answer over before it is sent (a gate's "Not good" waits for its words): return `true` and the

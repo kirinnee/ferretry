@@ -12,7 +12,6 @@ import {
   CatalogLinkService,
   CatalogMemberService,
   type ExecutableResolverPort,
-  LegacyWireUseCounter,
   NO_RELAY_DIRECTORY,
   type RelayAdvertisement,
   WebRtcCarrier,
@@ -477,7 +476,6 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
     );
   undo.push(spyOnPrototype(WebRtcCarrier.prototype, 'close', () => events.push('webrtc.close')));
   undo.push(spyOnPrototype(TunnelCarrierSwitch.prototype, 'stop', () => events.push('tunnel.stop')));
-  undo.push(spyOnPrototype(LegacyWireUseCounter.prototype, 'flush', () => events.push('legacyWire.flush')));
   patch(
     mountedWorld.analyticsIndexes,
     'open',

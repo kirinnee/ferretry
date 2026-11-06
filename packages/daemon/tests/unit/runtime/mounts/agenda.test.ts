@@ -1,6 +1,5 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AgendaSnapshotSchema as OldAgendaSnapshotSchema } from '../../../../../protocol/tests/fixtures/agenda-before-channel.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { type ApiCredentials, ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import {
@@ -36,18 +35,11 @@ class BrokenLedgerRepository implements AgendaLedgerRepository {
 }
 
 class FakeNotifications implements DirectNotificationSubsystem {
-  readonly asked: Array<{ readonly sessionId: string; readonly agendaId: string }> = [];
-  delivered = 0;
   enrolled: number | Error = 2;
 
   async enrolledDevices(): Promise<number> {
     if (this.enrolled instanceof Error) throw this.enrolled;
     return this.enrolled;
-  }
-
-  async agendaDelivered(sessionId: string, agendaId: string): Promise<number> {
-    this.asked.push({ sessionId, agendaId });
-    return this.delivered;
   }
 }
 
@@ -65,7 +57,7 @@ function fixture(
 
 const post = (body: unknown, headers: Readonly<Record<string, string>> = human) => ({
   method: 'POST',
-  path: '/v1/sessions/s1/attention',
+  path: '/v1/sessions/s1/agenda',
   headers,
   body: JSON.stringify(body),
 });
@@ -96,64 +88,14 @@ describe('agendaActor', () => {
   });
 });
 
-describe('attention routes', () => {
-  it('should replay the full stored owner answer when an old app retries its clipped view', async () => {
-    const repository = new FakeLedgerRepository();
-    const service = agendaService(repository);
-    const notes: (string | null | undefined)[] = [];
-    const gates: AgendaGatePort = {
-      isGate: async () => false,
-      answer: async answer => {
-        notes.push(answer.note);
-        return { handled: false };
-      },
-    };
-    const dispatch = fixture(repository, new FakeNotifications(), CREDENTIALS, gates);
-    await dispatch(post({ ...raise, ask: { kind: 'open-question' } }, agentIn('s1')));
-    const response = { kind: 'open-question', answer: 'a'.repeat(9_000) };
-    const note = 'n'.repeat(3_000);
-    await dispatch(post({ action: 'resolve', id: 'A1', response, note }));
-    const failed = await service.undelivered('s1', 'A1', 'offline', 1);
-    should(failed.ok).be.true();
-    const read = await dispatch({ path: '/v1/sessions/s1/agenda', headers: human });
-    const oldBoard = OldAgendaSnapshotSchema.parse(jsonBody(read));
-    const clipped = oldBoard.items[0]?.undelivered?.reply;
-    if (clipped === undefined) throw new Error('no Retry');
-    const retried = await dispatch(post({ ...clipped, id: 'A1' }));
-    should(retried.status).equal(200);
-    should(notes.at(-1)).equal(note);
-    const stored = await service.list('s1');
-    if (!stored.ok) throw new Error(stored.error.message);
-    should(stored.value.items[0]?.ownerAnswer).containDeep({ response, note });
-  });
-  it('should serve Send now in the old schema unless the caller opts into the channel', async () => {
-    const dispatch = fixture();
-    const raised = await dispatch(post(raise, agentIn('s1')));
-    const id = (jsonBody(raised).items as { id: string }[])[0]?.id;
-    await dispatch(
-      post({ action: 'edit', id, whereWeAre: 'new location', questionAnswer: 'q'.repeat(9_000) }, agentIn('s1')),
-    );
-    const path = '/v1/sessions/s1/agenda/replies';
-    const legacy = await dispatch({ method: 'POST', path, headers: human, body: '{}' });
-    const channel = await dispatch({
-      method: 'POST',
-      path,
-      headers: { ...human, 'x-fy-agenda-channel': '1' },
-      body: '{}',
-    });
-    should(legacy.status).equal(200);
-    should(channel.status).equal(200);
-    should(OldAgendaSnapshotSchema.safeParse(jsonBody(legacy)).success).be.true();
-    should(OldAgendaSnapshotSchema.safeParse(jsonBody(channel)).success).be.false();
-    should((jsonBody(channel).items as { questionAnswer: string }[])[0]?.questionAnswer).have.length(9_000);
-  });
+describe('agenda routes', () => {
   it('should answer an empty board rather than a 404 for a session with no ledger yet', async () => {
     // A session that has never blocked has an empty board, which is not the same as a missing one.
     // Arrange
     const dispatch = fixture();
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
+    const response = await dispatch({ path: '/v1/sessions/s1/agenda', headers: human });
 
     // Assert
     should(response.status).equal(200);
@@ -360,9 +302,7 @@ describe('attention routes', () => {
     const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
 
     // Act
-    const rested = await dispatch(
-      post({ action: 'rest', id, why: 'checking both branches' }, { ...agentIn('s1'), 'x-fy-agenda-channel': '1' }),
-    );
+    const rested = await dispatch(post({ action: 'rest', id, why: 'checking both branches' }, agentIn('s1')));
 
     // Assert
     should(rested.status).equal(200);
@@ -380,10 +320,7 @@ describe('attention routes', () => {
 
     // Act
     const answered = await dispatch(
-      post(
-        { action: 'resolve', id, response: { kind: 'multiple-choice', choice: 'main' } },
-        { ...human, 'x-fy-agenda-channel': '1' },
-      ),
+      post({ action: 'resolve', id, response: { kind: 'multiple-choice', choice: 'main' } }, human),
     );
 
     // Assert — a ferret's item RESTS on the owner's answer (docs/agenda.md § States): still open, the choice on it.
@@ -559,9 +496,9 @@ describe('attention routes', () => {
     const asFerret = (body: unknown, sessionId: string) => ({
       ...post(body, ferretOwn),
       ...FERRET_ARRIVAL,
-      path: `/v1/sessions/${sessionId}/attention`,
+      path: `/v1/sessions/${sessionId}/agenda`,
     });
-    const ownersItem = await dispatch({ ...post(raise), path: `/v1/sessions/${FERRET_SESSION}/attention` });
+    const ownersItem = await dispatch({ ...post(raise), path: `/v1/sessions/${FERRET_SESSION}/agenda` });
     const ownersId = (jsonBody(ownersItem).items as readonly { id: string }[])[0]?.id;
 
     // Act
@@ -596,7 +533,7 @@ describe('attention routes', () => {
     const dispatch = fixture();
 
     // Act — a path separator is not addressable, and the domain refuses the id it does get.
-    const response = await dispatch({ path: '/v1/sessions/not a session/attention', headers: human });
+    const response = await dispatch({ path: '/v1/sessions/not a session/agenda', headers: human });
 
     // Assert
     should(response.status).equal(400);
@@ -608,7 +545,7 @@ describe('attention routes', () => {
     const dispatch = fixture();
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/%2e%2e/attention', headers: human });
+    const response = await dispatch({ path: '/v1/sessions/%2e%2e/agenda', headers: human });
 
     // Assert
     should(response.status).equal(400);
@@ -633,7 +570,7 @@ describe('attention routes', () => {
     const dispatch = fixture(new BrokenLedgerRepository());
 
     // Act
-    const listed = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
+    const listed = await dispatch({ path: '/v1/sessions/s1/agenda', headers: human });
     const acted = await dispatch(post({ action: 'dismiss', id: 'A1' }));
 
     // Assert
@@ -651,7 +588,7 @@ describe('attention routes', () => {
 
     // Act
     const response = await dispatch({
-      path: '/v1/sessions/s1/attention',
+      path: '/v1/sessions/s1/agenda',
       headers: { authorization: `Bearer ${CREDENTIALS.warden}` },
     });
 
@@ -664,212 +601,10 @@ describe('attention routes', () => {
     const dispatch = fixture();
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/attention' });
+    const response = await dispatch({ path: '/v1/sessions/s1/agenda' });
 
     // Assert
     should(response.status).equal(401);
-  });
-
-  it('should turn a notify into an info item the calling ferret raised, and answer how many devices it reached', async () => {
-    // Arrange
-    const notifications = new FakeNotifications();
-    notifications.delivered = 2;
-    const dispatch = fixture(undefined, notifications);
-
-    // Act
-    const response = await dispatch({
-      method: 'POST',
-      path: '/v1/sessions/s1/notify',
-      headers: agentIn('s1'),
-      body: JSON.stringify({ body: 'The release is ready for review.', title: 'Release ready' }),
-    });
-    const board = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
-
-    // Assert
-    should(response.status).equal(200);
-    should(jsonBody(response)).deepEqual({ sessionId: 's1', delivered: 2 });
-    should(response.headers.get('cache-control')).equal('no-store');
-    should(jsonBody(board).items).containDeep([
-      {
-        kind: 'info',
-        title: 'Release ready',
-        subject: 'The release is ready for review.',
-        source: 'agent-raised',
-        raisedBy: 'agent',
-        raisedBySession: 's1',
-      },
-    ]);
-    should(notifications.asked).deepEqual([{ sessionId: 's1', agendaId: 'A1' }]);
-  });
-
-  it('should title a notify from the start of its text, and keep a long text whole in the context', async () => {
-    // Arrange
-    const dispatch = fixture();
-    const long = `The nightly backup finished and every table was verified against the copy. ${'More detail. '.repeat(30)}`;
-
-    // Act
-    await dispatch({
-      method: 'POST',
-      path: '/v1/sessions/s1/notify',
-      headers: human,
-      body: JSON.stringify({ body: long }),
-    });
-    const board = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
-
-    // Assert
-    const [item] = jsonBody(board).items as readonly { title: string; subject: string; context: string }[];
-    should(item?.title.length).be.lessThanOrEqual(40);
-    should(item?.title.endsWith('…')).be.true();
-    should(item?.subject.length).be.lessThanOrEqual(240);
-    should(item?.context).equal(long.trim());
-  });
-
-  it('should raise a notify as a notice, for a ferret and for a human operator alike', async () => {
-    // Arrange
-    const dispatch = fixture();
-
-    // Act
-    const byFerret = await dispatch({
-      method: 'POST',
-      path: '/v1/sessions/s1/notify',
-      headers: agentIn('s1'),
-      body: JSON.stringify({ body: 'The backup finished.' }),
-    });
-    const byOperator = await dispatch({
-      method: 'POST',
-      path: '/v1/sessions/s1/notify',
-      headers: human,
-      body: JSON.stringify({ body: 'A different note.' }),
-    });
-    const board = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
-
-    // Assert
-    should(byFerret.status).equal(200);
-    should(byOperator.status).equal(200);
-    const items = jsonBody(board).items as readonly { notice?: boolean; kind: string; ask?: unknown }[];
-    should(items.length).equal(2);
-    for (const item of items) should(item).containDeep({ notice: true, kind: 'info' });
-    for (const item of items) should(item.ask).be.undefined();
-  });
-
-  it('should count a human notify on a sub-ferret against its agenda home, where the item landed', async () => {
-    // Arrange
-    const notifications = new FakeNotifications();
-    notifications.delivered = 1;
-    const service = new AgendaService(
-      new FakeLedgerRepository(),
-      { now: () => '2024-05-01T10:00:00.000Z' },
-      { has: async () => true },
-      { raised: async () => undefined },
-      undefined,
-      undefined,
-      { leadOf: async id => (id === 's1' ? 'lead1' : undefined), addressOf: async id => id },
-      undefined,
-      { of: async () => 'lead1' },
-    );
-    const dispatcher = new ApiDispatcher(
-      new ApiRouter([...agendaRoutes(service, notifications, NO_HELD_REPLIES)]),
-      CREDENTIALS,
-      NO_GOVERNED_ROUTES_GUARD,
-    );
-
-    // Act
-    const response = await dispatcher.dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/sessions/s1/notify',
-        headers: human,
-        body: JSON.stringify({ body: 'The backup finished.' }),
-      }),
-    );
-
-    // Assert
-    should(response.status).equal(200);
-    should(jsonBody(response)).deepEqual({ sessionId: 's1', delivered: 1 });
-    should(notifications.asked).deepEqual([{ sessionId: 'lead1', agendaId: 'A1' }]);
-  });
-
-  it('should not raise the same notify twice while its item is still open, and report no devices', async () => {
-    // Arrange
-    const notifications = new FakeNotifications();
-    notifications.delivered = 1;
-    const dispatch = fixture(undefined, notifications);
-    const send = async () =>
-      await dispatch({
-        method: 'POST',
-        path: '/v1/sessions/s1/notify',
-        headers: agentIn('s1'),
-        body: JSON.stringify({ body: 'done' }),
-      });
-
-    // Act
-    const first = await send();
-    const retry = await send();
-    const board = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
-
-    // Assert
-    should(jsonBody(first)).have.property('delivered', 1);
-    should(jsonBody(retry)).have.property('delivered', 0);
-    should(jsonBody(board)).have.property('count', 1);
-  });
-
-  it('should refuse a notify that says it is progress or finishing, raising nothing', async () => {
-    // Arrange
-    const notifications = new FakeNotifications();
-    const dispatch = fixture(undefined, notifications);
-
-    // Act + Assert
-    for (const kind of ['completed', 'failed']) {
-      const response = await dispatch({
-        method: 'POST',
-        path: '/v1/sessions/s1/notify',
-        headers: agentIn('s1'),
-        body: JSON.stringify({ body: 'all done', kind }),
-      });
-      should(response.status).equal(400);
-      should(jsonBody(response)).have.property('code', 'invalid');
-      should(String(jsonBody(response).error)).match(/progress and finishing never notify the owner/u);
-    }
-    const board = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
-    should(jsonBody(board)).have.property('count', 0);
-    should(notifications.asked).be.empty();
-  });
-
-  it('should reject a malformed notify body before raising anything', async () => {
-    // Arrange
-    const dispatch = fixture();
-
-    // Act
-    const response = await dispatch({
-      method: 'POST',
-      path: '/v1/sessions/s1/notify',
-      headers: human,
-      body: JSON.stringify({ body: '' }),
-    });
-
-    // Assert
-    should(response.status).equal(400);
-  });
-
-  it('should keep a ferret to its own session and say so for an unknown one', async () => {
-    // Arrange
-    const dispatch = fixture();
-    const body = JSON.stringify({ body: 'done' });
-
-    // Act
-    const other = await dispatch({ method: 'POST', path: '/v1/sessions/s1/notify', headers: agentIn('s2'), body });
-    const unknown = await dispatch({ method: 'POST', path: '/v1/sessions/s9/notify', headers: human, body });
-    const device = await dispatch({
-      method: 'POST',
-      path: '/v1/sessions/s1/notify',
-      device: { deviceId: 'browser-1', appSession: 'app-one' },
-      body,
-    });
-
-    // Assert
-    should(other.status).equal(403);
-    should(unknown.status).equal(404);
-    should(device.status).equal(200);
   });
 });
 
@@ -888,7 +623,7 @@ describe('agenda routes and held answers', () => {
     const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
-    const response = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attention', headers: human }));
+    const response = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/agenda', headers: human }));
 
     // Assert — the board is the answer; a held outbox is decoration.
     should(response.status).equal(200);
@@ -906,7 +641,7 @@ describe('agenda routes and held answers', () => {
     const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 
     // Act
-    const response = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attention', headers: human }));
+    const response = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/agenda', headers: human }));
 
     // Assert — "Sending…" is told from the board itself.
     should(response.status).equal(200);
@@ -1364,25 +1099,6 @@ describe('agenda route snooze', () => {
     should(items(urgent)[0]).containDeep({ urgentAt: '2024-05-01T10:00:00.000Z' });
     should(items(urgent)[0]).not.have.property('parked');
     should(again.status).equal(429);
-  });
-});
-
-describe('attention routes for an older app', () => {
-  it('should leave the channel fields off an answer unless the caller names the channel', async () => {
-    // Arrange
-    const dispatch = fixture();
-    const raised = await dispatch(post(raise, agentIn('s1')));
-    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
-    const resolve = { action: 'resolve', id, response: { kind: 'multiple-choice', choice: 'main' } };
-
-    // Act
-    const answered = await dispatch(post(resolve));
-
-    // Assert
-    const [item] = jsonBody(answered).items as readonly Record<string, unknown>[];
-    should(item).not.have.property('ownerAnswer');
-    should(item).not.have.property('resting');
-    should(item?.parked).containDeep({ reason: 'replied' });
   });
 });
 

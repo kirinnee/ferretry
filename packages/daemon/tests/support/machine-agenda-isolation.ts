@@ -107,10 +107,6 @@ export async function machineAgendaWorld(
   const routes = agendaRoutes(
     service,
     {
-      agendaDelivered: async () => {
-        effects.push('notify');
-        return 0;
-      },
       enrolledDevices: async () => {
         effects.push('enrolled');
         return 0;
@@ -150,9 +146,7 @@ export async function assertMachineAgendaIsolation(world: MachineAgendaWorld): P
     for (const route of world.routes) {
       const path = route.path.replace(':sessionId', MACHINE_AGENDA_ID).replace(':id', 'A1').replace(':version', '1');
       const bodies =
-        route.method === 'POST' && /\/(agenda|attention)$/u.test(path)
-          ? ACTIONS
-          : [path.endsWith('/notify') ? { body: 'A notice' } : path.endsWith('/seen') ? { version: 1 } : {}];
+        route.method === 'POST' && /\/agenda$/u.test(path) ? ACTIONS : [path.endsWith('/seen') ? { version: 1 } : {}];
       for (const body of [...bodies, '{malformed']) {
         const reads = bodyReads();
         const response = await world.dispatcher.dispatch(
@@ -221,23 +215,18 @@ export async function assertOwnerAndSessionRoutes(world: MachineAgendaWorld): Pr
     ).status,
   ).equal(200);
   should((await world.machine.list()).items).be.empty();
-  for (const spelling of ['agenda', 'attention']) {
-    const path = `/v1/sessions/s1/${spelling}`;
-    should(
-      (
-        await world.dispatcher.dispatch(
-          request({ method: 'POST', path, headers: AGENT, body: JSON.stringify({ action: 'add', ...ASK }) }),
-        )
-      ).status,
-    ).equal(200);
-    should((await world.dispatcher.dispatch(request({ path, headers: HUMAN }))).status).equal(200);
-    should(
-      (
-        await world.dispatcher.dispatch(
-          request({ method: 'POST', path: `${path}/replies`, headers: HUMAN, body: '{}' }),
-        )
-      ).status,
-    ).equal(200);
-  }
+  const path = '/v1/sessions/s1/agenda';
+  should(
+    (
+      await world.dispatcher.dispatch(
+        request({ method: 'POST', path, headers: AGENT, body: JSON.stringify({ action: 'add', ...ASK }) }),
+      )
+    ).status,
+  ).equal(200);
+  should((await world.dispatcher.dispatch(request({ path, headers: HUMAN }))).status).equal(200);
+  should(
+    (await world.dispatcher.dispatch(request({ method: 'POST', path: `${path}/replies`, headers: HUMAN, body: '{}' })))
+      .status,
+  ).equal(200);
   should(world.effects).containEql('sendNow:s1');
 }
