@@ -17,6 +17,9 @@
  *    item. The adapter that knows those facts names the sessions; this rule never learns what they were.
  * 5. Every session that names it as `parent` is itself archived (or archivable in this very pass). A lead
  *    outlives its sub-ferrets in the live set, so a lead's children are never orphaned from it.
+ * 6. No live session's lineage is UNKNOWN (its config could not be read, so whose child it is cannot be said) unless
+ *    that session ended long ago itself. Until the lineage can be proved, any session might be its lead, so the pass
+ *    archives nothing: unknown is never read as "no parent".
  */
 import { SESSION_ENDED_STATUSES } from '@ferretry/protocol';
 
@@ -36,6 +39,8 @@ export interface ArchiveSession {
   readonly finishedAt: string | undefined;
   /** `config.parent`: the lead that started it. */
   readonly parent: string | undefined;
+  /** `true` when its config could not be read or its `parent` could not be understood: `parent` then says nothing. */
+  readonly parentUnknown?: boolean;
 }
 
 export interface ArchiveFacts {
@@ -70,6 +75,33 @@ export function selfKeepReason(session: ArchiveSession, facts: ArchiveFacts): Ar
   if (facts.nowMs - finished < facts.afterMs) return 'too-recent';
   if (facts.kept.has(session.id)) return 'kept-by-signal';
   return undefined;
+}
+
+/**
+ * Whether a live session whose lineage is unknown could still be a child of a session the pass would archive: it has
+ * not itself ended and aged out, so it is, or may be, work that a lead is still waiting on.
+ */
+export function unknownLineageBlocks(sessions: readonly ArchiveSession[], facts: ArchiveFacts): boolean {
+  return sessions.some(
+    session =>
+      session.parentUnknown === true &&
+      (!isEnded(session.status) || !(facts.nowMs - Date.parse(session.finishedAt ?? '') >= facts.afterMs)),
+  );
+}
+
+/**
+ * The live sessions that name `id` as their lead and are not on their way out. A lead may leave only when this is
+ * empty — asked at the commit boundary, against the roster as it is then, so a child that revived or appeared after
+ * the choice was made keeps its lead live.
+ */
+export function childrenStaying(
+  id: string,
+  live: readonly ArchiveSession[],
+  leaving: ReadonlySet<string>,
+): readonly string[] {
+  return live
+    .filter(session => session.parent === id && session.id !== id && !leaving.has(session.id))
+    .map(session => session.id);
 }
 
 /**
@@ -123,6 +155,8 @@ export function decideArchive(sessions: readonly ArchiveSession[], facts: Archiv
     out.push(id);
   };
   for (const id of ordered) emit(id);
+  // Whose child an unreadable session is cannot be said, so nothing can be proved safe to archive until it can.
+  if (unknownLineageBlocks(sessions, facts)) return { archive: [], deferred: out.length };
   return { archive: out.slice(0, Math.max(0, facts.limit)), deferred: Math.max(0, out.length - facts.limit) };
 }
 

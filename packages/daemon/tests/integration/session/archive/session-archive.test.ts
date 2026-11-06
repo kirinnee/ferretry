@@ -132,3 +132,93 @@ describe('a pass of the session archive as the daemon builds it', () => {
     should(archived).deepEqual([['free-1']]);
   });
 });
+
+describe('a whole pass over a family of sessions', () => {
+  const OLD = ago(72);
+
+  /** A storage whose `archiveSessions` runs `beforeLocks` first, as a revive queued ahead of the lanes would. */
+  function family(
+    documents: Map<string, { config: Record<string, unknown>; state: Record<string, unknown> }>,
+    beforeLocks: () => void = () => undefined,
+  ) {
+    const left: string[] = [];
+    const storage = {
+      archivedCount: () => 0,
+      listArchivedSessions: () => [],
+      findSession: () => undefined,
+      listSessions: () => [...documents.keys()].map(id => ({ id })),
+      readConfig: async (id: string) => {
+        const config = documents.get(id)?.config;
+        if (config === undefined) throw new Error('unreadable');
+        return config;
+      },
+      readState: async (id: string) => documents.get(id)?.state,
+      archiveSessions: async (ids: string[], verify: (id: string) => Promise<unknown>) => {
+        beforeLocks();
+        for (const id of ids) if ((await verify(id)) !== undefined) left.push(id);
+        return left;
+      },
+    };
+    const archive = createSessionArchive({
+      paths,
+      storage: storage as never,
+      clock: { nowMs: () => NOW },
+      afterMs: 24 * HOUR,
+      passLimit: 200,
+      sources: {
+        pinned: async () => new Map(),
+        board: async () => ({ cards: [], laneSets: new Map() }),
+        hasOpenAgendaItem: async () => false,
+      },
+      yieldToLoop: async () => undefined,
+    });
+    return { archive, left };
+  }
+
+  type Doc = { config: Record<string, unknown>; state: Record<string, unknown> };
+  const ended = (config: Record<string, unknown> = {}): Doc => ({
+    config: { mode: 'auto', ...config },
+    state: { status: 'completed', finishedAt: OLD },
+  });
+
+  it('should archive a lead and its child together when nothing changed', async () => {
+    const { archive, left } = family(
+      new Map<string, Doc>([
+        ['lead-1', ended()],
+        ['kid-1', ended({ parent: 'lead-1' })],
+      ]),
+    );
+
+    await archive.subsystem.run?.();
+
+    should(left).deepEqual(['kid-1', 'lead-1']);
+  });
+
+  it('should keep the lead live when its child revived between the decision and the locks', async () => {
+    const documents = new Map<string, Doc>([
+      ['lead-1', ended()],
+      ['kid-1', ended({ parent: 'lead-1' })],
+    ]);
+    const { archive, left } = family(documents, () => {
+      documents.set('kid-1', { config: { mode: 'auto', parent: 'lead-1' }, state: { status: 'running' } });
+    });
+
+    await archive.subsystem.run?.();
+
+    should(left).deepEqual([]);
+  });
+
+  it('should keep the old lead live when a running child has a config it cannot read', async () => {
+    const documents = new Map<string, Doc>([
+      ['lead-1', ended()],
+      ['kid-1', { config: { mode: 'auto', parent: 'lead-1' }, state: { status: 'running' } }],
+    ]);
+    const { archive, left } = family(documents);
+    // The kid's config tears after it was written: it is still listed, its state still says it is running.
+    documents.get('kid-1')!.config = undefined as never;
+
+    await archive.subsystem.run?.();
+
+    should(left).deepEqual([]);
+  });
+});

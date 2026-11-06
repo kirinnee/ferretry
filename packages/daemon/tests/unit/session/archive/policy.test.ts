@@ -5,9 +5,11 @@ import {
   ARCHIVE_AFTER_VARIABLE,
   type ArchiveFacts,
   type ArchiveSession,
+  childrenStaying,
   decideArchive,
   parseArchiveAfter,
   selfKeepReason,
+  unknownLineageBlocks,
 } from '../../../../src/lib/session/archive/policy.ts';
 
 const NOW = Date.parse('2026-11-06T12:00:00.000Z');
@@ -133,6 +135,66 @@ describe('session archive policy', () => {
 
   it('should archive nothing at a limit of zero', () => {
     should(decideArchive([session('a')], facts({ limit: 0 }))).deepEqual({ archive: [], deferred: 1 });
+  });
+});
+
+describe('a session whose lineage is unknown', () => {
+  it('should keep every lead live while a running session cannot say whose child it is', () => {
+    const decision = decideArchive(
+      [session('lead-1'), session('kid-1', { status: 'running', finishedAt: undefined, parentUnknown: true })],
+      facts(),
+    );
+
+    should(decision.archive).deepEqual([]);
+    should(decision.deferred).equal(1);
+  });
+
+  it('should keep every lead live while an unreadable session has no end time', () => {
+    should(
+      decideArchive(
+        [
+          session('lead-1'),
+          session('torn-1', { mode: undefined, status: 'unknown', finishedAt: undefined, parentUnknown: true }),
+        ],
+        facts(),
+      ).archive,
+    ).deepEqual([]);
+  });
+
+  it('should keep leads live while an unreadable session ended too recently to have aged out', () => {
+    should(unknownLineageBlocks([session('torn-1', { parentUnknown: true, finishedAt: ago(2) })], facts())).be.true();
+  });
+
+  it('should not let an unreadable session that ended long ago hold the whole archive back for good', () => {
+    const torn = session('torn-1', { mode: undefined, parentUnknown: true, finishedAt: ago(100) });
+
+    should(unknownLineageBlocks([torn], facts())).be.false();
+    should(decideArchive([session('lead-1'), torn], facts()).archive).deepEqual(['lead-1']);
+  });
+
+  it('should not block when every lineage is known', () => {
+    should(unknownLineageBlocks([session('a'), session('b', { parent: 'a' })], facts())).be.false();
+  });
+});
+
+describe('the sessions that keep a lead live at the commit boundary', () => {
+  const live = [
+    session('lead-1'),
+    session('kid-1', { parent: 'lead-1' }),
+    session('kid-2', { parent: 'lead-1' }),
+    session('other-1', { parent: 'else-1' }),
+  ];
+
+  it('should name every child that is not on its way out', () => {
+    should(childrenStaying('lead-1', live, new Set(['kid-1']))).deepEqual(['kid-2']);
+  });
+
+  it('should name none once every child is leaving', () => {
+    should(childrenStaying('lead-1', live, new Set(['kid-1', 'kid-2']))).deepEqual([]);
+  });
+
+  it('should not count a session as its own child', () => {
+    should(childrenStaying('loop-1', [session('loop-1', { parent: 'loop-1' })], new Set())).deepEqual([]);
   });
 });
 

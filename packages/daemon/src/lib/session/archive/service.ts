@@ -23,8 +23,12 @@ export interface SessionArchivePorts {
    * matter. A session it cannot answer for is named as kept.
    */
   kept(ids: readonly string[]): Promise<ReadonlyMap<string, string>>;
-  /** Takes these sessions out of the live set. Answers how many left. */
-  archive(ids: readonly string[]): Promise<number>;
+  /**
+   * Takes these sessions out of the live set. Answers how many left. `roster` is what the decision was made from: the
+   * adapter checks the lineage and the keep signals AGAIN at the commit boundary, with the sessions' lanes held,
+   * because the roster is only a snapshot.
+   */
+  archive(ids: readonly string[], roster: readonly ArchiveSession[]): Promise<number>;
 }
 
 export interface SessionArchiveSettings {
@@ -71,7 +75,7 @@ export class SessionArchiveService {
       if (qualifying.length === 0) return { archived: 0, deferred: 0, live: sessions.length };
       const kept = await this.ports.kept(qualifying);
       const decision = decideArchive(sessions, { ...base, kept, limit: this.settings.passLimit });
-      const archived = decision.archive.length === 0 ? 0 : await this.ports.archive(decision.archive);
+      const archived = decision.archive.length === 0 ? 0 : await this.ports.archive(decision.archive, sessions);
       return { archived, deferred: decision.deferred, live: sessions.length - archived };
     } finally {
       this.running = false;

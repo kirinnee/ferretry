@@ -83,13 +83,19 @@ export function createSessionArchive(input: {
     },
     hasOpenAgendaItem: sources.hasOpenAgendaItem,
   };
-  const reads = new StorageArchiveSessions(storage, input.clock, input.afterMs, input.yieldToLoop);
+  const reads = new StorageArchiveSessions(
+    storage,
+    input.clock,
+    input.afterMs,
+    input.yieldToLoop,
+    async ids => await sessionKeeps(keeps, ids),
+  );
   const service = new SessionArchiveService(
     {
       clock: input.clock,
       sessions: async () => await reads.sessions(),
       kept: async ids => await sessionKeeps(keeps, ids),
-      archive: async ids => await reads.archive(ids),
+      archive: async (ids, roster) => await reads.archive(ids, roster),
     },
     { afterMs: input.afterMs, passLimit: input.passLimit },
   );

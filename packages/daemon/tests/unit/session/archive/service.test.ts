@@ -17,7 +17,7 @@ const finished = (id: string, hours: number, overrides: Partial<ArchiveSession> 
 });
 
 function ports(sessions: readonly ArchiveSession[], kept: ReadonlyMap<string, string> = new Map()) {
-  const calls = { asked: [] as string[][], archived: [] as string[][] };
+  const calls = { asked: [] as string[][], archived: [] as string[][], rosters: [] as (readonly ArchiveSession[])[] };
   const port: SessionArchivePorts = {
     clock: { nowMs: () => NOW },
     sessions: async () => sessions,
@@ -25,8 +25,9 @@ function ports(sessions: readonly ArchiveSession[], kept: ReadonlyMap<string, st
       calls.asked.push([...ids]);
       return kept;
     },
-    archive: async ids => {
+    archive: async (ids, roster) => {
       calls.archived.push([...ids]);
+      calls.rosters.push(roster);
       return ids.length;
     },
   };
@@ -43,6 +44,15 @@ describe('the session archive service', () => {
 
     should(result).deepEqual({ archived: 2, deferred: 0, live: 1 });
     should(calls.archived).deepEqual([['old', 'mid']]);
+  });
+
+  it('should hand the archive the roster the decision was made from, so the commit can check it again', async () => {
+    const sessions = [finished('old', 72), finished('fresh', 2)];
+    const { port, calls } = ports(sessions);
+
+    await new SessionArchiveService(port, SETTINGS).runPass();
+
+    should(calls.rosters).deepEqual([sessions]);
   });
 
   it('should ask about keep signals only for the sessions that already qualify', async () => {

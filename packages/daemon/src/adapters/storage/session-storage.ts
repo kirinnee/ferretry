@@ -1108,10 +1108,7 @@ export class DaemonStorage {
    * bound it last set, so a walk counts it once per growth of the fleet, never once per read.
    */
   private documentBound(size: number): number {
-    if (size >= this.documentLimit) {
-      this.documentLimit = Math.max(DOCUMENT_CACHE_FLOOR, DOCUMENTS_PER_SESSION * this.index.listSessions().length);
-      this.trimWatches();
-    }
+    if (size >= this.documentLimit) this.recountDocumentBound();
     return this.documentLimit;
   }
 
@@ -1151,6 +1148,15 @@ export class DaemonStorage {
       this.dropWatch(path);
       surplus -= 1;
     }
+  }
+
+  /**
+   * Sets the cache and watch bound from the fleet that is live now, and lets go of the watches that no longer fit.
+   * An archive pass shrinks the live set by hundreds at once; without this the bound stays at the old fleet's size.
+   */
+  private recountDocumentBound(): void {
+    this.documentLimit = Math.max(DOCUMENT_CACHE_FLOOR, DOCUMENTS_PER_SESSION * this.index.listSessions().length);
+    this.trimWatches();
   }
 
   /** Stops watching `path`. */
@@ -1717,12 +1723,26 @@ export class DaemonStorage {
     return this.archived.has(id);
   }
 
-  private async persistRegistry(next: ReadonlyMap<SessionId, ArchivedSession>): Promise<void> {
-    const write = this.registryWrites.then(
-      async () => await this.fileSystem.writeTextAtomic(this.paths.archivedSessions, serializeArchiveRegistry(next)),
-    );
-    this.registryWrites = write.catch(() => undefined);
-    await write;
+  /**
+   * One change to the archive registry, as a READ-MODIFY-WRITE inside the registry's own queue.
+   *
+   * `change` is handed the registry as it is WHEN THIS TURN COMES, not as it was when the caller decided to change it,
+   * and answers the map to keep (or `undefined` for no change). The new map is written durably and only then
+   * published in memory, all inside the turn. Deriving the map before queueing would let two writers on different
+   * session lanes each clone the same registry and the later write lose the earlier one — a revived session archived
+   * again, or an archived one let back by an unrelated pass.
+   */
+  private async changeRegistry(
+    change: (current: ReadonlyMap<SessionId, ArchivedSession>) => ReadonlyMap<SessionId, ArchivedSession> | undefined,
+  ): Promise<void> {
+    const turn = this.registryWrites.then(async () => {
+      const next = change(this.archived);
+      if (next === undefined) return;
+      await this.fileSystem.writeTextAtomic(this.paths.archivedSessions, serializeArchiveRegistry(next));
+      this.archived = next;
+    });
+    this.registryWrites = turn.catch(() => undefined);
+    await turn;
   }
 
   /**
@@ -1739,30 +1759,34 @@ export class DaemonStorage {
   ): Promise<readonly SessionId[]> {
     this.assertOpen();
     return await this.holdSessions(ids, async () => {
-      const staged = new Map(this.archived);
-      const left: SessionId[] = [];
+      const entries = new Map<SessionId, ArchivedSession>();
       const archivedAt = this.clock.now();
       for (const id of ids) {
         const indexed = this.index.findSession(id);
-        if (indexed === undefined || staged.has(id)) continue;
+        if (indexed === undefined || this.archived.has(id)) continue;
         const verdict = await verify(id);
         if (verdict === undefined) continue;
-        staged.set(id, {
+        entries.set(id, {
           archivedAt,
           ...(verdict.name === undefined ? {} : { name: verdict.name }),
           ...(verdict.configTimes === undefined ? {} : { configTimes: verdict.configTimes }),
           indexed,
         });
-        left.push(id);
       }
-      if (left.length === 0) return [];
-      await this.persistRegistry(staged);
-      this.archived = staged;
+      if (entries.size === 0) return [];
+      // The delta joins the registry as it is when this turn comes: another session's revival may have landed meanwhile.
+      await this.changeRegistry(current => new Map([...current, ...entries]));
+      const left = [...entries.keys()];
       for (const id of left) {
         this.index.removeSession(id);
         const paths = createSessionPaths(this.paths, id);
-        for (const file of [paths.marker, paths.config, paths.state]) this.forgetDocument(file);
+        for (const file of [paths.marker, paths.config, paths.state]) {
+          this.forgetDocument(file);
+          // A watch only vouches for a cached document; the archived session's documents are no longer cached.
+          this.dropWatch(file);
+        }
       }
+      this.recountDocumentBound();
       return left;
     });
   }
@@ -1773,10 +1797,12 @@ export class DaemonStorage {
    */
   private async reviveIfArchived(id: SessionId): Promise<void> {
     if (!this.archived.has(id)) return;
-    const next = new Map(this.archived);
-    next.delete(id);
-    await this.persistRegistry(next);
-    this.archived = next;
+    await this.changeRegistry(current => {
+      if (!current.has(id)) return undefined;
+      const next = new Map(current);
+      next.delete(id);
+      return next;
+    });
   }
 
   /** An archived session's events, read straight from its journal: its index rows were let go when it left. */
