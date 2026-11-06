@@ -3,6 +3,8 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
+import { ApiRouter } from '../../../src/lib/api/router.ts';
+import type { RoutePattern } from '../../../src/lib/api/route.ts';
 import { releaseAcquired } from '../../../src/adapters/runtime/termination-gate.ts';
 import {
   AgendaResurfacer,
@@ -15,6 +17,7 @@ import {
   type RelayAdvertisement,
   WebRtcCarrier,
 } from '../../../src/lib/index.ts';
+import type { BuiltModule } from '../../../src/lib/runtime/modules.ts';
 import { CLOUDFLARED_NOT_ON_PATH, NO_TUNNEL_SERVICE, TunnelCarrierSwitch } from '../../../src/lib/tunnel/index.ts';
 import { OS_CHOSEN_PORT } from '../support/os-port.ts';
 import {
@@ -26,6 +29,7 @@ import {
 } from './boot-trace.expected.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 import { waitFor } from '../support/wait-for.ts';
+import { request } from '../../unit/api/support.ts';
 
 type Release = () => void | Promise<void>;
 
@@ -189,11 +193,19 @@ interface Rig {
   /** The warden's `arm()` promise, and the `agendaHomesMigrated` promise that releases it. */
   readonly homesMigrated: ReturnType<typeof deferred<void>>;
   readonly wardenArmed: ReturnType<typeof deferred<() => void>>;
-  readonly captured: { mounted: unknown; modules: unknown };
+  readonly captured: Captured;
   /** What each late-bound port answered when it was built and its source was not, in construction order. */
   readonly early: () => Promise<string[]>;
   /** Runs the cleanups in the order `execute()` runs them after `start` returns or throws. */
   readonly runCleanups: () => Promise<void>;
+}
+
+/** What the rig keeps of the one construction and of the dispatchers `start()` mounted over it. */
+interface Captured {
+  mounted: unknown;
+  modules: unknown;
+  dispatch?: Parameters<DaemonWorld['createDirectCarrier']>[0];
+  sockets?: Parameters<DaemonWorld['createDirectCarrier']>[1];
 }
 
 interface RigOptions {
@@ -230,6 +242,34 @@ function spyOnPrototype<T extends object, K extends keyof T & string>(
 
 const isThenable = (value: unknown): value is PromiseLike<unknown> =>
   typeof value === 'object' && value !== null && typeof (value as { then?: unknown }).then === 'function';
+
+/**
+ * Runs `call` and returns the `METHOD path` pairs of the one router it looked a request up in. A dispatcher keeps its
+ * router private and `start()` hands the carrier only a closure over it, so the router is caught at `lookup`, the one
+ * method every dispatch and upgrade asks.
+ */
+async function routesBehind(call: () => Promise<unknown>): Promise<ReadonlySet<string>> {
+  const seen = new Set<ApiRouter<RoutePattern>>();
+  const original = ApiRouter.prototype.lookup;
+  Object.defineProperty(ApiRouter.prototype, 'lookup', {
+    value: function (this: ApiRouter<RoutePattern>, ...args: Parameters<typeof original>) {
+      seen.add(this);
+      return original.apply(this, args);
+    },
+    configurable: true,
+    writable: true,
+  });
+  try {
+    await call();
+  } finally {
+    Object.defineProperty(ApiRouter.prototype, 'lookup', { value: original, configurable: true, writable: true });
+  }
+  if (seen.size !== 1) throw new Error(`expected the request to reach exactly one router, it reached ${seen.size}`);
+  const [router] = [...seen];
+  return new Set(
+    (router as ApiRouter<RoutePattern>).routes.map(route => `${route.method.toUpperCase()} ${route.path}`),
+  );
+}
 
 async function rig(options: RigOptions = {}): Promise<Rig> {
   const home = await tempDirectory('fyd-boot-trace');
@@ -275,7 +315,7 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
   const homesMigrated = deferred<void>();
   const wardenArmed = deferred<() => void>();
   const stopped = deferred<void>();
-  const captured: { mounted: unknown; modules: unknown } = { mounted: undefined, modules: undefined };
+  const captured: Captured = { mounted: undefined, modules: undefined };
 
   const mountedWorld = base;
   const instrument = (mounted: Record<string, unknown>): void => {
@@ -582,6 +622,12 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
       instrument(created.mounted as unknown as Record<string, unknown>);
       return created;
     },
+    // The two dispatchers `start()` mounts reach the direct carrier as these closures; the call is passed through.
+    createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
+      captured.dispatch = dispatch;
+      captured.sockets = sockets;
+      return await mountedWorld.createDirectCarrier(dispatch, sockets, devices, pairing);
+    },
     ...(options.failAfterStorage === true
       ? {
           createDirectCarrier: async () => {
@@ -754,10 +800,49 @@ describe('the boot and shutdown trace', () => {
     // patched instances, so the object the override saw is the object that was mounted.
     const mounted = r.captured.mounted as Record<string, unknown>;
     should(Object.keys(mounted)).containEql('monitor').and.containEql('analyticsIngest').and.containEql('warden');
-    // No module is extracted yet, so the factory hands back none.
-    should(r.captured.modules).deepEqual({});
     for (const armed of ['arm observer', 'arm configFiles', 'arm boardGitHub', 'arm daemonUpdate', 'arm queueDelivery'])
       should(r.events).containEql(armed);
+  }, 60_000);
+
+  it('should key every extracted module by its id and mount every route and socket it contributes', async () => {
+    // Arrange
+    const r = await rig();
+    const exit = start(r.world, r.cleanups);
+    await untilReady(r);
+    const modules = r.captured.modules as Record<string, BuiltModule<unknown, object>>;
+    const { dispatch, sockets } = r.captured;
+    if (dispatch === undefined || sockets === undefined) throw new Error('the boot never reached the direct carrier');
+    const { admin } = await r.world.credentials.load();
+    const headers = { authorization: `Bearer ${admin}` };
+
+    // Act: read the route tables of the two dispatchers `start()` mounted. They reach the carrier only as closures, so
+    // each is made to answer one authenticated request while `ApiRouter.lookup` records which router it asked; the
+    // table is that router's own `routes`, not an answer probed path by path.
+    const mountedHttp = await routesBehind(() => dispatch(request({ method: 'GET', path: '/healthz', headers })));
+    const mountedSockets = await routesBehind(() =>
+      sockets.upgrade(request({ method: 'GET', path: '/healthz', headers })),
+    );
+    r.stop();
+    await exit;
+    await r.runCleanups();
+
+    // Assert: the handle's key IS the module's id, and every METHOD+path a module contributes is in the table that
+    // is served: routes in the request/response table, sockets in the socket table. Nothing is missing.
+    const pair = (route: { readonly method: string; readonly path: string }): string =>
+      `${route.method.toUpperCase()} ${route.path}`;
+    const missing = (
+      contributed: (module: BuiltModule<unknown, object>) => ReadonlyArray<{ method: string; path: string }>,
+      mounted: ReadonlySet<string>,
+    ): string[] =>
+      Object.entries(modules).flatMap(([key, module]) =>
+        contributed(module)
+          .map(pair)
+          .filter(route => !mounted.has(route))
+          .map(route => `${key}: ${route}`),
+      );
+    for (const [key, module] of Object.entries(modules)) should(module.id).equal(key);
+    should(missing(module => module.contributes.routes ?? [], mountedHttp)).deepEqual([]);
+    should(missing(module => module.contributes.sockets ?? [], mountedSockets)).deepEqual([]);
   }, 60_000);
 
   it('should answer the early reads of the late-bound 2FA seed ports as today: no owner session, no agenda to raise on, a close that does nothing', async () => {
