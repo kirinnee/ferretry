@@ -89,6 +89,11 @@ const QUEUES: Record<string, object> = {
         sender: 'agent', from: 'lead', fromName: 'Lead', by: { kind: 'ferret', name: 'Lead' },
         label: 'fyi', holdUntil: at(50),
       }),
+      // A callsign with no break opportunity: the meta line must wrap it instead of widening a 390px page.
+      message('q10', 'Sender name has no spaces at all', 47, {
+        sender: 'agent', from: 'wide', fromName: 'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW', by: { kind: 'ferret', name: 'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW' },
+        label: 'fyi', waitReason: 'busy',
+      }),
     ],
   },
   '/v1/sessions/s2/queue': { messages: [] },

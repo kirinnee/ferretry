@@ -99,9 +99,12 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
+  min-width: 0;
   margin: 0;
   color: var(--muted);
   font-size: var(--text-sm, 0.85rem);
+  /* A name with no break opportunity wraps inside the line instead of widening the page. */
+  overflow-wrap: anywhere;
 }
 .fy-queue-meta > * + *::before {
   content: '·';
