@@ -188,6 +188,13 @@ describe('reading daemon.json from the config directory', () => {
     should(await files.daemonDocument()).be.undefined();
   });
 
+  it('should let any other filesystem error escape rather than report the document as absent', async () => {
+    // A path component longer than any filesystem allows fails with ENAMETOOLONG, whoever runs the test.
+    const { root, state } = await layout();
+    const files = new FileConfigFiles(join(root, 'x'.repeat(300)), state);
+    await should(files.daemonDocument()).be.rejectedWith({ code: 'ENAMETOOLONG' });
+  });
+
   it('should hand back JSON that is not an object as it is, for the check to find nothing in', async () => {
     const { directory, files } = await layout();
     await writeFile(join(directory, 'daemon.json'), 'null');
