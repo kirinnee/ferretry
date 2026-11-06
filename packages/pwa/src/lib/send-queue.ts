@@ -43,30 +43,65 @@ const QUEUE_READ_TIMEOUT_MS = 20_000;
 
 const queuePath = (sessionId: string): string => `/v1/sessions/${encodeURIComponent(sessionId)}/queue`;
 
+/** Which page of the queue a read asks for: none is the daemon's window (the newest page and every open message). */
+export interface QueuePageRequest {
+  /** The cursor a previous page named, to read the next older page. */
+  readonly before?: string;
+  readonly limit?: number;
+}
+
+/** One page of a session's queue, oldest first, and where the older history starts (`null`: nothing older). */
+export interface QueuePageRead {
+  readonly messages: readonly QueuedMessage[];
+  readonly nextCursor: string | null;
+}
+
+const pagePath = (sessionId: string, request: QueuePageRequest): string => {
+  const query = new URLSearchParams();
+  if (request.before !== undefined) query.set('before', request.before);
+  if (request.limit !== undefined) query.set('limit', String(request.limit));
+  const text = query.toString();
+  return text === '' ? queuePath(sessionId) : `${queuePath(sessionId)}?${text}`;
+};
+
 const statusOf = (reason: unknown): number | undefined =>
   typeof reason === 'object' && reason !== null && typeof (reason as { status?: unknown }).status === 'number'
     ? (reason as { status: number }).status
     : undefined;
 
 /**
- * One read of a session's queue. A daemon from before the queue answers 404 (or 405) for the route: that
- * is "no queue", never an error, so an older machine keeps showing exactly what it showed before.
- * A page this bundle cannot parse is also "no queue": the ledger rows stand on their own.
+ * One page of a session's queue. A daemon from before the queue answers 404 (or 405) for the route: that is
+ * "no queue", never an error, so an older machine keeps showing exactly what it showed before. A page this
+ * bundle cannot parse is also "no queue": the ledger rows stand on their own. A daemon from before the
+ * window answers the whole queue with no cursor, which reads as "nothing older".
+ */
+export const readSessionQueuePage = async (
+  api: Pick<IFyApiClient, 'request'>,
+  sessionId: string,
+  request: QueuePageRequest = {},
+): Promise<QueuePageRead> => {
+  try {
+    const raw = await api.request(pagePath(sessionId, request), z.unknown(), {}, QUEUE_READ_TIMEOUT_MS);
+    const parsed = SessionQueueSchema.safeParse(raw);
+    return parsed.success
+      ? { messages: parsed.data.messages, nextCursor: parsed.data.nextCursor ?? null }
+      : { messages: [], nextCursor: null };
+  } catch (reason) {
+    const status = statusOf(reason);
+    if (status === 404 || status === 405) return { messages: [], nextCursor: null };
+    throw reason;
+  }
+};
+
+/**
+ * The queue the chat joins to its ledger rows: the daemon's window (the newest page and every open message),
+ * which is the same window the ledger read answers. A bubble whose queue row falls outside it is drawn from
+ * its ledger row alone.
  */
 export const readSessionQueue = async (
   api: Pick<IFyApiClient, 'request'>,
   sessionId: string,
-): Promise<readonly QueuedMessage[]> => {
-  try {
-    const raw = await api.request(queuePath(sessionId), z.unknown(), {}, QUEUE_READ_TIMEOUT_MS);
-    const parsed = SessionQueueSchema.safeParse(raw);
-    return parsed.success ? parsed.data.messages : [];
-  } catch (reason) {
-    const status = statusOf(reason);
-    if (status === 404 || status === 405) return [];
-    throw reason;
-  }
-};
+): Promise<readonly QueuedMessage[]> => (await readSessionQueuePage(api, sessionId)).messages;
 
 /** The queue message states that mean the agent has the message. */
 const isQueueArrived = (state: QueuedMessage['state']): boolean => state === 'delivered' || state === 'read';
@@ -208,6 +243,11 @@ type QueueCancel = (record: { readonly sendId: string }) => Promise<boolean>;
 export interface QueueActions {
   readonly edit: QueueEdit;
   readonly cancel: QueueCancel;
+  /**
+   * Called while a queued message's menu or editor is open, so the chat reads the queue on every poll tick for as long
+   * as it is (a bare tick does not); returns the release. Absent: nothing to tell.
+   */
+  readonly watch?: () => () => void;
 }
 
 const messagePath = (sessionId: string, id: string): string => `${queuePath(sessionId)}/${encodeURIComponent(id)}`;
@@ -242,6 +282,7 @@ export const queueActions = (
   sessionId: string,
   refresh: () => void,
   outbox?: Pick<SendOutbox, 'edit' | 'cancel'>,
+  watch?: () => () => void,
 ): QueueActions => {
   const run = async (id: string, init: RequestInit): Promise<boolean> => {
     if (client === null) return false;
@@ -255,6 +296,7 @@ export const queueActions = (
     return true;
   };
   return {
+    ...(watch === undefined ? {} : { watch }),
     edit: async (record, text) => {
       if ((await outbox?.edit(record.sendId, text)) === 'edited') {
         refresh();
@@ -369,3 +411,139 @@ export const withdrawReplyVia =
     if (machine === undefined) throw new Error('That machine is no longer paired with this browser.');
     return await withdrawQueued(await clients.client(machine.connection), card.view.config.id, sendId, outbox);
   };
+
+/**
+ * WHAT THE QUEUE PAGE HOLDS OF ONE SESSION'S QUEUE: the daemon's window, plus any older pages the person asked for.
+ *
+ * `cursor` is where the next older page starts (`null`: the oldest message is already here) and `older` is
+ * whether the person has asked for any. `walk` numbers the walk the cursor belongs to: it moves up whenever the walk
+ * restarts from the window, and an older page read for one walk is never merged into another
+ * ({@link extendQueueHistory}). The daemon never removes a message, so a poll that re-reads the window must not make
+ * what the person already scrolled to vanish: {@link refreshQueueHistory} keeps it.
+ */
+export interface QueueHistory {
+  readonly messages: readonly QueuedMessage[];
+  readonly cursor: string | null;
+  readonly older: boolean;
+  readonly walk: number;
+}
+
+/** The window the daemon answered, nothing older asked for yet. */
+export const startQueueHistory = (page: QueuePageRead): QueueHistory => ({
+  messages: page.messages,
+  cursor: page.nextCursor,
+  older: false,
+  walk: 0,
+});
+
+/** A message that can still move: the daemon always carries these on the window, wherever they sit. */
+const isOpenState = (message: QueuedMessage): boolean =>
+  message.state === 'queued' || message.state === 'typing' || message.state === 'unconfirmed';
+
+/**
+ * How far along its life a state is. A message only moves forward (a refused typing aside), so of two reads that
+ * cannot be told apart by a version or an instant, the one further along is the later look.
+ */
+const PROGRESS: Readonly<Record<QueuedMessage['state'], number>> = {
+  queued: 0,
+  typing: 1,
+  unconfirmed: 2,
+  delivered: 3,
+  read: 4,
+  cancelled: 4,
+  failed: 4,
+};
+
+/**
+ * The fresher of one message as held and as just read, never a regression.
+ *
+ * The daemon stamps every message with a `version` that only grows (the position in its log of the message's latest
+ * change), so with one on both the higher wins and an equal one is the same fact. Without (a daemon from before it)
+ * the later revision (an edit) wins, then the later `stateAt` (a move), and on a tie the one further along — a clock
+ * tick is not a mutation, so two moves can share an instant and the later read is not always the later fact. Equally
+ * far along, the incoming read is the newer look at the same state. A message repeated across pages is thereby held
+ * once, in the newest state either read saw.
+ */
+const fresherMessage = (held: QueuedMessage, incoming: QueuedMessage): QueuedMessage => {
+  if (held.version !== undefined && incoming.version !== undefined)
+    return incoming.version > held.version ? incoming : held;
+  if (incoming.revision !== held.revision) return incoming.revision > held.revision ? incoming : held;
+  const later = Date.parse(incoming.stateAt) - Date.parse(held.stateAt);
+  if (later !== 0) return later > 0 ? incoming : held;
+  return PROGRESS[incoming.state] >= PROGRESS[held.state] ? incoming : held;
+};
+
+const byAgeThenId = (left: QueuedMessage, right: QueuedMessage): number =>
+  Date.parse(left.enqueuedAt) - Date.parse(right.enqueuedAt) || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+
+/** The messages of two reads as one set by id, the fresher of a repeated id kept, oldest first. */
+const mergeMessages = (
+  held: readonly QueuedMessage[],
+  incoming: readonly QueuedMessage[],
+): readonly QueuedMessage[] => {
+  const merged = new Map(held.map(message => [message.id, message]));
+  for (const message of incoming) {
+    const have = merged.get(message.id);
+    merged.set(message.id, have === undefined ? message : fresherMessage(have, message));
+  }
+  return [...merged.values()].sort(byAgeThenId);
+};
+
+/**
+ * A fresh read of the window applied over what is held. Until the person asks for older messages it IS the
+ * window. After, every message already shown stays (a new arrival pushes the window's edge up by one, and
+ * the message that fell off it is in no older page this person has not already read) and the fresher read wins
+ * for every id it carries.
+ *
+ * One thing cannot be kept as it is: a message held as still moving that the window no longer carries has finished
+ * since, and the daemon's walk leaves it out of every older page (it was open when the walk began), so its new state is
+ * unknown and would never come. It is let go and the WALK restarts from the window's edge — a new walk number, so no
+ * older page still in the air for the old one is merged — while every other message stays on screen; the restarted walk
+ * meets the finished one again, in its new state, where it belongs.
+ */
+export const refreshQueueHistory = (held: QueueHistory | undefined, fresh: QueuePageRead): QueueHistory => {
+  if (held === undefined || !held.older) return { ...startQueueHistory(fresh), walk: held?.walk ?? 0 };
+  const inWindow = new Set(fresh.messages.map(message => message.id));
+  const gone = held.messages.filter(message => !inWindow.has(message.id) && isOpenState(message));
+  if (gone.length === 0)
+    return {
+      messages: mergeMessages(held.messages, fresh.messages),
+      cursor: held.cursor,
+      older: true,
+      walk: held.walk,
+    };
+  const letGo = new Set(gone.map(message => message.id));
+  return {
+    messages: mergeMessages(
+      held.messages.filter(message => !letGo.has(message.id)),
+      fresh.messages,
+    ),
+    cursor: fresh.nextCursor,
+    older: true,
+    walk: held.walk + 1,
+  };
+};
+
+/** The place an older page was asked from: the walk and the cursor it was read at. */
+export interface OlderRequest {
+  readonly walk: number;
+  readonly cursor: string;
+}
+
+/** The request for the page that follows `held`, or `undefined` when it reached the oldest message. */
+export const olderRequest = (held: QueueHistory): OlderRequest | undefined =>
+  held.cursor === null ? undefined : { walk: held.walk, cursor: held.cursor };
+
+/**
+ * An older page read from `from`, added to what is held; a message is held once, in the fresher state of the two
+ * reads — a message that was open when the first page was cut and closed before this one arrives is the same bubble
+ * in its newest state, never the stale one nor a second one.
+ *
+ * A page answers the walk and cursor it was asked from. Merged into a history whose walk has restarted or whose
+ * cursor has moved on, it would hand that history a cursor that skips what the restart brought back, so it is not
+ * merged: `held` comes back unchanged and the caller asks again from where the history stands now.
+ */
+export const extendQueueHistory = (held: QueueHistory, page: QueuePageRead, from?: OlderRequest): QueueHistory =>
+  from !== undefined && (from.walk !== held.walk || from.cursor !== held.cursor)
+    ? held
+    : { messages: mergeMessages(held.messages, page.messages), cursor: page.nextCursor, older: true, walk: held.walk };

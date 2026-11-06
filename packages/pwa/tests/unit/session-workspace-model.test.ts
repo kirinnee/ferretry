@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { combinedDelivery, turnFileInstruction } from '@ferretry/protocol';
+import { combinedDelivery, type FyEvent, QUEUE_CHANGED_EVENT, turnFileInstruction } from '@ferretry/protocol';
 import {
   ACTED_WATCH_MS,
   NUDGE_SETTLE_MS,
+  QUEUE_FALLBACK_MS,
+  queueWatcher,
   RELAXED_REFRESH_MS,
   type SessionWorkspaceRefreshEnvironment,
   sendCanceller,
@@ -11,6 +13,7 @@ import {
   startSessionWorkspaceRefresh,
   transcriptEntriesFromLog,
 } from '../../src/components/session-workspace-model.ts';
+import { startSessionEventStream } from '../../src/components/session-event-stream-model.ts';
 import { rowAnchors, rowForOffset } from '../../src/lib/chat-search.ts';
 import { extractToolSummary, IMAGE_READ_TOOL } from '../../src/lib/tool-extract.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -1579,5 +1582,303 @@ describe('transcriptEntriesFromLog · a search hit on a copy', () => {
     expect(transcriptEntriesFromLog(midTurn, NOW, 'fy', [100, 200, 300, 400]).map(entry => entry.offset)).toEqual([
       100, 400,
     ]);
+  });
+});
+
+describe('startSessionWorkspaceRefresh · the durable queue is read on a nudge, not on every tick', () => {
+  const counted = () => {
+    const browser = environment();
+    let queueReads = 0;
+    let logReads = 0;
+    let sendReads = 0;
+    const shown: unknown[] = [];
+    const control = startSessionWorkspaceRefresh({
+      api: {
+        logs: async () => {
+          logReads += 1;
+          return '';
+        },
+        get: async () => sessionView('s-1'),
+        sends: async () => {
+          sendReads += 1;
+          return [];
+        },
+        queue: async () => {
+          queueReads += 1;
+          return [];
+        },
+      },
+      sessionId: 's-1',
+      environment: browser.env,
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onQueue: messages => shown.push(messages),
+      onError: () => undefined,
+    });
+    return { browser, control, shown, reads: () => ({ queue: queueReads, log: logReads, sends: sendReads }) };
+  };
+
+  test('ten bare working-state ticks read the transcript and the ledger each time but never the queue', async () => {
+    const { browser, control, reads } = counted();
+    await control.initial;
+
+    for (let tick = 0; tick < 10; tick += 1) {
+      browser.tick();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    control.stop();
+
+    expect(reads().queue).toBe(1);
+    expect(reads().log).toBe(11);
+    expect(reads().sends).toBe(11);
+  });
+
+  test('a bare tick alone adds no queue read; a nudge adds exactly one', async () => {
+    const { browser, control, reads } = counted();
+    await control.initial;
+    const opened = reads().queue;
+
+    for (let tick = 0; tick < 10; tick += 1) {
+      browser.tick();
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const afterTicks = reads().queue;
+    control.nudge();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    control.stop();
+
+    expect(opened).toBe(1);
+    expect(afterTicks).toBe(1);
+    expect(reads().queue).toBe(2);
+  });
+
+  test('while a queued message’s menu or editor is open every tick reads the queue again, and releasing stops it', async () => {
+    const { browser, control, reads } = counted();
+    await control.initial;
+    const release = control.watchQueue();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const watching = reads().queue;
+
+    browser.tick();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const afterWatchedTick = reads().queue;
+    release();
+    release();
+    browser.tick();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    control.stop();
+
+    expect(watching).toBe(2);
+    expect(afterWatchedTick).toBe(3);
+    expect(reads().queue).toBe(3);
+  });
+
+  test('an api with no queue is never asked, nudged or watched', async () => {
+    const browser = environment();
+    const control = startSessionWorkspaceRefresh({
+      api: { logs: async () => '', get: async () => sessionView('s-1') },
+      sessionId: 's-1',
+      environment: browser.env,
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onError: () => undefined,
+    });
+    await control.initial;
+
+    control.watchQueue()();
+    control.nudge();
+    await control.refresh(true);
+    control.stop();
+  });
+});
+
+describe('startSessionWorkspaceRefresh · a queue change reaches the open chat', () => {
+  /** A queue whose one message the test moves on the machine, with no feed event unless it asks for one. */
+  const machine = (startsFailing = false) => {
+    const browser = environment();
+    let clock = NOW;
+    let state = 'queued';
+    let failing = startsFailing;
+    let queueReads = 0;
+    const shown: string[] = [];
+    const env: SessionWorkspaceRefreshEnvironment = { ...browser.env, now: () => clock };
+    const control = startSessionWorkspaceRefresh({
+      api: {
+        logs: async () => '',
+        get: async () => sessionView('s-1'),
+        queue: async () => {
+          queueReads += 1;
+          if (failing) throw new Error('the machine is unreachable');
+          return [{ id: 'm1', state } as never];
+        },
+      },
+      sessionId: 's-1',
+      environment: env,
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onQueue: messages => shown.push(String((messages[0] as { state?: string } | undefined)?.state)),
+      onError: () => undefined,
+    });
+    return {
+      browser,
+      control,
+      shown,
+      reads: () => queueReads,
+      move: (next: string) => {
+        state = next;
+      },
+      fail: (value: boolean) => {
+        failing = value;
+      },
+      advance: (milliseconds: number) => {
+        clock += milliseconds;
+      },
+      beat: async () => {
+        browser.tick();
+        await new Promise(resolve => setTimeout(resolve, 0));
+      },
+    };
+  };
+
+  test('a queue change announced on the live feed is read through the real stream and controller, with no manual nudge', async () => {
+    // Arrange — the page's own wiring: every event of the session's feed nudges the refresh.
+    const world = machine();
+    await world.control.initial;
+    let deliver: ((event: FyEvent) => void) | undefined;
+    const stream = startSessionEventStream({
+      api: {
+        stream: async (_id, _after, onEvent) => {
+          deliver = onEvent;
+          await new Promise<void>(() => undefined);
+        },
+      },
+      sessionId: 's-1',
+      environment: { setTimeout: () => undefined, clearTimeout: () => undefined, random: () => 0 },
+      onEvent: () => world.control.nudge(),
+    });
+
+    // Act — the daemon cancels the message and journals QUEUE_CHANGED_EVENT after it is on disk.
+    world.move('cancelled');
+    deliver?.({
+      sequence: 1,
+      time: '2026-10-18T12:00:01.000Z',
+      sessionId: 's-1',
+      type: QUEUE_CHANGED_EVENT,
+      source: 'daemon',
+      data: { messageId: 'm1', change: 'moved' },
+    } as FyEvent);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    stream.stop();
+    world.control.stop();
+
+    // Assert
+    expect(world.shown).toEqual(['queued', 'cancelled']);
+  });
+
+  test('a cancel whose event never arrives is shown within the slow fallback beat, and not before it', async () => {
+    // Arrange
+    const world = machine();
+    await world.control.initial;
+
+    // Act — queued becomes cancelled on the machine and no event is ever delivered; ticks go by every 3 s.
+    world.move('cancelled');
+    for (let elapsed = 3_000; elapsed < QUEUE_FALLBACK_MS; elapsed += 3_000) {
+      world.advance(3_000);
+      await world.beat();
+    }
+    const beforeBeat = [...world.shown];
+    world.advance(3_000);
+    await world.beat();
+    world.control.stop();
+
+    // Assert
+    expect(beforeBeat).toEqual(['queued']);
+    expect(world.shown).toEqual(['queued', 'cancelled']);
+    expect(world.reads()).toBe(2);
+  });
+
+  test('a failed queue read is retried with a doubling backoff until it lands, then the slow beat resumes', async () => {
+    // Arrange — the first read fails.
+    const world = machine(true);
+    await world.control.initial;
+    const reads: number[] = [world.reads()];
+
+    // Act — ticks every 3 s: the retry waits 3 s, then 6 s; the machine comes back before the third try.
+    world.fail(false);
+    for (let tick = 0; tick < 3; tick += 1) {
+      world.advance(3_000);
+      await world.beat();
+      reads.push(world.reads());
+    }
+    world.advance(3_000);
+    await world.beat();
+    reads.push(world.reads());
+    world.control.stop();
+
+    // Assert — the read at 3 s landed and cleared the failure; no read follows until the 30 s beat.
+    expect(world.shown).toEqual(['queued']);
+    expect(reads).toEqual([1, 2, 2, 2, 2]);
+  });
+
+  test('a failed queue read is retried even on a relaxed page, which otherwise reads nothing for two minutes', async () => {
+    // Arrange — a relaxed page (feed live, agent idle) whose first queue read failed.
+    const browser = environment();
+    let clock = NOW;
+    let queueReads = 0;
+    let failing = true;
+    const control = startSessionWorkspaceRefresh({
+      api: {
+        logs: async () => '',
+        get: async () => sessionView('s-1'),
+        queue: async () => {
+          queueReads += 1;
+          if (failing) throw new Error('unreachable');
+          return [];
+        },
+      },
+      sessionId: 's-1',
+      environment: { ...browser.env, now: () => clock },
+      relaxed: () => true,
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onError: () => undefined,
+    });
+    await control.initial;
+
+    // Act — a tick inside the relaxed window, with the backoff run out
+    failing = false;
+    clock += 3_000;
+    browser.tick();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const afterRetry = queueReads;
+    clock += 3_000;
+    browser.tick();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    control.stop();
+
+    // Assert — the retry got through the relaxed skip; once it landed the page is relaxed again.
+    expect(afterRetry).toBe(2);
+    expect(queueReads).toBe(2);
+  });
+});
+
+describe('queueWatcher', () => {
+  test('asks the control that is current at the call to watch the queue, and hands back its release', () => {
+    const released: string[] = [];
+    const holder: { current: { watchQueue: () => () => void } | null } = { current: null };
+    const watch = queueWatcher(holder);
+
+    const idle = watch();
+    holder.current = {
+      watchQueue: () => () => {
+        released.push('released');
+      },
+    };
+    watch()();
+
+    expect(idle()).toBeUndefined();
+    expect(released).toEqual(['released']);
   });
 });

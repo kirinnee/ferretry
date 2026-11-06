@@ -916,6 +916,7 @@ import {
   NO_WATCHDOG,
   type NotificationHealthReading,
   NotificationService,
+  NotifyingSessionQueueStore,
   narrowAccountVault,
   needsRolloutFormatProbe,
   type ObservedSession,
@@ -9443,7 +9444,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        * restart left open; a session with nothing open costs nothing.
        */
       const queueSerial = new KeyedSerialExecutor();
-      const queueStore = new FileSessionQueueStore(id => createSessionPaths(paths, id).directory);
+      // Every writer of the queue log appends through this one store, which announces each durable change on the
+      // session's own journal (`control.queue_changed`, ids only) so an open chat reads the queue again.
+      const fileQueueStore = new FileSessionQueueStore(id => createSessionPaths(paths, id).directory);
+      const queueStore = new NotifyingSessionQueueStore(fileQueueStore, {
+        publish: async (id, type, data) => void (await storage.append(id, type, data)),
+      });
       const coalescing = {
         coalesce: delivery.coalesce,
         actionWindowMs: delivery.actionWindowMs,
@@ -12664,7 +12670,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // makes, the verified finish of a draft of ours, and one more look by the deliverer.
           stuckInbox: {
             queueWrittenAt: async sessionId => {
-              const written = await stat(queueStore.file(parseSessionId(sessionId))).catch((error: unknown) => {
+              const written = await stat(fileQueueStore.file(parseSessionId(sessionId))).catch((error: unknown) => {
                 if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
                 throw error;
               });

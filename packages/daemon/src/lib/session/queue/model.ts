@@ -123,13 +123,19 @@ function applied(message: QueuedMessage, event: Exclude<QueueEvent, { kind: 'enq
  */
 export function foldQueue(events: readonly QueueEvent[]): readonly QueuedMessage[] {
   const messages = new Map<string, QueuedMessage>();
+  // `version` is the 1-based position in the log of the latest line that CHANGED the message: the log is append-only,
+  // so it only grows, and unlike a clock it is never shared by two changes.
+  let position = 0;
   for (const event of events) {
+    position += 1;
     if (event.kind === 'enqueued') {
-      if (!messages.has(event.message.id)) messages.set(event.message.id, event.message);
+      if (!messages.has(event.message.id)) messages.set(event.message.id, { ...event.message, version: position });
       continue;
     }
     const current = messages.get(event.id);
-    if (current !== undefined) messages.set(event.id, applied(current, event));
+    if (current === undefined) continue;
+    const next = applied(current, event);
+    messages.set(event.id, next === current ? current : { ...next, version: position });
   }
   return [...messages.values()];
 }

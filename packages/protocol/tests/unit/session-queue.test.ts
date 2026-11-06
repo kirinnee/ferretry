@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { z } from 'zod';
 import * as queue from '../../src/lib/session-queue.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 
@@ -41,11 +42,54 @@ describe('a queued message', () => {
     should(parsed.deliveredAs).equal('m0');
   });
 
+  it('should keep the version a daemon stamps, parse without one, and reject one that is not a positive integer', () => {
+    should(queue.QueuedMessageSchema.parse({ ...oldMessage, version: 7 }).version).equal(7);
+    should(queue.QueuedMessageSchema.parse(oldMessage)).not.have.property('version');
+    should(queue.QueuedMessageSchema.safeParse({ ...oldMessage, version: 0 }).success).be.false();
+    should(queue.QueuedMessageSchema.safeParse({ ...oldMessage, version: 1.5 }).success).be.false();
+  });
+
   it('should reject a label outside blocker, action and fyi', () => {
     should(queue.QueuedMessageSchema.safeParse({ ...oldMessage, label: 'urgent' }).success).be.false();
   });
 
   it('should reject an empty batch id', () => {
     should(queue.QueuedMessageSchema.safeParse({ ...oldMessage, deliveredAs: '' }).success).be.false();
+  });
+});
+
+describe('a session queue answer', () => {
+  it('should parse the answer of a daemon from before the window, which named no cursor', () => {
+    // Act
+    const parsed = queue.SessionQueueSchema.parse({ messages: [oldMessage] });
+
+    // Assert
+    should(parsed.messages).have.length(1);
+    should(parsed.nextCursor ?? null).be.null();
+  });
+
+  it('should carry the cursor of the older page, or null at the oldest message', () => {
+    // Act
+    const more = queue.SessionQueueSchema.parse({ messages: [oldMessage], nextCursor: 'm0' });
+    const end = queue.SessionQueueSchema.parse({ messages: [], nextCursor: null });
+
+    // Assert
+    should(more.nextCursor).equal('m0');
+    should(end.nextCursor).be.null();
+  });
+
+  it('should be read, cursor and all, by a reader that knows only the messages array', () => {
+    // Arrange — what a client written before the window parses.
+    const before = z.object({ messages: z.array(queue.QueuedMessageSchema) });
+
+    // Act
+    const parsed = before.parse({ messages: [oldMessage], nextCursor: 'm0' });
+
+    // Assert
+    should(parsed.messages).have.length(1);
+  });
+
+  it('should reject an empty cursor, which names no message', () => {
+    should(queue.SessionQueueSchema.safeParse({ messages: [], nextCursor: '' }).success).be.false();
   });
 });

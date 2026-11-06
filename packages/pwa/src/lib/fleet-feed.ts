@@ -19,7 +19,7 @@
  * because a feed with no replay cannot say what changed while it was away.
  */
 
-import { type FyEvent, isMachineAgendaId, SURFACE_EVENT_TYPES } from '@ferretry/protocol';
+import { type FyEvent, isMachineAgendaId, QUEUE_CHANGED_EVENT, SURFACE_EVENT_TYPES } from '@ferretry/protocol';
 import { sessionEventStreamDeadlineMs, sessionEventStreamDelayMs } from '../components/session-event-stream-model.ts';
 
 /** What the poll beside a feed is told: whether it may stand back. */
@@ -67,8 +67,13 @@ export interface FleetFeedControl {
 /** A daemon that does not know `tail` refuses the upgrade with 400; nothing else says "too old". */
 const refusedAsTooOld = (reason: unknown): boolean => (reason as { readonly status?: unknown } | null)?.status === 400;
 
-/** SurfaceControl changes only surface maps and journals them, never session config/state or agendas. */
-const LIST_NEUTRAL_EVENTS = new Set<string>(Object.values(SURFACE_EVENT_TYPES));
+/**
+ * SurfaceControl changes only surface maps and journals them, never session config/state or agendas. A durable queue
+ * change (`control.queue_changed`, ids only) changes only that session's queue, which no list row shows — it is
+ * announced so the open chat reads `GET …/queue` (the per-session feed nudges on every event), and re-reading every
+ * session of the machine after each queued message would cost a list download for nothing.
+ */
+const LIST_NEUTRAL_EVENTS = new Set<string>([...Object.values(SURFACE_EVENT_TYPES), QUEUE_CHANGED_EVENT]);
 
 // Lifecycle, observer, send, resume and signal transitions (including interaction.help) all
 // change row facts. Agenda summaries are changed by agenda.changed / attention.changed;

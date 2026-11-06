@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { FyEvent } from '@ferretry/protocol';
+import { type FyEvent, QUEUE_CHANGED_EVENT } from '@ferretry/protocol';
 import should from 'should';
 import {
   browserFleetFeedEnvironment,
@@ -136,6 +136,34 @@ describe('startFleetFeed', () => {
 
     // Assert
     should(seen).eql(['board.changed', 'surface.driving']);
+    should(reads).equal(1);
+    control.stop();
+  });
+
+  it('should hand a queue change to onEvent but not re-read the session list for it', async () => {
+    // Arrange
+    const time = handTime();
+    const feed = daemon();
+    const seen: string[] = [];
+    let reads = 0;
+    const control = startFleetFeed({
+      open: feed.open,
+      onChange: () => (reads += 1),
+      onEvent: event => seen.push(event.type),
+      environment: time.environment,
+    });
+
+    // Act — a queue change moves no list row; a send landing does.
+    feed.opened[0]?.idle();
+    feed.opened[0]?.event(QUEUE_CHANGED_EVENT);
+    await time.advance(10_000);
+    const afterQueueChange = reads;
+    feed.opened[0]?.event('control.send_accepted');
+    await time.advance(10_000);
+
+    // Assert
+    should(seen).eql([QUEUE_CHANGED_EVENT, 'control.send_accepted']);
+    should(afterQueueChange).equal(0);
     should(reads).equal(1);
     control.stop();
   });

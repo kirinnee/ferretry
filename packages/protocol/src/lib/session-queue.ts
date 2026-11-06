@@ -80,6 +80,13 @@ export const QueuedMessageSchema = z.object({
   waitBehind: z.string().min(1).optional(),
   /** Why a `failed` message failed, in a sentence. */
   failure: z.string().optional(),
+  /**
+   * A number that only ever grows with the message's changes: the position in the queue log of the latest event that
+   * changed it. Of two looks at one message, the higher is the later, whatever the clock says (two moves can share a
+   * millisecond). Absent from a daemon from before it: a reader then falls back to `revision`, `stateAt` and how far
+   * along the state is.
+   */
+  version: PositiveIntegerSchema.optional(),
 });
 export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
 
@@ -87,6 +94,34 @@ export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
 export const QueueEditRequestSchema = z.strictObject({ text: z.string().trim().min(1) });
 export type QueueEditRequest = z.infer<typeof QueueEditRequestSchema>;
 
-/** `GET /v1/sessions/:sessionId/queue`: every message the session's queue holds, oldest first. */
-export const SessionQueueSchema = z.object({ messages: z.array(QueuedMessageSchema) });
+/**
+ * `GET /v1/sessions/:sessionId/queue`: a window onto the session's queue, oldest first. With no parameters it is
+ * the newest page and every message that can still move (`queued`, `typing`, `unconfirmed`), the same window
+ * `GET …/sends` answers; `?before=<nextCursor>` (and `limit`) pages the older history, each message once.
+ *
+ * `nextCursor` is OPAQUE — hand it back as `before` untouched. It names the oldest message of the page proper (and the
+ * snapshot the walk was cut at, and the session, so a message that changes state mid-walk is still met once and a
+ * cursor from another session or a forged one is refused with `400 invalid_cursor`), or is `null` when nothing older is
+ * left. It is absent from an answer of a daemon from before the window, which held the whole queue: absent
+ * reads as `null`.
+ * A reader written before the window ignores it and sees the same `messages` array, only shorter.
+ */
+export const SessionQueueSchema = z.object({
+  messages: z.array(QueuedMessageSchema),
+  nextCursor: z.string().min(1).nullable().optional(),
+});
 export type SessionQueue = z.infer<typeof SessionQueueSchema>;
+
+/**
+ * The session journal event a durable queue change publishes AFTER the change is on disk, so an open chat
+ * (and any other reader of `/v1/events`) learns it must read `GET …/queue` again. It carries ids and a kind
+ * only — never message text — and changes nothing a session LIST row shows, so the fleet feed does not re-read
+ * the list for it. A reader that does not know it ignores it safely: the event schema's `type` is free-form.
+ */
+export const QUEUE_CHANGED_EVENT = 'control.queue_changed';
+
+/** What a {@link QUEUE_CHANGED_EVENT} says: which message, and which kind of change. */
+export interface QueueChangedEventData {
+  readonly messageId: string;
+  readonly change: 'enqueued' | 'edited' | 'moved' | 'waiting';
+}

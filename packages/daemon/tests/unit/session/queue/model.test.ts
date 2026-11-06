@@ -48,7 +48,7 @@ describe('foldQueue', () => {
   it('should keep the first message for an id, so a retried request changes nothing', () => {
     const folded = foldQueue([enqueued(), enqueued({ text: 'a different retry' })]);
 
-    should(folded).deepEqual([message()]);
+    should(folded).deepEqual([message({ version: 1 })]);
   });
 
   it('should keep messages in the order they were accepted', () => {
@@ -69,7 +69,27 @@ describe('foldQueue', () => {
       moved('m1', 'read', 3),
     ]);
 
-    should(folded).deepEqual([message({ state: 'read', stateAt: at(3) })]);
+    should(folded).deepEqual([message({ state: 'read', stateAt: at(3), version: 4 })]);
+  });
+
+  it('should version a message by the log position of the latest line that changed it, and only those', () => {
+    const edit: QueueEvent = { v: 1, kind: 'edited', at: at(1), id: 'b', text: 'edited', revision: 2 };
+    const waiting: QueueEvent = { v: 1, kind: 'waiting', at: at(2), id: 'b', reason: 'busy' };
+    const folded = foldQueue([
+      enqueued({ id: 'a' }),
+      enqueued({ id: 'b' }),
+      edit,
+      waiting,
+      moved('a', 'delivered', 3), // illegal from queued: changes nothing, so no new version
+      enqueued({ id: 'b', text: 'a retry' }), // a retried request changes nothing
+      moved('ghost', 'typing', 4),
+      moved('a', 'typing', 5),
+    ]);
+
+    should(folded.map(entry => [entry.id, entry.version])).eql([
+      ['a', 8],
+      ['b', 4],
+    ]);
   });
 
   it('should not move a message where it cannot go, whatever order the lines are in', () => {
@@ -84,8 +104,8 @@ describe('foldQueue', () => {
     const failed = foldQueue([enqueued({ waitReason: 'busy' }), moved('m1', 'failed', 4, 'the session ended')]);
     const failedQuietly = foldQueue([enqueued(), moved('m1', 'failed', 4)]);
 
-    should(backAgain[0]).deepEqual(message({ state: 'queued', stateAt: at(3) }));
-    should(failed[0]).deepEqual(message({ state: 'failed', stateAt: at(4), failure: 'the session ended' }));
+    should(backAgain[0]).deepEqual(message({ state: 'queued', stateAt: at(3), version: 4 }));
+    should(failed[0]).deepEqual(message({ state: 'failed', stateAt: at(4), failure: 'the session ended', version: 2 }));
     should(failedQuietly[0]).not.have.property('failure');
   });
 

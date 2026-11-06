@@ -4,9 +4,8 @@
 // with the sentence for why it waits. Edit and cancel go through the same `queueActions` the chat bubble uses:
 // the outbox first (local), the daemon's PATCH/DELETE after.
 
-import type { QueuedMessage } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
-import { Fragment, useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { daemonQueuePath, daemonSessionPath } from '../lib/pages/routes.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
@@ -29,7 +28,16 @@ import {
 } from '../lib/queue-view.ts';
 import { useRouter } from '../lib/router.tsx';
 import { absoluteTime } from '../lib/session-screens.ts';
-import { QueueActionError, queueActions, readSessionQueue } from '../lib/send-queue.ts';
+import {
+  extendQueueHistory,
+  olderRequest,
+  QueueActionError,
+  type QueueHistory,
+  type QueuePageRead,
+  queueActions,
+  readSessionQueuePage,
+  refreshQueueHistory,
+} from '../lib/send-queue.ts';
 import { useAppStore, useConnectionSnapshot } from '../lib/store.tsx';
 import { ChatProse } from './chat-prose.tsx';
 import { DaemonTaskReferences } from './daemon-task-references.tsx';
@@ -250,6 +258,12 @@ export interface QueuePageViewProps {
   readonly loading: boolean;
   /** Wraps one ferret's card — the host puts what its messages' references need (a machine's cards) around it. */
   readonly wrapGroup?: (group: QueueGroup, content: ReactNode) => ReactNode;
+  /** Ferrets (by group key) whose queue has older messages on the machine than the page shows. */
+  readonly olderKeys?: ReadonlySet<string>;
+  /** The ferret whose older messages are being read now, and the one whose read failed. */
+  readonly loadingOlder?: string | null;
+  readonly olderFailed?: string | null;
+  readonly onLoadOlder?: (group: QueueGroup) => void;
   /** The clock the "… ago" times read; the page passes the present, a test passes a fixed instant. */
   readonly now?: number;
 }
@@ -264,9 +278,17 @@ export function QueuePageView({
   loading,
   wrapGroup = (_group, content) => content,
   now = Date.now(),
+  olderKeys,
+  loadingOlder = null,
+  olderFailed = null,
+  onLoadOlder,
 }: QueuePageViewProps) {
-  // A ferret with nothing in its queue has no card: the page says so once, whether it shows one ferret or all.
-  const shown = groups.filter(group => group.rows.length > 0);
+  // A ferret with nothing in its queue has no card: the page says so once, whether it shows one ferret or all. One
+  // whose newest window shows nothing (every message in it cancelled) but whose machine holds older messages keeps its
+  // card, because "Show older messages" lives there and would otherwise be unreachable.
+  const hasOlder = (group: QueueGroup): boolean => onLoadOlder !== undefined && olderKeys?.has(group.key) === true;
+  const shown = groups.filter(group => group.rows.length > 0 || hasOlder(group));
+  const loadOlder = onLoadOlder;
   const waiting = groups.reduce((sum, group) => sum + group.rows.filter(isWaitingRow).length, 0);
   return (
     <main aria-label={title} className="fy-queue-page scroll-thin" data-queue-page="">
@@ -295,6 +317,27 @@ export function QueuePageView({
         ) : null}
         {shown.map(group => {
           const next = nextRowId(group.rows, now);
+          // The older messages belong where they will appear: just above the finished ones, below what still waits.
+          const olderBefore = group.rows.find(row => !isWaitingRow(row))?.id;
+          const older =
+            loadOlder !== undefined && hasOlder(group) ? (
+              <li className="fy-queue-older" key="older">
+                <button
+                  className="kt-btn kt-btn--sm"
+                  data-queue-older=""
+                  disabled={loadingOlder === group.key}
+                  onClick={() => loadOlder(group)}
+                  type="button"
+                >
+                  {loadingOlder === group.key ? 'Reading older messages…' : 'Show older messages'}
+                </button>
+                {olderFailed === group.key ? (
+                  <span className="fy-queue-note" role="status">
+                    Older messages could not be read. Try again.
+                  </span>
+                ) : null}
+              </li>
+            ) : null;
           return (
             <Fragment key={group.key}>
               {wrapGroup(
@@ -312,8 +355,12 @@ export function QueuePageView({
                   </h2>
                   <ul className="fy-queue-list">
                     {group.rows.map(row => (
-                      <QueueRowView handlers={handlers} key={row.id} next={row.id === next} now={now} row={row} />
+                      <Fragment key={row.id}>
+                        {row.id === olderBefore ? older : null}
+                        <QueueRowView handlers={handlers} next={row.id === next} now={now} row={row} />
+                      </Fragment>
                     ))}
+                    {olderBefore === undefined ? older : null}
                   </ul>
                 </section>,
               )}
@@ -326,6 +373,8 @@ export function QueuePageView({
 }
 
 const POLL_MS = 5000;
+/** How often an older page is asked again after a poll restarted the walk under it. */
+const OLDER_ATTEMPTS = 3;
 
 /** Reads the queues for the route: one ferret, or every ferret on every machine this browser knows. */
 export function QueuePage({ daemonId, sessionId }: { readonly daemonId: DaemonId; readonly sessionId?: string }) {
@@ -334,7 +383,13 @@ export function QueuePage({ daemonId, sessionId }: { readonly daemonId: DaemonId
   const { connections } = useConnectionSnapshot();
   const fleet = useSyncExternalStore(store.fleet.subscribe, store.fleet.getSnapshot);
   const outbox = useSyncExternalStore(store.outbox.subscribe, store.outbox.snapshot);
-  const [queues, setQueues] = useState<ReadonlyMap<string, readonly QueuedMessage[]>>(new Map());
+  const [queues, setQueues] = useState<ReadonlyMap<string, QueueHistory>>(new Map());
+  // What each ferret's window held at the last read, so a poll keeps the older messages the person asked for.
+  const held = useRef<ReadonlyMap<string, QueueHistory>>(new Map());
+  // The number of the newest window poll started; see `read`.
+  const generation = useRef(0);
+  const [loadingOlder, setLoadingOlder] = useState<string | null>(null);
+  const [olderFailed, setOlderFailed] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
   const refresh = useCallback(() => setTick(value => value + 1), []);
@@ -357,21 +412,35 @@ export function QueuePage({ daemonId, sessionId }: { readonly daemonId: DaemonId
   useEffect(() => {
     let live = true;
     const read = async (): Promise<void> => {
-      const next = new Map<string, readonly QueuedMessage[]>();
+      // Every poll is numbered, and only the newest one still in the air may commit: a slower, older answer that
+      // lands after a newer one has been applied must not put the window back the way it was.
+      generation.current += 1;
+      const mine = generation.current;
+      const answers = new Map<string, QueuePageRead>();
       await Promise.all(
         targets.map(async target => {
           try {
             const client = await store.clients.client(target.connection);
-            next.set(
+            answers.set(
               `${target.connection.daemonId}/${target.sessionId}`,
-              await readSessionQueue(client, target.sessionId),
+              await readSessionQueuePage(client, target.sessionId),
             );
           } catch {
             // An unreachable machine shows only what this device still holds for it.
           }
         }),
       );
-      if (!live) return;
+      if (!live || mine !== generation.current) return;
+      // What is held is read NOW, after the answers: an older page the person loaded while this poll was in the air is
+      // in it, and the window answered is applied over it rather than over what was held when the poll began.
+      const next = new Map<string, QueueHistory>();
+      for (const target of targets) {
+        const key = `${target.connection.daemonId}/${target.sessionId}`;
+        const page = answers.get(key);
+        const history = page === undefined ? held.current.get(key) : refreshQueueHistory(held.current.get(key), page);
+        if (history !== undefined) next.set(key, history);
+      }
+      held.current = next;
       setQueues(next);
       setLoading(false);
     };
@@ -394,7 +463,13 @@ export function QueuePage({ daemonId, sessionId }: { readonly daemonId: DaemonId
         machine: target.connection.daemonName ?? target.connection.baseUrl,
         sessionId: target.sessionId,
         ferret: target.ferret,
-        rows: ferretRows(target.connection.daemonId, target.sessionId, target.ferret, queues.get(key) ?? [], outbox),
+        rows: ferretRows(
+          target.connection.daemonId,
+          target.sessionId,
+          target.ferret,
+          queues.get(key)?.messages ?? [],
+          outbox,
+        ),
       };
     });
     // A message saved on this device for a ferret this browser has not listed (a machine still offline) still shows.
@@ -432,12 +507,53 @@ export function QueuePage({ daemonId, sessionId }: { readonly daemonId: DaemonId
     };
   }, [connections, refresh, store.clients, store.outbox]);
 
+  // The queues of the page's own ferret reach back through the machine's cursor when asked. All queues lists only what
+  // waits, and everything that waits is always in the machine's window, so it never needs older pages.
+  const olderKeys = useMemo(
+    () => new Set([...queues].filter(([, history]) => history.cursor !== null).map(([key]) => key)),
+    [queues],
+  );
+  const loadOlder = useCallback(
+    async (group: QueueGroup): Promise<void> => {
+      const connection = connections.find(item => item.daemonId === group.daemonId);
+      const first = held.current.get(group.key);
+      if (first === undefined || olderRequest(first) === undefined || connection === undefined) return;
+      setLoadingOlder(group.key);
+      setOlderFailed(null);
+      try {
+        const client = await store.clients.client(connection);
+        // A page answers the walk and cursor it was asked from. A window poll that restarted the walk while it was in the
+        // air hands back the history unchanged, so the page is asked again from where the history stands now.
+        for (let attempt = 0; attempt < OLDER_ATTEMPTS; attempt += 1) {
+          const from = olderRequest(held.current.get(group.key) ?? first);
+          if (from === undefined) break;
+          const page = await readSessionQueuePage(client, group.sessionId, { before: from.cursor });
+          const latest = held.current.get(group.key) ?? first;
+          const extended = extendQueueHistory(latest, page, from);
+          if (extended === latest) continue;
+          held.current = new Map(held.current).set(group.key, extended);
+          setQueues(held.current);
+          break;
+        }
+      } catch {
+        setOlderFailed(group.key);
+      } finally {
+        setLoadingOlder(null);
+      }
+    },
+    [connections, store.clients],
+  );
+
   const title = sessionId === undefined ? 'All queues' : `Queue — ${groups[0]?.ferret ?? 'ferret'}`;
   return (
     <QueuePageView
       groups={groups}
       handlers={handlers}
       loading={loading}
+      loadingOlder={loadingOlder}
+      olderFailed={olderFailed}
+      olderKeys={olderKeys}
+      onLoadOlder={sessionId === undefined ? undefined : group => void loadOlder(group)}
       onOpenFerret={group => navigate(daemonSessionPath(group.daemonId as DaemonId, group.sessionId))}
       onShowAll={sessionId === undefined ? undefined : () => navigate(daemonQueuePath(daemonId))}
       showMachine={connections.length > 1}
