@@ -83,11 +83,11 @@ export interface SessionReferenceSurfaceOptions {
    * reported as a fleet with nobody in it.
    */
   readonly sessions?: readonly SessionView[];
-  /** This ferret's slice of the board (its cards, old ids included), when the host already holds it. */
-  readonly tasks?: readonly { readonly id: string; readonly legacyId?: string | null }[];
+  /** This ferret's slice of the board, when the host already holds it. */
+  readonly tasks?: readonly { readonly id: string }[];
   /**
    * Every card id on this machine, whatever its project, lane or state, when the host already holds it. A
-   * reference to any of them opens its card; `tasks` still decides the old ids and the `&` menu.
+   * reference to any of them opens its card; `tasks` still decides the `&` menu.
    */
   readonly taskIds?: ReadonlySet<string>;
   /**

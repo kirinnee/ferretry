@@ -16,6 +16,5 @@ export const sessionCard = (id: string, patch: Partial<SessionCard> = {}): Sessi
   assignee: null,
   touchedAt: '2026-10-01T00:00:00.000Z',
   agentAsked: false,
-  legacyId: null,
   ...patch,
 });

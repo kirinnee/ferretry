@@ -199,22 +199,22 @@ describe('sessionReferenceSurface', () => {
     should([afterTask, readSidePaneTabsState(scope).active]).deepEqual([null, 'skills']);
   });
 
-  test('should open the card an old task reference was imported as, and prefer a card on the slice with that id', () => {
+  test('should open a card of the slice by any case of its id, and leave an unknown id as written', () => {
     const visited: string[] = [];
     const surface = sessionReferenceSurface({
       connection,
       scope,
       fetcher: browserFetch,
       onNavigate: to => visited.push(to),
-      tasks: [{ id: 'F12' }, { id: 'F96', legacyId: 'F12' }, { id: 'F97', legacyId: 'F7' }],
+      tasks: [{ id: 'F12' }, { id: 'F96' }, { id: 'F97' }],
     });
 
-    surface.onTaskOpen?.('f7');
+    surface.onTaskOpen?.('f97');
     surface.onTaskOpen?.('f12');
 
     should(visited).deepEqual(['/d/daemon-a/board/F97', '/d/daemon-a/board/F12']);
-    should(surface.taskReferenceResolver?.('f7')).be.true();
-    should(surface.taskReferenceResolver?.('F8')).be.false();
+    should(surface.taskReferenceResolver?.('f97')).be.true();
+    should(surface.taskReferenceResolver?.('F7')).be.false();
   });
 
   test('should prove and open a card on another project from the machine-wide ids', () => {

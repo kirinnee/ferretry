@@ -13,9 +13,7 @@
  *   paired daemon, so it is not on the wire at all.
  * - **History is append-only and gap-free**, and a move back or a reopen always says why.
  *
- * Names the v1 per-session store (`tasks.ts`) already exports carry a `Board` prefix here; U18 deletes v1
- * and drops it. The kind, title rule and workflow names are v1's own schemas, reused, because they are
- * the same facts.
+ * `tasks.ts` holds the shared task primitives the board uses: the kind, id, title rule, workflow and message schemas.
  */
 import { z } from 'zod';
 import { AgendaIdSchema, unnestBullets } from './agenda.ts';
@@ -423,9 +421,6 @@ export type BoardTaskEventType = BoardTaskEvent['type'];
 // The card
 // ---------------------------------------------------------------------------------------------------
 
-/** Where a migrated card came from: `<session>:<old id>`. Old `&F12` references resolve through it. */
-export const LegacyTaskRefSchema = z.string().regex(/^[^\s:]+:[BFIC][1-9][0-9]{0,8}$/u);
-
 /** Who asked for the work, for the surfaces that wait on the owner: a `person`, or an `agent` on its own errand. */
 export const BoardTaskAskedBySchema = z.enum(['person', 'agent']);
 export type BoardTaskAskedBy = z.infer<typeof BoardTaskAskedBySchema>;
@@ -527,7 +522,6 @@ const BoardTaskShape = {
   /** {@link BoardActorVia}: absent unless the card was opened on the admin token. */
   createdByVia: BoardActorViaSchema.optional(),
   history: z.array(BoardTaskEventSchema).min(1),
-  legacyRef: LegacyTaskRefSchema.optional(),
   /**
    * Whether a PERSON asked for the card, decided by the daemon once (at creation, or at the first boot that
    * finds the card without it) and never taken from a caller: the Inbox's cards to test are only a person's.

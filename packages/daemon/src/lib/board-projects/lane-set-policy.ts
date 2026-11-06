@@ -16,11 +16,6 @@
  * - An edit keeps the set's Done and Not good lanes while they still fit, unless it names its own
  *   (`laneTargets`); an app that predates them never resets them.
  * - **confirm** is the owner's accept: the lanes and the version stay as they are.
- * - **merge the release lanes** ({@link mergeReleaseLanes}) folds a set's Released and To test lanes into one
- *   at boot: a release is what the owner tests, so the two were one step drawn twice.
- * - **add quick's To test lane** ({@link addQuickToTestLane}) at boot, to a `quick` set from before it.
- * - **stage the lanes** ({@link stageLanes}) at boot: every lane stored without a stage gets the one its
- *   compatibility fields already describe, written out.
  * - **what a change does to the gates** ({@link laneGateProblems}): removing, disarming, moving or skipping a gate,
  *   or sending cards into a closed lane, a new lane or past a gate. A ferret's change never goes live on a set
  *   that exists, so these are not refused: they are what the owner's Accept card says the proposal would do.
@@ -44,7 +39,6 @@ import {
   laneLayoutFromTemplate,
   laneStage,
   laneTargets,
-  QUICK_TO_TEST_LANE,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
 
@@ -159,7 +153,7 @@ const waitForOwner = (
 /**
  * The owner's Accept of the waiting proposal: it becomes the live set, confirmed, at its own version, and its
  * relocation is handed back to run as the owner's. A proposal made against a live set that has moved on since
- * (an owner's edit clears it; a boot migration drops it) is a version conflict.
+ * (an owner's edit clears it) is a version conflict.
  */
 export const acceptPendingLaneSet = (
   current: LaneSet,
@@ -353,177 +347,4 @@ export const describeLaneSetFailure = (
     case 'owner-gate':
       return `only the owner may change these gates: this change ${failure.problems.map(problem => problem.why).join('; ')}`;
   }
-};
-
-/** The merged lane's name: what the owner reads, whatever the two lanes were called. A progress name: the card's agenda carries its ask. */
-export const RELEASED_TO_TEST_NAME = 'Released';
-
-/** What merging a set's Released and To test lanes comes to: the set to store, and where cards move. */
-export interface ReleaseLaneMerge {
-  readonly next: LaneSet;
-  /** The To test lane that is gone. */
-  readonly from: string;
-  /** The Released lane every card of both now sits in. */
-  readonly into: string;
-}
-
-/**
- * Folds a set's Released lane (a `shipped` lane entered on `release.published`) and the To test lane right
- * after it (a `verify` lane entered on `release.running`) into one: the Released lane's id and place, named
- * {@link RELEASED_TO_TEST_NAME}, a `verify` lane entered on release, gated the way To test was. Variants
- * walk it where they walked either. The set's version rises and its confirmation stands: a merge is not a
- * new proposal, so the owner is asked nothing. `null` when there is nothing to merge, so it is idempotent.
- */
-export const mergeReleaseLanes = (current: LaneSet): ReleaseLaneMerge | null => {
-  const at = current.lanes.findIndex(
-    (lane, index) =>
-      lane.category === 'shipped' &&
-      lane.enterOn?.includes('release.published') === true &&
-      current.lanes[index + 1]?.category === 'verify' &&
-      current.lanes[index + 1]?.enterOn?.includes('release.running') === true,
-  );
-  const released = current.lanes[at];
-  const tested = current.lanes[at + 1];
-  if (at === -1 || released === undefined || tested === undefined) return null;
-  // Never empty: the Released lane was found by its `release.published`.
-  const enterOn = [
-    ...new Set(
-      [...(released.enterOn ?? []), ...(tested.enterOn ?? [])].filter(trigger => trigger !== 'release.running'),
-    ),
-  ];
-  const merged: Lane = {
-    id: released.id,
-    name: RELEASED_TO_TEST_NAME,
-    category: 'verify',
-    enterOn,
-    ...(tested.ownerGate === undefined ? {} : { ownerGate: tested.ownerGate }),
-    // The mirror an app that predates card asks requires of a verify lane.
-    emphasis: 'action',
-  };
-  const lanes = current.lanes.flatMap((lane, index) => {
-    if (index === at) return [merged];
-    return index === at + 1 ? [] : [lane];
-  });
-  const variants = Object.fromEntries(
-    Object.entries(current.variants).map(([workflow, ids]) => [
-      workflow,
-      [...new Set((ids ?? []).map(id => (id === tested.id ? released.id : id)))],
-    ]),
-  );
-  const layout = { lanes, variants };
-  const targets = laneTargets(layout, current) ?? { doneLane: current.doneLane, notGoodLane: current.notGoodLane };
-  const { pending: _stale, ...live } = current;
-  return {
-    next: { ...live, version: nextLaneSetVersion(current), ...layout, ...targets },
-    from: tested.id,
-    into: released.id,
-  };
-};
-
-/** The lanes, by id and category, of a `quick` set stored before it had To test. */
-const OLD_QUICK_SHAPE: readonly (readonly [string, Lane['category']])[] = [
-  ['todo', 'backlog'],
-  ['doing', 'active'],
-  ['closed', 'closed'],
-];
-
-/**
- * Gives a `quick` set from before To test its To test lane ({@link QUICK_TO_TEST_LANE}), between Doing and
- * Closed: quick work has no release step and facts never enter Closed, so a merged card had nowhere to go.
- * Every lane stays where it is and keeps its name, so no card moves; Closed becomes owner-gated (a set with
- * a `verify` lane closes only by the owner) and no longer entered on `signal.done`, which goes to To test.
- * Every variant walks To test where it walked Closed or Doing. The version rises and the confirmation
- * stands, so the owner is asked nothing. `null` for any other set, so it is idempotent.
- */
-export const addQuickToTestLane = (current: LaneSet): LaneSet | null => {
-  const shaped =
-    current.lanes.length === OLD_QUICK_SHAPE.length &&
-    current.lanes.every((lane, index) => {
-      const [id, category] = OLD_QUICK_SHAPE[index] ?? [];
-      return lane.id === id && lane.category === category;
-    });
-  if (!shaped) return null;
-  const [todo, doing, closed] = current.lanes as [Lane, Lane, Lane];
-  // The stage goes with the triggers it mirrored: Closed reads the stage its new fields describe.
-  const { enterOn, stage: _stage, ...rest } = closed;
-  const kept = enterOn?.filter(trigger => trigger !== 'signal.done') ?? [];
-  const gated: Lane = { ...rest, ...(kept.length === 0 ? {} : { enterOn: kept }), ownerGate: true };
-  const lanes = [todo, doing, QUICK_TO_TEST_LANE, gated];
-  const variants = Object.fromEntries(
-    Object.entries(current.variants).map(([workflow, ids]) => {
-      const walked = ids ?? [];
-      const walks = walked.includes(doing.id) || walked.includes(closed.id);
-      return [
-        workflow,
-        lanes.map(lane => lane.id).filter(id => walked.includes(id) || (walks && id === QUICK_TO_TEST_LANE.id)),
-      ];
-    }),
-  );
-  const layout = { lanes, variants };
-  const targets = laneTargets(layout, current) ?? { doneLane: current.doneLane, notGoodLane: current.notGoodLane };
-  const { pending: _stale, ...live } = current;
-  return { ...live, version: nextLaneSetVersion(current), ...layout, ...targets };
-};
-
-/**
- * Writes every lane's stage into a set stored before stages: each lane without one gets {@link laneStage}'s,
- * the stage its `enterOn` and `ownerGate` already describe, so nothing a reader decides changes and no card
- * moves. A lane that has a stage keeps it. The VERSION STAYS: the set means what it meant, so an edit made
- * against it still applies, and the Accept on a pending proposal's card still confirms it. The confirmation
- * stands and the owner is asked nothing. `null` when every lane has a stage already, so it is idempotent.
- */
-export const stageLanes = (current: LaneSet): LaneSet | null => {
-  if (current.lanes.every(lane => lane.stage !== undefined)) return null;
-  const lanes = current.lanes.map(lane => (lane.stage === undefined ? { ...lane, stage: laneStage(lane) } : lane));
-  return { ...current, lanes };
-};
-
-/**
- * The template lane names that said a lane waits on the owner, by lane id, and the progress name each one becomes
- * (docs/board.md § Lanes show progress): a card's ask rides its agenda now, so the lane only says where the work is.
- */
-export const PROGRESS_LANE_NAMES: Readonly<Record<string, { readonly from: string; readonly to: string }>> = {
-  released: { from: 'Released · to test', to: 'Released' },
-  'to-test': { from: 'To test', to: 'Ready to try' },
-};
-
-/** The non-verify template lanes drawn as the owner's action, by lane id: drawn as progress now. */
-const PROGRESS_EMPHASIS: Readonly<Record<string, { readonly name: string; readonly category: Lane['category'] }>> = {
-  plan: { name: 'Plan/Design', category: 'active' },
-  review: { name: 'Review', category: 'review' },
-};
-
-/** One lane as progress: a template name that waited on the owner is renamed; one the owner chose is kept. */
-const progressLane = (lane: Lane): Lane => {
-  const renamed = PROGRESS_LANE_NAMES[lane.id];
-  const named = renamed !== undefined && lane.name === renamed.from ? { ...lane, name: renamed.to } : lane;
-  const drawn = PROGRESS_EMPHASIS[lane.id];
-  return drawn !== undefined &&
-    named.name === drawn.name &&
-    named.category === drawn.category &&
-    named.emphasis === 'action'
-    ? { ...named, emphasis: 'progress' }
-    : named;
-};
-
-const sameLanes = (left: readonly Lane[], right: readonly Lane[]): boolean =>
-  left.every((lane, index) => lane === right[index]);
-
-/**
- * LANES SHOW PROGRESS (docs/board.md § Lanes show progress): a set's lanes still named as the TEMPLATE named a lane
- * that waits on the owner (`released` "Released · to test", `to-test` "To test") take its progress name, and the
- * template's Plan/Design and Review stop being drawn as the owner's action. A lane the owner renamed or redrew is
- * left as it is; a verify lane keeps its `action` emphasis, the mirror an older app requires. Ids, categories,
- * stages and gates are untouched, so no card moves and the owner's answer is still what moves a card past a gate.
- * A waiting proposal is brought along the same way. The VERSION STAYS and the confirmation stands: the set means what
- * it meant. `null` when nothing changes, so it is idempotent.
- */
-export const progressLaneNames = (current: LaneSet): LaneSet | null => {
-  const lanes = current.lanes.map(progressLane);
-  const pending =
-    current.pending === undefined ? undefined : { ...current.pending, lanes: current.pending.lanes.map(progressLane) };
-  const pendingMoved =
-    current.pending !== undefined && pending !== undefined && !sameLanes(current.pending.lanes, pending.lanes);
-  if (sameLanes(current.lanes, lanes) && !pendingMoved) return null;
-  return { ...current, lanes, ...(pending === undefined ? {} : { pending }) };
 };

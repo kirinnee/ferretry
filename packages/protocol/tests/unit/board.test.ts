@@ -51,7 +51,6 @@ import {
   formatAgendaRef,
   isInBoardState,
   LaneSetActionRequestSchema,
-  LegacyTaskRefSchema,
   MAX_BOARD_HOW_TO_TEST_LENGTH,
   MAX_BOARD_STATUS_PART_LENGTH,
   laneEditProblems,
@@ -209,7 +208,6 @@ const CARD: BoardTask = BoardTaskSchema.parse({
   createdAt: INSTANT,
   createdBy: { kind: 'daemon', sessionId: LEAD },
   history: HISTORY,
-  legacyRef: `${LEAD}:F12`,
 });
 
 const ROLLUP = {
@@ -298,7 +296,6 @@ const VALID: readonly SchemaCase[] = [
       reportedVia: 'admin-token',
     },
   },
-  { name: 'legacy ref', schema: LegacyTaskRefSchema, value: `${LEAD}:F12` },
   { name: 'card', schema: BoardTaskSchema, value: CARD },
   { name: 'card a person asked for', schema: BoardTaskSchema, value: { ...CARD, askedBy: 'person' } },
   { name: 'activity', schema: BoardTaskActivitySchema, value: 'orphaned' },
@@ -504,7 +501,6 @@ const INVALID: readonly SchemaCase[] = [
     schema: BoardTaskEventSchema,
     value: event(1, { type: 'field-edited', field: 'owner' }),
   },
-  { name: 'bad legacy ref', schema: LegacyTaskRefSchema, value: 'F12' },
   { name: 'card from the future', schema: BoardTaskSchema, value: { ...CARD, v: 2 } },
   { name: 'six-word title', schema: BoardTaskSchema, value: { ...CARD, title: 'one two three four five six' } },
   { name: 'long summary', schema: BoardTaskSchema, value: { ...CARD, summary: 'x'.repeat(141) } },
@@ -686,6 +682,13 @@ describe('Status', () => {
 });
 
 describe('card invariants', () => {
+  it('should read a stored card that still names the id it had before the board, and drop that key', () => {
+    const stored = BoardTaskSchema.parse({ ...CARD, legacyRef: `${LEAD}:F12` });
+
+    should(stored).not.have.property('legacyRef');
+    should(stored).deepEqual(BoardTaskSchema.parse(CARD));
+  });
+
   it('should match the id prefix to the kind', () => {
     should(issuesOf({ ...CARD, kind: 'bug' })).deepEqual(['task id prefix must match its kind']);
     should(['bug', 'feature', 'infra', 'chore'].map(kind => taskIdPrefix(kind as BoardTask['kind']))).deepEqual([

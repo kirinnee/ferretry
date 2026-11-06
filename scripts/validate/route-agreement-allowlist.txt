@@ -73,7 +73,6 @@ unserved GET /v1/tunnel-service # CORRECT: dialled against the same relay DISCOV
 unreached GET /usage # CORRECT: opt-in (publicUsageFeed) usage feed for external readers
 unreached GET /metrics # CORRECT: opt-in (publicUsageFeed) Prometheus feed for external scrapers
 unreached POST /v1/sessions/:sessionId/notify # CORRECT: kept for older CLIs; the current CLI raises an info item through the agenda route instead, so only items notify
-unreached GET /v1/sessions/:sessionId/tasks # CORRECT: an empty compatibility stub kept one release for older clients (U18a); the PWA reads this ferret's cards from /v1/board and no longer dials it
 
 # The agenda wire (agenda.wire.1, docs/agenda.md § Compatibility). Each client dials the agenda spelling or the older
 # attention one through a per-daemon choice — the PWA's sessionAgendaPath(id, wire) and wardenAgendaPath(wire), the CLI's
@@ -91,8 +90,6 @@ unreached GET /v1/sessions/:sessionId/attachments/:attachmentId # no client asks
 unreached GET /v1/sessions/:sessionId/terminals/:terminalId # the PWA consumes TerminalView rows from the list/create responses; no client asks for detail alone
 unreached POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock # the PWA has the unlock COPY and no call
 unreached DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock # the PWA has the unlock COPY and no call
-unreached GET /v1/board/tasks # the old-reference lookup (board U16) lands daemon-first; the PWA reference code (board U12) dials it next
-unreached GET /v1/tasks # DEPRECATED compatibility stub (empty list) for older fy clients; removed with the session route after one release (U18a)
 
 # ── verb-unproven: the address agrees, the method is not proved ────────────────────────────────
 

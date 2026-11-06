@@ -451,7 +451,7 @@ lot: `conversation-import` 74–184, `pairing` 29–128, `access` 183–301, `se
 | `input-requests`      | `input-requests`                                                                                                      |       158 | 149–160     |      20 |
 | `mcp`                 | `mcp-inventory`, `mcp-oauth`, `session-mcp`                                                                           |       144 | 134–144     |       5 |
 | `learning`            | `learning`                                                                                                            |       120 | 108–120     |       4 |
-| `board-github`        | `board-github`, `board-import`                                                                                        |       119 | 119         |       7 |
+| `board-github`        | `board-github`                                                                                                        |       119 | 119         |       7 |
 | `worktrees`           | `worktrees`                                                                                                           |       109 | 109         |       1 |
 | `models`              | `models`, `local-models`, `provider-probe`                                                                            |        89 | 89–97       |       2 |
 | `pairing`             | `pairing`, `push`                                                                                                     |        74 | 29–128      |       7 |

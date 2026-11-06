@@ -10,7 +10,6 @@ import type {
 import { Command } from 'commander';
 import should from 'should';
 import { registerBoardCommands } from '../../../src/adapters/board/board-commands';
-import { registerBoardImportCommand } from '../../../src/adapters/board-import/board-import-command';
 import { registerLaneCommands } from '../../../src/adapters/board-lanes/lane-commands';
 import { BoardController } from '../../../src/lib/board/board-controllers';
 import type { IBoardGateway } from '../../../src/lib/board/ports';
@@ -31,13 +30,12 @@ const boards: BoardProjectsResponse = listing({
 
 /**
  * The whole `board` group, registered in the composition root's order (`fy.ts`): `board` first with its
- * own `--project`, `--json` and `--session`, then `lanes` and `import` mounted onto it.
+ * own `--project`, `--json` and `--session`, then `lanes` mounted onto it.
  */
 function tree() {
   const queried: BoardQueryInput[] = [];
   const shown: BoardProjectId[] = [];
   const changed: { projectId: BoardProjectId; request: LaneSetActionRequest }[] = [];
-  const imported: boolean[] = [];
   const lines: string[] = [];
   const io = { success: (line: string) => lines.push(line), report: (line: string) => lines.push(line) };
   const boardGateway: IBoardGateway = {
@@ -76,17 +74,8 @@ function tree() {
   });
   registerBoardCommands(program, controller);
   registerLaneCommands(program, { gateway: laneGateway, io, binaryName: 'fy' });
-  registerBoardImportCommand(program, {
-    gateway: {
-      run: dryRun => {
-        imported.push(dryRun);
-        return Promise.reject(new Error('stop after recording the flag'));
-      },
-    },
-    io,
-  });
   const run = async (...argv: string[]) => void (await program.parseAsync(['bun', 'fy', ...argv]));
-  return { changed, imported, lines, queried, run, shown };
+  return { changed, lines, queried, run, shown };
 }
 
 describe('the board command tree', () => {
@@ -140,11 +129,5 @@ describe('the board command tree', () => {
     const { queried, run } = tree();
     await run('board', '--project', 'dotfiles');
     should(queried[0]).have.property('project', OTHER_ID);
-  });
-
-  it('should pass --dry-run and --json to `board import`', async () => {
-    const { imported, run } = tree();
-    await should(run('board', 'import', '--dry-run', '--json')).be.rejectedWith(/stop after recording/u);
-    should(imported).eql([true]);
   });
 });

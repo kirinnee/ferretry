@@ -36,7 +36,7 @@ export interface LaneProposalAgenda {
 
 /**
  * Whose a relocation is: the OWNER's (their own edit, or their Accept of a ferret's proposal), recorded as theirs
- * and free to close a card; or the DAEMON's (a boot migration), which runs every check an owner-less move does
+ * and free to close a card; or the DAEMON's (a change made live by a caller who is not the owner), which runs every check an owner-less move does
  * (`relocationProblems`) against `before`, the lanes the cards were in (absent: the lanes as they are now).
  */
 export type RelocationAuthority =
@@ -47,15 +47,10 @@ export type RelocationAuthority =
  * Moves the cards of a deleted lane to the lane the edit named, in the board store (U2). Called after the
  * edited set is stored, with the new set already readable; it must be safe to repeat, because a failure here
  * leaves the set edited and the cards where they were. `by` is whose move it is, and what each card's history
- * records; `reason` is what that history says about it; absent, it says the lane was removed.
+ * records, with the reason that the lane was removed.
  */
 export interface CardRelocator {
-  relocate(
-    projectId: BoardProjectId,
-    moves: Readonly<Record<string, string>>,
-    by: RelocationAuthority,
-    reason?: string,
-  ): Promise<void>;
+  relocate(projectId: BoardProjectId, moves: Readonly<Record<string, string>>, by: RelocationAuthority): Promise<void>;
 }
 
 /** Reads {@link ProjectGitFacts} for a folder. Never rejects: a folder it cannot read is a folder with no repository. */

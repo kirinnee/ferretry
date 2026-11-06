@@ -44,8 +44,6 @@ import { BoardCardTies } from '../src/adapters/agenda/card-ties';
 import { registerBoardCommands } from '../src/adapters/board/board-commands';
 import { FyBoardGateway } from '../src/adapters/board/fy-board-gateway';
 import { FyMergeGateGateway } from '../src/adapters/board/fy-merge-gate-gateway';
-import { registerBoardImportCommand } from '../src/adapters/board-import/board-import-command';
-import { FyBoardImportGateway } from '../src/adapters/board-import/fy-board-import-gateway';
 import { FyLaneGateway } from '../src/adapters/board-lanes/fy-lane-gateway';
 import { registerLaneCommands } from '../src/adapters/board-lanes/lane-commands';
 import { BUNDLED_FIREWALL_FILES } from '../src/adapters/browser/firewall-files';
@@ -970,8 +968,6 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   },
   ({ program, world, client }) =>
     registerLaneCommands(program, { gateway: new FyLaneGateway(client), io: world.io, binaryName: BINARY_NAME }),
-  ({ program, world, client }) =>
-    registerBoardImportCommand(program, { gateway: new FyBoardImportGateway(client), io: world.io }),
   ({ program, world, client }) =>
     registerProjectCommands(program, {
       gateway: new FyProjectGateway(client),

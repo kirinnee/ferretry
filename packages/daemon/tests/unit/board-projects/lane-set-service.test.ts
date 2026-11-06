@@ -2,7 +2,6 @@ import { describe, it } from 'bun:test';
 import {
   type BoardProjectId,
   LANE_TEMPLATES,
-  type Lane,
   type LaneLayoutValue,
   type LaneSet,
   type LaneSetActionRequest,
@@ -17,13 +16,11 @@ import {
   type LaneSetMutation,
   LaneSetService,
   type LaneSetStore,
-  mergeReleaseLanes,
   LANE_CARD_WITHDRAWN,
-  RELEASE_MERGE_REASON,
   type RelocationAuthority,
   UNFILED_PROJECT_NAME,
 } from '../../../src/lib/board-projects/index.ts';
-import { lanes, oldQuickLanes, templateLanes } from '../board/support.ts';
+import { templateLanes } from '../board/support.ts';
 import { DOCS_ID, FERRETRY_ID, project } from './support.ts';
 
 const OWNER: LaneActor = { kind: 'owner' };
@@ -57,17 +54,14 @@ class Agenda implements LaneProposalAgenda {
 
 class Relocator implements CardRelocator {
   readonly moves: Array<readonly [string, Readonly<Record<string, string>>]> = [];
-  readonly reasons: Array<string | undefined> = [];
   readonly authorities: RelocationAuthority[] = [];
   async relocate(
     projectId: BoardProjectId,
     moves: Readonly<Record<string, string>>,
     by: RelocationAuthority,
-    reason?: string,
   ): Promise<void> {
     this.moves.push([projectId, moves]);
     this.authorities.push(by);
-    this.reasons.push(reason);
   }
 }
 
@@ -390,38 +384,6 @@ describe('LaneSetService and a waiting proposal’s card', () => {
 
     should(agenda.withdrawn).deepEqual([]);
   });
-
-  it('should withdraw the card of a proposal a boot migration drops', async () => {
-    // Arrange: a classic set (Released and To test apart) and an old quick set, each with a ferret's proposal.
-    const parts = world();
-    const pending = (set: LaneSet) => ({
-      version: set.version + 1,
-      baseVersion: set.version,
-      proposedBy: 'koen',
-      proposerSession: 'ms8-abcd1234',
-      lanes: set.lanes,
-      variants: set.variants,
-      doneLane: set.doneLane,
-      notGoodLane: set.notGoodLane,
-      relocate: {},
-    });
-    const classic = { ...lanes(FERRETRY_ID), version: 3 };
-    const quick = { ...oldQuickLanes(DOCS_ID), version: 2 };
-    parts.store.sets.set(FERRETRY_ID, { ...classic, pending: pending(classic) });
-    parts.store.sets.set(DOCS_ID, { ...quick, pending: pending(quick) });
-
-    // Act
-    await parts.service.mergeReleaseLanes();
-    await parts.service.addQuickToTestLanes();
-
-    // Assert
-    should(parts.agenda.withdrawn).deepEqual([
-      ['ms8-abcd1234', reference(4), LANE_CARD_WITHDRAWN.dropped],
-      ['ms8-abcd1234', `lanes:${DOCS_ID}:3`, LANE_CARD_WITHDRAWN.dropped],
-    ]);
-    should(parts.store.sets.get(FERRETRY_ID)?.pending).be.undefined();
-    should(parts.store.sets.get(FERRETRY_ID)?.version).equal(5);
-  });
 });
 
 describe('LaneSetService.acceptProposal', () => {
@@ -503,324 +465,5 @@ describe('LaneSetService.acceptProposal', () => {
     should(await service.acceptProposal(FERRETRY_ID, 9)).be.false();
     should(await service.acceptProposal(DOCS_ID, 1)).be.false();
     should(store.sets.get(FERRETRY_ID)?.confirmedBy).be.null();
-  });
-});
-
-describe('LaneSetService merges Released and To test at boot', () => {
-  it('should merge each stored set that has both, move the cards before and after, and say why', async () => {
-    // Arrange
-    const { store, relocator, service } = world();
-    store.sets.set(FERRETRY_ID, { ...lanes(FERRETRY_ID), version: 3 });
-    store.sets.set(DOCS_ID, templateLanes(DOCS_ID));
-
-    // Act
-    const outcomes = await service.mergeReleaseLanes();
-
-    // Assert
-    should(outcomes).deepEqual([{ projectId: FERRETRY_ID, merged: true, version: 4 }]);
-    should(relocator.moves).deepEqual([
-      [FERRETRY_ID, { tested: 'released' }],
-      [FERRETRY_ID, { tested: 'released' }],
-    ]);
-    should(relocator.reasons).deepEqual([RELEASE_MERGE_REASON, RELEASE_MERGE_REASON]);
-    should(RELEASE_MERGE_REASON).equal('Released and To test are one lane now: Released');
-    should(store.sets.get(FERRETRY_ID)?.lanes.some(lane => lane.id === 'tested')).be.false();
-    should(store.sets.get(FERRETRY_ID)?.confirmedBy).equal('owner');
-    should(relocator.authorities.map(by => by.kind)).deepEqual(['daemon', 'daemon']);
-    // Judged from the lanes the cards were in: the set before the merge.
-    should(
-      relocator.authorities.map(by =>
-        by.kind === 'daemon' ? by.before?.lanes.some(lane => lane.id === 'tested') : undefined,
-      ),
-    ).deepEqual([true, true]);
-    should(store.sets.get(DOCS_ID)?.version).equal(1);
-  });
-
-  it('should do nothing the second time', async () => {
-    // Arrange
-    const { store, relocator, service } = world();
-    store.sets.set(FERRETRY_ID, lanes(FERRETRY_ID));
-    await service.mergeReleaseLanes();
-
-    // Act
-    const again = await service.mergeReleaseLanes();
-
-    // Assert
-    should(again).deepEqual([]);
-    should(relocator.moves).have.length(2);
-  });
-
-  it('should store nothing and move no card again when the set was merged in between', async () => {
-    // Arrange
-    const { store, relocator, service } = world();
-    store.sets.set(FERRETRY_ID, lanes(FERRETRY_ID));
-    const merged = mergeReleaseLanes(lanes(FERRETRY_ID))?.next;
-    const transact = store.transact.bind(store);
-    store.transact = async (projectId, decide) => {
-      if (merged !== undefined) store.sets.set(projectId, merged);
-      return await transact(projectId, decide);
-    };
-
-    // Act
-    const outcomes = await service.mergeReleaseLanes();
-
-    // Assert
-    should(outcomes).deepEqual([]);
-    should(relocator.moves).have.length(1);
-  });
-
-  it('should report a project it could not merge and go on with the rest', async () => {
-    // Arrange
-    const { store, service } = world();
-    store.sets.set(DOCS_ID, lanes(DOCS_ID));
-    const read = store.read.bind(store);
-    store.read = async projectId => {
-      if (projectId === FERRETRY_ID) throw new Error('damaged lane set');
-      return await read(projectId);
-    };
-
-    // Act
-    const outcomes = await service.mergeReleaseLanes();
-
-    // Assert
-    should(outcomes).deepEqual([
-      { projectId: FERRETRY_ID, merged: false, problem: 'damaged lane set' },
-      { projectId: DOCS_ID, merged: true, version: 2 },
-    ]);
-  });
-
-  it('should report a failure that is not an Error in its own words', async () => {
-    // Arrange
-    const { store, service } = world();
-    store.read = async () => Promise.reject('disk gone');
-
-    // Act + Assert
-    should((await service.mergeReleaseLanes())[0]).deepEqual({
-      projectId: UNFILED_PROJECT_ID,
-      merged: false,
-      problem: 'disk gone',
-    });
-  });
-});
-
-describe('LaneSetService gives quick sets their To test lane at boot', () => {
-  it('should add To test to each stored quick set from before it, move no card, and ask nothing', async () => {
-    // Arrange
-    const { store, agenda, relocator, service } = world();
-    store.sets.set(UNFILED_PROJECT_ID, { ...oldQuickLanes(UNFILED_PROJECT_ID), version: 2 });
-    store.sets.set(DOCS_ID, oldQuickLanes(DOCS_ID));
-    store.sets.set(FERRETRY_ID, templateLanes(FERRETRY_ID));
-
-    // Act
-    const outcomes = await service.addQuickToTestLanes();
-
-    // Assert
-    should(outcomes).deepEqual([
-      { projectId: UNFILED_PROJECT_ID, added: true, version: 3 },
-      { projectId: DOCS_ID, added: true, version: 2 },
-    ]);
-    should(store.sets.get(UNFILED_PROJECT_ID)?.lanes.map(lane => lane.id)).deepEqual([
-      'todo',
-      'doing',
-      'to-test',
-      'closed',
-    ]);
-    should(store.sets.get(UNFILED_PROJECT_ID)?.confirmedBy).equal('owner');
-    should(store.sets.get(FERRETRY_ID)?.version).equal(1);
-    should(relocator.moves).be.empty();
-    should(agenda.raised).be.empty();
-  });
-
-  it('should do nothing the second time, nor for an Unfiled board that keeps the built-in lanes', async () => {
-    // Arrange
-    const { store, service } = world();
-    store.sets.set(DOCS_ID, oldQuickLanes(DOCS_ID));
-    await service.addQuickToTestLanes();
-
-    // Act
-    const again = await service.addQuickToTestLanes();
-
-    // Assert
-    should(again).deepEqual([]);
-    should(store.sets.has(UNFILED_PROJECT_ID)).be.false();
-    should((await service.laneSet(UNFILED_PROJECT_ID))?.lanes.map(lane => lane.id)).containEql('to-test');
-  });
-
-  it('should report a project it could not update and go on with the rest', async () => {
-    // Arrange
-    const { store, service } = world();
-    store.sets.set(DOCS_ID, oldQuickLanes(DOCS_ID));
-    const transact = store.transact.bind(store);
-    store.transact = async (projectId, decide) => {
-      if (projectId === FERRETRY_ID) throw new Error('damaged lane set');
-      if (projectId === UNFILED_PROJECT_ID) return Promise.reject('disk gone');
-      return await transact(projectId, decide);
-    };
-
-    // Act
-    const outcomes = await service.addQuickToTestLanes();
-
-    // Assert
-    should(outcomes).deepEqual([
-      { projectId: UNFILED_PROJECT_ID, added: false, problem: 'disk gone' },
-      { projectId: FERRETRY_ID, added: false, problem: 'damaged lane set' },
-      { projectId: DOCS_ID, added: true, version: 2 },
-    ]);
-  });
-});
-
-describe('LaneSetService writes out every lane’s stage at boot', () => {
-  it('should stage each stored set from before stages, move no card, and ask nothing', async () => {
-    // Arrange
-    const { store, agenda, relocator, service } = world();
-    store.sets.set(UNFILED_PROJECT_ID, { ...oldQuickLanes(UNFILED_PROJECT_ID), version: 2 });
-    store.sets.set(FERRETRY_ID, { ...lanes(FERRETRY_ID), version: 5 });
-    store.sets.set(DOCS_ID, templateLanes(DOCS_ID, 'writing'));
-
-    // Act
-    const outcomes = await service.stageLanes();
-
-    // Assert
-    should(outcomes).deepEqual([
-      { projectId: UNFILED_PROJECT_ID, staged: true, version: 2 },
-      { projectId: FERRETRY_ID, staged: true, version: 5 },
-    ]);
-    should(store.sets.get(FERRETRY_ID)?.lanes.every(lane => lane.stage !== undefined)).be.true();
-    should(store.sets.get(FERRETRY_ID)?.confirmedBy).equal('owner');
-    should(store.sets.get(DOCS_ID)?.version).equal(1);
-    should(relocator.moves).be.empty();
-    should(agenda.raised).be.empty();
-  });
-
-  it('should do nothing the second time, nor for an Unfiled board that keeps the built-in lanes', async () => {
-    // Arrange
-    const { store, service } = world();
-    store.sets.set(DOCS_ID, oldQuickLanes(DOCS_ID));
-    await service.stageLanes();
-
-    // Act
-    const again = await service.stageLanes();
-
-    // Assert
-    should(again).deepEqual([]);
-    should(store.sets.has(UNFILED_PROJECT_ID)).be.false();
-    should((await service.laneSet(UNFILED_PROJECT_ID))?.lanes.every(lane => lane.stage !== undefined)).be.true();
-  });
-
-  it('should never write a staged set the next read would refuse', async () => {
-    // Arrange: a stored set no reader accepts (a lane entered on no trigger at all), which only a fake store holds.
-    const { store, service } = world();
-    const broken = oldQuickLanes(DOCS_ID);
-    const unreadable = {
-      ...broken,
-      lanes: broken.lanes.map(lane => (lane.id === 'doing' ? { ...lane, enterOn: [] } : lane)),
-    } as LaneSet;
-    store.sets.set(DOCS_ID, unreadable);
-
-    // Act
-    const outcomes = await service.stageLanes();
-
-    // Assert
-    should(outcomes).deepEqual([
-      {
-        projectId: DOCS_ID,
-        staged: false,
-        problem: 'staging its lanes would leave them unreadable, so they are left as they are',
-      },
-    ]);
-    should(store.sets.get(DOCS_ID)).equal(unreadable);
-  });
-
-  it('should report a project whose set it could not read and go on with the rest', async () => {
-    // Arrange
-    const { store, service } = world();
-    store.sets.set(DOCS_ID, oldQuickLanes(DOCS_ID));
-    const transact = store.transact.bind(store);
-    store.transact = async (projectId, decide) => {
-      if (projectId === FERRETRY_ID) throw new Error('refusing to use a damaged lane set');
-      if (projectId === UNFILED_PROJECT_ID) return Promise.reject('disk gone');
-      return await transact(projectId, decide);
-    };
-
-    // Act
-    const outcomes = await service.stageLanes();
-
-    // Assert
-    should(outcomes).deepEqual([
-      { projectId: UNFILED_PROJECT_ID, staged: false, problem: 'disk gone' },
-      { projectId: FERRETRY_ID, staged: false, problem: 'refusing to use a damaged lane set' },
-      { projectId: DOCS_ID, staged: true, version: 1 },
-    ]);
-  });
-
-  it('should leave a pending proposal acceptable: Accept on its card still confirms the staged set', async () => {
-    // Arrange: a ferret's proposal from before stages, its agenda card waiting on the owner.
-    const { store, service } = world();
-    store.sets.set(DOCS_ID, { ...oldQuickLanes(DOCS_ID), version: 4, confirmedBy: null, proposedBy: 'koen' });
-    await service.stageLanes();
-
-    // Act
-    const accepted = await service.acceptProposal(DOCS_ID, 4);
-
-    // Assert
-    should(accepted).be.true();
-    should(store.sets.get(DOCS_ID)).match({ version: 4, confirmedBy: 'owner' });
-    should(store.sets.get(DOCS_ID)?.lanes.every(lane => lane.stage !== undefined)).be.true();
-  });
-});
-
-describe('LaneSetService names waiting lanes as progress at boot', () => {
-  /** A set as stored before lanes showed progress: the template's waiting name for its Released lane. */
-  const waiting = (projectId: string): LaneSet => {
-    const set = templateLanes(projectId);
-    return {
-      ...set,
-      version: 3,
-      lanes: set.lanes.map(lane => (lane.id === 'released' ? { ...lane, name: 'Released · to test' } : lane)),
-    };
-  };
-
-  it('should rename each stored set’s template names, keep its version, move no card and ask nothing', async () => {
-    // Arrange
-    const { store, agenda, relocator, service } = world();
-    store.sets.set(FERRETRY_ID, waiting(FERRETRY_ID));
-    store.sets.set(DOCS_ID, templateLanes(DOCS_ID));
-
-    // Act
-    const outcomes = await service.progressLaneNames();
-    const again = await service.progressLaneNames();
-
-    // Assert
-    should(outcomes).deepEqual([{ projectId: FERRETRY_ID, renamed: true, version: 3 }]);
-    should(again).deepEqual([]);
-    should(store.sets.get(FERRETRY_ID)?.lanes.find(lane => lane.id === 'released')?.name).equal('Released');
-    should(relocator.moves).be.empty();
-    should(agenda.raised).be.empty();
-  });
-
-  it('should leave a set it cannot rename into a readable one, and report a store it cannot write', async () => {
-    // Arrange — a damaged set (a lane twice) still carrying a template name, and a store that fails
-    const { store, service } = world();
-    const damaged = waiting(DOCS_ID);
-    store.sets.set(DOCS_ID, { ...damaged, lanes: [...damaged.lanes, damaged.lanes[0] as Lane] });
-    const transact = store.transact.bind(store);
-    store.transact = async (projectId, decide) => {
-      if (projectId === UNFILED_PROJECT_ID) return Promise.reject('disk gone');
-      return await transact(projectId, decide);
-    };
-
-    // Act
-    const outcomes = await service.progressLaneNames();
-
-    // Assert
-    should(outcomes).deepEqual([
-      { projectId: UNFILED_PROJECT_ID, renamed: false, problem: 'disk gone' },
-      {
-        projectId: DOCS_ID,
-        renamed: false,
-        problem: 'renaming its lanes would leave them unreadable, so they are left as they are',
-      },
-    ]);
-    should(store.sets.get(DOCS_ID)?.lanes.find(lane => lane.id === 'released')?.name).equal('Released · to test');
   });
 });

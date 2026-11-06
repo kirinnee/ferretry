@@ -779,7 +779,7 @@ describe('GitHubWatcher: nudges and refiling', () => {
     await subject.watcher.tick();
     should(subject.stored('F116').laneId).equal('doing');
 
-    // Act: the boot migration gives the set its To test lane.
+    // Act: the project's lane set gains its To test lane.
     sets.set(UNFILED_PROJECT_ID, lanes(UNFILED_PROJECT_ID, 'quick'));
     await subject.watcher.tick();
 

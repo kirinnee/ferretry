@@ -918,7 +918,7 @@ const taskCandidates = (
         kind: 'task',
         label: reference,
         detail: [task.title, task.assignee ?? 'unassigned'].join(' · '),
-        keywords: [task.id, task.title, task.summary, task.lane, task.assignee ?? '', task.legacyId ?? ''].join(' '),
+        keywords: [task.id, task.title, task.summary, task.lane, task.assignee ?? ''].join(' '),
         group: 'Tasks',
         badge: task.lane,
         replacement: reference,

@@ -1025,11 +1025,11 @@ function methodLiteralIn(source: string, cleaned: string, from: number, to: numb
 /**
  * Functions and methods whose answer IS a path, by name.
  *
- * A repository this size does not write its URLs out at the call site. `FyTaskGateway.sessionBase()`
- * returns `/v1/sessions/${id}/tasks` and four call sites interpolate it; the terminal surface builds
- * every one of its five routes the same way. Without this, `${sessionBase(id)}/${taskId}` resolves
- * to nothing recognisable and NINE live routes read as dead — an under-match, which reads as
- * compliance.
+ * A repository this size does not write its URLs out at the call site. The CLI's lane gateway
+ * (`fy-lane-gateway.ts`) has `lanesPath(projectId)`, which returns `/v1/board/projects/${id}/lanes`,
+ * and every call site passes through it. Without this, `request(lanesPath(projectId), …)` resolves
+ * to nothing recognisable and the live routes behind it read as dead — an under-match, which reads
+ * as compliance.
  *
  * Only a literal that is the immediate answer of the declaration counts (`return '…'`, `=> '…'`), so
  * a function that merely mentions a path somewhere in its body maps to nothing.

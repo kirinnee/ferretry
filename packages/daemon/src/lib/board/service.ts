@@ -101,7 +101,7 @@ import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.t
 import { countsOf, inScope, pageOf, passesFilters } from './query.ts';
 import { returnCard, returnLead } from './return-to-lead.ts';
 import { doneLane, doneMove, doneNote } from './signal-done.ts';
-import { helperCloseReason, strandedCloseReason } from './sub-card-close.ts';
+import { helperCloseReason } from './sub-card-close.ts';
 import { defaultVisibility, visibilityChosen, visibilityVerdict, withDefaultVisibility } from './visibility.ts';
 
 export interface BoardServiceDependencies {
@@ -418,37 +418,6 @@ export class BoardService {
   }
 
   /**
-   * Closes every sub-card still waiting where a top-level card waits for the owner to try it (a verify lane): the
-   * ones that sat there before sub-cards closed themselves. Idempotent; a card that cannot be written is reported
-   * and left for the next boot. Answers how many it closed.
-   */
-  async closeStrandedSubCards(): Promise<number> {
-    const caller: BoardCaller = { kind: 'daemon' };
-    const { cards } = await this.snapshot();
-    let closed = 0;
-    for (const { id, parent } of cards) {
-      if (parent === null) continue;
-      try {
-        const task = await this.ports.store.write(id, async current => {
-          if (current === undefined) return { task: null, result: null };
-          const context = await this.context(current, caller);
-          const reason = strandedCloseReason(current, context.laneSet);
-          const next = reason === null ? null : closeAsDaemon(current, reason, context);
-          return { task: next === null ? null : requireValidCard(next), result: next };
-        });
-        if (task === null) continue;
-        await this.afterWrite(caller, task, [task.projectId]);
-        closed += 1;
-      } catch (error) {
-        this.ports.diagnostics.warn(
-          `board: could not close sub-card ${id}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-    return closed;
-  }
-
-  /**
    * Decides again who asked for every card not already a person's, by the same rule a new card is decided by,
    * except that a stored creator of kind `owner` proves nothing (a ferret holding the admin token wrote that too):
    * a card from before the field, and a card stored `agent` from fewer of the owner's words than are read now.
@@ -542,14 +511,6 @@ export class BoardService {
   /** One card, in full, with its board's lanes. */
   async task(id: BoardTaskId): Promise<BoardTaskResponse> {
     return await this.view(await this.ports.store.read(), id);
-  }
-
-  /** The card an old task became: `<session>:<old id>`, as `legacyRef` records it. */
-  async taskByLegacyRef(legacyRef: string): Promise<BoardTaskResponse> {
-    const snapshot = await this.ports.store.read();
-    const card = snapshot.cards.find(candidate => candidate.legacyRef === legacyRef);
-    if (card === undefined) throw new BoardError('not-found', `no card came from the old task ${legacyRef}`);
-    return await this.view(snapshot, card.id);
   }
 
   // -------------------------------------------------------------------------------------------------
@@ -890,7 +851,7 @@ export class BoardService {
    * Moves the cards of the lanes a lane edit removed to the lanes it named (`moves`: removed → kept),
    * after the edited set is stored (U3's `CardRelocator`). Safe to repeat: a card no longer in a removed
    * lane of this project is left alone. The direction of such a move is not defined — its lane is gone —
-   * so it is recorded as `by`'s move that says why: `reason`, else that the lane was removed. `by` is the
+   * so it is recorded as `by`'s move that says the lane was removed. `by` is the
    * owner for their own edit or their Accept of a proposal; anyone else is the daemon, which never closes a
    * card here: a move into a closed lane is left undone and said in the diagnostics (the lane service already
    * refused any gate it would pass). Returns the cards it moved.
@@ -898,7 +859,6 @@ export class BoardService {
   async relocate(
     projectId: BoardProjectId,
     moves: Readonly<Record<string, string>>,
-    reason?: string,
     by: RelocationAuthority = { kind: 'daemon' },
   ): Promise<readonly BoardTaskId[]> {
     const refused =
@@ -924,7 +884,7 @@ export class BoardService {
             from: current.laneId,
             to,
             backward: false,
-            reason: reason ?? `lane ${current.laneId} was removed from the board`,
+            reason: `lane ${current.laneId} was removed from the board`,
           },
           { now: this.ports.clock.now(), actor: actorOf(callerOf(by)), ...viaOf(callerOf(by)) },
         );

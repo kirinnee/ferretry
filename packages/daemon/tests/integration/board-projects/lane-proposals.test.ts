@@ -77,7 +77,7 @@ const daemon = async () => {
       raise: async (...parameters) => await agenda.raise(...parameters),
       resolveSource: async (...parameters) => await agenda.resolveSource(...parameters),
     }),
-    { relocate: async (projectId, moves, by, reason) => void (await board?.relocate(projectId, moves, reason, by)) },
+    { relocate: async (projectId, moves, by) => void (await board?.relocate(projectId, moves, by)) },
   );
   board = new BoardService({ ...boardPorts(), store: cards, lanes });
   for (const each of [

@@ -568,8 +568,8 @@ its own).
   the step-up and the unlock, grants, the security settings and the tunnel switch, confirming a held
   config change, updating the daemon or the agent CLIs, the browser proxy test, catalog shares, members,
   installs and publishing, Pack mode's clean-up, applying a lesson, revoking a session's credential, forking a
-  conversation, adopting an earlier Claude Code or Codex conversation, asking the Warden to investigate, the
-  old-board import, the owner's "Send now" for held agenda answers, and "Clear all from agent ferrets". Also
+  conversation, adopting an earlier Claude Code or Codex conversation, asking the Warden to investigate,
+  the owner's "Send now" for held agenda answers, and "Clear all from agent ferrets". Also
   everything that changes how ferrets run or are watched: **applying** a fleet change (`POST /v1/fleet/proposals/:id/apply` — a ferret may
   still propose one), harness and MCP sign-ins, a session's MCP login, installing machine tools, the
   warden's settings and "leave it alone", resource limits, the lessons settings, a session's Pack switch and a

@@ -29,7 +29,6 @@ import {
   world,
 } from '../../board/support.ts';
 import { DIRECTORY as SUB_FERRETS } from '../../sub-ferret/support.ts';
-import { handleDirectly } from './second-line.ts';
 import { agentIn, boardSubsystem, CREDENTIALS, FERRET_SESSION, fromFerret, grantSubsystem, human } from './support.ts';
 
 const phone = { deviceId: 'fy_device_id_phone', appSession: 'app-one' } as const;
@@ -51,9 +50,7 @@ const recording = (overrides: Partial<ServiceWorld> = {}) => {
     readonly actor?: string | undefined;
   }[] = [];
   const base = boardSubsystem();
-  const service = new BoardService(
-    world({ store: new MemoryBoardStore([card({ legacyRef: 'abc:F12' })]), ...overrides }),
-  );
+  const service = new BoardService(world({ store: new MemoryBoardStore([card()]), ...overrides }));
   const board: BoardSubsystem = {
     board: async (query: BoardQuery) => {
       calls.push({ route: 'board', value: query });
@@ -70,14 +67,6 @@ const recording = (overrides: Partial<ServiceWorld> = {}) => {
     task: async id => {
       calls.push({ route: 'task', value: id });
       return await service.task(id);
-    },
-    taskByLegacyRef: async legacyRef => {
-      calls.push({ route: 'legacyRef', value: legacyRef });
-      return await service.taskByLegacyRef(legacyRef);
-    },
-    importLegacy: async options => {
-      calls.push({ route: 'import', value: options });
-      return await base.importLegacy(options);
     },
     create: async (value: BoardTaskCreateRequest, caller) => {
       calls.push({ route: 'create', value, caller });
@@ -195,89 +184,6 @@ describe('the board mount', () => {
     should(response.status).equal(200);
     should(calls[0]?.value).equal('F1');
     should(jsonBody(response)).match({ task: { id: 'F1' } });
-  });
-
-  it('should serve the card an old task became, by any spelling of the old reference', async () => {
-    // Arrange
-    const { calls, board } = recording();
-
-    // Act
-    const response = await (await dispatcher(board)).dispatch(
-      request({ path: '/v1/board/tasks', headers: human, query: [['legacyRef', 'abc:&f12']] }),
-    );
-
-    // Assert
-    should(response.status).equal(200);
-    should(calls[0]).match({ route: 'legacyRef', value: 'abc:F12' });
-    should(jsonBody(response)).match({ task: { id: 'F1', legacyRef: 'abc:F12' } });
-  });
-
-  it('should answer 404 when no card came from the old task', async () => {
-    // Act
-    const response = await (await dispatcher(recording().board)).dispatch(
-      request({ path: '/v1/board/tasks', headers: human, query: [['legacyRef', 'abc:F99']] }),
-    );
-
-    // Assert
-    should(response.status).equal(404);
-  });
-
-  it.each([undefined, '', 'F12', 'abc:', ':F12', 'a b:F12', 'abc:nope'])(
-    'should refuse the legacyRef %s',
-    async value => {
-      // Act
-      const { calls, board } = recording();
-      const response = await (await dispatcher(board)).dispatch(
-        request({
-          path: '/v1/board/tasks',
-          headers: human,
-          query: value === undefined ? [] : [['legacyRef', value]],
-        }),
-      );
-
-      // Assert
-      should(response.status).equal(400);
-      should(jsonBody(response).code).equal('invalid');
-      should(calls).eql([]);
-    },
-  );
-
-  it.each([
-    { body: JSON.stringify({}), dryRun: false },
-    { body: JSON.stringify({ dryRun: false }), dryRun: false },
-    { body: JSON.stringify({ dryRun: true }), dryRun: true },
-  ])('should run the import for the owner with $body', async ({ body, dryRun }) => {
-    // Arrange
-    const { calls, board } = recording();
-
-    // Act
-    const response = await (await dispatcher(board)).dispatch(
-      request({ method: 'POST', path: '/v1/board/import', headers: human, body }),
-    );
-
-    // Assert
-    should(response.status).equal(200);
-    should(calls[0]).eql({ route: 'import', value: { dryRun } });
-    should(jsonBody(response)).match({ skipped: false, complete: true });
-  });
-
-  it('should refuse the import from a ferret, and a malformed body from the owner', async () => {
-    // Arrange
-    const { calls, board } = recording();
-    const live = await dispatcher(board);
-
-    // Act
-    const ferret = await live.dispatch(
-      request({ method: 'POST', path: '/v1/board/import', headers: agentIn('lead'), body: '{}' }),
-    );
-    const malformed = await live.dispatch(
-      request({ method: 'POST', path: '/v1/board/import', headers: human, body: JSON.stringify({ dryRun: 'yes' }) }),
-    );
-
-    // Assert
-    should(ferret.status).equal(403);
-    should(malformed.status).equal(400);
-    should(calls).eql([]);
   });
 
   it.each(['%E0%A4%A', 'F0'])('should refuse the card id %s', async id => {
@@ -723,20 +629,6 @@ describe('a board refusal on the wire', () => {
 
     // Assert
     should(() => reraiseBoardError(defect)).throw(defect);
-  });
-});
-
-describe('the board import’s own second line', () => {
-  it('should still refuse a ferret’s own credential if the boundary ever let one through', async () => {
-    // Arrange
-    const { board, calls } = recording();
-
-    // Act
-    const answer = await handleDirectly(boardRoutes(board), 'POST', '/v1/board/import', undefined, {});
-
-    // Assert
-    should([answer.status, answer.code]).deepEqual([403, 'forbidden']);
-    should(calls).deepEqual([]);
   });
 });
 

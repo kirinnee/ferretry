@@ -275,8 +275,7 @@ What is enforced, the defaults with a worked example and the one optional owner 
 `packages/daemon` also owns the **project board**: one board per project (Unfiled for work outside any git
 repository), cards with lanes in six fixed categories, authority from ownership and lineage, staleness, the
 GitHub watcher that moves a card when its PR or release does, and the agenda and dependency links between cards.
-The contract, the CLI verbs and the declared gaps are [docs/board.md](docs/board.md); the one-time import of the
-old per-session task files is [docs/board-import.md](docs/board-import.md). Implement against those documents.
+The contract, the CLI verbs and the declared gaps are [docs/board.md](docs/board.md). Implement against that document.
 
 **Finished autonomous sessions are archived, not kept live.** A session with `mode: auto` that ended more than a day
 ago leaves the daemon's live set — the index, `GET /v1/sessions`, the sweeps, the board's roster — while its directory

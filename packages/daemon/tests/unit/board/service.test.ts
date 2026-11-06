@@ -677,23 +677,6 @@ describe('dependencies', () => {
   });
 });
 
-describe('reading a card by the old task it came from', () => {
-  it('should serve the card whose legacyRef matches, and say when none does', async () => {
-    // Arrange
-    const store = new MemoryBoardStore([card({ legacyRef: 'abc:F12' }), card({ id: 'F2', legacyRef: 'abc:F13' })]);
-    const { service } = serviceWith([], { store });
-
-    // Act
-    const found = await service.taskByLegacyRef('abc:F13');
-    const missing = await refusal(service.taskByLegacyRef('abc:F14'));
-
-    // Assert
-    should(found.task.id).equal('F2');
-    should(missing.code).equal('not-found');
-    should(missing.message).containEql('abc:F14');
-  });
-});
-
 describe('everything else on a card', () => {
   it('should focus the calling ferret without writing the card', async () => {
     // Arrange
@@ -1981,23 +1964,6 @@ describe('the reopen message and actors', () => {
 });
 
 describe("relocating a removed lane's cards", () => {
-  it('should record the reason it is given instead, for a move that is not a removal', async () => {
-    // Arrange
-    const { ports, service } = serviceWith([card({ id: 'F1', laneId: 'tested' })]);
-
-    // Act
-    await service.relocate(PROJECT, { tested: 'released' }, 'Released and To test are one lane now');
-
-    // Assert
-    should(stored(ports, 'F1').laneId).equal('released');
-    should(lastEvent(ports, 'F1')).match({
-      type: 'moved',
-      from: 'tested',
-      to: 'released',
-      reason: 'Released and To test are one lane now',
-    });
-  });
-
   it('should move each card of a removed lane on that board once, and say why', async () => {
     // Arrange
     const { ports, service } = serviceWith([
@@ -2093,7 +2059,7 @@ describe("relocating a removed lane's cards", () => {
     const { ports, service } = serviceWith([card({ id: 'F1', laneId: 'tested' })]);
 
     // Act
-    const moved = await service.relocate(PROJECT, { tested: 'released' }, undefined, { kind: 'daemon', before });
+    const moved = await service.relocate(PROJECT, { tested: 'released' }, { kind: 'daemon', before });
 
     // Assert
     should(moved).eql(['F1']);
@@ -2105,8 +2071,8 @@ describe("relocating a removed lane's cards", () => {
     const { ports, service } = serviceWith([card({ id: 'F1', laneId: 'tested' }), card({ id: 'F2', laneId: 'plan' })]);
 
     // Act
-    const moved = await service.relocate(PROJECT, { tested: 'closed' }, undefined, { kind: 'owner' });
-    await service.relocate(PROJECT, { plan: 'implement' }, undefined, { kind: 'owner', via: 'admin-token' });
+    const moved = await service.relocate(PROJECT, { tested: 'closed' }, { kind: 'owner' });
+    await service.relocate(PROJECT, { plan: 'implement' }, { kind: 'owner', via: 'admin-token' });
 
     // Assert
     should(moved).eql(['F1']);

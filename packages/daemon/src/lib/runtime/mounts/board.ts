@@ -2,8 +2,6 @@ import {
   type BoardErrorCode,
   type BoardIdsResponse,
   type BoardMergeGateResponse,
-  BoardImportRequestSchema,
-  type BoardImportSummary,
   type BoardQuery,
   type BoardQueryInput,
   BoardQuerySchema,
@@ -28,7 +26,6 @@ import { type ApiResponse, decodeParameter, headerValue, queryValue } from '../.
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { type BoardCaller, BoardError, BoardUnavailableError } from '../../board/index.ts';
-import { parseLegacyRef } from '../../board-import/index.ts';
 
 /**
  * The project boards' HTTP surface (`board-design.md` §2): the board query, one card, a new card, every
@@ -41,10 +38,6 @@ export interface BoardSubsystem {
   /** Whether a PR may merge as far as the board's queue goes (docs/design/clash-queue.md). */
   mergeGate(pr: string): Promise<BoardMergeGateResponse>;
   task(id: BoardTaskId): Promise<BoardTaskResponse>;
-  /** The card an old task became, by `<session>:<old id>`; `not-found` when none did. */
-  taskByLegacyRef(legacyRef: string): Promise<BoardTaskResponse>;
-  /** Runs the one-time import of the old task files; with `dryRun` it only says what it would do. */
-  importLegacy(options: { readonly dryRun: boolean }): Promise<BoardImportSummary>;
   create(request: BoardTaskCreateRequest, caller: BoardCaller): Promise<BoardTaskResponse>;
   act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<BoardTaskResponse>;
   skip(request: BoardSkipRequest, caller: BoardCaller): Promise<BoardSkipResponse>;
@@ -146,16 +139,6 @@ const pathTaskId = (context: RouteContext): BoardTaskId => {
   return parsed.value.id;
 };
 
-/** The old reference in the query: `?legacyRef=<session>:<F12>`, with any sigil and case a person types. */
-const legacyRefOf = (context: RouteContext): string => {
-  const raw = queryValue(context.request, 'legacyRef');
-  const parsed = raw === undefined ? undefined : parseLegacyRef(raw);
-  if (parsed === undefined) {
-    throw new ApiError(400, 'legacyRef must be <session id>:<old task id>, such as abc123:F12', 'invalid');
-  }
-  return parsed;
-};
-
 const answer = async (work: () => Promise<unknown>): Promise<ApiResponse> =>
   jsonResponse(await work().catch(reraiseBoardError));
 
@@ -228,30 +211,6 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
         const caller = boardCaller(context.actor);
         const request = await parseBody(context.request, BoardSkipRequestSchema);
         return await answer(async () => await board.skip(request, caller));
-      },
-    },
-    {
-      method: 'GET',
-      path: '/v1/board/tasks',
-      minimum: 'operator',
-      caller: 'any',
-      capability: fleet,
-      noStore: true,
-      handle: async context => await answer(async () => await board.taskByLegacyRef(legacyRefOf(context))),
-    },
-    {
-      method: 'POST',
-      path: '/v1/board/import',
-      minimum: 'operator',
-      caller: 'person',
-      capability: fleet,
-      noStore: true,
-      handle: async context => {
-        if (boardCaller(context.actor).kind !== 'owner') {
-          throw new ApiError(403, 'only the owner may import the old task files', 'forbidden');
-        }
-        const request = await parseBody(context.request, BoardImportRequestSchema);
-        return await answer(async () => await board.importLegacy({ dryRun: request.dryRun === true }));
       },
     },
     {
