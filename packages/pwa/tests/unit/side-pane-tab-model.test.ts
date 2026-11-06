@@ -82,6 +82,12 @@ describe('the default strip', () => {
 // model." They are not registered, not default-open, and not reachable by
 // asking for them — #63 owns pins, #17 owns Attention.
 describe('pins and attention are not side-pane tabs', () => {
+  it('registers neither id', () => {
+    const ids = getSidePaneTabDefinitions().map(def => def.id);
+    expect(ids).not.toContain('pins');
+    expect(ids).not.toContain('attention');
+  });
+
   it('keeps both out of the default strip', () => {
     const defaults = new Set(readSidePaneTabsState(scopeA).open);
 
@@ -96,6 +102,15 @@ describe('pins and attention are not side-pane tabs', () => {
     expect(state.open).not.toContain('pins');
     expect(state.open).not.toContain('attention');
     expect(state.active).toBeNull();
+  });
+
+  it('still opens an instance tab that is already live, which is not registered either', () => {
+    const id = openSidePaneFileTab(scopeA, 'src/api.ts');
+    openSidePaneTab(scopeA, 'skills');
+
+    openSidePaneTab(scopeA, id);
+
+    expect(readSidePaneTabsState(scopeA).active).toBe(id);
   });
 
   it('refuses any unregistered id, not just the two that left', () => {
@@ -124,6 +139,8 @@ describe('pins and attention are not side-pane tabs', () => {
 
 describe('registry', () => {
   it('exposes the built-ins by id and in strip order', () => {
+    expect(getSidePaneTabDefinitions().find(def => def.id === 'lineage')?.shortLabel).toBe('Lineage');
+    expect(getSidePaneTabDefinitions().find(def => def.id === 'nope')).toBeUndefined();
     expect(getSidePaneTabDefinitions().map(def => def.id)).toEqual([
       'skills',
       'lineage',
@@ -184,6 +201,22 @@ describe('registry', () => {
     expect(notifications).toBe(2);
   });
 
+  it('lets the last registration win and refuses a stale unregister', () => {
+    const unregisterFirst = registerSidePaneTab({
+      id: 'dupe',
+      label: 'First',
+      shortLabel: 'A',
+      closeLabel: 'Close',
+      icon: 'tasks',
+      order: 1,
+    });
+    registerSidePaneTab({ id: 'dupe', label: 'Second', shortLabel: 'B', closeLabel: 'Close', icon: 'tasks', order: 1 });
+
+    unregisterFirst();
+
+    expect(getSidePaneTabDefinitions().find(def => def.id === 'dupe')?.label).toBe('Second');
+  });
+
   it('opens a newly registered default tab for strips that have not been touched', () => {
     registerSidePaneTab({
       id: 'notes',
@@ -203,6 +236,7 @@ describe('registry', () => {
     resetSidePaneTabRegistry();
 
     expect(getSidePaneTabDefinitions()).toHaveLength(SIDE_PANE_BUILT_IN_TABS.length);
+    expect(getSidePaneTabDefinitions().find(def => def.id === 'temp')).toBeUndefined();
   });
 });
 

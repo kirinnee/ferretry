@@ -95,6 +95,18 @@ describe('MachineStepper', () => {
     await view.unmount();
   });
 
+  it('confirms leaving from step 1, and Keep going returns to the step', async () => {
+    const view = await mount(<Host initial={startStepper(flow)} />);
+    await click(view.container, '[data-stepper-back]');
+    expect(text(view.container, '[data-stepper-confirm] p')).toBe('Stop adding a runtime?');
+    expect(view.container.querySelector('[data-body]')).toBeNull();
+    expect(view.container.querySelector('[data-stepper-back]')).toBeNull();
+    expect(view.container.querySelector('[data-stepper-cancel]')).toBeNull();
+    await click(view.container, '[data-stepper-keep]');
+    expect(view.container.querySelector('[data-body]')).not.toBeNull();
+    await view.unmount();
+  });
+
   it('Cancel then Stop leaves the stepper; nothing saved means no saved list', async () => {
     const left: string[] = [];
     const view = await mount(<Host initial={startStepper(flow)} left={left} />);
@@ -104,6 +116,14 @@ describe('MachineStepper', () => {
     await click(view.container, '[data-stepper-stop]');
     expect(left).toEqual(['left']);
     expect(view.container.querySelector('[data-left]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('Back from a harmless flow leaves without asking', async () => {
+    const left: string[] = [];
+    const view = await mount(<Host initial={startStepper({ ...flow, leaveWithoutConfirm: true })} left={left} />);
+    await click(view.container, '[data-stepper-back]');
+    expect(left).toEqual(['left']);
     await view.unmount();
   });
 

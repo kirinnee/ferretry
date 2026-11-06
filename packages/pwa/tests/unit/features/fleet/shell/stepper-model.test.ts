@@ -49,6 +49,13 @@ describe('stepper model', () => {
     expect(() => startStepper({ ...addRuntime, at: 'nowhere' })).toThrow('has no step nowhere');
   });
 
+  it('moves forward and stops at the last step', () => {
+    const state = stepForward(startStepper(addRuntime));
+    expect(currentFlow(state).at).toBe('profile');
+    const last = startStepper({ ...addRuntime, at: 'done' });
+    expect(currentFlow(stepForward(last)).at).toBe('done');
+  });
+
   it('replaces the step list, keeping the current step only when it survives', () => {
     const state = stepForward(startStepper(addRuntime));
     expect(currentFlow(withSteps(state, addRuntime.steps.slice(1))).at).toBe('profile');
@@ -75,8 +82,9 @@ describe('stepper model', () => {
     expect(backStep(startStepper({ ...addRuntime, leaveWithoutConfirm: true }))).toEqual({ kind: 'left' });
   });
 
-  it('Cancel always confirms, and Stop keeps what was saved', () => {
-    // Saving while the confirmation is up leaves it up.
-    expect(stopStepper(cancelStepper(startStepper(addRuntime)))).toBeNull();
+  it('Cancel always confirms, and Stop on the only flow ends the stepper', () => {
+    const confirming = cancelStepper(startStepper(addRuntime));
+    expect(confirming.confirming).toBe(true);
+    expect(stopStepper(confirming)).toBeNull();
   });
 });

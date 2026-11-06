@@ -45,6 +45,7 @@ import {
   nextOnboardingStep,
   ONBOARDING_ROUTES,
   type OnboardingPath,
+  onboardingDoers,
   onboardingRouteSteps,
   onboardingStep,
   onboardingStepCount,
@@ -92,6 +93,9 @@ const client = (device: 'desktop' | 'mobile' = 'desktop'): OnboardingPath => ({ 
 describe('which computer runs the daemon', () => {
   it('offers two answers, this machine first, and says what each means', () => {
     expect(SETUP_TARGETS.map(target => target.id)).toEqual(['this', 'other']);
+    for (const target of SETUP_TARGETS) expect(target.answer).not.toContain('\n');
+    expect(SETUP_TARGETS.find(target => target.id === 'this')?.title).toBe('This computer');
+    expect(SETUP_TARGETS.find(target => target.id === 'other')?.title).toBe('Another computer');
   });
 
   it('accepts only the two answers back from storage or a link', () => {
@@ -126,6 +130,21 @@ describe('which computer runs the daemon', () => {
 });
 
 describe('who installs it', () => {
+  it('offers two answers, agent first, worded for the machine already chosen', () => {
+    for (const target of ['this', 'other'] as const) {
+      expect(onboardingDoers(target).map(doer => doer.id)).toEqual(['agent', 'self']);
+      for (const doer of onboardingDoers(target)) expect(doer.answer).not.toContain('\n');
+    }
+    // Concrete about the host, because pasting the prompt into an agent on the
+    // wrong machine installs Ferretry on the wrong machine.
+    const answer = (id: 'agent' | 'self', target: 'this' | 'other'): string =>
+      onboardingDoers(target).find(doer => doer.id === id)?.answer ?? '';
+    expect(answer('agent', 'this')).toContain('this computer');
+    expect(answer('agent', 'other')).toContain('that computer');
+    expect(answer('self', 'this')).toContain('terminal on this computer');
+    expect(answer('self', 'other')).toContain('Open Ferretry on that computer');
+  });
+
   it('accepts only the two answers back from storage or a link', () => {
     expect(isOnboardingDoerId('agent')).toBe(true);
     expect(isOnboardingDoerId('self')).toBe(true);
@@ -189,8 +208,16 @@ describe('the agents Ferretry runs', () => {
 describe('the entry question', () => {
   it('asks what the reader HAS, and never what this device is', () => {
     expect(ONBOARDING_ROUTES.map(route => route.id)).toEqual(['first-time', 'add-client', 'add-daemon']);
+    for (const route of ONBOARDING_ROUTES) {
+      expect(route.answer).not.toContain('\n');
+      expect(route.answer.length).toBeGreaterThan(0);
+    }
+    const route = (id: string) => ONBOARDING_ROUTES.find(candidate => candidate.id === id);
     // The answer a reader holding a live code recognises instantly.
+    expect(route('add-client')?.title).toBe('I have a link or QR');
     // And the one that no longer claims THIS machine becomes anything.
+    expect(route('add-daemon')?.title).toBe('Add another daemon');
+    expect(route('add-daemon')?.answer).not.toContain('This machine');
   });
 
   it('is the same three answers on a phone, because none of them is impossible there', () => {
