@@ -450,13 +450,19 @@ longer than a quarter of a second with the work that was running and the code it
 fy daemon logs
 ```
 
-Two settings for the daemon's environment:
+Settings for the daemon's environment:
 
 - `FYD_BACKGROUND_DELAY_SECONDS`: how long after it starts serving the daemon waits before its
   background work (analytics, usage refresh, cleaning up finished terminals). The default is `120`.
   That work then runs one job at a time.
 - `FYD_STACK_SAMPLER=0`: stop sampling where stalls happen. Sampling costs a few percent of CPU, and
   only while the daemon is busy.
+- `FYD_SESSION_ARCHIVE_AFTER_HOURS`: automatic archiving is **off by default** (unset, empty or `off`).
+  Set `24` in the daemon's service environment to enable it; Linux file:
+  `~/.config/systemd/user/fyd.service.d/archive.conf`. The owner plans to enable it on **2026-11-07
+  after a clean day**. Archive routes, revival, `fy` commands and the app footer stay available while off.
+  See [the archive setting](docs/session-archive.md#setting) for the file contents, macOS setup and restart steps.
+  Changes take effect at the next daemon start; a release update restarts it anyway.
 
 macOS refuses to open `fy` or `fyd`: the binaries are not code-signed. The Homebrew cask clears the
 quarantine flag for you; after any other install, clear it once:

@@ -1,10 +1,10 @@
 import type {
   AnalyticsResponse,
   AttachmentView,
-  CgroupConfigView,
   FyEvent,
   FyEventStreamFrame,
   HealthView,
+  LimitsView,
   PwaConfigView,
   ScratchPlanView,
   ScratchSweepView,
@@ -258,28 +258,52 @@ export const wardenConfigView = {
   warnings: [],
 } satisfies WardenConfigView;
 
+/**
+ * The limits view for the measured box: 61 GiB of RAM under a 48 GiB `MemoryHigh` on the user slice, 32 cores,
+ * nvme with scheduler `none`. `packages/protocol/src/lib/limits.ts` owns every number here (R is a fixed 4 GiB).
+ */
 export const cgroupConfigView = {
-  config: {
-    enabled: true,
-    fleet: { cpuPercent: 80, memoryPercent: 80 },
-    perAgent: { cpuPercent: 40, memoryPercent: 40 },
+  switchedOn: true,
+  enforcement: 'cgroups',
+  explicit: false,
+  platform: 'linux',
+  budget: {
+    ceilingBytes: 48 * 1073741824,
+    physicalBytes: 61 * 1073741824,
+    swapBytes: 32 * 1073741824,
+    cpus: 32,
+    pidMax: 4_194_304,
+    source: 'memory.high of user-1000.slice',
+    reserveBytes: 4 * 1073741824,
   },
-  supported: true,
-  fleetSlice: 'ferretry-fleet.slice',
-  // The values a host manager is actually given: a percentage of the WHOLE machine for CPU — 80% of
-  // eight CPUs is `640%` — and decimal bytes for memory. This fixture used to carry the unified
-  // hierarchy's raw `cpu.max` pair (`"640000 100000"`), which is a second spelling of the same fact
-  // and one no `set-property` would accept. `packages/daemon/src/lib/cgroups/limits.ts` owns the
-  // conversion; every fixture, wire value and written property comes from it.
-  effective: {
-    cpus: 8,
-    memoryBytes: 8_000_000,
-    fleet: { cpuQuota: '640%', memoryMax: '6400000' },
-    perAgent: { cpuQuota: '320%', memoryMax: '3200000' },
+  fleet: {
+    cpuWeight: 50,
+    memoryHighBytes: 44 * 1073741824,
+    memoryMaxBytes: 46 * 1073741824,
+    swapMaxBytes: Math.floor(4.8 * 1073741824),
+    tasksMax: 16_384,
+    cpuPercent: null,
   },
-  restartRequiredSessions: [],
+  perFerret: {
+    cpuWeight: 100,
+    interactiveCpuWeight: 200,
+    memoryHighBytes: 12 * 1073741824,
+    memoryMaxBytes: Math.floor(14.4 * 1073741824),
+    tasksMax: 4_096,
+    cpuPercent: null,
+  },
+  daemonCpuWeight: 100,
+  voiceCpuWeight: 200,
+  disk: { ionice: true, scheduler: 'none', effect: 'none' },
+  throttled: [],
+  killed: [],
+  overBudget: [],
+  file: 'limits.yaml',
+  lines: [
+    'ferrets: memory 44 GiB soft / 46 GiB hard of a 48 GiB user budget · CPU weight 50 (daemon 100, voice 200) · disk priority: no effect on this disk (scheduler none)',
+  ],
   warnings: [],
-} satisfies CgroupConfigView;
+} satisfies LimitsView;
 
 export const pwaConfigView = {
   config: { version: 1, name: 'F controls', icon: 'F' },

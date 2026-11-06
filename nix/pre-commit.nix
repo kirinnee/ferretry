@@ -141,6 +141,20 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # A pull request runs the PWA browser gate (`pwa-screenshot`) only when something it reads changes. The
+    # list lives in scripts/ci/pwa-relevance.sh; this traces the harness bundle's imports and holds the list,
+    # the workflow gate and the fail-open rules to them. It runs when any file it reads can change: the
+    # harness bundle's sources, every file of the workspace packages it traces (section 6 reads their
+    # imports), any package manifest, and any workflow (it looks for jobs that need the gate).
+    a-pwa-relevance = {
+      enable = true;
+      name = "PWA browser gate relevance";
+      entry = validator "scripts/validate/pwa-relevance.sh";
+      files = "^(scripts/(ci/(pwa-relevance|pwa-screenshot-proof)|validate/pwa-relevance)\\.sh|\\.github/workflows/[^/]+\\.ya?ml|packages/(pwa/(src|harness)/.*\\.tsx?|(protocol|relay|fleet)/.*\\.tsx?|[^/]+/package\\.json))$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # A test's tier is where it lives, and the blocking tiers' promise is a deterministic outcome: an
     # integration test that asserts a wall-clock or memory bound belongs in the realworld tier, which
     # files an issue instead of failing a merge. This also holds config/test-groups.json to the files
@@ -160,7 +174,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Test tiers";
       entry = validator "scripts/validate/test-tiers.sh";
-      files = "^(packages/[^/]+/tests/.*\\.test\\.tsx?|config/test-groups\\.json|scripts/validate/test-tiers\\.sh)$";
+      files = "^(packages/[^/]+/tests/.*\\.test\\.tsx?|config/test-groups\\.json|nix/fmt\\.nix|scripts/(validate/test-tiers\\.sh|test/ci-sets\\.ts|ci/((quick|quick-part|parallel|integration|full-status|e2e-summary|pre-commit|gate-hook|full-gates)\\.sh|(unit-timings|gate-hooks)\\.ts))|\\.github/workflows/(ci|realworld|e2e-slow)\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };
@@ -185,7 +199,7 @@ pre-commit-lib.run {
       entry = validator "scripts/validate/relay-config.sh";
       # Both ends import the same source default, and the release compiler is deliberately included
       # so a per-build define cannot return while Nix remains direct-only.
-      files = "^(packages/relay/(wrangler\\.(hosted\\.json|jsonc)|src/(adapters/(worker|hosted-control)\\.ts|lib/(hosted-directory-default|index)\\.ts))|packages/protocol/package\\.json|packages/daemon/src/(lib/relay/discovery|adapters/system/runtime-environment)\\.ts|packages/pwa/(src/features/onboarding/hosted-relay|vite\\.config)\\.ts|scripts/(ci/relay-directory-origin|release/compile|validate/relay-config)\\.sh|\\.github/workflows/(relay-hosted|cd|pwa-pages)\\.yaml)$";
+      files = "^(packages/relay/(wrangler\\.(hosted\\.json|jsonc)|src/(adapters/(worker|hosted-control)\\.ts|lib/(hosted-directory-default|index)\\.ts))|packages/protocol/package\\.json|packages/daemon/src/(lib/relay/discovery|adapters/system/runtime-environment)\\.ts|packages/pwa/(src/features/onboarding/hosted-relay|vite\\.config)\\.ts|scripts/(ci/(relay-directory-origin|build-checks|quick|quick-part|setup)|local/setup|release/compile|validate/relay-config)\\.sh|\\.github/workflows/(ci|relay-hosted|cd|pwa-pages)\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };
@@ -377,6 +391,19 @@ pre-commit-lib.run {
       enable = true;
       name = "TypeScript typecheck";
       entry = bun-script "scripts/validate/typecheck.sh";
+      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|\\.(ts|tsx|mts|cts)$)";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    # `task test:e2e` typechecks `tests/e2e` AND `scripts/test/**` before any journey runs, and the root
+    # project above covers neither, so a type error in a script like `ci-sets.ts` stayed green here and
+    # then failed every E2E shard in 20 s (advisory, so the PR still merged green). Same command as
+    # `scripts/test/run-e2e.sh`, so Quick fails first. Read-only.
+    a-e2e-harness-typecheck = {
+      enable = true;
+      name = "E2E harness typecheck";
+      entry = bun-tool "tsc --noEmit --project tests/e2e/tsconfig.json";
       files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|\\.(ts|tsx|mts|cts)$)";
       pass_filenames = false;
       language = "system";

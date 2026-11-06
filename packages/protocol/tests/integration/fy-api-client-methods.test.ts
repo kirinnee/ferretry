@@ -187,15 +187,6 @@ const CASES: readonly MethodCase[] = [
     expected: cgroupConfigView,
   },
   {
-    name: 'updateCgroupConfig',
-    invoke: client => client.updateCgroupConfig({ enabled: true, fleet: { cpuPercent: 50 } }),
-    verb: 'PATCH',
-    path: '/v1/cgroups/config',
-    body: { enabled: true, fleet: { cpuPercent: 50 } },
-    response: () => jsonResponse(cgroupConfigView),
-    expected: cgroupConfigView,
-  },
-  {
     name: 'daemonUpdate',
     invoke: client => client.daemonUpdate(),
     verb: 'GET',
@@ -401,6 +392,22 @@ const CASES: readonly MethodCase[] = [
     path: '/v1/sessions',
     response: () => jsonResponse([sessionView]),
     expected: [sessionView],
+  },
+  {
+    name: 'archivedSessions with the default limit',
+    invoke: client => client.archivedSessions(),
+    verb: 'GET',
+    path: '/v1/archived-sessions?limit=100',
+    response: () => jsonResponse({ count: 1, sessions: [sessionView] }),
+    expected: { count: 1, sessions: [sessionView] },
+  },
+  {
+    name: 'archivedSessions asked only for its count',
+    invoke: client => client.archivedSessions(0),
+    verb: 'GET',
+    path: '/v1/archived-sessions?limit=0',
+    response: () => jsonResponse({ count: 4, sessions: [] }),
+    expected: { count: 4, sessions: [] },
   },
   {
     name: 'suggestNames with the default count',

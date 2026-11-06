@@ -100,6 +100,7 @@ describe('foundation paths', () => {
       // not make that journey. The grants it gates DO live in the configuration document, where
       // `--print-config` can report them with their provenance.
       retiredOperatorPassword: '/tmp/fy-home/state/operator-password.json',
+      archivedSessions: '/tmp/fy-home/state/archived-sessions.json',
       // Keyed by daemon by construction: a state home has exactly one owner, so one daemon's record
       // of who changed which grant can never be read as another's.
       grantAudit: '/tmp/fy-home/state/grant-audit.jsonl',

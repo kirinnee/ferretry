@@ -22,13 +22,17 @@ import {
   type ConfigComponentKind,
   type ConfigSchemaId,
   DEFAULT_LEARNING_CONFIG,
+  DEFAULT_LIMITS_CONFIG,
   DEFAULT_MODELS_GUIDE_FILE,
   DEFAULT_PACK_CONFIG,
   DEFAULT_VOICE_CONFIG,
   DEFAULT_WARDEN_CONFIG,
   type LearningConfig,
   LearningFileSchema,
+  type LimitsConfig,
+  LimitsFileSchema,
   learningConfigFromFile,
+  limitsLoosening,
   type ModelsGuideFile,
   ModelsGuideFileSchema,
   type PackConfig,
@@ -114,6 +118,7 @@ export const CONFIG_FILE_SCHEMAS: Readonly<Record<ConfigSchemaId, z.ZodType>> = 
   learning: LearningFileSchema,
   voice: VoiceConfigSchema,
   pack: PackFileSchema,
+  limits: LimitsFileSchema,
   modelsGuide: ModelsGuideFileSchema,
   accountDefaults: AccountDefaultsFileSchema,
   preset: ProviderPresetFileSchema,
@@ -135,6 +140,7 @@ export interface ConfigValues {
   readonly learning: LearningConfig;
   readonly voice: VoiceConfig;
   readonly pack: PackConfig;
+  readonly limits: LimitsConfig;
   readonly modelsGuide: ModelsGuideFile;
   readonly accountDefaults: AccountDefaultsFile;
   readonly preset: ProviderPresetFile;
@@ -196,6 +202,7 @@ export const SINGLETON_DEFAULTS = {
   learning: DEFAULT_LEARNING_CONFIG,
   voice: DEFAULT_VOICE_CONFIG,
   pack: DEFAULT_PACK_CONFIG,
+  limits: DEFAULT_LIMITS_CONFIG,
   modelsGuide: DEFAULT_MODELS_GUIDE_FILE,
   accountDefaults: {} as AccountDefaultsFile,
 } as const;
@@ -517,6 +524,7 @@ export function configLoosening<K extends SingletonKind>(
   kind: K,
   before: (typeof SINGLETON_DEFAULTS)[K],
   after: (typeof SINGLETON_DEFAULTS)[K],
+  context: { readonly memoryCeilingBytes?: number } = {},
 ): readonly string[] {
   switch (kind) {
     case 'machine':
@@ -527,6 +535,8 @@ export function configLoosening<K extends SingletonKind>(
       return learningLoosening(before as LearningConfig, after as LearningConfig);
     case 'pack':
       return packLoosening(before as PackConfig, after as PackConfig);
+    case 'limits':
+      return limitsLoosening(before as LimitsConfig, after as LimitsConfig, context.memoryCeilingBytes);
     // The guide only says which model suits which work: it widens nothing a ferret may do or spend.
     case 'modelsGuide':
       return [];
@@ -565,6 +575,8 @@ export const CONFIG_FILE_STARTERS: Readonly<Record<ConfigSchemaId, string>> = {
     '# The Warden. Its rules flag trouble for free; the Jev and LLM layers each spend, under their own daily cap.\nenabled: true\nlayers:\n  jev: false\n  llm: false\n',
   learning: '# Lessons. Every setting is optional.\nenabled: true\n',
   pack: '# Pack mode: ferrets delegate to sub-ferrets (docs/pack-mode.md). Every setting is optional.\nenabled: true\ndecision: agent\n',
+  limits:
+    '# How much of the machine ferrets may take (docs/ferret-limits.md). Every setting is optional: what you leave out is computed from this machine.\nenabled: true\n',
   modelsGuide:
     '# The routing prompt (docs/pack-mode.md): which model runs which kind of sub-task, in plain words.\n# Leave prompt out to use the one built from the model catalogs.\nprompt: |\n  Planning and review: claude-opus-5-5 at max. Everyday coding: claude-sonnet-5-5.\n  Chores and bulk edits: claude-haiku-5-5 at low. Prefer a login with quota left.\n',
   accountDefaults:

@@ -30,8 +30,7 @@
  *
  * THREE DELIBERATE DEPARTURES FROM THE ORIGINAL:
  *
- *   1. State is keyed by `(daemonId, sessionId)`, never by session id alone
- *      (`docs/migration/surveys/pwa-shape.md` item 52). Two daemons routinely
+ *   1. State is keyed by `(daemonId, sessionId)`, never by session id alone. Two daemons routinely
  *      hand out the same session id, and a strip that survived a daemon switch
  *      would show one daemon's open files under another's session.
  *   2. `SidePaneTabsState.browser`, the wave-1 singleton browser payload, is

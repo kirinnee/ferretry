@@ -26,7 +26,7 @@ export interface InfoOverviewProps {
   /** The ferret's focus card and how to open it. Absent: the host has no board, so there is no Card row. */
   readonly card?: InfoAboutProps['card'];
   /** The "About this ferret" block's other parts: capabilities, Restart and the agenda. */
-  readonly about?: Pick<InfoAboutProps, 'switches' | 'onRestart' | 'agenda'>;
+  readonly about?: Pick<InfoAboutProps, 'switches' | 'onRestart' | 'agenda' | 'memory'>;
   /** What the Warden said about this ferret (`info-warden.tsx`), under the agenda. */
   readonly warden?: ReactNode;
 }

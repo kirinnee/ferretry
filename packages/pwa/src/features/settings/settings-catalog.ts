@@ -811,9 +811,9 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
      * being eaten by an agent.
      */
     id: 'resource-limits',
-    label: 'Resource limits',
+    label: 'Ferret limits',
     description:
-      'CPU and RAM caps for the agents this daemon runs, fleet-wide and per agent, and whether they are enforced. On this machine — opens its Machine tab.',
+      'How much of the machine the ferrets may take, memory first, and whether that is working. On this machine — opens its Machine tab.',
     href: daemon => `${daemonSettingsPath(daemon)}#resource-limits`,
     keywords: [
       'cpu',
@@ -822,6 +822,9 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
       'resource',
       'resources',
       'limit',
+      'limits.yaml',
+      'killed',
+      'oom',
       'limits',
       'cap',
       'caps',
@@ -895,6 +898,9 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
       'jev',
       'depth',
       'limit',
+      'limits.yaml',
+      'killed',
+      'oom',
       'pack.yaml',
       'models-guide.yaml',
     ],

@@ -188,9 +188,20 @@ export const REQUEST_TIMEOUT_MS = 60_000;
 export const SHUTDOWN_TIMEOUT_MS = 2_000;
 
 /** Only the variables a browser needs; nothing else about this host leaks into the child. */
-const FORWARDED_ENVIRONMENT = ['PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL'] as const;
+const FORWARDED_ENVIRONMENT = [
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'LANG',
+  'LC_ALL',
+  'XDG_RUNTIME_DIR',
+  'DBUS_SESSION_BUS_ADDRESS',
+] as const;
 
 export interface WorkerClientOptions {
+  /** Puts this child in the shared browser allowance before exec, retaining its stdio and PID. */
+  readonly wrapCommand?: (command: readonly string[]) => Promise<readonly string[]>;
   /** Runtime that executes the worker entry, e.g. a Node binary. */
   readonly runtime: string;
   /** Absolute path to the worker script. */
@@ -333,22 +344,20 @@ export class BrowserWorkerClient implements BrowserAutomation {
 
   /** Spawns the worker and waits for its ready record, killing it if that never arrives. */
   static async connect(options: WorkerClientOptions): Promise<BrowserWorkerClient> {
-    const child = Bun.spawn(
-      [
-        ...(options.workerExecutable ? [options.workerEntry] : [options.runtime, options.workerEntry]),
-        options.endpoint,
-        ...(options.stageDirectory === undefined ? [] : [options.stageDirectory]),
-      ],
-      {
-        cwd: options.cwd ?? dirname(options.workerEntry),
-        env: workerEnvironment(options.environment ?? {}),
-        // Fds 3 and 4 are Chrome's DevTools pipe when there is one; nothing else is ever passed past stderr.
-        stdio:
-          options.cdpPipe === undefined
-            ? ['pipe', 'pipe', 'ignore']
-            : ['pipe', 'pipe', 'ignore', options.cdpPipe.toChrome, options.cdpPipe.fromChrome],
-      },
-    );
+    const command = [
+      ...(options.workerExecutable ? [options.workerEntry] : [options.runtime, options.workerEntry]),
+      options.endpoint,
+      ...(options.stageDirectory === undefined ? [] : [options.stageDirectory]),
+    ];
+    const child = Bun.spawn([...((await options.wrapCommand?.(command)) ?? command)], {
+      cwd: options.cwd ?? dirname(options.workerEntry),
+      env: workerEnvironment(options.environment ?? {}),
+      // Fds 3 and 4 are Chrome's DevTools pipe when there is one; nothing else is ever passed past stderr.
+      stdio:
+        options.cdpPipe === undefined
+          ? ['pipe', 'pipe', 'ignore']
+          : ['pipe', 'pipe', 'ignore', options.cdpPipe.toChrome, options.cdpPipe.fromChrome],
+    });
     const client = new BrowserWorkerClient(child, options);
     try {
       await withTimeout(

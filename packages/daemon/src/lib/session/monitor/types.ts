@@ -19,9 +19,8 @@ import type { DeclaredWait } from '../signal/types.ts';
  *
  * WHAT IT IS NOT, yet. kteam's `monitorLoop` is 687 lines: pane snapshots, transcript tailing, the
  * stall reflex, the turn ceiling, quota polling and the stale-marker refusal all ride the same tick.
- * This slice carries ONE of those responsibilities — `serviceWaiting` — and the rest are still GAP
- * rows in `docs/migration/surveys/session-manager-map.md` §F. The loop is deliberately shaped to take
- * them: a tick is a plan over a roster, and another responsibility is another planner.
+ * This slice carries ONE of those responsibilities — `serviceWaiting` — and the rest are still GAPs.
+ * The loop is deliberately shaped to take them: a tick is a plan over a roster, and another responsibility is another planner.
  */
 
 /** One parked session, as a tick reads it. Sessions that are not parked never reach the planner. */

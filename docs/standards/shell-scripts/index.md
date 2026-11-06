@@ -31,7 +31,7 @@ set -euo pipefail
 ### Linear and procedural
 
 - Avoid functions — keep scripts top-to-bottom readable.
-- Execute commands sequentially; separate phases with comments.
+- Execute commands sequentially; separate phases with comments. The consolidated Quick and Integration CI jobs deliberately run existing parts in parallel on larger machines (owner direction 2026-11-06, pending Go); `scripts/ci/parallel.sh` owns their bounded concurrency, logs and exit statuses.
 - Define a function only when it removes genuine repetition that no other construct can, or when
   the shell itself needs a name to call. Three shapes qualify, and `scripts/` has about two dozen
   functions across them (`rg -n '^\s*[a-z_]+\(\) \{' scripts`):
@@ -158,16 +158,18 @@ scripts/
 └── validate/  # repository policy checks, called from pre-commit
 ```
 
-| Caller            | May call                                                                                            |
-| ----------------- | --------------------------------------------------------------------------------------------------- |
-| GitHub workflows  | `scripts/ci/*`, `scripts/release/*`                                                                 |
-| Taskfiles         | `scripts/local/*`, `scripts/release/*`, `scripts/test/*`, `scripts/ci/test.sh` (`test:gate:*` only) |
-| pre-commit hooks  | `scripts/validate/*`                                                                                |
-| `.releaserc.yaml` | `scripts/release/*`                                                                                 |
+| Caller            | May call                                                                                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub workflows  | `scripts/ci/*`, `scripts/release/*`                                                                                                     |
+| Taskfiles         | `scripts/local/*`, `scripts/release/*`, `scripts/test/*`, `scripts/ci/test.sh` (`test:gate:*`), `scripts/ci/quick.sh` (`ci:quick` only) |
+| pre-commit hooks  | `scripts/validate/*`                                                                                                                    |
+| `.releaserc.yaml` | `scripts/release/*`                                                                                                                     |
 
 Taskfiles do not call `scripts/ci/*` in general — those scripts own their own setup and exist for
 the pipeline. Each `scripts/ci/*` script begins by running `scripts/ci/setup.sh` so a workflow job
 is a single line.
+
+The local `task ci:quick` is another deliberate exception: it calls the same Quick orchestrator with at most two parts at once.
 
 One exception is deliberate: `task test:gate:unit` and `task test:gate:int` run
 `scripts/ci/test.sh unit|int`. Their whole job is to be **the exact gate CI enforces**, coverage

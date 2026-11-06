@@ -1,8 +1,6 @@
 import type { z } from 'zod';
 import type { AnalyticsResponse } from './analytics.ts';
 import type { ProjectList, SessionSkills } from './catalog.ts';
-import type { ConfigChangeFrame } from './config-changes.ts';
-import type { DaemonRestartPatience } from './daemon-restart.ts';
 import type {
   CatalogInstalled,
   CatalogInstallList,
@@ -12,6 +10,13 @@ import type {
   CatalogInstallRequest,
   CatalogInstallScope,
 } from './catalog-install.ts';
+import type { ConfigChangeFrame } from './config-changes.ts';
+import type { DaemonRestartPatience } from './daemon-restart.ts';
+import type { DaemonUpdateSettingsPatch, DaemonUpdateStartRequest, DaemonUpdateView } from './daemon-update.ts';
+import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
+import type { SessionHandoverReceipt, SessionHandoverRequestInput } from './handover.ts';
+import type { HarnessUpdateStartRequest, HarnessUpdateView } from './harness-update.ts';
+import type { LimitsView } from './limits.ts';
 import type {
   LocalSkillInstalled,
   LocalSkillInstallList,
@@ -20,15 +25,8 @@ import type {
   LocalSkillPreviewRequest,
   LocalSkillRemoved,
 } from './local-skill-install.ts';
-import type { DaemonUpdateSettingsPatch, DaemonUpdateStartRequest, DaemonUpdateView } from './daemon-update.ts';
-import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
-import type { RestartCancelResult, RestartRequest, RestartResult, RestartStatus } from './session-restart.ts';
-import type { SessionHandoverReceipt, SessionHandoverRequestInput } from './handover.ts';
-import type { HarnessUpdateStartRequest, HarnessUpdateView } from './harness-update.ts';
 import type {
   AttachmentView,
-  CgroupConfigPatch,
-  CgroupConfigView,
   HealthView,
   PwaConfigPatch,
   PwaConfigView,
@@ -37,6 +35,7 @@ import type {
   UsageFeedView,
 } from './service.ts';
 import type {
+  ArchivedSessions,
   AskToStopJobsResult,
   ComposerDraftRequest,
   ComposerDraftResult,
@@ -58,6 +57,7 @@ import type {
 } from './session.ts';
 import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
 import type { SessionLiveActivity, SessionTranscriptMoved } from './session-live.ts';
+import type { RestartCancelResult, RestartRequest, RestartResult, RestartStatus } from './session-restart.ts';
 import type {
   LogPageOptions,
   LogSearchOptions,
@@ -66,8 +66,8 @@ import type {
   SessionLogSearch,
   SessionTranscriptPage,
 } from './session-transcript.ts';
-import type { TranscriptImageDownload } from './transcript-images.ts';
 import type { MachineSkillsInventory, SessionSkillsInventory, SkillFile } from './skills-inventory.ts';
+import type { TranscriptImageDownload } from './transcript-images.ts';
 import type { SessionHandoff } from './turn-handoff.ts';
 import type { VersionSkew } from './version-skew.ts';
 import type {
@@ -133,8 +133,8 @@ export interface IFyApiClient {
   wardenInvestigate(request: WardenInvestigateRequest): Promise<WardenInvestigateView>;
   /** Leave a flagged or cleared ferret alone for longer than the Warden would: an hour, four, or until it changes. */
   wardenLeave(request: WardenLeaveRequest): Promise<WardenLeaveView>;
-  cgroupConfig(): Promise<CgroupConfigView>;
-  updateCgroupConfig(patch: CgroupConfigPatch): Promise<CgroupConfigView>;
+  /** What ferret limits are in force on this machine and whether they are working (read-only). */
+  cgroupConfig(): Promise<LimitsView>;
   /** How this machine's daemon was installed, the latest release, and what updating takes. */
   /** Verify a signed catalog item and answer its review. Writes nothing. */
   previewCatalogInstall(
@@ -177,6 +177,8 @@ export interface IFyApiClient {
   scratchPlan(limit?: number): Promise<ScratchPlanView[]>;
   scratchSweep(force?: boolean): Promise<ScratchSweepView>;
   list(): Promise<readonly SessionView[]>;
+  /** The older finished autonomous sessions taken out of the live list; `limit` 0 asks only how many (docs/session-archive.md). */
+  archivedSessions(limit?: number): Promise<ArchivedSessions>;
   suggestNames(count?: number): Promise<string[]>;
   get(id: string, signal?: AbortSignal): Promise<SessionView>;
   start(input: StartSessionRequestInput, requestId?: string): Promise<SessionView>;

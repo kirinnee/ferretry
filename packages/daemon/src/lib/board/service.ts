@@ -19,6 +19,7 @@ import {
   type BoardEditableField,
   BoardEditableFieldSchema,
   type BoardIdsResponse,
+  type BoardMergeGateResponse,
   type BoardProjectId,
   type BoardQuery,
   type BoardReopenAttachments,
@@ -67,7 +68,9 @@ import {
   triggerMove,
   withEvent,
 } from './card-actions.ts';
+import { queueBehindClashes } from './clash-queue.ts';
 import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
+import { mergeGateOf } from './merge-gate.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
 import { gateEntry } from './gate-policy.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
@@ -272,11 +275,12 @@ const isHolderFieldEdit = (request: BoardTaskActionRequest): boolean =>
 
 /**
  * What a sub-ferret may do on a card it HOLDS (its assignee, else its owner) and no other: move it, change its focus to
- * it, link a commit or doc to it, set its status and How to test (an edit that names ONLY those: any other field is refused whole). Judged in {@link BoardService.decide}, where the card is in hand; claiming a card its
+ * it, claim or release the files it will touch (docs/design/clash-queue.md), link a commit or doc to it, set its status and How to test (an edit that names ONLY those: any other field is refused whole). Judged in {@link BoardService.decide}, where the card is in hand; claiming a card its
  * lead holds is what makes it the holder, so these are also the only refusals that point at `claim`.
  */
 const holderOnly = (request: BoardTaskActionRequest): boolean =>
   request.action === 'move' ||
+  request.action === 'file' ||
   request.action === 'focus' ||
   isHolderFieldEdit(request) ||
   (request.action === 'link' && request.pr === undefined && request.branch === undefined);
@@ -519,6 +523,20 @@ export class BoardService {
   async ids(): Promise<BoardIdsResponse> {
     const { cards } = await this.ports.store.read();
     return { ids: cards.map(card => card.id) };
+  }
+
+  /**
+   * Whether a PR may merge as far as the queue goes (`mergeGateOf`, docs/design/clash-queue.md), from one read of
+   * the board: the cards it could not read are named, since any of them might link the PR.
+   */
+  async mergeGate(pr: string): Promise<BoardMergeGateResponse> {
+    const snapshot = await this.ports.store.read();
+    const laneSets = await this.laneSetsOf(snapshot.cards.map(card => card.projectId));
+    const index = new BoardIndex(snapshot.cards, this.requireMachine());
+    const unreadable = snapshot.quarantined.map(card => card.id);
+    const answer = mergeGateOf(pr, { index, laneSets, unreadable });
+    if (answer === null) throw new BoardError('invalid', `not a GitHub pull request URL: ${pr}`);
+    return answer;
   }
 
   /** One card, in full, with its board's lanes. */
@@ -791,7 +809,7 @@ export class BoardService {
         return { task: outcome.task === null ? null : requireValidCard(outcome.task), result: { card, outcome } };
       });
     const { card, outcome } =
-      request.action === 'depend'
+      request.action === 'depend' || (request.action === 'file' && request.release !== true)
         ? await this.ports.serial.run(DEPENDENCY_SECTION, write)
         : request.action === 'adopt'
           ? await this.holdingAdopters(id, caller, write)
@@ -1011,12 +1029,28 @@ export class BoardService {
       visibilitySource,
       ...(facts.approval === undefined ? {} : { approval: facts.approval }),
     });
-    await this.ports.store.write(id, async current => {
-      if (current !== undefined)
-        throw new BoardUnavailableError(`the counter issued ${id}, which a card already holds`);
-      return { task: card, result: undefined };
+    const store = async (ready: BoardTask): Promise<BoardTask> => {
+      await this.ports.store.write(id, async current => {
+        if (current !== undefined)
+          throw new BoardUnavailableError(`the counter issued ${id}, which a card already holds`);
+        return { task: ready, result: undefined };
+      });
+      return ready;
+    };
+    if (card.files.length === 0) return await store(card);
+    // A card born with claims is queued behind the open cards whose claims clash (docs/design/clash-queue.md). The
+    // board is read again inside the dependency section, so a claim landing meanwhile is seen.
+    return await this.ports.serial.run(DEPENDENCY_SECTION, async () => {
+      const index = new BoardIndex((await this.ports.store.read()).cards, facts.machineId);
+      const laneSets: LaneSets = new Map([[facts.projectId, facts.laneSet]]);
+      const queued = queueBehindClashes(card, card.files, {
+        index,
+        laneSets,
+        now: card.createdAt,
+        actor: actorOf(facts.caller),
+      });
+      return await store(requireValidCard(queued));
     });
-    return card;
   }
 
   /**

@@ -45,7 +45,6 @@ import type { TranscriptHistoryControl } from './components/transcript-history-r
 import { AgendaInboxComposer } from './features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
-import { useCompactAtSessionActions } from './features/session-actions/compact-at-session-actions.tsx';
 import type { ToTestHost } from './features/agenda/to-test-rows.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { BoardOriginProvider, useBoardOrigin } from './features/board/board-origin.tsx';
@@ -101,16 +100,17 @@ import { queueContribution } from './features/queue-view/queue-action.ts';
 import { restartFerrets } from './features/restart-outdated/restart-outdated-api.ts';
 import { RestartOverlayProvider } from './features/restart-outdated/restart-overlay.tsx';
 import { ActionToast } from './features/session-actions/action-toast.tsx';
+import { useCompactAtSessionActions } from './features/session-actions/compact-at-session-actions.tsx';
 import { sessionRowMenuRenderer } from './features/session-actions/row-actions-host.tsx';
 import { switchTapper } from './features/session-info/switch-marks.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { aboutSettingsTab } from './features/settings/about-machine.tsx';
 import { agentClisSettingsTab } from './features/settings/agent-clis.tsx';
-import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
 import { ConnectionPreferenceSettings } from './features/settings/connection-preference-settings.tsx';
 import { daemonDisplayName, distinctDaemonName } from './features/settings/daemon-settings.tsx';
 import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
+import { LimitsSurface } from './features/settings/limits-settings.tsx';
 import { useMachineUpdates } from './features/settings/machine-updates.ts';
 import { NotificationFilterSettingsView } from './features/settings/notification-filter-settings.tsx';
 import { MachineNotificationList, NotificationsOffBanner } from './features/settings/notification-machines.tsx';
@@ -148,6 +148,7 @@ import { useAgendaDeepLink } from './hooks/use-agenda-deep-link.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
+import { useArchivedSessions } from './hooks/use-archived-sessions.ts';
 import { type BoardMachine, useBoard, useBoardActions } from './hooks/use-board.ts';
 import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
 import { useChatTasksUrl } from './hooks/use-chat-tasks-url.ts';
@@ -1100,6 +1101,9 @@ function ShellSessionsBar({
   const learnersOn = useMemo(() => allMachines?.connections ?? [connection], [allMachines, connection]);
   const daemonFetch = useDaemonFetch();
   const machineLearners = useMachinesPassiveLearning(learnersOn, daemonFetch);
+  // The quiet footer under the list: how many finished sessions this machine archived out of it
+  // (docs/session-archive.md), and the rows the reader's "Show" asks for.
+  const archived = useArchivedSessions(connection, clientFor);
   // The machine menu's update dot: each paired machine asked once, through the app's client pool.
   const updates = useMachineUpdates({
     connections,
@@ -1170,6 +1174,7 @@ function ShellSessionsBar({
       learningPassive={machineLearners.get(connection.daemonId) ?? NO_LEARNERS}
       {...(allMachines === undefined ? {} : { machineLearners })}
       projects={projects}
+      archived={archived}
       sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
       {...(allMachines === undefined ? {} : { machineSources: allMachines.sources, now })}
       {...(search === undefined ? {} : { search })}
@@ -2038,12 +2043,12 @@ function SettingsRoute({ connection }: DaemonPageProps) {
     () => [
       {
         id: 'resource-limits',
-        label: 'Resource limits',
-        description: 'Linux CPU and RAM caps for this daemon’s managed fleet.',
+        label: 'Ferret limits',
+        description: 'How much of this machine the ferrets may take, and whether that is working.',
         // Referenced directly rather than wrapped: this surface takes only `connection`, so a
         // pass-through arrow would add a component factory nothing renders — an uncovered line that
         // exists solely to rename its own argument. Doctor below genuinely needs one; it also passes `read`.
-        Surface: CgroupConfigSurface,
+        Surface: LimitsSurface,
       },
       {
         id: 'doctor',

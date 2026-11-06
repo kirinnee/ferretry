@@ -40,8 +40,8 @@ import {
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { MachineLearners } from '../features/learning/passive-learning.tsx';
 import {
-  RestartOutdatedResult,
   type RestartOutdated,
+  RestartOutdatedResult,
   useRestartOutdated,
 } from '../features/restart-outdated/restart-outdated-strip.tsx';
 import { pairPhoneLabel } from '../features/settings/pair-phone.tsx';
@@ -55,9 +55,9 @@ import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { FleetProject } from '../lib/fleet-grouping.ts';
 import {
   daemonAnalyticsPath,
+  daemonHomePath,
   daemonNewSessionPath,
   daemonProjectsPath,
-  daemonHomePath,
   daemonSettingsPath,
   daemonSharingPath,
 } from '../lib/pages/routes.ts';
@@ -68,15 +68,16 @@ import { NewSessionMenu, withReach } from './new-session-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
 import { type OpenRowMenu, SessionMenuContext, type SessionMenuState } from './session-menu-context.ts';
+import { SessionPinContext, type TogglePin } from './session-pin-context.ts';
 import { SessionsBarAgenda } from './sessions-bar-agenda.tsx';
-import { SessionsBarOptions } from './sessions-bar-options.tsx';
+import { type SessionsBarArchived, SessionsBarArchivedFooter } from './sessions-bar-archived.tsx';
 import { SessionsRailDot } from './sessions-bar-dot.tsx';
 import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filters.tsx';
 import { SessionsBarMachines, SessionsRailMachineDots } from './sessions-bar-machines.tsx';
 import { DEFAULT_LIST_FILTER, type SessionsListFilter, sessionsBarView, sidebarCompact } from './sessions-bar-model.ts';
 import { SessionsBarNeedsYou } from './sessions-bar-needs-you.tsx';
+import { SessionsBarOptions } from './sessions-bar-options.tsx';
 import { SessionsBarPinned } from './sessions-bar-pinned.tsx';
-import { SessionPinContext, type TogglePin } from './session-pin-context.ts';
 import { sessionTree } from './sessions-bar-tree.ts';
 import { SessionsBarTree } from './sessions-bar-tree.tsx';
 
@@ -181,6 +182,12 @@ export interface SessionsBarProps {
    * then lists them all (Needs you first, then machine by machine) instead of `sessions` alone.
    */
   readonly machineSources?: readonly MachineSource[];
+  /**
+   * This machine's archived finished sessions (`docs/session-archive.md`): the quiet footer under the
+   * list, with the Show that lists them again. Absent — or an all-machines list — draws no footer:
+   * the archive is a fact of ONE machine, and this prop is this machine's.
+   */
+  readonly archived?: SessionsBarArchived;
   /** The clock a machine's "last seen" is measured against. */
   readonly now?: number;
   /**
@@ -493,6 +500,14 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
             ))}
           </>
         )}
+        {machineView === null && props.archived !== undefined ? (
+          <SessionsBarArchivedFooter
+            archived={props.archived}
+            daemonId={daemonId}
+            isActive={row => row.config.id === activeSessionId}
+            onNavigate={navigate}
+          />
+        ) : null}
       </div>
       <nav aria-label="App" className="fy-sbar__foot">
         {SESSIONS_BAR_PLACES.map(place => (

@@ -531,7 +531,8 @@ export class ConfigFilesService {
     }
     const before =
       kind === 'machine' ? { machine: effective.model.machine, advanced: effective.model.advanced } : effective[kind];
-    return configLoosening(kind, before as never, checked.value as never);
+    // The SAME context evaluation uses: without the measured budget the comparison is symbolic and stricter.
+    return configLoosening(kind, before as never, checked.value as never, this.deps.checkContext);
   }
 
   /** What putting `text` into effect for login `id` would loosen in its budget, against what is in effect now. */

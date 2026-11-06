@@ -36,7 +36,18 @@ command -v tmux >/dev/null 2>&1 || {
 }
 
 ./scripts/ci/setup.sh
-./scripts/release/compile.sh
+
+# Compile only the binary these journeys run: this host's. `scripts/test/run-e2e.sh` resolves the
+# compiled CLI from `uname` (and every journey names the daemon by `process.arch`), so the other eight
+# release binaries were ~15s of dead work in every shard. The names are the release's own artifact
+# suffixes (scripts/release/compile.sh). A host it does not know compiles every target, as the release does.
+case "$(uname -s)-$(uname -m)" in
+Linux-x86_64 | Linux-amd64) host_target="linux-x64-baseline" ;;
+Linux-aarch64 | Linux-arm64) host_target="linux-arm64" ;;
+Darwin-arm64) host_target="darwin-arm64" ;;
+*) host_target="" ;;
+esac
+COMPILE_TARGETS="${host_target}" ./scripts/release/compile.sh
 
 evidence="${FY_E2E_EVIDENCE_DIR:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/e2e-evidence}"
 rm -rf "${evidence}"

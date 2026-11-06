@@ -20,17 +20,17 @@ from the diene `bun-cli` conventions.
 
 ## Layout
 
-| Path                | What                                                                           |
-| ------------------- | ------------------------------------------------------------------------------ |
-| `packages/cli`      | The CLI binary (commander composition root, three-layer dirs)                  |
-| `packages/protocol` | Placeholder — zod schemas + typed client SDK (P1)                              |
-| `packages/daemon`   | Placeholder — the per-host daemon (P1)                                         |
-| `packages/fleet`    | Placeholder — fleet management library + subcommands (P1)                      |
-| `packages/pwa`      | Placeholder — the web app (P1)                                                 |
-| `packages/relay`    | Rendezvous protocol + the metered hosted Workers relay (and a self-hosted one) |
-| `scripts/release`   | Compile, GoReleaser shim, publish, smoke, installer, bump                      |
-| `scripts/validate`  | Repo invariants run by pre-commit                                              |
-| `Casks/`            | Homebrew cask, committed in-repo by GoReleaser on release                      |
+| Path                | What                                                                               |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| `packages/cli`      | The CLI binary (commander composition root, three-layer dirs)                      |
+| `packages/protocol` | Zod schemas for every daemon API type + the typed client SDK shared by CLI and PWA |
+| `packages/daemon`   | The per-host daemon (`fyd`): API, sessions, state home, relay and pairing          |
+| `packages/fleet`    | The account model as a library: credentials, profiles, runtimes, launch wrappers   |
+| `packages/pwa`      | The multi-daemon web app, hosted as static files with a daemon-served fallback     |
+| `packages/relay`    | Rendezvous protocol + the metered hosted Workers relay (and a self-hosted one)     |
+| `scripts/release`   | Compile, GoReleaser shim, publish, smoke, installer, bump                          |
+| `scripts/validate`  | Repo invariants run by pre-commit                                                  |
+| `Casks/`            | Homebrew cask, committed in-repo by GoReleaser on release                          |
 
 ## Development
 

@@ -23,7 +23,7 @@ set -euo pipefail
 #
 # WHY A JOB AND NOT `paths`/`paths-ignore`. The same reason as scripts/ci/e2e-relevance.sh: a
 # workflow-level filter would skip the whole workflow, and a job that is skipped by `if:` reports as
-# skipped, which GitHub (and scripts/safe-merge.sh) count as passed. There is no branch protection to
+# skipped, which GitHub counts as passed. There is no branch protection to
 # configure and no stub check to keep in step.
 #
 # It fails open: any doubt — not a pull request, an unreadable file list, an empty one — runs all
@@ -100,7 +100,7 @@ if [ -n "${MACOS_RELEVANCE_FILES:-}" ]; then
   files="$(cat "${MACOS_RELEVANCE_FILES}")"
 else
   set +e
-  files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"
+  files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[] | .filename, (.previous_filename // empty)')"
   listed=$?
   set -e
   [ "${listed}" -ne 0 ] && emit "the pull request's files could not be listed" true true true true

@@ -254,9 +254,10 @@ either. What bounds the browser worker is three timeouts in its transport
 (`worker-client.ts:25-27`), which is a **transport bound, not supervision**.
 
 Resource limits are a separate mechanism again, and a narrower one than its name suggests:
-`packages/daemon/src/lib/cgroups/config.ts:1-25` describes limits that are **off by default**, apply
-to _"every managed agent"_ launched through one composition seam, and exist only where the Linux
-unified hierarchy and a reachable user manager do. On macOS there is nothing.
+`packages/daemon/src/lib/cgroups/launch.ts` describes limits that are **on by default** (`docs/ferret-limits.md`), apply
+to _"every managed agent"_ launched through one composition seam, and are enforced only where the Linux
+unified hierarchy and a reachable user manager are. On macOS there is lower CPU and disk priority and a memory
+watch, nothing capped.
 
 So the honest position, and the one §10's decision includes:
 

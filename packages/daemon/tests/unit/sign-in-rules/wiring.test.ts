@@ -144,7 +144,9 @@ describe('terminal standing rules are switched by the build alone', () => {
         )
           holding.push(file);
     should(holding).eql([]);
-    const features = await Bun.file(new URL('../../../../protocol/src/lib/daemon-features.ts', import.meta.url)).text();
+    const features = await Bun.file(
+      new URL('../../../../protocol/src/lib/daemon-features/index.ts', import.meta.url),
+    ).text();
     // Reported by this build (owner decision !A226): the name is no longer held back.
     should(features).not.match(/const NOT_YET_REPORTED[^;]*DAEMON_FEATURES\.signInRulesTerminal[^;]*;/u);
   });

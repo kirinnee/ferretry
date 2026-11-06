@@ -16,8 +16,6 @@ import type {
   CapabilityGrant,
   CapabilityGrants,
   CapabilityGrantView,
-  CgroupConfigPatch,
-  CgroupConfigView,
   DaemonCapability,
   DaemonUpdateSettingsPatch,
   DaemonUpdateStartRequest,
@@ -27,6 +25,7 @@ import type {
   GrantsView,
   HarnessUpdateStartRequest,
   HarnessUpdateView,
+  LimitsView,
   LoginEntryList,
   PairedDevicesView,
   PairingCodeMintResponse,
@@ -54,6 +53,7 @@ import { type ConnectionChoice, chooseConnection } from '@ferretry/relay';
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { ZodType } from 'zod';
+import { cgroupConfigView as harnessLimitsFixture } from '../../protocol/tests/fixtures.ts';
 import {
   type AttachmentBlobLoader,
   AttachmentGalleryProvider,
@@ -138,6 +138,7 @@ import { isMachineSetupStepId } from '../src/features/fleet/setup/onboarding-mod
 import { MachineSetupScreen } from '../src/features/fleet/setup/setup-screen.tsx';
 import type { MachineTabProps, MachineTabSurfaces } from '../src/features/fleet/shell/machines-surface.tsx';
 import { useHypermediaSessionActions } from '../src/features/hypermedia/hypermedia-session-actions.tsx';
+import { LEARNING_SETTINGS_TAB } from '../src/features/learning/learning-settings.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
 import type { ClipboardWriter } from '../src/features/onboarding/copy-button.tsx';
 import type { DeviceKind } from '../src/features/onboarding/device-kind.ts';
@@ -149,6 +150,7 @@ import {
   OnboardingProgressStore,
 } from '../src/features/onboarding/onboarding-progress.ts';
 import type { SetupSharePort } from '../src/features/onboarding/setup-handoff-panel.tsx';
+import { PACK_SETTINGS_TAB, PackSettingsSurface } from '../src/features/pack/pack-settings.tsx';
 import { DeviceRefusedNotice } from '../src/features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
@@ -160,14 +162,7 @@ import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { INFO_TABS, type InfoTab } from '../src/features/session-info/info-model.ts';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
-import { PACK_SETTINGS_TAB, PackSettingsSurface } from '../src/features/pack/pack-settings.tsx';
-import { distinctDaemonName } from '../src/features/settings/daemon-settings.tsx';
-import { ConnectionPreferenceSettings } from '../src/features/settings/connection-preference-settings.tsx';
 import { AboutMachineSurface } from '../src/features/settings/about-machine.tsx';
-import { pricingSettingsTab } from '../src/features/settings/pricing-settings.tsx';
-import { terminalSlotsSettingsTab } from '../src/features/settings/terminal-slots-settings.tsx';
-import { speedupsSettingsTab } from '../src/features/speedups/speedups-surface.tsx';
-import { LEARNING_SETTINGS_TAB } from '../src/features/learning/learning-settings.tsx';
 import type { PairingClient } from '../src/features/settings/add-device-api.ts';
 import {
   AddDeviceCard,
@@ -176,7 +171,8 @@ import {
 } from '../src/features/settings/add-device-settings.tsx';
 import { AgentClisSurface } from '../src/features/settings/agent-clis.tsx';
 import { CapabilityList } from '../src/features/settings/capability-list.tsx';
-import { CgroupConfigSurface } from '../src/features/settings/cgroup-settings.tsx';
+import { ConnectionPreferenceSettings } from '../src/features/settings/connection-preference-settings.tsx';
+import { distinctDaemonName } from '../src/features/settings/daemon-settings.tsx';
 import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemon-settings-frame.tsx';
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
@@ -184,18 +180,22 @@ import { DictationShortcutPicker } from '../src/features/settings/dictation-shor
 import { DoctorSettings } from '../src/features/settings/doctor-settings.tsx';
 import type { GrantClient } from '../src/features/settings/grants-api.ts';
 import { type GrantClientFactory, GrantsCard, GrantsSurface } from '../src/features/settings/grants-settings.tsx';
+import { LimitsSurface } from '../src/features/settings/limits-settings.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
 import { PerformanceSettings } from '../src/features/settings/performance-settings.tsx';
+import { pricingSettingsTab } from '../src/features/settings/pricing-settings.tsx';
 import type { SecurityLogClient } from '../src/features/settings/security-api.ts';
 import { SecurityLogSurface } from '../src/features/settings/security-log-settings.tsx';
 import type { PasskeyClientFactory } from '../src/features/settings/security-settings.tsx';
 import { settingsPaletteEntries } from '../src/features/settings/settings-catalog.ts';
 import { SettingsPage } from '../src/features/settings/settings-page.tsx';
+import { terminalSlotsSettingsTab } from '../src/features/settings/terminal-slots-settings.tsx';
 import { ViewportOverlay, viewportOverlay } from '../src/features/settings/viewport-details.tsx';
 import { VoiceEngineChoice } from '../src/features/settings/voice-engine-choice.tsx';
 import type { SkillsCatalog } from '../src/features/skills/skills-catalog.ts';
 import { SkillsSurface } from '../src/features/skills/skills-surface.tsx';
+import { speedupsSettingsTab } from '../src/features/speedups/speedups-surface.tsx';
 import { StepUpDialog, UNLOCK_COPY } from '../src/features/step-up/step-up-dialog.tsx';
 import { TaskName } from '../src/features/tasks/task-name.tsx';
 import { askWardenContribution } from '../src/features/warden/ask-warden.tsx';
@@ -329,13 +329,13 @@ import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
 import { harnessPerformanceClient, harnessRecorder } from './performance-fixture.ts';
+import { isSessionContextMenuPage, SessionContextMenuHarness } from './session-context-menu.tsx';
 import {
   HARNESS_PACK_STATE,
   harnessPricingClient,
   harnessSpeedupsClient,
   harnessTerminalSlotsClient,
 } from './settings-panels-fixture.ts';
-import { isSessionContextMenuPage, SessionContextMenuHarness } from './session-context-menu.tsx';
 import {
   WARDEN_FIXTURE_AGENDA,
   WARDEN_FIXTURE_CONFIG,
@@ -805,79 +805,36 @@ function DictationFlowHarness({
 }
 
 /**
- * The host this fixture's resource limits are computed against.
- *
- * `effective` is the pair of cgroup v2 values a daemon would actually write, so
- * a harness that echoed the same strings back after an apply would show a cap
- * nobody asked for. These are recomputed from the percentages the card sent
- * against this one fixed host, which is what makes the Apply button reviewable.
+ * The limits view this fixture shows: the measured box — 61 GiB of RAM under a 48 GiB limit on the user,
+ * 32 cores, a disk whose scheduler ignores priority — with one ferret slowed and one stopped for memory, so
+ * a capture proves both live lines survive the trip through the production card.
+ * `packages/protocol/src/lib/limits.ts` owns the numbers; the daemon owns the sentences.
  */
-const HARNESS_CGROUP_HOST = { cpus: 8, memoryBytes: 34_359_738_368 } as const;
-
-/**
- * The two values a host manager is actually given.
- *
- * A PERCENTAGE OF THE WHOLE MACHINE for CPU — 80% of eight CPUs is `640%` — and decimal bytes for
- * memory. This fixture used to compute the unified hierarchy's raw `cpu.max` pair
- * (`"640000 100000"`), which is a second spelling of one fact and one that no `set-property` would
- * accept, so a reviewer looking at the captured panel was reading a number the daemon never writes.
- * `packages/daemon/src/lib/cgroups/limits.ts` owns the conversion and this mirrors it exactly.
- */
-const harnessCgroupQuota = (cpuPercent: number, memoryPercent: number) => ({
-  cpuQuota: `${Math.max(1, Math.round(cpuPercent * HARNESS_CGROUP_HOST.cpus))}%`,
-  memoryMax: String(Math.max(1, Math.floor((memoryPercent / 100) * HARNESS_CGROUP_HOST.memoryBytes))),
-});
-
-const harnessCgroupView = (config: CgroupConfigView['config']): CgroupConfigView => ({
-  config,
-  // This fixture host is Linux with cgroup v2, so the controls it renders are
-  // controls that would do something. The unsupported presentation is a real
-  // state, but it belongs to a platform this fixture is not pretending to be.
-  supported: true,
-  // The slice a real daemon names, derived there from the product scope rather than written out.
-  fleetSlice: 'ferretry-fleet.slice',
-  effective: {
-    cpus: HARNESS_CGROUP_HOST.cpus,
-    memoryBytes: HARNESS_CGROUP_HOST.memoryBytes,
-    fleet: harnessCgroupQuota(config.fleet.cpuPercent, config.fleet.memoryPercent),
-    perAgent: harnessCgroupQuota(config.perAgent.cpuPercent, config.perAgent.memoryPercent),
-  },
-  // The captured state deliberately carries both kinds of evidence the surface must make visible:
-  // a running pane whose saved limit needs a relaunch, and a host-manager refusal that means the
-  // durable configuration is newer than the live scope. A happy-only fixture cannot prove either
-  // warning survives the trip through the production card.
-  restartRequiredSessions: ['msh-harness-running'],
-  warnings: [
-    'user manager unavailable — the saved limits are stored but are not in force; relaunch affected sessions once the host manager is reachable',
+const HARNESS_LIMITS_VIEW: LimitsView = {
+  ...harnessLimitsFixture,
+  throttled: [{ sessionId: 'msh-harness-running', callsign: 'gertrude' }],
+  killed: [
+    {
+      sessionId: 'msh-harness-running',
+      callsign: 'gertrude',
+      at: '2026-11-05T23:04:00Z',
+      what: 'bun test',
+      bytes: 9_771_000_000,
+    },
   ],
-});
-
-const HARNESS_CGROUP_CONFIG: CgroupConfigView['config'] = {
-  enabled: true,
-  fleet: { cpuPercent: 80, memoryPercent: 75 },
-  perAgent: { cpuPercent: 25, memoryPercent: 25 },
+  lines: [
+    'ferrets: memory 40.8 GiB soft / 44.4 GiB hard of a 48 GiB user budget · CPU weight 50 (daemon 100, voice 200) · disk priority: no effect on this disk (scheduler none)',
+    'each ferret: memory 12 GiB soft / 14.4 GiB hard · up to 4096 processes',
+    'swap: ferrets may use up to 4.8 GiB of swap',
+    '1 ferret slowed for memory now: gertrude',
+    'killed for memory: gertrude 23:04 (bun test, 9.1 GiB)',
+  ],
 };
 
-/**
- * The in-memory cgroup daemon. State lives per client, so every capture starts
- * from the declared configuration above rather than from whatever an earlier
- * capture typed, and the patch is merged exactly as the partial protocol shape
- * arrives.
- */
-const harnessCgroupClient = async (connection: DaemonConnection) => {
+/** The in-memory limits daemon. */
+const harnessLimitsClient = async (connection: DaemonConnection) => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
-  let config = HARNESS_CGROUP_CONFIG;
-  return {
-    cgroupConfig: async () => harnessCgroupView(config),
-    updateCgroupConfig: async (patch: CgroupConfigPatch) => {
-      config = {
-        enabled: patch.enabled ?? config.enabled,
-        fleet: { ...config.fleet, ...patch.fleet },
-        perAgent: { ...config.perAgent, ...patch.perAgent },
-      };
-      return harnessCgroupView(config);
-    },
-  };
+  return { cgroupConfig: async () => HARNESS_LIMITS_VIEW };
 };
 
 /** The Performance panel's fixture machine and this page's recorder (`performance-fixture.ts`). */
@@ -902,12 +859,12 @@ const HARNESS_CONFIG_FILES_CLIENT = harnessConfigFilesClient(unreachableDaemon.d
 const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
   {
     id: 'resource-limits',
-    label: 'Resource limits',
-    description: 'Linux CPU and RAM caps for this daemon’s managed fleet.',
+    label: 'Ferret limits',
+    description: 'How much of this machine the ferrets may take, and whether that is working.',
     // Wrapped, unlike production, only to inject the in-memory client: the
     // default client would reach the daemon this fixture does not have.
     Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
-      <CgroupConfigSurface connection={connection} createClient={harnessCgroupClient} />
+      <LimitsSurface connection={connection} createClient={harnessLimitsClient} />
     ),
   },
   {

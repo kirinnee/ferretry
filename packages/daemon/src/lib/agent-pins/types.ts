@@ -22,6 +22,8 @@ export interface AgentPinRepository {
   /** Every stored pin; none when nothing is stored or what is stored is unreadable. */
   load(): Promise<readonly AgentPin[]>;
   save(pins: readonly AgentPin[]): Promise<void>;
+  /** Retry live membership restoration for an already published pin, without rewriting its place or instant. */
+  retain?(sessionId: string): Promise<void>;
 }
 
 export interface AgentPinClock {

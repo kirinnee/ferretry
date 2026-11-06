@@ -1,3 +1,27 @@
+## [4.290.0](https://github.com/kirinnee/ferretry/compare/v4.289.0...v4.290.0) (2026-11-06)
+
+### Features
+
+* **daemon:** archive finished autonomous sessions out of the live set ([#1523](https://github.com/kirinnee/ferretry/issues/1523)) ([3b7cc70](https://github.com/kirinnee/ferretry/commit/3b7cc7050fa8f4eb03fbf516a38bd6832522fe6d))
+
+## [4.289.0](https://github.com/kirinnee/ferretry/compare/v4.288.0...v4.289.0) (2026-11-06)
+
+### Features
+
+* **board:** clashing work waits its turn (&I38) ([#1531](https://github.com/kirinnee/ferretry/issues/1531)) ([fb78a95](https://github.com/kirinnee/ferretry/commit/fb78a959f3537955f790ba068f129419cbe6724a))
+
+## [4.288.0](https://github.com/kirinnee/ferretry/compare/v4.287.1...v4.288.0) (2026-11-06)
+
+### Features
+
+* **daemon:** limit ferrets by default, sized from what the user may spend ([#1517](https://github.com/kirinnee/ferretry/issues/1517)) ([e3b1d94](https://github.com/kirinnee/ferretry/commit/e3b1d941d76b1e281b0e7302d86246cce20f1515))
+
+## [4.287.1](https://github.com/kirinnee/ferretry/compare/v4.287.0...v4.287.1) (2026-11-06)
+
+### Fixes
+
+* **daemon:** serve terminal rename as PATCH, the method the app sends ([#1526](https://github.com/kirinnee/ferretry/issues/1526)) ([8659e25](https://github.com/kirinnee/ferretry/commit/8659e25b75219955344a301def0320bcc4c11621))
+
 ## [4.287.0](https://github.com/kirinnee/ferretry/compare/v4.286.0...v4.287.0) (2026-11-06)
 
 ### Features

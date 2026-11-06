@@ -17,6 +17,8 @@ import {
   BoardEditableFieldSchema,
   BoardErrorCodeSchema,
   BoardIdsResponseSchema,
+  BoardMergeGateResponseSchema,
+  BoardMergeWaitSchema,
   BoardLinkFieldSchema,
   BoardPrStateFilterSchema,
   BoardQuarantinedCardSchema,
@@ -66,7 +68,7 @@ import {
 } from '../../src/lib/board.ts';
 import { LANE_TEMPLATES, type LaneSet, LaneSetSchema } from '../../src/lib/board-lanes.ts';
 import { BoardActorViaSchema, BoardReopenAttachmentsSchema } from '../../src/lib/board-refs.ts';
-import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features.ts';
+import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features/index.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
@@ -335,6 +337,21 @@ const VALID: readonly SchemaCase[] = [
   },
   { name: 'machine card ids', schema: BoardIdsResponseSchema, value: { ids: [CARD.id] } },
   {
+    name: 'merge wait',
+    schema: BoardMergeWaitSchema,
+    value: { task: { id: 'F20' }, on: { id: 'F18' }, until: 'shipped' },
+  },
+  {
+    name: 'merge gate',
+    schema: BoardMergeGateResponseSchema,
+    value: {
+      pr: 'https://github.com/kirinnee/ferretry/pull/42',
+      unit: [{ id: 'F20' }],
+      waits: [{ task: { id: 'F20' }, on: { id: 'F18', machineId: 'mac' }, until: 'released' }],
+      unreadable: ['F9'],
+    },
+  },
+  {
     name: 'create',
     schema: BoardTaskCreateRequestSchema,
     value: { kind: 'bug', title: 'Tunnel credit burst', ask: CARD.ask },
@@ -538,6 +555,21 @@ const INVALID: readonly SchemaCase[] = [
   },
   { name: 'create without ask', schema: BoardTaskCreateRequestSchema, value: { kind: 'bug', title: 'X' } },
   { name: 'card ids with a stray field', schema: BoardIdsResponseSchema, value: { ids: [], titles: [] } },
+  {
+    name: 'merge wait with no blocker',
+    schema: BoardMergeWaitSchema,
+    value: { task: { id: 'F20' }, until: 'shipped' },
+  },
+  {
+    name: 'merge gate for something that is not a PR',
+    schema: BoardMergeGateResponseSchema,
+    value: { pr: 'F12', unit: [], waits: [], unreadable: [] },
+  },
+  {
+    name: 'merge gate naming an unreadable card that is not an id',
+    schema: BoardMergeGateResponseSchema,
+    value: { pr: 'https://github.com/kirinnee/ferretry/pull/42', unit: [], waits: [], unreadable: ['torn.json'] },
+  },
   { name: 'unknown action', schema: BoardTaskActionRequestSchema, value: { action: 'status', status: 'done' } },
   { name: 'unknown lanes action', schema: LaneSetActionRequestSchema, value: { action: 'delete' } },
   { name: 'unknown error', schema: BoardErrorCodeSchema, value: 'ambiguous' },

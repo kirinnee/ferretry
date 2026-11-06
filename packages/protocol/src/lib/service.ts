@@ -41,6 +41,8 @@ export const HealthViewSchema = z.object({
   running: NonNegativeIntegerSchema,
   monitors: NonNegativeIntegerSchema,
   unmonitoredRunning: NonNegativeIntegerSchema,
+  /** Finished autonomous sessions taken out of the live count above (docs/session-archive.md). Absent from an older daemon. */
+  archivedSessions: NonNegativeIntegerSchema.optional(),
   wardenLastSweepSeconds: NonNegativeIntegerSchema.nullable(),
   wardenTimerArmed: z.boolean(),
   eventLoopLagMs: NonNegativeFiniteSchema,
@@ -54,7 +56,7 @@ export const HealthViewSchema = z.object({
   /** How the running sessions are observed: the pool size and sessions per worker thread. Absent from an older daemon. */
   sessionWorkers: SessionWorkerPoolSchema.optional(),
   /**
-   * What this daemon build can do that an older one could not (`daemon-features.ts`). Absent from an
+   * What this daemon build can do that an older one could not (`daemon-features/index.ts`). Absent from an
    * older daemon, which is how the app learns it must keep the older behaviour. Strings rather than an
    * enum, so a feature a newer daemon adds does not fail an older app.
    */
@@ -127,58 +129,6 @@ export const LivenessViewSchema = z.object({
     .optional(),
 });
 export type LivenessView = z.infer<typeof LivenessViewSchema>;
-
-export const CgroupLimitSchema = z.object({
-  cpuPercent: z.number().finite().gt(0).max(100),
-  memoryPercent: z.number().finite().gt(0).max(100),
-});
-export type CgroupLimit = z.infer<typeof CgroupLimitSchema>;
-
-export const CgroupConfigSchema = z
-  .object({
-    enabled: z.boolean(),
-    fleet: CgroupLimitSchema,
-    perAgent: CgroupLimitSchema,
-  })
-  .superRefine((value, context) => {
-    if (value.perAgent.cpuPercent > value.fleet.cpuPercent) {
-      context.addIssue({
-        code: 'custom',
-        message: 'perAgent.cpuPercent may not exceed fleet.cpuPercent',
-        path: ['perAgent', 'cpuPercent'],
-      });
-    }
-    if (value.perAgent.memoryPercent > value.fleet.memoryPercent) {
-      context.addIssue({
-        code: 'custom',
-        message: 'perAgent.memoryPercent may not exceed fleet.memoryPercent',
-        path: ['perAgent', 'memoryPercent'],
-      });
-    }
-  });
-export type CgroupConfig = z.infer<typeof CgroupConfigSchema>;
-
-export const CgroupConfigPatchSchema = z.strictObject({
-  enabled: z.boolean().optional(),
-  fleet: CgroupLimitSchema.partial().optional(),
-  perAgent: CgroupLimitSchema.partial().optional(),
-});
-export type CgroupConfigPatch = z.infer<typeof CgroupConfigPatchSchema>;
-
-export const CgroupConfigViewSchema = z.object({
-  config: CgroupConfigSchema,
-  supported: z.boolean(),
-  fleetSlice: z.string().min(1),
-  effective: z.object({
-    cpus: PositiveIntegerSchema,
-    memoryBytes: PositiveIntegerSchema,
-    fleet: z.object({ cpuQuota: z.string().min(1), memoryMax: z.string().min(1) }),
-    perAgent: z.object({ cpuQuota: z.string().min(1), memoryMax: z.string().min(1) }),
-  }),
-  restartRequiredSessions: z.array(z.string()),
-  warnings: z.array(z.string()),
-});
-export type CgroupConfigView = z.infer<typeof CgroupConfigViewSchema>;
 
 export const PwaConfigSchema = z.object({
   version: z.literal(1),

@@ -59,7 +59,7 @@ import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geom
 import { planSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runViewportMatrix } from './viewport-matrix.ts';
-import { lapPage, reportWalkTiming, timePage, timed } from './walk-timing.ts';
+import { lapPage, reportWalkTiming, timed, timePage } from './walk-timing.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(harnessDir, '..');
@@ -2962,7 +2962,7 @@ try {
               // Passkeys, daemon-scoped like the panels around it. The fixture answers GET /v1/passkeys with two
               // frozen entries, so the capture shows a real list and the Add control, never a prompt.
               ['Security', 'security', '[data-security-card]', 'machine'],
-              ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]', 'machine'],
+              ['Ferret limits', 'resource-limits', '[data-testid="limits-card"]', 'machine'],
               ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]', 'machine'],
               // The performance report, recorded: the broken budget first, then both reports as text.
               ['Performance', 'performance', '[data-performance]', 'machine'],
@@ -3005,32 +3005,27 @@ try {
                 await block.locator('[data-security-input="idleExpiryDays"]').fill('30');
               }
               if (slug === 'resource-limits') {
-                // Keep a top frame as navigation context, then compose the acceptance frame at the
-                // native viewport. The compact two-column mobile editors leave enough room between
-                // the enforcement toggle and final warning for BOTH endpoints (and every control
-                // between them) to remain in one honest 390x844 screenshot.
-                const toggle = readySurface.getByRole('checkbox');
-                await toggle.scrollIntoViewIfNeeded();
-                const toggleTarget = join(outDir, `settings-daemon-resource-limits-toggle-${viewport.name}.png`);
-                await page.screenshot({ path: toggleTarget });
-                process.stdout.write(`📸 Settings daemon Resource limits toggle ${viewport.name} -> ${toggleTarget}\n`);
-
-                // Bring the final warning into view, then minimally restore the toggle. If the two
-                // endpoints do not fit together, fail instead of silently emitting incomplete proof.
-                const warning = readySurface.getByRole('alert').last();
-                await warning.waitFor({ state: 'visible' });
-                await warning.scrollIntoViewIfNeeded();
-                await toggle.scrollIntoViewIfNeeded();
-                const [toggleBox, warningBox] = await Promise.all([toggle.boundingBox(), warning.boundingBox()]);
+                // The panel is read-only: what is in force, what was slowed or killed, and where to change it.
+                // The acceptance frame holds its first line (the budget and weights) AND the note that says
+                // how to change a limit, so a clipped card fails instead of emitting incomplete proof.
+                const card = readySurface;
+                const first = card.getByText('of a 48 GiB user budget', { exact: false }).first();
+                const note = card.getByText('limits.yaml', { exact: false }).last();
+                await first.waitFor({ state: 'visible' });
+                await note.scrollIntoViewIfNeeded();
+                const [firstBox, noteBox] = await Promise.all([first.boundingBox(), note.boundingBox()]);
                 const frameHeight = page.viewportSize()?.height;
                 if (
-                  toggleBox === null ||
-                  warningBox === null ||
+                  firstBox === null ||
+                  noteBox === null ||
                   frameHeight === undefined ||
-                  toggleBox.y < 0 ||
-                  warningBox.y + warningBox.height > frameHeight
+                  firstBox.y < 0 ||
+                  noteBox.y + noteBox.height > frameHeight
                 )
-                  throw new Error(`resource-limit evidence does not fit in the ${viewport.name} viewport`);
+                  throw new Error(`ferret-limit evidence does not fit in the ${viewport.name} viewport`);
+                const limitsTarget = join(outDir, `settings-daemon-resource-limits-${viewport.name}.png`);
+                await page.screenshot({ path: limitsTarget });
+                process.stdout.write(`📸 Settings daemon Ferret limits ${viewport.name} -> ${limitsTarget}\n`);
               }
               if (slug === 'performance') {
                 // Idle first (the one button), then a recording run to its report: the report text is the widest

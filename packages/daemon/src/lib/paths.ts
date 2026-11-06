@@ -43,6 +43,11 @@ export interface FoundationPaths {
    */
   readonly analyticsIndex: string;
   readonly sessions: string;
+  /**
+   * Which sessions have left the live set (docs/session-archive.md): one document, the ONLY fact that says "archived".
+   * Their directories under `sessions` stay where they are.
+   */
+  readonly archivedSessions: string;
   readonly temporary: string;
   /**
    * The daemon's durable Ed25519 identity document, holding its PKCS#8 PEM.
@@ -145,6 +150,7 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     sessionIndex: join(index, 'sessions.sqlite'),
     analyticsIndex: join(index, 'analytics.sqlite'),
     sessions: join(state, 'sessions'),
+    archivedSessions: join(state, 'archived-sessions.json'),
     temporary: join(state, 'tmp'),
     daemonIdentity: join(state, 'daemon-identity.json'),
     retiredOperatorPassword: join(state, 'operator-password.json'),

@@ -18,8 +18,7 @@
  * freely, so `s1` on a laptop and `s1` on a workstation are different sessions
  * with different terminals. Every call here takes the explicit `(connection,
  * scope)` pair, and the whole deck is remounted by key when either changes —
- * one daemon's shell must never appear under another daemon's session
- * (`docs/migration/surveys/pwa-shape.md`).
+ * one daemon's shell must never appear under another daemon's session.
  *
  * THE STREAM IS A PORT, NOT A SOCKET. A direct viewer opens a `wss://` socket at the daemon's own
  * address, carrying a short-lived ticket bought over HTTP so the durable device token never enters a

@@ -36,6 +36,15 @@ for (const [name, value] of Object.entries(OFFLINE_TEST_ENVIRONMENT)) process.en
  */
 process.env.FYD_BACKGROUND_DELAY_SECONDS ??= '0';
 
+/**
+ * A booted `fyd` archives finished autonomous sessions older than a day out of its live set
+ * (docs/session-archive.md), as one of those housekeeping jobs. The fleets tests seed are old, finished and
+ * autonomous by design — they stand for a machine's history — and a test that counts them, or measures a daemon
+ * walking them, expects them listed. So archiving is off here; a test about it builds the archive itself, or
+ * sets the variable.
+ */
+process.env.FYD_SESSION_ARCHIVE_AFTER_HOURS ??= 'off';
+
 /** Hosts a test may never reach: the hosted app, the hosted relay, and GitHub's release API. */
 export const FORBIDDEN_TEST_HOST =
   /(^|\.)ferretry\.pages\.dev$|^api\.github\.com$|(^|\.)ferretry-hosted-relay\.[a-z0-9-]+\.workers\.dev$/u;

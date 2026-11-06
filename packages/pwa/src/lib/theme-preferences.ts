@@ -12,8 +12,7 @@
  * render in the theme it advertises while the rest of the page stays in the
  * current one. Nothing here may hardcode a colour.
  *
- * Deliberately NOT daemon-scoped, and the survey agrees — "theme selection stays
- * browser-local" (`docs/migration/surveys/pwa-shape.md:240`). A family is a
+ * Deliberately NOT daemon-scoped: theme selection stays browser-local. A family is a
  * property of the reader's eyes and screen; keying it by `(daemonId, …)` would
  * repaint the app every time the reader switched daemon. Everything that carries
  * daemon *data* is keyed in `daemon-scope.ts`.

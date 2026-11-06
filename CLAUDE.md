@@ -64,8 +64,8 @@ profile, nix shell, modules, deb/rpm, standalone), is [docs/updating.md](docs/up
 
 ## Layout
 
-Bun workspaces monorepo — see [README.md](README.md#layout). Only `packages/cli` is real at P0;
-`protocol`, `daemon`, `fleet`, and `pwa` are placeholders for the P1 lift.
+Bun workspaces monorepo — see [README.md](README.md#layout). `packages/cli`, `protocol`,
+`daemon`, `fleet`, `pwa` and `relay` are all live packages.
 
 `packages/relay` owns how a browser reaches a daemon: the end-to-end session protocol and the
 Cloudflare rendezvous that can carry it. The wire contract is
@@ -263,21 +263,26 @@ When a setting reaches a running ferret — live, on restart, or only for new fe
 argv is built (one builder for start, Restart CLI, migrate and revive; a revive never replays):
 [docs/launch-settings.md](docs/launch-settings.md).
 
+Ferrets are **limited by default** so the daemon stays reachable: each launches in its own memory-capped
+slice sized from what the USER may really spend (not the RAM), with a fixed 4 GiB kept for the daemon, lowest
+disk priority, and CPU weights that rank the daemon and voice above the ferrets. Configured in `limits.yaml`
+(raising a cap is held for the owner); on macOS only CPU and disk priority are lowered and memory is watched.
+What is enforced, the defaults with a worked example and the one optional owner `sudo` step are
+[docs/ferret-limits.md](docs/ferret-limits.md).
+
 `packages/daemon` also owns the **project board**: one board per project (Unfiled for work outside any git
 repository), cards with lanes in six fixed categories, authority from ownership and lineage, staleness, the
 GitHub watcher that moves a card when its PR or release does, and the agenda and dependency links between cards.
 The contract, the CLI verbs and the declared gaps are [docs/board.md](docs/board.md); the one-time import of the
 old per-session task files is [docs/board-import.md](docs/board-import.md). Implement against those documents.
 
-## Migration context
+**Finished autonomous sessions are archived, not kept live.** A session with `mode: auto` that ended more than a day
+ago leaves the daemon's live set — the index, `GET /v1/sessions`, the sweeps, the board's roster — while its directory
+stays where it was and every read of it still works; a write brings it back. Interactive sessions are never archived.
+The rule, what keeps a session live, the timer and the declared gaps are [docs/session-archive.md](docs/session-archive.md).
+
+## Project record
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security
 design: [docs/design/split-proposal.md](docs/design/split-proposal.md). Feature backlog:
 [handover.md](handover.md).
-
-## Migration state
-
-Resuming or continuing the kteam→Ferretry migration (including on a new machine):
-[docs/migration/START-HERE.md](docs/migration/START-HERE.md) — the single entry point: bootstrap,
-work order, and cleanup. State and the `port/*` branch map are in `docs/migration/HANDOFF.md`; unit briefs in `docs/migration/units/`, source
-surveys in `docs/migration/surveys/`.

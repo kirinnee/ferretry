@@ -51,6 +51,8 @@ const AGENT_BROWSER_HOLDER = 'agent-browser';
  * which on a desktop host is the operator's real session — and the composition root closes it at shutdown.
  */
 export interface SessionBrowserModeOptions {
+  /** Scope-mode wrappers exec in place, preserving Chrome's PID, lease and DevTools fds 3/4. */
+  readonly limits?: { browserCommand(command: readonly string[]): Promise<readonly string[]> };
   /** This machine's Browser mode right now. Absent means headless, which is what every daemon ran before. */
   readonly mode?: () => Promise<BrowserMode>;
   /** The private display a Linux `window` browser draws into. */
@@ -136,23 +138,24 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         );
       }
       const userAgent = honestChromeUserAgent(version, platform, process.arch);
+      const chromeCommand = [
+        // HEADLESS unless the owner chose a real window. A real window keeps every page's window painting
+        // while another has focus (`agentBrowserArguments`), because an agent may be driving — and a
+        // person watching — any of them at once.
+        ...agentBrowserArguments(executable, lease.profile, cdp, viewport, platform, mode, {
+          ...(userAgent === undefined ? {} : { userAgent }),
+          ...(proxy === undefined
+            ? {}
+            : {
+                proxy: {
+                  server: relay === undefined ? proxy.setting.url : `http://127.0.0.1:${relay.port}`,
+                  bypass: proxy.setting.bypass,
+                },
+              }),
+        }),
+      ];
       chrome = Bun.spawn({
-        cmd: [
-          // HEADLESS unless the owner chose a real window. A real window keeps every page's window painting
-          // while another has focus (`agentBrowserArguments`), because an agent may be driving — and a
-          // person watching — any of them at once.
-          ...agentBrowserArguments(executable, lease.profile, cdp, viewport, platform, mode, {
-            ...(userAgent === undefined ? {} : { userAgent }),
-            ...(proxy === undefined
-              ? {}
-              : {
-                  proxy: {
-                    server: relay === undefined ? proxy.setting.url : `http://127.0.0.1:${relay.port}`,
-                    bypass: proxy.setting.bypass,
-                  },
-                }),
-          }),
-        ],
+        cmd: [...((await this.modes.limits?.browserCommand(chromeCommand)) ?? chromeCommand)],
         // The window's cookie rides with its display: a Chrome without it is refused by the private X server.
         env: defined(
           browserEnvironment(
@@ -187,6 +190,10 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
           endpoint,
           ...(pipe === undefined ? {} : { cdpPipe: pipe }),
           workerExecutable: this.worker.kind === 'executable',
+          environment: this.environment,
+          ...(this.modes.limits === undefined
+            ? {}
+            : { wrapCommand: this.modes.limits.browserCommand.bind(this.modes.limits) }),
           readyTimeoutMs: WORKER_ATTACH_TIMEOUT_MS,
           ...(this.modes.stageDirectory === undefined ? {} : { stageDirectory: this.modes.stageDirectory }),
         });

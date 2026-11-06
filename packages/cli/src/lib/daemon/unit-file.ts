@@ -21,6 +21,15 @@ export const EXIT_ALREADY_RUNNING = 78;
  */
 const EXIT_ADDRESS_CONFLICT = 69;
 
+/**
+ * The daemon's CPU weight in its unit: twice systemd's default of 100, against `<product>_fleet.slice` at 50
+ * and the voice slice at 200 (docs/ferret-limits.md).
+ */
+const DAEMON_CPU_WEIGHT = 200;
+
+/** Memory the kernel should leave the daemon alone for; see the comment in the rendered unit. */
+const DAEMON_MEMORY_LOW = '4G';
+
 export class InvalidUnitValueError extends Error {
   constructor(
     readonly field: string,
@@ -236,6 +245,13 @@ RestartPreventExitStatus=${String(EXIT_ALREADY_RUNNING)} ${String(EXIT_ADDRESS_C
 # lives in its control group. The default control-group kill erased the whole fleet on every daemon
 # restart. Signal only the daemon; panes survive and boot recovery re-adopts them.
 KillMode=process
+# The daemon outranks its ferrets: twice the default CPU weight, so a busy fleet (its own slice is
+# CPUWeight=50) never starves the thing that answers the app. MemoryLow= asks the kernel to reclaim from
+# everyone else before it touches the daemon's memory — but it only protects if EVERY ancestor also has a
+# MemoryLow=, and a stock user@.service does not. The owner makes it count with one line:
+#   sudo systemctl set-property user@UID.service MemoryLow=4G      (docs/ferret-limits.md)
+CPUWeight=${String(DAEMON_CPU_WEIGHT)}
+MemoryLow=${DAEMON_MEMORY_LOW}
 Environment=${systemdQuote(`FY_HOME=${spec.stateHome}`)}
 Environment=${systemdQuote(`HOME=${spec.userHome}`)}
 Environment=${systemdQuote(`PATH=${spec.searchPath}`)}

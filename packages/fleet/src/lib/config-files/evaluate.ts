@@ -22,6 +22,7 @@
  * Pure: the caller reads the directory and the accepted record, and stores the next record.
  */
 import {
+  type AccountDefaultsFile,
   type ConfigFileAddress,
   type ConfigFileState,
   type ConfigFileSummary,
@@ -30,8 +31,8 @@ import {
   classifyConfigPath,
   configFilePath,
   configSchemaId,
-  type AccountDefaultsFile,
   type LearningConfig,
+  type LimitsConfig,
   type ModelsGuideFile,
   type PackConfig,
   type VoiceConfig,
@@ -96,6 +97,8 @@ export interface EffectiveConfig {
   readonly learning: LearningConfig;
   readonly voice: VoiceConfig;
   readonly pack: PackConfig;
+  /** How much of the machine the ferrets may take; every absent setting is computed from the machine. */
+  readonly limits: LimitsConfig;
   /** The guide as written; `useCases` absent means the one derived from the catalogs (docs/pack-mode.md). */
   readonly modelsGuide: ModelsGuideFile;
   /** Which account a sign-in card offers first (`account-defaults.yaml`); the owner's lines only, every change held. */
@@ -230,6 +233,7 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
         address.kind,
         singletonValue(address.kind, previous),
         singletonValue(address.kind, candidate),
+        input.context,
       );
       if (changes.length > 0) {
         pending.push({ path: file.path, etag, changes: [...withEditorNote(address.kind, changes)] });
@@ -262,6 +266,7 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
         address.kind,
         singletonValue(address.kind, previous),
         SINGLETON_DEFAULTS[address.kind],
+        input.context,
       );
       if (changes.length > 0) {
         pending.push({ path, etag: ABSENT_CONFIG_ETAG, changes: [...withEditorNote(address.kind, changes)] });
@@ -298,6 +303,7 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
       learning: singleton('learning'),
       voice: singleton('voice'),
       pack: singleton('pack'),
+      limits: singleton('limits'),
       modelsGuide: singleton('modelsGuide'),
       accountDefaults: singleton('accountDefaults'),
       presets: Object.fromEntries(
