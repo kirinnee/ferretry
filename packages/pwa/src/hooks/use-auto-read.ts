@@ -22,12 +22,24 @@
  *     timer would have fired changes nothing.
  *   - Leaving the conversation, or switching the setting off.
  *
+ * THE REPLY IS READ OFF THE ROWS, NOT GUESSED. A turn only watched (nobody here sent it) is cut by its dated
+ * start. The reply to a SEND from this page is the assistant text after THAT SEND'S OWN ROW (the row the
+ * transcript joined to the send's id, else the row with the ledger's words dated no earlier than the daemon
+ * accepted it) — never "after the last row of the person's", which on a transcript that has not caught up is the
+ * PREVIOUS turn's answer. While the send's own row is not in the rows yet the reading WAITS (up to
+ * `EVIDENCE_WAIT_MS`, and the usual quiet guard once it shows) and, if it never shows, stays silent: a
+ * historical answer is never read.
+ *
+ * ONLY THE DAEMON'S LIVE WORD IS WATCHED. `authoritative` says the turn state is the daemon's live answer,
+ * not this device's cached copy; a cached snapshot arms nothing, raises nothing and is not a floor. The
+ * first live snapshot seeds the watermark and only later transitions are watched.
+ *
  * A SEND IS A TOKEN, TAKEN WHEN THE PRESS HAPPENS, AND BOUND TO THE SEND'S OWN IDENTITY. The page calls
  * `beginSend` as the composer starts sending, before anything is awaited: that stops a reading under way,
- * drops whatever was pending for an earlier send, remembers the newest turn state and the rows the page
- * already held, and arms the watch. `sent(sendId)` binds the token to the send the request came back with;
- * the daemon's ledger entry for that id says when the daemon accepted it, and only a turn that began after
- * that moment — never "now", a browser clock, or a state merely newer than an old snapshot — is its reply.
+ * drops whatever was pending for an earlier send, remembers the newest turn state and whether a turn was
+ * already running, and arms the watch. `sent(sendId)` binds the token to the send the request came back with;
+ * the daemon's ledger entry for that id says when the daemon accepted it, and only a turn the daemon ended
+ * after that moment — never "now" or a browser clock — is its reply.
  * The press reads nothing by itself, and the send's acknowledgement only stops a reading when no press
  * announced it: otherwise it would cut off the fast reply it belongs to. A send whose request failed drops
  * its token (`failed`).
@@ -43,20 +55,23 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'r
 import {
   armOnSend,
   dropSend,
+  EVIDENCE_WAIT_MS,
   IDLE_WATCH,
   observeTurn,
   stopWatching,
+  TEXT_SETTLED_MS,
   type TurnWatch,
   type WatchedTurn,
 } from '../lib/voice-chat/auto-read.ts';
 import { readOptionsOf } from '../lib/voice-chat/live-settings.ts';
 import { IDLE } from '../lib/voice-chat/read-aloud.ts';
 import {
-  hasRowSince,
   type PickerRow,
   pickQuestion,
   pickReply,
+  pickReplyToSend,
   type QuestionLike,
+  type SendEvidence,
 } from '../lib/voice-chat/reply-picker.ts';
 import { useDocumentVisible } from './use-document-visible.ts';
 import { useDeviceVoiceSettingsStore, useLiveVoiceSettings } from './use-live-voice-settings.ts';
@@ -66,12 +81,19 @@ import { useReadAloudController } from './use-read-aloud.ts';
 export interface SendAcceptance {
   readonly sendId: string;
   readonly acceptedAt: string;
+  /** The message as sent (the ledger's `message`): how the send's own row in the transcript is recognised. */
+  readonly message?: string;
 }
 
 export interface AutoReadInput {
   /** `daemon/session`: a new scope is a new conversation, so nothing carries over. */
   readonly scope: string;
   readonly entries: readonly PickerRow[];
+  /**
+   * `turn` and `turnStateAt` are the daemon's LIVE word, not this device's cached copy (the fleet's seeded
+   * view, a transcript drawn before the first live read). Cached state never arms anything.
+   */
+  readonly authoritative: boolean;
   /** Whose turn it is (`state.turnState`), or null for a session that is not live — and for a daemon that sends none. */
   readonly turn: WatchedTurn | null;
   /** The daemon's `state.turnStateAt`. Absent (or unreadable): the daemon cannot date its turns and nothing is auto-read. */
@@ -101,9 +123,15 @@ export interface AutoReadHandle {
   readonly failed: () => void;
 }
 
-/** The rows the page held when a send began, and the id it went under once the request came back. */
+/** A finished send's turn whose reply is waiting for the transcript to show the send's own row. */
+interface PendingReply {
+  readonly send: SendEvidence;
+  /** When the wait began (the clock `now`). */
+  readonly since: number;
+}
+
+/** The id a send went under once its request came back (null until then). */
 interface SendToken {
-  readonly knownIds: readonly string[];
   readonly sendId: string | null;
 }
 
@@ -127,6 +155,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   latest.current = { ...input, settings, visible };
   const watch = useRef<TurnWatch>(IDLE_WATCH);
   const token = useRef<SendToken | null>(null);
+  const pending = useRef<PendingReply | null>(null);
   const changedAt = useRef(now());
   const seen = useRef('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -145,36 +174,66 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
     const current = latest.current;
-    const fired = { knownIds: token.current?.knownIds, sendId: token.current?.sendId ?? null };
+    const sendId = token.current?.sendId ?? null;
     if (!current.settings.autoRead || !controller.supported) {
       // Off: nothing is watched, but what was already read stays read.
       watch.current = stopWatching(watch.current);
       token.current = null;
+      pending.current = null;
       return;
     }
     const at = now();
-    const accepted = current.sends.find(send => send.sendId === fired.sendId);
+    const accepted = current.sends.find(send => send.sendId === sendId);
+    const boundary = parseInstant(accepted?.acceptedAt);
     const step = observeTurn(watch.current, {
+      authoritative: current.authoritative,
       turn: current.turn,
       turnAt: parseInstant(current.turnStateAt),
       quietMs: at - changedAt.current,
       visible: current.visible,
-      boundary: accepted === undefined ? null : parseInstant(accepted.acceptedAt),
-      sentRow: fired.knownIds !== undefined && hasRowSince(current.entries, fired.knownIds),
+      boundary,
     });
     watch.current = step.watch;
     if (step.watch.armed?.kind !== 'sent') token.current = null;
     if (step.fire !== null) {
-      const pick =
-        step.fire.outcome === 'needs-input'
-          ? pickQuestion(current.question)
-          : pickReply(
-              current.entries,
-              { startedAt: step.fire.startedAt, knownIds: fired.knownIds },
-              current.settings.whatToRead,
-            );
-      mine.current = pick.key;
-      controller.read(pick.key, pick.markdown, readOptionsOf(current.settings));
+      pending.current = null;
+      if (step.fire.outcome === 'your-turn' && step.fire.startedAt === null) {
+        // The end of a SEND's turn is proven; its words are not read until the transcript shows the send's own row.
+        pending.current = {
+          send: { sendId: sendId ?? '', message: accepted?.message, acceptedAt: boundary },
+          since: at,
+        };
+      } else {
+        const pick =
+          step.fire.outcome === 'needs-input'
+            ? pickQuestion(current.question)
+            : pickReply(current.entries, step.fire.startedAt, current.settings.whatToRead);
+        mine.current = pick.key;
+        controller.read(pick.key, pick.markdown, readOptionsOf(current.settings));
+        return;
+      }
+    }
+    if (pending.current !== null) {
+      const waiting = pending.current;
+      const pick = current.visible ? pickReplyToSend(current.entries, waiting.send, current.settings.whatToRead) : null;
+      if (!current.visible) {
+        // Nobody is looking: it is gone for good.
+        pending.current = null;
+      } else if (pick === null) {
+        // The send's own row has not shown yet: wait for the transcript, then let go in silence.
+        const left = EVIDENCE_WAIT_MS - (at - waiting.since);
+        if (left <= 0) pending.current = null;
+        else timer.current = setTimeout(evaluate, left);
+      } else {
+        const quiet = at - changedAt.current;
+        if (quiet < TEXT_SETTLED_MS) {
+          timer.current = setTimeout(evaluate, Math.max(1, Math.ceil(TEXT_SETTLED_MS - Math.max(0, quiet))));
+        } else {
+          pending.current = null;
+          mine.current = pick.key;
+          controller.read(pick.key, pick.markdown, readOptionsOf(current.settings));
+        }
+      }
       return;
     }
     if (step.recheckInMs !== null) timer.current = setTimeout(evaluate, step.recheckInMs);
@@ -185,6 +244,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   useEffect(() => {
     watch.current = IDLE_WATCH;
     token.current = null;
+    pending.current = null;
     mine.current = null;
     return () => {
       if (timer.current !== null) clearTimeout(timer.current);
@@ -195,7 +255,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   // The conversation changed (a record, a new turn state, the daemon's word on a send): note the moment and look again.
   const last = entries.at(-1);
   const acceptance = sends.find(send => send.sendId === token.current?.sendId)?.acceptedAt ?? '';
-  const changeKey = `${scope}|${entries.length}|${last?.id ?? ''}|${last?.text.length ?? 0}|${turn ?? ''}|${turnStateAt ?? ''}|${acceptance}`;
+  const changeKey = `${scope}|${input.authoritative ? 1 : 0}|${entries.length}|${last?.id ?? ''}|${last?.text.length ?? 0}|${turn ?? ''}|${turnStateAt ?? ''}|${acceptance}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the change key is what says the conversation moved; the rest is read through `latest`.
   useEffect(() => {
     if (seen.current !== changeKey) {
@@ -209,11 +269,18 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   const arm = useCallback(
     (sendId: string | null): void => {
       const current = latest.current;
-      if (!current.settings.autoRead || !controller.supported || parseInstant(current.turnStateAt) === null) {
+      // A newer send replaces whatever the older one was still waiting to read.
+      pending.current = null;
+      if (
+        !current.settings.autoRead ||
+        !controller.supported ||
+        !current.authoritative ||
+        parseInstant(current.turnStateAt) === null
+      ) {
         token.current = null;
         return;
       }
-      token.current = { knownIds: current.entries.map(row => row.id), sendId };
+      token.current = { sendId };
       watch.current = armOnSend(watch.current);
       // Quiet counts from the press, not from whenever the conversation last changed before it.
       changedAt.current = now();

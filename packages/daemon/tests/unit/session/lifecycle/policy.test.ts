@@ -9,6 +9,7 @@ import {
   type CreateSessionLifecycleRequest,
   createSessionRecord,
   defaultSessionLifecycleSettings,
+  elapsedMs,
   firstTurnInstruction,
   isAgentAccount,
   lifecyclePhase,
@@ -20,6 +21,7 @@ import {
   sessionTmuxName,
   transitionSessionRecord,
   unrunnableAccountRefusal,
+  withHarnessStartup,
 } from '../../../../src/lib/session/lifecycle/index.ts';
 
 const NOW = '2026-07-31T10:00:00.000Z';
@@ -542,5 +544,48 @@ describe('session lifecycle policy', () => {
           '`fy runtime add <name> --credential <login> --profile <profile> --agent`; `fy runtimes` marks the agent runtimes.',
       );
     });
+  });
+});
+
+describe('how long a harness took to start', () => {
+  it('should measure whole milliseconds between two clock readings', () => {
+    should(elapsedMs('2026-07-31T10:00:00.000Z', '2026-07-31T10:00:04.234Z')).equal(4_234);
+    should(elapsedMs('2026-07-31T10:00:00.000Z', '2026-07-31T10:00:00.000Z')).equal(0);
+    should(elapsedMs('2026-07-31T10:00:00.000+00:00', '2026-07-31T11:00:01.000+01:00')).equal(1_000);
+  });
+
+  it('should clamp a backwards clock to zero, and answer nothing for a reading that is not an instant', () => {
+    should(elapsedMs('2026-07-31T10:00:05.000Z', '2026-07-31T10:00:00.000Z')).equal(0);
+    should(elapsedMs('not a time', '2026-07-31T10:00:00.000Z')).be.undefined();
+    should(elapsedMs('2026-07-31T10:00:00.000Z', 'not a time')).be.undefined();
+  });
+
+  it('should carry the measurement on the record, through the transition to running', () => {
+    // Arrange
+    const created = createSessionRecord(request(), context()).record;
+    const starting = transitionSessionRecord(created, 'starting', NOW).record;
+
+    // Act
+    const running = transitionSessionRecord(withHarnessStartup(starting, 'settled', 4_200), 'running', NOW).record;
+
+    // Assert
+    should(running.state.harnessStartupMs).equal(4_200);
+    should(starting.state.harnessStartupMs).be.undefined();
+  });
+
+  it('should record a wait that gave up as time waited, never as a startup time, and leave only the latest reading', () => {
+    // Arrange
+    const created = createSessionRecord(request(), context()).record;
+    const starting = transitionSessionRecord(created, 'starting', NOW).record;
+
+    // Act
+    const gaveUp = withHarnessStartup(withHarnessStartup(starting, 'settled', 4_200), 'timed-out', 30_000);
+    const readyAgain = withHarnessStartup(gaveUp, 'settled', 900);
+
+    // Assert
+    should(gaveUp.state.harnessNotReadyAfterMs).equal(30_000);
+    should(gaveUp.state.harnessStartupMs).be.undefined();
+    should(readyAgain.state.harnessStartupMs).equal(900);
+    should(readyAgain.state.harnessNotReadyAfterMs).be.undefined();
   });
 });

@@ -588,6 +588,43 @@ describe('PackService.newChild with a named runtime', () => {
     });
   });
 
+  it('should answer a start whose session came back failed as a refusal carrying its reason, never as started', async () => {
+    // Arrange
+    const base = sessionView('child-1');
+    const child = {
+      ...base,
+      state: { ...base.state, status: 'failed', reason: 'the interactive harness exited (1)' },
+    } as SessionView;
+    const { subject, starts } = build({ parents: { p1: PARENT }, child });
+
+    // Act
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', model: 'opus' }), OWNER);
+
+    // Assert — one start, no second candidate tried, and the attempt says it was not started.
+    should(starts).have.length(1);
+    should(outcome.outcome).equal('refused');
+    const refusal = refusalOf(outcome);
+    should(refusal?.code).equal('start_failed');
+    should(refusal?.message).containEql('the interactive harness exited (1)');
+    should(refusal?.remedy).containEql('child-1');
+    should(outcome.attempts).deepEqual([
+      { runtime: 'claude-main', model: 'opus', outcome: 'refused', refusal, probe: 'ran', probeMs: 25 },
+    ]);
+  });
+
+  it('should say a failed start had no recorded reason when the session holds none', async () => {
+    // Arrange
+    const base = sessionView('child-1');
+    const child = { ...base, state: { ...base.state, status: 'failed' } } as SessionView;
+    const { subject } = build({ parents: { p1: PARENT }, child });
+
+    // Act
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', model: 'opus' }), OWNER);
+
+    // Assert
+    should(refusalOf(outcome)?.message).containEql('no reason was recorded');
+  });
+
   it('should let any other start failure propagate', async () => {
     // Arrange
     const { subject } = build({ parents: { p1: PARENT }, startError: new Error('disk full') });

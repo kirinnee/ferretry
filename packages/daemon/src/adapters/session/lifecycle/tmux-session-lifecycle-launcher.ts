@@ -165,6 +165,11 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     await this.delivery.deliver(record.config.tmuxSession, instruction, {}, beforeWrite);
   }
 
+  /** Waits, boundedly, for the harness to finish its own startup now that its first turn is in. */
+  async settled(record: SessionLifecycleRecord): Promise<'settled' | 'timed-out'> {
+    return await this.delivery.waitStartupSettled(record.config.tmuxSession);
+  }
+
   async snapshot(record: SessionLifecycleRecord): Promise<void> {
     const state = await this.tmux.state(record.config.tmuxSession);
     if (state.alive && !state.dead) await this.snapshots?.write(record.config.id, state.visible);

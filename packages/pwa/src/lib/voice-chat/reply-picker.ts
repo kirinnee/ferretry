@@ -14,8 +14,10 @@
  * system rows, notices, thinking and tool calls (they are not `assistant` rows at all), a message this
  * ferret SENT to another one, and Pack commands. Only the agent's own words to the person.
  *
- * "The turn" is what came after the person's last message that started it. A row from before that point
- * is never picked, so a turn with no text cannot fall back to the previous turn's last reply.
+ * "The turn" is what came after the person's last message. A row from before that point is never picked, so a
+ * turn with no text cannot fall back to the previous turn's last reply. `pickLatestReply` is that and nothing
+ * more (the reply to a send); `pickReply` can also cut a turn by its dated start or by rows already held
+ * (a turn only watched, and the live reader).
  */
 
 /** The part of a transcript row this module reads: `TranscriptEntry` satisfies it as it is. */
@@ -25,6 +27,8 @@ export interface PickerRow {
   readonly text: string;
   readonly at?: number;
   readonly sent?: unknown;
+  /** The delivered send a person's row IS (the transcript's own join to the daemon's ledger): the exact proof of whose row it is. */
+  readonly send?: { readonly sendId: string } | undefined;
   readonly pack?: unknown;
   readonly peer?: unknown;
 }
@@ -72,12 +76,6 @@ export interface TurnStart {
 
 const isPersonsRow = (row: PickerRow): boolean => row.kind === 'user' && row.peer === undefined;
 
-/** The person's own row for a send: one of theirs that was NOT among `knownIds`, the rows the page held when send was pressed. */
-export const hasRowSince = (rows: readonly PickerRow[], knownIds: readonly string[]): boolean => {
-  const known = new Set(knownIds);
-  return rows.some(row => isPersonsRow(row) && !known.has(row.id));
-};
-
 /** The index of the row that begins the turn (-1: the whole conversation is the turn). */
 const boundaryOf = (rows: readonly PickerRow[], start: TurnStart, startedAt: number | null): number => {
   if (start.knownIds !== undefined) {
@@ -116,20 +114,85 @@ const rowsOfTurn = (rows: readonly PickerRow[], start: TurnStart): readonly Pick
   return after.filter(row => row.at === undefined || row.at >= startedAt - CLOCK_SLACK_MS);
 };
 
-/** The words of a turn that ended with `your-turn`. */
-export const pickReply = (
-  rows: readonly PickerRow[],
-  from: TurnStart | number | null,
-  whatToRead: WhatToRead = 'last',
-): ReplyPick => {
-  const start: TurnStart = typeof from === 'object' && from !== null ? from : { startedAt: from };
-  const texts = rowsOfTurn(Array.isArray(rows) ? rows : [], start).filter(isAssistantWords);
+/** The words to say for the assistant texts of a turn (oldest first), or that there were none. */
+const replyOf = (texts: readonly PickerRow[], whatToRead: WhatToRead): ReplyPick => {
   const last = texts.at(-1);
   if (last === undefined) return { key: SILENT_TURN_KEY, markdown: NO_MESSAGE_WORDS, reason: 'no-message' };
   if (whatToRead === 'every') {
     return { key: last.id, markdown: texts.map(row => row.text.trim()).join('\n\n'), reason: 'reply' };
   }
   return { key: last.id, markdown: last.text, reason: 'reply' };
+};
+
+/** The words of a turn that ended with `your-turn`, cut by the turn's dated start (or by the rows held when a send was pressed). */
+export const pickReply = (
+  rows: readonly PickerRow[],
+  from: TurnStart | number | null,
+  whatToRead: WhatToRead = 'last',
+): ReplyPick => {
+  const start: TurnStart = typeof from === 'object' && from !== null ? from : { startedAt: from };
+  return replyOf(rowsOfTurn(Array.isArray(rows) ? rows : [], start).filter(isAssistantWords), whatToRead);
+};
+
+/**
+ * The words of the turn that has just ended, with nothing inferred: the assistant text AFTER THE LAST ROW
+ * THE PERSON PUT TO THE AGENT that is present now (the whole conversation when there is none). A turn that
+ * wrote no text after that row says "Done. No message." — it never falls back to an earlier turn's words.
+ */
+export const pickLatestReply = (rows: readonly PickerRow[], whatToRead: WhatToRead = 'last'): ReplyPick => {
+  const held = Array.isArray(rows) ? rows : [];
+  return replyOf(held.slice(held.findLastIndex(isPersonsRow) + 1).filter(isAssistantWords), whatToRead);
+};
+
+/** What the daemon's ledger says about a send from this page: enough to recognise the send's own row in the transcript. */
+export interface SendEvidence {
+  readonly sendId: string;
+  /** The message as sent (the ledger's `message`); absent when the ledger entry is not at hand. */
+  readonly message?: string | undefined;
+  /** When the daemon accepted it (ms, the daemon's clock); null when unreadable. */
+  readonly acceptedAt: number | null;
+}
+
+const normalized = (value: string): string => value.normalize('NFC').trim().replace(/\s+/gu, ' ');
+
+/**
+ * Is this row of the person's the send's own? By identity when the transcript joined it to the ledger
+ * (`row.send`): exactly that send, and no other. A row not joined yet counts only when its words are the
+ * send's message and it is dated no earlier than the daemon accepted the send (the harness records it after
+ * the daemon accepted it, on the daemon's own machine: no slack, because a missed match only costs a wait
+ * while a false one reads the wrong reply), so an older row with the same words is never mistaken for it.
+ */
+const isOwnRow = (row: PickerRow, send: SendEvidence): boolean => {
+  if (!isPersonsRow(row)) return false;
+  if (row.send !== undefined) return row.send.sendId === send.sendId;
+  const message = typeof send.message === 'string' ? normalized(send.message) : '';
+  return (
+    message !== '' &&
+    send.acceptedAt !== null &&
+    row.at !== undefined &&
+    row.at >= send.acceptedAt &&
+    normalized(row.text) === message
+  );
+};
+
+/**
+ * The reply to ONE send from this page, or null while there is no evidence it is in the rows: the words are
+ * the assistant text after THE SEND'S OWN ROW (and before the next row of the person's), so nothing from
+ * before the send — the previous turn's answer, a transcript that has not caught up — can be picked. Null
+ * says "wait for the transcript"; a send whose row is there but whose turn wrote no text says "Done. No
+ * message.".
+ */
+export const pickReplyToSend = (
+  rows: readonly PickerRow[],
+  send: SendEvidence,
+  whatToRead: WhatToRead = 'last',
+): ReplyPick | null => {
+  const held = Array.isArray(rows) ? rows : [];
+  const own = held.findLastIndex(row => isOwnRow(row, send));
+  if (own === -1) return null;
+  const after = held.slice(own + 1);
+  const next = after.findIndex(isPersonsRow);
+  return replyOf((next === -1 ? after : after.slice(0, next)).filter(isAssistantWords), whatToRead);
 };
 
 /** The question a `needs-input` turn is waiting on: the shape of the daemon's `pendingQuestion`. */

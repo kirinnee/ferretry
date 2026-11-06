@@ -80,3 +80,10 @@ export const voiceNote = (voice: SpeakerVoice | null): string | null =>
 /** How a voice is named in a list: remote ones say where the text goes. */
 export const voiceLabel = (voice: SpeakerVoice): string =>
   voice.local ? voice.name : `${voice.name} (sends text to ${vendorOf(voice)})`;
+
+/**
+ * The short line a voice picker puts UNDER a voice's name, so the name is never lengthened (and never clipped)
+ * by it: remote voices say who gets the text, on-device ones say the text stays.
+ */
+export const voiceWhere = (voice: SpeakerVoice): string =>
+  voice.local ? 'Speaks on this device' : `Sends text to ${vendorOf(voice)}`;

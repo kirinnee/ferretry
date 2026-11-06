@@ -28,6 +28,7 @@ import {
   resumeMenuAction,
   type StartupDialogAction,
   startupDialogAction,
+  startupSettleStep,
 } from '../../../src/lib/index.ts';
 
 const IDLE: DeliveryFrame = { alive: true, dead: false, promptReady: true, visible: '> ' };
@@ -868,6 +869,48 @@ describe('a submission Codex 0.166 parks until its startup ends', () => {
     // The empty composers on either side of the park are ready, as before.
     should(capture('startup-composer').promptReady).be.true();
     should(capture('started-idle').promptReady).be.true();
+  });
+
+  it('should keep waiting while the park line is up, and call the harness settled once it clears', () => {
+    should(startupSettleStep(capture('startup-queued-message'))).deepEqual({ kind: 'wait' });
+    should(startupSettleStep(capture('startup-queued-slash'))).deepEqual({ kind: 'wait' });
+    should(startupSettleStep(capture('started-idle'))).deepEqual({ kind: 'settled' });
+  });
+
+  it('should settle at once for a harness that never draws the park line, and on the same words only in conversation', () => {
+    const claude: DeliveryFrame = { alive: true, dead: false, promptReady: true, visible: '❯ \n  ? for shortcuts' };
+    const quoted: DeliveryFrame = {
+      ...claude,
+      visible: ['• Codex showed:', '  Waiting for startup  · esc cancel', '', '› Ask Codex to do anything', ''].join(
+        '\n',
+      ),
+    };
+
+    should(startupSettleStep(claude)).deepEqual({ kind: 'settled' });
+    should(startupSettleStep(quoted)).deepEqual({ kind: 'settled' });
+  });
+
+  it('should answer a pane that died during startup with the harness’s own last words, before anything else', () => {
+    const died: DeliveryFrame = {
+      alive: true,
+      dead: true,
+      promptReady: false,
+      // Whatever the dead pane's screen says, the park line must not be mistaken for a live wait.
+      visible: 'Pane is dead\nWaiting for startup  · esc cancel',
+      exitCode: 1,
+      history: 'Error: account/read failed during TUI bootstrap: workspace routing discovery timed out\n',
+    };
+    const gone: DeliveryFrame = { alive: false, dead: false, promptReady: false, visible: '' };
+
+    should(startupSettleStep(died)).deepEqual({
+      kind: 'exited',
+      reason:
+        'the interactive harness exited (1): its last output was "Error: account/read failed during TUI bootstrap: workspace routing discovery timed out"',
+    });
+    should(startupSettleStep(gone)).deepEqual({
+      kind: 'exited',
+      reason: 'the interactive harness exited; tmux reported no exit code',
+    });
   });
 
   it('should hear the park only from the bottom line, never from the same words in the conversation', () => {

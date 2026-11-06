@@ -271,6 +271,8 @@ export type PackCleanUpStatus = z.infer<typeof PackCleanUpStatusSchema>;
  * - `scratch_cwd`: the folder named is a temporary or scratch folder, not a project; a sub-ferret runs in
  *   its parent's folder, so this comes only from an explicit `--cwd` or a start with no parent.
  * - `card_unavailable`: the card `--card` named does not exist here, or the caller may not hand it to a sub-ferret.
+ * - `start_failed`: the start was accepted but the harness did not come up (the session is `failed`, and its reason is
+ *   the message); the session holds the evidence, and a ferret may try its next candidate.
  */
 export const PACK_REFUSAL_CODES = [
   'pack_off',
@@ -290,6 +292,7 @@ export const PACK_REFUSAL_CODES = [
   'jev_cap_reached',
   'scratch_cwd',
   'card_unavailable',
+  'start_failed',
 ] as const;
 export const PackRefusalCodeSchema = z.enum(PACK_REFUSAL_CODES);
 export type PackRefusalCode = z.infer<typeof PackRefusalCodeSchema>;

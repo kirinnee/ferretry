@@ -8,6 +8,7 @@ import {
   DEFAULT_SPEECH_RATE,
   voiceLabel,
   voiceNote,
+  voiceWhere,
 } from '../../src/lib/voice-chat/voice-choice.ts';
 import { FakeSynth, FakeUtterance, voice } from '../support/fake-speech.ts';
 
@@ -130,6 +131,9 @@ describe('voice choice', () => {
     expect(voiceNote(null)).toBeNull();
     expect(voiceLabel(voices[0] as (typeof voices)[number])).toBe('Google US English (sends text to Google)');
     expect(voiceLabel(voices[2] as (typeof voices)[number])).toBe('Samantha');
+    // The picker's second line: who gets the text, apart from the name so the name is never lengthened.
+    expect(voiceWhere(voices[0] as (typeof voices)[number])).toBe('Sends text to Google');
+    expect(voiceWhere(voices[2] as (typeof voices)[number])).toBe('Speaks on this device');
   });
 
   test('the rate is kept between 0.8 and 2.0, and defaults to 1.1', () => {

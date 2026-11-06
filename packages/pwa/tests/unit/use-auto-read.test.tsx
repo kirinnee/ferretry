@@ -43,7 +43,11 @@ const memory = (): { getItem: (k: string) => string | null; setItem: (k: string,
 const AT = Date.UTC(2026, 10, 5, 3, 0, 0);
 const iso = (ms: number): string => new Date(AT + ms).toISOString();
 /** The daemon's ledger entry for a send: when the DAEMON accepted it. */
-const accepted = (sendId: string, ms: number): SendAcceptance => ({ sendId, acceptedAt: iso(ms) });
+const accepted = (sendId: string, ms: number, message = 'and this'): SendAcceptance => ({
+  sendId,
+  acceptedAt: iso(ms),
+  message,
+});
 const user: PickerRow = { id: 'u1', kind: 'user', text: 'fix it', at: AT };
 const reply = (text: string, id = 'a1'): PickerRow => ({ id, kind: 'assistant', text, at: AT + 9000 });
 const asked = (id: string, ms: number): PickerRow => ({ id, kind: 'user', text: 'and this', at: AT + ms });
@@ -55,6 +59,7 @@ const BASE: AutoReadInput = {
   turnStateAt: iso(-1000),
   question: null,
   sends: [],
+  authoritative: true,
 };
 const working = (extra: Partial<AutoReadInput> = {}): AutoReadInput => ({
   ...BASE,
@@ -670,5 +675,308 @@ describe('useAutoRead: history is never a fresh arrival', () => {
     await mounted.render(tree(r, ended(history)));
     await settle();
     expect(r.synth.spoken).toHaveLength(0);
+  });
+});
+
+describe('useAutoRead: round 4 — identity, short turns, hidden-before-ack, cached state', () => {
+  test('REGRESSION (round 4, #3): a cached working snapshot cannot turn the authoritative historical completion into speech', async () => {
+    const r = rig(true);
+    // Persisted fleet snapshot saved while this turn was working; it ended before the page opened.
+    mounted = await mount(tree(r, working({ authoritative: false })));
+    await mounted.render(tree(r, ended([user, reply('Finished before page load.')])));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+    // …and the first live snapshot only seeded the watermark: the next turn is watched and read.
+    await mounted.render(tree(r, { ...working(), turnStateAt: iso(20_000) }));
+    await mounted.render(
+      tree(r, ended([user, { ...reply('Live answer.', 'a3'), at: AT + 25_000 }], { turnStateAt: iso(30_000) })),
+    );
+    await settle();
+    expect(said(r)).toBe('Live answer.');
+  });
+
+  test('a press made while the state on screen is still the cached copy arms nothing', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, { ...BASE, authoritative: false }));
+    await press('s1');
+    const rows = [user, asked('u2', 30_100), { ...reply('Answer.', 'a2'), at: AT + 30_900 }];
+    await mounted.render(tree(r, ended(rows, { turnStateAt: iso(31_000), sends: [accepted('s1', 30_000)] })));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 4, #4): a fast turn whose working was never rendered is read after the ack', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, BASE));
+    await interact(() => handle?.beginSend());
+    // The refresh read the snapshot after the nudges settled: no working was ever rendered.
+    const rows = [user, asked('u2', 30_100), { ...reply('Fast answer.', 'a2'), at: AT + 30_900 }];
+    await mounted.render(tree(r, ended(rows, { turnStateAt: iso(31_000), sends: [accepted('s1', 30_000)] })));
+    await interact(() => handle?.sent('s1'));
+    await settle();
+    expect(said(r)).toBe('Fast answer.');
+  });
+
+  test('REGRESSION (round 4, #2): a completion seen hidden before the send is acknowledged stays silent on return', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, BASE));
+    await interact(() => handle?.beginSend());
+    const rows = [user, asked('u2', 30_100), { ...reply('Ended while hidden.', 'a2'), at: AT + 30_900 }];
+    await mounted.render(tree(r, working({ entries: rows.slice(0, 2), turnStateAt: iso(30_500) })));
+    await interact(() => setVisibility('hidden'));
+    await mounted.render(tree(r, ended(rows, { turnStateAt: iso(31_000), sends: [accepted('s1', 30_000)] })));
+    await interact(() => setVisibility('visible'));
+    await interact(() => handle?.sent('s1'));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('REGRESSION (round 4, #1): a hydrated prior user row cannot stand in for this send’s row — a silent turn says so', async () => {
+    const r = rig(true);
+    const cached = [user, OLD];
+    mounted = await mount(tree(r, { ...BASE, entries: cached, turnStateAt: iso(20_000) }));
+    await press('s2');
+    const sends = [accepted('s2', 30_000)];
+    const hydrated = [
+      ...cached,
+      asked('prior-user', 15_000),
+      { id: 'prior-answer', kind: 'assistant', text: 'Historical answer.', at: AT + 19_000 },
+    ];
+    await mounted.render(tree(r, working({ entries: hydrated, turnStateAt: iso(30_500), sends })));
+    await mounted.render(
+      tree(r, ended([...hydrated, asked('actual-user', 30_100)], { turnStateAt: iso(40_000), sends })),
+    );
+    await settle();
+    expect(said(r)).toBe('Done. No message.');
+  });
+
+  test('REGRESSION (round 4, #1): two sends, the first user row late — the first answer is not read for the second', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, { ...BASE, entries: [user, OLD] }));
+    await press('s1');
+    await mounted.render(
+      tree(r, working({ entries: [user, OLD], turnStateAt: iso(30_500), sends: [accepted('s1', 30_000)] })),
+    );
+    await press('s2');
+    const sends = [accepted('s1', 30_000), accepted('s2', 35_000)];
+    const firstTurnRows = [
+      user,
+      OLD,
+      asked('first-user', 30_100),
+      { id: 'first-answer', kind: 'assistant', text: 'First answer.', at: AT + 39_000 },
+    ];
+    // The first turn ends (dated after the second send was accepted): that end is the first turn's, not the reply.
+    await mounted.render(tree(r, ended(firstTurnRows, { turnStateAt: iso(40_000), sends })));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+    await mounted.render(tree(r, working({ entries: firstTurnRows, turnStateAt: iso(40_500), sends })));
+    await mounted.render(
+      tree(r, ended([...firstTurnRows, asked('second-user', 40_510)], { turnStateAt: iso(45_000), sends })),
+    );
+    await settle();
+    expect(said(r)).toBe('Done. No message.');
+  });
+
+  test('a turn the page only watched is still cut at its dated start; the last send-less words are not guessed', async () => {
+    const r = rig(true);
+    const rows = [user, OLD, asked('u2', 20_000), { ...reply('Historical.', 'h1'), at: AT + 30_000 }];
+    mounted = await mount(tree(r, { ...BASE, entries: rows, turnStateAt: iso(30_500) }));
+    await mounted.render(tree(r, working({ entries: rows, turnStateAt: iso(60_000) })));
+    await mounted.render(tree(r, ended(rows, { turnStateAt: iso(70_000) })));
+    await settle();
+    expect(said(r)).toBe('Done. No message.');
+  });
+});
+
+describe('useAutoRead: the reply is the one after THIS send’s own row (final round)', () => {
+  /** An idle session at your-turn@-1000 holding an old exchange, with the person's send s1 pressed and accepted@30000. */
+  const idleWithOld = (extra: Partial<AutoReadInput> = {}): AutoReadInput => ({
+    ...BASE,
+    entries: [user, OLD],
+    ...extra,
+  });
+  const SENDS = [accepted('s1', 30_000)];
+  const OWN: PickerRow = asked('u2', 30_100);
+  const NEW: PickerRow = { ...reply('The new answer.', 'a2'), at: AT + 39_000 };
+
+  test('REGRESSION (#2): the send’s turn ends but the transcript lags — the historical answer is NOT read; the real one is, once it shows', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idleWithOld()));
+    await press('s1');
+    // Accepted, working, and the turn ends — but the transcript still holds only the old exchange.
+    await mounted.render(tree(r, working({ entries: [user, OLD], turnStateAt: iso(30_500), sends: SENDS })));
+    await mounted.render(tree(r, ended([user, OLD], { turnStateAt: iso(40_000), sends: SENDS })));
+    await settle(1200);
+    expect(r.synth.spoken).toHaveLength(0);
+    // The transcript catches up: the send's own row, then its reply.
+    await mounted.render(tree(r, ended([user, OLD, OWN], { turnStateAt: iso(40_000), sends: SENDS })));
+    await settle(200);
+    expect(r.synth.spoken).toHaveLength(0);
+    await mounted.render(tree(r, ended([user, OLD, OWN, NEW], { turnStateAt: iso(40_000), sends: SENDS })));
+    await settle();
+    expect(said(r)).toBe('The new answer.');
+    expect(r.synth.spoken.map(u => u.text)).not.toContain('Previous reply.');
+  });
+
+  test('the row the transcript joined to this very send (its id) is the proof, whatever its words or date', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idleWithOld()));
+    await press('s1');
+    const joined: PickerRow = { id: 'u2', kind: 'user', text: 'a different wording', send: { sendId: 's1' } };
+    await mounted.render(tree(r, working({ entries: [user, OLD], turnStateAt: iso(30_500), sends: SENDS })));
+    await mounted.render(tree(r, ended([user, OLD, joined, NEW], { turnStateAt: iso(40_000), sends: SENDS })));
+    await settle();
+    expect(said(r)).toBe('The new answer.');
+  });
+
+  test('a row joined to ANOTHER send, even with the same words, is not this send’s proof: silence', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idleWithOld()));
+    await press('s1');
+    const others: PickerRow = { ...OWN, send: { sendId: 'earlier' } };
+    await mounted.render(tree(r, working({ entries: [user, OLD], turnStateAt: iso(30_500), sends: SENDS })));
+    await mounted.render(tree(r, ended([user, OLD, others, NEW], { turnStateAt: iso(40_000), sends: SENDS })));
+    await settle(1200);
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('if the send’s own row never shows, it stays silent after the wait — and a row that shows later is not read either', async () => {
+    const r = rig(true);
+    // The page's clock runs with real time, and the test can push it forward.
+    let ahead = 0;
+    const timed = (input: AutoReadInput): AutoReadInput => ({ ...input, now: () => Date.now() + ahead });
+    mounted = await mount(tree(r, timed(idleWithOld())));
+    await press('s1');
+    await mounted.render(tree(r, timed(working({ entries: [user, OLD], turnStateAt: iso(30_500), sends: SENDS }))));
+    await mounted.render(tree(r, timed(ended([user, OLD], { turnStateAt: iso(40_000), sends: SENDS }))));
+    // The turn’s end is proven and the quiet guard has passed: the reply now waits for the transcript.
+    await settle(600);
+    // Still waiting a few seconds in…
+    ahead += 4_000;
+    await mounted.render(
+      tree(
+        r,
+        timed(
+          ended([user, OLD, { id: 't', kind: 'tool', text: 'ran', at: AT + 1 }], {
+            turnStateAt: iso(40_000),
+            sends: SENDS,
+          }),
+        ),
+      ),
+    );
+    expect(r.synth.spoken).toHaveLength(0);
+    // …then past the bound: it lets go, in silence.
+    ahead += 2_000;
+    await mounted.render(tree(r, timed(ended([user, OLD], { turnStateAt: iso(40_000), sends: SENDS }))));
+    await mounted.render(tree(r, timed(ended([user, OLD, OWN, NEW], { turnStateAt: iso(40_000), sends: SENDS }))));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('the wait ends by itself: a timer lets go in silence when nothing at all changes', async () => {
+    const r = rig(true);
+    // The page's clock runs with real time, and the test can push it forward.
+    let ahead = 0;
+    const timed = (input: AutoReadInput): AutoReadInput => ({ ...input, now: () => Date.now() + ahead });
+    mounted = await mount(tree(r, timed(idleWithOld())));
+    await press('s1');
+    await mounted.render(tree(r, timed(working({ entries: [user, OLD], turnStateAt: iso(30_500), sends: SENDS }))));
+    await mounted.render(tree(r, timed(ended([user, OLD], { turnStateAt: iso(40_000), sends: SENDS }))));
+    // The turn’s end is proven and the quiet guard has passed: the reply now waits for the transcript.
+    await settle(600);
+    ahead += 6_000;
+    // The timer set for the end of the wait fires (the page clock having moved on): nothing is read.
+    await settle(5_100);
+    expect(r.synth.spoken).toHaveLength(0);
+  }, 10_000);
+
+  test('a tab that goes to the background while it waits lets the reply go for good', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idleWithOld()));
+    await press('s1');
+    await mounted.render(tree(r, working({ entries: [user, OLD], turnStateAt: iso(30_500), sends: SENDS })));
+    await mounted.render(tree(r, ended([user, OLD], { turnStateAt: iso(40_000), sends: SENDS })));
+    // The turn’s end is proven and the quiet guard has passed: the reply now waits for the transcript.
+    await settle(600);
+    await interact(() => setVisibility('hidden'));
+    await interact(() => setVisibility('visible'));
+    await mounted.render(tree(r, ended([user, OLD, OWN, NEW], { turnStateAt: iso(40_000), sends: SENDS })));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('a newer press drops what the older send was still waiting to read', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idleWithOld()));
+    await press('s1');
+    await mounted.render(tree(r, working({ entries: [user, OLD], turnStateAt: iso(30_500), sends: SENDS })));
+    await mounted.render(tree(r, ended([user, OLD], { turnStateAt: iso(40_000), sends: SENDS })));
+    // The turn’s end is proven and the quiet guard has passed: the reply now waits for the transcript.
+    await settle(600);
+    await interact(() => handle?.beginSend());
+    await mounted.render(tree(r, ended([user, OLD, OWN, NEW], { turnStateAt: iso(40_000), sends: SENDS })));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('switching the setting off while it waits lets the reply go', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idleWithOld()));
+    await press('s1');
+    await mounted.render(tree(r, working({ entries: [user, OLD], turnStateAt: iso(30_500), sends: SENDS })));
+    await mounted.render(tree(r, ended([user, OLD], { turnStateAt: iso(40_000), sends: SENDS })));
+    // The turn’s end is proven and the quiet guard has passed: the reply now waits for the transcript.
+    await settle(600);
+    await interact(() => r.store.update({ autoRead: false }));
+    await interact(() => r.store.update({ autoRead: true }));
+    await mounted.render(tree(r, ended([user, OLD, OWN, NEW], { turnStateAt: iso(40_000), sends: SENDS })));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  test('a reply still streaming when its row shows is read only after the usual quiet', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idleWithOld()));
+    await press('s1');
+    await mounted.render(tree(r, working({ entries: [user, OLD], turnStateAt: iso(30_500), sends: SENDS })));
+    await mounted.render(tree(r, ended([user, OLD], { turnStateAt: iso(40_000), sends: SENDS })));
+    await settle(600);
+    await mounted.render(tree(r, ended([user, OLD, OWN], { turnStateAt: iso(40_000), sends: SENDS })));
+    await settle(300);
+    // Words arrive before the quiet guard has passed: the reading waits for the last of them.
+    await mounted.render(
+      tree(r, ended([user, OLD, OWN, { ...NEW, text: 'The new' }], { turnStateAt: iso(40_000), sends: SENDS })),
+    );
+    await settle(300);
+    expect(r.synth.spoken).toHaveLength(0);
+    await mounted.render(tree(r, ended([user, OLD, OWN, NEW], { turnStateAt: iso(40_000), sends: SENDS })));
+    await settle();
+    expect(said(r)).toBe('The new answer.');
+  });
+
+  test('REGRESSION (#1): the running turn’s end is rejected once — its last transcript row arriving does not re-judge it as the reply', async () => {
+    const r = rig(true);
+    mounted = await mount(tree(r, idleWithOld()));
+    // The first turn is running when the person sends the second.
+    await mounted.render(tree(r, working({ entries: [user, OLD], turnStateAt: iso(25_000) })));
+    await press('s2');
+    const sends = [accepted('s2', 30_000)];
+    const firstEnds = ended([user, OLD, OWN], { turnStateAt: iso(40_000), sends });
+    await mounted.render(tree(r, firstEnds));
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+    // The first turn's final words land: the SAME completion is looked at again.
+    const firstWords: PickerRow = { id: 'first', kind: 'assistant', text: 'First turn’s reply.', at: AT + 39_000 };
+    await mounted.render(tree(r, ended([user, OLD, OWN, firstWords], { turnStateAt: iso(40_000), sends })));
+    await settle(1200);
+    expect(r.synth.spoken).toHaveLength(0);
+    // The second send's own turn, later, is read — and it is its reply, not the first's.
+    await mounted.render(tree(r, working({ entries: [user, OLD, OWN, firstWords], turnStateAt: iso(41_000), sends })));
+    const secondWords: PickerRow = { id: 'second', kind: 'assistant', text: 'Second turn’s reply.', at: AT + 44_000 };
+    await mounted.render(
+      tree(r, ended([user, OLD, OWN, firstWords, secondWords], { turnStateAt: iso(45_000), sends })),
+    );
+    await settle();
+    expect(said(r)).toBe('Second turn’s reply.');
   });
 });
