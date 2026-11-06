@@ -33,12 +33,12 @@ runtime and nothing a user writes runs in the daemon. Third-party plugins are a 
    route-caller and audit lists, `DAEMON_FEATURES` (split by area) and the knip entries (replaced by
    globs). Completeness tests prove no piece is lost (§4).
 4. **Order: 5 prerequisite PRs, 38 extraction PRs (40 modules), 1 tidy-up.** Behaviour stays the
-   same. Each PR is proven by the existing suites, a byte-identical route snapshot, and a boot and
+   same. Each PR is proven by the existing suites, a byte-identical canonical route snapshot, and a boot and
    shutdown trace (§6).
-5. **Modelled effect on daemon composition:** of the 221 PR pairs that were open at the same time
-   and both edited `fyd.ts` since 2026-11-01, **82–123 (37–56%) would no longer share a daemon
-   composition file**. 68 of the 72 `knip.json` edits would not have been needed, and
-   `DAEMON_FEATURES` overlaps drop from 39 pairs to 11 (§7). These are exposure scenarios, not
+5. **Modelled effect on daemon composition:** of the 224 PR pairs that were open at the same time
+   and both edited `fyd.ts` since 2026-11-01 00:00 UTC, **81–123 (36–55%) would no longer share a
+   daemon composition file**. 75 of the 80 `knip.json` edits would not have been needed, and
+   `DAEMON_FEATURES` overlaps drop from 40 pairs to 12 (§7). These are exposure scenarios, not
    counted rebases.
 6. **Two owner decisions** are in §10. Each has my pick.
 
@@ -57,17 +57,17 @@ the declarations only, without the comments that follow them):
 | └ `createSubsystems` closure         | 9914–14307  | 4,394 | 231 `const`/`let` declarations, building all 118 fields of `MountedSubsystems` |
 | `start()`                            | 14346–15372 | 1,027 | The boot: lock, config, address, bind, mount, ordered cleanups, jobs           |
 
-These are the shared files a feature has to hand-edit, ranked by how many of the **371** non-release,
-non-merge commits from 2026-11-01 to `c7e6beda1` edited each one:
+These are the shared files a feature has to hand-edit, ranked by how many of the **393** non-release,
+non-merge commits from 2026-11-01 00:00 UTC to `c7e6beda1` edited each one:
 
 | Shared file                                                  | Commits | Why a feature touches it                                         |
 | ------------------------------------------------------------ | ------: | ---------------------------------------------------------------- |
-| `packages/daemon/bin/fyd.ts`                                 |      92 | Its wiring, its seams and its factory all live here              |
-| `knip.json`                                                  |      72 | Each new PWA harness or fixture file is listed by hand           |
-| `packages/daemon/tests/unit/runtime/mounts/surface.test.ts`  |      41 | The contract over the whole route table                          |
-| `packages/protocol/src/lib/daemon-features.ts`               |      39 | One object literal; every new feature name is added at the end   |
+| `packages/daemon/bin/fyd.ts`                                 |      95 | Its wiring, its seams and its factory all live here              |
+| `knip.json`                                                  |      80 | Each new PWA harness or fixture file is listed by hand           |
+| `packages/daemon/tests/unit/runtime/mounts/surface.test.ts`  |      42 | The contract over the whole route table                          |
+| `packages/protocol/src/lib/daemon-features.ts`               |      40 | One object literal; every new feature name is added at the end   |
 | `packages/daemon/tests/unit/runtime/mounts/route-callers.ts` |      35 | One reviewed line per route                                      |
-| `scripts/validate/route-agreement-allowlist.txt`             |      29 | Route drift exemptions                                           |
+| `scripts/validate/route-agreement-allowlist.txt`             |      33 | Route drift exemptions                                           |
 | `packages/daemon/src/lib/runtime/mounts/index.ts`            |      28 | `MountedSubsystems` (118 fields) and the hand-ordered route list |
 | `packages/daemon/tests/unit/audit/not-audited.ts`            |      24 | Audit exemptions per route                                       |
 
@@ -121,13 +121,6 @@ export interface ModuleLifecycle {
   readonly releasing: () => boolean;
 }
 
-/** A job a module can run. The module DECLARES it; the kernel's boot sequence ARMS it (§3.4). */
-export interface BackgroundJob {
-  /** The ActivityLedger name, so a stall names it. */
-  readonly label: string;
-  readonly run: () => Promise<void | (() => void | Promise<void>)>;
-}
-
 /** Everything one module adds to the daemon. Every field is optional. */
 export interface ModuleContribution {
   readonly routes?: readonly ApiRoute[];
@@ -138,8 +131,17 @@ export interface ModuleContribution {
   readonly features?: readonly DaemonFeature[];
 }
 
-/** A built module: what other modules may use (`provides`) and what the host mounts (`contributes`). */
-export interface BuiltModule<Provides, Jobs extends Record<string, BackgroundJob> = Record<never, never>> {
+/**
+ * A built module: what other modules may use (`provides`), the jobs the kernel arms (`jobs`) and what the
+ * host mounts (`contributes`).
+ *
+ * `Jobs` is deliberately NOT one uniform job type. Each job keeps the exact signature it has today, because
+ * the kernel's arming line must not change: the GitHub watcher's `arm()` returns its stop callback
+ * synchronously (`board-github/watcher.ts:140-153`, pushed at once at `fyd.ts:15341`), the warden's `arm()`
+ * returns a promise whose late result is disarmed if shutdown has begun (`fyd.ts:15318-15324`). A uniform
+ * `Promise`-returning type would add a yield or delay a registration.
+ */
+export interface BuiltModule<Provides, Jobs extends object = Record<never, never>> {
   readonly id: string;
   readonly provides: Provides;
   readonly jobs: Jobs;
@@ -154,21 +156,41 @@ export interface BuiltModule<Provides, Jobs extends Record<string, BackgroundJob
  *  - `Needs`: the opened storage, the decided config and the `provides` of the modules it depends on.
  *  - `build` is always async and always awaited, so the wiring never reads `.provides` off a promise.
  */
-export interface DaemonModule<Seams, Needs, Provides, Jobs extends Record<string, BackgroundJob>> {
+export interface DaemonModule<Seams, Needs, Provides, Jobs extends object = Record<never, never>> {
   readonly id: string;
   readonly build: (needs: Needs, seams: Seams, lifecycle: ModuleLifecycle) => Promise<BuiltModule<Provides, Jobs>>;
 }
 
-/** A value one module needs that another module, built later, provides. Filled once by `fyd.ts`. */
+/**
+ * A value one module needs that another module, built later, provides. Filled once by the composition root.
+ * It has no throwing getter: each port that reads it keeps TODAY'S early-read behaviour explicitly, because
+ * those differ — `seedOwnerSession` answers `undefined` (`fyd.ts:8057`), `seedAgenda.close` is a no-op
+ * (`:8063`), `seedAgenda.raise` throws "the agenda is not running yet" (`:8060`), and the warden ledger
+ * reader answers `undefined` (`:10407`). P5 pins each one.
+ */
 export interface LateBound<T> {
-  readonly get: () => T; // throws a named error if read before it is bound, as `seedAgenda` does today
-  readonly bind: (value: T) => void; // called exactly once, by the composition root
+  readonly current: () => T | undefined;
+  readonly bind: (value: T) => void; // exactly once
 }
 ```
 
 These types follow the stateless rules. `BuiltModule` is a readonly structure, and `build` is a
 function of its inputs. A module **never** reaches for another module except through `needs`, a
 `LateBound` it was given, or a type-only import.
+
+**Two job shapes, both armed exactly as today** (this is `start()`, unchanged apart from the object it
+calls):
+
+```ts
+// synchronous stop callback, registered at once — fyd.ts:15341 today
+cleanups.push(board.jobs.githubWatcher.arm());
+
+// asynchronous, must not block "ready", disarms a late result once shutdown began — fyd.ts:15318-15324 today
+void agenda.provides.homesMigrated
+  .then(async () => await warden.jobs.sweep.arm())
+  .then(disarm => (releasing ? disarm() : cleanups.push(disarm)))
+  .catch(() => undefined);
+```
 
 ### 3.2 One module, concretely (`packages/daemon/bin/modules/learning.ts`)
 
@@ -202,16 +224,24 @@ export const learningModule: DaemonModule<void, LearningNeeds, LearningSubsystem
 
 ### 3.3 The host (`fyd.ts`)
 
+**Where the wiring lives during the migration.** Today `start()` calls `world.createSubsystems(...)`
+once (`fyd.ts:14810`), and a test replaces that factory to capture the exact analytics-ingestion
+instance that gets mounted (`boot-lifecycle.test.ts:4475-4487`). So until wave F, the module wiring
+below lives **inside the default `createSubsystems` factory** that `buildWorld` returns. It is still
+invoked once, from the same place, and an override still replaces the whole set with the same instance
+identity. P5 adds the `ModuleLifecycle` to that factory's parameters. Wave F moves the wiring into
+`start()` and moves that test onto a module seam in the same PR.
+
 ```ts
-// inside start(), after storage is open and the address is decided — that part of the boot is unchanged
-const lifecycle = kernelLifecycle(cleanups, () => releasing);
+// inside the default createSubsystems factory (moves to start() in wave F)
 const configFiles = await configFilesModule.build({ storage, paths, changes }, seamsOf.configFiles(world), lifecycle);
-const agendaLink = lateBound<AgendaProvides>('agenda'); // the board reads the agenda lazily today (fyd.ts:10403-10435)
+const agendaLink = lateBound<AgendaProvides>(); // the board reads the agenda lazily today (fyd.ts:10403-10435)
 const board = await boardModule.build({ storage, agenda: agendaLink /* … */ }, seamsOf.board(world), lifecycle);
 const agenda = await agendaModule.build({ storage, board: board.provides /* … */ }, undefined, lifecycle);
 agendaLink.bind(agenda.provides);
 // … one line per module
 
+// back in start(), where the routes are mounted today
 const host = composeModules(base, [pairing, access, configFiles, board, agenda /* … */]);
 const dispatcher = host.dispatcher;
 // The direct carrier needs the HTTP dispatcher AND the socket dispatcher it is part of, so it stays a
@@ -225,8 +255,11 @@ surface.mount(dispatcher, socketDispatcher);
 `composeModules` is pure and lives in `src/lib/runtime/modules.ts`. It replaces `mountedDaemonRoutes`
 and `mountedSocketRoutes`:
 
-- It **concatenates** every module's routes and sockets.
-- It **orders** them by route specificity (the D2 pick, proven equal to today in P3).
+- It **concatenates** every module's routes and sockets into the **inventory** (what the contract
+  tests read), in module order.
+- It gives the router a copy **ordered by route specificity** (the D2 pick, proven equal to today's
+  dispatch in P3). Inventory order and dispatch order are separate facts, and only dispatch order
+  decides which route answers.
 - It **wraps** the HTTP table in today's cross-cutting layers, in today's order: session addressing,
   audit and agent control (`mounts/index.ts:563-567`), then `configAnnouncedRoutes` and
   `observedRoutes` (`:868-871`). The socket table gets its own layers as today (`:891-905`). The
@@ -254,8 +287,8 @@ and tunnel start-up, and the cleanup list.
   own position (`:15338-15363`).
 
 Three phase buckets cannot express that. So **modules declare jobs, and the kernel arms them**: the
-boot calls `board.jobs.githubWatcher.run()` exactly where it calls `subsystems.boardGitHub.arm()`
-today, with the same await and release rule. Adding a new job is still a one-line edit to `start()`.
+boot calls `board.jobs.githubWatcher.arm()` exactly where it calls `subsystems.boardGitHub.arm()`
+today, with the same signature, await and release rule (§3.1). Adding a new job is still a one-line edit to `start()`.
 That is deliberate: when a job runs relative to the others is a fact about the whole boot, not about
 one feature.
 
@@ -284,6 +317,14 @@ module returns its routes in `contributes.routes`. The carrier socket stays a ke
   1. every mounted route is in exactly one fragment;
   2. every fragment line names a mounted route;
   3. every audit rule still names a mounted route, so a stale rule cannot hide.
+
+  The inventory is compared in a **canonical order** (sorted by `METHOD path`, sockets separately),
+  not in mount order. Today `surface.test.ts:2049-2054` compares the raw mounted order with
+  `ROUTE_CALLERS`, but one module's routes are interleaved with others' in that order (`boardRoutes`
+  at `mounts/index.ts:761`, `secureCopyRoutes` at `:774`, `taskPlanRoutes` at `:782`). Grouping by
+  module would reorder the list on every extraction PR, so P3 switches the comparison to canonical
+  order once, deliberately. Which route answers a request is proven separately, by the P3 dispatch
+  test.
 
   These are the same completeness and staleness proofs the lists give today. The review is still a
   diff a person reads; it now lands in the module's own file.
@@ -321,7 +362,7 @@ The daemon workspace already uses globs, apart from six explicit test-support en
 "tests/integration/fixtures/*-scene.tsx"
 ```
 
-Checking both sides of every diff, **68 of the 72 commits** that edited `knip.json` would not have
+Checking both sides of every diff, **75 of the 80 commits** that edited `knip.json` would not have
 needed to. The other 36 entries stay listed by name (benches, smoke scripts, `fy-render-shell`).
 
 Knip's `files: error` rule keeps the convention honest: a harness file whose name misses the glob,
@@ -340,7 +381,7 @@ The columns:
 
 - **Lines (range)**: `fyd.ts` lines attributed to the module, at the probe's propagation cut-off 6,
   with the range over cut-offs 3–12 (`attribute.ts --limit N`).
-- **Commits**: `fyd.ts` commits since 2026-11-01 that changed the module. One commit can count for
+- **Commits**: `fyd.ts` commits since 2026-11-01 00:00 UTC that changed the module. One commit can count for
   several modules.
 
 The line counts are **heuristic**. Most modules move by under 10% across cut-offs, but some move a
@@ -354,13 +395,13 @@ lot: `conversation-import` 74–184, `pairing` 29–128, `access` 183–301, `se
 | `fleet`               | `fleet`, `fleet-reading`, `fleet-refresh`, `fleet-credentials`                                                        |       928 | 928–974     |      16 |
 | `reach`               | `relay`, `webrtc`, `tunnel`                                                                                           |       885 | 796–908     |       6 |
 | `session-reads`       | `session/{reads,transcript,hypermedia,attach,snapshot,observer,monitor,live,events,context,compact-at}`, `transcript` |       857 | 830–857     |       6 |
-| `warden`              | `warden`                                                                                                              |       711 | 636–736     |      16 |
-| `agenda`              | `agenda`, `notifications`, `session/agenda-mode`                                                                      |       705 | 649–705     |      34 |
+| `warden`              | `warden`                                                                                                              |       711 | 636–736     |      17 |
+| `agenda`              | `agenda`, `notifications`, `session/agenda-mode`                                                                      |       705 | 649–705     |      36 |
 | `session-migrate`     | `migrate`                                                                                                             |       643 | 643–870     |       7 |
 | `board`               | `board`, `board-projects`, `task-plans`                                                                               |       586 | 561–718     |      40 |
-| `terminal`            | `terminal`, `tmux`, `session/console`                                                                                 |       446 | 388–461     |      11 |
+| `terminal`            | `terminal`, `tmux`, `session/console`                                                                                 |       446 | 388–461     |      13 |
 | `session-resume`      | `session/{resume,restart,auto-resume}`                                                                                |       443 | 443–460     |       7 |
-| `secrets`             | `secrets`, `secure-copy`, `sign-in-rules`, `sign-in-grants`                                                           |       443 | 377–565     |      27 |
+| `secrets`             | `secrets`, `secure-copy`, `sign-in-rules`, `sign-in-grants`                                                           |       443 | 377–565     |      30 |
 | `transfer`            | `transfer`, `attachments`                                                                                             |       363 | 298–363     |       5 |
 | `pack`                | `pack`, `sub-ferret`, `session/pack`                                                                                  |       351 | 334–351     |      13 |
 | `usage`               | `usage`, `budget`                                                                                                     |       341 | 290–347     |       3 |
@@ -370,10 +411,10 @@ lot: `conversation-import` 74–184, `pairing` 29–128, `access` 183–301, `se
 | `access`              | `grants`, `step-up`, `passkeys`, `security`, `audit`                                                                  |       253 | 183–301     |      15 |
 | `session-handover`    | `handover`                                                                                                            |       238 | 238–273     |       3 |
 | `names`               | `names`                                                                                                               |       230 | 220–230     |       5 |
-| `agent-tools`         | `agent-tools`, `agent-files`, `agent-pins`, `pins`                                                                    |       199 | 199         |      16 |
+| `agent-tools`         | `agent-tools`, `agent-files`, `agent-pins`, `pins`                                                                    |       199 | 199         |      17 |
 | `housekeeping`        | `housekeeping`, `scratch`, `tidy`, `speedups`                                                                         |       195 | 167–195     |       3 |
 | `conversation-import` | `imports` (conversation import, foreign history)                                                                      |       184 | 74–184      |       3 |
-| `input-requests`      | `input-requests`                                                                                                      |       158 | 149–160     |      17 |
+| `input-requests`      | `input-requests`                                                                                                      |       158 | 149–160     |      20 |
 | `mcp`                 | `mcp-inventory`, `mcp-oauth`, `session-mcp`                                                                           |       144 | 134–144     |       5 |
 | `learning`            | `learning`                                                                                                            |       120 | 108–120     |       4 |
 | `board-github`        | `board-github`, `board-import`                                                                                        |       119 | 119         |       7 |
@@ -410,15 +451,15 @@ while moving is written down and fixed in its own PR.
 
 ### 6.1 Prerequisites
 
-| PR  | What                                                                                                                                                                                                                                 | Proof                                                                                                                                                                                                    |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P1  | Knip globs (§4.4)                                                                                                                                                                                                                    | `knip` and `knip --production` give the same report before and after                                                                                                                                     |
-| P2  | Split `DAEMON_FEATURES` by area; duplicate test; health feature snapshot for privileged-loopback and remote requests (§4.3)                                                                                                          | `daemonFeatureList()` deep-equals its old value; both health snapshots pass before and after                                                                                                             |
-| P3  | `src/lib/runtime/modules.ts` types and `composeModules`. `mountedDaemonRoutes`/`mountedSocketRoutes` become `composeModules` over one temporary `legacy` module that returns today's lists. Add the **route-order equivalence test** | The whole `METHOD path minimum caller` table, both sockets and the carrier route (present, refused and absent), stays **byte-identical**; `surface.test.ts` passes unchanged                             |
-| P4  | Per-module contract fragments and `contributes.audit` (§4.2). The fragments start empty; `legacy` holds every line and rule                                                                                                          | `surface.test.ts` passes; the composed lists and rule sets deep-equal today's                                                                                                                            |
-| P5  | **The migration bridge.** `ModuleLifecycle` over today's `cleanups`; `LateBound<T>`; a per-module `seamsOf.<id>(world)` that reads today's `DaemonWorld` fields; a **boot and shutdown trace test**                                  | The trace test records each boot step, job arm and cleanup, in order, for three cases: a clean boot and stop, a stop during boot, and a boot that throws after storage opens. It passes before and after |
+| PR  | What                                                                                                                                                                                                                                                                                                             | Proof                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | Knip globs (§4.4)                                                                                                                                                                                                                                                                                                | `knip` and `knip --production` give the same report before and after                                                                                                                                                                                                                                                                                                                                     |
+| P2  | Split `DAEMON_FEATURES` by area; duplicate test; health feature snapshot for privileged-loopback and remote requests (§4.3)                                                                                                                                                                                      | `daemonFeatureList()` deep-equals its old value; both health snapshots pass before and after                                                                                                                                                                                                                                                                                                             |
+| P3  | `src/lib/runtime/modules.ts` types and `composeModules`. `mountedDaemonRoutes`/`mountedSocketRoutes` become `composeModules` over one temporary `legacy` module that returns today's lists. Add the **dispatch-equivalence test**. Switch the inventory comparison and `ROUTE_CALLERS` to canonical order (§4.2) | The `METHOD path minimum caller` table, both socket tables and the carrier route (present, refused and absent), in canonical order, stays **byte-identical**; the dispatch test passes; the only `surface.test.ts` change is the canonical-order comparison                                                                                                                                              |
+| P4  | Per-module contract fragments and `contributes.audit` (§4.2). The fragments start empty; `legacy` holds every line and rule                                                                                                                                                                                      | `surface.test.ts` passes; the composed lists and rule sets deep-equal today's                                                                                                                                                                                                                                                                                                                            |
+| P5  | **The migration bridge.** `ModuleLifecycle` over today's `cleanups`; `LateBound<T>`; a per-module `seamsOf.<id>(world)` that reads today's `DaemonWorld` fields; the lifecycle parameter on the default `createSubsystems`; a **boot and shutdown trace test**                                                   | The trace test records each boot step, job arm and cleanup, in order, for four cases: a clean boot and stop, a stop during boot, a boot that throws after storage opens, and a stop that lands before the warden's late `arm()` result. It also pins each late-bound port's early-read answer (§3.1) and that a `createSubsystems` override still sees the mounted instances. It passes before and after |
 
-**The route-order equivalence test (P3).** For every pair of mounted routes that share a verb and
+**The dispatch-equivalence test (P3).** For every pair of mounted routes that share a verb and
 could match the same concrete path, it asserts that specificity order picks the same route as
 today's registration order (`ApiRouter` tries routes in registration order, `router.ts:47`). If no
 pair disagrees, specificity ordering is provably the same behaviour and module order stops mattering.
@@ -437,13 +478,14 @@ between them, into one PR). It moves:
 4. its jobs, into `jobs`. The arming line in `start()` stays exactly where it is and only changes
    which object it calls.
 
-`DaemonWorld` keeps its shape. The module reads its seams through P5's `seamsOf.<id>`, so
-`buildWorld(overrides)` behaves the same.
+`DaemonWorld` keeps its shape. The module reads its seams through P5's `seamsOf.<id>` and is built
+inside the default `createSubsystems`, so `buildWorld(overrides)` and a `createSubsystems` override
+behave the same.
 
 Each PR is proven by:
 
 - the full unit and integration suites in CI, plus SIT;
-- the P3 route snapshot, still byte-identical;
+- the P3 canonical route snapshot, still byte-identical;
 - the P4 composed lists, which deep-equal the previous commit's;
 - the P5 boot and shutdown trace, unchanged.
 
@@ -456,7 +498,7 @@ and secrets captures `seedAgenda`, `seedCards` and `seedOwnerSession` (`fyd.ts:8
 | Wave                           | Modules, in PR order                                                                                                                                           | Why this order                                                                                                    |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | **A — pilot** (6 PRs)          | `learning`, `cgroups`, `analytics`, `update`, `worktrees`, `voice` + `renders` + `work-search`                                                                 | Small; routes **and** jobs (`analytics` uses the lane, `update` arms near "ready"); few dependents                |
-| **B — clash most** (11)        | `board`, `board-github`, `agenda`, `secrets`, `input-requests`, `agent-tools`, `access`, `pairing`, `config-files`, `catalogs`, `pack`                         | 197 of the 352 module-touches in §7, so most of the clash relief arrives early                                    |
+| **B — clash most** (11)        | `board`, `board-github`, `agenda`, `secrets`, `input-requests`, `agent-tools`, `access`, `pairing`, `config-files`, `catalogs`, `pack`                         | 206 of the 363 module-touches in §7, so most of the clash relief arrives early                                    |
 | **C — rest of the edges** (13) | `fleet-login`, `models`, `usage`, `mcp`, `shared-drafts`, `names`, `housekeeping`, `conversation-import`, `transfer`, `browser`, `terminal`, `fleet`, `warden` | Medium size, moderate clash                                                                                       |
 | **D — reach** (1)              | `reach`                                                                                                                                                        | Its carriers are built inside the boot sequence (`start():14585-14800`), so it goes once the boot trace is proven |
 | **E — sessions** (7)           | `session-fork`, `session-handover`, `session-migrate`, `session-resume`, `session-reads`, `session-messaging`, `sessions`                                      | The deepest graph and the most late binding; every other module has proven the pattern by then                    |
@@ -477,34 +519,41 @@ new file on its next rebase. It does not need to wait.
 
 ### 7.1 Method (`classify.ts`, `shared-lists.ts`)
 
-1. List the non-release commits since 2026-11-01 that edited `fyd.ts`: 92, all squash-merged PRs.
+1. List the non-release commits from 2026-11-01 00:00 UTC to `c7e6beda1` that edited `fyd.ts`: 95, all
+   squash-merged PRs. (A bare `--since=2026-11-01` would start at the current time of day, so the
+   probes pass a full UTC timestamp.)
 2. For each commit, collect the modules it changed:
    - The module of every **other** daemon file it touched, by path. The shared lists in §1 are
      skipped, because after the split each becomes the module's own fragment.
    - The module of every **`fyd.ts` line** it added or removed. Lines are attributed against **that
      commit's own tree**: `+` lines on the commit and `-` lines on its parent, each with its own
-     `src/` unpacked. A line attributed to the kernel counts as a "wiring" touch.
+     `src/` unpacked. A line attributed to the kernel counts as a "wiring" touch, and so does **any line
+     inside `start()`**: the plan keeps the boot sequence, job arming and cleanup registration there
+     (§3.4), so changing them still edits `fyd.ts` after the split. Such a line also keeps its feature
+     touch. The one retired folder in this history, `quota-failover` (the Warden's old automatic
+     migration), is counted as `warden`.
 3. For each pair of PRs, check whether they were **open at the same time** (`createdAt` to
    `mergedAt`, from `gh pr view`). A pair that overlapped and touched the same file is an
    **exposure**: if their hunks met, whichever merged second had to rebase.
-4. `DAEMON_FEATURES` commits are attributed per changed line. A line with a wire value goes to that
-   value's area. A comment goes to the entry it belongs to. A `DAEMON_FEATURES.<key>` reference (for
-   example in `NOT_YET_REPORTED`) goes to that key's area. Anything else counts as the shared `index`
-   file.
+4. `DAEMON_FEATURES` commits are attributed per changed line to the **file it would live in after the
+   split**. An entry of the object, and the comment above it, go to its area's file. Every other line
+   (the header, `NOT_YET_REPORTED`, the helpers) goes to the shared `index`, even when it names a
+   single feature, because those stay in one file. Two PRs clash when they share an area file or both
+   touch `index`.
 
 ### 7.2 Results (cut-offs 3, 6 and 12)
 
 | Scenario                                                                | Pairs today | Pairs after the split | Change       |
 | ----------------------------------------------------------------------- | ----------: | --------------------: | ------------ |
-| Overlapping PR pairs that both edited `fyd.ts`                          |         221 |                     — | —            |
-| … still sharing a **feature module** after the split                    |           — |                98–103 | −53% to −56% |
-| … still sharing a module **or both touching wiring**                    |           — |               126–139 | −37% to −43% |
-| `DAEMON_FEATURES`: overlapping pairs (same file → same area or `index`) |          39 |                    11 | −72%         |
-| `knip.json`: commits that needed an edit                                |          72 |                     4 | −94%         |
+| Overlapping PR pairs that both edited `fyd.ts`                          |         224 |                     — | —            |
+| … still sharing a **feature module** after the split                    |           — |               101–106 | −53% to −55% |
+| … still sharing a module **or both touching wiring**                    |           — |               130–143 | −36% to −42% |
+| `DAEMON_FEATURES`: overlapping pairs (same file → same area or `index`) |          40 |                    12 | −70%         |
+| `knip.json`: commits that needed an edit                                |          80 |                     5 | −94%         |
 
 Per commit, at cut-off 6:
 
-- 11 of the 92 `fyd.ts` commits changed exactly one module and no wiring; 4 more changed one module
+- 11 of the 95 `fyd.ts` commits changed exactly one module and no wiring; 4 more changed one module
   plus wiring.
 - The median commit changed 3 modules.
 
@@ -526,7 +575,7 @@ Per commit, at cut-off 6:
   `fyd.ts`. Two PRs changing different modules' lines rarely conflict as text. Today a wiring touch is
   an edit somewhere inside a 4,394-line closure.
 - **The remaining coupling is real, and now it is visible.** `agenda` and `board` changed together in
-  24 of the 92 commits. After the split that shows up as `needs` edges in the module types instead of
+  24 of the 95 commits. After the split that shows up as `needs` edges in the module types instead of
   being hidden in a shared closure. Whether they should be one module is a question for later.
 
 ---
@@ -581,7 +630,7 @@ contracts):
 ## 9. Risks, and how each is contained
 
 1. **Route order changes which route answers.** Contained by the P3 equivalence test, the
-   byte-identical snapshot on every PR, and the carrier route kept outside module composition.
+   byte-identical canonical snapshot on every PR, and the carrier route kept outside module composition.
 2. **Boot and shutdown order.** `start()` registers its cleanups in order, with prepends, and runs
    them forward. Jobs arm at specific points under different await and late-release rules. Contained
    by:
@@ -592,10 +641,12 @@ contracts):
 3. **Late-bound cycles.** `buildWorld` has 36 `let` declarations. Some are local state, and some are
    filled in later because two features need each other (`attachmentDaemonId` at `fyd.ts:7780`,
    `seedOwnerSession` at `:8048`, the board's lazy agenda). Each late-bound one becomes a `LateBound<T>`
-   from P5. It keeps today's "not running yet" error when read early, and `fyd.ts` binds it, so the
+   from P5. Each port that reads it keeps its own early-read answer from today (`undefined`, a no-op or
+   a "not running yet" error, §3.1), P5 pins each one, and `fyd.ts` binds it, so the
    cycle is visible in the wiring.
-4. **Test seams churn.** Contained by `seamsOf.<id>(world)` over the unchanged `DaemonWorld`, which
-   is removed only in wave F.
+4. **Test seams churn.** Contained by `seamsOf.<id>(world)` over the unchanged `DaemonWorld` and by
+   building modules inside the default `createSubsystems`, both of which
+   stay until wave F.
 5. **Health feature list changes by accident.** Contained by P2's two health snapshots and the
    unchanged decision in `health.ts`.
 6. **Merge pain during the window.** Contained by the quiet window after &C51/&C52, mechanical moves,

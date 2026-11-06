@@ -126,7 +126,8 @@ export const MODULES: Record<string, readonly string[]> = {
   'work-search': ['work-search', 'mount:work-search'],
   pack: ['pack', 'sub-ferret', 'session/pack', 'mount:pack'],
   names: ['names', 'mount:names'],
-  warden: ['warden', 'mount:warden', 'mount:warden-branches'],
+  // `quota-failover` was the Warden's automatic migration until it was retired; its history belongs to the warden.
+  warden: ['warden', 'quota-failover', 'mount:warden', 'mount:warden-branches'],
   analytics: ['analytics', 'mount:analytics', 'mount:analytics-pricing'],
   learning: ['learning', 'mount:learning'],
   terminal: [

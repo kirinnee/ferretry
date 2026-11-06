@@ -7,10 +7,12 @@
  *     per-module fragments (`NEUTRAL`) say nothing about which module a change belongs to, so they are skipped;
  *   - the module of every `fyd.ts` line it added or removed, attributed by `attribute.ts` against THAT
  *     commit's own tree (`+` lines on the commit, `-` lines on its parent), so a name that was later renamed or
- *     deleted still resolves. A line attributed to the kernel is a "wiring" touch.
+ *     deleted still resolves. A line attributed to the kernel is a "wiring" touch, and so is ANY line inside
+ *     `start()`: the plan keeps the boot sequence, job arming and cleanup registration there (§3.4), so a change
+ *     to them still edits `fyd.ts` after the split even when the line also belongs to a feature.
  * Then each PR's open window (`createdAt`..`mergedAt`, from `gh pr view`) decides which pairs overlapped.
  *
- * Usage (repository root): bun scripts/local/daemon-modules-probe/classify.ts [--since 2026-11-01] [--rev c7e6beda1]
+ * Usage (repository root): bun scripts/local/daemon-modules-probe/classify.ts [--since 2026-11-01T00:00:00Z] [--rev c7e6beda1]
  *   [--limit 6] [--rows]
  */
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -36,7 +38,7 @@ const option = (name: string, fallback: string) => {
   const at = argv.indexOf(name);
   return at === -1 ? fallback : (argv[at + 1] ?? fallback);
 };
-const since = option('--since', '2026-11-01');
+const since = option('--since', '2026-11-01T00:00:00Z');
 const rev = option('--rev', 'HEAD');
 const limit = Number(option('--limit', '6'));
 
@@ -47,14 +49,31 @@ async function run(command: readonly string[]): Promise<string> {
   return out;
 }
 
+interface Side {
+  readonly attribution: Attribution;
+  /** `start()`'s first and last line, 0-based, in this version. */
+  readonly start: readonly [number, number];
+}
+
+/** The 0-based line range of `export async function start(` up to the next top-level declaration. */
+function startRange(text: string): readonly [number, number] {
+  const lines = text.split('\n');
+  const first = lines.findIndex(line => /^export async function start\(/.test(line));
+  if (first === -1) return [-1, -2];
+  const next = lines.findIndex(
+    (line, index) => index > first && /^(export\s+)?(async\s+)?(function|const|let|class|interface|type)\s/.test(line),
+  );
+  return [first, (next === -1 ? lines.length : next) - 1];
+}
+
 /** `fyd.ts` at a revision, attributed against that revision's own `src` tree. */
-async function attributionAt(revision: string): Promise<Attribution | undefined> {
+async function attributionAt(revision: string): Promise<Side | undefined> {
   const text = await run(['git', 'show', `${revision}:${FYD}`]);
   if (text === '') return undefined;
   const scratch = await mkdtemp(join(tmpdir(), 'daemon-modules-probe-'));
   try {
     await run(['sh', '-c', `git archive "$1" packages/daemon/src | tar -x -C "$2"`, 'sh', revision, scratch]);
-    return await attribute(text, join(scratch, 'packages/daemon'), limit);
+    return { attribution: await attribute(text, join(scratch, 'packages/daemon'), limit), start: startRange(text) };
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
@@ -94,7 +113,7 @@ for (const entry of log) {
       continue;
     }
     if (line.startsWith('+++') || line.startsWith('---')) continue;
-    let side: Attribution | undefined;
+    let side: Side | undefined;
     let index: number;
     if (line.startsWith('+')) {
       side = after;
@@ -104,10 +123,12 @@ for (const entry of log) {
       index = oldLine++ - 1;
     } else continue;
     if (side === undefined || line.slice(1).trim() === '') continue;
-    let module = side.perLine[index];
+    const { attribution, start } = side;
+    if (index >= start[0] && index <= start[1]) wiring = true;
+    let module = attribution.perLine[index];
     if (module === IMPORT_LINES)
       // an import moves with the module that uses it
-      module = (line.match(/[A-Za-z_$][\w$]*/g) ?? []).map(token => side?.nameModule.get(token)).find(Boolean);
+      module = (line.match(/[A-Za-z_$][\w$]*/g) ?? []).map(token => attribution.nameModule.get(token)).find(Boolean);
     if (module === 'kernel') wiring = true;
     else if (module !== undefined) modules.add(module);
   }

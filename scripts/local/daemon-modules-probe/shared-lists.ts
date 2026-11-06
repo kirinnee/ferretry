@@ -2,16 +2,16 @@
  * The two shared lists the plan splits without touching the daemon (`docs/design/daemon-plugins.md` §4.3–4.4):
  *
  *   features — every commit that edited `packages/protocol/src/lib/daemon-features.ts`, each changed line
- *              attributed to a feature AREA (the first segment of a wire value, `agenda` of `agenda.snooze.1`):
- *              a line carrying a wire value is that value's area; a line naming `DAEMON_FEATURES.<key>` is that
- *              key's area; a comment or blank line inside the object belongs to the entry it precedes; anything
- *              else (the header, `NOT_YET_REPORTED` scaffolding, the helpers) is `index`, which stays shared after
- *              the split. Then overlapping PR pairs that edited the file vs. pairs that share an area or both edit
+ *              attributed to the FILE it would live in after the split (`areasOf`): an area file named by the
+ *              first segment of a wire value (`agenda` of `agenda.snooze.1`) for the object's entries and their
+ *              comments, and the shared `index` for everything else (the header, `NOT_YET_REPORTED`, the helpers),
+ *              because those stay in one file after the split. Then overlapping PR pairs that edited the file vs.
+ *              pairs that share an area or both edit
  *              `index`.
  *   knip     — every commit that edited `knip.json`: would the two proposed globs have made every changed line
  *              (both sides of the diff) unnecessary?
  *
- * Usage (repository root): bun scripts/local/daemon-modules-probe/shared-lists.ts [--since 2026-11-01] [--rev HEAD]
+ * Usage (repository root): bun scripts/local/daemon-modules-probe/shared-lists.ts [--since 2026-11-01T00:00:00Z] [--rev HEAD]
  */
 const FEATURES = 'packages/protocol/src/lib/daemon-features.ts';
 const KNIP = 'knip.json';
@@ -22,7 +22,7 @@ const option = (name: string, fallback: string) => {
   const at = argv.indexOf(name);
   return at === -1 ? fallback : (argv[at + 1] ?? fallback);
 };
-const since = option('--since', '2026-11-01');
+const since = option('--since', '2026-11-01T00:00:00Z');
 const rev = option('--rev', 'HEAD');
 
 async function run(command: readonly string[]): Promise<string> {
@@ -46,33 +46,24 @@ async function commitsTouching(file: string): Promise<{ sha: string; pr: number 
     });
 }
 
-/** The area of every line of one version of the features file. */
+/**
+ * The FILE every line of one version of the features file would live in after the split: a line inside the
+ * `DAEMON_FEATURES` object (an entry, or the comment above it) goes to its area's file; every other line —
+ * the header, `NOT_YET_REPORTED`, the helpers, even one naming a single feature — stays in the shared `index`.
+ */
 function areasOf(text: string): string[] {
   const lines = text.split('\n');
   const areas = lines.map(() => 'index');
-  const keyArea = new Map<string, string>();
   const open = lines.findIndex(line => /export const DAEMON_FEATURES\s*=\s*\{/.test(line));
   const close = lines.findIndex((line, index) => index > open && /^\}\s*as const;/.test(line));
   let pending: number[] = [];
-  let pendingKey: string | undefined;
   for (let index = open + 1; open !== -1 && index < close; index++) {
-    const line = lines[index] ?? '';
     pending.push(index);
-    pendingKey = line.match(/^\s*([A-Za-z_$][\w$]*)\s*:/)?.[1] ?? pendingKey;
-    const area = line.match(/'([a-z][a-z0-9-]*)\.[a-z0-9.-]+'/)?.[1];
+    const area = (lines[index] ?? '').match(/'([a-z][a-z0-9-]*)\.[a-z0-9.-]+'/)?.[1];
     if (area === undefined) continue;
     for (const owned of pending) areas[owned] = area;
-    if (pendingKey !== undefined) keyArea.set(pendingKey, area);
     pending = [];
-    pendingKey = undefined;
   }
-  lines.forEach((line, index) => {
-    if (areas[index] !== 'index') return;
-    const named = [...line.matchAll(/DAEMON_FEATURES\.([A-Za-z_$][\w$]*)/g)]
-      .map(match => keyArea.get(match[1] ?? ''))
-      .find(Boolean);
-    if (named !== undefined) areas[index] = named;
-  });
   return areas;
 }
 

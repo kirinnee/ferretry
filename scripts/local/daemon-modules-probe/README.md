@@ -17,7 +17,7 @@ and the run takes about two minutes.
 
 ```bash
 bun scripts/local/daemon-modules-probe/attribute.ts --limit 6
-bun scripts/local/daemon-modules-probe/classify.ts --rev c7e6beda1 --limit 6
+bun scripts/local/daemon-modules-probe/classify.ts --rev c7e6beda1 --limit 6   # history from 2026-11-01T00:00:00Z by default
 bun scripts/local/daemon-modules-probe/shared-lists.ts --rev c7e6beda1
 ```
 
