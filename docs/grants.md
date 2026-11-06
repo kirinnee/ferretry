@@ -101,7 +101,7 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 `mayTrustDirectLoopback`) is now about the **place**, never the owner: it admits only `privilegedOnly` routes
 — a local terminal attach — through `arrivedPrivileged`, and grants nothing.
 
-## Eight capabilities, two axes
+## Nine capabilities, two axes
 
 | capability   | what it covers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -113,6 +113,7 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 | `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `sharing`    | making catalogs of skills and MCP setups, freezing items into them, listing one item in many catalogs, choosing the default catalog, one-tap Add into it and its Undo, seeing what changed between versions, publishing a new version of an item, making a kept version current and retiring one, and exporting a signed file ([catalogs.md](catalogs.md#the-publisher-side)); a ferret reads only the current version of an item, older versions and their changes are the owner's; no new passkey act |
+| `voice`      | `use`: streaming a person's speech to this machine to be turned into text (it spends the machine's CPU and memory); `configure`: installing, removing and tuning the machine's speech engine, a ~500 MB download and a native library loaded on the host ([design/voice-modes.md](design/voice-modes.md) §4.1); every voice route is `caller: 'person'`                                                                                                                                                 |
 
 **Leaving a ferret alone is `warden.configure`.** `POST /v1/warden/leave` keeps the Warden off one flagged
 or cleared ferret for an hour, four, or until its status changes ([config-files.md](config-files.md#the-warden)).
@@ -233,7 +234,7 @@ closed would make a fresh remote session useless until somebody walked to the ma
 **The primary security layer is locality.** A remote caller can never turn a capability on. The passkey
 **unlock** is the **second layer**: a governed caller does nothing until its device unlocks the machine,
 and the unlock then stands in for the step-up over every `configure` and the `use` of `terminal`,
-`browser`, `pairing`, `secrets` and `sharing` — except minting a code, widening a device, sealing secrets for
+`browser`, `pairing`, `secrets` and `sharing` — and, for `voice`, every `configure` (its `use` is plain operation) — except minting a code, widening a device, sealing secrets for
 another machine ([secrets.md](secrets.md#copying-secrets-to-another-machine)), or turning "what agents
 may control" back ON (terminals/browsers/files) from a remote device, which always want a passkey for
 that act ([design/zero-trust.md](design/zero-trust.md) B1). Turning one of those three OFF never asks
@@ -381,18 +382,82 @@ device can only widen what it holds, so only the machine could turn Sharing on. 
 once, at boot** (owner decision 2026-10-31: sharing must start without a command at the machine;
 `sharing-follows-pairing.ts`). A device gets Sharing on both axes only when ALL of these hold:
 
-- its stored record has **every other capability fully on** and Sharing fully off — a device that held everything
-  before Sharing existed, what it would hold if it were paired today (the owner's phone);
+- its stored record has **the seven capabilities that existed before Sharing fully on** (`fleet`, `terminal`,
+  `browser`, `filesystem`, `warden`, `pairing`, `secrets`) and Sharing fully off — a device that held everything
+  before Sharing existed, what it would hold if it were paired today (the owner's phone). Capabilities added after
+  Sharing (`voice`) are not asked for: they are filled off on such a device;
 - the daemon-wide document is readable and has **Pairing fully on** (the operator's gate on handing out access);
 - **no grant-journal record ever names its Sharing** — a Sharing set by hand is never undone;
 - **no grant-journal record names the device at all since Sharing shipped** (v4.177.0): whoever changed it since
-  saw Sharing and decided.
+  saw Sharing and decided. A record whose time cannot be parsed counts as since: it fails closed and withholds the
+  device (the same rule holds for the Voice repair below).
 
 Each repair is recorded in the grant journal as `daemon:sharing-follows-pairing`, after its write, so it happens
 once and `fy daemon config history` says why; a write whose record failed is said at boot. The whole journal is
 read; a journal over 8 MiB, or a line or a file that will not read, repairs nothing and says so. A device that
 held less than everything is never widened by this. It can be turned on in the app (Settings › Devices) by a
 device that has Sharing and may manage devices, or at the machine with `fy device grant <device> sharing --use`.
+
+### Capability nine was added: `voice`
+
+The questions above, answered for it ([design/voice-modes.md](design/voice-modes.md) §4.1):
+
+1. **What does somebody reach for this switch to STOP?** A paired device streaming audio to this machine and
+   using its CPU and memory for recognition (`use`), or installing, removing and retuning the speech engine —
+   a ~500 MB download and a native library loaded on the host (`configure`).
+2. **Does switching it off also stop the thing that undoes it?** No. Turning `voice` off for remote callers
+   touches no credential and no device; revoking a lost phone is still `pairing`. There is no ordering to
+   follow, so nothing like `pairing`'s "revoke FIRST" note is on the switch (`COARSE_SWITCH_ALSO_STOPS` has no
+   `voice` entry, as it has none for `secrets` or `sharing`).
+3. **So the way back on the control** is the sentence every capability's remote turn-off carries: the host
+   command `fy daemon config set voice --use`. (`config set <capability>` takes any name in
+   `DAEMON_CAPABILITIES`, so `voice` needs no command of its own.)
+
+- **`voice.configure` needs a step-up, `voice.use` does not.** Every `configure` asks (`demandNeedsStepUp`); the
+  `use` of `voice` is a person speaking to their own machine and is ordinary operation, so it is not in the
+  set of `use` axes that ask. The unlock still gates it like every other governed call.
+- **Every voice route will be `caller: 'person'`.** The audio stream (`voice` / `use`) and every mutation —
+  install, remove, threads, caps, the `voice.yaml` engine block (`voice` / `configure`) — is `operator` with
+  `caller: 'person'`. A ferret's own session credential (and the warden's) is ungoverned by grants, so a capability
+  demand alone would let a ferret install a native runtime or stream audio by simply not being a grant caller;
+  `caller: 'person'` refuses it `403 owner_only`. **No route uses `voice` yet** — this change adds the capability,
+  its grants, labels and repair; the stream and install routes arrive in later slices and are built against this note.
+- **A newly paired device holds `voice` on both axes**, by the same rule as every capability: `FULL_DEVICE_GRANTS`
+  is every capability fully on (see "Permissive by default" above), and the daemon-wide default
+  (`DEFAULT_CAPABILITY_GRANTS`) is both axes enabled, so a fresh pairing gets `voice` exactly as it got `sharing`.
+  A `fy pair --limited` device gets it OFF, like every capability but `fleet.use`. Because "a full code minted from
+  another device is refused unless that device holds every capability itself", a device that was left with Voice
+  off cannot mint a full code until it is widened.
+- **Devices paired before `voice` existed start with Voice OFF** (the fill-missing rule in "Per-device grants"),
+  and then ONE boot repair widens it, as Sharing's did (owner decision D5 (a); `voice-follows-pairing.ts`, sharing one
+  rule with Sharing's in `follows-pairing.ts`). A device gets Voice on both axes only when ALL of these hold:
+  - its stored record has **every one of the eight capabilities before Voice — Sharing included — fully on** and Voice
+    fully off: a device that held everything, what it would hold if it were paired today (the owner's phone);
+  - the daemon-wide document is readable and has **Pairing fully on**;
+  - **no grant-journal record ever names its Voice** (`<device>/voice.*`) — a Voice set by hand is never undone;
+  - **no grant-journal record names the device at all since Voice shipped** (`VOICE_RELEASED_AT`): whoever changed it
+    since saw Voice and decided. The one exception is `daemon:sharing-follows-pairing`, the Sharing repair's record
+    from the same boot — that is the daemon, not somebody deciding, and counting it would stop the Voice repair for the
+    very device that needs both. A record whose time cannot be parsed counts as since Voice shipped: it fails closed
+    and withholds the device.
+
+  Each repair is recorded in the grant journal as `daemon:voice-follows-pairing`, after its write; the whole
+  journal is read, and a journal over 8 MiB, or a line or a file that will not read, repairs nothing and says so at boot.
+  A device that held less than everything is never widened by it. It can be turned on in the app (Settings › Devices) by a
+  device that has Voice and may manage devices, or at the machine with `fy device grant <device> voice --use --configure`.
+
+- **The two repairs run in order, Sharing first.** The Voice repair needs Sharing on, so a device from before Sharing ends
+  with both only if Sharing's repair has already run: `start` runs `repairSharing`, then `repairVoice`. A device that
+  already held Sharing (paired after it shipped, before Voice) gets only Voice.
+- **Sharing's repair is pinned to the seven capabilities that existed before Sharing** (`CAPABILITIES_BEFORE_SHARING`:
+  `fleet`, `terminal`, `browser`, `filesystem`, `warden`, `pairing`, `secrets`), and Voice's to those plus `sharing`
+  (`CAPABILITIES_BEFORE_VOICE`). Both were once "every capability but this one", computed from `DAEMON_CAPABILITIES`;
+  once `voice` existed and was off, a device upgrading straight from before Sharing would fail that test and the Sharing
+  repair would never fire. A repair's "held everything before" set is a historical fact and is named, never derived.
+- **`VOICE_RELEASED_AT` is a conservative bound, not the release instant.** It is set to the day this capability was
+  built; a journal record between it and the real release only withholds Voice from that device (the owner turns it on
+  by hand), while a late bound could widen a device somebody had already decided about. It is to be set to the actual
+  release instant when the first build carrying `voice` is cut, as Sharing's was. A declared GAP, not a silent one.
 
 Each instance above cites a command. **Verify a cited command exists before adding one**, and verify it a
 second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` — that is `--replace`, so
@@ -703,6 +768,8 @@ from. This is the version-skew rule in `packages/protocol/src/lib/version-skew.t
   **Devices paired before `sharing` existed therefore start with Sharing OFF**, except the one boot repair for a
   device that held every other capability (see "Capability eight was added"). Any other device: in the app by a
   device that has Sharing and may manage devices, or at the machine with `fy device grant <device> sharing --use`.
+  **The same holds for `voice`**, with its own one-time repair; `upgrade-grants.test.ts` also keeps a v4.283 file (eight
+  capabilities, before `voice`) and runs both repairs on both fixtures in the boot's order (see "Capability nine was added").
 
 ### Changing a device's grants
 

@@ -16,7 +16,7 @@ import type { EnforcedGrants } from './types.ts';
  * PERMISSIVE, and chosen rather than shrugged at. The governing principle is *control as much as
  * possible from the UI, with a security layer for the cautious* — so a person should be able to do
  * everything from a browser until they decide otherwise, and the restriction is something they turn
- * on rather than a wall they start behind. Both axes are therefore enabled for all eight capabilities,
+ * on rather than a wall they start behind. Both axes are therefore enabled for all nine capabilities,
  * `pairing` included — see `docs/grants.md` for why the one that hands out credentials needs no
  * exception: a caller who is not on this host can switch it off and can never switch it back on.
  *
@@ -44,6 +44,7 @@ export const DEFAULT_CAPABILITY_GRANTS: CapabilityGrants = {
   pairing: { use: true, configure: true },
   secrets: { use: true, configure: true },
   sharing: { use: true, configure: true },
+  voice: { use: true, configure: true },
 };
 
 /**
@@ -98,6 +99,10 @@ export function demandNeedsStepUp(demand: CapabilityDemand): boolean {
  *
  * `sharing.use` is here because it makes this machine VOUCH for something: an export is signed with the
  * daemon identity and handed to people outside it (`docs/grants.md`, capability eight).
+ *
+ * `voice.use` is NOT here, deliberately: streaming audio to be recognised is ordinary operation, a person speaking to
+ * their own machine, and it is the `configure` axis (installing a native engine) that reaches past the daemon
+ * — and every `configure` already asks (`docs/grants.md`, capability nine).
  */
 const STEP_UP_USE_CAPABILITIES: ReadonlySet<DaemonCapability> = new Set([
   'terminal',
@@ -182,6 +187,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   pairing: 'device pairing',
   secrets: 'the secret store',
   sharing: 'catalog sharing',
+  voice: 'speech recognition',
 };
 
 /** The capability as an operator reads it, for a report row or a refusal. */

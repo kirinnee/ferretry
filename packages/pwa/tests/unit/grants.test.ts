@@ -15,6 +15,7 @@ import {
   axisLabel,
   axisQuestion,
   axisRefusal,
+  capabilityBlurb,
   capabilityLabel,
   capabilityNoun,
   capabilityReach,
@@ -211,6 +212,24 @@ describe('grant vocabulary', () => {
     expect(originNote(entry({ origin: 'default' }))).toContain('default');
   });
 
+  it('gives every capability one short plain-words line for the per-device list, Voice included', () => {
+    for (const capability of DAEMON_CAPABILITIES) {
+      const blurb = capabilityBlurb(capability);
+      expect(blurb.length).toBeGreaterThan(0);
+      expect(blurb).not.toContain('\n');
+      expect(blurb.length).toBeLessThanOrEqual(80);
+    }
+    expect(capabilityBlurb('voice')).toBe('Speak to this machine, and set up its speech engine.');
+    expect(capabilityLabel('voice')).toBe('Voice');
+    expect(capabilityNoun('voice')).toBe('speech recognition');
+  });
+
+  it('weighs Voice as a moderate handover and words its two acts', () => {
+    expect(capabilityWeight('voice')).toBe('moderate');
+    expect(stepUpAct({ capability: 'voice', axis: 'use' })).toBe('stream your voice to this machine');
+    expect(stepUpAct({ capability: 'voice', axis: 'configure' })).toBe('change the settings for speech recognition');
+  });
+
   it('says how a remote reader gets a switch back, and the order that avoids a lockout', () => {
     expect(remoteRevokeWarning('terminal')).toContain('fy daemon config set terminal --use');
     expect(remoteRevokeWarning('terminal', 'fyd')).toContain('fyd daemon config set terminal --use');
@@ -218,6 +237,10 @@ describe('grant vocabulary', () => {
     expect(remoteRevokeWarning('pairing')).toContain('revoke that device FIRST');
     expect(remoteRevokeWarning('sharing')).toContain('fy daemon config set sharing --use');
     expect(remoteRevokeWarning('sharing')).not.toContain('also stops');
+    // Voice: turning it off stops no remedy (docs/grants.md, capability nine), so the way back is all it carries.
+    expect(remoteRevokeWarning('voice')).toContain('fy daemon config set voice --use');
+    expect(remoteRevokeWarning('voice')).not.toContain('also stops');
+    expect(remoteRevokeWarning('voice')).not.toContain('FIRST');
     expect(grantOnlyAtMachine('fleet')).toContain('fy daemon config set fleet --use');
     expect(grantOnlyAtMachine('fleet')).not.toMatch(/password|unlock/iu);
     expect(grantOnlyAtMachine('fleet', 'fyd')).toContain('fyd daemon config set fleet --use');

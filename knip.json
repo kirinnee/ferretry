@@ -46,6 +46,7 @@
         "harness/machine-home-screenshot.tsx",
         "harness/compact-at-screenshot.tsx",
         "harness/sharing-capability-screenshot.tsx",
+        "harness/voice-capability-screenshot.tsx",
         "harness/catalogs-screenshot.tsx",
         "harness/catalogs-share-screenshot.tsx",
         "harness/catalogs-rows-screenshot.tsx",

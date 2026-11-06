@@ -64,6 +64,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   pairing: 'device pairing',
   secrets: 'the secret store',
   sharing: 'catalog sharing',
+  voice: 'speech recognition',
 };
 
 export const capabilityNoun = (capability: DaemonCapability): string => CAPABILITY_NOUNS[capability];
@@ -78,6 +79,7 @@ const CAPABILITY_LABELS: Readonly<Record<DaemonCapability, string>> = {
   pairing: 'Device pairing',
   secrets: 'Secrets',
   sharing: 'Sharing',
+  voice: 'Voice',
 };
 
 export const capabilityLabel = (capability: DaemonCapability): string => CAPABILITY_LABELS[capability];
@@ -98,6 +100,7 @@ const USE_ACTS: Readonly<Record<DaemonCapability, string>> = {
   pairing: 'add or manage a paired device',
   secrets: 'run a command with a stored secret',
   sharing: 'manage or export a shared catalog',
+  voice: 'stream your voice to this machine',
 };
 
 /**
@@ -158,9 +161,30 @@ const CAPABILITY_REACH: Readonly<Record<DaemonCapability, string>> = {
     'Runs a command with a stored secret in its environment — code on this machine; and sets or deletes stored secrets.',
   sharing:
     'Making catalogs of this machine’s skills and MCP setups and exporting them as signed files, which makes this machine vouch for what they hold. Sharing with named people comes in a later update.',
+  voice:
+    'Streaming your voice to this machine to be turned into text, which uses its processor; and installing, removing or tuning its speech engine.',
 };
 
 export const capabilityReach = (capability: DaemonCapability): string => CAPABILITY_REACH[capability];
+
+/**
+ * What a capability lets a device do, in ONE short line of plain words, for the per-device list where sixteen-plus
+ * switches already crowd a phone. `CAPABILITY_REACH` is the fuller sentence the daemon-wide page carries; this is the
+ * line a person reads beside a device's switches to know what "Voice" is without opening anything else.
+ */
+const CAPABILITY_BLURBS: Readonly<Record<DaemonCapability, string>> = {
+  fleet: 'Look after the agent fleet: accounts, plans and updates.',
+  terminal: 'Open session terminals and type into them.',
+  browser: 'Use the browser the agents work in.',
+  filesystem: 'Read project files and register folders.',
+  warden: 'See and steer fleet supervision.',
+  pairing: 'Add devices and remove them.',
+  secrets: 'Run commands with stored secrets, and set or delete them.',
+  sharing: 'Share skills and MCP setups as signed catalogs.',
+  voice: 'Speak to this machine, and set up its speech engine.',
+};
+
+export const capabilityBlurb = (capability: DaemonCapability): string => CAPABILITY_BLURBS[capability];
 
 /** The two questions, as a person reads them rather than as the wire spells them. */
 const AXIS_LABELS: Readonly<Record<CapabilityAxis, string>> = { use: 'Use', configure: 'Configure' };
@@ -192,7 +216,7 @@ export const REMOTE_ONE_WAY_NOTE =
 /**
  * What switching a capability off ALSO switches off, when that is the thing somebody came here to do.
  *
- * ONE ENTRY TODAY, AND IT IS NOT DECORATION. A capability with no entry (`sharing` in phase 1) stops nothing
+ * ONE ENTRY TODAY, AND IT IS NOT DECORATION. A capability with no entry (`sharing` in phase 1, `voice`) stops nothing
  * beyond its own job, so its switch says nothing extra. Somebody reaches for `pairing` off because a phone was
  * stolen — and that same switch refuses `DELETE /v1/pair/devices/:deviceId`, because both carry
  * `pairing.use`. So the coarse switch disables the remedy the person is reaching for it to apply, and
@@ -351,6 +375,9 @@ const CAPABILITY_WEIGHTS: Readonly<Record<DaemonCapability, AccessWeight>> = {
   // Publishes this machine's own skills and MCP setups to people outside it, signed as this machine. What it
   // hands over is material the owner chose, not control of the host, so it weighs less than pairing.
   sharing: 'moderate',
+  // Streams audio to the machine and spends its processor; configure installs a pinned, hash-checked native engine.
+  // It reaches no files, shell or credentials, so it weighs the same as the other "hands something over" row.
+  voice: 'moderate',
 };
 
 export const capabilityWeight = (capability: DaemonCapability): AccessWeight => CAPABILITY_WEIGHTS[capability];

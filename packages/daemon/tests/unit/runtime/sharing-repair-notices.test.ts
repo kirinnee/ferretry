@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { sharingRepairNotices } from '../../../bin/fyd.ts';
+import { sharingRepairNotices, voiceRepairNotices } from '../../../bin/fyd.ts';
 
 const PHONE = 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa';
 const LAPTOP = 'fy_device_id_cccccccccccccccccccccc';
@@ -32,6 +32,41 @@ describe('what the boot says about the one-time Sharing repair', () => {
       should(sentence).match(/^Sharing was not turned on for devices paired before it existed: /u);
       should(sentence).match(/Settings › Devices/u);
       should(sentence).match(/device grant <device> sharing --use/u);
+    }
+  });
+});
+
+describe('what the boot says about the one-time Voice repair', () => {
+  it('says nothing when there was nothing to do', () => {
+    should(voiceRepairNotices(undefined)).deepEqual([]);
+    should(voiceRepairNotices({ kind: 'repaired', deviceIds: [], unrecorded: [], failed: [] })).deepEqual([]);
+  });
+
+  it('names how many were turned on, and which were turned on without a record or not at all', () => {
+    const said = voiceRepairNotices({
+      kind: 'repaired',
+      deviceIds: [PHONE, LAPTOP],
+      unrecorded: [LAPTOP],
+      failed: ['x'],
+    });
+    should(said).have.length(3);
+    should(said[0]).match(
+      /^Voice was turned on for 2 paired devices that held every other capability from before Voice existed/u,
+    );
+    should(said[0]).match(/daemon config history/u);
+    should(said[1]).equal(`Voice was turned on for ${LAPTOP}, but the grant journal could not record it`);
+    should(said[2]).match(/^Voice could not be turned on for x: the device record could not be written\./u);
+  });
+
+  it('gives each reason it skipped its own sentence, with the way to turn Voice on', () => {
+    const reasons = ['grants-undetermined', 'journal-too-large', 'journal-unreadable', 'failed'] as const;
+    const sentences = reasons.map(reason => voiceRepairNotices({ kind: 'skipped', reason })[0] ?? '');
+    should(new Set(sentences).size).equal(reasons.length);
+    for (const sentence of sentences) {
+      should(sentence).match(/^Voice was not turned on for devices paired before it existed: /u);
+      should(sentence).match(/Settings › Devices/u);
+      should(sentence).match(/device grant <device> voice --use/u);
+      should(sentence).not.match(/Sharing/u);
     }
   });
 });

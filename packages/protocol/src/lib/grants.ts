@@ -75,7 +75,7 @@ import { InstantSchema } from './common.ts';
 /**
  * The capabilities an operator is asked about, in the order they are asked.
  *
- * EIGHT, and the list is closed. Every one of them either reaches out of the daemon's own state onto
+ * NINE, and the list is closed. Every one of them either reaches out of the daemon's own state onto
  * the host — spawning a shell, writing an account's wrapper, opening a browser the operator is
  * signed into, reading a working tree — or decides how much of the host the daemon may spend on its
  * own. Everything the daemon does *inside its own state home* (sessions, tasks, attention, pins) is
@@ -95,6 +95,10 @@ import { InstantSchema } from './common.ts';
  * `sharing` is appended after it for the same reason. Its `use` axis publishes this machine's skills and MCP
  * setups to people who are not its devices, and signs for the machine; its `configure` axis governs only
  * re-granting `sharing` (docs/catalogs.md, docs/grants.md).
+ *
+ * `voice` is appended after it for the same reason. Its `use` axis streams audio to this machine for
+ * recognition, spending its CPU and memory; its `configure` axis installs, removes and retunes the machine's
+ * speech engine, a native library loaded on the host (docs/grants.md, "Capability nine was added: `voice`").
  */
 export const DAEMON_CAPABILITIES = [
   'fleet',
@@ -105,6 +109,7 @@ export const DAEMON_CAPABILITIES = [
   'pairing',
   'secrets',
   'sharing',
+  'voice',
 ] as const;
 export type DaemonCapability = (typeof DAEMON_CAPABILITIES)[number];
 
