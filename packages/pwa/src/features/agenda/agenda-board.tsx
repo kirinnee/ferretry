@@ -1,41 +1,24 @@
 import {
   AGENDA_KIND_LABELS,
   type AgendaAsk,
-  type AgendaBy,
   type AgendaItem,
   type AgendaResponse,
-  type AgendaSnapshot,
   type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 import {
-  ArrowRight,
   BadgeCheck,
-  BookOpen,
   Bot,
   Check,
-  ChevronDown,
-  ChevronRight,
   CircleAlert,
   CircleHelp,
-  Clock3,
   ListChecks,
   ListTodo,
-  LoaderCircle,
   MessageCircleQuestion,
   ShieldQuestion,
   UserRoundCheck,
-  X,
 } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
-import { hasAgendaBrief, visibleWhy } from '../../lib/agenda-inbox.ts';
-import { cn } from '../../lib/class-names.ts';
-import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { Button } from '../../shell/primitives.tsx';
-import { AgendaAnswerControls } from './agenda-answer-controls.tsx';
-import { AgendaBriefSections, PointForm } from './agenda-brief.tsx';
 
 export type AgendaTone = AgendaAsk['kind'] | 'none' | 'unknown';
-type Action = (id: string, action: AgendaResponse | null, dismissed?: boolean) => void;
 
 export const agendaKindMeta = (
   item: Pick<AgendaItem, 'source' | 'ask'>,
@@ -124,9 +107,6 @@ export const describeResponse = (response: AgendaResponse): string => {
 const agentLabel = (name: string | null, session: string | null): string =>
   name ?? session ?? 'an unidentified session';
 
-const actor = (by: AgendaBy, name: string | null, session: string | null): string =>
-  by === 'agent' ? `agent ${agentLabel(name, session)}` : by === 'human' ? 'you' : 'the daemon';
-
 type AgendaResolution = Pick<
   ResolvedAgendaItem,
   'resolvedBy' | 'resolvedByName' | 'resolvedBySession' | 'disposition' | 'response'
@@ -193,295 +173,6 @@ export function resolutionBadge({
     className: 'border-border bg-surface-2 text-muted',
     icon: Check,
   };
-}
-
-const prose = (text: string, className = '') => <PointForm className={cn('kt-attn-prose', className)} text={text} />;
-
-export interface AgendaBoardProps {
-  readonly connection: DaemonConnection;
-  readonly snapshot: AgendaSnapshot | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-  readonly busyId?: string | null;
-  readonly now?: number;
-  readonly onAction: Action;
-}
-
-/** Pure, render-testable agenda surface. Its data and actions are already bound to one daemon connection. */
-export function AgendaBoard({
-  connection,
-  snapshot,
-  loading,
-  error,
-  busyId = null,
-  now = Date.now(),
-  onAction,
-}: AgendaBoardProps) {
-  const [background, setBackground] = useState<Record<string, boolean>>({});
-  const items = (snapshot?.items ?? []).filter(item => item.parked === undefined);
-  const resolved = snapshot?.resolved ?? [];
-  const healthyEmpty = snapshot !== null && !error && items.length === 0 && (snapshot.parseErrors ?? 0) === 0;
-  return (
-    <section
-      className="flex h-full min-h-0 flex-1 flex-col"
-      aria-label="Inbox ledger"
-      data-daemon={connection.daemonId}
-    >
-      <header className="shrink-0 border-b border-border-soft px-panel pb-row-y">
-        <div className="mx-auto flex w-full max-w-2xl items-center gap-sm">
-          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-warn/40 bg-warn/10 text-warn">
-            <CircleAlert size={16} aria-hidden="true" />
-          </span>
-          <div className="min-w-0">
-            <h1 className="m-0 font-display text-title font-semibold tracking-display text-fg">Inbox</h1>
-            <p className="m-0 text-meta text-faint">
-              {healthyEmpty
-                ? 'Nothing needs you.'
-                : `${items.length} unresolved · oldest first · every clear records who did it`}
-            </p>
-          </div>
-        </div>
-      </header>
-      {error && (
-        <p role="alert" className="m-0 border-b border-err/30 bg-err/5 px-panel py-row-y text-meta text-err">
-          Could not verify the agenda: {error}
-        </p>
-      )}
-      {snapshot?.parseErrors !== undefined && snapshot.parseErrors > 0 && !error && (
-        <p role="alert" className="m-0 border-b border-err/30 bg-err/5 px-panel py-row-y text-meta text-err">
-          The daemon reported {snapshot.parseErrors} parse errors; repair the file before trusting this list.
-        </p>
-      )}
-      <div className="min-h-0 flex-1 overflow-y-auto scroll-thin" data-agenda-scroller>
-        <div className="mx-auto w-full max-w-2xl px-panel">
-          {loading && !snapshot ? (
-            <p role="status" className="flex items-center justify-center gap-xs py-8 text-cell text-muted">
-              <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" />
-              Loading the agenda…
-            </p>
-          ) : error && !snapshot ? (
-            <AgendaUnavailable />
-          ) : items.length === 0 && (snapshot?.parseErrors ?? 0) > 0 ? (
-            <AgendaUnavailable damaged />
-          ) : items.length === 0 ? (
-            <div className="py-10 text-center">
-              <Check size={18} className="mx-auto mb-sm text-muted" aria-hidden="true" />
-              <p className="m-0 text-cell font-medium text-fg">Nothing needs you.</p>
-              <p className="m-0 mt-xs text-meta text-faint">Resolved items remain in the audit below.</p>
-            </div>
-          ) : (
-            <ol className="m-0 flex list-none flex-col divide-y divide-border-soft p-0">
-              {items.map((item, index) => (
-                <AgendaRow
-                  key={item.id}
-                  item={item}
-                  oldest={index === 0}
-                  busy={busyId === item.id}
-                  now={now}
-                  background={background[item.id] ?? !collapsesByDefault(item.context ?? '')}
-                  onBackground={() =>
-                    setBackground(value => ({
-                      ...value,
-                      [item.id]: !(value[item.id] ?? !collapsesByDefault(item.context ?? '')),
-                    }))
-                  }
-                  onAction={onAction}
-                />
-              ))}
-            </ol>
-          )}
-          <ResolutionAudit items={resolved} />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function AgendaUnavailable({ damaged = false }: { readonly damaged?: boolean }) {
-  return (
-    <div className="py-10 text-center" role="alert">
-      <CircleAlert size={18} className="mx-auto mb-sm text-err" aria-hidden="true" />
-      <p className="m-0 text-cell font-medium text-fg">The Inbox needs human verification.</p>
-      <p className="m-0 mt-xs text-meta text-faint">
-        {damaged
-          ? 'The daemon reported damaged Inbox data. Repair it before assuming no action is needed.'
-          : 'The Inbox could not be read. Reconnect or repair the paired daemon before assuming no action is needed.'}
-      </p>
-    </div>
-  );
-}
-
-function AgendaRow({
-  item,
-  oldest,
-  busy,
-  now,
-  background,
-  onBackground,
-  onAction,
-}: {
-  readonly item: AgendaItem;
-  readonly oldest: boolean;
-  readonly busy: boolean;
-  readonly now: number;
-  readonly background: boolean;
-  readonly onBackground: () => void;
-  readonly onAction: Action;
-}) {
-  const kind = agendaKindMeta(item);
-  const KindIcon = kind.icon;
-  return (
-    <li
-      data-kind={kind.tone}
-      data-oldest={oldest || undefined}
-      className="kt-attn kt-attn-rail relative min-w-0 py-md pl-sm"
-    >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-sm gap-y-xs">
-        <span className="kt-attn-chip kt-label inline-flex shrink-0 items-center gap-1 px-badge-x py-0.5">
-          <KindIcon size={11} aria-hidden="true" />
-          {kind.label}
-        </span>
-        <span className="mono text-meta text-faint">{agendaReference(item.id)}</span>
-        {oldest && <span className="kt-label kt-attn-ink">oldest</span>}
-        <span className="ml-auto inline-flex items-center gap-xs text-meta text-faint">
-          <Clock3 size={11} />
-          {agendaAge(item.waitingSince, now)}
-        </span>
-      </div>
-      {prose(item.subject, 'mt-xs text-row font-semibold leading-tight text-fg')}
-      {visibleWhy(item) === null ? null : (
-        <Part part="why" icon={<CircleAlert size={11} />} label="Why">
-          {prose(item.why, 'mt-0.5 text-cell leading-base text-muted')}
-        </Part>
-      )}
-      {item.context && (
-        <div data-part="context" className="kt-attn-part min-w-0">
-          <button type="button" className="kt-attn-toggle" aria-expanded={background} onClick={onBackground}>
-            <ChevronRight size={13} className="kt-attn-chevron" />
-            <BookOpen size={11} />
-            <span className="kt-label kt-attn-part-ink">Background</span>
-            {!background && <span className="ml-auto text-meta text-faint">show</span>}
-          </button>
-          {background && prose(item.context, 'pb-xs text-meta leading-base text-muted')}
-        </div>
-      )}
-      {hasAgendaBrief(item) ? (
-        <AgendaBriefSections item={{ ...item, context: undefined }} renderProse={text => prose(text, 'text-cell')} />
-      ) : null}
-      <Part
-        part="action"
-        icon={<ArrowRight size={11} />}
-        label="What clears this"
-        className="kt-attn-part-rail mt-sm pl-sm"
-      >
-        {prose(item.howToResolve, 'mt-0.5 text-cell leading-base text-muted')}
-      </Part>
-      <div className="mt-sm flex flex-col gap-xs">
-        <p className="m-0 text-meta text-faint" data-agenda-action>
-          {kind.action}.
-        </p>
-        {kind.tone === 'unknown' ? (
-          <p role="alert" className="m-0 text-meta text-err">
-            Cannot offer a response for this damaged Inbox item. Repair it before treating it as resolved.
-          </p>
-        ) : item.ask ? (
-          <AgendaAnswerControls ask={item.ask} busy={busy} onRespond={response => onAction(item.id, response)} />
-        ) : (
-          <div className="flex justify-end">
-            <Button size="sm" className="min-h-[44px]" disabled={busy} onClick={() => onAction(item.id, null)}>
-              {busy ? (
-                <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />
-              ) : (
-                <UserRoundCheck size={14} />
-              )}
-              Mark done
-            </Button>
-          </div>
-        )}
-      </div>
-      <div className="mt-sm flex flex-wrap items-center gap-x-sm gap-y-xs text-meta text-faint">
-        <span>
-          {sourceLabel(item.source)} · raised by {actor(item.raisedBy, item.raisedByName, item.raisedBySession)} ·{' '}
-          {new Date(item.waitingSince).toLocaleString()}
-        </span>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onAction(item.id, null, true)}
-          className="ml-auto inline-flex min-h-[44px] items-center gap-xs rounded-control px-cell-x text-meta text-faint hover:bg-surface-2 hover:text-fg disabled:opacity-50"
-        >
-          <X size={13} />
-          Dismiss without answering
-        </button>
-      </div>
-    </li>
-  );
-}
-
-function Part({
-  part,
-  icon,
-  label,
-  children,
-  className = '',
-}: {
-  readonly part: 'why' | 'action';
-  readonly icon: ReactNode;
-  readonly label: string;
-  readonly children: ReactNode;
-  readonly className?: string;
-}) {
-  return (
-    <div data-part={part} className={cn('kt-attn-part min-w-0 mt-sm', className)}>
-      <span className="kt-label kt-attn-part-ink inline-flex items-center gap-1">
-        {icon}
-        {label}
-      </span>
-      {children}
-    </div>
-  );
-}
-
-function ResolutionAudit({ items }: { readonly items: readonly ResolvedAgendaItem[] }) {
-  return (
-    <details className="group mt-md border-t border-border-soft pt-row-y">
-      <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-sm rounded-control text-cell font-medium text-muted">
-        <ChevronDown size={14} className="transition-transform motion-reduce:transition-none group-open:rotate-180" />
-        Resolution audit<span className="mono ml-auto text-meta text-faint">{items.length}</span>
-      </summary>
-      {items.length === 0 ? (
-        <p className="m-0 py-row-y text-meta text-faint">No recorded resolutions.</p>
-      ) : (
-        <ul className="m-0 flex list-none flex-col gap-sm p-0 pb-row-y pt-xs">
-          {items.map(item => {
-            const badge = resolutionBadge(item);
-            const BadgeIcon = badge.icon;
-            return (
-              <li key={`${item.id}:${item.resolvedAt}`} className="min-w-0 text-meta leading-base">
-                <p className="m-0 font-medium text-muted">{item.subject}</p>
-                <p className="m-0 flex flex-wrap items-center gap-x-sm gap-y-xs text-faint">
-                  <span
-                    className={cn(
-                      'inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider',
-                      badge.className,
-                    )}
-                  >
-                    <BadgeIcon size={11} aria-hidden="true" />
-                    {badge.label}
-                  </span>
-                  <span>
-                    {agendaReference(item.id)} · {new Date(item.resolvedAt).toLocaleString()}
-                  </span>
-                </p>
-                {item.response && <p className="m-0 font-medium text-muted">{describeResponse(item.response)}</p>}
-                {item.resolutionNote && prose(item.resolutionNote, 'text-faint')}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </details>
-  );
 }
 
 /*

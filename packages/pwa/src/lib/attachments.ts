@@ -44,11 +44,6 @@ const RETRYABLE_UNLOCK_ERROR_CODES: readonly AttachmentErrorCode[] = ['wrong_pas
 export const isRetryableUnlockError = (code: string | undefined): boolean =>
   code !== undefined && (RETRYABLE_UNLOCK_ERROR_CODES as readonly string[]).includes(code);
 
-export interface UnlockFailure {
-  readonly message: string;
-  readonly retryable: boolean;
-}
-
 export interface TextExtraction {
   readonly method: 'pdfjs' | 'docx-xml';
   readonly characters: number;
@@ -248,10 +243,6 @@ export const validateAttachmentFile = (file: Pick<File, 'size' | 'type'>): Attac
   return (ATTACHMENT_MIME_TYPES as readonly string[]).includes(normalized) ? null : 'unsupported_mime';
 };
 
-/** Is this a recording the composer previews as audio? */
-export const isAudioMime = (mime: string | undefined): boolean =>
-  (AUDIO_MIME_TYPES as readonly string[]).includes(normalizeAttachmentMime(mime));
-
 export const normalizeAttachmentMime = (mime: string | undefined): string => {
   const bare = (mime ?? '').split(';', 1)[0]?.trim().toLowerCase() ?? '';
   return MIME_ALIASES[bare] ?? bare;
@@ -376,33 +367,6 @@ export const isTransientUploadFailure = (error: unknown): boolean => {
   const status = httpStatus(error);
   if (status !== undefined) return status === 408 || status === 429 || status >= 500;
   return error instanceof Error;
-};
-
-export const unlockFailure = (error: unknown): UnlockFailure => {
-  const code =
-    error !== null && typeof error === 'object' && typeof (error as { readonly code?: unknown }).code === 'string'
-      ? (error as { readonly code: string }).code
-      : undefined;
-  return { message: attachmentErrorMessage(error), retryable: isRetryableUnlockError(code) };
-};
-
-export const attachmentFromView = (sessionId: string, view: AttachmentView): StoredTranscriptAttachment => {
-  const textExtraction = isTextExtraction(view.textExtraction) ? view.textExtraction : undefined;
-  const textExtractionFailure = isTextExtractionFailure(view.textExtractionFailure)
-    ? view.textExtractionFailure
-    : undefined;
-  const encrypted = isAttachmentEncryption(view.encrypted) ? view.encrypted : undefined;
-  return {
-    kind: 'attachment',
-    sessionId,
-    attachmentId: view.id,
-    filename: view.filename,
-    mime: view.mime,
-    size: view.size,
-    ...(textExtraction !== undefined && textExtractionFailure === undefined ? { textExtraction } : {}),
-    ...(textExtractionFailure !== undefined && textExtraction === undefined ? { textExtractionFailure } : {}),
-    ...(encrypted === undefined ? {} : { encrypted }),
-  };
 };
 
 export const attachmentApiPath = (sessionId: string, attachmentId: string): string =>

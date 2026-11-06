@@ -4,7 +4,6 @@ import {
   answerAction,
   answerActions,
   answerNote,
-  canDiscussNow,
   cardAnswers,
   hasCustomLabel,
   isTextOnlyAsk,
@@ -136,19 +135,6 @@ describe('the swipe map is built from the card’s answers', () => {
   it('has no down swipe: a card swipes left, up and right only', () => {
     const targets = swipeTargets(agendaItem('A1', { ask: choices('One', 'Two', 'Three') }), 'why this?');
     expect(Object.keys(targets).sort()).toEqual(['left', 'right', 'up']);
-  });
-
-  it('still says whether an item can be discussed now, for the hosts that gate on it', () => {
-    const human = agendaItem('A1', { raisedBy: 'human', raisedBySession: null, raisedByName: null } as never);
-    expect(canDiscussNow(human)).toBe(false);
-    const inDiscussion = agendaItem('A2', {
-      waitingOn: 'ferret',
-      askedAt: '2026-07-31T10:42:00.000Z',
-      waitingFor: 'discussion',
-    });
-    expect(canDiscussNow(inDiscussion)).toBe(false);
-    expect(canDiscussNow(agendaItem('A3'))).toBe(true);
-    expect(canDiscussNow({ kind: 'info' } as never)).toBe(false);
   });
 
   it('gives a choice its recommended option up, then the first other left, then the next right', () => {

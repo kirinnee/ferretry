@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import should from 'should';
 import { Markdown } from '../../src/components/markdown.tsx';
 import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
-import { historyLine, tickedSteps } from '../../src/lib/agenda-inbox.ts';
+import { historyLine } from '../../src/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { mount } from '../support/dom.ts';
@@ -62,22 +62,6 @@ describe('the attention client', () => {
 });
 
 describe('steps and history helpers', () => {
-  test('lays pending ticks over the confirmed ones, in both directions', () => {
-    const item = { steps: ['a', 'b', 'c'], stepsDone: [0, 1] };
-    expect(
-      [
-        ...tickedSteps(
-          item,
-          new Map([
-            [2, true],
-            [0, false],
-          ]),
-        ),
-      ].sort(),
-    ).toEqual([1, 2]);
-    expect([...tickedSteps(item)].sort()).toEqual([0, 1]);
-  });
-
   test('reads the history in local time, asked and updated', () => {
     const line = historyLine(
       [

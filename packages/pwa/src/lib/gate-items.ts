@@ -127,17 +127,9 @@ export const gateWordsFor = (item: AgendaItem, action: InboxAction): GateWords =
   return option.outcome === 'reopen-with-agenda' ? 'required' : 'none';
 };
 
-/** Whether the answer must wait: it needs words and carries none. */
-export const gateHeld = (item: AgendaItem, action: InboxAction): boolean =>
-  gateWordsFor(item, action) === 'required' && !('note' in action && (action.note ?? '').trim() !== '');
-
 /** Whether the answer should first open the words box: it takes words (needed or optional) and carries none yet. */
 export const gateAsksWords = (item: AgendaItem, action: InboxAction): boolean =>
   gateWordsFor(item, action) !== 'none' && !('note' in action && (action.note ?? '').trim() !== '');
-
-/** The option "Not good" is, if the gate has one. */
-export const gateReopenOption = (item: GateItem): AgendaGate['options'][number] | undefined =>
-  item.gate.options.find(option => option.outcome === 'reopen-with-agenda');
 
 /**
  * The gate's answer as the action to send: the choice, and the owner's words as its note. `attached` marks it as the

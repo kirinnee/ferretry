@@ -6,7 +6,6 @@ import {
   parkedUntilWords,
   parkedWords,
   neededByWords,
-  nextOwnerItem,
   sortAgenda,
 } from '../../src/lib/agenda-status.ts';
 import { agendaItem } from '../support/agenda-inbox.tsx';
@@ -89,15 +88,6 @@ describe('sortAgenda', () => {
     ];
     expect(sortAgenda(items).map(item => item.id)).toEqual(['A3', 'A7', 'A5', 'A6', 'A4', 'A2', 'A1']);
     expect(items[0]?.id).toBe('A1');
-  });
-});
-
-describe('nextOwnerItem', () => {
-  it("jumps to the next item that is the owner's turn, wrapping round, and none when nothing is left", () => {
-    const list = [agendaItem('A1'), agendaItem('A2', { waitingOn: 'ferret' }), agendaItem('A3')];
-    expect(nextOwnerItem(list, 'A1')?.id).toBe('A3');
-    expect(nextOwnerItem(list, 'A3')?.id).toBe('A1');
-    expect(nextOwnerItem([agendaItem('A1')], 'A1')).toBeNull();
   });
 });
 

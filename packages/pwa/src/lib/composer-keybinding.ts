@@ -19,9 +19,3 @@ export const composerEnterAction = (
 /** The modified Enter action on a hardware keyboard is always the opposite of bare Enter. */
 export const shiftedComposerEnterAction = (bare: ComposerEnterAction): ComposerEnterAction =>
   bare === 'send' ? 'newline' : 'send';
-
-export const composerEnterHint = (bare: ComposerEnterAction, touchAffected: boolean): string => {
-  if (touchAffected)
-    return bare === 'send' ? 'Enter to send · use New line for a new line' : 'Enter for a new line · use Send to send';
-  return bare === 'send' ? 'Enter to send · Shift+Enter for a new line' : 'Enter for a new line · Shift+Enter to send';
-};

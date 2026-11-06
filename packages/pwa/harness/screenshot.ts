@@ -396,7 +396,6 @@ const SECTIONS = [
   'harness-terminal-deck',
   'harness-runtime-controls',
   'harness-pending-sends',
-  'harness-thinking-indicator',
   // The install stage is deliberately absent: it is taller than a phone, and an
   // element capture inside this fixed gallery clips its top away. It gets a
   // page of its own below instead.
@@ -3698,16 +3697,6 @@ try {
           }
           if (parts.has('sessions')) {
             await page.goto(server.url.toString());
-            // A four-kind ledger is taller than a phone viewport. Chrome may cull
-            // unpainted rows during an element screenshot, so temporarily borrow
-            // a tall viewport to capture the full, real phone-width board.
-            const agendaTarget = join(outDir, `attention-${viewport.name}.png`);
-            await page.setViewportSize({ width: viewport.width, height: 2_400 });
-            const agenda = page.getByLabel('Inbox ledger');
-            await agenda.locator('summary').filter({ hasText: 'Resolution audit' }).click();
-            await captureElement(page, agenda, agendaTarget);
-            await page.setViewportSize({ width: viewport.width, height: viewport.height });
-            process.stdout.write(`📸 Inbox ledger -> ${agendaTarget}\n`);
             // Three pairing screens, because they are three different screens: the
             // cold open a first-timer sees, the confirmation a scanned QR lands
             // on, and what the surface becomes once a daemon is connected.
@@ -3931,13 +3920,6 @@ try {
             await page.locator('[role="option"]').last().waitFor({ state: 'visible' });
             await page.screenshot({ path: paletteTarget });
             process.stdout.write(`📸 ${viewport.name} command palette -> ${paletteTarget}\n`);
-
-            const renameTarget = join(outDir, `${viewport.name}-rename.png`);
-            await page.goto(`${server.url}#rename`);
-            await page.reload();
-            await page.getByRole('dialog', { name: 'Rename session' }).waitFor({ state: 'visible' });
-            await page.screenshot({ path: renameTarget });
-            process.stdout.write(`📸 ${viewport.name} rename sheet -> ${renameTarget}\n`);
 
             const migrateTarget = join(outDir, `${viewport.name}-migrate.png`);
             await page.goto(`${server.url}#migrate`);

@@ -197,10 +197,6 @@ export const askedSurfaces = (state: SurfaceControlState): readonly SurfaceAsked
     .flatMap(kind => state[kind]?.asked ?? [])
     .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 
-/** The ask standing on a surface, if the agent handed it over. */
-export const surfaceAskFor = (state: SurfaceControlState, kind: SurfaceKind, key: string): SurfaceAsked | undefined =>
-  state[kind]?.asked.find(asked => addresses(asked, key));
-
 /** The agent driving a surface right now — its marker unlapsed, and nobody holding the surface. */
 export const surfaceDrivingFor = (
   state: SurfaceControlState,

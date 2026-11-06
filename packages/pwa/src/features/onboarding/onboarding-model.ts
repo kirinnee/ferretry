@@ -73,9 +73,6 @@ const TARGETS: Readonly<Record<SetupTargetId, SetupTarget>> = Object.freeze({
 /** Both answers, this-machine first: it is the shorter journey and the common one. */
 export const SETUP_TARGETS: readonly SetupTarget[] = Object.freeze([TARGETS.this, TARGETS.other]);
 
-/** Total, because the id is a closed union. */
-export const setupTarget = (id: SetupTargetId): SetupTarget => TARGETS[id];
-
 /** Whether a value read back from storage or a link is still one of the two answers. */
 export const isSetupTargetId = (value: unknown): value is SetupTargetId =>
   typeof value === 'string' && Object.hasOwn(TARGETS, value);
@@ -151,10 +148,6 @@ const DOERS: Readonly<Record<SetupTargetId, Readonly<Record<OnboardingDoerId, On
 export const onboardingDoers = (target: SetupTargetId): readonly OnboardingDoer[] =>
   Object.freeze([DOERS[target].agent, DOERS[target].self]);
 
-/** Total, because both ids are closed unions. */
-export const onboardingDoer = (id: OnboardingDoerId, target: SetupTargetId = 'this'): OnboardingDoer =>
-  DOERS[target][id];
-
 /** Whether a value read back from storage or a link is still one of the two answers. */
 export const isOnboardingDoerId = (value: unknown): value is OnboardingDoerId =>
   typeof value === 'string' && Object.hasOwn(DOERS.this, value);
@@ -220,9 +213,6 @@ export const ONBOARDING_ROUTES: readonly OnboardingRoute[] = Object.freeze([
   ROUTES['add-client'],
   ROUTES['add-daemon'],
 ]);
-
-/** Total, because the id is a closed union. */
-export const onboardingRoute = (id: OnboardingRouteId): OnboardingRoute => ROUTES[id];
 
 /** Whether a value read back from storage or a link is still one of the routes we ship. */
 export const isOnboardingRouteId = (value: unknown): value is OnboardingRouteId =>

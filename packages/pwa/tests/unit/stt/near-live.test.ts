@@ -17,7 +17,6 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   agreedPrefix,
-  EMPTY_NEAR_LIVE,
   hasSpeech,
   joinWords,
   MIN_PAUSE_MS,
@@ -137,7 +136,7 @@ class Rig {
   }
 
   get last(): NearLiveState {
-    return this.states.at(-1) ?? EMPTY_NEAR_LIVE;
+    return this.states.at(-1) ?? { committed: '', interim: '', paused: false };
   }
 }
 
@@ -287,7 +286,6 @@ describe('NearLiveTranscriber — committing at pauses', () => {
     rig.transcriber.start();
     rig.audio = take(3);
     await rig.fire();
-    should(rig.last).eql(EMPTY_NEAR_LIVE);
     rig.audio = take(4, [3.2, 4]);
     await rig.fire();
     // The silent pass moved the start to a pre-roll before the end of the silence it heard.

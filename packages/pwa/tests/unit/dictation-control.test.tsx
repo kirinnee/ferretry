@@ -7,7 +7,6 @@ import * as React from 'react';
 import {
   DictationControl,
   type DictationControlProps,
-  dictationStatusCopy,
   dictationTriggerStartsFresh,
 } from '../../src/components/dictation-control.tsx';
 import type { ShortcutHost } from '../../src/hooks/use-dictation-shortcut.ts';
@@ -79,22 +78,6 @@ const reviewText = (container: HTMLElement): HTMLTextAreaElement =>
 
 const stop = (container: HTMLElement): Promise<void> =>
   clickLabelled(container, 'button[aria-label^="Stop recording"]', 'the stop button');
-
-describe('dictationStatusCopy', () => {
-  it('names the real step for every phase', () => {
-    expect(dictationStatusCopy('requesting')).toContain('permission');
-    expect(dictationStatusCopy('recording')).toBe('Recording…');
-    expect(dictationStatusCopy('transcribing')).toBe('Finishing in your browser…');
-    expect(dictationStatusCopy('transcribing', undefined, 'parakeet')).toBe('Transcribing on this device…');
-    expect(dictationStatusCopy('review')).toBe('Review the text, then insert it.');
-    expect(dictationStatusCopy('idle')).toBe('');
-  });
-
-  it('prefers the real failure message over the generic one', () => {
-    expect(dictationStatusCopy('error', 'Microphone blocked.')).toBe('Microphone blocked.');
-    expect(dictationStatusCopy('error')).toBe('Dictation failed.');
-  });
-});
 
 describe('dictationTriggerStartsFresh', () => {
   it('starts a new take only from a clean idle', () => {

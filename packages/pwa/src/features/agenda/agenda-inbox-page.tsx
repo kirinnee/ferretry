@@ -177,9 +177,6 @@ export const inboxCardOrigin = (card: InboxCard, onNavigate: (to: string) => voi
 const failureFor = (failed: readonly FailedAgendaAction[], key: string): string | null =>
   failed.find(failure => failure.key === key)?.message ?? null;
 
-/** The words a page head uses for how many are waiting. */
-export const waitingWords = (count: number): string => (count === 0 ? 'Nothing waiting' : `${count} waiting on you`);
-
 /** A row's age, short: "7h", "now". */
 const shortAge = (waitingSince: string, now: number | undefined): string =>
   agendaAge(waitingSince, now).replace(/^waiting /u, '');

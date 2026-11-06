@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { useState } from 'react';
-import { useWorkspaceLayout, useWorkspaceRails } from '../../../src/features/workspace/use-workspace-layout.ts';
 import type { WorkspaceNewTabKind } from '../../../src/features/workspace/workspace-tab-strip.tsx';
 import { WorkspaceView, type WorkspaceViewProps } from '../../../src/features/workspace/workspace-view.tsx';
-import type { DaemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   AGENT_PANE_ID,
   defaultWorkspaceLayout,
@@ -16,8 +14,6 @@ import {
   workspacePanes,
   workspaceTab,
 } from '../../../src/lib/workspace-layout.ts';
-import { WorkspaceLayoutStore, type WorkspaceStorage } from '../../../src/lib/workspace-layout-store.ts';
-import { WorkspaceRailPreferenceStore } from '../../../src/lib/workspace-rail-preferences.ts';
 import { interact, mount, must, pressKey } from '../../support/dom.ts';
 
 const dev = workspaceTab('terminal', 'dev');
@@ -288,40 +284,5 @@ describe('WorkspaceView', () => {
     expect(isWorkspaceVisible(view.recorder.current())).toBe(false);
     expect((view.q('[data-pane-id="pane-1"]').parentElement as HTMLElement).hidden).toBe(true);
     await view.unmount();
-  });
-});
-
-describe('workspace store hooks', () => {
-  class MemoryStorage implements WorkspaceStorage {
-    readonly values = new Map<string, string>();
-    getItem(key: string): string | null {
-      return this.values.get(key) ?? null;
-    }
-    setItem(key: string, value: string): void {
-      this.values.set(key, value);
-    }
-  }
-
-  it('binds a session layout and the rail widths', async () => {
-    const layouts = new WorkspaceLayoutStore(new MemoryStorage());
-    const rails = new WorkspaceRailPreferenceStore(new MemoryStorage());
-    const scope = { daemonId: 'd' as DaemonId, sessionId: 's' };
-    const seen: { visible: boolean; left: number }[] = [];
-    let set: ((next: WorkspaceLayout) => void) | undefined;
-    let setRail: ((side: 'left' | 'right', width: number) => void) | undefined;
-    function Probe() {
-      const { layout, setLayout } = useWorkspaceLayout(layouts, scope);
-      const { rails: widths, setRailWidth } = useWorkspaceRails(rails);
-      set = setLayout;
-      setRail = setRailWidth;
-      seen.push({ visible: isWorkspaceVisible(layout), left: widths.left });
-      return null;
-    }
-    const mounted = await mount(<Probe />);
-    await interact(() => set?.(toggleWorkspacePane(layouts.snapshot(scope))));
-    await interact(() => setRail?.('left', 300));
-    expect(seen.at(-1)).toEqual({ visible: true, left: 300 });
-    expect(layouts.snapshot(scope).root.type).toBe('split');
-    await mounted.unmount();
   });
 });

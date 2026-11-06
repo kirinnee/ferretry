@@ -4,10 +4,8 @@ import { MachineStepper, shownSteps } from '../../../../../src/features/fleet/sh
 import {
   currentFlow,
   cancelStepper,
-  openSubStepper,
   type StepperFlowInput,
   type StepperState,
-  saveForReuse,
   startStepper,
   stepForward,
 } from '../../../../../src/features/fleet/shell/stepper-model.ts';
@@ -97,19 +95,6 @@ describe('MachineStepper', () => {
     await view.unmount();
   });
 
-  it('confirms leaving from step 1, lists what was saved, and Keep going returns to the step', async () => {
-    const view = await mount(<Host initial={saveForReuse(startStepper(flow), 'Profile Default')} />);
-    await click(view.container, '[data-stepper-back]');
-    expect(text(view.container, '[data-stepper-confirm] p')).toBe('Stop adding a runtime?');
-    expect(text(view.container, '[data-stepper-saved]')).toBe('Profile Default');
-    expect(view.container.querySelector('[data-body]')).toBeNull();
-    expect(view.container.querySelector('[data-stepper-back]')).toBeNull();
-    expect(view.container.querySelector('[data-stepper-cancel]')).toBeNull();
-    await click(view.container, '[data-stepper-keep]');
-    expect(view.container.querySelector('[data-body]')).not.toBeNull();
-    await view.unmount();
-  });
-
   it('Cancel then Stop leaves the stepper; nothing saved means no saved list', async () => {
     const left: string[] = [];
     const view = await mount(<Host initial={startStepper(flow)} left={left} />);
@@ -119,25 +104,6 @@ describe('MachineStepper', () => {
     await click(view.container, '[data-stepper-stop]');
     expect(left).toEqual(['left']);
     expect(view.container.querySelector('[data-left]')).not.toBeNull();
-    await view.unmount();
-  });
-
-  it('Back from a harmless flow leaves without asking, and a sub-stepper returns to its parent', async () => {
-    const left: string[] = [];
-    const harmless = await mount(<Host initial={startStepper({ ...flow, leaveWithoutConfirm: true })} left={left} />);
-    await click(harmless.container, '[data-stepper-back]');
-    expect(left).toEqual(['left']);
-    await harmless.unmount();
-
-    const nested = openSubStepper(startStepper(flow), { ...flow, kind: 'add-login', title: 'Add a login' });
-    const view = await mount(<Host initial={nested} />);
-    expect(view.container.querySelector('[data-machine-stepper]')?.getAttribute('data-machine-stepper')).toBe(
-      'add-login',
-    );
-    await click(view.container, '[data-stepper-back]');
-    expect(view.container.querySelector('[data-machine-stepper]')?.getAttribute('data-machine-stepper')).toBe(
-      'add-runtime',
-    );
     await view.unmount();
   });
 

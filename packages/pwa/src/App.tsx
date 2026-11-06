@@ -354,27 +354,6 @@ export const installOnce = (install: () => void): (() => boolean) => {
 
 const installPortraitLockOnce = installOnce(installPortraitLock);
 
-/**
- * Does this event target own the keystroke?
- *
- * The palette shortcut is registered in the CAPTURE phase on `window`, so a
- * field cannot decline it by handling the event first. Text entry therefore has
- * to be recognised here: Ctrl+K is "delete to end of line" in every readline
- * and GTK text field, and swallowing it inside the composer would break editing
- * to open a palette nobody asked for.
- *
- * Structural, not `instanceof`: the event may originate in another realm — an
- * embedded document, a test DOM — where `instanceof HTMLElement` is false for a
- * perfectly ordinary `<input>`.
- */
-export const isTextEntryTarget = (target: EventTarget | null): boolean => {
-  const element = target as { readonly tagName?: unknown; readonly isContentEditable?: unknown } | null;
-  if (element === null || typeof element !== 'object') return false;
-  if (element.isContentEditable === true) return true;
-  const tagName = typeof element.tagName === 'string' ? element.tagName.toUpperCase() : '';
-  return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
-};
-
 interface ShortcutTargetLike {
   closest?(selector: string): unknown;
 }

@@ -82,7 +82,6 @@ import { Markdown } from '../src/components/markdown.tsx';
 import { MigrateSheet } from '../src/components/migrate-sheet.tsx';
 import { NewSessionPage } from '../src/components/new-session-page.tsx';
 import { QuestionForm } from '../src/components/question-form.tsx';
-import { RenameSheet } from '../src/components/rename-sheet.tsx';
 import { RuntimeEffortControls, RuntimeModelControls } from '../src/components/runtime-controls.tsx';
 import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/components/session-chat-parts.tsx';
 import { SessionDashboard } from '../src/components/session-dashboard.tsx';
@@ -90,9 +89,7 @@ import { SessionTerminalDeck, type TerminalDeckDependencies } from '../src/compo
 import { transcriptEntriesFromLog } from '../src/components/session-workspace-model.ts';
 import { SessionsPage } from '../src/components/sessions-page.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
-import { ThinkingIndicator } from '../src/components/thinking-indicator.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
-import { AgendaBoard } from '../src/features/agenda/agenda-board.tsx';
 import type { AnalyticsRequest } from '../src/features/analytics/analytics-custom-query.tsx';
 import { AnalyticsMetricChart } from '../src/features/analytics/analytics-metric-chart.tsx';
 import {
@@ -1649,11 +1646,6 @@ const harnessSession = {
   },
   directory: '/work/ferretry',
 } as unknown as SessionView;
-
-const harnessChildSession = {
-  ...harnessSession,
-  config: { ...harnessSession.config, parent: 'harness-lead' },
-} as SessionView;
 
 openSidePaneFileTab(scope, 'packages/p../src/shell/side-pane-tabs.tsx');
 openSidePaneFileTab(scope, 'README.md');
@@ -5049,7 +5041,6 @@ function Shell() {
   const menuOpen = window.location.hash === '#menu';
   const paletteOpen = window.location.hash === '#palette';
   const migrateOpen = window.location.hash === '#migrate';
-  const renameOpen = window.location.hash === '#rename';
   const [chatWidth, setChatWidth] = useState<ChatWidth>('balanced');
 
   // The headless browser sizes its window after the first paint, so a viewport
@@ -6446,21 +6437,6 @@ function Shell() {
       render: () => <SettingsPageHarness />,
     },
     {
-      label: 'Inbox ledger',
-      render: () => (
-        <Card className="min-h-[360px] overflow-hidden">
-          <AgendaBoard
-            connection={daemon}
-            snapshot={AGENDA}
-            loading={false}
-            error={null}
-            now={HARNESS_NOW}
-            onAction={() => {}}
-          />
-        </Card>
-      ),
-    },
-    {
       label: 'Agenda',
       render: () => <AgendaHarness />,
     },
@@ -6762,19 +6738,6 @@ function Shell() {
             <div className="h-40">
               <ThreadSkeleton />
             </div>
-          </PanelBody>
-        </Card>
-      ),
-    },
-    {
-      label: 'Thinking indicator',
-      render: () => (
-        <Card className="min-w-0" id="harness-thinking-indicator">
-          <PanelHeader>
-            <Label>Thinking indicator</Label>
-          </PanelHeader>
-          <PanelBody>
-            <ThinkingIndicator activity="Writing the migration tests (34s · 2.1k tokens)" since={Date.now() - 34_000} />
           </PanelBody>
         </Card>
       ),
@@ -7353,13 +7316,6 @@ function Shell() {
         >
           <div className="p-panel text-ui">The shared modal shell, swipe handle and all.</div>
         </BottomSheet>
-        <RenameSheet
-          connection={daemon}
-          createClient={async () => ({ rename: async () => harnessChildSession })}
-          onClose={() => {}}
-          open={renameOpen}
-          view={harnessChildSession}
-        />
         <MigrateSheet
           canMutate
           connection={daemon}

@@ -15,7 +15,6 @@ import {
   profileScopeBadge,
   profileScopeWord,
   profilesWithLayer,
-  reuseLabel,
   settingsEntries,
   settingsValue,
   splitCommandLine,
@@ -72,7 +71,6 @@ describe('words', () => {
     expect(listed([])).toBe('');
     expect(listed(['a'])).toBe('a');
     expect(listed(['a', 'b', 'c'])).toBe('a, b and c');
-    expect(reuseLabel('modelSets', 'Heavy')).toBe('Model set Heavy');
   });
 
   it('names the profiles that have a component as their own layer', () => {

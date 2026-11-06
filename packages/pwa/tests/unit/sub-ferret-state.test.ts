@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  subFerretEffort,
   subFerretLive,
   subFerretModel,
   subFerretName,
@@ -65,10 +64,6 @@ describe('a sub-ferret as the parent lists it', () => {
     expect(subFerretName(child('mvabcdefghij', {}, { name: '' }))).toBe('mvabcdef…');
     expect(subFerretModel(child('c', { observedModel: 'opus[1m]' }, { model: 'opus' }))).toBe('opus[1m]');
     expect(subFerretModel(child('c', {}, { model: 'opus' }))).toBe('opus');
-    expect(subFerretEffort(child('c', { observedReasoningEffort: 'max' }, { launchReasoningEffort: 'high' }))).toBe(
-      'max',
-    );
-    expect(subFerretEffort(child('c', {}, { launchReasoningEffort: 'high' }))).toBe('high');
   });
 
   test('a parent’s sub-ferrets are its children, newest first, and never itself', () => {

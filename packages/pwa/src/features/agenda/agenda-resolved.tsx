@@ -12,10 +12,6 @@ import { cn } from '../../lib/class-names.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { agendaReference, describeResponse, resolutionBadge } from './agenda-board.tsx';
 
-/** Newest resolution first: the one just made is the one the reader is looking for. */
-export const byNewestResolution = (left: ResolvedAgendaItem, right: ResolvedAgendaItem): number =>
-  Date.parse(right.resolvedAt) - Date.parse(left.resolvedAt);
-
 /** When it was cleared, short and in the reader's own time: "Oct 23, 8:54 AM" — no year, no seconds. */
 export const resolvedWhen = (instant: string, timeZone?: string): string =>
   new Date(instant).toLocaleString(undefined, {

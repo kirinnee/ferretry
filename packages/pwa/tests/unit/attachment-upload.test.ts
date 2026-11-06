@@ -1,11 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { bytesToBase64, uploadAttachment } from '../../src/lib/attachment-upload.ts';
-import {
-  attachmentTypeLabel,
-  isAudioMime,
-  normalizeAttachmentMime,
-  validateAttachmentFile,
-} from '../../src/lib/attachments.ts';
+import { attachmentTypeLabel, normalizeAttachmentMime, validateAttachmentFile } from '../../src/lib/attachments.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
@@ -78,8 +73,6 @@ describe('uploadAttachment', () => {
 describe('attachment types', () => {
   test('accepts audio by its common aliases and any text type, and labels audio', () => {
     expect(normalizeAttachmentMime('audio/x-m4a')).toBe('audio/mp4');
-    expect(isAudioMime('audio/mp3')).toBe(true);
-    expect(isAudioMime('image/png')).toBe(false);
     expect(validateAttachmentFile({ size: 3, type: 'audio/webm' })).toBeNull();
     expect(validateAttachmentFile({ size: 3, type: 'text/x-typescript' })).toBeNull();
     expect(attachmentTypeLabel('audio/wave')).toBe('Audio recording');

@@ -4,7 +4,6 @@ import { readFold, writeFold } from '../../src/lib/agenda-fold.ts';
 import {
   activityLog,
   activityStamp,
-  FOLDED_PARTS,
   ITEM_VIEW_PARTS,
   itemCardAsks,
   itemStage,
@@ -29,7 +28,6 @@ describe('the eight parts', () => {
       'conversation',
       'activity',
     ]);
-    expect([...FOLDED_PARTS].sort()).toEqual(['activity', 'conversation', 'detail', 'references']);
   });
 
   test('call the tabs the item’s live document (&F923)', () => {

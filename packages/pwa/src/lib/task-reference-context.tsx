@@ -1,10 +1,6 @@
 /** Shared proof for task references: a board slice's cards, and every card id the machine holds. */
-import { createContext, type ReactNode, useContext, useMemo } from 'react';
 import type { TaskReferenceResolver } from './references.ts';
 import { resolveCardReference } from './session-cards.ts';
-
-const unresolved: TaskReferenceResolver = () => false;
-const TaskReferenceContext = createContext<TaskReferenceResolver>(unresolved);
 
 /** A card the host holds, with the id it had as an old task of this session when it was imported. */
 interface ReferenceCard {
@@ -24,21 +20,3 @@ export const createTaskReferenceResolver = (
 ): TaskReferenceResolver => {
   return id => resolveCardReference(cards, id) !== null || taskIds?.has(id.toUpperCase()) === true;
 };
-
-/**
- * The host owns fetching and daemon scoping. This provider only supplies its
- * already-scoped, current snapshot to Markdown, so it cannot create a second
- * cache that might carry task ids across paired daemons.
- */
-export function TaskReferenceProvider({
-  children,
-  tasks,
-}: {
-  readonly children: ReactNode;
-  readonly tasks: readonly ReferenceCard[];
-}) {
-  const resolver = useMemo(() => createTaskReferenceResolver(tasks), [tasks]);
-  return <TaskReferenceContext.Provider value={resolver}>{children}</TaskReferenceContext.Provider>;
-}
-
-export const useTaskReferenceResolver = (): TaskReferenceResolver => useContext(TaskReferenceContext);

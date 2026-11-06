@@ -29,11 +29,6 @@ export interface ToolResultData {
   readonly [key: string]: unknown;
 }
 
-export interface ToolResultImage {
-  readonly mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
-  readonly data: string;
-}
-
 export type ToolKind = 'bash' | 'read' | 'write' | 'edit' | 'patch' | 'search' | 'plan' | 'wait' | 'generic';
 
 export interface ExtractedTool {
@@ -376,28 +371,6 @@ export const langFromPath = (path?: string): string | undefined => {
   if (/^dockerfile$/i.test(base)) return 'dockerfile';
   const extension = base.includes('.') ? (base.split('.').pop() ?? '').toLowerCase() : '';
   return EXTENSION_LANGUAGES[extension];
-};
-
-const INLINE_IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
-
-/**
- * Images a tool result already carried to the browser. Parsing stays narrow —
- * base64 raster blocks only, never SVG — so transcript data cannot turn into an
- * active document inside the page.
- */
-export const resultImages = (result: ToolResultData): readonly ToolResultImage[] => {
-  if (!Array.isArray(result.content)) return [];
-  const images: ToolResultImage[] = [];
-  for (const part of result.content) {
-    if (!part || typeof part !== 'object') continue;
-    const block = part as { type?: unknown; source?: unknown };
-    if (block.type !== 'image' || !block.source || typeof block.source !== 'object') continue;
-    const source = block.source as { type?: unknown; media_type?: unknown; data?: unknown };
-    if (source.type !== 'base64' || typeof source.media_type !== 'string' || typeof source.data !== 'string') continue;
-    if (!INLINE_IMAGE_MEDIA_TYPES.has(source.media_type) || !source.data) continue;
-    images.push({ mediaType: source.media_type as ToolResultImage['mediaType'], data: source.data });
-  }
-  return images;
 };
 
 /** Best-effort readable text of a tool result. */

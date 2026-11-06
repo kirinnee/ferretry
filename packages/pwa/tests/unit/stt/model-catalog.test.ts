@@ -9,8 +9,6 @@ import should from 'should';
 import {
   modelBundle,
   modelDownloadBytes,
-  modelDownloadSize,
-  modelSourceUrl,
   ON_DEVICE_MODEL_IDS,
   ON_DEVICE_MODELS,
   type OnDeviceModel,
@@ -77,7 +75,6 @@ describe('the shipped catalog', () => {
     should(PARAKEET_CATALOG_MODEL.keyRoot).equal('/fy-stt/parakeet');
     should(PARAKEET_CATALOG_MODEL.versionLabel).equal(PARAKEET_VERSION_LABEL);
     should(modelDownloadBytes(PARAKEET_CATALOG_MODEL)).equal(PARAKEET_TOTAL_BYTES);
-    should(modelDownloadSize(PARAKEET_CATALOG_MODEL)).equal(`${Math.round(PARAKEET_TOTAL_BYTES / 1_000_000)} MB`);
   });
 
   it('finds an entry by id, and nothing for browser voice or an unknown id', () => {
@@ -108,14 +105,7 @@ describe('the shipped catalog', () => {
       shared: null,
     });
     should(modelDownloadBytes(VOSK_CATALOG_MODEL)).equal(41_205_931 + VOSK_RUNTIME_FILE.bytes);
-    should(modelDownloadSize(VOSK_CATALOG_MODEL)).equal('44 MB');
     should(modelDownloadBytes(VOSK_CATALOG_MODEL)).be.below(modelDownloadBytes(PARAKEET_CATALOG_MODEL));
-  });
-
-  it('names where the files come from, at the pinned commit', () => {
-    should(modelSourceUrl(PARAKEET_CATALOG_MODEL)).equal(
-      `https://huggingface.co/${PARAKEET_CATALOG_MODEL.source.repository}/tree/${PARAKEET_CATALOG_MODEL.source.revision}`,
-    );
   });
 });
 

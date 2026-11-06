@@ -66,8 +66,6 @@ export interface NearLiveState {
   readonly paused: boolean;
 }
 
-export const EMPTY_NEAR_LIVE: NearLiveState = Object.freeze({ committed: '', interim: '', paused: false });
-
 /** Said, verbatim, when live words stop for this take. */
 export const NEAR_LIVE_PAUSED_COPY = 'live words paused — device too slow';
 

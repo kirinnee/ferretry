@@ -14,7 +14,6 @@ import {
   percent,
   queuePosition,
   usd,
-  verdictChip,
   wardenHowItWorks,
   wardenInboxLine,
   wardenStatusLine,
@@ -74,7 +73,6 @@ describe('vocabulary helpers', () => {
     // Arrange / Act / Assert
     expect(usd(0.4)).toBe('$0.40');
     expect(percent(0.956)).toBe('96%');
-    expect(verdictChip('killed')).toEqual({ label: 'stop', tone: 'err' });
     expect(chip('running', 'accent', true)).toEqual({ label: 'running', tone: 'accent', busy: true });
   });
 });

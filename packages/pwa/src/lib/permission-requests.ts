@@ -147,12 +147,6 @@ export const permissionWords = (agent: string, request: PermissionRequest): Perm
   return { lead: `${agent} wants to ${request.action}`, what: request.what };
 };
 
-/** The whole sentence as text: "Hadi wants to read /etc/hostname", "… needs permission to use Foo". */
-export const permissionSentence = (agent: string, request: PermissionRequest, what = request.what): string =>
-  request.action === 'other'
-    ? `${agent} needs permission to use ${request.tool}`
-    : `${agent} wants to ${permissionPhrase(request, what)}`;
-
 /** One answer button: what it does in the app's words, and what the harness said, which is never hidden. */
 export interface PermissionOptionWords {
   readonly label: 'Allow once' | 'Always allow' | 'Deny';

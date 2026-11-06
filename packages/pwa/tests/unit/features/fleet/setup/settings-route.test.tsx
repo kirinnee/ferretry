@@ -4,7 +4,6 @@ import type { MachineTabId } from '../../../../../src/features/fleet/shell/machi
 import {
   machineItemHash,
   machinePanelFromHash,
-  machinePanelHash,
   type SettingsFlow,
   type SettingsFlowRoute,
   settingsFlowFromHash,
@@ -325,17 +324,5 @@ describe('useSettingsFlow', () => {
       await mounted.unmount();
       window.location.hash = '';
     }
-  });
-});
-
-describe('machinePanelHash', () => {
-  it('links a panel on the tab that lists it', () => {
-    expect(machinePanelHash('studio', 'warden')).toBe(machineItemHash('studio', 'agents', 'warden'));
-    expect(machinePanelHash('studio', 'secrets')).toBe(machineItemHash('studio', 'sign-ins', 'secrets'));
-    expect(machinePanelHash('studio', 'devices')).toBe(machineItemHash('studio', 'machine', 'devices'));
-  });
-
-  it('falls back to the Machine tab for a word that names no panel', () => {
-    expect(machinePanelHash('studio', 'retired-panel')).toBe(machineItemHash('studio', 'machine', 'retired-panel'));
   });
 });

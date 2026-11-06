@@ -36,7 +36,7 @@ import {
 import { memo, useState } from 'react';
 import { type LiveScheduler, useLiveElapsed } from '../hooks/use-live-counter.ts';
 import { cn } from '../lib/class-names.ts';
-import { formatElapsedSeconds, instantMs, wholeSecondsSince } from '../lib/live-counter.ts';
+import { formatElapsedSeconds, instantMs } from '../lib/live-counter.ts';
 import type { ToolCall } from '../lib/session-screens.ts';
 import {
   type AskedQuestion,
@@ -86,13 +86,6 @@ export const summarizeToolRun = (calls: readonly ToolCall[]): string => {
     counts.set(verb, (counts.get(verb) ?? 0) + 1);
   }
   return order.map(verb => ((counts.get(verb) ?? 0) > 1 ? `${verb} ×${counts.get(verb)}` : verb)).join(', ');
-};
-
-/** How long a running tool has been going, as a label. Undefined when the call
- *  carries no usable start time — a wrong duration is worse than none. */
-export const elapsedLabel = (since: string | undefined, now: number): string | undefined => {
-  const start = instantMs(since);
-  return start === null ? undefined : formatElapsedSeconds(wholeSecondsSince(start, now));
 };
 
 /** The reading of a bare result whose tool use never arrived. */

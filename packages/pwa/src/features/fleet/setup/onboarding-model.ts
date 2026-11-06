@@ -275,10 +275,6 @@ export const onboardingNeedsRuntime = (facts: OnboardingDoneFacts): boolean =>
   facts.runtimes !== undefined &&
   Object.values(facts.runtimes).every(names => names === undefined || names.length === 0);
 
-/** The steps still to do, in words: "Speed-ups and Warden", for Done's heading line. */
-export const onboardingSkippedSteps = (progress: MachineSetupProgress): readonly MachineSetupTaskId[] =>
-  ONBOARDING_TASKS.filter(id => progress.states[id] !== 'done');
-
 // ── Warden ───────────────────────────────────────────────────────────────────────────────────────
 
 /**

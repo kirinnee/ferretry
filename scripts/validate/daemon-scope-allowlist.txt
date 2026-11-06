@@ -43,11 +43,8 @@ retain packages/pwa/src/shell/side-pane-tab-model.ts:registryVersion # a monoton
 retain packages/pwa/src/shell/side-pane-tab-model.ts:registryListeners # definition-registry subscribers, held by identity. Callbacks, not records.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:definitionsCache # a memo of the definition registry's sorted array. Derived from `registry`, so it holds exactly what `registry` holds.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:defaultOpenCache # a memo of which definitions open by default. Derived from `registry`, so it holds exactly what `registry` holds.
-retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceBodies # renderers for each side-pane instance KIND, keyed by kind. A render function, not a record.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:stateVersion # a monotonic counter making useSyncExternalStore re-read tab state. A number, not a record.
-retain packages/pwa/src/shell/side-pane-tab-model.ts:stateListeners # tab-state subscribers, held by identity. Callbacks, not records.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceSequence # a document-unique suffix for generated instance ids. Monotonic and never reused, which is the property it is here for.
-retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceCloseListeners # instance-close subscribers, held by identity. Callbacks, not records.
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 # INVALIDATE — daemon-scoped caches the connection registry does not hold, and what clears them
@@ -58,7 +55,6 @@ retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceCloseListeners # in
 # daemon ids are DURABLE ACROSS A RE-PAIR (see lib/daemon-connection.ts), so the next pairing with
 # the same id reads the last one's records back.
 
-invalidate DaemonSessionCache # the keyed-cache PRIMITIVE, not a cache. Stores are built out of it and are registered themselves; registering the class would be registering the concept.
 invalidate DaemonUsageIndex # owned by DaemonUsageStore, which IS registered and forwards clearDaemon to it (lib/usage-store.ts:226).
 invalidate DaemonAgendaStore # owned by DaemonAgendaClient, which forwards clearDaemon to it (lib/agenda-client.ts:188).
 invalidate AgendaRollupStore # owned by DaemonAgendaClient, which forwards clearDaemon to it (lib/agenda-client.ts:330), and DaemonAgendaClient IS registered.

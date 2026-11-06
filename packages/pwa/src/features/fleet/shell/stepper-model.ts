@@ -87,13 +87,6 @@ const replaceTop = (state: StepperState, flow: StepperFlow): StepperState => ({
   confirming: false,
 });
 
-/** Moves the current flow to a named step (for flows whose next step depends on an answer). */
-export const goToStep = (state: StepperState, stepId: string): StepperState => {
-  const flow = currentFlow(state);
-  if (!flow.steps.some(step => step.id === stepId)) throw new Error(`stepper ${flow.kind} has no step ${stepId}`);
-  return replaceTop(state, { ...flow, at: stepId });
-};
-
 /** Replaces the current flow's step list, keeping the current step when it is still in it. */
 export const withSteps = (state: StepperState, steps: readonly StepperStep[]): StepperState => {
   const flow = currentFlow(state);
@@ -112,18 +105,6 @@ export const stepForward = (state: StepperState): StepperState => {
   return replaceTop(state, { ...flow, at: next.id });
 };
 
-/** Records something created inside the current flow, kept even if the flow is stopped. */
-export const saveForReuse = (state: StepperState, label: string): StepperState => {
-  const flow = currentFlow(state);
-  return { ...replaceTop(state, { ...flow, saved: [...flow.saved, label] }), confirming: state.confirming };
-};
-
-/** Opens a sub-stepper on top of the current flow ("+ Add a new login"). */
-export const openSubStepper = (state: StepperState, input: StepperFlowInput): StepperState => ({
-  stack: [...state.stack, flowFrom(input)],
-  confirming: false,
-});
-
 /**
  * Pops the top flow, handing what it saved to the flow below. `null` when it was the only flow — the
  * stepper is over and the view goes back to the tab it came from.
@@ -135,9 +116,6 @@ const popTop = (state: StepperState): StepperState | null => {
   const parent = below[below.length - 1] as StepperFlow;
   return { stack: [...below.slice(0, -1), { ...parent, saved: [...parent.saved, ...top.saved] }], confirming: false };
 };
-
-/** A sub-stepper finished: back to the parent step, which can now pick what was made. */
-export const returnToParent = (state: StepperState): StepperState | null => popTop(state);
 
 export type BackOutcome =
   | { readonly kind: 'moved'; readonly state: StepperState }

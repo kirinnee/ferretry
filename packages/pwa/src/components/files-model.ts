@@ -58,10 +58,6 @@ export const baseName = (rel: string): string => {
   const norm = normalizeRel(rel);
   return norm.slice(norm.lastIndexOf('/') + 1);
 };
-export const dirPrefix = (rel: string): string => {
-  const parent = parentRel(rel);
-  return parent ? `${parent}/` : '';
-};
 export interface Crumb {
   label: string;
   path: string;
@@ -148,8 +144,6 @@ export const statusChip = (raw: string | undefined | null): StatusChip => {
     ? { code: unstaged ? y : x, label: primary.label, tone: primary.tone, ...(detail ? { detail } : {}) }
     : { code: value.replace(/\s+/g, '') || '•', label: 'Changed', tone: 'neutral', ...(detail ? { detail } : {}) };
 };
-export const changeRowLabel = (path: string, chip: StatusChip, from?: string): string =>
-  `${chip.label}${chip.detail ? ` (${chip.detail})` : ''}: ${path}${from ? ` from ${from}` : ''}. Open diff`;
 
 type DiffLineKind = 'meta' | 'hunk' | 'add' | 'del' | 'ctx' | 'nonl';
 export interface DiffLine {
@@ -263,5 +257,3 @@ export const formatBytes = (size: number | undefined | null): string => {
   }
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 };
-export const countLabel = (n: number, singular: string, plural = `${singular}s`): string =>
-  `${n} ${n === 1 ? singular : plural}`;

@@ -7,7 +7,6 @@ import should from 'should';
 import {
   GPU_PROBE_MS,
   probeWebGpuAdapter,
-  readSpeedSignals,
   readSyncSpeedSignals,
   type SpeedGlobalLike,
 } from '../../../src/lib/stt/speed-signals.ts';
@@ -87,20 +86,5 @@ describe('probeWebGpuAdapter', () => {
     });
     should(answer).equal(false);
     should(performance.now() - started).be.within(GPU_PROBE_MS - 100, GPU_PROBE_MS + 1_000);
-  });
-});
-
-describe('readSpeedSignals', () => {
-  it('adds the adapter to the synchronous signals', async () => {
-    const signals = await readSpeedSignals({
-      crossOriginIsolated: true,
-      navigator: { hardwareConcurrency: 4, gpu: { requestAdapter: async () => ({}) } },
-    });
-    should(signals).deepEqual({
-      webgpuAdapter: true,
-      crossOriginIsolated: true,
-      hardwareConcurrency: 4,
-      deviceMemoryGb: null,
-    });
   });
 });

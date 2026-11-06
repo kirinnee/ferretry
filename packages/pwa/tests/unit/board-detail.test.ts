@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaRef, AgendaSnapshot, BoardTaskEvent, PrLink } from '@ferretry/protocol';
+import type { AgendaSnapshot, BoardTaskEvent, PrLink } from '@ferretry/protocol';
 
 import {
   activityText,
@@ -15,7 +15,6 @@ import {
   laneCategoryOf,
   laneNameOf,
   linkLabel,
-  nonBlockingAsks,
   prLine,
   type SessionAgenda,
   testSteps,
@@ -296,18 +295,6 @@ describe('history', () => {
       minor: true,
     });
     expect(rowOf('ordered')).toMatchObject({ text: 'reordered it in its lane', minor: true });
-  });
-});
-
-describe('nonBlockingAsks', () => {
-  it('leaves out the asks that are stopping the ferret', () => {
-    const open: AgendaRef[] = [
-      { sessionId: 's', id: 'A1' },
-      { sessionId: 's', id: 'A2' },
-    ];
-    const task = { openAsks: open, waitingOnOwner: [{ sessionId: 's', id: 'A1' }] };
-    expect(nonBlockingAsks(task)).toEqual([{ sessionId: 's', id: 'A2' }]);
-    expect(nonBlockingAsks({ openAsks: open, waitingOnOwner: [] })).toEqual(open);
   });
 });
 

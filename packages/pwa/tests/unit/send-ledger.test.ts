@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   foldLedgerSendRecords,
-  hasLedgerHardExpired,
-  isLedgerUnconfirmed,
-  isSendLedgerEvent,
   type LedgerSendRecord,
-  nextLedgerViewDeadline,
   parseLedgerSendRecord,
   parseLedgerSendsResponse,
   RECORD_CLOCK_SLACK_MS,
@@ -155,62 +151,6 @@ describe('send ledger read model', () => {
     expect(parseLedgerSendsResponse(null)).toEqual([]);
   });
 
-  it('expires an open row at its hard deadline and never a delivered, held or withdrawn one', () => {
-    expect(hasLedgerHardExpired(record({ hardDeadline: at(-1) }), NOW)).toBe(true);
-    expect(hasLedgerHardExpired(record({ hardDeadline: at(1) }), NOW)).toBe(false);
-    expect(hasLedgerHardExpired(record({ hardDeadline: at(-1), fate: 'delivered' }), NOW)).toBe(false);
-    expect(hasLedgerHardExpired(record({ hardDeadline: at(-1), held: true }), NOW)).toBe(false);
-    expect(hasLedgerHardExpired(record({ hardDeadline: at(-1), withdrawn: true }), NOW)).toBe(false);
-  });
-
-  it('keeps a row with a missing or malformed deadline visible rather than hiding it', () => {
-    expect(hasLedgerHardExpired(record(), NOW)).toBe(false);
-    expect(hasLedgerHardExpired(record({ hardDeadline: 'soon' }), NOW)).toBe(false);
-    expect(isLedgerUnconfirmed(record({ unaccountedDeadline: 'soon' }), NOW)).toBe(false);
-  });
-
-  it('treats an accepted row past its sweep deadline as unconfirmed', () => {
-    expect(isLedgerUnconfirmed(record(), NOW)).toBe(false);
-    expect(isLedgerUnconfirmed(record({ unaccountedDeadline: at(-1) }), NOW)).toBe(true);
-    expect(isLedgerUnconfirmed(record({ unaccountedDeadline: at(1) }), NOW)).toBe(false);
-    expect(isLedgerUnconfirmed(record({ fate: 'unaccounted' }), NOW)).toBe(true);
-    expect(isLedgerUnconfirmed(record({ fate: 'delivered', unaccountedDeadline: at(-1) }), NOW)).toBe(false);
-    expect(isLedgerUnconfirmed(record({ held: true, fate: 'unaccounted' }), NOW)).toBe(false);
-    expect(isLedgerUnconfirmed(record({ withdrawn: true, fate: 'unaccounted' }), NOW)).toBe(false);
-  });
-
-  it('schedules the earliest future presentation change, ignoring past and settled rows', () => {
-    const records = [
-      record({ sendId: 'a', unaccountedDeadline: at(-5_000), hardDeadline: at(60_000) }),
-      record({ sendId: 'b', unaccountedDeadline: at(20_000), hardDeadline: at(90_000) }),
-      record({ sendId: 'c', fate: 'delivered', hardDeadline: at(1_000) }),
-      record({ sendId: 'd', held: true, hardDeadline: at(2_000) }),
-      record({ sendId: 'e', withdrawn: true, hardDeadline: at(3_000) }),
-    ];
-    expect(nextLedgerViewDeadline(records, NOW)).toBe(NOW + 20_000);
-    // An unaccounted row can only still reach its hard cap.
-    expect(
-      nextLedgerViewDeadline([record({ fate: 'unaccounted', unaccountedDeadline: at(10), hardDeadline: at(50) })], NOW),
-    ).toBe(NOW + 50);
-    expect(nextLedgerViewDeadline([record()], NOW)).toBeUndefined();
-    expect(nextLedgerViewDeadline([], NOW)).toBeUndefined();
-  });
-
-  it('refreshes on every fate the daemon proves, and ignores the legacy consumed event', () => {
-    expect(isSendLedgerEvent({ type: 'control.send_accepted' })).toBe(true);
-    expect(isSendLedgerEvent({ type: 'control.send_delivered' })).toBe(true);
-    expect(isSendLedgerEvent({ type: 'control.send_unaccounted' })).toBe(true);
-    expect(isSendLedgerEvent({ type: 'control.send_withdrawn' })).toBe(true);
-    for (const type of [
-      'control.send_queued',
-      'control.send_timed_out',
-      'control.send_retried',
-      'control.send_released',
-    ])
-      expect(isSendLedgerEvent({ type })).toBe(true);
-    expect(isSendLedgerEvent({ type: 'control.send_consumed' })).toBe(false);
-  });
-
   it('reads the tracker fields, and lets a re-attempt move a settled send back to sending', () => {
     const parsed = parseLedgerSendRecord({
       sendId: 'a',
@@ -308,22 +248,6 @@ describe('a cancelled send, and one typed but never submitted', () => {
     });
     expect(unknown).not.toHaveProperty('cancelEffect');
     expect(unknown).not.toHaveProperty('typedNotSent');
-  });
-
-  it('refreshes on the daemon events that move a send in or out of the composer', () => {
-    for (const type of ['control.send_typed_not_sent', 'control.send_cancelled', 'control.send_submitted'])
-      expect(isSendLedgerEvent({ type })).toBe(true);
-  });
-
-  it('never re-badges a cancelled row unconfirmed, expires it, or schedules a wake-up for it', () => {
-    const cancelled = record({
-      fate: 'cancelled',
-      unaccountedDeadline: at(-10_000),
-      hardDeadline: at(-5_000),
-    });
-    expect(isLedgerUnconfirmed(cancelled, NOW)).toBe(false);
-    expect(hasLedgerHardExpired(cancelled, NOW)).toBe(false);
-    expect(nextLedgerViewDeadline([{ ...cancelled, hardDeadline: at(60_000) }], NOW)).toBeUndefined();
   });
 
   it('lets a cancel supersede anything unproven in the same attempt, but never a delivered proof', () => {

@@ -44,9 +44,7 @@ import { type SwipeTarget, type SwipeTargets, swipeTargets } from '../../lib/age
 import {
   type InboxAction,
   type InboxCard,
-  SWIPE_SLOP_PX,
   type SwipeDirection,
-  type SwipeIntent,
   swipeIntent,
   swipeThreshold,
 } from '../../lib/agenda-inbox.ts';
@@ -169,25 +167,7 @@ const useReducedMotion = (override?: boolean): boolean => {
 };
 
 /** A way a card can leave the deck: one of its answers' directions, or down — Skip. */
-export type DeckDirection = SwipeDirection | 'down';
-
-/**
- * Reads a drag on a deck that can skip: a mostly-downward drag is Skip (`down`), committed past the same threshold an
- * answer needs; every other drag reads as `swipeIntent` does. Where the deck cannot skip, down is nothing.
- */
-export const deckIntent = (
-  dx: number,
-  dy: number,
-  width: number,
-  targets: SwipeTargets,
-  canDown: boolean,
-): Omit<SwipeIntent, 'direction'> & { readonly direction: DeckDirection | null } => {
-  if (canDown && dy > Math.abs(dx) && dy >= SWIPE_SLOP_PX) {
-    const progress = Math.min(1, dy / swipeThreshold(width));
-    return { direction: 'down', progress, committed: progress >= 1 };
-  }
-  return swipeIntent(dx, dy, width, targets);
-};
+type DeckDirection = SwipeDirection | 'down';
 
 /** What the compass reads as, in the words the card's `data-swipe-answer` keeps. */
 const compassWord = (intent: ReturnType<typeof compassReading>['intent'] | undefined): string => {

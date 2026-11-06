@@ -51,8 +51,6 @@ const VERDICT_CHIPS: Readonly<Record<WardenVerdictKind, WardenChip>> = {
   unknown: chip('reviewed', 'pend'),
 };
 
-export const verdictChip = (verdict: WardenVerdictKind): WardenChip => VERDICT_CHIPS[verdict];
-
 /** `96%`, from Jev's 0–1 confidence. */
 export const percent = (confidence: number): string => `${Math.round(confidence * 100)}%`;
 

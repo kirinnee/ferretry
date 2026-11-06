@@ -285,11 +285,6 @@ function bumpRegistry(): void {
   for (const listener of registryListeners) listener();
 }
 
-/** Monotonic registry write counter — a cheap `useSyncExternalStore` key. */
-export function getSidePaneTabRegistryVersion(): number {
-  return registryVersion;
-}
-
 /** Register (or replace — last registration wins, so hot reload cannot dupe)
  *  one tab definition. Returns the unregister function. Registering a tab with
  *  `defaultOpen` affects strips that have not been touched yet; strips with
@@ -302,10 +297,6 @@ export function registerSidePaneTab(definition: SidePaneTabDefinition): () => vo
     registry.delete(definition.id);
     bumpRegistry();
   };
-}
-
-export function getSidePaneTabDefinition(id: SidePaneTabId): SidePaneTabDefinition | undefined {
-  return registry.get(id);
 }
 
 /** Every registered tab, in strip order. Snapshot identity is stable between
@@ -338,25 +329,9 @@ export function resetSidePaneTabRegistry(): void {
 // surface plumbing); the terminals deck claims its kind from its own module
 // scope, exactly like `registerSidePaneTab`.
 
-export type SidePaneInstanceBody = (props: SidePaneTabRenderProps) => ReactNode;
+type SidePaneInstanceBody = (props: SidePaneTabRenderProps) => ReactNode;
 
 const instanceBodies = new Map<SidePaneInstanceKind, SidePaneInstanceBody>();
-
-/** Register (or replace) the body for one instance kind. Returns the unregister
- *  function; a stale unregister cannot tear down a replacement. */
-export function registerSidePaneInstanceBody(kind: SidePaneInstanceKind, render: SidePaneInstanceBody): () => void {
-  instanceBodies.set(kind, render);
-  bumpRegistry();
-  return () => {
-    if (instanceBodies.get(kind) !== render) return;
-    instanceBodies.delete(kind);
-    bumpRegistry();
-  };
-}
-
-export function getSidePaneInstanceBody(kind: SidePaneInstanceKind): SidePaneInstanceBody | undefined {
-  return instanceBodies.get(kind);
-}
 
 // ---- per-(daemon, session) state -------------------------------------------
 
@@ -400,27 +375,11 @@ function notifyState(): void {
   for (const listener of stateListeners) listener();
 }
 
-export function subscribeSidePaneTabsState(listener: () => void): () => void {
-  stateListeners.add(listener);
-  return () => {
-    stateListeners.delete(listener);
-  };
-}
-
-/** Monotonic write counter — a cheap `useSyncExternalStore` snapshot key. */
-export function getSidePaneTabsVersion(): number {
-  return stateVersion;
-}
-
 /** Stable-identity read: the same object comes back until the next write to
  *  this daemon/session pair (or, for untouched pairs, the next registry
  *  change). */
 export function readSidePaneTabsState(scope: DaemonSessionScope): SidePaneTabsState {
   return tabStates.get(daemonSessionKey(scope)) ?? defaultState();
-}
-
-export function readSidePaneTabInstance(scope: DaemonSessionScope, id: SidePaneTabId): SidePaneTabInstance | undefined {
-  return readSidePaneTabsState(scope).instances[id];
 }
 
 /** Resolve any open tab id to a renderable definition: registry entries come
@@ -475,17 +434,6 @@ export function sortSidePaneTabs(
 function write(scope: DaemonSessionScope, next: SidePaneTabsState): void {
   tabStates.set(daemonSessionKey(scope), next);
   notifyState();
-}
-
-/** Low-level whole-state write — the test seam and the restore path. */
-export function writeSidePaneTabsState(scope: DaemonSessionScope, next: SidePaneTabsState): void {
-  const instances = next.instances ?? NO_INSTANCES;
-  write(scope, {
-    ...next,
-    fullViewport: next.fullViewport === true,
-    instances,
-    open: sortSidePaneTabs(next.open, instances),
-  });
 }
 
 /** Add a tab to the strip if absent and make it active. The single open path:
@@ -604,90 +552,6 @@ export function openSidePaneTerminalTab(scope: DaemonSessionScope, terminalId: s
     revision: (existing?.revision ?? 0) + 1,
   });
   return id;
-}
-
-/** Retitle a live instance tab (a browser page navigated, a terminal was
- *  renamed) without touching focus or strip membership. */
-export function setSidePaneInstanceLabel(
-  scope: DaemonSessionScope,
-  id: SidePaneTabId,
-  next: { label: string; title?: string; destination?: BrowserDestination | null },
-): void {
-  const current = readSidePaneTabsState(scope);
-  const instance = current.instances[id];
-  if (!instance) return;
-  write(scope, {
-    ...current,
-    instances: {
-      ...current.instances,
-      [id]: {
-        ...instance,
-        label: next.label,
-        title: next.title ?? instance.title,
-        ...(next.destination !== undefined ? { destination: next.destination } : {}),
-        revision: instance.revision + 1,
-      },
-    },
-  });
-}
-
-/** Switch among already-open tabs; a tab outside the strip is a no-op (use
- *  `openSidePaneTab` to add). */
-export function activateSidePaneTab(scope: DaemonSessionScope, id: SidePaneTabId): void {
-  const current = readSidePaneTabsState(scope);
-  if (!current.open.includes(id) || current.active === id) return;
-  write(scope, { ...current, active: id, fullViewport: false });
-}
-
-/** Close the pane. The strip — which tabs the reader chose — survives. */
-export function deactivateSidePane(scope: DaemonSessionScope): void {
-  const current = readSidePaneTabsState(scope);
-  if (current.active === null) return;
-  write(scope, { ...current, active: null, fullViewport: false });
-}
-
-// Closing an instance tab DISPOSES that instance; whoever owns its live backing
-// (the terminals deck killing a pty) subscribes here.
-export type SidePaneInstanceCloseListener = (scope: DaemonSessionScope, instance: SidePaneTabInstance) => void;
-const instanceCloseListeners = new Set<SidePaneInstanceCloseListener>();
-
-export function subscribeSidePaneInstanceClose(listener: SidePaneInstanceCloseListener): () => void {
-  instanceCloseListeners.add(listener);
-  return () => {
-    instanceCloseListeners.delete(listener);
-  };
-}
-
-/** Take a tab out of the strip (picker toggle-off, or an instance tab's ✕).
- *  Removing the active tab activates its nearest strip neighbour — the
- *  following tab when one exists, else the preceding one — and removing the
- *  last tab closes the pane.
- *
- *  A SINGLETON removal never unmounts a retained surface: hiding the terminals
- *  deck must not drop scrollback, exactly as switching away does not. An
- *  INSTANCE removal is a real close — the instance is disposed, its close
- *  listeners run, and no phantom tab survives it. */
-export function removeSidePaneTab(scope: DaemonSessionScope, id: SidePaneTabId): void {
-  const current = readSidePaneTabsState(scope);
-  const index = current.open.indexOf(id);
-  if (index === -1) return;
-  const open = current.open.filter(tab => tab !== id);
-  const active = current.active === id ? (open[index] ?? open[index - 1] ?? null) : current.active;
-  const closed = current.instances[id];
-  let instances = current.instances;
-  if (closed) {
-    const next = { ...current.instances };
-    delete next[id];
-    instances = next;
-  }
-  write(scope, {
-    ...current,
-    open,
-    active,
-    instances,
-    fullViewport: current.active === id ? false : current.fullViewport,
-  });
-  if (closed) for (const listener of instanceCloseListeners) listener(scope, closed);
 }
 
 /** Forget every strip belonging to one daemon — what an unpairing must do, and

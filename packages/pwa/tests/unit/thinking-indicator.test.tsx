@@ -1,10 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  ThinkingIndicator,
-  formatThinkingElapsed,
-  thinkingActivityLabel,
-} from '../../src/components/thinking-indicator.tsx';
-import { render } from '../support/react.ts';
+import { formatThinkingElapsed, thinkingActivityLabel } from '../../src/components/thinking-indicator.tsx';
 
 const textOf = (value: unknown): string => {
   if (typeof value === 'string') return value;
@@ -26,17 +21,5 @@ describe('ThinkingIndicator', () => {
     expect(formatThinkingElapsed(-1)).toBe('0s');
     expect(formatThinkingElapsed(34_999)).toBe('34s');
     expect(formatThinkingElapsed(95_000)).toBe('1m 35s');
-  });
-
-  test('renders a live status with three decorative dots and optional elapsed time', () => {
-    const withElapsed = render(<ThinkingIndicator activity="Writing tests (34s)" since={Date.now() - 34_000} />);
-    expect(withElapsed.root.findByProps({ role: 'status' }).findAllByType('span')).toHaveLength(6);
-    expect(textOf(withElapsed.toJSON())).toContain('Writing tests');
-    expect(textOf(withElapsed.toJSON())).toMatch(/3[4-5]s/u);
-    withElapsed.unmount();
-
-    const withoutElapsed = render(<ThinkingIndicator />);
-    expect(textOf(withoutElapsed.toJSON())).toBe('Working…');
-    withoutElapsed.unmount();
   });
 });

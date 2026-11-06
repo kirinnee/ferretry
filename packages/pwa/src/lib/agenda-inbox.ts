@@ -22,7 +22,6 @@ import {
   type AgendaItem,
   type AgendaSnapshot,
   agendaDeepLinkFromFragment,
-  agendaInDiscussion,
   agendaTurn,
   isMachineAgendaId,
   LEGACY_ATTENTION_LINK_PARAMETER,
@@ -93,10 +92,6 @@ export const unreadCount = (view: SessionView): number => {
   const summary = sessionAgendaSummary(view.state);
   return summary === undefined ? 0 : needsYouCount(summary);
 };
-
-/** How many of an open board's items need the owner: the pinned panel's header count. */
-export const needsYouItems = (items: readonly Pick<AgendaItem, 'waitingOn' | 'waitingFor' | 'parked'>[]): number =>
-  items.filter(item => !agendaInDiscussion(item) && item.parked === undefined).length;
 
 /** The badge's text: a count, capped so it never widens a row. */
 export const badgeText = (count: number): string => (count > 99 ? '99+' : String(count));
@@ -466,23 +461,6 @@ export const UNSNOOZE_ACTION: InboxAction = { kind: 'unsnooze', label: 'Back to 
 
 export const DONE_ACTION: InboxAction = { kind: 'resolve', label: 'Done' };
 export const DISMISS_ACTION: InboxAction = { kind: 'dismiss', label: 'Dismiss' };
-export const NEEDS_INFO_ACTION: Extract<InboxAction, { kind: 'needs-info' }> = {
-  kind: 'needs-info',
-  label: 'Need more info',
-};
-
-/** The ticked steps of an item once the not-yet-confirmed ticks are laid over them. */
-export const tickedSteps = (
-  item: Pick<AgendaItem, 'steps' | 'stepsDone'>,
-  pending: ReadonlyMap<number, boolean> = new Map(),
-): ReadonlySet<number> => {
-  const ticked = new Set(item.stepsDone ?? []);
-  for (const [step, done] of pending) {
-    if (done) ticked.add(step);
-    else ticked.delete(step);
-  }
-  return ticked;
-};
 
 const clock = (instantValue: string, timeZone?: string): string =>
   new Date(instantValue).toLocaleTimeString([], {
@@ -556,18 +534,6 @@ export const swipeMap = (item: Parameters<typeof swipeTargets>[0], reply = ''): 
       target.action === null ? [] : [[direction, target.action]],
     ),
   );
-
-/**
- * Which swipe, if any, an answer sits on — matched by meaning, because `inboxOptions` builds its
- * answers afresh on every call: the button and the gesture must agree on the SAME option.
- */
-export const directionOfAction = (map: SwipeMap, action: InboxAction): SwipeDirection | null => {
-  for (const direction of ['right', 'left', 'up'] as const) {
-    const mapped = map[direction];
-    if (mapped !== undefined && mapped.kind === action.kind && mapped.label === action.label) return direction;
-  }
-  return null;
-};
 
 /** A drag must travel this far before it moves at all, so a scroll is never read as a swipe. */
 export const SWIPE_SLOP_PX = 10;

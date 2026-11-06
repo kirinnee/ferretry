@@ -61,9 +61,3 @@ export const probeWebGpuAdapter = async (global: SpeedGlobalLike): Promise<boole
     clearTimeout(timer);
   }
 };
-
-/** All the signals, GPU included. Total. */
-export const readSpeedSignals = async (global: SpeedGlobalLike): Promise<SpeedSignals> => {
-  const base = readSyncSpeedSignals(global);
-  return { ...base, webgpuAdapter: await probeWebGpuAdapter(global) };
-};

@@ -86,10 +86,7 @@ export { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS };
  * re-exported from `@ferretry/protocol/fy-render`, where the daemon can run the
  * same reader on a save. The names its readers use are re-exported from here.
  */
-export {
-  FY_RENDER_IMAGE_MIMES,
-  FY_RENDER_MEDIA_TYPES,
-} from '@ferretry/protocol/fy-render';
+export { FY_RENDER_IMAGE_MIMES, FY_RENDER_MEDIA_TYPES } from '@ferretry/protocol/fy-render';
 export type { FyRenderImageMime, FyRenderMediaType } from '@ferretry/protocol/fy-render';
 
 /** The fence info string that opts a block into this grammar, and nothing else. */
@@ -849,18 +846,6 @@ export function parseFyRender(source: string): FyRenderParseResult {
     case 'image':
       return parseImageBlock(alt, mime as FyRenderImageMime, payload, source);
   }
-}
-
-/**
- * The decoded size of a block's payload, in bytes.
- *
- * The consent control names it, so a reader deciding whether to spend a decode
- * knows what they are spending it on. It lives here because the base64 arithmetic
- * is the grammar's, and a second copy in the renderer would be a second answer.
- */
-export function fyRenderPayloadBytes(block: FyRenderBlock): number {
-  if (block.type !== 'image') return byteLength(block.payload);
-  return decodedBase64Bytes(block.payload) ?? 0;
 }
 
 /**

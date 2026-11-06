@@ -134,16 +134,6 @@ export const sortAgenda = (items: readonly AgendaItem[]): readonly AgendaItem[] 
       a.id.localeCompare(b.id),
   );
 
-/** The item to open after one is answered: the next in `ordered` that is still the owner's turn, wrapping round. */
-export const nextOwnerItem = (ordered: readonly AgendaItem[], from: AgendaItem['id']): AgendaItem | null => {
-  const start = ordered.findIndex(item => item.id === from);
-  for (let step = 1; step <= ordered.length; step += 1) {
-    const candidate = ordered[(start + step + ordered.length) % ordered.length];
-    if (candidate !== undefined && candidate.id !== from && agendaTurn(candidate) === 'owner') return candidate;
-  }
-  return null;
-};
-
 /** Who raised it, in a word: "Warden" for the daemon's own Warden, otherwise the ferret that raised it. */
 export const agendaAuthor = (item: Pick<AgendaItem, 'raisedBy' | 'sourceRef'>, ferret: string): string =>
   item.raisedBy === 'daemon' && (item.sourceRef ?? '').startsWith('warden:') ? 'Warden' : ferret;

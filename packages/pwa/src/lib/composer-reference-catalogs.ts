@@ -153,31 +153,6 @@ async function readComposerAgendaIncrementally(
   if (signal.aborted) throw signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
 }
 
-/**
- * The standalone two-family read: one refused family must not erase the other.
- *
- * NOTHING IN THE APP CALLS THIS TODAY, and that is a stated position rather
- * than an oversight. The session page is the only production host, and it
- * always supplies `sources`, so the hook takes its shared-owner path and reads
- * Attention alone. This entry point is the COMPATIBILITY surface a host with no
- * existing task or skills owner uses — the shape the module had before the page
- * began sharing its own — and keeping its behaviour unchanged was an accepted
- * requirement of that change rather than a consequence of it.
- *
- * So its tests exercise a path production does not take, deliberately. What
- * they hold is the promise made to a caller that has no workspace around it,
- * and inventing a production caller to justify it would be the wrong repair:
- * the app would then read families it already owns.
- */
-export async function readComposerReferenceCatalogs(
-  client: ComposerReferenceCatalogReader,
-  sessionId: string,
-  signal: AbortSignal,
-  wire: AgendaWire = 'attention',
-): Promise<ComposerReferenceCatalogs> {
-  return await readComposerReferenceCatalogsIncrementally(client, sessionId, signal, () => undefined, wire);
-}
-
 const EMPTY_CATALOGS: ComposerReferenceCatalogs = Object.freeze({ failures: Object.freeze({}) });
 
 const mergeCatalogPatch = (

@@ -79,10 +79,6 @@ export const harnessWord = (harness: Harness): string => (harness === 'codex' ? 
 export const harnessDialogSentence = (agent: string, dialog: HarnessDialog): string =>
   `${agent}’s ${harnessWord(dialog.harness)} is waiting: ${dialog.title}`;
 
-/** The notification and status line: "Hadi is waiting on Codex: Hooks need review". */
-export const harnessDialogNotice = (agent: string, dialog: HarnessDialog): string =>
-  `${agent} is waiting on ${harnessWord(dialog.harness)}: ${dialog.title}`;
-
 /** What choosing a trust-granting option does, in the app's words — `undefined` for a kind that grants none. */
 const TRUST_NOTE: Readonly<Partial<Record<HarnessDialogKind, string>>> = {
   'hooks-review': 'Trusts these to run outside the sandbox',

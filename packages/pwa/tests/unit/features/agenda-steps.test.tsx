@@ -8,13 +8,7 @@ import { AgendaCard } from '../../../src/features/agenda/agenda-card.tsx';
 import { AgendaDetail } from '../../../src/features/agenda/agenda-detail.tsx';
 import { AgendaBody } from '../../../src/features/agenda/agenda-steps.tsx';
 import type { ClipboardWriter } from '../../../src/features/onboarding/copy-button.tsx';
-import {
-  historyLine,
-  type InboxAction,
-  swipeMap,
-  tickedSteps,
-  updatedSinceAsked,
-} from '../../../src/lib/agenda-inbox.ts';
+import { historyLine, type InboxAction, swipeMap, updatedSinceAsked } from '../../../src/lib/agenda-inbox.ts';
 import { agendaItem } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
@@ -301,18 +295,6 @@ describe('to-do helpers', () => {
     const updated = { at: '2026-07-31T10:44:00.000Z', kind: 'updated' as const, note: 'n' };
     expect(updatedSinceAsked({ history: [updated], waitingOn: undefined })).toEqual({ at: updated.at, note: 'n' });
     expect(updatedSinceAsked({ history: [updated], waitingOn: 'ferret' })).toBeNull();
-  });
-
-  test('ticked steps layer the pending ticks over the stored ones', () => {
-    expect([
-      ...tickedSteps(
-        { steps: ['a', 'b'], stepsDone: [0] },
-        new Map([
-          [1, true],
-          [0, false],
-        ]),
-      ),
-    ]).toEqual([1]);
   });
 });
 

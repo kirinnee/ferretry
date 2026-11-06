@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { CodeBlock } from '../../src/components/code-block.tsx';
-import { bodyLanguage, elapsedLabel, summarizeToolRun, ToolGroup } from '../../src/components/tool-group.tsx';
+import { bodyLanguage, summarizeToolRun, ToolGroup } from '../../src/components/tool-group.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { selectionHeld, transcriptHeldStill, useLiveClock } from '../../src/hooks/use-live-clock.ts';
 import type { ToolCall } from '../../src/lib/session-screens.ts';
@@ -57,22 +57,6 @@ describe('summarizeToolRun', () => {
     ]);
 
     expect(summary).toBe('Bash, Edit ×2, Read, result');
-  });
-});
-
-describe('elapsedLabel', () => {
-  test('reads seconds under a minute and minutes above it', () => {
-    expect(elapsedLabel('1970-01-01T00:00:00.000Z', 34_000)).toBe('34s');
-    expect(elapsedLabel('1970-01-01T00:00:00.000Z', 95_000)).toBe('1m 35s');
-  });
-
-  test('answers nothing rather than a wrong duration', () => {
-    expect(elapsedLabel(undefined, 1_000)).toBeUndefined();
-    expect(elapsedLabel('not a date', 1_000)).toBeUndefined();
-  });
-
-  test('never counts backwards when a call claims to start in the future', () => {
-    expect(elapsedLabel('1970-01-01T00:01:00.000Z', 0)).toBe('0s');
   });
 });
 

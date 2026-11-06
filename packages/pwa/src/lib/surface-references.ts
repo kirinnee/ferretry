@@ -43,7 +43,6 @@
 
 import type { BrowserStatus, SurfaceOpener, TerminalListView, TerminalView } from '@ferretry/protocol';
 import type { DaemonSessionScope } from './daemon-scope.ts';
-import { daemonSessionKey } from './daemon-scope.ts';
 import { formatReference, type SurfaceKind, type SurfaceProof, type SurfaceReferenceResolver } from './references.ts';
 
 /**
@@ -186,32 +185,6 @@ export const createSurfaceReferenceResolver = (
       key: lookup.key,
     } satisfies SurfaceProof;
   };
-};
-
-/**
- * A key over the ONLY facts the resolver reads, so terminal activity churn does
- * not reparse every rendered Markdown block. Opening or closing a terminal
- * changes it, which is exactly when a reference's proof changes.
- *
- * The scope is part of the key for the same reason it is part of the resolver:
- * two sessions routinely carry different terminals, and reusing one's resolver
- * for the other is the bug this module exists to prevent. An absent listing has
- * its own key — it is a different state from an empty one.
- */
-export const surfaceReferenceIdentityKey = (
-  scope: DaemonSessionScope,
-  terminals: TerminalListView | null | undefined,
-  browser?: BrowserStatus | null,
-): string => {
-  const evidence = evidenceFor(scope, terminals);
-  const pages = browserEvidenceFor(scope, browser);
-  return [
-    daemonSessionKey(scope),
-    evidence === null ? 'unlisted' : 'listed',
-    ...(evidence?.terminals.map(terminal => `${terminal.id}=${terminal.name ?? ''}`) ?? []),
-    pages === null ? 'pages-unlisted' : 'pages-listed',
-    ...(pages?.pages.map(page => `${page.id}=${page.name ?? ''}`) ?? []),
-  ].join('\u0001');
 };
 
 /**

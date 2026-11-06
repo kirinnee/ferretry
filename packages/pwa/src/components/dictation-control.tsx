@@ -137,32 +137,6 @@ export interface DictationControlProps {
 }
 
 /**
- * Kept as a pure map so the vocabulary has a test of its own: recording must not
- * pretend the words are already settled, and finishing must name where it is
- * happening. The sheet inlines its own stage copy.
- */
-export function dictationStatusCopy(
-  phase: DictationPhase,
-  errorMessage?: string,
-  engine: DictationHandle['engine'] = 'browser',
-): string {
-  switch (phase) {
-    case 'requesting':
-      return 'Waiting for microphone permission…';
-    case 'recording':
-      return 'Recording…';
-    case 'transcribing':
-      return isOnDeviceEngine(engine) ? 'Transcribing on this device…' : 'Finishing in your browser…';
-    case 'review':
-      return 'Review the text, then insert it.';
-    case 'error':
-      return errorMessage ?? 'Dictation failed.';
-    case 'idle':
-      return '';
-  }
-}
-
-/**
  * A mic-button press starts a NEW utterance only when there is no flow to
  * resume. This is the safety edge that makes hiding the panel non-destructive:
  * recording, transcription, empty and error states all reopen in place.

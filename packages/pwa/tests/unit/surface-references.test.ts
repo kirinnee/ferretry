@@ -7,7 +7,6 @@ import {
   createSurfaceReferenceResolver,
   describeSurfaceOwnership,
   sessionSurfaces,
-  surfaceReferenceIdentityKey,
   terminalIdForSurfaceKey,
 } from '../../src/lib/surface-references.ts';
 
@@ -228,56 +227,6 @@ describe('browser pages as references', () => {
       should(resolve({ kind: 'surface', surface: 'browser', key: 'docs' })).be.undefined();
     }
   });
-
-  test('should change the identity key when a page opens, is named or the list becomes evidence', () => {
-    const one = surfaceReferenceIdentityKey(scopeA, null, browserStatus('running', [page('PAGE1')]));
-    should(surfaceReferenceIdentityKey(scopeA, null, browserStatus('running', [page('PAGE1', 'app')]))).not.equal(one);
-    should(
-      surfaceReferenceIdentityKey(scopeA, null, browserStatus('running', [page('PAGE1'), page('PAGE2')])),
-    ).not.equal(one);
-    should(surfaceReferenceIdentityKey(scopeA, null, browserStatus('starting', []))).not.equal(
-      surfaceReferenceIdentityKey(scopeA, null, browserStatus('stopped', [])),
-    );
-    // A retitled page is the same referenceable surface.
-    should(
-      surfaceReferenceIdentityKey(scopeA, null, browserStatus('running', [{ ...page('PAGE1'), title: 'Renamed' }])),
-    ).equal(one);
-  });
-});
-
-describe('surfaceReferenceIdentityKey', () => {
-  test('should change when a terminal opens or closes', () => {
-    // Arrange
-    const one = surfaceReferenceIdentityKey(scopeA, listing([terminal(FIRST, 'build')]));
-
-    // Assert
-    should(
-      surfaceReferenceIdentityKey(scopeA, listing([terminal(FIRST, 'build'), terminal(SECOND, 'test')])),
-    ).not.equal(one);
-    should(surfaceReferenceIdentityKey(scopeA, listing([]))).not.equal(one);
-  });
-
-  test('should not change when only activity or titles churn', () => {
-    // Assert — a retitled terminal is the same referenceable surface.
-    should(surfaceReferenceIdentityKey(scopeA, listing([terminal(FIRST, 'renamed', 3)]))).equal(
-      surfaceReferenceIdentityKey(scopeA, listing([terminal(FIRST, 'build')])),
-    );
-  });
-
-  test('should distinguish an absent listing from an empty one', () => {
-    // Assert
-    should(surfaceReferenceIdentityKey(scopeA, null)).not.equal(surfaceReferenceIdentityKey(scopeA, listing([])));
-    should(surfaceReferenceIdentityKey(scopeA, listing([terminal(FIRST, 'x')], 'sess-2'))).equal(
-      surfaceReferenceIdentityKey(scopeA, null),
-    );
-  });
-
-  test('should distinguish two daemons holding identical terminals', () => {
-    // Assert
-    should(surfaceReferenceIdentityKey(scopeA, listing([terminal(FIRST, 'x')]))).not.equal(
-      surfaceReferenceIdentityKey(scopeB, listing([terminal(FIRST, 'x')])),
-    );
-  });
 });
 
 describe('terminal names as reference keys', () => {
@@ -302,12 +251,6 @@ describe('terminal names as reference keys', () => {
     should(terminalIdForSurfaceKey(listing([named]), FIRST)).equal(FIRST);
     should(terminalIdForSurfaceKey(listing([named]), 'web')).be.undefined();
     should(terminalIdForSurfaceKey(null, 'dev')).be.undefined();
-  });
-
-  test('should change the identity key when a terminal is opened with a name', () => {
-    should(surfaceReferenceIdentityKey(scopeA, listing([named]))).not.equal(
-      surfaceReferenceIdentityKey(scopeA, listing([terminal(FIRST, 'Terminal 1')])),
-    );
   });
 });
 

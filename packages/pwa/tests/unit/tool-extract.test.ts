@@ -5,7 +5,6 @@ import {
   firstLine,
   langFromPath,
   parseExecOutput,
-  resultImages,
   resultText,
   toolColorVar,
 } from '../../src/lib/tool-extract.ts';
@@ -408,55 +407,6 @@ describe('langFromPath', () => {
 
     // Assert
     should(actual === undefined).be.true();
-  });
-});
-
-describe('resultImages', () => {
-  it('should keep base64 raster blocks', () => {
-    // Arrange
-    const result = {
-      content: [
-        { type: 'text', text: 'look' },
-        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
-      ],
-    };
-
-    // Act
-    const actual = resultImages(result);
-
-    // Assert
-    should(actual).deepEqual([{ mediaType: 'image/png', data: 'AAAA' }]);
-  });
-
-  it('should refuse svg, non-base64 sources, empty data and malformed blocks', () => {
-    // Arrange
-    const result = {
-      content: [
-        null,
-        'text',
-        { type: 'image' },
-        { type: 'image', source: 'nope' },
-        { type: 'image', source: { type: 'url', media_type: 'image/png', data: 'AAAA' } },
-        { type: 'image', source: { type: 'base64', media_type: 7, data: 'AAAA' } },
-        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 7 } },
-        { type: 'image', source: { type: 'base64', media_type: 'image/svg+xml', data: 'PHN2Zz4=' } },
-        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: '' } },
-      ],
-    };
-
-    // Act
-    const actual = resultImages(result);
-
-    // Assert
-    should(actual).deepEqual([]);
-  });
-
-  it('should answer nothing when the result carries no content list', () => {
-    // Act
-    const actual = resultImages({ text: 'done' });
-
-    // Assert
-    should(actual).deepEqual([]);
   });
 });
 

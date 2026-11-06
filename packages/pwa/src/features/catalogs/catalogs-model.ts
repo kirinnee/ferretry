@@ -48,8 +48,6 @@ export const sharingGrantCommand = (deviceId: string | null = null): string => {
     : command;
 };
 
-export const SHARING_GRANT_COMMAND = sharingGrantCommand();
-
 export const SHARING_OFF_LINES: readonly string[] = [
   'This device may not make or export catalogs yet.',
   'A device that has Sharing on and may manage devices can turn it on for this one in Settings › Devices.',

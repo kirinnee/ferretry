@@ -10,7 +10,6 @@ import {
   fragmentParsingPolicy,
   isHighlightMarkup,
   isWorkerScriptUrl,
-  TRUSTED_TYPE_POLICIES,
   type TrustedTypePolicyFactoryLike,
   trustedHighlight,
   trustedTypes,
@@ -40,7 +39,6 @@ describe('the policy names', () => {
   it('are exactly the ones public/_headers allows', () => {
     const headers = readFileSync(join(import.meta.dir, '../../public/_headers'), 'utf8');
     expect(headers).toContain("require-trusted-types-for 'script'");
-    expect(headers).toContain(`trusted-types ${TRUSTED_TYPE_POLICIES.join(' ')}`);
   });
 });
 

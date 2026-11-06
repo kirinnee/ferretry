@@ -233,12 +233,6 @@ export const chatChip = (
   };
 };
 
-/** The chip as one sentence, for a title and a screen reader: `&F18 Board system, Plan/Design, active`. */
-export const chatChipSentence = (chip: ChatChip): string => {
-  if (chip.kind === 'none') return 'No card';
-  return [chip.ref, chip.title, chip.lane, chip.activity].filter(part => part !== null).join(', ');
-};
-
 /** The Info row's words for a card chip: `&F18 (Plan/Design)`, or just `&F18` while its lane is unknown. */
 export const chatCardLabel = (chip: Extract<ChatChip, { kind: 'card' }>): string =>
   chip.lane === null ? chip.ref : `${chip.ref} (${chip.lane})`;

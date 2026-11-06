@@ -15,7 +15,7 @@
 
 import type { SessionView } from '@ferretry/protocol';
 import { useEffect, useRef, useSyncExternalStore } from 'react';
-import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
+import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { ResolvedQuota } from '../lib/usage.ts';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import { pairingKey } from './use-machines-poll.ts';
@@ -50,35 +50,6 @@ export const useMachinesUsage = (store: DaemonUsageStore, machines: readonly Dae
     };
   }, [store, key]);
   useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-};
-
-/**
- * Reads a slice WITHOUT joining the poll — for chrome that renders whatever is
- * already known and must not make a fleet-wide request of its own.
- */
-export const useUsageSlice = (store: DaemonUsageStore, daemonId: DaemonId): DaemonUsageSlice =>
-  useSyncExternalStore(
-    store.subscribe,
-    () => store.usage(daemonId),
-    () => store.usage(daemonId),
-  );
-
-/**
- * One session's quota, resolved from its own monitored state first and the
- * daemon's feed second. `null` means no data: a caller must render an explicit
- * unknown rather than zero percent.
- */
-export const useSessionQuota = (
-  store: DaemonUsageStore,
-  daemonId: DaemonId,
-  view: SessionView,
-): ResolvedQuota | null => {
-  useSyncExternalStore(
-    store.subscribe,
-    () => store.getSnapshot(),
-    () => store.getSnapshot(),
-  );
-  return store.quotaFor(daemonId, view);
 };
 
 const NO_SUBSCRIPTION = (): (() => void) => () => undefined;

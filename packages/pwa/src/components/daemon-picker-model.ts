@@ -223,23 +223,6 @@ export const findAccountOption = (
   wrapper: string,
 ): AccountPickerOption | null => options?.find(option => option.wrapper === wrapper) ?? null;
 
-export interface AccountQuotaSummary {
-  /** `null` = no evidence; a real reading of 0% used is returned as `0`, never dropped. */
-  readonly fiveHourPercent: number | null;
-  readonly weeklyPercent: number | null;
-  /** `null` = unknown, distinct from a proven `false`. */
-  readonly atLimit: boolean | null;
-  readonly authOk: boolean | null;
-}
-
-/** Presentation-only facts: exhaustion or an auth failure here is advisory, never a disable decision. */
-export const accountQuotaSummary = (quota: AccountUsageRow | null): AccountQuotaSummary => ({
-  fiveHourPercent: quota?.fiveHourPercent ?? null,
-  weeklyPercent: quota?.weeklyPercent ?? null,
-  atLimit: quota?.atLimit ?? null,
-  authOk: quota?.authOk ?? null,
-});
-
 /**
  * Normalizes typed model text with no reference to any account: blank stays
  * blank (`null`, meaning "use the account's own default"). This signature

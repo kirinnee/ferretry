@@ -394,6 +394,3 @@ export function componentChange(draft: ComponentDraft, create: boolean): FleetAc
       });
   }
 }
-
-/** What the "saved for reuse" list calls something made inside a flow: "Instructions Team rules". */
-export const reuseLabel = (kind: FleetComponentKind, name: string): string => `${KIND_ONE[kind]} ${name}`;

@@ -52,10 +52,6 @@ export const machinePanelFromHash = (hash: string, tab: MachineTabId = 'machine'
   return item === null || FLOWS.has(item) || panelTab(item) !== tab ? null : item;
 };
 
-/** `#machines/<machine>/<tab>/<panel>`, on the tab that opens the panel. */
-export const machinePanelHash = (machine: string, panel: string): string =>
-  machineItemHash(machine, panelTab(panel) ?? 'machine', panel);
-
 export interface SettingsFlowRoute {
   readonly flow: SettingsFlow | null;
   /** The daemon panel the address opens, or `null` for none. */

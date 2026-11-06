@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { useEffect } from 'react';
 
-import {
-  createTaskReferenceResolver,
-  TaskReferenceProvider,
-  useTaskReferenceResolver,
-} from '../../src/lib/task-reference-context.tsx';
-import { render } from '../support/react.ts';
+import { createTaskReferenceResolver } from '../../src/lib/task-reference-context.tsx';
 
 describe('task reference context', () => {
   it('proves only ids from the supplied daemon-scoped board, case-insensitively', () => {
@@ -42,24 +36,5 @@ describe('task reference context', () => {
     const both = createTaskReferenceResolver([{ id: 'F96', legacyId: 'F12' }], new Set(['F1']));
     expect(both('f12')).toBeTrue();
     expect(both('F1')).toBeTrue();
-  });
-
-  it('makes the host snapshot available to nested Markdown consumers', () => {
-    let resolve: ReturnType<typeof useTaskReferenceResolver> | undefined;
-    const Probe = (): null => {
-      const current = useTaskReferenceResolver();
-      useEffect(() => {
-        resolve = current;
-      }, [current]);
-      return null;
-    };
-
-    render(
-      <TaskReferenceProvider tasks={[{ id: 'F12' }]}>
-        <Probe />
-      </TaskReferenceProvider>,
-    );
-    expect(resolve?.('F12')).toBeTrue();
-    expect(resolve?.('C1')).toBeFalse();
   });
 });
