@@ -67,7 +67,7 @@ import {
   type FleetEventStreamSubsystem,
   fleetEventSocketRoutes,
 } from './fleet-events.ts';
-import { type HarnessLoginSubsystem, harnessLoginRoutes } from './fleet-login.ts';
+import type { HarnessLoginSubsystem } from './fleet-login.ts';
 import { type FleetSetupSubsystem, fleetSetupRoutes } from './fleet-setup.ts';
 import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
@@ -212,7 +212,8 @@ export interface MountedSubsystems {
    *  harness's own login against one credential's store with piped stdio, publishes a verification
    *  URL — and for Codex a device code — accepts one short-lived authorization code straight into that
    *  child's stdin, and lets the harness write its own credential into its own store. Every route here
-   *  is `configure`, which a caller off this host passes only behind the passkey step-up. */
+   *  is `configure`, which a caller off this host passes only behind the passkey step-up. The routes come from the
+   *  fleet-login module; this field is read only by the shutdown that ends every child a sign-in started. */
   readonly harnessLogin: HarnessLoginSubsystem;
   /** Signing in to a remote MCP server from a browser, with the daemon as the OAuth client: tokens go
    *  straight into the secret store and are used by launch variable name (docs/mcp-oauth.md). Every act
@@ -579,10 +580,6 @@ export function legacyModule(
               ...fleetCredentialRoutes(subsystems.fleetCredentials),
               ...fleetCatalogRoutes(subsystems.fleetCatalog),
               ...fleetSetupRoutes(subsystems.fleetSetup),
-              // The sign-in surface sits directly beside the fleet it signs in, under `/v1/fleet/login` — a fixed
-              // literal with a one-segment id beneath it, so it can neither shadow nor be shadowed by anything in
-              // the fleet tables above.
-              ...harnessLoginRoutes(subsystems.harnessLogin),
               ...mcpOAuthRoutes(subsystems.mcpOAuth),
               // `/v1/mcp` and `/v1/mcp/check` are fixed literals no other route uses; the per-session list ends in
               // `mcp/servers`, a literal pair the session MCP routes below do not use, so none can shadow another.

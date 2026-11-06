@@ -2,6 +2,7 @@ import type { BuiltModule } from '../../../src/lib/runtime/modules.ts';
 import { builtAgentTools } from './agent-tools/fixture.ts';
 import { builtAnalytics } from './analytics/fixture.ts';
 import { builtCgroups } from './cgroups/fixture.ts';
+import { builtFleetLogin } from './fleet-login/fixture.ts';
 import { builtInputRequests } from './input-requests/fixture.ts';
 import { builtLearning } from './learning/fixture.ts';
 import { builtRenders } from './renders/fixture.ts';
@@ -28,4 +29,5 @@ export const builtModules = (): readonly BuiltModule<unknown, object>[] => [
   builtWorkSearch(),
   builtInputRequests(),
   builtAgentTools(),
+  builtFleetLogin(),
 ];

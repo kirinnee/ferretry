@@ -45,7 +45,9 @@ import { ApiError } from '../../api/error.ts';
 import { decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import type { AuditedRouteRule } from '../../audit/routes.ts';
 import { HarnessLoginRefusal, type HarnessLoginService } from '../../fleet-login/service.ts';
+import type { ModuleContribution } from '../modules.ts';
 
 /**
  * The subsystem these routes serve: the four calls, and the shutdown that ends every child they started
@@ -143,4 +145,37 @@ export function harnessLoginRoutes(subsystem: HarnessLoginSubsystem): readonly A
       handle: async context => await respondWith(HarnessLoginFlowSchema, () => subsystem.cancel(flowId(context))),
     },
   ];
+}
+
+/**
+ * The security log's rules for a sign-in: starting one, forwarding its answer and ending it. The subject is the flow
+ * id and nothing else — never the credential id, the verification URL, the code or the callback address.
+ */
+const HARNESS_LOGIN_AUDIT_RULES: readonly AuditedRouteRule[] = [
+  { method: 'POST', path: '/v1/fleet/login', event: 'fleet.configured', detail: { action: 'sign-in' } },
+  {
+    method: 'POST',
+    path: '/v1/fleet/login/:flowId',
+    event: 'fleet.configured',
+    subject: 'flowId',
+    detail: { action: 'sign-in-answer' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/fleet/login/:flowId',
+    event: 'fleet.configured',
+    subject: 'flowId',
+    detail: { action: 'sign-in-cancel' },
+  },
+];
+
+/**
+ * What the fleet-login module adds to the daemon: the four sign-in routes and their three audit rules. It claims no
+ * protocol feature.
+ *
+ * The sign-in surface sits directly beside the fleet it signs in, under `/v1/fleet/login` — a fixed literal with a
+ * one-segment id beneath it, so it can neither shadow nor be shadowed by anything in the fleet tables.
+ */
+export function harnessLoginContribution(subsystem: HarnessLoginSubsystem): ModuleContribution {
+  return { routes: harnessLoginRoutes(subsystem), audit: { routes: HARNESS_LOGIN_AUDIT_RULES } };
 }

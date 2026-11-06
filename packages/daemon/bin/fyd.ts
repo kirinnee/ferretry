@@ -198,9 +198,6 @@ import {
   ensurePrivateDirectory,
   runCredentialHarness,
 } from '../src/adapters/fleet-credentials/credential-facts.ts';
-import { deliverCodexCallback } from '../src/adapters/fleet-login/callback-delivery.ts';
-import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
-import { systemPortHolders } from '../src/adapters/fleet-login/port-holders.ts';
 import {
   FileSessionForkReceiptStore,
   forkOpeningTurnRefusal,
@@ -672,7 +669,6 @@ import { OrderedLogWriter } from '../src/adapters/runtime/ordered-log-writer.ts'
 import { forgetFerretIdentity } from '../src/adapters/tmux/forget-ferret-identity.ts';
 import { CatalogInstallService } from '../src/lib/catalog-installs/service.ts';
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
-import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import {
   SessionForkFacade,
   type SessionForkIdFactory,
@@ -1359,6 +1355,7 @@ import { type BuiltModule, lateBound, type ModuleLifecycle } from '../src/lib/ru
 import { agentIdentities, agentToolsModule } from './modules/agent-tools.ts';
 import { analyticsModule } from './modules/analytics.ts';
 import { cgroupsModule, createCgroupLaunchLimits } from './modules/cgroups.ts';
+import { fleetLoginModule } from './modules/fleet-login.ts';
 import { inputRequestsModule } from './modules/input-requests.ts';
 import { learningModule } from './modules/learning.ts';
 import { rendersModule } from './modules/renders.ts';
@@ -7945,29 +7942,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     ensureDirectory: ensurePrivateDirectory,
   });
   const locateHarness = (kind: HarnessKind): string | undefined => harnessBinary(HARNESS_BINARIES[kind]);
-  /**
-   * Driving a harness's own sign-in from a browser, holding no token: the harness's own login against
-   * one credential's store. It is given THIS PROCESS'S ENVIRONMENT, which the service sanitizes before
-   * any child sees it, so a sign-in started from inside an agent session cannot authenticate against
-   * that session's login. Who may start one is the route's `fleet.configure`, which holds a caller
-   * off this host behind the passkey step-up.
-   */
-  const harnessLogin = new HarnessLoginService({
-    credentialTargets: {
-      target: async id => fleetCredentialCatalog.signInTarget(await fleetCredentialCatalog.entry(id)),
-    },
-    locate: locateHarness,
-    clock: millisecondClock,
-    mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
-    spawn: spawnHarnessLoginChild,
-    deliverCallback: deliverCodexCallback,
-    environment: process.env,
-    timer: harnessLoginTimer,
-    sharedHost: async () => ((await declaredAccountModel())?.machine.browserPorts ?? 'random') !== 'random',
-    portHolders: systemPortHolders(),
-    clientName: CLIENT_NAME,
-    onSignedIn: () => configChanges.announce(['credentials', 'runtimes']),
-  });
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
    *  how spent each account is depends on whether the caller asked for a live probe. */
   const advisorOver = (usage: UsageFeedPort): TeamAdvisor => new TeamAdvisor(accounts, routing, usage);
@@ -12486,6 +12460,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const renders = rendersModule.build({ paths, stateFiles, clock }, seamsOf.renders(world), lifecycle);
       // Dictation enhancement: the enhancer is the world's seam, so a test substitutes it and keeps the route.
       const voice = voiceModule.build(undefined, seamsOf.voice(world), lifecycle);
+      // Driving a harness's own sign-in from a browser, holding no token: inert until a request, and read through the fleet's credential catalog.
+      const fleetLogin = fleetLoginModule.build(
+        {
+          credentials: fleetCredentialCatalog,
+          locate: locateHarness,
+          clock: millisecondClock,
+          environment: process.env,
+          clientName: CLIENT_NAME,
+          declaredAccountModel,
+          configChanges,
+        },
+        seamsOf.fleetLogin(world),
+        lifecycle,
+      );
       const mounted: Omit<
         MountedSubsystems,
         | 'sessionMcp'
@@ -12633,7 +12621,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         carriers,
         tunnel,
         webrtc,
-        harnessLogin,
+        harnessLogin: fleetLogin.provides,
         mcpOAuth,
         // The logins list is a WATCHER: somebody has it on screen, so the environment logins' provider
         // quotas that are due are read first (at most once a minute each). The usage feed's unattended
@@ -13602,6 +13590,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           workSearch: workSearchModuleBuilt,
           inputRequests,
           agentTools,
+          fleetLogin,
         },
       };
     },
