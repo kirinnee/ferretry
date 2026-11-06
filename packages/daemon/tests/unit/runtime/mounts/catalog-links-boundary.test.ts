@@ -85,6 +85,7 @@ const assertionBody = json({
   authenticatorData: 'YXV0aA',
   signature: 'c2ln',
 });
+const MINT = { item: { itemId: `itm_${'i'.repeat(22)}`, version: 1, digest: DIGEST }, kind: 'public', expires: '7d' };
 const MOVE = { version: 2, from: 1, digest: DIGEST };
 
 class FakeLinks {
@@ -92,6 +93,10 @@ class FakeLinks {
   widening = false;
   async storeStatus() {
     return { available: true };
+  }
+  async mint() {
+    this.calls.push('mint');
+    return { link: { linkId: LINK_ID }, url: 'https://app.example.test/l#v1;b=x;k=SECRETKEY' };
   }
   async move(linkId: string) {
     this.calls.push('move');
@@ -175,15 +180,14 @@ async function machine(initial: Partial<SecuritySettings>, granted: CapabilityGr
     should((await ask('POST', '/v1/unlock/options', { origin: ORIGIN })).status).equal(200);
     should((await ask('POST', '/v1/unlock', JSON.parse(assertionBody))).status).equal(200);
   };
-  const prove = async () => {
-    should((await ask('POST', '/v1/step-up/options', { origin: ORIGIN, act: STEP_UP_ACTS.shareLink })).status).equal(
-      200,
-    );
+  const prove = async (act: string = STEP_UP_ACTS.shareLink) => {
+    should((await ask('POST', '/v1/step-up/options', { origin: ORIGIN, act })).status).equal(200);
     should((await ask('POST', '/v1/step-up', JSON.parse(assertionBody))).status).equal(200);
   };
+  const mint = () => ask('POST', '/v1/catalog-links', MINT);
   const move = () => ask('PUT', `/v1/catalog-links/${LINK_ID}/version`, MOVE);
   const patch = (body: unknown) => ask('PATCH', `/v1/catalog-links/${LINK_ID}`, body);
-  return { links, ask, unlock, prove, move, patch };
+  return { links, ask, unlock, prove, mint, move, patch };
 }
 
 const codeOf = (response: { body: string }): string | undefined =>
@@ -252,6 +256,97 @@ describe('a governed device that asks for a passkey on every act', () => {
 
     // Assert
     should([first.status, second.status]).deepEqual([200, 403]);
+  });
+});
+
+describe('minting a link at the boundary', () => {
+  it.each([
+    ['a zero-minute window', { stepUpOnActions: true, stepUpWindowMinutes: 0 }],
+    ['the default window', {}],
+  ] as const)(
+    'should refuse without the share-link passkey, then serve after one, with %s',
+    async (_name, settings) => {
+      const world = await machine(settings);
+      await world.unlock();
+
+      const refused = await world.mint();
+      await world.prove();
+      const served = await world.mint();
+
+      should([refused.status, codeOf(refused)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
+      should(served.status).equal(201);
+      should(world.links.calls).deepEqual(['mint']);
+    },
+  );
+
+  it.each([
+    ['a zero-minute window', { stepUpOnActions: true, stepUpWindowMinutes: 0 }],
+    ['the default window', {}],
+  ] as const)('should let exactly one of two concurrent mints spend one proof, with %s', async (_name, settings) => {
+    const world = await machine(settings);
+    await world.unlock();
+    await world.prove();
+
+    const answers = await Promise.all([world.mint(), world.mint()]);
+
+    should(answers.map(answer => answer.status).sort()).deepEqual([201, 403]);
+    should(world.links.calls).deepEqual(['mint']);
+  });
+
+  it.each([
+    ['a mint', (world: Awaited<ReturnType<typeof machine>>) => world.mint()],
+    ['a move', (world: Awaited<ReturnType<typeof machine>>) => world.move()],
+  ] as const)('should leave the next governed act unproved after %s, with a zero-minute window', async (_name, act) => {
+    const world = await machine({ stepUpOnActions: true, stepUpWindowMinutes: 0 });
+    await world.unlock();
+    await world.prove();
+
+    const served = await act(world);
+    const store = await world.ask('GET', '/v1/catalog-links/store');
+
+    should(served.status).be.oneOf(200, 201);
+    should([store.status, codeOf(store)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
+  });
+
+  // A failed claim must not spend anything: with no second proof, the unlock's held step-up serves exactly one read.
+  it('should leave the held step-up unspent when the mint was refused for want of the proof, with a zero-minute window', async () => {
+    // Arrange
+    const world = await machine({ stepUpOnActions: true, stepUpWindowMinutes: 0 });
+    await world.unlock();
+
+    // Act
+    const refused = await world.mint();
+    const first = await world.ask('GET', '/v1/catalog-links/store');
+    const second = await world.ask('GET', '/v1/catalog-links/store');
+
+    // Assert
+    should([refused.status, codeOf(refused)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
+    should(first.status).equal(200);
+    should([second.status, codeOf(second)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
+    should(world.links.calls).be.empty();
+  });
+
+  it('should serve the mint on its own proof after a refused one, with a zero-minute window', async () => {
+    const world = await machine({ stepUpOnActions: true, stepUpWindowMinutes: 0 });
+    await world.unlock();
+
+    const refused = await world.mint();
+    await world.prove();
+    const served = await world.mint();
+
+    should([refused.status, codeOf(refused)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
+    should(served.status).equal(201);
+  });
+
+  it('should refuse a proof made for another act', async () => {
+    const world = await machine({});
+    await world.unlock();
+    await world.prove(STEP_UP_ACTS.shareCatalog);
+
+    const answer = await world.mint();
+
+    should([answer.status, codeOf(answer)]).deepEqual([403, STEP_UP_REQUIRED_CODE]);
+    should(world.links.calls).be.empty();
   });
 });
 

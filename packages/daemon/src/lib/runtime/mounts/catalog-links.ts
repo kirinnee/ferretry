@@ -2,7 +2,7 @@
  * Download links: ONE skill or MCP setup behind a URL (docs/catalogs.md § Links). The domain is `catalog-links/`;
  * the wire is `@ferretry/protocol` catalog-link.
  *
- * Every route is `sharing`/`use`; move, change, Copy and turn-off are the `narrowing` boundary demand (below). A FERRET HOLDS THE ADMIN TOKEN BUT MAY ONLY READ: previewing, minting, copying
+ * Every route is `sharing`/`use`; mint, move, change, Copy and turn-off are the `narrowing` boundary demand (below). A FERRET HOLDS THE ADMIN TOKEN BUT MAY ONLY READ: previewing, minting, copying
  * and turning off are the owner's (`ownerOnly`). A prompt-injected agent that could mint a link could hand a
  * stranger a skill or an MCP setup from this machine, and one that could Copy would read a public link's key.
  *
@@ -37,10 +37,11 @@ import { CatalogLinkRefusal, LINK_STATUS } from '../../catalog-links/refusal.ts'
 
 const SHARING_USE: CapabilityDemand = { capability: 'sharing', axis: 'use' };
 /**
- * What the routes that move, change, copy or turn off a link demand at the boundary: the grant, the device and the
- * unlock, and NOT a generic per-action proof. The boundary cannot tell a narrowing from a widening, and it would
- * spend the held proof before the handler claims the fresh `share-link` one that a move or a widening needs; the
- * handler asks that itself. A narrowing, Copy and turning off then ask nothing more.
+ * What the routes that mint, move, change, copy or turn off a link demand at the boundary: the grant, the device and the
+ * unlock, and NOT a generic per-action proof. The boundary cannot tell a narrowing from a widening, and with a
+ * zero-minute step-up window it would spend the held proof before the handler claims the fresh `share-link` one that a
+ * mint, a move or a widening needs, so that act could never succeed; the handler asks that itself. A narrowing, Copy
+ * and turning off then ask nothing more.
  */
 const SHARING_NARROWING: CapabilityDemand = { ...SHARING_USE, narrowing: true };
 
@@ -76,8 +77,14 @@ function ownerOnly(context: RouteContext, act: string): void {
  * caller (the machine's own `fy`) needs none.
  */
 function claimPasskey(context: RouteContext, what = 'making a download link'): ApiResponse | undefined {
-  if (context.governance?.governed !== true || context.claimFreshStepUp?.(STEP_UP_ACTS.shareLink) === true)
+  if (context.governance?.governed !== true) return undefined;
+  if (context.claimFreshStepUp?.(STEP_UP_ACTS.shareLink) === true) {
+    // The boundary did not spend the general step-up (these routes are `narrowing`), and the claim above only took the
+    // fresh proof; under a zero-minute window the held step-up would admit the NEXT governed act unproved. Spent
+    // only after a successful claim, so a refused claim leaves the person's step-up to retry with.
+    context.spendStepUp?.();
     return undefined;
+  }
   return jsonResponse(
     {
       error: `${what} needs a passkey confirmation for it, from this device`,
@@ -152,7 +159,7 @@ export function catalogLinkRoutes(subsystem: CatalogLinkSubsystem): readonly Api
       path: '/v1/catalog-links',
       minimum: 'operator',
       caller: 'person',
-      capability: SHARING_USE,
+      capability: SHARING_NARROWING,
       noStore: true,
       handle: async context => {
         ownerOnly(context, 'make a download link');
