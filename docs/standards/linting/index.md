@@ -23,8 +23,8 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI spli
 
 | Hook                         | What it enforces                                                                                 |
 | ---------------------------- | ------------------------------------------------------------------------------------------------ |
-| `treefmt`                    | formatting: actionlint, nixfmt, prettier, shfmt                                                  |
-| `a-biome`                    | Biome lint on TS/JS (formatting is prettier's job, not Biome's)                                  |
+| `treefmt`                    | formatting: Biome (TS/JS/JSON/CSS), prettier (Markdown/YAML/HTML), actionlint, nixfmt, shfmt     |
+| `a-biome`                    | Biome lint on TS/JS (Biome formats through `treefmt`, configured in the same `biome.json`)       |
 | `typecheck`                  | `tsc --noEmit` across the workspace                                                              |
 | `a-deadcode`                 | Knip, repository view (`knip.json`) — includes tests                                             |
 | `a-deadcode-production`      | Knip, production view (`knip.production.json`) — from the bin entry                              |
@@ -62,6 +62,13 @@ counts as using it. `a-composition-reachability` closes that hole — see
 
 `prettier` skips `Changelog.md` and `Changelog.old.md` — semantic-release owns those files and
 reformatting them would churn the release commit.
+
+**Biome formats code, prettier formats prose.** `nix/fmt.nix` hands TypeScript, JavaScript, JSON(C) and
+CSS to the workspace's own `node_modules/.bin/biome` (the version `a-biome` lints with) and leaves
+Markdown, YAML and HTML to prettier. The formatter options in `biome.json` mirror `.prettierrc` (120
+columns, single quotes, trailing commas, `arrowParens: avoid`); Biome formats the repository in ~2 s
+against prettier's ~40 s on 32 cores. Its few known differences from prettier were applied once, in
+one reformat commit.
 
 ## Configuration rules
 
