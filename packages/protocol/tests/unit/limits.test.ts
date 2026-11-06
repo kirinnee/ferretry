@@ -222,12 +222,18 @@ describe('limitsLoosening', () => {
       const unitChanged = limitsLoosening(file({ fleet: { memoryMax: '30G' } }), file({ fleet: { memoryMax: '50%' } }));
       const backToDefault = limitsLoosening(file({ fleet: { memoryMax: '30G' } }), {});
       const newCap = limitsLoosening({}, file({ fleet: { memoryMax: '30G' } }));
+      const noCap = limitsLoosening({}, file({ fleet: { memoryMax: 'infinity', swapMax: 'infinity' } }));
+      const underDefaultPercent = limitsLoosening({}, file({ perFerret: { memoryMax: '20%' } }));
+      const overDefaultPercent = limitsLoosening({}, file({ perFerret: { memoryMax: '40%' } }));
       // Assert
       should(sameUnitLower).deepEqual([]);
       should(sameUnitHigher.length).equal(1);
       should(unitChanged.length).equal(1);
       should(backToDefault.length).equal(1);
-      should(newCap).deepEqual([]);
+      should(newCap.length).equal(1);
+      should(noCap.length).equal(2);
+      should(underDefaultPercent).deepEqual([]);
+      should(overDefaultPercent.length).equal(1);
     });
   });
 });

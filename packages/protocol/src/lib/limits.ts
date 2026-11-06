@@ -269,13 +269,19 @@ const comparable = (cap: Cap | undefined): number => (cap === null ? Number.POSI
 
 /**
  * One setting compared WITHOUT knowing the budget. Only edits that are provably not looser pass:
- * the same unit written lower, a percent or size written where nothing was, no change. A change of
+ * the same unit written lower, a percent under the default's own percent written where nothing was, no change. A change of
  * unit, or going back to the computed default, cannot be proved tighter, so it is held.
  */
-function symbolicRaised(before: unknown, after: unknown): boolean {
+function symbolicRaised(before: unknown, after: unknown, defaultPercent: number | undefined): boolean {
   if (before === after || JSON.stringify(before) === JSON.stringify(after)) return false;
   if (after === undefined) return true;
-  if (before === undefined) return false;
+  if (before === undefined) {
+    // Nothing was written, so the baseline is the computed default, which needs the budget. Only a percent
+    // that sits under the default's own percent is provably tighter; `infinity`, bytes, and any percent
+    // above it cannot be shown to be below the default, so they are held.
+    const added = parseLimitSize(after);
+    return !(added?.kind === 'percent' && defaultPercent !== undefined && added.percent <= defaultPercent);
+  }
   const was = parseLimitSize(before);
   const now = parseLimitSize(after);
   if (was === undefined || now === undefined)
@@ -289,6 +295,13 @@ function symbolicRaised(before: unknown, after: unknown): boolean {
 }
 
 const SIZE_FIELDS = new Set(['memoryHigh', 'memoryMax', 'swapMax']);
+
+/** The computed defaults that are a fixed percent of the budget, by `group.field`; the others need the budget. */
+const DEFAULT_PERCENTS: Readonly<Record<string, number>> = {
+  'fleet.swapMax': 10,
+  'perFerret.memoryHigh': 25,
+  'perFerret.memoryMax': 30,
+};
 
 /**
  * Each loosening an edit from `before` to `after` makes, in words; empty when it loosens nothing.
@@ -318,7 +331,7 @@ export function limitsLoosening(before: LimitsConfig, after: LimitsConfig, ceili
     const raised =
       ceilingBytes !== undefined || !SIZE_FIELDS.has(field)
         ? comparable(resolvedAfter as Cap) > comparable(resolvedBefore as Cap)
-        : symbolicRaised(writtenBefore, writtenAfter);
+        : symbolicRaised(writtenBefore, writtenAfter, DEFAULT_PERCENTS[`${group}.${field}`]);
     if (raised) sentences.push(`${words} was raised`);
   };
   for (const field of Object.keys(FLEET_WORDS) as (keyof typeof FLEET_WORDS)[])
