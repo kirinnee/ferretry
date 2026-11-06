@@ -412,6 +412,7 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
       <div
         ref={menuRef}
         role="menu"
+        data-context-menu=""
         aria-label={ariaLabel}
         aria-orientation="vertical"
         onKeyDown={onKeyDown}
