@@ -675,3 +675,70 @@ describe('projectPackCalls', () => {
     expect(startOf(twice[0]).retried).toBeUndefined();
   });
 });
+
+// Captured from `renderPackNewOutcome` (packages/cli/src/lib/pack/render.ts) for a Codex start whose harness took
+// 1.2 s, one that gave up waiting, and a start whose session came back failed. The PWA does not depend on the CLI
+// package, so the real output is pinned here; regenerate it from the renderer if its wording changes.
+const STARTED_TIMED = [
+  'Started nadia (mvq1k2-7f3a) on codex-auto-work, gpt-6.1-sol — decided by you.',
+  '  started codex-auto-work gpt-6.1-sol (probe OK 640 ms), harness ready in 1.2 s',
+  'Wait for its result: fy wait mvq1k2-7f3a',
+].join('\n');
+const STARTED_NOT_READY = [
+  'Started nadia (mvq1k2-7f3a) on codex-auto-work, gpt-6.1-sol — decided by you.',
+  '  started codex-auto-work gpt-6.1-sol (probe OK 640 ms), harness not ready after 31.4 s',
+  'Codex waits on an account check with chatgpt.com before it starts, so a slow start is usually the network (the first start on a new Codex home also indexes its history once) (docs/message-delivery.md).',
+  'Wait for its result: fy wait mvq1k2-7f3a',
+].join('\n');
+const START_FAILED = [
+  'fy new: refused (start_failed): codex-auto-work gpt-6.1-sol did not start: the interactive harness exited (1)',
+  'Its session mvq1k2-7f3a holds the evidence (`fy status mvq1k2-7f3a`); try the next candidate.',
+  '',
+  'Tried:',
+  '  refused codex-auto-work gpt-6.1-sol (probe OK 640 ms) — start_failed: codex-auto-work gpt-6.1-sol did not start: the interactive harness exited (1)',
+].join('\n');
+
+describe('readPackCall — new, the lines a harness start adds', () => {
+  test('reads a started attempt that carries how long its harness took, and keeps its probe time', () => {
+    expect(done(readPackCall(bash(NEW, { text: STARTED_TIMED }), 'fy'))).toEqual({
+      outcome: 'started',
+      id: 'mvq1k2-7f3a',
+      teammate: 'nadia',
+      runtime: 'codex-auto-work',
+      model: 'gpt-6.1-sol',
+      decidedBy: 'you',
+      attempts: [{ runtime: 'codex-auto-work', model: 'gpt-6.1-sol', outcome: 'started', probe: 640 }],
+    });
+  });
+
+  test('reads a start that gave up waiting, without taking the slow-start explanation for its note', () => {
+    expect(done(readPackCall(bash(NEW, { text: STARTED_NOT_READY }), 'fy'))).toEqual({
+      outcome: 'started',
+      id: 'mvq1k2-7f3a',
+      teammate: 'nadia',
+      runtime: 'codex-auto-work',
+      model: 'gpt-6.1-sol',
+      decidedBy: 'you',
+      attempts: [{ runtime: 'codex-auto-work', model: 'gpt-6.1-sol', outcome: 'started', probe: 640 }],
+    });
+  });
+
+  test('reads a start whose session failed as the refusal it is, with the attempt', () => {
+    expect(done(readPackCall(bash(NEW, { text: START_FAILED }), 'fy'))).toEqual({
+      outcome: 'refused',
+      code: 'start_failed',
+      message: 'codex-auto-work gpt-6.1-sol did not start: the interactive harness exited (1)',
+      remedy: 'Its session mvq1k2-7f3a holds the evidence (`fy status mvq1k2-7f3a`); try the next candidate.',
+      attempts: [
+        {
+          runtime: 'codex-auto-work',
+          model: 'gpt-6.1-sol',
+          outcome: 'refused',
+          probe: 640,
+          code: 'start_failed',
+          message: 'codex-auto-work gpt-6.1-sol did not start: the interactive harness exited (1)',
+        },
+      ],
+    });
+  });
+});

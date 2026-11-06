@@ -57,6 +57,11 @@ export class FakeTmuxServer implements TmuxCommandPort {
    * inside its paste-burst window, measured on 0.156.1.
    */
   swallowEnters = 0;
+  /**
+   * Until this virtual time the harness is still starting: Codex 0.166 has taken a submission and parks it under a
+   * last line of `Waiting for startup · esc cancel`, so the composer is not the last thing on screen.
+   */
+  startupWaitUntilMs = 0;
   /** The virtual clock, in milliseconds, which only `advance` moves. */
   nowMs = 0;
   /** Until this virtual time the harness reads nothing typed and draws nothing new. */
@@ -193,6 +198,7 @@ export class FakeTmuxServer implements TmuxCommandPort {
     const rendered = [...this.transcript.split('\n')];
     if (this.modal !== undefined) rendered.push(...this.modal.split('\n'));
     if (this.working) rendered.push('✻ Lollygagging… (34s · ⚒ 2.1k tokens)');
+    if (this.nowMs < this.startupWaitUntilMs) return [...rendered, 'Waiting for startup · esc cancel'];
     return [...rendered, `> ${this.composer === '' ? this.placeholder : this.composer}`];
   }
 

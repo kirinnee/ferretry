@@ -9,6 +9,7 @@ import {
   type RoutingPromptView,
   type RoutingSuggested,
 } from '@ferretry/protocol';
+import { harnessReadyWords, slowCodexStartNote } from '../session/harness-startup.ts';
 
 /**
  * Which routing prompt is in effect, in words: "your routing prompt", "cleaned up by gpt-oss-120b on
@@ -80,21 +81,23 @@ export function renderGuide(view: PackView, bin: string): string {
  * The "reply OK" check of one attempt: `probe OK 640 ms`, `probe OK, cached`, or `probe failed 3436 ms`
  * (`shared` when another start's probe of the same model was already running). A refused attempt that
  * carries a time is one whose probe failed; one without a time passed it and was refused by the start.
+ * `start_failed` is the exception: its probe passed (the harness then did not come up) and it carries the time.
  */
 const probeWords = (attempt: PackAttempt): string => {
   if (attempt.probe === undefined) return '';
   const cached = attempt.probe === 'cached';
-  if (attempt.outcome === 'refused' && attempt.probeMs !== undefined)
+  if (attempt.outcome === 'refused' && attempt.probeMs !== undefined && attempt.refusal?.code !== 'start_failed')
     return cached ? ' (probe failed, shared)' : ` (probe failed ${String(attempt.probeMs)} ms)`;
   if (cached) return ' (probe OK, cached)';
   return attempt.probeMs === undefined ? ' (probe OK)' : ` (probe OK ${String(attempt.probeMs)} ms)`;
 };
 
-const attemptLine = (attempt: PackAttempt): string => {
+/** `ready` is how long the started attempt's harness took to be up (`, harness ready in 4.2 s`); only a started attempt has one. */
+const attemptLine = (attempt: PackAttempt, ready = ''): string => {
   const model = attempt.model === undefined ? '' : ` ${attempt.model}`;
   const probe = probeWords(attempt);
   return attempt.outcome === 'started'
-    ? `  started ${attempt.runtime}${model}${probe}`
+    ? `  started ${attempt.runtime}${model}${probe}${ready}`
     : `  refused ${attempt.runtime}${model}${probe} — ${attempt.refusal?.code ?? 'refused'}: ${attempt.refusal?.message ?? ''}`;
 };
 
@@ -130,7 +133,10 @@ function cardLines(card: PackChildCard | undefined): readonly string[] {
 
 /** What `new` did: the ferret it started and how, or the refusal and every attempt. */
 export function renderPackNewOutcome(outcome: PackNewOutcome, bin: string): string {
-  const attempts = outcome.attempts.map(attemptLine);
+  const ready = outcome.outcome === 'started' ? harnessReadyWords(outcome.view) : undefined;
+  const attempts = outcome.attempts.map(attempt =>
+    attemptLine(attempt, attempt.outcome === 'started' && ready !== undefined ? `, ${ready}` : ''),
+  );
   if (outcome.outcome === 'refused')
     return [
       `refused (${outcome.refusal.code}): ${outcome.refusal.message}`,
@@ -138,12 +144,14 @@ export function renderPackNewOutcome(outcome: PackNewOutcome, bin: string): stri
       ...(attempts.length === 0 ? [] : ['', 'Tried:', ...attempts]),
     ].join('\n');
   const view = outcome.view;
+  const slow = slowCodexStartNote(view);
   const who = view.config.teammate === undefined ? view.config.id : `${view.config.teammate} (${view.config.id})`;
   return [
     `Started ${who} on ${view.config.agent}${view.config.model === undefined ? '' : `, ${view.config.model}`} — decided by ${DECIDED_BY[outcome.decidedBy]}.`,
     ...(outcome.note === undefined ? [] : [outcome.note]),
     ...cardLines(outcome.card),
     ...attempts,
+    ...(slow === undefined ? [] : [slow]),
     `Wait for its result: ${bin} wait ${view.config.id}`,
   ].join('\n');
 }

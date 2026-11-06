@@ -203,11 +203,12 @@ const memoryApplyStatus = (): CgroupApplyStatusStore => {
   };
 };
 
-/** Delivery exercises only the durable admission boundary; it performs no pane mutation. */
+/** Delivery exercises only the durable admission boundary; it performs no pane mutation, and the pane is always up. */
 const NO_DELIVERY = {
   deliver: async (_session: string, _text: string, _options: unknown, beforeWrite?: () => Promise<void>) => {
     await beforeWrite?.();
   },
+  waitStartupSettled: async () => 'settled' as const,
 } as unknown as TmuxPaneDelivery;
 
 interface Harness {
