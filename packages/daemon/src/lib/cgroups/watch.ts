@@ -27,7 +27,9 @@ import type {
   SessionNotePort,
   TreeProcess,
 } from './ports.ts';
-import { sessionOfScope } from './scope.ts';
+import { sessionOfScope, sessionOfSlice } from './scope.ts';
+
+const sessionOfGroup = (name: string): string | undefined => sessionOfSlice(name) ?? sessionOfScope(name);
 
 /** How often the limits timer looks at the fleet's memory. */
 export const LIMITS_TICK_MS = 30_000;
@@ -102,6 +104,8 @@ export function describeProcess(biggest: TreeProcess): string {
 export class FleetMemoryWatcher {
   private readonly scopes = new Map<string, ScopeMemory>();
   private fleetEvents: MemoryEvents | undefined;
+  private fleetLocalEvents: MemoryEvents | undefined;
+  private browserEvents: MemoryEvents | undefined;
   private fleetSlowedAt: number | undefined;
   private fleetNotified = false;
   private applied: AppliedLimits | undefined;
@@ -121,29 +125,46 @@ export class FleetMemoryWatcher {
         return;
       }
       const now = this.ports.now();
-      this.applied = {
-        ...(sighting.applied === undefined ? {} : { fleet: sighting.applied }),
-        scopes: sighting.scopes.flatMap(scope => (scope.applied === undefined ? [] : [scope.applied])),
-      };
       const seen = new Set<string>();
-      let accounted = 0;
+      const browserGrowth =
+        sighting.browserEvents === undefined ? undefined : eventsGrowth(this.browserEvents, sighting.browserEvents);
+      let accounted = browserGrowth?.oomKill ?? 0;
       const nowScopes: Array<{ id: string; scope: ScopeSighting }> = [];
       for (const scope of sighting.scopes) {
-        const id = sessionOfScope(scope.scope);
+        const id = sessionOfGroup(scope.scope);
         if (id !== undefined) nowScopes.push({ id, scope });
+      }
+      const appliedBySession = new Map<string, AppliedCaps>();
+      for (const { id, scope } of nowScopes) appliedBySession.set(id, scope.applied ?? {});
+      this.applied = {
+        ...(sighting.applied === undefined ? {} : { fleet: sighting.applied }),
+        scopes: [...appliedBySession.values()],
+      };
+      let childHighGrowth = browserGrowth?.high ?? 0;
+      const notified = new Set<string>();
+      const slowedSessions = new Set<string>();
+      for (const [name, state] of this.scopes) {
+        const id = sessionOfGroup(name);
+        if (id !== undefined && state.throttledAt !== undefined && now - state.throttledAt <= THROTTLE_MEMORY_MS)
+          slowedSessions.add(id);
       }
       for (const { id, scope } of nowScopes) {
         seen.add(scope.scope);
         const previous = this.scopes.get(scope.scope);
         const growth = eventsGrowth(previous?.events, scope.events);
+        childHighGrowth += growth.high;
         const state: ScopeMemory = previous ?? { events: scope.events, lastCurrent: 0 };
         state.events = scope.events;
         state.lastCurrent = scope.currentBytes ?? 0;
         this.scopes.set(scope.scope, state);
         if (growth.high > 0) {
-          const first = state.throttledAt === undefined || now - state.throttledAt > THROTTLE_MEMORY_MS;
+          const first = !slowedSessions.has(id);
+          slowedSessions.add(id);
           state.throttledAt = now;
-          if (first) void this.safeNote(id, 'memory_throttled', {});
+          if (first && !notified.has(id)) {
+            notified.add(id);
+            void this.safeNote(id, 'memory_throttled', {});
+          }
         }
         const pressured =
           growth.high > 0 ||
@@ -161,7 +182,11 @@ export class FleetMemoryWatcher {
       }
       const vanished = [...this.scopes.entries()].filter(([name]) => !seen.has(name));
       const fleetGrowth = eventsGrowth(this.fleetEvents, sighting.events);
-      if (fleetGrowth.high > 0) {
+      const localHighGrowth =
+        sighting.localEvents === undefined
+          ? Math.max(0, fleetGrowth.high - childHighGrowth)
+          : eventsGrowth(this.fleetLocalEvents, sighting.localEvents).high;
+      if (localHighGrowth > 0) {
         // The fleet's own counter: its children's counters do not receive an ancestor's events, so when the
         // ferrets TOGETHER cross the soft limit this is the only place the throttling is visible.
         this.fleetSlowedAt = now;
@@ -169,8 +194,10 @@ export class FleetMemoryWatcher {
           this.fleetNotified = true;
           // Only as far as the evidence goes: every ferret running now shares the slowdown, none is singled out.
           for (const { id, scope } of nowScopes)
-            if (this.scopes.get(scope.scope)?.throttledAt !== now)
+            if (this.scopes.get(scope.scope)?.throttledAt !== now && !notified.has(id)) {
+              notified.add(id);
               void this.safeNote(id, 'memory_throttled', { shared: true });
+            }
         }
       } else if (this.fleetSlowedAt === undefined || now - this.fleetSlowedAt > THROTTLE_MEMORY_MS) {
         this.fleetNotified = false;
@@ -178,7 +205,7 @@ export class FleetMemoryWatcher {
       const unaccounted = fleetGrowth.oomKill - accounted;
       if (unaccounted > 0) {
         const blamed = vanished
-          .map(([name, state]) => ({ id: sessionOfScope(name), state }))
+          .map(([name, state]) => ({ id: sessionOfGroup(name), state }))
           .filter((entry): entry is { id: string; state: ScopeMemory } => entry.id !== undefined)
           .sort((left, right) => right.state.lastCurrent - left.state.lastCurrent)[0];
         if (blamed === undefined) await this.recordKill(undefined, undefined, now);
@@ -186,6 +213,8 @@ export class FleetMemoryWatcher {
       }
       for (const [name] of vanished) this.scopes.delete(name);
       this.fleetEvents = sighting.events;
+      this.fleetLocalEvents = sighting.localEvents;
+      this.browserEvents = sighting.browserEvents;
     } catch {
       // A look that failed changes nothing: the next one starts from the same baseline.
     }
@@ -219,9 +248,10 @@ export class FleetMemoryWatcher {
     const now = this.ports.now();
     const throttled: SlowedFerret[] = [];
     for (const [name, scope] of this.scopes) {
-      const id = sessionOfScope(name);
+      const id = sessionOfGroup(name);
       if (id === undefined || scope.throttledAt === undefined || now - scope.throttledAt > THROTTLE_MEMORY_MS) continue;
-      throttled.push({ sessionId: id, ...(await this.callsignField(id)) });
+      if (!throttled.some(entry => entry.sessionId === id))
+        throttled.push({ sessionId: id, ...(await this.callsignField(id)) });
     }
     const fleetSlowed = this.fleetSlowedAt !== undefined && now - this.fleetSlowedAt <= THROTTLE_MEMORY_MS;
     return {

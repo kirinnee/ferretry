@@ -20,7 +20,7 @@ function quota(percent: number | null, cpus: number): string {
 }
 
 /**
- * The properties on `<product>-fleet.slice`. `CPUQuota=` is written EMPTY when there is no quota, so
+ * The properties on `<product>_fleet.slice`. `CPUQuota=` is written EMPTY when there is no quota, so
  * removing a quota from `limits.yaml` actually removes it from a slice an earlier daemon configured.
  */
 export function fleetSliceProperties(limits: ResolvedFleetLimits, host: CgroupHostFacts): readonly string[] {
@@ -34,7 +34,7 @@ export function fleetSliceProperties(limits: ResolvedFleetLimits, host: CgroupHo
   ];
 }
 
-/** The properties on one ferret's scope. A person's own ferret gets the heavier CPU weight. */
+/** The properties on one ferret's slice. A person's own ferret gets the heavier CPU weight. */
 export function ferretScopeProperties(
   limits: ResolvedFerretLimits,
   host: CgroupHostFacts,
@@ -42,7 +42,7 @@ export function ferretScopeProperties(
 ): readonly string[] {
   return [
     `CPUWeight=${interactive ? limits.interactiveCpuWeight : limits.cpuWeight}`,
-    ...(limits.cpuPercent === null ? [] : [`CPUQuota=${quota(limits.cpuPercent, host.cpus)}`]),
+    `CPUQuota=${quota(limits.cpuPercent, host.cpus)}`,
     `MemoryHigh=${value(limits.memoryHigh)}`,
     `MemoryMax=${value(limits.memoryMax)}`,
     `TasksMax=${value(limits.tasksMax)}`,

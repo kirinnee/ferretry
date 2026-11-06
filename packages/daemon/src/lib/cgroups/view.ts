@@ -70,14 +70,12 @@ export interface LimitsViewInput {
 
 const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`;
 
-const bytesOrNone = (bytes: number | null): number | null => bytes;
-
 /** The kernel rounds a memory cap to a page, so two caps within a page are the same cap. */
 const PAGE = 4096;
 
-/** Whether a cap read back is the cap that was asked for. A field that could not be read matches anything. */
+/** Whether a memory cap read back is the cap requested. An unreadable field confirms nothing. */
 export function sameCap(applied: number | null | undefined, wanted: number | null): boolean {
-  if (applied === undefined) return true;
+  if (applied === undefined) return false;
   if (applied === null || wanted === null) return applied === wanted;
   return Math.abs(applied - wanted) < PAGE;
 }
@@ -85,12 +83,24 @@ export function sameCap(applied: number | null | undefined, wanted: number | nul
 /** What a group of running ferrets was given, with the ones that differ from what a new ferret would get. */
 function ferretsAgainst(
   scopes: readonly AppliedCaps[],
-  wanted: { readonly memoryHigh: number | null; readonly memoryMax: number | null; readonly tasksMax: number | null },
+  wanted: {
+    readonly memoryHigh: number | null;
+    readonly memoryMax: number | null;
+    readonly tasksMax: number | null;
+    readonly cpuWeight: number;
+    readonly interactiveCpuWeight: number;
+    readonly cpuPercent: number | null;
+  },
 ): { readonly shown: AppliedCaps | undefined; readonly stale: number } {
+  // Missing measurements are reported separately as unknown, never evidence of an earlier cap.
   const matches = (caps: AppliedCaps): boolean =>
-    sameCap(caps.memoryHigh, wanted.memoryHigh) &&
-    sameCap(caps.memoryMax, wanted.memoryMax) &&
-    sameCap(caps.tasksMax, wanted.tasksMax);
+    (caps.memoryHigh === undefined || sameCap(caps.memoryHigh, wanted.memoryHigh)) &&
+    (caps.memoryMax === undefined || sameCap(caps.memoryMax, wanted.memoryMax)) &&
+    (caps.tasksMax === undefined || caps.tasksMax === wanted.tasksMax) &&
+    (caps.cpuPercent === undefined || caps.cpuPercent === wanted.cpuPercent) &&
+    (caps.cpuWeight === undefined ||
+      caps.cpuWeight === wanted.cpuWeight ||
+      caps.cpuWeight === wanted.interactiveCpuWeight);
   const stale = scopes.filter(caps => !matches(caps));
   // When some differ, say what the MOST of them hold: the line is about what is running, not what will be.
   const shown = stale.length === 0 ? scopes[0] : (stale.length * 2 > scopes.length ? stale : scopes.filter(matches))[0];
@@ -107,15 +117,15 @@ export function buildLimitsView(input: LimitsViewInput): LimitsView {
   if (!resolved.enabled) because = `limits are switched off in ${input.file}`;
   else if (enforcement === undefined) because = 'the machine has not been checked yet';
   else if (enforcement.kind === 'direct') because = enforcement.reason;
+  else if (input.launchFailure !== undefined) because = `the last ferret could not be limited (${input.launchFailure})`;
   else if (enforcement.kind === 'priority') {
     kind = enforcement.wrapper === 'none' ? 'none' : 'priority';
     if (enforcement.wrapper === 'none') because = 'this Mac has neither taskpolicy nor nice';
-  } else if (input.launchFailure !== undefined)
-    because = `the last ferret could not be limited (${input.launchFailure})`;
-  else kind = 'cgroups';
+  } else kind = 'cgroups';
 
   const lines: string[] = [];
-  const memory = (bytes: number | null): string => (bytes === null ? 'no limit' : formatBytes(bytes));
+  const memory = (bytes: number | null | undefined): string =>
+    bytes === undefined ? 'unknown' : bytes === null ? 'no limit' : formatBytes(bytes);
   const ionice =
     resolved.ionice && (enforcement?.kind === 'cgroups' || enforcement?.kind === 'direct') && enforcement.ionice;
   const diskText = !resolved.ionice
@@ -134,44 +144,53 @@ export function buildLimitsView(input: LimitsViewInput): LimitsView {
   // the caps it started with, so the two can differ and the status says so instead of claiming the new number.
   const appliedFleet = input.live.applied?.fleet;
   const runningFerrets = input.live.applied?.scopes ?? [];
-  const fleetShown = {
-    memoryHigh: appliedFleet?.memoryHigh === undefined ? resolved.fleet.memoryHigh : appliedFleet.memoryHigh,
-    memoryMax: appliedFleet?.memoryMax === undefined ? resolved.fleet.memoryMax : appliedFleet.memoryMax,
-    swapMax: appliedFleet?.swapMax === undefined ? resolved.fleet.swapMax : appliedFleet.swapMax,
-    tasksMax: appliedFleet?.tasksMax === undefined ? resolved.fleet.tasksMax : appliedFleet.tasksMax,
-    cpuWeight: appliedFleet?.cpuWeight ?? resolved.fleet.cpuWeight,
-  };
+  const fleetShown = appliedFleet ?? resolved.fleet;
   const fleetBehind =
     appliedFleet !== undefined &&
-    (!sameCap(appliedFleet.memoryHigh, resolved.fleet.memoryHigh) ||
-      !sameCap(appliedFleet.memoryMax, resolved.fleet.memoryMax) ||
-      !sameCap(appliedFleet.swapMax, resolved.fleet.swapMax) ||
-      !sameCap(appliedFleet.tasksMax, resolved.fleet.tasksMax) ||
-      (appliedFleet.cpuWeight !== undefined && appliedFleet.cpuWeight !== resolved.fleet.cpuWeight));
+    ((appliedFleet.memoryHigh !== undefined && !sameCap(appliedFleet.memoryHigh, resolved.fleet.memoryHigh)) ||
+      (appliedFleet.memoryMax !== undefined && !sameCap(appliedFleet.memoryMax, resolved.fleet.memoryMax)) ||
+      (appliedFleet.swapMax !== undefined && !sameCap(appliedFleet.swapMax, resolved.fleet.swapMax)) ||
+      (appliedFleet.tasksMax !== undefined && appliedFleet.tasksMax !== resolved.fleet.tasksMax) ||
+      (appliedFleet.cpuWeight !== undefined && appliedFleet.cpuWeight !== resolved.fleet.cpuWeight) ||
+      (appliedFleet.cpuPercent !== undefined && appliedFleet.cpuPercent !== resolved.fleet.cpuPercent));
   const ferretsNow = ferretsAgainst(runningFerrets, resolved.perFerret);
   const ferretShown = ferretsNow.shown ?? resolved.perFerret;
-  const ferretMemoryHigh =
-    ferretShown.memoryHigh === undefined ? resolved.perFerret.memoryHigh : ferretShown.memoryHigh;
-  const ferretMemoryMax = ferretShown.memoryMax === undefined ? resolved.perFerret.memoryMax : ferretShown.memoryMax;
-  const ferretTasks = ferretShown.tasksMax === undefined ? resolved.perFerret.tasksMax : ferretShown.tasksMax;
+  const ferretMemoryHigh = ferretShown.memoryHigh;
+  const ferretMemoryMax = ferretShown.memoryMax;
+  const ferretTasks = ferretShown.tasksMax;
   if (kind === 'cgroups') {
     const notYet =
       appliedFleet === undefined ? 'configured, not yet applied (the first ferret you start puts it in force): ' : '';
     lines.push(
-      `${notYet}ferrets: memory ${memory(fleetShown.memoryHigh)} soft / ${memory(fleetShown.memoryMax)} hard of a ${formatBytes(host.memoryCeilingBytes)} user budget · CPU weight ${fleetShown.cpuWeight} (daemon ${DAEMON_CPU_WEIGHT}, voice ${VOICE_CPU_WEIGHT}) · disk priority: ${diskText}`,
-      `each ferret: memory ${memory(ferretMemoryHigh)} soft / ${memory(ferretMemoryMax)} hard · up to ${ferretTasks ?? 'any number of'} processes${
+      `${notYet}ferrets: memory ${memory(fleetShown.memoryHigh)} soft / ${memory(fleetShown.memoryMax)} hard of a ${formatBytes(host.memoryCeilingBytes)} user budget · CPU weight ${fleetShown.cpuWeight ?? 'unknown'} (daemon ${DAEMON_CPU_WEIGHT}, voice ${VOICE_CPU_WEIGHT}) · disk priority: ${diskText}`,
+      `each ferret: memory ${memory(ferretMemoryHigh)} soft / ${memory(ferretMemoryMax)} hard · up to ${ferretTasks === undefined ? 'unknown' : (ferretTasks ?? 'any number of')} processes${
         runningFerrets.length === 0 ? ' (set for ferrets you start; none is running under limits yet)' : ''
       }`,
-      `swap: ferrets may use ${fleetShown.swapMax === null ? 'any' : `up to ${formatBytes(fleetShown.swapMax)} of`} swap`,
+      `swap: ferrets may use ${fleetShown.swapMax === undefined ? 'an unknown amount of' : fleetShown.swapMax === null ? 'any' : `up to ${formatBytes(fleetShown.swapMax)} of`} swap`,
     );
     if (fleetBehind)
       lines.push(
-        `limits.yaml now asks for ${memory(resolved.fleet.memoryHigh)} soft / ${memory(resolved.fleet.memoryMax)} hard for all ferrets together; that takes effect when the next ferret starts`,
+        `limits.yaml now asks for ${memory(resolved.fleet.memoryHigh)} soft / ${memory(resolved.fleet.memoryMax)} hard for all ferrets together, up to ${resolved.fleet.tasksMax ?? 'any number of'} processes and CPU weight ${resolved.fleet.cpuWeight}; that takes effect when the next ferret starts`,
       );
     if (ferretsNow.stale > 0)
       lines.push(
-        `${plural(ferretsNow.stale, 'running ferret keeps', 'running ferrets keep')} the limits ${ferretsNow.stale === 1 ? 'it' : 'they'} started with; a new ferret gets ${memory(resolved.perFerret.memoryHigh)} soft / ${memory(resolved.perFerret.memoryMax)} hard`,
+        `${plural(ferretsNow.stale, 'running ferret keeps', 'running ferrets keep')} the limits ${ferretsNow.stale === 1 ? 'it' : 'they'} started with; a new ferret gets ${memory(resolved.perFerret.memoryHigh)} soft / ${memory(resolved.perFerret.memoryMax)} hard and up to ${resolved.perFerret.tasksMax ?? 'any number of'} processes`,
       );
+    if (
+      appliedFleet !== undefined &&
+      ['memoryHigh', 'memoryMax', 'swapMax', 'tasksMax', 'cpuWeight', 'cpuPercent'].some(
+        key => appliedFleet[key as keyof AppliedCaps] === undefined,
+      )
+    )
+      lines.push('some applied fleet limits are unknown: their control files could not be read');
+    if (
+      runningFerrets.some(caps =>
+        ['memoryHigh', 'memoryMax', 'tasksMax', 'cpuWeight', 'cpuPercent'].some(
+          key => caps[key as keyof AppliedCaps] === undefined,
+        ),
+      )
+    )
+      lines.push('some running ferret limits are unknown: their control files could not be read');
   } else if (kind === 'priority') {
     lines.push(
       'macOS: lower CPU and disk priority only; memory is watched, not capped',
@@ -179,7 +198,7 @@ export function buildLimitsView(input: LimitsViewInput): LimitsView {
     );
   } else {
     lines.push(`limits not enforced: ${because ?? 'unknown'}`);
-    if (resolved.enabled && explicit)
+    if (resolved.enabled && explicit && host.platform === 'linux')
       lines.push(`${input.file} says enabled: true, so a ferret that cannot be limited will not start`);
   }
   const step = ownerStep(host, input.uid);
@@ -229,20 +248,37 @@ export function buildLimitsView(input: LimitsViewInput): LimitsView {
       reserveBytes: resolved.reserveBytes,
     },
     fleet: {
-      cpuWeight: fleetShown.cpuWeight,
-      memoryHighBytes: bytesOrNone(fleetShown.memoryHigh),
-      memoryMaxBytes: bytesOrNone(fleetShown.memoryMax),
-      swapMaxBytes: bytesOrNone(fleetShown.swapMax),
-      tasksMax: fleetShown.tasksMax,
-      cpuPercent: resolved.fleet.cpuPercent,
+      cpuWeight: appliedFleet?.cpuWeight,
+      memoryHighBytes: appliedFleet?.memoryHigh,
+      memoryMaxBytes: appliedFleet?.memoryMax,
+      swapMaxBytes: appliedFleet?.swapMax,
+      tasksMax: appliedFleet?.tasksMax,
+      cpuPercent: appliedFleet?.cpuPercent,
     },
     perFerret: {
-      cpuWeight: resolved.perFerret.cpuWeight,
-      interactiveCpuWeight: resolved.perFerret.interactiveCpuWeight,
-      memoryHighBytes: bytesOrNone(ferretMemoryHigh),
-      memoryMaxBytes: bytesOrNone(ferretMemoryMax),
-      tasksMax: ferretTasks,
-      cpuPercent: resolved.perFerret.cpuPercent,
+      cpuWeight: ferretsNow.shown?.cpuWeight,
+      memoryHighBytes: ferretsNow.shown?.memoryHigh,
+      memoryMaxBytes: ferretsNow.shown?.memoryMax,
+      tasksMax: ferretsNow.shown?.tasksMax,
+      cpuPercent: ferretsNow.shown?.cpuPercent,
+    },
+    configured: {
+      fleet: {
+        cpuWeight: resolved.fleet.cpuWeight,
+        memoryHighBytes: resolved.fleet.memoryHigh,
+        memoryMaxBytes: resolved.fleet.memoryMax,
+        swapMaxBytes: resolved.fleet.swapMax,
+        tasksMax: resolved.fleet.tasksMax,
+        cpuPercent: resolved.fleet.cpuPercent,
+      },
+      perFerret: {
+        cpuWeight: resolved.perFerret.cpuWeight,
+        interactiveCpuWeight: resolved.perFerret.interactiveCpuWeight,
+        memoryHighBytes: resolved.perFerret.memoryHigh,
+        memoryMaxBytes: resolved.perFerret.memoryMax,
+        tasksMax: resolved.perFerret.tasksMax,
+        cpuPercent: resolved.perFerret.cpuPercent,
+      },
     },
     daemonCpuWeight: DAEMON_CPU_WEIGHT,
     voiceCpuWeight: VOICE_CPU_WEIGHT,

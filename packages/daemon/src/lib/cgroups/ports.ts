@@ -88,24 +88,30 @@ export interface AppliedCaps {
   readonly swapMax?: number | null;
   readonly tasksMax?: number | null;
   readonly cpuWeight?: number;
+  /** Share of this machine, parsed from cpu.max; null means no quota, absent means unreadable. */
+  readonly cpuPercent?: number | null;
 }
 
-/** One agent scope found under the fleet slice, and what the kernel says about its memory. */
+/** One per-ferret slice (or a legacy scope) and what the kernel says about its combined memory. */
 export interface ScopeSighting {
-  /** The scope unit name (`<product>-agent-<id>-<nonce>.scope`). */
+  /** The per-ferret slice unit name, or a legacy `<product>-agent-<id>-<nonce>.scope`. */
   readonly scope: string;
   readonly events: MemoryEvents;
   /** `memory.current`; absent where unreadable. */
   readonly currentBytes?: number;
   /** `memory.high`, as a number; absent for `max`. */
   readonly highBytes?: number;
-  /** What this scope was actually given when it started: fixed for its life. */
+  /** What this group actually holds now, read back from its control files. */
   readonly applied?: AppliedCaps;
 }
 
 /** The fleet slice as the kernel reports it. */
 export interface FleetSighting {
   readonly events: MemoryEvents;
+  /** The fleet's OWN events; memory.events above also includes its children. */
+  readonly localEvents?: MemoryEvents;
+  /** Shared browser child events, accounted separately so they never implicate a ferret. */
+  readonly browserEvents?: MemoryEvents;
   /** What the fleet slice holds now. */
   readonly applied?: AppliedCaps;
   readonly scopes: readonly ScopeSighting[];

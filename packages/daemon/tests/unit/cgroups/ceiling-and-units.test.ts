@@ -116,6 +116,7 @@ describe('the unit properties for this box', () => {
     // Assert
     should(sub).deepEqual([
       'CPUWeight=100',
+      'CPUQuota=',
       `MemoryHigh=${12 * GIBIBYTE}`,
       `MemoryMax=${Math.floor(14.4 * GIBIBYTE)}`,
       'TasksMax=4096',

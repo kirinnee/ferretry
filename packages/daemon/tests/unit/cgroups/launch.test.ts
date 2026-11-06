@@ -73,7 +73,7 @@ describe('the argv a ferret execs on Linux', () => {
     const actual = await planner.command('s1', CLAUDE);
 
     // Assert — the slice is configured first, then the scope carries the per-ferret share.
-    should(ran).have.length(2);
+    should(ran).have.length(3);
     should(ran[0]?.slice(0, 5)).deepEqual(['systemctl', '--user', 'set-property', '--runtime', 'ferretry_fleet.slice']);
     should(ran[0]).containEql('CPUWeight=50');
     should(actual.slice(0, 8)).deepEqual([
@@ -83,22 +83,26 @@ describe('the argv a ferret execs on Linux', () => {
       '--quiet',
       '--collect',
       '--unit=ferretry-agent-s1-a1b2c3d4.scope',
-      '--slice=ferretry_fleet.slice',
-      '--property=CPUWeight=100',
+      '--slice=ferretry_fleet-s1.slice',
+      '--',
     ]);
     should(actual.slice(-8)).deepEqual(['--', 'ionice', '-c2', '-n7', '--', 'claude', '--model', 'x'].slice(-8));
-    should(actual).containEql('--property=TasksMax=4096');
+    should(ran[1]).containEql('TasksMax=4096');
   });
 
   it('should give the ferret a person started the heavier weight', async () => {
     // Arrange
-    const { planner } = subject({ state: { kind: 'cgroups', ionice: true }, sessions: { s1: { interactive: true } } });
+    const { planner, ran } = subject({
+      state: { kind: 'cgroups', ionice: true },
+      sessions: { s1: { interactive: true } },
+    });
 
     // Act
     const actual = await planner.command('s1', CLAUDE);
 
     // Assert
-    should(actual).containEql('--property=CPUWeight=200');
+    should(ran[1]).containEql('CPUWeight=200');
+    should(actual).containEql('--slice=ferretry_fleet-s1.slice');
   });
 
   it('should leave ionice out when the config turns it off or the host has none', async () => {
@@ -158,8 +162,9 @@ describe('the argv a ferret execs on Linux', () => {
     // Assert
     should(ran[0]).containEql(`MemoryMax=${30 * GIBIBYTE}`);
     should(ran[0]).containEql('CPUQuota=1600%');
-    should(actual).containEql(`--property=MemoryMax=${5 * GIBIBYTE}`);
-    should(actual).containEql('--property=CPUQuota=320%');
+    should(ran[1]).containEql(`MemoryMax=${5 * GIBIBYTE}`);
+    should(actual).containEql('--slice=ferretry_fleet-s1.slice');
+    should(ran[1]).containEql('CPUQuota=320%');
   });
 });
 
@@ -307,11 +312,12 @@ describe('a scope that cannot be started after the slice was prepared', () => {
     const actual = await planner.command('s1', CLAUDE);
 
     // Assert
-    const proof = ran[1] as readonly string[];
+    const proof = ran[2] as readonly string[];
     should(proof[0]).equal('systemd-run');
     should(proof.at(-1)).equal('true');
-    should(proof).containEql('--slice=ferretry_fleet.slice');
-    should(proof).containEql('--property=MemoryMax=15461882265');
+    should(proof).containEql('--slice=ferretry_fleet-s1.slice');
+    should(ran[1]).containEql('MemoryMax=15461882265');
+    should(proof).not.containEql('--property=MemoryMax=15461882265');
     should(proof.some(word => word.startsWith('--unit=ferretry-probe-'))).be.true();
     should(actual).containEql('--unit=ferretry-agent-s1-a1b2c3d4.scope');
   });

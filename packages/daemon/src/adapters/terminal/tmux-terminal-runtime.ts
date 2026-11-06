@@ -152,10 +152,10 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
     const createdAtMs = this.now();
     const tmuxSession = terminalTmuxSessionName(input.ownerId, input.id);
     const shell = await this.loginShell.shell();
-    // The same planner and the same launch path as the ferret itself, keyed by the owning session.
+    // The credential's opener determines caps and exemptions, even when the target is another session.
     const argv =
       input.openedBy?.by === 'agent' && this.limits !== undefined
-        ? await this.limits.command(input.ownerId, [shell, '-l'], { terminal: true })
+        ? await this.limits.command(input.openedBy.sessionId, [shell, '-l'], { terminal: true })
         : [shell, '-l'];
     const result = await this.tmux.execute([
       'new-session',

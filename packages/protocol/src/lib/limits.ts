@@ -355,6 +355,23 @@ export const LIMITS_DISK_EFFECTS = ['full', 'class-only', 'none', 'unknown'] as 
 export const LimitsDiskEffectSchema = z.enum(LIMITS_DISK_EFFECTS);
 export type LimitsDiskEffect = z.infer<typeof LimitsDiskEffectSchema>;
 
+const FleetLimitsViewFields = z.object({
+  cpuWeight: PositiveIntegerSchema.optional(),
+  memoryHighBytes: NullableBytes.optional(),
+  memoryMaxBytes: NullableBytes.optional(),
+  swapMaxBytes: NullableBytes.optional(),
+  tasksMax: NullableBytes.optional(),
+  cpuPercent: z.number().finite().nullable().optional(),
+});
+const FerretLimitsViewFields = z.object({
+  cpuWeight: PositiveIntegerSchema.optional(),
+  interactiveCpuWeight: PositiveIntegerSchema.optional(),
+  memoryHighBytes: NullableBytes.optional(),
+  memoryMaxBytes: NullableBytes.optional(),
+  tasksMax: NullableBytes.optional(),
+  cpuPercent: z.number().finite().nullable().optional(),
+});
+
 export const LimitsViewSchema = z.object({
   /** Limits are on, off by `enabled: false`, or cannot be applied here. */
   switchedOn: z.boolean(),
@@ -375,22 +392,13 @@ export const LimitsViewSchema = z.object({
     source: z.string().min(1),
     reserveBytes: NonNegativeIntegerSchema,
   }),
-  fleet: z.object({
-    cpuWeight: PositiveIntegerSchema,
-    memoryHighBytes: NullableBytes,
-    memoryMaxBytes: NullableBytes,
-    swapMaxBytes: NullableBytes,
-    tasksMax: NullableBytes,
-    cpuPercent: z.number().finite().nullable(),
-  }),
-  perFerret: z.object({
-    cpuWeight: PositiveIntegerSchema,
-    interactiveCpuWeight: PositiveIntegerSchema,
-    memoryHighBytes: NullableBytes,
-    memoryMaxBytes: NullableBytes,
-    tasksMax: NullableBytes,
-    cpuPercent: z.number().finite().nullable(),
-  }),
+  /** Applied values only: absent fields could not be read back. */
+  fleet: FleetLimitsViewFields,
+  perFerret: FerretLimitsViewFields,
+  /** Configured defaults for the next launch, separate from running limits. */
+  configured: z
+    .object({ fleet: FleetLimitsViewFields.required(), perFerret: FerretLimitsViewFields.required() })
+    .optional(),
   daemonCpuWeight: PositiveIntegerSchema,
   voiceCpuWeight: PositiveIntegerSchema,
   disk: z.object({

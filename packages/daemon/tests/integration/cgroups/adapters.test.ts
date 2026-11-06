@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GIBIBYTE } from '@ferretry/protocol';
@@ -21,7 +21,7 @@ import {
   unmeasuredHostFacts,
 } from '../../../src/adapters/cgroups/index.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
-import { runCgroupCommand } from '../../../src/lib/cgroups/index.ts';
+import { ferretSliceName, runCgroupCommand } from '../../../src/lib/cgroups/index.ts';
 import {
   createFoundationPaths,
   createSessionPaths,
@@ -848,5 +848,76 @@ describe('a ferret’s resident memory by its pane’s process tree', () => {
     // Arrange / Act / Assert
     should(await memory('read').total('other')).equal(undefined);
     should(await memory('unavailable').total('s1')).equal(undefined);
+  });
+});
+
+describe('per-ferret slice accounting and local fleet events', () => {
+  it('should read the aggregate ferret slice, its CPU quota, and processes in both harness and terminal scopes', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-slice-accounting-'));
+    try {
+      const manager = 'user.slice/user-1000.slice/user@1000.service';
+      const fleet = `${manager}/ferretry_fleet.slice`;
+      const sliceName = ferretSliceName('sid-one');
+      const slice = `${fleet}/${sliceName}`;
+      const files: Record<string, string> = {
+        [`${fleet}/memory.events`]: 'high 7\noom_kill 0\n',
+        [`${fleet}/memory.events.local`]: 'high 0\noom_kill 0\n',
+        [`${fleet}/cpu.max`]: 'max 100000\n',
+        [`${fleet}/cpu.weight`]: '50\n',
+        [`${slice}/memory.events`]: 'high 7\noom_kill 0\n',
+        [`${slice}/memory.high`]: '1073741824\n',
+        [`${slice}/memory.max`]: '2147483648\n',
+        [`${slice}/memory.current`]: '123456\n',
+        [`${slice}/cpu.max`]: '800000 100000\n',
+        [`${slice}/cpu.weight`]: '200\n',
+        [`${slice}/pids.max`]: '32\n',
+        [`${slice}/ferretry-agent-sid-one-harness.scope/cgroup.procs`]: '4242\n',
+        [`${slice}/ferretry-agent-sid-one-terminal.scope/cgroup.procs`]: '4243\n',
+        // Shared browser events stay in the fleet aggregate and are never attributed to a session.
+        [`${fleet}/ferretry_fleet-browser.slice/memory.events`]: 'high 2\n',
+        'proc/4242/statm': '100 2\n',
+        'proc/4242/cmdline': 'claude\0',
+        'proc/4243/statm': '100 4\n',
+        'proc/4243/cmdline': 'bun\0test\0',
+      };
+      for (const [path, value] of Object.entries(files)) {
+        await mkdir(join(root, path, '..'), { recursive: true });
+        await writeFile(join(root, path), value);
+      }
+      const memory = new CgroupFleetMemory(
+        { ...unmeasuredHostFacts(), cpus: 32, ownCgroup: `/${manager}/app.slice/fyd.service` },
+        undefined,
+        root,
+        join(root, 'proc'),
+      );
+      const reading = await memory.read();
+      should(reading?.events.high).equal(7);
+      should(reading?.localEvents?.high).equal(0);
+      should(reading?.browserEvents?.high).equal(2);
+      should(reading?.applied).deepEqual({ cpuPercent: null, cpuWeight: 50 });
+      should(reading?.scopes).have.length(1);
+      should(reading?.scopes[0]?.scope).equal(sliceName);
+      should(reading?.scopes[0]?.applied).deepEqual({
+        memoryHigh: 1073741824,
+        memoryMax: 2147483648,
+        tasksMax: 32,
+        cpuWeight: 200,
+        cpuPercent: 25,
+      });
+      should(await memory.largest(sliceName)).deepEqual([
+        { argv: 'bun test', rssBytes: 4 * 4096 },
+        { argv: 'claude', rssBytes: 2 * 4096 },
+      ]);
+      await rm(join(root, fleet, 'memory.events.local'));
+      await writeFile(join(root, slice, 'cpu.max'), 'unreadable-value');
+      const missing = await memory.read();
+      should(missing?.localEvents).be.undefined();
+      should(missing?.scopes[0]?.applied?.cpuPercent).be.undefined();
+      await rm(join(root, slice, 'ferretry-agent-sid-one-harness.scope'), { recursive: true });
+      await rm(join(root, slice, 'ferretry-agent-sid-one-terminal.scope'), { recursive: true });
+      should((await memory.read())?.scopes).deepEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

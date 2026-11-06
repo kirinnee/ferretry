@@ -58,3 +58,11 @@ export function parseWeightFile(text: string): number | undefined {
   const value = text.trim();
   return /^\d+$/u.test(value) && Number(value) > 0 ? Number(value) : undefined;
 }
+
+/** cpu.max is quota/period in microseconds, or `max <period>` for no quota. */
+export function parseCpuMax(text: string, cpus: number): number | null | undefined {
+  const match = /^(max|\d+)\s+(\d+)$/u.exec(text.trim());
+  if (match === null || Number(match[2]) <= 0) return undefined;
+  if (match[1] === 'max') return null;
+  return (Number(match[1]) / Number(match[2]) / cpus) * 100;
+}

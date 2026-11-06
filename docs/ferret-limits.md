@@ -28,7 +28,8 @@ of a small budget.
 
 ### Linux (cgroup v2 + the user's systemd manager)
 
-Every new ferret launches as `systemd-run --user --scope` inside `<product>_fleet.slice`, with its harness
+Every new ferret launches as `systemd-run --user --scope` inside its own
+`<product>_fleet-<escaped-session-id>.slice`, below `<product>_fleet.slice`, with its harness
 wrapped as `ionice -c2 -n7 -- <cmd>`. Supervision (the Warden and what it started) is never wrapped, and the
 daemon is never launched through the wrapper.
 
@@ -61,6 +62,8 @@ that fails re-checks (at most every 30 s). If you wrote `enabled: true` yourself
 **fails to start** instead — you asked for a guarantee.
 
 Only **new** launches get the slice. A running ferret is never moved; relaunch it (Restart) to bring it under.
+Ferrets and terminals started before this update keep their earlier layout and allowances until relaunch.
+Legacy scopes outside the new fleet slice are not covered by its ceiling or watcher.
 
 **A scope is proven before a ferret is put in it.** The launch first starts the exact scope (same slice, same
 properties) around `true`. If the user's manager went away since boot, or refuses a property, the ferret starts
@@ -68,14 +71,23 @@ unconfined with a loud warning in the daemon log, the status says why and the ho
 30 s) — it never becomes a pane that dies before the harness ran. Only a manager that dies in the milliseconds
 between that proof and the real start can still catch one launch; the next launch's proof then reports it.
 
-**A terminal an agent opens is limited like the ferret that opened it.** `terminal_open` (and the terminal route
-when the ferret is the caller) starts the shell through the same launch path, in its own scope in the same fleet
-slice with the same per-ferret caps. Who opened it is what the daemon derived from the credential and the tool
-route and recorded on the pane — never anything the request or the agent said. A terminal the owner opens from
-the app, or on the host, stays outside: it is the person's shell. The scope of a ferret'"'"'s terminal is its own,
-so a ferret with several terminals can hold up to one allowance for the harness plus one per terminal; the fleet
-slice is the ceiling over all of them. Browser pages an agent opens run in a daemon-started worker that is not in
-the fleet slice yet — a declared gap.
+**A terminal an agent opens shares the opener's allowance.** The harness and every terminal opened by that
+session credential run in separate scopes below the **same per-ferret slice**. Memory and task caps and any
+CPU quota apply to their combined usage, so opening six terminals still gives one allowance. The session id
+is escaped for systemd unit names (a literal dash is `\x2d`), keeping each ferret slice directly below the fleet.
+Who opened it comes from the credential and the tool route, never a field the agent supplies. Cross-session
+terminal creation is supported: a terminal in another session still uses its **opener's** limits and priority.
+The Warden exemption follows the opener, never the target session. A terminal the owner opens from the app or
+on the host stays outside: it is the person's shell.
+
+**Shared agent Chrome and its worker share a separate allowance.** Both new children run in their own
+scopes below `<product>_fleet-browser.slice`, inside the fleet ceiling. Together they get one allowance
+from `perFerret`: by default 25% of the budget soft, 30% hard, 4096 processes, CPU weight 100, and any
+configured per-ferret CPU quota. This is a shared browser cap, not a cap per page or per caller. The scope
+wrapper execs in place: Chrome keeps its real PID on the profile lease, its DevTools pipe and its teardown
+semantics. The worker keeps its own stdio and PID too. A scope setup failure uses the same warning and
+unconfined fallback as a ferret (or refuses on Linux with explicit `enabled: true`). The owner's own browser
+is outside this allowance. Existing browser children join only when relaunched.
 
 ### macOS (no cgroups)
 
@@ -107,12 +119,18 @@ killed for memory: gertrude 23:04 (bun test, 9.1 GiB)
 
 **The numbers are what the kernel holds**, read back from the cgroup files on the same 30 s look — not what
 `limits.yaml` asks for. Before any ferret has launched there is nothing to read, and the status says
-**"configured, not yet applied"**. After you tighten a cap, the slice and each running ferret keep what they
-started with until the next launch (the slice) or their own restart (a ferret): the status keeps showing the held
+**"configured, not yet applied"**. An unreadable control file shows **"unknown"**, never the requested
+value. CPU weights and quotas are also read back; the API keeps configured defaults for new launches separate
+from applied running limits. Task counts are compared exactly; only memory byte caps allow page rounding.
+After you tighten a cap, fleet and per-ferret slices keep their earlier values until the next launch using
+that slice: the status keeps showing the held
 numbers and adds one line saying what the file now asks for and how many running ferrets keep earlier limits.
 
-When the ferrets _together_ go past the fleet'"'"'s soft limit while each stays under its own, the kernel counts it
-only on the fleet slice. The status then says **"all ferrets are slowed for memory now"**, and each ferret running
+When the ferrets _together_ go past the fleet's soft limit while each stays under its own, the kernel counts it
+on the fleet slice's own `memory.events.local`. The hierarchical `memory.events` also includes child events,
+so a single ferret crossing its own soft limit never implies that all ferrets are slowed. Where the local file
+cannot be read, only high events not explained by the observed children count as shared pressure.
+The status then says **"all ferrets are slowed for memory now"**, and each ferret running
 at that moment gets one journal note marked shared — it is not pinned on one ferret the evidence does not name.
 
 A slowed ferret (`high` rose) and a killed one (`oom_kill` rose) each get a note in their own journal

@@ -20,7 +20,8 @@
  * ORDERING IS NOT THIS MODULE'S PROBLEM. Every launch already runs inside the session lifecycle's
  * serial executor.
  */
-import { type LimitsConfig, resolveLimits } from '@ferretry/protocol';
+import { type LimitsConfig, type ResolvedLimits, resolveLimits } from '@ferretry/protocol';
+import { WARDEN_LABEL } from '../warden/types.ts';
 import { CgroupError, failureText, runCgroupCommand } from './apply.ts';
 import type { EnforcementState } from './enforcement.ts';
 import { launchIsExempt, resolveFleetExemption } from './exemption.ts';
@@ -30,7 +31,9 @@ import type { EnforcementRuntime } from './runtime.ts';
 import {
   agentScopeCommand,
   agentScopeName,
+  browserScopeName,
   FLEET_SLICE,
+  ferretSliceName,
   IONICE_PREFIX,
   MACOS_NICE_PREFIX,
   MACOS_PREFIX,
@@ -55,7 +58,7 @@ export interface CgroupLaunchPorts {
 
 /** What kind of process a launch is, so the scope it gets says so. */
 export interface LaunchKind {
-  /** A shell an agent opened (`terminal_open`), not the harness: its scope is the same share, named apart. */
+  /** A shell an agent opened: named apart, inside the opener's shared per-ferret allowance. */
   readonly terminal?: boolean;
 }
 
@@ -83,7 +86,34 @@ export class CgroupLaunchPlanner {
     const config = await this.ports.limits();
     const resolved = resolveLimits(config, { memoryCeilingBytes: this.ports.host.memoryCeilingBytes });
     if (!resolved.enabled) return command;
-    if (launchIsExempt(await resolveFleetExemption(sessionId, this.ports.sessions))) return command;
+    const own = await this.ports.sessions.facts(sessionId).catch(() => undefined);
+    // Terminal exemptions require evidence that the trusted opener IS the Warden. An unreadable opener or
+    // a lineage helper must not silently receive an unlimited shell, whichever target session holds it.
+    const exempt =
+      kind.terminal === true
+        ? own?.label?.trim() === WARDEN_LABEL
+        : launchIsExempt(await resolveFleetExemption(sessionId, this.ports.sessions));
+    if (exempt) return command;
+    const interactive = own?.interactive === true;
+    return await this.limitedCommand(sessionId, command, config, resolved, interactive, kind);
+  }
+
+  /** Both shared agent browser children share a bounded slice; the owner's own browser never uses this. */
+  async browserCommand(command: readonly string[]): Promise<readonly string[]> {
+    const config = await this.ports.limits();
+    const resolved = resolveLimits(config, { memoryCeilingBytes: this.ports.host.memoryCeilingBytes });
+    if (!resolved.enabled) return command;
+    return await this.limitedCommand('agent browser', command, config, resolved, false, undefined);
+  }
+
+  private async limitedCommand(
+    sessionId: string,
+    command: readonly string[],
+    config: LimitsConfig,
+    resolved: ResolvedLimits,
+    interactive: boolean,
+    kind: LaunchKind | undefined,
+  ): Promise<readonly string[]> {
     const explicit = config.enabled === true;
     const state = await this.ports.enforcement.current();
     if (state.kind === 'priority') return await this.onMac(state, command);
@@ -97,7 +127,7 @@ export class CgroupLaunchPlanner {
       return [...ionice, ...command];
     }
     const slice = this.ports.slice ?? FLEET_SLICE;
-    const interactive = (await this.ports.sessions.facts(sessionId).catch(() => undefined))?.interactive === true;
+    const allowance = ferretSliceName(kind === undefined ? 'browser' : sessionId, slice);
     const nonce = this.ports.nonce();
     const properties = ferretScopeProperties(resolved.perFerret, this.ports.host, interactive);
     try {
@@ -108,8 +138,13 @@ export class CgroupLaunchPlanner {
       );
       await runCgroupCommand(
         this.ports.commands,
-        agentScopeCommand({ scope: probeScopeName(nonce), slice, properties, command: ['true'] }),
-        `could not start a scope in ${slice}`,
+        slicePropertyCommand(allowance, properties),
+        `could not configure ${allowance}`,
+      );
+      await runCgroupCommand(
+        this.ports.commands,
+        agentScopeCommand({ scope: probeScopeName(nonce), slice: allowance, properties: [], command: ['true'] }),
+        `could not start a scope in ${allowance}`,
       );
     } catch (error) {
       // The manager may have gone away since boot: ask again (rate limited) so the status says so.
@@ -124,9 +159,12 @@ export class CgroupLaunchPlanner {
     return agentScopeCommand({
       // A terminal's nonce starts with `t`: still one session's scope (the name keeps the session id) but never
       // the same unit as that session's harness.
-      scope: agentScopeName(sessionId, kind.terminal === true ? `t${nonce}` : nonce),
-      slice,
-      properties,
+      scope:
+        kind === undefined
+          ? browserScopeName(nonce)
+          : agentScopeName(sessionId, kind.terminal === true ? `t${nonce}` : nonce),
+      slice: allowance,
+      properties: [],
       command: [...ionice, ...command],
     });
   }

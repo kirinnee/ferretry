@@ -79,8 +79,8 @@ describe('a terminal an agent opens', () => {
       '--collect',
       '--unit=ferretry-agent-ses-1-ta1b2c3d4.scope',
     ]);
-    should(words).containEql('--slice=ferretry_fleet.slice');
-    should(words).containEql('--property=MemoryMax=15461882265');
+    should(words).containEql('--slice=ferretry_fleet-ses\\x2d1.slice');
+    should(words).not.containEql('--property=MemoryMax=15461882265');
     // The shell itself is last, behind the disk-priority wrapper, so it is still a login shell.
     should(words.slice(-6)).deepEqual(['ionice', '-c2', '-n7', '--', '/bin/zsh', '-l']);
   });

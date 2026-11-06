@@ -9832,6 +9832,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       process.env,
       browserTransport.connectWorker,
       {
+        limits: cgroupLaunchPlanner,
         // Read at every launch, so a switch applies the next time the browser starts. An unreadable
         // configuration launches headless rather than not at all.
         mode: async () => (await declaredAccountModel())?.machine.browserMode ?? 'headless',

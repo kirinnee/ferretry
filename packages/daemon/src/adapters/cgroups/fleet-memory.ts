@@ -2,16 +2,19 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   AGENT_SCOPE_PREFIX,
+  type AppliedCaps,
+  BROWSER_SLICE,
   type CgroupHostFacts,
   FLEET_SLICE,
   type FleetMemoryPort,
   type FleetSighting,
-  type AppliedCaps,
   parseCapFile,
+  parseCpuMax,
   parseMemoryCap,
   parseMemoryEvents,
   parseWeightFile,
   type ScopeSighting,
+  sessionOfSlice,
   sliceCgroupPath,
   type TreeProcess,
   userManagerPath,
@@ -34,7 +37,7 @@ export class CgroupFleetMemory implements FleetMemoryPort {
   private readonly directory: string | undefined;
 
   constructor(
-    host: CgroupHostFacts,
+    private readonly host: CgroupHostFacts,
     slice: string = FLEET_SLICE,
     cgroupRoot = '/sys/fs/cgroup',
     private readonly procRoot = '/proc',
@@ -48,19 +51,35 @@ export class CgroupFleetMemory implements FleetMemoryPort {
     const events = parseMemoryEvents((await text(join(this.directory, 'memory.events'))) ?? '');
     if (events === undefined) return undefined;
     const names = await readdir(this.directory).catch(() => [] as string[]);
+    const localEvents = parseMemoryEvents((await text(join(this.directory, 'memory.events.local'))) ?? '');
+    const browserEvents = parseMemoryEvents((await text(join(this.directory, BROWSER_SLICE, 'memory.events'))) ?? '');
     const scopes = (
       await Promise.all(
         names
-          .filter(name => name.startsWith(AGENT_SCOPE_PREFIX) && name.endsWith('.scope'))
+          .filter(
+            name =>
+              sessionOfSlice(name) !== undefined || (name.startsWith(AGENT_SCOPE_PREFIX) && name.endsWith('.scope')),
+          )
           .map(name => this.scope(name)),
       )
     ).filter((scope): scope is ScopeSighting => scope !== undefined);
-    return { events, scopes, applied: await this.caps(this.directory, true) };
+    return {
+      events,
+      scopes,
+      ...(localEvents === undefined ? {} : { localEvents }),
+      ...(browserEvents === undefined ? {} : { browserEvents }),
+      applied: await this.caps(this.directory, true),
+    };
   }
 
   async largest(scope: string): Promise<readonly TreeProcess[]> {
     if (this.directory === undefined) return [];
-    const pids = (await text(join(this.directory, scope, 'cgroup.procs')))?.split('\n').filter(Boolean) ?? [];
+    const directory = join(this.directory, scope);
+    const children = (await readdir(directory).catch(() => [] as string[])).filter(name => name.endsWith('.scope'));
+    const lists = await Promise.all(
+      [directory, ...children.map(name => join(directory, name))].map(path => text(join(path, 'cgroup.procs'))),
+    );
+    const pids = [...new Set(lists.flatMap(list => list?.split('\n').filter(Boolean) ?? []))];
     const processes = await Promise.all(
       pids.slice(0, MAX_PROCESSES).map(async (pid): Promise<TreeProcess | undefined> => {
         const [statm, cmdline] = await Promise.all([
@@ -79,12 +98,13 @@ export class CgroupFleetMemory implements FleetMemoryPort {
 
   /** What the cgroup at `directory` really holds, read from its own files. A slice also has a swap cap. */
   private async caps(directory: string, swap: boolean): Promise<AppliedCaps> {
-    const [high, max, swapMax, tasks, weight] = await Promise.all([
+    const [high, max, swapMax, tasks, weight, cpuMax] = await Promise.all([
       text(join(directory, 'memory.high')),
       text(join(directory, 'memory.max')),
       swap ? text(join(directory, 'memory.swap.max')) : Promise.resolve(undefined),
       text(join(directory, 'pids.max')),
       text(join(directory, 'cpu.weight')),
+      text(join(directory, 'cpu.max')),
     ]);
     const field = <K extends string>(key: K, value: number | null | undefined): { [P in K]?: number | null } =>
       value === undefined ? {} : ({ [key]: value } as { [P in K]?: number | null });
@@ -93,6 +113,7 @@ export class CgroupFleetMemory implements FleetMemoryPort {
       ...field('memoryMax', max === undefined ? undefined : parseCapFile(max)),
       ...field('swapMax', swapMax === undefined ? undefined : parseCapFile(swapMax)),
       ...field('tasksMax', tasks === undefined ? undefined : parseCapFile(tasks)),
+      ...field('cpuPercent', cpuMax === undefined ? undefined : parseCpuMax(cpuMax, this.host.cpus)),
       ...(weight === undefined || parseWeightFile(weight) === undefined
         ? {}
         : { cpuWeight: parseWeightFile(weight) as number }),
@@ -101,6 +122,11 @@ export class CgroupFleetMemory implements FleetMemoryPort {
 
   private async scope(name: string): Promise<ScopeSighting | undefined> {
     const directory = join(this.directory as string, name);
+    // A configured slice can outlive its last scope. Only live child scopes make it a running ferret.
+    if (sessionOfSlice(name) !== undefined) {
+      const children = await readdir(directory).catch(() => [] as string[]);
+      if (!children.some(child => child.endsWith('.scope'))) return undefined;
+    }
     const events = parseMemoryEvents((await text(join(directory, 'memory.events'))) ?? '');
     if (events === undefined) return undefined;
     const current = Number((await text(join(directory, 'memory.current')))?.trim());

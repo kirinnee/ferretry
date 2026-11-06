@@ -9,8 +9,10 @@
  * ├── app.slice/…                       this daemon, never capped here (weight 100)
  * ├── …/…-spawn-*.scope                 the multiplexer's own control processes
  * └── <product>_fleet.slice             the aggregate ceiling (weight 50)
- *     ├── <product>-agent-<id>-<n>.scope   one agent's ceiling
- *     └── …
+ *     ├── <product>_fleet-<escaped-id>.slice   one ferret's combined allowance
+ *     │   ├── <product>-agent-<id>-<n>.scope   harness
+ *     │   └── <product>-agent-<id>-t<n>.scope terminals
+ *     └── <product>_fleet-browser.slice       shared Chrome + worker allowance
  * ```
  *
  * THE SLICE NAME HAS NO DASH ON PURPOSE. systemd reads a dash in a slice name as hierarchy
@@ -39,6 +41,38 @@ import { productName } from '../version.ts';
 /** The aggregate every managed agent shares. */
 export const FLEET_SLICE = `${productName.replaceAll('-', '_')}_fleet.slice`;
 
+/** A shared allowance for the agent Chrome and its worker, below the fleet ceiling. */
+export const BROWSER_SLICE = `${FLEET_SLICE.slice(0, -6)}-browser.slice`;
+
+/** systemd unit-name escaping: notably a literal dash must not introduce another slice ancestor. */
+export function escapeUnitPart(value: string): string {
+  return [...new TextEncoder().encode(value)]
+    .map((byte, index) => {
+      const char = String.fromCharCode(byte);
+      return /[A-Za-z0-9_:]/u.test(char) || (char === '.' && index > 0)
+        ? char
+        : `\\x${byte.toString(16).padStart(2, '0')}`;
+    })
+    .join('');
+}
+
+/** The harness and all terminals opened by this credential share ONE allowance here. */
+export function ferretSliceName(sessionId: string, fleet: string = FLEET_SLICE): string {
+  return `${fleet.slice(0, -6)}-${escapeUnitPart(sessionId)}.slice`;
+}
+
+/** Session attribution from a per-ferret slice, reversing its escaped UTF-8 bytes. */
+export function sessionOfSlice(slice: string): string | undefined {
+  const prefix = `${FLEET_SLICE.slice(0, -6)}-`;
+  if (!slice.startsWith(prefix) || !slice.endsWith('.slice') || slice === BROWSER_SLICE) return undefined;
+  const encoded = slice.slice(prefix.length, -6);
+  if (encoded === '' || !/^(?:[A-Za-z0-9_:.]|\\x[0-9a-f]{2})+$/u.test(encoded)) return undefined;
+  const bytes = encoded.match(/\\x[0-9a-f]{2}|./gu) as string[];
+  return new TextDecoder().decode(
+    Uint8Array.from(bytes, part => (part.startsWith('\\x') ? Number.parseInt(part.slice(2), 16) : part.charCodeAt(0))),
+  );
+}
+
 /**
  * The cgroup directories a slice lives in, outermost first, relative to the user manager: systemd nests
  * `a-b-c.slice` as `a.slice/a-b.slice/a-b-c.slice`, so reading `<manager>/a-b-c.slice` finds nothing. A name
@@ -63,6 +97,11 @@ export function safeUnitPart(value: string): string {
 /** The transient scope one launch asks for. */
 export function agentScopeName(sessionId: string, nonce: string): string {
   return `${AGENT_SCOPE_PREFIX}${safeUnitPart(sessionId)}-${safeUnitPart(nonce)}.scope`;
+}
+
+/** Browser scopes are deliberately outside agent-session attribution. */
+export function browserScopeName(nonce: string): string {
+  return `${productName}-browser-${safeUnitPart(nonce)}.scope`;
 }
 
 /**
