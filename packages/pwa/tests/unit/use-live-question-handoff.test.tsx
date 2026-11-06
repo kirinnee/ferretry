@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { StrictMode } from 'react';
 import { unitClock } from '../../../daemon/tests/support/unit-clock.ts';
 import { type LiveQuestionHandoff, useLiveQuestionHandoff } from '../../src/hooks/use-live-question-handoff.ts';
 import { LiveVoiceSettingsProvider } from '../../src/hooks/use-live-voice-settings.ts';
@@ -194,6 +195,45 @@ describe('useLiveQuestionHandoff', () => {
     mounted = null;
     await settle();
     expect(r.synth.spoken).toHaveLength(0);
+  });
+});
+
+describe('useLiveQuestionHandoff: a page that is leaving starts nothing (fix round 4)', () => {
+  it('a begin that arrives after the page has gone (a child unmounting after its parent) speaks nothing', async () => {
+    const r = await rig();
+    const begin = r.now().begin;
+    const repeat = r.now().repeat;
+    await mounted?.unmount();
+    mounted = null;
+    begin();
+    repeat();
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+    expect(r.synth.queue).toHaveLength(0);
+    expect(r.controller.getState().status).toBe('idle');
+  });
+
+  it('a page that is mounted again (StrictMode runs the cleanup and the setup again) can still read', async () => {
+    const synth = new FakeSynth();
+    const controller = createReadAloud({
+      speaker: createSpeechSynthesisSpeaker({ synth, createUtterance: text => new FakeUtterance(text) }),
+      language: () => 'en-US',
+    });
+    const handle: { current: LiveQuestionHandoff | null } = { current: null };
+    function Probe() {
+      handle.current = useLiveQuestionHandoff({ rows: () => [], question: () => QUESTION });
+      return null;
+    }
+    mounted = await mount(
+      <StrictMode>
+        <ReadAloudProvider controller={controller}>
+          <Probe />
+        </ReadAloudProvider>
+      </StrictMode>,
+    );
+    await interact(() => handle.current?.begin());
+    await settle();
+    expect(controller.getState().status).toBe('reading');
   });
 });
 

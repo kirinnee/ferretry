@@ -238,11 +238,31 @@ try {
               scrolls: box === null ? false : box.scrollHeight > box.clientHeight + 1,
               noteFont: note === null ? 0 : Number.parseFloat(getComputedStyle(note).fontSize),
               noteIcon: note !== null && note.querySelector('svg') !== null,
+              // The leftmost glyph box of an unmarked sentence is the caption text edge; the marked sentence's
+              // wrapped lines start a bar, and that bar must start ON that edge.
+              edge: (() => {
+                const current = document.querySelector('.fy-read-caption[data-current]');
+                const plain = [...document.querySelectorAll('.fy-read-caption:not([data-current])')].flatMap(node => [
+                  ...node.getClientRects(),
+                ]);
+                if (current === null || plain.length === 0) return null;
+                return {
+                  edge: Math.min(...plain.map(rect => rect.left)),
+                  bars: [...current.getClientRects()].map(rect => rect.left),
+                };
+              })(),
               focused: document.activeElement?.classList.contains('fy-read-aloud-button') ?? false,
               focusLabel: document.activeElement?.textContent?.trim() ?? '',
             };
           });
           const label = `${scheme} ${viewport.name} ${scene}`;
+          if (facts.edge !== null) {
+            const { edge, bars } = facts.edge;
+            // A bar within one indent of the edge starts a wrapped line (a first-line bar follows earlier words).
+            for (const bar of bars.filter(left => left < edge + 12))
+              if (Math.abs(bar - edge) > 1)
+                fail(`${label}: a highlight bar starts at ${bar}px, the caption text edge is ${edge}px`);
+          }
           const remote = scene.startsWith('remote-voice');
           const floor = viewport.mobile ? 48 : 44;
           if (facts.target < floor - 0.5) fail(`${label}: Read aloud/Stop is ${facts.target}px tall, wants ${floor}`);

@@ -147,7 +147,7 @@ import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
-import type { LivePhase } from '../voice-chat/live-machine.ts';
+import { type LiveState, mayHandOffQuestion } from '../voice-chat/live-machine.ts';
 import type { LiveReadingSource } from '../voice-chat/live-reader.ts';
 import { needsInputOf } from '../voice-chat/reply-picker.ts';
 import { workSearchPortFor } from '../work-search.ts';
@@ -976,8 +976,11 @@ export function SessionChatPage({
   );
   // Live voice reads the reply of its own turns: while it is on, the auto-read above stands down (never both).
   const [liveOn, setLiveOn] = useState(false);
-  const liveSources = useRef({ entries, spokenPrompt });
-  liveSources.current = { entries, spokenPrompt };
+  // The composer is replaced by the question FORM only for a structured question the person may answer (the condition
+  // the form itself renders on): that — and nothing else — is a hand-off. Any other unmount is the page leaving.
+  const formReplacesComposer = question !== null && canControl;
+  const liveSources = useRef({ entries, spokenPrompt, formReplacesComposer });
+  liveSources.current = { entries, spokenPrompt, formReplacesComposer };
   const liveReading = useMemo<LiveReadingSource>(
     () => ({ rows: () => liveSources.current.entries, question: () => liveSources.current.spokenPrompt }),
     [],
@@ -988,10 +991,13 @@ export function SessionChatPage({
   const questionHandoff = useLiveQuestionHandoff(liveReading);
   const { begin: beginQuestionReading, cancel: cancelQuestionReading, repeat: repeatQuestionReading } = questionHandoff;
   const retireLive = useCallback(
-    (phase: LivePhase) => {
-      // Only a Live that was waiting on the ferret (or already reading to the person) has a question to say.
-      if ((phase === 'working' || phase === 'reading') && liveSources.current.spokenPrompt !== null)
-        beginQuestionReading();
+    (live: LiveState) => {
+      // Only the structured question's form replacing the composer is a hand-off (the page leaving is not), and only a
+      // Live that was waiting on the ferret (or already reading to the person) with NO stop standing (a hidden tab, a
+      // latched hide, typing) has a question to say: a stop stays until the person's explicit Resume, which is gone
+      // with the composer, so the question is simply not spoken (it is on screen, and Repeat reads it on request).
+      const { spokenPrompt: prompt, formReplacesComposer: replaced } = liveSources.current;
+      if (replaced && prompt !== null && mayHandOffQuestion(live)) beginQuestionReading();
     },
     [beginQuestionReading],
   );

@@ -451,5 +451,75 @@ describe('Live and a structured question', () => {
       await flush();
       expect(r.controller.getState().status).toBe('stopped');
     });
+
+    describe('a stop that stands is not undone by the hand-off, and the page leaving never speaks (fix round 4)', () => {
+      const RUNNING_PROMPT = {
+        status: 'running',
+        turnState: 'needs-input',
+        turnStateAt: '2026-11-05T01:00:01Z',
+        turnPrompt: 'Choose a tool permission',
+      } as const;
+
+      it('a hide LATCHED while Live was Working stays a stop after coming back: the question that follows is not spoken', async () => {
+        const r = rig();
+        await r.working();
+        await hidePage();
+        await showPage();
+        await r.ask();
+        expect(bar(r)).toBeNull();
+        await r.settle(5_000);
+        expect(audible(r)).toHaveLength(0);
+        expect(r.controller.getState().status).toBe('idle');
+        // The form is there and answerable by hand as always; nothing was sent or answered by voice.
+        expect(r.root().querySelector('.fy-question-form')).not.toBeNull();
+        expect(r.sends).toEqual(['ask me a question']);
+        expect(r.answers).toEqual([]);
+      });
+
+      it('typing held Live (it outlives the reply): the question that follows is not spoken', async () => {
+        const r = rig();
+        await r.working();
+        await typeInto(must(r.root().querySelector('textarea'), 'composer'), 'one more thing', 'textarea');
+        await flush();
+        await r.ask();
+        expect(bar(r)).toBeNull();
+        await r.settle(5_000);
+        expect(audible(r)).toHaveLength(0);
+      });
+
+      it('still hearing the question after merely being away and back BEFORE Live was working is a fresh Live: control', async () => {
+        const r = rig();
+        await r.working();
+        await r.ask();
+        await r.settle(600);
+        expect(r.controller.getState().status).toBe('reading');
+        expect(audible(r).length).toBeGreaterThan(0);
+      });
+
+      it('the page leaving during an in-composer prompt reading starts no retained reader afterwards', async () => {
+        const r = rig();
+        await r.working();
+        await (page as Mounted).render(r.render(RUNNING_PROMPT));
+        await flush();
+        expect(r.phase()).toBe('reading');
+        await page?.unmount();
+        page = null;
+        await r.settle(600);
+        expect(audible(r)).toHaveLength(0);
+        expect(r.synth.queue.filter(utterance => utterance.volume > 0)).toHaveLength(0);
+        await r.settle(5_000);
+        expect(r.controller.getState().status).not.toBe('reading');
+      });
+
+      it('the page leaving with the structured question already on screen starts nothing either', async () => {
+        const r = rig();
+        await r.working();
+        await r.ask();
+        await page?.unmount();
+        page = null;
+        await r.settle(5_000);
+        expect(audible(r)).toHaveLength(0);
+      });
+    });
   });
 });

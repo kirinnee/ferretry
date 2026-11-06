@@ -24,7 +24,10 @@ import { useReadAloudController } from './use-read-aloud.ts';
 export interface LiveQuestionHandoff {
   /** The retained reader is waiting to speak or speaking. */
   readonly reading: boolean;
-  /** Read the question now, unless this device cannot speak, the tab is hidden, or a reading is already under way. */
+  /**
+   * Read the question now, unless this device cannot speak, the tab is hidden, a reading is already under way, or the
+   * page that owns this reader is leaving (page teardown never starts speech).
+   */
   begin(): void;
   /** End the reading, silently if it has not begun, and stop the voice if it has. */
   cancel(): void;
@@ -37,6 +40,8 @@ export function useLiveQuestionHandoff(source: LiveReadingSource): LiveQuestionH
   const voiceSettings = useDeviceVoiceSettingsStore();
   const [reading, setReading] = useState(false);
   const current = useRef<ReaderPort | null>(null);
+  /** The page that owns this reader is mounted. Once it is leaving, no reading can begin (see the cleanup below). */
+  const owned = useRef(true);
   const latest = useRef({ controller, voiceSettings, source });
   latest.current = { controller, voiceSettings, source };
 
@@ -49,7 +54,8 @@ export function useLiveQuestionHandoff(source: LiveReadingSource): LiveQuestionH
 
   const begin = useCallback((): void => {
     const { controller: voice, voiceSettings: settings, source: rows } = latest.current;
-    if (current.current !== null || !voice.supported || !documentVisibility(document).visible()) return;
+    if (!owned.current || current.current !== null || !voice.supported || !documentVisibility(document).visible())
+      return;
     const reader = createLiveReader({
       controller: voice,
       source: rows,
@@ -75,15 +81,18 @@ export function useLiveQuestionHandoff(source: LiveReadingSource): LiveQuestionH
     [cancel],
   );
 
-  // The page going away silences the reading (the voice is the page's, and the conversation is left).
-  useEffect(
-    () => () => {
+  // The page going away silences the reading (the voice is the page's, and the conversation is left) AND closes the
+  // door: the parent's cleanup runs before its children's, so a Composer unmounting with the page calls its `onRetire`
+  // AFTER this — and that must never start a reader on a page that is already gone (no Stop, no visibility watcher).
+  useEffect(() => {
+    owned.current = true;
+    return () => {
+      owned.current = false;
       const reader = current.current;
       current.current = null;
       reader?.stop();
-    },
-    [],
-  );
+    };
+  }, []);
 
   const repeat = useCallback((): void => {
     cancel();

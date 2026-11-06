@@ -31,7 +31,7 @@ import { DEFAULT_VOICE_CLEANUP, type VoiceCleanup } from '../lib/stt/voice-clean
 import { browserClock, type ClockGlobalLike } from '../lib/voice-chat/clock.ts';
 import { type AudioContextConstructor, navigatorHaptics, webAudioEarcons } from '../lib/voice-chat/earcons.ts';
 import { assembleFromPage, type LiveComposerBridge, type LivePageInputs } from '../lib/voice-chat/live-assembly.ts';
-import { INITIAL_LIVE_STATE, type LivePhase } from '../lib/voice-chat/live-machine.ts';
+import { INITIAL_LIVE_STATE, type LiveState } from '../lib/voice-chat/live-machine.ts';
 import { createLiveReader, type LiveReadingSource, pageVoice } from '../lib/voice-chat/live-reader.ts';
 import { LiveRunner, type LiveRunnerPorts } from '../lib/voice-chat/live-runner.ts';
 import { DEFAULT_LIVE_VOICE_SETTINGS, graceMsOf } from '../lib/voice-chat/live-settings.ts';
@@ -67,11 +67,13 @@ export interface UseLiveVoiceOptions {
    */
   readonly reading?: LiveReadingSource;
   /**
-   * The host is taking Live away while it is ON (the composer unmounts: a structured question replaced it). Called with
-   * the phase Live was in, BEFORE the runner is disposed, so the host can hand what Live was about to say to a reader
-   * that outlives the composer. Never called for an Live that was off.
+   * The composer is unmounting while Live is ON. Called with the runner's whole state (phase and every latched stop:
+   * `hidden`, `hiddenHold`, `typingHold`…), BEFORE the runner is disposed, so the host can decide whether to hand what
+   * Live was about to say to a reader that outlives the composer (`mayHandOffQuestion`). It fires for EVERY unmount —
+   * a structured question replacing the composer, and the whole page leaving — so the host must tell them apart: page
+   * teardown must never start speech. Never called for a Live that was off.
    */
-  readonly onRetire?: (phase: LivePhase) => void;
+  readonly onRetire?: (state: LiveState) => void;
   /** Overrides the countdown from this device's Live voice settings (tests, the harness). */
   readonly graceMs?: unknown;
   /** Overrides the pause from this device's Live voice settings (tests, the harness). */
@@ -275,7 +277,7 @@ export function useLiveVoice(options: UseLiveVoiceOptions): LiveVoiceHandle {
   useEffect(
     () => () => {
       const leaving = activeRunner(runnerRef);
-      if (leaving !== null) latest.current.onRetire?.(leaving.state.phase);
+      if (leaving !== null) latest.current.onRetire?.(leaving.state);
       stop();
     },
     [stop],

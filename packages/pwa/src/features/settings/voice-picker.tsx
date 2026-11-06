@@ -61,7 +61,7 @@ export function VoicePicker({ voices, chosen, onChoose, defaultOpen = false }: V
           <span className="fy-ar-voice-name">{chosen === null ? 'Best voice for this device' : chosen.name}</span>
           {chosen === null ? <BestVoiceWhere /> : <VoiceWhere voice={chosen} />}
         </span>
-        <ChevronDown aria-hidden="true" className={open ? 'rotate-180' : ''} size={20} />
+        <ChevronDown aria-hidden="true" className={open ? 'fy-ar-chevron rotate-180' : 'fy-ar-chevron'} size={20} />
       </button>
       {open ? (
         <div aria-labelledby="auto-read-voice-label" className="fy-ar-list" id={listId} role="radiogroup">
@@ -90,7 +90,7 @@ export function VoicePicker({ voices, chosen, onChoose, defaultOpen = false }: V
                     title={`${voiceLabel(voice)} — ${voice.lang}`}
                   >
                     <span className="fy-ar-voice-name">
-                      {voice.name} <span className="font-normal text-muted">· {voice.lang}</span>
+                      {voice.name} <span className="whitespace-nowrap font-normal text-muted">· {voice.lang}</span>
                     </span>
                     <VoiceWhere voice={voice} />
                   </VoiceRow>

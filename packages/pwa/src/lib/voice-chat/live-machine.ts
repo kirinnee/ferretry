@@ -1045,3 +1045,19 @@ function reduceSending(state: LiveState, event: LiveEvent): LiveStep {
 /** Whether the microphone is (meant to be) open in this phase: the UI's "mic" light. */
 export const micIsOpen = (state: LiveState): boolean =>
   MIC_OPEN_PHASES.includes(state.phase) || (state.phase === 'sending' && !state.sendInFlight && state.park === null);
+
+/**
+ * Whether Live may HAND ITS QUESTION to a reader that outlives the composer (a structured question replaced the form
+ * while Live was on). Only a Live that was waiting on the ferret (or already reading to the person) has a question to
+ * say, and only while the person is here and nothing of theirs is latched: a hidden tab (now, or latched in
+ * `hiddenHold` and not undone by coming back) and typing (`typingHold`) are stops that stand until an explicit Resume,
+ * and a stop that stands means the question is NOT spoken. Pure: the same rule the machine itself applies when a
+ * `needs-input` lands in the composer.
+ */
+export const mayHandOffQuestion = (state: LiveState): boolean =>
+  (state.phase === 'working' || state.phase === 'reading') &&
+  !state.hidden &&
+  !state.hiddenHold &&
+  !state.typingHold &&
+  state.holdReason === null &&
+  state.pauseReason === null;

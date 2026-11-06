@@ -92,7 +92,7 @@ createRoot(root).render(
   <LiveVoiceSettingsProvider store={store}>
     <ReadAloudProvider controller={controller}>
       <Driver />
-      <main data-live-scene="" style={{ margin: '0 auto', maxWidth: 760, padding: '12px 12px 24px' }}>
+      <main data-live-scene="" style={{ margin: '0 auto', maxWidth: 760, padding: '12px 12px 40px' }}>
         <SettingsSection definition={settingDefinition('live-voice')}>
           <LiveVoiceSettingsSection />
         </SettingsSection>
@@ -113,7 +113,7 @@ const html = (theme: string) => `<!doctype html>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="/app.css" />
-    <style>html, body { height: auto !important; overflow: visible !important; } /* the open voice list shows every row, so a review sees each vendor line */ .fy-ar-list { max-height: none !important; overflow: visible !important; }</style>
+    <style>*, *::before, *::after { transition: none !important; animation: none !important; } html, body { height: auto !important; overflow: visible !important; } /* the open voice list shows every row, so a review sees each vendor line */ .fy-ar-list { max-height: none !important; overflow: visible !important; }</style>
   </head>
   <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/live-settings-entry.js"></script></body>
 </html>`;
@@ -163,8 +163,6 @@ const SCENES = [
   'long-voice',
   'older-machine',
 ] as const;
-/** Space left under the last row, in CSS px. */
-const BOTTOM_MARGIN = 20;
 
 interface Measured {
   readonly name: string;
@@ -238,6 +236,14 @@ const rowSpans = (page: Page): Promise<[number, number][]> =>
       const rect = element.getBoundingClientRect();
       if (rect.height > 0) spans.push([rect.top + scroll, rect.bottom + scroll]);
     }
+    // A label and the control it names are one row: a cut between them would leave the label alone.
+    for (const label of scene.querySelectorAll<HTMLLabelElement>('label[for]')) {
+      const control = document.getElementById(label.htmlFor);
+      if (control === null) continue;
+      const a = label.getBoundingClientRect();
+      const b = control.getBoundingClientRect();
+      spans.push([Math.min(a.top, b.top) + scroll, Math.max(a.bottom, b.bottom) + scroll]);
+    }
     return spans;
   });
 
@@ -248,49 +254,117 @@ const rowSpans = (page: Page): Promise<[number, number][]> =>
 const groupGaps = (page: Page): Promise<number[]> =>
   page.evaluate(() => {
     const scroll = window.scrollY;
-    const card = document.querySelector('[data-live-voice-settings]');
-    if (card === null) return [];
-    const blocks = [...card.children] as HTMLElement[];
+    const blocks = [...document.querySelectorAll<HTMLElement>('[data-live-voice-settings], [data-auto-read-settings]')]
+      .flatMap(card => [...card.children] as HTMLElement[])
+      .map(block => block.getBoundingClientRect())
+      .filter(rect => rect.height > 0)
+      .sort((x, y) => x.top - y.top);
     const gaps: number[] = [];
     for (let index = 0; index + 1 < blocks.length; index += 1) {
-      const above = blocks[index]?.getBoundingClientRect().bottom ?? 0;
-      const below = blocks[index + 1]?.getBoundingClientRect().top ?? 0;
-      gaps.push(Math.round((above + below) / 2 + scroll));
+      const above = blocks[index]?.bottom ?? 0;
+      const below = blocks[index + 1]?.top ?? 0;
+      if (below >= above) gaps.push(Math.round((above + below) / 2 + scroll));
     }
     return gaps;
   });
 
 /**
- * The cut points for a page: at the largest gap BETWEEN GROUPS that still fills at least half a viewport, else
- * (a group taller than that) at the largest gap between rows. Never inside a row.
+ * Makes the free space at a cut at least `extra` px taller by pushing down the outermost block that starts in the
+ * gap [from, to] (page px). Only content BELOW the cut moves, so cuts already made stay where they are.
  */
-const cutPoints = (
-  spans: readonly [number, number][],
-  gaps: readonly number[],
-  total: number,
-  viewport: number,
-): number[] => {
-  // A row counts a little beyond its box: text ink and focus rings reach past it.
-  const insideARow = (y: number): boolean => spans.some(([top, bottom]) => top - 3 < y && y < bottom + 3);
+const widenGap = (page: Page, from: number, to: number, extra: number): Promise<boolean> =>
+  page.evaluate(
+    ([top, bottom, push]: readonly [number, number, number]) => {
+      const scroll = window.scrollY;
+      const scene = document.querySelector('[data-live-scene]');
+      if (scene === null) return false;
+      const starts = [...scene.querySelectorAll<HTMLElement>('*')]
+        .map(element => ({ element, y: element.getBoundingClientRect().top + scroll }))
+        .filter(({ element, y }) => {
+          const display = getComputedStyle(element).display;
+          return (
+            y >= top - 0.5 && y <= bottom + 12 && display !== 'inline' && display !== 'contents' && display !== 'none'
+          );
+        });
+      const first = starts.reduce<number>((least, { y }) => Math.min(least, y), Number.POSITIVE_INFINITY);
+      const block = starts.find(({ y }) => y - first < 0.5)?.element;
+      if (block === undefined) return false;
+      block.style.marginTop = `${(Number.parseFloat(getComputedStyle(block).marginTop) || 0) + push}px`;
+      return true;
+    },
+    [from, to, extra] as const,
+  );
+
+/** The free space kept on each side of a cut, in CSS px: a part never ends or starts closer than this to a row. */
+const CUT_MARGIN = 24;
+
+/**
+ * The cut points for a page, found one at a time (a cut may push the rest of the page down to make room, so the
+ * layout is measured again after each). A cut falls at a gap BETWEEN GROUPS when one fits in the viewport, else
+ * at the gap between rows that ends lowest — never inside a row — and the gap is widened until a part has
+ * CUT_MARGIN of free space under its last row and over the next part's first row.
+ */
+const cutPoints = async (page: Page, viewport: number): Promise<number[]> => {
   const cuts: number[] = [0];
   let start = 0;
-  while (total - start > viewport) {
-    const between = gaps.filter(gap => gap > start + viewport / 2 && gap <= start + viewport && !insideARow(gap));
-    let cut = between.length > 0 ? Math.max(...between) : start + viewport;
-    if (between.length === 0) {
-      while (cut > start + 120 && insideARow(cut)) cut -= 1;
-      // The middle of the free gap, so the ink of the rows either side is a few pixels away from the cut.
-      const above = Math.max(start, ...spans.map(([, bottom]) => bottom).filter(bottom => bottom <= cut));
-      const below = Math.min(total, ...spans.map(([top]) => top).filter(top => top >= cut));
-      cut = Math.round((above + below) / 2);
+  for (;;) {
+    const total = await pageEnd(page);
+    if (total - start <= viewport) {
+      cuts.push(total);
+      return cuts;
     }
+    // A row counts a little beyond its box: text ink and focus rings reach past it.
+    const spans = (await rowSpans(page))
+      .map(([top, bottom]): [number, number] => [top - 3, bottom + 3])
+      .sort((x, y) => x[0] - y[0]);
+    const rows: [number, number][] = [];
+    for (const span of spans) {
+      const last = rows.at(-1);
+      if (last !== undefined && span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+      else rows.push([span[0], span[1]]);
+    }
+    // Free gaps [above, below] between two rows, whose upper row ends where a part could still end.
+    const free = rows
+      .slice(0, -1)
+      .map((row, index): [number, number] => [row[1], rows[index + 1]?.[0] ?? row[1]])
+      .filter(([above]) => above > start + viewport / 2 && above + CUT_MARGIN <= start + viewport);
+    const groups = new Set(await groupGaps(page));
+    const grouped = free.filter(([above, below]) => [...groups].some(gap => gap > above && gap < below));
+    const pool = grouped.length > 0 ? grouped : free;
+    const chosen = pool.reduce<[number, number] | undefined>(
+      (best, gap) => (best === undefined || gap[0] > best[0] ? gap : best),
+      undefined,
+    );
+    if (chosen === undefined) fail(`no gap between rows within ${viewport}px of ${start}`);
+    const [above, below] = chosen as [number, number];
+    let bottom = below;
+    if (bottom - above < 2 * CUT_MARGIN) {
+      if (!(await widenGap(page, above - 3, below + 3, 2 * CUT_MARGIN - (bottom - above))))
+        fail(`cannot make room for a cut at ${above}`);
+      bottom = above + 2 * CUT_MARGIN;
+    }
+    const cut = Math.round(
+      Math.min(Math.max((above + bottom) / 2, above + CUT_MARGIN), bottom - CUT_MARGIN, start + viewport),
+    );
     if (cut <= start + 120) fail(`no gap between rows within ${viewport}px of ${start}`);
     cuts.push(cut);
     start = cut;
   }
-  cuts.push(total);
-  return cuts;
 };
+
+/** Where the page ends: the last element's bottom plus the margin the last row keeps. */
+const pageEnd = (page: Page): Promise<number> =>
+  page.evaluate(
+    margin =>
+      Math.ceil(
+        Math.max(
+          ...[...document.querySelectorAll<HTMLElement>('[data-live-scene] *')].map(
+            element => element.getBoundingClientRect().bottom + window.scrollY,
+          ),
+        ) + margin,
+      ),
+    CUT_MARGIN,
+  );
 
 try {
   const report: Record<string, unknown> = {};
@@ -318,7 +392,8 @@ try {
           await page.goto(`${server.url}?theme=studio-${scheme}&scene=${scene}`);
           await page.locator('body[data-ready="1"]').waitFor({ state: 'attached' });
           await page.locator('[data-live-voice-settings]').waitFor({ state: 'visible' });
-          await page.waitForTimeout(200);
+          await page.evaluate(() => document.fonts.ready);
+          await page.waitForTimeout(400);
 
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${label} scrolls sideways by ${overflow}px`);
@@ -343,22 +418,61 @@ try {
           if (switches.length > 0) fail(`${label}: ${switches.join('; ')}`);
           const clipped = await clippedText(page);
           if (clipped.length > 0) fail(`${label}: clipped text: ${clipped.join('; ')}`);
+          const layout = await page.evaluate(() => {
+            const size = (element: Element | null): number =>
+              element === null ? 0 : Number.parseFloat(getComputedStyle(element).fontSize);
+            const helper = size(document.querySelector('[data-live-voice-settings] p.text-meta'));
+            const trigger = document.querySelector('.fy-ar-picker-trigger');
+            const chevron = trigger?.querySelector('svg.fy-ar-chevron')?.getBoundingClientRect();
+            const edge = trigger?.getBoundingClientRect();
+            return {
+              helper,
+              where: [...document.querySelectorAll('.fy-ar-voice-where')].map(size),
+              // The lines a tag such as "· en-US" sits on: one, never "en-" over "US".
+              langLines: [...document.querySelectorAll('.fy-ar-list .whitespace-nowrap')].map(
+                element => new Set([...element.getClientRects()].map(rect => Math.round(rect.top))).size,
+              ),
+              chevron: chevron === undefined ? null : { width: chevron.width, height: chevron.height },
+              chevronGap: chevron === undefined || edge === undefined ? 0 : edge.right - chevron.right,
+            };
+          });
+          if (layout.where.some(value => Math.abs(value - layout.helper) > 0.1))
+            fail(`${label}: a voice's "where" line is ${layout.where.join('/')}px, helper text is ${layout.helper}px`);
+          if (layout.langLines.some(lines => lines !== 1))
+            fail(`${label}: a language tag such as en-US breaks across lines`);
+          if (
+            layout.chevron !== null &&
+            (layout.chevron.width !== 20 || layout.chevron.height !== 20 || layout.chevronGap > 24)
+          )
+            fail(
+              `${label}: the picker chevron is ${layout.chevron.width}x${layout.chevron.height} ${layout.chevronGap}px from the edge`,
+            );
           report[label] = {
             controls: controls.length,
             smallest: Math.min(...controls.map(control => control.height)),
             tallest: Math.max(...controls.map(control => control.height)),
           };
 
-          const contentBottom = await page.evaluate(() => {
-            const rects = [...document.querySelectorAll<HTMLElement>('[data-live-scene] *')].map(
-              element => element.getBoundingClientRect().bottom + window.scrollY,
-            );
-            return Math.max(...rects);
-          });
-          const total = Math.ceil(contentBottom + BOTTOM_MARGIN);
           const documentHeight = await page.evaluate(() => document.documentElement.scrollHeight);
-          if (documentHeight < total) fail(`${label}: no margin below the last row (${documentHeight} < ${total})`);
-          const cuts = cutPoints(await rowSpans(page), await groupGaps(page), total, viewport.height);
+          if (documentHeight < (await pageEnd(page))) fail(`${label}: no margin below the last row`);
+          const cuts = await cutPoints(page, viewport.height);
+          const total = cuts.at(-1) ?? 0;
+          const finalHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+          if (finalHeight < total) fail(`${label}: the page ends before the last part (${finalHeight} < ${total})`);
+          const finalRows = await rowSpans(page);
+          for (const cut of cuts.slice(1, -1)) {
+            const above = Math.max(0, ...finalRows.map(([, bottom]) => bottom).filter(bottom => bottom <= cut));
+            const below = Math.min(
+              Number.POSITIVE_INFINITY,
+              ...finalRows.map(([top]) => top).filter(top => top >= cut),
+            );
+            if (finalRows.some(([top, bottom]) => top < cut && cut < bottom))
+              fail(`${label}: a cut at ${cut} is inside a row`);
+            if (cut - above < CUT_MARGIN - 1 || below - cut < CUT_MARGIN - 1)
+              fail(
+                `${label}: a cut at ${cut} leaves ${Math.round(cut - above)}px under and ${Math.round(below - cut)}px over its rows`,
+              );
+          }
           const parts = cuts.length - 1;
           for (let part = 0; part < parts; part += 1) {
             const from = cuts[part] ?? 0;
