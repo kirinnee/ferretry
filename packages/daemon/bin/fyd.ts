@@ -989,9 +989,6 @@ import {
   locateHarnessCommand,
   lookBeforeReading,
   MachineAgenda,
-  type ManagedWorktreeOperations,
-  type ManagedWorktreeRegistry,
-  ManagedWorktreeService,
   McpCheckService,
   type McpInventoryAccount,
   type McpInventoryFolder,
@@ -1418,6 +1415,7 @@ import { cgroupsModule, createCgroupLaunchLimits } from './modules/cgroups.ts';
 import { learningModule } from './modules/learning.ts';
 import { type ModuleHandles, seamsOf } from './modules/seams.ts';
 import { updateModule } from './modules/update.ts';
+import { type WorktreeComposition, worktreesModule } from './modules/worktrees.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
 import {
   SessionCredentialError,
@@ -1517,21 +1515,6 @@ const SESSION_ARCHIVE_INTERVAL_MS = 60 * 60_000;
 const SESSION_ARCHIVE_BACKLOG_MS = 60_000;
 
 const AGENDA_NUDGE_SETTLE_MS = 2_000;
-
-/**
- * The three things the managed-worktree surface cannot decide for itself.
- *
- * Each is a fact about THIS boot rather than about worktrees: the registry is a document inside the
- * state home that was just opened, the managed root is derived from that home's name, and the Git
- * operations are the one collaborator whose real behaviour means creating and destroying checkouts
- * on the machine running the test. Grouping them keeps the composition seam one parameter wide.
- */
-export interface WorktreeComposition {
-  readonly operations: ManagedWorktreeOperations;
-  readonly registry: ManagedWorktreeRegistry;
-  /** Absent means this daemon hosts no managed checkouts, which every route then says plainly. */
-  readonly managedRoot: string | undefined;
-}
 
 /**
  * The adapters a daemon process needs. Subsystem units add their ports here as they land; this is
@@ -12867,6 +12850,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         seamsOf.update(world),
         lifecycle,
       );
+      // The managed-worktree surface: inert until a request, and read through the same session, terminal and project evidence the daemon serves from.
+      const managedWorktrees = worktreesModule.build(
+        { composition: worktrees, sessions, terminals, catalogs, clock: worktreeClock },
+        seamsOf.worktrees(world),
+        lifecycle,
+      );
       const mounted: Omit<
         MountedSubsystems,
         | 'sessionMcp'
@@ -13089,47 +13078,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         catalogs,
         boardProjects: laneSets,
         boardSwitches: boardWorld.switches,
-        // The evidence is read through the SAME collaborators the rest of the daemon serves from —
-        // the session directory, the terminal runtime and the project catalog — so a refusal to
-        // remove a checkout because a session or a shell is still in it cites the very records the
-        // client would see if it asked. Collecting any of it separately is how a safety gate ends up
-        // refusing on evidence nobody else can reproduce, or worse, never firing at all.
-        worktrees: new ManagedWorktreeService(
-          worktrees.registry,
-          worktrees.operations,
-          // BOTH READS ANSWER `undefined` RATHER THAN THROWING, and neither swallows the failure: a
-          // host whose tmux server will not answer used to take the whole worktree surface down with
-          // a 500, and the only thing worse than that is the version that reports zero live shells
-          // and lets a removal proceed. The domain turns an absent answer into an un-forceable
-          // refusal, so a read still succeeds and a destructive write still refuses.
-          {
-            sessions: async () =>
-              await sessions
-                .list()
-                .then(views =>
-                  views.map(session => ({
-                    id: session.config.id,
-                    cwd: session.config.cwd,
-                    status: session.state.status,
-                    ...(session.state.finishedAt === undefined ? {} : { finishedAt: session.state.finishedAt }),
-                  })),
-                )
-                .catch(() => undefined),
-          },
-          {
-            roots: async () =>
-              await terminals
-                .list()
-                .then(records => records.map(record => record.root))
-                .catch(() => undefined),
-          },
-          { projects: async () => await catalogs.projects() },
-          // The SAME clock the Git adapter stamps records with, so an intent this daemon writes
-          // before a mutation and the record it writes after cannot disagree about when.
-          worktreeClock,
-          { next: () => crypto.randomUUID() },
-          worktrees.managedRoot,
-        ),
+        worktrees: managedWorktrees.provides,
         sessionControl,
         sessionCredential: sessionCredentialRevocation(storage, createSessionLifecycle, launcher),
         sessionResume: sessionResumeSubsystem,
@@ -14029,7 +13978,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         catalogMembers: { members: catalogMembers },
         catalogLinks: { links: catalogLinks },
       };
-      return { mounted: builtSubsystems, modules: { cgroups, learning, analytics, update } };
+      return {
+        mounted: builtSubsystems,
+        modules: { cgroups, learning, analytics, update, worktrees: managedWorktrees },
+      };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: millisecondClock,

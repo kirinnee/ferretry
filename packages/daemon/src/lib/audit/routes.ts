@@ -809,7 +809,6 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'memberId',
     responseFields: { catalogId: ['catalogId'] },
   },
-  { method: 'POST', path: '/v1/worktrees/remove', event: 'worktree.removed' },
   { method: 'POST', path: '/v1/browser/login', event: 'browser.opened', detail: { action: 'sign-in-window' } },
   // A proxy test makes this machine dial a proxy with the stored credentials, so it is kept by name: only whether
   // it reached, how long it took and the error class — never an address, a header or a credential. A refused

@@ -31,6 +31,7 @@ import * as cgroups from './cgroups/route-contract.ts';
 import * as learning from './learning/route-contract.ts';
 import * as legacy from './legacy/route-contract.ts';
 import * as update from './update/route-contract.ts';
+import * as worktrees from './worktrees/route-contract.ts';
 
 /** One module's reviewed lines. */
 interface RouteContractFragment {
@@ -45,6 +46,7 @@ export const FRAGMENTS: Readonly<Record<string, RouteContractFragment>> = {
   cgroups,
   analytics,
   update,
+  worktrees,
 };
 
 /** The concatenation of every fragment's `callers`: one line per route, both tables. */
