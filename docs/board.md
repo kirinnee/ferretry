@@ -1349,6 +1349,10 @@ PR nobody has asked GitHub about is polled on the next tick. A card the owner se
 than that move merges. History names the fact; no move is ever typed into a chat
 ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)).
 
+The same query reads whether GitHub can merge each open PR (`mergeable`, cached on the link as `mergeable` or `conflicting`); an answer GitHub has not worked out yet leaves the cached one standing, and a PR that is
+closed or merged carries none. The Warden reads it, with the checks, to wake the ferret of a review card whose PR has
+been unable to merge for 30 minutes ([ferret-messages.md](ferret-messages.md#the-warden-and-the-board)).
+
 The watcher itself polls GitHub through the host's `gh` about once a minute while a repository has an open linked
 PR, and every ten minutes otherwise, and after `gh` is missing or signed out. Every tick also re-reads each open card's lane set
 and reconciles the card against it, PRs that can no longer change included, so a lane set that gains a lane (the

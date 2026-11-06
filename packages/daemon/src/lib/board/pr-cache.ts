@@ -24,6 +24,7 @@ import {
   type LaneTrigger,
   type PrChecks,
   type PrLink,
+  type PrMergeable,
   prUrlParts,
   type ReleasedIn,
 } from '@ferretry/protocol';
@@ -42,6 +43,8 @@ export interface PrObservation {
   readonly state: 'open' | 'closed' | 'merged';
   readonly draft: boolean;
   readonly checks: PrChecks;
+  /** Whether GitHub can merge it; absent while GitHub has not worked that out, when the cached answer stands. */
+  readonly mergeable?: PrMergeable;
   /** When the PR was opened; `null` or absent when GitHub did not say. */
   readonly createdAt?: string | null;
   /** Set exactly when `state` is `merged`. */
@@ -117,10 +120,22 @@ const factsDiffer = (before: PrLink, after: PrLink): boolean =>
   before.state !== after.state ||
   before.draft !== after.draft ||
   before.checks !== after.checks ||
+  before.mergeable !== after.mergeable ||
   before.mergedAt !== after.mergedAt ||
   before.mergeSha !== after.mergeSha ||
   (before.createdAt ?? null) !== (after.createdAt ?? null) ||
   before.releasedIn !== after.releasedIn;
+
+/**
+ * The link with its merge answer as this poll leaves it: what GitHub just said of an open PR; the cached answer
+ * while GitHub has not worked it out (`UNKNOWN`); and none once the PR is closed or merged, where a conflict
+ * means nothing.
+ */
+const withMergeable = (link: PrLink, observed: PrObservation): PrLink => {
+  const { mergeable: cached, ...rest } = link;
+  const mergeable = observed.state === 'open' ? (observed.mergeable ?? cached) : undefined;
+  return mergeable === undefined ? rest : { ...rest, mergeable };
+};
 
 /** One link after this poll, and the changes it saw. */
 const nextLink = (pr: PrLink, update: PrUpdate, now: string): LinkChange => {
@@ -132,18 +147,21 @@ const nextLink = (pr: PrLink, update: PrUpdate, now: string): LinkChange => {
   const facts: PrLink =
     observed === undefined
       ? { ...pr, releasedIn }
-      : {
-          ...pr,
-          state: observed.state,
-          draft: observed.draft,
-          checks: observed.checks,
-          ...(observed.createdAt === undefined && pr.createdAt === undefined
-            ? {}
-            : { createdAt: observed.createdAt ?? pr.createdAt ?? null }),
-          mergedAt: merged ? observed.mergedAt : null,
-          mergeSha: merged ? observed.mergeSha : null,
-          releasedIn: merged ? releasedIn : null,
-        };
+      : withMergeable(
+          {
+            ...pr,
+            state: observed.state,
+            draft: observed.draft,
+            checks: observed.checks,
+            ...(observed.createdAt === undefined && pr.createdAt === undefined
+              ? {}
+              : { createdAt: observed.createdAt ?? pr.createdAt ?? null }),
+            mergedAt: merged ? observed.mergedAt : null,
+            mergeSha: merged ? observed.mergeSha : null,
+            releasedIn: merged ? releasedIn : null,
+          },
+          observed,
+        );
   const stale = pr.polledAt === null || Date.parse(now) - Date.parse(pr.polledAt) >= PR_POLL_LABEL_REFRESH_MS;
   const changed = factsDiffer(pr, facts);
   const link = changed || (observed !== undefined && stale) ? { ...facts, polledAt: now } : pr;

@@ -219,6 +219,12 @@ import {
   planOverdueReports,
 } from './report-overdue.ts';
 import {
+  blockedReviewCards,
+  planReviewBlocked,
+  type ReviewBlockedMemory,
+  recordReviewBlockedNudge,
+} from './review-blocked.ts';
+import {
   detectStuckInput,
   mayHoldRetractedPointer,
   planStuckInput,
@@ -1307,7 +1313,13 @@ export class WardenSweepService {
       at,
       force: options.force,
     });
-    const final = await this.handleStuck({ stuck, state: overdueTold, config, at, force: options.force });
+    // REVIEW BLOCKED, likewise beside the ferrets' anomalies: facts about a card, and a remedy that is one nudge
+    // (`review-blocked.ts`). A board that could not be read proves nothing, so its memory is left as it stands.
+    const reviewTold =
+      board === undefined
+        ? overdueTold
+        : await this.nudgeBlockedReviews({ board, fleet, state: overdueTold, config, at, force: options.force });
+    const final = await this.handleStuck({ stuck, state: reviewTold, config, at, force: options.force });
     await this.ports.state.write(final);
 
     // LAST, and deliberately so. Everything above — detection, the report
@@ -3038,6 +3050,51 @@ export class WardenSweepService {
     }
     const { overdue: _previous, ...rest } = input.state;
     return Object.keys(memory).length === 0 ? rest : { ...rest, overdue: memory };
+  }
+
+  /**
+   * Wake the ferret of each review-lane card whose pull request has been unable to merge for 30 minutes, once per
+   * blocking state (`review-blocked.ts`). A nudge that could not be typed is journalled and not remembered, so the
+   * next sweep tries again.
+   */
+  private async nudgeBlockedReviews(input: {
+    readonly board: WardenBoardRead;
+    readonly fleet: readonly WardenFleetSession[];
+    readonly state: WardenRuntimeState;
+    readonly config: WardenConfig;
+    readonly at: string;
+    readonly force: boolean;
+  }): Promise<WardenRuntimeState> {
+    const plan = planReviewBlocked({
+      blocked: blockedReviewCards(input.board),
+      fleet: input.fleet,
+      memory: input.state.reviewBlocked ?? {},
+      enabled: input.force || input.config.enabled,
+      mayNudge: input.config.mayActAlone.nudge,
+      clientName: this.settings.clientName,
+      nowMs: Date.parse(input.at),
+    });
+    let memory: ReviewBlockedMemory = plan.memory;
+    for (const nudge of plan.nudges) {
+      const typed = await this.ports.remedies.nudge(nudge.sessionId, nudge.message).then(
+        () => true,
+        () => false,
+      );
+      if (!typed) {
+        this.ports.journal.record('fleet.warden_review_blocked_failed', {
+          sessionId: nudge.sessionId,
+          taskId: nudge.cardId,
+        });
+        continue;
+      }
+      memory = recordReviewBlockedNudge(memory, nudge, input.at);
+      this.ports.journal.record('fleet.warden_review_blocked_nudged', {
+        sessionId: nudge.sessionId,
+        taskId: nudge.cardId,
+      });
+    }
+    const { reviewBlocked: _previous, ...rest } = input.state;
+    return Object.keys(memory).length === 0 ? rest : { ...rest, reviewBlocked: memory };
   }
 
   /**
