@@ -130,6 +130,8 @@ export function catalogRoutes(catalogs: CatalogSubsystem, sessions: SessionDirec
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/skills',
+      // Preserve the legacy winner at /v1/sessions/by-request/skills; see dispatch-equivalence.test.ts.
+      precedence: 1,
       minimum: 'operator',
       caller: 'any',
       noStore: true,
