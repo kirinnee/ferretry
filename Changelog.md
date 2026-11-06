@@ -1,3 +1,9 @@
+## [4.289.0](https://github.com/kirinnee/ferretry/compare/v4.288.0...v4.289.0) (2026-11-06)
+
+### Features
+
+* **board:** clashing work waits its turn (&I38) ([#1531](https://github.com/kirinnee/ferretry/issues/1531)) ([fb78a95](https://github.com/kirinnee/ferretry/commit/fb78a959f3537955f790ba068f129419cbe6724a))
+
 ## [4.288.0](https://github.com/kirinnee/ferretry/compare/v4.287.1...v4.288.0) (2026-11-06)
 
 ### Features
