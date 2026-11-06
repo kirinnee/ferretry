@@ -10,6 +10,8 @@
  * proved", never an empty daemon fact.
  */
 import {
+  AGENDA_CHANNEL_HEADER,
+  AGENDA_CHANNEL_VERSION,
   type AgendaItem,
   AgendaListSnapshotSchema,
   type IFyApiClient,
@@ -90,7 +92,10 @@ async function readComposerReferenceCatalogsIncrementally(
   wire: AgendaWire,
 ): Promise<ComposerReferenceCatalogs> {
   const agenda = client
-    .request(sessionAgendaPath(sessionId, wire), AgendaListSnapshotSchema, { signal })
+    .request(sessionAgendaPath(sessionId, wire), AgendaListSnapshotSchema, {
+      signal,
+      headers: { [AGENDA_CHANNEL_HEADER]: AGENDA_CHANNEL_VERSION },
+    })
     .then(value => sameSession(sessionId, value));
   const skills = client.request(sessionSkillsPath(sessionId), SessionSkillsSchema, { signal });
   const publishIfLive = (patch: ComposerReferenceCatalogPatch): void => {
@@ -139,7 +144,10 @@ async function readComposerAgendaIncrementally(
   wire: AgendaWire,
 ): Promise<void> {
   const agenda = client
-    .request(sessionAgendaPath(sessionId, wire), AgendaListSnapshotSchema, { signal })
+    .request(sessionAgendaPath(sessionId, wire), AgendaListSnapshotSchema, {
+      signal,
+      headers: { [AGENDA_CHANNEL_HEADER]: AGENDA_CHANNEL_VERSION },
+    })
     .then(value => sameSession(sessionId, value));
   await agenda.then(
     value => {

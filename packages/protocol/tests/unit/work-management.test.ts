@@ -171,6 +171,34 @@ const resolvedAgenda = {
   response: { kind: 'permission', decision: 'approve' },
   disposition: 'done',
 };
+const resolvedAgendaHeader = {
+  projection: 'header',
+  lifecycle: 'addressed',
+  id: 'A2',
+  title: 'Approval granted',
+  kind: 'permission',
+  subject: agendaItem.subject,
+  why: agendaItem.why,
+  sourceRef: agendaItem.sourceRef,
+  raisedBy: agendaItem.raisedBy,
+  raisedByName: agendaItem.raisedByName,
+  conversationCount: 3,
+  resolvedAt: resolvedAgenda.resolvedAt,
+  resolvedBy: resolvedAgenda.resolvedBy,
+  resolvedBySession: resolvedAgenda.resolvedBySession,
+  resolvedByName: resolvedAgenda.resolvedByName,
+  resolutionNote: resolvedAgenda.resolutionNote,
+  disposition: resolvedAgenda.disposition,
+};
+const agendaListSnapshot = {
+  v: 1,
+  sessionId: 'session-1',
+  items: [agendaItem],
+  resolved: [resolvedAgendaHeader, { ...resolvedAgenda, id: 'A3' }],
+  count: 1,
+  parseErrors: 0,
+  updatedAt: LATER_INSTANT,
+};
 
 const agendaCases: SchemaCase[] = [
   {
@@ -388,6 +416,12 @@ const agendaCases: SchemaCase[] = [
   },
   { name: 'resolved attention', schema: agenda.ResolvedAgendaItemSchema, value: resolvedAgenda },
   { name: 'stored resolved attention', schema: agenda.StoredResolvedAgendaItemSchema, value: resolvedAgenda },
+  { name: 'resolved attention header', schema: agenda.ResolvedAgendaHeaderSchema, value: resolvedAgendaHeader },
+  { name: 'header list record', schema: agenda.AgendaListRecordSchema, value: resolvedAgendaHeader },
+  { name: 'full list record', schema: agenda.AgendaListRecordSchema, value: resolvedAgenda },
+  { name: 'mixed attention list', schema: agenda.AgendaListSnapshotSchema, value: agendaListSnapshot },
+  { name: 'open one-item read', schema: agenda.AgendaReadItemSchema, value: agendaItem },
+  { name: 'resolved one-item read', schema: agenda.AgendaReadItemSchema, value: resolvedAgenda },
   {
     name: 'card a notice is about',
     schema: agenda.AgendaCardRowSchema,
@@ -1066,6 +1100,32 @@ describe('attention schemas', () => {
     // Act + Assert
     assertRoundTrips(cases);
     assertCoversEverySchema(agenda, cases);
+  });
+
+  it('should reject invalid list projections and incomplete one-item reads', () => {
+    // Arrange
+    const cases: SchemaCase[] = [
+      {
+        name: 'header with the wrong lifecycle',
+        schema: agenda.ResolvedAgendaHeaderSchema,
+        value: { ...resolvedAgendaHeader, lifecycle: 'open' },
+      },
+      { name: 'open item in resolved list', schema: agenda.AgendaListRecordSchema, value: agendaItem },
+      {
+        name: 'list count mismatch',
+        schema: agenda.AgendaListSnapshotSchema,
+        value: { ...agendaListSnapshot, count: 0 },
+      },
+      {
+        name: 'duplicate resolved headers',
+        schema: agenda.AgendaListSnapshotSchema,
+        value: { ...agendaListSnapshot, resolved: [resolvedAgendaHeader, resolvedAgendaHeader] },
+      },
+      { name: 'header in one-item read', schema: agenda.AgendaReadItemSchema, value: resolvedAgendaHeader },
+    ];
+
+    // Act + Assert
+    assertRejects(cases);
   });
 
   it('should refuse a standing rule pointer that is not exactly its own id', () => {
