@@ -196,6 +196,11 @@
   text-align: left;
   width: 100%;
 }
+/* A switch among others in the Live voice card: never under 48px on any screen, and room for a wrapped name. */
+:root .fy-ar-switch-row {
+  min-height: max(var(--target-floor, 0px), 48px);
+  padding-block: 8px;
+}
 .fy-ar-switch[aria-checked='true'] {
   background: var(--accent-soft);
   border-color: var(--accent);
@@ -291,6 +296,10 @@
   gap: 6px;
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+/* In the Live summary the line is helper text: the size of the text around it, not the picker's larger one. */
+.fy-live-summary-voice .fy-ar-voice-where {
+  font-size: inherit;
 }
 .fy-ar-voice-where[data-remote] {
   color: var(--warn);

@@ -133,14 +133,16 @@ run('./node_modules/.bin/tailwindcss', [
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/') {
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
       });
     }
-    return new Response(Bun.file(join(buildDir, url.pathname)));
+    const file = Bun.file(join(buildDir, url.pathname));
+    // A font the page asks for by its unhashed name is not part of the build: answer 404, never a crash.
+    return (await file.exists()) ? new Response(file) : new Response('not found', { status: 404 });
   },
 });
 
@@ -194,6 +196,10 @@ const checkSwitches = (page: Page): Promise<string[]> =>
         problems.push(`${toggle.textContent}: no aria-checked`);
       if (!/(On|Off)$/.test((toggle.textContent ?? '').trim()))
         problems.push(`${toggle.textContent}: does not say On or Off`);
+      const track = toggle.querySelector<HTMLElement>('.fy-ar-track')?.getBoundingClientRect();
+      const thumb = toggle.querySelector<HTMLElement>('.fy-ar-thumb')?.getBoundingClientRect();
+      if (track === undefined || thumb === undefined || track.width < 40 || thumb.width < 16)
+        problems.push(`${toggle.textContent}: no visible track and thumb`);
       return problems;
     }),
   );
@@ -207,16 +213,32 @@ const clippedText = (page: Page): Promise<string[]> =>
       .map(element => `${element.tagName.toLowerCase()} "${(element.textContent ?? '').trim().slice(0, 50)}"`),
   );
 
-/** The page's rows as [top, bottom] in page px: a cut may only fall in a gap between them. */
+/**
+ * Everything a cut must not touch, as [top, bottom] in page px: EVERY line of text on the page (measured from the
+ * text itself, so a group label or heading in a plain span or div is as protected as a paragraph), plus the box of
+ * every control and every boxed block. A cut may only fall in a gap between these.
+ */
 const rowSpans = (page: Page): Promise<[number, number][]> =>
   page.evaluate(() => {
-    const atomic =
-      'h3, h4, p, label, button, select, output, input, [role="alert"], [role="note"], [data-live-reading-summary], [data-live-screen-reader-hint]';
     const scroll = window.scrollY;
-    return [...document.querySelectorAll<HTMLElement>(`[data-live-scene] :is(${atomic})`)]
-      .map(element => element.getBoundingClientRect())
-      .filter(rect => rect.height > 0)
-      .map(rect => [rect.top + scroll, rect.bottom + scroll] as [number, number]);
+    const spans: [number, number][] = [];
+    const scene = document.querySelector('[data-live-scene]');
+    if (scene === null) return spans;
+    const walker = document.createTreeWalker(scene, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      if ((node.textContent ?? '').trim() === '') continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const rect of range.getClientRects())
+        if (rect.height > 0) spans.push([rect.top + scroll, rect.bottom + scroll]);
+    }
+    const boxed =
+      'button, select, output, input, label, fieldset, [role="alert"], [role="note"], [data-live-reading-summary], [data-live-screen-reader-hint], [aria-hidden="true"]';
+    for (const element of scene.querySelectorAll<HTMLElement>(boxed)) {
+      const rect = element.getBoundingClientRect();
+      if (rect.height > 0) spans.push([rect.top + scroll, rect.bottom + scroll]);
+    }
+    return spans;
   });
 
 /**

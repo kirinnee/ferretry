@@ -93,7 +93,7 @@ export function LiveVoiceSettingsSection({ store: given }: LiveVoiceSettingsSect
   const chosen = voices.find(voice => voice.id === settings.voiceId) ?? null;
 
   return (
-    <section aria-label="Live voice" className="fy-live-settings flex flex-col gap-4" data-live-voice-settings="">
+    <section aria-label="Live voice" className="fy-live-settings fy-ar flex flex-col gap-4" data-live-voice-settings="">
       <div className="flex flex-col items-start gap-2">
         <Badge tone="pend">This device</Badge>
         <p className="m-0 text-meta leading-base text-faint">{LIVE_VOICE_APPLIES_NOTE}</p>
@@ -300,7 +300,10 @@ interface SwitchRowProps {
   readonly hideExplanation?: boolean;
 }
 
-/** A real switch: the whole row is the target (≥ 48 px), and the state is said in words, never colour alone. */
+/**
+ * A real switch, the same one as Auto-read replies (`fy-ar-switch` in `read-aloud.css`): the whole row is the target
+ * (≥ 48 px), a visible track and thumb, and the state said in words, never colour alone.
+ */
 function SwitchRow({
   label,
   checked,
@@ -320,14 +323,15 @@ function SwitchRow({
         aria-describedby={describedBy}
         {...{ [attribute]: '' }}
         onClick={() => onChange(!checked)}
-        className={cn(
-          'flex min-h-[48px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
-          'focus-visible:ring-2 focus-visible:ring-accent',
-          checked ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-fg',
-        )}
+        className="fy-ar-switch fy-ar-switch-row min-h-[48px]"
       >
-        <span className="min-w-0 text-ui font-semibold">{label}</span>
-        <span className="shrink-0 text-meta font-semibold">{checked ? 'On' : 'Off'}</span>
+        <span className="fy-ar-switch-name min-w-0">{label}</span>
+        <span className="fy-ar-switch-state">
+          <span className="fy-ar-switch-word">{checked ? 'On' : 'Off'}</span>
+          <span aria-hidden="true" className="fy-ar-track">
+            <span className="fy-ar-thumb" />
+          </span>
+        </span>
       </button>
       {hideExplanation ? null : (
         <p id={describedBy} className="m-0 text-meta leading-base text-muted">
@@ -429,7 +433,7 @@ function ReadingSummary({
  */
 function SummaryVoice({ voice }: { readonly voice: SpeakerVoice | null }) {
   return (
-    <span className="flex flex-col gap-1" data-live-summary-voice="">
+    <span className="fy-live-summary-voice flex flex-col gap-1" data-live-summary-voice="">
       <span>{voice === null ? 'Best voice for this device' : voice.name}</span>
       <span className="text-meta font-normal text-muted">
         {voice === null ? <BestVoiceWhere /> : <VoiceWhere voice={voice} />}
