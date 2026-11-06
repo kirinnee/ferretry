@@ -21,7 +21,10 @@ import { type SendPageQuery, windowPage } from '../send/page.ts';
  * carried, so it is left out. The one move this cannot read is `unconfirmed` → `read` — it reaches the same
  * final state as `delivered` → `read` — and it is answered rather than left out: the cost is that rare
  * message twice, never a gap, and a reader merges a repeated id by its fresher revision/state anyway.
- * A cursor that is a bare id (an older daemon's) falls back to the state at the time of the read.
+ * A cursor is ALWAYS this opaque form, never a bare message id: message ids are chosen by the sender, so a bare id
+ * could be spelled exactly like another session's cursor and slip past the binding below. The paged read is new, so no
+ * client holds a bare-id cursor; anything that does not decode, names another session or was not cut from this
+ * queue is refused.
  *
  * The messages of a page are answered OLDEST FIRST, as the whole queue always was, so a reader written
  * against the unpaged answer reads this one unchanged — it only sees fewer messages.
@@ -56,8 +59,8 @@ const SNAPSHOT_CURSOR = /^(\d{4}-\d{2}-\d{2}T[^~]+)~([^~]+)~([^~]+)$/;
 
 interface Cursor {
   readonly id: string;
-  /** The instant the walk's first page was cut; absent on a bare-id cursor. */
-  readonly asOf?: string;
+  /** The instant the walk's first page was cut. */
+  readonly asOf: string;
 }
 
 const escapePart = (part: string): string => encodeURIComponent(part).replaceAll('~', '%7E');
@@ -71,22 +74,21 @@ const unescapePart = (part: string): string | undefined => {
 };
 
 /**
- * What a cursor says. One that is not shaped as a snapshot cursor, or is shaped as one but names ANOTHER session or an
- * unreadable instant, is read as a bare id: an older daemon's cursor was only the id, and keeping that path means a
- * forged or foreign snapshot cursor lands on a message id nobody has and is refused, never trusted.
+ * What a cursor says, or `undefined` when it is not a snapshot cursor of THIS session: not shaped as one, badly escaped,
+ * naming another session, or an unreadable instant. There is no bare-id reading to fall back to.
  */
-const decodeCursor = (cursor: string, session: string): Cursor => {
+const decodeCursor = (cursor: string, session: string): Cursor | undefined => {
   const match = SNAPSHOT_CURSOR.exec(cursor);
   const asOf = match?.[1];
   const from = match?.[2] === undefined ? undefined : unescapePart(match[2]);
   const id = match?.[3] === undefined ? undefined : unescapePart(match[3]);
   return asOf !== undefined && id !== undefined && from === session && Number.isFinite(Date.parse(asOf))
     ? { id, asOf }
-    : { id: cursor };
+    : undefined;
 };
 
-const encodeCursor = (session: string, id: string, asOf: string | undefined): string =>
-  asOf === undefined ? id : `${asOf}~${escapePart(session)}~${escapePart(id)}`;
+const encodeCursor = (session: string, id: string, asOf: string): string =>
+  `${asOf}~${escapePart(session)}~${escapePart(id)}`;
 
 /** The newest instant any message shows: what the first page of a walk can say it saw. */
 const snapshotOf = (messages: readonly QueuedMessage[]): string | undefined => {
@@ -101,9 +103,8 @@ const snapshotOf = (messages: readonly QueuedMessage[]): string | undefined => {
 const LEFT_OPEN_INTO: ReadonlySet<string> = new Set(['delivered', 'cancelled', 'failed']);
 
 /** Whether the first page of the walk cut at `asOf` carried this message, so an older page must not. */
-const carriedByFirstPage = (message: QueuedMessage, asOf: string | undefined): boolean =>
-  isOpenMessage(message) ||
-  (asOf !== undefined && LEFT_OPEN_INTO.has(message.state) && Date.parse(message.stateAt) > Date.parse(asOf));
+const carriedByFirstPage = (message: QueuedMessage, asOf: string): boolean =>
+  isOpenMessage(message) || (LEFT_OPEN_INTO.has(message.state) && Date.parse(message.stateAt) > Date.parse(asOf));
 
 /**
  * Whether a snapshot can be one this session's walk was cut at. The log only grows, so a snapshot is never later than
@@ -113,7 +114,7 @@ const carriedByFirstPage = (message: QueuedMessage, asOf: string | undefined): b
 const snapshotFits = (messages: readonly QueuedMessage[], cursor: Cursor): boolean => {
   const named = messages.find(message => message.id === cursor.id);
   const newest = snapshotOf(messages);
-  if (cursor.asOf === undefined || named === undefined || newest === undefined) return true;
+  if (named === undefined || newest === undefined) return true;
   const at = Date.parse(cursor.asOf);
   return at <= Date.parse(newest) && at >= Date.parse(named.enqueuedAt);
 };
@@ -128,7 +129,7 @@ export const queuePage = (
   session: string,
 ): QueuePage | undefined => {
   const cursor = query.before === undefined ? undefined : decodeCursor(query.before, session);
-  if (cursor !== undefined && !snapshotFits(messages, cursor)) return undefined;
+  if (query.before !== undefined && (cursor === undefined || !snapshotFits(messages, cursor))) return undefined;
   const window = windowPage(
     messages,
     cursor === undefined ? { limit: query.limit } : { limit: query.limit, before: cursor.id },
@@ -137,7 +138,8 @@ export const queuePage = (
   if (window === undefined) return undefined;
   // The first page cuts the snapshot its walk is judged against; an older page carries it on.
   const asOf = cursor === undefined ? snapshotOf(messages) : cursor.asOf;
-  const nextCursor = window.nextCursor === null ? null : encodeCursor(session, window.nextCursor, asOf);
+  const nextCursor =
+    window.nextCursor === null || asOf === undefined ? null : encodeCursor(session, window.nextCursor, asOf);
   const items =
     cursor === undefined ? window.items : window.items.filter(message => !carriedByFirstPage(message, cursor.asOf));
   return { messages: [...items].reverse(), nextCursor };

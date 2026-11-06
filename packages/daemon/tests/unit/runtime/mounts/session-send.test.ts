@@ -466,7 +466,7 @@ describe('the session send ledger routes', () => {
       should(JSON.parse(forged.body)).match({ code: 'invalid_cursor' });
     });
 
-    it("should refuse a cursor from another session's walk, even when the ids coincide, and still take a bare id", async () => {
+    it("should refuse a cursor from another session's walk, even when the ids coincide, and take no bare id", async () => {
       const sessions = new FakeSessionSend(['s1', 's2']);
       sessions.queued = longQueue();
       const subject = dispatcher(sessions);
@@ -488,7 +488,34 @@ describe('the session send ledger routes', () => {
       should(mine.status).equal(200);
       should(other.status).equal(400);
       should(JSON.parse(other.body)).match({ code: 'invalid_cursor' });
-      should(bare.status).equal(200);
+      should(bare.status).equal(400);
+      should(JSON.parse(bare.body)).match({ code: 'invalid_cursor' });
+    });
+
+    it('should not let a caller-chosen message id stand in for a cursor it is spelled like', async () => {
+      const sessions = new FakeSessionSend(['s1', 's2']);
+      sessions.queued = longQueue();
+      const subject = dispatcher(sessions);
+      const ask = async (session: string, query: Record<string, string>) =>
+        await subject.dispatch(
+          request({
+            method: 'GET',
+            path: `/v1/sessions/${session}/queue`,
+            headers: human,
+            query: Object.entries(query),
+          }),
+        );
+      const cursor = SessionQueueSchema.parse(JSON.parse((await ask('s1', { limit: '10' })).body)).nextCursor ?? '';
+      const template = sessions.queued[0];
+      if (template === undefined) throw new Error('the fixture holds no message');
+      sessions.queued = [...sessions.queued, { ...template, id: cursor }, { ...template, id: '2026-10-30Tbad~s1~a' }];
+
+      const foreign = await ask('s2', { before: cursor });
+      const malformed = await ask('s1', { before: '2026-10-30Tbad~s1~a' });
+
+      should(foreign.status).equal(400);
+      should(JSON.parse(foreign.body)).match({ code: 'invalid_cursor' });
+      should(malformed.status).equal(400);
     });
 
     it('should ask the same of the caller as before: an operator, and not a caller with no credential', async () => {

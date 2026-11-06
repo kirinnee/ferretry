@@ -182,7 +182,7 @@ describe('a page of a session queue', () => {
 
     // Act
     const first = pageOf(queue, { limit: 1 });
-    const older = pageOf(queue, { limit: 5, before: 'd' });
+    const older = pageOf(queue, { limit: 5, before: first.nextCursor ?? '' });
 
     // Assert
     should(ids(first.messages)).eql(['a', 'd']);
@@ -195,8 +195,9 @@ describe('a page of a session queue', () => {
     const queue = [message('a', 1), message('b', 2)];
 
     // Act
-    const unknown = queuePage(queue, { limit: 10, before: 'nope' }, SESSION);
-    const past = pageOf(queue, { limit: 10, before: 'a' });
+    const first = pageOf(queue, { limit: 10 });
+    const unknown = queuePage(queue, { limit: 10, before: `${first.messages[0]?.enqueuedAt}~s1~nope` }, SESSION);
+    const past = pageOf(queue, { limit: 10, before: `${queue[0]?.enqueuedAt}~s1~a` });
 
     // Assert
     should(unknown).be.undefined();
@@ -278,16 +279,22 @@ describe('a cursor of a session queue', () => {
     should(refused.every(each => each === undefined)).be.true();
   });
 
-  it('should still be read as a bare message id, the form an older daemon answered', () => {
-    // Arrange / Act
-    const older = pageOf(queue, { limit: 5, before: 'c' });
+  it('should refuse a bare message id, even one spelled exactly like a cursor of another session', () => {
+    // Arrange — message ids are the sender's choice, so a cursor and an id can be the same string.
     const first = pageOf(queue, { limit: 1 });
+    const cursor = first.nextCursor ?? '';
+    const lookalike = [...queue, { ...message(cursor, 9), id: cursor }];
+    const malformed = '2026-10-30Tbad~s1~a';
 
-    // Assert — the bare path walks on and re-issues a bare cursor, as an older daemon's would.
-    should(ids(older.messages)).eql(['a', 'b']);
-    should(older.nextCursor).be.null();
-    should(pageOf(queue, { limit: 1, before: 'c' }).nextCursor).equal('b');
-    should(first.nextCursor).not.equal('c');
+    // Act
+    const bare = queuePage(queue, { limit: 5, before: 'c' }, SESSION);
+    const elsewhere = queuePage(lookalike, { limit: 5, before: cursor }, 's2');
+    const bad = queuePage([message('a', 1), message(malformed, 2)], { limit: 5, before: malformed }, SESSION);
+
+    // Assert
+    should(bare).be.undefined();
+    should(elsewhere).be.undefined();
+    should(bad).be.undefined();
   });
 });
 
