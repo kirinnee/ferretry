@@ -284,16 +284,24 @@ Earlier releases kept a content-addressed copy of `fyd` under
 `$XDG_STATE_HOME/ferretry/daemon-snapshots/fyd` and launched the copy. Nothing reads it any more, and
 the `fy daemon snapshot …` verbs are gone: `fy` runs the daemon executable installed on the host.
 
-If that directory is still there it is safe to delete by hand. It is sealed read-only, so make it
-writable first:
+If that directory is still there it is safe to delete by hand, but only once no service definition
+names it. First run `fy daemon install` or `fy daemon restart` with the new `fy` (either rewrites the
+systemd unit or launchd plist to the installed executable's absolute path), or `fy daemon uninstall`.
+`fy daemon start` is not enough: when the daemon is already running it returns without rewriting the
+definition.
+
+Then delete the snapshot store and its Nix GC roots (symlinks into `/nix/store` that keep the retired
+closures alive; `rm -rf` removes the links and never follows them). The store is sealed read-only, so
+make it writable first:
 
 ```bash
-chmod -R u+w "${XDG_STATE_HOME:-$HOME/.local/state}/ferretry/daemon-snapshots/fyd"
-rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/ferretry/daemon-snapshots/fyd"
+state="${XDG_STATE_HOME:-$HOME/.local/state}/ferretry"
+chmod -R u+w "$state/daemon-snapshots/fyd"
+rm -rf "$state/daemon-snapshots/fyd" "$state/nix/snapshots/fyd"
 ```
 
-Leave the `.…lifecycle.lock` file beside it in `daemon-snapshots/` alone: an older `fy` and this one
-use it to exclude each other.
+Keep `ferretry/nix/fyd` (the live GC root of the installed daemon) and the `.…lifecycle.lock` file
+in `daemon-snapshots/`: an older `fy` and this one use that file to exclude each other.
 
 ## GitHub release (one-line installer)
 
