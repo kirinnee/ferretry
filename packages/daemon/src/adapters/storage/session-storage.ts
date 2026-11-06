@@ -1065,6 +1065,8 @@ export class DaemonStorage {
         if (!publishing) return { error };
         outcome = { error };
       }
+      // A rejected conditional update published nothing and must not retain archived ancestors either.
+      if (!publishing) return outcome;
       // Even a failed atomic write can have renamed its document already.
       try {
         const parent = jsonObject(await this.readConfig(id, 'proved'))?.parent;
@@ -1343,20 +1345,27 @@ export class DaemonStorage {
     kind: 'config' | 'state',
     transform: (current: FrozenJsonValue) => unknown,
     create?: () => unknown,
+    unlessArchived = false,
   ): Promise<JsonValue> {
     this.assertOpen();
     const write = async (publishing: () => void = () => {}): Promise<JsonValue> =>
       await this.serial.run(id, async () => {
-        await this.reviveIfArchived(id);
         const paths = createSessionPaths(this.paths, id);
         const current = await this.readDocument(id, kind);
         const compute = current === undefined ? create : () => transform(current);
         if (compute === undefined) throw new InvalidStateDocumentError(paths[kind], 'file is missing');
+        // Checked under the same lineage gate and session lane as archive publication: maintenance
+        // never revives a session that left the live set while its caller was reading the transcript.
+        if (unlessArchived && this.archived.has(id)) return canonicalJsonValue(current);
         // The journal contract is settled BEFORE the transform runs and before any byte is written,
-        // so a session that has lost its journal keeps its documents exactly as they were. The write
-        // paths get the same gate from their own ensureSessionDirectory call.
+        // so a session that has lost its journal keeps its documents exactly as they were and nothing is
+        // even computed to write. The write paths get the same gate from their own ensureSessionDirectory call.
         await this.ensureSessionDirectory(id);
-        const next = canonicalJsonValue(await compute());
+        const computed = await compute();
+        // CAS losers and already-applied transforms have no publication or index/cache side effects.
+        if (current !== undefined && computed === current) return canonicalJsonValue(current);
+        await this.reviveIfArchived(id);
+        const next = canonicalJsonValue(computed);
         // The write is inside the try for the same reason as `writeConfig`: a write that threw after its rename
         // has still changed the stored config.
         try {
@@ -1373,8 +1382,12 @@ export class DaemonStorage {
     return kind === 'config' ? await this.configWrite(id, write) : await write();
   }
 
-  async updateConfig(id: SessionId, transform: (current: FrozenJsonValue) => unknown): Promise<JsonValue> {
-    return await this.updateDocument(id, 'config', transform);
+  async updateConfig(
+    id: SessionId,
+    transform: (current: FrozenJsonValue) => unknown,
+    options?: { readonly unlessArchived?: boolean },
+  ): Promise<JsonValue> {
+    return await this.updateDocument(id, 'config', transform, undefined, options?.unlessArchived);
   }
 
   async updateState(id: SessionId, transform: (current: FrozenJsonValue) => unknown): Promise<JsonValue> {

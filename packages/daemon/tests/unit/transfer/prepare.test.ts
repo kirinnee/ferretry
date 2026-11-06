@@ -21,6 +21,10 @@ import {
   type TransferSourceSession,
 } from '../../../src/lib/transfer/types.ts';
 import { request, sourceSession, target } from './fixtures.ts';
+import {
+  verifySessionTranscriptMessageToken,
+  SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+} from '../../../src/lib/session/transcript/message-token.ts';
 
 const NO_REFERENCES: ReferenceFacet = {
   counts: { agent: 0, file: 0, task: 0, attention: 0, skill: 0, terminal: 0, browser: 0 },
@@ -122,6 +126,40 @@ describe('deriveTransferPlanId', () => {
 });
 
 describe('SessionTransferPreparer', () => {
+  it('refuses a legacy fork picker through selection_stale so the app can ask for one refresh', async () => {
+    // Arrange: legacy bindings are never reinterpreted under the new framing.
+    const { preparer: subject } = preparer(
+      sourceSession(),
+      {},
+      {
+        verifySelection: async (evidence, binding) =>
+          (await verifySessionTranscriptMessageToken(
+            {
+              tag: async () => new Uint8Array(32),
+              matches: async () => {
+                throw new Error('legacy token reached the v2 codec');
+              },
+            },
+            SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+            {
+              sessionId: evidence.sourceSessionId,
+              incarnation: evidence.sourceIncarnation,
+              provenance: evidence.transcriptProvenance,
+            },
+            evidence.through,
+            evidence.rawPrefix,
+            binding,
+          )) === 'accepted',
+      },
+    );
+    // Act
+    const actual = await subject
+      .prepare(request({ selectionBinding: `s1.${'A'.repeat(43)}` }))
+      .catch((error: unknown) => error);
+    // Assert
+    expect(actual).toBeInstanceOf(TransferPrepareError);
+    expect((actual as TransferPrepareError).failure).toBe('selection_stale');
+  });
   it('holds readers and contributors only — no writer, no lifecycle, no board', () => {
     expect(Object.keys(SESSION_TRANSFER_PREPARE_PORTS).sort()).toEqual(['contributors', 'selection', 'source']);
   });

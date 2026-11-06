@@ -14,6 +14,7 @@ import {
   type SessionView,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
+import { staleMessageEvidence, withFreshMessageCursor } from '../../lib/message-cursor.ts';
 import { downgradeOf, downgradeSentence } from './context-downgrade.ts';
 
 /** The largest page the messages route serves. */
@@ -43,6 +44,19 @@ const RESTART_PS_FAILED = "Couldn't check the agent's processes on this machine 
 
 type ForkClient = Pick<IFyApiClient, 'messages' | 'fork' | 'rename'>;
 
+const latestMessage = async (client: ForkClient, sessionId: string) =>
+  withFreshMessageCursor(async () => {
+    let cursor: string | undefined;
+    let last: Awaited<ReturnType<ForkClient['messages']>>['messages'][number] | undefined;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const read = await client.messages(sessionId, cursor, PAGE);
+      last = read.messages.at(-1) ?? last;
+      if (read.nextCursor === null) break;
+      cursor = read.nextCursor;
+    }
+    return last;
+  });
+
 /**
  * Forks a ferret through its LATEST durable message, on its own login, and names the fork when a name
  * was given. The messages route reads forward, so the last row is found by walking to the end; the
@@ -54,20 +68,20 @@ export const forkThroughLatest = async (
   teammate: string | undefined,
   requestId: string,
 ): Promise<ForkSessionOutcome> => {
-  let cursor: string | undefined;
-  let last: Awaited<ReturnType<ForkClient['messages']>>['messages'][number] | undefined;
-  for (let page = 0; page < MAX_PAGES; page += 1) {
-    const read = await client.messages(view.config.id, cursor, PAGE);
-    last = read.messages.at(-1) ?? last;
-    if (read.nextCursor === null) break;
-    cursor = read.nextCursor;
-  }
+  const last = await latestMessage(client, view.config.id);
   if (last === undefined) throw new NothingToForkError();
-  const outcome = await client.fork(
-    view.config.id,
-    { through: last.point, selectionBinding: last.selectionBinding, agent: view.config.agent },
-    requestId,
-  );
+  const outcome = await client
+    .fork(
+      view.config.id,
+      { through: last.point, selectionBinding: last.selectionBinding, agent: view.config.agent },
+      requestId,
+    )
+    .catch(async (reason: unknown) => {
+      if (!staleMessageEvidence(reason, 'selection_stale')) throw reason;
+      // Refresh the evidence, but let the person choose again before another fork request is sent.
+      await latestMessage(client, view.config.id).catch(() => undefined);
+      throw new Error('The conversation changed — choose the message again.');
+    });
   const name = teammate?.trim().toLowerCase();
   if (name !== undefined && name !== '') await client.rename(outcome.session.id, undefined, name);
   return outcome;

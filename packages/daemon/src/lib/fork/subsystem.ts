@@ -170,6 +170,7 @@ const REFUSAL_MESSAGE_POLICY: {
 
 /** The message the caller is given, after the failure class chooses what may cross the boundary. */
 function refusalMessage(failure: ForkSessionFailure, error: unknown): string {
+  if (failure === 'selection_stale') return 'The conversation changed — choose the message again.';
   if (REFUSAL_MESSAGE_POLICY[failure] === 'generic') return GENERIC_FORK_FAILURE_MESSAGE;
   return error instanceof Error && error.message !== '' ? error.message : GENERIC_FORK_FAILURE_MESSAGE;
 }

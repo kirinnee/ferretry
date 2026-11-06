@@ -64,6 +64,13 @@ interface KnownSession {
 /** Only an object has an identity worth keeping a parse against. */
 const isDocument = (value: unknown): value is object => typeof value === 'object' && value !== null;
 
+/** Keep launch evidence in storage and in the projector, rather than in every public list/view. */
+function viewConfig(config: SessionConfig): SessionView['config'] {
+  if (config.transcript === undefined) return config;
+  const { baseline: _baseline, ...transcript } = config.transcript;
+  return { ...config, transcript };
+}
+
 export interface SessionDirectoryPorts {
   /** Every session the index holds. */
   readonly sessions: () => readonly IndexedSession[];
@@ -137,7 +144,7 @@ export function createSessionDirectory(ports: SessionDirectoryPorts): SessionDir
     const assembled: SessionView = unchanged
       ? previous.view
       : {
-          config: config.data,
+          config: viewConfig(config.data),
           state: state.data,
           directory: ports.directory(id),
           ...(journalSequence === undefined ? {} : { journalSequence }),

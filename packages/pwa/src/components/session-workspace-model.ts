@@ -937,7 +937,7 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
           if (stopped) return;
           older = 'idle';
           // The session's transcript is another file now: what was held names nothing in it.
-          if (refusedWith(reason, 409, 'log_cursor_stale')) {
+          if (refusedWith(reason, 409, 'log_cursor_stale') || refusedWith(reason, 409, 'message_cursor_stale')) {
             history = EMPTY_HISTORY;
             void refresh(true);
           } else older = 'error';

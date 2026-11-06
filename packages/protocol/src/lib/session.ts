@@ -917,8 +917,13 @@ export const SessionContextSchema = z.strictObject({
 });
 export type SessionContext = z.infer<typeof SessionContextSchema>;
 
+/** Public reads never carry the launch-time rollout exclusion set; discovery reads stored config. */
+export const SessionViewConfigSchema = SessionConfigSchema.extend({
+  transcript: TranscriptProvenanceSchema.transform(({ baseline: _baseline, ...provenance }) => provenance).optional(),
+});
+
 export const SessionViewSchema = z.object({
-  config: SessionConfigSchema,
+  config: SessionViewConfigSchema,
   state: SessionStateSchema,
   /** Whether this session can be brought back, and why (or why not); see {@link SessionReviveSchema}. Absent from a daemon that predates it. */
   revive: SessionReviveSchema.optional(),

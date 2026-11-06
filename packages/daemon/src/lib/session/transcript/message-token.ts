@@ -45,6 +45,7 @@ import {
   SESSION_TRANSCRIPT_UNSIGNED_64_BYTES,
   sessionTranscriptUnsigned64,
 } from './raw-prefix.ts';
+import { withoutResolvedTranscriptBaseline } from './baseline.ts';
 
 /** The chain and its framing live in `raw-prefix.ts`, so a fold can load them alone; they are still this vocabulary. */
 export {
@@ -55,7 +56,7 @@ export {
 } from './raw-prefix.ts';
 
 /** The envelope every token tag is taken under, so no other Ferretry MAC can be read as one. */
-const SESSION_TRANSCRIPT_MESSAGE_TOKEN_ENVELOPE = 'ferretry.session-transcript.message-token.v1';
+const SESSION_TRANSCRIPT_MESSAGE_TOKEN_ENVELOPE = 'ferretry.session-transcript.message-token.v2';
 
 /** The domain of a row-selection binding, carried in the tag rather than beside it. */
 export const SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN = 'selection';
@@ -85,8 +86,8 @@ const TAG_TEXT = /^[A-Za-z0-9_-]{43}$/u;
 /** Three u64 point fields are 24 bytes, which is exactly 32 unpadded base64url characters. */
 const POINT_TEXT = /^[A-Za-z0-9_-]{32}$/u;
 
-const SELECTION_BINDING_PREFIX = 's1';
-const CURSOR_PREFIX = 'c1';
+const SELECTION_BINDING_PREFIX = 's2';
+const CURSOR_PREFIX = 'c2';
 
 const UNSIGNED_64_BYTES = SESSION_TRANSCRIPT_UNSIGNED_64_BYTES;
 const ABSENT = Uint8Array.of(0);
@@ -122,8 +123,9 @@ export interface SessionTranscriptMessageTokenContext {
   /**
    * The pinned provenance this page was resolved through.
    *
-   * Every optional member is encoded with an explicit presence byte, so a provenance that later
-   * gains a field it did not have is a different context rather than the same one. Whether the
+   * Every optional identity member is encoded with an explicit presence byte. v2 first removes a
+   * completed correlation's baseline, so retiring spent discovery evidence leaves tokens valid.
+   * Every other field gained or changed is a different context rather than the same one. Whether the
    * provenance is COMPLETE is the caller's decision to make and to refuse on: this module states
    * what a tag covers, never whether a session should have been served at all.
    */
@@ -199,7 +201,10 @@ export class SessionTranscriptMessageTokenError extends Error {
 function frameProvenance(provenance: TranscriptProvenance): Uint8Array | undefined {
   const parsed = TranscriptProvenanceSchema.safeParse(provenance);
   if (!parsed.success) return undefined;
-  return Buffer.concat(Object.values(SESSION_TRANSCRIPT_PROVENANCE_FRAMERS).map(framer => framer(parsed.data)));
+  // v2 excludes spent discovery evidence. A page or fork selection stays valid across the lazy
+  // config cleanup, while every fact identifying the pinned transcript remains authenticated.
+  const stable = withoutResolvedTranscriptBaseline(parsed.data);
+  return Buffer.concat(Object.values(SESSION_TRANSCRIPT_PROVENANCE_FRAMERS).map(framer => framer(stable)));
 }
 
 /**
@@ -262,9 +267,9 @@ function base64url(bytes: Uint8Array): string {
 /**
  * Issue one token for one row.
  *
- * A selection binding is `s1.<tag>` and carries nothing else: the fork request already names the
+ * A selection binding is `s2.<tag>` and carries nothing else: the fork request already names the
  * point it is cutting at, so repeating it in the token would add a second spelling of one fact.
- * A cursor is `c1.<point>.<tag>`, because the server has to learn where to resume from the client's
+ * A cursor is `c2.<point>.<tag>`, because the server has to learn where to resume from the client's
  * own string — and that point is public, already served, and authenticated by the tag beside it.
  */
 export async function issueSessionTranscriptMessageToken(
@@ -345,7 +350,9 @@ function tagOf(domain: SessionTranscriptMessageTokenDomain, token: string): Uint
  */
 export function readSessionTranscriptMessageCursor(cursor: string): ConversationMessagePoint | undefined {
   const parts = cursor.split('.');
-  if (parts.length !== 3 || parts[0] !== CURSOR_PREFIX) return undefined;
+  // A well-formed legacy cursor still names a point, but never verifies under v2. Reading it here
+  // routes an open page across an update through message_cursor_stale (reload), rather than a 400.
+  if (parts.length !== 3 || (parts[0] !== CURSOR_PREFIX && parts[0] !== 'c1')) return undefined;
   const encodedPoint = parts[1] ?? '';
   if (!POINT_TEXT.test(encodedPoint) || !TAG_TEXT.test(parts[2] ?? '')) return undefined;
   const bytes = Buffer.from(encodedPoint, 'base64url');

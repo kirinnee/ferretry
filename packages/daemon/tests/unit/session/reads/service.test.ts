@@ -599,6 +599,21 @@ describe('OperatorReadService.messages', () => {
     should(refusal).be.instanceof(OperatorReadError).and.have.property('failure', 'message_cursor_stale');
   });
 
+  it('should answer a legacy page open across an update through the recoverable transcript-changed path', async () => {
+    // Arrange: the old envelope has the same coordinate vocabulary, but a different authenticated context.
+    const subject = service({ rows: five });
+    const first = await subject.messages('s1', undefined, 2);
+    const legacy = (first.nextCursor ?? '').replace(/^c2\./u, 'c1.');
+    // Act / Assert: forward and backward pages both use the app's reload answer, never invalid_query.
+    for (const read of [
+      () => subject.messages('s1', legacy, 2),
+      () => subject.messages('s1', undefined, 2, { through: legacy }),
+    ]) {
+      const actual = await read().catch((error: unknown) => error);
+      should(actual).be.instanceof(OperatorReadError).and.have.property('failure', 'message_cursor_stale');
+    }
+  });
+
   it('should refuse a cursor whose anchor raw content was replaced at the same point', async () => {
     // Arrange — the point still resolves and the DISPLAY is byte-identical; only the raw prefix moved.
     const reads = service({ rows: five });

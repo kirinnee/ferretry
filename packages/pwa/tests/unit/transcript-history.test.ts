@@ -281,6 +281,20 @@ describe('scrolling a chat back to its first message', () => {
     expect(view.status()).toBe('more');
   });
 
+  test('reloads the newest page silently after a legacy message cursor is refused', async () => {
+    const daemon = new PagingDaemon(600);
+    const view = chat(daemon);
+    await view.control.initial;
+    daemon.count = 650;
+    daemon.failOlder = Object.assign(new Error('legacy cursor'), { status: 409, code: 'message_cursor_stale' });
+    await view.control.loadOlder();
+    await view.control.refresh();
+    view.control.stop();
+    expect(view.texts()).toEqual(messages(450, 650));
+    expect(view.status()).toBe('more');
+    expect(daemon.calls.at(-1)).toEqual({});
+  });
+
   test('says a failed older page, and loads it when asked again', async () => {
     const daemon = new PagingDaemon(300);
     const view = chat(daemon);

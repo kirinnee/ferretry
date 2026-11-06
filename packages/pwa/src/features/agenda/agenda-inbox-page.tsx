@@ -404,7 +404,8 @@ function OpenItem({
   /** A tapped notification opened it: it opens at its ask, and each tap is a new number. */
   readonly askTap?: number;
 }) {
-  const entries = useItemConversation(card, readConversation);
+  const conversation = useItemConversation(card, readConversation);
+  const entries = conversation.entries;
   const connection = inbox.connectionFor(card.daemonId);
   const lifecycle = useItemLifecycle({
     connection,
@@ -448,7 +449,7 @@ function OpenItem({
           busy={false}
           closeLabel="Back to the Inbox"
           daemonId={card.daemonId}
-          error={failureFor(inbox.deferredState.failed, card.key)}
+          error={failureFor(inbox.deferredState.failed, card.key) ?? conversation.error}
           ferret={inboxWho(card).ferret}
           formKey={card.key}
           history={history}
@@ -671,14 +672,19 @@ function GateWhy({
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
 const NO_BOARD: readonly AgendaItem[] = [];
 
-/** What was said about the card's item in its conversation; nothing until it is read, and nothing when it cannot be. */
+/** What was said about the card's item, with read failures shown by the item's normal error state. */
 function useItemConversation(
   card: InboxCard,
   read: ((card: InboxCard) => Promise<readonly TranscriptEntry[]>) | undefined,
-): readonly TranscriptEntry[] {
-  const [loaded, setLoaded] = useState<{ readonly key: string; readonly entries: readonly TranscriptEntry[] }>({
+): { readonly entries: readonly TranscriptEntry[]; readonly error: string | null } {
+  const [loaded, setLoaded] = useState<{
+    readonly key: string;
+    readonly entries: readonly TranscriptEntry[];
+    readonly error: string | null;
+  }>({
     key: '',
     entries: NO_ENTRIES,
+    error: null,
   });
   const key = card.key;
   const latest = useRef({ read, card });
@@ -689,15 +695,18 @@ function useItemConversation(
     let live = true;
     latest.current.read?.(latest.current.card).then(
       entries => {
-        if (live) setLoaded({ key, entries });
+        if (live) setLoaded({ key, entries, error: null });
       },
-      () => undefined,
+      (reason: unknown) => {
+        if (live)
+          setLoaded({ key, entries: NO_ENTRIES, error: reason instanceof Error ? reason.message : String(reason) });
+      },
     );
     return () => {
       live = false;
     };
   }, [key, reads]);
-  return loaded.key === key ? loaded.entries : NO_ENTRIES;
+  return loaded.key === key ? loaded : { entries: NO_ENTRIES, error: null };
 }
 
 /**

@@ -495,6 +495,7 @@ describe('the open Inbox item’s History', () => {
     );
     await interact(() => Promise.resolve());
     expect(topView(mounted).getAttribute('data-agenda-view')).toBe('A2');
+    expect(mounted.container.querySelector('[role="alert"]')?.textContent).toContain('offline');
     await mounted.unmount();
   });
 
