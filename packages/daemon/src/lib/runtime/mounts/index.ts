@@ -880,8 +880,14 @@ function compositionDependencies(base: DaemonApiDependencies, subsystems: Mounte
   };
 }
 
-export function createMountedDispatcher(base: DaemonApiDependencies, subsystems: MountedSubsystems): ApiDispatcher {
-  return composeModules(compositionDependencies(base, subsystems), [legacyModule(base, subsystems)]).dispatcher;
+/** `modules` are the extracted feature modules, composed after the legacy inventory; none until one is extracted. */
+export function createMountedDispatcher(
+  base: DaemonApiDependencies,
+  subsystems: MountedSubsystems,
+  modules: readonly BuiltModule<unknown, object>[] = [],
+): ApiDispatcher {
+  return composeModules(compositionDependencies(base, subsystems), [legacyModule(base, subsystems), ...modules])
+    .dispatcher;
 }
 
 /** Carrier routes are appended after the module sockets have been decorated. */
@@ -889,10 +895,12 @@ export function createMountedSocketDispatcher(
   base: DaemonApiDependencies,
   subsystems: MountedSubsystems,
   carriers: readonly SocketRoute[] = [],
+  modules: readonly BuiltModule<unknown, object>[] = [],
 ): ApiSocketDispatcher {
-  return composeModules(compositionDependencies(base, subsystems), [legacyModule(base, subsystems)]).socketDispatcher(
-    carriers,
-  );
+  return composeModules(compositionDependencies(base, subsystems), [
+    legacyModule(base, subsystems),
+    ...modules,
+  ]).socketDispatcher(carriers);
 }
 
 // THERE IS NO THIRD TABLE ANY MORE, and this note is here because its absence is a decision rather

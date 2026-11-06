@@ -198,3 +198,20 @@ export function composeModules(
       ),
   };
 }
+
+/**
+ * A {@link LateBound} that is empty until the composition root binds it, and binds exactly once.
+ *
+ * It has no throwing getter on purpose: every port that reads it keeps TODAY'S answer for "not bound
+ * yet", and those answers differ, so the port says which one it keeps (see {@link LateBound}).
+ */
+export function lateBound<T>(): LateBound<T> {
+  let bound: { readonly value: T } | undefined;
+  return {
+    current: () => bound?.value,
+    bind: value => {
+      if (bound !== undefined) throw new Error('this late-bound value is already bound');
+      bound = { value };
+    },
+  };
+}
