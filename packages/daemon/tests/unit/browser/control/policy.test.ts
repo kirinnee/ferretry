@@ -13,8 +13,6 @@ import {
   chromeLaunchArguments,
   generateVncPassword,
   loginWindowMinutes,
-  normalizeBrowserUrl,
-  normalizeViewport,
   selectChromeExecutable,
   vncSupervisorArguments,
   x11vncLaunchArguments,
@@ -26,16 +24,6 @@ import {
 const PORT = { kind: 'port', port: 9222 } as const;
 
 describe('browser control policy', () => {
-  it('should accept safe browser URLs and refuse active or local schemes', () => {
-    // Act + Assert
-    should(normalizeBrowserUrl('example.com/docs')).equal('https://example.com/docs');
-    should(normalizeBrowserUrl('localhost:5173')).equal('http://localhost:5173/');
-    should(normalizeBrowserUrl('about:blank')).equal('about:blank');
-    for (const value of ['', 'http://[', 'file:///etc/passwd', 'javascript:alert(1)', 'chrome://settings']) {
-      should(() => normalizeBrowserUrl(value)).throw(BrowserControlError);
-    }
-  });
-
   it('should create an explicit, scrubbed browser environment', () => {
     // Act
     const actual = browserEnvironment(':99', { PATH: '/bin', HOME: '/safe', DISPLAY: ':0', FY_TOKEN: 'secret' });
@@ -352,13 +340,11 @@ describe('browser control policy', () => {
     should(supervised.slice(0, 4)).deepEqual(['timeout', '--signal=TERM', '--kill-after=1', '1']);
   });
 
-  it('should generate unbiased eight-character passwords and normalize finite viewports', () => {
+  it('should generate unbiased eight-character passwords', () => {
     // Act
     const password = generateVncPassword(buffer => buffer.fill(255).fill(0, 0, 8));
 
     // Assert
     should(password).equal('aaaaaaaa');
-    should(normalizeViewport(100.7, 9000)).deepEqual({ width: 320, height: 1200 });
-    should(() => normalizeViewport(Number.NaN, 800)).throw(BrowserControlError);
   });
 });

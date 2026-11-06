@@ -86,8 +86,3 @@ export function unusableAccountReason(usage: AccountUsage | undefined): string |
       return undefined;
   }
 }
-
-/** The usage row for an executable name, or `undefined` when the feed has nothing for it. */
-export function usageForAgent(accounts: readonly AccountUsage[], agent: string): AccountUsage | undefined {
-  return accounts.find(account => account.agent === agent);
-}

@@ -1,30 +1,23 @@
 import { afterEach, describe, it } from 'bun:test';
-import { existsSync } from 'node:fs';
 import { type FileHandle, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { SessionTransferPlan } from '@ferretry/protocol';
-import { InstantSchema, SessionTransferPlanSchema } from '@ferretry/protocol';
+import { SessionTransferPlanSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
-  FileSessionTransferPlanStore,
   FileSessionTransferTargetPlanStore,
-  forkReceiptPath,
   fsyncTransferPlanDirectory,
   fsyncTransferPlanFile,
   SessionTransferPlanConflictError,
   SessionTransferPlanCorruptError,
-  type TransferReceipt,
-  transferRequestFingerprint,
 } from '../../../src/adapters/transfer/plan-store.ts';
 import { parseSessionId } from '../../../src/lib/session-id.ts';
 import { deriveTransferPlanId } from '../../../src/lib/transfer/prepare.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
- * The authoritative fork receipt (daemon-global, plan-id-keyed) and the target-session plan copy, on
- * a real filesystem. The receipt round-trips, recovers the target id after a restart without touching
- * the source, refuses a request id reused for a different transfer, and keeps phase progress
- * append-only rather than conflicting.
+ * The target-session plan copy, on a real filesystem: installed once and idempotently, refused when a
+ * second plan claims the same target, written privately and atomically, and made durable parent-first.
  *
  * Everything here runs inside a throwaway directory; no state home is resolved.
  */
@@ -40,15 +33,6 @@ function counter(): () => string {
   return () => {
     n += 1;
     return `t${n}`;
-  };
-}
-
-/** Deterministic instants, so a phase history reads in order. */
-function clock(): () => string {
-  let n = 0;
-  return () => {
-    n += 1;
-    return `2025-01-0${n}T00:00:00+00:00`;
   };
 }
 
@@ -175,21 +159,14 @@ function makePlan(overrides: {
 }
 
 interface Harness {
-  readonly subject: FileSessionTransferPlanStore;
+  readonly subject: FileSessionTransferTargetPlanStore;
   readonly home: string;
-  readonly forks: string;
 }
 
 async function harness(label: string): Promise<Harness> {
   const home = await tempDirectory(label);
-  const forks = join(home, 'state', 'forks');
-  const subject = new FileSessionTransferPlanStore(
-    planId => forkReceiptPath(join(home, 'state'), planId),
-    id => join(home, 'sessions', id, TARGET_PLAN_FILE),
-    counter(),
-    clock(),
-  );
-  return { subject, home, forks };
+  const subject = new FileSessionTransferTargetPlanStore(id => join(home, 'sessions', id, TARGET_PLAN_FILE), counter());
+  return { subject, home };
 }
 
 describe('deriveTransferPlanId', () => {
@@ -201,458 +178,7 @@ describe('deriveTransferPlanId', () => {
   });
 });
 
-describe('transferRequestFingerprint', () => {
-  it('pins the whole frozen decision — every carried facet, durable setting and resolved target — not just the cut', () => {
-    // The fingerprint is the request's identity: the FULL plan. preparedAt is the lone wall-clock
-    // field and moves while the fingerprint must not.
-    const base = makePlan({});
-    should(transferRequestFingerprint(makePlan({ preparedAt: '2025-09-09T00:00:00+00:00' }))).equal(
-      transferRequestFingerprint(base),
-    );
-    // The cut and the caller's agent/effort choice still differentiate the request.
-    should(transferRequestFingerprint(makePlan({ cutByteOffset: 4096 }))).not.equal(transferRequestFingerprint(base));
-    should(transferRequestFingerprint(makePlan({ targetAgent: 'codex' }))).not.equal(transferRequestFingerprint(base));
-    should(transferRequestFingerprint(makePlan({ targetEffort: 'high' }))).not.equal(transferRequestFingerprint(base));
-    // And so does every other resolved decision the cut-plus-choice fingerprint used to miss: a
-    // carried conversation message, a durable setting, and the resolved target account.
-    should(transferRequestFingerprint(makePlan({ messageText: 'a different carried conversation' }))).not.equal(
-      transferRequestFingerprint(base),
-    );
-    should(transferRequestFingerprint(makePlan({ durableCwd: '/elsewhere' }))).not.equal(
-      transferRequestFingerprint(base),
-    );
-    should(transferRequestFingerprint(makePlan({ targetAccount: 'acc-9' }))).not.equal(
-      transferRequestFingerprint(base),
-    );
-  });
-});
-
-describe('FileSessionTransferPlanStore record/replay (authoritative global receipt)', () => {
-  afterEach(async () => await cleanupTempDirectories());
-
-  it('persists the parsed plan and target id keyed by the composite plan id, before create', async () => {
-    // The receipt is daemon-global under state/forks/<planId>.json, written ahead of lifecycle.create,
-    // carrying the exact parsed plan and the pre-minted target id.
-    // Arrange
-    const { subject, forks } = await harness('transfer-receipt-record');
-    const plan = makePlan({});
-
-    // Act
-    const outcome = await subject.record(plan, { requestId: REQUEST, targetId: 'target-session', phase: 'requested' });
-
-    // Assert
-    should(outcome.status).equal('created');
-    should(outcome.phaseAppended).be.true();
-    should(outcome.receipt.targetId).equal('target-session');
-    should(outcome.receipt.plan.source.cutMessagePoint).deepEqual({ v: 1, byteOffset: 0, blockIndex: 0 });
-    should(outcome.receipt.fingerprint).equal(transferRequestFingerprint(plan));
-    should(subject.receiptPath(PLAN_ID)).equal(join(forks, `${PLAN_ID}.json`));
-    should((await readdir(forks)).sort()).deepEqual([`${PLAN_ID}.json`]);
-  });
-
-  it('uses protocol-valid default instants when no clock is injected', async () => {
-    // Arrange — deterministic temporary names, but deliberately no fourth constructor clock argument.
-    const home = await tempDirectory('transfer-receipt-default-instant');
-    const subject = new FileSessionTransferPlanStore(
-      planId => forkReceiptPath(join(home, 'state'), planId),
-      id => join(home, 'sessions', id, TARGET_PLAN_FILE),
-      counter(),
-    );
-
-    // Act
-    const outcome = await subject.record(makePlan({}), {
-      requestId: REQUEST,
-      targetId: 'target-session',
-      phase: 'requested',
-    });
-    const receipt = await subject.load(PLAN_ID);
-    if (receipt === undefined) throw new Error('expected the default-clock receipt to be persisted');
-
-    // Assert — wall-clock values are intentionally not compared; the durable contract is an offset-bearing instant.
-    should(outcome.status).equal('created');
-    for (const instant of [receipt.createdAt, receipt.updatedAt, receipt.phaseHistory[0]?.at])
-      should(InstantSchema.safeParse(instant).success).be.true();
-  });
-
-  it('round-trips the receipt, embedding the full parsed plan', async () => {
-    // Arrange
-    const { subject } = await harness('transfer-receipt-roundtrip');
-    await subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-session', phase: 'requested' });
-
-    // Act
-    const receipt = await subject.load(PLAN_ID);
-    if (receipt === undefined) throw new Error('expected a recorded receipt');
-
-    // Assert — the recovered plan is schema-valid and decision-identical to what was recorded.
-    const plan = SessionTransferPlanSchema.parse(receipt.plan);
-    should(plan.planId).equal(PLAN_ID);
-    should(receipt.targetId).equal('target-session');
-    should(receipt.phaseHistory).have.length(1);
-    should(receipt.phaseHistory[0]?.phase).equal('requested');
-  });
-
-  it('recovers the target id and plan after a restart, without reading the source', async () => {
-    // A crash after the receipt is written but before import completes: a fresh store process reads
-    // the durable receipt by plan id and gets back the exact target id and plan. The source session
-    // directory is never opened — it does not even exist on disk.
-    // Arrange
-    const { subject, home } = await harness('transfer-receipt-restart');
-    await subject.record(makePlan({}), {
-      requestId: REQUEST,
-      targetId: 'target-session',
-      phase: 'replacement_creating',
-    });
-    const state = join(home, 'state');
-    const forks = join(state, 'forks');
-    const receiptFile = subject.receiptPath(PLAN_ID);
-    const beforeReplay = await stat(receiptFile);
-    const syncs: string[] = [];
-    const fileSyncs: PinnedFileSyncObservation[] = [];
-
-    // Act — a NEW process, NEW store instance, same state tree.
-    const restarted = new FileSessionTransferPlanStore(
-      planId => forkReceiptPath(state, planId),
-      id => join(home, 'sessions', id, TARGET_PLAN_FILE),
-      counter(),
-      clock(),
-      recordingDirectorySync(syncs),
-      recordingFileSync(syncs, fileSyncs),
-    );
-    const recovered = await restarted.replay(PLAN_ID);
-    if (recovered === undefined) throw new Error('expected a recoverable receipt');
-
-    // Assert
-    should(recovered.receipt.targetId).equal('target-session');
-    should(recovered.plan.planId).equal(PLAN_ID);
-    should(recovered.plan.facets.conversation?.messages[0]?.text).equal('carry this through the cut');
-    // Recovery re-flushes the existing inode and its names before downstream work; it does not
-    // rewrite the receipt. The empty read remainder proves the parser and fsync used one retained
-    // handle; its inode is the receipt that was present before recovery, not a path reopen.
-    should(syncs).deepEqual([receiptFile, state, forks]);
-    should(fileSyncs).deepEqual([{ path: receiptFile, inode: beforeReplay.ino, unreadAfterParse: '' }]);
-    const afterReplay = await stat(receiptFile);
-    should(afterReplay.ino).equal(beforeReplay.ino);
-    should(afterReplay.mtimeMs).equal(beforeReplay.mtimeMs);
-    // Source immutability, held by construction: the source session directory was never created.
-    should(existsSync(join(home, 'sessions', SOURCE))).be.false();
-  });
-
-  it('appends a new phase rather than conflicting when the same request advances', async () => {
-    // Phase progress is append-only history, NOT a conflict basis. Re-recording the same request at a
-    // later seam phase appends to phaseHistory and leaves the plan untouched.
-    // Arrange
-    const { subject } = await harness('transfer-receipt-phase');
-    await subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-session', phase: 'requested' });
-
-    // Act
-    const advanced = await subject.record(makePlan({}), {
-      requestId: REQUEST,
-      targetId: 'target-session',
-      phase: 'replacement_creating',
-    });
-
-    // Assert
-    should(advanced.status).equal('replayed');
-    should(advanced.phaseAppended).be.true();
-    should(advanced.receipt.phaseHistory.map(entry => entry.phase)).deepEqual(['requested', 'replacement_creating']);
-  });
-
-  it('refuses a request id reused for a different cut, target agent, effort or target session', async () => {
-    // THE FINGERPRINT IS AUTHORIZATION. The composite key (source, request) arrives with a different
-    // request, so the refusal is outright and the durable receipt stands.
-    // Arrange
-    const { subject } = await harness('transfer-receipt-conflict');
-    await subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-a', phase: 'requested' });
-
-    // Act + Assert — same composite key, four ways the request can differ.
-    const differentCut = await reject(
-      subject.record(makePlan({ cutByteOffset: 4096 }), {
-        requestId: REQUEST,
-        targetId: 'target-a',
-        phase: 'requested',
-      }),
-    );
-    should(differentCut).be.instanceOf(SessionTransferPlanConflictError);
-    should((differentCut as SessionTransferPlanConflictError).conflict).equal('payload_mismatch');
-
-    const differentAgent = await reject(
-      subject.record(makePlan({ targetAgent: 'codex' }), {
-        requestId: REQUEST,
-        targetId: 'target-a',
-        phase: 'requested',
-      }),
-    );
-    should((differentAgent as SessionTransferPlanConflictError).conflict).equal('payload_mismatch');
-
-    const differentEffort = await reject(
-      subject.record(makePlan({ targetEffort: 'high' }), {
-        requestId: REQUEST,
-        targetId: 'target-a',
-        phase: 'requested',
-      }),
-    );
-    should((differentEffort as SessionTransferPlanConflictError).conflict).equal('payload_mismatch');
-
-    const differentTarget = await reject(
-      subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-b', phase: 'requested' }),
-    );
-    should((differentTarget as SessionTransferPlanConflictError).conflict).equal('payload_mismatch');
-
-    // The anchor still records the original decision and target.
-    should((await subject.load(PLAN_ID))?.targetId).equal('target-a');
-  });
-
-  it('reuses the frozen plan P0 on replay and refuses a re-prepare that drifted, never replacing it', async () => {
-    // A source is live: its transcript and facets can move between the first prepare and a crashed
-    // retry. The durable receipt freezes P0, so a replay that arrives carrying a re-prepared P1 — a
-    // different decision under the same plan id — is refused outright, and the frozen P0 is left
-    // intact rather than overwritten.
-    // Arrange
-    const { subject } = await harness('transfer-receipt-p0-frozen');
-    await subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-session', phase: 'requested' });
-
-    // Act — a re-prepare whose conversation facet moved (the source grew past the cut), same plan id.
-    const drifted = await reject(
-      subject.record(makePlan({ messageText: 'the source transcript grew past the cut' }), {
-        requestId: REQUEST,
-        targetId: 'target-session',
-        phase: 'replacement_creating',
-      }),
-    );
-
-    // Assert — the drift is a different decision, so it is refused; nothing was appended.
-    should(drifted).be.instanceOf(SessionTransferPlanConflictError);
-    should((drifted as SessionTransferPlanConflictError).conflict).equal('payload_mismatch');
-    const recovered = await subject.load(PLAN_ID);
-    if (recovered === undefined) throw new Error('expected the frozen receipt');
-    should(recovered.plan.facets.conversation?.messages[0]?.text).equal('carry this through the cut');
-    should(recovered.phaseHistory).have.length(1);
-  });
-
-  it('keys receipts globally by plan id: distinct (source, request) pairs are distinct files', async () => {
-    // Arrange
-    const { subject, forks } = await harness('transfer-receipt-keyed');
-    const otherRequest = 'req-2';
-    const otherPlanId = deriveTransferPlanId(SOURCE, otherRequest);
-    const otherPlan = makePlan({ planId: otherPlanId });
-
-    // Act
-    await subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-1', phase: 'requested' });
-    await subject.record(otherPlan, { requestId: otherRequest, targetId: 'target-2', phase: 'requested' });
-
-    // Assert
-    should((await readdir(forks)).sort()).deepEqual([`${PLAN_ID}.json`, `${otherPlanId}.json`].sort());
-  });
-
-  it('reports a corrupt receipt rather than pretending no transfer was recorded', async () => {
-    // Arrange
-    const { subject } = await harness('transfer-receipt-corrupt');
-    await subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-session', phase: 'requested' });
-    await Bun.write(subject.receiptPath(PLAN_ID), '{ not a receipt');
-
-    // Act + Assert
-    await should(subject.load(PLAN_ID)).be.rejectedWith(SessionTransferPlanCorruptError);
-  });
-
-  it('parses an authoritative replay before flushing it or any directory name', async () => {
-    // Arrange — valid JSON with an invalid receipt shape reaches schema parsing, which must complete
-    // before the pinned-file sync. A corrupt anchor earns no durability claim and no directory barrier.
-    const { subject, home } = await harness('transfer-receipt-corrupt-replay-order');
-    await subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-session', phase: 'requested' });
-    await Bun.write(subject.receiptPath(PLAN_ID), '{}\n');
-    const syncs: string[] = [];
-    const restarted = new FileSessionTransferPlanStore(
-      planId => forkReceiptPath(join(home, 'state'), planId),
-      id => join(home, 'sessions', id, TARGET_PLAN_FILE),
-      counter(),
-      clock(),
-      recordingDirectorySync(syncs),
-      recordingFileSync(syncs),
-    );
-
-    // Act
-    const error = await reject(restarted.replay(PLAN_ID));
-
-    // Assert
-    should(error).be.instanceOf(SessionTransferPlanCorruptError);
-    should(syncs).deepEqual([]);
-  });
-
-  it('writes the receipt privately and atomically, leaving no temporary file beside it', async () => {
-    // Arrange
-    const { subject, forks } = await harness('transfer-receipt-atomic');
-
-    // Act
-    await subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-session', phase: 'requested' });
-
-    // Assert
-    should(await readdir(forks)).deepEqual([`${PLAN_ID}.json`]);
-    should((await stat(subject.receiptPath(PLAN_ID))).mode & 0o777).equal(0o600);
-    should((await stat(forks)).mode & 0o777).equal(0o700);
-  });
-
-  it('syncs created receipt directories parent-first and retains the concurrent-leaf guard in steady state', async () => {
-    // Arrange — only the temp root exists. The first write must make state/forks durable; subsequent
-    // writes still sync state before publishing because another key may have observed a concurrent
-    // creator's forks directory even when its own recursive mkdir returned `undefined`.
-    const home = await tempDirectory('transfer-receipt-sync-order');
-    const state = join(home, 'state');
-    const forks = join(state, 'forks');
-    const syncs: string[] = [];
-    const fileSyncs: PinnedFileSyncObservation[] = [];
-    const subject = new FileSessionTransferPlanStore(
-      planId => forkReceiptPath(state, planId),
-      id => join(home, 'sessions', id, TARGET_PLAN_FILE),
-      counter(),
-      clock(),
-      recordingDirectorySync(syncs),
-      recordingFileSync(syncs, fileSyncs),
-    );
-
-    // Act + Assert — created entry parents first, then the receipt's containing directory after rename.
-    await subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-session', phase: 'requested' });
-    should(syncs).deepEqual([home, state, forks]);
-
-    // A real steady-state replacement creates no directory, but retains the state-directory guard.
-    syncs.length = 0;
-    await subject.record(makePlan({}), {
-      requestId: REQUEST,
-      targetId: 'target-session',
-      phase: 'replacement_creating',
-    });
-    should(syncs).deepEqual([state, forks]);
-
-    // An exact replay does not replace the document, but it must repair a prior writer that died
-    // after rename and before its directory sync: final file, lazy-directory parent guard, then leaf.
-    const receiptFile = subject.receiptPath(PLAN_ID);
-    const beforeReplay = await stat(receiptFile);
-    syncs.length = 0;
-    await subject.record(makePlan({}), {
-      requestId: REQUEST,
-      targetId: 'target-session',
-      phase: 'replacement_creating',
-    });
-    should(syncs).deepEqual([receiptFile, state, forks]);
-    should(fileSyncs).deepEqual([{ path: receiptFile, inode: beforeReplay.ino, unreadAfterParse: '' }]);
-    const afterReplay = await stat(receiptFile);
-    should(afterReplay.ino).equal(beforeReplay.ino);
-    should(afterReplay.mtimeMs).equal(beforeReplay.mtimeMs);
-  });
-
-  it('makes an observer of a concurrently created receipt directory sync its parent before publishing', async () => {
-    // Arrange — caller one creates `forks` and pauses before syncing its name into `state`. Caller two
-    // then observes the directory, so its recursive mkdir returns `undefined`; it must not publish a
-    // different receipt until it has independently synced `state`.
-    const home = await tempDirectory('transfer-receipt-concurrent-directory');
-    const state = join(home, 'state');
-    const forks = join(state, 'forks');
-    await mkdir(state, { recursive: true, mode: 0o700 });
-    await fsyncTransferPlanDirectory(home);
-    const firstPaused = deferred();
-    const releaseFirst = deferred();
-    const syncs: string[] = [];
-    let pauseNextStateSync = true;
-    const subject = new FileSessionTransferPlanStore(
-      planId => forkReceiptPath(state, planId),
-      id => join(home, 'sessions', id, TARGET_PLAN_FILE),
-      counter(),
-      clock(),
-      async path => {
-        if (path === state && pauseNextStateSync) {
-          pauseNextStateSync = false;
-          firstPaused.resolve();
-          await releaseFirst.promise;
-        }
-        await fsyncTransferPlanDirectory(path);
-        syncs.push(path);
-      },
-    );
-    const firstWrite = subject.record(makePlan({}), {
-      requestId: REQUEST,
-      targetId: 'target-1',
-      phase: 'requested',
-    });
-    await firstPaused.promise;
-    const secondRequest = 'req-2';
-    const secondPlanId = deriveTransferPlanId(SOURCE, secondRequest);
-
-    // Act — caller two completes while caller one remains paused at the parent sync.
-    try {
-      await subject.record(makePlan({ planId: secondPlanId }), {
-        requestId: secondRequest,
-        targetId: 'target-2',
-        phase: 'requested',
-      });
-    } finally {
-      releaseFirst.resolve();
-      await firstWrite;
-    }
-
-    // Assert — caller two's state/forks pair precedes caller one's delayed pair. Without the
-    // unconditional parent guard its first entry would be `forks`, allowing it to return too early.
-    should(syncs).deepEqual([state, forks, state, forks]);
-  });
-});
-
-describe('FileSessionTransferPlanStore refuses a corrupt durable anchor', () => {
-  afterEach(async () => await cleanupTempDirectories());
-
-  /** Records the canonical receipt and returns it parsed, as the on-disk source of every mutation. */
-  async function recordedReceipt(subject: FileSessionTransferPlanStore): Promise<TransferReceipt> {
-    await subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-session', phase: 'requested' });
-    const receipt = await subject.load(PLAN_ID);
-    if (receipt === undefined) throw new Error('expected a recorded receipt');
-    return receipt;
-  }
-
-  /** Overwrites the receipt file with a hand-mutated document, simulating a torn or edited anchor. */
-  async function overwriteReceipt(subject: FileSessionTransferPlanStore, doc: unknown): Promise<void> {
-    await Bun.write(subject.receiptPath(PLAN_ID), `${JSON.stringify(doc)}\n`);
-  }
-
-  it('refuses a receipt whose embedded plan carries a different plan id', async () => {
-    // A receipt keyed as plan A but embedding plan B must not redirect recovery at a different session.
-    const { subject } = await harness('transfer-receipt-corrupt-nested-plan-id');
-    const receipt = await recordedReceipt(subject);
-    await overwriteReceipt(subject, { ...receipt, plan: { ...receipt.plan, planId: '0'.repeat(64) } });
-    await should(subject.load(PLAN_ID)).be.rejectedWith(SessionTransferPlanCorruptError);
-  });
-
-  it('refuses a receipt whose outer source session no longer derives its plan id', async () => {
-    const { subject } = await harness('transfer-receipt-corrupt-source');
-    const receipt = await recordedReceipt(subject);
-    await overwriteReceipt(subject, { ...receipt, sourceSessionId: 'a-different-session' });
-    await should(subject.load(PLAN_ID)).be.rejectedWith(SessionTransferPlanCorruptError);
-  });
-
-  it('refuses a receipt whose fingerprint no longer matches the frozen plan', async () => {
-    const { subject } = await harness('transfer-receipt-corrupt-fingerprint');
-    const receipt = await recordedReceipt(subject);
-    await overwriteReceipt(subject, { ...receipt, fingerprint: 'f'.repeat(64) });
-    await should(subject.load(PLAN_ID)).be.rejectedWith(SessionTransferPlanCorruptError);
-  });
-
-  it('refuses a receipt whose phase history entry is malformed', async () => {
-    const { subject } = await harness('transfer-receipt-corrupt-phase');
-    const receipt = await recordedReceipt(subject);
-    await overwriteReceipt(subject, { ...receipt, phaseHistory: [{ phase: '', at: receipt.createdAt }] });
-    await should(subject.load(PLAN_ID)).be.rejectedWith(SessionTransferPlanCorruptError);
-  });
-
-  it('refuses a receipt whose cut message point dropped the durable block index', async () => {
-    // blockIndex is required: several messages can share a JSONL record and byte offset, so a point
-    // without it is ambiguous and must not be replayed.
-    const { subject } = await harness('transfer-receipt-corrupt-block-index');
-    const receipt = await recordedReceipt(subject);
-    await overwriteReceipt(subject, {
-      ...receipt,
-      plan: { ...receipt.plan, source: { ...receipt.plan.source, cutMessagePoint: { v: 1, byteOffset: 0 } } },
-    });
-    await should(subject.load(PLAN_ID)).be.rejectedWith(SessionTransferPlanCorruptError);
-  });
-});
-
-describe('FileSessionTransferPlanStore install (target plan copy)', () => {
+describe('FileSessionTransferTargetPlanStore install (target plan copy)', () => {
   afterEach(async () => await cleanupTempDirectories());
 
   it('installs the plan into the target session directory after create, idempotently', async () => {
@@ -965,89 +491,22 @@ describe('FileSessionTransferTargetPlanStore capability boundary', () => {
   });
 });
 
-describe('FileSessionTransferPlanStore refusals and outcomes', () => {
+describe('FileSessionTransferTargetPlanStore unreadable and corrupt documents', () => {
   afterEach(async () => await cleanupTempDirectories());
 
-  it('refuses a plan whose id does not derive from its source session and request, writing nothing', async () => {
+  it('refuses a target plan document that is not valid JSON or not a valid plan, rather than reporting it absent', async () => {
     // Arrange
-    const { subject } = await harness('transfer-receipt-plan-id-mismatch');
-    const forged = makePlan({ planId: '0'.repeat(64) });
+    const { subject } = await harness('transfer-target-plan-corrupt');
+    const target = parseSessionId('20260806-target');
+    const file = subject.targetPlanPath(target);
+    await mkdir(dirname(file), { recursive: true });
 
-    // Act
-    const error = await reject(
-      subject.record(forged, { requestId: REQUEST, targetId: 'target-session', phase: 'requested' }),
-    );
-
-    // Assert
-    should(error).be.instanceOf(SessionTransferPlanConflictError);
-    should((error as SessionTransferPlanConflictError).message).match(/the plan id must match the composite key/u);
-    should(existsSync(subject.receiptPath(PLAN_ID))).be.false();
-    should(await subject.load(PLAN_ID)).equal(undefined);
-  });
-
-  it('stamps a terminal outcome with its detail when one is recorded, and keeps it across a later phase', async () => {
-    // Arrange
-    const { subject } = await harness('transfer-receipt-outcome-detail');
-
-    // Act
-    const created = await subject.record(makePlan({}), {
-      requestId: REQUEST,
-      targetId: 'target-session',
-      phase: 'requested',
-      outcome: { status: 'failed', detail: 'the target refused to launch' },
-    });
-    const advanced = await subject.record(makePlan({}), {
-      requestId: REQUEST,
-      targetId: 'target-session',
-      phase: 'imported',
-    });
-
-    // Assert
-    should(created.receipt.outcome).eql({
-      status: 'failed',
-      detail: 'the target refused to launch',
-      at: '2025-01-01T00:00:00+00:00',
-    });
-    should(advanced.receipt.outcome).eql(created.receipt.outcome);
-    should((await subject.load(PLAN_ID))?.outcome).eql(created.receipt.outcome);
-  });
-
-  it('stamps an outcome with no detail as exactly its status, leaving no detail key behind', async () => {
-    // Arrange
-    const { subject } = await harness('transfer-receipt-outcome-bare');
-    await subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-session', phase: 'requested' });
-
-    // Act
-    const settled = await subject.record(makePlan({}), {
-      requestId: REQUEST,
-      targetId: 'target-session',
-      phase: 'requested',
-      outcome: { status: 'done' },
-    });
-
-    // Assert
-    should(settled.status).equal('replayed');
-    should(settled.receipt.outcome).eql({ status: 'done', at: '2025-01-02T00:00:00+00:00' });
-    should(Object.hasOwn(settled.receipt.outcome ?? {}, 'detail')).be.false();
-  });
-
-  it('reports an unreadable receipt location as itself, not as a transfer that was never recorded', async () => {
-    // Arrange — the receipt directory's parent is a file, so no receipt can even be looked up.
-    const { subject, home } = await harness('transfer-receipt-unreadable-location');
-    await mkdir(join(home, 'state'), { recursive: true });
-    await writeFile(join(home, 'state', 'forks'), 'not a directory');
-
-    // Act
-    const recorded = await reject(
-      subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-session', phase: 'requested' }),
-    );
-    const replayed = await reject(subject.replay(PLAN_ID));
-    const loaded = await reject(subject.load(PLAN_ID));
-
-    // Assert
-    should((recorded as NodeJS.ErrnoException).code).equal('ENOTDIR');
-    should((replayed as NodeJS.ErrnoException).code).equal('ENOTDIR');
-    should((loaded as NodeJS.ErrnoException).code).equal('ENOTDIR');
+    // Act + Assert
+    await writeFile(file, '{ not json');
+    await should(subject.load(target)).be.rejectedWith(SessionTransferPlanCorruptError);
+    await writeFile(file, JSON.stringify({ v: 1 }));
+    await should(subject.load(target)).be.rejectedWith(SessionTransferPlanCorruptError);
+    await should(subject.install(target, makePlan({}))).be.rejectedWith(SessionTransferPlanCorruptError);
   });
 
   it('reports a target plan location that cannot be read as itself, not as an absent plan', async () => {
@@ -1057,7 +516,7 @@ describe('FileSessionTransferPlanStore refusals and outcomes', () => {
     await mkdir(join(home, 'sessions', target, TARGET_PLAN_FILE), { recursive: true });
 
     // Act
-    const error = await reject(subject.loadTargetPlan(target));
+    const error = await reject(subject.load(target));
 
     // Assert
     should((error as NodeJS.ErrnoException).code).equal('EISDIR');

@@ -29,7 +29,7 @@ import {
 import type { DaemonStorage } from '../../../src/adapters/storage/session-storage.ts';
 import { FileSessionAttachmentCopier } from '../../../src/adapters/transfer/attachment-copier.ts';
 import { FileSessionTransferBriefWriter } from '../../../src/adapters/transfer/brief-writer.ts';
-import { FileSessionTransferPlanStore } from '../../../src/adapters/transfer/plan-store.ts';
+import { FileSessionTransferTargetPlanStore } from '../../../src/adapters/transfer/plan-store.ts';
 import { StorageTransferEnvelopeWriter } from '../../../src/adapters/transfer/storage-transfer-envelope-writer.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/index.ts';
 import type { SessionForkBoundTarget } from '../../../src/lib/fork/types.ts';
@@ -124,7 +124,7 @@ interface Harness {
   readonly sessionDirectory: (id: string) => string;
   /** Everything the launcher and the runtime path did, in the order it happened. */
   readonly happened: string[];
-  readonly plans: FileSessionTransferPlanStore;
+  readonly plans: FileSessionTransferTargetPlanStore;
   bind(): SessionForkBoundTarget;
   counts(): { readonly captures: number; readonly creates: number };
   /** Makes the published fleet answer differently between two attempts at one fork. */
@@ -158,10 +158,7 @@ async function harness(
   let resolved: SessionForkTargetAccount = { account: account(), executable: '/fleet/bin/claude-auto-zelda' };
   let environment: Readonly<Record<string, string>> = {};
 
-  const plans = new FileSessionTransferPlanStore(
-    planId => join(opened.home, 'state', 'forks', `${planId}.json`),
-    id => join(opened.sessionDirectory(id), 'transfer-plan.json'),
-  );
+  const plans = new FileSessionTransferTargetPlanStore(id => join(opened.sessionDirectory(id), 'transfer-plan.json'));
   const briefWriter = new FileSessionTransferBriefWriter(id => opened.sessionDirectory(id));
   const attachmentCopier = new FileSessionAttachmentCopier(id => join(opened.sessionDirectory(id), 'attachments'));
   const tasks = new FileSessionTaskStore(id => opened.sessionDirectory(id));
@@ -230,7 +227,7 @@ async function harness(
     },
     planner: planner(),
     plans: {
-      read: async id => await plans.loadTargetPlan(id),
+      read: async id => await plans.load(id),
       install: async (id, value) => await plans.install(id, value),
     },
     transcripts: {
@@ -438,7 +435,7 @@ describe('SessionForkTargetBinder', () => {
       ...LAUNCH_ARGUMENTS,
     ]);
     // The plan is durable beneath the target, so a later replay reads it rather than the source.
-    should((await subject.plans.loadTargetPlan(subject.target))?.planId).equal(subject.plan.planId);
+    should((await subject.plans.load(subject.target))?.planId).equal(subject.plan.planId);
     should(subject.counts()).eql({ captures: 1, creates: 1 });
   });
 
@@ -1393,7 +1390,7 @@ describe('SessionForkTargetBinder', () => {
 
       // Assert
       should(refused.message).match(/has no session record, so plan plan-fork-1 cannot be applied to it/u);
-      should(await subject.plans.loadTargetPlan(subject.target)).equal(undefined);
+      should(await subject.plans.load(subject.target)).equal(undefined);
     });
 
     it('should refuse to capture once the opening-turn document no longer matches the plan, and repair it by replaying the import', async () => {

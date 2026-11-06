@@ -22,14 +22,8 @@ import {
   type ExecutorCaller,
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
-  FleetCatalogService,
-  type FleetCatalogServiceDeps,
 } from '../../../../src/lib/fleet/catalog-service.ts';
-import {
-  createFleetCatalogSubsystem,
-  type FleetCatalogSubsystem,
-  fleetCatalogRoutes,
-} from '../../../../src/lib/runtime/mounts/fleet-catalog.ts';
+import { type FleetCatalogSubsystem, fleetCatalogRoutes } from '../../../../src/lib/runtime/mounts/fleet-catalog.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, GRANTED, human } from './support.ts';
 
@@ -417,16 +411,5 @@ describe('the fleet catalogue mount', () => {
 
     // Assert
     should(response.status).equal(500);
-  });
-
-  it('should build the service the composition root mounts', () => {
-    // Act
-    const subsystem = createFleetCatalogSubsystem({
-      now: () => 0,
-      mintId: () => 'x',
-    } as unknown as FleetCatalogServiceDeps);
-
-    // Assert
-    should(subsystem).be.instanceOf(FleetCatalogService);
   });
 });

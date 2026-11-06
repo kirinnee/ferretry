@@ -184,64 +184,27 @@ export const FleetUsageWindowSchema = z.strictObject({
 export type FleetUsageWindow = z.infer<typeof FleetUsageWindowSchema>;
 
 /** The complete, account-scoped result returned by a usage adapter. */
-export const FleetUsageProbeResultSchema = z.strictObject({
-  provider: z.string().min(1).optional(),
-  usageBased: z.boolean(),
-  ok: z.boolean(),
-  unavailable: z.boolean().optional(),
-  unavailableReason: z.string().min(1).optional(),
-  authOk: z.boolean().optional(),
+export interface FleetUsageProbeResult {
+  provider?: string | undefined;
+  usageBased: boolean;
+  ok: boolean;
+  unavailable?: boolean | undefined;
+  unavailableReason?: string | undefined;
+  authOk?: boolean | undefined;
   /**
    * What the free provider read established about the credential, when a probe was in a position to
    * establish anything. Absent means this probe does not speak for this account at all — which is
    * how a Codex account reaches a health verdict of "unproven" rather than one invented from a
    * probe that declined to run.
    */
-  credentialSignal: FleetCredentialSignalSchema.optional(),
+  credentialSignal?: FleetCredentialSignal | undefined;
   /** Secret-safe evidence from the HTTP response that produced `credentialSignal`. */
-  responseFingerprint: ProviderResponseFingerprintSchema.optional(),
-  error: z.string().min(1).optional(),
-  shortWindow: FleetUsageWindowSchema.optional(),
-  longWindow: FleetUsageWindowSchema.optional(),
-  atLimit: z.boolean().optional(),
-});
-
-export type FleetUsageProbeResult = z.infer<typeof FleetUsageProbeResultSchema>;
-
-/** One usage row, keyed solely by the stable manifest account ID. */
-export const FleetUsageSchema = z.strictObject({
-  accountId: z.string().min(1),
-  kind: z.string().min(1),
-  provider: z.string().min(1).optional(),
-  usageBased: z.boolean(),
-  ok: z.boolean(),
-  unavailable: z.boolean(),
-  unavailableReason: z.string().min(1).optional(),
-  authOk: z.boolean().optional(),
-  /**
-   * Carried through per credential GROUP, exactly like the quota reading beside it, because it was
-   * measured against the group's shared login. A sibling's own LOCAL credential copy is read
-   * separately by the health collector, and a positively dead local copy outranks this — see
-   * `./health.ts`, which is where the two are joined.
-   */
-  credentialSignal: FleetCredentialSignalSchema.optional(),
-  /** The representative request's secret-safe response evidence, shared with this credential group. */
-  responseFingerprint: ProviderResponseFingerprintSchema.optional(),
-  error: z.string().min(1).optional(),
-  shortWindow: FleetUsageWindowSchema.optional(),
-  longWindow: FleetUsageWindowSchema.optional(),
-  atLimit: z.boolean(),
-});
-
-export type FleetUsage = z.infer<typeof FleetUsageSchema>;
-
-/** The cached wire contract served by the fleet endpoint. */
-export const FleetUsageSnapshotSchema = z.strictObject({
-  at: epochMilliseconds,
-  accounts: z.array(FleetUsageSchema),
-});
-
-export type FleetUsageSnapshot = z.infer<typeof FleetUsageSnapshotSchema>;
+  responseFingerprint?: ProviderResponseFingerprint | undefined;
+  error?: string | undefined;
+  shortWindow?: FleetUsageWindow | undefined;
+  longWindow?: FleetUsageWindow | undefined;
+  atLimit?: boolean | undefined;
+}
 
 /** Clamp a provider percentage into the public 0–100 usage range. */
 export function clampUsagePercent(value: unknown): number | undefined {

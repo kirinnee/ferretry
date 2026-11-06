@@ -3,12 +3,28 @@ import should from 'should';
 import {
   buildLaunchArgv,
   currentLaunchCompactAt,
-  fastLaunchArguments,
   launchedCompactAt,
   settingsArguments,
 } from '../../../../src/lib/session/launch/index.ts';
 
 const WRAPPER = '/fleet/bin/claude-auto-boot';
+
+/** The launch arguments the fast-mode overlay adds, read off a full launch argv that names nothing else. */
+const fastLaunchArguments = (
+  harness: 'claude' | 'codex',
+  fast: boolean | undefined,
+  fixedSettings: string | undefined,
+): readonly string[] =>
+  buildLaunchArgv({
+    harness,
+    executable: 'wrapper',
+    remoteControl: [],
+    transcript: [],
+    readableFolders: [],
+    harnessFlags: [],
+    ...(fast === undefined ? {} : { fast }),
+    ...(fixedSettings === undefined ? {} : { fixedSettings }),
+  }).slice(1);
 
 const claudeParts = (extra: Record<string, unknown> = {}) => ({
   harness: 'claude' as const,

@@ -4,9 +4,9 @@ import {
   FRAME_ENVELOPE_HEADER_BYTES,
   FRAME_ENVELOPE_VERSION,
   MAX_FRAME_BYTES,
-  decodeFrameEnvelope,
   encodeFrameEnvelope,
 } from '../../../../src/lib/index.ts';
+import { decodeFrameEnvelope } from '../../../support/frame-envelope.ts';
 
 const jpeg = (...bytes: number[]): Uint8Array => Uint8Array.from(bytes);
 

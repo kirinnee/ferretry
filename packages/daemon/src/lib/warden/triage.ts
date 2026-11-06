@@ -18,7 +18,7 @@
  * - EVERYTHING ELSE ESCALATES: unsure, not sure enough, an act the owner keeps for themselves, a
  *   failover (Jev cannot name the login to move to), and every failure — no key, a timeout, a refusal,
  *   an unreadable answer, the cap, a provider back-off. Escalating means an investigation while that
- *   layer is on and under its cap, and otherwise the owner's Needs you ({@link jevRoute}); a confident
+ *   layer is on and under its cap, and otherwise the owner's Needs you; a confident
  *   recommendation the Warden could not carry out is put in front of the owner as held. An
  *   investigation that fails leaves the flag standing, which is the owner's Needs you too.
  *
@@ -416,15 +416,6 @@ export function firstResponse(decision: TriageDecision, policy: JevResponderPoli
     reason: decision.reason ?? verdict,
     ...(verdict === 'nudge' && decision.nudge !== undefined ? { message: decision.nudge.message } : {}),
   };
-}
-
-/** Where a flag goes after Jev: left, acted on, or handed on to an investigation or to the owner. */
-export type JevRoute = 'leave' | 'act' | 'investigation' | 'owner';
-
-/** An escalation is an investigation while that layer is on and under its cap, and the owner otherwise. */
-export function jevRoute(outcome: WardenGuardOutcome, investigating: boolean): JevRoute {
-  if (outcome.kind !== 'escalate') return outcome.kind;
-  return investigating ? 'investigation' : 'owner';
 }
 
 /** The failures that ask the guard to wait before it is called again. */

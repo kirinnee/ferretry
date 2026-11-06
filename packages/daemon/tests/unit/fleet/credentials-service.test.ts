@@ -22,7 +22,6 @@ import {
   type CredentialUsage,
   type HarnessKind,
   type LocalCredentialReading,
-  type PassiveUsageRecord,
   resolveCredentialStore,
   type StoredCredentialResolution,
 } from '@ferretry/fleet';
@@ -39,7 +38,6 @@ import {
   type CredentialStatusReader,
   createFleetCredentialsSubsystem,
   credentialLaunch,
-  credentialPassiveUsage,
   FleetCredentialCatalog,
   FleetCredentialRefusal,
   type FleetCredentialsService,
@@ -982,40 +980,6 @@ describe('passive usage', () => {
 
     // Assert — a stranger's rollout is never attributed, whatever directory it was written in.
     should(actual).deepEqual(['/pool/a.jsonl', '/pool/b.jsonl']);
-  });
-
-  it('should read Claude from its statusLine file and Codex from its attributed rollouts', async () => {
-    // Arrange
-    const record: PassiveUsageRecord = { version: 1, source: 'codex-rollout', at: 5, fiveHour: { usedPercent: 10 } };
-    const asked: (readonly string[])[] = [];
-    const claudeIds: string[] = [];
-    const catalog = catalogOf(
-      v2({ work: claudeFerretry, codex: codexFerretry, idle: codexFerretry }, { alpha: 'codex' }),
-    );
-    const passive = credentialPassiveUsage({
-      catalog,
-      claude: async id => {
-        claudeIds.push(id);
-        return undefined;
-      },
-      sessions: async () => sessions,
-      newestRollout: async files => {
-        asked.push(files);
-        return record;
-      },
-    });
-
-    // Act
-    const claude = await passive({ id: 'work', resolution: resolved('work', claudeFerretry) });
-    const codex = await passive({ id: 'codex', resolution: resolved('codex', codexFerretry) });
-    const idle = await passive({ id: 'idle', resolution: resolved('idle', codexFerretry) });
-
-    // Assert — a credential no recorded session ran on reads nothing at all.
-    should(claude).be.undefined();
-    should(claudeIds).deepEqual(['work']);
-    should(codex).deepEqual(record);
-    should(idle).be.undefined();
-    should(asked).deepEqual([['/pool/a.jsonl', '/pool/b.jsonl']]);
   });
 });
 

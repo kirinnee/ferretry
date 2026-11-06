@@ -1,7 +1,7 @@
 import type { QueueAuthor } from '@ferretry/protocol';
 import { type SessionLaunchInstructions, type SessionStatus, SessionStatusSchema } from '@ferretry/protocol';
 import { z } from 'zod';
-import { type SessionId, SessionIdSchema } from '../../session-id.ts';
+import type { SessionId } from '../../session-id.ts';
 
 /**
  * Which statuses a resume can act on: EVERY status the protocol's state document may hold.
@@ -181,18 +181,6 @@ export class ReviveDedupeConflict extends ResumeRefused {
     this.name = 'ReviveDedupeConflict';
   }
 }
-
-export const ResumeTargetSchema = z.object({
-  id: SessionIdSchema,
-  status: ResumableSessionStatusSchema,
-  mode: z.enum(['auto', 'interactive']),
-  cwd: z.string().min(1),
-  label: z.string().optional(),
-  turn: z.number().int().min(0),
-  retryAttempt: z.number().int().min(0).optional(),
-  needsHumanKind: z.string().min(1).optional(),
-  transientRetryBudget: z.number().int().min(0).optional(),
-});
 
 /** Durable boundary for resume: reads the target and records each transition it makes. */
 export interface ResumeRepository {

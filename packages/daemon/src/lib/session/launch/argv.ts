@@ -17,7 +17,7 @@
  *   4. the fixed `Read(...)` rules for the session's own hand-off folders;
  *   5. the session's CURRENT model and reasoning effort;
  *   6. fast mode, when the session has a decided state (Codex `-c service_tier=…`; Claude a `--settings`
- *      overlay, see {@link fastLaunchArguments});
+ *      overlay, see {@link overlayLaunchArguments});
  *   7. where the conversation is compacted (Codex `-c model_auto_compact_token_limit=…`; Claude the same
  *      `--settings` overlay as fast mode, see {@link overlayLaunchArguments});
  *   8. the owner's free-form harness flags, LAST, so an explicitly supplied flag still wins.
@@ -110,31 +110,20 @@ export class FixedSettingsUnreadableError extends Error {
 }
 
 /**
- * The launch arguments that start a harness with fast mode on or off.
+ * Everything the launch says through Claude's one `--settings` (or Codex's `-c` pairs): fast mode and the
+ * compaction trigger. Asking for both yields ONE overlay carrying both.
  *
  *   * Codex reads its service tier from configuration, which `-c` overrides for one invocation.
- *   * Claude has no flag for it. `--settings '{"fastMode":true}'` works, but only ONE `--settings` is
+ *   * Claude has no flag for fast mode. `--settings '{"fastMode":true}'` works, but only ONE `--settings` is
  *     honoured — the last — and the fleet wrapper already passes the fixed overlay (permission mode,
  *     skipped prompts). So the overlay is read, `fastMode` is added to it, and the whole object is
  *     passed inline after the wrapper's own, which it then replaces without losing anything.
  *
- * Both are explicit in both directions: a login that saved fast mode with an earlier `/fast on` would
+ * Fast mode is explicit in both directions: a login that saved fast mode with an earlier `/fast on` would
  * otherwise start every later session fast, whatever it was launched with.
  *
  * Throws {@link FixedSettingsUnreadableError} when the fixed file exists and is not a JSON object:
  * dropping it would launch an unattended agent without its permission mode.
- */
-export function fastLaunchArguments(
-  harness: HarnessKind,
-  fast: boolean | undefined,
-  fixedSettings: string | undefined,
-): readonly string[] {
-  return overlayLaunchArguments(harness, { fast }, fixedSettings);
-}
-
-/**
- * Everything the launch says through Claude's one `--settings` (or Codex's `-c` pairs): fast mode and the
- * compaction trigger. Asking for both yields ONE overlay carrying both.
  */
 function overlayLaunchArguments(
   harness: HarnessKind,

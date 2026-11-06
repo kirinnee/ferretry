@@ -35,7 +35,7 @@ captures behind the unit fixtures are `tests/fixtures/transcript/claude-fast-mod
 | Does this Codex model have a fast tier, and is it the default | the live account (`model/list` `serviceTiers` / `defaultServiceTier`), parsed into the catalog        |
 | Does this Claude model have fast mode                         | `claudeFastSupport` (`lib/session/harness/fast-mode.ts`) — a mirror of the CLI's name rule, kept once |
 | Is fast mode on now                                           | the CLI's report (`state.observedFast`), else `config.launchFast`, else the model's default           |
-| What a launch asserts                                         | `buildLaunchArgv` (`fastLaunchArguments`)                                                             |
+| What a launch asserts                                         | `buildLaunchArgv`                                                                                     |
 
 `observedFast` moves `observedModelAt`, the same freshness token a model switch uses, so a switch is
 confirmed by any new report — including a re-report of the same value — and the chip reads "switching…" then

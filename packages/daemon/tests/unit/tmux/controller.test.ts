@@ -14,7 +14,6 @@ import {
   paneMetadataArguments,
   paneProofArguments,
   paneSessionClientsArguments,
-  paneTarget,
   parseControlClients,
   parsePaneMetadata,
   pasteBufferName,
@@ -46,12 +45,11 @@ class FakeTmux implements TmuxCommandPort {
 const ok = (stdout = ''): TmuxCommandResult => ({ code: 0, stdout, stderr: '' });
 
 describe('tmux addresses and commands', () => {
-  it('should construct unambiguous validated session, window, pane, and command arguments', () => {
+  it('should construct unambiguous validated session, window, and command arguments', () => {
     // Act
     const actual = {
       session: sessionTarget('work-1'),
       window: windowTarget('work-1', 'main'),
-      pane: paneTarget('work-1', 'main', 2),
       has: hasSessionArguments('work-1'),
       list: listSessionsArguments(),
       history: capturePaneArguments('work-1', true),
@@ -74,7 +72,6 @@ describe('tmux addresses and commands', () => {
     should(actual).deepEqual({
       session: 'work-1',
       window: 'work-1:main',
-      pane: 'work-1:main.2',
       has: ['has-session', '-t', 'work-1'],
       list: ['list-sessions', '-F', '#{session_name}'],
       history: ['capture-pane', '-p', '-S', '-', '-t', 'work-1'],
@@ -99,7 +96,6 @@ describe('tmux addresses and commands', () => {
     for (const action of [
       () => sessionTarget('Work'),
       () => windowTarget('work', 'main:other'),
-      () => paneTarget('work', 'main', -1),
       () => sendLiteralArguments('work', ''),
       () => sendKeyArguments('work', 'Enter;kill'),
     ])

@@ -5,11 +5,25 @@ import {
   availableCallsigns,
   DEFAULT_CALLSIGN_POOL,
   formatSessionTitle,
-  isValidCallsignPool,
   normalizeCallsign,
   resolveSessionReference,
   suggestCallsigns,
 } from '../../../src/lib/names/index.ts';
+
+/** A pool is usable when every callsign is plain lowercase letters, and the list is sorted and free of repeats. */
+function isValidCallsignPool(pool: readonly string[]): boolean {
+  if (pool.length === 0) return false;
+  const seen = new Set<string>();
+  let previous: string | undefined;
+  for (const callsign of pool) {
+    if (!/^[a-z]{2,32}$/.test(callsign)) return false;
+    if (seen.has(callsign)) return false;
+    if (previous !== undefined && callsign.localeCompare(previous) < 0) return false;
+    seen.add(callsign);
+    previous = callsign;
+  }
+  return true;
+}
 
 describe('callsign policy', () => {
   it.each([

@@ -7,7 +7,7 @@ import {
 } from '../../../src/adapters/transfer/storage-transfer-envelope-writer.ts';
 import { StorageSessionProvenanceStore } from '../../../src/adapters/session/provenance/index.ts';
 import {
-  parseSessionProvenance,
+  SessionProvenanceSchema,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
 } from '../../../src/lib/session/provenance/index.ts';
@@ -108,7 +108,7 @@ describe('StorageTransferEnvelopeWriter', () => {
     // An absent parent is an ABSENT FIELD: the schema every reader parses this with refuses a null.
     should(Object.hasOwn(document, 'parent')).equal(false);
     // Descent recorded where the warden detector reads its shield from, with no parent to walk.
-    should(parseSessionProvenance(document.provenance)).eql({
+    should(SessionProvenanceSchema.safeParse(document.provenance).data).eql({
       v: 1,
       at: AT,
       origin: 'warden',
@@ -185,7 +185,7 @@ describe('StorageTransferEnvelopeWriter', () => {
 
     // Assert
     const document = (await storage.readConfig(target)) as Record<string, unknown>;
-    const stamped = parseSessionProvenance(document.provenance);
+    const stamped = SessionProvenanceSchema.safeParse(document.provenance).data;
     should(stamped).eql({ v: 1, at: AT, origin: 'human', wardenLineage: false, lineageSource: 'none' });
     should(document.label).equal('f117');
   });

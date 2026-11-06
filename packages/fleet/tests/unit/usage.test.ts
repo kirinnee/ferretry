@@ -3,8 +3,6 @@ import should from 'should';
 import {
   claudeStatuslineCommand,
   clampUsagePercent,
-  FleetUsageProbeResultSchema,
-  FleetUsageSnapshotSchema,
   isAtLimit,
   normalizeResetAt,
   PassiveUsageRecordSchema,
@@ -50,20 +48,6 @@ describe('fleet usage normalization', () => {
     should(isAtLimit(spare, spare)).equal(false);
     should(isAtLimit(undefined, undefined)).equal(false);
     should(isAtLimit(spare, undefined, 20)).equal(true);
-  });
-
-  it('keeps public schemas strict', () => {
-    // Arrange
-    const invalidProbe = { usageBased: true, ok: true, surprise: true };
-    const invalidSnapshot = { at: 0, accounts: [], surprise: true };
-
-    // Act
-    const parseProbe = (): unknown => FleetUsageProbeResultSchema.parse(invalidProbe);
-    const parseSnapshot = (): unknown => FleetUsageSnapshotSchema.parse(invalidSnapshot);
-
-    // Assert
-    should(parseProbe).throw();
-    should(parseSnapshot).throw();
   });
 
   it('keeps provider-controlled response text outside the public fingerprint schema', () => {

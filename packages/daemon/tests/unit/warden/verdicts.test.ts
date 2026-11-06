@@ -7,7 +7,6 @@ import {
   parseWardenReports,
   parseWardenVerdictSourceRef,
   structuredVerdict,
-  wardenVerdictSourceRef,
   type WardenReportFile,
 } from '../../../src/lib/warden/index.ts';
 
@@ -43,21 +42,12 @@ describe('verdict source references', () => {
     },
     { label: 'a path alone', path: '/reports/a.md', kind: undefined, ref: 'warden:/reports/a.md' },
     { label: 'a kind alone', path: undefined, kind: 'dead_monitor' as const, ref: 'warden:dead_monitor' },
-  ])('should round-trip $label', ({ path, kind, ref }) => {
-    // Arrange / Act
-    const built = wardenVerdictSourceRef(path, kind);
-
-    // Assert
-    should(built).eql(ref);
-    should(parseWardenVerdictSourceRef(built)).eql({
+  ])('should read $label', ({ path, kind, ref }) => {
+    // Arrange / Act / Assert
+    should(parseWardenVerdictSourceRef(ref)).eql({
       ...(path === undefined ? {} : { reportPath: path }),
       ...(kind === undefined ? {} : { anomalyKind: kind }),
     });
-  });
-
-  it('should produce no reference when neither identity is known', () => {
-    // Arrange / Act / Assert
-    should(wardenVerdictSourceRef(undefined, undefined)).be.undefined();
   });
 
   it.each([

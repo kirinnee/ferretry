@@ -67,9 +67,6 @@ export const paneCompaction = (frame: string): PaneCompaction | undefined => {
   return undefined;
 };
 
-/** Whether a captured frame shows the harness compacting right now. */
-export const paneShowsCompaction = (frame: string): boolean => paneCompaction(frame) !== undefined;
-
 /** The prior used until this daemon has watched one compaction, per harness. Assumptions, labelled `typical`. */
 export const TYPICAL_COMPACTION_MS: Readonly<Record<TranscriptHarness, number>> = {
   claude: 60_000,

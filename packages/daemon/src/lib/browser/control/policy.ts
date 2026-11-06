@@ -1,11 +1,4 @@
-import {
-  BROWSER_MAX_HEIGHT,
-  BROWSER_MAX_WIDTH,
-  BROWSER_MIN_HEIGHT,
-  BROWSER_MIN_WIDTH,
-  type BrowserMode,
-  type BrowserViewport,
-} from '@ferretry/protocol';
+import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserMode, type BrowserViewport } from '@ferretry/protocol';
 
 export const browserLoginDefaultMinutes = 15;
 export const browserLoginMaximumMinutes = 60;
@@ -23,28 +16,6 @@ export class BrowserControlError extends Error {
     super(message);
     this.name = 'BrowserControlError';
   }
-}
-
-/** Rejects URL schemes Chrome can use to execute local or active content. */
-export function normalizeBrowserUrl(input: string): string {
-  const trimmed = input.trim();
-  if (!trimmed) throw new BrowserControlError('bad_request', 'a URL is required');
-  const loopback = /^(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/|$)/i.test(trimmed);
-  const candidate = loopback
-    ? `http://${trimmed}`
-    : /^[a-z][a-z\d+.-]*:/i.test(trimmed)
-      ? trimmed
-      : `https://${trimmed}`;
-  let url: URL;
-  try {
-    url = new URL(candidate);
-  } catch {
-    throw new BrowserControlError('bad_request', `invalid browser URL: ${trimmed}`);
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:' && url.href !== 'about:blank') {
-    throw new BrowserControlError('bad_request', 'browser navigation supports only HTTP(S) URLs and about:blank');
-  }
-  return url.href;
 }
 
 /**
@@ -384,16 +355,6 @@ export function generateVncPassword(randomValues: (buffer: Uint8Array) => Uint8A
     }
   }
   return password;
-}
-
-export function normalizeViewport(width: number, height: number): BrowserViewport {
-  if (!Number.isFinite(width) || !Number.isFinite(height)) {
-    throw new BrowserControlError('bad_request', 'browser viewport dimensions must be finite');
-  }
-  return {
-    width: Math.min(BROWSER_MAX_WIDTH, Math.max(BROWSER_MIN_WIDTH, Math.round(width))),
-    height: Math.min(BROWSER_MAX_HEIGHT, Math.max(BROWSER_MIN_HEIGHT, Math.round(height))),
-  };
 }
 
 /**

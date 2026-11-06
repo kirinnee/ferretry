@@ -539,8 +539,3 @@ export function jevPathFacts(path: readonly WardenJevPathStep[]): string {
     .map(step => `${(jevNodeQuestion(step.node) ?? step.node).replace(/\?$/u, '')}: ${step.answer}`)
     .join('; ');
 }
-
-/** The reason a leaf records, in the words the owner reads. */
-export function jevLeafReason(leaf: Exclude<JevLeaf, 'quota_or_provider'>): string {
-  return LEAF[leaf].reason;
-}

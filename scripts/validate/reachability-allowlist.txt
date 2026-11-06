@@ -257,7 +257,7 @@
 # could not be answered honestly even so: `anomalies` is a required field of `WardenStatusView`.
 #
 # LANDED (P5, the Warden's Needs-you feed): `attention.ts` is served at `GET /v1/warden/attention`. The
-# unwatched-fleet objection above is met by `collapseUnsupervisedMonitors`, which states the missing
+# unwatched-fleet objection above is met by `collapseUnwatchedFleet`, which states the missing
 # monitor subsystem as ONE daemon-level fault instead of a wall of per-session `dead_monitor` rows.
 
 # PR #21 — establish terminal IO policies: FULLY MOUNTED, nothing to list.

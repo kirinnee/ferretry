@@ -9,7 +9,6 @@ import {
   MAX_COMPACTION_MS,
   PANE_GRACE_MS,
   paneCompaction,
-  paneShowsCompaction,
   resolveCompaction,
   TYPICAL_COMPACTION_MS,
 } from '../../../../src/lib/session/live/compaction.ts';
@@ -71,17 +70,17 @@ const fixture = (name: string): string => readFileSync(join(FIXTURES, name), 'ut
 const CLAUDE_LINE = '✻ Compacting conversation… (12s · esc to interrupt · ctrl+t to show todos)';
 const CODEX_LINE = '• Compacting (3s • Esc to interrupt)';
 
-describe('paneShowsCompaction', () => {
+describe('a pane showing compaction', () => {
   it('should see Claude Code and Codex compacting at the foot of a frame', () => {
     // Arrange
     const frame = (line: string): string => `⏺ Done reading.\n\n${line}\n\n│ > `;
 
     // Assert
-    should(paneShowsCompaction(frame(CLAUDE_LINE))).be.true();
-    should(paneShowsCompaction(frame(CODEX_LINE))).be.true();
-    should(paneShowsCompaction(frame('✢ Compacting conversation... (esc to interrupt)'))).be.true();
-    should(paneShowsCompaction(frame('✻ Compacting conversation… (1m 12s)'))).be.true();
-    should(paneShowsCompaction(frame(CODEX_LINE).replaceAll('\n', '\r\n'))).be.true();
+    should(paneCompaction(frame(CLAUDE_LINE))).not.be.undefined();
+    should(paneCompaction(frame(CODEX_LINE))).not.be.undefined();
+    should(paneCompaction(frame('✢ Compacting conversation... (esc to interrupt)'))).not.be.undefined();
+    should(paneCompaction(frame('✻ Compacting conversation… (1m 12s)'))).not.be.undefined();
+    should(paneCompaction(frame(CODEX_LINE).replaceAll('\n', '\r\n'))).not.be.undefined();
   });
 
   it('should not take prose, a bare word or an old frame for a running compaction', () => {
@@ -89,11 +88,11 @@ describe('paneShowsCompaction', () => {
     const old = `${CLAUDE_LINE}\n${'filler\n'.repeat(30)}`;
 
     // Assert
-    should(paneShowsCompaction('• Compacting the cache before the build…')).be.false();
-    should(paneShowsCompaction('Compacting conversation… (12s · esc to interrupt)')).be.false();
-    should(paneShowsCompaction('✻ Pontificating… (12s · esc to interrupt)')).be.false();
-    should(paneShowsCompaction('')).be.false();
-    should(paneShowsCompaction(old)).be.false();
+    should(paneCompaction('• Compacting the cache before the build…')).be.undefined();
+    should(paneCompaction('Compacting conversation… (12s · esc to interrupt)')).be.undefined();
+    should(paneCompaction('✻ Pontificating… (12s · esc to interrupt)')).be.undefined();
+    should(paneCompaction('')).be.undefined();
+    should(paneCompaction(old)).be.undefined();
   });
 });
 
@@ -148,7 +147,7 @@ describe('paneCompaction', () => {
     const frame = fixture('claude-2.1.28x-compacting-progress.txt').replaceAll('\n', '\r\n');
 
     should(paneCompaction(frame)).deepEqual({ percent: 49, tokensWritten: 37_400 });
-    should(paneShowsCompaction(frame)).be.true();
+    should(paneCompaction(frame)).not.be.undefined();
   });
 });
 

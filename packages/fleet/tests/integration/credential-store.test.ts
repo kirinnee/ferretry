@@ -87,14 +87,6 @@ describe('SpawnCredentialCommand', () => {
     should(actual.stdout.trim()).equal('placeholder-output');
   });
 
-  it('should hand the child its standard input and close it', async () => {
-    // Act — `cat` only exits once its input is closed, so this also proves the close.
-    const actual = await new SpawnCredentialCommand().run(['/bin/cat'], 5_000, 'placeholder-input');
-
-    // Assert
-    should(actual).deepEqual({ code: 0, stdout: 'placeholder-input' });
-  });
-
   it('should report a non-zero exit rather than throwing', async () => {
     const actual = await new SpawnCredentialCommand().run(['/bin/sh', '-c', 'exit 44'], 5_000);
     should(actual.code).equal(44);

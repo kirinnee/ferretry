@@ -8,7 +8,6 @@ import {
   detectAnomalies,
   firstResponse,
   jevActsFor,
-  jevRoute,
   foldLivenessSample,
   type LivenessTrack,
   leftoverBrowserCandidates,
@@ -325,7 +324,7 @@ const policyFor = (shape: ReportShape) => ({
 const routes = (shapes: readonly ReportShape[], sure: number): Record<string, number> => {
   const counted: Record<string, number> = {};
   for (const shape of shapes) {
-    const route = jevRoute(firstResponse(jevAgreeing(shape, sure), policyFor(shape)), true);
+    const route = firstResponse(jevAgreeing(shape, sure), policyFor(shape)).kind;
     counted[route] = (counted[route] ?? 0) + 1;
   }
   return counted;
@@ -338,7 +337,7 @@ describe('the 39 paid investigations, with Jev as first responder', () => {
 
     // Assert — the 33 LEAVEs are left and both NUDGEs sent; the four KILLs are stops the owner never
     // let the Warden do alone, so they still go to an investigation.
-    should(actual).deepEqual({ leave: 33, act: 2, investigation: 4 });
+    should(actual).deepEqual({ leave: 33, act: 2, escalate: 4 });
   });
 
   it('should leave the nudges to an investigation when Jev is sure enough to leave but not to nudge', () => {
@@ -346,7 +345,7 @@ describe('the 39 paid investigations, with Jev as first responder', () => {
     const actual = routes(REPORT_SHAPES, 0.88);
 
     // Assert
-    should(actual).deepEqual({ leave: 33, investigation: 6 });
+    should(actual).deepEqual({ leave: 33, escalate: 6 });
   });
 
   it('should settle both flags the new rules still raise — the real CI loop with a specific nudge', () => {

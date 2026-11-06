@@ -29,7 +29,6 @@ import {
   type LaneActor,
   mergeReleaseLanes,
   nextLaneSetVersion,
-  noLaneSetMessage,
   progressLaneNames,
   proposeLaneSet,
   RELEASED_TO_TEST_NAME,
@@ -473,13 +472,6 @@ describe('relocationProblems', () => {
 });
 
 describe('the words of a refusal', () => {
-  it('should tell a card creator the exact command to run', () => {
-    should(noLaneSetMessage('ferretry', 'fy')).equal(
-      'ferretry has no lanes yet. Propose them first: fy board lanes propose --template ' +
-        'pr-release-verify|pr-release|pr|ops|writing|quick --project ferretry',
-    );
-  });
-
   it('should describe every failure', () => {
     should(describeLaneSetFailure({ code: 'not-found', projectId: 'x' })).equal('no board for project x');
     should(describeLaneSetFailure({ code: 'unknown-lane', laneId: 'l' })).containEql('no lane l');

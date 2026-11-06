@@ -7,12 +7,8 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import { SocketViewerDownstream, SystemFrameClock, type ViewerSocket } from '../../../../src/adapters/index.ts';
-import {
-  type BrowserViewerHost,
-  BrowserViewerStream,
-  decodeFrameEnvelope,
-  type ViewerAttachment,
-} from '../../../../src/lib/index.ts';
+import { type BrowserViewerHost, BrowserViewerStream, type ViewerAttachment } from '../../../../src/lib/index.ts';
+import { decodeFrameEnvelope } from '../../../support/frame-envelope.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
 class FakeSocket implements ViewerSocket {

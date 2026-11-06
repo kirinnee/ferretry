@@ -4,8 +4,6 @@ import type { AnalyticsPricingRate } from '../../../src/lib/analytics/pricing.ts
 import {
   deriveAnalyticsSessionRecord,
   type FinishedAnalyticsSession,
-  type FinishedAnalyticsSessionSource,
-  rebuildAnalyticsSessionIndex,
 } from '../../../src/lib/analytics/session-record.ts';
 
 const catalog: readonly AnalyticsPricingRate[] = [
@@ -166,26 +164,6 @@ describe('deriveAnalyticsSessionRecord', () => {
     should(actual.raw.tokens).be.null();
     should(actual.raw.durationMs).equal(0);
     should(actual.raw.timeToFirstOutputMs).equal(0);
-  });
-
-  it('should rebuild the disposable index from authoritative records and replace duplicate ids', () => {
-    // Arrange
-    const source: FinishedAnalyticsSessionSource = {
-      listFinishedAnalyticsSessions: () => [
-        { ...finished, id: 'first', label: 'old' },
-        { ...finished, id: 'first', label: 'new' },
-        { ...finished, id: 'second', usage: null },
-      ],
-    };
-
-    // Act
-    const actual = rebuildAnalyticsSessionIndex(source, catalog);
-
-    // Assert
-    should(actual.map(record => [record.raw.id, record.raw.label, record.pricing?.kind])).deepEqual([
-      ['first', 'new', 'priced'],
-      ['second', 'analytics', undefined],
-    ]);
   });
 
   it('should leave every token metric unknown when the total cannot be represented safely', () => {

@@ -19,9 +19,7 @@ const MAX_PAGE_ID_BYTES = 0xffff;
  *   next N bytes UTF-8 opaque page id
  *   remainder    JPEG bytes
  *
- * The message boundary supplies the JPEG length. Both directions of the codec live here so the
- * viewer and the daemon can never drift apart — the kteam original described the layout in a
- * comment and hand-wrote an independent decoder in the web client.
+ * The message boundary supplies the JPEG length.
  */
 export type FrameEnvelopeResult =
   | { readonly ok: true; readonly value: Uint8Array }
@@ -45,37 +43,4 @@ export function encodeFrameEnvelope(pageId: string, jpegBytes: Uint8Array): Fram
   envelope.set(pageIdBytes, FRAME_ENVELOPE_HEADER_BYTES);
   envelope.set(jpegBytes, FRAME_ENVELOPE_HEADER_BYTES + pageIdBytes.byteLength);
   return { ok: true, value: envelope };
-}
-
-export interface DecodedFrameEnvelope {
-  readonly pageId: string;
-  readonly jpegBytes: Uint8Array;
-}
-
-export type DecodedFrameEnvelopeResult =
-  | { readonly ok: true; readonly value: DecodedFrameEnvelope }
-  | { readonly ok: false; readonly message: string };
-
-export function decodeFrameEnvelope(envelope: Uint8Array): DecodedFrameEnvelopeResult {
-  if (envelope.byteLength <= FRAME_ENVELOPE_HEADER_BYTES) return { ok: false, message: 'envelope is truncated' };
-  if (FRAME_ENVELOPE_MAGIC.some((byte, index) => envelope[index] !== byte)) {
-    return { ok: false, message: 'envelope magic does not match' };
-  }
-  if (envelope[4] !== FRAME_ENVELOPE_VERSION) return { ok: false, message: 'unsupported envelope version' };
-
-  const header = new DataView(envelope.buffer, envelope.byteOffset, envelope.byteLength);
-  const pageIdBytes = header.getUint16(5, false);
-  const jpegStart = FRAME_ENVELOPE_HEADER_BYTES + pageIdBytes;
-  if (pageIdBytes === 0) return { ok: false, message: 'envelope carries no page id' };
-  if (jpegStart >= envelope.byteLength) return { ok: false, message: 'envelope is truncated' };
-
-  const pageId = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-  let decodedPageId: string;
-  try {
-    decodedPageId = pageId.decode(envelope.subarray(FRAME_ENVELOPE_HEADER_BYTES, jpegStart));
-  } catch {
-    return { ok: false, message: 'page id is not valid UTF-8' };
-  }
-  if (decodedPageId.length > BROWSER_MAX_PAGE_ID_LENGTH) return { ok: false, message: 'pageId is too long' };
-  return { ok: true, value: { pageId: decodedPageId, jpegBytes: envelope.subarray(jpegStart) } };
 }

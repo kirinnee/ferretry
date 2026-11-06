@@ -53,7 +53,6 @@ import {
   type FleetUsageWindow,
   type HarnessKind,
   HOST_CLAUDE_SECURE_STORAGE,
-  type PassiveUsageRecord,
   type ProviderPreset,
   resolveCredentialStore,
   type StoredCredentialResolution,
@@ -822,16 +821,6 @@ export interface CredentialSessionRecord {
   readonly transcript?: { readonly home: string; readonly file?: string };
 }
 
-export interface CredentialPassiveUsageDeps {
-  readonly catalog: Pick<FleetCredentialCatalog, 'entry'>;
-  /** A Claude credential's statusLine file (`FilePassiveUsageStore.read`). */
-  claude(id: string): Promise<PassiveUsageRecord | undefined>;
-  /** The sessions this daemon has records for. */
-  sessions(): Promise<readonly CredentialSessionRecord[]>;
-  /** The newest reading across these rollout files (`newestRolloutRateLimits`). */
-  newestRollout(files: readonly string[]): Promise<PassiveUsageRecord | undefined>;
-}
-
 /**
  * The transcripts of the sessions that ran on this credential (§8.2.3): a session started on one of
  * its runtimes. A rollout this
@@ -848,18 +837,6 @@ export function attributedTranscripts(
     if (entry.usedBy.includes(session.agent)) files.add(file);
   }
   return [...files].sort();
-}
-
-/** The status service's `passiveUsage` port: Claude's statusLine file, or Codex's attributed rollouts. */
-export function credentialPassiveUsage(
-  deps: CredentialPassiveUsageDeps,
-): (subject: CredentialSubject) => Promise<PassiveUsageRecord | undefined> {
-  return async subject => {
-    if (subject.resolution.harness === 'claude') return await deps.claude(subject.id);
-    const entry = await deps.catalog.entry(subject.id);
-    const files = attributedTranscripts(entry, await deps.sessions());
-    return files.length === 0 ? undefined : await deps.newestRollout(files);
-  };
 }
 
 // ── The subsystem ────────────────────────────────────────────────────────────────────────────────

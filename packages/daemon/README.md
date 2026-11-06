@@ -1,7 +1,7 @@
 # daemon
 
-The per-host Ferretry daemon. This package owns the durable state-home foundation; later units add
-the API and runtime subsystems on top of it.
+The per-host Ferretry daemon. This package owns the durable state home, the HTTP and socket API served
+from it, and the session, fleet, board, agenda, terminal and browser subsystems that run on top.
 
 ## State-home layout
 

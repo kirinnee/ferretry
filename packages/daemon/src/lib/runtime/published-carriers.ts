@@ -20,7 +20,7 @@
  * redemption.
  */
 
-import { type DaemonCarrier, PublishedCarriersSchema } from '@ferretry/protocol';
+import type { DaemonCarrier } from '@ferretry/protocol';
 import type { PublishedCarrierView } from '../pairing/index.ts';
 import { publishedDaemonCarriers, type RelayCarrierSource } from '../relay/discovery.ts';
 
@@ -45,10 +45,4 @@ export class PublishedCarrierSet implements PublishedCarrierView {
   tunnel(url: string | undefined): void {
     this.#current = Object.freeze(publishedDaemonCarriers(this.directUrl, this.relays, url));
   }
-}
-
-/** A set that never changes, parsed once: for a caller that holds one answer rather than an owner. */
-export function fixedCarrierView(carriers: readonly DaemonCarrier[]): PublishedCarrierView {
-  const frozen = Object.freeze([...PublishedCarriersSchema.parse(carriers)]);
-  return { current: () => frozen };
 }

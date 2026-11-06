@@ -597,7 +597,7 @@ export interface WardenSweepSettings extends WardenPromptSettings {
    * session have a live monitor handle", and in a daemon with no monitor
    * subsystem the answer is no for every session — so a raw sweep reports the
    * entire live fleet as broken, once per session, every five minutes. See
-   * `collapseUnsupervisedMonitors` for what is done about it and why the answer is
+   * `collapseUnwatchedFleet` for what is done about it and why the answer is
    * not to suppress the evidence.
    */
   readonly supervisesMonitors: boolean;
@@ -661,14 +661,6 @@ export function collapseUnwatchedFleet(
           : `this daemon's liveness monitor has seen no ferret for five minutes — the daemon or its host is stuck, not the ferrets — ${count}`,
     },
   ];
-}
-
-/** {@link collapseUnwatchedFleet} for a daemon that does or does not mount monitors at all. */
-export function collapseUnsupervisedMonitors(
-  anomalies: readonly WardenAnomaly[],
-  supervisesMonitors: boolean,
-): readonly WardenAnomaly[] {
-  return collapseUnwatchedFleet(anomalies, supervisesMonitors ? undefined : 'unsupervised');
 }
 
 /** Why an owner's request for an investigation was refused. */

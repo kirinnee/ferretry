@@ -4,7 +4,6 @@ import {
   buildLaunchArgv,
   effortLaunchArguments,
   FixedSettingsUnreadableError,
-  fastLaunchArguments,
   settingsArguments,
   transcriptLaunchArguments,
 } from '../../../../src/lib/session/launch/index.ts';
@@ -114,7 +113,24 @@ describe('effortLaunchArguments', () => {
   });
 });
 
-describe('fastLaunchArguments', () => {
+/** The launch arguments the fast-mode overlay adds, read off a full launch argv that names nothing else. */
+const fastLaunchArguments = (
+  harness: 'claude' | 'codex',
+  fast: boolean | undefined,
+  fixedSettings: string | undefined,
+): readonly string[] =>
+  buildLaunchArgv({
+    harness,
+    executable: 'wrapper',
+    remoteControl: [],
+    transcript: [],
+    readableFolders: [],
+    harnessFlags: [],
+    ...(fast === undefined ? {} : { fast }),
+    ...(fixedSettings === undefined ? {} : { fixedSettings }),
+  }).slice(1);
+
+describe('the fast-mode launch arguments', () => {
   const FIXED = JSON.stringify({ permissions: { defaultMode: 'auto' }, skipAutoPermissionPrompt: true });
 
   it('should say nothing when no state was decided, so the harness keeps its own setting', () => {

@@ -6,7 +6,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { transcriptName } from '../../../src/lib/imports/conversation-name.ts';
+import { transcriptNames } from '../../../src/lib/imports/conversation-name.ts';
 import { NO_HANDOFF_SCOPE } from '../../../src/lib/imports/conversation-text.ts';
 import {
   adoptedConversationFile,
@@ -729,13 +729,14 @@ describe('conversation names', () => {
     ].join('\n');
 
     // Act & Assert
-    should(transcriptName('claude', text)).equal('First summary');
+    should(transcriptNames('claude', text)).deepEqual({ generated: 'First summary' });
     should(
-      transcriptName('claude', `${text}\n${JSON.stringify({ type: 'agent-name', agentName: 'Named by agent' })}`),
+      transcriptNames('claude', `${text}\n${JSON.stringify({ type: 'agent-name', agentName: 'Named by agent' })}`)
+        .chosen,
     ).equal('Named by agent');
-    should(transcriptName('claude', claude('Hello', '2026-10-17T08:01:00.000Z'))).be.undefined();
+    should(transcriptNames('claude', claude('Hello', '2026-10-17T08:01:00.000Z'))).deepEqual({});
     should(
-      transcriptName('claude', JSON.stringify({ type: 'custom-title', customTitle: 'y'.repeat(200) })),
+      transcriptNames('claude', JSON.stringify({ type: 'custom-title', customTitle: 'y'.repeat(200) })).chosen,
     ).have.length(120);
   });
 

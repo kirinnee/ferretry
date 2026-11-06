@@ -4,7 +4,6 @@ import { parseSessionId } from '../../../../src/lib/index.ts';
 import {
   defaultSessionMonitorSettings,
   heartbeatDue,
-  parseSessionMonitorSettings,
   planWaitTick,
   tickOverdue,
   waitDeadline,
@@ -40,16 +39,6 @@ function wait(overrides: Partial<DeclaredWait> = {}): DeclaredWait {
 function parked(overrides: Partial<ParkedSession> = {}): ParkedSession {
   return { id: ID, status: 'waiting', waiting: wait(), ...overrides };
 }
-
-describe('the settings the monitor slice owns', () => {
-  it('parses a complete settings document', () => {
-    should(parseSessionMonitorSettings({ ...defaultSessionMonitorSettings })).eql(defaultSessionMonitorSettings);
-  });
-
-  it('refuses a tick interval that would never fire', () => {
-    should(() => parseSessionMonitorSettings({ ...defaultSessionMonitorSettings, tickIntervalMs: 0 })).throw();
-  });
-});
 
 describe('when a park ends, and on whose authority', () => {
   it('honours the deadline the teammate declared', () => {

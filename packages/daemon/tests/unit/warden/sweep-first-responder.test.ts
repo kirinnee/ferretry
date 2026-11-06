@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import type { WardenAction } from '@ferretry/protocol';
 import should from 'should';
 import { NUDGE_MESSAGES } from '../../../src/lib/speedups/jev.ts';
-import { jevLeafReason, jevNudgeMessage } from '../../../src/lib/warden/index.ts';
+import { jevNudgeMessage } from '../../../src/lib/warden/index.ts';
 import { WARDEN_TERMINAL_STATUSES } from '../../../src/lib/warden/types.ts';
 import {
   enabled,
@@ -116,7 +116,7 @@ describe('Jev acting as first responder', () => {
       outcome: 'done',
       by: 'jev',
       confidence: 0.93,
-      reason: jevLeafReason('nudge_wait'),
+      reason: 'It is waiting on something real, and has waited longer than is reasonable.',
       anomalyKind: 'sus_subprocess',
     });
     should(subject.state().actions?.[0]?.detail).startWith('Jev nudged it (93% sure)');

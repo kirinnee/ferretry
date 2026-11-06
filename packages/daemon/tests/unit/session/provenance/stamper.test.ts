@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  parseSessionProvenance,
+  SessionProvenanceSchema,
   SessionProvenanceStamper,
   type SessionAncestor,
   type SessionProvenance,
@@ -100,7 +100,7 @@ describe('SessionProvenanceStamper.stamp', () => {
     const stamped = stamperAt(SPAWNED_AT).stamp({ id: 'w1', label: WARDEN_LABEL, requestedByHuman: false }, fleetOf());
 
     // Act
-    const parsed = parseSessionProvenance(stamped.provenance);
+    const parsed = SessionProvenanceSchema.safeParse(stamped.provenance).data;
 
     // Assert
     should(parsed).eql(stamped.provenance);

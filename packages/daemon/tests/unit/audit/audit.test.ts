@@ -31,7 +31,6 @@ import {
   auditFoldKey,
   auditOutcomeOf,
   auditRecord,
-  isKeptAuditEntry,
   type NewDeviceAlertPush,
   newDeviceAlert,
   type PairedDeviceNotice,
@@ -453,24 +452,6 @@ describe('audit folding and bounds', () => {
       auditFoldKey({ ...refusal, detail: { carrier: 'direct' } }),
     );
     should(auditFoldKey({ ...refusal, actor: { kind: 'host' } })).not.equal(auditFoldKey(refusal));
-  });
-
-  it('should keep only SUCCESSES of high-value events out of a flood’s reach', () => {
-    // Arrange / Act / Assert
-    should(isKeptAuditEntry({ ...refusal, outcome: 'succeeded' })).be.true();
-    should(isKeptAuditEntry(refusal)).be.false();
-    should(
-      isKeptAuditEntry({ event: 'pairing.refused', actor: { kind: 'anonymous' }, outcome: 'succeeded' }),
-    ).be.false();
-    // Activity a paired device can repeat at will is never kept: a store that took it could be flooded.
-    for (const event of [
-      'terminal.opened',
-      'terminal.input',
-      'secrets.used',
-      'fleet.configured',
-      'agent.prompted',
-    ] as const)
-      should(isKeptAuditEntry({ ...refusal, event, outcome: 'succeeded' })).be.false();
   });
 
   it('should fold a repeated SUCCESS of activity per who, what, subject and detail', async () => {

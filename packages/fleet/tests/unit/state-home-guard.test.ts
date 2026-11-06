@@ -1,11 +1,14 @@
 import { describe, it } from 'bun:test';
+import { basename, dirname } from 'node:path';
 import should from 'should';
 import {
-  copyTreeOutsideStateHomes,
+  copyTreeIntoFolder,
   createOutsideStateHomes,
   type FileIdentity,
+  type GuardTreeOptions,
   judgeOutsideStateHomes,
   MutableRootError,
+  openFolderOutsideStateHomes,
   openOutsideStateHomes,
   resolveImmutableRoots,
   resolveStateHomes,
@@ -34,6 +37,26 @@ const world = async (throughDescriptors = true) => {
   disk.file('/work/a.txt', 3, 'abc');
   const homes = await resolveStateHomes({ homes: ['/link-fy'], openings: ['/fy/fleet/assets'] }, disk);
   return { disk, homes };
+};
+
+/**
+ * Copies a tree to `destination` the way a provisioner does: the destination's folder is opened below the homes,
+ * then `copyTreeIntoFolder` makes the new entry through it.
+ */
+const copyTreeBelow = async (
+  source: string,
+  destination: string,
+  homes: StateHomes,
+  disk: FakeGuardDisk,
+  options: GuardTreeOptions,
+) => {
+  const folder = await openFolderOutsideStateHomes(dirname(destination), homes, disk);
+  if (!folder.ok) return folder;
+  try {
+    return await copyTreeIntoFolder(source, folder.value, basename(destination), homes, disk, options);
+  } finally {
+    await folder.value.close();
+  }
 };
 
 const rule = (result: { readonly ok: boolean; readonly rule?: string }): string | undefined =>
@@ -499,8 +522,8 @@ describe('createOutsideStateHomes', () => {
   });
 });
 
-describe('copyTreeOutsideStateHomes', () => {
-  const tree = async (source: string, options: Partial<Parameters<typeof copyTreeOutsideStateHomes>[4]> = {}) => {
+describe('copying a tree below the homes', () => {
+  const tree = async (source: string, options: Partial<GuardTreeOptions> = {}) => {
     const { disk, homes } = await world();
     disk.dir('/src', 0o750);
     disk.file('/src/a.md', 4, 'aaaa', 0o640);
@@ -511,7 +534,7 @@ describe('copyTreeOutsideStateHomes', () => {
       disk,
       run: async (extra: (d: FakeGuardDisk) => void = () => undefined) => {
         extra(disk);
-        return await copyTreeOutsideStateHomes(source, '/out/copy', homes, disk, {
+        return await copyTreeBelow(source, '/out/copy', homes, disk, {
           maxFileBytes: 100,
           maxTotalBytes: 1000,
           maxFiles: 10,
@@ -915,7 +938,7 @@ describe('secrev-1255 F3 — the tree copy sets a folder mode through its descri
     const tokenMode = disk.entries.get('/fy/api-token')?.kind === 'file' ? 0o644 : -1;
 
     // Act
-    const copied = await copyTreeOutsideStateHomes('/src', '/out/copy', homes, disk, {
+    const copied = await copyTreeBelow('/src', '/out/copy', homes, disk, {
       maxFileBytes: 10,
       maxTotalBytes: 100,
       maxFiles: 5,
@@ -935,7 +958,7 @@ describe('secrev-1255 F3 — the tree copy sets a folder mode through its descri
     disk.dir('/out');
 
     // Act
-    const copied = await copyTreeOutsideStateHomes('/src', '/out/copy', homes, disk, {
+    const copied = await copyTreeBelow('/src', '/out/copy', homes, disk, {
       maxFileBytes: 10,
       maxTotalBytes: 100,
       maxFiles: 5,
@@ -1016,7 +1039,7 @@ describe('secrev-1260 L3 — the tree copy writes through the folders it checked
     };
 
     // Act
-    const copied = await copyTreeOutsideStateHomes('/src', '/out/copy', homes, racing, {
+    const copied = await copyTreeBelow('/src', '/out/copy', homes, racing, {
       maxFileBytes: 10,
       maxTotalBytes: 100,
       maxFiles: 5,
@@ -1043,7 +1066,7 @@ describe('secrev-1260 L3 — the tree copy writes through the folders it checked
     };
 
     // Act
-    await copyTreeOutsideStateHomes('/src', '/out/copy', homes, disk, {
+    await copyTreeBelow('/src', '/out/copy', homes, disk, {
       maxFileBytes: 10,
       maxTotalBytes: 100,
       maxFiles: 5,
@@ -1064,7 +1087,7 @@ describe('secrev-1260 L4 — the tree copy is bounded', () => {
     disk.dir('/src');
     disk.dir('/out');
     build(disk);
-    return await copyTreeOutsideStateHomes('/src', '/out/copy', homes, disk, {
+    return await copyTreeBelow('/src', '/out/copy', homes, disk, {
       maxFileBytes: 100,
       maxTotalBytes: limits.maxTotalBytes ?? 1000,
       maxFiles: limits.maxFiles ?? 100,
