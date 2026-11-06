@@ -27,6 +27,13 @@ const run = (command: string, args: readonly string[]): void => {
 
 const BAR_ENTRY = `
 import { createRoot } from 'react-dom/client';
+import { sessionRowMenuRenderer } from '../../../src/features/session-actions/row-actions-host.tsx';
+import { DaemonAccountPickerStore } from '../../../src/lib/account-picker-store.ts';
+import { DaemonConnectionStore } from '../../../src/lib/connections.ts';
+import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { DaemonFleetStore } from '../../../src/lib/fleet-store.ts';
+import { DaemonProjectsStore } from '../../../src/lib/projects-store.ts';
+import { StoreProvider } from '../../../src/lib/store.tsx';
 import { SessionsBar } from '../../../src/shell/sessions-bar.tsx';
 import { sessionView } from '../../../tests/support/sessions.ts';
 
@@ -38,13 +45,36 @@ const make = (id, label, status) =>
   });
 const sessions = [make('stopped-one', 'Home manager', 'stopped'), make('running-one', 'Plain chores', 'running')];
 const compact = window.innerWidth < 640;
+const connection = daemonConnection({
+  daemonId: 'fy_daemon_' + 'Cc'.repeat(21) + 'A',
+  baseUrl: 'https://workstation.example.test',
+  deviceId: 'harness',
+});
+// The row menu is drawn by the host's own renderer, which reads the stores a real page provides.
+const store = {
+  connections: new DaemonConnectionStore({
+    connections: [{ ...connection, pairedAt: 1, lastSelectedAt: 1 }],
+    selectedDaemonId: connection.daemonId,
+  }),
+  clients: { client: async () => ({ request: async () => ({ capabilities: [], governed: false }) }) },
+  fleet: new DaemonFleetStore({ list: async () => sessions, get: async () => sessions[0] }),
+  projects: new DaemonProjectsStore({ projects: async () => [] }),
+  accountPicker: new DaemonAccountPickerStore({
+    catalog: async () => ({ accounts: [] }),
+    health: async () => ({ credentials: [] }),
+    probe: async () => ({ credentials: [] }),
+  }),
+  carrier: { fetch: async () => Response.json({ passive: [], sessions: [] }) },
+};
 const root = document.getElementById('root');
 createRoot(root).render(
-  <div className="bg-bg text-fg" data-shot="" style={{ width: compact ? 390 : 340, minHeight: 560 }}>
-    <SessionsBar active={null} activeSessionId="running-one" canMutate daemonId={'harness'} machineName="Liftoff EC2"
-      machines={[]} onAddMachine={() => {}} onClose={() => {}} onCollapse={() => {}} onNavigate={() => {}}
-      onOpenPalette={() => {}} presentation="column" projects={[]} sessions={sessions} />
-  </div>,
+  <StoreProvider store={store}>
+    <div className="bg-bg text-fg" data-shot="" style={{ width: compact ? 390 : 340, minHeight: 560 }}>
+      <SessionsBar active={null} activeSessionId="running-one" canMutate daemonId={connection.daemonId} machineName="Liftoff EC2"
+        machines={[]} onAddMachine={() => {}} onClose={() => {}} onCollapse={() => {}} onNavigate={() => {}}
+        onOpenPalette={() => {}} presentation="column" projects={[]} renderSessionMenu={sessionRowMenuRenderer(() => {})} sessions={sessions} />
+    </div>
+  </StoreProvider>,
 );
 `;
 
