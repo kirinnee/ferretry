@@ -174,7 +174,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Test tiers";
       entry = validator "scripts/validate/test-tiers.sh";
-      files = "^(packages/[^/]+/tests/.*\\.test\\.tsx?|config/test-groups\\.json|scripts/(validate/test-tiers\\.sh|test/ci-sets\\.ts|ci/((quick|quick-part|parallel|integration|full-status|e2e-summary|pre-commit|gate-hook|full-gates)\\.sh|(unit-timings|gate-hooks)\\.ts))|\\.github/workflows/(ci|realworld|e2e-slow)\\.yaml)$";
+      files = "^(packages/[^/]+/tests/.*\\.test\\.tsx?|config/test-groups\\.json|nix/fmt\\.nix|scripts/(validate/test-tiers\\.sh|test/ci-sets\\.ts|ci/((quick|quick-part|parallel|integration|full-status|e2e-summary|pre-commit|gate-hook|full-gates)\\.sh|(unit-timings|gate-hooks)\\.ts))|\\.github/workflows/(ci|realworld|e2e-slow)\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };

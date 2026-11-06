@@ -14,6 +14,12 @@ format)
       printf '%s\0' "${file}"
     done | tar --null -T - -cf - | tar -xf - -C "${snapshot}"
   cp -P .pre-commit-config.yaml "${snapshot}/.pre-commit-config.yaml"
+  # The snapshot holds tracked and untracked files, not the ignored `node_modules`, and treefmt runs Biome
+  # as `./node_modules/.bin/biome` from the tree root (nix/fmt.nix). Link the real binary in, so the copy
+  # formats with the workspace's own Biome (the version `a-biome` lints with) and the workspace stays untouched.
+  [[ -x node_modules/.bin/biome ]] || { echo "❌ node_modules/.bin/biome is missing: run setup.sh first" >&2 && exit 1; }
+  mkdir -p "${snapshot}/node_modules/.bin"
+  ln -s "$(realpath node_modules/.bin/biome)" "${snapshot}/node_modules/.bin/biome"
   git init --quiet "${snapshot}"
   git -C "${snapshot}" -c core.hooksPath=/dev/null add --all
   cd "${snapshot}"

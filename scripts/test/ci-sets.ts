@@ -218,6 +218,20 @@ assert.equal(judge({ ...successful, 'full-pending': { result: 'skipped' } }, '',
 
 const temporary = mkdtempSync(join(tmpdir(), 'ci-parts-'));
 try {
+  // Quick's format part runs treefmt in a scratch snapshot that has no `node_modules`. Every workspace tool
+  // treefmt runs from there (nix/fmt.nix) must be linked into that snapshot, or Quick fails in CI with exit 127
+  // (#1525 made Biome the formatter) instead of here.
+  const formatters = new Set(
+    [...readFileSync('nix/fmt.nix', 'utf8').matchAll(/\.\/node_modules\/\.bin\/([\w-]+)/g)].map(match => match[1]),
+  );
+  assert.ok(formatters.size > 0, 'nix/fmt.nix runs no workspace tool: the snapshot link contract below is stale');
+  const quickPart = readFileSync('scripts/ci/quick-part.sh', 'utf8');
+  for (const tool of formatters)
+    assert.ok(
+      quickPart.includes(`"\${snapshot}/node_modules/.bin/${tool}"`),
+      `Quick's format snapshot must link node_modules/.bin/${tool}, which nix/fmt.nix runs`,
+    );
+
   // `E2E Journeys`: no shard leaving a result fails it; failing journeys and a partial set stay advisory.
   const summarize = (shards: number[], env: Record<string, string> = {}) => {
     const evidence = join(temporary, `e2e-evidence-${shards.join('-')}-${Object.keys(env).join('-')}`);
