@@ -258,13 +258,11 @@ describe('a gate item in the Inbox', () => {
 
   describe('with files', () => {
     const attachId = `att_${'b'.repeat(64)}`;
-    const ports = (takes: boolean) => {
+    const ports = () => {
       const uploaded: Array<[string, string]> = [];
       return {
         uploaded,
         ports: {
-          sendBackFiles: async () => false,
-          answerFiles: async () => takes,
           uploadAttachment: async (_daemon: unknown, sessionId: string, file: File) => {
             uploaded.push([sessionId, file.name]);
             return {
@@ -302,7 +300,7 @@ describe('a gate item in the Inbox', () => {
     it('offers "+" on a Not good once the machine takes them, and sends the ids from the item’s session', async () => {
       await mouseIsLastPointer();
       const fake = fakeInbox();
-      const given = ports(true);
+      const given = ports();
       const mounted = await mount(page(fake, [gate], { initialOpen: gate.key, toTestHost: host(given.ports) }));
       await press(buttonNamed(mounted, 'Not good'));
       await flush();
@@ -322,7 +320,7 @@ describe('a gate item in the Inbox', () => {
     it('sends no files when none were attached', async () => {
       await mouseIsLastPointer();
       const fake = fakeInbox();
-      const mounted = await mount(page(fake, [gate], { initialOpen: gate.key, toTestHost: host(ports(true).ports) }));
+      const mounted = await mount(page(fake, [gate], { initialOpen: gate.key, toTestHost: host(ports().ports) }));
       await press(buttonNamed(mounted, 'Not good'));
       await flush();
       const why = sendBackBox(mounted.container);
@@ -332,18 +330,12 @@ describe('a gate item in the Inbox', () => {
       await mounted.unmount();
     });
 
-    it('draws no "+" on a machine that has not got them, or on a page with no way to upload', async () => {
-      for (const given of [
-        host(ports(false).ports),
-        host(undefined),
-        host({ sendBackFiles: async () => true } as never),
-      ]) {
-        const mounted = await mount(page(fakeInbox(), [gate], { initialOpen: gate.key, toTestHost: given }));
-        await press(buttonNamed(mounted, 'Not good'));
-        await flush();
-        expect(attach(mounted)).toBeNull();
-        await mounted.unmount();
-      }
+    it('draws no "+" on a page with no way to upload', async () => {
+      const mounted = await mount(page(fakeInbox(), [gate], { initialOpen: gate.key, toTestHost: host(undefined) }));
+      await press(buttonNamed(mounted, 'Not good'));
+      await flush();
+      expect(attach(mounted)).toBeNull();
+      await mounted.unmount();
     });
 
     it('draws no "+" on "Not yet": it leaves the card where it is', async () => {
@@ -363,7 +355,7 @@ describe('a gate item in the Inbox', () => {
         sessionView('sess-p', { config: { teammate: 'judson', name: 'Plan' } as never }),
       );
       const mounted = await mount(
-        page(fakeInbox(), [plan], { initialOpen: plan.key, toTestHost: host(ports(true).ports) }),
+        page(fakeInbox(), [plan], { initialOpen: plan.key, toTestHost: host(ports().ports) }),
       );
       await press(buttonNamed(mounted, 'Not yet'));
       await flush();

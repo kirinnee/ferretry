@@ -117,7 +117,6 @@ import type { DaemonAgendaClient } from '../agenda-client.ts';
 import { useFormComposer } from '../agenda-form-send.ts';
 import type { AgendaLoadStatus } from '../agenda-store.ts';
 import { sessionAgendaSummary } from '../agenda-wire.ts';
-import { useWorkSearchOffered } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
 import type { ChatTasksView } from '../board-chat-url.ts';
@@ -146,7 +145,7 @@ import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
 import { needsInputOf } from '../voice-chat/reply-picker.ts';
 import { hideWaiting } from '../waiting-fold.ts';
-import { workSearchPortFor } from '../work-search.ts';
+import { createWorkSearchPort } from '../work-search.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
 import { daemonAddSkillsPath, daemonBoardCardPath, daemonBoardForFerretPath, daemonSessionPath } from './routes.ts';
@@ -591,12 +590,8 @@ export function SessionChatPage({
   // until a catalog has actually been read — unread, never "no skills".
   // The carrier router: the `@file` proof and the skills read both reach a relay-only daemon.
   const referenceFetch = useDaemonFetch();
-  const workSearchOffered = useWorkSearchOffered(connection.daemonId);
-  const workProjectNames = useWorkProjectNames(connection, workSearchOffered === true);
-  const workSearch = useMemo(
-    () => workSearchPortFor(workSearchOffered, connection, referenceFetch),
-    [workSearchOffered, connection, referenceFetch],
-  );
+  const workProjectNames = useWorkProjectNames(connection, true);
+  const workSearch = useMemo(() => createWorkSearchPort(connection, referenceFetch), [connection, referenceFetch]);
   // The model catalog is read through the same routed fetch: a paired device has no bearer value.
   const routedRuntimeCatalogs = useMemo<RuntimeModelCatalogSource>(
     () => ({ load: async (daemon, scope) => await runtimeModelCatalogs.load(daemon, scope, referenceFetch) }),

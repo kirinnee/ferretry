@@ -48,8 +48,6 @@ export interface AccountsScreenProps {
   readonly error: string | null;
   readonly client: InputClient;
   readonly addKey: ((stage: TwoFactorStageId, words: string) => Promise<boolean>) | undefined;
-  /** Whether this machine has 2FA keys at all; without it the 2FA keys tab is not offered. */
-  readonly withKeys: boolean;
   /** A seed was just saved by the shared panel: read the list again. */
   readonly onRefresh: () => void;
   /** Called when the person moves between views, so a refusal from the last one stops showing. */
@@ -79,7 +77,6 @@ export function AccountsScreen(props: AccountsScreenProps): ReactNode {
           account={account}
           accounts={list.accounts}
           addKey={props.addKey}
-          withKeys={props.withKeys}
           busy={busy}
           client={props.client}
           error={error}

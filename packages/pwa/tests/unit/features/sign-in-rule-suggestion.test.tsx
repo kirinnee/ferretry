@@ -33,7 +33,7 @@ const withRule: RuleWorld = {
   eligibility: { signIn: SITE_SIGN_IN, eligible: true, history: 2, rule: RULE_ID },
   list: ruleList({ rules: [pageRule({ status: 'expired' })] }),
   fail: (key, body) =>
-    key === 'POST /v1/sign-in-rules/stages' && body?.['replaces'] !== RULE_ID
+    key === 'POST /v1/sign-in-rules/stages' && body?.replaces !== RULE_ID
       ? refused(SIGN_IN_RULE_REFUSAL_WORDS.rule_exists, { status: 409, code: 'rule_exists' })
       : undefined,
 };
@@ -52,7 +52,6 @@ const host = (
         connection={connection}
         createClient={async () => fake.client}
         item={ref}
-        offered
         {...props}
       />
     ),
@@ -464,7 +463,7 @@ describe('the offer after a hand-tapped sign-in', () => {
       await settle();
       await click(q(mounted.container, '[data-rule-approve]'));
       await settle();
-      expect(fake.calls.find(call => call.key === 'POST /v1/sign-in-rules/stages')?.body?.['replaces']).toBe(RULE_ID);
+      expect(fake.calls.find(call => call.key === 'POST /v1/sign-in-rules/stages')?.body?.replaces).toBe(RULE_ID);
       expect(q(mounted.container, '[data-rule-offer-saved]').textContent).toContain('Standing rule saved');
     } finally {
       await mounted.unmount();

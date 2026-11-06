@@ -13,15 +13,18 @@
  * first-run nudge — "Not written yet" and a big Write it for me — rather than a box holding the default.
  */
 
-import type { PackCleanUpJob, PackCleanUpSuggestion, PackView } from '@ferretry/protocol';
-import { modelVocabulary } from '@ferretry/protocol';
+import {
+  MAX_IDEA_CHARS,
+  modelVocabulary,
+  type PackCleanUpJob,
+  type PackCleanUpSuggestion,
+  type PackView,
+} from '@ferretry/protocol';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
   cleanUpProblem,
-  FULL_IDEA_LIMIT,
-  type IdeaLimit,
   ideaCounter,
   ideaFill,
   routingCounter,
@@ -57,8 +60,6 @@ export interface RoutingPromptCardProps {
   readonly connection: DaemonConnection;
   readonly view: Pick<PackView, 'routing' | 'models' | 'available' | 'undo' | 'cleanUp'>;
   readonly state: Pick<MachinePack, 'savePrompt' | 'cleanUp' | 'readJob' | 'accept' | 'undo'>;
-  /** How much "your idea" may say on this machine; the full limit when nothing gates it (tests, harness). */
-  readonly ideaLimit?: IdeaLimit;
   readonly pollMs?: number;
   readonly clock?: () => number;
   /** A run and its rewrite the card starts on (harness, tests). */
@@ -69,7 +70,6 @@ export function RoutingPromptCard({
   connection,
   view,
   state,
-  ideaLimit = FULL_IDEA_LIMIT,
   pollMs = CLEAN_UP_POLL_MS,
   clock = Date.now,
   initial,
@@ -267,7 +267,6 @@ export function RoutingPromptCard({
             onChange={setIdea}
             onSubmit={submitWrite}
             disabled={busy || running}
-            limit={ideaLimit}
           />
           <Button
             variant="primary"
@@ -349,7 +348,6 @@ export function RoutingPromptCard({
               onChange={setIdea}
               onSubmit={submitWrite}
               disabled={busy || running}
-              limit={ideaLimit}
             />
             <Button
               variant="primary"
@@ -462,19 +460,16 @@ function IdeaField({
   onChange,
   onSubmit,
   disabled,
-  limit,
 }: {
   readonly id: string;
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly onSubmit: () => void;
   readonly disabled: boolean;
-  readonly limit: IdeaLimit;
 }) {
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const counterId = `${id}-count`;
-  const fill = ideaFill(value, limit);
-  const noteId = `${id}-update`;
+  const fill = ideaFill(value);
 
   // Grow with the text up to IDEA_MAX_ROWS (the CSS max-height), then scroll inside the box.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `value` is the re-measure trigger; the effect reads the node
@@ -497,9 +492,9 @@ function IdeaField({
         style={{ maxHeight: `calc(${String(IDEA_MAX_ROWS)}lh + 2 * var(--pad-row-y) + 2 * var(--stroke-control))` }}
         rows={IDEA_MIN_ROWS}
         value={value}
-        maxLength={limit.max}
+        maxLength={MAX_IDEA_CHARS}
         disabled={disabled}
-        aria-describedby={limit.updateNote === null ? counterId : `${counterId} ${noteId}`}
+        aria-describedby={counterId}
         placeholder="Cheap models for chores, Opus for planning, never burn the Claude weekly quota"
         onChange={event => onChange(event.currentTarget.value)}
         onKeyDown={event => {
@@ -519,15 +514,10 @@ function IdeaField({
           )}
           data-idea-counter={fill}
         >
-          {ideaCounter(value, limit)}
+          {ideaCounter(value)}
           <span className="sr-only"> characters</span>
         </span>
       </div>
-      {limit.updateNote === null ? null : (
-        <p id={noteId} className="m-0 break-words text-meta leading-base text-warn" data-idea-update-note="">
-          {limit.updateNote}
-        </p>
-      )}
     </div>
   );
 }

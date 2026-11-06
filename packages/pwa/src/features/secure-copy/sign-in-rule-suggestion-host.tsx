@@ -10,18 +10,16 @@
  * Inbox; so does a suggestion the daemon's owner list no longer holds.
  */
 
-import {
-  type AccountSummary,
-  type AgendaItem,
-  DAEMON_FEATURES,
-  type SignInRuleScope,
-  type SignInRuleSuggestionView,
-  type SignInSummary,
+import type {
+  AccountSummary,
+  AgendaItem,
+  SignInRuleScope,
+  SignInRuleSuggestionView,
+  SignInSummary,
 } from '@ferretry/protocol';
 import { useEffect, useMemo, useState } from 'react';
 import { type AnsweredSuggestions, answeredSuggestions } from '../../lib/answered-suggestions.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { machineOffers } from '../../lib/daemon-health.ts';
 import { readAccounts } from '../../lib/input-api.ts';
 import {
   codeKeyLabel,
@@ -33,7 +31,6 @@ import {
   type RuleClient,
 } from '../../lib/sign-in-rules.ts';
 import { useApproveSignInRuleStepUp, useDaemonClient } from '../../lib/store.tsx';
-import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { SignInRuleSheetHost } from '../accounts/sign-in-rule-panel.tsx';
 import type { RulesBinding } from '../accounts/use-sign-in-rules.ts';
 
@@ -49,8 +46,6 @@ export interface SignInRuleSuggestionHostProps {
   readonly createClient?: (connection: DaemonConnection) => Promise<RuleClient>;
   /** Asks for the passkey bound to the stage, in place of the store's step-up (the harness and tests). */
   readonly askPasskey?: RulesBinding['askPasskey'];
-  /** Says the machine offers `sign-in-rules.1` without reading its health (the harness and tests). */
-  readonly offered?: boolean;
   readonly onDone?: () => void;
   /** The set an answer is marked in, in place of the app's (the tests). */
   readonly answered?: AnsweredSuggestions;
@@ -71,15 +66,12 @@ export function SignInRuleSuggestionHost({
   projectId,
   createClient: injected,
   askPasskey: injectedAsk,
-  offered: injectedOffered,
   onDone,
   answered = answeredSuggestions,
 }: SignInRuleSuggestionHostProps) {
   const routed = useDaemonClient();
   const createClient = injected ?? routed;
-  const health = useDaemonHealth(injectedOffered === undefined ? connection : undefined);
   const askStage = useApproveSignInRuleStepUp();
-  const offered = injectedOffered ?? machineOffers(health, DAEMON_FEATURES.signInRules);
   const suggestionId = item.signInRuleSuggestion?.suggestion;
 
   const askPasskey = useMemo<RulesBinding['askPasskey']>(
@@ -102,7 +94,7 @@ export function SignInRuleSuggestionHost({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!offered || suggestionId === undefined) return undefined;
+    if (suggestionId === undefined) return undefined;
     let current = true;
     setForbidden(false);
     void createClient(connection)
@@ -133,9 +125,9 @@ export function SignInRuleSuggestionHost({
     return () => {
       current = false;
     };
-  }, [offered, connection, createClient, suggestionId, answered]);
+  }, [connection, createClient, suggestionId, answered]);
 
-  if (suggestionId === undefined || !offered) return null;
+  if (suggestionId === undefined) return null;
   if (forbidden)
     return (
       <p className="m-0 text-ui text-warn" data-rule-suggestion-forbidden="" role="status">

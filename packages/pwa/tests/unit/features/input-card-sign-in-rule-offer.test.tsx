@@ -1,6 +1,6 @@
 /** After a hand-tapped sign-in the card offers a standing rule: only for a machine that has the rules, and never after the one-tap. */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { DAEMON_FEATURES, type InputRequest } from '@ferretry/protocol';
+import type { InputRequest } from '@ferretry/protocol';
 import { InputCard } from '../../../src/features/input-request/input-card.tsx';
 import { InputCardHost } from '../../../src/features/input-request/input-card-host.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
@@ -9,7 +9,6 @@ import type { RuleClient } from '../../../src/lib/sign-in-rules.ts';
 import { createAppStore, DaemonClientProvider, StoreProvider } from '../../../src/lib/store.tsx';
 import { type Mounted, mount } from '../../support/dom.ts';
 import { click, settle } from '../../support/dom-form.ts';
-import { healthOf } from '../../support/health.ts';
 import { type Call, fakeClient, NOW, offer, primaryOffer, saved, withSaved } from '../../support/input-fixtures.ts';
 import { type RuleWorld, ruleClient } from '../../support/sign-in-rule-client.ts';
 import { SITE_SIGN_IN } from '../../support/sign-in-rule-fixtures.ts';
@@ -96,14 +95,13 @@ describe('the standing-rule offer on the input card', () => {
 });
 
 describe('the input card host', () => {
-  const host = async (features: string[], store?: Awaited<ReturnType<typeof createAppStore>>) => {
+  const host = async (store?: Awaited<ReturnType<typeof createAppStore>>) => {
     const rules = ruleClient();
     const value = withSaved(saved({ offers: two() }), { expiresAt: '2099-01-01T00:00:00.000Z' });
     const client = {
       request: async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) => {
         if (path.startsWith('/v1/sign-in-rules') || path === '/v1/accounts')
           return await rules.client.request(path, schema as never, init);
-        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', features));
         if (path.endsWith('/deliver'))
           return schema.parse(delivered({ path, method: init?.method ?? 'GET', body: JSON.parse(String(init?.body)) }));
         return schema.parse({ requests: [value] });
@@ -137,20 +135,14 @@ describe('the input card host', () => {
       fetcher: async () => Response.json({}),
     });
 
-  it('offers a rule after a hand-tap on a machine that reports sign-in rules', async () => {
-    const view = await host([DAEMON_FEATURES.signInRules]);
+  it('offers a rule after a hand-tap', async () => {
+    const view = await host();
     expect(view.container.querySelector('[data-rule-offer-button]')).not.toBeNull();
-  });
-
-  it('offers none on a machine that does not', async () => {
-    const view = await host(['messages.tail.1']);
-    expect(view.container.querySelector('[data-input-settled]')).not.toBeNull();
-    expect(view.container.querySelector('[data-rule-offer-button]')).toBeNull();
   });
 
   it('asks the app’s own passkey prompt for the rule the owner approves', async () => {
     const store = await withStore();
-    const view = await host([DAEMON_FEATURES.signInRules], store);
+    const view = await host(store);
     await click(view.container.querySelector('[data-rule-offer-button]'));
     for (let tries = 0; tries < 4; tries += 1) await settle();
     await click(view.container.querySelector('[data-rule-approve]'));

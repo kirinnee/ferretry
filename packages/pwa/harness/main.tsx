@@ -27,7 +27,6 @@ import type {
   HarnessUpdateStartRequest,
   HarnessUpdateView,
   LimitsView,
-  LoginEntryList,
   PairedDevicesView,
   PairingCodeMintResponse,
   PasskeysView,
@@ -282,6 +281,7 @@ import {
   fakePort as fakeBoardPort,
   laneSetFor,
 } from '../tests/unit/board-support.ts';
+import { fileOf as accountDefaultsOf, list as accountsFixture } from '../tests/support/accounts-fixtures.ts';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
 import { AgendaChatHarness } from './agenda-chat.tsx';
 import { RESOLVED_AGENDA_LIST } from './agenda-projection-fixture.ts';
@@ -1747,30 +1747,10 @@ const COPY_RULES_READY: PasteRuleList = {
   ],
 };
 
-const SAVED_LOGINS_READY: LoginEntryList = {
-  v: 1,
-  health: 'ready',
-  entries: [
-    {
-      id: 'GITHUB_KIRINNEE',
-      label: 'GitHub (kirinnee)',
-      match: ['github.com'],
-      username: 'kirinnee',
-      fields: { password: true, totp: false },
-      createdAt: '2026-10-30T09:00:00.000Z',
-      updatedAt: '2026-10-30T09:00:00.000Z',
-    },
-    {
-      id: 'SUDO_KIRIN_BOX',
-      label: 'sudo on kirin-box',
-      match: ['sudo@kirin-box'],
-      fields: { password: true, totp: true },
-      totp: { algorithm: 'SHA1', digits: 6, period: 30 },
-      createdAt: '2026-10-30T09:00:00.000Z',
-      updatedAt: '2026-10-30T09:00:00.000Z',
-    },
-  ],
-};
+const ACCOUNTS_READY = accountsFixture();
+
+/** `account-defaults.yaml`, which the Accounts screen reads beside the list: absent, so no default is drawn. */
+const accountDefaultsFile = accountDefaultsOf('', false);
 
 const SECRETS_READY: SecretList = {
   v: SECRET_SCHEMA_VERSION,
@@ -1979,16 +1959,20 @@ const HARNESS_UNLOCK_GATE = new StepUpGate({
 });
 if (window.location.search === '?unlock-prompt') void HARNESS_UNLOCK_GATE.require(daemon);
 
-/** The secret store's client: answers the two lists the panel reads (secrets and saved logins), and no write. */
+/** The secret store's client: answers the lists the panels read (secrets, secure-copy rules and accounts), and no write. */
 const HARNESS_SECRET_CLIENT: SecretClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
   return {
     request: (async (path: string) =>
-      path === '/v1/secrets/logins'
-        ? SAVED_LOGINS_READY
-        : path === '/v1/copy-rules'
-          ? COPY_RULES_READY
-          : SECRETS_READY) as SecretClient['request'],
+      path === '/v1/accounts'
+        ? ACCOUNTS_READY
+        : path === '/v1/accounts/look-alike'
+          ? { v: 1, groups: [] }
+          : path.startsWith('/v1/config/file')
+            ? accountDefaultsFile
+            : path === '/v1/copy-rules'
+              ? COPY_RULES_READY
+              : SECRETS_READY) as SecretClient['request'],
   };
 };
 
@@ -2062,7 +2046,7 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
     if (setup !== undefined) return setup;
     if (path === '/v1/fleet/export') return HARNESS_CLONE_EXPORT;
     // A machine that predates the review: no such route, so a clone copies its settings whole (and says so).
-    if (path === '/v1/fleet/clone/review') throw new FyHttpError('no route POST ' + path, 404, 'unknown_route');
+    if (path === '/v1/fleet/clone/review') throw new FyHttpError(`no route POST ${path}`, 404, 'unknown_route');
     if (path === '/v1/fleet/setup/scan') return setUp ? HARNESS_SETUP_SCAN : HARNESS_FIRST_RUN_SCAN;
     // The Browser tab: a running browser behind a proxy, and a Test proxy that reaches it.
     if (path === '/v1/browser/state')
@@ -2873,8 +2857,8 @@ const HARNESS_SEARCH_SESSION_IDS: readonly string[] = ['harness-session', HARNES
 
 const HARNESS_DAEMON_READS: Readonly<Record<string, unknown>> = {
   '/v1/secrets': SECRETS_READY,
-  // Saved logins: one GitHub login with a username, and sudo on this machine with a 2FA seed; never a value.
-  '/v1/secrets/logins': SAVED_LOGINS_READY,
+  // Accounts: sites and sign-ins with their factors; never a value.
+  '/v1/accounts': ACCOUNTS_READY,
   // Secure copy: one paste approved in advance, so Settings › Secrets shows the section with a rule in it.
   '/v1/copy-rules': COPY_RULES_READY,
   // The session workspace's "This folder" rail: one open signal and one answered, and its skills.

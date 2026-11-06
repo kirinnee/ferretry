@@ -48,15 +48,6 @@ export async function listRules(client: CopyClient): Promise<PasteRuleList> {
   return await client.request(RULES_PATH, PasteRuleListSchema);
 }
 
-/** The one-step create, for a daemon that does not stage paste rules (`copy-rules.passkey.1` not reported). */
-export async function addRule(client: CopyClient, rule: PasteRuleCreate): Promise<PasteRule> {
-  return await client.request(RULES_PATH, PasteRuleSchema, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(PasteRuleCreateSchema.parse(rule)),
-  });
-}
-
 /** What `GET /v1/copy-rules/settings` came to: the view, a daemon too old to have it, or why it could not be read. */
 export type CopySettingsRead =
   | { readonly kind: 'view'; readonly view: PasteRuleSettingsView }

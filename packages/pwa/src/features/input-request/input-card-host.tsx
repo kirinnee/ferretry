@@ -8,23 +8,14 @@
  * happened rather than vanish.
  */
 
-import {
-  type AccountList,
-  type AgendaItem,
-  DAEMON_FEATURES,
-  type InputRequest,
-  strongestSensitivity,
-  type TwoFactorStageId,
-} from '@ferretry/protocol';
+import type { AccountList, AgendaItem, InputRequest, TwoFactorStageId } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { machineOffers } from '../../lib/daemon-health.ts';
 import type { InputClient } from '../../lib/input-api.ts';
 import { readAccounts, readInputRequest } from '../../lib/input-api.ts';
 import { fieldsOf } from '../../lib/input-card.ts';
 import type { StepUpWords } from '../../lib/step-up-gate.ts';
 import { useAddKeyStepUp, useApproveSignInRuleStepUp, useDaemonClient } from '../../lib/store.tsx';
-import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { InputCard } from './input-card.tsx';
 
 const INPUT_REFRESH_MS = 3_000;
@@ -63,11 +54,8 @@ export function InputCardHost({
   const [client, setClient] = useState<InputClient | null>(null);
   const [read, setRead] = useState<Read>({ kind: 'loading' });
   const settled = useRef(false);
-  const health = useDaemonHealth(connection);
-  const offersKeys = machineOffers(health, DAEMON_FEATURES.twoFactorKeys);
   const requireAddKey = useAddKeyStepUp();
   const askRuleStage = useApproveSignInRuleStepUp();
-  const offersRules = machineOffers(health, DAEMON_FEATURES.signInRules);
   const [accounts, setAccounts] = useState<AccountList | undefined>(undefined);
   const [accountsTick, setAccountsTick] = useState(0);
 
@@ -114,12 +102,9 @@ export function InputCardHost({
     return () => clearInterval(timer);
   }, [refresh]);
 
-  // A code card reads them for its keys; any other card with saved accounts, to name whose sign-in it is in its title.
+  // A card with saved accounts reads them, to name whose sign-in it is (and, on a code card, its keys) in its title.
   // The listing is secrets-gated (`GET /v1/accounts` needs `secrets.use`): a device refused it keeps the place-only title.
-  const wantsAccounts =
-    read.kind === 'open' &&
-    read.request.saved !== undefined &&
-    (strongestSensitivity(read.request.fields) === 'code' ? offersKeys : true);
+  const wantsAccounts = read.kind === 'open' && read.request.saved !== undefined;
   useEffect(() => {
     if (!wantsAccounts || client === null) {
       setAccounts(undefined);
@@ -184,16 +169,12 @@ export function InputCardHost({
         ? {}
         : { addKey: (stage: TwoFactorStageId, words: string) => requireAddKey(connection, stage, words) })}
       {...(agentName === undefined ? {} : { agentName })}
-      {...(!offersRules
-        ? {}
-        : {
-            ruleOffer: {
-              askPasskey:
-                askRuleStage === undefined
-                  ? undefined
-                  : (stage: `srs_${string}`, words: StepUpWords) => askRuleStage(connection, stage, words),
-            },
-          })}
+      ruleOffer={{
+        askPasskey:
+          askRuleStage === undefined
+            ? undefined
+            : (stage: `srs_${string}`, words: StepUpWords) => askRuleStage(connection, stage, words),
+      }}
     />
   );
 }

@@ -6,7 +6,6 @@ import { useEffect } from 'react';
 import { Composer, type ComposerProps } from '../../../src/components/composer.tsx';
 import {
   BoardSendBack,
-  SEND_BACK_FILES_NEED_UPDATE,
   type SendBack,
   type SendBackFiles,
   type SendBackPorts,
@@ -52,7 +51,6 @@ const png = (name: string): File => new File(['png'], name, { type: 'image/png' 
 const files = (overrides: Partial<SendBackFiles> = {}): SendBackFiles & { readonly uploaded: string[] } => {
   const uploaded: string[] = [];
   return {
-    offered: true,
     sessionId: 'child-1',
     upload: async file => {
       uploaded.push(file.name);
@@ -441,28 +439,9 @@ describe('BoardSendBack — pictures', () => {
     expect(given.uploaded).toHaveLength(MAX_BOARD_REOPEN_ATTACHMENTS);
   });
 
-  it('sends the words alone to a machine too old for pictures, and says how to get them', async () => {
-    const given = files({ offered: false });
-    const { root } = await composer({ files: given });
-    expect(attachButton(root)).toBeNull();
-    expect(root.querySelector('[data-send-back-note="update"]')?.textContent).toBe(SEND_BACK_FILES_NEED_UPDATE);
-    const shot = new Event('paste', { bubbles: true, cancelable: true });
-    Object.assign(shot, { clipboardData: { files: [png('screen.png')] } });
-    await interact(() => fieldOf(root).dispatchEvent(shot));
-    expect(shot.defaultPrevented).toBe(false);
-    expect(given.uploaded).toEqual([]);
-  });
-
-  it('waits on pictures until the machine has answered, and says nothing about updates', async () => {
-    const { root } = await composer({ files: files({ offered: null }) });
-    expect(attachButton(root)).toBeNull();
-    expect(root.querySelector('[data-send-back-note]')).toBeNull();
-  });
-
-  it('draws the words alone, with no note, where the page cannot upload', async () => {
+  it('draws the words alone where the page cannot upload', async () => {
     const { root } = await composer({ files: null });
     expect(attachButton(root)).toBeNull();
-    expect(root.querySelector('[data-send-back-note]')).toBeNull();
   });
 });
 
@@ -488,109 +467,32 @@ describe('useSendBackFiles', () => {
   };
 
   const uploads: string[] = [];
-  const ports = (answer: (daemon: DaemonConnection) => Promise<boolean>): SendBackPorts => ({
-    sendBackFiles: answer,
+  const ports: SendBackPorts = {
     uploadAttachment: async (daemon, sessionId, file) => {
       uploads.push(`${daemon.daemonId}:${sessionId}:${file.name}`);
       return viewOf(file);
     },
-  });
+  };
 
-  it("asks the card's machine, then uploads to the card's ferret", async () => {
-    const { seen, last } = await probe(
-      ports(async () => true),
-      laptop,
-      'child-1',
-    );
-    expect(seen[0]?.offered).toBeNull();
-    expect(last()?.offered).toBe(true);
+  it("uploads to the card's ferret on the card's machine", async () => {
+    const { last } = await probe(ports, laptop, 'child-1');
     expect(last()?.sessionId).toBe('child-1');
     await last()?.upload(png('a.png'));
     expect(uploads.at(-1)).toBe(`${laptop.daemonId}:child-1:a.png`);
   });
 
-  it('reads a machine that says no as too old, and one that cannot be asked as not yet read', async () => {
-    expect(
-      (
-        await probe(
-          ports(async () => false),
-          laptop,
-          'child-1',
-        )
-      ).last()?.offered,
-    ).toBe(false);
-    await reset();
-    const failing = await probe(
-      ports(async () => {
-        throw new Error('offline');
-      }),
-      laptop,
-      'child-1',
-    );
-    expect(failing.last()?.offered).toBeNull();
-  });
-
-  it('forgets one machine answer when the card is on another', async () => {
-    const answers = new Map([
-      [laptop.daemonId, deferred<boolean>()],
-      [workstation.daemonId, deferred<boolean>()],
-    ]);
-    const { last, rerender } = await probe(
-      ports(daemon => must(answers.get(daemon.daemonId), 'answer').promise),
-      laptop,
-      'child-1',
-    );
-    answers.get(laptop.daemonId)?.resolve(true);
-    await interact(() => flush());
-    expect(last()?.offered).toBe(true);
+  it('follows the card to another machine', async () => {
+    const { last, rerender } = await probe(ports, laptop, 'child-1');
     await rerender(workstation);
-    expect(last()?.offered).toBeNull();
-    // The machine left behind answering late changes nothing.
-    await rerender(laptop);
-    await rerender(workstation);
-    answers.get(workstation.daemonId)?.resolve(false);
-    await interact(() => flush());
-    expect(last()?.offered).toBe(false);
+    await last()?.upload(png('b.png'));
+    expect(uploads.at(-1)).toBe(`${workstation.daemonId}:child-1:b.png`);
   });
 
   it('gives nothing without ports, a machine or a ferret', async () => {
     expect((await probe(undefined, laptop, 'child-1')).last()).toBeNull();
     await reset();
-    expect(
-      (
-        await probe(
-          ports(async () => true),
-          undefined,
-          'child-1',
-        )
-      ).last(),
-    ).toBeNull();
+    expect((await probe(ports, undefined, 'child-1')).last()).toBeNull();
     await reset();
-    expect(
-      (
-        await probe(
-          ports(async () => true),
-          laptop,
-          null,
-        )
-      ).last(),
-    ).toBeNull();
-  });
-
-  it.each([
-    { name: 'an answer', settle: (late: ReturnType<typeof deferred<boolean>>) => late.resolve(true) },
-    { name: 'a failure', settle: (late: ReturnType<typeof deferred<boolean>>) => late.reject(new Error('gone')) },
-  ])('drops $name that comes back after the hook is gone', async ({ settle }) => {
-    const late = deferred<boolean>();
-    const { seen } = await probe(
-      ports(() => late.promise),
-      laptop,
-      'child-1',
-    );
-    const before = seen.length;
-    await reset();
-    settle(late);
-    await flush();
-    expect(seen).toHaveLength(before);
+    expect((await probe(ports, laptop, null)).last()).toBeNull();
   });
 });

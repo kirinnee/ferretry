@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import {
   type AccountList,
   AccountListSchema,
-  DAEMON_FEATURES,
   LOGIN_ONE_FACTOR_WARNING,
   LOGIN_TOTP_WARNING,
   TWO_FACTOR_ERROR_CODES,
@@ -17,7 +16,6 @@ import { fieldsOf } from '../../../src/lib/input-card.ts';
 import { createAppStore, DaemonClientProvider, StoreProvider } from '../../../src/lib/store.tsx';
 import { interact, type Mounted, mount } from '../../support/dom.ts';
 import { click, settle, typeInto } from '../../support/dom-form.ts';
-import { healthOf } from '../../support/health.ts';
 import { type Call, fakeClient, field, NOW, offer, requestOf, saved } from '../../support/input-fixtures.ts';
 
 const mounted: Mounted[] = [];
@@ -656,17 +654,13 @@ describe('a code card with several accounts that sign in here', () => {
 });
 
 describe('the code card host', () => {
-  const served = (
-    features: string[] | undefined,
-    card: InputRequest = codeCard([{ factor: APP, label: 'Authenticator app' }]),
-  ) => {
+  const served = (card: InputRequest = codeCard([{ factor: APP, label: 'Authenticator app' }])) => {
     const paths: string[] = [];
     const client = {
       request: async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) => {
         paths.push(path);
         if (path.includes('/factors/seed'))
           return schema.parse(answers({ path, method: init?.method ?? 'GET', body: undefined }));
-        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', features));
         if (path === '/v1/accounts') return schema.parse(accountList([totp(APP, 'Authenticator app')]));
         return schema.parse({ requests: [card] });
       },
@@ -693,18 +687,8 @@ describe('the code card host', () => {
     return view;
   };
 
-  it('should not read accounts, nor change the card, against a daemon that does not report 2FA keys', async () => {
-    const machine = served(['messages.tail.1']);
-
-    const view = await host(machine);
-
-    expect(machine.paths).not.toContain('/v1/accounts');
-    expect(view.container.querySelector('[data-input-title]')).toBeNull();
-    expect(view.container.querySelector('[data-codes-panel]')).toBeNull();
-  });
-
   it('should draw no code panel or code title for a card whose field the daemon made a secret, even if it says code', async () => {
-    const machine = served([DAEMON_FEATURES.twoFactorKeys], { ...codeCard(), fields: [field('secret')] });
+    const machine = served({ ...codeCard(), fields: [field('secret')] });
 
     const view = await host(machine);
 
@@ -716,7 +700,6 @@ describe('the code card host', () => {
   it('should draw the plain card, no panel, when the accounts cannot be read', async () => {
     const client = {
       request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
-        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.twoFactorKeys]));
         if (path === '/v1/accounts') throw new Error('unreachable');
         return schema.parse({ requests: [codeCard([{ factor: APP, label: 'Authenticator app' }])] });
       },
@@ -729,7 +712,7 @@ describe('the code card host', () => {
   });
 
   it('should ask the app’s own passkey prompt, naming the account, when a key is saved inside the app', async () => {
-    const machine = served([DAEMON_FEATURES.twoFactorKeys]);
+    const machine = served();
     const store = await createAppStore({
       repository: { load: async () => null, save: async () => undefined },
       connectClient: async () => ({}) as never,
@@ -766,7 +749,7 @@ describe('the code card host', () => {
   });
 
   it('should read accounts and title the card from the keys where the daemon reports 2FA keys', async () => {
-    const machine = served([DAEMON_FEATURES.twoFactorKeys]);
+    const machine = served();
 
     const view = await host(machine);
 

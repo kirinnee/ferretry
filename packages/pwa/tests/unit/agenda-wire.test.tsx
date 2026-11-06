@@ -9,7 +9,7 @@ import {
   sessionAgendaRepliesPath,
   sessionAgendaSummary,
 } from '../../src/lib/agenda-wire.ts';
-import { AgendaWireProbes, useWorkSearchOffered } from '../../src/lib/agenda-wire-react.tsx';
+import { AgendaWireProbes } from '../../src/lib/agenda-wire-react.tsx';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import type { DaemonHealthRead } from '../../src/lib/daemon-health.ts';
 import { type AppStore, DaemonClientProvider, StoreProvider } from '../../src/lib/store.tsx';
@@ -37,7 +37,6 @@ describe('the agenda paths', () => {
 describe('AgendaWireDirectory', () => {
   it('says nothing about a machine nobody has read', () => {
     const wires = new AgendaWireDirectory();
-    expect(wires.workSearchOf(A)).toBeUndefined();
     expect(wires.gateItemsOf(A)).toBeUndefined();
     expect(wires.cardAsksOf(A)).toBeUndefined();
   });
@@ -57,37 +56,6 @@ describe('AgendaWireDirectory', () => {
     expect(heard).toBe(2);
     stop();
     wires.note(A, PLAIN);
-    expect(heard).toBe(2);
-  });
-});
-
-describe('whether a machine searches work by words (work.search.1)', () => {
-  const SEARCHES = featured(DAEMON_FEATURES.workSearch);
-
-  it('says nothing until health answered, then follows the feature list, and forgets it with the machine', () => {
-    const wires = new AgendaWireDirectory();
-    expect(wires.workSearchOf(A)).toBeUndefined();
-    wires.note(A, { kind: 'failed' });
-    expect(wires.workSearchOf(A)).toBeUndefined();
-    wires.note(A, SEARCHES);
-    wires.note(B, PLAIN);
-    expect(wires.workSearchOf(A)).toBe(true);
-    expect(wires.workSearchOf(B)).toBe(false);
-    wires.clearDaemon(A);
-    expect(wires.workSearchOf(A)).toBeUndefined();
-  });
-
-  it('tells listeners when only that answer changes', () => {
-    const wires = new AgendaWireDirectory();
-    let heard = 0;
-    wires.subscribe(() => {
-      heard += 1;
-    });
-    wires.note(A, PLAIN);
-    expect(heard).toBe(1);
-    wires.note(A, SEARCHES);
-    expect(heard).toBe(2);
-    wires.note(A, SEARCHES);
     expect(heard).toBe(2);
   });
 });
@@ -145,35 +113,22 @@ const healthClient = (read: Record<string, DaemonHealthRead>) =>
     } as unknown as FyApiClient;
   }) as never;
 
-function Search({ id }: { readonly id: string }) {
-  return <span data-search={String(useWorkSearchOffered(daemonId(id)))} />;
-}
-
-const searchShown = (): string | null | undefined =>
-  shown?.container.querySelector('span')?.getAttribute('data-search');
-
 describe('the agenda wire in React', () => {
-  it('offers nothing outside an app store', async () => {
-    shown = await mount(<Search id="alpha" />);
-    expect(searchShown()).toBe('undefined');
-  });
-
-  it('learns each paired machine’s features from the health the probes read, and follows a change', async () => {
+  it('learns each paired machine’s features from the health the probes read', async () => {
     const wires = new AgendaWireDirectory();
     const store = { agendaWire: wires } as unknown as AppStore;
     const machines = [alpha, { ...alpha, daemonId: daemonId('beta') }];
     shown = await mount(
       <StoreProvider store={store}>
-        <DaemonClientProvider client={healthClient({ alpha: featured(DAEMON_FEATURES.workSearch), beta: PLAIN })}>
+        <DaemonClientProvider client={healthClient({ alpha: featured(DAEMON_FEATURES.agendaCardAsks), beta: PLAIN })}>
           <AgendaWireProbes machines={machines} />
-          <Search id="alpha" />
         </DaemonClientProvider>
       </StoreProvider>,
     );
-    await settleUntil(() => searchShown() === 'true', 'alpha to read as searching work', runAsync);
-    expect(wires.workSearchOf(daemonId('alpha'))).toBe(true);
-    expect(wires.workSearchOf(daemonId('beta'))).toBe(false);
-    await runAsync(async () => wires.note(daemonId('alpha'), PLAIN));
-    expect(searchShown()).toBe('false');
+    await settleUntil(
+      () => wires.cardAsksOf(daemonId('alpha')) === true && wires.cardAsksOf(daemonId('beta')) === false,
+      'both machines to be read',
+      runAsync,
+    );
   });
 });

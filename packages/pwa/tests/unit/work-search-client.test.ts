@@ -8,7 +8,7 @@ import {
   workHitDescription,
   workProjectLabel,
   workProjectNames,
-  workSearchPortFor,
+  createWorkSearchPort,
 } from '../../src/lib/work-search.ts';
 
 const RELAY_PROJECT = '6f1c2f0e-3a4b-4c55-9d1e-0a7b8c9d1e2f';
@@ -59,12 +59,16 @@ describe('the work search client', () => {
   });
 });
 
-describe('which machines get a search port', () => {
-  it('hands one out only for a machine whose health said it can search', () => {
-    const fetcher = async () => json({});
-    expect(workSearchPortFor(true, daemon, fetcher)).toBeDefined();
-    expect(workSearchPortFor(false, daemon, fetcher)).toBeUndefined();
-    expect(workSearchPortFor(undefined, daemon, fetcher)).toBeUndefined();
+describe('the search port of a machine', () => {
+  it('searches that machine through the carrier it is handed', async () => {
+    const seen: string[] = [];
+    const fetcher = async (url: Parameters<typeof fetch>[0]) => {
+      seen.push(String(url));
+      return json({ hits: [], total: 0, indexed: { tasks: 0, agenda: 0 } });
+    };
+    await createWorkSearchPort(daemon, fetcher).search({ q: 'relay' });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toContain('/v1/search');
   });
 });
 

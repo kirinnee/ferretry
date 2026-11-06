@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { DAEMON_FEATURES } from '@ferretry/protocol';
 import { type ItemConversationClient, itemSince, readItemConversation } from '../../src/lib/item-conversation.ts';
 
 const row = (offset: number, role: string, text: string, timestamp?: string) => ({
@@ -13,24 +12,14 @@ const row = (offset: number, role: string, text: string, timestamp?: string) => 
 type Row = ReturnType<typeof row>;
 
 interface Fake extends ItemConversationClient {
-  readonly cursors: unknown[];
   readonly tails: { through?: string | undefined; limit?: number | undefined }[];
 }
 
-/** A daemon with `rows` as its whole conversation, paging forward by `messages` and backward by `messagesTail`. */
-const daemonOf = (rows: readonly Row[], options: { tail: boolean }): Fake => {
-  const cursors: unknown[] = [];
+/** A daemon with `rows` as its whole conversation, paged backward by `messagesTail`. */
+const daemonOf = (rows: readonly Row[]): Fake => {
   const tails: Fake['tails'] = [];
   return {
-    cursors,
     tails,
-    health: async () => ({ features: options.tail ? [DAEMON_FEATURES.messagesTail] : [] }),
-    messages: async (_session: string, cursor?: string, limit = 200) => {
-      cursors.push(cursor);
-      const from = cursor === undefined ? 0 : Number(cursor);
-      const served = rows.slice(from, from + limit);
-      return { messages: served, nextCursor: from + limit < rows.length ? String(from + limit) : null } as never;
-    },
     messagesTail: async (_session: string, tail: { through?: string; limit?: number } = {}) => {
       tails.push({ through: tail.through, limit: tail.limit });
       const end = tail.through === undefined ? rows.length : Number(tail.through);
@@ -65,47 +54,36 @@ describe('readItemConversation', () => {
     ['assistant', 'Shipped.'],
   ];
 
-  it('keeps the rows that name the item, and the ferret’s answer to the owner’s, across pages, oldest first', async () => {
-    const client = daemonOf(rows, { tail: false });
+  it('keeps the rows that name the item, and the ferret’s answer to the owner’s, oldest first', async () => {
+    const client = daemonOf(rows);
     const entries = await readItemConversation(client, 'sess', 'A4');
     expect(entries.map(entry => [entry.kind, entry.text])).toEqual(expected);
     expect(entries[1]?.at).toBe(Date.parse('2026-08-01T10:05:00.000Z'));
-    expect(client.tails).toEqual([]);
   });
 
-  for (const tail of [false, true]) {
-    it(
-      'reloads once without old cursor evidence when ' + (tail ? 'tail' : 'forward') + ' history goes stale',
-      async () => {
-        const fake = daemonOf(rows, { tail });
-        const cursors: unknown[] = [];
-        let reads = 0;
-        const serve = async (cursor: string | undefined) => {
-          cursors.push(cursor);
-          reads += 1;
-          if (reads === 2) throw new FyHttpError('legacy cursor', 409, 'message_cursor_stale');
-          return {
-            messages: reads === 1 ? [row(999, 'user', 'obsolete !A4')] : rows,
-            nextCursor: reads === 1 ? 'legacy' : null,
-            previousCursor: reads === 1 ? 'legacy' : null,
-          } as never;
-        };
-        const client = {
-          ...fake,
-          messages: async (_id: string, cursor?: string) => serve(cursor),
-          messagesTail: async (_id: string, options?: { through?: string }) => serve(options?.through),
-        };
-        const entries = await readItemConversation(client, 'sess', 'A4');
-        expect(entries.map(entry => [entry.kind, entry.text])).toEqual(expected);
-        expect(cursors).toEqual([undefined, 'legacy', undefined]);
+  it('reloads once without old cursor evidence when history goes stale', async () => {
+    const cursors: unknown[] = [];
+    let reads = 0;
+    const client = {
+      messagesTail: async (_id: string, options?: { through?: string }) => {
+        cursors.push(options?.through);
+        reads += 1;
+        if (reads === 2) throw new FyHttpError('legacy cursor', 409, 'message_cursor_stale');
+        return {
+          messages: reads === 1 ? [row(999, 'user', 'obsolete !A4')] : rows,
+          nextCursor: reads === 1 ? 'legacy' : null,
+          previousCursor: reads === 1 ? 'legacy' : null,
+        } as never;
       },
-    );
-  }
+    };
+    const entries = await readItemConversation(client, 'sess', 'A4');
+    expect(entries.map(entry => [entry.kind, entry.text])).toEqual(expected);
+    expect(cursors).toEqual([undefined, 'legacy', undefined]);
+  });
 
   it('surfaces a second stale refusal instead of retrying forever', async () => {
     let reads = 0;
     const client = {
-      ...daemonOf([], { tail: true }),
       messagesTail: async () => {
         reads += 1;
         throw new FyHttpError('still stale', 409, 'message_cursor_stale');
@@ -113,27 +91,6 @@ describe('readItemConversation', () => {
     };
     await expect(readItemConversation(client, 'sess', 'A4')).rejects.toThrow('still stale');
     expect(reads).toBe(2);
-  });
-
-  it('walks a machine without backward reads forward from the start, a page of 1000 at a time', async () => {
-    const long = filler(100, 2_500, n => `2026-07-01T00:00:${String(n % 60).padStart(2, '0')}.000Z`);
-    const client = daemonOf([...long, ...rows], { tail: false });
-    await readItemConversation(client, 'sess', 'A4');
-    expect(client.cursors).toEqual([undefined, '1000', '2000']);
-  });
-
-  it('falls back to the forward walk when the machine’s health cannot be read', async () => {
-    const client = { ...daemonOf(rows, { tail: true }), health: async () => Promise.reject(new Error('offline')) };
-    const entries = await readItemConversation(client, 'sess', 'A4');
-    expect(entries.map(entry => [entry.kind, entry.text])).toEqual(expected);
-  });
-
-  it('reads the same thread from the tail as it does from the start', async () => {
-    const client = daemonOf(rows, { tail: true });
-    const entries = await readItemConversation(client, 'sess', 'A4');
-    expect(entries.map(entry => [entry.kind, entry.text])).toEqual(expected);
-    expect(entries[1]?.at).toBe(Date.parse('2026-08-01T10:05:00.000Z'));
-    expect(client.cursors).toEqual([]);
   });
 
   it('starts from the tail and stops at the first page that reaches back before the item', async () => {
@@ -144,7 +101,7 @@ describe('readItemConversation', () => {
       row(30_002, 'assistant', 'on it', '2026-08-01T10:01:00.000Z'),
       ...filler(40_000, 248, () => '2026-08-01T11:00:00.000Z'),
     ];
-    const client = daemonOf([...old, ...recent], { tail: true });
+    const client = daemonOf([...old, ...recent]);
     const since = Date.parse('2026-07-31T00:00:00.000Z');
     const entries = await readItemConversation(client, 'sess', 'A4', since);
     expect(entries.map(entry => entry.text)).toEqual(['about !A4', 'on it']);
@@ -154,7 +111,6 @@ describe('readItemConversation', () => {
       { through: undefined, limit: 200 },
       { through: String(8_000 + 350 - 200), limit: 200 },
     ]);
-    expect(client.cursors).toEqual([]);
   });
 
   it('joins a thread that straddles two tail pages', async () => {
@@ -163,7 +119,7 @@ describe('readItemConversation', () => {
       row(500, 'user', 'about !A4', '2026-08-01T10:00:00.000Z'),
       ...Array.from({ length: 8 }, (_, n) => row(501 + n, 'assistant', `answer ${n}`, '2026-08-01T10:01:00.000Z')),
     ];
-    const client = daemonOf([...lead, ...thread], { tail: true });
+    const client = daemonOf([...lead, ...thread]);
     const entries = await readItemConversation(client, 'sess', 'A4', Date.parse('2026-08-01T00:00:00.000Z'));
     expect(entries.map(entry => entry.text)).toEqual([
       'about !A4',
@@ -172,7 +128,7 @@ describe('readItemConversation', () => {
   });
 
   it('walks to the start of the conversation when the item gives no instant to stop at', async () => {
-    const client = daemonOf([...filler(100, 450, () => '2026-07-01T00:00:00.000Z'), ...rows], { tail: true });
+    const client = daemonOf([...filler(100, 450, () => '2026-07-01T00:00:00.000Z'), ...rows]);
     const entries = await readItemConversation(client, 'sess', 'A4');
     expect(entries).toHaveLength(3);
     expect(client.tails).toHaveLength(3);

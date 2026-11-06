@@ -1,21 +1,16 @@
 import { describe, expect, it } from 'bun:test';
-import { DAEMON_FEATURES } from '@ferretry/protocol';
 import { AgendaInboxPage } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import type { ClearPort } from '../../../src/lib/agenda-clear-agents.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import type { DaemonHealthRead } from '../../../src/lib/daemon-health.ts';
 import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../../support/agenda-inbox.tsx';
 import { chooseFromMenu } from '../../support/inbox-menus.ts';
 import { interact, mount, must } from '../../support/dom.ts';
-import { healthOf } from '../../support/health.ts';
 import { sessionView } from '../../support/sessions.ts';
 import { settleUntil } from '../../support/settle.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 const WORKSHOP = daemonConnection({ daemonId: 'workshop', baseUrl: 'https://workshop.example.test', deviceId: 't1' });
 const LAPTOP = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 't2' });
-const OFFERS: DaemonHealthRead = { kind: 'read', health: healthOf('5.0.0', [DAEMON_FEATURES.agendaClearAgents]) };
-const OLD: DaemonHealthRead = { kind: 'read', health: healthOf('4.9.0', []) };
 
 const agentCard = inboxCard(
   agendaItem('A1', { subject: 'Agent asks' }),
@@ -44,14 +39,15 @@ const settle = async (): Promise<void> =>
     interact,
   );
 
-const mountPage = async (withPort: boolean, health: Record<string, DaemonHealthRead>, calls: string[] = []) => {
+/** `down` names the machines whose clear route does not answer. */
+const mountPage = async (withPort: boolean, down: readonly string[] = [], calls: string[] = []) => {
   const fake = fakeInbox();
   const port: ClearPort = {
-    readHealth: async connection => health[connection.daemonId] ?? { kind: 'failed' },
     fetcher: async (input, init) => {
+      if (down.some(id => new URL(String(input)).hostname.startsWith(id))) throw new Error('offline');
       const body = JSON.parse(String(init?.body ?? '{}')) as { dryRun?: boolean };
       calls.push(`${new URL(String(input)).hostname} ${body.dryRun === true ? 'dry' : 'clear'}`);
-      return new Response(JSON.stringify({ cleared: body.dryRun === true ? 2 : 2, sessions: 1 }), {
+      return new Response(JSON.stringify({ cleared: 2, sessions: 1 }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -86,7 +82,7 @@ const mountPage = async (withPort: boolean, health: Record<string, DaemonHealthR
 
 describe('Inbox kind filter', () => {
   it('shows every ferret by default, then only interactive ones, then only agents', async () => {
-    const { view, kind, rows } = await mountPage(true, {});
+    const { view, kind, rows } = await mountPage(true);
     expect(view.container.querySelector('[data-agenda-kind] [aria-haspopup="menu"]')?.textContent).toBe('All');
     expect(rows().sort()).toEqual(['A1', 'A2', 'A3']);
     await kind('interactive');
@@ -99,7 +95,7 @@ describe('Inbox kind filter', () => {
 
 describe('Clear all from agent ferrets (gate)', () => {
   it('offers the button only under Agents', async () => {
-    const { view, kind, button } = await mountPage(true, {});
+    const { view, kind, button } = await mountPage(true);
     expect(button()).toBeNull();
     await kind('interactive');
     expect(button()).toBeNull();
@@ -109,7 +105,7 @@ describe('Clear all from agent ferrets (gate)', () => {
   });
 
   it('offers nothing when the host gave it no way to reach machines', async () => {
-    const { view, kind, button } = await mountPage(false, {});
+    const { view, kind, button } = await mountPage(false);
     await kind('auto');
     expect(button()).toBeNull();
     await view.unmount();
@@ -117,14 +113,14 @@ describe('Clear all from agent ferrets (gate)', () => {
 });
 
 describe('Clear all from agent ferrets (confirm, clear, result)', () => {
-  it('counts across machines, names the one that needs an update, then clears the others', async () => {
+  it('counts across machines, names the one it could not reach, then clears the others', async () => {
     const calls: string[] = [];
-    const { view, kind, button, dialog } = await mountPage(true, { workshop: OFFERS, laptop: OLD }, calls);
+    const { view, kind, button, dialog } = await mountPage(true, ['laptop'], calls);
     await kind('auto');
     await interact(() => must(button(), 'button').click());
     await settle();
     expect(dialog()?.textContent).toContain('Dismiss 2 agenda items from agent ferrets?');
-    expect(dialog()?.textContent).toContain('Laptop needs an update to clear');
+    expect(dialog()?.textContent).toContain('Laptop could not be reached');
     expect(calls).toEqual(['workshop.example.test dry']);
 
     await interact(() =>
@@ -134,16 +130,16 @@ describe('Clear all from agent ferrets (confirm, clear, result)', () => {
     expect(calls).toEqual(['workshop.example.test dry', 'workshop.example.test clear']);
     const result = must(view.container.querySelector('[data-clear-result]'), 'result').textContent ?? '';
     expect(result).toContain('Dismissed 2 agenda items from 1 ferret.');
-    expect(result).toContain('Laptop needs an update to clear');
+    expect(result).toContain('Laptop could not be reached');
 
     await interact(() => must(view.container.querySelector<HTMLButtonElement>('[data-clear-close]'), 'close').click());
     expect(dialog()).toBeNull();
     await view.unmount();
   });
 
-  it('clears every machine that offers the feature', async () => {
+  it('clears every machine', async () => {
     const calls: string[] = [];
-    const { view, kind, button } = await mountPage(true, { workshop: OFFERS, laptop: OFFERS }, calls);
+    const { view, kind, button } = await mountPage(true, [], calls);
     await kind('auto');
     await interact(() => must(button(), 'button').click());
     await settle();
@@ -164,7 +160,7 @@ describe('Clear all from agent ferrets (confirm, clear, result)', () => {
 
   it('can be cancelled without sending a clear', async () => {
     const calls: string[] = [];
-    const { view, kind, button, dialog } = await mountPage(true, { workshop: OFFERS }, calls);
+    const { view, kind, button, dialog } = await mountPage(true, ['laptop'], calls);
     await kind('auto');
     await interact(() => must(button(), 'button').click());
     await settle();
@@ -175,7 +171,7 @@ describe('Clear all from agent ferrets (confirm, clear, result)', () => {
   });
 
   it('closes on Escape once it has counted', async () => {
-    const { view, kind, button, dialog } = await mountPage(true, { workshop: OFFERS }, []);
+    const { view, kind, button, dialog } = await mountPage(true);
     await kind('auto');
     await interact(() => must(button(), 'button').click());
     await settle();
@@ -186,14 +182,14 @@ describe('Clear all from agent ferrets (confirm, clear, result)', () => {
     await view.unmount();
   });
 
-  it('has nothing to confirm when no machine can clear', async () => {
-    const { view, kind, button } = await mountPage(true, { workshop: OLD, laptop: { kind: 'failed' } });
+  it('has nothing to confirm when no machine answers', async () => {
+    const { view, kind, button } = await mountPage(true, ['workshop', 'laptop']);
     await kind('auto');
     await interact(() => must(button(), 'button').click());
     await settle();
     const text = view.container.querySelector('[data-clear-dialog]')?.textContent ?? '';
     expect(text).toContain('No open agenda items from agent ferrets.');
-    expect(text).toContain('Workshop needs an update to clear');
+    expect(text).toContain('Workshop could not be reached');
     expect(text).toContain('Laptop could not be reached');
     expect(view.container.querySelector('[data-clear-confirm-button]')).toBeNull();
     await view.unmount();

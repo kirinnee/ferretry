@@ -60,8 +60,6 @@ export interface AccountDetailProps {
   readonly rules?: RulesBinding | undefined;
   /** Asks for the passkey bound to a staged seed; absent outside the app, where no seed can be saved. */
   readonly addKey: ((stage: TwoFactorStageId, words: string) => Promise<boolean>) | undefined;
-  /** False on a machine without 2FA keys: the tab is not offered. */
-  readonly withKeys: boolean;
   readonly tab: AccountTab;
   readonly onTab: (tab: AccountTab) => void;
   readonly onOpenSite: (signIn: SignInSummary) => void;
@@ -70,7 +68,7 @@ export interface AccountDetailProps {
 }
 
 export function AccountDetail(props: AccountDetailProps): ReactNode {
-  const { account, tab, onTab, withKeys } = props;
+  const { account, tab, onTab } = props;
   return (
     <section
       aria-label={`Account ${account.label}`}
@@ -84,14 +82,9 @@ export function AccountDetail(props: AccountDetailProps): ReactNode {
           names it, not an environment variable
         </p>
       </header>
-      <Tabs
-        label={`${account.label} sections`}
-        onSelect={onTab}
-        selected={tab}
-        tabs={withKeys ? TABS : TABS.filter(each => each.id !== 'keys')}
-      />
+      <Tabs label={`${account.label} sections`} onSelect={onTab} selected={tab} tabs={TABS} />
       {tab === 'details' ? <DetailsTab {...props} /> : null}
-      {tab === 'keys' && withKeys ? <KeysTab {...props} /> : null}
+      {tab === 'keys' ? <KeysTab {...props} /> : null}
       {tab === 'sites' ? <SitesTab {...props} /> : null}
     </section>
   );

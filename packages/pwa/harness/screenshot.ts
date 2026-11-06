@@ -2959,7 +2959,7 @@ try {
               ['Warden', 'warden', '[data-daemon-panel-open="warden"] > *', 'agents'],
               // Sign-ins: the site accounts, secrets and secure-copy rules.
               ['Secrets', 'secrets', '[data-testid="secrets-card"]', 'sign-ins'],
-              ['Accounts', 'accounts', '[data-testid="logins-card"]', 'sign-ins'],
+              ['Accounts', 'accounts', '[data-accounts-screen]', 'sign-ins'],
               ['Secure copy', 'secure-copy', '[data-testid="copy-rules-card"]', 'sign-ins'],
               // The live panel, inside the frame, because that is where a reader meets it. The gallery
               // cards prove the individual states; this proves it is reachable and fits both widths.
