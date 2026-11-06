@@ -323,6 +323,79 @@ describe('planClashes across shipping units (review round 2)', () => {
   });
 });
 
+describe('planClashes and the board service (review round 3)', () => {
+  const prLink = (number: number): PrLink =>
+    PrLinkSchema.parse({
+      url: `https://github.com/kirinnee/ferretry/pull/${String(number)}`,
+      number,
+      repo: 'kirinnee/ferretry',
+      state: 'open',
+      draft: false,
+      checks: 'passing',
+      mergedAt: null,
+      mergeSha: null,
+      releasedIn: null,
+      polledAt: NOW,
+    });
+  const linking = (...prs: PrLink[]): Pick<BoardTask, 'links'> => ({
+    links: { prs, branch: null, commits: [], docs: [] },
+  });
+
+  it('should see a cycle through two cards that share one PR', async () => {
+    // Arrange — F1 and F2 ship PR 42 together; F3 ships PR 43.
+    const { ports, service } = serviceWith([
+      card({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) }),
+      card({ id: 'F2', laneId: 'implement', files: ['x.ts'], ...linking(prLink(42)) }),
+      card({ id: 'F3', laneId: 'implement', files: ['y.ts'], ...linking(prLink(43)) }),
+    ]);
+
+    // Act — F1 queues behind F3 (y.ts); then F3 claims x.ts, which F2 holds in PR 42.
+    await service.act('F1', action({ action: 'file', path: 'y.ts' }), lead);
+    await service.act('F3', action({ action: 'file', path: 'x.ts' }), lead);
+
+    // Assert
+    should(stored(ports, 'F1').dependsOn).eql([{ task: { id: 'F3' }, until: 'shipped' }]);
+    should(stored(ports, 'F3').dependsOn).eql([]);
+    should(stored(ports, 'F3').history.at(-1)).match({ type: 'note' });
+    should((stored(ports, 'F3').history.at(-1) as { text: string }).text).containEql(
+      "PR already waits on this card's PR",
+    );
+  });
+
+  for (const order of ['F2 first', 'F3 first'] as const) {
+    it(`should queue behind the lead's PR whatever the store order (${order})`, () => {
+      // Arrange — F2 and F3 are helpers of F1 (PR 42) claiming x.ts; F4, under F2, ships its own PR 43.
+      const lead = card({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) });
+      const f2 = card({ id: 'F2', parent: { id: 'F1' }, files: ['x.ts'] });
+      const f3 = card({ id: 'F3', parent: { id: 'F1' }, files: ['x.ts'] });
+      const subject = card({ id: 'F4', parent: { id: 'F2' }, ...linking(prLink(43)) });
+
+      // Act
+      const result = plan(subject, ['x.ts'], order === 'F2 first' ? [lead, f2, f3] : [lead, f3, f2]);
+
+      // Assert
+      should(result.waits.map(wait => wait.task.id)).eql(['F1']);
+    });
+  }
+
+  it('should queue behind a lead on another board whose lanes this read does not hold', () => {
+    // Arrange
+    const lead = card({
+      id: 'F1',
+      projectId: OTHER_PROJECT as BoardTask['projectId'],
+      laneId: 'implement',
+      ...linking(prLink(42)),
+    });
+    const helper = card({ id: 'F2', parent: { id: 'F1' }, files: ['x.ts'] });
+
+    // Act
+    const result = plan(card({ id: 'F3' }), ['x.ts'], [lead, helper]);
+
+    // Assert
+    should(result.waits.map(wait => wait.task.id)).eql(['F1']);
+  });
+});
+
 describe('queueBehindClashes', () => {
   it("should add the dependency and a note, both the daemon's, for the claiming session", () => {
     // Arrange

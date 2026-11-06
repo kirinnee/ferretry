@@ -13,6 +13,7 @@ import {
   type BoardTask,
   type PrLink,
   prUrlParts,
+  type TaskRef,
 } from '@ferretry/protocol';
 import { type BoardIndex, blockedBy, type LaneSets } from './graph.ts';
 import { ShippingUnits } from './shipping-unit.ts';
@@ -22,6 +23,11 @@ const samePr =
   (pr: { readonly repo: string; readonly number: number }) =>
   (link: Pick<PrLink, 'repo' | 'number'>): boolean =>
     link.repo.toLowerCase() === pr.repo.toLowerCase() && link.number === pr.number;
+
+/** Whether two refs name the same card: the same id, both on this machine or both on the same other one. */
+const sameRef = (index: BoardIndex, left: TaskRef, right: TaskRef): boolean =>
+  left.id === right.id &&
+  (index.isLocal(left) ? index.isLocal(right) : !index.isLocal(right) && left.machineId === right.machineId);
 
 /** The cards that ship in this PR (see the module doc), in store order. */
 const mergeUnit = (linksPr: (card: BoardTask) => boolean, index: BoardIndex): readonly BoardTask[] => {
@@ -47,9 +53,10 @@ export const mergeGateOf = (
   const inUnit = new Set(unit.map(card => card.id));
   const waits = unit.flatMap(card =>
     blockedBy(card, board.index, board.laneSets).flatMap((on): BoardMergeWait[] => {
+      // `get` answers only for a card on this machine, so a remote card that shares an id is never "inside".
       const blocker = board.index.get(on);
-      if (inUnit.has(on.id) || (blocker !== undefined && linksPr(blocker))) return [];
-      const until = card.dependsOn.find(dependency => dependency.task.id === on.id)?.until ?? 'shipped';
+      if (blocker !== undefined && (inUnit.has(blocker.id) || linksPr(blocker))) return [];
+      const until = card.dependsOn.find(dependency => sameRef(board.index, dependency.task, on))?.until ?? 'shipped';
       return [{ task: { id: card.id }, on, until }];
     }),
   );

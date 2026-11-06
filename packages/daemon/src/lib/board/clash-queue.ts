@@ -69,11 +69,15 @@ export interface ClashPlan {
   readonly unqueued: readonly (Clash & { readonly why: string })[];
 }
 
-/** Whether a card can hold another back: not dropped, and its work not shipped yet. */
+/**
+ * Whether a card can hold another back: not dropped, and its work not shipped yet. A card on a board whose lanes this
+ * read does not hold (a lead on another board) counts: dismissing it would hide a real clash, while a wait on a card
+ * that did ship is read as done wherever its lanes are known (`blockedBy`, the merge gate).
+ */
 const inQueue = (card: BoardTask, laneSets: LaneSets): boolean => {
   if (card.dropped !== null) return false;
   const category = cardCategory(card, laneSets);
-  return category !== undefined && !isBlockerDone(category, 'shipped');
+  return category === undefined || !isBlockerDone(category, 'shipped');
 };
 
 /** Whether the card's ferret already took this card out of its queue on purpose (`fy task undepend`). */
@@ -152,10 +156,11 @@ export const planClashes = (
     if (other.projectId !== card.projectId || other.files.length === 0) continue;
     const pair = firstClash(claimed, other.files);
     if (pair === undefined) continue;
+    // Same unit first: a clashing card that merges with this one says nothing about the other cards its target ships.
+    if (units.sameUnit(card, other)) continue;
     const target = units.shippingCard(other);
     if (decided.has(target.id) || target.id === card.id || !inQueue(target, laneSets)) continue;
     decided.add(target.id);
-    if (units.sameUnit(card, other)) continue;
     if (card.dependsOn.some(dependency => dependency.task.id === target.id && index.isLocal(dependency.task))) continue;
     if (releasedOnPurpose(card, target)) continue;
     const clash: Clash = {

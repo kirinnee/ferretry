@@ -122,6 +122,23 @@ describe('mergeGateOf', () => {
     should(gate(cards)?.waits).eql([{ task: { id: 'F1' }, on: { id: 'F18' }, until: 'shipped' }]);
   });
 
+  it('should keep the wait on a card of another machine that shares an id with a card in the unit', () => {
+    // Arrange
+    const cards = [
+      card({
+        id: 'F1',
+        ...linking(prLink(42)),
+        dependsOn: [{ task: { id: 'F1', machineId: 'machine-2' }, until: 'released' }],
+      }),
+    ];
+
+    // Act
+    const answer = gate(cards);
+
+    // Assert
+    should(answer?.waits).eql([{ task: { id: 'F1' }, on: { id: 'F1', machineId: 'machine-2' }, until: 'released' }]);
+  });
+
   it('should name the cards it could not read', () => {
     should(gate([], ['F7'])?.unreadable).eql(['F7']);
   });

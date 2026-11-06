@@ -45,7 +45,9 @@ One pure function, `claimsClash(a, b)` in `src/lib/board/clash-queue.ts`:
 - clash when the paths are equal, or one starts with the other followed by `/`.
 
 A card's claims **count** when it is on the same board and not dropped, and its shipping card (below) has not
-shipped: `isBlockerDone(category, 'shipped', …)` is false. A backlog card counts: it claimed the area
+shipped: `isBlockerDone(category, 'shipped', …)` is false. A shipping card on a board whose lanes the claim's read
+does not hold (a lead on another board) counts too: dismissing it would hide a real clash, and a wait on a card that
+did ship reads as done wherever its lanes are known. A backlog card counts: it claimed the area
 first, and a lead who wants the other card first removes the dependency (§4).
 
 **Shipping units** (`src/lib/board/shipping-unit.ts`, the ONE definition the queue and the gate share):
@@ -57,9 +59,10 @@ first, and a lead who wants the other card first removes the dependency (§4).
   soon as its ferret finishes), not when the work merges.
 - A card **rides** its shipping card's unit; a PR-free card also rides the units of everything under it, because an
   umbrella lead's claims are touched by whichever child PR merges.
-- Two cards are in the **same unit** when they ride a unit in common, or their shipping cards link a PR in common that
-  is still in flight. A merged or closed PR both kept from earlier says nothing about the next merge. Ancestry alone
-  is not a unit: a child with its own PR is a separate merge from its lead's.
+- Shipping cards that link a PR in common that is still in flight merge together, so they are **one unit** with one
+  key (the first such card in store order). A merged or closed PR both kept from earlier says nothing about the next
+  merge. Ancestry alone is not a unit: a child with its own PR is a separate merge from its lead's.
+- Two cards are in the **same unit** when they ride a unit key in common.
 
 **Who is waited on:** the clashing card's shipping card. A helper that already closed still counts while that shipping
 card has not shipped.
@@ -67,7 +70,7 @@ card has not shipped.
 Skipped, so the rule never deadlocks:
 
 - the card itself, and any card in the same shipping unit (they merge together, and the gate would hold the PR on
-  itself);
+  itself) — judged per clashing card before its shipping card is taken, so the store order never decides;
 - a card it already depends on (no second entry), and a card it took out of its queue with `fy task undepend`
   (a re-claim does not put back what the lead removed on purpose);
 - a card past the most dependencies a card may hold (128): noted, not added;
