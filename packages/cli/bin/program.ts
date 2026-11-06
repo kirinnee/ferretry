@@ -65,7 +65,6 @@ import { HostProcessIncarnations } from '../src/adapters/daemon/process-incarnat
 import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
 import { FileResetTrees } from '../src/adapters/daemon/reset-trees';
 import { FileDaemonRestartMarker, restartMarkerPath } from '../src/adapters/daemon/restart-marker';
-import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { privateRuntimeDirectory } from '../src/adapters/daemon/runtime-directory';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { TmuxSessionTerminalServer } from '../src/adapters/daemon/session-terminals';
@@ -628,7 +627,6 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
       let found: InstalledDaemonBinary | undefined;
       return () => (found ??= resolveDaemonBinary(environment, daemonName));
     })(),
-    retired: new FileRetiredArtifacts(),
     resetTrees: new FileResetTrees(),
     sessionTerminals: new TmuxSessionTerminalServer(processes),
     /**

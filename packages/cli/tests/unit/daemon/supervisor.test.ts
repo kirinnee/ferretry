@@ -13,7 +13,6 @@ import { type CommandScript, FakeFiles, FakeProcesses, FakeStateHomeClaim, insta
 const linux = layout();
 const mac = layout({ platform: 'darwin', userId: 501 });
 const daemonBinary = installedDaemon();
-const retiredPointer = `${linux.legacySnapshotRoot}/current`;
 
 function systemd(script: CommandScript = []): {
   supervisor: SystemdSupervisor;
@@ -71,7 +70,6 @@ describe('systemd supervisor install', () => {
 
     // Assert
     should(files.written.get(linux.systemdUnitFile)).containEql(`ExecStart="${daemonBinary.path}"`);
-    should(files.written.get(linux.systemdUnitFile)).not.containEql(`ExecStart="${retiredPointer}"`);
     should(processes.ran).deepEqual([
       'systemctl --user daemon-reload',
       'systemctl --user enable fyd.service',
@@ -531,7 +529,6 @@ describe('direct supervisor', () => {
     should(files.directories).deepEqual([linux.logDirectory]);
     should(processes.launched).have.length(1);
     should(processes.launched[0]?.argv).deepEqual([daemonBinary.path]);
-    should(processes.launched[0]?.argv).not.deepEqual([retiredPointer]);
     should(processes.launched[0]?.environment).deepEqual({
       FY_HOME: linux.stateHome,
       HOME: linux.homeDirectory,

@@ -106,37 +106,21 @@ export interface IIoPressurePort {
 }
 
 /**
- * One garbage-collection root that exists right now, reported with the path it was found at.
- *
- * The path travels back with the name so a caller that wants to drop a root passes back what
- * discovery returned rather than re-deriving it. Only the retired per-snapshot root directory an
- * earlier release wrote is still enumerated this way; the live root is one known path.
- */
-export interface HeldGcRoot {
-  /** Directory entry name, exactly as the root directory reported it. */
-  readonly name: string;
-  readonly path: string;
-}
-
-/**
  * Pinning a Nix store path so it cannot be garbage-collected.
  *
  * A daemon installed with `nix shell` has no garbage-collection root of its own: the store path is
  * live only while that shell is open, so a later `nix-collect-garbage` deletes the executable out
- * from under an installed service, which then breaks with no user action. That is why the root
- * survives the snapshot store: a person's own shell breaking afterwards is an accepted cost, but a
+ * from under an installed service, which then breaks with no user action. That is why the daemon
+ * holds a root of its own: a person's own shell breaking afterwards is an accepted cost, but a
  * user service that cannot launch at the next login is a failure nobody is present to see, and the
  * absolute path a unit file must record is the exact path a collection can delete.
  *
  * Every method reports rather than throws. A daemon that runs but is unpinned is strictly better than
- * a daemon that refuses to start because a pin did not take, and a root directory that cannot be read
- * is answered as "nothing is held" so the caller pins rather than refuses.
+ * a daemon that refuses to start because a pin did not take.
  */
 export interface INixGcRootPort {
   /** Resolve symbolic links, so a profile or shim path is classified by what it actually points at. */
   realPath(path: string): Promise<string>;
-  /** Every root currently in `directory`; empty when it does not exist yet. */
-  held(directory: string): Promise<readonly HeldGcRoot[]>;
   /**
    * Register an indirect GC root at `rootPath` for `storePath`.
    *
@@ -193,32 +177,6 @@ export interface IDaemonLifecycleLockPort {
 }
 
 /**
- * What removing one retired artifact tree did.
- *
- * Total on purpose, and `failed` is a VALUE rather than a rejection. Reclaiming disk an earlier
- * release left behind is tidying, and tidying may never fail a lifecycle verb — the daemon in front
- * of the operator is the thing that has to keep working. `absent` is the ordinary answer on every
- * host that never ran the release this cleans up after, and it says nothing to anybody.
- */
-export type RetiredArtifactOutcome =
-  | { readonly kind: 'absent' }
-  | { readonly kind: 'removed'; readonly files: number; readonly bytes: number }
-  | { readonly kind: 'failed'; readonly reason: string };
-
-/**
- * Removing a CLI-owned artifact tree an earlier release wrote and this one no longer keeps.
- *
- * Separate from `IServiceFilePort` because it makes a promise that port must never make: it forces
- * write permission back onto directories on the way down. The retired daemon snapshot store sealed
- * every snapshot directory read-only, so an ordinary recursive remove cannot unlink anything inside
- * one, and a store nobody can delete is the 100MB an operator is stuck with forever.
- */
-export interface IRetiredArtifactPort {
-  /** Remove `path` and everything under it; an absent path is `absent`, never a failure. */
-  retire(path: string): Promise<RetiredArtifactOutcome>;
-}
-
-/**
  * What one tree holds, measured without removing anything.
  *
  * `escapingLinks` is the evidence for a promise this port makes and a person has no other way to
@@ -239,11 +197,9 @@ export type ResetTreeMeasure =
 /**
  * Measuring and removing the trees a reset destroys.
  *
- * SEPARATE FROM `IRetiredArtifactPort`, and the difference is the failure contract rather than the
- * mechanics. Retiring an artifact an earlier release left behind is tidying, so it may never fail a
- * lifecycle verb and reports its problems as values. A reset that cannot remove what it just told
- * somebody it would remove has LIED to them, and half a reset is the state the whole verb exists to
- * stop people reaching by hand — so both methods here throw, and the verb fails with them.
+ * Every failure throws. A reset that cannot remove what it just told somebody it would remove has
+ * LIED to them, and half a reset is the state the whole verb exists to stop people reaching by hand —
+ * so both methods here throw, and the verb fails with them.
  *
  * `measure` is a separate call rather than a return value of `remove` because the order is the point:
  * a person is shown the sizes and the counts, and only then asked. A measurement that arrived with the

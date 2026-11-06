@@ -8,7 +8,6 @@ import type {
   DaemonStartHandle,
   DaemonSupervisorReport,
   DetachedLaunch,
-  HeldGcRoot,
   IClockPort,
   IDaemonHealthPort,
   IDaemonLifecycleClaim,
@@ -20,13 +19,11 @@ import type {
   INixGcRootPort,
   IResetInventoryPort,
   IResetTreePort,
-  IRetiredArtifactPort,
   IServiceDefinitionSupervisor,
   IServiceFilePort,
   ISessionTerminalServerPort,
   IStateHomeClaimPort,
   ResetTreeMeasure,
-  RetiredArtifactOutcome,
   SessionTerminalEnding,
   StopRequest,
 } from '../../../src/lib/daemon/ports';
@@ -242,8 +239,6 @@ export class FakeNixGcRoot implements INixGcRootPort {
   readonly realPaths: string[] = [];
   readonly pinned: Array<{ storePath: string; rootPath: string }> = [];
   readonly released: string[] = [];
-  /** Root entry names already in the root directory, as a real one would report them. */
-  heldNames: readonly string[] = [];
   failure: string | undefined;
   afterRealPath: (() => void) | undefined;
 
@@ -251,10 +246,6 @@ export class FakeNixGcRoot implements INixGcRootPort {
     this.realPaths.push(path);
     this.afterRealPath?.();
     return Promise.resolve(this.links.get(path) ?? path);
-  }
-
-  held(directory: string): Promise<readonly HeldGcRoot[]> {
-    return Promise.resolve(this.heldNames.map(name => ({ name, path: `${directory}/${name}` })));
   }
 
   pin(storePath: string, rootPath: string): Promise<string | undefined> {
@@ -335,23 +326,6 @@ export class FakeLogs implements IDaemonLogPort {
   show(logFile: string, follow: boolean): Promise<number> {
     this.shown.push({ file: logFile, follow });
     return Promise.resolve(this.code);
-  }
-}
-
-/**
- * Records which retired artifact trees a verb asked to remove, and can answer for each of them.
- *
- * The DEFAULT is `absent`, because that is what every host gets that never ran the release with the
- * snapshot store: the ordinary path has to be the one that needs no arranging, or a test proves the
- * cleanup only in the world where there is something to clean.
- */
-export class FakeRetiredArtifacts implements IRetiredArtifactPort {
-  readonly retired: string[] = [];
-  readonly answers = new Map<string, RetiredArtifactOutcome>();
-
-  retire(path: string): Promise<RetiredArtifactOutcome> {
-    this.retired.push(path);
-    return Promise.resolve(this.answers.get(path) ?? { kind: 'absent' });
   }
 }
 

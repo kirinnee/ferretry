@@ -4,6 +4,11 @@ import should from 'should';
 import { InvalidDaemonEnvironmentError, managerForPlatform, resolveDaemonLayout } from '../../../src/lib/daemon/layout';
 import { environment, HOME, layout } from './fixtures';
 
+/** The claim that stands for every CLI-owned artifact under the state directory. */
+function artifactClaim(resolved: ReturnType<typeof layout>): string | undefined {
+  return resolved.lifecycleLocks.find(lock => lock.includes('snapshot-store'));
+}
+
 describe('manager for platform', () => {
   it('should map each platform to the manager that actually exists there', () => {
     // Act + Assert
@@ -81,14 +86,13 @@ describe('daemon layout', () => {
     should(actual.launchAgentFile).equal(`${HOME}/Library/LaunchAgents/com.ferretry.fyd.plist`);
   });
 
-  it('should derive the retired snapshot store root without resolving a live executable', () => {
+  it('should resolve the daemon and product names without resolving a live executable', () => {
     // Act
     const actual = layout({ searchPath: '/only/here' });
 
     // Assert
     should(actual.daemonName).equal('fyd');
     should(actual.product).equal('ferretry');
-    should(actual.legacySnapshotRoot).equal(`${HOME}/.local/state/ferretry/daemon-snapshots/fyd`);
     should(actual.searchPath).equal('/only/here');
   });
 
@@ -104,9 +108,7 @@ describe('daemon layout', () => {
     // spelled independently, so a fourth reader — the verb that REMOVES them — would have been a
     // fourth spelling with nothing making the four agree, and one of them would be left behind.
     should(actual.stateArtifactRoot).equal(`${expected}/ferretry`);
-    for (const derived of [actual.legacySnapshotRoot, actual.nixGcRoot, actual.legacySnapshotGcRootDirectory]) {
-      should(derived.startsWith(`${actual.stateArtifactRoot}/`)).be.true();
-    }
+    should(actual.nixGcRoot.startsWith(`${actual.stateArtifactRoot}/`)).be.true();
   });
 
   it.each([
@@ -117,21 +119,6 @@ describe('daemon layout', () => {
     // refuse on is the home directory: `FY_HOME=$HOME` would otherwise make a reset remove every file
     // the user owns.
     should(layout({ stateHome: input }).homeDirectory).equal(expected);
-  });
-
-  it.each([
-    { name: 'XDG_STATE_HOME when the operator set one', input: '/tmp/xdg-state', expected: '/tmp/xdg-state' },
-    { name: '~/.local/state when it is unset', input: undefined, expected: `${HOME}/.local/state` },
-    { name: '~/.local/state when it is blank', input: '  ', expected: `${HOME}/.local/state` },
-  ])('should put the retired per-snapshot Nix roots under $name', ({ input, expected }) => {
-    // Act
-    const actual = layout({ stateDirectory: input });
-
-    // Assert — never under the state home. That directory is the daemon's, its layout model refuses
-    // any entry it has not declared, and its filesystem port refuses symbolic links anywhere inside
-    // it — and these roots are symbolic links.
-    should(actual.legacySnapshotGcRootDirectory).equal(`${expected}/ferretry/nix/snapshots/fyd`);
-    should(actual.legacySnapshotGcRootDirectory.startsWith(`${actual.stateHome}/`)).be.false();
   });
 
   describe('lifecycle claim', () => {
@@ -199,10 +186,10 @@ describe('daemon layout', () => {
         const exported = layout({ platform, stateDirectory: '/tmp/exported-state' });
         const defaulted = layout({ platform, stateDirectory: undefined });
 
-        // Assert — changing the snapshot/root ownership changes only that claim. The definition,
+        // Assert — changing the state-artifact ownership changes only that claim. The definition,
         // logical manager target and direct daemon still serialize the transaction.
         should(exported.lifecycleLocks.filter(lock => defaulted.lifecycleLocks.includes(lock))).deepEqual(shared);
-        should(exported.legacySnapshotGcRootDirectory).not.equal(defaulted.legacySnapshotGcRootDirectory);
+        should(exported.nixGcRoot).not.equal(defaulted.nixGcRoot);
       },
     );
 
@@ -462,17 +449,6 @@ describe('daemon layout', () => {
     });
   });
 
-  it('should name one live root and keep the retired per-snapshot directory out from under it', () => {
-    // Act
-    const actual = layout({ stateDirectory: '/tmp/xdg-state' });
-
-    // Assert — the live root is a symbolic link, so it cannot also be the directory the retired
-    // per-snapshot roots sit in; an installation that spelled them the same way could create neither.
-    should(actual.nixGcRoot).equal('/tmp/xdg-state/ferretry/nix/fyd');
-    should(actual.legacySnapshotGcRootDirectory).equal('/tmp/xdg-state/ferretry/nix/snapshots/fyd');
-    should(actual.legacySnapshotGcRootDirectory.startsWith(`${actual.nixGcRoot}/`)).be.false();
-  });
-
   it('should reject a relative XDG_STATE_HOME rather than resolve it against the cwd', () => {
     // Act + Assert
     should(() => resolveDaemonLayout(environment({ stateDirectory: 'state' }))).throw(
@@ -480,15 +456,14 @@ describe('daemon layout', () => {
     );
   });
 
-  it('should key the retired store by product and daemon under XDG_STATE_HOME', () => {
+  it('should key the artifact claim by product and daemon under XDG_STATE_HOME', () => {
     // Act
     const first = layout({ stateDirectory: '/tmp/state', product: 'alpha', daemonName: 'one' });
     const second = layout({ stateDirectory: '/tmp/state', product: 'alpha', daemonName: 'two' });
 
     // Assert
-    should(first.legacySnapshotRoot).equal('/tmp/state/alpha/daemon-snapshots/one');
-    should(second.legacySnapshotRoot).equal('/tmp/state/alpha/daemon-snapshots/two');
-    should(first.legacySnapshotRoot).not.equal(second.legacySnapshotRoot);
+    should(artifactClaim(first)).equal('/tmp/state/alpha/daemon-snapshots/.3-one.14-snapshot-store.lifecycle.lock');
+    should(artifactClaim(second)).equal('/tmp/state/alpha/daemon-snapshots/.3-two.14-snapshot-store.lifecycle.lock');
   });
 
   it('should treat a blank XDG_STATE_HOME as unset', () => {
@@ -496,7 +471,9 @@ describe('daemon layout', () => {
     const actual = layout({ stateDirectory: '   ' });
 
     // Assert
-    should(actual.legacySnapshotRoot).equal(`${HOME}/.local/state/ferretry/daemon-snapshots/fyd`);
+    should(artifactClaim(actual)).equal(
+      `${HOME}/.local/state/ferretry/daemon-snapshots/.3-fyd.14-snapshot-store.lifecycle.lock`,
+    );
   });
 
   it('should normalise a path with redundant segments', () => {

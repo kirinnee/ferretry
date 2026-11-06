@@ -45,7 +45,7 @@ export function resetRoots(layout: DaemonLayout): readonly [ResetRoot, ResetRoot
     },
     {
       label: `${layout.product} installation artifacts`,
-      holds: 'Nix garbage-collection roots, and the retired daemon snapshot store on an upgraded host',
+      holds: 'Nix garbage-collection roots and lifecycle locks',
       path: layout.stateArtifactRoot,
     },
   ];

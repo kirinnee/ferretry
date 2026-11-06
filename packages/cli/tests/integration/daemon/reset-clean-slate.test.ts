@@ -18,7 +18,6 @@ import {
 import { NixStoreGcRoot } from '../../../src/adapters/daemon/nix-gc-root.ts';
 import { BunDaemonProcess } from '../../../src/adapters/daemon/process.ts';
 import { FileResetTrees } from '../../../src/adapters/daemon/reset-trees.ts';
-import { FileRetiredArtifacts } from '../../../src/adapters/daemon/retired-artifacts.ts';
 import { FileServiceStore } from '../../../src/adapters/daemon/service-files.ts';
 import { TmuxSessionTerminalServer } from '../../../src/adapters/daemon/session-terminals.ts';
 import { FileStateHomeClaim } from '../../../src/adapters/state-home/claim-files.ts';
@@ -121,6 +120,11 @@ async function closeStores(): Promise<void> {
   stores.clear();
 }
 
+/** Where a host upgraded from the retired snapshot-store release still has its sealed store. */
+function sealedStoreOf(layout: DaemonLayout): string {
+  return join(layout.stateArtifactRoot, 'daemon-snapshots', layout.daemonName);
+}
+
 /**
  * A full installation: a claimed and bootstrapped state home, plus the artifact tree an upgraded host
  * carries — a snapshot store sealed read-only, and a garbage-collection link into a store output.
@@ -133,7 +137,7 @@ async function installation(layout: DaemonLayout): Promise<void> {
   // secret inside the home, so what a reset destroys is something this test can see going.
   await writeFile(join(layout.stateHome, 'state', 'secrets.json'), '{"ciphertext":"x"}');
 
-  const snapshot = join(layout.legacySnapshotRoot, 'snapshots', `sha256-${'a'.repeat(64)}`);
+  const snapshot = join(sealedStoreOf(layout), 'snapshots', `sha256-${'a'.repeat(64)}`);
   await mkdir(snapshot, { recursive: true });
   await writeFile(join(snapshot, 'fyd'), 'x'.repeat(1_000));
   await chmod(join(snapshot, 'fyd'), 0o555);
@@ -158,7 +162,6 @@ function deps(layout: DaemonLayout, out: string[], serving: HealthView | undefin
       acquire: (): Promise<IDaemonLifecycleClaim> => Promise.resolve({ release: () => Promise.resolve(undefined) }),
     },
     installedDaemon: () => ({ path: NOTHING, source: 'PATH', version: '1.2.3' }),
-    retired: new FileRetiredArtifacts(),
     resetTrees: new FileResetTrees(),
     // The daemon is down in every case here, so nothing is ever asked of this. That is the ordinary
     // situation for a reset: somebody is resetting a machine whose daemon will not serve.
@@ -199,7 +202,7 @@ afterEach(async () => {
   await closeStores();
   for (const root of roots) {
     // The fixtures seal directories read-only, so the tidy-up needs the same unsealing the subject does.
-    await new FileRetiredArtifacts().retire(root);
+    await new FileResetTrees().remove(root).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
   roots.clear();
@@ -213,7 +216,7 @@ describe('resetting an installation and starting again on the clean slate', () =
     const layout = layoutFor(await createTemporaryRoot());
     await installation(layout);
     should(await exists(join(layout.stateHome, 'state', 'secrets.json'))).be.true();
-    should(await exists(layout.legacySnapshotRoot)).be.true();
+    should(await exists(sealedStoreOf(layout))).be.true();
 
     // Act
     const out: string[] = [];

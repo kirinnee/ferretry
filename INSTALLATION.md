@@ -280,18 +280,20 @@ fy daemon restart         # stops the stray, then systemd starts its own
 
 ### Upgrading from a release with the daemon snapshot store
 
-Earlier releases copied `fyd` into a content-addressed store under
-`$XDG_STATE_HOME/ferretry/daemon-snapshots/fyd` and launched the copy, with `fy daemon snapshot
-build|list|promote` to manage it. Every property that store added — content addressing, verification,
-immutability, an atomic pointer, rollback — is one `/nix/store` already provides for a Nix
-installation and one your package manager owns for every other, so it is gone, and so are those three
-verbs.
+Earlier releases kept a content-addressed copy of `fyd` under
+`$XDG_STATE_HOME/ferretry/daemon-snapshots/fyd` and launched the copy. Nothing reads it any more, and
+the `fy daemon snapshot …` verbs are gone: `fy` runs the daemon executable installed on the host.
 
-Nothing you have to do. The first `fy daemon install`, `start`, `restart` or `uninstall` after the
-upgrade records the installed executable's absolute path, and only then removes the store and its
-per-snapshot Nix roots — roughly 100MB on a host that used it. It says what it removed. If the removal
-fails it says that too, names the directory, and carries on: nothing reads it any more, so it is safe
-to delete by hand.
+If that directory is still there it is safe to delete by hand. It is sealed read-only, so make it
+writable first:
+
+```bash
+chmod -R u+w "${XDG_STATE_HOME:-$HOME/.local/state}/ferretry/daemon-snapshots/fyd"
+rm -rf "${XDG_STATE_HOME:-$HOME/.local/state}/ferretry/daemon-snapshots/fyd"
+```
+
+Leave the `.…lifecycle.lock` file beside it in `daemon-snapshots/` alone: an older `fy` and this one
+use it to exclude each other.
 
 ## GitHub release (one-line installer)
 

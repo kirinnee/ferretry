@@ -93,17 +93,6 @@ export interface DaemonLayout {
   readonly stateArtifactRoot: string;
   readonly logDirectory: string;
   readonly logFile: string;
-  /**
-   * The daemon snapshot store an earlier release kept, named ONLY so it can be removed.
-   *
-   * Nothing writes here any more. Ferretry runs the daemon executable this host has installed, at the
-   * absolute path a unit file records, and every property the store added on top of that — content
-   * addressing, verification, immutability, an atomic pointer, rollback — is one `/nix/store` already
-   * provides for a Nix installation and one a package manager owns for every other. An upgraded host
-   * still has the directory, and roughly 100MB of copied executables inside it, so a lifecycle verb
-   * that has launched the installed daemon retires it rather than leaving it there forever.
-   */
-  readonly legacySnapshotRoot: string;
   readonly searchPath: string;
   /** The locale variables the daemon runs under, from {@link daemonLocale} — always UTF-8. */
   readonly locale: Readonly<Record<string, string>>;
@@ -134,15 +123,6 @@ export interface DaemonLayout {
    */
   readonly nixGcRoot: string;
   /**
-   * The directory of per-snapshot roots the retired snapshot store kept, named ONLY to release them.
-   *
-   * One root per retained snapshot existed because a snapshot's copied executable still loaded its
-   * ELF interpreter and shared libraries from the store output it was copied FROM, so each rollback
-   * candidate needed that output held. With no snapshots there are no rollback candidates and no
-   * copies, and every one of those roots holds a closure nothing on this host can run.
-   */
-  readonly legacySnapshotGcRootDirectory: string;
-  /**
    * The claims that serialize this daemon's mutating lifecycle commands across separate invocations.
    *
    * **Keyed on every ownership target the verbs may actually use, not on where this CLI keeps its own
@@ -153,7 +133,7 @@ export interface DaemonLayout {
    * logical user-manager unit; a launchd host claims its plist and domain/label. Both also claim the
    * daemon-qualified state home because either platform falls back to a direct child when no
    * definition is installed. Finally, one claim stands for every CLI-owned artifact derived from the
-   * same state directory — the garbage-collection root and the retired snapshot store — so two
+   * same state directory — the garbage-collection root and the lifecycle claims — so two
    * environments cannot share those artifacts without excluding one another.
    *
    * The array is already in one SEMANTIC acquisition order: manager target, state-artifact ownership,
@@ -266,7 +246,9 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
   const launchdLabel = `com.${product}.${daemonName}`;
   const launchdDomain = `gui/${String(userId)}`;
   const stateArtifactRoot = join(stateDirectory, product);
-  const legacySnapshotRoot = join(stateArtifactRoot, 'daemon-snapshots', daemonName);
+  // The path the artifact claim sits BESIDE, not a directory anything uses. It and the qualifier below
+  // are the ones the retired snapshot store used, so an older `fy` still contends on the same claim.
+  const artifactClaimAnchor = join(stateArtifactRoot, 'daemon-snapshots', daemonName);
   const manager = managerForPlatform(input.platform);
   const systemdUnitName = `${daemonName}.service`;
   const systemdUnitFile = join(configHome, 'systemd', 'user', systemdUnitName);
@@ -283,7 +265,6 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     stateArtifactRoot,
     logDirectory,
     logFile: join(logDirectory, `${daemonName}.log`),
-    legacySnapshotRoot,
     searchPath: input.searchPath,
     locale: daemonLocale(input.platform, input.locale ?? {}),
     systemdUnitName,
@@ -293,13 +274,12 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     launchdServiceTarget: `${launchdDomain}/${launchdLabel}`,
     launchAgentFile,
     nixGcRoot: join(stateArtifactRoot, 'nix', daemonName),
-    legacySnapshotGcRootDirectory: join(stateArtifactRoot, 'nix', 'snapshots', daemonName),
     lifecycleLocks: lifecycleLocksFor(manager, {
       systemdUnitName,
       systemdUnitFile,
       launchdLabel,
       launchAgentFile,
-      legacySnapshotRoot,
+      artifactClaimAnchor,
       stateHome,
       daemonName,
       userId,
@@ -314,7 +294,8 @@ interface LifecycleArtifacts {
   readonly systemdUnitFile: string;
   readonly launchdLabel: string;
   readonly launchAgentFile: string;
-  readonly legacySnapshotRoot: string;
+  /** The path the artifact claim sits beside; see {@link lifecycleLocksFor} for why it is spelled this way. */
+  readonly artifactClaimAnchor: string;
   readonly stateHome: string;
   readonly daemonName: string;
   readonly userId: number;
@@ -333,8 +314,7 @@ interface LifecycleArtifacts {
  * means another user can at worst occupy the predictable name and make the lifecycle fail closed
  * (a limit only where no private runtime directory exists). The definition claim covers the actual
  * file, the direct claim covers the state home used when that file is absent, and the artifact claim
- * covers everything derived from the same `XDG_STATE_HOME`: the Nix garbage-collection root, and the
- * retired snapshot store a verb removes.
+ * covers everything derived from the same `XDG_STATE_HOME`, such as the Nix garbage-collection root.
  *
  * **The manager-target claim is per user, not per state home, and that is deliberate.** A temporary
  * `FY_HOME` does not get a service of its own: there is one `fyd.service` per user manager (one
@@ -358,16 +338,15 @@ interface LifecycleArtifacts {
  *
  * **The artifact claim keeps the path and qualifier the snapshot store gave it**, which is deliberate
  * rather than leftover. During an upgrade an older `fy` is still on this host and still takes that
- * exact claim, and the older one is precisely the invocation that might be writing into the store this
- * one is about to delete. Renaming the claim to match the new vocabulary would make the two versions
- * contend for nothing at the one moment exclusion actually matters.
+ * exact claim. Renaming the claim to match the new vocabulary would make the two versions contend for
+ * nothing at the one moment exclusion actually matters.
  *
  * Checking which owner is active before acquiring would merely move the race. The fixed role order
  * below is therefore load-bearing: unresolved aliases can spell the same directories in opposite
  * lexical orders, but they cannot move a physical claim from one semantic position to another.
  */
 function lifecycleLocksFor(manager: DaemonManagerKind, artifacts: LifecycleArtifacts): readonly [string, ...string[]] {
-  const snapshots = claimBeside(artifacts.legacySnapshotRoot, 'snapshot-store');
+  const snapshots = claimBeside(artifacts.artifactClaimAnchor, 'snapshot-store');
   const direct = claimBeside(artifacts.stateHome, `${artifacts.daemonName}.direct`);
   if (manager === 'direct') return [snapshots, direct];
   const definition = claimBeside(

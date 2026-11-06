@@ -63,13 +63,10 @@ describe('the two roots a reset removes', () => {
   });
 
   it('should hold the same artifact root every other state-directory path is derived from', () => {
-    // Assert — one derivation, so a fourth reader cannot be a fourth spelling. Every path the retiring
-    // and pinning verbs address has to sit inside the tree the reset removes, or a reset would leave
-    // one of them behind.
+    // Assert — one derivation, so a fourth reader cannot be a fourth spelling. Every path the pinning
+    // verbs address has to sit inside the tree the reset removes, or a reset would leave it behind.
     const resolved = layout();
-    should(resolved.legacySnapshotRoot.startsWith(`${resolved.stateArtifactRoot}/`)).be.true();
     should(resolved.nixGcRoot.startsWith(`${resolved.stateArtifactRoot}/`)).be.true();
-    should(resolved.legacySnapshotGcRootDirectory.startsWith(`${resolved.stateArtifactRoot}/`)).be.true();
   });
 });
 
@@ -209,7 +206,7 @@ describe('the preflight a person reads before confirming', () => {
   });
 
   it('should report an absent path as absent rather than as an empty one', () => {
-    // Arrange — every host that installed after the snapshot store was retired has no artifact tree,
+    // Arrange — a host with nothing left in the artifact tree has none to remove,
     // and that is normal rather than an error.
     const text = renderResetPlan(plan({ surveys: [survey('/var/lib/ferretry', { kind: 'absent' }, 'artifacts')] }));
 
