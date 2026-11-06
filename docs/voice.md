@@ -1221,10 +1221,22 @@ described](#what-is-read-and-what-is-described), [Which voice](#which-voice)); L
   (or Reading) and a prompt is waiting, the page reads the question **and its options** over the same one voice, once the
   text has settled. By then the microphone and the sends are gone with the runner, so the question is read and **never
   answerable by voice**. It ends with the speech, when the row's Stop is pressed, when the question is answered or goes
-  away, and with the page; a hidden tab or a device that cannot speak reads nothing (the form is on screen). While it
+  away, and with the page. **A hidden tab hears nothing, at any moment:** the reader watches the tab's visibility, so
+  hiding it during the 500 ms settle cancels the pending reading before it starts, hiding it while it speaks stops the
+  voice, and coming back to the tab never starts it again (a device that cannot speak reads nothing either; the form is on
+  screen). While it
   speaks the page's Auto-read stays out of the way, and the composer's unmount tells the page Live is off (it used to
   stay "on", leaving Auto-read suspended). A question that arrives while Live is only Listening is not read: Live was
   not waiting on the ferret. `session-chat-page-live-question.test.tsx` proves it through the real page.
+- **A question being read has its own controls.** The form replaced the Live bar, so while the retained reader is waiting
+  or speaking a bar sits right above the question (`question-reading-bar.tsx`): the state in words ("Reading the question
+  aloud", "Nothing is listening"), **Stop reading** and **Repeat** (48 px on a phone, 44 px on a computer; the keys are
+  written on the desktop buttons). The page also listens for **Space**, **Esc** or **S** to stop and **R** to read it again,
+  only while focus is not in a text field (the form's "Other" box keeps its own keys), never with Ctrl/Cmd/Alt held, never
+  for a key something already handled, and a focused button keeps its own Space. The bar is the reader's controls and
+  nothing else: there is no microphone, **Listen**, **Hold** or send, so the question is still **never answerable by
+  voice**; stopping it never reopens the microphone. The bar is gone once the reading ends. The page-level proof is
+  `session-chat-page-live-question.test.tsx`; the bar's own keys and layouts are `question-reading-bar.test.tsx`.
 - **A message you send by hand while a reply is being read** stops the reading — it belongs to an older turn. Typing
   comes first and already put Live On hold (above), so the usual hand send leaves it there until Resume; for a press that
   Live sees begin while reading (nothing typed — a files-only message), Live waits for its ANSWER (`LiveRunner.personSent`,

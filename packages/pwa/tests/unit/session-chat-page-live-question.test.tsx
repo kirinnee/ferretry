@@ -17,8 +17,8 @@ import { SessionSearchProvider } from '../../src/features/session-search/session
 import { ReadAloudProvider } from '../../src/hooks/use-read-aloud.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { SessionChatPage } from '../../src/lib/pages/session-chat-page.tsx';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
+import { SessionChatPage } from '../../src/lib/pages/session-chat-page.tsx';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import { createReadAloud } from '../../src/lib/voice-chat/read-aloud.ts';
 import { createSpeechSynthesisSpeaker } from '../../src/lib/voice-chat/speech-synthesis.ts';
@@ -72,7 +72,7 @@ afterEach(async () => {
   writeMdComposePref('on');
 });
 
-const rig = () => {
+const rig = (factor: 'phone' | 'desktop' = 'desktop') => {
   const recognition = fakeRecognitionProvider({ endsOnStop: true });
   restores.push(
     patch(globalThis, 'isSecureContext', true),
@@ -139,7 +139,7 @@ const rig = () => {
           client={client as never}
           connection={daemon}
           entries={[]}
-          formFactor="desktop"
+          formFactor={factor}
           onSessionChange={() => undefined}
           presentation="pane"
           session={sessionView('q', { state })}
@@ -267,5 +267,189 @@ describe('Live and a structured question', () => {
     page = null;
     expect(r.controller.getState().status).toBe('idle');
     expect(r.synth.queue.filter(utterance => utterance.text.trim() !== '')).toHaveLength(0);
+  });
+
+  describe('the retained reading has exits (fix round 3)', () => {
+    const hidePage = async (): Promise<void> => {
+      const original = descriptorOf(document, 'visibilityState');
+      restores.push(() => {
+        if (original) Object.defineProperty(document, 'visibilityState', original);
+        else delete (document as unknown as Record<string, unknown>).visibilityState;
+      });
+      await interact(() => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await flush();
+    };
+    const showPage = async (): Promise<void> => {
+      await interact(() => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await flush();
+    };
+    const key = async (name: string, target: EventTarget = document.body): Promise<void> => {
+      await interact(() => {
+        target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+      });
+      await flush();
+    };
+    const bar = (r: ReturnType<typeof rig>): HTMLElement | null => r.root().querySelector('[data-question-reading]');
+    const button = (r: ReturnType<typeof rig>, label: RegExp): HTMLButtonElement =>
+      must(
+        [...(bar(r) as HTMLElement).querySelectorAll<HTMLButtonElement>('button')].find(b =>
+          label.test(b.textContent ?? ''),
+        ) ?? null,
+        String(label),
+      );
+    const audible = (r: ReturnType<typeof rig>) => r.synth.spoken.filter(utterance => utterance.text.trim() !== '');
+
+    it('hiding the tab during the settle cancels the pending reading, and coming back does not re-arm it', async () => {
+      const r = rig();
+      await r.working();
+      await r.ask();
+      expect(bar(r)).not.toBeNull();
+      await hidePage();
+      expect(bar(r)).toBeNull();
+      await r.settle(600);
+      expect(audible(r)).toHaveLength(0);
+      await showPage();
+      await r.settle(5_000);
+      expect(audible(r)).toHaveLength(0);
+      expect(r.controller.getState().status).toBe('idle');
+    });
+
+    it('hiding the tab while the question speaks stops the voice', async () => {
+      const r = rig();
+      await r.working();
+      await r.ask();
+      await r.settle(600);
+      expect(r.controller.getState().status).toBe('reading');
+      await hidePage();
+      expect(r.controller.getState().status).toBe('stopped');
+      expect(r.synth.queue).toHaveLength(0);
+      expect(bar(r)).toBeNull();
+    });
+
+    it('shows Stop and Repeat with the state in words while the question is read, and nothing once it is not', async () => {
+      const r = rig();
+      await r.working();
+      expect(bar(r)).toBeNull();
+      await r.ask();
+      await r.settle(600);
+      const shown = bar(r) as HTMLElement;
+      expect(shown.textContent).toContain('Reading the question aloud');
+      expect(shown.textContent).toContain('Nothing is listening');
+      expect(shown.textContent).toContain('press Space to stop, R to hear it again');
+      expect(button(r, /Stop reading/)).toBeDefined();
+      expect(button(r, /Repeat/)).toBeDefined();
+      // The bar sits next to the question and is NOT a microphone: no listen / hold / send.
+      expect(shown.nextElementSibling?.classList.contains('fy-question-form')).toBe(true);
+      expect(shown.querySelector('[aria-label*="Live"]')).toBeNull();
+      await interact(async () => {
+        while (r.synth.queue.length > 0) r.synth.play();
+      });
+      await flush();
+      expect(bar(r)).toBeNull();
+    });
+
+    it('Stop reading silences the question and never reopens the microphone', async () => {
+      const r = rig();
+      await r.working();
+      await r.ask();
+      await r.settle(600);
+      const takes = r.recognition.created;
+      await interact(() => button(r, /Stop reading/).click());
+      await flush();
+      expect(r.controller.getState().status).toBe('stopped');
+      expect(r.synth.queue).toHaveLength(0);
+      expect(bar(r)).toBeNull();
+      await r.settle(60_000);
+      expect(r.recognition.created).toBe(takes);
+      expect(r.sends).toEqual(['ask me a question']);
+      expect(r.answers).toEqual([]);
+      expect(r.root().querySelector('.fy-question-form')).not.toBeNull();
+    });
+
+    it('Repeat reads the question again from the top', async () => {
+      const r = rig();
+      await r.working();
+      await r.ask();
+      await r.settle(600);
+      const first = audible(r).length;
+      await interact(() => button(r, /Repeat/).click());
+      await flush();
+      expect(bar(r)).not.toBeNull();
+      await r.settle(600);
+      expect(r.controller.getState().status).toBe('reading');
+      expect(r.controller.getState().segments.join(' ')).toContain('Which option?');
+      expect(audible(r).length).toBeGreaterThan(first);
+    });
+
+    it('Escape, Space and S stop it; R repeats it; the keys are for the page and not for a text field', async () => {
+      for (const name of ['Escape', ' ', 's', 'S']) {
+        const r = rig();
+        await r.working();
+        await r.ask();
+        await r.settle(600);
+        expect(r.controller.getState().status).toBe('reading');
+        await key(name);
+        expect(r.controller.getState().status).toBe('stopped');
+        expect(r.synth.queue.filter(utterance => utterance.volume > 0)).toHaveLength(0);
+        expect(bar(r)).toBeNull();
+        await page?.unmount();
+        page = null;
+        for (const restore of restores.reverse()) restore();
+        restores = [];
+      }
+      const r = rig();
+      await r.working();
+      await r.ask();
+      await r.settle(600);
+      const before = audible(r).length;
+      await key('r');
+      await r.settle(600);
+      expect(audible(r).length).toBeGreaterThan(before);
+      expect(r.controller.getState().status).toBe('reading');
+    });
+
+    it('a key typed in a text field, or with a modifier, or already handled, does not stop the reading', async () => {
+      const r = rig();
+      await r.working();
+      await r.ask();
+      await r.settle(600);
+      const field = document.createElement('input');
+      (page as Mounted).container.appendChild(field);
+      await key('Escape', field);
+      await key('s', field);
+      await key('r', field);
+      await interact(() => {
+        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', ctrlKey: true, bubbles: true }));
+        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', repeat: true, bubbles: true }));
+        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }));
+      });
+      // Space on the Stop button is the button's own press, not the page key (it would act twice).
+      await interact(() => {
+        button(r, /Stop reading/).dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+      });
+      await flush();
+      expect(r.controller.getState().status).toBe('reading');
+      expect(bar(r)).not.toBeNull();
+    });
+
+    it('on a phone the controls are the full-width phone row', async () => {
+      const r = rig('phone');
+      await r.working();
+      await r.ask();
+      await r.settle(600);
+      const shown = bar(r) as HTMLElement;
+      expect(shown.className).toContain('fy-live--question-phone');
+      expect(shown.textContent).not.toContain('press Space');
+      expect(shown.querySelector('kbd')).toBeNull();
+      await interact(() => button(r, /Stop reading/).click());
+      await flush();
+      expect(r.controller.getState().status).toBe('stopped');
+    });
   });
 });
