@@ -32,7 +32,7 @@ packages/cli/
 `src/lib/` may not import from `src/adapters/`, and it may not touch `console.*`, `process.*`, or
 terminal libraries (`chalk`/`ora`/`cli-progress`/`inquirer`). That boundary is not a convention you
 have to remember -- `scripts/validate/cli-contracts.sh arch` fails the build if domain code reaches
-for a terminal or an adapter. The composition root `bin/fy.ts` is the only seam allowed to know both
+for a terminal or an adapter. The composition root `bin/program.ts` is the only seam allowed to know both
 sides.
 
 Except where a snippet names a real package artifact, the domain examples below are illustrative;
@@ -189,7 +189,7 @@ class GreetController {
 }
 ```
 
-When such a controller is registered, `bin/fy.ts` can pass `world.io`: `ICliIo` structurally
+When such a controller is registered, `bin/program.ts` can pass `world.io`: `ICliIo` structurally
 satisfies `IGreetingOutput` without the domain importing the adapter. In tests, a captured double is
 injected in its place, so a journey can assert on the exact `{code, out, err}` a command produced
 without a real terminal. Because `src/lib/` is forbidden from importing an adapter or touching

@@ -1,10 +1,5 @@
-import {
-  AGENT_TOOL_MAX_TOTAL_WAIT_MS,
-  type AgentToolResult,
-  AgentToolCallSchema,
-  type SurfaceControlView,
-  type SurfaceKind,
-} from '@ferretry/protocol';
+import type { AgentToolResult, SurfaceControlView, SurfaceKind } from '@ferretry/protocol';
+import { AGENT_TOOL_MAX_TOTAL_WAIT_MS, AgentToolCallSchema } from '@ferretry/protocol/agent-tools';
 import type { IBrowserIo, IScreenshotWriter } from '../browser/types.ts';
 import { type AgentToolsClient, AgentToolsCommandError, type TerminalWait } from './client.ts';
 

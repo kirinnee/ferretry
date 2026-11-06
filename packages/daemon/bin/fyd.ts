@@ -1577,7 +1577,7 @@ export interface WorktreeComposition {
  * It exists because the two repository gates pull in opposite directions: the architecture gate
  * forbids `src/lib` from importing `src/adapters`, while production dead-code analysis requires
  * every module to be reachable from the package entry. A composition root outside both directories
- * satisfies each — the same reason `packages/cli/bin/fy.ts` is shaped this way.
+ * satisfies each — the same reason `packages/cli/bin/program.ts` is shaped this way.
  */
 export interface DaemonWorld {
   readonly role: typeof packageRole;

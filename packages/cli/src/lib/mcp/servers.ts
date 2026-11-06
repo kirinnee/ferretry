@@ -6,17 +6,14 @@
  * home and its project — so an agent can ask "why is my server not there?" and get the scope, the
  * approval and the check in words. Outside one, or with `--machine`, they read the whole machine.
  */
+import type { IFyApiClient, McpCheckResult, McpInventory, McpInventoryServer } from '@ferretry/protocol';
 import {
-  type IFyApiClient,
   MCP_CHECK_PATH,
   MCP_INVENTORY_PATH,
   McpCheckRequestSchema,
-  type McpCheckResult,
   McpCheckResultSchema,
-  type McpInventory,
   McpInventorySchema,
-  type McpInventoryServer,
-} from '@ferretry/protocol';
+} from '@ferretry/protocol/mcp-inventory';
 
 /** The only client capability the gateway consumes. */
 export type McpServersApiClient = Pick<IFyApiClient, 'request'>;

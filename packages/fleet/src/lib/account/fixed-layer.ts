@@ -77,6 +77,7 @@ import {
   settingsKey,
 } from './layering.ts';
 import type { AgentPermissions } from './schema.ts';
+import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from './pane-contract.ts';
 
 /** What one fixed-layer entry is for, as the read-only lock shows it. */
 export type FixedEntryPurpose =
@@ -242,7 +243,7 @@ export const CLAUDE_QUESTION_HOOKS: SettingsObject = {
 export const CODEX_QUESTIONS_FEATURE = 'default_mode_request_user_input';
 
 /** The launch variable naming a ferret's mode (`interactive` or `auto`); written by the daemon at creation. */
-export const SESSION_MODE_ENV = 'FY_SESSION_MODE';
+export { SESSION_MODE_ENV };
 
 export const CODEX_NO_ALT_SCREEN_FLAG = '--no-alt-screen';
 
@@ -292,7 +293,7 @@ export const FERRETRY_MCP_ENV_VARS: readonly string[] = [
  * Passive learning: whether this ferret is told to file lessons. A running ferret switched on or off
  * is told so with a queued, non-interrupting message, because its environment is fixed.
  */
-export const PASSIVE_LEARNING_ENV = 'FY_LEARNING_PASSIVE';
+export { PASSIVE_LEARNING_ENV };
 
 /** The teaching a ferret that is instructed to learn carries. Short on purpose — it is in every prompt. */
 export const LESSONS_INSTRUCTION = (fy: string): string =>
@@ -306,7 +307,7 @@ export const LESSONS_INSTRUCTION = (fy: string): string =>
  * The markup it teaches is the `fy-render` fence (docs/fy-render.md), and docs/hypermedia.md is the
  * contract that quotes this text verbatim.
  */
-export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
+export { HYPERMEDIA_ENV };
 
 /**
  * The hypermedia teaching. Short on purpose — it is in every prompt, so only mermaid, svg and html are taught
@@ -340,7 +341,7 @@ export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
  * a ferret at the deepest level a sub-ferret may start from, so it is never told about a door it cannot
  * open. docs/pack-mode.md quotes this text verbatim.
  */
-export const PACK_ENV = 'FY_PACK';
+export { PACK_ENV };
 
 /** The Pack mode teaching. Short on purpose — it is in every prompt. */
 export const PACK_INSTRUCTION = (fy: string): string =>
@@ -446,7 +447,7 @@ export const SET_UP_FERRETRY_INSTRUCTION = (fy: string): string =>
  * their attention, and the daemon pushes the phone once when it stops with items waiting. Off unless the
  * daemon writes {@link AGENDA_ENV} `1`. docs/notifications.md quotes this text verbatim.
  */
-export const AGENDA_ENV = 'FY_AGENDA';
+export { AGENDA_ENV };
 
 /**
  * The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. It teaches the model first
@@ -599,13 +600,8 @@ export function launchInstructions(fy: string, env: Readonly<Record<string, stri
   };
 }
 
-/**
- * What the tools server says when an agent connects (MCP `initialize` instructions): one line. Every
- * behavioural instruction is in the appended system prompt instead, which a harness weighs far above
- * a server's instructions.
- */
-export const TOOLS_SERVER_INSTRUCTIONS =
-  "Ferretry's tools: terminals, browser pages, configuration and lessons. How to use them is in your system prompt.";
+// The tools server's one-line MCP instructions live in their own import-free module (`./pane-contract.ts`).
+export { TOOLS_SERVER_INSTRUCTIONS } from './pane-contract.ts';
 
 /** The binary's name, as an instruction names it: the last segment of the command a wrapper runs. */
 export const binaryName = (fyCommand: string): string => fyCommand.split('/').pop() || fyCommand;

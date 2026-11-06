@@ -1,4 +1,10 @@
-import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from '@ferretry/fleet';
+import {
+  AGENDA_ENV,
+  HYPERMEDIA_ENV,
+  PACK_ENV,
+  PASSIVE_LEARNING_ENV,
+  SESSION_MODE_ENV,
+} from '@ferretry/fleet/pane-contract';
 
 /**
  * WHICH OF ITS OWN SECTIONS A FERRET LAUNCHED WITH (docs/hypermedia.md), read from the launch environment

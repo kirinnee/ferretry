@@ -42,8 +42,14 @@ cd "${root_dir}"
 cli_pkg="packages/cli"
 name="$(jq -r '.bin | to_entries[0].key' "${cli_pkg}/package.json")"
 [ -z "${name}" ] || [ "${name}" = "null" ] && echo "❌ no .bin entry in ${cli_pkg}/package.json" >&2 && exit 1
-# The composition root is the bin entry's FILE, derived like the name so a rename moves both.
-cli_root="${cli_pkg}/$(jq -r '.bin | to_entries[0].value' "${cli_pkg}/package.json")"
+# The composition root sits BESIDE the bin entry, derived from it so a rename moves both: the bin entry
+# itself only routes an invocation to a slice or to `program.ts` (packages/cli/bin/fy.ts).
+cli_entry="$(jq -r '.bin | to_entries[0].value' "${cli_pkg}/package.json")"
+cli_root="${cli_pkg}/$(dirname "${cli_entry}")/program.ts"
+[ -f "${cli_root}" ] || {
+  echo "❌ no CLI composition root at ${cli_root}" >&2
+  exit 1
+}
 daemon_pkg="packages/daemon"
 daemon_name="$(jq -r '.bin | to_entries[0].key' "${daemon_pkg}/package.json")"
 [ -z "${daemon_name}" ] || [ "${daemon_name}" = "null" ] && echo "❌ no .bin entry in ${daemon_pkg}/package.json" >&2 && exit 1

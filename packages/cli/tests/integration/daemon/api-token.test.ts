@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { daemonConnection } from '../../../bin/fy.ts';
+import { daemonConnection } from '../../../bin/wiring.ts';
 import {
   DaemonTokenFileError,
   type DaemonTokenFileSystem,

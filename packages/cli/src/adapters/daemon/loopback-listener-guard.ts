@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { PROC_TCP_TABLES } from '@ferretry/protocol';
+import { PROC_TCP_TABLES } from '@ferretry/protocol/tcp-listeners';
 import { daemonUrlPort, foreignListenerRefusal, listenerOwnerVerdict } from '../../lib/daemon/listener-owner.ts';
 
 /** The kernel's socket tables, or `undefined` on a host that publishes none (macOS). */

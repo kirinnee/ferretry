@@ -1,11 +1,11 @@
+import type { LayoutDecision } from '@ferretry/protocol';
 import {
   CURRENT_LAYOUT_VERSION,
   decideLayout,
   LAYOUT_VERSION_FILENAME,
   LAYOUT_VERSION_MODE,
-  type LayoutDecision,
   layoutVersionContent,
-} from '@ferretry/protocol';
+} from '@ferretry/protocol/state-home-layout';
 import type { IStateHomeFilePort, StateHomeEntry } from './ports.ts';
 
 /**

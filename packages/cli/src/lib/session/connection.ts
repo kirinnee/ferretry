@@ -1,4 +1,4 @@
-import { FY_DEFAULT_DAEMON_URL as FY_PROTOCOL_DEFAULT_DAEMON_URL } from '@ferretry/protocol';
+import { FY_DEFAULT_DAEMON_URL as FY_PROTOCOL_DEFAULT_DAEMON_URL } from '@ferretry/protocol/address';
 import { SessionCommandError } from './errors.ts';
 
 /**

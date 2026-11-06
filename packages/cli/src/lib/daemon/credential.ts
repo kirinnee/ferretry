@@ -1,4 +1,4 @@
-import { DAEMON_FEATURES, hasFeature } from '@ferretry/protocol';
+import { DAEMON_FEATURES, hasFeature } from '@ferretry/protocol/daemon-features';
 
 /**
  * The prefix every ferret session credential is minted with since RF-1. Duplicated from the daemon's

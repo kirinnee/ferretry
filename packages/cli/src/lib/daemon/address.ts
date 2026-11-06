@@ -1,4 +1,4 @@
-import { FY_DEFAULT_DAEMON_URL, isLoopbackHost, recordedBindAddress } from '@ferretry/protocol';
+import { FY_DEFAULT_DAEMON_URL, isLoopbackHost, recordedBindAddress } from '@ferretry/protocol/address';
 
 /**
  * Whether a daemon URL names this machine, and may therefore use the locally minted credential.
