@@ -43,10 +43,14 @@ export class CgroupServiceWeights implements ServiceWeightsPort {
 
   private async voice(): Promise<Pick<ServiceWeights, 'voice' | 'voiceState'>> {
     if (this.voiceDirectory === undefined) return { voiceState: 'unknown' };
-    const children = await readdir(this.voiceDirectory).catch(() => undefined);
+    const children = await readdir(this.voiceDirectory).then(
+      names => names,
+      (error: unknown) => ((error as NodeJS.ErrnoException).code === 'ENOENT' ? [] : undefined),
+    );
+    // A slice that cannot be read says nothing about the worker (permission, I/O): unknown, never "not running".
+    if (children === undefined) return { voiceState: 'unknown' };
     // No slice at all, or one with no live scope, is a worker that is not running — not a reading failure.
-    if (children === undefined || !children.some(child => child.endsWith('.scope')))
-      return { voiceState: 'not-running' };
+    if (!children.some(child => child.endsWith('.scope'))) return { voiceState: 'not-running' };
     const voice = await this.weight(this.voiceDirectory);
     return { voiceState: 'running', ...(voice === undefined ? {} : { voice }) };
   }

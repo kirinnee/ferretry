@@ -555,6 +555,20 @@ describe('reading the daemon and voice CPU weights', () => {
     should(actual).deepEqual({ daemon: 1000, voiceState: 'not-running' });
   });
 
+  it('should answer unknown, never "not running", when the voice slice exists but cannot be listed', async () => {
+    // Arrange — a slice that cannot be read as a directory (ENOTDIR here; EACCES or EIO on a host): a reading
+    // failure says nothing about whether the worker runs. A file stands in because CI may run as root.
+    const { root, voice } = await tree();
+    await mkdir(join(root, MANAGER), { recursive: true });
+    await writeFile(voice, 'not a directory\n');
+
+    // Act
+    const actual = await new CgroupServiceWeights(hostOf(OWN), root, 'ferretry_voice.slice').read();
+
+    // Assert
+    should(actual).deepEqual({ daemon: 1000, voiceState: 'unknown' });
+  });
+
   it('should leave a weight out, not guess it, when its file is unreadable or malformed', async () => {
     // Arrange
     const { root, voice } = await tree();
