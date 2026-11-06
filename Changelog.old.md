@@ -1,3 +1,9 @@
+## [4.290.0](https://github.com/kirinnee/ferretry/compare/v4.289.0...v4.290.0) (2026-11-06)
+
+### Features
+
+* **daemon:** archive finished autonomous sessions out of the live set ([#1523](https://github.com/kirinnee/ferretry/issues/1523)) ([3b7cc70](https://github.com/kirinnee/ferretry/commit/3b7cc7050fa8f4eb03fbf516a38bd6832522fe6d))
+
 ## [4.289.0](https://github.com/kirinnee/ferretry/compare/v4.288.0...v4.289.0) (2026-11-06)
 
 ### Features
