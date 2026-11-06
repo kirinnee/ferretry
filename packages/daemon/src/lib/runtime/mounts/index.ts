@@ -16,7 +16,6 @@ import type { ConfigChangeSink } from '../../config-files/index.ts';
 import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { HandoverReconcileLoop } from '../../handover/index.ts';
-import type { PhoneApprovalService } from '../../input-requests/phone-approval.ts';
 import type { InputRequestService } from '../../input-requests/service.ts';
 import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
@@ -74,7 +73,6 @@ import { type FleetSetupSubsystem, fleetSetupRoutes } from './fleet-setup.ts';
 import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
-import { inputRequestRoutes, phoneApprovalRoutes } from './input-requests.ts';
 import { type LegacyTaskSubsystem, legacyTaskRoutes } from './legacy-tasks.ts';
 import { type LocalSkillInstallSubsystem, localSkillInstallRoutes } from './local-skill-installs.ts';
 import { type McpInventorySubsystem, mcpInventoryRoutes } from './mcp-inventory.ts';
@@ -411,8 +409,6 @@ export interface MountedSubsystems {
   readonly agentTools: { readonly service: AgentToolService; readonly identities: AgentIdentityResolver };
   /** The owner's answers to an agent's request for a password, a code or an answer (docs/input-requests.md). */
   readonly inputRequests: InputRequestService;
-  /** Approving a sign-in on the phone (docs/input-requests.md, "Approve on your phone"); absent: no such routes. */
-  readonly phoneApprovals?: PhoneApprovalService;
   /** Secure copy (docs/secure-copy.md): copies by description, pre-approval rules and ferrets' task plans. */
   readonly secureCopy: {
     readonly copies: CopyListing;
@@ -717,9 +713,6 @@ export function legacyModule(
               // The agent's route is a fixed literal under `/v1/agent`, and a person's are under
               // `/v1/sessions/:sessionId/surfaces`, which no other subsystem uses: none can shadow or be shadowed.
               ...agentToolRoutes(subsystems.agentTools.service, subsystems.agentTools.identities),
-              ...inputRequestRoutes(subsystems.inputRequests),
-              // `/v1/phone-approvals` and `/v1/sessions/:sessionId/phone-approvals/*` are literals no other subsystem uses.
-              ...(subsystems.phoneApprovals === undefined ? [] : phoneApprovalRoutes(subsystems.phoneApprovals)),
               ...secureCopyRoutes(
                 subsystems.secureCopy.copies,
                 subsystems.secureCopy.rules,
