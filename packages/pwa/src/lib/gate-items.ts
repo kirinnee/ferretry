@@ -17,6 +17,7 @@ import {
   type AgendaItem,
   type BoardReopenAttachments,
   cardAskOf,
+  cardAskStage,
   gateAnswers,
   gateAskOptions,
   gateReference,
@@ -76,9 +77,9 @@ export const gateWhySubject = (item: AgendaItem, action: InboxAction): string =>
  * recommendation are the thread's ask, not the card's. Carried over, a thread with several questions made the card
  * ask read as "several questions — answer in words", and its OK to build button was never drawn.
  */
-export const attachedGateView = (item: AgendaItem): GateItem | undefined => {
+export const gateViewOf = (item: AgendaItem, gate: AgendaGate | undefined): GateItem | undefined => {
   const {
-    gateAttached,
+    gateAttached: _gateAttached,
     waitingOn: _waitingOn,
     questions: _questions,
     steps: _steps,
@@ -88,27 +89,31 @@ export const attachedGateView = (item: AgendaItem): GateItem | undefined => {
     recommendation: _recommendation,
     ...rest
   } = item;
-  if (gateAttached === undefined || item.gate !== undefined || item.notice === true) return undefined;
+  if (gate === undefined || item.gate !== undefined || item.notice === true) return undefined;
   return {
     ...rest,
-    gate: gateAttached,
+    gate,
     kind: 'choice',
-    ask: { kind: 'multiple-choice', options: gateAskOptions(gateAttached) },
-    answers: gateAnswers(gateAttached),
+    ask: { kind: 'multiple-choice', options: gateAskOptions(gate) },
+    answers: gateAnswers(gate),
   };
 };
 
-/**
- * What a card ask says about its card, under the heading that names its id: "Badge colour is ready to test." for a card
- * waiting to be tried (its options reopen it), else "Badge colour is at Review."; "It is ..." when the title is not known.
- */
-export const attachedGateLead = (gate: AgendaGate): string => {
-  return `${gate.cardTitle ?? 'It'} is ${attachedGateStanding(gate)}.`;
-};
+/** The gate attached to a thread (the one-ask mirror), drawn as the gate item it would be. */
+export const attachedGateView = (item: AgendaItem): GateItem | undefined => gateViewOf(item, item.gateAttached);
 
-/** Where the attached card stands, in the owner's words: "ready to test", else "at Review". */
-const attachedGateStanding = (gate: AgendaGate): string =>
-  gate.options.some(option => option.outcome === 'reopen-with-agenda') ? 'ready to test' : `at ${gate.laneName}`;
+/**
+ * What a card ask is, in the owner's verb: a card to try, or a plan to approve. It is the ask's own heading: the ask is
+ * the item's, so it never says "card" or "your answer for the card".
+ */
+export const attachedGateHeading = (gate: AgendaGate): string => (cardAskStage(gate) === 'test' ? 'Try it' : 'Approve');
+
+/**
+ * The one plain line that names the card a card ask is about: "For &F12 Badge colour" (the id alone when the title is
+ * not known). A reference, not a heading; a title the ask's own heading already carries is left out.
+ */
+export const attachedGateReference = (gate: AgendaGate, withTitle = true): string =>
+  `For &${gate.cardId}${withTitle && gate.cardTitle !== undefined ? ` ${gate.cardTitle}` : ''}`;
 
 /** An answer from the attached gate's row: marked so the daemon answers the gate, never the thread. */
 export const toGateAction = (action: InboxAction, gate?: AgendaGate): InboxAction =>

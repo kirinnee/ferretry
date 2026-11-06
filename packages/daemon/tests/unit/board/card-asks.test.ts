@@ -1,19 +1,20 @@
 import { describe, it } from 'bun:test';
 import {
-  agendaState,
   type AgendaItem,
   type AgendaResponse,
+  agendaState,
   type BoardTask,
   type BoardTaskActionRequest,
-  type LaneSet,
   BoardTaskActionRequestSchema,
   gateReference,
+  type LaneSet,
   MAX_AGENDA_BODY_LENGTH,
+  nothingToTryLine,
   type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 import should from 'should';
+import type { StoreBoardAttachments } from '../../../src/adapters/board/board-attachments.ts';
 import { BoardGateCards } from '../../../src/adapters/board/board-gate-cards.ts';
-import { StoreBoardAttachments } from '../../../src/adapters/board/board-attachments.ts';
 import {
   type AgendaActor,
   type AgendaLedger,
@@ -25,11 +26,12 @@ import {
 import {
   type BoardCaller,
   BoardService,
+  cardAgendaRaise,
   type GateAnswer,
+  type GateCard,
   GateItems,
   gateEntry,
   gateOf,
-  cardAgendaRaise,
   stageGateLanes,
 } from '../../../src/lib/board/index.ts';
 import { card, FakeDone, FakeReopen, lanes, MemoryBoardStore, NOW, world } from './support.ts';
@@ -80,6 +82,10 @@ const external = (overrides: Partial<BoardTask> = {}): BoardTask => {
     laneId,
   });
 };
+
+/** What a try-it carries for a card with these steps, no preview and no PR: where to try it, then the steps as written. */
+const TRY_IT =
+  'There is no preview for this one. Try it for real: the steps below say where.\n\n1. Open the Inbox\n2. Answer the card';
 
 const internal = (overrides: Partial<BoardTask> = {}): BoardTask =>
   external({ ask: { text: 'tidy the logs', source: 'session:child' }, ...overrides });
@@ -250,6 +256,7 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
           await cards_.act(id, request, caller, expect);
           await faults.afterAct?.();
         },
+        closeNothingToTry: async (id, expect, reason) => await cards_.closeNothingToTry(id, expect, reason),
       },
       lanes: stageGateLanes,
       homes,
@@ -373,6 +380,9 @@ const threadAbout = (cardId: string) => ({
   task: { id: cardId },
 });
 
+/** A ferret's thread whose line only repeats its card's try-it ask (docs/agenda.md § One ask): the card ask is all it asks. */
+const REPEATING = (cardId: string) => ({ ...threadAbout(cardId), subject: 'Try it: Open the Inbox' });
+
 /** A card of `lead`'s own, which the owner asked for: its agenda home is `lead`. */
 const leads = (overrides: Partial<BoardTask> = {}): BoardTask =>
   external({ owner: 'lead', assignee: null, createdBy: { kind: 'ferret', sessionId: 'lead' }, ...overrides });
@@ -418,7 +428,7 @@ describe('a card at a gate asks on its agenda, never on its own', () => {
     should(item.cardAsks).have.length(1);
     should(item.cardAsks?.[0]).match({
       gate: { cardId: 'F1', laneId: 'tested', entry: 2, options: [{ label: 'Done' }, { label: 'Not good' }] },
-      howToTest: '1. Open the Inbox\n2. Answer the card',
+      howToTest: TRY_IT,
     });
     should(item.cardAsks?.[0]?.answer).be.undefined();
     should(item.gateAttached).eql(item.cardAsks?.[0]?.gate);
@@ -965,6 +975,60 @@ describe('answering a card ask', () => {
     should(world.stored('F3').laneId).not.equal('plan');
   });
 
+  /** Two sub-cards' plan asks open on the lead's thread, read three minutes on (past the two-minute replay guard). */
+  const twoOpenPlanAsksLater = async () => {
+    const world = fixture(
+      [
+        leads(),
+        leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } }),
+        leads({ id: 'F3', laneId: 'todo', parent: { id: 'F1' } }),
+      ],
+      { gatesNow: '2026-10-30T10:03:00.000Z' },
+    );
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    for (const each of ['F2', 'F3'])
+      await world.board.act(each, BoardTaskActionRequestSchema.parse({ action: 'move', to: 'plan' }), OWNER);
+    return { world, id: raised.item.id };
+  };
+
+  it('shows an older app the next ask once the owner says Not yet to the first, and its answer reaches that one', async () => {
+    // Arrange — two approvals, F2 then F3; the owner says Not yet to F2 on a newer app
+    const { world, id } = await twoOpenPlanAsksLater();
+    await world.answer(id, choose('Not yet'), { sessionId: 'lead', cardAsk: 'gate:F2:plan:2' });
+    should(openOf(world, 'lead', id).gateAttached?.cardId).equal('F3');
+
+    // Act — an app that predates card asks answers what it is shown
+    const outcome = await world.answer(id, choose('OK to build'), { sessionId: 'lead', gate: true });
+
+    // Assert — F3 moved on; F2, set aside, did not
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.stored('F3').laneId).not.equal('plan');
+    should(world.stored('F2').laneId).equal('plan');
+  });
+
+  it('moves an older app on to the next ask with each Not yet, never back onto the one it set aside', async () => {
+    // Arrange — two approvals, F2 shown
+    const { world, id } = await twoOpenPlanAsksLater();
+
+    // Act — an older app says Not yet to what it is shown, twice
+    const first = await world.answer(id, choose('Not yet'), { sessionId: 'lead', gate: true });
+    const shown = openOf(world, 'lead', id).gateAttached?.cardId;
+    const second = await world.answer(id, choose('Not yet'), { sessionId: 'lead', gate: true });
+
+    // Assert — the first set F2 aside and showed F3; the second set F3 aside, not F2 again
+    should(first).match({ handled: true, mutation: { ok: true } });
+    should(shown).equal('F3');
+    should(second).match({ handled: true, mutation: { ok: true } });
+    const asks = openOf(world, 'lead', id).cardAsks ?? [];
+    should(asks.map(ask => [ask.gate.cardId, ask.notYet !== undefined])).deepEqual([
+      ['F2', true],
+      ['F3', true],
+    ]);
+    should(world.stored('F2').laneId).equal('plan');
+    should(world.stored('F3').laneId).equal('plan');
+  });
+
   it('does not delay the first tap on an ask that came to a bare agenda', async () => {
     // Arrange — one ask appears from nothing; nothing replaced another
     const world = fixture([leads(), leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } })]);
@@ -1092,7 +1156,7 @@ describe('answering a card ask', () => {
     // Assert — read against B, the newest, as a different answer to it
     should(other).match({
       handled: true,
-      refused: { code: 'moved-on', message: `${id}'s card ask was already answered, differently: nothing was sent` },
+      refused: { code: 'moved-on', message: `${id}'s question was already answered, differently: nothing was sent` },
     });
     should(world.reopen.notices).be.empty();
   });
@@ -1108,7 +1172,7 @@ describe('answering a card ask', () => {
     // Assert
     should(outcome).match({
       handled: true,
-      refused: { code: 'moved-on', message: `${item.id} no longer carries that card ask, so nothing was moved` },
+      refused: { code: 'moved-on', message: `${item.id} no longer asks that, so nothing was moved` },
     });
     should(world.stored().laneId).equal('tested');
   });
@@ -1336,7 +1400,7 @@ describe('open gate items from before card asks', () => {
       stage: 'test',
       waitingSince: legacy.waitingSince,
     });
-    should(items[0]?.cardAsks?.[0]).match({ gate: legacy.gate, howToTest: task.howToTest });
+    should(items[0]?.cardAsks?.[0]).match({ gate: legacy.gate, howToTest: TRY_IT });
     const answered = await world.answer(legacy.id, choose('Done'), { cardAsk: 'gate:F1:tested:2' });
     should(answered).match({ handled: true, mutation: { ok: true } });
     should(world.stored().laneId).equal('closed');
@@ -1399,7 +1463,7 @@ describe('the new agenda for a card', () => {
 
     // Assert
     should(steps).match(
-      /^How to test is 201,003 characters, too long to show here \(the most is 200,000\)\. Open the card \(/u,
+      /How to test is 201,003 characters, too long to show here \(the most is 200,000\)\. Open the card \(/u,
     );
     should(steps).not.match(/x{10}/u);
   });
@@ -1422,12 +1486,95 @@ describe('the new agenda for a card', () => {
       sourceRef: 'card-agenda:F1',
       kind: 'reply',
       ask: { kind: 'open-question' },
-      subject: 'Try it: Open the Inbox',
+      subject: 'Try it: Gates raise one agenda item',
       task: { id: 'F1' },
       stage: 'test',
-      cardAsks: [{ gate, at: NOW, howToTest: '1. Open the Inbox\n2. Answer the card' }],
+      cardAsks: [{ gate, at: NOW, howToTest: TRY_IT }],
     });
     should(request.gate).be.undefined();
+  });
+});
+
+describe('the new agenda for a card carries everything needed to try it', () => {
+  const PR = 'https://github.com/kirinnee/ferretry/pull/9';
+  const linked = (
+    state: 'open' | 'merged',
+    releasedIn: { version: string } | null,
+    docs: string[] = [],
+  ): Partial<BoardTask> => ({
+    laneId: 'tested',
+    history: [{ seq: 1, at: NOW, actor: { kind: 'owner' }, type: 'created', laneId: 'tested' }],
+    links: {
+      prs: [
+        {
+          url: PR,
+          number: 9,
+          repo: 'kirinnee/ferretry',
+          state,
+          draft: false,
+          checks: 'passing',
+          mergedAt: state === 'merged' ? NOW : null,
+          mergeSha: state === 'merged' ? 'a'.repeat(40) : null,
+          releasedIn:
+            releasedIn === null ? null : { version: releasedIn.version, tag: `v${releasedIn.version}`, at: NOW },
+          polledAt: NOW,
+        },
+      ],
+      branch: null,
+      commits: [],
+      docs,
+    },
+  });
+  const raised = (overrides: Partial<BoardTask>) => {
+    const task = external(overrides);
+    const gate = gateOf({ task, laneSet: lanes(), audience: 'external' }, stageGateLanes);
+    if (gate === undefined) throw new Error('expected a gate');
+    return cardAgendaRaise(gate, task, NOW);
+  };
+
+  it('links the preview first, then the steps, then the shipped version and the PR', () => {
+    const request = raised(linked('merged', { version: '1.2.3' }, ['https://abc123.ferretry.pages.dev/inbox']));
+    const steps = request.cardAsks?.[0]?.howToTest ?? '';
+    should(steps.startsWith('**Try it on the preview:** https://abc123.ferretry.pages.dev/inbox')).be.true();
+    should(steps).containEql('1. Open the Inbox');
+    should(steps).containEql(`Shipped in Ferretry v1.2.3 (${PR})`);
+    should(steps.indexOf('1. Open the Inbox')).be.below(steps.indexOf('Shipped in'));
+  });
+
+  it('says where to try it for real when the card has no preview, and that an open PR is not shipped', () => {
+    const steps = raised(linked('open', null)).cardAsks?.[0]?.howToTest ?? '';
+    should(steps).startWith('There is no preview for this one. Try it for real');
+    should(steps).containEql('Not merged yet, so not shipped');
+    // The agenda itself carries no second copy of the PR line: the one ask says it.
+    should(raised(linked('open', null)).context).be.undefined();
+  });
+
+  it('asks an approval in its own words, with the card’s text as written and no try-it frame', () => {
+    const request = raised({
+      laneId: 'plan',
+      history: [{ seq: 1, at: NOW, actor: { kind: 'owner' }, type: 'created', laneId: 'plan' }],
+    });
+    should(request.subject).equal('OK to build? Gates raise one agenda item');
+    should(request.cardAsks?.[0]?.howToTest).not.containEql('preview');
+  });
+
+  it('points an approval at the card when its text is too long for a body', () => {
+    const request = raised({
+      laneId: 'plan',
+      howToTest: `1. ${'x'.repeat(MAX_AGENDA_BODY_LENGTH + 10)}`,
+      history: [{ seq: 1, at: NOW, actor: { kind: 'owner' }, type: 'created', laneId: 'plan' }],
+    });
+    should(request.cardAsks?.[0]?.howToTest).match(/^How to test is /u);
+    should(request.cardAsks?.[0]?.howToTest).not.match(/x{10}/u);
+  });
+
+  it('carries no text for an approval whose card wrote none', () => {
+    const request = raised({
+      laneId: 'plan',
+      howToTest: '',
+      history: [{ seq: 1, at: NOW, actor: { kind: 'owner' }, type: 'created', laneId: 'plan' }],
+    });
+    should(request.cardAsks?.[0]?.howToTest).be.undefined();
   });
 });
 
@@ -1600,7 +1747,7 @@ describe('the gate engine, edge by edge', () => {
     await world.board.trigger('F1', 'release.running');
 
     // Assert
-    should(world.warnings.some(each => each.startsWith('could not attach a card ask on !'))).be.true();
+    should(world.warnings.some(each => each.startsWith('could not attach an ask about a card on !'))).be.true();
     should(world.warnings.some(each => each.startsWith('no agenda for &F1 in '))).be.true();
   });
 
@@ -1897,7 +2044,9 @@ describe('where a card’s asks are read from', () => {
 
     await world.board.trigger('F1', 'release.running');
 
-    should(world.warnings.some(each => each.startsWith('the agendas holding card asks could not be listed'))).be.true();
+    should(
+      world.warnings.some(each => each.startsWith('the agendas holding asks about cards could not be listed')),
+    ).be.true();
     should(world.open()).have.length(1);
   });
 
@@ -1983,7 +2132,7 @@ describe('card asks across merge and split (docs/agenda.md § Merge and split)',
   /** Two of the lead's threads, each about a card at its gate: A1 carries F1's ask, A2 carries F2's. */
   const twoAsking = async (faults: Faults = {}) => {
     const world = fixture([leads(), leads({ id: 'F2' })], faults);
-    const first = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    const first = await world.agenda.raise('lead', REPEATING('F1'), AGENT);
     const second = await world.agenda.raise('lead', { ...threadAbout('F2'), subject: 'And the menu?' }, AGENT);
     if (!first.ok || !second.ok || first.item === undefined || second.item === undefined) {
       throw new Error('expected two threads');
@@ -2098,7 +2247,7 @@ describe('card asks across merge and split (docs/agenda.md § Merge and split)',
       const split = await world.agenda.split(
         'lead',
         parent,
-        { ...plain, subject: 'Is the sub-card right on its own?' },
+        { ...plain, subject: 'OK to build? Open the Inbox' },
         AGENT,
         [{ id: 'F2' }],
       );
@@ -2238,3 +2387,457 @@ describe('card asks across merge and split (docs/agenda.md § Merge and split)',
     should(items[0]?.cardAsks?.[0]?.answer).be.undefined();
   });
 });
+
+// ---------------------------------------------------------------------------------------------------
+// Try it only when there is something to try (docs/agenda.md § Try it only when there is something to try)
+// ---------------------------------------------------------------------------------------------------
+
+/** A merged PR of the card, as the watcher caches it, with the kind of change it read (absent: not read). */
+const mergedPr = (number: number, changes?: 'docs-tests' | 'code') => ({
+  url: `https://github.com/ferretry/ferretry/pull/${String(number)}`,
+  number,
+  repo: 'ferretry/ferretry',
+  state: 'merged' as const,
+  draft: false,
+  checks: 'passing' as const,
+  mergedAt: NOW,
+  mergeSha: 'a'.repeat(40),
+  releasedIn: { version: '4.1.0', tag: 'v4.1.0', at: NOW },
+  polledAt: NOW,
+  ...(changes === undefined ? {} : { changes }),
+});
+
+const withPrs = (...prs: ReturnType<typeof mergedPr>[]): Partial<BoardTask> => ({
+  links: { prs, branch: null, commits: [], docs: [] },
+});
+
+/** The last thing that happened to the card, as its history says. */
+const lastEvent = (task: BoardTask) => task.history[task.history.length - 1];
+
+describe('a try-it is asked only when there is something to try', () => {
+  it('waits while the card is blocked by an open dependency, asks nothing and closes nothing, then asks once it is free', async () => {
+    // Arrange — F1 depends on F2, which is still being built
+    const dependency = external({ id: 'F2', laneId: 'implement' });
+    const world = fixture([external({ dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] }), dependency]);
+
+    // Act — the card reaches To test while blocked
+    await world.board.trigger('F1', 'release.running');
+    await world.gates.written('F1');
+    await world.gates.sweep();
+
+    // Assert — it stays at To test, and nobody is asked
+    should(world.stored().laneId).equal('tested');
+    should(world.open()).have.length(0);
+
+    // Act — the dependency is gone; the next look at the card asks as usual
+    world.store.cards.set('F1', { ...world.stored(), dependsOn: [] });
+    const asked = await world.gates.sweep();
+
+    // Assert
+    should(asked).equal(1);
+    should(world.open()).have.length(1);
+    should(world.open()[0]?.cardAsks?.map(ask => gateReference(ask.gate))).eql(['gate:F1:tested:2']);
+  });
+
+  it('waits while the card is blocked by hand', async () => {
+    // Arrange
+    const world = fixture([external({ blocked: { on: 'external', reason: 'waiting on the vendor', since: NOW } })]);
+
+    // Act
+    await world.board.trigger('F1', 'release.running');
+    await world.gates.written('F1');
+
+    // Assert
+    should(world.stored().laneId).equal('tested');
+    should(world.open()).have.length(0);
+    should(world.closed()).have.length(0);
+  });
+
+  it('closes a private card with one line of reason and asks nobody', async () => {
+    // Arrange
+    const world = fixture([external({ visibility: 'private', visibilitySource: 'chosen' })]);
+
+    // Act
+    await world.board.trigger('F1', 'release.running');
+    await world.gates.written('F1');
+
+    // Assert — the daemon closed it, with the reason, and no agenda was raised
+    should(world.stored().laneId).equal('closed');
+    should(lastEvent(world.stored())).match({
+      type: 'moved',
+      from: 'tested',
+      to: 'closed',
+      reason: 'Nothing to try: it is a private card',
+      auto: true,
+      actor: { kind: 'daemon' },
+    });
+    should(world.open()).have.length(0);
+    should(world.closed()).have.length(0);
+    should(world.warnings).eql([]);
+  });
+
+  it('closes a card with no steps to try, and one whose steps say there is nothing to try', async () => {
+    // Arrange
+    const bare = fixture([external({ howToTest: '' })]);
+    const said = fixture([external({ howToTest: 'Nothing to try: unit suites pass; no PWA behaviour change.' })]);
+
+    // Act
+    for (const world of [bare, said]) {
+      await world.board.trigger('F1', 'release.running');
+      await world.gates.written('F1');
+    }
+
+    // Assert
+    should(bare.stored().laneId).equal('closed');
+    should(lastEvent(bare.stored())).match({ reason: 'Nothing to try: it has no steps to try' });
+    should(said.stored().laneId).equal('closed');
+    should(lastEvent(said.stored())).match({ reason: 'Nothing to try: its steps say there is nothing to try' });
+    should(bare.open()).have.length(0);
+    should(said.open()).have.length(0);
+  });
+
+  it('closes a card whose every merged PR changed only docs and tests', async () => {
+    // Arrange
+    const world = fixture([external(withPrs(mergedPr(1, 'docs-tests'), mergedPr(2, 'docs-tests')))]);
+
+    // Act
+    await world.board.trigger('F1', 'release.running');
+    await world.gates.written('F1');
+
+    // Assert
+    should(world.stored().laneId).equal('closed');
+    should(lastEvent(world.stored())).match({ reason: 'Nothing to try: its PRs change only docs and tests' });
+    should(world.open()).have.length(0);
+  });
+
+  it('still asks when one PR changed code, or when the kind of a PR is not known', async () => {
+    // Arrange
+    const code = fixture([external(withPrs(mergedPr(1, 'docs-tests'), mergedPr(2, 'code')))]);
+    const unknown = fixture([external(withPrs(mergedPr(1, 'docs-tests'), mergedPr(2)))]);
+    const none = fixture([external()]);
+
+    // Act
+    for (const world of [code, unknown, none]) {
+      await world.board.trigger('F1', 'release.running');
+      await world.gates.written('F1');
+    }
+
+    // Assert — each is asked, exactly as before
+    for (const world of [code, unknown, none]) {
+      should(world.stored().laneId).equal('tested');
+      should(world.open()).have.length(1);
+      should(world.open()[0]?.cardAsks?.map(ask => gateReference(ask.gate))).eql(['gate:F1:tested:2']);
+    }
+  });
+
+  it('leaves the plan gate alone: OK to build is asked for a private card with no steps', async () => {
+    // Arrange
+    const world = fixture([
+      external({ visibility: 'private', visibilitySource: 'chosen', howToTest: '', laneId: 'todo' }),
+    ]);
+
+    // Act
+    await world.move('plan');
+
+    // Assert
+    should(world.stored().laneId).equal('plan');
+    should(world.open()).have.length(1);
+    should(world.open()[0]?.cardAsks?.map(ask => gateReference(ask.gate))).eql(['gate:F1:plan:2']);
+  });
+
+  it('withdraws a try-it ask that was open when the card turned out to have nothing to try', async () => {
+    // Arrange — asked while it had steps
+    const world = fixture([external()]);
+    await world.board.trigger('F1', 'release.running');
+    should(world.open()).have.length(1);
+
+    // Act — its steps are emptied, and the card is looked at again
+    world.store.cards.set('F1', { ...world.stored(), howToTest: '' });
+    await world.gates.sweep();
+
+    // Assert — closed, and the card agenda that held only that ask went with it
+    should(world.stored().laneId).equal('closed');
+    should(world.open()).have.length(0);
+  });
+
+  it('adds one plain line to the open agenda that carries the card, and does not wake it', async () => {
+    // Arrange — the lead's own thread about the card, on the owner's turn, before the card reaches To test
+    const world = fixture([leads({ visibility: 'private', visibilitySource: 'chosen', laneId: 'implement' })]);
+    const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
+    if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
+    const before = openOf(world, 'lead', raised.item.id);
+
+    // Act
+    await world.board.trigger('F1', 'release.running');
+    await world.gates.written('F1');
+    await world.gates.sweep();
+
+    // Assert — the card closed; the thread is still open, with one line, no ask, and the same turn
+    should(world.stored().laneId).equal('closed');
+    const after = openOf(world, 'lead', raised.item.id);
+    should(after.cardAsks).be.undefined();
+    should(agendaState(after).state).equal(agendaState(before).state);
+    should(after.waitingSince).equal(before.waitingSince);
+    should((after.history ?? []).filter(entry => entry.note?.includes('Nothing to try') === true)).have.length(1);
+    should(after.history?.at(-1)).match({ kind: 'updated', note: '&F1: Nothing to try: it is a private card' });
+    // — and the app can tell that line from any other update, and shows its words (the one shape the PWA reads)
+    should(nothingToTryLine(after.history?.at(-1)?.note)).equal('&F1: Nothing to try: it is a private card');
+    should(after.stage).equal(before.stage);
+    should(after.stages).eql(before.stages);
+    should(world.open('lead')).have.length(1);
+  });
+
+  it('puts the ask on the topic item the card was made from, before opening an item of its own', async () => {
+    // Arrange — the owner's topic is !A1 on the lead's agenda; the card was made on its Yes
+    const world = fixture([
+      leads({ laneId: 'implement', ask: { text: 'make the gates ask me', source: 'owner (agenda !A1)' } }),
+    ]);
+    const topic = await world.agenda.raise('lead', { ...threadAbout('F0'), task: undefined }, AGENT);
+    if (!topic.ok || topic.item === undefined) throw new Error('expected a topic item');
+    should(topic.item.id).equal('A1');
+
+    // Act
+    await world.board.trigger('F1', 'release.running');
+    await world.gates.written('F1');
+
+    // Assert — the ask rides !A1; no card agenda was raised
+    const items = world.open('lead');
+    should(items).have.length(1);
+    should(items[0]?.id).equal('A1');
+    should(items[0]?.sourceRef).be.null();
+    should(items[0]?.cardAsks?.map(ask => gateReference(ask.gate))).eql(['gate:F1:tested:2']);
+  });
+
+  it('reads the topic from the card’s approval first, on the plan gate too', async () => {
+    // Arrange
+    const world = fixture([
+      leads({ laneId: 'todo', approval: { sessionId: 'lead', id: 'A1' }, ask: { text: 'build it', source: 'owner' } }),
+    ]);
+    const topic = await world.agenda.raise('lead', { ...threadAbout('F0'), task: undefined }, AGENT);
+    if (!topic.ok) throw new Error('expected a topic item');
+
+    // Act
+    await world.move('plan');
+
+    // Assert
+    const items = world.open('lead');
+    should(items).have.length(1);
+    should(items[0]?.cardAsks?.map(ask => gateReference(ask.gate))).eql(['gate:F1:plan:2']);
+  });
+
+  it('opens an item of its own only when the topic item is not open', async () => {
+    // Arrange — the card names !A7, which is not on its agendas
+    const world = fixture([
+      leads({ laneId: 'implement', ask: { text: 'make the gates ask me', source: 'owner (agenda !A7)' } }),
+    ]);
+
+    // Act
+    await world.board.trigger('F1', 'release.running');
+    await world.gates.written('F1');
+
+    // Assert
+    const items = world.open('lead');
+    should(items).have.length(1);
+    should(items[0]?.sourceRef).equal('card-agenda:F1');
+  });
+
+  it('never lets a ferret, nor the daemon’s ordinary move, pass a gate', async () => {
+    // Arrange — a card asked at To test
+    const world = fixture([external()]);
+    await world.board.trigger('F1', 'release.running');
+
+    // Act + Assert — the card's own ferret is refused, as before
+    await should(world.move('closed', { kind: 'ferret', sessionId: 'grandchild' })).be.rejectedWith(/owner/u);
+    // — and so is the daemon through an ordinary move
+    await should(world.move('closed', { kind: 'daemon' })).be.rejected();
+    should(world.stored().laneId).equal('tested');
+  });
+});
+
+describe('the daemon’s one close of a card with nothing to try', () => {
+  it('closes only a card still at the try-it gate the verdict was about', async () => {
+    // Arrange
+    const world = fixture([external({ visibility: 'private', visibilitySource: 'chosen', laneId: 'tested' })]);
+    const gate = gateOf((await cardsOf(world))[0] as GateCard, stageGateLanes);
+    if (gate === undefined) throw new Error('expected a gate');
+
+    // Act + Assert — a stale entry writes nothing
+    should(
+      await world.board.closeWhereNothingToTry(
+        'F1',
+        { laneId: gate.laneId, entry: gate.entry + 1 },
+        'Nothing to try: it is a private card',
+      ),
+    ).be.false();
+    should(world.stored().laneId).equal('tested');
+    // — the right one closes
+    should(
+      await world.board.closeWhereNothingToTry(
+        'F1',
+        { laneId: gate.laneId, entry: gate.entry },
+        'Nothing to try: it is a private card',
+      ),
+    ).be.true();
+    should(world.stored().laneId).equal('closed');
+  });
+
+  it('closes nothing out of the plan gate', async () => {
+    // Arrange
+    const world = fixture([external({ laneId: 'todo' })]);
+    await world.move('plan');
+    const gate = gateOf((await cardsOf(world))[0] as GateCard, stageGateLanes);
+    if (gate === undefined) throw new Error('expected a gate');
+
+    // Act
+    const closed = await world.board.closeWhereNothingToTry(
+      'F1',
+      { laneId: gate.laneId, entry: gate.entry },
+      'Nothing to try: x',
+    );
+
+    // Assert
+    should(closed).be.false();
+    should(world.stored().laneId).equal('plan');
+  });
+});
+
+describe('the close judges the verdict again inside the card’s write', () => {
+  const at = async (world: ReturnType<typeof fixture>) => {
+    const gate = gateOf((await cardsOf(world))[0] as GateCard, stageGateLanes);
+    if (gate === undefined) throw new Error('expected a gate');
+    return { laneId: gate.laneId, entry: gate.entry };
+  };
+
+  it('closes nothing when real steps arrive at the same entry between the read and the write', async () => {
+    // Arrange — a card with no steps: the verdict is "nothing", read at this lane and entry
+    const world = fixture([external({ howToTest: '', laneId: 'tested' })]);
+    const expect = await at(world);
+
+    // Act — steps are added without the card moving; the close then writes
+    world.store.cards.set('F1', { ...world.stored(), howToTest: '1. Open the Inbox\n2. Tap Done' });
+    const closed = await world.board.closeWhereNothingToTry('F1', expect, 'Nothing to try: it has no steps to try');
+
+    // Assert
+    should(closed).be.false();
+    should(world.stored().laneId).equal('tested');
+  });
+
+  it('closes nothing when the card is blocked, by hand or by an open dependency, at the same entry', async () => {
+    // Arrange — a private card at To test, held there only so the verdict can be read
+    const world = fixture([
+      external({ visibility: 'private', visibilitySource: 'chosen', laneId: 'tested' }),
+      external({ id: 'F2', laneId: 'implement' }),
+    ]);
+    const expect = await at(world);
+    const reason = 'Nothing to try: it is a private card';
+
+    // Act + Assert — blocked by hand
+    world.store.cards.set('F1', {
+      ...world.stored(),
+      blocked: { on: 'external', reason: 'waiting on the vendor', since: NOW },
+    });
+    should(await world.board.closeWhereNothingToTry('F1', expect, reason)).be.false();
+    should(world.stored().laneId).equal('tested');
+    // — blocked by an unfinished dependency
+    world.store.cards.set('F1', {
+      ...world.stored(),
+      blocked: null,
+      dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }],
+    });
+    should(await world.board.closeWhereNothingToTry('F1', expect, reason)).be.false();
+    should(world.stored().laneId).equal('tested');
+    // — and once nothing holds it, the very same close goes through
+    world.store.cards.set('F1', { ...world.stored(), dependsOn: [] });
+    should(await world.board.closeWhereNothingToTry('F1', expect, reason)).be.true();
+    should(world.stored().laneId).equal('closed');
+  });
+
+  it('closes nothing when the reason it was asked to record is no longer the verdict', async () => {
+    // Arrange — private, so the verdict is "nothing" for that reason alone
+    const world = fixture([external({ visibility: 'private', visibilitySource: 'chosen', laneId: 'tested' })]);
+    const expect = await at(world);
+
+    // Act + Assert
+    should(
+      await world.board.closeWhereNothingToTry('F1', expect, 'Nothing to try: its PRs change only docs'),
+    ).be.false();
+    should(world.stored().laneId).equal('tested');
+  });
+});
+
+describe('a card that becomes blocked takes back its live try-it ask', () => {
+  const blocked = { on: 'external' as const, reason: 'waiting on the vendor', since: NOW };
+
+  it('withdraws an unanswered ask when a block arrives, keeps the card put, and asks again once it is free', async () => {
+    // Arrange — the ask is live at To test
+    const { world, item } = await atTest();
+    should(world.open()).have.length(1);
+
+    // Act — a ferret blocks the card; the next look runs
+    world.store.cards.set('F1', { ...world.stored(), blocked });
+    await world.gates.sweep();
+
+    // Assert — the ask is gone from Needs you, the card stays at To test, nothing was closed by the daemon
+    should(world.stored().laneId).equal('tested');
+    should(world.open()).have.length(0);
+    should(world.closed().every(each => each.id !== item.id || each.resolvedBy !== 'human')).be.true();
+
+    // Act — unblocked: the next look asks again
+    world.store.cards.set('F1', { ...world.stored(), blocked: null });
+    const asked = await world.gates.sweep();
+
+    // Assert
+    should(asked).equal(1);
+    should(world.open()).have.length(1);
+    should(world.open()[0]?.cardAsks?.map(ask => gateReference(ask.gate))).eql(['gate:F1:tested:2']);
+  });
+
+  it('withdraws the ask when an unfinished dependency is added', async () => {
+    // Arrange
+    const { world } = await atTest();
+    world.store.cards.set('F2', external({ id: 'F2', laneId: 'implement' }));
+
+    // Act
+    world.store.cards.set('F1', { ...world.stored(), dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] });
+    await world.gates.sweep();
+
+    // Assert
+    should(world.stored().laneId).equal('tested');
+    should(world.open()).have.length(0);
+  });
+
+  it('leaves the plan gate’s ask alone, a Not yet on it included: only a try-it can wait', async () => {
+    // Arrange — the owner said Not yet to OK to build
+    const world = fixture([external({ laneId: 'todo' })]);
+    await world.move('plan');
+    const [item] = world.open() as [AgendaItem];
+    await world.answer(item.id, choose('Not yet'), { cardAsk: 'gate:F1:plan:2', note: 'after the demo' });
+
+    // Act — the card then becomes blocked
+    world.store.cards.set('F1', { ...world.stored(), blocked });
+    await world.gates.sweep();
+
+    // Assert — the ask is still there, with the owner's words
+    should(world.stored().laneId).equal('plan');
+    const after = openOf(world, 'grandchild', item.id);
+    should(after.cardAsks?.map(ask => gateReference(ask.gate))).eql(['gate:F1:plan:2']);
+    should(after.cardAsks?.[0]?.notYet).match({ note: 'after the demo' });
+  });
+
+  it('leaves a try-it ask the owner already answered exactly as it is', async () => {
+    // Arrange — Not good was answered, and the card came back to To test (a new entry) with its ask answered there
+    const { world, item, reference } = await atTest();
+    await world.answer(item.id, choose('Done'), { cardAsk: reference });
+    const before = openOf(world, 'grandchild', item.id).cardAsks;
+
+    // Act — a block lands on the (now closed) card, and the next look runs
+    world.store.cards.set('F1', { ...world.stored(), blocked });
+    await world.gates.sweep();
+
+    // Assert — the answered ask is the agenda's record and is untouched
+    should(openOf(world, 'grandchild', item.id).cardAsks).eql(before);
+  });
+});
+
+const cardsOf = async (world: ReturnType<typeof fixture>): Promise<readonly GateCard[]> =>
+  await new BoardGateCards(world.board, { project: async () => ({ name: 'Ferretry' }) }).cards();

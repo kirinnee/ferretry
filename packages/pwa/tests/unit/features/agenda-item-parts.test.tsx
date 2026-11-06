@@ -295,41 +295,70 @@ describe('the conversation', () => {
 });
 
 describe('what it needs from you', () => {
-  test('holds the ask and EVERY card ask, each with its own buttons, inside the item — never docked', async () => {
-    const acted = await draw(full);
+  // The same item answered in words: its card ask is then its answer, drawn as the item's own ask.
+  const asking = agendaItem('A47', {
+    ...full,
+    kind: 'reply',
+    ask: { kind: 'open-question' },
+  } as unknown as Partial<AgendaItem>);
+
+  // &B165: one answer row. An item with buttons of its own keeps them; its card ask is named, and asked next.
+  test('keeps ONE answer row on an item with buttons of its own: the card ask first, its own buttons held', async () => {
+    await draw(full);
+    const needs = one('[data-agenda-part="needs"]');
+    expect(needs.querySelector('[data-agenda-card-ask="gate:F12:tested:3"]')).not.toBeNull();
+    expect(one('[data-agenda-own-row-held]').textContent).toBe(
+      'First answer the try-it below; the buttons for this come back once it is answered.',
+    );
+    expect(root().querySelectorAll('[data-agenda-option="Done"]')).toHaveLength(1);
+    expect(root().querySelectorAll('[data-agenda-option="Blue"]')).toHaveLength(0);
+    expect(root().textContent).not.toMatch(/your answer for|Card &F12|card ask/iu);
+  });
+
+  test('gives an item its own buttons back once its card ask is answered', async () => {
+    const { gateAttached: _mirror, cardAsks: _asks, ...answered } = full as AgendaItem & { gateAttached?: unknown };
+    await draw(answered as AgendaItem);
+    expect(root().querySelector('[data-agenda-own-row-held]')).toBeNull();
+    expect(root().querySelector('[data-agenda-card-ask]')).toBeNull();
+    expect(root().querySelectorAll('[data-agenda-option="Blue"]')).toHaveLength(1);
+  });
+
+  test('draws the card ask as the item’s own ask, inside the item — never docked', async () => {
+    const acted = await draw(asking);
     const needs = one('[data-agenda-part="needs"]');
     const ask = must(needs.querySelector('[data-agenda-card-ask]'), 'the card ask');
     expect(ask.getAttribute('data-agenda-card-ask')).toBe('gate:F12:tested:3');
-    expect(ask.textContent).toContain('Badge colour is ready to test.');
+    expect(ask.closest('[data-agenda-need]')).not.toBeNull();
+    expect(ask.querySelector('[data-agenda-card-ask-ref]')?.textContent).toBe('For &F12 Badge colour');
     expect(root().querySelector('.fy-item-view__dock [data-agenda-card-ask]')).toBeNull();
+    // Its own question stays (it says something the card ask does not); no "Type your answer below" beside buttons.
+    expect(one('[data-agenda-question-line]').textContent).toContain('Which colour for the badge?');
+    expect(needs.textContent).not.toContain('Type your answer below.');
     const labels = [...ask.querySelectorAll('[data-agenda-option]')].map(node =>
       node.getAttribute('data-agenda-option'),
     );
     expect(labels).toEqual(['Not good', 'Done']);
     await interact(() => must(ask.querySelector<HTMLElement>('[data-agenda-option="Done"]'), 'Done').click());
     expect(acted).toEqual([expect.objectContaining({ kind: 'respond', label: 'Done', gate: true })]);
-    // The item's own answers are its own row, inline under its ask and labelled: never docked beside the card's.
-    expect(root().querySelector('.fy-item-view__dock [data-agenda-option="Blue"]')).toBeNull();
-    const own = must(needs.querySelector('[data-agenda-item-answer]'), 'the item’s own answer');
-    expect(own.textContent).toContain('Your answer for this item');
-    expect(own.querySelector('[data-agenda-option="Blue"]')).not.toBeNull();
   });
 
-  test('offers the owner’s plain “yes” reply as the card ask’s answer, one tap, never applied (&B155)', async () => {
-    const acted = await draw(full, {}, [{ kind: 'owner', key: 'o1', at: NOW - 1_000, text: 'works for me!' }]);
+  test('offers the owner’s plain “yes” reply as the card ask’s answer, pointing at the one row, never applied (&B155)', async () => {
+    const acted = await draw(asking, {}, [{ kind: 'owner', key: 'o1', at: NOW - 1_000, text: 'works for me!' }]);
     const offer = one('[data-agenda-card-ask] [data-agenda-reply-offer]');
-    expect(offer.textContent).toContain('You replied “works for me!”.');
+    expect(offer.textContent).toContain('You replied “works for me!”. If that is your answer, tap Done.');
+    // Words only: the one row's Done is still the one place to answer.
+    expect(offer.querySelector('button')).toBeNull();
     expect(acted).toEqual([]);
-    await interact(() => one<HTMLButtonElement>('[data-agenda-reply-offer-use="Done"]').click());
+    await interact(() => one<HTMLButtonElement>('[data-agenda-card-ask] [data-agenda-option="Done"]').click());
     expect(acted).toEqual([
       expect.objectContaining({ kind: 'respond', label: 'Done', gate: true, cardAsk: 'gate:F12:tested:3' }),
     ]);
     await unmount();
     // Longer words, or the ferret answering after them, offer nothing.
-    await draw(full, {}, [{ kind: 'owner', key: 'o1', at: NOW - 1_000, text: 'works, but the colour is off' }]);
+    await draw(asking, {}, [{ kind: 'owner', key: 'o1', at: NOW - 1_000, text: 'works, but the colour is off' }]);
     expect(root().querySelector('[data-agenda-reply-offer]')).toBeNull();
     await unmount();
-    await draw(full, {}, conversation);
+    await draw(asking, {}, conversation);
     expect(root().querySelector('[data-agenda-reply-offer]')).toBeNull();
   });
 
@@ -346,16 +375,75 @@ describe('what it needs from you', () => {
     expect(one('[data-agenda-part="needs"]').hasAttribute('data-agenda-needs-you')).toBe(false);
   });
 
-  test('gives every card ask its own heading, and the board’s How to test when the host has it', async () => {
-    await draw(full, { howToTestFor: id => (id === 'F12' ? '1. Open the badge.\n2. See it is blue.' : null) });
+  test('heads every card ask with its verb, names the card once, and shows the board’s How to test', async () => {
+    await draw(asking, { howToTestFor: id => (id === 'F12' ? '1. Open the badge.\n2. See it is blue.' : null) });
     const ask = one('[data-agenda-card-ask]');
-    expect(ask.querySelector('[data-agenda-card-ask-title]')?.textContent).toBe('Card &F12: your answer for the card');
+    expect(ask.querySelector('[data-agenda-card-ask-title]')?.textContent).toBe('Try it');
+    expect(root().textContent).not.toMatch(/your answer for the card|Card &F12|card ask/iu);
+    expect(root().textContent?.match(/&F12 Badge colour/gu)).toHaveLength(1);
     const steps = must(ask.querySelector('[data-agenda-card-ask-test]'), 'the test steps');
     expect(steps.textContent).toContain('How to test');
     expect(steps.textContent).toContain('Open the badge.');
     await unmount();
-    await draw(full);
+    await draw(asking);
     expect(root().querySelector('[data-agenda-card-ask-test]')).toBeNull();
+  });
+
+  // &B165: a daemon-raised try-it drew its ask twice, then a nested "Card &F1302: your answer for the card" with buttons.
+  describe('a try-it whose ask is the card ask', () => {
+    const STEPS =
+      'Read docs/design/ferret-capacity.md in https://github.com/kirinnee/ferretry/pull/1515. Start with D1–D3.';
+    const tryIt = (cardAsks: readonly object[] = [gate]) =>
+      agendaItem('A432', {
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        // The owner's screenshot: the daemon's ask line was the card's first step, cut at its first sentence.
+        subject: 'Try it: Read docs/design/ferret-capacity.md in https://github.com/kirinnee/ferretry/pull/1515.',
+        gateAttached: cardAsks[0],
+        cardAsks: cardAsks.map(each => ({ gate: each, at: '2026-08-01T11:00:00.000Z' })),
+      } as unknown as Partial<AgendaItem>);
+    const steps = (id: string): string | null =>
+      id === 'F12' ? STEPS : id === 'F13' ? 'Open the second badge.' : null;
+
+    test('is ONE block under What I need from you: the steps once, its buttons, no card wording, no typed-answer line', async () => {
+      const acted = await draw(tryIt(), { howToTestFor: steps });
+      const needs = one('[data-agenda-need]');
+      expect(needs.querySelectorAll('[data-agenda-card-ask]')).toHaveLength(1);
+      expect(needs.querySelector('[data-agenda-question-line]')).toBeNull();
+      expect(needs.querySelector('[data-agenda-need-lead]')).toBeNull();
+      expect(needs.textContent?.match(/Read docs\/design\/ferret-capacity\.md/gu)).toHaveLength(1);
+      expect(one('[data-agenda-card-ask-title]').textContent).toBe('Try it');
+      expect(one('[data-agenda-card-ask-ref]').textContent).toBe('For &F12 Badge colour');
+      expect(root().textContent).not.toMatch(/your answer|Card &F12|card ask|Type your answer below/iu);
+      expect(
+        [...needs.querySelectorAll('[data-agenda-option]')].map(node => node.getAttribute('data-agenda-option')),
+      ).toEqual(['Not good', 'Done']);
+      await interact(() => must(needs.querySelector<HTMLElement>('[data-agenda-option="Done"]'), 'Done').click());
+      expect(acted).toEqual([expect.objectContaining({ label: 'Done', gate: true, cardAsk: 'gate:F12:tested:3' })]);
+    });
+
+    test('answers by the arrow keys too, like any choice item', async () => {
+      const acted = await draw(tryIt(), { howToTestFor: steps });
+      await interact(() => {
+        one('[data-agenda-part="needs"]').dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
+        );
+      });
+      expect(acted).toEqual([expect.objectContaining({ label: 'Done', gate: true, cardAsk: 'gate:F12:tested:3' })]);
+    });
+
+    test('asks one of several card asks at a time: the first with its buttons, the next named', async () => {
+      const second = { ...gate, cardId: 'F13', entry: 1, cardTitle: 'Badge shape' };
+      await draw(tryIt([gate, second]), { howToTestFor: steps });
+      const blocks = [...root().querySelectorAll('[data-agenda-card-ask]')];
+      expect(blocks.map(block => block.getAttribute('data-agenda-card-ask'))).toEqual(['gate:F12:tested:3']);
+      expect(one('[data-agenda-card-ask-ref]').textContent).toBe('For &F12 Badge colour');
+      expect(one('[data-agenda-card-ask-later]').textContent).toBe(
+        'Next: try it, for &F13 Badge shape. It is asked here once you answer above.',
+      );
+      expect(root().querySelectorAll('[data-agenda-option="Done"]')).toHaveLength(1);
+      expect(root().textContent).not.toMatch(/your answer|Card &F1|card ask/iu);
+    });
   });
 
   test('docks the item’s row at the view’s foot only when no card ask shares the view', async () => {

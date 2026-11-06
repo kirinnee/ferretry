@@ -32,8 +32,9 @@ const holdIt = inboxCard(
 
 const withGate = inboxCard(
   agendaItem('A4', {
-    subject: 'Which colour?',
-    ask: choices('Blue', 'Green'),
+    subject: 'Which shade of blue?',
+    kind: 'reply',
+    ask: { kind: 'open-question' },
     gateAttached: {
       cardId: 'F12',
       laneId: 'tested',

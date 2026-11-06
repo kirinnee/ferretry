@@ -2,7 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { type AgendaCardAsk, type AgendaGate, AgendaItemSchema } from '../../src/lib/agenda.ts';
 import {
-  asksOnlyCardAsks,
+  askedCardAsks,
+  askLineRepeatsCardAsk,
   canCarryCardAsk,
   cardAgendaReference,
   cardAskOf,
@@ -10,8 +11,11 @@ import {
   cardAskStage,
   carriesCard,
   hasOpenCardAsk,
+  isGeneratedCardAgendaAsk,
+  itemAsksOwnQuestion,
   mirroredCardAsk,
   openCardAsks,
+  ownCardAsk,
   parseCardAgendaReference,
 } from '../../src/lib/agenda-card-asks.ts';
 import { type AgendaQueueSource, needsYouQueue } from '../../src/lib/agenda-queue.ts';
@@ -54,6 +58,33 @@ describe('open card asks', () => {
     should(hasOpenCardAsk({ cardAsks: [answered('F1')] })).be.false();
     should(hasOpenCardAsk({})).be.false();
     should(mirroredCardAsk({})).be.undefined();
+  });
+
+  it('should ask a Not yet after every ask still waiting, so the mirror and an unnamed answer reach the next one', () => {
+    // Arrange — two approvals, F12 then F13; the owner said Not yet to F12
+    const deferred = (cardId: string, at: string): AgendaCardAsk => ({ ...open(cardId), notYet: { at } });
+    const item = { cardAsks: [deferred('F12', LATER), open('F13')] };
+
+    // Act
+    const order = askedCardAsks(item).map(ask => ask.gate.cardId);
+
+    // Assert
+    should(order).deepEqual(['F13', 'F12']);
+    should(mirroredCardAsk(item)?.gate.cardId).equal('F13');
+  });
+
+  it('should ask the Not yet set aside longest ago first, so a second Not yet moves on rather than re-trapping', () => {
+    // Arrange — both set aside: F13 after F12, then F12 again (an older app answering what it is shown)
+    const deferred = (cardId: string, at: string): AgendaCardAsk => ({ ...open(cardId), notYet: { at } });
+    const both = { cardAsks: [deferred('F12', AT), deferred('F13', LATER)] };
+    const again = { cardAsks: [deferred('F12', '2026-11-03T11:00:00.000Z'), deferred('F13', LATER)] };
+    const tied = { cardAsks: [deferred('F12', AT), deferred('F13', AT), answered('F14')] };
+
+    // Act / Assert — the one set aside longest ago comes first; a tie keeps the order the asks were put on
+    should(askedCardAsks(both).map(ask => ask.gate.cardId)).deepEqual(['F12', 'F13']);
+    should(mirroredCardAsk(again)?.gate.cardId).equal('F13');
+    should(askedCardAsks(tied).map(ask => ask.gate.cardId)).deepEqual(['F12', 'F13']);
+    should(askedCardAsks({})).deepEqual([]);
   });
 
   it('should find an ask by its gate reference, open or answered', () => {
@@ -122,7 +153,7 @@ describe('an agenda item’s card asks', () => {
     should(AgendaItemSchema.safeParse(item([open('F412'), open('F412', 2)])).success).be.true();
     const twice = AgendaItemSchema.safeParse(item([open('F412'), answered('F412')]));
     should(twice.success).be.false();
-    should(twice.error?.issues.map(issue => issue.message)).containEql('an agenda carries each card ask once');
+    should(twice.error?.issues.map(issue => issue.message)).containEql('an agenda carries each ask about a card once');
   });
 
   it('should carry the turn an ask woke the agenda out of, and when the mirror last changed, and read without them', () => {
@@ -188,27 +219,168 @@ describe('which agendas can carry a card ask', () => {
   });
 });
 
-describe('an agenda that asks only card asks', () => {
-  const base = { raisedBy: 'agent' as const, sourceRef: null, waitingSince: AT };
+describe('ownCardAsk: the one ask of a card’s own agenda', () => {
+  const own = { raisedBy: 'daemon', sourceRef: 'card-agenda:F12', cardAsks: [open('F12')] } as const;
 
-  it('should be false with no open ask', () => {
-    should(asksOnlyCardAsks({ ...base })).be.false();
-    should(asksOnlyCardAsks({ ...base, cardAsks: [answered('F1')] })).be.false();
+  it('is the open ask of the agenda the daemon opened for the card', () => {
+    should(ownCardAsk(own)).eql(open('F12'));
   });
 
-  it('should be true for the daemon’s card agenda, whatever else is on it', () => {
+  it('is nothing for a ferret’s own thread, however many asks it carries', () => {
+    should(ownCardAsk({ ...own, raisedBy: 'agent', sourceRef: 'task:F12' })).be.undefined();
+    should(ownCardAsk({ ...own, raisedBy: 'agent' })).be.undefined();
+  });
+
+  it('is nothing when the card agenda has no open ask or more than one', () => {
+    should(ownCardAsk({ ...own, cardAsks: [{ ...open('F12'), answer: undefined }, open('F13')] })).be.undefined();
+    should(ownCardAsk({ ...own, cardAsks: [] })).be.undefined();
+    should(ownCardAsk({ raisedBy: 'daemon', sourceRef: 'card-agenda:F12' })).be.undefined();
+  });
+});
+
+describe('the generated card agenda ask', () => {
+  const tryIt = (answer?: AgendaCardAsk['answer']): AgendaCardAsk => ({
+    gate: gate('F12', 1, 'reopen-with-agenda'),
+    at: AT,
+    howToTest: '1. The badge counts unread items.\n2. Open the Inbox.',
+    ...(answer === undefined ? {} : { answer }),
+  });
+  const SUBJECT = 'Try it: the badge counts unread items.';
+  const daemon = {
+    raisedBy: 'daemon' as const,
+    sourceRef: 'card-agenda:F12',
+    ask: { kind: 'open-question' as const },
+    subject: SUBJECT,
+    generatedSubject: SUBJECT,
+    cardAsks: [tryIt()],
+  };
+
+  it('should hold while the subject is still exactly the one the daemon last wrote', () => {
+    should(isGeneratedCardAgendaAsk(daemon)).be.true();
+  });
+
+  it('should stop holding once anyone rewrote the subject, however long ago (no revision tail is read)', () => {
+    should(isGeneratedCardAgendaAsk({ ...daemon, subject: 'Should the badge also change keyboard focus?' })).be.false();
+    // Even a rewrite in the lane's own words is the rewriter's once a generated subject is on record.
+    should(isGeneratedCardAgendaAsk({ ...daemon, subject: 'Try it: and the focus ring too?' })).be.false();
+  });
+
+  it('should stop holding once the item asks questions, fields, steps or a non-open ask of its own', () => {
+    should(isGeneratedCardAgendaAsk({ ...daemon, questions: [{ question: 'Which?' }] })).be.false();
+    should(isGeneratedCardAgendaAsk({ ...daemon, fields: [{ id: 'f', label: 'Name', type: 'text' }] })).be.false();
+    should(isGeneratedCardAgendaAsk({ ...daemon, steps: ['Open the app'] })).be.false();
+    should(isGeneratedCardAgendaAsk({ ...daemon, ask: { kind: 'permission' } })).be.false();
+  });
+
+  it('should never let a lane prefix alone hide a question on a card agenda from before the generated subject', () => {
+    const { generatedSubject: _generated, ...legacy } = daemon;
+    // The upgrade path: a ferret rewrote it before `generatedSubject` existed, keeping the "Try it:" opening.
+    const rewritten = {
+      ...legacy,
+      subject: 'Try it: the badge counts unread items. Should keyboard focus change too?',
+    };
+    should(isGeneratedCardAgendaAsk(rewritten)).be.false();
+    should(itemAsksOwnQuestion(rewritten, rewritten.cardAsks)).be.true();
+  });
+
+  it('should read a card agenda from before the generated subject by the lane words of one of its card asks', () => {
+    const { generatedSubject: _generated, ...legacy } = daemon;
+    should(isGeneratedCardAgendaAsk(legacy)).be.true();
+    // The answered ask still wrote the subject: Good does not turn it into a question of its own.
+    should(isGeneratedCardAgendaAsk({ ...legacy, cardAsks: [tryIt(answered('F12').answer)] })).be.true();
+    should(isGeneratedCardAgendaAsk({ ...legacy, subject: 'Should the badge also change keyboard focus?' })).be.false();
+    should(isGeneratedCardAgendaAsk({ ...legacy, cardAsks: undefined })).be.false();
+  });
+
+  it('should never hold for an item that is not the daemon’s card agenda', () => {
+    should(isGeneratedCardAgendaAsk({ ...daemon, raisedBy: 'agent' })).be.false();
+    should(isGeneratedCardAgendaAsk({ ...daemon, sourceRef: 'gate:F12:tested:1' })).be.false();
+    should(isGeneratedCardAgendaAsk({ ...daemon, sourceRef: null })).be.false();
+  });
+
+  it('should keep the generated subject on the stored item, so an old app may drop it', () => {
+    const parsed = AgendaItemSchema.safeParse({
+      id: 'A1',
+      source: 'task',
+      sourceRef: 'card-agenda:F12',
+      subject: SUBJECT,
+      generatedSubject: SUBJECT,
+      why: 'F12 reached Ready to try.',
+      context: null,
+      waitingSince: AT,
+      howToResolve: 'Try it.',
+      raisedBy: 'daemon',
+      raisedBySession: null,
+      raisedByName: null,
+    });
+    should(parsed.success).be.true();
+    should(parsed.success && parsed.data.generatedSubject).equal(SUBJECT);
+  });
+});
+
+describe('an ask line that repeats a card ask', () => {
+  const ask = {
+    gate: { ...gate('F12', 1, 'reopen-with-agenda'), cardTitle: 'Unread badge' },
+    howToTest: '1. Open the Inbox. Look at the corner.\n2. **Mark** one item read.',
+  };
+
+  it('should hold for the lane words alone, or followed by the card title or one whole step', () => {
+    should(askLineRepeatsCardAsk('Try it:', [ask])).be.true();
+    should(askLineRepeatsCardAsk('Try it: Unread badge', [ask])).be.true();
+    should(askLineRepeatsCardAsk('Try it: Mark one item read.', [ask])).be.true();
+    // A step clipped at its first sentence, as the daemon clips the line.
+    should(askLineRepeatsCardAsk('Try it: Open the Inbox', [ask])).be.true();
+  });
+
+  it('should not hold for anything else, even a line quoting part of a step', () => {
+    should(askLineRepeatsCardAsk('Try it: Open the', [ask])).be.false();
+    should(askLineRepeatsCardAsk('Try it: does the badge also change keyboard focus?', [ask])).be.false();
+    should(askLineRepeatsCardAsk('Open the Inbox.', [ask])).be.false();
+    should(askLineRepeatsCardAsk('Try it: Unread badge', [])).be.false();
+    should(askLineRepeatsCardAsk('Try it: Mark one item read.', [{ ...ask, howToTest: null }])).be.false();
+  });
+
+  it('should read an approval lane by its first option', () => {
+    const plan = { gate: { ...gate('F12'), options: [{ id: 'o0', label: 'OK to build', outcome: 'close' as const }] } };
+    should(askLineRepeatsCardAsk('OK to build?', [plan])).be.true();
+    should(askLineRepeatsCardAsk('OK to build? Should it also cover the CLI?', [plan])).be.false();
+  });
+});
+
+describe('whether an item asks its own question beside its card asks', () => {
+  const asks = [{ gate: { ...gate('F12', 1, 'reopen-with-agenda'), cardTitle: 'Unread badge' }, howToTest: null }];
+  const thread = {
+    raisedBy: 'agent' as const,
+    sourceRef: null,
+    ask: { kind: 'open-question' as const },
+    subject: 'Should the badge also change keyboard focus?',
+  };
+  const cardAgenda = {
+    raisedBy: 'daemon' as const,
+    sourceRef: 'card-agenda:F12',
+    ask: { kind: 'open-question' as const },
+    subject: 'Try it: the badge counts unread items.',
+    generatedSubject: 'Try it: the badge counts unread items.',
+    cardAsks: [open('F12')],
+  };
+
+  it('should hold for a ferret’s subject-only question', () => {
+    should(itemAsksOwnQuestion(thread, asks)).be.true();
+  });
+
+  it('should hold for questions, fields or steps, whatever the line says', () => {
+    should(itemAsksOwnQuestion({ ...cardAgenda, questions: [{ question: 'Which?' }] }, asks)).be.true();
+    should(itemAsksOwnQuestion({ ...thread, subject: 'Try it: Unread badge', steps: ['Open it'] }, asks)).be.true();
+  });
+
+  it('should not hold for the daemon’s generated card agenda ask, nor a line that only repeats the card ask', () => {
+    should(itemAsksOwnQuestion(cardAgenda, asks)).be.false();
+    should(itemAsksOwnQuestion({ ...thread, subject: 'Try it: Unread badge' }, asks)).be.false();
+  });
+
+  it('should hold for a card agenda whose subject a ferret rewrote into a question', () => {
     should(
-      asksOnlyCardAsks({
-        raisedBy: 'daemon',
-        sourceRef: 'card-agenda:F1',
-        waitingSince: LATER,
-        cardAsks: [open('F1')],
-      }),
+      itemAsksOwnQuestion({ ...cardAgenda, subject: 'Should the badge also change keyboard focus?' }, asks),
     ).be.true();
-  });
-
-  it('should be true for a thread the ask was put on after its last question, false when the ferret asked since', () => {
-    should(asksOnlyCardAsks({ ...base, cardAsks: [{ ...open('F1'), at: LATER }] })).be.true();
-    should(asksOnlyCardAsks({ ...base, waitingSince: LATER, cardAsks: [open('F1')] })).be.false();
   });
 });

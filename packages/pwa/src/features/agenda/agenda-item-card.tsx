@@ -44,9 +44,10 @@ import { cardModel } from '../../lib/agenda-card-model.ts';
 import { readTab, writeTab } from '../../lib/agenda-fold.ts';
 import { useFormPicks } from '../../lib/agenda-form-state.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
-import { type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import { type InboxAction, type SwipeMap, swipeMap } from '../../lib/agenda-inbox.ts';
 import {
   type ItemCardAsk,
+  itemAskPlan,
   itemCardAsks,
   itemStage,
   PART_TITLES,
@@ -59,11 +60,12 @@ import type { LineageTitles } from '../../lib/agenda-merge.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, versionCount } from '../../lib/agenda-revisions.ts';
 import { openTab, sectionTab, viewTabs } from '../../lib/agenda-tab-view.ts';
-import { attachedGateLead, toGateAction } from '../../lib/gate-items.ts';
+import { attachedGateHeading, attachedGateReference, toGateAction } from '../../lib/gate-items.ts';
 import { type ReplyApproval, replyApproval } from '../../lib/reply-approval.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
 import { AgendaActivityLog } from './agenda-activity-log.tsx';
 import { AgendaLinkRow, PointForm } from './agenda-brief.tsx';
+import { CardAskAnswer } from './agenda-card-ask-answer.tsx';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
 import { AgendaDelivery } from './agenda-delivery.tsx';
 import { AgendaFold } from './agenda-fold.tsx';
@@ -95,6 +97,11 @@ export interface AgendaItemCardProps {
   /** The ↓ swipe: Skip (the host moves to the next item, changing nothing), or absent where there is no next item. */
   readonly onSkip?: (() => void) | undefined;
   readonly onAct: (action: InboxAction) => void;
+  /**
+   * The host draws the box under the item and takes what is typed there as the answer to the item's one card ask (the
+   * Inbox's, `typedCardAsk`). Only then is that ask Good-only; everywhere else it keeps its own buttons.
+   */
+  readonly typedAnswer?: boolean;
   readonly onProgress?: ((step: number, done: boolean) => Promise<void>) | undefined;
   readonly doneClose?: DoneCloseView | undefined;
   /** Why it cannot be answered here (parked, resolved): drawn in the answer row's place, and Not needed is gone. */
@@ -105,7 +112,7 @@ export interface AgendaItemCardProps {
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the answer row's place, its Allow and Decline are the answer. */
   readonly planForm?: ReactNode;
-  /** The cards a machine notice is about (`AgendaCardsHost`): each with its own Open, Start and Close. Got it stays the answer. */
+  /** The cards a machine notice is about (`AgendaCardsHost`): ONE form, a pick per card and one Send, which is the answer. */
   readonly cardsForm?: ReactNode;
   /**
    * A review's Request changes: the host sends the composer's words as the change asked for, or puts the owner in
@@ -321,9 +328,10 @@ function ReferencesTable({
 }
 
 /**
- * ONE CARD ASK inside "What I need from you": its own heading ("Card &F559: your answer for the card"),
- * the card and what it waits on, its How to test when the ask carries one, and ITS buttons (Done / Not good, or OK to
- * build) — tap only, so the arrows and swipes stay the item's own.
+ * ONE CARD ASK, drawn as the ITEM'S OWN ASK inside "What I need from you" (docs/agenda.md § One model): its verb as the
+ * heading ("Try it", "Approve"), ONE plain reference line naming the card ("For &F12 Badge colour"), how to try it, and
+ * its answers — the gate's buttons, or (`typed`) Good alone with the words typed below as the other answer. It is never
+ * headed "Card …" and never says "your answer for the card": to the owner it is simply what this item asks.
  */
 function CardAskBlock({
   ask,
@@ -331,49 +339,86 @@ function CardAskBlock({
   onAct,
   renderProse,
   offer = null,
+  map = {},
+  swipeable = false,
+  onSkip,
+  typed = false,
+  error = null,
 }: {
   readonly ask: ItemCardAsk;
   readonly busy: boolean;
+  /** Why the last answer did not land: said beside the one ask, whichever of the item's rows waits behind it. */
+  readonly error?: string | null;
   readonly onAct: (action: InboxAction) => void;
   readonly renderProse: Prose;
-  /** The owner's last words already approve this ask (&B155): offered as its answer, one tap, never applied. */
+  /** The owner's last words already approve this ask (&B155): offered as one tap, never applied. */
   readonly offer?: ReplyApproval | null;
+  /** The swipes this ask answers, when it is the item's only answer (the arrows are drawn and swiped). */
+  readonly map?: SwipeMap;
+  readonly swipeable?: boolean;
+  readonly onSkip?: (() => void) | undefined;
+  /** The host's box under the item takes the typed words as this ask's other answer: Good is the one button. */
+  readonly typed?: boolean;
 }) {
+  const own = Object.keys(map).length > 0;
+  const steps = ask.howToTest === null || ask.howToTest.trim() === '' ? null : ask.howToTest;
   return (
     <div className="fy-card__gate-row" data-agenda-attached-gate={ask.gate.cardId} data-agenda-card-ask={ask.key}>
       <h5 className="fy-card__label fy-card__card-ask-title" data-agenda-card-ask-title="">
-        Card &amp;{ask.gate.cardId}: your answer for the card
+        {attachedGateHeading(ask.gate)}
       </h5>
-      <p className="fy-card__gate-lead">{attachedGateLead(ask.gate)}</p>
-      {ask.howToTest === null || ask.howToTest.trim() === '' ? null : (
-        <div className="fy-card__need-part" data-agenda-card-ask-test="">
-          <h5 className="fy-card__label">How to test</h5>
-          <HowToTest renderProse={renderProse} text={ask.howToTest} />
-        </div>
+      <div className="fy-card__gate-lead" data-agenda-card-ask-ref="">
+        {renderProse(attachedGateReference(ask.gate))}
+      </div>
+      {typed ? (
+        <>
+          <CardAskAnswer ask={ask} busy={busy} offer={offer} onAct={onAct} renderProse={renderProse} />
+          {error === null ? null : (
+            <p className="fy-qr__error m-0" data-agenda-card-ask-error="" role="alert">
+              Not sent: {error}
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          {steps === null ? null : (
+            <div className="fy-card__need-part" data-agenda-card-ask-test="">
+              <h5 className="fy-card__label">How to test</h5>
+              <HowToTest renderProse={renderProse} text={steps} />
+            </div>
+          )}
+          {offer === null ? null : (
+            // Words, not a second button: the one row below is still the only place to answer (&B165).
+            <p className="fy-card__reply-offer" data-agenda-reply-offer={offer.label}>
+              You replied “{offer.reply}”. If that is your answer, tap {offer.label}.
+            </p>
+          )}
+          <AgendaQuickReplies
+            busy={busy}
+            error={error}
+            map={map}
+            model={cardModel(ask.view)}
+            onAct={action => onAct(toGateAction(action, ask.gate))}
+            swipeable={own && swipeable}
+            tapOnly={!own}
+            {...(own && onSkip !== undefined ? { onSkip } : {})}
+          />
+        </>
       )}
-      {offer === null ? null : (
-        <p className="fy-card__reply-offer" data-agenda-reply-offer="">
-          <span>You replied “{offer.reply}”. Use it as your answer for the card?</span>
-          <button
-            className="kt-btn fy-card__reply-offer-use"
-            data-agenda-reply-offer-use={offer.label}
-            disabled={busy}
-            onClick={() => onAct(toGateAction(optionAction({ label: offer.label }, ''), ask.gate))}
-            type="button"
-          >
-            {offer.label}
-          </button>
-        </p>
+    </div>
+  );
+}
+
+/**
+ * A card ask that waits for the item's own answer: the item has a row of its own, and one answer row is all an item
+ * shows. One plain line names it; its buttons come once the item's own ask is answered.
+ */
+function CardAskLater({ ask, renderProse }: { readonly ask: ItemCardAsk; readonly renderProse: Prose }) {
+  return (
+    <div className="fy-card__card-ask-later" data-agenda-card-ask-later={ask.key}>
+      {renderProse(
+        `Next: ${attachedGateHeading(ask.gate).toLowerCase()}, ${attachedGateReference(ask.gate).replace(/^For /u, 'for ')}. It is asked here once you answer above.`,
       )}
-      <AgendaQuickReplies
-        busy={busy}
-        error={null}
-        map={{}}
-        model={cardModel(ask.view)}
-        onAct={action => onAct(toGateAction(action, ask.gate))}
-        swipeable={false}
-        tapOnly
-      />
     </div>
   );
 }
@@ -390,6 +435,7 @@ export function AgendaItemCard({
   onSkip,
   renderProse,
   onAct,
+  typedAnswer = false,
   onProgress,
   doneClose,
   settled,
@@ -464,6 +510,12 @@ export function AgendaItemCard({
   const gated = item.gate !== undefined;
   const pull = useDownSwipe(() => onSkip?.(), swipeable && onSkip !== undefined);
 
+  // ONE answer row (docs/agenda.md § One model): the first card ask the item carries is asked first, as the item's own,
+  // inside "What I need from you"; the item's own buttons wait behind it (`ownRowHeld`). Only the latest version is
+  // answerable, so an earlier one draws none.
+  const cardAsks = latest && settled === undefined ? itemCardAsks(item, howToTestFor) : [];
+  const plan = itemAskPlan(item, cardAsks, { typedHost: typedAnswer });
+
   // A choice (one question): its options are listed with what each means, and answered on the row. Any other shape
   // offers none, whatever options an item raised before the rule still carries.
   const shape = model.shape;
@@ -482,7 +534,7 @@ export function AgendaItemCard({
         name: named,
         meaning: meaning === null ? null : mark(meaning),
         recommended: option.recommended,
-        pickHere: answerable && !onRow.has(option.label.trim().toLowerCase()),
+        pickHere: answerable && !plan.ownRowHeld && !onRow.has(option.label.trim().toLowerCase()),
       };
     },
   );
@@ -507,38 +559,56 @@ export function AgendaItemCard({
     answerable && onRequestChanges !== undefined && model.requestChanges !== undefined
       ? { answer: model.requestChanges, onTap: () => onRequestChanges(model.requestChanges as AgendaCardAnswer) }
       : undefined;
-  // Every card ask the item carries is answered HERE, inside the item, with its own buttons: never docked, never a
-  // separate item. Only the latest version is answerable, so an earlier one draws none.
-  const cardAsks = latest && settled === undefined ? itemCardAsks(item, howToTestFor) : [];
-  // The owner already said yes in words ("build", "ok to build!"): offer it as the card ask's answer (&B155).
-  const replyOffer = cardAsks.length === 0 ? null : replyApproval(item, history);
+  // The owner already said yes in words ("build", "ok to build!", "works now"): offered as the ask's answer (&B155).
+  const replyOffer = plan.asks.length === 0 ? null : replyApproval(item, history);
+  const askBlocks =
+    plan.asks.length === 0 && plan.later.length === 0 ? null : (
+      <div className="fy-card__card-asks" data-agenda-card-asks={plan.asks.length} data-bare="">
+        {plan.asks.map(ask => (
+          <CardAskBlock
+            ask={ask}
+            busy={busy}
+            key={ask.key}
+            offer={replyOffer?.ask === ask.key ? replyOffer : null}
+            onAct={onAct}
+            renderProse={renderProse}
+            typed={plan.typed === ask}
+            error={error}
+            {...(plan.swipes === undefined ? {} : { map: plan.swipes, swipeable })}
+            {...(plan.swipes !== undefined && onSkip !== undefined ? { onSkip } : {})}
+          />
+        ))}
+        {plan.later.map(ask => (
+          <CardAskLater ask={ask} key={ask.key} renderProse={renderProse} />
+        ))}
+      </div>
+    );
   const replies = (
     <AgendaQuickReplies
       busy={busy}
-      error={error}
+      // While a card ask is the item's answer, its error is said beside it and the item offers no Done-closes of its
+      // own: that would be a second answer row (&B165).
+      error={plan.asks.length > 0 ? null : error}
       map={swipeMap(item)}
       model={model}
       onAct={onAct}
       swipeable={swipeable}
       {...(onSkip === undefined ? {} : { onSkip })}
-      {...(doneClose === undefined ? {} : { doneClose })}
+      {...(doneClose === undefined || plan.asks.length > 0 ? {} : { doneClose })}
       {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
       {...(requestChanges === undefined ? {} : { requestChanges })}
     />
   );
-  // Only a row of buttons docks; a card answered in words has none, and its note or error stays in the card.
-  // With card asks the item's own row is not docked: it sits inline under its ask, labelled, so two button sets never
-  // share the foot of the view and the card ask's buttons are never covered. An item answered in words (a reply, its
-  // questions) has no row to label: it gets no "Your answer for this item" heading over nothing (&B156).
-  const ownRow = model.notice || model.answers.length > 0 || requestChanges !== undefined;
-  const rowInline = cardAsks.length > 0 && !isInput && planForm === undefined && ownRow;
+  // Only a row of buttons docks; a card answered in words has none, and its note or error stays in the card. An item
+  // whose card asks are its answer has their buttons inside "What I need from you", so nothing docks over them.
   const docked =
     answerDock != null &&
     latest &&
     settled === undefined &&
     !isInput &&
     planForm === undefined &&
-    cardAsks.length === 0 &&
+    cardsForm === undefined &&
+    plan.asks.length === 0 &&
     (model.notice || model.answers.length > 0 || requestChanges !== undefined);
   const state = stateChip(current, ferret, now);
   const stage = itemStage(current);
@@ -577,7 +647,7 @@ export function AgendaItemCard({
             )}
           </span>
         </div>
-        {gated || description === null ? null : (
+        {gated || plan.typed !== undefined || description === null ? null : (
           <div className="fy-card__desc" data-agenda-description="">
             {renderProse(description)}
           </div>
@@ -657,9 +727,10 @@ export function AgendaItemCard({
                 : shape === 'form'
                   ? { lead: FORM_ELSEWHERE }
                   : {})}
-              {...(answerable && cardsForm !== undefined ? { lead: '' } : {})}
+              {...((answerable && cardsForm !== undefined) || plan.asks.length > 0 ? { lead: '' } : {})}
             >
               {askLine === '' ||
+              !plan.ownLine ||
               cardsForm !== undefined ||
               (gated && body !== null) ||
               shape === 'answers' ||
@@ -671,6 +742,13 @@ export function AgendaItemCard({
               )}
               {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
               {cardsForm}
+              {plan.ownRowHeld && plan.asks[0] !== undefined ? (
+                <p className="fy-card__card-ask-later" data-agenda-own-row-held="">
+                  First answer the {attachedGateHeading(plan.asks[0].gate) === 'Try it' ? 'try-it' : 'approval'} below;
+                  the buttons for this come back once it is answered.
+                </p>
+              ) : null}
+              {askBlocks}
               {gated && body !== null ? <HowToTest renderProse={renderProse} text={body} /> : null}
               {choosing && showList ? (
                 <OptionsList
@@ -719,13 +797,6 @@ export function AgendaItemCard({
               ) : null}
             </AgendaNeed>
           )}
-          {rowInline ? (
-            <div className="fy-card__item-answer" data-agenda-item-answer="">
-              <h5 className="fy-card__label fy-card__item-answer-title">Your answer for this item</h5>
-              {parkedNote}
-              {replies}
-            </div>
-          ) : null}
           {recommendation === undefined || recommendation.why === undefined ? null : (
             <Section
               name="recommendation"
@@ -762,20 +833,6 @@ export function AgendaItemCard({
               )}
             </Section>
           )}
-          {cardAsks.length === 0 ? null : (
-            <div className="fy-card__card-asks" data-agenda-card-asks={cardAsks.length}>
-              {cardAsks.map(ask => (
-                <CardAskBlock
-                  ask={ask}
-                  busy={busy}
-                  key={ask.key}
-                  offer={replyOffer?.ask === ask.key ? replyOffer : null}
-                  onAct={onAct}
-                  renderProse={renderProse}
-                />
-              ))}
-            </div>
-          )}
           {!latest ? (
             <p className="fy-card__old" data-agenda-old-version="">
               <span>Showing v{shown}.</span>
@@ -801,8 +858,19 @@ export function AgendaItemCard({
             </div>
           ) : (
             <>
-              {rowInline ? null : parkedNote}
-              {rowInline ? null : docked ? createPortal(replies, answerDock) : replies}
+              {parkedNote}
+              {/* A notice's cards form is its answer (its Send answers Got it): no second row under it. */}
+              {cardsForm !== undefined ? (
+                error === null ? null : (
+                  <p className="fy-qr__error m-0" role="alert">
+                    Not sent: {error}
+                  </p>
+                )
+              ) : plan.ownRowHeld ? null : docked ? (
+                createPortal(replies, answerDock)
+              ) : (
+                replies
+              )}
             </>
           )}
         </div>

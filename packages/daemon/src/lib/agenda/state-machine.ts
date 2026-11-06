@@ -107,6 +107,8 @@ import {
   closeRefusal,
   joinCardAsks,
   leaveCardAsks,
+  ownAskDigest,
+  replyKeepsCardAskOpen,
   restRefusal,
   sealCardAsks,
   withCardAsks,
@@ -244,7 +246,7 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly gate?: AgendaGate;
   /**
    * The card asks the new agenda carries (docs/agenda.md § Card asks): only the daemon raises one with any, when it
-   * opens the agenda of a card that nobody's agenda carries yet. `gateAttached` mirrors the first open one.
+   * opens the agenda of a card that nobody's agenda carries yet. `gateAttached` mirrors the first one asked (`mirroredCardAsk`).
    */
   readonly cardAsks?: readonly AgendaCardAsk[];
   /**
@@ -283,6 +285,9 @@ export type AgendaCarried = Pick<
   | 'cardAsks'
   | 'gateAttached'
   | 'gateAttachedChangedAt'
+  | 'generatedSubject'
+  | 'askVersion'
+  | 'ownAskRepliedTo'
 >;
 
 const CARRIED_FIELDS = [
@@ -303,6 +308,13 @@ const CARRIED_FIELDS = [
   'cardAsks',
   'gateAttached',
   'gateAttachedChangedAt',
+  // What the daemon wrote on a card agenda goes with it, so the subject a ferret rewrote stays the ferret's there too.
+  'generatedSubject',
+  // The owner's reply to the item's own question goes with it, and so does the ask version that digest was taken at
+  // (`ownAskDigest` reads it): carried content digests the same, so a question already answered stays answered, while
+  // one the arriving request words differently no longer matches and is asked afresh.
+  'askVersion',
+  'ownAskRepliedTo',
 ] as const satisfies readonly (keyof AgendaCarried)[];
 
 /** The carried fields an item has, and only those: an absent one stays absent. */
@@ -1498,6 +1510,19 @@ function frozenSuggestion(ledger: AgendaLedger, command: AgendaCommand): AgendaM
 }
 
 type RaiseCommand = Extract<AgendaCommand, { action: 'raise' }>;
+
+/**
+ * The subject the daemon writes on the card agenda it opens or restates, kept as its own (`generatedSubject`): while the
+ * subject still equals it, the item asks nothing but its card asks (`isGeneratedCardAgendaAsk`). One carried over from
+ * another ferret's agenda keeps what that one held (`AgendaCarried`), never the subject it arrives with.
+ */
+const generatedSubjectOf = ({ actor, request }: RaiseCommand): { readonly generatedSubject?: string } =>
+  actor.kind === 'daemon' &&
+  request.carried === undefined &&
+  request.source === 'task' &&
+  parseCardAgendaReference(request.sourceRef) !== undefined
+    ? { generatedSubject: request.subject }
+    : {};
 type AddressCommand = Extract<AgendaCommand, { action: 'answer' | 'resolve' | 'dismiss' }>;
 type EditCommand = Extract<AgendaCommand, { action: 'edit' }>;
 type ProgressCommand = Extract<AgendaCommand, { action: 'progress' }>;
@@ -1532,7 +1557,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
     (request.gate !== undefined || request.discussion === true || request.cardAsks !== undefined) &&
     actor.kind !== 'daemon'
   ) {
-    return failure('forbidden', 'only the daemon raises a gate item, its follow-up or a card ask');
+    return failure('forbidden', 'only the daemon raises a gate item, its follow-up or an ask about a card');
   }
   if (request.carried !== undefined && actor.kind !== 'daemon') {
     return failure('forbidden', 'only the daemon carries an item over to another ferret\u2019s agenda');
@@ -1622,6 +1647,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       sourceRef: request.sourceRef,
       ...(request.sourceSeq === undefined ? {} : { sourceSeq: request.sourceSeq }),
       subject: request.subject,
+      ...generatedSubjectOf(command),
       why: request.why,
       ...(request.context === undefined ? {} : { context: request.context }),
       waitingSince: actor.kind === 'daemon' && request.waitingSince !== undefined ? request.waitingSince : command.at,
@@ -1652,7 +1678,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
     },
     actor,
   );
-  // A card agenda opens with its card asks, the first open one mirrored for an app that predates them.
+  // A card agenda opens with its card asks, the first one asked mirrored for an app that predates them.
   // One that carries its talk over from another ferret's is not sealed: it reads its activity lines, as one from before the seal does.
   const asked = request.cardAsks === undefined ? raised : withCardAsks(raised, request.cardAsks);
   const item = request.cardAsks === undefined || request.carried !== undefined ? asked : sealCardAsks(asked);
@@ -1690,6 +1716,7 @@ function refreshStable(
     // The gate it asks about follows the lane: a renamed lane or edited options are restated too.
     ...(request.gate === undefined ? {} : { gate: request.gate }),
     subject: request.subject,
+    ...generatedSubjectOf(command),
     why: request.why,
     context: request.context ?? null,
     howToResolve: request.howToResolve,
@@ -1770,10 +1797,7 @@ function addressById(
   }
   if (command.action === 'resolve' && command.actor.kind === 'human' && hasOpenCardAsk(target.item)) {
     const labels = openCardAsks(target.item).flatMap(ask => ask.gate.options.map(option => option.label));
-    return failure(
-      'invalid',
-      `answer ${command.id}'s card ask instead (${[...new Set(labels)].join(' / ')}), or Not needed`,
-    );
+    return failure('invalid', `answer ${command.id} instead (${[...new Set(labels)].join(' / ')}), or Not needed`);
   }
   // A question the owner has ANSWERED (it rests on the answer) is not withdrawn by the ferret's done: it is settled.
   if (
@@ -2562,6 +2586,7 @@ function editInPlace(ledger: AgendaLedger, item: AgendaItem, command: EditComman
           askVersion: (item.askVersion ?? 1) + 1,
           waitingSince: command.at,
           ownerAnswer: undefined,
+          ownAskRepliedTo: undefined,
           undelivered: undefined,
         }
       : {}),
@@ -2733,18 +2758,33 @@ function reply(ledger: AgendaLedger, command: ReplyCommand): AgendaMutation {
   }
   const words = command.note?.trim() ?? '';
   const note = words === '' ? null : words.slice(0, MAX_AGENDA_REPLY_LENGTH);
-  return restOnOwnerWords(
-    ledger,
-    target.item,
-    command.at,
-    note,
-    wordsOf(command.fromChat?.at ?? command.at, 'owner', 'reply', command.note, command.fromChat),
-  );
+  const entry = wordsOf(command.fromChat?.at ?? command.at, 'owner', 'reply', command.note, command.fromChat);
+  // Words about an item whose card ask is still open, and which asks nothing of its own ("works now" under a try-it), are
+  // logged but answer nothing: the item stays the owner's turn, so the Good it promised stays in Needs you.
+  if (replyKeepsCardAskOpen(target.item)) {
+    return replaceItem(
+      ledger,
+      {
+        ...target.item,
+        history: withHistory(target.item.history, {
+          at: command.at,
+          kind: 'replied',
+          ...(note === null ? {} : { note }),
+        }),
+        ...said(target.item, entry),
+      },
+      command.at,
+      'replied',
+    );
+  }
+  return restOnOwnerWords(ledger, target.item, command.at, note, entry);
 }
 
 /**
  * RESTING, not closed: the item leaves the owner's queue (and any discussion) and waits on the ferret, whose answer
  * brings it back to its place and whose `done` closes it. A reply to a snoozed or working item is a reply too.
+ * The owner's words answer the item's own ask as it stands now (`ownAskRepliedTo`): a card ask answered later does not
+ * put that question back in front of them, until a ferret asks something else.
  */
 function restOnOwnerWords(
   ledger: AgendaLedger,
@@ -2753,9 +2793,11 @@ function restOnOwnerWords(
   note: string | null,
   entry: AgendaConversationEntry | undefined,
 ): AgendaMutation {
-  const { waitingOn: _w, askedAt: _a, waitingFor: _f, parked: _p, resting: _r, ...open } = item;
+  const { waitingOn: _w, askedAt: _a, waitingFor: _f, parked: _p, resting: _r, ownAskRepliedTo: _o, ...open } = item;
+  const digest = ownAskDigest(item);
   const rested: AgendaItem = {
     ...open,
+    ...(digest === undefined ? {} : { ownAskRepliedTo: digest }),
     parked: { reason: 'replied', at },
     resting: { sub: 'waiting-on-ferret', at },
     history: withHistory(open.history, { at, kind: 'replied', ...(note === null ? {} : { note }) }),
@@ -3501,11 +3543,12 @@ function restateConfirms(ledger: AgendaLedger, command: RestateConfirmsCommand):
  * nothing) and not a standalone gate item from before card asks (it IS the ask).
  */
 function cardAsk(ledger: AgendaLedger, command: CardAskCommand): AgendaMutation {
-  if (command.actor.kind !== 'daemon') return failure('forbidden', 'only the daemon puts a card ask on an agenda');
+  if (command.actor.kind !== 'daemon')
+    return failure('forbidden', 'only the daemon puts an ask about a card on an agenda');
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
   if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   if (isGateItem(target.item) || target.item.notice === true) {
-    return failure('invalid', `${command.id} is a gate item or a notice, so it carries no card ask`);
+    return failure('invalid', `${command.id} is a gate item or a notice, so it carries no ask about a card`);
   }
   const outcome = applyCardAsk(target.item, command.operation, command.at, {
     stage: (item, stage) => ({ ...item, ...staged(item, stage, command.at) }),

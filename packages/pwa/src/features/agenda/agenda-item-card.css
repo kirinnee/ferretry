@@ -1855,3 +1855,47 @@
 .fy-card__answered-line {
   margin: 0;
 }
+/* A card ask that IS the item's ask (a try-it): drawn bare inside "What I need from you", no frame of its own, so the
+   owner sees one block: the verb, the steps and the buttons. Beside another card ask a rule keeps them apart. */
+.fy-card__card-asks[data-bare] .fy-card__gate-row {
+  padding: 0;
+  border: 0;
+}
+.fy-card__card-asks[data-bare] .fy-card__gate-row + .fy-card__gate-row {
+  padding-top: 10px;
+  border-top: var(--stroke, 1px) solid var(--border);
+}
+/* A card ask waiting behind the item's own answer row (or behind the first card ask): one quiet line, no buttons. */
+.fy-card__card-ask-later {
+  color: var(--muted);
+  font-size: 0.875em;
+}
+.fy-card__card-ask-later p {
+  margin: 0;
+}
+
+/* THE ONE ASK answered Good and the words typed below (the Inbox): how to try it, one tap, then the words line. */
+.fy-card__try-it {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-card__try-taps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+.fy-card__try-taps .fy-qr__chip {
+  flex: 1 1 8rem;
+}
+
+/* "You wrote “works now”. If that is your answer, tap Good." inside the one ask: its own surface, so it reads as the owner's words offered back. */
+.fy-card__try-it .fy-card__reply-offer {
+  background: var(--surface, transparent);
+  border: var(--border-width, 1px) solid var(--border-strong, currentColor);
+  padding: 8px 10px;
+}
+.fy-card__try-it .fy-card__reply-offer > span {
+  flex: 1 1 12rem;
+}

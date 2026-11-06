@@ -101,6 +101,34 @@ describe('Done · closes on an agenda item: when it is offered', () => {
     expect(theChip().hasAttribute('data-agenda-answer')).toBe(false);
   });
 
+  test('waits while a card ask is the item’s answer: one answer row, never a second Done (&B165)', async () => {
+    const gate = {
+      cardId: 'F1',
+      laneId: 'tested',
+      laneName: 'To test',
+      entry: 2,
+      projectId: 'p1',
+      cardTitle: 'Badge colour',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    };
+    await drawItem(
+      closing({
+        kind: 'reply',
+        subject: 'Anything else?',
+        ask: { kind: 'open-question' },
+        gateAttached: gate,
+        cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
+      } as unknown as Partial<AgendaItem>),
+      world(),
+    );
+    expect(root().querySelector('[data-agenda-card-ask]')).not.toBeNull();
+    expect(chip()).toBeNull();
+    expect(root().querySelectorAll('[data-agenda-option="Done"]')).toHaveLength(1);
+  });
+
   test('draws nothing for an item with no linked card', async () => {
     await drawItem(closing({ task: undefined } as Partial<AgendaItem>), world());
     expect(chip()).toBeNull();

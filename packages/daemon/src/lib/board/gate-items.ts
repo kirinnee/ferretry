@@ -26,25 +26,25 @@ import { createHash } from 'node:crypto';
 import {
   type AgendaCardAsk,
   type AgendaGate,
+  type AgendaGateOption,
   type AgendaId,
   type AgendaItem,
   type AgendaResponse,
   type AgendaSnapshot,
-  type ResolvedAgendaItem,
   type BoardReopenAttachments,
   type BoardTask,
   type BoardTaskActionRequest,
   type BoardTaskId,
   canCarryCardAsk,
-  carriesCard,
   cardAskOf,
   cardAskReference,
+  carriesCard,
   clipAtWord,
   formatTaskRef,
   gateChoice,
   gateReference,
-  gatesAnsweredOn,
   gateReopenOption,
+  gatesAnsweredOn,
   isOpenCardAsk,
   MAX_BOARD_REASON_LENGTH,
   mirroredCardAsk,
@@ -52,13 +52,22 @@ import {
   parseCardAgendaReference,
   parseGateFollowupReference,
   parseGateReference,
-  type AgendaGateOption,
+  type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 import { type CardAskOperation, LEGACY_REPLAY_MS } from '../agenda/card-asks.ts';
 import type { AgendaQueryResult } from '../agenda/service.ts';
 import type { AgendaActor, AgendaMutation, RaiseAgendaRequest } from '../agenda/state-machine.ts';
 import { type BoardCaller, effectiveAssignee } from './authority.ts';
-import { cardAgendaRaise, type GateCard, type GateLanes, gateMoveReason, gateOf, howToTestOf } from './gate-policy.ts';
+import {
+  cardAgendaRaise,
+  type GateCard,
+  type GateLanes,
+  gateMoveReason,
+  gateOf,
+  howToTestOf,
+  nothingToTryReason,
+  tryItVerdict,
+} from './gate-policy.ts';
 import type { CardWriteObserver } from './service.ts';
 
 /** The agenda operations the card asks use. */
@@ -79,6 +88,11 @@ export interface GateBoard {
    * still sit in that lane by that entry, or nothing is written.
    */
   act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller, expect?: GateExpectation): Promise<void>;
+  /**
+   * The daemon's own move of a card out of a try-it lane into the closed lane, reason beside it: the one pass of a gate
+   * that is not the owner's. Written only while the card still sits at `expect`; `false` when it did not close.
+   */
+  closeNothingToTry(id: BoardTaskId, expect: GateExpectation, reason: string): Promise<boolean>;
 }
 
 /** Tells a card's ferret the owner's answer, through the reopen ladder. */
@@ -410,7 +424,7 @@ export class GateItems implements CardWriteObserver {
   async answer(answer: GateAnswer): Promise<GateAnswerOutcome> {
     if (!toCardAsk(answer)) return (await this.unmigrated(answer)) ?? { handled: false };
     const found = await this.find(answer);
-    if (found === undefined) return refused('moved-on', `${answer.id} carries no card ask, so nothing was moved`);
+    if (found === undefined) return refused('moved-on', `${answer.id} asks nothing about a card, so nothing was moved`);
     // Answers to one card take turns: the second reads the board the first one left.
     return await serially(this.answers, found.gate.cardId, async () => await this.answerAlone(found.answer));
   }
@@ -423,7 +437,7 @@ export class GateItems implements CardWriteObserver {
       ? undefined
       : refused(
           'not-moved',
-          `${answer.id} is the gate of ${formatTaskRef({ id: gate.cardId })} from before card asks, and it could not be moved onto an agenda: nothing was moved. Say Not needed to set it aside`,
+          `${answer.id} is the gate of ${formatTaskRef({ id: gate.cardId })} from an older version, and it could not be moved onto an agenda: nothing was moved. Say Not needed to set it aside`,
         );
   }
 
@@ -457,13 +471,13 @@ export class GateItems implements CardWriteObserver {
     if (open === undefined) return await this.replayedClosed(answer, listed.value.resolved);
     const ask = askOf(open, answer, this.now());
     if (ask === undefined) {
-      return refused('moved-on', `${answer.id} no longer carries that card ask, so nothing was moved`);
+      return refused('moved-on', `${answer.id} no longer asks that, so nothing was moved`);
     }
     const gate = ask.gate;
     if (answer.actor.kind !== 'human') {
       return refused(
         'forbidden',
-        `only the owner answers ${answer.id}'s card ask: it decides where ${formatTaskRef({ id: gate.cardId })} goes next`,
+        `only the owner answers ${answer.id}'s question: it decides where ${formatTaskRef({ id: gate.cardId })} goes next`,
       );
     }
     const denied = answer.permitted?.();
@@ -549,7 +563,7 @@ export class GateItems implements CardWriteObserver {
     receipt: string,
   ): Promise<GateAnswerOutcome> {
     if (ask.answer?.receipt !== receipt) {
-      return refused('moved-on', `${answer.id}'s card ask was already answered, differently: nothing was sent`);
+      return refused('moved-on', `${answer.id}'s question was already answered, differently: nothing was sent`);
     }
     const mutation = await this.ports.agenda.cardAsk(answer.sessionId, item.id, {
       kind: 'answered',
@@ -646,10 +660,26 @@ export class GateItems implements CardWriteObserver {
 
   private async reconcileAlone(card: GateCard): Promise<boolean> {
     const { task } = card;
-    const gate = gateOf(card, this.ports.lanes);
-    const wanted = gate === undefined ? undefined : gateReference(gate);
+    const seen = gateOf(card, this.ports.lanes);
     const home = await this.sessionsOf(task);
     const held = await this.held(task, home);
+    // At a try-it lane the daemon first asks whether there is anything to try (`tryItVerdict`).
+    // A gate the owner already answered (a Not yet) is never closed under them: that ask was made, for good.
+    const verdict =
+      seen === undefined || held.asked.has(gateReference(seen))
+        ? undefined
+        : tryItVerdict({ ...task, blockedBy: card.blockedBy }, seen);
+    // Nothing to try: the card closes, so what follows is the card as it stands NOW, past that gate.
+    const closed =
+      seen !== undefined &&
+      verdict?.kind === 'nothing' &&
+      (await this.closeNothing(card, seen, verdict.why, held, home));
+    if (verdict?.kind === 'nothing' && !closed) return false;
+    const gate = closed ? undefined : seen;
+    // Blocked: the card is not ready to try, so nothing is asked, and an ask still waiting for the owner is taken back
+    // (the card stays where it is; the next look after it is unblocked asks again). Only a try-it gate can wait, and it
+    // offers no Not yet: an ask the owner answered is never judged here (`held.asked`).
+    const wanted = gate === undefined || verdict?.kind === 'wait' ? undefined : gateReference(gate);
     // Every open ask of this card but the one its lane asks now goes, wherever it is; a second copy of that one too.
     const asking = held.carriers.filter(each => openCardAsks(each.item).some(ask => ask.gate.cardId === task.id));
     const keeper =
@@ -670,7 +700,7 @@ export class GateItems implements CardWriteObserver {
     await this.closeEarlierRounds(task, gate, held.followups);
     const operation: CardAskOperation = {
       kind: 'attach',
-      ask: { gate, ...withSteps(howToTestOf(task)) },
+      ask: { gate, ...withSteps(howToTestOf(task, gate)) },
     };
     // Already asked: restated as the card stands now (a renamed lane, new steps), never asked a second time.
     if (keeper !== undefined) {
@@ -682,7 +712,57 @@ export class GateItems implements CardWriteObserver {
       if (carrier === undefined) continue;
       if (await this.operate(carrier, operation)) return true;
     }
+    // Before a new agenda of its own: the topic the card was made from, when that is still open.
+    const topic = await this.topicOf(task, home);
+    if (topic !== undefined && (await this.operate(topic, operation))) return true;
     return await this.open(task, gate, home);
+  }
+
+  /**
+   * The daemon closes a card with nothing to try, with one plain line for the owner and no question. The line goes on
+   * the open agenda that already carries the card, when there is one; with none, no agenda is raised: the card's own
+   * history says why. `true` once the card is closed; `false` when it moved on first (the next look reads it as it is).
+   * The card's own write is not a reason to look again, so it is not read as a card moving on while it is written.
+   */
+  private async closeNothing(
+    card: GateCard,
+    gate: AgendaGate,
+    why: string,
+    held: HeldItems,
+    home: readonly string[],
+  ): Promise<boolean> {
+    const reason = nothingToTryReason(why);
+    this.answering.add(card.task.id);
+    try {
+      if (
+        !(await this.ports.board.closeNothingToTry(card.task.id, { laneId: gate.laneId, entry: gate.entry }, reason))
+      ) {
+        return false;
+      }
+    } finally {
+      this.answering.delete(card.task.id);
+    }
+    const carrier = pick(held.carriers, home);
+    if (carrier !== undefined)
+      await this.operate(carrier, { kind: 'line', line: `${formatTaskRef(card.task)}: ${reason}` });
+    return true;
+  }
+
+  /**
+   * The agenda the card was made from, when it is still open on one of the card's own sessions and can carry its ask:
+   * `task.approval` (the Yes it was made on), else the first `!A<n>` its ask's source names. A card asks on its topic's
+   * item, never on a new item of its own per gate.
+   */
+  private async topicOf(task: BoardTask, home: readonly string[]): Promise<OpenItem | undefined> {
+    const named = task.approval ?? undefined;
+    const id = named?.id ?? /!(A[1-9][0-9]*)/u.exec(task.ask.source)?.[1];
+    if (id === undefined) return undefined;
+    for (const sessionId of named === undefined ? home : home.filter(each => each === named.sessionId)) {
+      const listed = await this.ports.agenda.list(sessionId).catch(() => undefined);
+      const item = listed?.ok === true ? listed.value.items.find(each => each.id === id) : undefined;
+      if (item !== undefined && canCarryCardAsk(item)) return { sessionId, item };
+    }
+    return undefined;
   }
 
   /** One card-ask operation on one agenda; `true` when it changed the agenda. A refusal is said and not thrown. */
@@ -690,7 +770,7 @@ export class GateItems implements CardWriteObserver {
     const mutation = await this.ports.agenda.cardAsk(on.sessionId, on.item.id, operation);
     if (!mutation.ok) {
       this.ports.diagnostics.warn(
-        `could not ${operation.kind} a card ask on !${on.item.id} of ${on.sessionId}: ${mutation.error.message}`,
+        `could not ${operation.kind} an ask about a card on !${on.item.id} of ${on.sessionId}: ${mutation.error.message}`,
       );
       return false;
     }
@@ -822,7 +902,7 @@ export class GateItems implements CardWriteObserver {
   private async scanned(): Promise<void> {
     this.scanning ??= this.scan().catch((error: unknown) => {
       this.scanning = undefined;
-      this.ports.diagnostics.warn(`the agendas holding card asks could not be listed: ${errorText(error)}`);
+      this.ports.diagnostics.warn(`the agendas holding asks about cards could not be listed: ${errorText(error)}`);
     });
     await this.scanning;
   }

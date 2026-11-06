@@ -26,7 +26,9 @@ import { type ReactNode, useId } from 'react';
 import { answerAction, CLEAR_ACTION, kindWord, optionAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { DISMISS_ACTION, historyLine, type InboxAction, updatedSinceAsked } from '../../lib/agenda-inbox.ts';
+import { itemAskPlan, itemCardAsks } from '../../lib/agenda-item-sections.ts';
 import { decidedSummary, type RevisionHighlight, revisionHighlight } from '../../lib/agenda-revisions.ts';
+import { attachedGateHeading, attachedGateReference, toGateAction } from '../../lib/gate-items.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { AgendaActions } from './agenda-actions.tsx';
 import { agendaAge, agendaKindMeta } from './agenda-board.tsx';
@@ -95,7 +97,7 @@ export interface AgendaCardProps {
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the answer bar's place, its Allow and Decline are the answer. */
   readonly planForm?: ReactNode;
-  /** The cards a machine notice is about (`AgendaCardsHost`): each with its own Open, Start and Close. Got it stays the answer. */
+  /** The cards a machine notice is about (`AgendaCardsHost`): ONE form, a pick per card and one Send, which is the answer. */
   readonly cardsForm?: ReactNode;
 }
 
@@ -127,7 +129,7 @@ export function AgendaCard({
   const kind = agendaKindMeta(item);
   const KindIcon = kind.icon;
   const model = cardModel(item);
-  const { answers, extras, heading, showAsk, asking, recommended } = model;
+  const { heading, showAsk, asking } = model;
   // Several questions are answered in one reply: listed, numbered, with no picker.
   const listsAnswers = model.shape === 'answers' && (item.questions?.length ?? 0) > 1;
   const history = historyLine(item.history);
@@ -138,6 +140,13 @@ export function AgendaCard({
     if (busy) return;
     onAct(action);
   };
+  // ONE answer row (&B165; the same plan the item view reads): while a card ask is open its options are this card's
+  // buttons, each marked for that ask, and the item's own buttons wait behind it.
+  const plan = itemAskPlan(item, itemCardAsks(item));
+  const [cardAsk] = plan.asks;
+  const answering = cardAsk === undefined ? model : cardModel(cardAsk.view);
+  const giveAnswer = (action: InboxAction): void =>
+    give(cardAsk === undefined ? action : toGateAction(action, cardAsk.gate));
 
   return (
     <article
@@ -232,32 +241,49 @@ export function AgendaCard({
           Not sent: {error}
         </p>
       )}
-      {planForm !== undefined ? (
+      {cardAsk === undefined ? null : (
+        <div className="fy-attn-card__card-ask" data-agenda-card-ask={cardAsk.key}>
+          <p className="m-0 text-meta" data-agenda-card-ask-title="">
+            <strong>{attachedGateHeading(cardAsk.gate)}</strong>
+          </p>
+          <div className="fy-attn-card__why" data-agenda-card-ask-ref="">
+            {renderProse(attachedGateReference(cardAsk.gate))}
+          </div>
+          {plan.ownRowHeld ? (
+            <p className="m-0 text-meta text-faint" data-agenda-own-row-held="">
+              The buttons for this come back once it is answered.
+            </p>
+          ) : null}
+        </div>
+      )}
+      {cardAsk === undefined && planForm !== undefined ? (
         <div className="fy-attn-card__input" data-agenda-plan-form="">
           {planForm}
         </div>
-      ) : inputForm !== undefined && item.kind === 'input' ? (
+      ) : cardAsk === undefined && cardsForm !== undefined ? null : cardAsk === undefined &&
+        inputForm !== undefined &&
+        item.kind === 'input' ? (
         <div className="fy-attn-card__input" data-agenda-input-form="">
           {inputForm}
         </div>
       ) : (
         <AgendaActions
-          answers={answers}
+          answers={answering.answers}
           arrows={!flat && (swipeHints || pinned)}
           busy={busy}
           dismissInMenu={model.dismissInMenu && !model.notice}
-          extraOptions={extras}
+          extraOptions={answering.extras}
           onAnswer={answer => {
             const action = answerAction(answer, '');
-            if (action !== null) give(action);
+            if (action !== null) giveAnswer(action);
           }}
           onDismiss={() => give(DISMISS_ACTION)}
-          onOption={option => give(optionAction(option, ''))}
-          recommendationLine={model.recommendationLine}
-          recommended={recommended}
+          onOption={option => giveAnswer(optionAction(option, ''))}
+          recommendationLine={answering.recommendationLine}
+          recommended={answering.recommended}
           swipeHints={swipeHints && !flat}
-          {...(model.composerHint === undefined ? {} : { composerHint: model.composerHint })}
-          {...(model.notice ? { clear: () => give(CLEAR_ACTION) } : {})}
+          {...(cardAsk === undefined && model.composerHint !== undefined ? { composerHint: model.composerHint } : {})}
+          {...(model.notice && cardAsk === undefined ? { clear: () => give(CLEAR_ACTION) } : {})}
           {...(onSkip === undefined ? {} : { onSkip })}
           {...(onOpenDetail !== undefined && !model.notice && agendaHasDetail(item) ? { onOpenDetail } : {})}
           {...(item.waitingOn === 'ferret' && !model.notice

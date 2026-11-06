@@ -151,7 +151,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: `fy task show <id> --yaml`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy task patch <id> --file f`. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
+Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: only an agenda item asks, and its answer moves the card. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: `fy task show <id> --yaml`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy task patch <id> --file f`. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -308,12 +308,19 @@ name or id, wherever the flag is written on the line.
 
 ## The lane design rule
 
-**Lanes show progress; what the owner must DO rides the card's agenda.** The owner, verbatim (their build-time addition to the agenda redesign, &F559):
+**Lanes show progress; what the owner must DO is asked by an agenda item.** The one model, and the words the owner sees,
+are [agenda.md § One model: the agenda asks, the card shows](agenda.md#one-model-the-agenda-asks-the-card-shows): the
+agenda item is the only place the owner acts, a card is read-only status and never the one asking, and answering an item
+may move its cards as the daemon's bookkeeping. The owner, verbatim (their build-time addition to the agenda redesign, &F559):
 
 > make sure that the whole new attention system also changes how tasks works. task no longer have 'need human'
 > lanes, and you need to remove those!
 
-The earlier rule (2026-10-30) still decides which progress is worth a lane:
+The earlier rule (2026-10-30) still decides which progress is worth a lane — its "ACTION" now means what an agenda
+item asks, never a button on a card. **SUPERSEDED:** the owner's asks of 2026-10-30 to 2026-11-01 for Done / Not good
+buttons on cards (the agenda's "mark a task as done" button, the cards to test in the Inbox, "stage can have request
+user options") are replaced by the rule of 2026-11-02 above; whatever was built for them answers on the agenda item, as
+the item's own ask, or goes:
 
 > remember the lane design is always about ACTION -- when user need to have action and INFORMATION -- its good for
 > the user to feel like there is SOME progress, but action is more important. for example, in-progress tells the
@@ -433,7 +440,8 @@ without gets `pr`, a folder with no repository gets `quick`.
 
 ### A ferret's lane change waits for the owner
 
-Lanes are where the owner's gates live, so changing them is the owner's to decide. **A ferret's `propose` or
+Lanes decide what the daemon asks on the agenda (a lane's gate is its bookkeeping, never a button on a card), so
+changing them is the owner's to decide. **A ferret's `propose` or
 `edit` of a project that already HAS lanes never goes live.** The daemon stores it beside the live set as the
 set's `pending` proposal (`LaneSet.pending`, `decideLaneChange` in
 `packages/daemon/src/lib/board-projects/lane-set-policy.ts`), and the live set stays in force: no gate changes, no
@@ -1102,9 +1110,10 @@ view switches, the filters, **Show private**, the scope toggle, the theme switch
 drop and comment on a card are unchanged: ferrets and the CLI still use them, and the owner's only way to move a card is
 to answer where it asks, in the agenda.
 
-The owner's two answers about a card, on the agenda surfaces:
+The owner's two answers about a card, on the agenda surfaces (an item whose whole ask is the card's draws them as **Good**, one
+tap, and the words typed below it; see [One ask](agenda.md#one-ask-in-the-lanes-own-words)):
 
-- **Done** moves the card to the project's Closed lane, and its ferret is told in one plain line.
+- **Done** (shown as **Good** on a try-it) moves the card to the project's Closed lane, and its ferret is told in one plain line.
 - **Not good** opens the chat's own composer, detached from any chat: the words, plus any images or files, with the
   same mic, Enter to send and Shift+Enter for a new line. What is typed is kept nowhere — never the ferret's chat draft,
   never queued as a message — and the box is as wide as the column it sits in (under the Inbox deck's card it takes the
@@ -1154,7 +1163,10 @@ has its ask on exactly ONE open agenda, found in this order:
 1. an open agenda that already **carries the card**: it is about the card (`task`, or a card a merge brought in), or it
    carries one of the card's asks;
 2. else an open agenda that carries its **parent card**;
-3. else a **new agenda** named after the card, raised by the daemon on behalf of the card's ferret on its **agenda home**
+3. else the card's **topic item**: the agenda item the card was made from (`approval` when the card has one, else the
+   first `!A<n>` its ask's `source` names), when it is still open on one of the card's agenda homes and can carry an
+   ask. The ask goes on the topic's item, never on a new item per stage;
+4. else a **new agenda** named after the card, raised by the daemon on behalf of the card's ferret on its **agenda home**
    (the assignee's, else the owner ferret's; [agenda.md](agenda.md#the-agenda-home)), `sourceRef` `card-agenda:<card>`,
    stage `test` or `plan`. Its own ask is only a reply; the card ask's buttons move the card.
 
@@ -1164,6 +1176,13 @@ ask is named `gate:<card>:<lane>:<entry>`, where `entry` is the history `seq` of
 the same entry is restated in place (a renamed lane, new steps), never asked twice, and an ask the owner answered —
 or that was still open when the owner closed its agenda (Not needed) — is never asked again. At boot every card
 already at a gate gets its ask once, in the background. The daemon never raises a standalone gate item.
+
+**A try-it is asked only when there is something to try.** At a stage whose answers include **Not good**, `tryItVerdict`
+(`gate-policy.ts`) decides first: a **blocked** card (an open dependency, or blocked by hand) waits, with no ask, until
+the next look finds it free (an ask already live and unanswered is taken back, and the card stays put); a card with **nothing to try** (private, no How to test or one that, as a whole, is a complete no-testing declaration (a closed grammar, agenda.md), or only docs,
+design and tests in every merged PR) closes with the reason `Nothing to try: <why>` and is never asked; anything else
+is asked as above. The plan stage is never touched. The rules, the PR change kinds and the one line left on a carrying
+item are in [agenda.md](agenda.md#try-it-only-when-there-is-something-to-try).
 
 **It wakes the agenda.** A new card ask puts its agenda in Needs you, fresh — even out of a snooze or a discussion,
 because it is a blocker of its card — and it stays ONE entry in the unique queue, blockers first. Its ferret cannot
@@ -1200,7 +1219,12 @@ daemon-opened card agenda with no conversation; a ferret's thread that carried i
 now carries the ask.
 
 **Only the owner passes a gate.** Their answer to its card ask, or their own move or report (and, on an internal card,
-its owner ferret's or a lead's move, below). Every other path may bring a card INTO a gate and move it between
+its owner ferret's or a lead's move, below). **One narrow exception, the daemon's:** a card at a try-it stage with
+nothing to try is closed by the daemon itself — only the daemon, only out of a stage whose answers include Not good, only
+into the Closed lane, and only while the card still sits at that stage by the entry the verdict was about, and the verdict, judged again inside
+the card's own write, still says nothing to try
+(`BoardService.closeWhereNothingToTry`, `closeNothingToTry` in `card-actions.ts`; a port the wire cannot send, and not a
+loosening of `needsOwner`). The history reads `Nothing to try: <why>`. Every other path may bring a card INTO a gate and move it between
 automatic stages, never out of one or past one: a ferret's `fy task move` (refused `owner-gate`, naming the lane),
 a daemon trigger (`work.started`, a PR, a release — it stops in the first gate on its way, and the history says
 "stopped at <lane>, which waits for the owner"), PR facts (they never pull a card back out of a gate for an open PR
@@ -1344,6 +1368,11 @@ unmerged says nothing. Nor does a fact move a card out of Closed or a drop, or i
 `verify` lane. A fact never passes a gate: it moves a card into one and stops there, and it neither moves nor pulls back
 a card waiting at one (Plan/Design, Released), whatever its PRs say
 ([Cards show progress](#cards-show-progress-their-asks-ride-the-agenda)); the "pulled back" exception above applies only outside a gate.
+**A release of a blocked card waits:** the card reaches Released (the history says "while blocked by …"), but nothing is
+asked of the owner until it is unblocked. **A card whose merged PRs changed only docs and tests closes at Released** with
+"Nothing to try: its PRs change only docs and tests", asking nobody. The watcher reads each PR's files in its one query to
+know (`PrLink.changes`, bound to the head or merge commit it was read at in `PrLink.changesRevision`; an unread PR, or a
+kind whose commit has changed since, counts as code).
 The GitHub watcher reconciles every linked card on every poll, refile and `fy task link --pr` re-evaluate at once, and a
 PR nobody has asked GitHub about is polled on the next tick. A card the owner sent back stays back until a PR newer
 than that move merges. History names the fact; no move is ever typed into a chat

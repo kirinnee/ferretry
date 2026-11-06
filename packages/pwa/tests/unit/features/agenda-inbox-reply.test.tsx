@@ -77,11 +77,14 @@ const rig = async (
             onNavigate={() => undefined}
             phone
             reducedMotion
-            renderComposer={card => (
+            renderComposer={(card, answerForm, typed) => (
               <AgendaInboxComposer
+                answerForm={answerForm}
+                {...(typed === undefined ? {} : { answerTyped: typed, typedPlaceholder: typed.placeholder })}
                 clientFor={async () => api}
                 compact
                 connection={daemon}
+                formKey={card.key}
                 itemId={card.item.id}
                 onReplied={message => inbox.replied.mark(card, message)}
                 onRestored={() => inbox.replied.takeRestore(card.key)}
@@ -282,6 +285,50 @@ describe('a reply from an Inbox card moves the Inbox on', () => {
     expect(seen.getAttribute('data-keys')).toBe(`${asked.key},${rebase.key}`);
     expect(seen.getAttribute('data-total')).toBe('2');
     expect(run.fake.replied.getSnapshot().entries).toEqual([]);
+    await run.mounted.unmount();
+  });
+
+  it('keeps a try-it and its one Good in the Inbox when the owner types “works now” under the card’s own ask', async () => {
+    const gate = {
+      cardId: 'F907',
+      laneId: 'released',
+      laneName: 'Released',
+      entry: 2,
+      projectId: 'p1',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    } as const;
+    const tryIt = inboxCard(
+      agendaItem('A404', {
+        subject: 'Try it: Released',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        raisedBy: 'daemon',
+        source: 'task',
+        sourceRef: 'card-agenda:F907',
+        // What the daemon records for the subject it wrote (`generatedSubject`).
+        generatedSubject: 'Try it: Released',
+        gateAttached: gate,
+        cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
+      } as never),
+      sessionView('sess-5', { config: { teammate: 'zoe', name: 'Badge' } as never }),
+    );
+    const run = await rig([tryIt], async () => ({ disposition: 'delivered', sendId: 'm1' }));
+    await type(run.mounted, 'works now');
+
+    await send(run.mounted);
+
+    // It went as an ordinary reply about the item, not as Not good...
+    expect(run.sent).toEqual([{ sessionId: 'sess-5', message: '!A404 works now' }]);
+    // ...and it did NOT hide the item or park it: the ask is still open and its Good still waits.
+    expect(keys(run.latest().cards)).toEqual([tryIt.key]);
+    expect(run.latest().parked).toEqual([]);
+    expect(run.fake.replied.getSnapshot().entries).toEqual([]);
+    expect(toast(run.mounted)).toBeNull();
+    expect(run.mounted.container.querySelectorAll('[data-agenda-answer-option]').length).toBe(1);
+    expect(run.mounted.container.querySelector('[data-agenda-answer-option="Done"]')).not.toBeNull();
     await run.mounted.unmount();
   });
 });

@@ -419,6 +419,35 @@ describe('AgendaBuzz card asks', () => {
     should(alone.sink.stops).deepEqual([]);
     should(beside.sink.stops).have.length(1);
   });
+
+  it('should push the deadline and the stop of a card agenda rewritten into a question of its own, not of one that is not', async () => {
+    // Arrange — both are due inside the warning window; one subject is still the daemon's, one a ferret rewrote
+    const generated = world({ idleSince: NOW });
+    await generated.attention.raise(SESSION, cardAgenda, DAEMON);
+    dated(generated.boards, 'A1', '2026-10-23T12:00:00.000Z');
+    const rewritten = world({ idleSince: NOW });
+    await rewritten.attention.raise(SESSION, cardAgenda, DAEMON);
+    dated(rewritten.boards, 'A1', '2026-10-23T12:00:00.000Z');
+    const ledger = rewritten.boards.ledger as AgendaLedger;
+    rewritten.boards.ledger = {
+      ...ledger,
+      entries: ledger.entries.map(entry =>
+        entry.item.id === 'A1'
+          ? ({ ...entry, item: { ...entry.item, subject: 'Should keyboard focus change too?' } } as typeof entry)
+          : entry,
+      ),
+    };
+
+    // Act
+    await generated.buzz.turnChanged(SESSION);
+    await rewritten.buzz.turnChanged(SESSION);
+
+    // Assert
+    should(generated.sink.deadlines).deepEqual([]);
+    should(generated.sink.stops).deepEqual([]);
+    should(rewritten.sink.deadlines).deepEqual(['A1']);
+    should(rewritten.sink.stops).have.length(1);
+  });
 });
 
 describe('AgendaBuzz wake', () => {

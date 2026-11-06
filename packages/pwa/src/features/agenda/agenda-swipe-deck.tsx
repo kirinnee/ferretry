@@ -3,7 +3,7 @@
  *
  * A swipe is an answer, so it is held to the same rules a button is, and then some:
  *
- * - THE MAPPING IS THE CARD'S OWN ANSWERS (`swipeTargets`), never a second one: left, up and right each
+ * - THE MAPPING IS THE CARD'S OWN ANSWERS (`itemSwipeTargets`: the first card ask's while one is open), never a second one: left, up and right each
  *   give the answer the card put in that direction. A direction with no answer commits nothing. While the
  *   card is dragged it follows the finger; nothing is drawn over it naming the answer (the owner wants no teaching
  *   text on the card) — what letting go would do is kept on the card as `data-swipe-*` attributes. A review's
@@ -40,7 +40,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { type SwipeTarget, type SwipeTargets, swipeTargets } from '../../lib/agenda-answers.ts';
+import type { SwipeTarget, SwipeTargets } from '../../lib/agenda-answers.ts';
+import { itemSwipeTargets } from '../../lib/agenda-item-sections.ts';
 import {
   type InboxAction,
   type InboxCard,
@@ -354,7 +355,7 @@ export function AgendaSwipeDeck({
   const refocus = useRef(false);
   const swallowClick = useRef(false);
   const top = cards[0];
-  const targets: SwipeTargets = top === undefined ? {} : swipeTargets(top.item);
+  const targets: SwipeTargets = top === undefined ? {} : itemSwipeTargets(top.item);
   /** ↓ is Skip, and only where the deck can skip. */
   const canDown = onSkip !== undefined;
   const available: CompassAvailable = {
@@ -406,7 +407,7 @@ export function AgendaSwipeDeck({
       setDrag(null);
       return;
     }
-    const direction = directionOf(swipeTargets(card.item), action);
+    const direction = directionOf(itemSwipeTargets(card.item), action);
     refocus.current = deck.current?.contains(document.activeElement) === true;
     gesture.current = null;
     setDrag(null);

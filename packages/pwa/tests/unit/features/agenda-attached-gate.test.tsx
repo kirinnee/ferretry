@@ -46,58 +46,48 @@ const draw = async (item: AgendaItem, acted: unknown[] = []): Promise<HTMLElemen
   return view.container;
 };
 
-describe('a thread with a gate attached', () => {
-  test('draws the gate options as a second answer row, beside the thread own answers', async () => {
-    const root = await draw(thread({ gateAttached: gate } as unknown as Partial<AgendaItem>));
-    const row = must(root.querySelector<HTMLElement>('[data-agenda-attached-gate]'), 'the gate row');
-    expect(row.getAttribute('data-agenda-attached-gate')).toBe('F12');
-    expect(row.textContent).toContain('F12');
-    const labels = [...row.querySelectorAll<HTMLElement>('[data-agenda-option]')].map(node =>
-      node.getAttribute('data-agenda-option'),
-    );
-    expect(labels.sort()).toEqual(['Done', 'Not good']);
-    const own = [...root.querySelectorAll<HTMLElement>('[data-agenda-option]')]
-      .filter(node => !row.contains(node))
-      .map(node => node.getAttribute('data-agenda-option'));
-    expect(own).toContain('Blue');
-  });
+// &B165: the old app drew the mirrored gate as a SECOND answer row beside the thread's own. One row only, now.
+const reply = (extra: Partial<AgendaItem> = {}): AgendaItem =>
+  agendaItem('A6', {
+    subject: 'Which shade of blue?',
+    kind: 'reply',
+    ask: { kind: 'open-question' },
+    ...extra,
+  } as unknown as Partial<AgendaItem>);
 
-  test('tapping a gate option sends it marked for the gate; the thread own option is not marked', async () => {
-    const acted: { gate?: true; label: string }[] = [];
-    const root = await draw(thread({ gateAttached: gate } as unknown as Partial<AgendaItem>), acted);
-    const row = must(root.querySelector<HTMLElement>('[data-agenda-attached-gate]'), 'the gate row');
-    await interact(() => must(row.querySelector<HTMLElement>('[data-agenda-option="Done"]'), 'Done').click());
-    expect(acted).toEqual([expect.objectContaining({ kind: 'respond', label: 'Done', gate: true })]);
-
-    const blue = must(
-      [...root.querySelectorAll<HTMLElement>('[data-agenda-option="Blue"]')].find(node => !row.contains(node)),
-      'Blue',
-    );
-    await interact(() => blue.click());
-    expect(acted[1]?.gate).toBeUndefined();
-  });
-
-  test('names the card by its title, says it is ready to test, inside What I need from you', async () => {
+describe('a thread with a gate attached (an older daemon’s mirror)', () => {
+  test('a thread with buttons of its own keeps ONE row: the gate first, its own buttons held', async () => {
     const root = await draw(
       thread({ gateAttached: { ...gate, cardTitle: 'Badge colour' } } as unknown as Partial<AgendaItem>),
     );
-    const lead = must(root.querySelector<HTMLElement>('.fy-card__gate-lead'), 'the lead');
-    expect(lead.textContent).toBe('Badge colour is ready to test.');
-    // It is answered inside the item, in What I need from you: never docked, never a separate item.
-    expect(lead.closest('[data-agenda-part="needs"]')).not.toBeNull();
+    expect(root.querySelector('[data-agenda-attached-gate]')).not.toBeNull();
+    expect(root.querySelectorAll('[data-agenda-option="Done"]')).toHaveLength(1);
+    expect(root.querySelector('[data-agenda-option="Blue"]')).toBeNull();
+    expect(root.querySelector('[data-agenda-own-row-held]')).not.toBeNull();
   });
 
-  test('keeps the arrows and the swipe on the thread own pair only: the gate buttons are tap only', async () => {
-    const root = await draw(thread({ gateAttached: gate } as unknown as Partial<AgendaItem>));
+  test('a thread answered in words draws the gate as its own ask, inside What I need from you', async () => {
+    const root = await draw(
+      reply({ gateAttached: { ...gate, cardTitle: 'Badge colour' } } as unknown as Partial<AgendaItem>),
+    );
     const row = must(root.querySelector<HTMLElement>('[data-agenda-attached-gate]'), 'the gate row');
-    expect(row.querySelectorAll('[data-agenda-answer]')).toHaveLength(0);
-    expect(row.querySelectorAll('.fy-qr__arrow')).toHaveLength(0);
-    const own = [...root.querySelectorAll<HTMLElement>('[data-agenda-answer]')].filter(node => !row.contains(node));
-    expect(own.length).toBeGreaterThan(0);
+    expect(row.getAttribute('data-agenda-attached-gate')).toBe('F12');
+    expect(row.closest('[data-agenda-part="needs"]')).not.toBeNull();
+    expect(row.querySelector('[data-agenda-card-ask-title]')?.textContent).toBe('Try it');
+    expect(row.querySelector('[data-agenda-card-ask-ref]')?.textContent).toBe('For &F12 Badge colour');
+    expect(root.textContent).not.toMatch(/your answer for the card|Card &F12|card ask|ready to test/iu);
+  });
+
+  test('tapping a gate option sends it marked for the gate', async () => {
+    const acted: { gate?: true; label: string }[] = [];
+    const root = await draw(reply({ gateAttached: gate } as unknown as Partial<AgendaItem>), acted);
+    const row = must(root.querySelector<HTMLElement>('[data-agenda-attached-gate]'), 'the gate row');
+    await interact(() => must(row.querySelector<HTMLElement>('[data-agenda-option="Done"]'), 'Done').click());
+    expect(acted).toEqual([expect.objectContaining({ kind: 'respond', label: 'Done', gate: true })]);
   });
 
   test('reads Not good on the left and Done on the right, like every swipe surface', async () => {
-    const root = await draw(thread({ gateAttached: gate } as unknown as Partial<AgendaItem>));
+    const root = await draw(reply({ gateAttached: gate } as unknown as Partial<AgendaItem>));
     const row = must(root.querySelector<HTMLElement>('[data-agenda-attached-gate]'), 'the gate row');
     const order = [...row.querySelectorAll<HTMLElement>('[data-agenda-option]')].map(node =>
       node.getAttribute('data-agenda-option'),
@@ -108,5 +98,6 @@ describe('a thread with a gate attached', () => {
   test('a thread without an attachment draws no gate row', async () => {
     const root = await draw(thread());
     expect(root.querySelector('[data-agenda-attached-gate]')).toBeNull();
+    expect(root.querySelector('[data-agenda-card-ask-later]')).toBeNull();
   });
 });

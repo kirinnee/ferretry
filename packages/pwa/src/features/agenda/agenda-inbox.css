@@ -1411,6 +1411,17 @@ a.fy-inbox-row:focus-visible {
 .fy-totest__project {
   color: var(--fg);
 }
+/* The row's one ask (&B165): what it needs from you, the steps, then the one answer row below. */
+.fy-totest__need {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+.fy-totest__ask {
+  margin: 0;
+  color: var(--fg);
+}
 .fy-totest__how {
   display: flex;
   min-width: 0;

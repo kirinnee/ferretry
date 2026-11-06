@@ -1,4 +1,4 @@
-import { type AgendaItem, type AgendaSnapshot, asksOnlyCardAsks, hasOpenCardAsk } from '@ferretry/protocol';
+import { type AgendaItem, type AgendaSnapshot, hasOpenCardAsk } from '@ferretry/protocol';
 import {
   type AgendaBoardChange,
   type AgendaChangeObserver,
@@ -9,6 +9,7 @@ import {
   ownerTurnItems,
   type SessionStops,
 } from '../agenda/index.ts';
+import { asksOnlyCardAsks } from '../agenda/card-asks.ts';
 
 /** What a buzz reaches the owner's phone through: each call is at most one push, deduped by the ledger. */
 export interface BuzzSink {

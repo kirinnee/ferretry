@@ -478,8 +478,10 @@ describe('Not good on a card ask drawn on a thread', () => {
   const thread = (cardId: string): InboxCard =>
     inboxCard(
       agendaItem('T1', {
-        subject: 'Which colour for the badge?',
-        ask: choices('Blue', 'Green'),
+        // Answered in words: its card ask is its one answer row (an item with buttons of its own asks the card next).
+        subject: 'Which shade of blue?',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
         gateAttached: askOf(cardId),
       } as Partial<AgendaItem>),
       owner,

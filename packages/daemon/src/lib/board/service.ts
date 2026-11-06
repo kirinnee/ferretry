@@ -62,6 +62,7 @@ import {
   type CardContext,
   type CardOutcome,
   closeAsDaemon,
+  closeNothingToTry,
   newCard,
   requireLocalCard,
   requireStanding,
@@ -72,7 +73,7 @@ import { queueBehindClashes } from './clash-queue.ts';
 import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
 import { mergeGateOf } from './merge-gate.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
-import { gateEntry } from './gate-policy.ts';
+import { gateEntry, nothingToTryReason, stageGateLanes, tryItVerdict } from './gate-policy.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
 import { approvalProblem, cardLicence, offBoardRefusal } from './opt-in.ts';
@@ -375,6 +376,42 @@ export class BoardService {
       const context = await this.context(current, caller);
       const reason = helperCloseReason(current, context.laneSet);
       const task = reason === null ? null : closeAsDaemon(current, reason, context);
+      return { task: task === null ? null : requireValidCard(task), result: task };
+    });
+    if (closed === null) return false;
+    await this.afterWrite(caller, closed, [closed.projectId]);
+    return true;
+  }
+
+  /**
+   * The daemon closes a card that sits at a try-it gate with nothing to try (`closeNothingToTry`): the one move past a
+   * gate that is not the owner's. `expect` is checked inside the card's write, as an answer's is: the card must still sit
+   * in that lane by that entry, or nothing is written. The verdict itself is judged AGAIN there, against the card and its
+   * dependencies as they are now (steps, a block or an unfinished dependency can arrive without moving the card): the
+   * card closes only when that is still `nothing`, for the very reason `reason` states. `true` when it closed.
+   * Never reachable from a route or `fy`.
+   */
+  async closeWhereNothingToTry(
+    id: BoardTaskId,
+    expect: { readonly laneId: string; readonly entry: number },
+    reason: string,
+  ): Promise<boolean> {
+    const caller: BoardCaller = { kind: 'daemon' };
+    const closed = await this.ports.store.write(id, async current => {
+      if (current === undefined) return { task: null, result: null };
+      if (current.laneId !== expect.laneId || gateEntry(current) !== expect.entry) return { task: null, result: null };
+      const context = await this.context(current, caller);
+      const lane = context.laneSet.lanes.find(candidate => candidate.id === current.laneId);
+      const verdict =
+        lane === undefined
+          ? undefined
+          : tryItVerdict(
+              { ...current, blockedBy: blockedBy(current, context.index, context.laneSets) },
+              { options: [...stageGateLanes.options(lane)] },
+            );
+      if (verdict?.kind !== 'nothing' || nothingToTryReason(verdict.why) !== reason)
+        return { task: null, result: null };
+      const task = closeNothingToTry(current, reason, context);
       return { task: task === null ? null : requireValidCard(task), result: task };
     });
     if (closed === null) return false;

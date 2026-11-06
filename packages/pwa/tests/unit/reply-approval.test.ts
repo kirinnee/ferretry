@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { AgendaGate, AgendaItem } from '@ferretry/protocol';
 import { storedHistory } from '../../src/lib/agenda-conversation.ts';
 import type { HistoryEvent } from '../../src/lib/agenda-history.ts';
-import { replyApproval } from '../../src/lib/reply-approval.ts';
+import { replyApproval, typedApproval } from '../../src/lib/reply-approval.ts';
 import { agendaItem } from '../support/agenda-inbox.tsx';
 
 /**
@@ -16,10 +16,7 @@ const plan: AgendaGate = {
   laneName: 'Plan',
   entry: 4,
   projectId: 'p1',
-  options: [
-    { id: 'o0', label: 'OK to build', outcome: 'next' },
-    { id: 'o1', label: 'Not yet', outcome: 'reopen-with-agenda' },
-  ],
+  options: [{ id: 'o0', label: 'OK to build', outcome: 'next' }],
 };
 const test_: AgendaGate = {
   ...plan,
@@ -96,6 +93,105 @@ describe('a reply offered as the card ask’s answer', () => {
       ],
     };
     expect(offered([two], [owner('yes')])).toBeNull();
+  });
+});
+
+describe('words typed at a try-it that plainly approve', () => {
+  test('are the pass option, for the owner’s case "works now" and its kin', () => {
+    for (const said of [
+      'works now',
+      'Works now',
+      'it works now!',
+      'works',
+      'works fine',
+      'works great.',
+      'it works well',
+      'good now',
+      'good',
+      'Good!',
+      'lgtm',
+      'looks good',
+      'tested, ok',
+      'tested ok',
+      'done',
+      'works for me 👍',
+      '  works now  ',
+    ]) {
+      expect(typedApproval(test_, said)).toBe('Done');
+    }
+  });
+
+  test('are never read from anything that is not clearly positive: a clause, a negation, a question, a long message', () => {
+    for (const said of [
+      'works but the colour is off',
+      'works now, but the badge is red',
+      'however it works now',
+      "doesn't work now",
+      'does not work now',
+      'not good',
+      'not working',
+      "it isn't good now",
+      'works now?',
+      'does it work now?',
+      'no',
+      'works now and I also want the badge bigger',
+      '',
+      'x'.repeat(40),
+    ]) {
+      expect(typedApproval(test_, said)).toBeNull();
+    }
+  });
+
+  test('are never read at an approval ("ok" there is a Not yet word), or at a gate with no single pass', () => {
+    // An approval has one option and no Not good: its typed words are Not yet words.
+    const approval = plan;
+    for (const said of ['ok', 'yes', 'works now', 'lgtm', 'build']) expect(typedApproval(approval, said)).toBeNull();
+    const two: AgendaGate = {
+      ...test_,
+      options: [
+        { id: 'a', label: 'Done', outcome: 'close' },
+        { id: 'b', label: 'Ship', outcome: 'next' },
+        { id: 'c', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    };
+    expect(typedApproval(two, 'works now')).toBeNull();
+  });
+
+  test('keep a lane’s own pass label (its words, the plain approvals and a tester’s), and offer a stored reply', () => {
+    const lane: AgendaGate = {
+      ...test_,
+      options: [
+        { id: 'a', label: 'Verified', outcome: 'close' },
+        { id: 'b', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    };
+    expect(typedApproval(lane, 'verified')).toBe('Verified');
+    expect(typedApproval(lane, 'lgtm')).toBe('Verified');
+    // A try-it is a try-it whatever the lane calls its pass: "works now" is a yes there, offered under the pass's own label.
+    expect(typedApproval(lane, 'works now')).toBe('Verified');
+    const good: AgendaGate = {
+      ...lane,
+      options: [
+        { id: 'a', label: 'Good', outcome: 'close' },
+        { id: 'b', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    };
+    expect(typedApproval(good, 'it works now!')).toBe('Good');
+    expect(offered([good], [owner('works now')])).toEqual({
+      reply: 'works now',
+      label: 'Good',
+      ask: 'gate:F12:design:4',
+    });
+    // Build words stay an approval's: a try-it never reads "build" as a yes.
+    expect(typedApproval(lane, 'build')).toBeNull();
+    expect(offered([test_], [owner('!A304 works now')])).toEqual({
+      reply: 'works now',
+      label: 'Done',
+      ask: 'gate:F12:design:4',
+    });
+    // Tester's words say nothing to a plan, and a negation offers nothing at a try-it.
+    expect(offered([plan], [owner('works now')])).toBeNull();
+    expect(offered([test_], [owner("doesn't work now")])).toBeNull();
   });
 });
 

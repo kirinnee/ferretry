@@ -8,15 +8,17 @@ import {
   type AgendaGate,
   type AgendaGateOption,
   type BoardTask,
-  clipAtWord,
-  formatTaskRef,
   cardAgendaReference,
   cardAskStage,
-  isSubCard,
+  clipAtWord,
+  formatTaskRef,
   type GateOption,
   type GateOutcomeError,
+  gateAskLine,
   gateOptions,
   gateOutcomeLane,
+  gateStyle,
+  isSubCard,
   type Lane,
   type LaneSet,
   laneOf,
@@ -24,10 +26,16 @@ import {
   MAX_AGENDA_REASON_LENGTH,
   MAX_AGENDA_SUBJECT_LENGTH,
   MAX_AGENDA_TITLE_LENGTH,
+  NOTHING_TO_TRY_PREFIX,
+  RELEASE_OWNER,
+  type TaskRef,
   type TaskWorkflow,
+  tryItText,
 } from '@ferretry/protocol';
 import { CARD_AGENDA_HOW_TO_RESOLVE, type RaiseAgendaRequest } from '../agenda/state-machine.ts';
 import type { CardAudience } from './authority.ts';
+import { productName } from '../version.ts';
+import { cardVisibility } from './visibility.ts';
 
 /** Where an option leads, or why it leads nowhere on this board. */
 type GateOutcomeLane = { readonly ok: true; readonly lane: Lane } | { readonly ok: false; readonly message: string };
@@ -101,6 +109,8 @@ export interface GateCard {
   readonly laneSet: LaneSet | null;
   readonly audience: CardAudience;
   readonly projectName?: string;
+  /** The dependencies still holding the card back, as the board computes them (`blockedBy`); absent reads as none. */
+  readonly blockedBy?: readonly TaskRef[];
 }
 
 /**
@@ -131,44 +141,38 @@ export const gateOf = (card: GateCard, lanes: GateLanes): AgendaGate | undefined
   };
 };
 
-/** The first line of a card text that says something, list markers and Markdown emphasis taken off. */
-const firstLine = (text: string): string | undefined =>
-  text
-    .split('\n')
-    .map(line =>
-      line
-        .replace(/^\s*(?:[-*+]|\d+[.)])\s+/u, '')
-        .replaceAll(/[*_`#>]/gu, '')
-        .trim(),
-    )
-    .find(line => line !== '' && !line.endsWith(':'));
-
-const isTryIt = (gate: Pick<AgendaGate, 'options'>): boolean =>
-  gate.options.some(option => option.outcome === 'reopen-with-agenda');
-
-/** The ask the lane makes, in one line: "Try it: <the first step>" at a try-it gate, else "<option>? <summary>". */
-const gateSubject = (gate: AgendaGate, task: Pick<BoardTask, 'title' | 'summary' | 'howToTest'>): string => {
+/** The ask the lane makes, in one line, in the lane's own words (`gateAskLine`): what the card is, never its first step. */
+const gateSubject = (gate: AgendaGate, task: Pick<BoardTask, 'title' | 'summary'>): string => {
   const said = task.summary.trim() === '' ? task.title : task.summary.trim();
-  const line = isTryIt(gate)
-    ? `Try it: ${firstLine(task.howToTest ?? '') ?? said}`
-    : `${gate.options[0]?.label ?? gate.laneName}? ${said}`;
-  return clipAtWord(line.replaceAll(/\s+/gu, ' '), MAX_AGENDA_SUBJECT_LENGTH);
+  return clipAtWord(gateAskLine(gate, said).replaceAll(/\s+/gu, ' '), MAX_AGENDA_SUBJECT_LENGTH);
 };
 
-/** One line per PR of the card that is still open, or `null` when none is. */
-const openPullRequests = (task: Pick<BoardTask, 'links'>): string | null => {
-  const open = task.links.prs.filter(pr => pr.state === 'open');
-  return open.length === 0 ? null : open.map(pr => `A new PR is open for this card: ${pr.url}`).join('\n');
-};
-
-/** The card's How to test as written (Markdown keeps its lines), absent when it has none, and never a cut-off copy: too long for a body, it is a pointer to the card. */
-export const howToTestOf = (task: Pick<BoardTask, 'id' | 'howToTest'>): string | undefined => {
+/**
+ * EVERYTHING NEEDED TO TRY IT, written for someone cold (`tryItText`): the preview link first when the card has one, else
+ * where to try it for real; the card's How to test as written; the shipped version and the PR. Never a cut-off copy: too
+ * long for a body, the steps are a pointer to the card.
+ */
+export const howToTestOf = (
+  task: Pick<BoardTask, 'id' | 'howToTest' | 'links'>,
+  gate: Pick<AgendaGate, 'options'>,
+): string | undefined => {
+  // An approval has nothing to try: its ask carries the card's own words (the plan) as written, when it has them.
   const steps = task.howToTest?.trim() ?? '';
-  if (steps === '') return undefined;
-  return steps.length <= MAX_AGENDA_BODY_LENGTH
-    ? steps
-    : `How to test is ${steps.length.toLocaleString('en-US')} characters, too long to show here (the most is ${MAX_AGENDA_BODY_LENGTH.toLocaleString('en-US')}). Open the card (${formatTaskRef(task)}) for the full steps.`;
+  if (gateStyle(gate) === 'approval') {
+    if (steps === '') return undefined;
+    return steps.length <= MAX_AGENDA_BODY_LENGTH ? steps : pointerTo(task)(steps.length);
+  }
+  return tryItText(task, pointerTo(task), MAX_AGENDA_BODY_LENGTH, SELF);
 };
+
+/** This daemon's own product, from its single source: only a PR of its release repository is shipped in it. */
+const SELF = {
+  repository: `${RELEASE_OWNER}/${productName}`,
+  name: `${productName.slice(0, 1).toUpperCase()}${productName.slice(1)}`,
+} as const;
+
+const pointerTo = (task: Pick<BoardTask, 'id'>) => (length: number) =>
+  `How to test is ${length.toLocaleString('en-US')} characters, too long to show here (the most is ${MAX_AGENDA_BODY_LENGTH.toLocaleString('en-US')}). Open the card (${formatTaskRef(task)}) for the full steps.`;
 
 /**
  * The agenda the daemon opens for a card that no open agenda carries yet (docs/agenda.md § Card asks): named after
@@ -182,7 +186,7 @@ export const cardAgendaRaise = (
 ): RaiseAgendaRequest => {
   const where = gate.projectName === undefined ? gate.laneName : `${gate.laneName} on ${gate.projectName}`;
   const summary = task.summary.trim();
-  const howToTest = howToTestOf(task);
+  const howToTest = howToTestOf(task, gate);
   return {
     source: 'task',
     sourceRef: cardAgendaReference(task.id),
@@ -192,8 +196,6 @@ export const cardAgendaRaise = (
     subject: gateSubject(gate, task),
     why: `${formatTaskRef(task)} reached ${where}.`,
     howToResolve: CARD_AGENDA_HOW_TO_RESOLVE,
-    // A PR still open while the card waits: the card stays at the gate, so the owner is told to wait or say Not good.
-    context: openPullRequests(task),
     ...(summary === '' ? {} : { premise: clipAtWord(summary, MAX_AGENDA_REASON_LENGTH) }),
     task: { id: task.id },
     stage: cardAskStage(gate),
@@ -203,3 +205,93 @@ export const cardAgendaRaise = (
 
 /** The reason a move from the Inbox is recorded with (the wire contract). */
 export const gateMoveReason = (option: Pick<AgendaGateOption, 'label'>): string => `${option.label} (from the Inbox)`;
+
+// ---------------------------------------------------------------------------------------------------
+// Try it only when there is something to try (docs/agenda.md § Try it only when there is something to try)
+// ---------------------------------------------------------------------------------------------------
+
+/** What the daemon does at a try-it gate: ask, hold the ask back, or find nothing to try. */
+export type TryItVerdict =
+  /** Something to try: the ask is put on the agenda, as it always was. */
+  | { readonly kind: 'ask' }
+  /** Blocked: no ask yet, and the card stays where it is. The next look after it is unblocked asks. */
+  | { readonly kind: 'wait'; readonly why: string }
+  /** Nothing a person could try: the card closes with this reason, and nobody is asked. */
+  | { readonly kind: 'nothing'; readonly why: string };
+
+/**
+ * A How to test that says there is nothing to try, as a CLOSED GRAMMAR: the whole text (trimmed, one sentence, an
+ * optional final period) is a declaration ("Nothing to try", "No user-visible change", "Docs only" …), optionally
+ * followed by a reason from a closed list ("docs only", "internal refactor", "unit suites pass" …) or by a second
+ * declaration, the clauses joined by ":" ";" "," or " — ". A word outside the grammar (after / while / when / should /
+ * in / on …), a second sentence, a list, a step: none of it is a no-test statement, so the owner is asked. Verbs are
+ * never blacklisted — a text is accepted only when every word of it is spoken for. When in doubt it is not.
+ */
+const NO_TEST_DECLARATION =
+  /^(?:nothing (?:to (?:try|test)|for (?:you|the owner) to (?:try|test))|no (?:(?:(?:pwa|app|cli|user[- ]facing|user[- ]visible|visible) )(?:behaviou?r )?|behaviou?r )change|docs only|tests only|docs and tests only)$/iu;
+/** The closed list of reasons a declaration may carry. */
+const NO_TEST_REASON =
+  /^(?:docs only|tests only|docs and tests only|internal refactor|refactor only|ci only|unit suites pass|no user[- ]visible change)$/iu;
+/** What joins the clauses: a colon, a semicolon, a comma or a dash set apart by spaces (never the hyphen inside a word). */
+const NO_TEST_JOINER = /\s*(?:[:;,—–]|\s-\s)\s*/u;
+/** A declaration, then at most two more clauses (a reason or another declaration). */
+const NO_TEST_MAX_CLAUSES = 3;
+
+const isNoTestClause = (clause: string): boolean => NO_TEST_DECLARATION.test(clause) || NO_TEST_REASON.test(clause);
+
+/** Whether a How to test is absent or, as a whole, says there is nothing to try. Pure and total. */
+export const saysNothingToTry = (howToTest: string | null | undefined): boolean => {
+  const text = howToTest?.trim() ?? '';
+  if (text === '') return true;
+  const clauses = text
+    .replace(/\.$/u, '')
+    .split(NO_TEST_JOINER)
+    .map(clause => clause.trim());
+  const [first, ...rest] = clauses;
+  return (
+    first !== undefined &&
+    clauses.length <= NO_TEST_MAX_CLAUSES &&
+    NO_TEST_DECLARATION.test(first) &&
+    rest.every(isNoTestClause)
+  );
+};
+
+/** The card as the try-it verdict reads it: what it is, what it waits on, what its steps and its shipped PRs say. */
+export type TryItFacts = Pick<
+  BoardTask,
+  'ask' | 'askedBy' | 'parent' | 'visibility' | 'visibilitySource' | 'blocked' | 'howToTest' | 'links'
+> & { readonly blockedBy?: readonly TaskRef[] | undefined };
+
+/**
+ * WHAT TO DO AT A TRY-IT GATE, in this order. The plan gate ("OK to build") is never touched: it asks.
+ *
+ * 1. **wait** — the card is blocked (an open dependency, or blocked by hand): it is not ready to try, so nothing is asked
+ *    and nothing closes. When it is unblocked the next look at the card asks as usual.
+ * 2. **nothing** — it is a private card; or it has no How to test, or its How to test says there is nothing to try; or
+ *    every merged PR it links changed only docs, design or tests, and there is at least one, each of a KNOWN kind.
+ *    An unknown kind is treated as code.
+ * 3. **ask** — anything else.
+ *
+ * Pure and total.
+ */
+export const tryItVerdict = (card: TryItFacts, gate: Pick<AgendaGate, 'options'>): TryItVerdict => {
+  if (gateStyle(gate) !== 'try-it') return { kind: 'ask' };
+  const holding = card.blockedBy?.length ?? 0;
+  if (holding > 0) {
+    return { kind: 'wait', why: `it waits on ${String(holding)} other ${holding === 1 ? 'card' : 'cards'}` };
+  }
+  if (card.blocked !== null && card.blocked !== undefined) {
+    return { kind: 'wait', why: `it is blocked: ${card.blocked.reason}` };
+  }
+  if (cardVisibility(card) === 'private') return { kind: 'nothing', why: 'it is a private card' };
+  if ((card.howToTest?.trim() ?? '') === '') return { kind: 'nothing', why: 'it has no steps to try' };
+  if (saysNothingToTry(card.howToTest)) return { kind: 'nothing', why: 'its steps say there is nothing to try' };
+  const merged = card.links.prs.filter(pr => pr.state === 'merged');
+  if (merged.length > 0 && merged.every(pr => pr.changes === 'docs-tests')) {
+    return { kind: 'nothing', why: 'its PRs change only docs and tests' };
+  }
+  return { kind: 'ask' };
+};
+
+/** The reason the board records when the daemon closes a card with nothing to try. */
+export const nothingToTryReason = (why: string): string => `${NOTHING_TO_TRY_PREFIX}${why}`;

@@ -1,37 +1,39 @@
 /**
- * THE CARDS A NOTICE IS ABOUT (`AgendaItem.cards`) — one row per card, each with its own three buttons on ONE line:
- * Open, Start a ferret, Close (a phone's width holds them; the accessible names say the card: "Open card &B1"). The line is the daemon's own (it says the card, where it waits and why nothing
- * will happen); the buttons are the owner's, and each goes through the same authorization as the board's own
- * (`AgendaCardsHost`). Got it is not here: it dismisses the whole notice and stays on the answer row.
+ * THE CARDS A NOTICE IS ABOUT (`AgendaItem.cards`), ANSWERED AS ONE FORM (&B165; docs/agenda.md § One model: the agenda
+ * asks, the card shows). The notice is the agenda item that asks; each card is only named — its line is the daemon's
+ * own (it says the card, where it waits and why nothing will happen), with a way to open it — and the owner picks, per
+ * card, **Start a ferret**, **Close it** or **Leave it** (the default). ONE Send answers the whole notice: it does each
+ * pick through the same authorization as the board's own writes (`AgendaCardsHost`), and when every pick took, it
+ * answers the notice as Got it (`onSent`). There is no per-card button row and no second Got it.
  *
- * The notice does not repeat its subject above the list: every card's line is here, so each says which card its
- * buttons are for.
+ * A card a live ferret already holds is not started a second time: the daemon answers with that ferret, the row's line
+ * says so in place of "no ferret is assigned" (which would now be untrue), and the row offers its chat instead.
  *
- * A card a live ferret already holds is not started a second time: the daemon answers with that ferret, the row's
- * line says so in place of "no ferret is assigned" (which would now be untrue), and Start becomes "Open its chat",
- * which goes to that ferret.
- *
- * Close asks first, in the row: the card leaves the board, so the owner sees what is about to happen, may edit the
- * reason the daemon will record, and must say yes. A refusal is shown on the row in the daemon's words and the
- * buttons stay, so the owner can try the other one.
+ * Close shows what is about to happen before Send — the card leaves the board — and the reason the daemon will record,
+ * which the owner may edit. A refusal is shown on its row in the daemon's words; the notice stays open, the picks stay,
+ * and the next Send only does what has not taken yet.
  */
 
 import { type AgendaCardRow, type BoardTaskId, formatTaskRef } from '@ferretry/protocol';
 import { type ReactNode, useState } from 'react';
 import { defaultAgendaProse } from './agenda-prose.tsx';
 
-/** What a button did: a plain sentence either way, so the row can say it without knowing the board. */
+/** What a pick did: a plain sentence either way, so the row can say it without knowing the board. */
 export type AgendaCardOutcome =
   | { readonly ok: true; readonly note: string; readonly ferret?: string }
   | { readonly ok: false; readonly message: string };
 
 export interface AgendaCardsActions {
+  /** Where the card's page is, for the row's link. */
+  readonly cardPath: (id: BoardTaskId) => string;
   /** Shows the card. */
   readonly open: (id: BoardTaskId) => void;
   /** Starts a new ferret on the card; `ferret` in the answer means one already held it and nothing was started. */
   readonly start: (id: BoardTaskId) => Promise<AgendaCardOutcome>;
   /** Shows the chat of the ferret that holds the card. */
   readonly openChat: (sessionId: string) => void;
+  /** Where that chat is, for the row's link. */
+  readonly chatPath: (sessionId: string) => string;
   /** Drops the card, with the reason the board records. */
   readonly close: (id: BoardTaskId, reason: string) => Promise<AgendaCardOutcome>;
 }
@@ -47,172 +49,187 @@ const heldLine = (line: string, ref: string): string => {
 
 export const CLOSE_CARD_REASON = 'Closed by the owner: no ferret was working on it.';
 
-type RowState =
-  | { readonly step: 'idle' }
-  | { readonly step: 'working'; readonly what: 'start' | 'close' }
-  | { readonly step: 'confirming'; readonly reason: string }
-  | { readonly step: 'done'; readonly note: string };
+/** The owner's pick for one card. */
+export type AgendaCardPick = 'start' | 'close' | 'leave';
 
-const IDLE: RowState = { step: 'idle' };
+const PICKS: readonly (readonly [AgendaCardPick, string])[] = [
+  ['start', 'Start a ferret'],
+  ['close', 'Close it'],
+  ['leave', 'Leave it'],
+];
 
-function CardRow({
-  card,
-  actions,
-  renderProse,
-}: {
-  readonly card: AgendaCardRow;
-  readonly actions: AgendaCardsActions;
-  readonly renderProse: (text: string) => ReactNode;
-}) {
-  const id = card.task.id;
-  const [state, setState] = useState<RowState>(IDLE);
-  const [problem, setProblem] = useState<string | null>(null);
-  const [held, setHeld] = useState<{ readonly ferret: string } | null>(null);
-  const ref = formatTaskRef({ id });
+/** What a Send did to one card. */
+type RowResult =
+  | { readonly kind: 'done'; readonly note: string }
+  | { readonly kind: 'held'; readonly ferret: string }
+  | { readonly kind: 'problem'; readonly message: string };
 
-  const run = async (what: 'start' | 'close', go: () => Promise<AgendaCardOutcome>): Promise<void> => {
-    setProblem(null);
-    setState({ step: 'working', what });
-    const outcome = await go();
-    if (outcome.ok && outcome.ferret !== undefined) {
-      setHeld({ ferret: outcome.ferret });
-      setState(IDLE);
-      return;
-    }
-    if (outcome.ok) {
-      setState({ step: 'done', note: outcome.note });
-      return;
-    }
-    setProblem(outcome.message);
-    setState(IDLE);
+/** A card whose pick already took is not done again by the next Send. */
+const settled = (result: RowResult | undefined): boolean => result !== undefined && result.kind !== 'problem';
+
+/** Activates a link with the app's own navigation, keeping the browser's own ways (a new tab) for a modified click. */
+const linkClick =
+  (go: () => void) =>
+  (event: { readonly metaKey: boolean; readonly ctrlKey: boolean; readonly preventDefault: () => void }) => {
+    if (event.metaKey || event.ctrlKey) return;
+    event.preventDefault();
+    go();
   };
-
-  const working = state.step === 'working';
-  return (
-    <li className="flex min-w-0 flex-col gap-2" data-agenda-card-row={id}>
-      <div
-        className="min-w-0 break-words text-ui text-fg"
-        data-agenda-card-line=""
-        {...(held === null ? {} : { role: 'status' })}
-      >
-        {renderProse(held === null ? card.line : heldLine(card.line, ref))}
-      </div>
-      {state.step === 'done' ? (
-        <p className="m-0 text-ui text-muted" data-agenda-card-done="" role="status">
-          {state.note}
-        </p>
-      ) : state.step === 'confirming' ? (
-        <fieldset
-          aria-label={`Close ${id}`}
-          className="m-0 flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
-          data-agenda-card-confirm=""
-        >
-          <p className="m-0 text-ui text-fg">
-            Close this card? It leaves the board and nothing more will happen to it. The reason is kept on the card.
-          </p>
-          <label className="flex flex-col gap-1 text-meta text-muted">
-            Reason
-            <input
-              className="min-h-[44px] rounded-control border border-border bg-surface px-3 text-ui text-fg"
-              data-agenda-card-reason=""
-              onChange={event => setState({ step: 'confirming', reason: event.currentTarget.value })}
-              type="text"
-              value={state.reason}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="kt-btn min-h-[44px]"
-              data-agenda-card-confirm-close=""
-              disabled={state.reason.trim() === ''}
-              onClick={() => void run('close', () => actions.close(id, state.reason.trim() || CLOSE_CARD_REASON))}
-              type="button"
-            >
-              Yes, close it
-            </button>
-            <button
-              className="kt-btn min-h-[44px]"
-              data-agenda-card-keep=""
-              onClick={() => setState(IDLE)}
-              type="button"
-            >
-              Keep it
-            </button>
-          </div>
-        </fieldset>
-      ) : (
-        <div className="flex gap-2" data-agenda-card-buttons="">
-          <button
-            aria-label={`Open card ${ref}`}
-            className="kt-btn kt-btn--sm min-h-[44px] min-w-0 flex-1"
-            data-agenda-card-open=""
-            disabled={working}
-            onClick={() => actions.open(id)}
-            type="button"
-          >
-            Open
-          </button>
-          {held === null ? (
-            <button
-              aria-label={`Start a ferret on ${ref}`}
-              className="kt-btn kt-btn--sm min-h-[44px] min-w-0 flex-1"
-              data-agenda-card-start=""
-              disabled={working}
-              onClick={() => void run('start', () => actions.start(id))}
-              type="button"
-            >
-              {state.step === 'working' && state.what === 'start' ? 'Starting…' : 'Start a ferret'}
-            </button>
-          ) : (
-            <button
-              aria-label={`Open the chat of the ferret on ${ref}`}
-              className="kt-btn kt-btn--sm min-h-[44px] min-w-0 flex-1"
-              data-agenda-card-chat=""
-              disabled={working}
-              onClick={() => actions.openChat(held.ferret)}
-              type="button"
-            >
-              Open its chat
-            </button>
-          )}
-          <button
-            aria-label={`Close card ${ref}`}
-            className="kt-btn kt-btn--sm min-h-[44px] min-w-0 flex-1"
-            data-agenda-card-close=""
-            disabled={working}
-            onClick={() => {
-              setProblem(null);
-              setState({ step: 'confirming', reason: CLOSE_CARD_REASON });
-            }}
-            type="button"
-          >
-            {state.step === 'working' && state.what === 'close' ? 'Closing…' : 'Close'}
-          </button>
-        </div>
-      )}
-      {problem === null ? null : (
-        <p className="m-0 text-ui text-err" data-agenda-card-problem="" role="alert">
-          {problem}
-        </p>
-      )}
-    </li>
-  );
-}
 
 export function AgendaCardsList({
   cards,
   actions,
   renderProse = defaultAgendaProse,
+  onSent,
 }: {
   readonly cards: readonly AgendaCardRow[];
   readonly actions: AgendaCardsActions;
   readonly renderProse?: (text: string) => ReactNode;
+  /** Every pick took: the notice is answered (Got it). */
+  readonly onSent?: (() => void) | undefined;
 }) {
+  const [picks, setPicks] = useState<Readonly<Record<string, AgendaCardPick>>>({});
+  const [reasons, setReasons] = useState<Readonly<Record<string, string>>>({});
+  const [results, setResults] = useState<Readonly<Record<string, RowResult>>>({});
+  const [sending, setSending] = useState(false);
+  const pickOf = (id: string): AgendaCardPick => picks[id] ?? 'leave';
+
+  const send = async (): Promise<void> => {
+    if (sending) return;
+    setSending(true);
+    const next: Record<string, RowResult> = { ...results };
+    let failed = false;
+    for (const card of cards) {
+      const id = card.task.id;
+      const pick = pickOf(id);
+      if (pick === 'leave' || settled(next[id])) continue;
+      const outcome =
+        pick === 'start'
+          ? await actions.start(id)
+          : await actions.close(id, (reasons[id] ?? CLOSE_CARD_REASON).trim() || CLOSE_CARD_REASON);
+      if (!outcome.ok) {
+        failed = true;
+        next[id] = { kind: 'problem', message: outcome.message };
+      } else
+        next[id] =
+          outcome.ferret === undefined
+            ? { kind: 'done', note: outcome.note }
+            : { kind: 'held', ferret: outcome.ferret };
+    }
+    setResults(next);
+    setSending(false);
+    if (!failed) onSent?.();
+  };
+
   return (
-    <ul aria-label="Cards" className="m-0 flex list-none flex-col gap-4 p-0" data-agenda-cards="">
-      {cards.map(card => (
-        <CardRow actions={actions} card={card} key={card.task.id} renderProse={renderProse} />
-      ))}
-    </ul>
+    <form
+      aria-label="What to do with each card"
+      className="m-0 flex min-w-0 flex-col gap-4"
+      data-agenda-cards=""
+      onSubmit={event => {
+        event.preventDefault();
+        void send();
+      }}
+    >
+      <ul aria-label="Cards" className="m-0 flex list-none flex-col gap-4 p-0">
+        {cards.map(card => {
+          const id = card.task.id;
+          const ref = formatTaskRef({ id });
+          const result = results[id];
+          const pick = pickOf(id);
+          return (
+            <li className="flex min-w-0 flex-col gap-2" data-agenda-card-row={id} key={id}>
+              <div
+                className="min-w-0 break-words text-ui text-fg"
+                data-agenda-card-line=""
+                {...(result?.kind === 'held' ? { role: 'status' } : {})}
+              >
+                {renderProse(result?.kind === 'held' ? heldLine(card.line, ref) : card.line)}
+              </div>
+              <p className="m-0 flex flex-wrap gap-3 text-meta" data-agenda-card-links="">
+                <a
+                  className="text-accent"
+                  data-agenda-card-open=""
+                  href={actions.cardPath(id)}
+                  onClick={linkClick(() => actions.open(id))}
+                >
+                  Open {ref}
+                </a>
+                {result?.kind === 'held' ? (
+                  <a
+                    className="text-accent"
+                    data-agenda-card-chat=""
+                    href={actions.chatPath(result.ferret)}
+                    onClick={linkClick(() => actions.openChat(result.ferret))}
+                  >
+                    Open its ferret’s chat
+                  </a>
+                ) : null}
+              </p>
+              {result?.kind === 'done' ? (
+                <p className="m-0 text-ui text-muted" data-agenda-card-done="" role="status">
+                  {result.note}
+                </p>
+              ) : result?.kind === 'held' ? null : (
+                <div
+                  aria-label={`What to do with ${ref}`}
+                  className="flex min-w-0 flex-wrap gap-x-4"
+                  data-agenda-card-picks=""
+                  role="radiogroup"
+                >
+                  {PICKS.map(([value, label]) => (
+                    <label className="flex min-h-[44px] items-center gap-2 text-ui text-fg" key={value}>
+                      <input
+                        checked={pick === value}
+                        data-agenda-card-pick={value}
+                        disabled={sending}
+                        name={`agenda-card-${id}`}
+                        onChange={() => setPicks(current => ({ ...current, [id]: value }))}
+                        type="radio"
+                        value={value}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              )}
+              {pick === 'close' && !settled(result) ? (
+                <label className="flex flex-col gap-1 text-meta text-muted" data-agenda-card-close-note="">
+                  It leaves the board and nothing more will happen to it. The reason is kept on the card:
+                  <input
+                    className="min-h-[44px] rounded-control border border-border bg-surface px-3 text-ui text-fg"
+                    data-agenda-card-reason=""
+                    disabled={sending}
+                    onChange={event => {
+                      const reason = event.currentTarget.value;
+                      setReasons(current => ({ ...current, [id]: reason }));
+                    }}
+                    type="text"
+                    value={reasons[id] ?? CLOSE_CARD_REASON}
+                  />
+                </label>
+              ) : null}
+              {result?.kind === 'problem' ? (
+                <p className="m-0 text-ui text-err" data-agenda-card-problem="" role="alert">
+                  {result.message}
+                </p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="fy-qr__row" data-agenda-quick-replies="">
+        <button
+          className="kt-btn fy-qr__chip"
+          data-agenda-answer-option="Send"
+          data-agenda-cards-send=""
+          data-variant="primary"
+          disabled={sending}
+          type="submit"
+        >
+          {sending ? 'Sending…' : 'Send'}
+        </button>
+      </div>
+    </form>
   );
 }

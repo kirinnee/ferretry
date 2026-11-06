@@ -235,7 +235,7 @@ describe('the Machine group in the Inbox', () => {
     expect(view?.container.querySelector('[data-inbox-machine-moves]')).toBeNull();
   });
 
-  test('draws an orphan notice with a row of buttons per card, keeps Got it, and says the lines once', async () => {
+  test('draws an orphan notice as ONE form — a pick per card, one Send, no second Got it — and says the lines once', async () => {
     // Arrange
     const line = (id: string) =>
       `&${id} Fix it is waiting in Review/CI, but no ferret is assigned, so nothing will happen to it.`;
@@ -260,8 +260,10 @@ describe('the Machine group in the Inbox', () => {
     const text = view?.container.querySelector('[data-inbox-open]')?.textContent ?? '';
     expect(view?.container.querySelectorAll('[data-agenda-card-row]').length).toBe(2);
     expect(view?.container.querySelectorAll('[data-agenda-card-open]').length).toBe(2);
-    expect(view?.container.querySelectorAll('[data-agenda-card-start]').length).toBe(2);
-    expect(view?.container.querySelectorAll('[data-agenda-card-close]').length).toBe(2);
+    expect(view?.container.querySelectorAll('[data-agenda-card-pick]').length).toBe(6);
+    expect(view?.container.querySelectorAll('[data-agenda-card-row] button').length).toBe(0);
+    expect(view?.container.querySelectorAll('[data-agenda-cards-send]').length).toBe(1);
+    expect(view?.container.querySelector('[data-agenda-clear]')).toBeNull();
     expect(text).not.toContain('Tap Got it to dismiss this notice.');
     expect(text.split(line('B1')).length).toBe(2);
     expect(text).not.toContain('Nothing to decide');

@@ -11,7 +11,8 @@
  *   reply that leaves it open empties only what was sent.
  *
  * A REPLY MOVES THE INBOX ON: once a chat message about the item is accepted, `onReplied` tells the host (the item
- * is marked replied at once, `lib/agenda-replied.ts`). A form item's Send is an answer, not a reply, and tells nothing.
+ * is marked replied at once, `lib/agenda-replied.ts`). A form item's Send is an answer, not a reply, and tells nothing; neither does approving
+ * wording typed under a card's own ask ("works now"): it is logged, yet the ask is open and the item stays.
  * `restore` is the words of a reply the owner took back: they go into the box once.
  *
  * A FORM ITEM'S Send answers the form: `answerForm` (the page's) combines the picks on the card with what is typed, and
@@ -21,10 +22,11 @@
  */
 
 import type { AgendaId, SessionView } from '@ferretry/protocol';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer, type ComposerProps, type ComposerSent } from '../../components/composer.tsx';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { useFormComposer } from '../../lib/agenda-form-send.ts';
+import { type TypedAnswerTarget, withTypedSend } from '../../lib/agenda-gate-send.ts';
 import { withReferencePrefix } from '../../lib/answer-chip.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonUsageStore } from '../../lib/usage-store.ts';
@@ -53,6 +55,16 @@ export interface AgendaInboxComposerProps {
   readonly answerForm?: (() => void) | undefined;
   /** The open form's picks key: a changed pick clears the "nothing to send" line under the box. */
   readonly formKey?: string | undefined;
+  /**
+   * The open item is a card's own agenda: what is typed here answers THAT ask (Not good, with these words), so Send runs
+   * this instead of chatting, and `typedPlaceholder` says what to type. It never marks the item replied. The box is
+   * bound to the ask's `key`: a Send that lands after the ask was replaced or answered shows an error and answers nothing.
+   * The typed words are the owner's exactly — the box sends them raw (no `!A404` prefix) and never through the device outbox.
+   * The one exception is words that plainly approve ("works now"): they are an ordinary reply about the item, with its
+   * reference, and mark it replied; the item shows them back above Good, in words (never applied by themselves).
+   */
+  readonly answerTyped?: TypedAnswerTarget | undefined;
+  readonly typedPlaceholder?: string | undefined;
   readonly autocompleteFetcher?: ComposerProps['autocompleteFetcher'];
   readonly enterKeyPreference?: ComposerProps['enterKeyPreference'];
   /** This device's dictation settings, the chat composer's own: present, the box carries the same mic. */
@@ -75,6 +87,8 @@ export function AgendaInboxComposer({
   disabled = false,
   answerForm,
   formKey,
+  answerTyped,
+  typedPlaceholder,
   autocompleteFetcher,
   enterKeyPreference = null,
   dictationSettings,
@@ -101,23 +115,55 @@ export function AgendaInboxComposer({
   const chat = useMemo(() => (api === null ? null : withReferencePrefix(api, () => [itemId])), [api, itemId]);
   const form = useFormComposer(chat, answerForm, formKey);
   const forForm = form.allowEmptySend;
-  if (form.api === null) return null;
+  // The ask that is open NOW: a send bound to an earlier one asks this when it finally runs, and fails if it moved on.
+  const typing = useRef(answerTyped);
+  typing.current = answerTyped;
+  // A composer that is gone has no open ask: a Send still awaiting when the card was answered (or left) answers nothing.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const askKey = answerTyped?.key;
+  const forTyped = askKey !== undefined;
+  // A typed answer goes through the raw client — never the chat's reference prefix — and one client per ask.
+  // Words that plainly approve ("works now") are the one exception: they are a reply about the item, through `chat` — and
+  // never the reply overlay (`onReplied`): the card ask is still open, so the item and its Good stay in the Inbox.
+  const sender = useMemo(
+    () =>
+      forTyped
+        ? api === null || chat === null
+          ? null
+          : withTypedSend(api, askKey, () => (mounted.current ? typing.current : undefined), chat)
+        : form.api,
+    [api, askKey, chat, forTyped, form.api],
+  );
+  if (sender === null) return null;
   return (
     <Composer
       allowEmptySend={forForm}
       {...(form.clearErrorOn === undefined ? {} : { clearErrorOn: form.clearErrorOn })}
-      api={form.api}
+      api={sender}
       compact={compact}
       daemon={connection}
       disabled={disabled}
       draftSlot={itemId}
-      {...(forForm || onReplied === undefined ? {} : { onSent: onReplied })}
+      {...(forTyped ? { directSend: true } : {})}
+      {...(forForm || forTyped || onReplied === undefined ? {} : { onSent: onReplied })}
       {...(restore === undefined ? {} : { restore })}
       {...(onRestored === undefined ? {} : { onRestored })}
       {...(dictationSettings === undefined ? {} : { dictationSettings })}
       enterKeyPreference={enterKeyPreference}
       phoneEnterKeyPreference={phoneEnterKeyPreference}
-      placeholder={forForm ? `Anything else for ${ferretName(view)}?` : `Reply to ${ferretName(view)}…`}
+      placeholder={
+        forTyped && typedPlaceholder !== undefined
+          ? typedPlaceholder
+          : forForm
+            ? `Anything else for ${ferretName(view)}?`
+            : `Reply to ${ferretName(view)}…`
+      }
       quota={quota}
       sessionId={view.config.id}
       {...(autocompleteFetcher === undefined ? {} : { autocompleteFetcher })}

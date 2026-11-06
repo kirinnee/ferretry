@@ -4,7 +4,8 @@ import { swipeTargets } from '../../src/lib/agenda-answers.ts';
 import { cardModel } from '../../src/lib/agenda-card-model.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
-  attachedGateLead,
+  attachedGateHeading,
+  attachedGateReference,
   attachedGateView,
   gateAnswerAction,
   gateAsksWords,
@@ -156,12 +157,13 @@ describe('a gate attached to a thread', () => {
     expect(labels.sort()).toEqual(['Done', 'Not good']);
   });
 
-  test('leads with the card title: ready to test when its options reopen it, else the lane', () => {
-    expect(attachedGateLead({ ...twoOptions, cardTitle: 'Badge colour' })).toBe('Badge colour is ready to test.');
-    expect(attachedGateLead(twoOptions)).toBe('It is ready to test.');
-    const review = { ...twoOptions, laneName: 'Review', options: [{ ...twoOptions.options[0], outcome: 'advance' }] };
-    expect(attachedGateLead({ ...review, cardTitle: 'Badge colour' } as never)).toBe('Badge colour is at Review.');
-    expect(attachedGateLead(review as never)).toBe('It is at Review.');
+  test('names the ask by its verb, and the card on one plain reference line: never "Card &F12" or "your answer for the card"', () => {
+    expect(attachedGateHeading(twoOptions)).toBe('Try it');
+    const plan = { ...twoOptions, options: [{ ...twoOptions.options[0], outcome: 'next' }] };
+    expect(attachedGateHeading(plan as never)).toBe('Approve');
+    expect(attachedGateReference({ ...twoOptions, cardTitle: 'Badge colour' })).toBe('For &F1 Badge colour');
+    expect(attachedGateReference({ ...twoOptions, cardTitle: 'Badge colour' }, false)).toBe('For &F1');
+    expect(attachedGateReference(twoOptions)).toBe('For &F1');
   });
 
   // &B156: !A304 was a reply with three questions carrying "OK to build" for &F923, and drew no button for it.

@@ -15,7 +15,14 @@
  *   approvals, or the forward option's own label. Nothing longer is read: "build it after lunch" offers nothing.
  */
 
-import { type AgendaGate, type AgendaItem, cardAskReference, openCardAsks } from '@ferretry/protocol';
+import {
+  type AgendaGate,
+  type AgendaItem,
+  cardAskReference,
+  type GateStyle,
+  gateStyle,
+  openCardAsks,
+} from '@ferretry/protocol';
 import { type HistoryEvent, withoutLeadingReference } from './agenda-history.ts';
 
 /** The words that alone mean "yes, go on" to any card ask, in lower case. */
@@ -25,6 +32,7 @@ const APPROVALS: ReadonlySet<string> = new Set([
   'yeah',
   'ok',
   'okay',
+  'good',
   'go',
   'go ahead',
   'go for it',
@@ -39,7 +47,7 @@ const APPROVALS: ReadonlySet<string> = new Set([
   'all good',
 ]);
 
-/** The words that approve only a plan ("OK to build"): a tested card is never "built". */
+/** The words that approve only a plan ("OK to build"): a card at a try-it is never "built". */
 const BUILD_APPROVALS: ReadonlySet<string> = new Set([
   'build',
   'build it',
@@ -49,8 +57,25 @@ const BUILD_APPROVALS: ReadonlySet<string> = new Set([
   'okay to build',
 ]);
 
-/** The words that pass only a card waiting to be tried ("Done"): a plan is never "tested". */
-const TEST_APPROVALS: ReadonlySet<string> = new Set(['done', 'works', 'it works', 'tested', 'works for me']);
+/** The words that pass only a card waiting to be tried, whatever its lane calls the pass: a plan is never "tested". */
+const TEST_APPROVALS: ReadonlySet<string> = new Set([
+  'done',
+  'works',
+  'it works',
+  'works now',
+  'it works now',
+  'works fine',
+  'it works fine',
+  'works great',
+  'it works great',
+  'works well',
+  'it works well',
+  'good now',
+  'tested',
+  'tested ok',
+  'tested okay',
+  'works for me',
+]);
 
 /** The longest reply that is read at all: an approval is a word or a few. */
 const MAX_APPROVAL_LENGTH = 32;
@@ -63,6 +88,33 @@ const normal = (text: string): string =>
     .replace(/[.!,;:]+/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim();
+
+/**
+ * Whether plain words approve a gate whose forward option is `label`: one of the short approvals, the option's own
+ * label, and then the style's own words — a tester's at a try-it (whatever the lane calls its pass), a plan's build
+ * words at an approval. Whatever else, a longer message, a question, a negation or a "but" clause, is not an
+ * approval: the match is of the WHOLE message.
+ */
+const approvesWith = (label: string, reply: string, style: GateStyle): boolean => {
+  if (reply.length > MAX_APPROVAL_LENGTH) return false;
+  const said = normal(reply);
+  const named = normal(label);
+  return (
+    APPROVALS.has(said) ||
+    said === named ||
+    (style === 'approval' && named.includes('build') && BUILD_APPROVALS.has(said)) ||
+    (style === 'try-it' && TEST_APPROVALS.has(said))
+  );
+};
+
+/**
+ * The pass option typed words approve at a TRY-IT, or `null`: "works now", "lgtm", "good" typed under a card to try
+ * mean Good, not Not good. An approval gate never reads typed words as a yes ("ok" there is a Not yet word).
+ */
+export const typedApproval = (gate: AgendaGate, words: string): string | null => {
+  const label = forwardLabel(gate);
+  return label !== null && gateStyle(gate) === 'try-it' && approvesWith(label, words.trim(), 'try-it') ? label : null;
+};
 
 export interface ReplyApproval {
   /** The owner's words, as they wrote them. */
@@ -105,13 +157,5 @@ export const replyApproval = (item: AgendaItem, history: readonly HistoryEvent[]
   const event = Number.isFinite(raised) ? lastOwnerReply(history, raised) : null;
   if (label === null || event?.kind !== 'owner') return null;
   const reply = withoutLeadingReference(event.text, item.id);
-  if (reply.length > MAX_APPROVAL_LENGTH) return null;
-  const said = normal(reply);
-  const named = normal(label);
-  const fits =
-    APPROVALS.has(said) ||
-    said === named ||
-    (named.includes('build') && BUILD_APPROVALS.has(said)) ||
-    (named === 'done' && TEST_APPROVALS.has(said));
-  return fits ? { reply, label, ask: cardAskReference(ask) } : null;
+  return approvesWith(label, reply, gateStyle(ask.gate)) ? { reply, label, ask: cardAskReference(ask) } : null;
 };
