@@ -84,7 +84,7 @@ captured IO for the coverage ledger (`SIT_DRIVER=inprocess`). Every journey asse
 
 ## Quality gates
 
-Biome lints (formatting is treefmt/prettier's job), strict no-emit TypeScript, knip twice
+Biome lints (formatting is treefmt's job: Biome for code, prettier for prose), strict no-emit TypeScript, knip twice
 (repository view incl. tests; production view from the bin entry — it catches files used only
 by tests). Shell scripts are shellcheck-clean, executable, and `set -euo pipefail`.
 Run everything: `task lint`.
