@@ -343,6 +343,10 @@ streams** at once and **1 per device** by default; more are refused `429 voice_b
 
 ### 3.1 The voice stream
 
+> **The wire format is specified, byte by byte, in [`docs/voice-stream.md`](../voice-stream.md)** (slice B3a, built
+> in `packages/protocol`): the start record, both unit layouts, the control slot, the fragment rules, the bounds
+> and every refusal. Where the two differ, that page wins; this section is the reasoning.
+
 A new route on the daemon's socket table, `/v1/voice/stream`, opened as a **§14 stream session**
 (`docs/relay-protocol.md` § Stream sessions) — so it is dispatched through the same route table, the
 same capability guard and the same device proof on every carrier, and the rendezvous changes **zero

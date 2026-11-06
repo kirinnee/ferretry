@@ -932,6 +932,9 @@ pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the 
   platform, and inside the Nix build's pinned dependency hash), a 460 MB archive download and
   extraction on the daemon, an audio route plus its PWA dial and a `grants` capability for it. That is
   its own change, not part of this one.
+- **The voice stream to your machine** (audio up, words and the countdown down, as fixed-size units inside the
+  end-to-end session): its wire format is specified in [Voice stream](voice-stream.md) and the pure codec is
+  built (`packages/protocol`); the daemon route, the worker and the PWA's side are not.
 - ~~A machine-wide default chosen during onboarding~~ — done: New machine setup's Voice step renders
   `VoiceEngineChoice` and saves the choice as `voice.yaml`'s `defaultEngine`; a device that has not picked an
   engine dictates with it until it picks its own. Settings › Dictation still shows the device's own choice
