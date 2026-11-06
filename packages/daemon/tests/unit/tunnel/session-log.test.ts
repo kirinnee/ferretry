@@ -19,6 +19,44 @@ const END: DirectSessionEnd = {
 };
 
 describe('the tunnel session log', () => {
+  it('should name only the five busiest route templates, ordered by sent wire bytes with stable ties', () => {
+    // Arrange
+    const traffic = {
+      routes: [
+        { route: 'GET /v1/small', answers: 100, bytes: 10 },
+        { route: 'GET /v1/sessions', answers: 41, bytes: 40_055_603 },
+        { route: 'GET /v1/a', answers: 1, bytes: 2_048 },
+        { route: 'GET /v1/b', answers: 2, bytes: 2_048 },
+        { route: 'GET /v1/c', answers: 3, bytes: 3_072 },
+        { route: 'other', answers: 4, bytes: 4_096 },
+      ],
+    };
+
+    // Act
+    const actual = describeTunnelSessionEnd({ ...END, traffic });
+
+    // Assert
+    should(actual).endWith(
+      'top routes: GET /v1/sessions 41× 38.2 MB, other 4× 4.0 KB, GET /v1/c 3× 3.0 KB, GET /v1/a 1× 2.0 KB, GET /v1/b 2× 2.0 KB',
+    );
+    should(actual).not.containEql('/v1/small');
+    should(traffic.routes[0]?.route).equal('GET /v1/small');
+  });
+
+  it('should name event and terminal stream templates with their sent frame count, including an empty stream', () => {
+    // Arrange
+    for (const route of ['GET /v1/events', 'GET /v1/sessions/:sessionId/terminals/:terminalId/stream']) {
+      const traffic = { routes: [], stream: { route, frames: 0, bytes: 0 } };
+
+      // Act
+      const actual = describeTunnelSessionEnd({ ...END, traffic });
+
+      // Assert
+      should(actual).endWith(`stream: ${route} 0 frames, 0 B out`);
+      should(actual).not.containEql('top routes:');
+    }
+  });
+
   it('should say who cut a session, what the code means, how long it lived and when it last heard anything', () => {
     // Act
     const line = describeTunnelSessionEnd(END);

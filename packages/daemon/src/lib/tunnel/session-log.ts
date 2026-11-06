@@ -61,6 +61,20 @@ export const describeTunnelSessionEnd = (end: DirectSessionEnd): string => {
     `last frame ${describeDuration(end.lastFrameAgeMs)} before`,
     `${describeBytes(end.bytesIn)} in, ${describeBytes(end.bytesOut)} out`,
     end.proved ? 'device proved' : 'no device proved',
+    ...(end.traffic === undefined || end.traffic.routes.length === 0
+      ? []
+      : [
+          `top routes: ${[...end.traffic.routes]
+            .sort((left, right) => right.bytes - left.bytes || left.route.localeCompare(right.route))
+            .slice(0, 5)
+            .map(route => `${route.route} ${String(route.answers)}× ${describeBytes(route.bytes)}`)
+            .join(', ')}`,
+        ]),
+    ...(end.traffic?.stream === undefined
+      ? []
+      : [
+          `stream: ${end.traffic.stream.route} ${String(end.traffic.stream.frames)} frames, ${describeBytes(end.traffic.stream.bytes)} out`,
+        ]),
   ].join('; ');
 };
 

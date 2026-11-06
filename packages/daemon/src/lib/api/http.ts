@@ -24,6 +24,8 @@ export interface ApiRequest {
   readonly path: string;
   readonly query: QueryParameters;
   readonly headers: ApiHeaders;
+  /** Internal measurement hook: the router's registered template, never the caller's raw path. */
+  readonly onRoute?: (template: string) => void;
   /** Transport-observed peer address, used only as a rate-limit bucket key. */
   readonly clientAddress?: string;
   /** Whether the peer is on the loopback interface. */

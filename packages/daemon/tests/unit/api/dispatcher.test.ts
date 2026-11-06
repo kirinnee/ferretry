@@ -63,6 +63,44 @@ const dispatcherFor = (...routes: readonly ApiRoute[]) =>
   new ApiDispatcher(new ApiRouter(routes), credentials, NO_GOVERNED_ROUTES_GUARD);
 
 describe('ApiDispatcher authorization', () => {
+  it('should spend a route’s standing and fresh proofs only for its session-proven device', async () => {
+    // Arrange
+    const spent: unknown[] = [];
+    const fresh: unknown[] = [];
+    const subject = new ApiDispatcher(
+      new ApiRouter([
+        {
+          ...echo('/v1/proof', 'authenticated'),
+          handle: async context => {
+            context.spendStepUp?.();
+            context.spendFreshStepUp?.();
+            return jsonResponse({ ok: true });
+          },
+        },
+      ]),
+      credentials,
+      NO_GOVERNED_ROUTES_GUARD,
+      undefined,
+      {
+        held: () => true,
+        spend: device => {
+          spent.push(device);
+        },
+        spendFresh: device => {
+          fresh.push(device);
+        },
+      },
+    );
+
+    // Act
+    await subject.dispatch(request({ path: '/v1/proof', headers: { authorization: 'Bearer admin-secret' } }));
+    await subject.dispatch({ ...request({ path: '/v1/proof' }), device: DEVICE });
+
+    // Assert
+    should(spent).eql([DEVICE]);
+    should(fresh).eql([DEVICE]);
+  });
+
   it('should serve a public route with no token at all', async () => {
     // Arrange
     const dispatcher = dispatcherFor(echo('/healthz', 'none'));

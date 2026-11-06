@@ -821,6 +821,39 @@ describe('a relayed session', () => {
     should(read.messages.at(-1)).containDeep({ t: 'res', id: 4, status: 200, body: JSON.stringify({ text: 'same' }) });
   });
 
+  it('should stop a stale multipart answer even after earlier parts passed their final send checks', async () => {
+    // Arrange — change the tail after the first part has left, preserving the prefix byte for byte.
+    const prefix = 'x'.repeat(MAX_PLAINTEXT_BYTES * 2);
+    let checks = 0;
+    const harnessed = harness(async () => ({
+      status: 200,
+      headers: new Map(),
+      body: '',
+      late: () => {
+        checks += 1;
+        return { status: 200, headers: new Map(), body: `${prefix}${checks < 3 ? 'PRIVATE-TAIL' : 'held'}` };
+      },
+    }));
+    const { link, wire: sent } = harnessed;
+    const session = await keyedSession(harnessed);
+    const channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    const before = sent.frames.length;
+
+    // Act
+    await clientSend(link, channel, { t: 'req', id: 4, method: 'GET', path: '/v1/input' });
+
+    // Assert — the two unchanged prefix parts crossed; no stale tail did, and the session ends.
+    const actual = await clientReadAll(sent, session.channel);
+    should(sent.frames.slice(before).filter(frame => frame.kind === FRAME_KINDS.data)).have.length(2);
+    should(JSON.stringify(actual.messages)).not.containEql('PRIVATE-TAIL');
+    should(controlOf(sent.frames.at(-1))).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.protocolError });
+    should(link.report().sessions).equal(0);
+  });
+
   it('should carry an answer too large for one record as ordered parts, never truncating it', async () => {
     // Arrange — a response far past one record.
     const body = 'x'.repeat(70_000);

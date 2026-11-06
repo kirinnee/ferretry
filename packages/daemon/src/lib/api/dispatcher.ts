@@ -161,6 +161,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       response: errorResponse(403, `the request may not use ${request.method} ${request.path}`, 'forbidden'),
     };
   const lookup = router.lookup(request.method, request.path);
+  if (lookup.kind === 'matched') request.onRoute?.(`${lookup.route.method.toUpperCase()} ${lookup.route.path}`);
   // The public shortcut answers before authentication is even attempted, which is the whole point of
   // being public — but it is a shortcut past EVERY check below, so it may only be taken by a route
   // that asks for none of them. Privileged arrival is the one exception it can answer itself: a

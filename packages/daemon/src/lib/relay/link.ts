@@ -143,9 +143,10 @@ import {
   tunnelDataFrame,
   tunnelDataMessage,
   tunnelMemberRequest,
-  tunnelResponseMessages,
   tunnelStreamRequest,
 } from './tunnel.ts';
+import { tunnelAnswerRecords } from './answer.ts';
+import type { SessionTraffic } from './session-traffic.ts';
 
 /** The socket the link talks through. One method per thing a WebSocket can be asked to do. */
 export interface RelayLinkSocket {
@@ -344,6 +345,8 @@ const RELAY_STREAM_CLOSES = {
 } as const;
 
 export interface RelayLinkDependencies {
+  /** Log-only accounting for a single tunnel socket; absent on other carriers. */
+  readonly traffic?: SessionTraffic;
   readonly crypto: RelayCrypto;
   readonly identity: DaemonIdentity;
   /** The host of the configured rendezvous URL, exactly as that URL spells it. In the signature. */
@@ -487,6 +490,7 @@ interface PendingRecord {
    * are both awaits.
    */
   readonly permit?: () => boolean;
+  readonly answer?: { readonly route: string; readonly first: boolean };
 }
 
 /**
@@ -1310,27 +1314,41 @@ export class RelayLink {
       if (device === undefined && member === undefined) return;
       // A try rather than `.catch()`: a port implemented without `async` throws instead of rejecting.
       let response: ApiResponse;
+      let route = 'other';
+      const measured = (input: ApiRequest): ApiRequest =>
+        this.deps.traffic === undefined
+          ? input
+          : {
+              ...input,
+              onRoute: template => {
+                route = template;
+              },
+            };
       try {
         // A member's request goes to the member route table and to nothing else: there is no path from here to
         // the dispatcher a device uses.
         response =
           member !== undefined
             ? await this.#dispatchMember(
-                tunnelMemberRequest(
-                  { ...request, body },
-                  member,
-                  session.sessionId.text,
-                  this.deps.arrival,
-                  session.transcript,
+                measured(
+                  tunnelMemberRequest(
+                    { ...request, body },
+                    member,
+                    session.sessionId.text,
+                    this.deps.arrival,
+                    session.transcript,
+                  ),
                 ),
               )
             : await this.deps.dispatch(
-                tunnelApiRequest(
-                  { ...request, body },
-                  device as SessionDevice,
-                  session.sessionId.text,
-                  this.deps.arrival,
-                  session.transcript,
+                measured(
+                  tunnelApiRequest(
+                    { ...request, body },
+                    device as SessionDevice,
+                    session.sessionId.text,
+                    this.deps.arrival,
+                    session.transcript,
+                  ),
                 ),
               );
       } catch {
@@ -1343,7 +1361,7 @@ export class RelayLink {
         };
       }
       if (this.#live(session)) {
-        this.#answer(session, request.id, response);
+        this.#answer(session, request.id, response, route);
         if (response.endsSession === true && member !== undefined) {
           // A request racing the close is refused as a record after the end, not served and then cut off.
           session.phase = 'concluding';
@@ -1376,25 +1394,20 @@ export class RelayLink {
   }
 
   /** One answer, as one record or as its ordered parts. */
-  #answer(session: LinkSession, id: number, response: ApiResponse): void {
-    const messages = tunnelResponseMessages(id, response);
-    const permitOf = (index: number, sent: RelayTunnelDaemonMessage): (() => boolean) | undefined => {
-      if (response.late === undefined) return undefined;
-      const spelled = encodeTunnelMessage(sent);
-      return () => {
-        try {
-          const again = tunnelResponseMessages(id, response)[index];
-          return again !== undefined && sameBytes(encodeTunnelMessage(again), spelled);
-        } catch {
-          return false;
-        }
-      };
-    };
-    if (messages.length === 1 && messages[0] !== undefined) {
-      this.#sendRecord(session, messages[0], permitOf(0, messages[0]));
+  #answer(session: LinkSession, id: number, response: ApiResponse, route = 'other'): void {
+    const records = tunnelAnswerRecords(id, response).map(
+      (record, index): PendingRecord => ({
+        ...record,
+        payload: false,
+        ...(this.deps.traffic === undefined ? {} : { answer: { route, first: index === 0 } }),
+      }),
+    );
+    if (records.length === 1 && records[0] !== undefined) {
+      this.#sendEncodedRecord(session, records[0]);
       return;
     }
-    for (const [index, message] of messages.entries()) this.#queue(session, message, false, permitOf(index, message));
+    for (const record of records) session.waiting.push(record);
+    this.#flush(session);
   }
 
   // ─── one pairing exchange ───────────────────────────────────────────────────────────────────
@@ -1641,8 +1654,18 @@ export class RelayLink {
     if (!(await this.#prove(session, 'stream', request))) return;
     session.phase = 'concluding';
     const streamRequest = tunnelStreamRequest(request, session.sessionId.text, this.deps.arrival);
+    let route = 'other';
+    const measured =
+      this.deps.traffic === undefined
+        ? streamRequest
+        : {
+            ...streamRequest,
+            onRoute: (template: string) => {
+              route = template;
+            },
+          };
     const decision = await this.deps.sockets
-      .upgrade(streamRequest)
+      .upgrade(measured)
       .catch((): SocketUpgradeDecision => ({ outcome: 'unclaimed' }));
     // Ended while the route table was deciding — the device unpaired, the rendezvous closed it, the
     // deadline fired. Nothing has been attached yet, so there is nothing to release.
@@ -1681,6 +1704,7 @@ export class RelayLink {
     }
     session.stream = handler;
     session.streamRequest = streamRequest;
+    this.deps.traffic?.openStream(route);
     session.phase = 'streaming';
     this.#queue(session, {
       t: 'stream-opened',
@@ -1944,9 +1968,12 @@ export class RelayLink {
     });
   }
 
-  #sendRecord(session: LinkSession, message: RelayTunnelDaemonMessage, permit?: () => boolean): void {
-    const plaintext = encodeTunnelMessage(message);
-    if (plaintext.byteLength > MAX_PLAINTEXT_BYTES || wholeRecords(session.waiting) >= CREDIT_WINDOW_FRAMES) {
+  #sendRecord(session: LinkSession, message: RelayTunnelDaemonMessage): void {
+    this.#sendEncodedRecord(session, { plaintext: encodeTunnelMessage(message), payload: false });
+  }
+
+  #sendEncodedRecord(session: LinkSession, record: PendingRecord): void {
+    if (record.plaintext.byteLength > MAX_PLAINTEXT_BYTES || wholeRecords(session.waiting) >= CREDIT_WINDOW_FRAMES) {
       // Neither is reachable through a peer that honours the protocol — `tunnelResponseMessage`
       // refuses an oversized answer and the carrier bounds how many requests can be outstanding —
       // and both would otherwise become an unbounded buffer or a record the carrier drops. Ending
@@ -1954,7 +1981,7 @@ export class RelayLink {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'this session cannot carry its own answer');
       return;
     }
-    session.waiting.push({ plaintext, payload: false, ...(permit === undefined ? {} : { permit }) });
+    session.waiting.push(record);
     this.#flush(session);
   }
 
@@ -2090,7 +2117,11 @@ export class RelayLink {
         // whole channel here would put it back. Each direction owns exactly one number.
         session.channel = { ...(session.channel ?? channel), sendSequence: sealed.state.sendSequence };
         session.send = recordSent(session.send);
-        this.deps.socket.send(encodeFrame(sealed.frame));
+        const bytes = encodeFrame(sealed.frame);
+        this.deps.socket.send(bytes);
+        if (pending.answer !== undefined)
+          this.deps.traffic?.answer(pending.answer.route, bytes.byteLength, pending.answer.first);
+        if (pending.payload) this.deps.traffic?.streamFrame(bytes.byteLength);
       }
       // A session with an outcome ends HERE, from whichever flush finally empties its queue, rather
       // than at the moment the outcome was decided — see `#conclude`. Reached only on the normal
@@ -2182,6 +2213,3 @@ function instant(milliseconds: number): string {
 export function transcriptKey(transcript: Uint8Array | undefined): string {
   return transcript === undefined ? '' : [...transcript].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
-
-const sameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
-  a.byteLength === b.byteLength && a.every((byte, index) => byte === b[index]);
