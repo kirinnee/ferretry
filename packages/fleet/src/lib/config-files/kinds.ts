@@ -419,9 +419,14 @@ function voiceLoosening(before: VoiceConfig, after: VoiceConfig): readonly strin
   const wasSending = from.provider !== 'off' && from.style !== 'off';
   const moved = sends && (!wasSending || from.provider !== to.provider || from.login !== to.login);
   const context = to.useConversation && !from.useConversation && to.style !== 'off';
+  // A runtime path is code the daemon will load: a native library from a directory the file names, instead of the
+  // pinned, hash-checked one Install downloads. Choosing among catalog models loosens nothing — they are pinned too.
+  const runtime = after.engine.runtimePath;
+  const loadsOtherCode = runtime !== undefined && runtime !== before.engine.runtimePath;
   return [
     ...(moved ? [`dictated text now goes to ${destination} to be cleaned up`] : []),
     ...(context ? ['recent conversation messages may now go to the cleanup provider to help clean up dictation'] : []),
+    ...(loadsOtherCode ? [`the speech engine will now load native code from ${runtime}`] : []),
   ];
 }
 

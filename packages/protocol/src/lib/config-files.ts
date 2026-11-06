@@ -351,7 +351,29 @@ export const DEFAULT_VOICE_CLEANUP_PROMPTS: Readonly<Record<Exclude<VoiceCleanup
     'Rewrite the dictated text into clear, well-formed sentences with correct spelling, punctuation and capitalization. Keep the same meaning and every fact; do not add, answer or explain anything.',
 };
 
+/**
+ * The speech engine on THIS machine (docs/voice.md › "On my machine: models and Install"): which installed model each
+ * role uses, and where a native runtime that was not downloaded lives. A model id is checked against the daemon's
+ * catalog when it is used, not here: the catalog is the daemon's data, and a row can be added without a schema change.
+ */
+export const VoiceMachineEngineSchema = z.strictObject({
+  /** The batch model voice chat and dictation use; the recommended one when it is installed and this is unset. */
+  batch: NonEmptyStringSchema.optional(),
+  /** The streaming model real-time dictation uses; the recommended one when it is installed and this is unset. */
+  streaming: NonEmptyStringSchema.optional(),
+  /**
+   * A directory that already holds the native sherpa-onnx runtime (the addon and its libraries), used instead of
+   * the one Install downloads — for NixOS, where the downloaded prebuild cannot run. Absolute.
+   */
+  runtimePath: NonEmptyStringSchema.refine(
+    path => path.startsWith('/'),
+    'runtimePath must be an absolute path',
+  ).optional(),
+});
+export type VoiceMachineEngine = z.infer<typeof VoiceMachineEngineSchema>;
+
 export const VoiceConfigSchema = z.strictObject({
+  engine: VoiceMachineEngineSchema.prefault({}),
   /**
    * The speech engine a device paired to this machine uses until that device picks its own (New machine
    * setup's Voice step writes it). Transcription always runs ON the device; this only names the default.

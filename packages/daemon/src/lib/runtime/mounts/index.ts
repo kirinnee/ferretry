@@ -146,6 +146,7 @@ import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
 import { type SystemOpenSubsystem, systemOpenRoutes } from './system-open.ts';
 import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
 import { tunnelRoutes } from './tunnel.ts';
+import { type VoiceEngineSubsystem, voiceEngineRoutes } from './voice-engine.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 import { type WebRtcSignallingSubsystem, webrtcRoutes } from './webrtc.ts';
 import { type WorktreeSubsystem, worktreeRoutes } from './worktrees.ts';
@@ -476,6 +477,9 @@ export interface MountedSubsystems {
   /** How this machine's `claude` and `codex` were installed, whether Ferretry verified their versions, and
    *  updating them on request. No loop: npm is asked only when somebody reads — see `mounts/harness-update.ts`. */
   readonly harnessUpdate: HarnessUpdateSubsystem;
+  /** The speech engine on this machine: the model catalog with what is installed, and Install, Cancel, Remove and
+   *  choosing the active model. No loop: a download runs only when a person asks — see `mounts/voice-engine.ts`. */
+  readonly voiceEngine: VoiceEngineSubsystem;
   /** One session's working tree, read-only and confined by descriptor: a listing, one file, the change
    *  list and one path's diff. The confinement is the feature — see `src/lib/session/filesystem`. */
   readonly sessionFilesystem: SessionFilesystem;
@@ -800,6 +804,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...daemonUpdateRoutes(subsystems.daemonUpdate),
         // Fixed literals under `/v1/harnesses`, which no other subsystem uses: none can shadow or be shadowed.
         ...harnessUpdateRoutes(subsystems.harnessUpdate),
+        // Fixed literals under `/v1/voice/engine`, which no other subsystem uses: none can shadow or be shadowed.
+        ...voiceEngineRoutes(subsystems.voiceEngine),
         // The working-tree read registers last among the per-session subsystems: three of its four paths are
         // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
         // its one-segment `fs`, so nothing here can shadow or be shadowed.

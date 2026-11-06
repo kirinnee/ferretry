@@ -401,6 +401,7 @@ describe('voice.yaml', () => {
 
     // Assert
     should(actual).deepEqual({
+      engine: {},
       postProcessing: { provider: 'off', style: 'fix', prompts: {}, useConversation: false, conversationMessages: 8 },
     });
     should(config.DEFAULT_VOICE_CONFIG).deepEqual(actual);
@@ -544,6 +545,11 @@ const cases: SchemaCase[] = [
   { name: 'VoiceCleanupStyleSchema', schema: config.VoiceCleanupStyleSchema, value: 'polish' },
   { name: 'VoiceCleanupPromptsSchema', schema: config.VoiceCleanupPromptsSchema, value: { fix: 'Fix it.' } },
   { name: 'VoiceConfigSchema', schema: config.VoiceConfigSchema, value: { postProcessing: { provider: 'groq' } } },
+  {
+    name: 'VoiceMachineEngineSchema',
+    schema: config.VoiceMachineEngineSchema,
+    value: { batch: 'whisper-turbo', runtimePath: '/opt/sherpa' },
+  },
   {
     name: 'VoiceConfigSchema with a default engine',
     schema: config.VoiceConfigSchema,

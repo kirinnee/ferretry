@@ -140,7 +140,10 @@ actor phrases (`this computer`, `a supervising agent`, …).
 Starting a daemon update (`POST /v1/daemon/update`, subject `daemon-update`) and changing the
 automatic-install setting (`PATCH /v1/daemon/update/settings`, subject `daemon-update-settings`, with
 `autoInstall` in `detail`), and updating an agent CLI (`POST /v1/harnesses/update`, subject `harness-update`),
-are also `security.changed`: each lets new code run on the machine ([updating.md](updating.md)).
+are also `security.changed`: each lets new code run on the machine ([updating.md](updating.md)). So are the speech
+engine's four acts (`POST /v1/voice/engine/install`, `…/cancel`, `…/remove` and `…/use`, subjects `voice-install`,
+`voice-install-cancel`, `voice-remove` and `voice-use`): an install puts a native library on the host
+([voice.md](voice.md#on-my-machine-models-and-install)).
 
 **Standing sign-in rules** ([secrets.md](secrets.md#standing-sign-in-rules)) write `security.changed` themselves.
 The subject is the rule id (`sr_…`). The detail holds the revision, the sign-in, the account handle, the fields, the

@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import { type CapabilityGrants, FULL_DEVICE_GRANTS, LIMITED_DEVICE_GRANTS } from '@ferretry/protocol';
 import should from 'should';
 import {
+  CAPABILITIES_BEFORE_SHARING,
   DEFAULT_CAPABILITY_GRANTS,
   type EnforcedGrants,
   type GrantAuditEntry,
@@ -23,6 +24,13 @@ const ON = { use: true, configure: true };
 
 /** The owner's phone as the upgrade left it: everything it held before Sharing existed, Sharing filled off. */
 const oldFull = (): CapabilityGrants => ({ ...FULL_DEVICE_GRANTS, sharing: OFF });
+
+/**
+ * The same phone as a build that has `voice` reads it when the record predates BOTH: Sharing and Voice filled off.
+ * Sharing's repair must still fire for it — its "held everything before" test names the seven capabilities that
+ * existed before Sharing, rather than "every capability but Sharing", which would demand Voice too.
+ */
+const preSharingFull = (): CapabilityGrants => ({ ...FULL_DEVICE_GRANTS, sharing: OFF, voice: OFF });
 
 interface Rig {
   devices?: Record<string, CapabilityGrants>;
@@ -89,6 +97,33 @@ describe('Sharing for a device that held everything before Sharing existed', () 
     ]);
   });
 
+  it('still fires for a device from before Sharing when a later capability is off, because the test names its seven', async () => {
+    const { deps, stored, recorded } = rig({ devices: { [PHONE]: preSharingFull() } });
+
+    should(await repairSharingFromPairing(deps)).deepEqual({
+      kind: 'repaired',
+      deviceIds: [PHONE],
+      unrecorded: [],
+      failed: [],
+    });
+    should(stored.get(PHONE)?.sharing).deepEqual(ON);
+    // Only Sharing: whatever a later capability's own repair decides is not this one's to settle.
+    should(stored.get(PHONE)?.voice).deepEqual(OFF);
+    should(recorded).have.length(1);
+  });
+
+  it('names exactly the seven capabilities that existed before it', () => {
+    should([...CAPABILITIES_BEFORE_SHARING]).deepEqual([
+      'fleet',
+      'terminal',
+      'browser',
+      'filesystem',
+      'warden',
+      'pairing',
+      'secrets',
+    ]);
+  });
+
   it('never widens a device that lacked any other capability, held Pairing or not, nor one with any Sharing', async () => {
     const pairingOnly: CapabilityGrants = { ...LIMITED_DEVICE_GRANTS, pairing: ON, sharing: OFF };
     const { deps, stored, reads } = rig({
@@ -151,6 +186,27 @@ describe('Sharing for a device that held everything before Sharing existed', () 
     should(stored.get(TABLET)?.sharing).deepEqual(OFF);
     should(stored.get(LAPTOP)?.sharing).deepEqual(ON);
     should(SHARING_RELEASED_AT < AFTER && SHARING_RELEASED_AT > BEFORE).be.true();
+  });
+
+  it('fails closed on a record whose time cannot be told: the device it names is not widened', async () => {
+    const journal: WholeJournal = {
+      kind: 'read',
+      entries: [
+        { actor: 'admin-cli', changes: [`${PHONE}/terminal.use=on`], at: 'not-an-instant' },
+        { actor: 'admin-cli', changes: [`${TABLET}/terminal.use=on`], at: BEFORE },
+      ],
+      unreadable: 0,
+    };
+    const { deps, stored } = rig({ devices: { [PHONE]: oldFull(), [TABLET]: oldFull() }, journal });
+
+    should(await repairSharingFromPairing(deps)).deepEqual({
+      kind: 'repaired',
+      deviceIds: [TABLET],
+      unrecorded: [],
+      failed: [],
+    });
+    should(stored.get(PHONE)?.sharing).deepEqual(OFF);
+    should(stored.get(TABLET)?.sharing).deepEqual(ON);
   });
 
   it('repairs a device at most once, because its own record marks it', async () => {

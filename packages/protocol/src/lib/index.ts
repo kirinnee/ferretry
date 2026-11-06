@@ -153,6 +153,7 @@ export * from './tunnel.ts';
 export * from './turn-handoff.ts';
 export * from './two-factor.ts';
 export * from './version-skew.ts';
+export * from './voice-engine.ts';
 export * from './warden.ts';
 export * from './webrtc.ts';
 export * from './work-search.ts';

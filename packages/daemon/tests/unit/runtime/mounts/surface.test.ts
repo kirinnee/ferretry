@@ -877,6 +877,23 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  voiceEngine: {
+    view: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    install: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    cancel: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    remove: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    use: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
   systemOpen: { open: async () => ({ opened: true, host: 'example.com' }) },
@@ -1042,7 +1059,8 @@ describe('the mounted daemon surface', () => {
       9 + // the download links this machine makes: the store's status, a preview, list, mint, one link, move, change, Copy and turn off (docs/catalogs.md § Links)
       1 + // this daemon's own id for the owner's CLI links (`GET /v1/pair/identity`, person only)
       3 + // the shared draft: the owner's unsent composer, read, edited and streamed live to any of their own devices (&F331)
-      1; // the roll-up of every conversation's open and parked agenda items, paged (`GET /v1/agenda/open`, docs/agenda.md)
+      1 + // the roll-up of every conversation's open and parked agenda items, paged (`GET /v1/agenda/open`, docs/agenda.md)
+      5; // the speech engine on this machine: the catalog and install state, then Install, Cancel, Remove and Use (docs/voice.md)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -1521,6 +1539,12 @@ describe('the mounted daemon surface', () => {
       // Updating the agent CLIs: the view, and starting one harness's update.
       'GET /v1/harnesses/update',
       'POST /v1/harnesses/update',
+      // The speech engine on this machine: the catalog and install state, then Install, Cancel, Remove and Use.
+      'GET /v1/voice/engine',
+      'POST /v1/voice/engine/install',
+      'POST /v1/voice/engine/cancel',
+      'POST /v1/voice/engine/remove',
+      'POST /v1/voice/engine/use',
       // The working-tree read. Its four deeper paths come before the one-segment `fs`, which is what
       // keeps `fs/file` reachable at all: the router matches in registration order.
       'GET /v1/sessions/:sessionId/fs/file',

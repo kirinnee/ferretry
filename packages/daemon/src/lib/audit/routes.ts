@@ -126,6 +126,13 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   { method: 'POST', path: '/v1/daemon/update', event: 'security.changed', fixedSubject: 'daemon-update' },
   // Updating an agent CLI puts new code on the machine that every new ferret then runs as.
   { method: 'POST', path: '/v1/harnesses/update', event: 'security.changed', fixedSubject: 'harness-update' },
+  // The speech engine's Install puts a native library and a ~500 MB model on the host, and Remove, Cancel and
+  // Use change what it holds and what it will run. The request body (the model id) is not readable here, so the
+  // subject names the act; the model is in the state home's `voice/` directory and `voice.yaml`.
+  { method: 'POST', path: '/v1/voice/engine/install', event: 'security.changed', fixedSubject: 'voice-install' },
+  { method: 'POST', path: '/v1/voice/engine/cancel', event: 'security.changed', fixedSubject: 'voice-install-cancel' },
+  { method: 'POST', path: '/v1/voice/engine/remove', event: 'security.changed', fixedSubject: 'voice-remove' },
+  { method: 'POST', path: '/v1/voice/engine/use', event: 'security.changed', fixedSubject: 'voice-use' },
   {
     method: 'PATCH',
     path: '/v1/daemon/update/settings',

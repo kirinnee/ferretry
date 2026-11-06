@@ -68,6 +68,7 @@ import {
   checkCompactAt,
   commandLabel,
   configFilePath,
+  type DaemonCapability,
   DAEMON_FEATURES,
   DORMANT_AGENT_STATUSES,
   type DuplicateAsk,
@@ -930,6 +931,7 @@ import {
   type FileSystemPort,
   FixedSettingsUnreadableError,
   type FleetEventSource,
+  type FollowsPairingOutcome,
   FleetEventStreamService,
   FleetLaunchEnvironment,
   FleetLaunchRenewal,
@@ -1192,6 +1194,7 @@ import {
   renderHarnessPreflight,
   renderInitialAttachmentSection,
   repairSharingFromPairing,
+  repairVoiceFromPairing,
   resolveBrowserProxy,
   resolveResumePolicy,
   resolveStateHome,
@@ -1396,6 +1399,7 @@ import {
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
+  type VoiceRepairOutcome,
   type WardenAutoMigratePorts,
   WardenAutoMigrateService,
   type WardenBoardPort,
@@ -1432,6 +1436,18 @@ import {
   xvfbMissingMessage,
 } from '../src/lib/index.ts';
 import { LocalSkillInstallService } from '../src/lib/local-skill-installs/service.ts';
+import {
+  ConfigFileVoiceEngineSettings,
+  NodeVoiceInstallFiles,
+  SystemVoiceArchiveReader,
+} from '../src/adapters/voice-install/index.ts';
+import {
+  SHERPA_WRAPPER_VERSION,
+  VOICE_MODELS,
+  VOICE_RUNTIMES,
+  VoiceInstallService,
+  voiceRuntimeTargetFor,
+} from '../src/lib/voice-install/index.ts';
 import {
   admitChild,
   CleanUpService,
@@ -1896,6 +1912,11 @@ export interface DaemonWorld {
      * anything is served. It never throws: a failure is an outcome, said at boot.
      */
     readonly repairSharing?: () => Promise<SharingRepairOutcome>;
+    /**
+     * The one-time Voice repair for old full devices (docs/grants.md, capability nine). Same shape and timing as
+     * {@link repairSharing}, and run AFTER it: a device from before Sharing must end with both.
+     */
+    readonly repairVoice?: () => Promise<VoiceRepairOutcome>;
   }>;
   /**
    * The DIRECT carrier: the socket route a browser that can reach this address opens its sessions on.
@@ -7736,8 +7757,22 @@ const STARTED_SAMPLE_INTERVAL = process.env.BUN_JSC_sampleInterval;
 
 /** The boot sentences for what the one-time Sharing repair did (docs/grants.md), one per outcome. */
 export function sharingRepairNotices(repair: SharingRepairOutcome | undefined): readonly string[] {
+  return followsPairingRepairNotices({ name: 'Sharing', capability: 'sharing' }, repair);
+}
+
+/** The boot sentences for what the one-time Voice repair did (docs/grants.md), one per outcome. */
+export function voiceRepairNotices(repair: VoiceRepairOutcome | undefined): readonly string[] {
+  return followsPairingRepairNotices({ name: 'Voice', capability: 'voice' }, repair);
+}
+
+/** What a one-time "follows pairing" repair says at boot: one sentence per outcome, naming the way to do it by hand. */
+function followsPairingRepairNotices(
+  words: { readonly name: string; readonly capability: DaemonCapability },
+  repair: FollowsPairingOutcome | undefined,
+): readonly string[] {
   if (repair === undefined) return [];
-  const turnOn = `Turn it on per device in the app (Settings › Devices) or with \`${CLIENT_NAME} device grant <device> sharing --use\``;
+  const { name, capability } = words;
+  const turnOn = `Turn it on per device in the app (Settings › Devices) or with \`${CLIENT_NAME} device grant <device> ${capability} --use\``;
   if (repair.kind === 'skipped') {
     const why: Readonly<Record<typeof repair.reason, string>> = {
       'grants-undetermined': 'the capability grants could not be read',
@@ -7745,22 +7780,22 @@ export function sharingRepairNotices(repair: SharingRepairOutcome | undefined): 
       'journal-unreadable': 'the grant journal could not be read whole',
       failed: 'the repair failed before it changed anything',
     };
-    return [`Sharing was not turned on for devices paired before it existed: ${why[repair.reason]}. ${turnOn}`];
+    return [`${name} was not turned on for devices paired before it existed: ${why[repair.reason]}. ${turnOn}`];
   }
   const plural = (count: number) => (count === 1 ? 'device' : 'devices');
   return [
     ...(repair.deviceIds.length === 0
       ? []
       : [
-          `Sharing was turned on for ${repair.deviceIds.length} paired ${plural(repair.deviceIds.length)} that held every other capability from before Sharing existed; recorded in \`${CLIENT_NAME} daemon config history\``,
+          `${name} was turned on for ${repair.deviceIds.length} paired ${plural(repair.deviceIds.length)} that held every other capability from before ${name} existed; recorded in \`${CLIENT_NAME} daemon config history\``,
         ]),
     ...(repair.unrecorded.length === 0
       ? []
-      : [`Sharing was turned on for ${repair.unrecorded.join(', ')}, but the grant journal could not record it`]),
+      : [`${name} was turned on for ${repair.unrecorded.join(', ')}, but the grant journal could not record it`]),
     ...(repair.failed.length === 0
       ? []
       : [
-          `Sharing could not be turned on for ${repair.failed.join(', ')}: the device record could not be written. ${turnOn}`,
+          `${name} could not be turned on for ${repair.failed.join(', ')}: the device record could not be written. ${turnOn}`,
         ]),
   ];
 }
@@ -9737,8 +9772,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
           clock: new SystemGrantClock(),
         }).catch((): SharingRepairOutcome => ({ kind: 'skipped', reason: 'failed' }));
+      // The same shape for Voice, and `start` runs it second (docs/grants.md, capability nine).
+      const repairVoice = async (): Promise<VoiceRepairOutcome> =>
+        await repairVoiceFromPairing({
+          devices: pairingService,
+          daemonWide: () => grants.enforced(),
+          journal: new JournalGrantAudit(paths.grantAudit, stateFiles),
+          audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
+          clock: new SystemGrantClock(),
+        }).catch((): VoiceRepairOutcome => ({ kind: 'skipped', reason: 'failed' }));
       return {
         repairSharing,
+        repairVoice,
         credentials,
         push,
         stepUp,
@@ -13678,6 +13723,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
           );
         })(),
+        // The speech engine on this machine (docs/voice.md): a catalog of pinned models, downloaded only when a
+        // person presses Install — resumed, hashed, unpacked safely — and the choice of which one is active.
+        voiceEngine: new VoiceInstallService({
+          root: join(paths.home, 'voice'),
+          catalog: { models: VOICE_MODELS, runtimes: VOICE_RUNTIMES, wrapperVersion: SHERPA_WRAPPER_VERSION },
+          target: voiceRuntimeTargetFor(process.platform, process.arch),
+          files: new NodeVoiceInstallFiles(),
+          fetch: async (url, init) =>
+            await fetch(url, {
+              headers: { ...init.headers, 'user-agent': `${DAEMON_NAME}/${daemonVersion}` },
+              signal: init.signal,
+            }),
+          archives: new SystemVoiceArchiveReader(),
+          settings: new ConfigFileVoiceEngineSettings(configFiles),
+          clock: { now: () => clock.now() },
+        }),
         // Updating this machine's `claude` and `codex` (docs/updating.md › "Updating Claude Code and Codex"):
         // the file a runtime launches comes from the ONE harness resolution rule, its install facts are read
         // exactly as this daemon's own are, and npm is asked for the newest only when somebody looks.
@@ -14888,6 +14949,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // Now that the daemon-wide grants are known, and before anything is served (the surface still answers 503).
   const repair = await pairing.repairSharing?.();
   for (const notice of sharingRepairNotices(repair)) world.notices.state(notice);
+  // Voice second, ALWAYS: its predicate needs Sharing on, so a device from before Sharing ends with both only in this order.
+  const voiceRepair = await pairing.repairVoice?.();
+  for (const notice of voiceRepairNotices(voiceRepair)) world.notices.state(notice);
   // The operator password is gone; a passkey step-up from the paired device replaced it. A verifier an
   // older daemon left behind gates nothing now, so it is deleted rather than left looking like a lock —
   // and said ONCE, so an operator who remembers setting a password learns where it went.
