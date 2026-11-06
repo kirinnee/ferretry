@@ -15,6 +15,7 @@ import type { ITextFileReader } from '../tasks/ports';
 import type { RelatedCheck } from '../work-search/related';
 import { explainingRefusals } from './board-refusal';
 import { mergeStatus, parseStatusFile, type StatusParts } from './board-status';
+import { queuedLines } from './clash-notes';
 import { cardPatchDocument, composeCardPatch, parseCardPatch } from './card-patch';
 import {
   type BoardVerb,
@@ -268,6 +269,11 @@ export class BoardController {
     if (options.json === true) return this.deps.output.success(asJson(response));
     const names = sessionNames(await this.gateway.sessions());
     this.deps.output.success(renderActed(verb, response.task, response.laneSet, names));
+    // A claim that clashed with another card's queued this one behind it (docs/design/clash-queue.md): say so.
+    if (verb === 'file' || verb === 'create') {
+      for (const line of queuedLines(response.task))
+        this.deps.output.diagnostic(`${formatTaskRef(response.task)} ${line}`);
+    }
   }
 
   /**

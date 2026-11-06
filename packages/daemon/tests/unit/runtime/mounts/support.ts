@@ -2403,6 +2403,7 @@ export function boardSubsystem(overrides: Partial<BoardSubsystem> = {}): BoardSu
       quarantined: [],
     }),
     ids: async () => ({ ids: [] }),
+    mergeGate: async pr => ({ pr, unit: [], waits: [], unreadable: [] }),
     task: missing,
     taskByLegacyRef: missing,
     importLegacy: async () => ({

@@ -613,7 +613,7 @@ fields plus the ones the daemon derives.
 | `dropped`               | why the card was dropped, or none                                                |
 | `workflow`              | selects the lane variant; immutable                                              |
 | `links`                 | PRs, branches, commits and documents                                             |
-| `files`                 | advisory: the files the work expects to touch                                    |
+| `files`                 | advisory: the files or folders the work expects to touch; a clash queues it      |
 | `order`                 | the owner's manual order within a lane                                           |
 | `history`               | every move and note, each with who and why; at least one event                   |
 | `legacyRef`             | `<sessionId>:<oldId>` for a card imported from the old per-session files         |
@@ -1367,6 +1367,47 @@ stored.
 - When the last blocker ships, the dependent's assignee hears `&F20 unblocked: &F18 merged` on its next message.
 - A ferret may add a dependency only from its own card.
 
+### Clashing claims queue the later card
+
+The owner: _"make sure that features that will conflcit gets "queued up", and add depends on on the board, and wait
+for that feature to be built before merging."_ (&I38; the design is
+[design/clash-queue.md](design/clash-queue.md)).
+
+- **A claim is a file or a folder** the work will touch: `fy task create --file <path>` or `fy task file <id> <path>`.
+  The card's lead claims at brief time, and the ferret holding the card may claim and release files on it too.
+  Claim the shared hot files when the work touches them: `packages/daemon/bin/fyd.ts`, `knip.json`,
+  `packages/protocol/src/lib/daemon-features.ts`.
+- **Two claims clash** when the paths are the same, or one is a folder the other sits inside (`packages/daemon`
+  holds `packages/daemon/bin/fyd.ts`, not `packages/daemon-x`). `.` is the whole repository, and `./` or `..`
+  inside a path are read as the path they name.
+- **The daemon queues the later claim.** In the same write as the claim, the claiming card gets a `dependsOn`
+  (`until: shipped`) for every open card on the same board that already claims a clashing path and has not shipped
+  (backlog included), plus a note: `queued behind &F18 to merge: both claim knip.json …`. The dependency is on the
+  card whose PR **ships** the clashing work — the clashing card itself when it has a PR of its own (open, not polled
+  yet, or merged) or no parent, else its parent's shipping card — because a helper sub-card with no PR closes when
+  its ferret finishes, long before its lead's PR merges. A finished helper's claims keep counting until then. Both are recorded as the
+  daemon's, acting for the session that claimed. The command prints the note back. Claims and dependency writes
+  share one board-wide section, so two clashing claims cannot miss each other.
+- **Never queued:** a card in the same shipping unit — the same shipping card, an umbrella lead and the cards under
+  it, or a PR in flight they both link (an old merged PR they both kept does not count, and a child with its own PR
+  is a separate merge from its lead's) — a card it already depends on, one it took out of its queue with
+  `fy task undepend`, and a wait that would close a cycle between cards or between two PRs' units (that clash leaves
+  a note instead). The rule is `ShippingUnits` in `packages/daemon/src/lib/board/shipping-unit.ts`.
+- **Only the merge waits**, as the owner put it: _"wait for that feature to be built before merging"_. Both cards are built at once; the later one's PR
+  merges after the first ships, then rebases. `fy task merge-gate <pr-url>` (over `GET /v1/board/merge-gate?pr=`)
+  answers for the merger from ONE read of the board. A PR ships a **merge unit**: every card not dropped that links
+  it, and every card not dropped riding one of those cards' units (its helpers, finished or not, and an umbrella lead
+  above it). Units change after a claim lands (a card opens its PR, a helper finishes), so the gate does not trust
+  the daemon's claim-time depends-on: it derives the **clash order live** — of two units whose claims clash, the one
+  that claimed first merges first, by one rank per unit (the earliest claim of any card riding it, then of the cards
+  riding only it, then its key), so no set of PRs ever waits in a circle — and adds the dependencies a person made. Exit 0 when the unit waits on nothing; 1 (printing `&F20 waits on &F18 (until
+shipped)`) when it does; 2 when it cannot tell — the daemon is down or predates the gate, a card on the machine is
+  unreadable (it might link the PR), or the URL is not a PR. The merger treats 2 as "do not merge". A card inside the
+  unit, or one linking the same PR, never holds it; nor does a unit that shipped or was dropped.
+- **To jump the queue**, the card's lead removes the wait on purpose: `fy task undepend <id> <other> --reason
+"<why>"` (when the gate names a wait the board has no depends-on for, `fy task depend` it first). The owner may
+  override instead. Releasing a claim does not remove a dependency.
+
 ## Agenda and cards
 
 An agenda item names the card it is about. `fy agenda add --task <id>` sets it, defaulting to the calling
@@ -1491,11 +1532,12 @@ Every `fy task` verb takes `--session <id>` (act as that session instead of the 
 | `fy task skip "<why>"`                            | record that this work needs no card                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `fy task block` / `unblock`                       | mark or clear an external block                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `fy task depend` / `undepend`                     | add or remove a dependency; `--until`, `--override <why>` (owner)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `fy task merge-gate <pr-url>`                     | whether a PR may merge as far as the queue goes: exit 0 free, 1 a card it ships waits on another, 2 cannot tell ([Clashing claims](#clashing-claims-queue-the-later-card))                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `fy task drop --reason`                           | drop a card                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `fy task reopen <id> --to <lane> --ask "<words>"` | reopen a finished card with the owner's new ask                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `fy task clarify <id> --source`                   | append verbatim words to the original ask                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `fy task link`                                    | attach one `--pr`, `--branch`, `--commit` or `--doc`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `fy task assign`, `note`, `order`, `file`, `edit` | assignee, a note, manual order, expected files, edit the text fields; `edit --visibility public\|private` ([Public and private cards](#public-and-private-cards))                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `fy task assign`, `note`, `order`, `file`, `edit` | assignee, a note, manual order, expected files or folders (a clash queues the card), edit the text fields; `edit --visibility public\|private` ([Public and private cards](#public-and-private-cards))                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `fy task refile <id> --project`                   | move a card to another project's board; `--lane`, `--reason`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `fy board`                                        | the board; `--project <name\|all>`, `--ferret`, `--mine`, `--private`, `--all`, `--kind`, `--pr`, `--activity`, `--state`, `--closed`, `--query`, `--json`, `--md`                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `fy board lanes propose\|show\|edit`              | read or change a project's lane set; `--project`, `--rename`, `--remove`, `--into`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -1515,6 +1557,7 @@ The routes behind them, all needing the `fleet` capability at operator minimum f
 | ----------------------------------------------- | ----------------------------------------------------------------------------- |
 | `GET /v1/board`                                 | the board view; `visibility=public\|private\|all` (default `all`)             |
 | `GET /v1/board/ids`                             | every card id on the machine, ids only: what `&F12` is proved against         |
+| `GET /v1/board/merge-gate?pr=`                  | whether a PR may merge as far as the queue goes, from one read of the board   |
 | `POST /v1/board/tasks`                          | create a card                                                                 |
 | `GET /v1/board/tasks?legacyRef=`                | find the card an imported task became                                         |
 | `GET, POST /v1/board/tasks/:taskId`             | read a card, or apply one action to it                                        |
