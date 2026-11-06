@@ -83,7 +83,7 @@ Say what the chart says; the reader's theme paints it. \`title:\` is optional; \
 
 JSON/YAML {center: [lat, lng], zoom, markers: [{at, label, popup}], lines: [{points}], polygons, geojson}; real places.
 
-\`center\` is \`[lat, lng]\`; omit it to fit the view to everything drawn. \`zoom\` is 0–18 (with a fit, the closest the fit may zoom). Markers carry \`at\`, \`label\` and \`popup\`; \`lines\` are routes (\`points: [[lat, lng], …]\`, \`label\`); \`polygons\` need three points a ring; \`geojson\` takes Point, LineString, Polygon and their \`Multi*\`/Feature/Collection forms. Colours: \`red\`, \`blue\`, \`green\`, \`amber\`, \`purple\` or \`#hex\`. An interactive map with OpenStreetMap tiles as its one remote load: pan, zoom, tap a marker for its popup. Caps: 32 KiB, 100 markers, 50 lines+polygons, 2,000 vertices; a refusal falls back to a coordinates list.
+\`center\` is \`[lat, lng]\`; omit it to fit the view to everything drawn. \`zoom\` is 0–18 (with a fit, the closest the fit may zoom). Markers carry \`at\`, \`label\` and \`popup\`; \`lines\` are routes (\`points: [[lat, lng], …]\`, \`label\`); \`polygons\` need three points a ring; \`geojson\` takes Point, LineString, Polygon and their \`Multi*\`/Feature/Collection forms. Colours: \`red\`, \`blue\`, \`green\`, \`amber\`, \`purple\` or \`#hex\`. An interactive map with OpenStreetMap tiles as its one remote load: pan, zoom, tap a marker for its popup. A reader who opted into Google Maps (Settings › Appearance) sees a single marker or a plain view drawn by Google instead; several markers, routes and shapes stay on OpenStreetMap, with a note. Caps: 32 KiB, 100 markers, 50 lines+polygons, 2,000 vertices; a refusal falls back to a coordinates list.
 
 ### media
 

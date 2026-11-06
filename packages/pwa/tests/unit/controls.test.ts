@@ -79,6 +79,7 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   skillSuggestions: false,
   composerVimMode: true,
   openLinksIn: 'panel',
+  mapStyle: 'google',
   keepChatsFresh: false,
   keepChatsFreshNotOnCellular: true,
 };
@@ -138,6 +139,7 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       composerVimMode: false,
       // A payload written before links had a home opens them in the reader's browser.
       openLinksIn: 'browser',
+      mapStyle: 'osm',
       keepChatsFresh: true,
       keepChatsFreshNotOnCellular: false,
     });
@@ -230,6 +232,15 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
     should(read({ openLinksIn: 'computer' })).equal('computer');
     should(read({ openLinksIn: 'safari' })).equal('browser');
     should(read({})).equal('browser');
+  });
+
+  it('draws maps with OpenStreetMap unless Google Maps was explicitly chosen', () => {
+    const read = (device: Record<string, unknown>) =>
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device })).device.mapStyle;
+    should(read({ mapStyle: 'google' })).equal('google');
+    should(read({ mapStyle: 'osm' })).equal('osm');
+    should(read({ mapStyle: 'bing' })).equal('osm');
+    should(read({})).equal('osm');
   });
 
   it('keeps Vim-style composer editing off unless it was explicitly turned on', () => {

@@ -48,6 +48,7 @@
 import type { InteractionMode } from '@ferretry/protocol';
 import type { ComposerEnterKeyPreference } from './composer-keybinding.ts';
 import type { DaemonId } from './daemon-connection.ts';
+import { DEFAULT_MAP_STYLE, type MapStyle } from './map-style.ts';
 
 /**
  * WHICH KEYS OPEN A REFERENCE MENU — Settings › Behaviour › "Open suggestions with".
@@ -173,6 +174,12 @@ export interface DeviceControls {
   /** Where an ordinary tap on an external link opens (`OpenLinksIn`). */
   readonly openLinksIn: OpenLinksIn;
   /**
+   * Which service draws a `map` block: OpenStreetMap (the default) or, when this build carries the Ferretry
+   * key, Google Maps (`lib/map-style.ts`). Per device; a saved `google` on a build without the key draws as
+   * OpenStreetMap.
+   */
+  readonly mapStyle: MapStyle;
+  /**
    * Keep the interactive chats and the most recently opened ones fresh in the background, so switching
    * to one is instant (`lib/background-fresh.ts`). On by default; per device.
    */
@@ -211,6 +218,7 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   skillSuggestions: true,
   composerVimMode: false,
   openLinksIn: 'browser',
+  mapStyle: DEFAULT_MAP_STYLE,
   keepChatsFresh: true,
   keepChatsFreshNotOnCellular: false,
 });
@@ -331,6 +339,7 @@ const readDeviceControls = (value: unknown): DeviceControls => {
       fields.openLinksIn === 'panel' || fields.openLinksIn === 'computer'
         ? fields.openLinksIn
         : DEFAULT_DEVICE_CONTROLS.openLinksIn,
+    mapStyle: fields.mapStyle === 'google' ? 'google' : DEFAULT_MAP_STYLE,
     keepChatsFresh: readFlag(fields.keepChatsFresh, DEFAULT_DEVICE_CONTROLS.keepChatsFresh),
     keepChatsFreshNotOnCellular: readFlag(
       fields.keepChatsFreshNotOnCellular,

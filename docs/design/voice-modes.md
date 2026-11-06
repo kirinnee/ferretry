@@ -603,7 +603,7 @@ chats on this device. You can turn it off at any time."_ The 2–3× is the meas
 break**: OpenStreetMap already answers with `Access-Control-Allow-Origin: *`, so slice C1 gives the tile
 layer `crossOrigin` and maps keep working under isolation.
 
-**"Why not embed Google Maps instead?"** It would not help, and it adds costs: a Google Maps embed is a
+**"Why not embed Google Maps instead?"** (Since added as an opt-in map style — `docs/fy-render.md` › Maps › Map style — with the costs below accepted for the readers who choose it; OpenStreetMap stays the default and the fix that keeps maps working under isolation.) As the _default_ it would not help, and it adds costs: a Google Maps embed is a
 third-party iframe, which the page's CSP refuses today (no `frame-src`), and under isolation a framed
 page must itself opt in with COEP or CORP — not something Google's embed is known to send (unverified),
 and the milder `credentialless` iframe Safari lacks. It also needs an API key and tells Google every map

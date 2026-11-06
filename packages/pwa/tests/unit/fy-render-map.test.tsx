@@ -4,6 +4,8 @@ import should from 'should';
 import { FyRenderMap, type FyRenderMapModules } from '../../src/components/fy-render-map.tsx';
 import type { MapHandle } from '../../src/components/fy-render-map-engine.ts';
 import { readMap } from '../../src/lib/fy-render-map.ts';
+import { MapStyleProvider } from '../../src/lib/map-style-context.tsx';
+import type { MapEnvironment } from '../../src/lib/map-style.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { settleUntil } from '../support/settle.ts';
 
@@ -322,5 +324,176 @@ describe('FyRenderMap', () => {
     // Assert
     should(view.container.querySelector('.leaflet-container')).not.be.null();
     should(view.container.querySelectorAll('.fy-map-pin').length).equal(1);
+  });
+});
+
+describe('FyRenderMap in the Google Maps style', () => {
+  const KEY = 'AIzaFAKEfakeFAKEfakeFAKEfakeFAKEfake00';
+  const CHROMIUM: MapEnvironment = { credentialless: true, isolated: false };
+  const ISOLATED_SAFARI: MapEnvironment = { credentialless: false, isolated: true };
+  const PIN = 'markers:\n  - {at: [51.5007, -0.1246], label: Big Ben}';
+
+  const showGoogle = async (payload: string, environment: MapEnvironment, key: string | null = KEY) => {
+    const fake = recorder();
+    const view = await show(
+      <MapStyleProvider embedKey={key} style="google">
+        <FyRenderMap
+          alt="London"
+          environment={environment}
+          fullscreen={false}
+          load={async () => fake.modules}
+          mode="dark"
+          onListing={noop}
+          payload={payload}
+        />
+      </MapStyleProvider>,
+    );
+    return { fake, view };
+  };
+
+  test('should frame a lone marker instead of mounting Leaflet, with the frame locked down', async () => {
+    // Act
+    const { fake, view } = await showGoogle(PIN, CHROMIUM);
+    await settle(() => view.container.querySelector('iframe') !== null, 'the frame');
+
+    // Assert
+    const frame = must(view.container.querySelector('iframe'), 'the frame');
+    should(frame.getAttribute('src')).startWith('https://www.google.com/maps/embed/v1/place?');
+    should(frame.hasAttribute('credentialless')).be.true();
+    should(frame.getAttribute('referrerpolicy')).equal('origin');
+    should(frame.getAttribute('sandbox')).containEql('allow-scripts').and.not.containEql('allow-top-navigation');
+    should(frame.getAttribute('title')).equal('Map: London (Google Maps)');
+    should(fake.calls).eql([]);
+    should(view.container.querySelector('.fy-render-map-note')?.textContent).equal('Big Ben');
+    should([...view.container.querySelectorAll('button')]).have.length(0);
+  });
+
+  test('should keep the map and its note inside one wrapper, not as siblings of the stage', async () => {
+    // Act
+    const { view } = await showGoogle(PIN, CHROMIUM);
+    await settle(() => view.container.querySelector('.fy-render-map-note') !== null, 'the note');
+
+    // Assert
+    const block = must(view.container.querySelector('.fy-render-map-block'), 'the wrapper');
+    const note = must(view.container.querySelector('.fy-render-map-note'), 'the note');
+    should(view.container.firstElementChild).equal(block);
+    should(note.parentElement).equal(block);
+    should(must(view.container.querySelector('.fy-render-map'), 'the map').parentElement).equal(block);
+  });
+
+  test('should say so, and mount OpenStreetMap, for a map Google cannot draw', async () => {
+    // Act
+    const { fake, view } = await showGoogle('markers:\n  - {at: [1, 2]}\n  - {at: [3, 4]}', CHROMIUM);
+    await settle(() => fake.calls.includes('mount'), 'the map to mount');
+
+    // Assert
+    should(view.container.querySelector('iframe')).equal(null);
+    should(view.container.querySelector('.fy-render-map-note')?.textContent).equal(
+      "Shown with OpenStreetMap: Google Maps can't draw more than one marker here.",
+    );
+  });
+
+  test('should say so, and mount OpenStreetMap, where isolation forbids a plain Google frame', async () => {
+    // Act
+    const { fake, view } = await showGoogle(PIN, ISOLATED_SAFARI);
+    await settle(() => fake.calls.includes('mount'), 'the map to mount');
+
+    // Assert
+    should(view.container.querySelector('iframe')).equal(null);
+    should(view.container.querySelector('.fy-render-map-note')?.textContent).containEql('several cores');
+  });
+
+  test('should draw OpenStreetMap, with no note, when the build has no key', async () => {
+    // Act
+    const { fake, view } = await showGoogle(PIN, CHROMIUM, null);
+    await settle(() => fake.calls.includes('mount'), 'the map to mount');
+
+    // Assert
+    should(view.container.querySelector('iframe')).equal(null);
+    should(view.container.querySelector('.fy-render-map-note')).equal(null);
+  });
+
+  describe('when the loader resolves immediately and the style or payload changes', () => {
+    const element = (style: 'osm' | 'google', payload: string, fake: Recorder) => (
+      <MapStyleProvider embedKey={KEY} style={style}>
+        <FyRenderMap
+          alt="London"
+          environment={CHROMIUM}
+          fullscreen={false}
+          load={async () => fake.modules}
+          mode="dark"
+          onListing={noop}
+          payload={payload}
+        />
+      </MapStyleProvider>
+    );
+
+    test('should mount OpenStreetMap after Google was shown, then the frame again', async () => {
+      // Arrange
+      const fake = recorder();
+      const view = await show(element('google', PIN, fake));
+      await settle(() => view.container.querySelector('iframe') !== null, 'the frame');
+      const host = view.container.querySelector('.fy-render-map-canvas:not(iframe)');
+
+      // Act: Google -> OpenStreetMap
+      await view.render(element('osm', PIN, fake));
+      await settle(() => fake.calls.includes('mount'), 'the map to mount');
+
+      // Assert
+      should(view.container.querySelector('iframe')).equal(null);
+      should(fake.hosts).have.length(1);
+      should(fake.hosts[0]).equal(view.container.querySelector('.fy-render-map-canvas'));
+      should(fake.hosts[0]).equal(host);
+      should((fake.hosts[0] as HTMLElement).hidden).be.false();
+      should(view.container.querySelector('[data-fy-render-map]')?.getAttribute('data-fy-render-map')).equal('drawn');
+      should(view.container.querySelector('.fy-render-map-note')).equal(null);
+
+      // Act: OpenStreetMap -> Google
+      await view.render(element('google', PIN, fake));
+      await settle(() => view.container.querySelector('iframe') !== null, 'the frame again');
+
+      // Assert
+      should(fake.calls.filter(call => call === 'destroy')).have.length(1);
+      should(view.container.querySelector('[data-fy-render-map]')?.getAttribute('data-fy-render-map')).equal('google');
+      should(view.container.querySelectorAll('button')).have.length(0);
+    });
+
+    test('should re-frame the new place when a Google payload changes', async () => {
+      // Arrange
+      const fake = recorder();
+      const view = await show(element('google', PIN, fake));
+      await settle(() => view.container.querySelector('iframe') !== null, 'the first frame');
+      const first = view.container.querySelector('iframe')?.getAttribute('src');
+
+      // Act
+      await view.render(element('google', 'markers:\n  - {at: [48.8584, 2.2945], label: Eiffel Tower}', fake));
+      await settle(
+        () => view.container.querySelector('iframe')?.getAttribute('src') !== first,
+        'the frame to move to the new place',
+      );
+
+      // Assert
+      const second = new URL(must(view.container.querySelector('iframe'), 'the frame').getAttribute('src') ?? '');
+      should(second.searchParams.get('q')).equal('48.858400,2.294500');
+      should(view.container.querySelectorAll('iframe')).have.length(1);
+      should(view.container.querySelector('.fy-render-map-note')?.textContent).equal('Eiffel Tower');
+      should(fake.calls).eql([]);
+    });
+
+    test('should drop a Google frame and caption for a payload Google cannot draw', async () => {
+      // Arrange
+      const fake = recorder();
+      const view = await show(element('google', PIN, fake));
+      await settle(() => view.container.querySelector('iframe') !== null, 'the frame');
+
+      // Act
+      await view.render(element('google', 'markers:\n  - {at: [1, 2]}\n  - {at: [3, 4]}', fake));
+      await settle(() => fake.calls.includes('mount'), 'the map to mount');
+
+      // Assert
+      should(view.container.querySelector('iframe')).equal(null);
+      should(view.container.querySelectorAll('.fy-render-map-note')).have.length(1);
+      should(view.container.querySelector('.fy-render-map-note')?.textContent).containEql('more than one marker');
+    });
   });
 });

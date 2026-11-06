@@ -42,6 +42,7 @@ describe('shared settings catalog', () => {
       'speedup-keys',
       'sessions-list',
       'motion',
+      'map-style',
       'open-links-in',
       'message-marks',
     ]);
@@ -62,7 +63,17 @@ describe('shared settings catalog', () => {
       'Machines',
     ]);
     expect(SETTINGS_SECTIONS.map(section => section.settingIds)).toEqual([
-      ['text-size', 'theme', 'motion', 'density', 'group-needs-you', 'chat-width', 'open-links-in', 'message-marks'],
+      [
+        'text-size',
+        'theme',
+        'motion',
+        'density',
+        'group-needs-you',
+        'chat-width',
+        'open-links-in',
+        'map-style',
+        'message-marks',
+      ],
       [
         'sessions-list',
         'composer-markdown',
@@ -120,6 +131,13 @@ describe('shared settings catalog', () => {
     expect(() => settingsSectionForSetting('invented' as never)).toThrow(
       'Setting invented does not belong to a settings section',
     );
+  });
+
+  test('offers Map style in search only where this build can draw Google Maps', () => {
+    expect(settingsPaletteEntries(alpha, 'google maps').map(entry => entry.settingId)).not.toContain('map-style');
+    expect(
+      settingsPaletteEntries(alpha, 'google maps', { googleMapsAvailable: true }).map(entry => entry.settingId),
+    ).toContain('map-style');
   });
 
   test('offers an explicit Open settings command before any query', () => {
