@@ -4652,7 +4652,7 @@ describe('daemon boot lifecycle', () => {
     const created = await fetch(base, { method: 'POST', headers });
     const opened = TerminalViewSchema.parse(await created.json());
     const renamed = await fetch(`${base}/${opened.id}`, {
-      method: 'POST',
+      method: 'PATCH',
       headers: { ...headers, 'content-type': 'application/json' },
       body: JSON.stringify({ title: 'Deploy log' }),
     });

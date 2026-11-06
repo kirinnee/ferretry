@@ -1480,7 +1480,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/terminals',
       'POST /v1/sessions/:sessionId/terminals',
       'GET /v1/sessions/:sessionId/terminals/:terminalId',
-      'POST /v1/sessions/:sessionId/terminals/:terminalId',
+      'PATCH /v1/sessions/:sessionId/terminals/:terminalId',
       'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
       // The human login window, and the per-session automation that is now genuinely served: the
       // browser session runtime composes the worker and its transport into a production

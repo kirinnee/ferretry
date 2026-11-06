@@ -359,7 +359,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'GET /v1/sessions/:sessionId/terminals operator any',
   'POST /v1/sessions/:sessionId/terminals operator any',
   'GET /v1/sessions/:sessionId/terminals/:terminalId operator any',
-  'POST /v1/sessions/:sessionId/terminals/:terminalId operator any',
+  'PATCH /v1/sessions/:sessionId/terminals/:terminalId operator any',
   'DELETE /v1/sessions/:sessionId/terminals/:terminalId operator any',
   'GET /v1/browser/login operator person',
   'POST /v1/browser/login operator person',

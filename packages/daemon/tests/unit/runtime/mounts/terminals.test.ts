@@ -31,13 +31,23 @@ function dispatcher(terminals: FakeTerminals = new FakeTerminals()): ApiDispatch
   return new ApiDispatcher(new ApiRouter(terminalRoutes(terminals)), CREDENTIALS, GRANTED);
 }
 
-const post = (path: string, body?: unknown, headers: Readonly<Record<string, string>> = human) =>
+const send = (
+  method: 'POST' | 'PATCH',
+  path: string,
+  body?: unknown,
+  headers: Readonly<Record<string, string>> = human,
+) =>
   request({
-    method: 'POST',
+    method,
     path,
     headers: { ...headers, 'content-type': 'application/json' },
     body: body === undefined ? '' : JSON.stringify(body),
   });
+
+const post = (path: string, body?: unknown, headers: Readonly<Record<string, string>> = human) =>
+  send('POST', path, body, headers);
+
+const patch = (path: string, body?: unknown) => send('PATCH', path, body);
 
 /** The same request from a paired device: whoever its session proved, with no header credential. */
 const devicePost = (path: string, body?: unknown) =>
@@ -310,7 +320,7 @@ describe('the terminal mount', () => {
 
       // Act
       const renamed = await dispatch.dispatch(
-        post(`/v1/sessions/s1/terminals/${terminal.id}`, { title: 'Deploy log' }),
+        patch(`/v1/sessions/s1/terminals/${terminal.id}`, { title: 'Deploy log' }),
       );
 
       // Assert
@@ -318,12 +328,26 @@ describe('the terminal mount', () => {
       should(TerminalViewSchema.parse(jsonBody(renamed)).title).equal('Deploy log');
     });
 
+    it('should not serve a retitle sent as POST, the method the app does not use', async () => {
+      // Arrange
+      const { dispatch, terminal } = await withTerminal();
+
+      // Act
+      const renamed = await dispatch.dispatch(
+        post(`/v1/sessions/s1/terminals/${terminal.id}`, { title: 'Deploy log' }),
+      );
+
+      // Assert
+      should(renamed.status).equal(405);
+      should(jsonBody(renamed)).have.property('code', 'method_not_allowed');
+    });
+
     it('should refuse a title of control characters', async () => {
       // Arrange
       const { dispatch, terminal } = await withTerminal();
 
       // Act
-      const renamed = await dispatch.dispatch(post(`/v1/sessions/s1/terminals/${terminal.id}`, { title: 'a\u0007b' }));
+      const renamed = await dispatch.dispatch(patch(`/v1/sessions/s1/terminals/${terminal.id}`, { title: 'a\u0007b' }));
 
       // Assert
       should(renamed.status).equal(400);
