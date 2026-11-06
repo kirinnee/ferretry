@@ -1123,8 +1123,8 @@ The files travel as ordinary chat attachments. The app uploads them to the card'
 its owner ferret) through the session attachment route, then names them on the move (`attachments: { from,
 ids }`). The daemon refuses files from anyone but the owner, files in any other session, and files on a move
 that sends nothing back. Whichever ferret the reopen reaches gets a copy in its own session; if the copy
-fails, the line still lands with a sentence saying the files did not. A daemon reports
-`board.reopen.attachments.1` on `GET /v1/health` when it takes files.
+fails, the line still lands with a sentence saying the files did not. The app offers the "+" whenever it can upload
+(the page has an upload port and the card's ferret session is known); otherwise the move back is words alone.
 
 The upload rides the same carrier as every other call to that machine (the router's fetch), because a paired
 device holds no bearer value: the device key that opened the session is the credential, and a request sent over
@@ -1267,8 +1267,8 @@ no longer drawn as the owner's action. A lane the owner renamed keeps its name; 
 
 **GAPS.** Every guarantee here holds against a ferret on its own session credential. The admin token with no session
 (an older `fy`, `fy --as-owner`) still has the owner's authority and is only RECORDED as `admin-token`
-([The board is opt-in](#the-board-is-opt-in), &F291). A Not good takes files only on a machine that reports
-`agenda.gate.attachments.1`. An app that predates card asks answers the ask `gateAttached` shows and names none: a
+([The board is opt-in](#the-board-is-opt-in), &F291). A Not good takes files whenever the app can upload them (the page has an upload port and the card's ferret session
+is known); without one it is words alone. An app that predates card asks answers the ask `gateAttached` shows and names none: a
 answer with the same receipt given in the last two minutes, or in the two minutes after the shown ask took another one's place, is never
 applied to another ask on that agenda (`409 gate_moved_on`); with no ask left to show, an exact repeat comes back unchanged. The app now names the ask. An answered ask is remembered only as long as the agenda keeps it
 (the newest 16 answered asks of an open agenda, `MAX_AGENDA_RESOLUTIONS` closed agendas).

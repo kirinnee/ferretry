@@ -203,8 +203,8 @@ profile on`) is listed for every paired device under Settings â€º Secure copy â€
   a device took included, is never dropped to make room. "The machine" is one stager, shared with anything that holds
   its token. A dismissed prompt drops a stage this device made, and leaves a machine's stage waiting (Deny
   drops it). `fy copy rules add` stages at the machine, prints the rows, and waits while you approve it there. The old
-  one-step `POST /v1/copy-rules` makes nothing and answers `409 paste_rule_passkey_needed`; an app or `fy` on a
-  daemon that does not report `copy-rules.passkey.1` keeps the one-step add.
+  one-step `POST /v1/copy-rules` makes nothing and answers `409 paste_rule_passkey_needed`; `fy` still makes the rule in one step on a
+  daemon that does not report `copy-rules.passkey.1`.
 - **Narrowing and removing stay tap-free.** Removing a rule (`DELETE /v1/copy-rules/:ruleId`) and dropping a staged
   one (`DELETE /v1/copy-rules/stages/:stage`) are narrowing routes: they ask the grant and a proven device, never a
   passkey, whatever "ask again for each act" says.
