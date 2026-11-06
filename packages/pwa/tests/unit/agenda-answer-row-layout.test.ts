@@ -73,6 +73,15 @@ describe('the run’s arrow-key hints', () => {
       gateAttached: gate,
       cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z', howToTest: '1. Look.' }],
     } as unknown as Partial<AgendaItem>);
-    expect(words(agendaRunKeys(inboxCard(tryIt)))).toEqual([{ key: '→', word: 'Good' }]);
+    expect(words(agendaRunKeys(inboxCard(tryIt), false, true))).toEqual([{ key: '→', word: 'Good' }]);
+    // No composer drawn under it: the buttons are the ask's own Not good / Done, and the keys say the same.
+    expect(words(agendaRunKeys(inboxCard(tryIt)))).toEqual([
+      { key: '←', word: 'Not good' },
+      { key: '→', word: 'Done' },
+    ]);
+    // An older machine's item mirrors the ask in gateAttached only: nothing is typed there, so no key says Good.
+    const { cardAsks: _asks, ...mirrored } = tryIt as AgendaItem & { cardAsks?: unknown };
+    const mirror = agendaItem('A405', mirrored as unknown as Partial<AgendaItem>);
+    expect(words(agendaRunKeys(inboxCard(mirror), false, true)).map(each => each.word)).not.toContain('Good');
   });
 });

@@ -353,6 +353,8 @@ export interface AgendaSwipeDeckProps {
    * card springs back, nothing is sent, and the host asks for what is missing.
    */
   readonly onHold?: (card: InboxCard, action: InboxAction) => boolean;
+  /** Whether a card is drawn with its typed answer (one Good under a try-it): its arrows then say Good, as its button does. */
+  readonly typedHost?: (card: InboxCard) => boolean;
   /** Forces reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
   /**
@@ -373,6 +375,7 @@ export function AgendaSwipeDeck({
   onSnooze,
   canSnooze,
   onHold,
+  typedHost,
   ownGesturesIn,
   reducedMotion,
   runKeys = false,
@@ -387,7 +390,7 @@ export function AgendaSwipeDeck({
   const refocus = useRef(false);
   const swallowClick = useRef(false);
   const top = cards[0];
-  const targets: SwipeTargets = top === undefined ? {} : itemSwipeTargets(top.item);
+  const targets: SwipeTargets = top === undefined ? {} : itemSwipeTargets(top.item, typedHost?.(top) ?? false);
   /** ↓ is Skip, and only where the deck can skip. */
   const canDown = onSkip !== undefined;
   const available: CompassAvailable = {
@@ -439,7 +442,7 @@ export function AgendaSwipeDeck({
       setDrag(null);
       return;
     }
-    const direction = directionOf(itemSwipeTargets(card.item), action);
+    const direction = directionOf(itemSwipeTargets(card.item, typedHost?.(card) ?? false), action);
     refocus.current = deck.current?.contains(document.activeElement) === true;
     gesture.current = null;
     setDrag(null);

@@ -509,15 +509,22 @@ export const answersWithCardsForm = (item: Pick<AgendaItem, 'cards'>): boolean =
  * wait behind it — else the item's own answers. One function, so a swipe on the deck and a tap in the view always answer
  * the same ask. A notice about cards answers with its one form's Send, so it swipes to nothing: a swipe or key that
  * said Got it would skip every pick on it.
+ *
+ * `typedHost`: the surface really draws this item with its typed answer (a composer under a try-it), so its one button
+ * reads "Good" and the arrows say so too. Anywhere else (an older machine's mirrored ask, no composer) the buttons keep
+ * the ask's own words ("Not good", "Done"), and so do the arrows.
  */
-export const itemSwipeTargets = (item: AgendaItem): SwipeTargets => {
+export const itemSwipeTargets = (item: AgendaItem, typedHost = false): SwipeTargets => {
   if (answersWithCardsForm(item)) return {};
-  const [first] = itemAskPlan(item, itemCardAsks(item)).asks;
+  const plan = itemAskPlan(item, itemCardAsks(item), { typedHost });
+  const [first] = plan.asks;
   if (first === undefined) return swipeTargets(item);
-  // Each says what its BUTTON says ("Good", not the lane's "Done"): the arrows and the buttons name one answer once.
+  // The same test the Inbox draws its typed answer by (`typedCardAsk`), so the words never disagree with the buttons.
+  const typed = typedHost && plan.typed?.key === gateReference(first.gate) && typedCardAsk(item) !== undefined;
+  // Each says what its BUTTON says: "Good" where the typed answer draws one Good, else the ask's own words.
   const wording = (label: string): string => {
     const option = first.gate.options.find(entry => entry.label === label);
-    return option === undefined ? label : gateButtonLabel(first.gate, option);
+    return option === undefined || !typed ? label : gateButtonLabel(first.gate, option);
   };
   return Object.fromEntries(
     Object.entries(swipeTargets(first.view)).map(([direction, target]) => [

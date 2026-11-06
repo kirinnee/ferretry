@@ -552,10 +552,12 @@ export function AgendaItemCard({
   const finished = (current as { readonly resolvedAt?: string }).resolvedAt !== undefined;
   // The item's question is said ONCE: when the "What I need from you" block leads with it, the head does not repeat it,
   // and when the title above already IS the question (the sticky row, always on screen) the block does not say it again.
+  // The sticky row always shows the CURRENT item's title, so an older version is judged against that, not its own.
+  const shownTitle = agendaCardHead(current).title;
   const questionLineShown =
     !finished &&
     askLine !== '' &&
-    !(askLine.length <= TITLE_READS_WHOLE && sameWords(cardHead.title, askLine)) &&
+    !(askLine.length <= TITLE_READS_WHOLE && sameWords(shownTitle, askLine)) &&
     plan.ownLine &&
     cardsForm === undefined &&
     !(gated && body !== null) &&

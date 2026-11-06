@@ -1504,12 +1504,12 @@ const RUN_MOVES: readonly RunKey[] = [
  * row the open card draws (`answerRowLayout`): the deck's open item always has a composer, so a review's Request
  * changes is on it, and "Done · closes" is on it when the item offers one (`doneClose`).
  */
-export const agendaRunKeys = (card: InboxCard, doneClose = false): readonly RunKey[] => {
-  const targets = itemSwipeTargets(card.item);
+export const agendaRunKeys = (card: InboxCard, doneClose = false, typedHost = false): readonly RunKey[] => {
+  const targets = itemSwipeTargets(card.item, typedHost);
   const { slots } = answerRowLayout(cardModel(card.item), { requestChanges: true, doneClose });
   // A try-it answered with the box under it has ONE button, Good: ← would only open a words prompt for the Not good the
   // box already sends, so the line says no ← (the footer lists what the buttons offer).
-  const typedAsk = typedCardAsk(card.item) !== undefined;
+  const typedAsk = typedHost && typedCardAsk(card.item) !== undefined;
   return [
     ...(targets.left === undefined || typedAsk
       ? []
@@ -1521,9 +1521,9 @@ export const agendaRunKeys = (card: InboxCard, doneClose = false): readonly RunK
 };
 
 /** The run's keys for the open agenda card, counting its "Done · closes" as its row does. */
-function AgendaRunKeysHint({ card }: { readonly card: InboxCard }) {
+function AgendaRunKeysHint({ card, typed }: { readonly card: InboxCard; readonly typed: boolean }) {
   const doneClose = useDoneClose(card.daemonId, card.item) !== undefined;
-  return <RunKeysHint keys={agendaRunKeys(card, doneClose)} />;
+  return <RunKeysHint keys={agendaRunKeys(card, doneClose, typed)} />;
 }
 
 /** A task card's two answers by arrow, then Skip. */
@@ -2132,6 +2132,7 @@ export function AgendaInboxPage({
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open" data-agenda-deck-host="">
             <AgendaSwipeDeck
               cards={deck}
+              typedHost={card => composerDrawn(card, renderComposer) && typedAnswerFor(host, card) !== undefined}
               canSnooze={card => snoozable(card)}
               onAct={(card, action) => answerWithDraft(host, card, action)}
               onDismiss={card => answerCard(host, card, DISMISS_ACTION)}
@@ -2220,7 +2221,12 @@ export function AgendaInboxPage({
                   )}
                 </div>
               )}
-              {phone || deck[0] === undefined ? null : <AgendaRunKeysHint card={deck[0]} />}
+              {phone || deck[0] === undefined ? null : (
+                <AgendaRunKeysHint
+                  card={deck[0]}
+                  typed={composerDrawn(deck[0], renderComposer) && typedAnswerFor(host, deck[0]) !== undefined}
+                />
+              )}
             </div>
           </div>
         )}
