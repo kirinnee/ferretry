@@ -13,8 +13,8 @@
  *   unit has ONE rank: the earliest claim of any card riding it (an umbrella lead's counts for every unit under it),
  *   then the earliest claim of the cards riding only it, then its key. A rank never depends on the pair being
  *   compared, so the order is total and no set of PRs ever waits on each other in a circle through it. A unit
- *   whose shipping card has shipped or was dropped holds nothing, nor does an umbrella lead's own unit once it has
- *   child units (it never ships by itself; its claims count through them). A lead waives one wait with
+ *   whose shipping card has shipped or was dropped holds nothing, nor does an umbrella lead's own unit while one of
+ *   its child units can still hold (it never ships by itself; its claims count through that unit). A lead waives one wait with
  *   `fy task undepend`.
  * - **The dependencies a person added** (not the daemon's own claim-time ones), on a card outside the unit that is not
  *   done. A card inside the unit, or one linking the same PR, ships in the same merge and never holds it.
@@ -121,13 +121,18 @@ const clashWaits = (
   const rankOf = (key: string): Rank => [anyRider.get(key) ?? Infinity, ownRider.get(key) ?? Infinity, key];
   const myRank = [...keys].map(rankOf).sort(compareRanks)[0] ?? rankOf('');
   const waits: BoardMergeWait[] = [];
-  for (const [key, cards] of others) {
+  /** The unit's shipping card when that unit can still hold a merge: there, not dropped, and not shipped. */
+  const holding = (key: string): BoardTask | undefined => {
     const target = board.index.get({ id: key as BoardTask['id'] });
-    if (target === undefined || target.dropped !== null) continue;
-    // An umbrella lead with child units never ships by itself: its claims already count through those units.
-    if (units.rides(target).size > 1) continue;
+    if (target === undefined || target.dropped !== null) return undefined;
     const category = cardCategory(target, board.laneSets);
-    if (category !== undefined && isBlockerDone(category, 'shipped')) continue;
+    return category !== undefined && isBlockerDone(category, 'shipped') ? undefined : target;
+  };
+  for (const [key, cards] of others) {
+    const target = holding(key);
+    if (target === undefined) continue;
+    // An umbrella lead never ships by itself while a child unit can: its claims count through that unit instead.
+    if ([...units.rides(target)].some(other => other !== key && holding(other) !== undefined)) continue;
     // A card riding both units (an umbrella lead) belongs to neither side of this pair.
     const mine = unit.filter(card => !units.rides(card).has(key)).flatMap(claimsOf);
     const theirs = cards.flatMap(claimsOf);

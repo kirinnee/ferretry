@@ -120,7 +120,7 @@ which answers from ONE read of the board — paging through the board view could
      claim of the cards riding only it, then its key — where a claim's moment is the last `file-claimed` of that exact
      spelling, else the card's creation. A rank never depends on the pair compared, so the order is total and no
      set of PRs waits in a circle through it. A unit that shipped or was dropped holds nothing, and neither does an
-     umbrella lead's own unit once it has child units (it never ships by itself; its claims count through them). A
+     umbrella lead's own unit while one of its child units can still hold (it never ships by itself; its claims count through that unit). A
      unit card that removed a wait on that unit's shipping card with `fy task undepend` waives it;
    - the **dependencies a person added**: each unfinished `blockedBy` of a unit card on a card outside the unit
      that does not link the same PR, except the daemon's own claim-time ones (their latest `depended` is the

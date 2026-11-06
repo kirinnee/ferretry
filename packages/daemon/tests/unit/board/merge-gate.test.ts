@@ -305,6 +305,24 @@ describe('mergeGateOf', () => {
       should(gateFor(44, cards)?.waits).eql([]);
     });
 
+    for (const child of ['dropped', 'shipped'] as const) {
+      it(`should hold a PR on an umbrella lead whose only child unit was ${child}`, () => {
+        // Arrange — PR-free F1 claimed x.ts first; its only child F2 has a PR but was dropped, or already shipped.
+        const f2 =
+          child === 'dropped'
+            ? card({ id: 'F2', parent: { id: 'F1' }, dropped: { reason: 'gone', at: NOW }, ...linking(prLink(42)) })
+            : card({ id: 'F2', parent: { id: 'F1' }, laneId: 'merged', ...linking(prLink(42)) });
+        const cards = [
+          claiming('F1', [['x.ts', 1]], { laneId: 'implement' }),
+          f2,
+          claiming('F3', [['x.ts', 2]], linking(prLink(43))),
+        ];
+
+        // Act / Assert
+        should(gateFor(43, cards)?.waits).eql([{ task: { id: 'F3' }, on: { id: 'F1' }, until: 'shipped' }]);
+      });
+    }
+
     it('should not hold a PR on a unit that already shipped', () => {
       const cards = [
         claiming('F2', [['x.ts', 1]], { laneId: 'merged', ...linking(prLink(42)) }),
