@@ -297,13 +297,16 @@ Notable details:
   last CI job to finish in 103 of 153 successful pull-request runs (Oct 30 – Nov 5, Namespace 2x4, test
   step p50 / p90: `everything-else` 225 / ~450 s, `daemon` 127 / ~190, `pwa-surfaces` 110 / ~155,
   `pwa-render` 95 / ~130, `pwa-chat` 63 / ~90, `daemon-runtime` 48 / ~75). It held 40 PWA browser-walk
-  files, ~350 s of per-file test time in one bun process. Those files are now dealt out by name prefix in
-  `config/test-groups.json` (`agenda-clip` to `pwa-render`; `chat-`, `jump-latest-` and `snooze` to
-  `pwa-chat`; `inbox-` to `pwa-surfaces`), so each PWA group and `everything-else` carries ~160 s and
-  `daemon` is the slowest group. This costs the ledger nothing: the PWA has no `src/adapters`, and the
-  `cli`, `fleet`, `protocol` and `relay` tests that cover those packages' adapters stay in
-  `everything-else`. Rebalance by measuring per-file times from the job logs (bun prints each test's
-  duration), not by guessing; a group name is a label for the CI job, not a promise about its contents.
+  files, ~350 s of per-file test time in one bun process. 17 of them are now dealt out by name prefix in
+  `config/test-groups.json`: `agenda-` to `daemon-runtime` (the lightest group, which stopped being
+  runtime-only), `jump-latest-`, `chat-polish` and `chat-rerender` to `pwa-render`, `snooze` and
+  `chat-history` to `pwa-chat`, `inbox-` to `pwa-surfaces`. A first deal-out was measured on its own PR
+  run (`pwa-chat` 237 s, `everything-else` 256 s) and re-cut on the real file times, so each group
+  carries ~160-200 s and `daemon` is the slowest. This costs the ledger nothing: the PWA has no
+  `src/adapters`, and the `cli`, `fleet`, `protocol` and `relay` tests that cover those packages'
+  adapters stay in `everything-else`. Rebalance by measuring per-file times from the job logs (bun prints
+  each test's duration), not by guessing; a group name is a label for the CI job, not a promise about its
+  contents.
 - **The int tier warms Chrome before its clock starts.** The first Chrome a fresh runner starts is
   slow — on one slow VM longer than the agent browser's 20-second launch budget — so
   `scripts/ci/warm-chrome.sh` starts it once, headless, before the tests. A warm-up, not a gate or a
