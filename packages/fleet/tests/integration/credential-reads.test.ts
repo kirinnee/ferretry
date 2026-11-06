@@ -367,7 +367,6 @@ describe('the probes, handed material their caller read', () => {
         asked.push(request.headers.Authorization ?? '');
         return await reply(200, { five_hour: { utilization: 12 } })(request);
       },
-      credentials: { material: async () => ({ outcome: 'absent' }) },
     });
 
     // Act
@@ -386,7 +385,6 @@ describe('the probes, handed material their caller read', () => {
         asked.push(`${request.headers.Authorization} ${request.headers['ChatGPT-Account-Id']}`);
         return await reply(200, { rate_limit: { primary_window: { used_percent: 3 } } })(request);
       },
-      stored: { storedMaterial: async () => ({ outcome: 'absent' }) },
       now: () => NOW,
     });
 
@@ -485,7 +483,6 @@ describe('the canary: no token reaches what is kept, returned or logged', () => 
         const heads = new InMemoryCredentialStatusStore();
         const anthropic = new AnthropicUsageProbe({
           fetch: fetchOf(answer),
-          credentials: { material: async () => ({ outcome: 'absent' }) },
         });
         const reads = new CachedCredentialReads({
           reads: new MaterialCredentialReads({
@@ -529,7 +526,6 @@ describe('the canary: no token reaches what is kept, returned or logged', () => 
     const heads = new InMemoryCredentialStatusStore();
     const anthropic = new AnthropicUsageProbe({
       fetch: fetchOf('unauthorized'),
-      credentials: { material: async () => ({ outcome: 'absent' }) },
     });
     const reads = new CachedCredentialReads({
       reads: new MaterialCredentialReads({
@@ -609,7 +605,6 @@ describe('the canary: no token reaches what is kept, returned or logged', () => 
       const heads = new InMemoryCredentialStatusStore();
       const codex = new CodexUsageProbe({
         fetch: fetchOf(answer),
-        stored: { storedMaterial: async () => ({ outcome: 'absent' }) },
         now: () => NOW,
       });
       const reads = new CachedCredentialReads({

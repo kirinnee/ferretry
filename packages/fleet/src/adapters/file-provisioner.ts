@@ -639,6 +639,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
     sharedHistory: FleetApplyPreview['sharedHistory'],
   ): Promise<readonly FleetWriteOperation[]> {
     const refusedHomes = sharedHistory.flatMap(preview => preview.refusals.map(refusal => refusal.home));
+    // An unresolvable state home, or an asset opening that reaches a protected one, refuses the plan here
+    // as it does at apply — even when no operation reads a source.
+    await this.resolvedSourceFence();
     const previewed: FleetWriteOperation[] = [];
     for (const operation of operations) {
       const followsFinalComponent = traversesDestination(operation);

@@ -20,7 +20,7 @@
 import type { CredentialMaterial } from '../lib/identity.ts';
 import { parseCodexUsageBody } from '../lib/quota.ts';
 import type { FleetUsageProbeResult } from '../lib/usage.ts';
-import type { QuotaFetch, StoredMaterialSource } from './anthropic-usage-probe.ts';
+import type { QuotaFetch } from './anthropic-usage-probe.ts';
 
 export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 
@@ -31,7 +31,6 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 
 export interface CodexUsageProbeDeps {
   readonly fetch: QuotaFetch;
-  readonly stored: StoredMaterialSource;
   readonly now: () => number;
   readonly timeoutMs?: number;
   /** Where the usage read goes: {@link CODEX_USAGE_URL} unless a loopback test server stands in. */

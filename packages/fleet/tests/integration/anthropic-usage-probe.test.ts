@@ -14,7 +14,6 @@ import should from 'should';
 import {
   ANTHROPIC_USAGE_URL,
   AnthropicUsageProbe,
-  type CredentialMaterialSource,
   FilePassiveUsageStore,
   fetchQuota,
   MAX_RESPONSE_BODY_BYTES,
@@ -23,21 +22,14 @@ import {
   type QuotaResponse,
 } from '../../src/adapters/anthropic-usage-probe.ts';
 import type { CredentialMaterial } from '../../src/lib/identity.ts';
-import type { HarnessKind } from '../../src/lib/manifest.ts';
 import type { PassiveUsageRecord } from '../../src/lib/usage.ts';
 
 const TOKEN = 'placeholder-access-token';
-
-/** A credential source holding one blob. Never a real keychain or a real file. */
-const credentials = (material: CredentialMaterial): CredentialMaterialSource => ({
-  material: (_kind: HarnessKind, _home: string) => Promise.resolve(material),
-});
 
 const STORED: CredentialMaterial = {
   outcome: 'found',
   blob: JSON.stringify({ claudeAiOauth: { accessToken: TOKEN, expiresAt: 1_900_000_000_000 } }),
 };
-const storedCredential = credentials(STORED);
 
 interface Reply {
   readonly status?: number;
@@ -103,7 +95,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert — 42 is read as 42%, which is only correct under the stored-usage rule.
     should(actual.ok).be.true();
@@ -122,7 +114,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     });
 
     // Act
-    await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert — one request, to the endpoint that consumes no inference quota.
     should(requests).have.length(1);
@@ -163,7 +155,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert — a bare control-plane 401 cannot tell token rejection from client rejection, so it is
     // retained as evidence but never turned into a login instruction.
@@ -239,7 +231,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.credentialSignal).equal('inconclusive');
@@ -255,7 +247,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     // Arrange
     const shapeOf = async (headers: Record<string, string>): Promise<unknown> => {
       const { fetch } = transport({ [ANTHROPIC_USAGE_URL]: { status: 401, headers } });
-      const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+      const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
       return (actual.responseFingerprint as { headers?: Record<string, unknown> } | undefined)?.headers;
     };
 
@@ -282,7 +274,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     // Arrange
     const retryAfterOf = async (value: string): Promise<unknown> => {
       const { fetch } = transport({ [ANTHROPIC_USAGE_URL]: { status: 429, headers: { 'retry-after': value } } });
-      const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+      const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
       return (actual.responseFingerprint as { headers?: { retryAfter?: unknown } } | undefined)?.headers?.retryAfter;
     };
 
@@ -316,7 +308,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
       });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(oversized.byteLength).be.above(MAX_RESPONSE_BODY_BYTES);
@@ -343,7 +335,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
       });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.ok).be.false();
@@ -359,7 +351,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     const { fetch } = transport({ [ANTHROPIC_USAGE_URL]: { status: 500 } });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.ok).be.false();
@@ -375,7 +367,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     const { fetch } = transport({ [ANTHROPIC_USAGE_URL]: { body: { five_hour: {}, seven_day: {} } } });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert — never a fabricated 0%.
     should(actual.ok).be.false();
@@ -390,7 +382,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     const { fetch } = transport({ [ANTHROPIC_USAGE_URL]: { unreadableJson: true } });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.ok).be.false();
@@ -404,7 +396,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     const { fetch } = transport({ [ANTHROPIC_USAGE_URL]: { throws: new Error('getaddrinfo ENOTFOUND') } });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.ok).be.false();
@@ -419,7 +411,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.error).equal('Bearer [redacted] could not be sent');
@@ -433,7 +425,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     const { fetch } = transport({ [ANTHROPIC_USAGE_URL]: { throws: aborted } });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.error).equal('the request timed out');
@@ -444,7 +436,7 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     const fetch: QuotaFetch = () => Promise.reject('nope');
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.error).equal('the request failed');
@@ -482,7 +474,7 @@ describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => 
     const { fetch } = forbidden();
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert — not measurable, and NOT signed out: the token still works, it just cannot read usage.
     should(actual.ok).be.false();
@@ -495,7 +487,7 @@ describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => 
     const { fetch, requests } = forbidden();
 
     // Act
-    await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert — the whole request list, so an added call is a failure rather than an unnoticed cost.
     should(requests.map(request => request.url)).deepEqual([ANTHROPIC_USAGE_URL]);
@@ -514,7 +506,7 @@ describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => 
     });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.credentialSignal).equal('inconclusive');
@@ -540,7 +532,7 @@ describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => 
     });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.credentialSignal).equal('inconclusive');
@@ -559,7 +551,7 @@ describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => 
     });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.credentialSignal).equal('inconclusive');
@@ -577,7 +569,7 @@ describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => 
     });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.credentialSignal).equal('inconclusive');
@@ -598,7 +590,7 @@ describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => 
     });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.credentialSignal).equal('scope_unavailable');
@@ -617,7 +609,7 @@ describe('AnthropicUsageProbe when the usage endpoint refuses the token', () => 
     });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(actual.credentialSignal).equal('inconclusive');
@@ -631,7 +623,7 @@ describe('AnthropicUsageProbe when there is nothing to ask with', () => {
     const { fetch, requests } = transport({});
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial({
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial({
       outcome: 'absent',
     });
 
@@ -649,7 +641,7 @@ describe('AnthropicUsageProbe when there is nothing to ask with', () => {
     const { fetch } = transport({});
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial({
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial({
       outcome: 'found',
       blob: 'not json',
     });
@@ -663,7 +655,7 @@ describe('AnthropicUsageProbe when there is nothing to ask with', () => {
     const { fetch } = transport({});
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial({
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial({
       outcome: 'found',
       blob: JSON.stringify({ claudeAiOauth: { refreshToken: 'r' } }),
     });
@@ -679,7 +671,7 @@ describe('AnthropicUsageProbe when there is nothing to ask with', () => {
     });
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial({
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial({
       outcome: 'found',
       blob: JSON.stringify({ accessToken: TOKEN }),
     });
@@ -696,7 +688,7 @@ describe('AnthropicUsageProbe when there is nothing to ask with', () => {
     });
 
     // Act
-    await new AnthropicUsageProbe({ fetch, credentials: storedCredential, timeoutMs: 1234 }).probeMaterial(STORED);
+    await new AnthropicUsageProbe({ fetch, timeoutMs: 1234 }).probeMaterial(STORED);
 
     // Assert
     should(requests[0]?.timeoutMs).equal(1234);
@@ -709,7 +701,7 @@ describe('AnthropicUsageProbe when there is nothing to ask with', () => {
     });
 
     // Act
-    await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
 
     // Assert
     should(requests[0]?.timeoutMs).be.above(0);
@@ -913,7 +905,7 @@ describe('fetchQuota', () => {
 describe('AnthropicUsageProbe reporting what the answer said about the credential', () => {
   const signalFor = async (reply: Reply) => {
     const { fetch, requests } = transport({ [ANTHROPIC_USAGE_URL]: reply });
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial(STORED);
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial(STORED);
     return { signal: actual.credentialSignal, requests };
   };
 
@@ -973,7 +965,7 @@ describe('AnthropicUsageProbe reporting what the answer said about the credentia
     const { fetch, requests } = transport({});
 
     // Act
-    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probeMaterial({
+    const actual = await new AnthropicUsageProbe({ fetch }).probeMaterial({
       outcome: 'absent',
     });
 
@@ -990,7 +982,7 @@ describe('AnthropicUsageProbe reading an account-model credential', () => {
     const { fetch, requests } = transport({
       [ANTHROPIC_USAGE_URL]: { body: { five_hour: { utilization: 30 }, seven_day: { utilization: 7 } } },
     });
-    const subject = new AnthropicUsageProbe({ fetch, credentials: storedCredential });
+    const subject = new AnthropicUsageProbe({ fetch });
 
     // Act
     const actual = await subject.probeMaterial({

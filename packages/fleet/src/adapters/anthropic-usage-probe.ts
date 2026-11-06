@@ -45,9 +45,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { ferretryCredentialDirectory } from '../lib/account/credential-directory.ts';
-import type { StoredCredentialResolution } from '../lib/account/credentials.ts';
 import type { CredentialMaterial } from '../lib/identity.ts';
-import type { HarnessKind } from '../lib/manifest.ts';
 import {
   parseStoredUsageBody,
   type QuotaReading,
@@ -132,21 +130,8 @@ export interface QuotaRequest {
 /** Performing one bounded HTTP request. The only thing here that touches a network. */
 export type QuotaFetch = (request: QuotaRequest) => Promise<QuotaResponse>;
 
-/** Reading one home's raw credential. Satisfied structurally by the platform credential store. */
-export interface CredentialMaterialSource {
-  material(kind: HarnessKind, home: string): Promise<CredentialMaterial>;
-}
-
-/** Reading one account-model credential's raw material from its one store. Satisfied by the platform store. */
-export interface StoredMaterialSource {
-  storedMaterial(resolution: StoredCredentialResolution): Promise<CredentialMaterial>;
-}
-
 export interface AnthropicUsageProbeDeps {
   readonly fetch: QuotaFetch;
-  readonly credentials: CredentialMaterialSource;
-  /** The account model's reader, by credential store rather than by home. */
-  readonly stored?: StoredMaterialSource;
   readonly timeoutMs?: number;
   /** Where the usage read goes: {@link ANTHROPIC_USAGE_URL} unless a loopback test server stands in. */
   readonly url?: string;

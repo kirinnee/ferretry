@@ -110,7 +110,7 @@ The feed is `WatchedUsageFeed`, then its `.unattended` half, then `CachedUsageFe
 - Passive reading first. Then, if `needsActiveUsageRead` (`:525`) finds no passive reading younger than the
   interval, `#activeRead` (`:666`) runs:
   - a classify, which is **spawn 1**;
-  - the probe's own material read, **spawn 2** (`AnthropicUsageProbe.probeMaterial`);
+  - at the time of this measurement, the probe re-read the store itself, **spawn 2** (the probe now takes the material the classify already read, via `AnthropicUsageProbe.probeMaterial`, and reads no store);
   - `GET https://api.anthropic.com/api/oauth/usage` with a bearer token and a 20 s timeout, or
     `GET https://chatgpt.com/backend-api/wham/usage`.
 - Then `#view` classifies again: **spawn 3**.

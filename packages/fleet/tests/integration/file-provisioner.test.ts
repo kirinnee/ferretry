@@ -1110,3 +1110,26 @@ describe('FileFleetProvisioner', () => {
     should(await readFile(elsewhere, 'utf8')).equal('not part of the skill\n');
   });
 });
+
+describe('FileFleetProvisioner source fence at preview', () => {
+  it('should refuse to preview an empty plan when the fence cannot be resolved, as apply does', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const subject = new FileFleetProvisioner([root], undefined, {}, { homes: [root], open: [root], hardLinkRoots: [] });
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [],
+    };
+
+    // Act
+    const failure = await subject.preview(plan).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(failure).be.an.instanceOf(Error);
+    should((failure as Error).name).equal('StateHomeUnresolvedError');
+  });
+});

@@ -134,13 +134,11 @@ export function hostHousekeepingPorts(
   const timeout = settings.usageTimeoutMs === undefined ? {} : { timeoutMs: settings.usageTimeoutMs };
   const anthropic = new AnthropicUsageProbe({
     fetch,
-    credentials: store,
     ...timeout,
     ...(urls === undefined ? {} : { url: urls.anthropic }),
   });
   const codex = new CodexUsageProbe({
     fetch,
-    stored: store,
     now,
     ...timeout,
     ...(urls === undefined ? {} : { url: urls.codex }),

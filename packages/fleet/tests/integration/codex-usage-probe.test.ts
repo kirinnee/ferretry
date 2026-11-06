@@ -5,7 +5,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { QuotaFetch, QuotaRequest, StoredMaterialSource } from '../../src/adapters/anthropic-usage-probe.ts';
+import type { QuotaFetch, QuotaRequest } from '../../src/adapters/anthropic-usage-probe.ts';
 import { CODEX_USAGE_URL, CodexUsageProbe } from '../../src/adapters/codex-usage-probe.ts';
 import type { CredentialMaterial } from '../../src/lib/identity.ts';
 
@@ -13,15 +13,10 @@ const NOW = 1_800_000_000_000;
 const TOKEN = 'placeholder-codex-access';
 const ACCOUNT = 'placeholder-account-id';
 
-const stored = (material: CredentialMaterial): StoredMaterialSource => ({
-  storedMaterial: () => Promise.resolve(material),
-});
-
 const SIGNED_IN: CredentialMaterial = {
   outcome: 'found',
   blob: JSON.stringify({ tokens: { access_token: TOKEN, refresh_token: 'r', account_id: ACCOUNT } }),
 };
-const signedIn = stored(SIGNED_IN);
 
 interface Reply {
   readonly status?: number;
@@ -56,7 +51,7 @@ const usageBody = JSON.stringify({
   },
 });
 
-const probe = (fetch: QuotaFetch) => new CodexUsageProbe({ fetch, stored: signedIn, now: () => NOW });
+const probe = (fetch: QuotaFetch) => new CodexUsageProbe({ fetch, now: () => NOW });
 
 describe('CodexUsageProbe', () => {
   it('should read both windows with exactly a bearer and an account id, and conclude nothing about the login', async () => {
@@ -92,7 +87,6 @@ describe('CodexUsageProbe', () => {
     // Act
     const actual = await new CodexUsageProbe({
       fetch,
-      stored: signedIn,
       now: () => NOW,
       timeoutMs: 5,
     }).probeMaterial(SIGNED_IN);
