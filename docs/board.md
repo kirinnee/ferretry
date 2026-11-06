@@ -1399,8 +1399,8 @@ for that feature to be built before merging."_ (&I38; the design is
   it, and every card not dropped riding one of those cards' units (its helpers, finished or not, and an umbrella lead
   above it). Units change after a claim lands (a card opens its PR, a helper finishes), so the gate does not trust
   the daemon's claim-time depends-on: it derives the **clash order live** — of two units whose claims clash, the one
-  whose own cards claimed first merges first (a card riding both, an umbrella lead, sits out the pair) — and adds the
-  dependencies a person made. Exit 0 when the unit waits on nothing; 1 (printing `&F20 waits on &F18 (until
+  that claimed first merges first, by one rank per unit (the earliest claim of any card riding it, then of the cards
+  riding only it, then its key), so no set of PRs ever waits in a circle — and adds the dependencies a person made. Exit 0 when the unit waits on nothing; 1 (printing `&F20 waits on &F18 (until
 shipped)`) when it does; 2 when it cannot tell — the daemon is down or predates the gate, a card on the machine is
   unreadable (it might link the PR), or the URL is not a PR. The merger treats 2 as "do not merge". A card inside the
   unit, or one linking the same PR, never holds it; nor does a unit that shipped or was dropped.

@@ -269,6 +269,42 @@ describe('mergeGateOf', () => {
       should(gateFor(43, [claiming('F2', [['x.ts', 1]], linking(prLink(42))), waiving])?.waits).eql([]);
     });
 
+    it('should keep an older claim old when the same path is claimed again in another spelling', () => {
+      // Arrange — F1 claimed x.ts first, then also ./x.ts after F2 claimed x.ts.
+      const cards = [
+        claiming(
+          'F1',
+          [
+            ['x.ts', 1],
+            ['./x.ts', 3],
+          ],
+          linking(prLink(42)),
+        ),
+        claiming('F2', [['x.ts', 2]], linking(prLink(43))),
+      ];
+
+      // Act / Assert
+      should(gateFor(42, cards)?.waits).eql([]);
+      should(gateFor(43, cards)?.waits).eql([{ task: { id: 'F2' }, on: { id: 'F1' }, until: 'shipped' }]);
+    });
+
+    it('should never circle three PRs through an umbrella and a tied claim', () => {
+      // Arrange — PR-free F9 claimed at minute 1; its children F1 (PR 42) at 3 and F3 (PR 43) at 2; F2 (PR 44) at 1.
+      const cards = [
+        claiming('F9', [['x.ts', 1]], { laneId: 'implement' }),
+        claiming('F1', [['x.ts', 3]], { parent: { id: 'F9' }, ...linking(prLink(42)) }),
+        claiming('F3', [['x.ts', 2]], { parent: { id: 'F9' }, ...linking(prLink(43)) }),
+        claiming('F2', [['x.ts', 1]], linking(prLink(44))),
+      ];
+
+      // Act
+      const waiting = [42, 43, 44].filter(number => (gateFor(number, cards)?.waits.length ?? 0) > 0);
+
+      // Assert — the earliest of them is free, so the queue always moves.
+      should(waiting.length).be.below(3);
+      should(gateFor(44, cards)?.waits).eql([]);
+    });
+
     it('should not hold a PR on a unit that already shipped', () => {
       const cards = [
         claiming('F2', [['x.ts', 1]], { laneId: 'merged', ...linking(prLink(42)) }),

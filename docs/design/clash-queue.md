@@ -114,12 +114,14 @@ which answers from ONE read of the board — paging through the board view could
    cards' shipping units (§2): a helper of a linking card, finished or not, and an umbrella lead above one;
 2. the unit's **waits**, derived from the board as it is now, because units change after a claim lands (a card
    opens its PR, a helper finishes, a card is reparented) and the daemon's claim-time depends-on can go stale:
-   - the **live clash order**: for every other unit whose claims clash with this unit's, the unit whose own cards
-     claimed first (the last `file-claimed` of each path, else the card's creation) merges first. A card riding both
-     units, an umbrella lead, sits out that pair. One rule decides both sides of every pair, so two PRs never wait
-     on each other through it. A unit that shipped or was dropped holds nothing, and neither does an umbrella lead's
-     own unit once it has child units (it never ships by itself; its claims count through them). A unit card that
-     removed a wait on that unit's shipping card with `fy task undepend` waives it;
+   - the **live clash order**: for every other unit whose claims clash with this unit's (a card riding both, an
+     umbrella lead, sits out the clash test), the unit that claimed first merges first. Each unit has ONE rank — the
+     earliest claim of any card riding it (an umbrella lead's counts for every unit under it), then the earliest
+     claim of the cards riding only it, then its key — where a claim's moment is the last `file-claimed` of that exact
+     spelling, else the card's creation. A rank never depends on the pair compared, so the order is total and no
+     set of PRs waits in a circle through it. A unit that shipped or was dropped holds nothing, and neither does an
+     umbrella lead's own unit once it has child units (it never ships by itself; its claims count through them). A
+     unit card that removed a wait on that unit's shipping card with `fy task undepend` waives it;
    - the **dependencies a person added**: each unfinished `blockedBy` of a unit card on a card outside the unit
      that does not link the same PR, except the daemon's own claim-time ones (their latest `depended` is the
      daemon's), which the live order stands in for;

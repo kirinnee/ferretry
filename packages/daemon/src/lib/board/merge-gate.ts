@@ -9,9 +9,10 @@
  *
  * - **The clash order, derived live.** Shipping units change after a claim lands (a card links its PR, a helper
  *   finishes, a card is reparented), so the depends-on the daemon wrote at claim time can be stale. The gate does not
- *   trust it: for every other unit whose claims clash with this unit's, the unit that claimed FIRST merges first —
- *   comparing the earliest claim of the cards each unit has on its own (a card riding both, an umbrella lead, is left
- *   out of the pair). One rule decides both sides of every pair, so two PRs never wait on each other through it. A unit
+ *   trust it: for every other unit whose claims clash with this unit's, the unit that claimed FIRST merges first. Each
+ *   unit has ONE rank: the earliest claim of any card riding it (an umbrella lead's counts for every unit under it),
+ *   then the earliest claim of the cards riding only it, then its key. A rank never depends on the pair being
+ *   compared, so the order is total and no set of PRs ever waits on each other in a circle through it. A unit
  *   whose shipping card has shipped or was dropped holds nothing, nor does an umbrella lead's own unit once it has
  *   child units (it never ships by itself; its claims count through them). A lead waives one wait with
  *   `fy task undepend`.
@@ -28,7 +29,7 @@ import {
   prUrlParts,
   type TaskRef,
 } from '@ferretry/protocol';
-import { claimsClash, normaliseClaim } from './clash-queue.ts';
+import { claimsClash } from './clash-queue.ts';
 import { type BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ShippingUnits } from './shipping-unit.ts';
 
@@ -50,17 +51,23 @@ interface Claim {
   readonly atMs: number;
 }
 
+/** Each held spelling keeps its own moment: claiming `./x.ts` beside `x.ts` later never makes `x.ts` younger. */
 const claimsOf = (card: BoardTask): readonly Claim[] =>
   card.files.map(path => {
-    const wanted = normaliseClaim(path);
     const event = card.history.findLast(
       (entry): entry is Extract<BoardTaskEvent, { type: 'file-claimed' }> =>
-        entry.type === 'file-claimed' && normaliseClaim(entry.path) === wanted,
+        entry.type === 'file-claimed' && entry.path === path,
     );
     return { card, path, atMs: Date.parse(event?.at ?? card.createdAt) };
   });
 
 const earliest = (claims: readonly Claim[]): number => Math.min(...claims.map(claim => claim.atMs));
+
+/** A unit's place in the queue: earliest claim of any rider, earliest of its own riders, then its key. */
+type Rank = readonly [number, number, string];
+
+const compareRanks = (left: Rank, right: Rank): number =>
+  left[0] - right[0] || left[1] - right[1] || (left[2] < right[2] ? -1 : left[2] > right[2] ? 1 : 0);
 
 /**
  * Whether the dependency was written by the daemon when a claim landed (its latest `depended` event is the daemon's):
@@ -99,7 +106,20 @@ const clashWaits = (
       if (!keys.has(key)) others.set(key, [...(others.get(key) ?? []), card]);
     }
   }
-  const myKey = [...keys].sort()[0] ?? '';
+  // One rank per unit, never per pair, so the order is total (see the module doc).
+  const anyRider = new Map<string, number>();
+  const ownRider = new Map<string, number>();
+  for (const card of live) {
+    if (card.files.length === 0) continue;
+    const first = earliest(claimsOf(card));
+    const rides = units.rides(card);
+    for (const key of rides) {
+      anyRider.set(key, Math.min(anyRider.get(key) ?? Infinity, first));
+      if (rides.size === 1) ownRider.set(key, Math.min(ownRider.get(key) ?? Infinity, first));
+    }
+  }
+  const rankOf = (key: string): Rank => [anyRider.get(key) ?? Infinity, ownRider.get(key) ?? Infinity, key];
+  const myRank = [...keys].map(rankOf).sort(compareRanks)[0] ?? rankOf('');
   const waits: BoardMergeWait[] = [];
   for (const [key, cards] of others) {
     const target = board.index.get({ id: key as BoardTask['id'] });
@@ -115,8 +135,7 @@ const clashWaits = (
       theirs.some(other => other.card.projectId === claim.card.projectId && claimsClash(claim.path, other.path)),
     );
     if (clash === undefined) continue;
-    const [myFirst, theirFirst] = [earliest(mine), earliest(theirs)];
-    const theyWereFirst = theirFirst < myFirst || (theirFirst === myFirst && key < myKey);
+    const theyWereFirst = compareRanks(rankOf(key), myRank) < 0;
     if (!theyWereFirst || waived(unit, key, board.index)) continue;
     waits.push({ task: { id: clash.card.id }, on: { id: target.id }, until: 'shipped' });
   }
