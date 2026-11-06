@@ -25,7 +25,7 @@
     "./browser-page-lifecycle": "./src/lib/browser-page-lifecycle.ts",
     "./compact-at": "./src/lib/compact-at.ts",
     "./config-files": "./src/lib/config-files.ts",
-    "./daemon-features": "./src/lib/daemon-features.ts",
+    "./daemon-features": "./src/lib/daemon-features/index.ts",
     "./daemon-restart": "./src/lib/daemon-restart.ts",
     "./input-request": "./src/lib/input-request.ts",
     "./login-recipes": "./src/lib/login-recipes.ts",

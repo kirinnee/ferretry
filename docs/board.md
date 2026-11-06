@@ -1376,7 +1376,7 @@ for that feature to be built before merging."_ (&I38; the design is
 - **A claim is a file or a folder** the work will touch: `fy task create --file <path>` or `fy task file <id> <path>`.
   The card's lead claims at brief time, and the ferret holding the card may claim and release files on it too.
   Claim the shared hot files when the work touches them: `packages/daemon/bin/fyd.ts`, `knip.json`,
-  `packages/protocol/src/lib/daemon-features.ts`.
+  `packages/protocol/src/lib/daemon-features/index.ts`.
 - **Two claims clash** when the paths are the same, or one is a folder the other sits inside (`packages/daemon`
   holds `packages/daemon/bin/fyd.ts`, not `packages/daemon-x`). `.` is the whole repository, and `./` or `..`
   inside a path are read as the path they name.

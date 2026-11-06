@@ -68,7 +68,7 @@ import {
 } from '../../src/lib/board.ts';
 import { LANE_TEMPLATES, type LaneSet, LaneSetSchema } from '../../src/lib/board-lanes.ts';
 import { BoardActorViaSchema, BoardReopenAttachmentsSchema } from '../../src/lib/board-refs.ts';
-import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features.ts';
+import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features/index.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 

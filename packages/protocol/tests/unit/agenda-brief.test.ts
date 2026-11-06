@@ -18,7 +18,7 @@ import {
   MAX_AGENDA_OPTION_DETAIL_MARKDOWN_LENGTH,
   MAX_AGENDA_POINTS_LENGTH,
 } from '../../src/lib/agenda.ts';
-import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features.ts';
+import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features/index.ts';
 
 const AT = '2026-10-26T09:00:00.000Z';
 
