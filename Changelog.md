@@ -1,3 +1,9 @@
+## [4.288.0](https://github.com/kirinnee/ferretry/compare/v4.287.1...v4.288.0) (2026-11-06)
+
+### Features
+
+* **daemon:** limit ferrets by default, sized from what the user may spend ([#1517](https://github.com/kirinnee/ferretry/issues/1517)) ([e3b1d94](https://github.com/kirinnee/ferretry/commit/e3b1d941d76b1e281b0e7302d86246cce20f1515))
+
 ## [4.287.1](https://github.com/kirinnee/ferretry/compare/v4.287.0...v4.287.1) (2026-11-06)
 
 ### Fixes
