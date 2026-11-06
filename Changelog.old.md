@@ -1,3 +1,9 @@
+## [4.285.1](https://github.com/kirinnee/ferretry/compare/v4.285.0...v4.285.1) (2026-11-06)
+
+### Performance
+
+* **cli:** load only the command group a long-lived fy needs ([#1520](https://github.com/kirinnee/ferretry/issues/1520)) ([fa27b1e](https://github.com/kirinnee/ferretry/commit/fa27b1edd87aee92266e6df978cff04ded259f67))
+
 ## [4.285.0](https://github.com/kirinnee/ferretry/compare/v4.284.0...v4.285.0) (2026-11-06)
 
 ### Features
