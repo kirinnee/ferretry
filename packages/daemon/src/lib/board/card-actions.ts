@@ -62,6 +62,7 @@ import {
   OPERATION_STANDINGS,
   refusalMessage,
 } from './authority.ts';
+import { queueBehindClashes } from './clash-queue.ts';
 import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
@@ -847,11 +848,13 @@ const file = (
     };
   }
   if (held) throw new BoardError('invalid', `${ref} already claims ${action.path}`);
+  // A claim that clashes with an open card's queues this one behind it (docs/design/clash-queue.md).
   return {
-    task: {
-      ...withEvent(card, { type: 'file-claimed', path: action.path }, context),
-      files: [...card.files, action.path],
-    },
+    task: queueBehindClashes(
+      { ...withEvent(card, { type: 'file-claimed', path: action.path }, context), files: [...card.files, action.path] },
+      [action.path],
+      context,
+    ),
   };
 };
 

@@ -1,6 +1,6 @@
 # Clashing work waits its turn
 
-Status: **plan** · Date: 2026-11-06 · Card: &I38 · Owner's Go on !A423, verbatim: _"make sure that features that
+Status: **built** (owner decision taken: merge only) · Date: 2026-11-06 · Card: &I38 · Owner's Go on !A423, verbatim: _"make sure that features that
 will conflcit gets "queued up", and add depends on on the board, and wait for that feature to be built before
 merging."_
 
@@ -18,7 +18,7 @@ Paths are relative to `packages/daemon/` unless they start with `packages/`, `sc
 4. **Work still runs in parallel; only the merge waits** (the one owner decision, §6). The dependent card is
    built and reviewed as usual. Its PR does not merge until the card it waits on has merged.
 5. **The merger checks the board.** A new read, `fy task merge-gate <pr-url>`, exits 0 when the PR's card waits
-   on nothing and 1 (with the blockers) when it does. `merge-all.sh` skips a PR that answers 1. The patch is
+   on nothing, 1 (with the blockers) when it does, 2 when it cannot tell. `merge-all.sh` merges only on 0. The patch is
    `/tmp/claude-1000/merge-all-clash-gate.patch`; the script itself is not edited here.
 
 ## 1. Declaring the area
@@ -31,15 +31,16 @@ Claims stay what they are: repo-relative paths on the card (`files`, max 256, ea
   building the card knows best what it touches, so `file` joins `holderOnly`: a sub-ferret may claim and release
   files on a card it holds, like its status and How to test. The lead still claims at brief time.
 
-Known hot files are claimed like any other file. The brief text and the Board rules line tell a lead to claim
-them when the work will touch them: `packages/daemon/bin/fyd.ts`, `knip.json`,
+Known hot files are claimed like any other file. `fy task file --help`, `fy task create --help` and
+[board.md](../board.md#clashing-claims-queue-the-later-card) tell a lead to claim them when the work will touch them: `packages/daemon/bin/fyd.ts`, `knip.json`,
 `packages/protocol/src/lib/daemon-features.ts`. The daemon does not guess claims a card did not make.
 
 ## 2. Detecting a clash
 
-One pure function, `claimsClash(a, b)` in `src/lib/board/claims.ts`:
+One pure function, `claimsClash(a, b)` in `src/lib/board/clash-queue.ts`:
 
-- normalise each path: drop a leading `./`, a trailing `/`, and repeated `/`;
+- normalise each path: drop a leading `./`, a trailing `/`, and repeated `/`; `.` and `./` are the whole
+  repository, which clashes with every path;
 - clash when the paths are equal, or one starts with the other followed by `/`.
 
 A card is **in the queue** (can hold another card back) when it is on the same board, is not dropped, and its
@@ -50,7 +51,9 @@ Skipped, so the rule never deadlocks:
 
 - the card itself, its ancestors and its descendants (a sub-card overlaps its lead's claims by design, and the
   lead ships through it);
-- a card it already depends on (no second entry);
+- a card it already depends on (no second entry), and a card it took out of its queue with `fy task undepend`
+  (a re-claim does not put back what the lead removed on purpose);
+- a card past the most dependencies a card may hold (128): noted, not added;
 - a card whose dependency on it would close a cycle (`dependencyCycle`): the history notes the clash instead, so a
   lead still sees it.
 
@@ -60,17 +63,18 @@ The daemon, in the same card write as the claim (the `file` action, and `create`
 its dependencies land together or not at all. The new history events carry the daemon as actor:
 
 - `depended` on `&F18`, `until: shipped`;
-- a note: `waits on &F18 to merge: both claim packages/daemon/bin/fyd.ts`.
+- a note: `queued behind &F18 to merge: both claim packages/daemon/bin/fyd.ts. It can be built now; its PR merges
+after &F18 ships.`
 
 The authority rule "a ferret may add a dependency only from its own card" is not bent: the dependency is on the
 claimer's own card, and the daemon writes it.
 
-Releasing a claim (`fy task file --release`) does not remove a dependency. Removing one is a deliberate act (§4).
+Releasing a claim (`fy task file --remove`) does not remove a dependency. Removing one is a deliberate act (§4).
 
 ## 4. What a lead sees
 
-- **At claim time**, the command's answer says it: `&F20 now waits on &F18 (both claim knip.json): it can be built,
-but its PR merges only after &F18 ships.`
+- **At claim time**, `fy task file` and `fy task create` print the daemon's note on stderr:
+  `&F20 queued behind &F18 to merge: both claim knip.json. It can be built now; its PR merges after &F18 ships.`
 - **On the board**, the card's existing `blockedBy` shows the wait, and `&F18`'s `blocks` shows the queue.
 - **When the wait ends**, the existing notice arrives on the next message: `&F20 unblocked: &F18 merged`. The lead
   rebases the PR; the merger takes it on its next pass.
@@ -87,8 +91,8 @@ move it, so the card shows its real progress while it waits.
 1. read every open card whose links include that PR (paging through the board read, all projects, public and
    private);
 2. exit **0** and print nothing when no card waits on anything (or no card links the PR);
-3. exit **1** and print `#412 waits on &F18 (until shipped)` when any linked card has an unfinished `blockedBy`;
-4. exit **2** when the daemon cannot be read. The merger treats 2 like 1: **it fails closed** and merges nothing it
+3. exit **1** and print `&F20 waits on &F18 (until shipped)` when any linked card has an unfinished `blockedBy`;
+4. exit **2** when the daemon cannot be read, the URL is not a PR, or the board runs past 40 pages. The merger treats 2 like 1: **it fails closed** and merges nothing it
    cannot check.
 
 The patch to `/tmp/claude-1000/merge-all.sh` adds one check after the approval check, and tells the lead once per
@@ -116,9 +120,12 @@ and would hold every PR.
 
 ## 8. The build (one PR)
 
-- `src/lib/board/claims.ts`: `claimsClash`, `clashingCards` (pure, unit-tested).
-- `src/lib/board/card-actions.ts`: `file` and `create` add the dependencies and notes; `service.ts`: `file` joins
-  `holderOnly`.
-- `packages/cli`: `fy task merge-gate`, and the claim answer prints the new waits.
-- `docs/board.md` §Dependencies and the Board rules line; this doc; the merge-all patch.
-- Tests: unit for the clash rule and the skips, the card action, the CLI exit codes.
+- `src/lib/board/clash-queue.ts`: `claimsClash`, `planClashes`, `queueBehindClashes` (pure, unit-tested).
+- `src/lib/board/card-actions.ts`: the `file` action queues; `service.ts`: a claim runs in the dependency section,
+  a create with claims re-reads the board in it and queues, and `file` joins `holderOnly`.
+- `packages/cli`: `fy task merge-gate` (`lib/board/merge-gate.ts`), and `file`/`create` print the queue notes
+  (`lib/board/clash-notes.ts`).
+- `docs/board.md` § Clashing claims queue the later card; this doc; the merge-all patch (outside the repo).
+- Not changed: the ferrets' Board rules line. Its size is pinned by the system-prompt budget tests; the help
+  texts and board.md carry the rule instead.
+- Tests: `packages/daemon/tests/unit/board/clash-queue.test.ts`, `packages/cli/tests/unit/board/clash-queue.test.ts`.

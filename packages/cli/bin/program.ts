@@ -105,6 +105,7 @@ import { registerAuditCommands } from '../src/lib/audit/commands';
 import { AuditController } from '../src/lib/audit/controller';
 import { ProtocolAuditGateway } from '../src/lib/audit/gateway';
 import { BoardController } from '../src/lib/board/board-controllers';
+import { MergeGateController } from '../src/lib/board/merge-gate';
 import { BrowserController, registerBrowserCommands, registerFirewallCommands } from '../src/lib/browser';
 import { registerCatalogCommands } from '../src/lib/catalog/commands';
 import { CatalogController } from '../src/lib/catalog/controller';
@@ -964,7 +965,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       environmentSessionId: ownSessionId,
       related: relatedCheck(world, client),
     });
-    registerTaskCommands(program, { board });
+    const mergeGate = new MergeGateController({ gateway: new FyBoardGateway(client), io: world.io });
+    registerTaskCommands(program, { board, mergeGate });
     registerBoardCommands(program, board);
   },
   ({ program, world, client }) =>

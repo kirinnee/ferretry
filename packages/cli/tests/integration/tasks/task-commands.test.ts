@@ -14,10 +14,18 @@ import should from 'should';
 import { registerBoardCommands } from '../../../src/adapters/board/board-commands';
 import { registerTaskCommands } from '../../../src/adapters/tasks/task-commands';
 import { BoardController } from '../../../src/lib/board/board-controllers';
+import { MergeGateController } from '../../../src/lib/board/merge-gate';
 import type { IBoardGateway, SessionDirectoryEntry } from '../../../src/lib/board/ports';
 import { TASK_CREATE_RULE } from '../../../src/lib/board/umbrella';
 import type { ITextFileReader } from '../../../src/lib/tasks/ports';
 import { boardResponse, FERRETRY_ID, listing, taskResponse } from '../board/fixtures';
+
+/** A merge gate nothing here asks: these tests are about the other verbs. */
+const quietGate = (): MergeGateController =>
+  new MergeGateController({
+    gateway: { board: () => Promise.resolve(boardResponse()) },
+    io: { report: () => {}, diagnostic: () => {}, setExitCode: () => {} },
+  });
 
 class FakeBoardGateway implements IBoardGateway {
   queried: BoardQueryInput | undefined;
@@ -102,7 +110,7 @@ function harness(environmentSessionId: string | undefined = 'session-7', files =
   const board = new BoardController({ gateway, output, files, binary: 'fy', environmentSessionId });
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  registerTaskCommands(program, { board });
+  registerTaskCommands(program, { board, mergeGate: quietGate() });
   registerBoardCommands(program, board);
   return {
     gateway,
@@ -249,7 +257,7 @@ describe('fy task move --help', () => {
     const written: string[] = [];
     const program = new Command().name('fy').exitOverride();
     program.configureOutput({ writeOut: text => written.push(text), writeErr: () => {} });
-    registerTaskCommands(program, { board });
+    registerTaskCommands(program, { board, mergeGate: quietGate() });
 
     // Act
     await program.parseAsync(['node', 'fy', 'task', 'move', '--help']).catch(() => undefined);
@@ -277,7 +285,7 @@ describe('fy task create --help', () => {
     const written: string[] = [];
     const program = new Command().name('fy').exitOverride();
     program.configureOutput({ writeOut: text => written.push(text), writeErr: () => {} });
-    registerTaskCommands(program, { board });
+    registerTaskCommands(program, { board, mergeGate: quietGate() });
 
     // Act
     await program.parseAsync(['node', 'fy', 'task', 'create', '--help']).catch(() => undefined);
