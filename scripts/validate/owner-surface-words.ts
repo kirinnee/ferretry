@@ -36,6 +36,13 @@ const SCOPE: readonly string[] = [
 export const FORBIDDEN: readonly { readonly name: string; readonly pattern: RegExp }[] = [
   { name: '"your answer for the card"', pattern: /\byour answer for the card\b/iu },
   { name: '"card ask"', pattern: /\bcard asks?\b/iu },
+  // The card narrated as an actor in what the owner reads: "The card goes back with your words", "The card stays put".
+  // The ferret is who acts, and the owner says what they want; a card only shows (docs/agenda.md § One model).
+  {
+    name: '"the card <verb>s" narration',
+    pattern:
+      /\bthe card (?:goes back|goes to|stays|stay|comes back|returns|is sent back|is sent|waits|reads your|gets your|moves back)\b/iu,
+  },
   // A heading that names a card as the one asking: "Card &F12:", "Card &amp;{id}:", "Card &${id}:".
   { name: '"Card &…:" heading', pattern: /\bcard\s*&(?:amp;)?\s*(?:[A-Z]+\d+|\{\}|\$\{\})\s*:/iu },
 ];

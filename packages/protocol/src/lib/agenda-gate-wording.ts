@@ -43,8 +43,8 @@ export const gateTypedLabel = (gate: Pick<AgendaGate, 'options'>): string | unde
 /** What the owner is told to do with words, one plain sentence, under the buttons. */
 export const gateTypedLead = (gate: Pick<AgendaGate, 'options'>): string =>
   gateStyle(gate) === 'try-it'
-    ? 'Not good? Type what is wrong or what needs changing in the box below, then send. The card goes back with your words.'
-    : 'Want something changed first? Type it in the box below, then send. The card stays put and the ferret reads your words.';
+    ? 'Not good? Type what is wrong or what needs changing in the box below, then send. The ferret gets your words and tries again.'
+    : 'Want something changed first? Type it in the box below, then send. The ferret reads your words first, and nothing is built yet.';
 
 /** The words under a card's buttons when the owner is looking at several asks: which answer a typed message is. */
 export const gateTypedPlaceholder = (gate: Pick<AgendaGate, 'options'>): string =>

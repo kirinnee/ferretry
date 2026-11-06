@@ -37,13 +37,21 @@ const tryIt = (cardId: string, title: string): AgendaGate => ({
 const first = tryIt('F12', 'Badge colour');
 const second = tryIt('F13', 'Badge shape');
 
+/**
+ * Who the item's ONE ask is. `card`: the item asks nothing of its own, or closes itself (a to-do, an info), so its card ask is
+ * the answer row. `own-row`: it asks its own question on buttons (a choice, a permission, a review): those are the one row,
+ * and the card ask waits as "Next". `own-words`: it asks in words (a reply, a form): typed words answer it, there is no row,
+ * and the card ask waits as "Next" — a try-it's Done / Not good is never squeezed in beside a ferret's question (&B165).
+ */
+type OneAsk = 'card' | 'own-row' | 'own-words';
+
 /** Every kind of item an agenda holds, as the owner meets it. */
-const KINDS: readonly (readonly [string, Partial<AgendaItem>])[] = [
-  ['a choice', { kind: 'choice', subject: 'Which colour?', ask: choices('Blue', 'Green') }],
-  ['a yes or no', { kind: 'yesno', subject: 'Ship it?', ask: choices('No', 'Yes') }],
-  ['a permission', { kind: 'permission', subject: 'May I deploy?', ask: { kind: 'permission' } }],
-  ['a review', { kind: 'review', subject: 'Is the migration safe?' }],
-  ['a reply, one question', { kind: 'reply', subject: 'Which shade?', ask: { kind: 'open-question' } }],
+const KINDS: readonly (readonly [string, Partial<AgendaItem>, OneAsk])[] = [
+  ['a choice', { kind: 'choice', subject: 'Which colour?', ask: choices('Blue', 'Green') }, 'own-row'],
+  ['a yes or no', { kind: 'yesno', subject: 'Ship it?', ask: choices('No', 'Yes') }, 'own-row'],
+  ['a permission', { kind: 'permission', subject: 'May I deploy?', ask: { kind: 'permission' } }, 'own-row'],
+  ['a review', { kind: 'review', subject: 'Is the migration safe?' }, 'own-row'],
+  ['a reply, one question', { kind: 'reply', subject: 'Which shade?', ask: { kind: 'open-question' } }, 'own-words'],
   [
     'a reply, several questions',
     {
@@ -52,8 +60,9 @@ const KINDS: readonly (readonly [string, Partial<AgendaItem>])[] = [
       ask: { kind: 'open-question' },
       questions: [{ question: 'One?' }, { question: 'Two?' }, { question: 'Three?' }],
     },
+    'own-words',
   ],
-  ['a to-do', { kind: 'task', subject: 'Rotate the key', ask: { kind: 'task' } }],
+  ['a to-do', { kind: 'task', subject: 'Rotate the key', ask: { kind: 'task' } }, 'card'],
   [
     'a form whose subject repeats the card',
     {
@@ -62,8 +71,9 @@ const KINDS: readonly (readonly [string, Partial<AgendaItem>])[] = [
       ask: { kind: 'open-question' },
       fields: [{ id: 'shade', type: 'text', label: 'Which shade?' }],
     },
+    'own-words',
   ],
-  ['an info', { kind: 'info', subject: 'The build is green' }],
+  ['an info', { kind: 'info', subject: 'The build is green' }, 'card'],
   [
     'the agenda the daemon opened for the card',
     {
@@ -75,10 +85,12 @@ const KINDS: readonly (readonly [string, Partial<AgendaItem>])[] = [
       sourceRef: 'card-agenda:F12',
       task: { id: 'F12' },
     },
+    'card',
   ],
   [
     'a daemon try-it whose ask line is the first step',
     { kind: 'reply', subject: 'Try it: Open the badge.', ask: { kind: 'open-question' } },
+    'card',
   ],
 ] as const;
 
@@ -125,7 +137,7 @@ const answerRows = (root: HTMLElement): readonly Element[] => {
 
 describe('every kind of item shows ONE answer row, however many card asks it carries', () => {
   for (const typedAnswer of [false, true]) {
-    for (const [name, fields] of KINDS) {
+    for (const [name, fields, one] of KINDS) {
       for (const asks of [[first], [first, second]]) {
         test(`${name}, ${asks.length === 1 ? 'one card ask' : 'two card asks'}${typedAnswer ? ', in the Inbox' : ''}`, async () => {
           const root = await draw(
@@ -137,14 +149,21 @@ describe('every kind of item shows ONE answer row, however many card asks it car
             } as unknown as Partial<AgendaItem>),
             typedAnswer,
           );
-          expect(answerRows(root)).toHaveLength(1);
+          // ONE row at most, and it is the item's one ask: the card ask's, or the item's own question's — never both.
+          expect(answerRows(root)).toHaveLength(one === 'own-words' ? 0 : 1);
+          expect(root.querySelectorAll('[data-agenda-card-ask]')).toHaveLength(one === 'card' ? 1 : 0);
+          if (one !== 'card') {
+            // A question of its own is never answered Done / Good / Not good: the try-it waits, named on one line.
+            for (const label of ['Done', 'Good', 'Not good']) expect(answerButtons(root, label)).toHaveLength(0);
+            expect(root.querySelector('[data-agenda-card-ask-later]')).not.toBeNull();
+          }
           expect(root.textContent).not.toMatch(/your answer for the card|card asks?\b|\bCard &F\d+\s*:/iu);
           // Each card is named at most once as the one this is about, never as the one asking.
           for (const gate of asks) {
             expect(root.textContent?.split(`&${gate.cardId} ${gate.cardTitle}`).length ?? 0).toBeLessThanOrEqual(2);
           }
-          // No "type your answer" line beside buttons a card ask drew.
-          if (root.querySelector('[data-agenda-card-ask]') !== null) {
+          // No "type your answer" line beside buttons a card ask drew, or beside the item's own row.
+          if (root.querySelector('[data-agenda-card-ask]') !== null || one === 'own-row') {
             expect(root.textContent).not.toContain('Type your answer below.');
           }
         });
@@ -161,17 +180,18 @@ const carrying = (fields: Partial<AgendaItem>, asks: readonly AgendaGate[] = [fi
     cardAsks: asks.map(gate => ({ gate, at: '2026-08-01T11:00:00.000Z' })),
   } as unknown as Partial<AgendaItem>);
 
-describe('the one answer row holds after the owner wrote a reply (&B155 offer)', () => {
+describe('the one answer row holds after the owner wrote a reply (&B155: nothing is shown back about the words)', () => {
   const said: readonly HistoryEvent[] = [
     { kind: 'owner', key: 'o1', at: Date.parse('2026-08-01T11:30:00.000Z'), text: 'works now' },
   ];
   for (const typedAnswer of [false, true]) {
-    for (const [name, fields] of KINDS) {
-      test(`${name}${typedAnswer ? ', in the Inbox' : ''}: one Done or Good, however the offer reads`, async () => {
+    for (const [name, fields, one] of KINDS) {
+      test(`${name}${typedAnswer ? ', in the Inbox' : ''}: no prompt about the words, and the same one row`, async () => {
         const root = await draw(carrying(fields), typedAnswer, said);
-        expect(answerRows(root)).toHaveLength(1);
-        expect(answerButtons(root, 'Done').length + answerButtons(root, 'Good').length).toBe(1);
-        expect(root.querySelector('[data-agenda-reply-offer] button')).toBeNull();
+        expect(answerRows(root)).toHaveLength(one === 'own-words' ? 0 : 1);
+        expect(answerButtons(root, 'Done').length + answerButtons(root, 'Good').length).toBe(one === 'card' ? 1 : 0);
+        expect(root.querySelector('[data-agenda-reply-offer]')).toBeNull();
+        expect(root.textContent).not.toMatch(/If that is your answer/u);
       });
     }
   }
@@ -221,12 +241,47 @@ describe('an item with buttons of its own asks its card ask first', () => {
     expect(answerButtons(root, 'Done')[0]?.closest('[data-agenda-card-ask]')).not.toBeNull();
   });
 
-  test('the second card ask is named as next, never drawn as a row of its own', async () => {
+  test('a second card ask is named as next, never drawn as a row of its own', async () => {
+    const root = await draw(
+      carrying({ kind: 'task', subject: 'Rotate the key', ask: { kind: 'task' } }, [first, second]),
+      false,
+    );
+    expect(root.querySelectorAll('[data-agenda-card-ask]')).toHaveLength(1);
+    expect(root.querySelector('[data-agenda-card-ask-later="gate:F13:released:4"]')).not.toBeNull();
+  });
+});
+
+describe('an item that asks a question of its own answers THAT question (&B165 finding 1)', () => {
+  test('a ferret’s question keeps its reply box; the try-it on the same card is one "Next" line, never a second ask', async () => {
+    const root = await draw(
+      carrying({
+        kind: 'reply',
+        subject: 'Should a capacity request wait for the owner?',
+        ask: { kind: 'open-question' },
+      }),
+      false,
+    );
+    expect(answerRows(root)).toHaveLength(0);
+    expect(root.querySelector('[data-agenda-card-ask]')).toBeNull();
+    expect(root.textContent).toContain('Type your answer below.');
+    for (const label of ['Done', 'Good', 'Not good']) expect(answerButtons(root, label)).toHaveLength(0);
+    expect(root.querySelector('[data-agenda-card-ask-later="gate:F12:released:4"]')?.textContent).toContain(
+      '&F12 Badge colour',
+    );
+    // One "What I need from you", and the question said ONCE.
+    expect(root.querySelectorAll('[data-agenda-need]')).toHaveLength(1);
+    expect(root.textContent?.split('Should a capacity request wait for the owner?').length).toBeLessThanOrEqual(3);
+  });
+
+  test('a choice keeps its own buttons; the try-it waits behind them', async () => {
     const root = await draw(
       carrying({ kind: 'choice', subject: 'Which colour?', ask: choices('Blue', 'Green') }, [first, second]),
       false,
     );
-    expect(root.querySelectorAll('[data-agenda-card-ask]')).toHaveLength(1);
+    expect(answerRows(root)).toHaveLength(1);
+    expect(answerButtons(root, 'Blue')).toHaveLength(1);
+    expect(root.querySelectorAll('[data-agenda-card-ask]')).toHaveLength(0);
+    expect(root.querySelector('[data-agenda-card-ask-later="gate:F12:released:4"]')).not.toBeNull();
     expect(root.querySelector('[data-agenda-card-ask-later="gate:F13:released:4"]')).not.toBeNull();
   });
 });
@@ -332,6 +387,10 @@ describe('Not yet on one approval leaves the next reachable', () => {
     const item = agendaItem('A9', {
       kind: 'reply',
       subject: 'Two plans',
+      generatedSubject: 'Two plans',
+      raisedBy: 'daemon',
+      source: 'task',
+      sourceRef: 'card-agenda:F12',
       ask: { kind: 'open-question' },
       cardAsks: [
         { gate: f12, at: '2026-08-01T11:00:00.000Z', notYet: { at: '2026-08-01T11:30:00.000Z' } },
@@ -362,14 +421,14 @@ describe('a refused answer is said beside the one ask', () => {
         swipeable={false}
       />,
     );
-    const ask = must(view.container.querySelector('[data-agenda-card-ask]'), 'the ask');
-    expect(ask.textContent).toContain('card moved on');
+    // The item asks its own question, so the answer row is its own and the error is said beside THAT: once.
+    expect(view.container.querySelector('[data-agenda-card-ask]')).toBeNull();
     expect(view.container.textContent?.split('card moved on').length).toBe(2);
   });
 });
 
 describe('the compact card answers the same ask', () => {
-  test('a choice carrying a try-it shows the try-it’s answers, each marked for it, and holds Blue / Green', async () => {
+  test('a choice carrying a try-it shows its own Blue / Green; a to-do shows the try-it’s answers, each marked for it', async () => {
     const acted: InboxAction[] = [];
     view = await mount(
       <AgendaCard
@@ -377,8 +436,17 @@ describe('the compact card answers the same ask', () => {
         onAct={action => acted.push(action)}
       />,
     );
-    const root = must(view.container, 'the card');
-    expect(root.querySelector('[data-agenda-option="Blue"]')).toBeNull();
+    let root = must(view.container, 'the card');
+    expect(root.querySelector('[data-agenda-option="Blue"]')).not.toBeNull();
+    expect(root.querySelector('[data-agenda-option="Done"]')).toBeNull();
+    await view.unmount();
+    view = await mount(
+      <AgendaCard
+        item={carrying({ kind: 'task', subject: 'Rotate the key', ask: { kind: 'task' } })}
+        onAct={action => acted.push(action)}
+      />,
+    );
+    root = must(view.container, 'the card');
     expect(root.querySelector('[data-agenda-card-ask-ref]')?.textContent).toContain('&F12');
     expect(root.querySelector('[data-agenda-own-row-held]')).not.toBeNull();
     const done = must(root.querySelector<HTMLElement>('[data-agenda-option="Done"]'), 'Done');

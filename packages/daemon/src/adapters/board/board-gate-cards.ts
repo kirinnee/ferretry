@@ -85,5 +85,6 @@ const cardOf = (
   laneSet,
   audience,
   blockedBy: view.blockedBy,
+  building: view.rollup.byCategory.backlog + view.rollup.byCategory.active + view.rollup.byCategory.review,
   ...(projectName === undefined ? {} : { projectName }),
 });

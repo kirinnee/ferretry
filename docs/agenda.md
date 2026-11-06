@@ -68,8 +68,13 @@ daemon decides one of three things, in one pure function (`tryItVerdict`, `gate-
    again as usual. The daemon looks
    at every card at a stage again on each board write and on each Warden sweep (`GateItems.sweep`), so a dependency
    that ships frees its dependants within one sweep.
+   **An umbrella card waits too**: while any of its live sub-cards is still being built (a backlog, active or review
+   lane), a PR linked to the umbrella itself shipping does not make it ready to try. Nothing is asked and nothing
+   closes; the next look after its sub-cards ship decides again. (The owner's case, 11-06: &C50 "Split fyd.ts" got a
+   try-it when a prerequisite PR linked to it was released.)
 2. **Nothing to try.** Any of these:
    - the card is **private** (stored `visibility`, else the daemon's default for who asked);
+   - the card is **internal work**: its kind is `chore` (a refactor, a clean-up, a migration — nothing a person sees);
    - it has **no How to test**, or its How to test **as a whole** is one complete no-testing declaration
      (`saysNothingToTry`, a closed grammar — never a list of banned verbs). The whole text, trimmed, one sentence with an
      optional final period, is a **declaration**: "Nothing to try", "Nothing to test", "Nothing for you to try|test",
@@ -1578,16 +1583,11 @@ and a part the item does not carry is not drawn:
   the item runs; when its card asks are its answer, their buttons are inside "What I need from you" and nothing docks.
   A card ask's How to test is the daemon's (`howToTest` on the ask), else read from the board the app already loads
   (`howToTestFor`).
-- **A reply that already says yes is offered as the card's answer (&B155).** The owner who answers an item holding a
-  card ask in words ("build", "ok to build!") has not pressed the card's button, so the card stays where it is and the
-  ferret may not press it for them. When the owner's words are the LAST thing on the item and plainly approve, the card
-  ask says "You replied “build”. If that is your answer, tap OK to build." above its forward button (OK to build, Done),
-  in words, never a second button (`replyApproval`). It is only offered, never applied, and only conservatively: ONE open card ask
-  (counted in `cardAsks`, never the one-ask `gateAttached` mirror, so an item from a daemon that keeps none offers
-  nothing), one forward option, words written AFTER that ask was raised, and a short approval (yes, ok, go ahead,
-  lgtm, ship it…; build words only for OK to build, "works" or "tested" only for Done) or the button's own label. The
-  item's own reference the composer puts in front ("!A304 ok to build!") is set aside, and only that one. Nothing
-  longer is read, and a ferret reply after the words withdraws the offer.
+- **A reply that already says yes is a reply, and nothing is said back (&B155, v4).** The owner who types "build" or "works now"
+  has not pressed the card's button, so the card stays where it is. The ask does NOT draw a line above its button ("You wrote
+  … tap Good"): that was a second prompt beside the one row, which read as a second ask. The words are a reply (see below), the
+  one row's button is the answer, and a typed answer that WAS sent says what it sent ("Sent your words on !A404: “It scanned,…”"),
+  never the label the words rode on.
 - **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
   part 6, "What I need from you", with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item
   the owner opens themselves, or one paged to from the one a push opened, starts at its top.
@@ -1714,11 +1714,20 @@ movements"_). One pure rule decides it for every kind (`itemAskPlan` in `package
   along as for any Not good); at an approval **Not yet**, the card staying while its ferret reads the words (words alone: a Send with files is refused, saying so, and the box keeps the words and the files). Elsewhere
   (the chat's agenda, which draws no such box) the ask keeps the gate's own buttons, Done and Not good: an ask is never
   drawn with "type what is wrong" and nowhere to type it.
-- **An item with buttons of its own** (a choice, a to-do's Done, a notice, Request changes) asks its card ask FIRST and
-  holds its own buttons behind it, one plain line saying so ("First answer the try-it below; the buttons for this come
-  back once it is answered."). The daemon refuses an item's own Done while a card ask is open and takes the card ask's
-  answer first, so the other order would ask for an answer that cannot land. Once the card ask is answered its own
-  buttons come back: still one row at a time.
+- **An item that asks a question of its OWN answers THAT question** (a ferret's question, a choice, a permission, a review: the
+  daemon's `itemAsksOwnQuestion`). Its answers are the one ask — typed words, or its own buttons — and a try-it on the same
+  card is never squeezed in beside them. The card ask is named on one plain line ("Next: try it, for &F12 Badge colour. It is
+  asked here once you have answered.") and takes the answer row when the question is answered (an item whose question was
+  answered in words rests, and the daemon keeps it in Needs you while a card ask stays open). A **to-do's Done, an info's Got it
+  and a notice** close the item, which the daemon refuses while a card ask is open, so there the card ask goes FIRST and the
+  item's own buttons wait behind it ("First answer the try-it below; the buttons for this come back once it is answered.").
+  Either way: one row at a time, one "What I need from you".
+- **A finished item** (resolved or done) is a record: how it ended is said ONCE (the settled line, or the Done chip when the host
+  draws none, and never a stage chip saying Done again), and it has no "What I need from you" box to repeat its headline. The
+  question or ask is also said once while open: the block leads with it, so the head does not repeat it under the title.
+- **A notice answered by a form of its cards** ("3 cards have nobody working on them": a pick per card, one Send) needs the owner:
+  its chip says Needs you, its list row is a tile like any item, its picks are one compact row per card, and its one Send sticks to
+  the foot of the view so it is always in reach.
 - **Which card ask is first**: the first one still waiting for an answer. One the owner said **Not yet** to waits behind
   the others (still named, asked again once they are answered; of several, the one set aside longest ago first), so a
   deferred approval never blocks the next one. The app, the daemon's `gateAttached` mirror and an older app's unnamed
@@ -1736,8 +1745,7 @@ movements"_). One pure rule decides it for every kind (`itemAskPlan` in `package
   row. No card heading, no "Close card".
 
 There is no second box, no "Card &F12: your answer for the card" heading and no exception for a ferret's own thread: a
-thread whose own question stands keeps that question, and the card ask under it is drawn as the item's ask in the same
-words. `scripts/validate/owner-surface-words.sh` fails the build on the old words, and
+thread whose own question stands keeps that question as the one ask, and the card ask under it waits, named on one line. `scripts/validate/owner-surface-words.sh` fails the build on the old words, and
 `packages/pwa/tests/unit/features/agenda-one-answer-row.test.tsx` draws every kind with card asks and counts one answer
 row.
 
@@ -1749,9 +1757,8 @@ row.
 - **It is a direct call**, not a chat send: it bypasses the device send outbox and sends the words exactly as typed — no
   `!A404` reference prefix, no "See the attached files." stand-in, no location block.
 - **One exception: words that CLEARLY approve a try-it** ("works now", "it works", "good", "lgtm", "tested, ok" — the
-  `replyApproval` vocabulary of &B155, read by `typedApproval`). Sent as Not good they would send a finished card back,
-  so they go as an ordinary reply about the item, and the ask says them back right above Good, in words: **"You wrote
-  “works now”. If that is your answer, tap Good."** — never a second button. They never move the card by themselves, **and they never move the item:** the words are logged and the
+  vocabulary of &B155, read by `typedApproval`). Sent as Not good they would send a finished card back,
+  so they go as an ordinary reply about the item. Nothing is said back above Good (no "You wrote … tap Good"). They never move the card by themselves, **and they never move the item:** the words are logged and the
   ferret reads them, but the card ask is still open, so the item **stays in Needs you** with its Good (the app does not hide it
   as replied, and the daemon does not park it — `replyKeepsCardAskOpen`). A reply on an item that asks its own question beside
   the card ask is that question's answer and parks it as any reply does. Anything not plainly positive (a "but", a

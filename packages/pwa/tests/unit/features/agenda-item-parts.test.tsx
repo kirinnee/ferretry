@@ -131,7 +131,10 @@ describe('the item view’s parts', () => {
 
   test('the head draws the description — the item’s summary — whole, right under its two small chips', async () => {
     const long = `Which colour for the badge? ${'It sits on every row and is the first thing the owner sees. '.repeat(20)}End.`;
-    await draw(agendaItem('A47', { ...full, subject: long } as Partial<AgendaItem>));
+    // The question is asked on its own line ("What I need from you" says it), so the summary under the chips is a different line.
+    await draw(
+      agendaItem('A47', { ...full, subject: long, questions: [{ question: 'Blue or green?' }] } as Partial<AgendaItem>),
+    );
     const head = one('[data-agenda-part="head"]');
     const description = must(head.querySelector('[data-agenda-description]'), 'the description');
     expect(description.textContent).toBe(long);
@@ -295,24 +298,47 @@ describe('the conversation', () => {
 });
 
 describe('what it needs from you', () => {
-  // The same item answered in words: its card ask is then its answer, drawn as the item's own ask.
+  // The agenda the daemon opened for the card: its ask line only repeats the card, so the card ask is its whole ask, drawn as
+  // the item's own.
   const asking = agendaItem('A47', {
     ...full,
     kind: 'reply',
     ask: { kind: 'open-question' },
+    subject: 'Try it: Badge colour',
+    raisedBy: 'daemon',
+    source: 'task',
+    sourceRef: 'card-agenda:F12',
+    generatedSubject: 'Try it: Badge colour',
+  } as unknown as Partial<AgendaItem>);
+  // A ferret's own question on a card that also has a try-it open.
+  const asksItsOwn = agendaItem('A47', {
+    ...full,
+    kind: 'reply',
+    ask: { kind: 'open-question' },
+    subject: 'Which colour for the badge?',
   } as unknown as Partial<AgendaItem>);
 
-  // &B165: one answer row. An item with buttons of its own keeps them; its card ask is named, and asked next.
-  test('keeps ONE answer row on an item with buttons of its own: the card ask first, its own buttons held', async () => {
+  // &B165: one answer row. An item that asks its own choice keeps ITS buttons as the one row; its card ask is named, asked next.
+  test('keeps ONE answer row on an item that asks its own choice: its buttons, the try-it named as next', async () => {
     await draw(full);
     const needs = one('[data-agenda-part="needs"]');
-    expect(needs.querySelector('[data-agenda-card-ask="gate:F12:tested:3"]')).not.toBeNull();
-    expect(one('[data-agenda-own-row-held]').textContent).toBe(
-      'First answer the try-it below; the buttons for this come back once it is answered.',
+    expect(needs.querySelector('[data-agenda-card-ask]')).toBeNull();
+    expect(one('[data-agenda-card-ask-later]').textContent).toBe(
+      'Next: try it, for &F12 Badge colour. It is asked here once you have answered.',
     );
-    expect(root().querySelectorAll('[data-agenda-option="Done"]')).toHaveLength(1);
-    expect(root().querySelectorAll('[data-agenda-option="Blue"]')).toHaveLength(0);
+    expect(root().querySelectorAll('[data-agenda-option="Done"]')).toHaveLength(0);
+    expect(root().querySelectorAll('[data-agenda-option="Blue"]')).toHaveLength(1);
+    expect(root().querySelectorAll('[data-agenda-need]')).toHaveLength(1);
     expect(root().textContent).not.toMatch(/your answer for|Card &F12|card ask/iu);
+  });
+
+  test('keeps a ferret’s own question in words: no Done / Not good beside it, the try-it named as next, the question said once', async () => {
+    await draw(asksItsOwn);
+    expect(root().querySelector('[data-agenda-card-ask]')).toBeNull();
+    expect(root().querySelectorAll('[data-agenda-answer-option], [data-agenda-option]')).toHaveLength(0);
+    expect(one('[data-agenda-need-lead]').textContent).toBe('Type your answer below.');
+    expect(one('[data-agenda-card-ask-later]').textContent).toContain('&F12 Badge colour');
+    expect(root().textContent?.match(/Which colour for the badge\?/gu)).toHaveLength(1);
   });
 
   test('gives an item its own buttons back once its card ask is answered', async () => {
@@ -331,8 +357,8 @@ describe('what it needs from you', () => {
     expect(ask.closest('[data-agenda-need]')).not.toBeNull();
     expect(ask.querySelector('[data-agenda-card-ask-ref]')?.textContent).toBe('For &F12 Badge colour');
     expect(root().querySelector('.fy-item-view__dock [data-agenda-card-ask]')).toBeNull();
-    // Its own question stays (it says something the card ask does not); no "Type your answer below" beside buttons.
-    expect(one('[data-agenda-question-line]').textContent).toContain('Which colour for the badge?');
+    // The daemon's ask line only repeats the card, so it is not said twice; no "Type your answer below" beside buttons.
+    expect(needs.querySelector('[data-agenda-question-line]')).toBeNull();
     expect(needs.textContent).not.toContain('Type your answer below.');
     const labels = [...ask.querySelectorAll('[data-agenda-option]')].map(node =>
       node.getAttribute('data-agenda-option'),
@@ -342,24 +368,15 @@ describe('what it needs from you', () => {
     expect(acted).toEqual([expect.objectContaining({ kind: 'respond', label: 'Done', gate: true })]);
   });
 
-  test('offers the owner’s plain “yes” reply as the card ask’s answer, pointing at the one row, never applied (&B155)', async () => {
+  test('draws no second prompt for the owner’s plain “yes” reply: the one row’s Done is the only answer (&B155)', async () => {
     const acted = await draw(asking, {}, [{ kind: 'owner', key: 'o1', at: NOW - 1_000, text: 'works for me!' }]);
-    const offer = one('[data-agenda-card-ask] [data-agenda-reply-offer]');
-    expect(offer.textContent).toContain('You replied “works for me!”. If that is your answer, tap Done.');
-    // Words only: the one row's Done is still the one place to answer.
-    expect(offer.querySelector('button')).toBeNull();
+    expect(root().querySelector('[data-agenda-reply-offer]')).toBeNull();
+    expect(root().textContent).not.toMatch(/If that is your answer/u);
     expect(acted).toEqual([]);
     await interact(() => one<HTMLButtonElement>('[data-agenda-card-ask] [data-agenda-option="Done"]').click());
     expect(acted).toEqual([
       expect.objectContaining({ kind: 'respond', label: 'Done', gate: true, cardAsk: 'gate:F12:tested:3' }),
     ]);
-    await unmount();
-    // Longer words, or the ferret answering after them, offer nothing.
-    await draw(asking, {}, [{ kind: 'owner', key: 'o1', at: NOW - 1_000, text: 'works, but the colour is off' }]);
-    expect(root().querySelector('[data-agenda-reply-offer]')).toBeNull();
-    await unmount();
-    await draw(asking, {}, conversation);
-    expect(root().querySelector('[data-agenda-reply-offer]')).toBeNull();
   });
 
   test('is marked out while the item needs the owner, and quiet once it rests', async () => {
@@ -439,7 +456,7 @@ describe('what it needs from you', () => {
       expect(blocks.map(block => block.getAttribute('data-agenda-card-ask'))).toEqual(['gate:F12:tested:3']);
       expect(one('[data-agenda-card-ask-ref]').textContent).toBe('For &F12 Badge colour');
       expect(one('[data-agenda-card-ask-later]').textContent).toBe(
-        'Next: try it, for &F13 Badge shape. It is asked here once you answer above.',
+        'Next: try it, for &F13 Badge shape. It is asked here once you have answered.',
       );
       expect(root().querySelectorAll('[data-agenda-option="Done"]')).toHaveLength(1);
       expect(root().textContent).not.toMatch(/your answer|Card &F1|card ask/iu);
@@ -468,7 +485,7 @@ describe('what it needs from you', () => {
   });
 
   // &B156: !A304 was a reply with three questions carrying "OK to build" for &F923, and the app drew no button for it.
-  test('draws a card ask’s own buttons on a thread of questions, which is still answered in words', async () => {
+  test('keeps a thread of questions answered in words: its try-it waits as next, never squeezed beside the questions', async () => {
     const plan = {
       ...gate,
       cardId: 'F923',
@@ -476,7 +493,7 @@ describe('what it needs from you', () => {
       laneName: 'Plan',
       options: [{ id: 'ok', label: 'OK to build', outcome: 'next' }],
     };
-    const acted = await draw(
+    await draw(
       agendaItem('A304', {
         kind: 'reply',
         ask: { kind: 'open-question' },
@@ -489,14 +506,12 @@ describe('what it needs from you', () => {
       } as unknown as Partial<AgendaItem>),
     );
     const needs = one('[data-agenda-part="needs"]');
-    const ask = must(needs.querySelector('[data-agenda-card-ask="gate:F923:plan:3"]'), 'the card ask');
-    const ok = must(ask.querySelector<HTMLButtonElement>('[data-agenda-option="OK to build"]'), 'OK to build');
-    // The thread's own questions are still asked, in words, with no buttons and no empty heading of their own.
+    // The thread's own questions are asked, in words, with no buttons: the plan to approve is one line, named, not a second row.
+    expect(needs.querySelector('[data-agenda-card-ask]')).toBeNull();
+    expect(needs.querySelectorAll('[data-agenda-option]')).toHaveLength(0);
     expect(needs.textContent).toContain('Three?');
     expect(needs.querySelector('[data-agenda-item-answer]')).toBeNull();
-    await interact(() => ok.click());
-    expect(acted).toHaveLength(1);
-    expect(acted[0]).toMatchObject({ gate: true, cardAsk: 'gate:F923:plan:3' });
+    expect(needs.querySelector('[data-agenda-card-ask-later="gate:F923:plan:3"]')).not.toBeNull();
   });
 
   test('draws no card ask on an earlier version, which only reads', async () => {

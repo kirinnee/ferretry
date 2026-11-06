@@ -74,7 +74,7 @@ import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
 import { mergeGateOf } from './merge-gate.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
 import { gateEntry, nothingToTryReason, stageGateLanes, tryItVerdict } from './gate-policy.ts';
-import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
+import { BoardIndex, blockedBy, cardCategory, type LaneSets, stillBuilding } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
 import { approvalProblem, cardLicence, offBoardRefusal } from './opt-in.ts';
 import { cardAudience, decideAskedBy } from './origin.ts';
@@ -406,7 +406,11 @@ export class BoardService {
         lane === undefined
           ? undefined
           : tryItVerdict(
-              { ...current, blockedBy: blockedBy(current, context.index, context.laneSets) },
+              {
+                ...current,
+                blockedBy: blockedBy(current, context.index, context.laneSets),
+                building: stillBuilding(current, context.index, context.laneSets),
+              },
               { options: [...stageGateLanes.options(lane)] },
             );
       if (verdict?.kind !== 'nothing' || nothingToTryReason(verdict.why) !== reason)

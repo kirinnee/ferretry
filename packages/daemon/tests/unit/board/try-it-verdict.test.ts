@@ -67,12 +67,35 @@ describe('tryItVerdict', () => {
       should(tryItVerdict(held, TRY_IT)).eql({ kind: 'wait', why: 'it is blocked: waiting on the vendor' });
     });
 
+    it('waits on an umbrella card while its sub-cards are still being built, even with steps and a code PR', () => {
+      const umbrella = { ...tryable(withPrs(pr(1536, 'code'))), building: 1 };
+      should(tryItVerdict(umbrella, TRY_IT)).eql({
+        kind: 'wait',
+        why: 'it is an umbrella card: 1 of its sub-cards is still being built',
+      });
+      should(tryItVerdict({ ...umbrella, building: 3 }, TRY_IT)).match({
+        why: 'it is an umbrella card: 3 of its sub-cards are still being built',
+      });
+    });
+
+    it('decides as for any card once no sub-card is still being built', () => {
+      should(tryItVerdict({ ...tryable(), building: 0 }, TRY_IT)).eql({ kind: 'ask' });
+    });
+
     it('does not wait for a dependency list that is empty', () => {
       should(tryItVerdict({ ...tryable(), blockedBy: [] }, TRY_IT)).eql({ kind: 'ask' });
     });
   });
 
   describe('nothing', () => {
+    it('finds nothing to try in internal work (a chore), even with steps and a code PR', () => {
+      should(tryItVerdict(tryable({ kind: 'chore', ...withPrs(pr(1536, 'code')) }), TRY_IT)).eql({
+        kind: 'nothing',
+        why: 'it is internal work, with nothing a person sees',
+      });
+      should(tryItVerdict(tryable({ kind: 'feature' }), TRY_IT)).eql({ kind: 'ask' });
+    });
+
     it('finds nothing to try on a private card, however it came to be private', () => {
       should(tryItVerdict(tryable({ visibility: 'private', visibilitySource: 'chosen' }), TRY_IT)).eql({
         kind: 'nothing',

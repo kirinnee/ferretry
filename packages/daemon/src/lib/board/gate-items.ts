@@ -668,7 +668,7 @@ export class GateItems implements CardWriteObserver {
     const verdict =
       seen === undefined || held.asked.has(gateReference(seen))
         ? undefined
-        : tryItVerdict({ ...task, blockedBy: card.blockedBy }, seen);
+        : tryItVerdict({ ...task, blockedBy: card.blockedBy, building: card.building }, seen);
     // Nothing to try: the card closes, so what follows is the card as it stands NOW, past that gate.
     const closed =
       seen !== undefined &&

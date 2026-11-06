@@ -475,13 +475,11 @@ describe('the open Inbox item', () => {
       expect(typed?.approves(no)).toBe(false);
     }
     await mounted.unmount();
-    // After the reply the card offers it back, and the tap answers the lane's pass exactly as Good does.
+    // After the reply nothing is shown back: the one row's Good is the only place to answer, and it answers the lane's pass.
     mounted = await draw(['!A404 works now']);
     await interact(() => Promise.resolve());
-    const offer = must(mounted.container.querySelector('[data-agenda-reply-offer]'), 'the offer');
-    expect(offer.textContent).toContain('You wrote “works now”. If that is your answer, tap Good.');
-    // Words only: the one row's Good is still the one place to answer.
-    expect(offer.querySelector('button')).toBeNull();
+    expect(mounted.container.querySelector('[data-agenda-reply-offer]')).toBeNull();
+    expect(mounted.container.textContent).not.toMatch(/If that is your answer/u);
     expect(fake.deferred.getSnapshot().pending).toEqual([]);
     await interact(() =>
       must(mounted.container.querySelector<HTMLButtonElement>('[data-agenda-answer-option="Done"]'), 'Good').click(),

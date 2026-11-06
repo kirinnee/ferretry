@@ -24,6 +24,22 @@ describe('the owner-surface words gate', () => {
     expect(found("const a = 'Card &F12: try it';", 'example.ts')).toEqual(['"Card &…:" heading']);
   });
 
+  test('finds the card narrated as the one acting: "the card goes back", "the card stays"', () => {
+    expect(found("const a = 'The card goes back with your words.';", 'example.ts')).toEqual([
+      '"the card <verb>s" narration',
+    ]);
+    expect(found('const a = <p>The card stays put and the ferret reads your words.</p>;')).toEqual([
+      '"the card <verb>s" narration',
+    ]);
+    expect(found("const a = 'Then the card comes back here.';", 'example.ts')).toEqual([
+      '"the card <verb>s" narration',
+    ]);
+    // The same words in a comment, or in the ferret's own terms, are not read.
+    expect(
+      found("// the card goes back with the words\nconst a = 'The ferret gets your words and tries again.';"),
+    ).toEqual([]);
+  });
+
   test('reads nothing nobody sees: comments, identifiers, data attributes, selectors and module paths', () => {
     expect(
       found(`

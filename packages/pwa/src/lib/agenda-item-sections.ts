@@ -29,8 +29,11 @@ import {
   askedCardAsks,
   agendaState,
   gateReference,
+  AGENDA_KIND_LABELS,
+  gateStyle,
   gateTypedLabel,
   itemAsksOwnQuestion,
+  TEST_KIND_LABEL,
   nothingToTryLine,
   openCardAsks,
   parseGateReference,
@@ -78,6 +81,11 @@ export interface StateChip {
 
 /** The STATE chip: the protocol's one state, said the way the owner reads it. */
 export const stateChip = (item: AgendaItem, ferret: string, now: number): StateChip => {
+  // A notice answered by a form of its cards (a pick per card, one Send) is something to DO: it needs the owner, whatever
+  // the protocol says of notices that only inform.
+  if (answersWithCardsForm(item) && (item as { readonly resolvedAt?: string }).resolvedAt === undefined) {
+    return { state: 'needs-you', label: 'Needs you' };
+  }
   const view = agendaState(item);
   switch (view.state) {
     case 'needs-you':
@@ -359,8 +367,13 @@ const cardAskSwipeMap = (asks: readonly ItemCardAsk[]): SwipeMap => {
  *   one plain reference line naming the card — never a "Card &F12" heading. Any other card ask is named, asked next
  *   (`later`): one thing at a time, one row. It goes first because it is always answerable: the daemon refuses the
  *   item's own Done while a card ask is open.
- * - **An item with buttons of its own** (a choice, a to-do, a notice, Request changes) keeps its question on screen, but
- *   its buttons wait (`ownRowHeld`) and come back once the card ask is answered.
+ * - **An item that asks a question of its OWN** (a ferret's question, a choice, a permission, a review) keeps THAT as the
+ *   one ask: its answers answer its question (typed words, or its own buttons), and a try-it on the same card never
+ *   shares the block (`ownFirst`). The card ask is named on one plain line, "Next", and is asked here once the question
+ *   is answered. (A to-do or a notice closes the item, which the daemon refuses while a card ask is open, so there the
+ *   card ask goes first.)
+ * - **Any other item with buttons of its own** keeps its question on screen, but its buttons wait (`ownRowHeld`) and
+ *   come back once the card ask is answered.
  * - The item's own ask line is kept when it says something the card ask does not (`ownLine`): a ferret's own question,
  *   its numbered questions or fields stay; the daemon's "Try it: …" line that only repeats the ask goes. "Type your
  *   answer below" is never said beside buttons.
@@ -371,6 +384,8 @@ const cardAskSwipeMap = (asks: readonly ItemCardAsk[]): SwipeMap => {
 export interface ItemAskPlan {
   readonly asks: readonly ItemCardAsk[];
   readonly later: readonly ItemCardAsk[];
+  /** The item's own question is the one ask: no card ask is drawn as an answer row, all of them wait (`later`). */
+  readonly ownFirst: boolean;
   readonly ownLine: boolean;
   /** The item's own buttons wait behind the card ask: drawn again once it is answered. */
   readonly ownRowHeld: boolean;
@@ -381,6 +396,7 @@ export interface ItemAskPlan {
 const NO_CARD_ASKS: ItemAskPlan = {
   asks: [],
   later: [],
+  ownFirst: false,
   ownLine: true,
   ownRowHeld: false,
   typed: undefined,
@@ -393,6 +409,12 @@ const hasOwnRow = (item: AgendaItem): boolean => {
   return model.notice || model.answers.length > 0 || model.requestChanges !== undefined;
 };
 
+/** Whether answering the item's own row closes it (a to-do's Mark as done, a notice's Got it). */
+const closesItem = (item: AgendaItem): boolean => {
+  const model = cardModel(item);
+  return model.notice || model.shape === 'todo' || model.shape === 'info';
+};
+
 export const itemAskPlan = (
   item: AgendaItem,
   asks: readonly ItemCardAsk[],
@@ -400,6 +422,21 @@ export const itemAskPlan = (
 ): ItemAskPlan => {
   const [first, ...rest] = asks;
   if (first === undefined) return NO_CARD_ASKS;
+  // An item that asks a question of its OWN answers THAT (typed words, a choice, a permission, a review): its answers are
+  // never the try-it's Done / Not good. Only a to-do or a notice, which CLOSE the item (refused by the daemon while a card
+  // ask is open), let the card ask go first.
+  const own = itemAsksOwnQuestion(item, asks);
+  if (own && !closesItem(item)) {
+    return {
+      asks: [],
+      later: asks,
+      ownFirst: true,
+      ownLine: true,
+      ownRowHeld: false,
+      typed: undefined,
+      swipes: undefined,
+    };
+  }
   // The card ask is asked FIRST: the daemon refuses the item's own Done while one is open, and always takes the ask's
   // answer, so an item's own buttons wait behind it and come back once it is answered (never the other way round).
   const ownRow = hasOwnRow(item);
@@ -410,7 +447,15 @@ export const itemAskPlan = (
   // own, and no other ask behind it. Anything the item asks itself keeps the box as its reply.
   const whole = !ownRow && !ownLine && rest.length === 0;
   const typed = options.typedHost === true && whole && gateTypedLabel(first.gate) !== undefined ? first : undefined;
-  return { asks: [first], later: rest, ownLine, ownRowHeld: ownRow, typed, swipes: cardAskSwipeMap([first]) };
+  return {
+    asks: [first],
+    later: rest,
+    ownFirst: false,
+    ownLine,
+    ownRowHeld: ownRow,
+    typed,
+    swipes: cardAskSwipeMap([first]),
+  };
 };
 
 /**
@@ -425,6 +470,19 @@ export const typedCardAsk = (
   const typed = itemAskPlan(item, itemCardAsks(item, howToTestFor), { typedHost: true }).typed;
   return typed === undefined ? undefined : openCardAsks(item).find(ask => gateReference(ask.gate) === typed.key);
 };
+
+/**
+ * The ONE word that says what an item asks when its whole ask is a card ask: "Test" for a card to try, "Approve" for a plan.
+ * The Inbox's list row and the open item's chip both read it, so the same item never says Question in one and Test in the
+ * other. `undefined` when the item asks something else (its own question, a notice): those keep their kind's word.
+ */
+export const planAskWord = (plan: Pick<ItemAskPlan, 'asks'>): string | undefined => {
+  const [first] = plan.asks;
+  if (first === undefined) return undefined;
+  return gateStyle(first.gate) === 'try-it' ? TEST_KIND_LABEL : AGENDA_KIND_LABELS.permission;
+};
+
+export const itemAskWord = (item: AgendaItem): string | undefined => planAskWord(itemAskPlan(item, itemCardAsks(item)));
 
 /** Whether the item is a notice about cards, answered by its one form (`AgendaCardsList`) and nothing else. */
 export const answersWithCardsForm = (item: Pick<AgendaItem, 'cards'>): boolean => (item.cards?.length ?? 0) > 0;

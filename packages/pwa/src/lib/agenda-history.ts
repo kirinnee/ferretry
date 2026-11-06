@@ -91,7 +91,7 @@ export type HistoryEvent =
 const citesPattern = (id: AgendaItem['id']): RegExp => new RegExp(`(?:^|[^\\w])!${id}(?![\\w])`, 'u');
 
 /** A plain reply without the reference the composer put in front of it: the bubble says what the owner typed. */
-export const withoutLeadingReference = (text: string, id: AgendaItem['id']): string => {
+const withoutLeadingReference = (text: string, id: AgendaItem['id']): string => {
   const stripped = text.replace(new RegExp(`^\\s*!${id}(?![\\w])[\\s:,—-]*`, 'u'), '');
   return stripped.trim() === '' ? text.trim() : stripped.trim();
 };

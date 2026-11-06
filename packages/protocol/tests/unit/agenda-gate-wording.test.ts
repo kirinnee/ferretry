@@ -54,7 +54,7 @@ describe('a gate’s style comes from its lane’s stage', () => {
     should(gateTypedLabel(gate(OK))).equal('Not yet');
     should(gateTypedLabel(gate())).be.undefined();
     should(gateTypedLead(gate(DONE, NOT_GOOD))).match(/Not good\? Type what is wrong/u);
-    should(gateTypedLead(gate(OK))).match(/stays put/u);
+    should(gateTypedLead(gate(OK))).match(/ferret reads your words first/u);
     should(gateTypedPlaceholder(gate(DONE, NOT_GOOD))).equal('What is wrong, or what needs changing?');
     should(gateTypedPlaceholder(gate(OK))).equal('What should change first?');
   });

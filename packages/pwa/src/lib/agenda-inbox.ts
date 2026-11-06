@@ -583,7 +583,18 @@ export const actionSentence = (action: InboxAction, id: AgendaId, now = Date.now
   if (action.label === 'Reply') return `Replied to !${id}`;
   if (action.kind === 'resolve' && action.label === 'Clear') return `Cleared !${id}`;
   if (action.kind === 'resolve') return `Marked !${id} done`;
+  // Words typed as the answer ("Not good" with what is wrong): say what was SENT, never the label the words rode on.
+  if (action.kind === 'respond' && action.note !== undefined && action.note.trim() !== '') {
+    return `Sent your words on !${id}: “${clipped(action.note)}”`;
+  }
   return `Answered !${id}: ${action.label}`;
+};
+
+/** The most of a typed answer a receipt repeats: enough to know which one it was. */
+const RECEIPT_WORDS = 14;
+const clipped = (words: string): string => {
+  const one = words.replace(/\s+/gu, ' ').trim();
+  return one.length <= RECEIPT_WORDS ? one : `${one.slice(0, RECEIPT_WORDS - 1).trimEnd()}…`;
 };
 
 /** How long an answer waits, undoable, before it is sent. */

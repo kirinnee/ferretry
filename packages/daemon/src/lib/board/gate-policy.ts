@@ -111,6 +111,8 @@ export interface GateCard {
   readonly projectName?: string;
   /** The dependencies still holding the card back, as the board computes them (`blockedBy`); absent reads as none. */
   readonly blockedBy?: readonly TaskRef[];
+  /** Its live sub-cards still being built (a backlog, active or review lane); absent reads as none. */
+  readonly building?: number;
 }
 
 /**
@@ -259,17 +261,22 @@ export const saysNothingToTry = (howToTest: string | null | undefined): boolean 
 /** The card as the try-it verdict reads it: what it is, what it waits on, what its steps and its shipped PRs say. */
 export type TryItFacts = Pick<
   BoardTask,
-  'ask' | 'askedBy' | 'parent' | 'visibility' | 'visibilitySource' | 'blocked' | 'howToTest' | 'links'
-> & { readonly blockedBy?: readonly TaskRef[] | undefined };
+  'ask' | 'askedBy' | 'parent' | 'visibility' | 'visibilitySource' | 'blocked' | 'howToTest' | 'links' | 'kind'
+> & {
+  readonly blockedBy?: readonly TaskRef[] | undefined;
+  /** Its live sub-cards still being built (a backlog, active or review lane); absent reads as none. */
+  readonly building?: number | undefined;
+};
 
 /**
  * WHAT TO DO AT A TRY-IT GATE, in this order. The plan gate ("OK to build") is never touched: it asks.
  *
- * 1. **wait** — the card is blocked (an open dependency, or blocked by hand): it is not ready to try, so nothing is asked
- *    and nothing closes. When it is unblocked the next look at the card asks as usual.
- * 2. **nothing** — it is a private card; or it has no How to test, or its How to test says there is nothing to try; or
- *    every merged PR it links changed only docs, design or tests, and there is at least one, each of a KNOWN kind.
- *    An unknown kind is treated as code.
+ * 1. **wait** — the card is blocked (an open dependency, or blocked by hand), or it is an UMBRELLA card whose sub-cards
+ *    are still being built (a PR linked to the umbrella itself shipped, but the work it stands for has not): it is not
+ *    ready to try, so nothing is asked and nothing closes. When that changes, the next look at the card decides again.
+ * 2. **nothing** — it is a private card; or internal work (a chore: a refactor, a clean-up — nothing a person sees);
+ *    or it has no How to test, or its How to test says there is nothing to try; or every merged PR it links changed
+ *    only docs, design or tests, and there is at least one, each of a KNOWN kind. An unknown kind is treated as code.
  * 3. **ask** — anything else.
  *
  * Pure and total.
@@ -283,7 +290,15 @@ export const tryItVerdict = (card: TryItFacts, gate: Pick<AgendaGate, 'options'>
   if (card.blocked !== null && card.blocked !== undefined) {
     return { kind: 'wait', why: `it is blocked: ${card.blocked.reason}` };
   }
+  const building = card.building ?? 0;
+  if (building > 0) {
+    return {
+      kind: 'wait',
+      why: `it is an umbrella card: ${String(building)} of its sub-cards ${building === 1 ? 'is' : 'are'} still being built`,
+    };
+  }
   if (cardVisibility(card) === 'private') return { kind: 'nothing', why: 'it is a private card' };
+  if (card.kind === 'chore') return { kind: 'nothing', why: 'it is internal work, with nothing a person sees' };
   if ((card.howToTest?.trim() ?? '') === '') return { kind: 'nothing', why: 'it has no steps to try' };
   if (saysNothingToTry(card.howToTest)) return { kind: 'nothing', why: 'its steps say there is nothing to try' };
   const merged = card.links.prs.filter(pr => pr.state === 'merged');

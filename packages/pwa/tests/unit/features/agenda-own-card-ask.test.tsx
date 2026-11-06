@@ -121,27 +121,17 @@ describe('a card’s own agenda asks ONE thing, inside “What I need from you�
     ]);
   });
 
-  test('offers “works now”, typed and sent as a reply, back above Good — words only, Good is the one tap, never applied', async () => {
+  test('says nothing back about “works now”: no second prompt beside Good, and Good is the one tap', async () => {
     const said = (text: string): HistoryEvent => ({
       kind: 'owner',
       key: 'o1',
       at: Date.parse('2026-08-01T11:30:00.000Z'),
       text,
     });
-    // No reply, no offer; a reply that is not a plain approval offers nothing either.
-    await draw(cardAgenda(tryGate, STEPS));
-    expect(needs().querySelector('[data-agenda-reply-offer]')).toBeNull();
-    await view?.unmount();
-    await draw(cardAgenda(tryGate, STEPS), undefined, true, [said('works but the colour is off')]);
-    expect(needs().querySelector('[data-agenda-reply-offer]')).toBeNull();
-    await view?.unmount();
     const acted = await draw(cardAgenda(tryGate, STEPS), undefined, true, [said('works now')]);
     const own = must(needs().querySelector<HTMLElement>('[data-agenda-own-ask="F12"]'), 'the one ask');
-    const offer = must(own.querySelector<HTMLElement>('[data-agenda-reply-offer]'), 'the offer');
-    expect(offer.textContent).toContain('You wrote “works now”. If that is your answer, tap Good.');
-    expect(offer.querySelector('button')).toBeNull();
-    // Right above the Good button, and nothing moved by itself.
-    expect(offer.nextElementSibling?.matches('[data-agenda-try-taps]')).toBe(true);
+    expect(needs().querySelector('[data-agenda-reply-offer]')).toBeNull();
+    expect(needs().textContent).not.toMatch(/You wrote|If that is your answer/u);
     expect(acted).toEqual([]);
     await interact(() => must(own.querySelector<HTMLElement>('[data-agenda-answer-option="Done"]'), 'Good').click());
     expect(acted).toEqual([
@@ -195,7 +185,7 @@ describe('a card’s own agenda asks ONE thing, inside “What I need from you�
   });
 
   // &B165: the exception #1494 kept (a ferret's thread with a card ask drew "Card &F12: your answer for the card") is gone.
-  test('draws a ferret’s own thread’s card ask as the item’s own ask too: its question stays, no card heading', async () => {
+  test('keeps a ferret’s own question as the one ask: the try-it on the card waits as one line, no card heading (&B165)', async () => {
     const acted = await draw(
       agendaItem('A5', {
         title: 'Badge colour',
@@ -209,16 +199,12 @@ describe('a card’s own agenda asks ONE thing, inside “What I need from you�
     );
     const part = needs();
     expect(part.querySelector('[data-agenda-question-line]')?.textContent).toContain('Which shade of blue');
-    expect(part.querySelector('[data-agenda-card-ask-title]')?.textContent).toBe('Try it');
-    expect(part.querySelector('[data-agenda-card-ask-ref]')?.textContent).toBe('For &F12 Badge colour');
     expect(root().textContent).not.toMatch(/your answer for the card|Card &F12|card ask/iu);
-    // Its own question is answered in the box, so the typed words stay a reply: the try-it keeps Done and Not good.
+    // The question is answered in words: no try-it block, no Done / Not good — only the one line that names what comes next.
+    expect(part.querySelector('[data-agenda-card-ask]')).toBeNull();
     expect(part.querySelector('[data-agenda-own-ask]')).toBeNull();
-    expect(part.textContent).not.toContain('Type your answer below.');
-    expect(
-      [...part.querySelectorAll('[data-agenda-option]')].map(node => node.getAttribute('data-agenda-option')),
-    ).toEqual(['Not good', 'Done']);
-    await interact(() => must(part.querySelector<HTMLElement>('[data-agenda-option="Done"]'), 'Done').click());
-    expect(acted).toEqual([expect.objectContaining({ label: 'Done', gate: true, cardAsk: 'gate:F12:tested:3' })]);
+    expect(part.querySelectorAll('[data-agenda-option], [data-agenda-answer-option]')).toHaveLength(0);
+    expect(part.querySelector('[data-agenda-card-ask-later]')?.textContent).toContain('&F12 Badge colour');
+    expect(acted).toEqual([]);
   });
 });

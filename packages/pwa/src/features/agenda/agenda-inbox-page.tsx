@@ -84,7 +84,7 @@ import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { STALE_ASK_COPY, type TypedAnswerTarget, typedGateAnswer } from '../../lib/agenda-gate-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
-import { itemSwipeTargets, typedCardAsk } from '../../lib/agenda-item-sections.ts';
+import { itemAskWord, itemSwipeTargets, typedCardAsk } from '../../lib/agenda-item-sections.ts';
 import {
   actionSentence,
   agendaConversationPath,
@@ -358,7 +358,7 @@ const typedAnswerFor = (
     // The ask's own name: a Send pressed for this ask answers only it, even if it finally runs after another replaced it.
     key: cardAskReference(ask),
     placeholder: gateTypedPlaceholder(ask.gate),
-    // Clear approval ("works now") is a reply the card offers back as Good, never a Not good with those words.
+    // Clear approval ("works now") is an ordinary reply, never a Not good with those words.
     approves: words => typedApproval(ask.gate, words) !== null,
     send: send => {
       // The card already has an answer held or being sent (Good tapped, or answered elsewhere): these words are too late.
@@ -1283,7 +1283,7 @@ function ItemRow({
         {ask === null ? null : <span className="fy-inbox-row__ask">{ask}</span>}
         <span className="fy-inbox-row__meta">
           {status === null || status.tone === 'needs-you' ? null : <AgendaStatusPill status={status} />}
-          <span>{kindWord(card.item)}</span>
+          <span>{itemAskWord(card.item) ?? kindWord(card.item)}</span>
           <span aria-hidden="true">·</span>
           <span>{agendaReference(card.item.id)}</span>
           {itemCard === null || itemCard === group.card ? null : (

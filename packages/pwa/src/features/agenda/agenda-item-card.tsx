@@ -51,6 +51,7 @@ import {
   itemCardAsks,
   itemStage,
   PART_TITLES,
+  planAskWord,
   type ReferenceRow,
   referenceRows,
   STAGE_WORDS,
@@ -61,7 +62,6 @@ import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-opt
 import { itemAtVersion, versionCount } from '../../lib/agenda-revisions.ts';
 import { openTab, sectionTab, viewTabs } from '../../lib/agenda-tab-view.ts';
 import { attachedGateHeading, attachedGateReference, toGateAction } from '../../lib/gate-items.ts';
-import { type ReplyApproval, replyApproval } from '../../lib/reply-approval.ts';
 import { HowToTest } from '../board/detail/board-detail-sections.tsx';
 import { AgendaActivityLog } from './agenda-activity-log.tsx';
 import { AgendaLinkRow, PointForm } from './agenda-brief.tsx';
@@ -154,6 +154,9 @@ export interface AgendaItemCardProps {
   /** The titles of the agendas this one was merged into or split from, where the board holds them. */
   readonly lineageTitles?: LineageTitles | undefined;
 }
+
+/** Two lines that say the same thing: the same words once case and spacing are set aside. */
+const sameWords = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** The detail without its premise: the daemon also writes a confirmed change into it for older apps. */
 const forConfirmation = (item: AgendaItem): AgendaItem => {
@@ -338,7 +341,6 @@ function CardAskBlock({
   busy,
   onAct,
   renderProse,
-  offer = null,
   map = {},
   swipeable = false,
   onSkip,
@@ -351,8 +353,6 @@ function CardAskBlock({
   readonly error?: string | null;
   readonly onAct: (action: InboxAction) => void;
   readonly renderProse: Prose;
-  /** The owner's last words already approve this ask (&B155): offered as one tap, never applied. */
-  readonly offer?: ReplyApproval | null;
   /** The swipes this ask answers, when it is the item's only answer (the arrows are drawn and swiped). */
   readonly map?: SwipeMap;
   readonly swipeable?: boolean;
@@ -372,7 +372,7 @@ function CardAskBlock({
       </div>
       {typed ? (
         <>
-          <CardAskAnswer ask={ask} busy={busy} offer={offer} onAct={onAct} renderProse={renderProse} />
+          <CardAskAnswer ask={ask} busy={busy} onAct={onAct} renderProse={renderProse} />
           {error === null ? null : (
             <p className="fy-qr__error m-0" data-agenda-card-ask-error="" role="alert">
               Not sent: {error}
@@ -386,12 +386,6 @@ function CardAskBlock({
               <h5 className="fy-card__label">How to test</h5>
               <HowToTest renderProse={renderProse} text={steps} />
             </div>
-          )}
-          {offer === null ? null : (
-            // Words, not a second button: the one row below is still the only place to answer (&B165).
-            <p className="fy-card__reply-offer" data-agenda-reply-offer={offer.label}>
-              You replied “{offer.reply}”. If that is your answer, tap {offer.label}.
-            </p>
           )}
           <AgendaQuickReplies
             busy={busy}
@@ -417,7 +411,7 @@ function CardAskLater({ ask, renderProse }: { readonly ask: ItemCardAsk; readonl
   return (
     <div className="fy-card__card-ask-later" data-agenda-card-ask-later={ask.key}>
       {renderProse(
-        `Next: ${attachedGateHeading(ask.gate).toLowerCase()}, ${attachedGateReference(ask.gate).replace(/^For /u, 'for ')}. It is asked here once you answer above.`,
+        `Next: ${attachedGateHeading(ask.gate).toLowerCase()}, ${attachedGateReference(ask.gate).replace(/^For /u, 'for ')}. It is asked here once you have answered.`,
       )}
     </div>
   );
@@ -487,7 +481,7 @@ export function AgendaItemCard({
   // The head's description: the item's summary under its title, drawn whole (the view's sticky row holds the title).
   // A gate item repeats nothing, and a notice drawn with its cards lists them as rows (its summary is the same lines,
   // for an older app): neither has one.
-  const description = cardsForm === undefined ? agendaCardHead(item).description : null;
+  const headDescription = cardsForm === undefined ? agendaCardHead(item).description : null;
   // The segment LEADS WITH THE ASK, whatever the header above it says (a form's is its header's, said once): the lone question, else the item's one-line
   // ask — what is being chosen, approved, done or read. Several questions are their own numbered list instead.
   const askLine = singleAgendaQuestion(item)?.question.trim() || item.subject.trim();
@@ -546,6 +540,22 @@ export function AgendaItemCard({
   const recommendedOption = listed.find(option => option.recommended);
   const kind = meta.kind;
   const body = item.body?.trim() ? item.body : null;
+  // A FINISHED item (resolved or done) is a record: it shows how it ended once (the chip, or the host's settled line) and
+  // asks nothing, so there is no "What I need from you" box on it.
+  // (A notice reads "done" to the protocol while it is still open and answered by its form: that is not finished.)
+  const finished = (current as { readonly resolvedAt?: string }).resolvedAt !== undefined;
+  // The item's question is said ONCE: when the "What I need from you" block leads with it, the head does not repeat it.
+  const questionLineShown =
+    !finished &&
+    askLine !== '' &&
+    plan.ownLine &&
+    cardsForm === undefined &&
+    !(gated && body !== null) &&
+    shape !== 'answers' &&
+    shape !== 'input' &&
+    shape !== 'form';
+  const description =
+    headDescription !== null && questionLineShown && sameWords(headDescription, askLine) ? null : headDescription;
   const questionAnswer = item.questionAnswer?.trim() ? item.questionAnswer : null;
   const detail = read.detail?.trim() ? read.detail : null;
   const steps = item.steps ?? [];
@@ -559,8 +569,6 @@ export function AgendaItemCard({
     answerable && onRequestChanges !== undefined && model.requestChanges !== undefined
       ? { answer: model.requestChanges, onTap: () => onRequestChanges(model.requestChanges as AgendaCardAnswer) }
       : undefined;
-  // The owner already said yes in words ("build", "ok to build!", "works now"): offered as the ask's answer (&B155).
-  const replyOffer = plan.asks.length === 0 ? null : replyApproval(item, history);
   const askBlocks =
     plan.asks.length === 0 && plan.later.length === 0 ? null : (
       <div className="fy-card__card-asks" data-agenda-card-asks={plan.asks.length} data-bare="">
@@ -569,7 +577,6 @@ export function AgendaItemCard({
             ask={ask}
             busy={busy}
             key={ask.key}
-            offer={replyOffer?.ask === ask.key ? replyOffer : null}
             onAct={onAct}
             renderProse={renderProse}
             typed={plan.typed === ask}
@@ -612,6 +619,8 @@ export function AgendaItemCard({
     (model.notice || model.answers.length > 0 || requestChanges !== undefined);
   const state = stateChip(current, ferret, now);
   const stage = itemStage(current);
+  // The chip says the same word the Inbox's list row does (`itemAskWord`): a card to try is a Test in both.
+  const askWord = planAskWord(plan);
 
   return (
     <article
@@ -626,18 +635,22 @@ export function AgendaItemCard({
       <div className="fy-card__head" data-agenda-part="head">
         <div className="fy-card__top" data-agenda-card-top="" {...pull}>
           <span className="fy-card__chips">
-            <span className="fy-card__state" data-agenda-state={state.state}>
-              {state.label}
-            </span>
-            {/* A standalone card gate says its stage in its own meta line (Test, Plan to approve): said once. */}
-            {gated ? null : (
+            {/* A finished item says how it ended once: its settled line when the host draws one, else this chip. */}
+            {finished && settled !== undefined ? null : (
+              <span className="fy-card__state" data-agenda-state={state.state}>
+                {state.label}
+              </span>
+            )}
+            {/* A standalone card gate says its stage in its own meta line (Test, Plan to approve): said once. A finished
+                item's stage is not said at all: it is the state, and the state is said once. */}
+            {gated || finished || cardsForm !== undefined ? null : (
               <span
                 className="fy-card__type"
                 data-agenda-stage={stage}
                 data-agenda-type={meta.kind}
                 data-tone={meta.tone}
               >
-                {STAGE_WORDS[stage]}
+                {askWord ?? STAGE_WORDS[stage]}
               </span>
             )}
             {latest ? null : (
@@ -647,11 +660,18 @@ export function AgendaItemCard({
             )}
           </span>
         </div>
-        {gated || plan.typed !== undefined || description === null ? null : (
-          <div className="fy-card__desc" data-agenda-description="">
-            {renderProse(description)}
-          </div>
-        )}
+        {
+          // A card ask that is the item's whole ask says the ask itself (Try it, the card, the steps): the generated "Try it: …"
+          // line under the title would say it a second time.
+          gated ||
+          plan.typed !== undefined ||
+          (plan.asks.length > 0 && !plan.ownLine) ||
+          description === null ? null : (
+            <div className="fy-card__desc" data-agenda-description="">
+              {renderProse(description)}
+            </div>
+          )
+        }
       </div>
       {versions !== undefined && diffOpen && diffId !== undefined ? (
         <VersionDiffPanel
@@ -703,7 +723,7 @@ export function AgendaItemCard({
         <div
           className="fy-card__part"
           data-agenda-part="needs"
-          {...(answerable && state.state === 'needs-you' ? { 'data-agenda-needs-you': '' } : {})}
+          {...(answerable && !finished && state.state === 'needs-you' ? { 'data-agenda-needs-you': '' } : {})}
           tabIndex={-1}
         >
           {/* The ferret answered the owner's question: the answer is the main tab's first block, below — said here so it
@@ -716,7 +736,7 @@ export function AgendaItemCard({
             </p>
           )}
           {/* An input card's form is its ask: its field says what is wanted, and "Type the value below" said it twice. */}
-          {inputDrawn ? null : (
+          {inputDrawn || finished ? null : (
             <AgendaNeed
               shape={shape}
               {...(gated && body !== null ? { heading: 'How to test' } : {})}
@@ -729,17 +749,11 @@ export function AgendaItemCard({
                   : {})}
               {...((answerable && cardsForm !== undefined) || plan.asks.length > 0 ? { lead: '' } : {})}
             >
-              {askLine === '' ||
-              !plan.ownLine ||
-              cardsForm !== undefined ||
-              (gated && body !== null) ||
-              shape === 'answers' ||
-              shape === 'input' ||
-              shape === 'form' ? null : (
+              {questionLineShown ? (
                 <div className="fy-card__question" data-agenda-question-line="">
                   {renderProse(mark(askLine))}
                 </div>
-              )}
+              ) : null}
               {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
               {cardsForm}
               {plan.ownRowHeld && plan.asks[0] !== undefined ? (

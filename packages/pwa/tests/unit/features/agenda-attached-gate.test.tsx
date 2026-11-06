@@ -55,21 +55,30 @@ const reply = (extra: Partial<AgendaItem> = {}): AgendaItem =>
     ...extra,
   } as unknown as Partial<AgendaItem>);
 
+/** What an older daemon raised for a card to try: the ask line is the card's own title, and the gate is mirrored. */
+const tryIt = (gateAttached: object): AgendaItem =>
+  reply({
+    subject: 'Try it: Badge colour',
+    raisedBy: 'daemon',
+    source: 'task',
+    sourceRef: 'card-agenda:F12',
+    gateAttached,
+  } as unknown as Partial<AgendaItem>);
+
 describe('a thread with a gate attached (an older daemon’s mirror)', () => {
-  test('a thread with buttons of its own keeps ONE row: the gate first, its own buttons held', async () => {
+  test('a thread that asks its own choice keeps ITS buttons as the one row; the gate waits, named once (&B165)', async () => {
     const root = await draw(
       thread({ gateAttached: { ...gate, cardTitle: 'Badge colour' } } as unknown as Partial<AgendaItem>),
     );
-    expect(root.querySelector('[data-agenda-attached-gate]')).not.toBeNull();
-    expect(root.querySelectorAll('[data-agenda-option="Done"]')).toHaveLength(1);
-    expect(root.querySelector('[data-agenda-option="Blue"]')).toBeNull();
-    expect(root.querySelector('[data-agenda-own-row-held]')).not.toBeNull();
+    expect(root.querySelector('[data-agenda-attached-gate]')).toBeNull();
+    expect(root.querySelectorAll('[data-agenda-option="Done"]')).toHaveLength(0);
+    expect(root.querySelectorAll('[data-agenda-option="Blue"]')).toHaveLength(1);
+    expect(root.querySelector('[data-agenda-own-row-held]')).toBeNull();
+    expect(root.querySelector('[data-agenda-card-ask-later]')).not.toBeNull();
   });
 
   test('a thread answered in words draws the gate as its own ask, inside What I need from you', async () => {
-    const root = await draw(
-      reply({ gateAttached: { ...gate, cardTitle: 'Badge colour' } } as unknown as Partial<AgendaItem>),
-    );
+    const root = await draw(tryIt({ ...gate, cardTitle: 'Badge colour' }));
     const row = must(root.querySelector<HTMLElement>('[data-agenda-attached-gate]'), 'the gate row');
     expect(row.getAttribute('data-agenda-attached-gate')).toBe('F12');
     expect(row.closest('[data-agenda-part="needs"]')).not.toBeNull();
@@ -80,14 +89,14 @@ describe('a thread with a gate attached (an older daemon’s mirror)', () => {
 
   test('tapping a gate option sends it marked for the gate', async () => {
     const acted: { gate?: true; label: string }[] = [];
-    const root = await draw(reply({ gateAttached: gate } as unknown as Partial<AgendaItem>), acted);
+    const root = await draw(tryIt({ ...gate, cardTitle: 'Badge colour' }), acted);
     const row = must(root.querySelector<HTMLElement>('[data-agenda-attached-gate]'), 'the gate row');
     await interact(() => must(row.querySelector<HTMLElement>('[data-agenda-option="Done"]'), 'Done').click());
     expect(acted).toEqual([expect.objectContaining({ kind: 'respond', label: 'Done', gate: true })]);
   });
 
   test('reads Not good on the left and Done on the right, like every swipe surface', async () => {
-    const root = await draw(reply({ gateAttached: gate } as unknown as Partial<AgendaItem>));
+    const root = await draw(tryIt({ ...gate, cardTitle: 'Badge colour' }));
     const row = must(root.querySelector<HTMLElement>('[data-agenda-attached-gate]'), 'the gate row');
     const order = [...row.querySelectorAll<HTMLElement>('[data-agenda-option]')].map(node =>
       node.getAttribute('data-agenda-option'),

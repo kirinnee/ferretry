@@ -363,7 +363,10 @@ export function AgendaItemView({
           <header className="fy-item-view__head" data-agenda-top="" ref={top}>
             <CardHead
               close={{ label: closeLabel, onClick: onClose }}
-              pager={{ index: position.index, total: position.total, onPrevious, onNext }}
+              // Nothing to step through when this is the only item: no arrows and no "1/1", so the title gets the room.
+              {...(position.total > 1
+                ? { pager: { index: position.index, total: position.total, onPrevious, onNext } }
+                : {})}
               status={
                 urgent === null ? null : (
                   <span className="fy-item-view__status" title={urgent.label}>

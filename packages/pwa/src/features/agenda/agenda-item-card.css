@@ -1597,22 +1597,6 @@
   margin-inline-start: auto;
 }
 
-/* The owner's reply already says yes to the card ask (&B155): offered as its answer, never applied. */
-.fy-card__reply-offer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--gap-sm, 8px);
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  background: var(--accent-soft);
-}
-.fy-card__reply-offer > span {
-  flex: 1 1 14rem;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
 /* THE OPEN ITEM'S ⋯ MENU (`agenda-item-menu.tsx`): a popover under ⋯ on a wide screen, the app's bottom sheet on a
    phone. Its groups are a quiet label over their controls; every control keeps the 44px finger floor on a phone. */
 .fy-item-menu {
@@ -1890,12 +1874,18 @@
   flex: 1 1 8rem;
 }
 
-/* "You wrote “works now”. If that is your answer, tap Good." inside the one ask: its own surface, so it reads as the owner's words offered back. */
-.fy-card__try-it .fy-card__reply-offer {
-  background: var(--surface, transparent);
-  border: var(--border-width, 1px) solid var(--border-strong, currentColor);
-  padding: 8px 10px;
+/* A notice's cards form: its one Send sticks to the foot of the item's own scroller, so three cards and a reason box never push
+   the button out of reach (it is opaque, so the cards scroll under it). */
+.fy-cards-send {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding-block: 8px;
+  background: var(--surface, var(--bg));
+  border-top: var(--border-width, 1px) solid var(--border-soft, transparent);
 }
-.fy-card__try-it .fy-card__reply-offer > span {
-  flex: 1 1 12rem;
+.fy-card__part[data-agenda-needs-you] .fy-cards-send {
+  /* The marked-out box's tint over the opaque surface: the bar hides what scrolls under it and still reads as the box's own. */
+  background: linear-gradient(var(--accent-soft), var(--accent-soft)), var(--surface);
+  border-top-color: transparent;
 }

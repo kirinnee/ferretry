@@ -1369,8 +1369,11 @@ unmerged says nothing. Nor does a fact move a card out of Closed or a drop, or i
 a card waiting at one (Plan/Design, Released), whatever its PRs say
 ([Cards show progress](#cards-show-progress-their-asks-ride-the-agenda)); the "pulled back" exception above applies only outside a gate.
 **A release of a blocked card waits:** the card reaches Released (the history says "while blocked by …"), but nothing is
-asked of the owner until it is unblocked. **A card whose merged PRs changed only docs and tests closes at Released** with
-"Nothing to try: its PRs change only docs and tests", asking nobody. The watcher reads each PR's files in its one query to
+asked of the owner until it is unblocked. **So does an umbrella's** while any sub-card is still being built: a PR linked
+to the umbrella itself shipping is not the umbrella's work done. **A card whose merged PRs changed only docs and tests
+closes at Released** with "Nothing to try: its PRs change only docs and tests", asking nobody; so does a **chore**
+("Nothing to try: it is internal work, with nothing a person sees"). The rules are
+[agenda.md § Try it only when there is something to try](agenda.md#try-it-only-when-there-is-something-to-try). The watcher reads each PR's files in its one query to
 know (`PrLink.changes`, bound to the head or merge commit it was read at in `PrLink.changesRevision`; an unread PR, or a
 kind whose commit has changed since, counts as code).
 The GitHub watcher reconciles every linked card on every poll, refile and `fy task link --pr` re-evaluate at once, and a

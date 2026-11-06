@@ -1049,10 +1049,12 @@ describe('answering a card ask', () => {
     leave: (world: ReturnType<typeof fixture>, id: string) => Promise<void>,
     faults: Faults = {},
   ) => {
-    const world = fixture([leads(), leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } })], faults);
+    // F2 was made from the thread (its topic), so its ask rides it; it is not F1's sub-card, or F1 would wait for it.
+    const world = fixture([leads(), leads({ id: 'F2', laneId: 'todo' })], faults);
     const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
     if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
     const id = raised.item.id;
+    world.store.cards.set('F2', { ...world.stored('F2'), ask: { text: 'make it', source: `!${id}` } });
     await world.board.trigger('F1', 'release.running');
     should(openOf(world, 'lead', id).gateAttached?.cardId).equal('F1');
     await leave(world, id);
@@ -2233,13 +2235,12 @@ describe('card asks across merge and split (docs/agenda.md § Merge and split)',
 
   /** The lead's thread about F1 carries F1's ask at To test and its sub-card F2's at Plan; F3 is a card of no gate. */
   const parentAndSubBeforeSplit = async (faults: Faults = {}) => {
-    const world = fixture(
-      [leads(), leads({ id: 'F2', laneId: 'todo', parent: { id: 'F1' } }), leads({ id: 'F3', laneId: 'todo' })],
-      faults,
-    );
+    // F2 was made from the thread (its topic), so its ask rides it; it is not F1's sub-card, or F1 would wait for it.
+    const world = fixture([leads(), leads({ id: 'F2', laneId: 'todo' }), leads({ id: 'F3', laneId: 'todo' })], faults);
     const raised = await world.agenda.raise('lead', threadAbout('F1'), AGENT);
     if (!raised.ok || raised.item === undefined) throw new Error('expected a thread');
     const parent = raised.item.id;
+    world.store.cards.set('F2', { ...world.stored('F2'), ask: { text: 'make it', source: `!${parent}` } });
     await world.board.act('F2', BoardTaskActionRequestSchema.parse({ action: 'move', to: 'plan' }), OWNER);
     await world.board.trigger('F1', 'release.running');
     const splitOff = async () => {
@@ -2762,6 +2763,72 @@ describe('the close judges the verdict again inside the card’s write', () => {
       await world.board.closeWhereNothingToTry('F1', expect, 'Nothing to try: its PRs change only docs'),
     ).be.false();
     should(world.stored().laneId).equal('tested');
+  });
+});
+
+describe('an umbrella or internal card never gets a try-it (&C50, 2026-11-06)', () => {
+  // The owner's case: the umbrella &C50 "Split fyd.ts", a chore, had a prerequisite PR linked to it. Its release moved the
+  // card to the try-it lane, and an older daemon raised "Try it: Split fyd.ts…" with a box asking the owner about the card.
+  const umbrella = (overrides: Partial<BoardTask> = {}): BoardTask =>
+    external({
+      id: overrides.kind === 'feature' ? 'F50' : 'C50',
+      kind: 'chore',
+      summary: 'Split fyd.ts into feature modules',
+      howToTest: '',
+      ...withPrs(mergedPr(1536, 'code')),
+      ...overrides,
+    });
+  const subCard = (id: string, laneId: string, parent = 'C50'): BoardTask =>
+    external({ id, laneId, parent: { id: parent } });
+
+  it('closes the C50 umbrella when its PR ships, with one line and no ask, no new agenda and no second prompt', async () => {
+    // Arrange — every sub-card shipped and closed, as on 11-06
+    const world = fixture([umbrella(), subCard('F1473', 'closed')]);
+
+    // Act — the prerequisite PR is released: the card enters the try-it lane
+    await world.board.trigger('C50', 'release.running');
+    await world.gates.written('C50');
+    await world.gates.sweep();
+
+    // Assert — closed by the daemon with the reason; nobody is asked anything
+    const stored = world.store.cards.get('C50');
+    should(stored?.laneId).equal('closed');
+    should(stored === undefined ? undefined : lastEvent(stored)).match({
+      type: 'moved',
+      to: 'closed',
+      reason: 'Nothing to try: it is internal work, with nothing a person sees',
+      actor: { kind: 'daemon' },
+    });
+    should(world.open()).have.length(0);
+    should(world.closed()).have.length(0);
+  });
+
+  it('holds an umbrella whose sub-cards are still being built: no ask, nothing closes, even with steps to try', async () => {
+    // Arrange — a feature umbrella with steps, a released code PR, and one sub-card still in Implement
+    const world = fixture([
+      umbrella({ kind: 'feature', howToTest: '1. Open the Inbox\n2. Answer the card' }),
+      subCard('F1473', 'closed', 'F50'),
+      subCard('F1474', 'implement', 'F50'),
+    ]);
+
+    // Act
+    await world.board.trigger('F50', 'release.running');
+    await world.gates.written('F50');
+    await world.gates.sweep();
+
+    // Assert — it waits at the try-it lane; no agenda carries it
+    should(world.store.cards.get('F50')?.laneId).equal('tested');
+    should(world.open()).have.length(0);
+    should(world.closed()).have.length(0);
+
+    // Act — the last sub-card ships; the next look decides again, and now asks once
+    world.store.cards.set('F1474', { ...(world.store.cards.get('F1474') as BoardTask), laneId: 'closed' });
+    const asked = await world.gates.sweep();
+
+    // Assert
+    should(asked).equal(1);
+    should(world.open()).have.length(1);
+    should(world.open()[0]?.cardAsks?.map(ask => gateReference(ask.gate))).eql(['gate:F50:tested:2']);
   });
 });
 

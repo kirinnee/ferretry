@@ -124,21 +124,21 @@ export function AgendaCardsList({
   return (
     <form
       aria-label="What to do with each card"
-      className="m-0 flex min-w-0 flex-col gap-4"
+      className="m-0 flex min-w-0 flex-col gap-3"
       data-agenda-cards=""
       onSubmit={event => {
         event.preventDefault();
         void send();
       }}
     >
-      <ul aria-label="Cards" className="m-0 flex list-none flex-col gap-4 p-0">
+      <ul aria-label="Cards" className="m-0 flex list-none flex-col gap-3 p-0">
         {cards.map(card => {
           const id = card.task.id;
           const ref = formatTaskRef({ id });
           const result = results[id];
           const pick = pickOf(id);
           return (
-            <li className="flex min-w-0 flex-col gap-2" data-agenda-card-row={id} key={id}>
+            <li className="flex min-w-0 flex-col gap-1" data-agenda-card-row={id} key={id}>
               <div
                 className="min-w-0 break-words text-ui text-fg"
                 data-agenda-card-line=""
@@ -146,9 +146,9 @@ export function AgendaCardsList({
               >
                 {renderProse(result?.kind === 'held' ? heldLine(card.line, ref) : card.line)}
               </div>
-              <p className="m-0 flex flex-wrap gap-3 text-meta" data-agenda-card-links="">
+              <p className="m-0 flex flex-wrap items-center gap-x-3 text-meta" data-agenda-card-links="">
                 <a
-                  className="text-accent"
+                  className="inline-flex items-center text-accent"
                   data-agenda-card-open=""
                   href={actions.cardPath(id)}
                   onClick={linkClick(() => actions.open(id))}
@@ -173,12 +173,15 @@ export function AgendaCardsList({
               ) : result?.kind === 'held' ? null : (
                 <div
                   aria-label={`What to do with ${ref}`}
-                  className="flex min-w-0 flex-wrap gap-x-4"
+                  className="flex min-w-0 flex-nowrap justify-between gap-x-2"
                   data-agenda-card-picks=""
                   role="radiogroup"
                 >
                   {PICKS.map(([value, label]) => (
-                    <label className="flex min-h-[44px] items-center gap-2 text-ui text-fg" key={value}>
+                    <label
+                      className="flex min-h-[44px] items-center gap-1.5 whitespace-nowrap text-meta text-fg"
+                      key={value}
+                    >
                       <input
                         checked={pick === value}
                         data-agenda-card-pick={value}
@@ -218,7 +221,9 @@ export function AgendaCardsList({
           );
         })}
       </ul>
-      <div className="fy-qr__row" data-agenda-quick-replies="">
+      {/* Send is ALWAYS in reach: it sticks to the foot of whatever scrolls (the item's body), so three cards and a reason box
+          never push the one button out of sight. */}
+      <div className="fy-qr__row fy-cards-send" data-agenda-quick-replies="">
         <button
           className="kt-btn fy-qr__chip"
           data-agenda-answer-option="Send"

@@ -117,7 +117,7 @@ describe('Done · closes on an agenda item: when it is offered', () => {
     await drawItem(
       closing({
         kind: 'reply',
-        subject: 'Anything else?',
+        subject: 'Try it: Badge colour',
         ask: { kind: 'open-question' },
         gateAttached: gate,
         cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],

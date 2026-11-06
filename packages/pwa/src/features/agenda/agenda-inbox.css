@@ -161,8 +161,15 @@
   }
   /* An open Find box needs the whole line: the row folds, and the box takes the second line. */
   .fy-attn-inbox__head:has(.fy-filter-menu__finding),
-  .fy-attn-inbox__head:has(.fy-filter-menu__finding) .fy-attn-inbox__tools {
+  .fy-attn-inbox__head:has(.fy-filter-menu__finding) .fy-attn-inbox__tools,
+  /* A "From Warden" chip on the row: with the machine and Find chips too, nothing fits one phone line, and a chip squeezed
+     to a few pixels shows only a fragment of its icon. The row folds instead, and every chip keeps its own width. */
+  .fy-attn-inbox__head:has(.fy-attn-inbox__chip),
+  .fy-attn-inbox__head:has(.fy-attn-inbox__chip) .fy-attn-inbox__tools {
     flex-wrap: wrap;
+  }
+  .fy-attn-inbox__tools > * {
+    flex-shrink: 0;
   }
   .fy-attn-inbox__find {
     width: auto;
