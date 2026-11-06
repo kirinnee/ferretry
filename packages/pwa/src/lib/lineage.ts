@@ -15,13 +15,6 @@ export interface LineageIndex {
   readonly depthOf: ReadonlyMap<string, number>;
 }
 
-interface NestedRow {
-  readonly view: SessionView;
-  depth: number;
-  readonly children: NestedRow[];
-  spawnedBy?: string;
-}
-
 export interface LineageLabel {
   readonly callsign: string;
   readonly task: string;
@@ -120,18 +113,3 @@ const activityAt = (view: SessionView): number => {
 
 /** Newest life-sign first; equal timestamps preserve daemon order. */
 export const byNewestActivity = (left: SessionView, right: SessionView): number => activityAt(right) - activityAt(left);
-
-const sortAndDepth = (rows: NestedRow[], depth: number): number => {
-  const subtreeActivity = new Map<NestedRow, number>();
-  let newest = 0;
-  for (const row of rows) {
-    const childActivity = sortAndDepth(row.children, depth + 1);
-    const activity = Math.max(activityAt(row.view), childActivity);
-    subtreeActivity.set(row, activity);
-    newest = Math.max(newest, activity);
-  }
-  if (depth === 0) rows.sort((left, right) => (subtreeActivity.get(right) ?? 0) - (subtreeActivity.get(left) ?? 0));
-  else rows.sort((left, right) => byNewestActivity(left.view, right.view));
-  for (const row of rows) row.depth = depth;
-  return newest;
-};

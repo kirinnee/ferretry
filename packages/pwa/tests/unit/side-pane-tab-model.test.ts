@@ -195,6 +195,7 @@ describe('registry', () => {
 
     unregister();
     expect(notifications).toBe(2);
+    expect(getSidePaneTabDefinitions().find(def => def.id === 'search')).toBeUndefined();
 
     unsubscribe();
     registerSidePaneTab({ id: 'x', label: 'X', shortLabel: 'X', closeLabel: 'Close X', icon: 'tasks', order: 1 });
@@ -273,6 +274,15 @@ describe('opening singleton tabs', () => {
 
     expect(state.active).toBe('files');
     expect(state.open.at(-1)).toBe('files');
+  });
+
+  it('is a no-op when the tab is already open and already active', () => {
+    openSidePaneTab(scopeA, 'files');
+    const before = readSidePaneTabsState(scopeA);
+
+    openSidePaneTab(scopeA, 'files');
+
+    expect(readSidePaneTabsState(scopeA)).toBe(before);
   });
 
   it('re-activates an already open tab without duplicating it', () => {

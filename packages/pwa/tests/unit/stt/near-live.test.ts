@@ -286,6 +286,7 @@ describe('NearLiveTranscriber — committing at pauses', () => {
     rig.transcriber.start();
     rig.audio = take(3);
     await rig.fire();
+    should(rig.last).eql({ committed: '', interim: '', paused: false });
     rig.audio = take(4, [3.2, 4]);
     await rig.fire();
     // The silent pass moved the start to a pre-roll before the end of the silence it heard.
