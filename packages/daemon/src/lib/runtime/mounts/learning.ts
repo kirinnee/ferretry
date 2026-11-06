@@ -38,7 +38,9 @@ import {
   type Proposal,
   type Tombstone,
 } from '../../learning/index.ts';
+import type { AuditedRouteRule } from '../../audit/routes.ts';
 import { presentedSessionCapability, TWO_SESSION_CREDENTIALS } from './agent-tools.ts';
+import type { ModuleContribution } from '../modules.ts';
 
 /**
  * The learning subsystem's REVIEW surface: what evidence the daemon holds, which rules that evidence
@@ -646,4 +648,25 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       handle: async context => await agentSuggest(subsystem, context),
     },
   ];
+}
+
+/**
+ * The audit rules for the learning routes (docs/learning.md): the machine default written into `learning.yaml`,
+ * and an Apply — the one write outside the state home, into the global instructions or a project's AGENTS.md /
+ * CLAUDE.md.
+ */
+export const LEARNING_AUDIT_ROUTES: readonly AuditedRouteRule[] = [
+  { method: 'PATCH', path: '/v1/learning/config', event: 'fleet.configured', detail: { action: 'learning-config' } },
+  {
+    method: 'POST',
+    path: '/v1/learning/proposals/:id/apply',
+    event: 'fleet.configured',
+    subject: 'id',
+    detail: { action: 'lesson-apply' },
+  },
+];
+
+/** What the learning module adds to the daemon: its routes and the audit rules that record two of them. */
+export function learningContribution(subsystem: LearningSubsystem): ModuleContribution {
+  return { routes: learningRoutes(subsystem), audit: { routes: LEARNING_AUDIT_ROUTES } };
 }

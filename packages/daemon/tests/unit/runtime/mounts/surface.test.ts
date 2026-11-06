@@ -3,18 +3,17 @@ import should from 'should';
 import type { ApiResponse } from '../../../../src/lib/api/http.ts';
 import { MemberDispatcher, type SharedRouteDeps } from '../../../../src/lib/catalog-members/shared-routes.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
+import { PREFIXED_S1 } from '../../agent-tools/support.ts';
+import { jsonBody, request } from '../../api/support.ts';
+import { FRAGMENTS, NOT_AUDITED, OTHER_TABLE_CALLERS, ROUTE_CALLERS } from '../../modules/route-contracts.ts';
+import { agentIn, CREDENTIALS, grantSubsystem, human } from './support.ts';
 import {
   createMountedDispatcher,
   createMountedSocketDispatcher,
   mountedAuditRules,
   mountedDaemonRoutes,
   mountedSocketRoutes,
-} from '../../../../src/lib/runtime/index.ts';
-import { PREFIXED_S1 } from '../../agent-tools/support.ts';
-import { jsonBody, request } from '../../api/support.ts';
-import { FRAGMENTS, NOT_AUDITED, OTHER_TABLE_CALLERS, ROUTE_CALLERS } from '../../modules/route-contracts.ts';
-import { agentIn, CREDENTIALS, grantSubsystem, human } from './support.ts';
-
+} from './surface-mounted.ts';
 import { base, subsystems } from './surface-world.ts';
 
 /**

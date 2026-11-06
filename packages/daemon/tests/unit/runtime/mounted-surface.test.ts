@@ -1,12 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { ScopedRoute } from '../../../src/lib/api/route.ts';
-import {
-  createMountedSocketDispatcher,
-  mountedDaemonRoutes,
-  mountedSocketRoutes,
-} from '../../../src/lib/runtime/mounts/index.ts';
 import { request } from '../api/support.ts';
 import { surfaceCarrier } from './mounts/surface-carrier.ts';
+import { createMountedSocketDispatcher, mountedDaemonRoutes, mountedSocketRoutes } from './mounts/surface-mounted.ts';
 import { base, subsystems } from './mounts/surface-world.ts';
 import snapshot from './mounted-surface.snapshot.json';
 

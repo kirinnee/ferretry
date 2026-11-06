@@ -82,7 +82,6 @@ import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { harnessUpdateRoutes } from './harness-update.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { inputRequestRoutes, phoneApprovalRoutes } from './input-requests.ts';
-import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type LegacyTaskSubsystem, legacyTaskRoutes } from './legacy-tasks.ts';
 import { type LocalSkillInstallSubsystem, localSkillInstallRoutes } from './local-skill-installs.ts';
 import { type McpInventorySubsystem, mcpInventoryRoutes } from './mcp-inventory.ts';
@@ -459,9 +458,6 @@ export interface MountedSubsystems {
   readonly signInRuleSuggestions: SignInRuleSuggestions;
   /** Free teammate callsigns, for composing a session title before starting one. */
   readonly names: NameSubsystem;
-  /** The learning review board: the evidence the daemon holds, and a human's verdict on each rule
-   *  it proposes. Mining itself is not mounted — see the mount's own header. */
-  readonly learning: LearningSubsystem;
   /** The team recommender over the published fleet manifest and the operator's routing catalog. */
   readonly recommend: RecommendSubsystem;
   /** Dictation's one daemon-side half: the hosted-model pass that repairs a transcript. Recognition
@@ -790,7 +786,6 @@ export function legacyModule(
               ...browserLoginRoutes(subsystems.browserLogin, subsystems.browser),
               ...browserProxyRoutes(subsystems.browserProxy),
               ...nameRoutes(subsystems.names),
-              ...learningRoutes(subsystems.learning),
               ...recommendRoutes(subsystems.recommend),
               // Dictation enhancement is a fixed literal under `/v1/stt`, which no other subsystem uses, so it
               // can neither shadow nor be shadowed by anything around it. It registers with the daemon-wide
@@ -855,18 +850,32 @@ function legacySockets(subsystems: MountedSubsystems): readonly SocketRoute[] {
   ];
 }
 
-/** Inventory order is registration order; the dispatcher uses its own specificity-ordered copy. */
-export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: MountedSubsystems): readonly ApiRoute[] {
-  return composeModules(subsystems, [legacyModule(base, subsystems)]).routes;
+/**
+ * Inventory order is registration order; the dispatcher uses its own specificity-ordered copy. `modules` are the
+ * extracted feature modules, composed after the legacy inventory: the inventory readers and the contract tests pass
+ * them explicitly, exactly as the dispatcher factories below do.
+ */
+export function mountedDaemonRoutes(
+  base: DaemonApiDependencies,
+  subsystems: MountedSubsystems,
+  modules: readonly BuiltModule<unknown, object>[] = [],
+): readonly ApiRoute[] {
+  return composeModules(subsystems, [legacyModule(base, subsystems), ...modules]).routes;
 }
 
-export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly SocketRoute[] {
-  return composeModules(subsystems, [legacyModule(undefined, subsystems)]).sockets;
+export function mountedSocketRoutes(
+  subsystems: MountedSubsystems,
+  modules: readonly BuiltModule<unknown, object>[] = [],
+): readonly SocketRoute[] {
+  return composeModules(subsystems, [legacyModule(undefined, subsystems), ...modules]).sockets;
 }
 
 /** The audit rules the composed modules contribute: what the audit layers receive, for the contract tests. */
-export function mountedAuditRules(subsystems: MountedSubsystems) {
-  return composeModules(subsystems, [legacyModule(undefined, subsystems)]).audit;
+export function mountedAuditRules(
+  subsystems: MountedSubsystems,
+  modules: readonly BuiltModule<unknown, object>[] = [],
+) {
+  return composeModules(subsystems, [legacyModule(undefined, subsystems), ...modules]).audit;
 }
 
 /** Credentials use the same session directory for HTTP and socket requests. */

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import type { RoutePattern } from '../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
-import { mountedDaemonRoutes, mountedSocketRoutes } from '../../../src/lib/runtime/mounts/index.ts';
 import { orderRoutesBySpecificity } from '../../../src/lib/runtime/modules.ts';
 import { surfaceCarrier } from './mounts/surface-carrier.ts';
+import { mountedDaemonRoutes, mountedSocketRoutes } from './mounts/surface-mounted.ts';
 import { base, subsystems } from './mounts/surface-world.ts';
 
 const parts = (path: string) =>

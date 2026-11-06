@@ -23,7 +23,6 @@ import {
   manifestRuntimes,
   PACK_ENV,
   PACK_ROUTING_ENV,
-  PASSIVE_LEARNING_ENV,
   resolveDefaultRuntime,
   runtimeIdsPath,
   SUB_FERRET_ENV,
@@ -48,7 +47,6 @@ import {
   AccountKeySchema,
   type Advertisement,
   type AgendaItem,
-  type AnalyticsPricingRate,
   type AskToStopJobsResult,
   type AutoResumeSummary,
   type BoardTaskStartResponse,
@@ -72,7 +70,6 @@ import {
   type InputQuarantineEvent,
   InputQuarantineEventSchema,
   ioPressureView,
-  type LearningConfig,
   type LimitsConfig,
   localOnlyNotice,
   MACHINE_AGENDA_ID,
@@ -158,7 +155,6 @@ import {
   WorkerAnalyticsPersister,
   WorkerTranscriptFolds,
 } from '../src/adapters/analytics/index.ts';
-import { KeyedSerialExecutor as LearningSerialExecutor } from '../src/adapters/atomic-file/index.ts';
 import {
   decryptPdfInMemory,
   FileAttachmentOriginals,
@@ -388,17 +384,7 @@ import {
   type WorkerProbeReport,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
-import {
-  CatalogPrices,
-  ConfigFileLearningSettings,
-  DirectoryLessonSessions,
-  FileLearningStore,
-  FleetGlobalLessons,
-  LEARNING_MINER_LABEL,
-  LearningMiner,
-  NodeLessonFiles,
-  SessionPassiveChannel,
-} from '../src/adapters/learning/index.ts';
+import { LEARNING_MINER_LABEL } from '../src/adapters/learning/index.ts';
 import {
   FileClaudeLocalScope,
   FileMcpHarnessDocuments,
@@ -1013,11 +999,9 @@ import {
   KnownAndFerretFolders,
   LaneProposalAcceptance,
   LaneSetService,
-  type LearningSubsystem,
   LegacyLimitsMigration,
   LegacySendReproof,
   LegacyWireUseCounter,
-  LessonsService,
   LIMITS_TICK_MS,
   LimitsService,
   LiveDeviceConnections,
@@ -1474,7 +1458,8 @@ import { PerformanceProfiler, sampleIntervalMs } from '../src/lib/performance/pr
 import { NO_PERFORMANCE_PROBE, PerformanceRecorder } from '../src/lib/performance/recorder.ts';
 import { teeStackSampler } from '../src/lib/performance/sampler-tee.ts';
 import type { BuiltModule, ModuleLifecycle } from '../src/lib/runtime/modules.ts';
-import type { ModuleHandles } from './modules/seams.ts';
+import { learningModule } from './modules/learning.ts';
+import { type ModuleHandles, seamsOf } from './modules/seams.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
 import {
   SessionCredentialError,
@@ -7199,13 +7184,6 @@ function createNameSubsystem(storage: DaemonStorage): NameSubsystem {
 const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
 
 /**
- * The learning review board, over the state home's own `learning/` directory.
- *
- * ONE executor for the whole process, keyed on the board: a verdict is a read-decide-rewrite of a
- * single JSON snapshot, so two landing together would otherwise lose one. The key is a constant
- * because there is exactly one board per state home — unlike the task boards, which are per session.
- */
-/**
  * The human browser-login window, over the daemon's own private profile and a private X display.
  *
  * ONE PROFILE for the whole daemon, inside the state home. It is the artefact the window exists to
@@ -7268,81 +7246,6 @@ function browserWorkerProgram(): BrowserWorkerProgram {
     sourceEntry: join(import.meta.dir, 'browser-worker.ts'),
     exists: existsSync,
   });
-}
-
-/** What the learning subsystem is built from, beyond the state home's own learning directory. */
-interface LearningSubsystemParts {
-  readonly paths: FoundationPaths;
-  readonly files: StateFileSystem;
-  readonly clock: SystemClock;
-  readonly serial: LearningSerialExecutor;
-  readonly sessions: SessionDirectorySubsystem;
-  readonly transcripts: SessionTranscriptReader;
-  readonly sessionControl: SessionControlSubsystem;
-  readonly config: () => LearningConfig;
-  readonly configFiles: ConfigFilesService;
-  readonly identities: CredentialAgentIdentities;
-  /** A ferret's launch environment, merged under that session's own lock. */
-  readonly mergeEnvironment: (sessionId: string, variables: Readonly<Record<string, string>>) => Promise<void>;
-  /** A queued, non-interrupting send. */
-  readonly send: (sessionId: string, message: string, sendId: string) => Promise<void>;
-  readonly pricing: () => Promise<readonly AnalyticsPricingRate[]>;
-  readonly userHome: string;
-}
-
-/**
- * The learning review board, passive lessons, Apply and the explicit scan.
- *
- * Apply writes outside the state home — the fleet's global lessons document under the asset tree, or a
- * project's AGENTS.md / CLAUDE.md — through `NodeLessonFiles`, and only after the route authorized it.
- */
-function createLearningSubsystem(parts: LearningSubsystemParts): LearningSubsystem {
-  const { paths, files, clock, config } = parts;
-  const store = new FileLearningStore(paths, files, clock);
-  const now = () => clock.now();
-  const miner = new LearningMiner(
-    paths,
-    files,
-    store,
-    parts.sessions,
-    parts.transcripts,
-    parts.sessionControl,
-    config,
-    now,
-  );
-  const settings = new ConfigFileLearningSettings(parts.configFiles);
-  const lessons = new LessonsService({
-    store,
-    sessions: new DirectoryLessonSessions(parts.sessions, parts.transcripts),
-    files: new NodeLessonFiles(),
-    global: new FleetGlobalLessons({
-      assetsDirectory: join(paths.fleet, 'assets'),
-      userHome: parts.userHome,
-      model: () => parts.configFiles.current().evaluation.effective.model,
-      writeComponent: async file => await settings.writeLessonsComponent(file),
-    }),
-    passive: new SessionPassiveChannel({
-      variable: PASSIVE_LEARNING_ENV,
-      mergeEnvironment: parts.mergeEnvironment,
-      send: parts.send,
-    }),
-    miner,
-    prices: new CatalogPrices(parts.pricing, now),
-    config,
-    now,
-    binaryName: CLIENT_NAME,
-    minerLabel: LEARNING_MINER_LABEL,
-  });
-  return {
-    store,
-    transaction: async work => await parts.serial.run('learning', work),
-    config,
-    now,
-    run: async spawn => await miner.run(spawn),
-    lessons,
-    identities: parts.identities,
-    writeConfig: async patch => await settings.writePassiveDefault(patch.passiveDefault),
-  };
 }
 
 /**
@@ -8221,9 +8124,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // child printed is a mask by the time anybody sees it. Read `lib/secrets/redaction.ts` for what
   // that does and does not promise — in particular that a value an agent deliberately transformed is
   // not recognisable, and this is not a defence against one that is trying.
-  // Its own executor: a learning verdict must not queue behind another document's transaction, and the
-  // snapshots share no file.
-  const learningBoard = new LearningSerialExecutor();
   // The values the daemon has just typed for the owner are masked at the SAME boundary as a vault secret:
   // every read below that takes this redactor (screen, transcript, journal, processes) hides them too.
   const justTyped = new EphemeralValues({ now: () => Date.now() });
@@ -10046,9 +9946,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     fileEvents,
     tmuxControl: tmux,
     createSubsystems: async (
-      // Read by the first extracted module: `seamsOf.<id>(world)` and its releases through `lifecycle`.
-      _world,
-      _lifecycle,
+      // Read by each extracted module: `seamsOf.<id>(world)` and its releases through `lifecycle`.
+      world,
+      lifecycle,
       storage,
       terminals,
       usage,
@@ -12674,40 +12574,43 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // Lessons: the review board, passive suggestions, Apply and the explicit scan. A new ferret's
       // passive default is recorded through it, and a running one is re-instructed with a queued send.
-      const learning = createLearningSubsystem({
-        paths,
-        files: stateFiles,
-        clock,
-        serial: learningBoard,
-        sessions,
-        transcripts: createTranscriptReader(storage),
-        sessionControl: withSystemCallsign(sessionControl, systemCallsigns, 'learning'),
-        config: () => configFiles.current().evaluation.effective.learning,
-        configFiles,
-        identities: agentIdentities(storage),
-        mergeEnvironment: async (sessionId, variables) => {
-          const id = tryParseSessionId(sessionId);
-          if (id === undefined) return;
-          await sessionMutations.run(`session:${id}`, async () => {
-            await sessionEnvironments.write(id, { ...(await sessionEnvironments.read(id)), ...variables });
-          });
+      const learning = learningModule.build(
+        {
+          paths,
+          files: stateFiles,
+          clock,
+          sessions,
+          transcripts: createTranscriptReader(storage),
+          sessionControl: withSystemCallsign(sessionControl, systemCallsigns, 'learning'),
+          config: () => configFiles.current().evaluation.effective.learning,
+          configFiles,
+          identities: agentIdentities(storage),
+          binaryName: CLIENT_NAME,
+          mergeEnvironment: async (sessionId, variables) => {
+            const id = tryParseSessionId(sessionId);
+            if (id === undefined) return;
+            await sessionMutations.run(`session:${id}`, async () => {
+              await sessionEnvironments.write(id, { ...(await sessionEnvironments.read(id)), ...variables });
+            });
+          },
+          send: async (sessionId, message, sendId) => {
+            const id = tryParseSessionId(sessionId);
+            if (id === undefined) throw new Error(`${JSON.stringify(sessionId)} is not a usable session id`);
+            await producerSends('Lessons').send({ id, sendId, message });
+          },
+          pricing: async () => {
+            const read = await daemonConfigStore.readPricing();
+            return effectiveAnalyticsPricing(
+              read.kind === 'unavailable' ? [] : read.configuration.catalog,
+              await modelCatalogService.catalogs(),
+            );
+          },
         },
-        send: async (sessionId, message, sendId) => {
-          const id = tryParseSessionId(sessionId);
-          if (id === undefined) throw new Error(`${JSON.stringify(sessionId)} is not a usable session id`);
-          await producerSends('Lessons').send({ id, sendId, message });
-        },
-        userHome,
-        pricing: async () => {
-          const read = await daemonConfigStore.readPricing();
-          return effectiveAnalyticsPricing(
-            read.kind === 'unavailable' ? [] : read.configuration.catalog,
-            await modelCatalogService.catalogs(),
-          );
-        },
-      });
+        seamsOf.learning(world),
+        lifecycle,
+      );
       adoptLearning = async id => {
-        await learning.transaction(async () => await learning.lessons.adopt(id));
+        await learning.provides.transaction(async () => await learning.provides.lessons.adopt(id));
       };
       // The live pane, read through the SAME tmux server the launch path addresses: the session observer
       // reads its turn evidence through `turnPorts.pane`, and the live readout (`?live=1` on a session's
@@ -13836,7 +13739,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         }),
         names: createNameSubsystem(storage),
-        learning,
         recommend: createRecommendSubsystem(advisorOver, usage),
         sttEnhancement,
         // Names-only status over the store's listing, and a Test that spends a key once through the
@@ -14521,7 +14423,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         catalogMembers: { members: catalogMembers },
         catalogLinks: { links: catalogLinks },
       };
-      return { mounted: builtSubsystems, modules: {} };
+      return { mounted: builtSubsystems, modules: { learning } };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: millisecondClock,
