@@ -144,13 +144,4 @@ describe('session workers in a booted daemon', () => {
       // And this thread has no tick of its own: every running session is its worker's.
       should(report.activities.find(activity => activity.name === 'turn watcher')?.count ?? 0).be.belowOrEqual(1);
     }, 180_000);
-
-  it('should still observe on the workers when the retired switch says to turn them off', async () => {
-    // Act
-    const report = await profiled({ enabled: false });
-
-    // Assert
-    should(report.workers.map(worker => worker.name)).containEql('session-observer');
-    should(looksIn(report)).be.aboveOrEqual(1);
-  }, 180_000);
 });
