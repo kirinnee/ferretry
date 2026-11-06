@@ -38,6 +38,11 @@ const AUTO_READ_EXPLANATION =
 
 const AUTO_READ_OFF_EXPLANATION = 'Off by default. Nothing is read aloud unless you press Read aloud on a message.';
 
+const EARCONS_ON_EXPLANATION =
+  'Live makes a short rising tone when it starts listening, a blip when your message is sent, a two-note chime when the reply is ready and a falling tone when it stops. On an Android phone it also buzzes briefly when your message is sent and when the reply is ready.';
+
+const EARCONS_OFF_EXPLANATION = 'Live is silent: the words on the Live bar are the only signal.';
+
 const OLDER_MACHINE_NOTE =
   'Auto-read needs a newer Ferretry on your computer. Until you update the Ferretry app on your computer, nothing is read on its own, but Read aloud on a message still works.';
 
@@ -192,6 +197,28 @@ function Supported({
             {OLDER_MACHINE_NOTE}
           </p>
         ) : null}
+      </div>
+
+      {/* ---- Live's tones ---- */}
+      <div className="flex flex-col gap-2">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={settings.earcons}
+          aria-describedby="live-sounds-explanation"
+          data-live-sounds=""
+          onClick={() => update({ earcons: !settings.earcons })}
+          className={cn(
+            'flex min-h-[44px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
+            settings.earcons ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-fg',
+          )}
+        >
+          <span className="text-ui font-semibold">Live sounds</span>
+          <span className="text-meta">{settings.earcons ? 'On' : 'Off'}</span>
+        </button>
+        <p id="live-sounds-explanation" className="text-meta leading-base text-muted">
+          {settings.earcons ? EARCONS_ON_EXPLANATION : EARCONS_OFF_EXPLANATION}
+        </p>
       </div>
 
       {/* ---- the voice, with a preview ---- */}

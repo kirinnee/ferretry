@@ -1,0 +1,210 @@
+/**
+ * PUTTING THE LIVE LOOP'S PORTS TOGETHER from what the page holds: the engine the person chose, the
+ * composer, the session. This is the composition seam `hooks/use-live-voice.ts` calls with live values;
+ * everything here is a function of its arguments, so it is tested with plain objects.
+ *
+ * NO ENGINE IS FORKED. A Live take makes the same sessions the mic button does: an on-device voice's
+ * `createSession` (with live words off, so the early finish is offered), or the browser's own
+ * recognition. The engine is the person's choice and Live never falls back to another: an engine that
+ * is not chosen, not installed or not available is a refusal with words (`LiveBlock`).
+ */
+
+import type { DaemonConnection } from '../daemon-connection.ts';
+import {
+  type BrowserRecognitionProvider,
+  BrowserRecognitionSession,
+  browserRecognitionErrorFrom,
+} from '../stt/browser-recognition.ts';
+import type { MicMeterPort } from '../stt/level-monitor.ts';
+import type { OnDeviceVoice } from '../stt/on-device-voice.ts';
+import type { RemoteEnhancementFetch } from '../stt/remote-enhancement.ts';
+import type { DeviceSpeedupKeys } from '../stt/speedup-keys.ts';
+import { isOnDeviceEngine, type SttSettings } from '../stt/stt-settings.ts';
+import type { VoiceCleanup } from '../stt/voice-cleanup.ts';
+import { meterLevelFrames } from './level-frames.ts';
+import { cleanLiveTurn, type LiveCleanupDeps } from './live-cleanup.ts';
+import type { LiveRunnerPorts } from './live-runner.ts';
+import { blockOf, type LiveSession, type LiveSessionCallbacks, liveTakePort } from './live-take.ts';
+import type {
+  ClockPort,
+  EarconPort,
+  HapticsPort,
+  LiveBlock,
+  MicLockPort,
+  ReplyFeedPort,
+  SendPort,
+  ReaderPort,
+  SendTicket,
+  VisibilityPort,
+  VoicePort,
+  WakeLockPort,
+} from './ports.ts';
+import { type ReplySource, sessionReplyFeed } from './reply-feed.ts';
+
+/** What the composer tells Live about the person, the moment it happens (never later, in an effect). */
+export interface LiveComposerObserver {
+  /** The draft was written by anything but Live's own `show`/`clear` (a keystroke, a paste, another device). */
+  edited(text: string): void;
+  /**
+   * An input-method composition began. The word being composed is the person's and is not in the draft yet, so Live
+   * holds exactly as it does for a keystroke: auto-send pauses and a send queued but not started is taken back.
+   */
+  composing(): void;
+  /** The person pressed the composer's own Send; `outcome` is that press (true: it went). */
+  sending(outcome: Promise<boolean>): void;
+}
+
+/** The composer, as Live drives it. `composer.tsx` implements it; nothing else sends from voice. */
+export interface LiveComposerBridge {
+  /** Replace this turn's words in the box (text typed before them, and earlier takes' words, stay in front). */
+  show(words: string): void;
+  /** Take this turn's words out of the box again. */
+  clear(): void;
+  /** What is in the box is final for this take: the next take's words go after it, never over it. */
+  seal(): void;
+  /** Hear the person synchronously. One observer at a time; returns the stop. */
+  observe(observer: LiveComposerObserver): () => void;
+  /** What the box holds now. */
+  draft(): string;
+  /** The text in the box that is not Live's words (typed by a person, before or during Live); '' when none. */
+  typed(): string;
+  /** What `show` last put in the box; null before the first. A draft that is not this was edited by a person. */
+  lastShown(): string | null;
+  /**
+   * The composer's own send of exactly `ticket.text`: true once it is on its way. Before it starts, the composer
+   * checks that the box still holds those words and calls `ticket.commit()`; a revoked ticket sends nothing (false).
+   */
+  submit(ticket: SendTicket): Promise<boolean>;
+}
+
+export interface LiveEngineDeps {
+  readonly settings: SttSettings;
+  readonly recognition: BrowserRecognitionProvider;
+  /** The voice of the chosen on-device engine; null when none is available here. */
+  readonly voice: OnDeviceVoice | null;
+}
+
+/** A session over the chosen engine for a Live take, or the reason there is none. Never throws. */
+export function createLiveSession(deps: LiveEngineDeps, callbacks: LiveSessionCallbacks): LiveSession | LiveBlock {
+  const { engine } = deps.settings;
+  if (engine === null) return 'engine-not-chosen';
+  try {
+    if (isOnDeviceEngine(engine)) {
+      if (deps.voice === null || !deps.voice.support.available) return 'engine-missing';
+      // Live words off: the early finish (`beginFinish`) is what makes the loop fast, and near-live re-reads its own window.
+      return deps.voice.createSession({ ...callbacks, liveWords: false });
+    }
+    if (!deps.recognition.support.available)
+      // An iPhone Home Screen app cannot run Browser voice at all (`support.availability` says so).
+      return deps.recognition.support.availability === 'ios-home-screen' ? 'ios-browser-voice' : 'engine-failed';
+    return new BrowserRecognitionSession(deps.recognition, callbacks);
+  } catch (failure) {
+    return blockOf(browserRecognitionErrorFrom(failure));
+  }
+}
+
+export interface LiveAssemblyDeps {
+  /** Read afresh at every call, so settings changed mid-Live apply to the next take. */
+  readonly engine: () => LiveEngineDeps;
+  readonly cleanup: () => LiveCleanupDeps;
+  readonly meter: MicMeterPort | null;
+  readonly composer: LiveComposerBridge;
+  readonly reply: ReplySource;
+  readonly reader: ReaderPort | null;
+  /** The page's one voice: the microphone never opens while anything speaks. */
+  readonly voice?: VoicePort | null;
+  readonly earcons?: EarconPort | null;
+  readonly haptics?: HapticsPort | null;
+  readonly clock: ClockPort;
+  readonly visibility: VisibilityPort;
+  readonly micLock: MicLockPort;
+  readonly wakeLock: WakeLockPort;
+}
+
+/** Every port the runner needs, built over the page's pieces. */
+export function assembleLivePorts(deps: LiveAssemblyDeps): LiveRunnerPorts {
+  const send: SendPort = {
+    show: words => deps.composer.show(words),
+    clear: () => deps.composer.clear(),
+    seal: () => deps.composer.seal(),
+    shown: () => deps.composer.draft(),
+    typed: () => deps.composer.typed(),
+    send: async ticket => {
+      const sent = await deps.composer.submit(ticket);
+      return sent ? { kind: 'sent', sentAtMs: deps.clock.now() } : { kind: 'failed', reason: 'not-sent' };
+    },
+  };
+  const reply: ReplyFeedPort = sessionReplyFeed(deps.reply);
+  return {
+    take: liveTakePort({
+      createSession: callbacks => createLiveSession(deps.engine(), callbacks),
+      clean: (text, signal) => cleanLiveTurn(text, deps.cleanup(), signal),
+    }),
+    levels: meterLevelFrames(deps.meter, deps.clock),
+    send,
+    reply,
+    reader: deps.reader,
+    voice: deps.voice ?? null,
+    earcons: deps.earcons ?? null,
+    haptics: deps.haptics ?? null,
+    wakeLock: deps.wakeLock,
+    visibility: deps.visibility,
+    micLock: deps.micLock,
+    clock: deps.clock,
+  };
+}
+
+/** Everything the page holds that a Live take reads, gathered at the moment it is read. */
+export interface LivePageInputs {
+  readonly settings: SttSettings;
+  readonly recognition: BrowserRecognitionProvider;
+  readonly voice: OnDeviceVoice | null;
+  readonly cleanup: VoiceCleanup;
+  readonly keys: DeviceSpeedupKeys | null;
+  readonly daemon: DaemonConnection;
+  readonly fetchImpl: RemoteEnhancementFetch;
+  readonly readContext: (needsEvidence: boolean) => readonly string[];
+  readonly meter: MicMeterPort | null;
+}
+
+/** The environment Live runs in: the composer, the session, and the page's clock and locks. */
+export interface LiveEnvironment {
+  readonly composer: LiveComposerBridge;
+  readonly reply: ReplySource;
+  readonly reader: ReaderPort | null;
+  /** The page's one voice: the microphone never opens while anything speaks. */
+  readonly voice?: VoicePort | null;
+  readonly earcons?: EarconPort | null;
+  readonly haptics?: HapticsPort | null;
+  readonly clock: ClockPort;
+  readonly visibility: VisibilityPort;
+  readonly micLock: MicLockPort;
+  readonly wakeLock: WakeLockPort;
+}
+
+/**
+ * The ports over what the page holds, read through `read` at the moment each is needed — so a setting
+ * changed mid-Live applies to the next take, and nothing here is captured stale.
+ */
+export function assembleFromPage(read: () => LivePageInputs, environment: LiveEnvironment): LiveRunnerPorts {
+  return assembleLivePorts({
+    ...environment,
+    engine: () => {
+      const page = read();
+      return { settings: page.settings, recognition: page.recognition, voice: page.voice };
+    },
+    cleanup: () => {
+      const page = read();
+      return {
+        settings: page.settings,
+        cleanup: page.cleanup,
+        keys: page.keys,
+        daemon: page.daemon,
+        fetchImpl: page.fetchImpl,
+        readContext: page.readContext,
+      };
+    },
+    // Ports are built when Live starts, so the meter is the one the page has then.
+    meter: read().meter,
+  });
+}

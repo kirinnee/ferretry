@@ -64,6 +64,8 @@ export interface ReadAloudController {
   read(key: string, markdown: string, options?: ReadOptions): void;
   /** Stop whatever is being read. */
   stop(): void;
+  /** Make later speech allowed (iOS: call it inside a tap). Silent, safe to repeat, never throws. */
+  unlock(): void;
   /** What to say about the voice a reading would use right now, before anything is read: null for a device voice. */
   previewVoiceNote(voiceId?: string | null): string | null;
   /** Stop and forget the message (and its sentences): the conversation it belonged to has been left. */
@@ -162,6 +164,13 @@ export function createReadAloud(deps: ReadAloudDeps): ReadAloudController {
         });
       } catch {
         if (live()) set({ ...state, status: 'failed' });
+      }
+    },
+    unlock: () => {
+      try {
+        speaker.unlock();
+      } catch {
+        // Nothing to unlock.
       }
     },
     dismiss: () => {

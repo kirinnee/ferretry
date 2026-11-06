@@ -1,0 +1,103 @@
+/**
+ * LIVE'S QUESTION OUTLIVES ITS COMPOSER. A ferret's structured question replaces the composer with the question
+ * form, and Live belongs to the composer: the runner is disposed with it, and the question Live was about to read
+ * would never be spoken. This hook is the page's retained reader for that moment — one reading of the question and
+ * its options, over the page's ONE read-aloud controller, that does not need the composer.
+ *
+ * It is a READER and nothing else. The microphone and the sends went with the runner, so while this speaks
+ * nothing listens and nothing is sent: the question is read to the person and is never answerable by voice. It
+ * ends when the speech does (finished, stopped from the row, failed), when the question is gone (answered), and
+ * with the page, and when the tab is hidden (a reading still waiting out its settle never starts, a speaking one is
+ * stopped, and coming back to the tab never starts it again). While it is active the page's own auto-read stays out
+ * of the way (`reading`).
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { browserClock, type ClockGlobalLike } from '../lib/voice-chat/clock.ts';
+import { createLiveReader, type LiveReadingSource } from '../lib/voice-chat/live-reader.ts';
+import { DEFAULT_LIVE_VOICE_SETTINGS } from '../lib/voice-chat/live-settings.ts';
+import type { ReaderPort } from '../lib/voice-chat/ports.ts';
+import { documentVisibility } from '../lib/voice-chat/visibility.ts';
+import { useDeviceVoiceSettingsStore } from './use-live-voice-settings.ts';
+import { useReadAloudController } from './use-read-aloud.ts';
+
+export interface LiveQuestionHandoff {
+  /** The retained reader is waiting to speak or speaking. */
+  readonly reading: boolean;
+  /**
+   * Read the question now, unless this device cannot speak, the tab is hidden, a reading is already under way, or the
+   * page that owns this reader is leaving (page teardown never starts speech).
+   */
+  begin(): void;
+  /** End the reading, silently if it has not begun, and stop the voice if it has. */
+  cancel(): void;
+  /** Read the question again from the top: ends the reading under way (if any) and begins afresh. */
+  repeat(): void;
+}
+
+export function useLiveQuestionHandoff(source: LiveReadingSource): LiveQuestionHandoff {
+  const controller = useReadAloudController();
+  const voiceSettings = useDeviceVoiceSettingsStore();
+  const [reading, setReading] = useState(false);
+  const current = useRef<ReaderPort | null>(null);
+  /** The page that owns this reader is mounted. Once it is leaving, no reading can begin (see the cleanup below). */
+  const owned = useRef(true);
+  const latest = useRef({ controller, voiceSettings, source });
+  latest.current = { controller, voiceSettings, source };
+
+  const cancel = useCallback((): void => {
+    const reader = current.current;
+    current.current = null;
+    reader?.stop();
+    setReading(false);
+  }, []);
+
+  const begin = useCallback((): void => {
+    const { controller: voice, voiceSettings: settings, source: rows } = latest.current;
+    if (!owned.current || current.current !== null || !voice.supported || !documentVisibility(document).visible())
+      return;
+    const reader = createLiveReader({
+      controller: voice,
+      source: rows,
+      settings: () => settings?.get() ?? DEFAULT_LIVE_VOICE_SETTINGS,
+      clock: browserClock(globalThis as unknown as ClockGlobalLike),
+    });
+    current.current = reader;
+    setReading(true);
+    reader.read('question', () => {
+      if (current.current !== reader) return;
+      current.current = null;
+      setReading(false);
+    });
+  }, []);
+
+  // A hidden tab hears nothing: a reading still waiting out its settle never starts and a speaking one is stopped.
+  // Returning to the tab starts nothing — the question is read once, when it arrived, or when the person asks again.
+  useEffect(
+    () =>
+      documentVisibility(document).watch(visible => {
+        if (!visible) cancel();
+      }),
+    [cancel],
+  );
+
+  // The page going away silences the reading (the voice is the page's, and the conversation is left) AND closes the
+  // door: the parent's cleanup runs before its children's, so a Composer unmounting with the page calls its `onRetire`
+  // AFTER this — and that must never start a reader on a page that is already gone (no Stop, no visibility watcher).
+  useEffect(() => {
+    owned.current = true;
+    return () => {
+      owned.current = false;
+      const reader = current.current;
+      current.current = null;
+      reader?.stop();
+    };
+  }, []);
+
+  const repeat = useCallback((): void => {
+    cancel();
+    begin();
+  }, [cancel, begin]);
+
+  return { reading, begin, cancel, repeat };
+}

@@ -80,6 +80,7 @@ import { RouterProvider } from '../../src/lib/router.tsx';
 import { SCROLL_MEMORY_KEY, type ScrollMemoryStorage } from '../../src/lib/scroll-memory.ts';
 import { SessionCache, type SessionCacheBackend } from '../../src/lib/session-cache.ts';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
+import { LIVE_VOICE_TOGGLE_EVENT } from '../../src/lib/voice-chat/live-command.ts';
 import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.ts';
 import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
@@ -5075,6 +5076,30 @@ describe('pairing a phone from the machine menu and the finder', () => {
       expect(new URLSearchParams(window.location.search).get('ferret')).toBe('s1');
     } finally {
       await view.unmount();
+    }
+  });
+
+  it('offers "Live voice" on a chat and asks the composer\'s Live control to toggle, and nowhere else', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
+    const heard: Event[] = [];
+    const listener = (event: Event): void => void heard.push(event);
+    document.addEventListener(LIVE_VOICE_TOGGLE_EVENT, listener);
+    try {
+      await settle();
+      await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+      await pressPaletteRow('command-live-voice');
+      expect(heard.length).toBe(1);
+    } finally {
+      document.removeEventListener(LIVE_VOICE_TOGGLE_EVENT, listener);
+      await view.unmount();
+    }
+    const dashboard = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
+    try {
+      await settle();
+      await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+      expect(paletteOption('command-live-voice')).toBeNull();
+    } finally {
+      await dashboard.view.unmount();
     }
   });
 

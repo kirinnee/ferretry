@@ -8,6 +8,8 @@ import {
   BOARD_FOR_FERRET_SEARCH_TERMS,
   boardForFerretPaletteCommand,
   destinationExists,
+  LIVE_VOICE_SEARCH_TERMS,
+  liveVoicePaletteCommand,
   destinationPaletteEntries,
   PAIR_PHONE_SEARCH_TERMS,
   pairPhonePaletteCommand,
@@ -240,6 +242,18 @@ describe('boardForFerretPaletteCommand', () => {
       Icon: QrCode,
     });
     for (const word of ['board', 'cards', 'kanban']) expect(matchesPaletteCommand(command, word)).toBe(true);
+    command.run();
+    expect(ran).toBe(1);
+  });
+});
+
+describe('liveVoicePaletteCommand', () => {
+  it('is "Live voice", is found by what people type for it, and runs what the host gave it', () => {
+    let ran = 0;
+    const command = liveVoicePaletteCommand(QrCode, () => (ran += 1));
+    expect(command).toMatchObject({ id: 'live-voice', label: 'Live voice', searchTerms: LIVE_VOICE_SEARCH_TERMS });
+    for (const word of ['live', 'hands free', 'voice chat', 'talk'])
+      expect(matchesPaletteCommand(command, word)).toBe(true);
     command.run();
     expect(ran).toBe(1);
   });

@@ -181,6 +181,19 @@ export const whatsNewPaletteCommand = (Icon: LucideIcon, run: () => void): Palet
   Icon,
 });
 
+export const LIVE_VOICE_SEARCH_TERMS =
+  'live voice chat hands free hands-free talk speak dictate microphone mic listen speech conversation';
+
+/** "Live voice": toggle Live on the chat in front of you, through the composer's own button. */
+export const liveVoicePaletteCommand = (Icon: LucideIcon, run: () => void): PaletteCommand => ({
+  id: 'live-voice',
+  label: 'Live voice',
+  description: 'Talk to this ferret: it listens, sends after a short countdown you can stop, and listens again.',
+  searchTerms: LIVE_VOICE_SEARCH_TERMS,
+  run,
+  Icon,
+});
+
 export const BOARD_FOR_FERRET_SEARCH_TERMS = 'board for this ferret cards tasks kanban project mine';
 
 /** "Board for <ferret>": the project Board narrowed to the ferret the reader is chatting with. */

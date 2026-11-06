@@ -31,7 +31,6 @@
       "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"],
       "ignore": [
         "src/lib/stt/speed-bench-report.ts",
-        "src/lib/voice-chat/turn-endpointer.ts",
         "src/lib/voice-chat/turn-endpointer-scoring.ts"
       ]
     }

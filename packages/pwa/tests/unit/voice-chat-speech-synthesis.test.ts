@@ -302,6 +302,47 @@ describe('createSpeechSynthesisSpeaker', () => {
     expect(a.events).toHaveLength(2);
   });
 
+  test('stopped is told only AFTER the browser was cancelled: whoever hears it never hears a queued utterance', () => {
+    const synth = new FakeSynth();
+    const speaker = speakerOver(synth);
+    const atStopped: { cancels: number; queued: number }[] = [];
+    speaker.speak({ segments: ['One.', 'Two.'], rate: 1 }, event => {
+      if (event.type === 'stopped') atStopped.push({ cancels: synth.cancels, queued: synth.queue.length });
+    });
+    synth.start();
+    const before = synth.cancels;
+    speaker.stop();
+    // At the instant stopped was told the engine had already been cancelled (once) and held nothing.
+    expect(atStopped).toEqual([{ cancels: before + 1, queued: 0 }]);
+    expect(synth.cancels).toBe(before + 1);
+  });
+
+  test('a reading replaced by another is told stopped only after the browser was cancelled, and the engine is cancelled once', () => {
+    const synth = new FakeSynth();
+    const speaker = speakerOver(synth);
+    const seen: string[] = [];
+    speaker.speak({ segments: ['A one.'], rate: 1 }, event => {
+      if (event.type === 'stopped') seen.push(`stopped: queued ${synth.queue.length}`);
+    });
+    const before = synth.cancels;
+    speaker.speak({ segments: ['B one.'], rate: 1 }, () => {});
+    expect(seen).toEqual(['stopped: queued 0']);
+    expect(synth.cancels).toBe(before + 1);
+    expect(synth.queue.map(utterance => utterance.text)).toEqual(['B one.']);
+  });
+
+  test('a cancel that throws still ends the reading as stopped', () => {
+    const synth = new FakeSynth();
+    const speaker = speakerOver(synth);
+    const { events, onEvent } = record();
+    speaker.speak({ segments: ['One.'], rate: 1 }, onEvent);
+    synth.cancel = () => {
+      throw new Error('already quiet');
+    };
+    speaker.stop();
+    expect(events).toEqual([{ type: 'stopped' }]);
+  });
+
   test('an engine error ends the reading as failed', () => {
     const synth = new FakeSynth();
     const speaker = speakerOver(synth);

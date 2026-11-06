@@ -442,7 +442,7 @@ const take = session.beginFinish(); // null when this engine cannot, or the mic 
 attempt was not discarded, replaced or cleared meanwhile; otherwise it decodes the whole take afresh, so the words are always those of the audio that was said. It
 never stops the microphone and never sends anything. Offered by the whole-take engines (Parakeet 0.6B and
 110M, the other sherpa batch models, Whisper); not by Vosk (already ~0.05 s), Browser voice, or Parakeet
-with near-live words on. Slice 4 (the Live loop) will call it; nothing ships calling it yet, in dictation or elsewhere.
+with near-live words on. The Live loop calls it (see [Live voice](#live-voice-the-one-place-voice-sends)); nothing in dictation does.
 
 ### Measuring your own device
 
@@ -761,6 +761,9 @@ refused storage keeps the choice in memory and says so. Nothing in it is a secre
 | Speed             | 0.8× – 2.0×                                          | 1.1×                     |
 | Longest reading   | 30 seconds · 1 · 2 · 5 minutes · No limit            | 1 minute                 |
 | What to read      | Last message of the turn · Every message             | Last message of the turn |
+| Live sounds       | On / Off (Live's tones, and the Android buzz)        | **On**                   |
+
+**While Live voice is on, Auto-read stands down:** Live reads its own turns ([Reading the reply](#reading-the-reply)), so a reply is never read twice. The "Auto-read replies" setting is not changed; it works again when Live ends.
 
 The voice is chosen from a **picker** (`features/settings/voice-picker.tsx`), not a native `<select>`: a closed select shows one line and cuts what
 does not fit, and the words that matter most are the voice's name and who gets the text. The button shows the voice in use — its name, then a
@@ -919,13 +922,367 @@ pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the 
   microphones (browser noise suppression and auto-gain change the levels) need an on-device check with
   the in-app timing numbers (pause → STT done, countdown held/used), which tune the defaults.
 - **Café/TV** — see above.
-- **No screen yet.** The Live bar, the countdown and the loop that uses these events come in later slices.
+- **The screen is built:** the Live bar, the countdown and the loop that uses these events are in [Live voice](#live-voice-the-one-place-voice-sends).
+
+## Live voice: the one place voice sends
+
+**This is a rule change, on purpose.** Dictation never sends: `hooks/use-dictation.ts` still has no path from
+recognised words to a sent message, and the mic button still ends in the review box. **Live voice is the one
+exception.** You press **Live**, you speak, and a turn you finish is put in the composer where you can see it,
+counted down, and sent through the composer's **own** send — the same route, grants, send ledger and audit as
+a typed message. The only code that sends from voice is `hooks/use-live-voice.ts`; its header says so.
+
+### What it does
+
+| State              | What you see                                                                                                                                 | Mic     |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Starting           | "Starting…" until the mic is open **and** the Live-tab lock is ours ("Allow the microphone if your browser asks." on the first start)        | opening |
+| Listening          | level bars (one labelled "Mic level" meter with reduced motion), "Listening"                                                                 | open    |
+| Hearing            | the words appearing in the composer                                                                                                          | open    |
+| Sending in 1.5 s   | a ring counting down, **Hold**, **Send now**                                                                                                 | open    |
+| Working            | "Working 0:12", **End**                                                                                                                      | **off** |
+| Reading            | "Reading reply" (or "Reading question"): the sentence being said is highlighted in the chat; **Stop reading**, **Hold**, **Repeat**, **End** | **off** |
+| Your turn (iPhone) | "The reply has been read. Tap Listen to talk." and one big **Listen** button                                                                 | off     |
+| On hold            | "On hold — paused while you type", **Resume**                                                                                                | off     |
+| Paused             | the tab is hidden                                                                                                                            | off     |
+
+- **The words are in the composer, visibly, during the countdown.** What is sent is exactly what the composer
+  shows at that moment. Edit them, add to them or delete them: typing pauses the countdown and holds, and
+  nothing is sent until you press **Send now** or **Resume**.
+- **The countdown is 1.5 s** (`DEFAULT_GRACE_MS`, adjustable in the machine's range) and always visible: a
+  ring on a phone and a bar along the strip on a computer, both filling from the moment the pause was heard,
+  plus a large text count when reduced motion is on. **Hold** stops it, **Send now** skips it.
+- **The words must be on screen for 500 ms before an automatic send** (`SETTLE_MS`), so a late transcript can
+  never be sent before you could see it. **Send now** skips that too. With a countdown of 0 the send follows
+  the words as soon as they are shown.
+- **Speaking again during the countdown cancels the send** and goes back to listening; the words so far stay
+  and the next words are added after them. Engines that stop on `finish()` (Vosk, Browser voice, near-live
+  Parakeet) open a new session and carry the earlier words; the whole-take engines (Parakeet, Whisper) keep the
+  mic open and only discard the early decode (`discard()`, see [Starting to transcribe during the send
+  countdown](#starting-to-transcribe-during-the-send-countdown)).
+- **Interrupting is a tap or a key, never your voice.** The mic is **off** while the ferret works and while its
+  reply is read, so nothing it or the room says can send or stop anything.
+- **Keys** (only when focus is not in a text field, and never with Ctrl, Cmd or Alt held): **Enter** = Send now,
+  **H** = Hold, **Space** = Resume. **While a reply is being read:** **Space**, **Esc** and **S** stop the
+  reading and Live listens again (Esc does _not_ end Live then — use **End**), **R** reads it again, **H** holds
+  (the speech stops and the microphone stays shut until **Resume**). Otherwise **Esc** = End. The palette entry **Live voice** toggles it (offered on a chat page).
+- **A stop is sticky (the surprise-send rule).** Nothing sends unless the visible countdown elapsed in an
+  un-parked state. **Hold**, typing and a hidden tab pressed while the words are still being worked out stop
+  capture and the level frames at once (the transcription already under way is allowed to finish, so nothing
+  said is lost); renewed speech and a second pause cannot revive the turn, and when the words arrive — or come
+  to nothing, or fail — Live lands on **On hold** / **Paused** with the microphone shut, never back on
+  Listening and never on a send. The first stop stands: a later one does not change where it lands. The bar
+  says "Getting your words…" with nothing to press until they land.
+- **A stop closes the microphone itself, at once.** Stopping capture also closes the take's own recording
+  (`TakeHandle.stopRecording` → the session's `closeCapture`): the early finish reads its snapshot first, then
+  the recorder stops and the tracks are released, while the model is still decoding. A slow or stuck decode can
+  no longer keep the person's microphone open; the words still arrive from the snapshot.
+- **A stop also closes the engine's own hide listener.** A hidden tab cancels a plain dictation, as it always did. A Live
+  take whose capture was closed by a stop (`closeCapture`, Parakeet and Whisper) hands its stopped snapshot to Live,
+  so its hide listener is removed and a hide already queued for it does nothing: the page fans a hide out to the
+  runner first (it parks and starts the early finish) and the session second, and the second can no longer cancel the
+  first's decode. Tested with the real `watchHidden` and both listeners in registration order
+  (`tests/unit/voice-chat/live-capture.test.ts`).
+- **A stop in the middle of a sentence keeps the sentence.** **Hold**, typing or a hidden tab pressed while you
+  are still speaking (before the pause that ends the turn) finish the turn into the same sticky stop: its words
+  are worked out with no countdown and no send, and they are put in the message box before Live lands on
+  **On hold** / **Paused**. Nothing said is thrown away.
+- **Typing is a hold that outlasts the reply.** Typing while Live is Starting holds it at once (the mic being
+  opened is closed). Typing while the ferret works (Working) keeps watching for the
+  reply but remembers the hold: when the reply lands Live goes to **On hold**, does **not** reopen the mic, and
+  waits for **Resume**. Typing (or **Hold**) while a reply is being **read** is different: the speech stops AT
+  ONCE and Live lands On hold on the spot — a sticky stop, microphone shut, draft preserved, explicit **Resume**
+  required (hiding the tab and **End** stop a reading too). Your draft is never touched, and nothing the room
+  says — or the speaker says — can send it. The hold is latched
+  **even once Live's own send is on the wire** (it cannot be taken back, but typing still counts): another device
+  replacing the shared draft with its next instruction while the first send waits for its acknowledgement holds Live
+  after the reply, the same as typing here. The composer's own emptying of the box after a successful send is **not**
+  typing (`emptyingSent` in `composer.tsx`), so an ordinary turn still reopens the microphone.
+- **Text you typed never rides along with a voice send.** If the message box holds any text Live did not put
+  there (typed before Live started, or since) when a countdown would start, the turn is not counted down: its
+  words are added after your text and Live goes **On hold**. Only **Send now** (your own press) sends them.
+- **One revocable send path (nothing is sent that was not on screen exactly as sent, never twice, never after a stop).**
+  Live sends through exactly one door: a `SendTicket` (`ports.ts`) carrying the words on screen when the machine
+  approved the send. The composer sends them a render later (`liveBridge.submit`) and carries the ticket **into the
+  one `sendDraft`**, where it stays revocable across **every await** — the wait for the shared draft's acknowledgement
+  included. **Immediately before the message is submitted** (the daemon call, or the outbox), with nothing awaited in
+  between, the composer checks that the ticket is unrevoked, that the box still reads exactly the approved words, that
+  no composition is open and that the page is visible, and only then calls `ticket.commit()`. Until that moment the
+  send is only _queued_: **Hold**, typing, a composition starting, a hidden tab, **End**, a refused lock and the page
+  leaving each revoke the ticket (Hold, typing, a composition and a hidden tab first tell the machine `send-withdrawn`,
+  so they land exactly as in the countdown, words kept), and the composer then sends nothing — also if the shared
+  draft's answer only arrives later or its wait only runs out later. A send the composer has committed is on the wire
+  and stands. Only the _current_ ticket's answer is heard, so a taken-back send that answers late cannot fail the next
+  one.
+- **A composition holds Live, and Live never becomes an ordinary press.** An input-method composition starting
+  (`compositionstart`) is the person typing before the first `input` is reported: it pauses auto-send and takes back
+  a queued send at once (`LiveComposerObserver.composing`). A Live attempt never ends a composition to read its word
+  (a person's press does that, and resubmits as the person); a ticketed attempt that finds a composition open, a
+  revoked ticket or a box that differs from the approved words **returns false and sends nothing** — it is never
+  deferred and never promoted into the ordinary send, so text the person did not approve cannot go as a voice send.
+- **A hide while Live's send is on its way or the ferret is working is latched.** The hide during `sending` (send in
+  flight) or `working` sets `LiveState.hiddenHold`, which showing the tab does **not** clear: the reply watch carries
+  on, the finished reply lands **Paused** (not Listening, not Reading) with the microphone shut, and only **Resume**
+  reopens it. Anything that ends the wait (the reply needing input, a failed send, **End**) drops the latch, so it never
+  carries into a later turn.
+- **Typing is heard at the keystroke.** The composer tells Live about every write to its draft the moment it is made
+  (`LiveComposerBridge.observe`), so typing pauses auto-send and takes back a queued send before React renders — not in an
+  effect after it. A write that is exactly the words Live just put there is not typing.
+- **Your own Send retires the attempt.** Pressing the composer's own Send (arrow, Enter, ⌘↵) while Live is anywhere but
+  Working sends what you see and tells Live (`LiveRunner.personSent`): the countdown, the timers, the take and its
+  pending decode and the microphone are all gone, and your press becomes the send in flight — **Working** and the reply
+  watch when it went, **On hold** with the words kept when it failed. A slow decode that finishes afterwards can no
+  longer re-insert the words and send them a second time; the microphone stays off through the first real turn.
+- **A new take never writes over a finished one.** When the microphone opens (the tap, **Resume**, after a hidden tab, after
+  the reply) the box is _sealed_ (`SendPort.seal`): the words Live left in it — a held sentence — become the front of the
+  next take's words, which follow them, and are never replaced. Text you typed is still yours (it keeps a turn from counting
+  down); words you edit become yours too.
+- **Both the microphone and the lock before Listening.** The microphone and the one-tab Web Lock are asked for
+  in parallel and Live listens only when both have answered; a refusal of the lock ends Live in any phase, so
+  two tabs can never both capture and send. A lock granted after Live ended (End, the page leaving, a hidden
+  tab at start-up) is handed straight back (`live-runner.ts` lock generations; `mic-lock.ts` honours a
+  release before the grant).
+- **Voice returning while an engine is still finishing a turn** (Vosk, Browser voice, near-live Parakeet) opens
+  a fresh recognition session at once and carries the finishing session's words in front when they arrive; the
+  old session is never aborted and cannot change the new one (`live-take.ts`).
+- **The reply is watched from before the send** (`ReplyFeedPort.arm()`, attached on the acknowledgement), so a
+  turn the ferret finishes while the send is still being acknowledged is not lost.
+- **A failed send is never retried automatically.** The loop goes to **On hold** with your words kept in the
+  composer and the reason said; **Resume** sends again by your hand. Once the composer has started the send (it is on
+  the wire), Hold, typing and hiding the tab do nothing to it; before that they take it back.
+- **Idle for 10 minutes ends Live** (`IDLE_END_MS`). It never turns itself back on.
+- **One Live tab:** it takes a Web Lock; a second tab says "Live is on in another tab". It asks for a Screen
+  Wake Lock and asks again when the tab is visible; if refused it says **Screen may turn off**. Hiding, showing
+  and Resume while a request is still pending share that one request; a grant that arrives after Live ended or
+  after a newer one replaced it is handed straight back, so End releases everything that was granted
+  (`wake-lock.ts`). A hidden tab **pauses** Live (mic closed); coming back to the tab does not reopen the microphone — **Resume** does.
+- **Buttons are at least 48 px tall on a phone and 44 px on a computer** (the harness measures them; the CSS
+  outranks the app's coarse-pointer 44 px floor). On a phone **Hold** is the big round button wherever the big button is Hold (listening, hearing, the countdown) — there is
+  never a second one. While a reply is read the big button is **Stop reading**, so **Hold** is a 48 px button of its own in
+  the row beside **Repeat** and **End**.
+- **The button is an icon** (44 px on a phone), and on a desktop it is **not drawn in a pane narrower than 300 px of row**
+  (a split agent pane beside Info): five buttons would push Send past the pane. The palette entry still starts it.
+- **It cannot be offered where it cannot send:** a device without send rights (`disabled`) gets no Live button.
+  The mic button is held back while Live is on, and Live while the mic is recording.
+
+### Reading the reply
+
+When the ferret's turn ends after a message **Live sent**, Live reads the reply aloud and then listens again.
+The words and the voice are the Read aloud / Auto-read ones ([What is read, and what is
+described](#what-is-read-and-what-is-described), [Which voice](#which-voice)); Live only decides **when**.
+
+- **Only the last message of the turn is read** (the "Last message of the turn" choice; "Every message" is
+  honoured if you chose it). Code, tables, diagrams and pictures are **described** ("Code block, 14 lines of
+  TypeScript. It's on screen."), never read out. A turn that wrote no text says "Done. No message." — it never
+  falls back to the previous turn's reply, because the page's rows are remembered as the message goes
+  (`ReaderPort.mark`).
+- **It stops at about a minute** (the "Longest reading" setting, 1 minute by default) and says "There's more on
+  screen." The cut is made by the speakable text, not by the loop: to the loop a capped reading is one that
+  ended. **R** reads the reply again from the start — there is no "read the rest" yet.
+- **The text settles first.** The daemon says the turn is over a moment before the last record always shows, so
+  the reply is picked once the conversation has held still for 500 ms (at most 3 s) — `live-reader.ts`.
+- **The microphone is off the whole time** (half-duplex): it was shut when the message went and is reopened only
+  when the speech ends. Nothing the voice says can be heard, transcribed or sent. The state is **Reading reply**;
+  the sentence being said is highlighted in the chat and scrolled into view (the same captions as Read aloud).
+- **THE RULE FOR EVERY SPEAKER ON THE PAGE: Live's microphone is open only while NO speech is playing from anywhere.**
+  The page has one voice (the read-aloud controller) and Live's reading, a **Read aloud** tap on any message and the
+  Settings preview all share it. A key change is _not_ an end of speech (`live-reader.ts` answers `taken`, not
+  `stopped`: another reading took the voice and is speaking). So:
+  1. **Another message takes the voice while Live reads** (you tap Read aloud on an older message): Live gives the
+     voice up — it never stops the other speech — and lands **On hold** ("Another message is being read aloud.
+     Listen stops it and talks."). The microphone stays shut; **the speech ending does not reopen anything** (Live
+     never reopens behind a speaker by itself). **Listen** is your say-so: it cuts any speech still playing, then opens
+     the microphone.
+  2. **A Read aloud tap while Live listens (or hears you mid-sentence)** closes the microphone first — a turn in
+     the middle of a sentence is parked with its words kept in the box and never sent — and Live waits On hold the same way.
+  3. **Starting Live while something is being read** cuts that speech before the microphone opens (pressing Live is
+     the decision to talk).
+  4. **The row's own Stop is a stop, not a license to listen.** Pressing **Stop** on the message being read (or anything else
+     that stops the shared voice) cancels the browser's speech queue **before** Live is told the reading ended: the speech
+     adapter bumps its generation (so the browser's own cancellation callbacks are stale and ignored), calls
+     `speechSynthesis.cancel()`, and only then publishes `stopped` (`speech-synthesis.ts`). Live's reader forwards that
+     `stopped` as the end of the reading, so the microphone reopens only once nothing is queued or audible. The same order
+     holds when one reading replaces another. `composer-live-half-duplex.test.tsx` presses the row's Stop button (not
+     only the Live bar's) and watches the order of cancel and stopped.
+  5. Every road back to listening checks the voice first (`VoicePort`: `busy` / `watch` / `silence`): a reply
+     that lands while another message is read waits On hold too, and the runner's `openMic` itself refuses to open over
+     speech as a last line of defence, so no event order can put the microphone under a speaker.
+     The integrated tests (`composer-live-half-duplex.test.tsx`) run the real Composer, hook, runner, reader, read-aloud
+     controller and speech adapter over a fake `speechSynthesis` and check, at the instant each side acts, that a take and
+     audible speech never overlap and that a synthetic echo never produces a second send.
+- **The live region says the state, never the reply** ("Reading reply"): a screen reader would otherwise speak
+  over the voice. If you use VoiceOver or TalkBack, consider switching Read aloud off — Live then shows the
+  reply and listens again.
+- **Only a tap or a key interrupts it** (see Keys above): the big **Stop reading** button, **Space**, **Esc**, **S**.
+  There is no interrupt by voice.
+- **A question is read, then Live stops at the prompt.** When the ferret needs you (`needs-input`) Live reads the
+  question and its options, then lands **On hold** with the normal prompt on screen. It does **not** listen for an
+  answer and has **no way to accept an approval by voice** — permission, sudo, secret and payment prompts are
+  only ever read. A skipped, broken or hidden-tab reading lands at the same prompt, never on Listening. The
+  machine tests assert that no event can produce a send from a question or its prompt. **Hold** while a question is read
+  is the same as stopping it: Live lands at the prompt.
+- **A question that arrives as a form is still read.** A _structured_ question (`pendingQuestion`) replaces the composer
+  with the question form, and Live belongs to the composer, so Live ends with it. Before that, the page hands the question to
+  a reader that outlives the composer (`use-live-question-handoff.ts`): when the composer leaves while Live is Working
+  (or Reading) and a prompt is waiting, the page reads the question **and its options** over the same one voice, once the
+  text has settled. By then the microphone and the sends are gone with the runner, so the question is read and **never
+  answerable by voice**. It ends with the speech, when the row's Stop is pressed, when the question is answered or goes
+  away, and with the page. **A hidden tab hears nothing, at any moment:** the reader watches the tab's visibility, so
+  hiding it during the 500 ms settle cancels the pending reading before it starts, hiding it while it speaks stops the
+  voice, and coming back to the tab never starts it again (a device that cannot speak reads nothing either; the form is on
+  screen). **A stop that stands stays a stop:** if the tab was hidden while Live was Working (the hide is latched, and
+  coming back does not undo it), or the person typed (typing holds Live), the question is **not** handed over — it is on
+  screen as the form, and nothing is read — because those stops end only at an explicit
+  Resume, and Resume went with the composer (`mayHandOffQuestion` in `live-machine.ts`). **Only the question form
+  replacing the composer is a hand-off:** the whole page leaving also unmounts the composer, and the page leaving never
+  starts speech (an in-composer prompt, a permission or a harness dialog, is read by Live itself; the hook refuses to begin
+  once its page is gone, so a late unmount of the composer cannot start a reader on a page that left). While it
+  speaks the page's Auto-read stays out of the way, and the composer's unmount tells the page Live is off (it used to
+  stay "on", leaving Auto-read suspended). A question that arrives while Live is only Listening is not read: Live was
+  not waiting on the ferret. `session-chat-page-live-question.test.tsx` proves it through the real page.
+- **A question being read has its own controls.** The form replaced the Live bar, so while the retained reader is waiting
+  or speaking a bar sits right above the question (`question-reading-bar.tsx`): the state in words ("Reading the question
+  aloud", "Nothing is listening"), **Stop reading** and **Repeat** (48 px on a phone, 44 px on a computer; the keys are
+  written on the desktop buttons). The page also listens for **Space**, **Esc** or **S** to stop and **R** to read it again,
+  only while focus is not in a text field (the form's "Other" box keeps its own keys), never with Ctrl/Cmd/Alt held, never
+  for a key something already handled, and a focused button keeps its own Space. The bar is the reader's controls and
+  nothing else: there is no microphone, **Listen**, **Hold** or send, so the question is still **never answerable by
+  voice**; stopping it never reopens the microphone. The bar is gone once the reading ends. The page-level proof is
+  `session-chat-page-live-question.test.tsx`; the bar's own keys and layouts are `question-reading-bar.test.tsx`.
+- **A message you send by hand while a reply is being read** stops the reading — it belongs to an older turn. Typing
+  comes first and already put Live On hold (above), so the usual hand send leaves it there until Resume; for a press that
+  Live sees begin while reading (nothing typed — a files-only message), Live waits for its ANSWER (`LiveRunner.personSent`,
+  the same one door as any hand send): the reply feed is armed at the press (so a fast turn is not lost), **accepted** →
+  Live follows the new turn (Working, no Live turn recorded), **refused or failed** → Live lands On hold with your draft
+  kept and the feed dropped. It never sits in Working on a turn that did not begin.
+- **If it cannot speak, Live keeps going as text.** A speech error says "Couldn't speak this reply. It is on
+  screen."; a device with no built-in voice (remote voices are never chosen automatically) says "This device has
+  no built-in voice for reading, so the reply stays on screen." Either way the reply is on screen and Live
+  listens again.
+- **Live reads its own turns, and nothing else does while it is on.** The page's "Auto-read replies" stands
+  down while Live is on (`useAutoRead({ suspended })`, the setting itself is untouched), so a reply is never
+  read twice; it comes back by itself when Live ends. Both go through the page's **one** read-aloud controller,
+  so two voices can never talk at once.
+- **Every reading has an id.** A reading that ends late — the stopped one answering after **R**, a speech that was
+  replaced — is ignored, so it can never end the reading that replaced it.
+
+### Sounds and buzzes
+
+Four short tones from Web Audio oscillators (no files, `lib/voice-chat/earcons.ts`): a **rising pair** when Live
+starts listening (the first time and after each reply), one **short blip** when your message is sent, a
+**two-note chime** when the reply is ready (including a question), a **falling pair** when Live stops. They are
+told apart by shape, not only pitch, are quiet (peak gain 0.12) and last under 0.4 s; the "listening" tone sounds
+as the mic opens, and the endpointer ignores anything shorter than a real utterance, so it is never taken for a
+turn. A refusal to start, hearing you, a countdown, a hold and a take that came to nothing make no sound. On an
+Android phone `navigator.vibrate` buzzes briefly for **sent** and **reply ready** (guarded: iOS web has no
+vibration, and a refusing device is silent). **Settings › Voice › Live sounds** switches the tones **and** the
+buzzes off (`fy-live-voice-v1`, `earcons`, on by default). The audio context is created and resumed inside the tap
+that starts Live (browsers refuse sound before a gesture).
+
+### Proving it on an iPhone
+
+The iPhone behaviour is **built but unproven** — nobody has run it on a real iPhone. What the code does:
+
+- **Speech is unlocked inside the Live tap** (`ReaderPort.unlock` → a silent utterance), and again inside every
+  Resume/Listen tap, because iOS only lets speech start from a gesture.
+- **Half-duplex:** the mic is closed before any speech (it is closed while the ferret works anyway), because an
+  open mic can route iOS audio to the earpiece.
+- **After each reply Live shows one big "Listen"** (state "Your turn") instead of reopening the mic by itself,
+  where the browser looks like an iPhone/iPad (`lib/voice-chat/platform.ts`, a cautious user-agent guess). Anywhere
+  else, a mic that Live reopened by itself and was **refused** falls back to the same **Listen** — so a wrong guess
+  costs one tap, not a stuck loop.
+
+What must be tried on a real iPhone before this is called done (Safari tab, and the Home Screen app):
+
+1. Press Live. The mic prompt appears, you can speak, the turn sends, and the **reply is spoken aloud** from the
+   loudspeaker (not the earpiece) at a normal volume.
+2. After the reply, **Listen** appears (or the mic reopened by itself — note which). Tapping it opens the mic and
+   the next turn works. Repeat for five turns in a row.
+3. **Stop reading** stops the speech at once; the next tap on **Listen** works.
+4. Lock the screen mid-reading and unlock: Live is **Paused** with "Resume?" and nothing speaks by itself.
+5. Take a phone call or switch app mid-reading: speech does not resume on its own.
+6. A reply with code and a table is **described**, not read out.
+7. With the silent switch on, note whether speech is heard (Safari plays speech through the media channel;
+   record what actually happens).
+8. Home Screen app + Browser voice: Live refuses and says to pick an on-device voice (existing behaviour).
+9. Whether the "listening" tone is heard by the mic and taken as speech (it should not be).
+
+Record the iOS version, the model and the result of each in this section; until then every claim above about
+iOS is a design intent.
+
+### Clean-up in Live: Fix only
+
+Live runs the Fix clean-up (`lib/voice-chat/live-cleanup.ts`) with a 3 s budget, and **any failure sends the
+raw words** — a slow or broken correction never holds a turn. A machine that has Polish configured gets Fix in
+Live; Polish is too slow and too free for a send that nobody reads first. **Known gap:** a machine whose
+clean-up is Polish with only a machine key (no device key) leaves the words **raw** in Live.
+
+### Refusals, in words
+
+The bar says why Live did not start, then goes away after 10 s: microphone blocked (with how to allow it),
+no voice chosen ("Pick a voice in Settings › Voice first"), the chosen voice not installed ("This voice isn't installed yet — install it in Settings › Voice"), the voice stopped, Live open in
+another tab, no send rights, and — on an iPhone Home Screen app — that Browser voice cannot run there (choose an
+on-device engine). The words live in `lib/voice-chat/live-view.ts` (`LIVE_BLOCK_COPY`).
+
+### What the code is
+
+`lib/voice-chat/live-machine.ts` is a pure reducer `(state, event) → { state, effects }`, tested table-driven
+including every race (speech returning during the countdown, a late transcript for an old attempt, a failed
+send, typing while words are still being worked out or while the ferret works or speaks, a stop in the middle of a sentence,
+hiding the tab mid-send, another message taking the voice). `live-runner.ts` owns the I/O
+through ports (`lib/voice-chat/ports.ts`: level frames, take, send, reply feed, reader, voice, earcons, haptics, wake
+lock, visibility, clock, mic lock; `live-reader.ts` is the reader and the voice over the page's read-aloud controller) and drops every stale async answer by generation. `reply-feed.ts` counts a reply as finished only
+once `working` was seen or `turnStateAt` changed — never by comparing clocks.
+
+**A turn that was already working when you spoke is not the reply to your message.** Live can send while the ferret
+is mid-turn (the message queues behind it). If the session was `working` when the send began, that turn stopping —
+whatever time it carries, and even when it ends inside the send's acknowledgement — is **never** read as this
+message's reply and **never** reopens the microphone: the watch keeps going until a turn begins after it (`working`
+seen again) and only that turn's end counts (`tests/unit/composer-live-real.test.tsx`, through the real composer,
+runner and feed). A question (`needs-input`) still surfaces, because it only holds Live. If the queued message was
+folded into the running turn so no second `working` ever shows, Live stays **Working** until you press **End**: the
+safe side of the doubt, because this loop never opens the microphone when it is unsure.
+
+### Latency: last word to sent
+
+Measured per turn by the loop itself (`TurnNumbers`: end → words, end → send, **last word → sent**; numbers
+only, never words; the last twenty are kept in memory and the working state says "Sent 3.4 s after your last
+word."). The table is **computed, not measured with a microphone**: the real machine, runner and endpointer
+run on a virtual clock (`tests/unit/voice-chat/live-latency.test.ts`) with an engine whose decode time after
+the pause is the "After early finish" figure measured on this 32-core Linux box (above). Clean-up and the
+network round trip are **not** in it.
+
+| Engine (this box)                  | Decode left after the pause | Last word → sent, 1.5 s countdown |
+| ---------------------------------- | --------------------------: | --------------------------------: |
+| Parakeet 110M                      |                         0 s |                         **3.0 s** |
+| Parakeet 0.6B, early finish        |                      0.22 s |                         **3.0 s** |
+| Vosk small                         |                      0.06 s |                         **3.0 s** |
+| Whisper base.en, early finish      |                      1.80 s |                         **3.8 s** |
+| Parakeet 0.6B, **no** early finish |                      1.76 s |                        **3.76 s** |
+| Parakeet 0.6B, countdown 0         |                      0.22 s |                        **1.72 s** |
+
+So at the defaults the loop is **pause (1.5 s) + countdown (1.5 s)** and the engine is hidden inside the
+countdown whenever it needs under 1 s — which is what the early finish buys. Whisper's decode does not fit
+in the countdown, so it adds the difference. A phone is several times slower than this box: expect the
+engine term to grow there, and measure it (the working state shows your real number). **Not measured:**
+real microphones, noise suppression, phones, Safari, any GPU.
+
+### Still open
+
+- **"Read the rest"** of a reply cut at the cap is not built: **R** reads it again from the start.
+- **No spoken summary, no voice to answer a question.** The reply is read as it is; a question is read and
+  answered by tapping.
+- **No `⌥L` chord yet;** the palette entry and the button are the ways in.
+- **No separate "connection lost" state.** A lost connection shows as the send failing (**On hold**, "Couldn't
+  send. Your words are in the message box."), or as Live ending when the composer can no longer send.
+- **A daemon without `turnState`** never reports a reply, so Live stays in **Working** until you press **Skip**
+  or **End**.
+- **iOS is unproven:** the Listen fallback, the speech unlock and the loudspeaker routing have not been tried on
+  a device — see [Proving it on an iPhone](#proving-it-on-an-iphone). The first turn is from the tap; the rest is design intent.
 
 ## Not built yet
 
-- **Live voice** (listen, notice the pause, send after a visible countdown, read the reply aloud):
-  only its end-of-turn detector exists so far — see [Pause detection](#pause-detection-the-end-of-a-spoken-turn).
-  There is no Live button, bar or loop yet.
+- **Live voice settings screen and the `⌥L` chord** (slice 6): the loop, the reading and the sounds are built (see [Live voice](#live-voice-the-one-place-voice-sends)); the Live-specific settings (pause length, countdown, keep-screen-on) are not on a screen yet.
 - **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):
   downloaded once to the daemon, usable by every paired device, audio crossing only the end-to-end
   channel to your own machine. It needs a native sherpa-onnx addon inside the compiled `fyd` binary (per

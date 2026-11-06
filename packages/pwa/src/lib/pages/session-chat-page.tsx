@@ -20,6 +20,7 @@ import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../compon
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
 import { PackSessionsProvider } from '../../components/pack-call.tsx';
 import { type QuestionAnswerApi, QuestionForm } from '../../components/question-form.tsx';
+import { QuestionReadingBar } from '../../components/question-reading-bar.tsx';
 import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../components/reference-surface.tsx';
 import {
   isPromptKnownBusy,
@@ -103,7 +104,9 @@ import { conversationFromTranscript } from '../../hooks/use-dictation.ts';
 import { useProjectCards } from '../../hooks/use-ferret-cards.ts';
 import { useFinePointer } from '../../hooks/use-fine-pointer.ts';
 import { useLiveActivity } from '../../hooks/use-live-counter.ts';
+import { useLiveQuestionHandoff } from '../../hooks/use-live-question-handoff.ts';
 import { useMachineTaskIds } from '../../hooks/use-machine-task-ids.ts';
+import { useSessionReplySource } from '../../hooks/use-session-reply-source.ts';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { useWorkProjectNames } from '../../hooks/use-work-project-names.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
@@ -144,6 +147,8 @@ import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
+import { type LiveState, mayHandOffQuestion } from '../voice-chat/live-machine.ts';
+import type { LiveReadingSource } from '../voice-chat/live-reader.ts';
 import { needsInputOf } from '../voice-chat/reply-picker.ts';
 import { hideWaiting } from '../waiting-fold.ts';
 import { workSearchPortFor } from '../work-search.ts';
@@ -911,6 +916,12 @@ export function SessionChatPage({
   // the notifications read. The pane is read only to print the harness's own working line — and, for
   // a daemon that sends no `turnState`, as the fallback evidence.
   const working = session.state.turnState === 'working';
+  // Live voice watches the same turn state to know when the ferret has finished.
+  const liveReply = useSessionReplySource({
+    turnState: session.state.turnState,
+    turnStateAt: session.state.turnStateAt,
+    status: session.state.status,
+  });
   const legacyLive = session.state.turnState === undefined && statusMark(session).klass === 'active';
   const readActivityFrame = useCallback<PaneFrameReader>(
     async signal => await readPaneSnapshot(connection, scope, signal, referenceFetch, true, 'screen'),
@@ -966,7 +977,39 @@ export function SessionChatPage({
         : needsInputOf({ question, permissionRequest, harnessDialog, turnPrompt: session.state.turnPrompt }),
     [harnessDialog, permissionRequest, question, session.state.status, session.state.turnPrompt],
   );
+  // Live voice reads the reply of its own turns: while it is on, the auto-read above stands down (never both).
+  const [liveOn, setLiveOn] = useState(false);
+  // The composer is replaced by the question FORM only for a structured question the person may answer (the condition
+  // the form itself renders on): that — and nothing else — is a hand-off. Any other unmount is the page leaving.
+  const formReplacesComposer = question !== null && canControl;
+  const liveSources = useRef({ entries, spokenPrompt, formReplacesComposer });
+  liveSources.current = { entries, spokenPrompt, formReplacesComposer };
+  const liveReading = useMemo<LiveReadingSource>(
+    () => ({ rows: () => liveSources.current.entries, question: () => liveSources.current.spokenPrompt }),
+    [],
+  );
+  // A structured question swaps the composer — and Live with it — for the question form. Live's reading of that
+  // question is handed to a reader that stays on the page: it speaks the question and its options, with the microphone
+  // and the sends already gone, so the question is read and never answerable by voice. Auto-read stays out meanwhile.
+  const questionHandoff = useLiveQuestionHandoff(liveReading);
+  const { begin: beginQuestionReading, cancel: cancelQuestionReading, repeat: repeatQuestionReading } = questionHandoff;
+  const retireLive = useCallback(
+    (live: LiveState) => {
+      // Only the structured question's form replacing the composer is a hand-off (the page leaving is not), and only a
+      // Live that was waiting on the ferret (or already reading to the person) with NO stop standing (a hidden tab, a
+      // latched hide, typing) has a question to say: a stop stays until the person's explicit Resume, which is gone
+      // with the composer, so the question is simply not spoken (it is on screen, and Repeat reads it on request).
+      const { spokenPrompt: prompt, formReplacesComposer: replaced } = liveSources.current;
+      if (replaced && prompt !== null && mayHandOffQuestion(live)) beginQuestionReading();
+    },
+    [beginQuestionReading],
+  );
+  // The question went (answered, or the turn moved on): nothing is left to read.
+  useEffect(() => {
+    if (spokenPrompt === null) cancelQuestionReading();
+  }, [spokenPrompt, cancelQuestionReading]);
   const autoRead = useAutoRead({
+    suspended: liveOn || questionHandoff.reading,
     scope: `${connection.daemonId}/${session.config.id}`,
     entries,
     authoritative,
@@ -1741,14 +1784,24 @@ export function SessionChatPage({
             />
           )}
           {question !== null && canControl ? (
-            <QuestionForm
-              api={questionApi}
-              daemon={connection}
-              key={`${connection.daemonId}:${session.config.id}:${question.toolUseId}`}
-              onOpenConsole={openConsole}
-              question={question}
-              sessionId={session.config.id}
-            />
+            <>
+              {/* The form replaced Live, so the retained reader brings its own Stop and Repeat (and keys) while it speaks. */}
+              {questionHandoff.reading ? (
+                <QuestionReadingBar
+                  layout={formFactor === 'phone' ? 'phone' : 'desktop'}
+                  onRepeat={repeatQuestionReading}
+                  onStop={cancelQuestionReading}
+                />
+              ) : null}
+              <QuestionForm
+                api={questionApi}
+                daemon={connection}
+                key={`${connection.daemonId}:${session.config.id}:${question.toolUseId}`}
+                onOpenConsole={openConsole}
+                question={question}
+                sessionId={session.config.id}
+              />
+            </>
           ) : awaitingAnswer ? (
             /* Status without a validated payload is damaged or incomplete
            evidence, never an empty question. Keep the recovery action
@@ -1788,6 +1841,10 @@ export function SessionChatPage({
               vimMode={composerVimMode}
               {...(dictationSettings === undefined ? {} : { dictationSettings })}
               dictationConversation={readDictationConversation}
+              liveReply={liveReply}
+              liveReading={liveReading}
+              onLiveActiveChange={setLiveOn}
+              onLiveRetire={retireLive}
               enterKeyPreference={composerEnterKey}
               phoneEnterKeyPreference={composerPhoneEnterKey}
               daemon={connection}

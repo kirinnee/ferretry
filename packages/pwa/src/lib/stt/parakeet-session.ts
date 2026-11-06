@@ -78,6 +78,8 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
   readonly #options: ParakeetSessionOptions;
   readonly #abort = new AbortController();
   #state: State = 'opening';
+  /** `closeCapture` released the microphone: no early finish starts after it. */
+  #captureClosed = false;
   #recording: Promise<AudioRecording> | null = null;
   #live: NearLiveTranscriber | null = null;
   #limitTimer: unknown = null;
@@ -106,7 +108,7 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
    * already re-read a window of their own.
    */
   beginFinish(): TentativeTake | null {
-    if (this.#state !== 'recording' || this.#live !== null) return null;
+    if (this.#state !== 'recording' || this.#captureClosed || this.#live !== null) return null;
     return this.#tentative.begin();
   }
 
@@ -115,9 +117,33 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
     return await this.#recording;
   }
 
+  /**
+   * Close the microphone now. An early finish in flight keeps working on the snapshot it took (the recording is
+   * released the moment that snapshot is read, not when the model is done), so a stalled decode cannot hold the
+   * person's microphone open. After this no new early finish starts.
+   */
+  closeCapture(): void {
+    if (this.#state !== 'recording' || this.#captureClosed) return;
+    this.#captureClosed = true;
+    this.#clearLimit();
+    this.#options.onMonitor?.(null);
+    // Live owns the stopped snapshot now: a tab that is hidden from here on must not cancel the words it is
+    // still working out. (Dictation never closes capture alone, so its own hide-cancels behaviour is unchanged.)
+    this.#cleanup();
+    void this.#tentative.snapshotTaken().then(async () => {
+      try {
+        await (await this.#whenRecording()).stop();
+      } catch {
+        // The recording ended on its own: nothing is left open.
+      }
+    });
+  }
+
   /** Call synchronously from the reader's gesture: the permission prompt is attributed to it. */
   start(): void {
     this.#unwatchHidden = this.#ports.watchHidden(() => {
+      // A listener already queued when capture closed (a page's hide fans out to every watcher) stands down too.
+      if (this.#captureClosed) return;
       if (this.#state !== 'opening' && this.#state !== 'recording') return;
       this.cancel();
       this.#options.onAbort();

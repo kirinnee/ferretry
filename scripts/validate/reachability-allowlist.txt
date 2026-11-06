@@ -321,12 +321,15 @@ packages/pwa/src/features/catalogs/local-skill-installs-api.ts # the copy-from-t
 packages/pwa/src/features/context-rail/machine-skills-model.ts # the On this machine rows, used by add-skills-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-auto-read.ts # Auto-read replies: reads a finished turn aloud, used by SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/voice-chat/auto-read.ts # the pure turn watcher behind Auto-read replies, used by use-auto-read.ts ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/voice-chat/reply-picker.ts # picks the words of a finished turn to read aloud, used by use-auto-read.ts ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/hooks/use-live-question-handoff.ts # the page-level reader that speaks a Live question after its form replaces the composer, used by SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
 
+
+# The Live voice noise harness's judging rules (&F137 slice 3), dev tooling only.
+packages/pwa/src/lib/voice-chat/turn-endpointer-scoring.ts # the noise harness's pure judging rules, used only by harness/turn-endpointer-noise.ts and its unit tests; not part of the shipped app
 
 # The speed benchmark's result schema and arithmetic: dev tooling, reached only from the one-click page (packages/pwa/speed-bench/main.ts, runner.ts) and the headless driver (packages/pwa/harness/stt-speed-bench-page.ts), neither of which is the app's composition root. It lives under src/lib so the unit tier's 100% ledger holds it. Delete this line if the app ever imports it.
 packages/pwa/src/lib/stt/speed-bench-report.ts # benchmark result schema, used by speed-bench/ and harness/stt-speed-bench-page.ts only; not part of the shipped app
 
-# The Live voice end-of-turn detector (&F137 slice 3), built and measured before the Live loop hook (slice 4) consumes it.
-packages/pwa/src/lib/voice-chat/turn-endpointer.ts # pure pause detection over level frames, used so far only by its unit tests and harness/turn-endpointer-noise.ts; slice 4's use-live-voice.ts wires it into the composition root and this entry goes then
-packages/pwa/src/lib/voice-chat/turn-endpointer-scoring.ts # the noise harness's pure judging rules, used only by harness/turn-endpointer-noise.ts and its unit tests; goes with the turn-endpointer entry above
+
+# The Live voice reply source (&F137 slice 4).
+packages/pwa/src/hooks/use-session-reply-source.ts # the session page's turn state as a ReplySource for Live voice, used by lib/pages/session-chat-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots

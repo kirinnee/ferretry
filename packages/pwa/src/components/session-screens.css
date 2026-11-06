@@ -2213,6 +2213,19 @@ button.fy-receipt {
   padding: 0;
   white-space: pre-wrap;
 }
+/* THE LIVE BUTTON GIVES WAY IN A NARROW PANE. A desktop row holds attach, the mic, Live, Interrupt and Send at 36px
+   each plus the field; in a ~240px agent pane beside another pane that is a fifth button too many and Send ran
+   19px past the pane's edge (geometry harness, 1100px split with Info). Below 300px of row the button is not
+   drawn — the palette's "Live voice" still starts it — rather than squeezing the field to nothing. The phone
+   layout lays its buttons out in columns and keeps the button at any width. */
+.fy-composer:not([data-composer-layout='phone']) .fy-composer-row {
+  container-type: inline-size;
+}
+@container (max-width: 300px) {
+  .fy-composer:not([data-composer-layout='phone']) .fy-live-button {
+    display: none;
+  }
+}
 /* The controls after the field. On a desktop the dock is no box at all — its buttons sit in the row
    exactly where they always did. */
 .fy-composer-dock {

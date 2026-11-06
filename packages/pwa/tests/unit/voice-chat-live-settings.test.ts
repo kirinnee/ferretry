@@ -28,6 +28,7 @@ describe('defaults', () => {
       rate: 1.1,
       maxSeconds: 60,
       whatToRead: 'last',
+      earcons: true,
     });
     expect(LIVE_VOICE_SETTINGS_KEY).toBe('fy-live-voice-v1');
   });
@@ -54,6 +55,7 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
       rate: 1.5,
       maxSeconds: 120,
       whatToRead: 'every',
+      earcons: false,
     } as const;
     expect(parseLiveVoiceSettings(JSON.stringify(good))).toEqual(good);
   });
@@ -96,7 +98,15 @@ describe('parseLiveVoiceSettings: defensive, capped, versioned', () => {
 
   test('unknown extra fields are dropped, so nothing hostile is carried along', () => {
     const parsed = parseLiveVoiceSettings(JSON.stringify({ v: 1, autoRead: true, token: 'secret', text: 'a reply' }));
-    expect(Object.keys(parsed).sort()).toEqual(['autoRead', 'maxSeconds', 'rate', 'v', 'voiceId', 'whatToRead']);
+    expect(Object.keys(parsed).sort()).toEqual([
+      'autoRead',
+      'earcons',
+      'maxSeconds',
+      'rate',
+      'v',
+      'voiceId',
+      'whatToRead',
+    ]);
   });
 
   test('normalise clamps what a caller hands in', () => {
