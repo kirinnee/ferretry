@@ -17,6 +17,8 @@ import { serializeArchiveRegistry } from '../../src/lib/session/archive/registry
 
 const NOW = '2026-11-06T12:00:00.000Z';
 const paths = createFoundationPaths('/state-home-that-is-never-touched' as never);
+/** The name of a session's version marker, whatever session directory holds it. */
+const MARKER_FILE = `/${createSessionPaths(paths, parseSessionId('x')).marker.split('/').at(-1) ?? ''}`;
 
 const indexed = (id: SessionId) => ({
   id,
@@ -34,7 +36,10 @@ async function archivedStorage(archivedIds: readonly string[], live: readonly st
   const storage = new DaemonStorage(
     paths,
     {
-      readText: async () => document,
+      // Only the registry is a document here. A revival also proves the session's own marker — a current one —
+      // and finds no config, which is what a session with nothing written yet looks like.
+      readText: async (file: string) =>
+        file === paths.archivedSessions ? document : file.endsWith(MARKER_FILE) ? '2\n' : undefined,
       // A write takes a turn of the event loop, so two unserialized writers genuinely overlap.
       writeTextAtomic: async (_file: string, text: string) => {
         await Promise.resolve();
