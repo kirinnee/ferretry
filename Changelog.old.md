@@ -1,3 +1,13 @@
+## [4.287.0](https://github.com/kirinnee/ferretry/compare/v4.286.0...v4.287.0) (2026-11-06)
+
+### Features
+
+* **pwa:** hide waiting messages from the chat; show send times on the queue page (F955) ([#1493](https://github.com/kirinnee/ferretry/issues/1493)) ([82fb39c](https://github.com/kirinnee/ferretry/commit/82fb39c08fdcf4789673fe02d1b46227bc99088f)), closes [#1496](https://github.com/kirinnee/ferretry/issues/1496)
+
+### Fixes
+
+* **daemon:** keep the event loop off the disk and off whole-fleet renders ([#1516](https://github.com/kirinnee/ferretry/issues/1516)) ([d44379b](https://github.com/kirinnee/ferretry/commit/d44379b2472539a6484d97b2279fb974c5c9af33))
+
 ## [4.286.0](https://github.com/kirinnee/ferretry/compare/v4.285.1...v4.286.0) (2026-11-06)
 
 ### Features

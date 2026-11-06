@@ -1,3 +1,9 @@
+## [4.287.1](https://github.com/kirinnee/ferretry/compare/v4.287.0...v4.287.1) (2026-11-06)
+
+### Fixes
+
+* **daemon:** serve terminal rename as PATCH, the method the app sends ([#1526](https://github.com/kirinnee/ferretry/issues/1526)) ([8659e25](https://github.com/kirinnee/ferretry/commit/8659e25b75219955344a301def0320bcc4c11621))
+
 ## [4.287.0](https://github.com/kirinnee/ferretry/compare/v4.286.0...v4.287.0) (2026-11-06)
 
 ### Features
