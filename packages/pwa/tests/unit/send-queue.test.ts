@@ -9,6 +9,7 @@ import {
   joinQueue,
   QueueActionError,
   extendQueueHistory,
+  olderRequest,
   queueActions,
   readSessionQueue,
   readSessionQueuePage,
@@ -408,16 +409,112 @@ describe('the queue history a page holds', () => {
     expect(moved.messages[0]?.state).toBe('read');
   });
 
-  test('starts over from the window when a message held as waiting is no longer in it', () => {
-    const first = startQueueHistory({ messages: [read('d', 4)], nextCursor: 'd' });
-    const extended = extendQueueHistory(first, { messages: [waiting('a', 1)], nextCursor: null });
+  test('restarts only the walk, keeping every other message, when a message held as waiting is no longer in the window', () => {
+    const first = startQueueHistory({ messages: [read('d', 4), read('e', 5)], nextCursor: 'd' });
+    const extended = extendQueueHistory(
+      extendQueueHistory(first, { messages: [read('b', 2), read('c', 3)], nextCursor: 'b' }),
+      { messages: [waiting('a', 1)], nextCursor: null },
+    );
 
-    // `a` finished since (cancelled, say), so the window carries it no more and its new state is unknown.
-    const polled = refreshQueueHistory(extended, { messages: [read('d', 4)], nextCursor: 'd' });
+    // `a` finished since (cancelled, say), so the window carries it no more and its new state is unknown: it is let go
+    // and the walk starts again from the window's edge, but what else was loaded stays on screen.
+    const polled = refreshQueueHistory(extended, { messages: [read('d', 4), read('e', 5)], nextCursor: 'd' });
 
-    expect(ids(polled)).toEqual(['d']);
-    expect(polled).toMatchObject({ cursor: 'd', older: false });
+    expect(ids(polled)).toEqual(['b', 'c', 'd', 'e']);
+    expect(polled).toMatchObject({ cursor: 'd', older: true, walk: extended.walk + 1 });
   });
+
+  test('keeps the walk, and its number, while every open message held is still in the window', () => {
+    const first = startQueueHistory({ messages: [waiting('c', 3)], nextCursor: 'c' });
+    const extended = extendQueueHistory(first, { messages: [read('a', 1)], nextCursor: null });
+
+    const polled = refreshQueueHistory(extended, { messages: [waiting('c', 3)], nextCursor: 'c' });
+
+    expect(polled).toMatchObject({ cursor: null, older: true, walk: extended.walk });
+  });
+
+  test('keeps the walk number when a poll replaces a window nothing older was asked of', () => {
+    const first = startQueueHistory({ messages: [read('c', 3)], nextCursor: 'c' });
+
+    expect(refreshQueueHistory(first, { messages: [read('d', 4)], nextCursor: 'd' }).walk).toBe(first.walk);
+    expect(refreshQueueHistory(undefined, { messages: [], nextCursor: null }).walk).toBe(0);
+  });
+
+  test('does not merge an older page asked for a walk or cursor the history has left', () => {
+    const first = startQueueHistory({ messages: [read('d', 4)], nextCursor: 'd' });
+    const page = { messages: [read('c', 3)], nextCursor: null };
+
+    const asked = olderRequest(first);
+    expect(asked).toEqual({ walk: 0, cursor: 'd' });
+    expect(extendQueueHistory(first, page, asked)).toMatchObject({ cursor: null, older: true });
+    expect(extendQueueHistory(first, page, { walk: 1, cursor: 'd' })).toBe(first);
+    expect(extendQueueHistory(first, page, { walk: 0, cursor: 'x' })).toBe(first);
+    expect(olderRequest({ ...first, cursor: null })).toBeUndefined();
+  });
+});
+
+describe('which look at a message is the later one', () => {
+  const stamped = (overrides: Partial<QueuedMessage>) =>
+    message({ id: 'a', enqueuedAt: '2026-10-30T10:00:00.000Z', stateAt: '2026-10-30T11:00:00.000Z', ...overrides });
+  const held = (...messages: QueuedMessage[]) => startQueueHistory({ messages, nextCursor: 'a' });
+  const merged = (from: QueuedMessage, incoming: QueuedMessage) =>
+    extendQueueHistory(held(from), { messages: [incoming], nextCursor: null }).messages[0];
+
+  test('is decided by the version when both carry one, whatever the clock and the state say', () => {
+    const early = stamped({ state: 'unconfirmed', version: 5 });
+    const late = stamped({ state: 'read', version: 6 });
+
+    expect(merged(early, late)?.state).toBe('read');
+    expect(merged(late, early)?.state).toBe('read');
+    expect(merged(late, { ...late, text: 'same fact' })?.text).not.toBe('same fact');
+  });
+
+  test('never lets a stale snapshot that shares the millisecond undo a state read after it, without a version', () => {
+    const unconfirmed = stamped({ state: 'unconfirmed' });
+    const done = stamped({ state: 'read' });
+
+    expect(merged(done, unconfirmed)?.state).toBe('read');
+    expect(merged(unconfirmed, done)?.state).toBe('read');
+    expect(merged(stamped({ state: 'typing' }), stamped({ state: 'delivered' }))?.state).toBe('delivered');
+    expect(merged(stamped({ state: 'delivered' }), stamped({ state: 'typing' }))?.state).toBe('delivered');
+  });
+
+  test('takes the incoming look at a message equally far along, the newer look at the same state', () => {
+    expect(merged(stamped({ state: 'queued' }), stamped({ state: 'queued', waitReason: 'busy' }))?.waitReason).toBe(
+      'busy',
+    );
+  });
+
+  test('falls back to revision and instant when only one look carries a version', () => {
+    const versioned = stamped({ state: 'read', version: 9 });
+    const old = stamped({ state: 'delivered', stateAt: '2026-10-30T12:00:00.000Z' });
+
+    expect(merged(versioned, old)?.state).toBe('delivered');
+  });
+
+  test('a window that lacks the unconfirmed-to-read merge cannot undo it in the same millisecond', () => {
+    // The reviewer's timeline: a typed → unconfirmed → read inside one tick; an older page repeats it as read and is
+    // merged; then a window captured while it was only unconfirmed lands.
+    const typing = stamped({ state: 'typing', stateAt: '2026-10-30T10:00:00.000Z' });
+    const history = startQueueHistory({ messages: [typing, read('c', 3)], nextCursor: 'c' });
+    const afterOlder = extendQueueHistory(history, {
+      messages: [stamped({ state: 'read' }), read('b', 2)],
+      nextCursor: null,
+    });
+
+    const result = refreshQueueHistory(afterOlder, {
+      messages: [stamped({ state: 'unconfirmed' }), read('c', 3)],
+      nextCursor: 'c',
+    });
+
+    expect(result.messages.find(each => each.id === 'a')?.state).toBe('read');
+    expect(result.walk).toBe(afterOlder.walk);
+    expect(ids(result)).toEqual(['a', 'b', 'c']);
+  });
+
+  const ids = (history: { readonly messages: readonly QueuedMessage[] }) => history.messages.map(each => each.id);
+  const read = (id: string, minute: number) =>
+    message({ id, enqueuedAt: new Date(Date.UTC(2026, 9, 30, 10, minute)).toISOString(), state: 'read' });
 });
 
 describe('queueActions', () => {

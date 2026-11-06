@@ -30,6 +30,7 @@ import { useRouter } from '../lib/router.tsx';
 import { absoluteTime } from '../lib/session-screens.ts';
 import {
   extendQueueHistory,
+  olderRequest,
   QueueActionError,
   type QueueHistory,
   type QueuePageRead,
@@ -372,6 +373,8 @@ export function QueuePageView({
 }
 
 const POLL_MS = 5000;
+/** How often an older page is asked again after a poll restarted the walk under it. */
+const OLDER_ATTEMPTS = 3;
 
 /** Reads the queues for the route: one ferret, or every ferret on every machine this browser knows. */
 export function QueuePage({ daemonId, sessionId }: { readonly daemonId: DaemonId; readonly sessionId?: string }) {
@@ -512,18 +515,26 @@ export function QueuePage({ daemonId, sessionId }: { readonly daemonId: DaemonId
   );
   const loadOlder = useCallback(
     async (group: QueueGroup): Promise<void> => {
-      const history = held.current.get(group.key);
       const connection = connections.find(item => item.daemonId === group.daemonId);
-      if (history?.cursor == null || connection === undefined) return;
+      const first = held.current.get(group.key);
+      if (first === undefined || olderRequest(first) === undefined || connection === undefined) return;
       setLoadingOlder(group.key);
       setOlderFailed(null);
       try {
         const client = await store.clients.client(connection);
-        const page = await readSessionQueuePage(client, group.sessionId, { before: history.cursor });
-        const latest = held.current.get(group.key) ?? history;
-        const extended = extendQueueHistory(latest, page);
-        held.current = new Map(held.current).set(group.key, extended);
-        setQueues(held.current);
+        // A page answers the walk and cursor it was asked from. A window poll that restarted the walk while it was in the
+        // air hands back the history unchanged, so the page is asked again from where the history stands now.
+        for (let attempt = 0; attempt < OLDER_ATTEMPTS; attempt += 1) {
+          const from = olderRequest(held.current.get(group.key) ?? first);
+          if (from === undefined) break;
+          const page = await readSessionQueuePage(client, group.sessionId, { before: from.cursor });
+          const latest = held.current.get(group.key) ?? first;
+          const extended = extendQueueHistory(latest, page, from);
+          if (extended === latest) continue;
+          held.current = new Map(held.current).set(group.key, extended);
+          setQueues(held.current);
+          break;
+        }
       } catch {
         setOlderFailed(group.key);
       } finally {

@@ -337,7 +337,8 @@ async function sendsPage(subsystem: SessionSendSubsystem, context: RouteContext)
 /** One page of a session's durable queue, or the refusal of a cursor that names none of its messages. */
 async function queueMessagesPage(subsystem: SessionSendSubsystem, context: RouteContext): Promise<ApiResponse> {
   const query = pageQuery(context, 'queue');
-  const page = queuePage(await subsystem.queue(pathSessionId(context)).catch(refuse), query);
+  const sessionId = pathSessionId(context);
+  const page = queuePage(await subsystem.queue(sessionId).catch(refuse), query, sessionId);
   if (page === undefined)
     throw new ApiError(400, `no queued message ${query.before ?? ''} to page from`, 'invalid_cursor');
   return jsonResponse(page);

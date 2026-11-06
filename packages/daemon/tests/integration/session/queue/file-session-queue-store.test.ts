@@ -136,11 +136,11 @@ describe('a long-lived session queue read as a window', () => {
     const messages = foldQueue(await subject.read(ID));
 
     // Act
-    let page = queuePage(messages, { limit: 100 });
+    let page = queuePage(messages, { limit: 100 }, ID);
     const first = page;
     const seen = [...(page?.messages ?? [])];
     while (page?.nextCursor != null) {
-      page = queuePage(messages, { limit: 100, before: page.nextCursor });
+      page = queuePage(messages, { limit: 100, before: page.nextCursor }, ID);
       seen.push(...(page?.messages ?? []));
     }
 
@@ -183,9 +183,9 @@ describe('a queue change on the real log is announced after it is on disk, and a
     await file.append(ID, { v: 1, kind: 'moved', at: EARLY, id: 'c', state: 'read' });
 
     // Act — the first page of one carries a; a is cancelled; the walk goes on.
-    const first = queuePage(await service.list(ID), { limit: 1 });
+    const first = queuePage(await service.list(ID), { limit: 1 }, ID);
     await service.cancel(ID, 'a');
-    const older = queuePage(await service.list(ID), { limit: 5, before: first?.nextCursor ?? '' });
+    const older = queuePage(await service.list(ID), { limit: 5, before: first?.nextCursor ?? '' }, ID);
 
     // Assert
     should(announced).eql(['enqueued:a', 'enqueued:b', 'enqueued:c', 'moved:a']);

@@ -42,6 +42,13 @@ describe('a queued message', () => {
     should(parsed.deliveredAs).equal('m0');
   });
 
+  it('should keep the version a daemon stamps, parse without one, and reject one that is not a positive integer', () => {
+    should(queue.QueuedMessageSchema.parse({ ...oldMessage, version: 7 }).version).equal(7);
+    should(queue.QueuedMessageSchema.parse(oldMessage)).not.have.property('version');
+    should(queue.QueuedMessageSchema.safeParse({ ...oldMessage, version: 0 }).success).be.false();
+    should(queue.QueuedMessageSchema.safeParse({ ...oldMessage, version: 1.5 }).success).be.false();
+  });
+
   it('should reject a label outside blocker, action and fyi', () => {
     should(queue.QueuedMessageSchema.safeParse({ ...oldMessage, label: 'urgent' }).success).be.false();
   });

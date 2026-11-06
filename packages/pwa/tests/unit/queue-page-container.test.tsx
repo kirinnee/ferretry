@@ -415,6 +415,58 @@ describe('QueuePage', () => {
     expect(mounted.root.findAllByProps({ 'data-queue-older': '' })).toHaveLength(1);
   });
 
+  test('an older page asked before a window restarted the walk is not merged: it is asked again on the new walk', async () => {
+    const at = (minute: number) => `2026-10-30T10:0${String(minute)}:00.000Z`;
+    const finished = (id: string, minute: number) => ({
+      ...queued(id, `words of ${id}`),
+      state: 'read',
+      enqueuedAt: at(minute),
+    });
+    const answers: Record<string, unknown> = {
+      '/v1/sessions/s1/queue': {
+        messages: [{ ...queued('q0', 'waiting words'), enqueuedAt: at(0) }, finished('q4', 4), finished('q5', 5)],
+        nextCursor: 'q4',
+      },
+      '/v1/sessions/s1/queue?before=q4': { messages: [finished('q2', 2), finished('q3', 3)], nextCursor: 'q2' },
+    };
+    const { store } = await open(answers);
+    mounted = render(
+      <RouterProvider>
+        <StoreProvider store={store}>
+          <QueuePage daemonId={alpha.daemonId} sessionId="s1" />
+        </StoreProvider>
+      </RouterProvider>,
+    );
+    const rowIds = () =>
+      (
+        mounted?.root.findAll(node => typeof node.type === 'string' && node.props['data-queue-row'] !== undefined) ?? []
+      ).map(node => String(node.props['data-queue-row']));
+    await settleUntil(() => rowIds().length === 3, 'initial window', runAsync);
+    await runAsync(async () => mounted?.root.findByProps({ 'data-queue-older': '' }).props.onClick());
+    await settleUntil(() => rowIds().includes('q2'), 'first older page', runAsync);
+
+    let resolveOlder: (value: unknown) => void = () => {};
+    answers['/v1/sessions/s1/queue?before=q2'] = new Promise(resolve => {
+      resolveOlder = resolve;
+    });
+    await runAsync(async () => mounted?.root.findByProps({ 'data-queue-older': '' }).props.onClick());
+    // Cancel q0 while the second older page is in flight. Its absence from the next window resets the history.
+    answers['/v1/sessions/s1/queue'] = { messages: [finished('q4', 4), finished('q5', 5)], nextCursor: 'q4' };
+    await runAsync(async () =>
+      mounted?.root
+        .findByProps({ 'data-queue-row': 'q0' })
+        .findAll(node => node.type === 'button' && text(node) === 'Cancel message')[0]
+        ?.props.onClick(),
+    );
+    await settleUntil(() => !rowIds().includes('q0'), 'window reset', runAsync);
+    await runAsync(async () => resolveOlder({ messages: [finished('q1', 1)], nextCursor: null }));
+    // The late page named the old walk: it is dropped (q1 never shows, the walk is not claimed finished) and the page is
+    // asked again from the restarted walk's cursor, which brings q2 and q3 back.
+    await settleUntil(() => rowIds().includes('q2'), 'the page asked again on the new walk', runAsync);
+    expect(rowIds()).toEqual(['q2', 'q3', 'q4', 'q5']);
+    expect(mounted.root.findAllByProps({ 'data-queue-older': '' })).toHaveLength(1);
+  });
+
   test('All queues never offers older messages: everything waiting is already in the window', async () => {
     const { store } = await open({
       '/v1/sessions/s1/queue': { messages: [queued('q1', 'from the machine')], nextCursor: 'q1' },

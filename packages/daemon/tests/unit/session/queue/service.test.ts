@@ -53,7 +53,8 @@ describe('accepting a message', () => {
     should(message.attachmentIds).eql(['att-1']);
     should(message).not.have.property('by');
     should(store.logs.get(ID)).have.length(1);
-    should(await service.list(ID)).deepEqual([message]);
+    // The read side stamps the log position of its latest change; the answer to the write was made before it was read back.
+    should(await service.list(ID)).deepEqual([{ ...message, version: 1 }]);
   });
 
   it('should answer a retried request from the first message, writing nothing', async () => {
@@ -62,7 +63,7 @@ describe('accepting a message', () => {
 
     const second = await service.enqueue(ID, { id: 'm1', sender: 'human', text: 'ship it' });
 
-    should(second).deepEqual({ message: first.message, created: false });
+    should(second).deepEqual({ message: { ...first.message, version: 1 }, created: false });
     should(first.message).not.have.property('from');
     should(first.message).not.have.property('replyExpected');
     should(first.message.attachmentIds).eql([]);
@@ -135,7 +136,7 @@ describe('changing a message that still waits', () => {
 
     should(edited).containEql({ text: 'ship it now', revision: 2 });
     should(cancelled).containEql({ state: 'cancelled', text: 'ship it now' });
-    should(await service.list(ID)).deepEqual([cancelled]);
+    should(await service.list(ID)).deepEqual([{ ...cancelled, version: 3 }]); // enqueued, edited, cancelled: its third line
   });
 
   it('should refuse a message it does not hold, and one that no longer waits', async () => {

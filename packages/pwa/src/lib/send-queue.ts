@@ -416,13 +416,16 @@ export const withdrawReplyVia =
  * WHAT THE QUEUE PAGE HOLDS OF ONE SESSION'S QUEUE: the daemon's window, plus any older pages the person asked for.
  *
  * `cursor` is where the next older page starts (`null`: the oldest message is already here) and `older` is
- * whether the person has asked for any. The daemon never removes a message, so a poll that re-reads the
- * window must not make what the person already scrolled to vanish: {@link refreshQueueHistory} keeps it.
+ * whether the person has asked for any. `walk` numbers the walk the cursor belongs to: it moves up whenever the walk
+ * restarts from the window, and an older page read for one walk is never merged into another
+ * ({@link extendQueueHistory}). The daemon never removes a message, so a poll that re-reads the window must not make
+ * what the person already scrolled to vanish: {@link refreshQueueHistory} keeps it.
  */
 export interface QueueHistory {
   readonly messages: readonly QueuedMessage[];
   readonly cursor: string | null;
   readonly older: boolean;
+  readonly walk: number;
 }
 
 /** The window the daemon answered, nothing older asked for yet. */
@@ -430,6 +433,7 @@ export const startQueueHistory = (page: QueuePageRead): QueueHistory => ({
   messages: page.messages,
   cursor: page.nextCursor,
   older: false,
+  walk: 0,
 });
 
 /** A message that can still move: the daemon always carries these on the window, wherever they sit. */
@@ -437,14 +441,36 @@ const isOpenState = (message: QueuedMessage): boolean =>
   message.state === 'queued' || message.state === 'typing' || message.state === 'unconfirmed';
 
 /**
- * The fresher of one message as held and as just read, never a regression: a later revision (an edit) wins, then a
- * later `stateAt` (a move), and on a tie the incoming read — it is the newer look at the same fact. A message
- * repeated across pages (the window carries every open one, and a walk can meet one that moved mid-walk) is thereby
- * held once, in the newest state either read saw.
+ * How far along its life a state is. A message only moves forward (a refused typing aside), so of two reads that
+ * cannot be told apart by a version or an instant, the one further along is the later look.
+ */
+const PROGRESS: Readonly<Record<QueuedMessage['state'], number>> = {
+  queued: 0,
+  typing: 1,
+  unconfirmed: 2,
+  delivered: 3,
+  read: 4,
+  cancelled: 4,
+  failed: 4,
+};
+
+/**
+ * The fresher of one message as held and as just read, never a regression.
+ *
+ * The daemon stamps every message with a `version` that only grows (the position in its log of the message's latest
+ * change), so with one on both the higher wins and an equal one is the same fact. Without (a daemon from before it)
+ * the later revision (an edit) wins, then the later `stateAt` (a move), and on a tie the one further along — a clock
+ * tick is not a mutation, so two moves can share an instant and the later read is not always the later fact. Equally
+ * far along, the incoming read is the newer look at the same state. A message repeated across pages is thereby held
+ * once, in the newest state either read saw.
  */
 const fresherMessage = (held: QueuedMessage, incoming: QueuedMessage): QueuedMessage => {
+  if (held.version !== undefined && incoming.version !== undefined)
+    return incoming.version > held.version ? incoming : held;
   if (incoming.revision !== held.revision) return incoming.revision > held.revision ? incoming : held;
-  return Date.parse(incoming.stateAt) >= Date.parse(held.stateAt) ? incoming : held;
+  const later = Date.parse(incoming.stateAt) - Date.parse(held.stateAt);
+  if (later !== 0) return later > 0 ? incoming : held;
+  return PROGRESS[incoming.state] >= PROGRESS[held.state] ? incoming : held;
 };
 
 const byAgeThenId = (left: QueuedMessage, right: QueuedMessage): number =>
@@ -467,25 +493,57 @@ const mergeMessages = (
  * A fresh read of the window applied over what is held. Until the person asks for older messages it IS the
  * window. After, every message already shown stays (a new arrival pushes the window's edge up by one, and
  * the message that fell off it is in no older page this person has not already read) and the fresher read wins
- * for every id it carries. One thing cannot be kept: a message held as still moving that the window no longer
- * carries has finished since, and its new state is unknown — the history starts over from the window rather
- * than draw a stale tick, and "Show older messages" is there again.
+ * for every id it carries.
+ *
+ * One thing cannot be kept as it is: a message held as still moving that the window no longer carries has finished
+ * since, and the daemon's walk leaves it out of every older page (it was open when the walk began), so its new state is
+ * unknown and would never come. It is let go and the WALK restarts from the window's edge — a new walk number, so no
+ * older page still in the air for the old one is merged — while every other message stays on screen; the restarted walk
+ * meets the finished one again, in its new state, where it belongs.
  */
 export const refreshQueueHistory = (held: QueueHistory | undefined, fresh: QueuePageRead): QueueHistory => {
-  if (held === undefined || !held.older) return startQueueHistory(fresh);
+  if (held === undefined || !held.older) return { ...startQueueHistory(fresh), walk: held?.walk ?? 0 };
   const inWindow = new Set(fresh.messages.map(message => message.id));
-  const kept = held.messages.filter(message => !inWindow.has(message.id));
-  if (kept.some(isOpenState)) return startQueueHistory(fresh);
-  return { messages: mergeMessages(held.messages, fresh.messages), cursor: held.cursor, older: true };
+  const gone = held.messages.filter(message => !inWindow.has(message.id) && isOpenState(message));
+  if (gone.length === 0)
+    return {
+      messages: mergeMessages(held.messages, fresh.messages),
+      cursor: held.cursor,
+      older: true,
+      walk: held.walk,
+    };
+  const letGo = new Set(gone.map(message => message.id));
+  return {
+    messages: mergeMessages(
+      held.messages.filter(message => !letGo.has(message.id)),
+      fresh.messages,
+    ),
+    cursor: fresh.nextCursor,
+    older: true,
+    walk: held.walk + 1,
+  };
 };
 
+/** The place an older page was asked from: the walk and the cursor it was read at. */
+export interface OlderRequest {
+  readonly walk: number;
+  readonly cursor: string;
+}
+
+/** The request for the page that follows `held`, or `undefined` when it reached the oldest message. */
+export const olderRequest = (held: QueueHistory): OlderRequest | undefined =>
+  held.cursor === null ? undefined : { walk: held.walk, cursor: held.cursor };
+
 /**
- * An older page read from `held.cursor`, added to what is held; a message is held once, in the fresher state of
- * the two reads — a message that was open when the first page was cut and closed before this one arrives is the
- * same bubble in its newest state, never the stale one nor a second one.
+ * An older page read from `from`, added to what is held; a message is held once, in the fresher state of the two
+ * reads — a message that was open when the first page was cut and closed before this one arrives is the same bubble
+ * in its newest state, never the stale one nor a second one.
+ *
+ * A page answers the walk and cursor it was asked from. Merged into a history whose walk has restarted or whose
+ * cursor has moved on, it would hand that history a cursor that skips what the restart brought back, so it is not
+ * merged: `held` comes back unchanged and the caller asks again from where the history stands now.
  */
-export const extendQueueHistory = (held: QueueHistory, page: QueuePageRead): QueueHistory => ({
-  messages: mergeMessages(held.messages, page.messages),
-  cursor: page.nextCursor,
-  older: true,
-});
+export const extendQueueHistory = (held: QueueHistory, page: QueuePageRead, from?: OlderRequest): QueueHistory =>
+  from !== undefined && (from.walk !== held.walk || from.cursor !== held.cursor)
+    ? held
+    : { messages: mergeMessages(held.messages, page.messages), cursor: page.nextCursor, older: true, walk: held.walk };

@@ -48,8 +48,11 @@ const QUEUE_KEYS = {
   open: isOpenMessage,
 };
 
-/** `<snapshot instant>~<message id>`: the snapshot is an ISO instant, which holds no `~`. */
-const SNAPSHOT_CURSOR = /^(\d{4}-\d{2}-\d{2}T[^~]+)~(.+)$/s;
+/**
+ * `<snapshot instant>~<session>~<message id>`: the snapshot is an ISO instant, which holds no `~`, and the session
+ * and the id are percent-escaped (with `~` too) so neither can hold one.
+ */
+const SNAPSHOT_CURSOR = /^(\d{4}-\d{2}-\d{2}T[^~]+)~([^~]+)~([^~]+)$/;
 
 interface Cursor {
   readonly id: string;
@@ -57,14 +60,33 @@ interface Cursor {
   readonly asOf?: string;
 }
 
-const decodeCursor = (cursor: string): Cursor => {
-  const match = SNAPSHOT_CURSOR.exec(cursor);
-  const asOf = match?.[1];
-  const id = match?.[2];
-  return asOf !== undefined && id !== undefined && Number.isFinite(Date.parse(asOf)) ? { id, asOf } : { id: cursor };
+const escapePart = (part: string): string => encodeURIComponent(part).replaceAll('~', '%7E');
+
+const unescapePart = (part: string): string | undefined => {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return undefined;
+  }
 };
 
-const encodeCursor = (id: string, asOf: string | undefined): string => (asOf === undefined ? id : `${asOf}~${id}`);
+/**
+ * What a cursor says. One that is not shaped as a snapshot cursor, or is shaped as one but names ANOTHER session or an
+ * unreadable instant, is read as a bare id: an older daemon's cursor was only the id, and keeping that path means a
+ * forged or foreign snapshot cursor lands on a message id nobody has and is refused, never trusted.
+ */
+const decodeCursor = (cursor: string, session: string): Cursor => {
+  const match = SNAPSHOT_CURSOR.exec(cursor);
+  const asOf = match?.[1];
+  const from = match?.[2] === undefined ? undefined : unescapePart(match[2]);
+  const id = match?.[3] === undefined ? undefined : unescapePart(match[3]);
+  return asOf !== undefined && id !== undefined && from === session && Number.isFinite(Date.parse(asOf))
+    ? { id, asOf }
+    : { id: cursor };
+};
+
+const encodeCursor = (session: string, id: string, asOf: string | undefined): string =>
+  asOf === undefined ? id : `${asOf}~${escapePart(session)}~${escapePart(id)}`;
 
 /** The newest instant any message shows: what the first page of a walk can say it saw. */
 const snapshotOf = (messages: readonly QueuedMessage[]): string | undefined => {
@@ -84,11 +106,29 @@ const carriedByFirstPage = (message: QueuedMessage, asOf: string | undefined): b
   (asOf !== undefined && LEFT_OPEN_INTO.has(message.state) && Date.parse(message.stateAt) > Date.parse(asOf));
 
 /**
- * The page `query` asks for, out of every message of one session in any order; `undefined` when its cursor
- * names no message of this session. Pure and total.
+ * Whether a snapshot can be one this session's walk was cut at. The log only grows, so a snapshot is never later than
+ * the newest instant it shows now, and the first page that cut it carried the message the cursor names, so it is not
+ * earlier than that message's enqueue. Anything else was not made here — a forged cursor, or one of another log.
  */
-export const queuePage = (messages: readonly QueuedMessage[], query: SendPageQuery): QueuePage | undefined => {
-  const cursor = query.before === undefined ? undefined : decodeCursor(query.before);
+const snapshotFits = (messages: readonly QueuedMessage[], cursor: Cursor): boolean => {
+  const named = messages.find(message => message.id === cursor.id);
+  const newest = snapshotOf(messages);
+  if (cursor.asOf === undefined || named === undefined || newest === undefined) return true;
+  const at = Date.parse(cursor.asOf);
+  return at <= Date.parse(newest) && at >= Date.parse(named.enqueuedAt);
+};
+
+/**
+ * The page `query` asks for, out of every message of `session` in any order; `undefined` when its cursor names no
+ * message of it, or is a snapshot cursor that was not cut from this session's queue. Pure and total.
+ */
+export const queuePage = (
+  messages: readonly QueuedMessage[],
+  query: SendPageQuery,
+  session: string,
+): QueuePage | undefined => {
+  const cursor = query.before === undefined ? undefined : decodeCursor(query.before, session);
+  if (cursor !== undefined && !snapshotFits(messages, cursor)) return undefined;
   const window = windowPage(
     messages,
     cursor === undefined ? { limit: query.limit } : { limit: query.limit, before: cursor.id },
@@ -97,7 +137,7 @@ export const queuePage = (messages: readonly QueuedMessage[], query: SendPageQue
   if (window === undefined) return undefined;
   // The first page cuts the snapshot its walk is judged against; an older page carries it on.
   const asOf = cursor === undefined ? snapshotOf(messages) : cursor.asOf;
-  const nextCursor = window.nextCursor === null ? null : encodeCursor(window.nextCursor, asOf);
+  const nextCursor = window.nextCursor === null ? null : encodeCursor(session, window.nextCursor, asOf);
   const items =
     cursor === undefined ? window.items : window.items.filter(message => !carriedByFirstPage(message, cursor.asOf));
   return { messages: [...items].reverse(), nextCursor };

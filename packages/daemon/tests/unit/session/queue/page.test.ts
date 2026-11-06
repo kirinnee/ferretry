@@ -19,9 +19,11 @@ const message = (id: string, minutes: number, state: QueuedMessageState = 'read'
 
 const ids = (messages: readonly QueuedMessage[]) => messages.map(each => each.id);
 
-/** A page that must exist: every cursor these cases name is a message of theirs. */
-const pageOf = (...args: Parameters<typeof queuePage>) => {
-  const page = queuePage(...args);
+const SESSION = 's1';
+
+/** A page of session `s1` that must exist: every cursor these cases name is a message of theirs. */
+const pageOf = (messages: readonly QueuedMessage[], query: Parameters<typeof queuePage>[1]) => {
+  const page = queuePage(messages, query, SESSION);
   if (page === undefined) throw new Error('the cursor named no message');
   return page;
 };
@@ -53,7 +55,7 @@ describe('a page of a session queue', () => {
     should(ids(page.messages).slice(0, 3)).eql(['m0003', 'm0040', 'm0041']);
     should(page.messages.at(-1)?.id).equal('m2947');
     should(ids(page.messages)).eql([...ids(page.messages)].sort());
-    should(page.nextCursor).endWith('~m2848');
+    should(page.nextCursor).endWith('~s1~m2848');
   });
 
   it('should answer a small fraction of the bytes the whole queue weighed', () => {
@@ -171,7 +173,7 @@ describe('a page of a session queue', () => {
 
     // Assert
     const snapshot = (first.nextCursor ?? '').split('~')[0];
-    should(second.nextCursor).equal(`${snapshot}~c`);
+    should(second.nextCursor).equal(`${snapshot}~s1~c`);
   });
 
   it('should leave the open messages out of an older page, since the first page carried them', () => {
@@ -193,7 +195,7 @@ describe('a page of a session queue', () => {
     const queue = [message('a', 1), message('b', 2)];
 
     // Act
-    const unknown = queuePage(queue, { limit: 10, before: 'nope' });
+    const unknown = queuePage(queue, { limit: 10, before: 'nope' }, SESSION);
     const past = pageOf(queue, { limit: 10, before: 'a' });
 
     // Assert
@@ -211,7 +213,81 @@ describe('a page of a session queue', () => {
 
     // Assert
     should([...ids(first.messages), ...ids(rest.messages)].sort()).eql(['a', 'b', 'c']);
-    should(first.nextCursor).endWith('~b');
+    should(first.nextCursor).endWith('~s1~b');
+  });
+});
+
+describe('a cursor of a session queue', () => {
+  const queue = [message('a', 1), message('b', 2), message('c', 3)];
+
+  it('should be refused at another session, even when its message ids coincide', () => {
+    // Arrange
+    const first = pageOf(queue, { limit: 1 });
+
+    // Act
+    const elsewhere = queuePage(queue, { limit: 5, before: first.nextCursor ?? '' }, 's2');
+
+    // Assert
+    should(elsewhere).be.undefined();
+  });
+
+  it('should carry a session id that holds the delimiter, and not mistake another for it', () => {
+    // Arrange
+    const odd = 'we~ird/session id';
+    const first = queuePage(queue, { limit: 1 }, odd);
+
+    // Act
+    const same = queuePage(queue, { limit: 5, before: first?.nextCursor ?? '' }, odd);
+    const other = queuePage(queue, { limit: 5, before: first?.nextCursor ?? '' }, 'we');
+
+    // Assert
+    should(ids(same?.messages ?? [])).eql(['a', 'b']);
+    should(other).be.undefined();
+  });
+
+  it('should be refused when its snapshot is after anything the log has, or before the message it names', () => {
+    // Arrange — c is the newest message, a the oldest; a real cursor is `<instant>~s1~<id>`.
+    const future = '9999-12-31T23:59:59.999Z';
+    const ancient = '2000-01-01T00:00:00.000Z';
+
+    // Act
+    const tooLate = queuePage(queue, { limit: 5, before: `${future}~s1~b` }, SESSION);
+    const tooEarly = queuePage(queue, { limit: 5, before: `${ancient}~s1~b` }, SESSION);
+
+    // Assert
+    should(tooLate).be.undefined();
+    should(tooEarly).be.undefined();
+  });
+
+  it('should be refused when it names no message, or is not shaped as a cursor at all', () => {
+    // Arrange
+    const real = (pageOf(queue, { limit: 1 }).nextCursor ?? '').split('~')[0] ?? '';
+
+    // Act
+    const refused = [
+      `${real}~s1~nope`,
+      `${real}~s1~%E0%A4%A`,
+      `${real}~%E0%A4%A~b`,
+      'garbage',
+      '2026-XX~s1~b',
+      '~s1~b',
+      `${real}~s1~`,
+    ].map(before => queuePage(queue, { limit: 5, before }, SESSION));
+
+    // Assert
+    should(refused.every(each => each === undefined)).be.true();
+  });
+
+  it('should still be read as a bare message id, the form an older daemon answered', () => {
+    // Arrange / Act
+    const older = pageOf(queue, { limit: 5, before: 'c' });
+    const first = pageOf(queue, { limit: 1 });
+
+    // Assert — the bare path walks on and re-issues a bare cursor, as an older daemon's would.
+    should(ids(older.messages)).eql(['a', 'b']);
+    should(older.nextCursor).be.null();
+    should(pageOf(queue, { limit: 1, before: 'c' }).nextCursor).equal('b');
+    should(first.nextCursor).not.equal('c');
   });
 });
 
