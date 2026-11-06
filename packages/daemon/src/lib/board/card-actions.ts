@@ -56,6 +56,7 @@ import {
   type BoardStanding,
   type CardAudience,
   claimRefusalMessage,
+  effectiveAssignee,
   mayDo,
   mayPassGate,
   OPERATION_STANDINGS,
@@ -90,6 +91,8 @@ export interface CardContext {
   readonly handsDown?: boolean;
   /** The lead of the caller's own that holds the card, when the caller may CLAIM it (`claimableFrom`). */
   readonly claimedFrom?: string;
+  /** The ended owner ferret a live lead may ADOPT the card from (the service judged the orphan: `BoardService.orphanedOwner`). */
+  readonly adoptedFrom?: string;
   /** The lanes of the card's own board. */
   readonly laneSet: LaneSet;
   readonly index: BoardIndex;
@@ -1146,6 +1149,35 @@ export const applyAction = (
             context,
           ),
           assignee: claimer,
+        },
+      };
+    }
+    case 'adopt': {
+      const actor = context.actor;
+      if (context.adoptedFrom === undefined || actor.kind !== 'ferret') {
+        throw new BoardError(
+          'forbidden',
+          `only a live lead may adopt ${ref}, and only when its owner ferret and its assignee have both ended`,
+        );
+      }
+      const adopter = actor.sessionId;
+      return {
+        task: {
+          ...withEvent(
+            card,
+            {
+              type: 'assigned',
+              from: card.assignee,
+              to: adopter,
+              adopted: {
+                from: context.adoptedFrom,
+                reason: action.reason ?? `owner ferret ${card.owner} and assignee ${effectiveAssignee(card)} ended`,
+              },
+            },
+            context,
+          ),
+          owner: adopter,
+          assignee: adopter,
         },
       };
     }

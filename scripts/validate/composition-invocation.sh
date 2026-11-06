@@ -46,7 +46,14 @@ bin_entry() {
   printf '%s/%s\n' "$1" "${entry}"
 }
 daemon_root="$(bin_entry packages/daemon)"
-cli_root="$(bin_entry packages/cli)"
+# The CLI's bin entry only routes an invocation (to a slice or to the full program); the composition
+# root that declares and builds `CliWorld` is `program.ts` beside it. A missing file fails here rather
+# than letting `check_root` skip it, which would turn this gate off for the CLI without a word.
+cli_root="$(dirname "$(bin_entry packages/cli)")/program.ts"
+[ -f "${cli_root}" ] || {
+  echo "❌ no CLI composition root at ${cli_root}" >&2
+  exit 1
+}
 
 status=0
 blocked_file="scripts/validate/invocation-blocked.txt"

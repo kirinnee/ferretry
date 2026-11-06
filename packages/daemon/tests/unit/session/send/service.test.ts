@@ -19,6 +19,8 @@ import {
   SendLandingUnconfirmed,
   type SendLaunchGate,
   type SendLedger,
+  SendNotReady,
+  SendPaneNotReady,
   type SendPaneObservation,
   SendPending,
   type SendQueueOutcome,
@@ -184,6 +186,7 @@ class FakeTerminal implements SendTerminal {
   async deliver(_id: SessionId, text: string): Promise<void> {
     if (this.occupied !== undefined) throw new SendComposerOccupied(this.occupied);
     if (this.unreadable) throw new SendComposerUnreadable();
+    if (this.notReady !== undefined) throw this.notReady;
     this.calls.push('deliver');
     this.typed.push(text);
     if (this.deliverFailure !== undefined) throw this.deliverFailure;
@@ -207,6 +210,8 @@ class FakeTerminal implements SendTerminal {
   occupied: string | undefined;
   /** Thrown by a transport before any key, as the terminal does at a composer it cannot read. */
   unreadable = false;
+  /** Thrown by the idle transport before any key, as the terminal does at a pane that never comes to a prompt. */
+  notReady: SendPaneNotReady | undefined;
 
   async heldAt(_id: SessionId, text: string): Promise<SendHeldAt | undefined> {
     this.calls.push('heldAt');
@@ -628,6 +633,19 @@ describe('send to a busy pane', () => {
 
   it('ends the active turn first when the caller said `now`', async () => {
     const { service, terminal } = parts(target({ status: 'thinking' }), [
+      pane({ activeWork: true }),
+      pane({ promptReady: true }),
+    ]);
+    const outcome = await service.send(request({ now: true }));
+    should(terminal.calls).eql(['observe', 'stopActiveTurn', 'deliver']);
+    should(outcome.disposition).equal('delivered');
+  });
+
+  it('ends a declared wait mid-turn when the caller said `now` (&B153)', async () => {
+    // A `waiting` record over a pane at work routes busy now, so `--now` interrupts the turn as it does for
+    // any busy agent — a ferret parked in a blocking `fy wait` call has that call cut short. Before, the idle
+    // path waited for a prompt that never came.
+    const { service, terminal } = parts(target({ status: 'waiting' }), [
       pane({ activeWork: true }),
       pane({ promptReady: true }),
     ]);
@@ -1213,6 +1231,169 @@ describe('a composer that already holds unsent text', () => {
       message: 'tmux went away',
     });
     should(built.ledger.withdrawn).be.empty();
+  });
+});
+
+describe('&B153: a pane that never comes to a prompt', () => {
+  // ryu, 2026-11-02 → 11-04: the record said `waiting` while the agent was mid-turn, so the send took the idle
+  // path, the wait for a prompt gave up before a single key, and the throw left an `accepted` row that no
+  // tracker look was ever scheduled for. Eleven queues sat behind it for 38 min to 5 h 49 min.
+  const notReady = (why: SendPaneNotReady['why'] = 'busy') =>
+    new SendPaneNotReady('tmux session fy-ryu did not become ready to accept a turn', why);
+  const sender = { id: PEER, status: 'running', mode: 'auto', turn: 2 } as SendTarget;
+
+  it("refuses a ferret's send before any key, withdraws its row and names the wait", async () => {
+    const built = parts(target({ status: 'waiting' }), [pane()], { [PEER]: sender });
+    built.terminal.notReady = notReady();
+
+    const refusal = await built.service.send(request({ senderReference: PEER })).catch((error: unknown) => error);
+
+    should(refusal).be.instanceof(SendNotReady);
+    should((refusal as SendNotReady).reason).equal('busy');
+    should((refusal as SendNotReady).message).match(/never came to a prompt/u);
+    should(built.ledger.withdrawn).eql(['send-1']);
+    should(built.ledger.records.size).equal(0);
+    should(built.terminal.typed).be.empty();
+    should(built.repository.transitions).be.empty();
+    // Nothing is open, so nothing is left for the tracker; the queue holds the message instead.
+    should(built.tracked).be.empty();
+  });
+
+  it('names a dialog and a pane that went away as what the queue waits on', async () => {
+    const reasons: string[] = [];
+    for (const why of ['dialog', 'exited'] as const) {
+      const built = parts(target(), [pane({ promptReady: true })], { [PEER]: sender });
+      built.terminal.notReady = notReady(why);
+      const refusal = await built.service.send(request({ senderReference: PEER })).catch((error: unknown) => error);
+      reasons.push((refusal as SendNotReady).reason);
+    }
+
+    should(reasons).eql(['dialog', 'stopped']);
+  });
+
+  it("keeps a person's send open and untyped for the tracker, saying why", async () => {
+    const built = parts(target({ status: 'waiting' }), [pane()]);
+    built.terminal.notReady = notReady();
+
+    const answer = await built.service.send(request());
+
+    should(built.ledger.only()).containEql({ fate: 'accepted', untyped: true, senderKind: 'human' });
+    should(answer.record.untyped).be.true();
+    should(built.terminal.typed).be.empty();
+    should(built.tracked).eql([ID]);
+    should(built.repository.journal_).containEql({
+      event: 'control.send_deferred',
+      data: { sendId: 'send-1', reason: 'the agent never came to a prompt' },
+    });
+  });
+
+  const heldRelease = (why: SendPaneNotReady['why']) => {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    built.ledger.records.set('held-1', {
+      sendId: 'held-1',
+      acceptedAt: NOW,
+      acceptedTurn: 3,
+      path: 'revive-queue',
+      message: 'when you are back',
+      held: true,
+      fate: 'accepted',
+    });
+    built.terminal.notReady = notReady(why);
+    return built;
+  };
+
+  it('keeps a released held message open for the tracker when the live pane never comes to a prompt', async () => {
+    // Back on hold it would wait for a revive this live session never gets.
+    const built = heldRelease('busy');
+
+    should(await built.service.releaseHeld(ID)).equal(1);
+
+    should(built.ledger.records.get('held-1')).containEql({ fate: 'accepted', held: false, untyped: true });
+    should(built.terminal.typed).be.empty();
+    should(built.tracked).eql([ID]);
+  });
+
+  it('puts a released held message back on hold when its pane went away during the wait', async () => {
+    const built = heldRelease('exited');
+
+    await built.service.releaseHeld(ID).should.be.rejectedWith(SendNotReady);
+
+    should(built.ledger.records.get('held-1')).containEql({ fate: 'accepted', held: true });
+    should(built.terminal.typed).be.empty();
+  });
+
+  it("withdraws a person's send whose pane went away during the wait, so the next one revives it", async () => {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    built.terminal.notReady = notReady('exited');
+
+    const refusal = await built.service.send(request()).catch((error: unknown) => error);
+
+    should((refusal as SendNotReady).reason).equal('stopped');
+    should(built.ledger.withdrawn).eql(['send-1']);
+    should(built.tracked).be.empty();
+  });
+
+  it('tells the tracker about a send whose transport threw after its row was accepted', async () => {
+    const built = parts(target(), [pane({ promptReady: true })], { [PEER]: sender });
+    built.terminal.deliverFailure = new Error('tmux went away mid-Enter');
+
+    await built.service.send(request({ senderReference: PEER })).should.be.rejectedWith(/tmux went away/u);
+
+    // The row stays `accepted` — keys may have gone — and a look is now scheduled to settle it.
+    should(built.ledger.only().fate).equal('accepted');
+    should(built.tracked).eql([ID]);
+  });
+
+  it('tells the tracker when the ledger cannot be read to rule an open row out', async () => {
+    const built = parts(target(), [pane({ promptReady: true })], { [PEER]: sender });
+    built.terminal.deliverFailure = new Error('tmux went away mid-Enter');
+    const list = built.ledger.list.bind(built.ledger);
+    built.ledger.list = async () => {
+      // The send's own reads succeed; the one after the keys went does not.
+      if (built.terminal.typed.length > 0) throw new Error('ledger is unreadable');
+      return await list();
+    };
+
+    await built.service.send(request({ senderReference: PEER })).should.be.rejectedWith(/tmux went away/u);
+
+    should(built.tracked).eql([ID]);
+  });
+
+  it('schedules no look for a send refused before its row was written', async () => {
+    const built = parts(target({ needsHumanKind: 'codex-picker-unconfirmed' }));
+
+    await built.service.send(request()).should.be.rejectedWith(SendUnavailable);
+
+    should(built.tracked).be.empty();
+  });
+
+  it('withholds a daemon retype at a pane that never comes to a prompt, as busy, and puts the record back', async () => {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    await built.service.send(request());
+    built.ledger.records.set('send-1', { ...built.ledger.only(), fate: 'accepted', attempt: 1 });
+    built.terminal.typed.length = 0;
+    built.tracked.length = 0;
+    built.terminal.notReady = notReady();
+
+    const withheld = await built.service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((e: unknown) => e);
+
+    should(withheld).be.instanceof(SendRetypeWithheld);
+    should((withheld as SendRetypeWithheld).reason).equal('busy');
+    should(built.ledger.only()).match({ fate: 'accepted', attempt: 1 });
+    should(built.terminal.typed).be.empty();
+  });
+
+  it('tells the tracker about a retype whose transport threw after its attempt was ledgered', async () => {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    await built.service.send(request());
+    built.ledger.records.set('send-1', { ...built.ledger.only(), fate: 'queued', attempt: 1 });
+    built.tracked.length = 0;
+    built.terminal.deliverFailure = new Error('tmux went away');
+
+    await built.service.reattempt(ID, 'send-1', { by: 'daemon' }).should.be.rejectedWith(/tmux went away/u);
+
+    should(built.ledger.only()).match({ fate: 'accepted', attempt: 2 });
+    should(built.tracked).eql([ID]);
   });
 });
 

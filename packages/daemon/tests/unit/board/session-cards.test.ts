@@ -11,6 +11,7 @@ import {
   askOf,
   BoardService,
   cardFooterLine,
+  cardOrigin,
   cardTitle,
   type DelegationRequest,
   ownerDelegation,
@@ -214,6 +215,53 @@ describe('a session started with a brief', () => {
 
     // Assert
     should(stored(ports, 'F1').ask).deepEqual({ text: 'Survey the agenda', source: 'session:lead' });
+  });
+
+  describe("a ferret's job is never the owner's ask", () => {
+    const OWNER_MESSAGE =
+      'Review the Insights screenshots for the timezone picker on phone and desktop, light and dark';
+    const ownerSaid = { world: { ownerWords: { said: async () => [OWNER_MESSAGE] } } };
+
+    it("should file a fy new no lead was recorded for as the ferrets' own work: private, top level, never person-asked", async () => {
+      // Arrange: the boundary took the caller for a person, so the start has no parent and no delegation
+      const { subject, ports } = build();
+
+      // Act
+      await subject.open({ sessionId: 'cordie', brief: 'Read-only review of the screenshots', viaPack: true });
+
+      // Assert
+      const made = stored(ports, 'F1');
+      should(made.ask).deepEqual({ text: 'Read-only review of the screenshots', source: 'fy new' });
+      should(made).match({ askedBy: 'agent', visibility: 'private', parent: null });
+      should(cardOrigin(made, { startedByFerret: () => false })).equal('agent');
+    });
+
+    it('should keep a fy new card agent-asked and private when its brief quotes the owner, now and after a reboot', async () => {
+      // Arrange: the lead is a top-level ferret that talks to the owner, and its brief repeats their message
+      const { subject, ports } = build(ownerSaid);
+      const { delegation } = await subject.delegate('lead', { brief: OWNER_MESSAGE, name: 'Screenshots' }, true);
+
+      // Act
+      await subject.open({ sessionId: 'child', brief: OWNER_MESSAGE, parent: 'lead', delegation, viaPack: true });
+      const restamped = await new BoardService(ports).backfillAskedBy();
+
+      // Assert
+      should(stored(ports, 'F1')).match({ askedBy: 'agent', visibility: 'private' });
+      should(restamped).equal(0);
+      should(cardOrigin(stored(ports, 'F1'), { startedByFerret: () => false })).equal('agent');
+    });
+
+    it("should still make the owner's own New session their ask: public, person-asked", async () => {
+      // Arrange
+      const { subject, ports } = build(ownerSaid);
+
+      // Act
+      await subject.open({ sessionId: 'worker', brief: OWNER_MESSAGE });
+
+      // Assert
+      should(stored(ports, 'F1').ask.source).equal('owner');
+      should(stored(ports, 'F1')).match({ askedBy: 'person', visibility: 'public' });
+    });
   });
 
   describe('on a board that is off', () => {

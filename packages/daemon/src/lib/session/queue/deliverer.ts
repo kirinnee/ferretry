@@ -17,7 +17,8 @@ import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from './sett
  * ONE AT A TIME. A message is marked `typing` on disk BEFORE it is handed over, and nothing else is handed
  * over while one is. A daemon that dies in between leaves a `typing` message, and the send ledger — keyed
  * by the same id — says on the next look whether a key ever went: no record means none did, and it waits
- * again; a record says where it went. Nothing is ever typed twice on a guess.
+ * again; a record says where it went. Nothing is ever typed twice on a guess. A record still `accepted` long
+ * after its hand-over is the send tracker's to settle, and the tracker is asked to look (`recheckMs`).
  *
  * EVENT-DRIVEN. A session is looked at when a message is enqueued, when its state document changes (a
  * turn moving, a dialog opening), and — while something in it is still waiting or unproven — again after
@@ -60,6 +61,11 @@ export interface QueueTransport {
    * verified, counted Enter — and says whose it is (`OwnDraft`).
    */
   clearOwnDraft(id: SessionId): Promise<OwnDraft>;
+  /**
+   * Has the send tracker look at this session's sends now: the one look that can prove where an `accepted`
+   * hand-over went, and type it again once it is proven absent. The look keeps every rule it always has.
+   */
+  recheck(id: SessionId): Promise<void>;
 }
 
 export interface QueueDeliveryPorts {
@@ -87,6 +93,11 @@ export interface QueueDeliverySettings extends QueueCoalesceSettings {
   readonly perLook: number;
   /** The longest a stopping daemon waits for the hand-overs already in flight. */
   readonly drainMs: number;
+  /**
+   * How long a message may sit `typing` behind an `accepted` send before the tracker is asked to look at it,
+   * and how often it is asked again while it stays there (&B153).
+   */
+  readonly recheckMs: number;
 }
 
 export const defaultQueueDeliverySettings: QueueDeliverySettings = {
@@ -95,6 +106,7 @@ export const defaultQueueDeliverySettings: QueueDeliverySettings = {
   readWatchMs: 60 * 60_000,
   perLook: 8,
   drainMs: 15_000,
+  recheckMs: 60_000,
 };
 
 export class QueueDeliverer {
@@ -102,6 +114,17 @@ export class QueueDeliverer {
   private readonly open = new Set<SessionId>();
   /** The looks running now, which a stopping daemon waits out. */
   private readonly running = new Set<Promise<void>>();
+  /** When each session's tracker was last asked to look at a hand-over stuck `accepted`. */
+  private readonly rechecked = new Map<SessionId, number>();
+  /**
+   * Sessions whose last hand-over found no prompt: when, the reason the queue waits on meanwhile, and whether
+   * the record's own readiness flag was already true at the refusal (`staleReady`) — a flag that still
+   * says "ready" for a pane that showed none is the very thing that was refused, not a new prompt.
+   */
+  private readonly promptless = new Map<
+    SessionId,
+    { readonly at: number; readonly reason: QueueWaitReason; staleReady: boolean }
+  >();
   private stopped = false;
 
   constructor(
@@ -189,12 +212,40 @@ export class QueueDeliverer {
 
   /** Brings every message already handed over up to what the send ledger proves. */
   private async settle(id: SessionId): Promise<void> {
+    let stalled = false;
+    const now = Date.parse(this.ports.clock.now());
     for (const message of await this.messages(id)) {
       if (message.state !== 'typing' && message.state !== 'delivered' && message.state !== 'unconfirmed') continue;
       // A member of a combined turn is proven by the ONE ledger record the turn was sent under.
       const fate = await this.ports.transport.fate(id, message.deliveredAs ?? message.id);
       for (const move of movesFrom(message, fate)) await this.move(id, message.id, move.state, move.failure);
+      if (
+        message.state === 'typing' &&
+        fate === 'accepted' &&
+        now - Date.parse(message.stateAt) >= this.settings.recheckMs
+      )
+        stalled = true;
     }
+    if (stalled) this.recheck(id, now);
+    else this.rechecked.delete(id);
+  }
+
+  /**
+   * Asks the tracker to look at a hand-over that has sat `accepted` too long, at most once per `recheckMs`.
+   *
+   * Only the tracker moves an `accepted` send, and it moves one only when a look is scheduled for it. A
+   * hand-over that threw used to schedule none, so its message sat `typing` and every message behind it
+   * waited, with no reason given, until a restart or a `fy send --wait` happened to make the tracker look
+   * (&B153). The look is the tracker's own: transcript proof wins, and only a send proven absent is typed
+   * again. Not awaited: the tracker's look takes the send path's lock, and this look holds the queue's.
+   */
+  private recheck(id: SessionId, now: number): void {
+    // A stopping daemon starts no tracker look: one begun now could type after the tracker was disarmed.
+    if (this.stopped) return;
+    const last = this.rechecked.get(id);
+    if (last !== undefined && now - last < this.settings.recheckMs) return;
+    this.rechecked.set(id, now);
+    void this.ports.transport.recheck(id).catch(() => undefined);
   }
 
   /**
@@ -237,6 +288,10 @@ export class QueueDeliverer {
         reason = waitReasonOf(view);
       }
     }
+    // A pane that never came to a prompt is not handed the message again until one shows, or `recheckMs` has
+    // passed (&B153). Each hand-over holds both locks through a readiness wait of about half a minute, and the
+    // queue looked again every `lookMs`: a pane that drew neither a prompt nor work looped for as long.
+    if (reason === undefined) reason = this.awaitingPrompt(id, view);
     await this.waiting(id, deliveryOrder(messages, view.target.mode), reason, behind);
     if (reason !== undefined) return false;
     // Every member is `typing` under the delivery's id BEFORE anything is handed over, so a daemon that
@@ -249,6 +304,13 @@ export class QueueDeliverer {
         failure: error instanceof Error ? error.message : String(error),
       }),
     );
+    if (outcome.kind === 'refused' && outcome.untilPrompt === true)
+      this.promptless.set(id, {
+        at: Date.parse(this.ports.clock.now()),
+        reason: outcome.reason,
+        staleReady: view.target.promptReady === true,
+      });
+    else this.promptless.delete(id);
     switch (outcome.kind) {
       case 'landed':
         for (const member of members) await this.move(id, member.id, 'delivered');
@@ -261,12 +323,31 @@ export class QueueDeliverer {
         return false;
       case 'failed':
         // A hand-over that threw may still have typed: when the ledger, keyed by this id, has a record of
-        // it, it stays `typing` and the next look settles it. With no record nothing was typed, so it
+        // it, it stays `typing` and the next look settles it — the send path told the tracker, and a record
+        // still `accepted` after `recheckMs` is put to it again. With no record nothing was typed, so it
         // fails and the next message may go.
         if ((await this.ports.transport.fate(id, delivery.sendId)) !== undefined) return false;
         for (const member of members) await this.move(id, member.id, 'failed', outcome.failure);
         return true;
     }
+  }
+
+  /** The reason a session whose last hand-over found no prompt still waits, or `undefined` once it may go. */
+  private awaitingPrompt(id: SessionId, view: DeliveryView): QueueWaitReason | undefined {
+    const last = this.promptless.get(id);
+    if (last === undefined) return undefined;
+    const { target, pane } = view;
+    // The record's flag counts only as a CHANGE since the refusal: one already true then, and true still, is
+    // the stale reading that was refused, and would end the backoff on the very next look. Seeing it false
+    // re-arms it, so a later true is a real readiness change.
+    if (target.promptReady !== true) last.staleReady = false;
+    const recordReady = target.promptReady === true && !last.staleReady;
+    const prompt = pane.promptReady || recordReady || !pane.alive || pane.dead;
+    if (prompt || Date.parse(this.ports.clock.now()) - last.at >= this.settings.recheckMs) {
+      this.promptless.delete(id);
+      return undefined;
+    }
+    return last.reason;
   }
 
   /** Says why each waiting message is waiting, writing only what changed. */

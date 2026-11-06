@@ -26,6 +26,7 @@ import {
   paneBlockingPrompt,
   paneResponded,
   retryDelays,
+  startupSettleStep,
   type StartupDialogAction,
   type StartupDialogOptions,
   type TmuxController,
@@ -57,6 +58,11 @@ export interface PaneDeliveryOptions {
   readonly submitPolls?: number;
   /** How long to wait between composer and submit observations. */
   readonly pollMs?: number;
+  /**
+   * The longest `waitStartupSettled` watches a parked first turn, counted in `pollMs` steps. Past it the
+   * wait ends without failing, answering `timed-out`: a harness that is merely slow is not a failed start.
+   */
+  readonly startupSettleMs?: number;
 }
 
 const DEFAULTS = {
@@ -72,6 +78,7 @@ const DEFAULTS = {
   submitAttempts: 3,
   submitPolls: 12,
   pollMs: 250,
+  startupSettleMs: 30_000,
 } as const;
 
 /** A payload could not be delivered, and the message says which half failed. */
@@ -79,6 +86,43 @@ export class PaneDeliveryError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'PaneDeliveryError';
+  }
+}
+
+/**
+ * The pane never came to a prompt, so NOTHING OF THE PAYLOAD WAS TYPED: every way `waitReady` gives up.
+ *
+ * Its own type because a send must tell it from a failure after the keys (&B153). A send whose session record
+ * said idle while its agent was still mid-turn waited here half a minute and threw a plain delivery error; the
+ * send path could not tell "no key went" from "keys went somewhere", so it left the message `typing` behind a
+ * row nothing ever looked at again, and eleven queues stalled for up to six hours. Keys a startup dialog's
+ * known answer needed may have been pressed on the way, but never a character of the payload.
+ */
+export class PaneNotReadyError extends PaneDeliveryError {
+  constructor(
+    message: string,
+    /** What the pane was doing instead: still at work, behind a dialog, or gone. */
+    readonly why: PaneNotReadyCause,
+  ) {
+    super(message);
+    this.name = 'PaneNotReadyError';
+  }
+}
+
+/** Why a pane never came to a prompt. */
+export type PaneNotReadyCause = 'busy' | 'dialog' | 'exited';
+
+/**
+ * The pane died while `waitStartupSettled` was watching it. `parked` is whether a frame showed the first turn
+ * parked behind the harness's startup before it died: only then is the turn known never to have run.
+ */
+export class PaneStartupExitedError extends PaneDeliveryError {
+  constructor(
+    message: string,
+    readonly parked: boolean,
+  ) {
+    super(message);
+    this.name = 'PaneStartupExitedError';
   }
 }
 
@@ -129,7 +173,10 @@ export class TmuxPaneDelivery {
       const step = nextReadinessStep(frame, attemptsByKind, options);
       if (step.kind === 'ready') return;
       if (step.kind === 'exited' || step.kind === 'stuck')
-        throw new PaneDeliveryError(`${step.reason}; tmux session ${session}`);
+        throw new PaneNotReadyError(
+          `${step.reason}; tmux session ${session}`,
+          step.kind === 'exited' ? 'exited' : 'dialog',
+        );
       // A composer holding typed input will never become ready by waiting, and the wait is long. Two
       // frames in a row, so a repaint caught halfway through clearing a submit is not mistaken for one.
       // Text parked behind Codex's startup wait is not a draft: Codex accepted it, so just keep waiting.
@@ -150,10 +197,11 @@ export class TmuxPaneDelivery {
       attempt++;
     }
     // Name the dialog when one is why: "not ready" sent the reader to the transcript, which was fine.
-    throw new PaneDeliveryError(
+    throw new PaneNotReadyError(
       blocked === undefined
         ? `tmux session ${session} did not become ready to accept a turn`
         : `tmux session ${session} is blocked by a prompt on screen: "${blocked}" — answer it in the terminal`,
+      blocked === undefined ? 'busy' : 'dialog',
     );
   }
 
@@ -173,6 +221,30 @@ export class TmuxPaneDelivery {
     await beforeWrite?.();
     const evidence = await this.fill(session, text);
     return await this.submit(session, text, evidence);
+  }
+
+  /**
+   * Wait, boundedly, until the harness has finished its OWN startup after a first turn was delivered.
+   *
+   * Codex 0.166 takes a submission before its startup ends and parks it under `Waiting for startup`
+   * (`paneShowsStartupWait`), so delivery is already proven while the harness is not yet running. Any
+   * other pane answers on the first frame. A pane that dies meanwhile fails the wait with the harness's
+   * own exit reason (a `PaneStartupExitedError` saying whether the park was seen first), so the start reports it instead of a session that dies later; a bound that passes
+   * answers `timed-out` rather than failing, because a slow harness is not a failed one and the caller
+   * must not mistake the bound for a measured startup time.
+   */
+  async waitStartupSettled(session: string): Promise<'settled' | 'timed-out'> {
+    // A step below one millisecond would never advance `waited`, so the bound could not end the loop.
+    const step = Math.max(1, this.settings.pollMs);
+    let parked = false;
+    for (let waited = 0; ; waited += step) {
+      const frame = startupSettleStep(await captureFrame(this.tmux, session));
+      if (frame.kind === 'settled') return 'settled';
+      if (frame.kind === 'exited') throw new PaneStartupExitedError(`${frame.reason}; tmux session ${session}`, parked);
+      parked = true;
+      if (waited >= this.settings.startupSettleMs) return 'timed-out';
+      await this.sleep(step);
+    }
   }
 
   private async fill(session: string, text: string): Promise<LandingEvidence> {

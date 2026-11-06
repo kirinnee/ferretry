@@ -277,6 +277,39 @@ export function withLaunchInstructions(
 }
 
 /**
+ * Whole milliseconds from one clock reading to a later one, never below zero; `undefined` when either reading
+ * is not an instant.
+ *
+ * The lifecycle reads time only through its clock port, whose readings are instants; a clock that steps
+ * backwards is clamped, and a reading that does not parse is no measurement at all — recording a made-up
+ * zero would claim an instant start.
+ */
+export function elapsedMs(from: string, to: string): number | undefined {
+  const span = Date.parse(to) - Date.parse(from);
+  return Number.isFinite(span) ? Math.max(0, Math.round(span)) : undefined;
+}
+
+/**
+ * The record carrying what the launch that opened its pane learned about the harness's startup: how long it
+ * took (`settled`), or how long was spent before the wait gave up (`timed-out`, which is NOT a startup time).
+ * Whichever of the two it sets replaces both fields the record carried, so one launch never shows both.
+ */
+export function withHarnessStartup(
+  record: SessionLifecycleRecord,
+  settlement: 'settled' | 'timed-out',
+  elapsed: number,
+): SessionLifecycleRecord {
+  const { harnessStartupMs: _ready, harnessNotReadyAfterMs: _waited, ...state } = record.state;
+  return {
+    ...record,
+    state:
+      settlement === 'settled'
+        ? { ...state, harnessStartupMs: elapsed }
+        : { ...state, harnessNotReadyAfterMs: elapsed },
+  };
+}
+
+/**
  * The lifecycle phase a recorded status implies.
  *
  * The six lifecycle statuses are their own phase. Every turn-level status the watcher writes while a

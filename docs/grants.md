@@ -204,6 +204,25 @@ machine in `state/agent-pins.json` (session ids and instants only), and rides `G
 on the view. A test pins this choice (`tests/unit/runtime/mounts/session-pin.test.ts`), so making pinning
 governed is a reviewed decision.
 
+<a id="saved-pictures"></a>
+
+**Saved pictures are content a ferret put into a conversation.** `GET /v1/renders/:id` and
+`GET /v1/renders/:id/meta` ([renders.md](renders.md)) are `operator` with **no capability**, like the
+transcript image route: a picture is shown in a conversation, a card or an agenda, all of which a device that may
+read them already reads, so a second gate would be a second copy of the first. `POST /v1/renders` is also
+`operator` with no capability, and is narrower than its credential: the handler admits only a ferret's own session
+credential or the host's admin token **over a loopback carrier** (`arrivedOnHost`) and refuses everyone else —
+a paired device, a browser on the host, a relayed session (never loopback, whatever address it appears to carry)
+and the warden — with `403 render_save_host_only` before the body is read. Nothing in the app saves a picture, so
+there is no remote write to govern. Tests pin this choice (`tests/unit/runtime/mounts/renders.test.ts`), so making
+renders governed is a reviewed decision.
+
+**A known widening, stated rather than hidden:** today an `image` block's `src: media:<file>` is read under
+`filesystem` _use_. A saved picture is read at `operator`. A device whose `filesystem` use is denied will therefore
+see saved `svg` and `html` pictures it could not see as `media:` files. That is the exposure an inline `svg` or
+`html` fence in the transcript already has: the ferret chose to publish it into the conversation. The store holds
+only these two text kinds; a future store of media would need this decision made again.
+
 One consequence: agenda actions are gated by **who acts** (the human or a ferret), never by a capability.
 `POST /v1/agenda/clear-agents` is owner-only on that axis — an agent credential gets 403 — and has no grant.
 `GET /v1/agenda/open` (every conversation's open and parked items, [agenda.md](agenda.md#the-roll-up-every-conversation-and-a-count-that-is-the-list)) is the same: `operator`, `caller: 'person'`, no capability.

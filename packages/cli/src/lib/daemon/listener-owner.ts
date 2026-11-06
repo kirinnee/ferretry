@@ -1,4 +1,4 @@
-import { loopbackListenersOn } from '@ferretry/protocol';
+import { loopbackListenersOn } from '@ferretry/protocol/tcp-listeners';
 
 /**
  * WHOSE PROGRAM IS LISTENING on the loopback port a credential is about to be sent to.

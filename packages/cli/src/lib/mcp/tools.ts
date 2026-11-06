@@ -1,23 +1,20 @@
+import type { AgentConfigToolName, AgentLessonToolName, AgentToolName } from '@ferretry/protocol';
 import {
   AGENT_TOOL_DEFAULT_WAIT_MS,
   AGENT_TOOL_MAX_READ_LINES,
   AGENT_TOOL_MAX_TOTAL_WAIT_MS,
   AGENT_TOOL_MAX_WAIT_MS,
-  type AgentConfigToolName,
-  type AgentLessonToolName,
-  type AgentToolName,
+  TERMINAL_KEYS,
+} from '@ferretry/protocol/agent-tools';
+import { LESSON_RULE_MAX_CHARS } from '@ferretry/protocol/agent-tools-lessons';
+import {
   BROWSER_CONSOLE_LEVELS,
   BROWSER_CPU_THROTTLE_MAX,
   BROWSER_EMULATED_PERMISSIONS,
   BROWSER_RESOURCE_TYPES,
-  INPUT_MAX_EXPIRY_SECONDS,
-  INPUT_MAX_FIELDS,
-  INPUT_PROMPT_MAX_LENGTH,
-  LESSON_RULE_MAX_CHARS,
-  LOGIN_PROPOSAL_WHY_MAX_LENGTH,
-  LOGIN_RECIPE_MAX_LENGTH,
-  TERMINAL_KEYS,
-} from '@ferretry/protocol';
+} from '@ferretry/protocol/browser-page-lifecycle';
+import { INPUT_MAX_EXPIRY_SECONDS, INPUT_MAX_FIELDS, INPUT_PROMPT_MAX_LENGTH } from '@ferretry/protocol/input-request';
+import { LOGIN_PROPOSAL_WHY_MAX_LENGTH, LOGIN_RECIPE_MAX_LENGTH } from '@ferretry/protocol/login-recipes';
 
 /**
  * The Ferretry tools as an MCP server shows them.

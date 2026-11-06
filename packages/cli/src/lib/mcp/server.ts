@@ -1,18 +1,20 @@
+import type {
+  AgentConfigToolCall,
+  AgentConfigToolResult,
+  AgentLessonToolCall,
+  AgentLessonToolResult,
+  AgentToolCall,
+  AgentToolResult,
+  WorkSearchQueryInput,
+  WorkSearchResponse,
+} from '@ferretry/protocol';
 import {
   AGENT_TOOL_DEFAULT_WAIT_MS,
   AGENT_TOOL_MAX_TOTAL_WAIT_MS,
-  type AgentConfigToolCall,
-  AgentConfigToolCallSchema,
-  type AgentConfigToolResult,
-  type AgentLessonToolCall,
-  AgentLessonToolCallSchema,
-  type AgentLessonToolResult,
-  type AgentToolCall,
   AgentToolCallSchema,
-  type AgentToolResult,
-  type WorkSearchQueryInput,
-  type WorkSearchResponse,
-} from '@ferretry/protocol';
+} from '@ferretry/protocol/agent-tools';
+import { AgentLessonToolCallSchema } from '@ferretry/protocol/agent-tools-lessons';
+import { AgentConfigToolCallSchema } from '@ferretry/protocol/config-files';
 import { z } from 'zod';
 import type { BrowserWait, TerminalWait } from '../agent-tools/client.ts';
 import { renderToolResult } from '../agent-tools/controller.ts';

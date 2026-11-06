@@ -1,10 +1,8 @@
-import {
-  describeCompactAt,
-  displayModel,
-  formatTaskRef,
-  type SessionState,
-  type SessionView,
-} from '@ferretry/protocol';
+import type { SessionState, SessionView } from '@ferretry/protocol';
+import { formatTaskRef } from '@ferretry/protocol/board-refs';
+import { describeCompactAt } from '@ferretry/protocol/compact-at';
+import { displayModel } from '@ferretry/protocol/session-subtree';
+import { harnessReadySeconds } from './harness-startup.ts';
 import type { ICellColour } from './ports.ts';
 
 /** Statuses a session never leaves; `ps` hides them unless asked for everything. */
@@ -68,10 +66,22 @@ function headline(view: SessionView): string {
     .join('  ');
 }
 
+/**
+ * `ready in 4.2 s`, or `not ready after 31.4 s` when the start gave up waiting (the time from launch until it gave up,
+ * at least the 30 s bound); empty when nothing was measured.
+ */
+function startupVital(state: SessionState): string {
+  if (state.harnessStartupMs !== undefined) return `ready in ${harnessReadySeconds(state.harnessStartupMs)}`;
+  return state.harnessNotReadyAfterMs === undefined
+    ? ''
+    : `not ready after ${harnessReadySeconds(state.harnessNotReadyAfterMs)}`;
+}
+
 function vitals(view: SessionView): string[] {
   const quota = quotaLabel(view.state);
   const parts = [
     view.config.compactAt === undefined ? '' : `compact at ${describeCompactAt(view.config.compactAt)}`,
+    startupVital(view.state),
     view.state.contextPercent === undefined ? '' : `context ${view.state.contextPercent}% used`,
     quota === undefined ? '' : `quota ${quota}`,
     view.state.lastToolStartedAt === undefined ? '' : `last tool started ${view.state.lastToolStartedAt}`,

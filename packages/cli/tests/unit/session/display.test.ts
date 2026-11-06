@@ -170,6 +170,24 @@ describe('renderSessionView', () => {
     should(observed[2]).equal('  context 42% used  quota 5h 10%  last tool started 2026-01-01T00:09:00.000Z');
   });
 
+  it('should show how long the harness took to start among the vitals, once it was measured', () => {
+    // Arrange
+    const measured = renderSessionView(sessionView({}, { harnessStartupMs: 4_200, contextPercent: 42 }), NOW);
+    const unmeasured = renderSessionView(sessionView({}, { contextPercent: 42 }), NOW);
+
+    // Act / Assert
+    should(measured[2]).equal('  ready in 4.2 s  context 42% used');
+    should(unmeasured[2]).equal('  context 42% used');
+  });
+
+  it('should say a start that gave up waiting was not ready, rather than ready in the bound', () => {
+    // Arrange
+    const gaveUp = renderSessionView(sessionView({}, { harnessNotReadyAfterMs: 31_400, contextPercent: 42 }), NOW);
+
+    // Act / Assert
+    should(gaveUp[2]).equal('  not ready after 31.4 s  context 42% used');
+  });
+
   it('should report the liveness ledger with a nudge marker', () => {
     // Arrange
     const view = sessionView(

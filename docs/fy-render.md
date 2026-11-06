@@ -281,9 +281,12 @@ they reach a style.
   visible attribution (the component's © OpenStreetMap contributors link), a valid `Referer` (the tile
   `<img>`s alone carry `referrerpolicy="strict-origin-when-cross-origin"`; the page's own policy stays
   `no-referrer`), no bulk fetching, zoom capped at 18, a one-tile buffer, tiles loaded only when the map
-  is idle. A map draws only when it is near the viewport. Heavy deployments should move to a hosted
-  provider: change `MAP_TILE_ORIGIN` (`fy-render-map-tiles.ts`) and `img-src` together; the unit test and
-  the Pages gate fail until they agree.
+  is idle. The tile `<img>`s load in **anonymous CORS mode** (`crossOrigin: ''` on the layer): OSM answers
+  `Access-Control-Allow-Origin: *`, so it costs nothing today and keeps the tiles allowed should the page
+  ever be cross-origin isolated (COEP `require-corp`; docs/voice.md) — and CORS mode leaves the Referer to
+  `referrerPolicy`, so OSM still gets one. A map draws only when it is near the viewport. Heavy
+  deployments should move to a hosted provider: change `MAP_TILE_ORIGIN` (`fy-render-map-tiles.ts`) and
+  `img-src` together; the unit test and the Pages gate fail until they agree.
 - **Touch.** On a coarse pointer one finger scrolls the transcript and the map is dragged in Fullscreen
   (where the wheel zoom is also on); the Zoom buttons work inline.
 - **Dark mode** is a CSS filter on the tile pane, not a second tile source.

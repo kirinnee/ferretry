@@ -34,6 +34,7 @@ export * from './pins/index.ts';
 export * from './provider-probe/index.ts';
 export * from './push/index.ts';
 export * from './relay/index.ts';
+export * from './renders/index.ts';
 export * from './runtime/index.ts';
 export * from './scratch/index.ts';
 export * from './secrets/index.ts';

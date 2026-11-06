@@ -275,6 +275,14 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
       await board.claim(id, options);
     });
 
+  acting(group.command('adopt'))
+    .description('take a card whose owner ferret and assignee have both ended (you must be a live lead on its board)')
+    .argument('<id>', ID_HELP)
+    .option('--reason <why>', 'why you take it; kept in its history')
+    .action(async (id: string, options: SessionOptions & { reason?: string }) => {
+      await board.adopt(id, options);
+    });
+
   acting(group.command('note'))
     .description('append a note to the history')
     .argument('<id>', ID_HELP)

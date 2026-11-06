@@ -548,6 +548,7 @@ import {
 } from '../src/adapters/session/transcript/index.ts';
 import { StorageTurnPorts, storagePaneLimits } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
+import { FileRenderRepository } from '../src/adapters/renders/index.ts';
 import { FileSharedDraftRepository } from '../src/adapters/shared-drafts/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
@@ -650,6 +651,7 @@ import {
   ReopenDeliveryLadder,
   rungsOf,
   SessionCards,
+  type SessionLivenessGuard,
   type SessionLivenessSource,
   stageGateLanes,
   startOnCard,
@@ -1157,6 +1159,7 @@ import {
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   RememberedHandoverReceipts,
+  RenderService,
   RestartBusy,
   RestartService,
   type RestartSubject,
@@ -1574,7 +1577,7 @@ export interface WorktreeComposition {
  * It exists because the two repository gates pull in opposite directions: the architecture gate
  * forbids `src/lib` from importing `src/adapters`, while production dead-code analysis requires
  * every module to be reachable from the package entry. A composition root outside both directories
- * satisfies each — the same reason `packages/cli/bin/fy.ts` is shaped this way.
+ * satisfies each — the same reason `packages/cli/bin/program.ts` is shaped this way.
  */
 export interface DaemonWorld {
   readonly role: typeof packageRole;
@@ -2255,7 +2258,7 @@ function createBoardWorld(
   agendaItems: (sessionId: string) => Promise<readonly AgendaItem[]>,
   bin: string,
   /** Every session's life-signs, with the Warden's liveness ledger laid over them, for "last touched". */
-  sessions: SessionLivenessSource,
+  sessions: SessionLivenessSource & SessionLivenessGuard,
   /** Registers a folder as a project: the catalog `POST /v1/projects` writes through, so both share its dedupe. */
   registrar: ProjectRegistrar,
   /** The folders a ferret's repository is registered from (`projectRoots`), read per adoption. */
@@ -2318,6 +2321,7 @@ function createBoardWorld(
     ),
     attachments,
     done: new DoneDeliveryLadder(new SendReopenMessenger(ownerSends), diagnostics),
+    liveness: sessions,
     activity: new LivenessActivityDeriver({ sessions, clock }),
     // A card's ask goes on its ferret's agenda home: the homes are read too, so a sub-ferret's card finds its agenda.
     agenda: new AgendaCardLinks(
@@ -3089,6 +3093,7 @@ function createSessionControlSubsystem(
             brief: request.prompt,
             parent: request.parent,
             delegation: startDelegation,
+            ...(caller.pack === true ? { viaPack: true as const } : {}),
           });
         await lifecycle.start(
           id,
@@ -10289,7 +10294,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock,
           scheduler: new TimerSendScheduler(),
           view: async id => await deliveryView.view(id),
-          transport: new SendPathQueueTransport(sends, sendLedger),
+          transport: new SendPathQueueTransport(sends, sendLedger, sendTracker),
           sessions: () => storage.listSessions().map(session => session.id),
           sleep: async milliseconds => await Bun.sleep(milliseconds),
         },
@@ -13276,6 +13281,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // next process would restart.
           { next: () => crypto.randomUUID() },
         ),
+        // Saved pictures: svg and html a ferret keeps as daemon files (docs/renders.md). Its saves run one at a time
+        // on a queue of their own: the collision check and the quotas read the whole store.
+        renders: new RenderService(new FileRenderRepository(paths, stateFiles), clock, new KeyedSerialExecutor()),
         // The owner's unsent composer, live across their devices. Its own write queue for the same reason
         // pins have one, and its own timer: a draft is written a second after it last changed.
         sharedDrafts: sharedDraftService,

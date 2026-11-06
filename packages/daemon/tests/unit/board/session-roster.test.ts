@@ -82,6 +82,29 @@ describe('the board session roster memo', () => {
     should(sessions.get('orphan')?.lead).be.undefined();
   });
 
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['not an object', 'text'],
+  ])(
+    'should not take a session whose configuration is %s for a root: it is not marked as read',
+    async (_what, config) => {
+      // Arrange
+      const documents = new Documents();
+      documents.set('lead', { status: 'running' });
+      documents.set('odd', { status: 'running' });
+      documents.configs.set('odd', config);
+
+      // Act
+      const { sessions } = await new StorageSessionRoster(documents.storage, () => undefined).roster();
+
+      // Assert
+      should(sessions.get('lead')?.configRead).be.true();
+      should(sessions.get('odd')?.lead).be.undefined();
+      should(sessions.get('odd')?.configRead).be.undefined();
+    },
+  );
+
   it('should read only the named sessions, proved from the files, when a commit holds them', async () => {
     // Arrange
     const documents = new Documents();
@@ -149,6 +172,7 @@ describe('the board session roster memo', () => {
       status: 'completed',
       focusTask: null,
       declaredWait: false,
+      configRead: true,
       lastActivityAt: LATER,
     });
   });
@@ -188,6 +212,7 @@ describe('the board session roster memo', () => {
       status: 'running',
       focusTask: null,
       declaredWait: false,
+      configRead: true,
       lastTranscriptAt: LATER,
       lastTokenAdvanceAt: LATER,
     });

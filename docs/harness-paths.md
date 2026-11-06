@@ -13,7 +13,7 @@ interactive shell — so `claude` works perfectly in their terminal and is invis
 There was nothing they could write down to fix it.
 
 The CLI had already solved exactly this for the daemon binary: `resolveDaemonBinary` in
-`packages/cli/bin/fy.ts` reads `FY_DAEMON_BIN` before falling back to a `PATH` lookup, _because_
+`packages/cli/bin/program.ts` reads `FY_DAEMON_BIN` before falling back to a `PATH` lookup, _because_
 "systemd requires an absolute ExecStart, so a bare name on PATH is resolved here". The harnesses got
 no equivalent. This document is that equivalent.
 

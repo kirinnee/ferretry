@@ -260,6 +260,9 @@ describe('history', () => {
     expect(rowOf('assigned', { from: 'y', to: 'x', returnedFrom: 'y' }).text).toBe(
       'returned to ferret x: ferret y finished',
     );
+    expect(rowOf('assigned', { from: 'z', to: 'x', adopted: { from: 'y', reason: 'nobody is left' } }).text).toBe(
+      'adopted by ferret x from ferret y, whose ferrets ended: nobody is left',
+    );
   });
 
   it('says a dependency, with an override when it had one', () => {

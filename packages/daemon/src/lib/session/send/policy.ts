@@ -78,11 +78,20 @@ export type SendRouting =
  * `busy` is the LAST answer, reached only when nothing says otherwise. A status that is idle by its
  * own account, a document that says the composer is ready, or a pane that looks ready are each enough
  * to take the tracked path — because mistaking an idle prompt for a busy one submits the message as
- * an untracked ghost turn, while mistaking busy for idle merely queues it behind the current one.
+ * an untracked ghost turn, while mistaking busy for idle merely waits for a prompt that does not come,
+ * and the send is refused before its first key (`SendNotReady`).
+ *
+ * ONE STATUS IS NOT TAKEN AT ITS WORD AGAINST THE PANE: `waiting` (&B153). A declared wait is set by the
+ * agent from INSIDE its turn, so the record says waiting while the pane is still visibly at work — ryu's
+ * record read `waiting` with `promptReady: false` through eleven stalls. A pane that shows work under it is
+ * busy, and the message rides the harness's own queue; one that shows neither work nor a prompt is still
+ * taken as idle, because the ghost turn is the worse of the two mistakes.
  */
 export function routeSend(target: SendTarget, pane: SendPaneObservation): SendRouting {
   if (TERMINAL_SEND_STATUSES.has(target.status) || !pane.alive || pane.dead) return 'revive';
-  if (IDLE_SEND_STATUSES.has(target.status) || target.promptReady === true || pane.promptReady) return 'idle';
+  if (target.promptReady === true || pane.promptReady) return 'idle';
+  if (target.status === 'waiting' && pane.activeWork) return 'busy';
+  if (IDLE_SEND_STATUSES.has(target.status)) return 'idle';
   return 'busy';
 }
 

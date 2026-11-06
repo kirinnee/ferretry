@@ -429,8 +429,19 @@ export class PackService {
             name: request.name ?? taskTitleFor(request.task, 'Sub-ferret'),
           },
           delegation,
-          caller,
+          { ...caller, pack: true },
         );
+        // A launch that failed still answers with the session that holds the evidence (fyd.ts), and that view
+        // is not a ferret that started: say so, with the reason the daemon recorded.
+        if (view.state.status === 'failed') {
+          const failure: PackRefusal = {
+            code: 'start_failed',
+            message: `${runtime}${model === undefined ? '' : ` ${model}`} did not start: ${view.state.reason ?? 'no reason was recorded'}`,
+            remedy: `Its session ${view.config.id} holds the evidence (\`${this.ports.bin} status ${view.config.id}\`); try the next candidate.`,
+          };
+          attempts.push({ runtime, ...named, outcome: 'refused', refusal: failure, probe, probeMs: probed.outcome.ms });
+          return refused(failure, attempts);
+        }
         attempts.push({ runtime, ...named, outcome: 'started', probe, probeMs: probed.outcome.ms });
         const childCard = startedCard(view, delegation, card?.notes ?? []);
         return {

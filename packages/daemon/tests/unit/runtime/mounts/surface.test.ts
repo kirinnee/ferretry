@@ -29,6 +29,7 @@ import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
 import { SharedDraftPresence } from '../../../../src/lib/shared-drafts/index.ts';
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
+import { renderService } from '../../../support/renders.ts';
 import { MemoryTranscript } from '../../../support/transcript-images.ts';
 import { agentToolWorld, PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { fixedClock, jsonBody, request } from '../../api/support.ts';
@@ -397,6 +398,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     enrolledDevices: async () => 0,
   },
   pins: pinService([]),
+  renders: renderService(),
   sharedDrafts: sharedDraftService(['s1']),
   sharedDraftStream: {
     presence: new SharedDraftPresence(),
@@ -1042,6 +1044,7 @@ describe('the mounted daemon surface', () => {
       9 + // the download links this machine makes: the store's status, a preview, list, mint, one link, move, change, Copy and turn off (docs/catalogs.md § Links)
       1 + // this daemon's own id for the owner's CLI links (`GET /v1/pair/identity`, person only)
       3 + // the shared draft: the owner's unsent composer, read, edited and streamed live to any of their own devices (&F331)
+      3 + // the saved pictures: a ferret's or the owner's save, a picture's meta, and its payload (docs/renders.md)
       1; // the roll-up of every conversation's open and parked agenda items, paged (`GET /v1/agenda/open`, docs/agenda.md)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
@@ -1387,6 +1390,9 @@ describe('the mounted daemon surface', () => {
       'POST /v1/machine/agenda',
       'GET /v1/sessions/:sessionId/pins',
       'POST /v1/sessions/:sessionId/pins',
+      'POST /v1/renders',
+      'GET /v1/renders/:id/meta',
+      'GET /v1/renders/:id',
       'GET /v1/sessions/:sessionId/shared-draft',
       'POST /v1/sessions/:sessionId/shared-draft',
       'GET /v1/tasks',

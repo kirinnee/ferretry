@@ -254,6 +254,7 @@ export const liveSession = (id: string, overrides: Partial<SessionLiveness> = {}
   turnState: 'your-turn',
   focusTask: null,
   declaredWait: false,
+  configRead: true,
   ...overrides,
 });
 
