@@ -9,15 +9,21 @@ import type { ReactNode } from 'react';
 import { Fragment, useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { daemonQueuePath, daemonSessionPath } from '../lib/pages/routes.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
+import { clockOfInstant } from '../lib/message-clock.ts';
 import {
+  DUE_NOW_COPY,
   ferretRows,
   fromLabel,
+  groupNextSend,
   isWaitingRow,
   needsClamp,
   nextRowId,
   queuedAgo,
   type QueueGroup,
   type QueueRow,
+  type RowSend,
+  rowSend,
+  TURN_ENDS_COPY,
   waitingCountLine,
   waitingGroups,
 } from '../lib/queue-view.ts';
@@ -54,6 +60,17 @@ const STATE_TICKS: Readonly<Record<QueueRow['state'], number>> = {
 /** "On this device · waiting for connection"; a message on the machine's queue says only why it waits. */
 const statusLine = (row: QueueRow): string =>
   STATE_LABEL[row.state] === '' ? row.why : `${STATE_LABEL[row.state]} · ${row.why}`;
+
+/** "sends by 11:20" / "due now" / "when its turn ends", on the reader's clock. */
+const sendCopy = (send: RowSend, lead: string): string => {
+  if ('due' in send) return DUE_NOW_COPY;
+  if ('turn' in send) return TURN_ENDS_COPY;
+  const clock = clockOfInstant(send.at);
+  return clock === undefined ? TURN_ENDS_COPY : `${lead} ${clock.short}`;
+};
+
+/** The machine-readable twin of the copy: `due`, `turn`, or the hold's instant. */
+const sendKey = (send: RowSend): string => ('due' in send ? 'due' : 'turn' in send ? 'turn' : send.at);
 
 export interface QueueRowHandlers {
   readonly edit: (row: QueueRow, text: string) => Promise<void>;
@@ -103,6 +120,7 @@ function QueueRowView({
   readonly now: number;
 }) {
   const ago = queuedAgo(row.at, now);
+  const send = rowSend(row, now);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(row.text);
   const [note, setNote] = useState<string | null>(null);
@@ -139,6 +157,7 @@ function QueueRowView({
           </span>
         )}
         <span data-queue-meta="status">{statusLine(row)}</span>
+        {send === undefined ? null : <span data-queue-send={sendKey(send)}>{sendCopy(send, 'sends by')}</span>}
         {ago === '' ? null : (
           <time dateTime={row.at} title={absoluteTime(row.at)}>
             {ago}
@@ -209,6 +228,17 @@ function QueueRowView({
   );
 }
 
+/** The earliest next send of one ferret, beside its name. */
+function GroupNextSend({ group, now }: { readonly group: QueueGroup; readonly now: number }) {
+  const next = groupNextSend(group, now);
+  if (next === undefined) return null;
+  return (
+    <span className="fy-queue-group-next" data-queue-group-send={sendKey(next)}>
+      {sendCopy(next, 'next send')}
+    </span>
+  );
+}
+
 export interface QueuePageViewProps {
   readonly title: string;
   readonly groups: readonly QueueGroup[];
@@ -275,6 +305,7 @@ export function QueuePageView({
                       {group.ferret}
                     </button>
                     {showMachine ? <span className="fy-queue-machine">{group.machine}</span> : null}
+                    <GroupNextSend group={group} now={now} />
                     {shown.length > 1 ? (
                       <span className="fy-queue-group-count">{`${group.rows.filter(isWaitingRow).length} waiting`}</span>
                     ) : null}

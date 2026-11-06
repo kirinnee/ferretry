@@ -42,6 +42,7 @@ import { SessionSearchProvider } from '../../src/features/session-search/session
 import { SessionWorkspace } from '../../src/features/workspace/session-workspace.tsx';
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
 import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
+import type { TranscriptEntry } from '../../src/lib/session-screens.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
 import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
@@ -3846,6 +3847,29 @@ describe('SessionChatPage Info and Actions', () => {
       expect(actionLabels(page.root)).toEqual(['Copy session id']);
       expect(page.root.findByType(SessionInfo).props.onRename).toBeUndefined();
       expect(page.root.findAllByProps({ 'data-info-rename': '' })).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('a message still waiting to go into the ferret is left out of the Transcript; nothing else changes', () => {
+    const waiting = {
+      id: 'send:w1',
+      kind: 'ledger',
+      text: 'saved for later',
+      ledger: {
+        sendId: 'w1',
+        acceptedAt: '2026-11-04T11:00:00.000Z',
+        message: 'saved for later',
+        attachmentIds: [],
+        fate: 'accepted',
+        held: true,
+      },
+      placement: 'chronological',
+    } as unknown as TranscriptEntry;
+    const page = renderSessionChatPage(chatPage({ entries: [waiting] }), fakeDaemon().factory);
+    try {
+      expect(page.root.findByType(Transcript).props.entries).toEqual([]);
     } finally {
       run(() => page.unmount());
     }

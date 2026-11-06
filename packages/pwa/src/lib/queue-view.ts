@@ -38,6 +38,8 @@ export interface QueueRow {
   /** Still changeable: on this device, or queued and not typed yet. */
   readonly editable: boolean;
   readonly refused?: true;
+  /** Why it waits, when the daemon says (`QueuedMessage.waitReason`). */
+  readonly waitReason?: NonNullable<QueuedMessage['waitReason']>;
 }
 
 const originOf = (message: QueuedMessage): QueueRow['origin'] =>
@@ -80,6 +82,7 @@ export const queueRowOf = (daemonId: string, sessionId: string, ferret: string, 
     origin: originOf(message),
     ...(message.holdUntil === undefined ? {} : { holdUntil: message.holdUntil }),
     editable: message.state === 'queued',
+    ...(message.waitReason === undefined ? {} : { waitReason: message.waitReason }),
     ...(sender === undefined ? {} : { sender }),
   };
 };
@@ -203,3 +206,47 @@ export const waitingGroups = (groups: readonly QueueGroup[]): readonly QueueGrou
 /** "3 waiting for connection" — the one line a count of saved-on-device messages reads as. */
 export const waitingCountLine = (count: number): string =>
   count === 0 ? 'nothing is waiting' : count === 1 ? '1 message is waiting' : `${count} messages are waiting`;
+
+/** What a queued message with no time says it waits for. */
+export const TURN_ENDS_COPY = 'when its turn ends';
+
+/** What a queued message whose hold has run out (or is exactly up) says: the daemon sends it without waiting. */
+export const DUE_NOW_COPY = 'due now';
+
+/**
+ * When a queued row goes, in the reader's words: `{ at }` while its hold still has time to run ("sends by
+ * 11:20"), `{ due: true }` once a hold has run out (at or before now) with nothing else in the way — the daemon
+ * treats an expired hold as due immediately, it does not wait for the turn — `{ turn: true }` for a queued
+ * message with no hold at all that is just waiting for a busy ferret's turn to end, and `undefined` for everything else (on this device, typed, a stopped ferret — its `why`
+ * already says).
+ */
+export type RowSend = { readonly at: string } | { readonly due: true } | { readonly turn: true };
+
+export const rowSend = (row: QueueRow, nowMs: number): RowSend | undefined => {
+  if (row.state !== 'queued') return undefined;
+  const held = row.holdUntil === undefined ? Number.NaN : Date.parse(row.holdUntil);
+  if (Number.isFinite(held) && held > nowMs && row.holdUntil !== undefined) return { at: row.holdUntil };
+  if (Number.isFinite(held) && row.waitReason === undefined) return { due: true };
+  return row.waitReason === undefined || row.waitReason === 'busy' ? { turn: true } : undefined;
+};
+
+/**
+ * A ferret's next send: due now when any row's hold has run out, else the earliest hold still running, else the
+ * turn's end when a row waits on it.
+ */
+export const groupNextSend = (group: QueueGroup, nowMs: number): RowSend | undefined => {
+  let earliest: { readonly at: string; readonly ms: number } | undefined;
+  let turn = false;
+  for (const row of group.rows) {
+    const send = rowSend(row, nowMs);
+    if (send === undefined) continue;
+    if ('due' in send) return send;
+    if ('turn' in send) {
+      turn = true;
+      continue;
+    }
+    const ms = Date.parse(send.at);
+    if (earliest === undefined || ms < earliest.ms) earliest = { at: send.at, ms };
+  }
+  return earliest !== undefined ? { at: earliest.at } : turn ? { turn: true } : undefined;
+};

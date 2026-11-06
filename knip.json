@@ -186,6 +186,7 @@
         "harness/double-bubble-screenshot.tsx",
         "harness/outbox-screenshot.tsx",
         "harness/queue-page-screenshot.tsx",
+        "harness/waiting-hidden-screenshot.tsx",
         "harness/shared-draft-screenshot.tsx",
         "harness/harness-events-screenshot.tsx",
         "harness/transcript-unbound-screenshot.tsx",
