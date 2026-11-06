@@ -48,8 +48,10 @@ interface InFlight {
  * synchronously, the unconfirmed rest of the write in flight and then the queue, and the log is synchronous from
  * then on. What it cannot know is whether an I/O thread is in the middle of that very write — a write cannot be
  * cancelled once handed over — so if that thread finishes before the process is gone, the in-flight bytes land
- * TWICE, the second copy after the lines written behind them. NOTHING IS LOST; at an abrupt exit with a write in
- * flight, a repeated tail is possible. That is the trade chosen for a crash log: losing its last line is worse.
+ * TWICE, the second copy after the lines written behind them — possibly only a partial prefix of it. NOTHING IS
+ * LOST; a repeated tail is possible whenever the process exits with a write in flight: an abrupt exit, or an
+ * ordinary stop whose bounded {@link drain} ran out first. That is the trade chosen for a crash log: losing its
+ * last line is worse.
  *
  * A FAILED WRITE IS SWALLOWED, as it always was: losing the log is bad, a daemon stopped by its own log is worse.
  */

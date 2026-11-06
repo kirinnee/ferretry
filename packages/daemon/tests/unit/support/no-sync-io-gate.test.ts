@@ -38,6 +38,23 @@ describe('the synchronous-IO counter', () => {
     ]);
   });
 
+  it('should count a call inside a destructuring default or a computed key, however deep the pattern', () => {
+    should(uses('const { config: { text = readFileSync(p, "utf8") } } = input;')).deepEqual(['readFileSync']);
+    should(uses('const [first = statSync(p)] = list; const { [realpathSync(p)]: value } = input;')).deepEqual([
+      'statSync',
+      'realpathSync',
+    ]);
+    should(uses('function f({ a = existsSync(p) } = {}) {}')).deepEqual(['existsSync']);
+  });
+
+  it('should count a member spelled as a string, which names the function as surely as an identifier', () => {
+    should(uses('fs["readFileSync"](p); fs[`statSync`](p); fs[readSync](d);')).deepEqual([
+      'readFileSync',
+      'statSync',
+      'readSync',
+    ]);
+  });
+
   it('should count nothing that only names, declares or describes a type', () => {
     const code = [
       "import { readFileSync, writeSync } from 'node:fs';",
@@ -55,6 +72,9 @@ describe('the synchronous-IO counter', () => {
     should(aliases("import {\n  readFileSync\n  as read\n} from 'node:fs';")).equal(1);
     should(aliases('const { readFileSync: read } = fs;')).equal(1);
     should(aliases('const { readFileSync: read = fallback } = fs;')).equal(1);
+    should(aliases('const { exports: { readFileSync: read } } = { exports: fs };')).equal(1);
+    should(aliases('const { "readFileSync": read } = fs;')).equal(1);
+    should(aliases('import { "readFileSync" as read } from "node:fs";')).equal(1);
     should(aliases("import { readFileSync } from 'node:fs'; const { existsSync } = fs;")).equal(0);
   });
 

@@ -10,12 +10,14 @@
  * WHAT COUNTS. Every IDENTIFIER spelled as one of the blocking names (each `…Sync` function `node:fs` exports, read
  * from the runtime itself, plus `spawnSync`, `execSync` and `execFileSync`) in a position where it is a VALUE: the
  * callee of a call, the name in `fs.readFileSync(…)` or `Bun.spawnSync(…)`, the base of `realpathSync.native(…)`, or a
- * reference handed on (`exists: existsSync`) — the function then runs wherever it is called. Nested calls count
- * once each. Names that only DECLARE something are not uses: a property or method name in a declaration or
+ * reference handed on (`exists: existsSync`) — the function then runs wherever it is called — and a member
+ * spelled as a string (`fs['readFileSync'](…)`). Nested calls count once each, and so does a call inside a
+ * destructuring default or a computed key, however deeply the pattern nests. Names that only DECLARE something are not uses: a property or method name in a declaration or
  * signature, a parameter, an import specifier itself.
  *
- * WHAT IS REFUSED OUTRIGHT. Binding a blocking function to ANOTHER NAME — `import { readFileSync as read }`, or
- * `const { readFileSync: read } = fs` — because every later call of the new name would be invisible to the count.
+ * WHAT IS REFUSED OUTRIGHT. Binding a blocking function to ANOTHER NAME — `import { readFileSync as read }`,
+ * `const { readFileSync: read } = fs`, at any depth of a pattern, by identifier or by string — because every later
+ * call of the new name would be invisible to the count.
  *
  * Usage: `bun scripts/validate/no-sync-io.ts <repo root>`; exits 0 clean, 1 a violation, 2 a broken gate.
  */
@@ -123,44 +125,99 @@ export function scanSource(fileName: string, text: string): FileScan {
   };
   const uses: { line: number; name: string }[] = [];
   const aliases: { line: number; text: string }[] = [];
+  /** The name a key or member spells STATICALLY — an identifier, a string, a template with no holes — else none. */
+  const staticName = (node: unknown): string | undefined => {
+    if (!isNode(node)) return undefined;
+    if (node.type === 'Identifier' && typeof node.name === 'string') return node.name;
+    if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
+    if (node.type === 'TemplateLiteral' && Array.isArray(node.expressions) && node.expressions.length === 0) {
+      const quasi = (node.quasis as EstreeNode[] | undefined)?.[0]?.value as { cooked?: unknown } | undefined;
+      return typeof quasi?.cooked === 'string' ? quasi.cooked : undefined;
+    }
+    return undefined;
+  };
+  const isBlocking = (name: string | undefined): name is string => name !== undefined && BLOCKING_NAMES.has(name);
   const blocking = (node: unknown): node is EstreeNode & { name: string } =>
     isNode(node) && node.type === 'Identifier' && typeof node.name === 'string' && BLOCKING_NAMES.has(node.name);
   const alias = (node: EstreeNode): void => {
     aliases.push({ line: lineOf(node.start), text: text.slice(node.start, node.end) });
   };
+  const children = (node: EstreeNode, each: (child: EstreeNode, key: string) => void): void => {
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'type' || key === 'start' || key === 'end') continue;
+      if (Array.isArray(value)) {
+        for (const item of value) if (isNode(item)) each(item, key);
+      } else if (isNode(value)) each(value, key);
+    }
+  };
+  /**
+   * A binding pattern: its identifiers only NAME new bindings, but everything else in it runs — a default
+   * value, a computed key, a member target — and a blocking name taken out under another name is a rebinding.
+   */
+  const visitPattern = (node: EstreeNode): void => {
+    switch (node.type) {
+      case 'Identifier':
+        return;
+      case 'ObjectPattern':
+        for (const property of (node.properties as EstreeNode[] | undefined) ?? []) {
+          if (property.type === 'RestElement') {
+            if (isNode(property.argument)) visitPattern(property.argument);
+            continue;
+          }
+          if (property.computed === true && isNode(property.key)) visit(property.key, property, 'key');
+          const value = property.value as EstreeNode | undefined;
+          const bound = value?.type === 'AssignmentPattern' ? (value.left as EstreeNode | undefined) : value;
+          if (
+            isBlocking(staticName(property.key)) &&
+            !(bound?.type === 'Identifier' && bound.name === staticName(property.key))
+          )
+            alias(property);
+          if (isNode(value)) visitPattern(value);
+        }
+        return;
+      case 'ArrayPattern':
+        for (const element of (node.elements as unknown[] | undefined) ?? [])
+          if (isNode(element)) visitPattern(element);
+        return;
+      case 'AssignmentPattern':
+        if (isNode(node.left)) visitPattern(node.left);
+        if (isNode(node.right)) visit(node.right, node, 'right');
+        return;
+      case 'RestElement':
+        if (isNode(node.argument)) visitPattern(node.argument);
+        return;
+      default:
+        // A member or other expression used as a target (\`[a[readFileSync(p)]] = …\`) runs as written.
+        visit(node, undefined, 'pattern');
+    }
+  };
   const visit = (node: EstreeNode, parent: EstreeNode | undefined, key: string): void => {
     if (TYPE_ONLY.has(node.type)) return;
     if (node.type === 'ImportSpecifier' || node.type === 'ExportSpecifier') {
-      const imported = node.type === 'ImportSpecifier' ? node.imported : node.local;
-      const local = node.type === 'ImportSpecifier' ? node.local : node.exported;
-      if (blocking(imported) && isNode(local) && local.name !== imported.name) alias(node);
+      const imported = staticName(node.type === 'ImportSpecifier' ? node.imported : node.local);
+      const local = staticName(node.type === 'ImportSpecifier' ? node.local : node.exported);
+      if (isBlocking(imported) && local !== imported) alias(node);
       return;
     }
-    if (node.type === 'ObjectPattern') {
-      for (const property of (node.properties as EstreeNode[] | undefined) ?? []) {
-        const value = property.value as EstreeNode | undefined;
-        const bound = value?.type === 'AssignmentPattern' ? (value.left as EstreeNode | undefined) : value;
-        if (
-          property.type === 'Property' &&
-          blocking(property.key) &&
-          !(isNode(bound) && bound.name === property.key.name)
-        )
-          alias(property);
-        if (value?.type === 'AssignmentPattern' && isNode(value.right))
-          visit(value.right as EstreeNode, value, 'right');
-      }
+    if (
+      node.type === 'ObjectPattern' ||
+      node.type === 'ArrayPattern' ||
+      node.type === 'AssignmentPattern' ||
+      node.type === 'RestElement'
+    ) {
+      visitPattern(node);
       return;
+    }
+    if (node.type === 'MemberExpression' && node.computed === true) {
+      const name = staticName(node.property);
+      if (isBlocking(name) && (node.property as EstreeNode).type !== 'Identifier')
+        uses.push({ line: lineOf(node.start), name });
     }
     if (node.type === 'Identifier') {
       if (blocking(node) && !declaresOnly(parent, key)) uses.push({ line: lineOf(node.start), name: node.name });
       return;
     }
-    for (const [child, value] of Object.entries(node)) {
-      if (child === 'type' || child === 'start' || child === 'end') continue;
-      if (Array.isArray(value)) {
-        for (const item of value) if (isNode(item)) visit(item, node, child);
-      } else if (isNode(value)) visit(value, node, child);
-    }
+    children(node, (child, childKey) => visit(child, node, childKey));
   };
   visit(parsed.program as unknown as EstreeNode, undefined, 'program');
   return { uses, aliases };
