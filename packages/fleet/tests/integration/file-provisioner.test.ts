@@ -234,6 +234,8 @@ describe('FileFleetProvisioner', () => {
       conflicts: 0,
       links: 0,
       changes: [],
+      emptiedSourceDirectories: [],
+      refusals: [],
     };
     let manifestObservedByMigration: unknown;
     let wrapperObservedByMigration: string | undefined;
