@@ -143,13 +143,14 @@ pre-commit-lib.run {
 
     # A pull request runs the PWA browser gate (`pwa-screenshot`) only when something it reads changes. The
     # list lives in scripts/ci/pwa-relevance.sh; this traces the harness bundle's imports and holds the list,
-    # the workflow gate and the fail-open rules to them. It runs when any file that can add an import,
-    # a dependency or a gate input changes.
+    # the workflow gate and the fail-open rules to them. It runs when any file it reads can change: the
+    # harness bundle's sources, every file of the workspace packages it traces (section 6 reads their
+    # imports), any package manifest, and any workflow (it looks for jobs that need the gate).
     a-pwa-relevance = {
       enable = true;
       name = "PWA browser gate relevance";
       entry = validator "scripts/validate/pwa-relevance.sh";
-      files = "^(scripts/(ci/(pwa-relevance|pwa-screenshot-proof)|validate/pwa-relevance)\\.sh|\\.github/workflows/ci\\.yaml|packages/(pwa/(src|harness)/.*\\.tsx?|(pwa|protocol|relay|fleet)/package\\.json))$";
+      files = "^(scripts/(ci/(pwa-relevance|pwa-screenshot-proof)|validate/pwa-relevance)\\.sh|\\.github/workflows/[^/]+\\.ya?ml|packages/(pwa/(src|harness)/.*\\.tsx?|(protocol|relay|fleet)/.*\\.tsx?|[^/]+/package\\.json))$";
       pass_filenames = false;
       language = "system";
     };

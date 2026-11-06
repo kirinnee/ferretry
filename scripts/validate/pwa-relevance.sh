@@ -18,12 +18,21 @@ set -euo pipefail
 #   4. `main`, a manual dispatch, the nightly and any doubt (no PR number, an unreadable or empty file
 #      list, a rename that moves an input out, a pull request past the files API's 3000-file cut-off) run it;
 #   5. ci.yaml gates `pwa-screenshot` on the decision, from a job that is a few seconds of bash on GitHub
-#      (no nix, no Namespace, sparse checkout), and nothing but relevance saying `false` can skip the gate
-#      on a failed, cancelled or skipped relevance job: the decision is one conjunct of the gate's `if:`
-#      (other conjuncts, like a label, may sit beside it), and a job that needs the gate must run
-#      `always()` or `!cancelled()` (the `Full CI` verdict) so the skip does not cascade;
-#   6. no relative import in a workspace package of the closure leaves that package, because the trace
-#      follows packages by their manifests and would not see a file reached around them.
+#      (no nix, no Namespace, sparse checkout). What is enforced, exactly: the gate's `if:` is a
+#      conjunction (no top-level `||`) that carries `!cancelled()` and
+#      `needs.pwa-relevance.outputs.run != 'false'`, and tests neither the relevance result nor
+#      `run == 'true'`, so a failed, cancelled or skipped relevance job runs the gate. Any other conjunct
+#      must read only `github.event` / `github.event_name` (a label, an action, the event) through
+#      `==`, `!=`, `!`, `||`, `&&`, `contains()` and quoted strings, so the `full-ci` label may narrow
+#      WHEN the whole workflow runs the gate; a literal such as `false`, a `needs`, `steps`, `env`,
+#      `vars` or `secrets` expression, or any other function is rejected. What is NOT enforced is what such
+#      an event conjunct means: that is the reviewer's. A job that needs the gate (in an inline,
+#      block-list or multi-line flow-sequence `needs:`) must have an `if:` starting with `always()` or
+#      `!cancelled()` (the `Full CI` verdict), so the skip does not cascade;
+#   6. no relative import in a workspace package of the closure leaves that package, and no
+#      `@ferretry/*` import in it names a package its `package.json` does not declare, because the trace
+#      follows packages by their manifests and would not see a file reached around them (bun hoisting
+#      resolves an undeclared workspace import without a manifest entry).
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
@@ -151,10 +160,19 @@ done
 # The closure above is read from manifests, and the trace never opens a workspace package's files, so a
 # relative import that climbs out of one (`../../other/src/x`) would reach a file nothing selects.
 escapes=()
+undeclared=()
 for pkg in "${!workspace[@]}"; do
   [ "${pkg}" = pwa ] && continue
+  declared=" $(jq -r '[.dependencies, .devDependencies, .peerDependencies, .optionalDependencies] | map(. // {} | keys[]) | join(" ")' "packages/${pkg}/package.json") "
   while IFS=' ' read -r file spec; do
     case "${spec}" in
+    @ferretry/*)
+      name="@ferretry/$(sed -E 's#^@ferretry/([^/]+).*#\1#' <<<"${spec}")"
+      case "${declared}" in
+      *" ${name} "*) ;;
+      *) [ "${name}" = "@ferretry/${pkg}" ] || undeclared+=("${file} imports '${spec}', which packages/${pkg}/package.json does not declare") ;;
+      esac
+      ;;
     .*)
       resolve_module "${file%/*}" "${spec}"
       case "${NORMALIZED}/" in
@@ -170,6 +188,7 @@ for pkg in "${!workspace[@]}"; do
   )
 done
 [ "${#escapes[@]}" -eq 0 ] || fail "a relative import leaves its workspace package, where the gate's trace cannot follow it: ${escapes[0]} (${#escapes[@]} in all)"
+[ "${#undeclared[@]}" -eq 0 ] || fail "a workspace package imports another @ferretry/* package it does not declare, so the gate's trace (which follows manifests) misses it: ${undeclared[0]} (${#undeclared[@]} in all)"
 
 # Files the bundle reaches by a relative import out of packages/pwa.
 for file in "${!seen[@]}"; do
@@ -328,37 +347,118 @@ conjuncts() {
     sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//'
 }
 
-gate_if="$(job_block pwa-screenshot | sed -n 's/^    if: //p' | head -n 1)"
-[ -n "${gate_if}" ] || fail "${workflow}: job 'pwa-screenshot' must have a single-line if: that gates it on the decision"
-gate_conjuncts="$(conjuncts "${gate_if}")"
-rg -qx '__TOP_LEVEL_OR__' <<<"${gate_conjuncts}" &&
-  fail "${workflow}: job 'pwa-screenshot': an || at the top level of its if: lets something other than the decision decide the gate; keep every condition a conjunct (&&)"
-rg -qxF "needs.pwa-relevance.outputs.run != 'false'" <<<"${gate_conjuncts}" ||
-  fail "${workflow}: job 'pwa-screenshot' if: must carry the conjunct needs.pwa-relevance.outputs.run != 'false' (only a 'false' may skip the gate: an empty output, from a relevance job that failed, timed out or was skipped, runs it)"
-rg -qxF '!cancelled()' <<<"${gate_conjuncts}" ||
-  fail "${workflow}: job 'pwa-screenshot' if: must carry the conjunct !cancelled(): without a status function a failed or skipped need skips the gate, and the relevance job must fail open at the job level"
-if rg -q "pwa-relevance[.]result|run == 'true'" <<<"${gate_if}"; then
-  fail "${workflow}: job 'pwa-screenshot' if: must not test the relevance result or run == 'true': that skips the gate when the relevance job fails"
-fi
+# gate_if_problem <if:> → prints why the gate's `if:` is unsound (nothing when it is sound).
+gate_if_problem() {
+  local text="$1" conjunct leftover list
+  [ -n "${text}" ] || {
+    echo "job 'pwa-screenshot' must have a single-line if: that gates it on the decision"
+    return
+  }
+  list="$(conjuncts "${text}")"
+  if rg -qx '__TOP_LEVEL_OR__' <<<"${list}"; then
+    echo "an || at the top level of its if: lets something other than the decision decide the gate; keep every condition a conjunct (&&)"
+    return
+  fi
+  rg -qxF "needs.pwa-relevance.outputs.run != 'false'" <<<"${list}" || {
+    echo "its if: must carry the conjunct needs.pwa-relevance.outputs.run != 'false' (only a 'false' may skip the gate: an empty output, from a relevance job that failed, timed out or was skipped, runs it)"
+    return
+  }
+  rg -qxF '!cancelled()' <<<"${list}" || {
+    echo "its if: must carry the conjunct !cancelled(): without a status function a failed or skipped need skips the gate, and the relevance job must fail open at the job level"
+    return
+  }
+  if rg -q "pwa-relevance[.]result|run == 'true'" <<<"${text}"; then
+    echo "its if: must not test the relevance result or run == 'true': that skips the gate when the relevance job fails"
+    return
+  fi
+  # Every other conjunct may read only the event (a label, an action, the event name): see the header, 5.
+  while IFS= read -r conjunct; do
+    [ "${conjunct}" = "needs.pwa-relevance.outputs.run != 'false'" ] && continue
+    [ "${conjunct}" = '!cancelled()' ] && continue
+    # Quoted strings are data; what is left, minus the event paths and the allowed operators, must be empty.
+    leftover="$(sed -E "s/'[^']*'//g; s/github[.]event_name//g; s/github[.]event([.][A-Za-z_*]+)+//g; s/contains[(]//g; s/(==|!=|[|][|]|&&|[!(),])//g; s/[[:space:]]+//g" <<<"${conjunct}")"
+    if [ -n "${leftover}" ] || ! rg -q 'github[.]event' <<<"${conjunct}"; then
+      echo "its if: has the conjunct '${conjunct}', which may not be here: besides !cancelled() and the relevance decision, a conjunct may read only github.event / github.event_name (a label, an action) through ==, !=, !, ||, &&, contains() and quoted strings, so nothing else can skip the gate"
+      return
+    fi
+  done <<<"${list}"
+}
 
-# A job may need the gate only when it runs whatever the gate did: a skipped need skips its dependants.
-needs_gate=()
-for file in .github/workflows/*.y*ml; do
-  while IFS= read -r id; do
-    [ "${file}" = "${workflow}" ] && [ "${id}" = pwa-screenshot ] && continue
-    block="$(awk -v id="${id}" '
-      $0 == "  " id ":" { in_job = 1; next }
-      in_job && /^  [A-Za-z0-9_-]+:$/ { exit }
-      in_job { print }
-    ' "${file}" | { rg -v '^[[:space:]]*#' || true; })"
-    needs="$(awk '/^    needs:/ { on = 1; print; next } on && /^      - / { print; next } { on = 0 }' <<<"${block}")"
-    rg -q 'pwa-screenshot' <<<"${needs}" || continue
-    job_if="$(sed -n 's/^    if: //p' <<<"${block}" | head -n 1)"
-    rg -q '^(\$\{\{[[:space:]]*)?(always\(\)|!cancelled\(\))' <<<"${job_if}" ||
-      needs_gate+=("${file}: ${id}")
-  done < <(rg -o '^  [A-Za-z0-9_-]+:$' "${file}" | tr -d ' :')
+problem="$(gate_if_problem "$(job_block pwa-screenshot | sed -n 's/^    if: //p' | head -n 1)")"
+[ -z "${problem}" ] || fail "${workflow}: job 'pwa-screenshot': ${problem}"
+
+# needs_gate_jobs <workflow-file>... → prints "<file>: <job>" for each job that needs pwa-screenshot (the
+# gate itself excepted) without an `if:` that starts with always() or !cancelled(): a skipped need
+# skips its dependants.
+needs_gate_jobs() {
+  local file id block needs job_if
+  for file in "$@"; do
+    while IFS= read -r id; do
+      [ "${file}" = "${workflow}" ] && [ "${id}" = pwa-screenshot ] && continue
+      block="$(awk -v id="${id}" '
+        $0 == "  " id ":" { in_job = 1; next }
+        in_job && /^  [A-Za-z0-9_-]+:$/ { exit }
+        in_job { print }
+      ' "${file}" | { rg -v '^[[:space:]]*#' || true; })"
+      # The whole value of `needs:`, up to the next key of the job: an inline scalar or flow sequence, a
+      # block list, or a flow sequence over several lines (the shape prettier writes).
+      needs="$(awk '/^    needs:/ { on = 1; print; next } on && /^    [A-Za-z_-]+:/ { on = 0 } on { print }' <<<"${block}")"
+      rg -q 'pwa-screenshot' <<<"${needs}" || continue
+      job_if="$(sed -n 's/^    if: //p' <<<"${block}" | head -n 1)"
+      rg -q '^(\$\{\{[[:space:]]*)?(always\(\)|!cancelled\(\))' <<<"${job_if}" || echo "${file}: ${id}"
+    done < <(rg -o '^  [A-Za-z0-9_-]+:$' "${file}" | tr -d ' :')
+  done
+}
+
+offenders="$(needs_gate_jobs .github/workflows/*.y*ml)"
+[ -z "${offenders}" ] ||
+  fail "a job that needs pwa-screenshot must have an if: starting with always() or !cancelled(), or a skipped gate skips it too: $(tr '\n' ' ' <<<"${offenders}")"
+
+# The same checks against fixtures, in every shape a workflow can write them.
+fixture="${tmp_dir}/fixture.yaml"
+needs_fixture() { # <needs lines> <if:|-> → a workflow whose `full` job needs the gate that way
+  {
+    printf 'jobs:\n  pwa-screenshot:\n    needs: pwa-relevance\n  full:\n'
+    printf '%s\n' "$1"
+    [ "$2" = - ] || printf '    if: %s\n' "$2"
+    printf '    runs-on: ubuntu-latest\n'
+  } >"${fixture}"
+  needs_gate_jobs "${fixture}"
+}
+declare -A needs_forms=(
+  [inline]='    needs: [pwa-screenshot, quick]'
+  [scalar]='    needs: pwa-screenshot'
+  [block]=$'    needs:\n      - quick\n      - pwa-screenshot'
+  [block - flush]=$'    needs:\n    - quick\n    - pwa-screenshot'
+  [flow - multiline]=$'    needs:\n      [\n        quick,\n        pwa-screenshot,\n        summary,\n      ]'
+)
+needs_other='    needs: [quick]'
+for form in "${!needs_forms[@]}"; do
+  lines="${needs_forms[${form}]}"
+  [ -n "$(needs_fixture "${lines}" "\${{ github.event_name == 'pull_request' }}")" ] ||
+    fail "a job whose needs: is the ${form} form and names pwa-screenshot, with no always() or !cancelled() in its if:, must be refused"
+  [ -n "$(needs_fixture "${lines}" -)" ] || fail "a job whose needs: is the ${form} form and names pwa-screenshot, with no if: at all, must be refused"
+  [ -z "$(needs_fixture "${lines}" "\${{ always() && github.event_name == 'push' }}")" ] ||
+    fail "a job whose needs: is the ${form} form and names pwa-screenshot, with an if: that starts with always(), must be accepted"
+  [ -z "$(needs_fixture "${lines}" '!cancelled()')" ] || fail "an if: that starts with !cancelled() must be accepted for the ${form} form"
 done
-[ "${#needs_gate[@]}" -eq 0 ] ||
-  fail "a job that needs pwa-screenshot must have an if: starting with always() or !cancelled(), or a skipped gate skips it too: ${needs_gate[*]}"
+[ -z "$(needs_fixture "${needs_other}" -)" ] || fail 'a job that does not need pwa-screenshot must not be refused'
+
+gate_ok="needs.pwa-relevance.outputs.run != 'false'"
+label_conjunct="((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci'))"
+[ -z "$(gate_if_problem "\${{ !cancelled() && ${gate_ok} }}")" ] || fail 'the gate if: as ci.yaml writes it must be accepted'
+[ -z "$(gate_if_problem "\${{ !cancelled() && ${gate_ok} && ${label_conjunct} }}")" ] || fail 'the gate if: with the full-ci label conjunct, last, must be accepted'
+[ -z "$(gate_if_problem "\${{ ${label_conjunct} && !cancelled() && ${gate_ok} }}")" ] || fail 'the gate if: with the full-ci label conjunct, first, must be accepted'
+for bad in 'false' "true" "needs.quick.result == 'success'" "github.ref == 'refs/heads/main'" "always()" \
+  "vars.CI_RUNNER_POOL == 'github'" "github.event_name != 'pull_request' && false" "contains(github.event.pull_request.labels.*.name, 'x') || false" \
+  "fromJSON(github.event.number)" "success()"; do
+  [ -n "$(gate_if_problem "\${{ !cancelled() && ${gate_ok} && ${bad} }}")" ] ||
+    fail "a gate if: with the extra conjunct '${bad}' must be refused: only an event expression may sit beside the decision"
+done
+[ -n "$(gate_if_problem "\${{ always() && ${gate_ok} }}")" ] || fail 'a gate if: with always() in place of !cancelled() must be refused'
+[ -n "$(gate_if_problem "\${{ !cancelled() && ${gate_ok} || github.event_name == 'push' }}")" ] || fail 'a gate if: with a top-level || must be refused'
+[ -n "$(gate_if_problem "\${{ !cancelled() && needs.pwa-relevance.outputs.run == 'true' }}")" ] || fail "a gate if: testing run == 'true' must be refused"
+[ -n "$(gate_if_problem "\${{ !cancelled() && needs.pwa-relevance.result == 'success' && ${gate_ok} }}")" ] || fail 'a gate if: testing the relevance result must be refused'
+[ -n "$(gate_if_problem '')" ] || fail 'a gate with no single-line if: must be refused'
 
 echo "✅ PWA relevance holds: every import of the harness bundle ($(printf '%s\n' "${!seen[@]}" | wc -l | tr -d ' ') files, ${#workspace[@]} workspace packages) selects the gate, docs-only changes do not, main and any doubt run it, and ci.yaml gates pwa-screenshot on the decision, failing open"

@@ -356,8 +356,14 @@ Notable details:
   and a job and not `paths-ignore` for the reason `E2E Relevance` gives. **Only a `false` skips the
   gate**: a relevance job that failed, timed out or was skipped leaves the output empty and the gate
   runs, so the job fails open as well as the script. Another job may `need` `pwa-screenshot` only if its
-  own `if:` starts with `always()` or `!cancelled()` (the `Full CI` verdict), and the gate's `if:` may
-  carry further conjuncts (the `full-ci` label) so long as nothing but relevance saying `false` can skip it. The decision is self-contained: it reads
+  own `if:` starts with `always()` or `!cancelled()` (the `Full CI` verdict; the validator reads the
+  `needs:` as an inline list, a block list or a flow sequence over several lines). The gate's `if:` is a
+  conjunction (no top-level `||`) of `!cancelled()`, the relevance conjunct and nothing else but
+  **event conjuncts**: expressions over `github.event` / `github.event_name` (a label, an action) built
+  from `==`, `!=`, `!`, `&&`, `||`, `contains()` and quoted strings, which is how the `full-ci` label
+  narrows when the whole workflow runs the gate. A literal such as `false`, a `needs`, `steps`, `env`, `vars` or
+  `secrets` expression, or any other function fails the validator. What it cannot judge is whether an
+  event conjunct means what it should: a reviewer owns that. The decision is self-contained: it reads
   nothing but the pull request's file list, so it holds however and whenever the gate is triggered.
   - **What selects the gate**: anything under `packages/pwa/`, `packages/protocol/`, `packages/relay/`
     or `packages/fleet/` (the PWA's workspace closure: it imports all three, and `fleet` and `relay`
@@ -373,8 +379,11 @@ Notable details:
     daemon-only change selects it, if a change that mixes docs with one input does not, if `main`,
     dispatch or any doubt would skip it, or if `ci.yaml` stops gating exactly `pwa-screenshot` on the
     decision or lets the relevance job grow a nix shell, a Namespace runner or a `needs`. It checks the
-    fail-open `if:`, a rename moving an input out, a pull request over the files API's cut-off, and that
-    no relative import in the traced workspace packages leaves its own package.
+    fail-open `if:` and the allow-list of its other conjuncts, a dependant's `needs:` in all three YAML
+    shapes (each tested against a fixture workflow), a rename moving an input out, a pull request over
+    the files API's cut-off, that no relative import in the traced workspace packages leaves its own
+    package, and that no `@ferretry/*` import in them names a package their `package.json` does not
+    declare (bun hoisting would resolve it, the manifest-following trace would not).
   - **It adds ~10 s before the gate legs can request runners**: it is `ubuntu-latest` with a sparse
     checkout of `scripts/ci` and two API calls, and `pwa-screenshot` cannot ask for its Namespace runner
     until it has queued and run (more when GitHub is busy). The gate waits on it, so keep it bare.
