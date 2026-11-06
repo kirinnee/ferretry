@@ -2,8 +2,8 @@
 export const AGENDA_FEATURES = {
   /**
    * The agenda's wire names (docs/agenda.md § Compatibility): `/v1/sessions/:id/agenda`,
-   * `/v1/sessions/:id/agenda/replies`, `/v1/warden/agenda` and `SessionState.agenda`, beside the older
-   * `attention` spellings this daemon still answers.
+   * `/v1/sessions/:id/agenda/replies`, `/v1/warden/agenda` and `SessionState.agenda`, the only spellings a daemon
+   * answers. No client reads this name; it stays advertised.
    */
   agendaWire: 'agenda.wire.1',
   /**
@@ -14,8 +14,8 @@ export const AGENDA_FEATURES = {
   agendaTask: 'agenda.task.1',
   /**
    * The agenda's parked items (docs/agenda.md § Parked items): `snooze` and `unsnooze` requests, and `now` on
-   * `edit` and `surface`. A daemon without this name refuses them as an unknown action: the app offers the
-   * clock only where the machine reports it, and otherwise says the machine needs an update.
+   * `edit` and `surface`. A daemon without this name refuses them as an unknown action. No client gates on it: the app
+   * offers the clock on every machine.
    */
   agendaSnooze: 'agenda.snooze.1',
   /**
@@ -26,8 +26,8 @@ export const AGENDA_FEATURES = {
   agendaClearAgents: 'agenda.clear-agents.1',
   /**
    * The roll-up of every conversation's open and parked agenda items (`GET /v1/agenda/open`, docs/agenda.md § The
-   * roll-up). A daemon without this name answers 404: the Inbox then lists the snoozed and replied items of the boards
-   * it has read, and says so.
+   * roll-up). A daemon without this name answers 404. No client gates on it: the Inbox reads the roll-up from
+   * every machine.
    */
   agendaOpen: 'agenda.open.1',
   /**
@@ -38,8 +38,8 @@ export const AGENDA_FEATURES = {
   agendaGateAttachments: 'agenda.gate.attachments.1',
   /**
    * An agenda add may carry `offerClose`, and an item may come back with it: the app then offers "Done · closes
-   * &F12" beside the answers. A daemon without this name refuses the add, so the app and the CLI send it only
-   * where the machine reports it.
+   * &F12" beside the answers. A daemon without this name refuses the add, so the CLI sends it only where the machine reports it;
+   * the app does not gate on it.
    */
   agendaOfferClose: 'agenda.offer-close.1',
   /**
@@ -66,8 +66,9 @@ export const AGENDA_FEATURES = {
    * EDITABLE ASKS (docs/agenda.md § Editable asks): an edit may REPLACE the ask (`ask`, `kind`, `answers`, questions
    * with other options, a form's fields) and clear `questionAnswer`, and an answer — or a Done or Skip given from the
    * ask — names the `askVersion` it was given to and is refused `409 ask_changed` past it (a human's unversioned
-   * answer to a replaced ask too). A daemon without this name refuses all three as malformed, so a client sends
-   * them only to one that reports it.
+   * answer to a replaced ask too). The app always sends the `askVersion` of the ask on screen and does not gate on this name; the
+   * CLI sends `--kind` and `--clear-question-answer` on an edit only to a daemon that reports it, and a daemon
+   * without it refuses all three as malformed.
    */
   agendaAsks: 'agenda.asks.1',
   /**
@@ -75,7 +76,7 @@ export const AGENDA_FEATURES = {
    * is kept on it (`conversation`), `fy agenda log` copies the owner's chat words onto it, `merge` and `split` join and
    * divide items, and every change to an item is kept as a full version that can be listed and fetched, with a per-device
    * "last seen" mark. A daemon without this name refuses the `log`, `merge` and `split` actions as malformed and has no
-   * version routes, so a client sends them only to one that reports it; an older app drops the new item fields.
+   * version routes, so the CLI sends them only to one that reports it; the app does not gate on it.
    */
   agendaConversation: 'agenda.conversation.1',
   /**
