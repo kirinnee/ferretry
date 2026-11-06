@@ -36,7 +36,7 @@ import { buildInventory } from './cleanup/inventory.ts';
 import { PACK_JEV_LIMITS, type PackJevPort } from './jev.ts';
 import type { CachedProbe, PackProbeRequest } from './probe.ts';
 import { automaticOrder, availableModels, type PackFleetFacts, runtimeRefusal } from './recommend.ts';
-import { defaultPrompt, effectiveRouting, fleetModels, routingLine } from './routing.ts';
+import { effectiveRouting, fleetModels, routingLine } from './routing.ts';
 import { SCRATCH_REMEDY, scratchMessage } from './scratch.ts';
 
 /** The settings in effect, read fresh for every request. */
@@ -187,12 +187,6 @@ export class PackService {
   async view(): Promise<Omit<PackView, 'undo' | 'cleanUp'>> {
     const { settings, models, routing, available } = await this.snapshot();
     return { config: settings.config, routing, models, available };
-  }
-
-  /** The default routing prompt, rendered from the catalogs in effect, whatever the file says. */
-  async defaultPrompt(): Promise<string> {
-    const [catalogs, facts] = await Promise.all([this.ports.catalogs(), this.ports.facts()]);
-    return defaultPrompt(fleetModels(catalogs, facts.runtimes), this.ports.bin);
   }
 
   /** What the clean-up ferret is shown (`./cleanup/inventory.ts`): the harness config, names and states only. */

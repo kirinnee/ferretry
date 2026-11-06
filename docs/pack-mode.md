@@ -185,25 +185,6 @@ prompt: |
   version stays in effect. A routing prompt never loosens anything (it widens nothing a ferret may do or
   spend), so an edit is never held.
 
-### Migration
-
-The prompt replaced a **models guide** of use cases (each with ranked candidates, keywords and reasons),
-per-model descriptions, the builder's `routingPreferences` in `pack.yaml` and a one-line `routing.short`. The
-first daemon start with this version renders an old guide into one prompt, **once**:
-
-1. Both files are copied whole, as they were, into `state/pack-routing-migration-<when>.json` — first, so
-   nothing is lost even if a write after it fails.
-2. `models-guide.yaml` gets `prompt`: the old use cases, each with its first three candidates and their
-   efforts, best first (a guide that named none ran on the catalogs' guide, so the default prompt stands in),
-   then the old routing prompt, then the routing preferences. When that is longer than 1,200 characters the
-   use cases are kept whole and the prose is cut at a sentence, and the daemon's log says so. The old keys
-   (`useCases`, `routing`, `models`) and the old `suggested` are removed.
-3. `pack.yaml` loses `routingPreferences`.
-
-Until it runs, an old file still loads (the old keys are read, never written) and is rendered the same way on
-the fly. A start that finds none of the old keys does nothing. An undo kept from an accepted use-case guide no
-longer reads and is dropped. Clean up turns a migrated prompt into a short one.
-
 ## `fy recommend ["<task>"]`
 
 `POST /v1/pack/recommend {task?}` — `operator`, `fleet.use`. It prints the **routing prompt** in effect (and

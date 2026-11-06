@@ -16,7 +16,6 @@ import {
   resolveStateHome,
   StateHomeLayoutError,
   sessionJournalRequired,
-  sessionMarkerNeedsUpgrade,
   temporaryFilePath,
   tryParseSessionId,
 } from '../../src/lib/index.ts';
@@ -95,11 +94,6 @@ describe('foundation paths', () => {
       // the same one. A second identity would carry a second fingerprint, and every paired browser
       // pins the first.
       daemonIdentity: '/tmp/fy-home/state/daemon-identity.json',
-      // Under `state`, deliberately NOT under `config`: the configuration document is the file that
-      // travels into backups, dotfile repositories and screen shares, and a password verifier must
-      // not make that journey. The grants it gates DO live in the configuration document, where
-      // `--print-config` can report them with their provenance.
-      retiredOperatorPassword: '/tmp/fy-home/state/operator-password.json',
       archivedSessions: '/tmp/fy-home/state/archived-sessions.json',
       // Keyed by daemon by construction: a state home has exactly one owner, so one daemon's record
       // of who changed which grant can never be read as another's.
@@ -221,7 +215,7 @@ describe('layout decisions', () => {
     { marker: `${CURRENT_LAYOUT_VERSION}\n`, entries: ['layout-version'], expected: 'proceed' },
     { marker: undefined, entries: ['config'], expected: 'refuse' },
     { marker: 'garbage', entries: ['layout-version'], expected: 'refuse' },
-    { marker: '1', entries: ['layout-version'], expected: 'upgrade' },
+    { marker: '1', entries: ['layout-version'], expected: 'refuse' },
     { marker: '3', entries: ['layout-version'], expected: 'refuse' },
     { marker: '0', entries: ['layout-version'], expected: 'refuse' },
   ])('should choose $expected for marker $marker', ({ marker, entries, recoverable, expected }) => {
@@ -246,7 +240,7 @@ describe('layout decisions', () => {
     should(actual).equal(expected);
   });
 
-  it('should accept both supported session markers and refuse anything else', () => {
+  it('should accept only the current session marker and refuse anything else', () => {
     // Act
     const legacy = decideSessionMarker('1\n');
     const current = decideSessionMarker('2\n');
@@ -255,22 +249,19 @@ describe('layout decisions', () => {
     const future = decideSessionMarker('3');
 
     // Assert
-    should(legacy).equal('proceed');
+    should(legacy).equal('refuse');
     should(current).equal('proceed');
     should(missing).equal('refuse');
     should(blank).equal('refuse');
     should(future).equal('refuse');
   });
 
-  it('should require a journal only under the current marker and upgrade only the legacy one', () => {
+  it('should require a journal only under the current marker', () => {
     // Act
     const required = [undefined, '1\n', '2\n', '3'].map(marker => sessionJournalRequired(marker));
-    const upgradable = [undefined, '1\n', '2\n', '3'].map(marker => sessionMarkerNeedsUpgrade(marker));
 
-    // Assert — a version-1 directory predates the contract, so its missing journal is still
-    // ambiguous; a version-2 one created its journal with itself, so absence is loss.
+    // Assert — a version-2 directory created its journal with itself, so absence is loss.
     should(required).deepEqual([false, false, true, false]);
-    should(upgradable).deepEqual([false, true, false, false]);
   });
 
   it('should describe missing and unsupported home markers distinctly', () => {

@@ -372,29 +372,6 @@ describe('session storage — a journal that moves while it is read', () => {
   });
 });
 
-describe('session storage — a version-1 session that never had a journal', () => {
-  it('should keep it indexed without a journal across a reconcile, and replay it as empty', async () => {
-    // Arrange
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
-    const id = parseSessionId('legacy-eventless');
-    const paths = createSessionPaths(opened.paths, id);
-    await mkdir(paths.directory, { recursive: true, mode: 0o700 });
-    await writeFile(paths.marker, '1\n', { mode: 0o600 });
-    await writeFile(paths.state, '{"status":"running"}\n', { mode: 0o600 });
-    await opened.storage.rebuildIndex();
-
-    // Act
-    const reconcile = await opened.storage.reconcile();
-    const replay = await opened.storage.replay(id);
-
-    // Assert
-    should(reconcile).deepEqual({ sessionCount: 1, eventCount: 0, problems: [] });
-    should(opened.storage.findSession(id)?.journal).be.null();
-    should(replay.events).deepEqual([]);
-  });
-});
-
 describe('session storage — replay and fleet tail', () => {
   it('should refuse replay arguments that are not whole, bounded numbers', async () => {
     // Arrange

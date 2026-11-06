@@ -64,11 +64,6 @@ export class DaemonStorageFactory {
     try {
       // The archive first: every walk below (and every one after boot) must already know which sessions have left.
       await storage.loadArchive();
-      // Version-1 directories predate the journal contract, so they are migrated under the home
-      // lock before anything reads them. A version-2 session whose journal is already gone is NOT
-      // touched here: opening the home must still succeed so rebuild can quarantine that one
-      // session and keep every healthy sibling indexed.
-      await storage.upgradeLegacySessions();
       await storage.repairSessionPermissions();
       return { paths, fileSystem, layout, storage };
     } catch (error) {

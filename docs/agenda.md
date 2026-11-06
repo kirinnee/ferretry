@@ -2058,8 +2058,7 @@ old one, and always writes the new one**, so a daemon upgraded or downgraded in 
   downgrade before that session's next write, leaves that last append out.
 - Records already in `notifications.jsonl` keep their `attention:` keys, their `attention` origin and their
   `attentionId` field; new ones are written `agenda:` with `agendaId`, a repeat check treats the two key spellings as
-  one key, and `attentionId` is read as `agendaId`. A daemon-written send id is read the same
-  way: `attention-…` and `agenda-…` name one send.
+  one key, and `attentionId` is read as `agendaId`.
 
 ### One bad entry
 

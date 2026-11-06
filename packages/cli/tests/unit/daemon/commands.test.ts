@@ -60,7 +60,7 @@ function run(
   const adoptController = (): StateHomeController =>
     new StateHomeController(
       new StateHomeClaimService(
-        new FakeStateHomeFiles([{ name: 'layout-version', directory: false, regularFile: true }], '1\n'),
+        new FakeStateHomeFiles([{ name: 'layout-version', directory: false, regularFile: true }], '2\n'),
         'fy daemon adopt',
       ),
       '/tmp/fy-home/.ferretry',

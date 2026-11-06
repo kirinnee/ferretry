@@ -56,26 +56,11 @@ const cases: SchemaCase[] = [
   { name: 'jev', schema: pack.PackJevSchema, value: { usdPerDay: 0.5 } },
   { name: 'config', schema: pack.PackConfigSchema, value: pack.DEFAULT_PACK_CONFIG },
   { name: 'file', schema: pack.PackFileSchema, value: { decision: 'jev', limits: { maxDepth: 3 } } },
-  {
-    name: 'a file not yet migrated, with the old preferences',
-    schema: pack.PackFileSchema,
-    value: { routingPreferences: 'Opus for reviews.' },
-  },
   { name: 'routing prompt', schema: pack.RoutingPromptSchema, value: prompt },
   { name: 'builder mode', schema: pack.PackBuilderModeSchema, value: 'generate' },
   { name: 'suggested', schema: pack.RoutingSuggestedSchema, value: suggested },
   { name: 'suggested by writing', schema: pack.RoutingSuggestedSchema, value: { ...suggested, mode: 'generate' } },
   { name: 'guide file', schema: pack.ModelsGuideFileSchema, value: { prompt, suggested } },
-  {
-    name: 'a guide file not yet migrated, with the old keys',
-    schema: pack.ModelsGuideFileSchema,
-    value: {
-      useCases: [{ id: 'bulk', title: 'Bulk', candidates: [] }],
-      routing: { prompt: 'Opus first.', short: 'Routing: x.' },
-      models: [{ provider: 'zai', model: 'glm-5.3', description: 'Cheap.' }],
-      suggested: { ...suggested, partial: true },
-    },
-  },
   { name: 'routing view', schema: pack.RoutingPromptViewSchema, value: routing },
   { name: 'undo', schema: pack.RoutingUndoSchema, value: { savedAt: INSTANT, source: 'default' } },
   { name: 'clean-up job', schema: pack.PackCleanUpJobSchema, value: job },
@@ -276,19 +261,6 @@ describe('pack schemas', () => {
   });
 });
 
-describe('isLegacyModelsGuide', () => {
-  it('should say a file with any of the old keys still has a migration to run', () => {
-    should(pack.isLegacyModelsGuide({ useCases: [] })).be.true();
-    should(pack.isLegacyModelsGuide({ routing: { prompt: 'x', short: 'y' } })).be.true();
-    should(pack.isLegacyModelsGuide({ models: [] })).be.true();
-  });
-
-  it('should say a file of the one routing prompt, or none, has nothing to migrate', () => {
-    should(pack.isLegacyModelsGuide({})).be.false();
-    should(pack.isLegacyModelsGuide({ prompt, suggested })).be.false();
-  });
-});
-
 describe('packConfigFromFile', () => {
   it('should be the defaults for an empty file: on, the agent decides, 20 / 4 / depth 2', () => {
     should(pack.packConfigFromFile({})).deepEqual(pack.DEFAULT_PACK_CONFIG);
@@ -314,10 +286,6 @@ describe('packConfigFromFile', () => {
       probe: { timeoutSeconds: 45, cacheSeconds: 0 },
       jev: { usdPerDay: 1 },
     });
-  });
-
-  it('should ignore the old routing preferences: only the migration reads them', () => {
-    should(pack.packConfigFromFile({ routingPreferences: 'Opus for reviews.' })).deepEqual(pack.DEFAULT_PACK_CONFIG);
   });
 
   it('should start from a guide file with no prompt, so the rendered one is in effect', () => {

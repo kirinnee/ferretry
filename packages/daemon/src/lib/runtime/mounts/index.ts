@@ -32,7 +32,6 @@ import type { SessionObserverHost } from '../../session/observer/host.ts';
 import type { QueueDeliverer } from '../../session/queue/deliverer.ts';
 import type { OperatorReadService } from '../../session/reads/index.ts';
 import type { SessionRuntimeSubsystem } from '../../session/runtime-control/types.ts';
-import type { LegacySendReproof } from '../../session/send/reproof.ts';
 import type { SendTrackingLoop } from '../../session/send/tracker.ts';
 import type { TranscriptImages } from '../../session/transcript/image-reader.ts';
 import type { SharedDraftService } from '../../shared-drafts/index.ts';
@@ -314,9 +313,6 @@ export interface MountedSubsystems {
    *  proven absent, and settles the rest honestly. It is armed at boot because a restart owes every
    *  in-flight send a re-derivation from the transcript — never a re-typing. */
   readonly sendTracking: SendTrackingLoop;
-  /** The one-time re-proof of the "not delivered" rows written before the queue: run in the background
-   *  after the tracker is armed, and stopped on the way down (it finishes on the next start). */
-  readonly sendReproof: Pick<LegacySendReproof, 'run' | 'stop'>;
   /**
    * The durable queue's deliverer: armed after the bind like every loop that can type into a pane, and
    * stopped FIRST on the way down, so a hand-over in flight is finished rather than cut in half.

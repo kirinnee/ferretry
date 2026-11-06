@@ -5,8 +5,7 @@
  * never wrote one still has one, and it moves with the catalogs (a new Opus, a new GLM) without a release.
  *
  * Also: the editor's vocabulary (every model any catalog lists, with the runtimes here that run it), the
- * prompt as ONE line for a ferret's system prompt, and the old use-case guide rendered into one prompt for
- * the one-time migration.
+ * prompt as ONE line for a ferret's system prompt.
  *
  * Pure: catalogs, runtimes and the file in, values out.
  */
@@ -18,7 +17,7 @@ import type {
   PackFleetModel,
   RoutingPromptView,
 } from '@ferretry/protocol';
-import { isLegacyModelsGuide, MAX_ROUTING_PROMPT_CHARS } from '@ferretry/protocol';
+import { MAX_ROUTING_PROMPT_CHARS } from '@ferretry/protocol';
 
 type Harness = PackFleetModel['harness'];
 type Tier = ModelCatalogEntryView['tier'];
@@ -170,8 +169,7 @@ export function defaultPrompt(models: readonly PackFleetModel[], bin: string): s
 }
 
 /**
- * The routing prompt in effect: the file's `prompt`; else, for a file the migration has not reached yet, its
- * old use cases rendered into one prompt (so nothing it said is lost meanwhile); else the default.
+ * The routing prompt in effect: the file's `prompt`; else the default.
  */
 export function effectiveRouting(
   file: ModelsGuideFile,
@@ -182,8 +180,6 @@ export function effectiveRouting(
   const suggested = file.suggested === undefined ? {} : { suggested: file.suggested };
   if (file.prompt !== undefined) return { text: file.prompt, source: 'file', ...suggested };
   const base = defaultPrompt(fleetModels(catalogs, runtimes), bin);
-  const legacy = isLegacyModelsGuide(file) ? legacyPrompt(file, undefined, base) : undefined;
-  if (legacy !== undefined) return { text: legacy.text, source: 'file' };
   return { text: base, source: 'default' };
 }
 
@@ -216,40 +212,6 @@ export function routingLine(text: string): string {
   return `${ROUTING_LINE_PREFIX}${clean}`;
 }
 
-// ── The old guide, rendered once ────────────────────────────────────────────────────────────────
-
-/** The old guide's pieces as the migration reads them: leniently, since nothing checks them any more. */
-interface LegacyUseCase {
-  readonly title: string;
-  readonly candidates: readonly { readonly model: string; readonly effort?: string; readonly codex: boolean }[];
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const text = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
-
-function legacyUseCases(raw: readonly unknown[] | undefined): readonly LegacyUseCase[] {
-  return (raw ?? []).flatMap(entry => {
-    if (!isRecord(entry)) return [];
-    const title = text(entry.title) ?? text(entry.id);
-    if (title === undefined) return [];
-    const candidates = (Array.isArray(entry.candidates) ? entry.candidates : []).flatMap(candidate => {
-      if (!isRecord(candidate)) return [];
-      const model = text(candidate.model);
-      const effort = text(candidate.effort);
-      return model === undefined
-        ? []
-        : [{ model, ...(effort === undefined ? {} : { effort }), codex: candidate.harness === 'codex' }];
-    });
-    return [{ title, candidates }];
-  });
-}
-
-/** How many of a use case's candidates the rendered line names. */
-export const LEGACY_CANDIDATES = 3;
-
 /**
  * Text cut to `limit` characters at the last sentence or line end that fits, with "…" after it; whole when it
  * fits. `cut` says whether anything was lost.
@@ -260,50 +222,4 @@ export function cut(value: string, limit: number): { readonly text: string; read
   const end = Math.max(head.lastIndexOf('. '), head.lastIndexOf('.\n'), head.lastIndexOf('\n'));
   const kept = (end > limit / 2 ? head.slice(0, end + 1) : head).trimEnd();
   return { text: `${kept}…`, cut: true };
-}
-
-/** The old guide rendered as one prompt, and whether it had to be cut to fit. */
-export interface LegacyRender {
-  readonly text: string;
-  readonly cut: boolean;
-}
-
-/**
- * The old guide as ONE routing prompt (docs/pack-mode.md § Migration): its use cases first — each title and
- * its first candidates, best first, so `--auto` tries them in the order the guide ranked them — then its own
- * routing prompt, then the owner's routing preferences from `pack.yaml`. A file that named no use cases ran on
- * the guide built from the catalogs, so `base` — the default prompt — stands in for them. When that is longer
- * than a prompt may be, the use cases are kept whole and the prose is cut at a sentence; the old file is kept
- * in full beside it. `undefined` when the file said nothing a prompt could carry (it only described models).
- */
-export function legacyPrompt(
-  file: ModelsGuideFile,
-  preferences: string | undefined,
-  base: string,
-): LegacyRender | undefined {
-  const useCases = legacyUseCases(file.useCases);
-  const lines = useCases.map(useCase => {
-    const named = useCase.candidates
-      .slice(0, LEGACY_CANDIDATES)
-      .map(
-        candidate =>
-          `${candidate.model}${candidate.codex ? ' (codex)' : ''}${candidate.effort === undefined ? '' : ` at ${candidate.effort}`}`,
-      );
-    return `- ${useCase.title}: ${named.length === 0 ? 'no model named' : named.join(', then ')}.`;
-  });
-  const prose = [
-    isRecord(file.routing) ? text(file.routing.prompt) : undefined,
-    text(preferences) === undefined ? undefined : `Preferences: ${text(preferences) ?? ''}`,
-  ].filter((part): part is string => part !== undefined);
-  if (lines.length === 0 && prose.length === 0) return undefined;
-  const head = lines.length === 0 ? [base] : ["Pick each sub-task's model by the kind of work, best first:", ...lines];
-  const structured = cut(head.join('\n'), MAX_ROUTING_PROMPT_CHARS);
-  if (prose.length === 0) return structured;
-  const room = MAX_ROUTING_PROMPT_CHARS - (structured.text.length === 0 ? 0 : structured.text.length + 1);
-  if (room < 40) return { text: structured.text, cut: true };
-  const tail = cut(prose.join('\n'), room);
-  return {
-    text: [structured.text, tail.text].filter(part => part !== '').join('\n'),
-    cut: structured.cut || tail.cut,
-  };
 }

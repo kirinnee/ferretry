@@ -190,10 +190,6 @@ describe('PackService.view', () => {
     should(view.routing.source).equal('default');
     should(view.routing.text).containEql('critical code: opus at high');
   });
-
-  it('should render the default from the catalogs whatever the file says', async () => {
-    should(await build().subject.defaultPrompt()).containEql('- Everyday coding: sonnet.');
-  });
 });
 
 describe('PackService.inventory', () => {

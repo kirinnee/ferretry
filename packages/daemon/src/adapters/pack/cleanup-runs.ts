@@ -3,7 +3,6 @@ import { PackCleanUpJobResultSchema, RoutingUndoSchema } from '@ferretry/protoco
 import { z } from 'zod';
 import type { ReplacedGuide } from '../../lib/pack/cleanup/file.ts';
 import type { CleanUpRun, CleanUpRunStore } from '../../lib/pack/cleanup/service.ts';
-import type { RoutingMigrationBackup } from '../../lib/pack/migrate.ts';
 import type { FileSystemPort } from '../../lib/ports.ts';
 
 /** A run's id: what `newId` makes, so a path built from one never leaves the runs folder. */
@@ -104,22 +103,5 @@ export class FileReplacedGuide {
   async write(value: ReplacedGuide | undefined): Promise<void> {
     if (value === undefined) await this.files.removeFile(this.path);
     else await this.files.writeTextAtomic(this.path, `${JSON.stringify(value)}\n`);
-  }
-}
-
-/**
- * Where the one-time migration to one routing prompt keeps the files it rewrote (docs/pack-mode.md § Migration):
- * one document per run, named by when it ran, so a later run never overwrites an earlier backup.
- */
-export class FileRoutingMigrationBackup {
-  constructor(
-    private readonly files: Pick<FileSystemPort, 'writeTextAtomic'>,
-    private readonly directory: string,
-  ) {}
-
-  async write(value: RoutingMigrationBackup): Promise<string> {
-    const path = join(this.directory, `pack-routing-migration-${value.at.replaceAll(/[:.]/gu, '-')}.json`);
-    await this.files.writeTextAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
-    return path;
   }
 }

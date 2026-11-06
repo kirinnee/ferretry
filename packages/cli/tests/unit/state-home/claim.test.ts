@@ -69,24 +69,20 @@ describe('claiming a state home before writing into it', () => {
     should(store.writes).be.empty();
   });
 
-  it('should leave a version-1 home to the daemon to upgrade, never rewriting its marker', async () => {
-    // Arrange — an older layout the daemon upgrades in place; the client must not stamp over it.
+  it('should refuse a version-1 home as an unsupported version, never rewriting its marker', async () => {
+    // Arrange — an older layout this release no longer serves; the client must not stamp over it.
     const { store, claims } = service(files('layout-version'), '1\n');
 
-    // Act
-    const claim = await claims.claim(HOME);
-
-    // Assert
-    should(claim).deepEqual({ kind: 'already-claimed', home: HOME });
+    // Act + Assert
+    await should(claims.claim(HOME)).be.rejectedWith(StateHomeClaimRefusedError);
     should(store.writes).be.empty();
     should(store.marker).equal('1\n');
-    should(store.created).deepEqual([{ path: HOME, mode: STATE_HOME_MODE }]);
   });
 
   it('should tolerate a marker written with trailing whitespace', async () => {
-    // Arrange — the content is `1\n`, but a person repairing a home by hand may not reproduce it
+    // Arrange — the content is `2\n`, but a person repairing a home by hand may not reproduce it
     // byte for byte, and refusing them over an extra newline would be gratuitous.
-    const { claims } = service(files('layout-version'), '  1  \n');
+    const { claims } = service(files('layout-version'), '  2  \n');
 
     // Act + Assert
     should((await claims.claim(HOME)).kind).equal('already-claimed');
@@ -391,7 +387,7 @@ describe('adopting a home Ferretry created before claims existed', () => {
 
   it('should report a home that is already claimed and change nothing', async () => {
     // Arrange
-    const { store, claims } = service([...directories('fleet'), ...files('layout-version')], '1\n');
+    const { store, claims } = service([...directories('fleet'), ...files('layout-version')], '2\n');
 
     // Act
     const adoption = await claims.adopt(HOME);

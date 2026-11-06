@@ -85,12 +85,6 @@ export const PackFileSchema = z.strictObject({
   limits: PackLimitsSchema.partial().optional(),
   probe: PackProbeSchema.partial().optional(),
   jev: PackJevSchema.partial().optional(),
-  /**
-   * @deprecated The old guide builder's preferences. Still READ, so a file written before the one routing
-   * prompt loads unchanged; the daemon folds it into the routing prompt once and removes it
-   * (docs/pack-mode.md § Migration). Nothing else reads it.
-   */
-  routingPreferences: z.string().optional(),
 });
 export type PackFile = z.infer<typeof PackFileSchema>;
 
@@ -155,31 +149,16 @@ export type RoutingSuggested = z.infer<typeof RoutingSuggestedSchema>;
 
 /**
  * `models-guide.yaml`: the routing prompt and, when it was an accepted clean-up, where it came from.
- * `prompt` absent means the prompt rendered from the catalogs (or, for a file not yet migrated, from its
- * old use cases).
- *
- * `useCases`, `routing` and `models` are the old guide's keys: still READ, never written, so a file from
- * before the one routing prompt loads; the daemon renders them into `prompt` once, keeps the old file in
- * its state home and removes them (docs/pack-mode.md § Migration).
+ * `prompt` absent means the prompt rendered from the catalogs.
  */
 export const ModelsGuideFileSchema = z.strictObject({
   prompt: RoutingPromptSchema.optional(),
   suggested: RoutingSuggestedSchema.optional(),
-  /** @deprecated The old use cases; migrated once into `prompt`. */
-  useCases: z.array(z.unknown()).optional(),
-  /** @deprecated The old `{prompt, short}` routing guidance; migrated once into `prompt`. */
-  routing: z.unknown().optional(),
-  /** @deprecated The old per-model descriptions; kept in the migration's backup. */
-  models: z.array(z.unknown()).optional(),
 });
 export type ModelsGuideFile = z.infer<typeof ModelsGuideFileSchema>;
 
 /** What a machine with no `models-guide.yaml` has: nothing written, so the rendered prompt is in effect. */
 export const DEFAULT_MODELS_GUIDE_FILE: ModelsGuideFile = {};
-
-/** Whether a parsed file still carries the old guide's keys, so the one-time migration has work to do. */
-export const isLegacyModelsGuide = (file: ModelsGuideFile): boolean =>
-  file.useCases !== undefined || file.routing !== undefined || file.models !== undefined;
 
 /**
  * The routing prompt in effect. `file`: the owner's words (hand-written or an accepted clean-up).

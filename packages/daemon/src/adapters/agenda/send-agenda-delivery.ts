@@ -6,7 +6,6 @@ import {
   type AgendaReceipt,
   type AgendaReceipts,
 } from '../../lib/agenda/index.ts';
-import { sameSendId } from '../../lib/session/send/index.ts';
 import type { SessionSendService } from '../../lib/session/send/service.ts';
 import {
   SendDraftRefused,
@@ -90,7 +89,7 @@ export class LedgerAgendaReceipts implements AgendaReceipts {
   async receipt(sessionId: string, sendId: string): Promise<AgendaReceipt> {
     const id = tryParseSessionId(sessionId);
     if (id === undefined) return { state: 'failed', reason: 'the ferret could not be found' };
-    const record = (await this.ledger.list(id)).find(each => sameSendId(each.sendId, sendId));
+    const record = (await this.ledger.list(id)).find(each => each.sendId === sendId);
     if (record?.fate === 'delivered') return { state: 'delivered' };
     const reason = record?.fate === undefined ? undefined : FAILED_FATES[record.fate];
     return reason === undefined ? { state: 'pending' } : { state: 'failed', reason };

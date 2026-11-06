@@ -30,7 +30,7 @@ describe('index rebuild planning', () => {
     const input: SessionSource[] = [
       {
         id,
-        marker: { file: '/home/state/sessions/session-a/session-version', text: '1\n' },
+        marker: { file: '/home/state/sessions/session-a/session-version', text: '2\n' },
         config: {
           file: '/home/state/sessions/session-a/config.json',
           text: JSON.stringify({ createdAt: '2026-07-30T12:00:00.000Z', updatedAt: '2026-07-30T12:00:02.000Z' }),
@@ -78,7 +78,7 @@ describe('index rebuild planning', () => {
       },
       {
         id: parseSessionId('b-session'),
-        marker: { file: '/sessions/b/session-version', text: '1' },
+        marker: { file: '/sessions/b/session-version', text: '2' },
         config: { file: '/sessions/b/config.json', text: '{bad' },
         state: { file: '/sessions/b/state.json', text: JSON.stringify({ status: 'stopped', finishedAt: 'bad-time' }) },
       },
@@ -102,12 +102,12 @@ describe('index rebuild planning', () => {
     const input: SessionSource[] = [
       {
         id,
-        marker: { file: '/z/session-version', text: '1' },
+        marker: { file: '/z/session-version', text: '2' },
         state: { file: '/z/state.json', text: '{"status":"z"}' },
       },
       {
         id,
-        marker: { file: '/a/session-version', text: '1' },
+        marker: { file: '/a/session-version', text: '2' },
         state: { file: '/a/state.json', text: '{"status":"a"}' },
       },
     ];

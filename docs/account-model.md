@@ -200,9 +200,7 @@ read from it and nothing is deleted. The same sentence reaches `fy` and the brow
 > example rename it to config.yaml.old), then set this machine up again from the app or with
 > `fy daemon setup`.
 
-The state home's layout version is 2. A version-1 home is upgraded in place — only its marker changes —
-so paired devices, sessions and secrets survive, and an older Ferretry refuses the upgraded home rather
-than acting on a configuration nobody edits.
+The state home's layout version is 2. A home at any other version is refused with the version it found, and nothing in it is rewritten.
 
 A `config/daemon.json` that still has an `accountModel` key, or the retired `fleet.prepareDefaults`
 key (which every earlier boot wrote itself), still boots; the key is ignored and the boot says so

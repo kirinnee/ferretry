@@ -44,7 +44,7 @@ async function installation(root: string): Promise<{ home: string; artifacts: st
   await mkdir(join(home, 'config'), { recursive: true });
   await mkdir(join(home, 'fleet'), { recursive: true });
   await mkdir(join(home, 'logs'), { recursive: true });
-  await writeFile(join(home, 'layout-version'), '1\n');
+  await writeFile(join(home, 'layout-version'), '2\n');
   await writeFile(join(home, 'api-token'), 'fy_token');
   await writeFile(join(home, 'config', 'daemon.json'), '{}');
   await writeFile(join(home, 'logs', 'fyd.log'), 'x'.repeat(100));

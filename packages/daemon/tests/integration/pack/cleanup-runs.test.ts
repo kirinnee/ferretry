@@ -1,17 +1,12 @@
 import { describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
-import {
-  FileCleanUpRunStore,
-  FileReplacedGuide,
-  FileRoutingMigrationBackup,
-} from '../../../src/adapters/pack/cleanup-runs.ts';
+import { FileCleanUpRunStore, FileReplacedGuide } from '../../../src/adapters/pack/cleanup-runs.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
 import type { CleanUpRun } from '../../../src/lib/pack/cleanup/service.ts';
-import type { RoutingMigrationBackup } from '../../../src/lib/pack/migrate.ts';
 
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-cleanup-runs-'));
@@ -104,60 +99,6 @@ describe('FileReplacedGuide', () => {
       should(wrong).be.undefined();
       should(damaged).be.undefined();
       should(await replaced.read()).be.undefined();
-    } finally {
-      await rm(subject.home, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('FileRoutingMigrationBackup', () => {
-  const backup = (at: string, modelsGuide: string | null): RoutingMigrationBackup => ({
-    at,
-    modelsGuide,
-    pack: null,
-    cut: false,
-  });
-
-  it('should keep a run in a document named by when it ran, and answer where it is', async () => {
-    // Arrange
-    const subject = await fixture();
-    const target = new FileRoutingMigrationBackup(subject.files, subject.home);
-    const value: RoutingMigrationBackup = {
-      at: '2026-10-22T12:00:00.123Z',
-      modelsGuide: 'useCases: []\n',
-      pack: 'routingPreferences: opus\n',
-      prompt: 'Opus for everything.',
-      cut: true,
-    };
-    try {
-      // Act
-      const path = await target.write(value);
-
-      // Assert
-      should(path).equal(join(subject.home, 'pack-routing-migration-2026-10-22T12-00-00-123Z.json'));
-      should(JSON.parse(await readFile(path, 'utf8'))).deepEqual(value);
-      should(await readFile(path, 'utf8')).endWith('\n');
-    } finally {
-      await rm(subject.home, { recursive: true, force: true });
-    }
-  });
-
-  it('should never let one run overwrite another: two runs at different times keep two documents', async () => {
-    // Arrange
-    const subject = await fixture();
-    const target = new FileRoutingMigrationBackup(subject.files, subject.home);
-    try {
-      // Act
-      const first = await target.write(backup('2026-10-22T12:00:00.000Z', 'first: 1\n'));
-      const second = await target.write(backup('2026-10-22T12:00:00.001Z', 'second: 2\n'));
-      const later = await target.write(backup('2026-10-23T09:30:00.000Z', null));
-
-      // Assert
-      should(new Set([first, second, later]).size).equal(3);
-      should(JSON.parse(await readFile(first, 'utf8')).modelsGuide).equal('first: 1\n');
-      should(JSON.parse(await readFile(second, 'utf8')).modelsGuide).equal('second: 2\n');
-      should(JSON.parse(await readFile(later, 'utf8')).modelsGuide).be.null();
-      should((await readdir(subject.home)).filter(name => name.startsWith('pack-routing-migration-'))).have.length(3);
     } finally {
       await rm(subject.home, { recursive: true, force: true });
     }
