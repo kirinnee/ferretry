@@ -223,6 +223,25 @@ describe('FileSessionTransferTargetPlanStore install (target plan copy)', () => 
     should((error as SessionTransferPlanConflictError).conflict).equal('session_claimed');
   });
 
+  it('surfaces a plan path that cannot be opened rather than reading it as no plan', async () => {
+    // Arrange — a regular FILE where the target directory should be makes `open` fail with ENOTDIR,
+    // a cause that holds for root as well (unlike a permission failure).
+    const home = await tempDirectory('transfer-plan-unopenable');
+    const target = parseSessionId('target-session');
+    await mkdir(join(home, 'sessions'), { recursive: true });
+    await writeFile(join(home, 'sessions', target), 'not a directory\n', 'utf8');
+    const subject = new FileSessionTransferTargetPlanStore(
+      id => join(home, 'sessions', id, TARGET_PLAN_FILE),
+      counter(),
+    );
+
+    // Act
+    const error = await reject(subject.install(target, makePlan({})));
+
+    // Assert — only ENOENT means "no plan"; anything else must not be mistaken for it and overwritten.
+    should((error as NodeJS.ErrnoException).code).equal('ENOTDIR');
+  });
+
   it('writes the target plan privately, with no temporary file left beside it', async () => {
     // Arrange
     const { subject } = await harness('transfer-plan-atomic');
