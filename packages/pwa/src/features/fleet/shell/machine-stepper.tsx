@@ -16,7 +16,7 @@
  * And the two states that replace a step's body:
  *
  * - **Leave confirmation.** Cancel (or Back from step 1) asks first, says what will not be created and
- *   lists what was already saved for reuse, which is kept.
+ *   offers Stop or Keep going.
  * - **Paused.** A machine that is asleep or offline pauses the flow (O5): the progress stays exactly
  *   where it was, but the step's body is not rendered, so nothing it would send can be queued. A write
  *   needs the machine awake; Retry asks the caller to check again.
@@ -38,7 +38,6 @@ import {
   type StepperFlow,
   type StepperState,
   stepPosition,
-  stopStepper,
 } from './stepper-model.ts';
 
 export interface MachineStepperProps {
@@ -149,7 +148,7 @@ export function MachineStepper({
   const { index, step } = stepPosition(flow);
   const final = step.final === true;
   const titleRef = useRef<HTMLHeadingElement>(null);
-  const stepKey = `${state.stack.length}:${flow.kind}:${flow.at}`;
+  const stepKey = `${flow.kind}:${flow.at}`;
   const steps = shownSteps(flow);
   const current = steps.findIndex(candidate => candidate.state === 'now');
   const position =
@@ -169,18 +168,8 @@ export function MachineStepper({
     <div role="alert" data-stepper-confirm="" className="kt-panel p-panel">
       <p className="m-0 text-row font-semibold text-fg">{flow.leave.question}</p>
       <p className="mb-0 mt-1 text-cell leading-base text-muted">{flow.leave.consequence}</p>
-      {flow.saved.length > 0 ? (
-        <>
-          <p className="mb-0 mt-3 text-cell font-medium text-fg">Saved for reuse:</p>
-          <ul className="mb-0 mt-1 list-disc pl-5 text-cell leading-base text-fg" data-stepper-saved="">
-            {flow.saved.map(item => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </>
-      ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        <Button type="button" variant="danger" data-stepper-stop="" onClick={() => onChange(stopStepper(state))}>
+        <Button type="button" variant="danger" data-stepper-stop="" onClick={() => onChange(null)}>
           {flow.leave.stopLabel}
         </Button>
         <Button type="button" variant="primary" data-stepper-keep="" onClick={() => onChange(keepGoing(state))}>

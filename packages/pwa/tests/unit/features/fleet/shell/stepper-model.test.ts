@@ -9,7 +9,6 @@ import {
   startStepper,
   stepForward,
   stepPosition,
-  stopStepper,
   withSteps,
 } from '../../../../../src/features/fleet/shell/stepper-model.ts';
 
@@ -43,7 +42,6 @@ describe('stepper model', () => {
       total: 4,
       step: { id: 'credential', label: 'Credential' },
     });
-    expect(currentFlow(state).saved).toEqual([]);
     expect(currentFlow(startStepper({ ...addRuntime, at: 'name' })).at).toBe('name');
     expect(() => startStepper({ ...addRuntime, steps: [] })).toThrow('has no steps');
     expect(() => startStepper({ ...addRuntime, at: 'nowhere' })).toThrow('has no step nowhere');
@@ -82,9 +80,7 @@ describe('stepper model', () => {
     expect(backStep(startStepper({ ...addRuntime, leaveWithoutConfirm: true }))).toEqual({ kind: 'left' });
   });
 
-  it('Cancel always confirms, and Stop on the only flow ends the stepper', () => {
-    const confirming = cancelStepper(startStepper(addRuntime));
-    expect(confirming.confirming).toBe(true);
-    expect(stopStepper(confirming)).toBeNull();
+  it('Cancel always confirms', () => {
+    expect(cancelStepper(startStepper(addRuntime)).confirming).toBe(true);
   });
 });

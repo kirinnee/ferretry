@@ -107,11 +107,10 @@ describe('MachineStepper', () => {
     await view.unmount();
   });
 
-  it('Cancel then Stop leaves the stepper; nothing saved means no saved list', async () => {
+  it('Cancel then Stop leaves the stepper', async () => {
     const left: string[] = [];
     const view = await mount(<Host initial={startStepper(flow)} left={left} />);
     await click(view.container, '[data-stepper-cancel]');
-    expect(view.container.querySelector('[data-stepper-saved]')).toBeNull();
     expect(text(view.container, '[data-stepper-stop]')).toBe('Stop, add no runtime');
     await click(view.container, '[data-stepper-stop]');
     expect(left).toEqual(['left']);

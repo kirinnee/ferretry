@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 
+import type { AgendaItem } from '@ferretry/protocol';
+
 import {
   agendaAge,
+  agendaKindMeta,
   agendaReference,
   collapsesByDefault,
   describeResponse,
@@ -9,6 +12,25 @@ import {
 } from '../../../src/features/agenda/agenda-board.tsx';
 
 describe('AgendaBoard', () => {
+  it('describes the answer each kind of ask needs, and fails closed on a kind it does not know', () => {
+    const meta = (ask: unknown, source: AgendaItem['source'] = 'agent-raised') =>
+      agendaKindMeta({ source, ask } as Pick<AgendaItem, 'source' | 'ask'>);
+    expect(meta(undefined, 'task')).toMatchObject({ tone: 'none', label: 'Blocked task' });
+    expect(meta(undefined, 'question').label).toBe('Question');
+    expect(meta(undefined).label).toBe('Agent request');
+    expect(meta(undefined, 'future' as AgendaItem['source']).label).toBe('Unknown source');
+    expect(meta({ kind: 'permission' }).action).toBe('Approve or reject');
+    expect(meta({ kind: 'multiple-choice', options: [] }).action).toBe('Choose an answer');
+    expect(meta({ kind: 'answer-review' }).action).toBe('Accept it, or ask for more');
+    expect(meta({ kind: 'open-question' }).action).toBe('Write an answer');
+    expect(meta({ kind: 'task' }).action).toBe('Do it, then mark it done — or ask for more info');
+    expect(meta({ kind: 'future-kind' })).toMatchObject({
+      tone: 'unknown',
+      label: 'Damaged Inbox',
+      action: 'The requested action is malformed. Repair it before treating this as resolved',
+    });
+  });
+
   it('distinguishes who dismissed an item from who answered or cleared it', () => {
     const agent = { resolvedBy: 'agent' as const, resolvedBySession: 'sess-agent-7' };
     const person = { resolvedBy: 'human' as const, resolvedBySession: null, resolvedByName: null };

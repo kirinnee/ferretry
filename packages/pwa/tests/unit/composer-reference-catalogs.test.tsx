@@ -252,6 +252,52 @@ describe('useComposerReferenceCatalogs', () => {
     run(() => view.unmount());
   });
 
+  const readWith = async (answer: (path: string) => unknown) => {
+    let latest: ReturnType<typeof useComposerReferenceCatalogs> | undefined;
+    const view = render(
+      <CatalogProbe
+        client={reader(answer)}
+        onCatalogs={catalogs => {
+          latest = catalogs;
+        }}
+        sessionId="session-a"
+      />,
+    );
+    await flushCatalogs();
+    run(() => view.unmount());
+    return latest;
+  };
+
+  test('keeps the skills when the attention route fails, and says so under Attention', async () => {
+    const catalogs = await readWith(path => {
+      if (path.endsWith('/attention')) throw new Error('attention unavailable');
+      return skillsListing;
+    });
+
+    expect(catalogs?.attention).toBeUndefined();
+    expect(catalogs?.skills?.harness).toBe('codex');
+    expect(catalogs?.failures).toEqual({ attention: 'attention unavailable' });
+  });
+
+  test('keeps Attention when the skills route fails, and says so under skills', async () => {
+    const catalogs = await readWith(path => {
+      if (path.endsWith('/attention')) return agendaListing();
+      throw new Error('skills unavailable');
+    });
+
+    expect(catalogs?.attention).toHaveLength(1);
+    expect(catalogs?.skills).toBeUndefined();
+    expect(catalogs?.failures).toEqual({ skills: 'skills unavailable' });
+  });
+
+  test('refuses an Agenda about another session without erasing the skills', async () => {
+    const catalogs = await readWith(path => (path.endsWith('/attention') ? agendaListing('session-b') : skillsListing));
+
+    expect(catalogs?.attention).toBeUndefined();
+    expect(catalogs?.skills?.harness).toBe('codex');
+    expect(catalogs?.failures.attention).toContain('session-b');
+  });
+
   test('fences a late answer after session navigation', async () => {
     const pending: Array<(value: unknown) => void> = [];
     const slow = reader(path =>
