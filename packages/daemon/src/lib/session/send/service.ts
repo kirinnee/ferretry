@@ -1116,6 +1116,8 @@ export class SessionSendService {
     // (two pastes whose placeholders read alike), neither is provably this one, and nothing is pressed.
     if (strandedSend(pane.draft, records)?.sendId !== record.sendId) return { outcome: 'refused', record };
     if (!(await this.provablyStranded(id, record))) return { outcome: 'refused', record };
+    // A taken-back pointer is pressed only when the box is the WHOLE pointer — never a clipped or edited drawing of it.
+    if (record.fate === 'delivered' && !sameComposerText(pane.draft, text)) return { outcome: 'refused', record };
     const counted = await this.ports.ledger.settle(id, record.sendId, { submitNudges: (record.submitNudges ?? 0) + 1 });
     return await this.finishStranded(await this.require(id), counted ?? record, by);
   }
@@ -1211,8 +1213,8 @@ export class SessionSendService {
     record: SendRecord,
     by: 'send' | 'daemon' | 'queue' | 'warden',
   ): Promise<{ readonly outcome: ComposerSubmitOutcome; readonly record: SendRecord }> {
-    const outcome = await this.ports.terminal.submitComposer(target.id, record.matchText ?? record.message);
     const retracted = record.fate === 'delivered';
+    const outcome = await this.ports.terminal.submitComposer(target.id, record.matchText ?? record.message, retracted);
     await this.ports.repository.journal(target.id, 'control.send_resubmitted', {
       sendId: record.sendId,
       outcome,
@@ -1258,6 +1260,9 @@ export class SessionSendService {
    * unprovable one is treated the same: nothing is pressed.
    */
   private async provablyStranded(id: SessionId, record: SendRecord): Promise<boolean> {
+    // A repaired retraction the tracker has not yet settled on its new user record is OPEN WITH EVIDENCE — no other
+    // send ever is (`reopenedRetraction`). Nothing proves the box's text is still ours then, so no path presses it.
+    if (record.evidence !== undefined && record.fate !== 'delivered') return false;
     if (record.fate !== 'delivered') return true;
     // ONE repair per send: a pointer pressed once already and taken back again is escalated, never pressed again.
     // Its earlier user records are no longer on the ledger, so a later recall could otherwise lean on a stale one.

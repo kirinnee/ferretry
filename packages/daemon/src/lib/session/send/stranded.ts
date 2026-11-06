@@ -172,7 +172,11 @@ export function showsOwnText(draft: string, text: string): boolean {
 export function strandedSend(draft: string, records: readonly SendRecord[]): SendRecord | undefined {
   const matches = records.filter(record => {
     const text = strandableText(record, records);
-    return text !== undefined && showsOwnText(draft, text);
+    if (text === undefined) return false;
+    // &B153: a DELIVERED pointer is claimed only as the whole pointer, re-wrapped at most. The clip tolerance below
+    // is for a send whose Enter never took; for one the harness took back it would claim a person's clipped or
+    // edited copy, which no transcript proof covers.
+    return record.fate === 'delivered' ? sameComposerText(draft, text) : showsOwnText(draft, text);
   });
   return matches.length === 1 ? matches[0] : undefined;
 }

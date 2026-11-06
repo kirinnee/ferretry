@@ -79,6 +79,13 @@ describe('a composer parked under Codex 0.166’s `Waiting for startup` line', (
     should(holdsExactly(frameOf('startup-queued-cancelled'), 'say hello')).be.true();
   });
 
+  it('&B153: in strict mode, holds only the whole text, re-wrapped at most', () => {
+    should(holdsExactly(frameOf('startup-queued-cancelled'), 'say hello', true)).be.true();
+    should(holdsExactly(frameOf('startup-queued-cancelled'), 'say\n  hello', true)).be.true();
+    should(holdsExactly(frameOf('startup-queued-cancelled'), 'say hello there', true)).be.false();
+    should(holdsExactly(frameOf('startup-queued-message'), 'say hello', true)).be.false();
+  });
+
   it('presses no Enter and no C-u at it', async () => {
     const submit = terminalOver('startup-queued-message');
     const clear = terminalOver('startup-queued-message');

@@ -269,3 +269,18 @@ describe('&B153: ordering by when a send was last typed (review)', () => {
     should(strandedSend(OURS, [pointerA, inlineB])?.sendId).equal('send-1');
   });
 });
+
+describe('&B153: a taken-back pointer is claimed only whole (review round 4)', () => {
+  const delivered = record({ fate: 'delivered' });
+
+  it('claims it re-wrapped, never clipped, cut short or edited', () => {
+    should(strandedSend(wrapped(OURS, 37), [delivered])?.sendId).equal('send-1');
+    const clipped = `${OURS.slice(0, OURS.indexOf('.md') + ' now, then'.length + 3)}…`;
+    should(strandedSend(clipped, [delivered])).be.undefined();
+    should(strandedSend(`${OURS.slice(0, OURS.indexOf('.md') + 3)} …`, [delivered])).be.undefined();
+    should(strandedSend(OURS.replace('carefully ', ''), [delivered])).be.undefined();
+    should(strandedSend(`${OURS} and also this`, [delivered])).be.undefined();
+    // The same clip of an OPEN send is still claimed, as B144 always did.
+    should(strandedSend(clipped, [record()])?.sendId).equal('send-1');
+  });
+});

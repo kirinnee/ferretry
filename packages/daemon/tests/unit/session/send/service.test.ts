@@ -225,8 +225,12 @@ class FakeTerminal implements SendTerminal {
     return this.clearOutcome;
   }
 
-  async submitComposer(): Promise<ComposerSubmitOutcome> {
+  /** Whether each Enter asked for the strict whole-text check (&B153). */
+  readonly submitStrict: boolean[] = [];
+
+  async submitComposer(_id?: SessionId, _text?: string, strict = false): Promise<ComposerSubmitOutcome> {
     this.calls.push('submitComposer');
+    this.submitStrict.push(strict);
     return this.submitOutcome;
   }
 
@@ -2552,6 +2556,32 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
       const built = taken([pane({ draft: POINTER })], new FakeRetraction(false), answered);
 
       should(await built.service.retractedDraft(ID)).be.undefined();
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'foreign' });
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('presses nothing for a repaired send before the tracker re-binds it, on any path (review round 4)', async () => {
+      const proof = new FakeRetraction(true);
+      const built = taken([pane({ draft: POINTER })], proof, delivered());
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('submitted');
+      should(built.terminal.submitStrict).eql([true]);
+      // Open with its old evidence; the box shows the pointer again — a second rewind, or a person's recall.
+      should(built.ledger.records.get('send-0')).match({ fate: 'accepted', submitNudges: 1 });
+
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'stuck', sendId: 'send-0', tried: false });
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
+      should(await built.service.resubmit(ID, 'send-0')).match({ submitNudges: 1 });
+      const refusal = await built.service.send(request()).catch((error: unknown) => error);
+      should(refusal).be.instanceof(SendRefused);
+      should(built.terminal.calls.filter(call => call === 'submitComposer')).have.length(1);
+    });
+
+    it('claims and presses a taken-back pointer only whole, never a clipped drawing of it (review round 4)', async () => {
+      const clipped = `${POINTER.slice(0, POINTER.indexOf('.md') + 12)}…`;
+      const built = taken([pane({ draft: clipped })], new FakeRetraction(true), delivered());
+
+      should(await built.service.retractedDraft(ID)).be.undefined();
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
       should(await built.service.finishOwnDraft(ID)).eql({ kind: 'foreign' });
       should(built.terminal.calls).not.containEql('submitComposer');
     });
