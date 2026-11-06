@@ -1108,7 +1108,13 @@ described](#what-is-read-and-what-is-described), [Which voice](#which-voice)); L
   away, and with the page. **A hidden tab hears nothing, at any moment:** the reader watches the tab's visibility, so
   hiding it during the 500 ms settle cancels the pending reading before it starts, hiding it while it speaks stops the
   voice, and coming back to the tab never starts it again (a device that cannot speak reads nothing either; the form is on
-  screen). While it
+  screen). **A stop that stands stays a stop:** if the tab was hidden while Live was Working (the hide is latched, and
+  coming back does not undo it), or the person typed (typing holds Live), the question is **not** handed over — it is on
+  screen as the form, and nothing is read — because those stops end only at an explicit
+  Resume, and Resume went with the composer (`mayHandOffQuestion` in `live-machine.ts`). **Only the question form
+  replacing the composer is a hand-off:** the whole page leaving also unmounts the composer, and the page leaving never
+  starts speech (an in-composer prompt, a permission or a harness dialog, is read by Live itself; the hook refuses to begin
+  once its page is gone, so a late unmount of the composer cannot start a reader on a page that left). While it
   speaks the page's Auto-read stays out of the way, and the composer's unmount tells the page Live is off (it used to
   stay "on", leaving Auto-read suspended). A question that arrives while Live is only Listening is not read: Live was
   not waiting on the ferret. `session-chat-page-live-question.test.tsx` proves it through the real page.

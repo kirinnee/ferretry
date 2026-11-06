@@ -22,6 +22,7 @@ import {
   type LivePhase,
   type LiveState,
   liveReduce,
+  mayHandOffQuestion,
   micIsOpen,
   resolveGraceMs,
   SETTLE_MS,
@@ -1420,5 +1421,48 @@ describe('liveReduce — totality', () => {
         if (phase === 'sending') should(state.wordsReady || event.type === 'turn-words').be.true();
       }
     }
+  });
+});
+
+describe('mayHandOffQuestion: which Live may give its question to the reader that outlives the composer', () => {
+  const at = (patch: Partial<LiveState>): LiveState => ({ ...INITIAL_LIVE_STATE, ...patch });
+  it('a Live that was Working on the ferret, or Reading to the person, with no stop standing, may', () => {
+    should(mayHandOffQuestion(at({ phase: 'working' }))).be.true();
+    should(mayHandOffQuestion(at({ phase: 'reading', readKind: 'reply' }))).be.true();
+  });
+  it('a Live that was not waiting on the ferret may not', () => {
+    for (const phase of ['off', 'starting', 'listening', 'hearing', 'sending', 'hold', 'paused'] as const)
+      should(mayHandOffQuestion(at({ phase }))).be.false();
+  });
+  it('every stop that stands keeps it silent: a hidden tab, a LATCHED hide, typing, a hold, a pause', () => {
+    should(mayHandOffQuestion(at({ phase: 'working', hidden: true }))).be.false();
+    should(mayHandOffQuestion(at({ phase: 'working', hiddenHold: true }))).be.false();
+    should(mayHandOffQuestion(at({ phase: 'working', typingHold: true }))).be.false();
+    should(mayHandOffQuestion(at({ phase: 'reading', typingHold: true }))).be.false();
+    should(mayHandOffQuestion(at({ phase: 'working', holdReason: 'user' }))).be.false();
+    should(mayHandOffQuestion(at({ phase: 'working', pauseReason: 'hidden' }))).be.false();
+  });
+  it('is the state the machine really leaves: a hide latched in Working survives coming back', () => {
+    const working = run([
+      {
+        type: 'start',
+        voiceBusy: false,
+        atMs: 0,
+        canSend: true,
+        visible: true,
+        graceMs: 0,
+        canRead: true,
+        tapToListen: false,
+      },
+    ]).state;
+    const latched = liveReduce(
+      liveReduce({ ...working, phase: 'working' }, { type: 'visibility', visible: false }).state,
+      {
+        type: 'visibility',
+        visible: true,
+      },
+    ).state;
+    should(latched.hiddenHold).be.true();
+    should(mayHandOffQuestion(latched)).be.false();
   });
 });

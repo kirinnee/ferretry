@@ -150,7 +150,7 @@ describe('useLiveVoiceControl', () => {
       <Host
         props={props({
           onActiveChange: active => void seen.push(active),
-          onRetire: phase => void retired.push(phase),
+          onRetire: live => void retired.push(live.phase),
           seams: { ports: fake.ports },
         })}
         onControl={next => (control = next)}
@@ -167,7 +167,7 @@ describe('useLiveVoiceControl', () => {
   it('a control that leaves with Live OFF retires nothing', async () => {
     const retired: string[] = [];
     const view = await mount(
-      <Host props={props({ onRetire: phase => void retired.push(phase) })} onControl={() => undefined} />,
+      <Host props={props({ onRetire: live => void retired.push(live.phase) })} onControl={() => undefined} />,
     );
     await view.unmount();
     expect(retired).toEqual([]);
