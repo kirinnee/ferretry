@@ -128,7 +128,10 @@ const fakeClient = (hold: Gate[] | null = null) => {
     rollup,
     hydrate: revalidate,
     revalidate,
-  } as unknown as DaemonAgendaClient;
+  } satisfies Pick<
+    DaemonAgendaClient,
+    'store' | 'wires' | 'rollup' | 'hydrate' | 'revalidate'
+  > as unknown as DaemonAgendaClient;
 };
 
 const quietTimers: DeferredTimers = { setTimeout: () => 0, clearTimeout: () => undefined, now: () => NOW };

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { type FyEvent, MACHINE_AGENDA_ID, type SessionView } from '@ferretry/protocol';
 import { useEffect, useSyncExternalStore } from 'react';
+import { unitClock } from '../../../daemon/tests/support/unit-clock.ts';
 import { useAgendaInboxModel } from '../../src/hooks/use-agenda-inbox.ts';
 import {
   useMachinesPoll,
@@ -11,9 +12,10 @@ import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { DaemonFleetStore } from '../../src/lib/fleet-store.ts';
-import { listClock, listDeferred, flushListReads } from '../support/list-refresh.ts';
+import { listClock, listDeferred } from '../support/list-refresh.ts';
 import { interact, mount, type Mounted } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
+import { settleUntil } from '../support/settle.ts';
 
 const machine = daemonConnection({ daemonId: 'machine', baseUrl: 'https://machine.invalid', deviceId: 'device' });
 const machines = [machine];
@@ -142,6 +144,18 @@ const setup = () => {
   };
 };
 type Subject = ReturnType<typeof setup>;
+/** Response.json() may finish on a real task; wait for the published board, not a microtask budget. */
+const settleLists = async (subject: Subject, previous?: ReturnType<Subject['agenda']['store']['agenda']>) => {
+  await settleUntil(
+    () =>
+      subject.fleet.fleet(machine.daemonId).status === 'ready' &&
+      subject.agenda.store.status(scope) === 'ready' &&
+      subject.agenda.store.agenda(scope) !== previous,
+    'session list and fresh machine agenda published',
+    interact,
+  );
+  return subject.agenda.store.agenda(scope);
+};
 function Poller({ subject }: { subject: Subject }) {
   useMachinesPoll(
     subject.fleet,
@@ -220,7 +234,7 @@ describe('shared whole-list traffic', () => {
         ))}
       </div>,
     );
-    await flushListReads();
+    await settleLists(subject);
     await view.render(
       <div>
         {readers.map(reader => (
@@ -243,12 +257,14 @@ describe('shared whole-list traffic', () => {
     const subject = setup();
     view = await mount(<Poller subject={subject} />);
     subject.stream().idle();
+    const previous = await settleLists(subject);
     // Act
     for (let index = 0; index < 50; index += 1) {
       subject.stream().event(event('turn.state'));
       subject.stream().event(event('agenda.changed', MACHINE_AGENDA_ID));
       await subject.clock.advance(200);
     }
+    await settleLists(subject, previous);
     // Assert
     expect(subject.reads.sessions).toBe(2);
     expect(subject.reads.agenda).toBe(2);
@@ -263,10 +279,6 @@ describe('shared whole-list traffic', () => {
       'surface.takeover',
       'surface.handback',
       'surface.handed',
-      'board.changed',
-      'output.delta',
-      'browser.changed',
-      'terminal.output',
     ])
       subject.stream().event(event(type));
     await subject.clock.advance(10_000);
@@ -300,12 +312,14 @@ describe('shared whole-list traffic', () => {
     const subject = setup();
     view = await mount(<Poller subject={subject} />);
     subject.stream().idle();
+    const previous = await settleLists(subject);
     // Act
     subject.stream().end();
-    await flushListReads();
+    await interact(() => unitClock.turn());
     await subject.clock.advance(1_000);
     subject.stream(1).idle();
     await subject.clock.advance(9_000);
+    await settleLists(subject, previous);
     // Assert
     expect(subject.reads.sessions).toBe(2);
     expect(subject.reads.agenda).toBe(2);
@@ -319,9 +333,10 @@ describe('shared whole-list traffic', () => {
     const subject = setup();
     view = await mount(<Poller subject={subject} />);
     subject.stream().idle();
+    let previous = await settleLists(subject);
     // Act: a live, recently read list has no safety traffic.
     subject.tick();
-    await flushListReads();
+    await interact(() => unitClock.turn());
     expect(subject.reads.sessions).toBe(1);
     expect(subject.reads.agenda).toBe(1);
     for (let index = 0; index < 5; index += 1) {
@@ -329,14 +344,14 @@ describe('shared whole-list traffic', () => {
       await subject.clock.advance(60_000);
     }
     subject.tick();
-    await flushListReads();
+    previous = await settleLists(subject, previous);
     expect(subject.reads.sessions).toBe(2);
     expect(subject.reads.agenda).toBe(2);
     subject.stream().end();
-    await flushListReads();
+    await interact(() => unitClock.turn());
     await subject.clock.advance(60_000);
     subject.tick();
-    await flushListReads();
+    previous = await settleLists(subject, previous);
     expect(subject.reads.sessions).toBe(3);
     expect(subject.reads.agenda).toBe(3);
     // Assert: hidden safety beats do nothing; returning reconciles once through the same budget.
@@ -346,7 +361,7 @@ describe('shared whole-list traffic', () => {
     expect(subject.reads.sessions).toBe(3);
     expect(subject.reads.agenda).toBe(3);
     subject.show();
-    await flushListReads();
+    await settleLists(subject, previous);
     expect(subject.reads.sessions).toBe(4);
     expect(subject.reads.agenda).toBe(4);
   });
@@ -413,7 +428,7 @@ describe('shared whole-list traffic', () => {
     subject.agenda.noteEvent(machine, event('agenda.changed', 'unread-session'));
     expect(subject.reads.agenda).toBe(0);
     subject.agenda.noteEvent(machine, event('attention.changed', MACHINE_AGENDA_ID));
-    await flushListReads();
+    await subject.agenda.hydrate(machine, scope);
     expect(subject.reads.agenda).toBe(1);
     let reads = 0;
     const sessionClient = new DaemonAgendaClient(undefined, async () => {
@@ -421,8 +436,13 @@ describe('shared whole-list traffic', () => {
       return Response.json({ ...board(), sessionId: 's' });
     });
     await sessionClient.hydrate(machine, daemonSessionScope(machine, 's'));
+    const previous = sessionClient.store.agenda(daemonSessionScope(machine, 's'));
     sessionClient.noteEvent(machine, event('agenda.changed'));
-    await flushListReads();
+    await settleUntil(
+      () => sessionClient.store.agenda(daemonSessionScope(machine, 's')) !== previous,
+      'refreshed session board published',
+      interact,
+    );
     // Assert
     expect(reads).toBe(2);
     expect(() =>
@@ -450,6 +470,7 @@ describe('shared list freshness regressions', () => {
       const subject = setup();
       view = await mount(<Poller subject={subject} />);
       subject.stream().idle();
+      await settleLists(subject);
       subject.sessions([sessionView('s', { state: { status: 'waiting' } })]);
       subject.stream().event(event(type));
       await subject.clock.advance(10_000);
@@ -466,9 +487,7 @@ describe('shared list freshness regressions', () => {
       </>,
     );
     subject.stream().idle();
-    await interact(async () => {
-      await flushListReads();
-    });
+    await settleLists(subject);
     expect(subject.reads.agenda).toBe(1);
     await interact(async () => {
       await subject.clock.advance(10_000);
@@ -497,5 +516,24 @@ describe('shared list freshness regressions', () => {
     await first;
     await clock.advance(6_000);
     expect(fleet.session(daemonSessionScope(machine, 's'))?.state.status).toBe('waiting');
+  });
+
+  it('refreshes a session auto-title and focus changed by a board write', async () => {
+    // Arrange: BoardService.afterWrite updates both fields through StorageSessionFocus.
+    const subject = setup();
+    view = await mount(<Poller subject={subject} />);
+    subject.stream().idle();
+    await settleLists(subject);
+    const updated = sessionView('s', {
+      config: { name: 'Updated task title', nameSource: 'auto', focusTask: { id: 'F123' } },
+    });
+    // Act
+    subject.sessions([updated]);
+    subject.stream().event(event('board.changed'));
+    await subject.clock.advance(10_000);
+    // Assert
+    expect(subject.fleet.session(daemonSessionScope(machine, 's'))?.config.name).toBe('Updated task title');
+    expect(subject.fleet.session(daemonSessionScope(machine, 's'))?.config.focusTask).toEqual({ id: 'F123' });
+    expect(subject.reads.sessions).toBe(2);
   });
 });

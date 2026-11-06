@@ -87,7 +87,20 @@ const fakeClient = (boards: ReadonlyMap<string, AgendaSnapshot>) => {
     discuss: record('discuss'),
     snooze: record('snooze'),
     unsnooze: record('unsnooze'),
-  } as unknown as DaemonAgendaClient;
+  } satisfies Pick<
+    DaemonAgendaClient,
+    | 'store'
+    | 'wires'
+    | 'rollup'
+    | 'hydrate'
+    | 'revalidate'
+    | 'respond'
+    | 'resolve'
+    | 'dismiss'
+    | 'discuss'
+    | 'snooze'
+    | 'unsnooze'
+  > as unknown as DaemonAgendaClient;
   return { client, calls };
 };
 

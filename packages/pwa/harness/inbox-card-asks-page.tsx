@@ -16,6 +16,8 @@ import type { DaemonAgendaClient } from '../src/lib/agenda-client.ts';
 import { AgendaRollupStore } from '../src/lib/agenda-rollup.ts';
 import { DaemonAgendaStore } from '../src/lib/agenda-store.ts';
 import { AgendaWireDirectory } from '../src/lib/agenda-wire.ts';
+import type { DaemonConnection } from '../src/lib/daemon-connection.ts';
+import type { DaemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { toTestCards } from '../src/lib/to-test-inbox.ts';
 import { AppBar, AppTabBar } from '../src/shell/app-bar.tsx';
 import { SessionsBarAgenda } from '../src/shell/sessions-bar-agenda.tsx';
@@ -63,14 +65,19 @@ wires.note(laptop.daemonId, {
   kind: 'read',
   health: healthOf('4.120.0', MODERN ? [DAEMON_FEATURES.agendaCardAsks] : []),
 });
+const loadBoard = async (_daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> => {
+  if (scope.sessionId === SESSION_ID) store.applySnapshot(scope, BOARD);
+};
 const client = {
   store,
   wires,
   rollup: new AgendaRollupStore(async () => new Response(JSON.stringify({ sessions: [] }), { status: 200 })),
-  revalidate: async (_daemon: unknown, scope: { readonly sessionId: string }) => {
-    if (scope.sessionId === SESSION_ID) store.applySnapshot(scope as never, BOARD);
-  },
-} as unknown as DaemonAgendaClient;
+  hydrate: loadBoard,
+  revalidate: loadBoard,
+} satisfies Pick<
+  DaemonAgendaClient,
+  'store' | 'wires' | 'rollup' | 'hydrate' | 'revalidate'
+> as unknown as DaemonAgendaClient;
 
 const tested = (id: string, title: string, minutes: number, extra: Record<string, unknown> = {}) =>
   card(id, {

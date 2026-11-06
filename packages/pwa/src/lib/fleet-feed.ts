@@ -67,19 +67,14 @@ export interface FleetFeedControl {
 /** A daemon that does not know `tail` refuses the upgrade with 400; nothing else says "too old". */
 const refusedAsTooOld = (reason: unknown): boolean => (reason as { readonly status?: unknown } | null)?.status === 400;
 
-/** Payload-only events have no session-row facts. Unknown state events must still invalidate. */
-const LIST_NEUTRAL_EVENTS = new Set([
-  ...Object.values(SURFACE_EVENT_TYPES),
-  'surface.control',
-  'board.changed',
-  'output.delta',
-  'terminal.output',
-  'browser.changed',
-]);
+/** SurfaceControl changes only surface maps and journals them, never session config/state or agendas. */
+const LIST_NEUTRAL_EVENTS = new Set<string>(Object.values(SURFACE_EVENT_TYPES));
 
 // Lifecycle, observer, send, resume and signal transitions (including interaction.help) all
 // change row facts. Agenda summaries are changed by agenda.changed / attention.changed;
-// the machine board belongs only to the agenda source. Default to reading new event types.
+// the machine agenda belongs only to the agenda source. Board writes can update a session's
+// focusTask and auto-title (StorageSessionFocus), so board.changed also invalidates the list.
+// Default to reading new event types.
 const movesTheList = (event: FyEvent): boolean =>
   !LIST_NEUTRAL_EVENTS.has(event.type) &&
   !(isMachineAgendaId(event.sessionId) && (event.type === 'agenda.changed' || event.type === 'attention.changed'));

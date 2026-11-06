@@ -115,7 +115,7 @@ describe('startFleetFeed', () => {
     control.stop();
   });
 
-  it('should hand every event to onEvent, and let a board event move no list row', async () => {
+  it('should hand every event to onEvent, and invalidate board writes that can rename a session', async () => {
     // Arrange
     const time = handTime();
     const feed = daemon();
@@ -136,7 +136,7 @@ describe('startFleetFeed', () => {
 
     // Assert
     should(seen).eql(['board.changed', 'surface.driving']);
-    should(reads).equal(0);
+    should(reads).equal(1);
     control.stop();
   });
 

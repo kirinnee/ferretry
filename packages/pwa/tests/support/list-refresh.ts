@@ -1,6 +1,6 @@
 import type { ListRefreshEnvironment } from '../../src/lib/list-refresh.ts';
 
-export const flushListReads = async (): Promise<void> => {
+const flushListReads = async (): Promise<void> => {
   for (let index = 0; index < 30; index += 1) await Promise.resolve();
 };
 
