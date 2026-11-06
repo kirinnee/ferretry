@@ -1066,7 +1066,7 @@ export class SessionSendService {
       if (pane.draft === undefined) return { kind: 'clear' as const };
       const stranded = strandedSend(pane.draft, await this.ports.ledger.list(id));
       // A delivered pointer nothing proves the harness took back is a person's to deal with (&B153): a recall.
-      if (stranded === undefined || !(await this.provablyStranded(id, stranded))) return { kind: 'foreign' as const };
+      if (stranded === undefined || !(await this.ours(id, stranded))) return { kind: 'foreign' as const };
       const outcome = await this.enterOwnText(id, stranded, 'queue', STRANDED_ENTER_LIMIT, pane);
       return outcome.outcome === 'submitted'
         ? { kind: 'clear' as const }
@@ -1259,6 +1259,17 @@ export class SessionSendService {
    */
   private async provablyStranded(id: SessionId, record: SendRecord): Promise<boolean> {
     if (record.fate !== 'delivered') return true;
+    // ONE repair per send: a pointer pressed once already and taken back again is escalated, never pressed again.
+    // Its earlier user records are no longer on the ledger, so a later recall could otherwise lean on a stale one.
+    return (record.submitNudges ?? 0) === 0 && (await this.ours(id, record));
+  }
+
+  /**
+   * Whether the box's text is provably a send of ours at all: any unsettled one, or a delivered pointer the transcript
+   * proves was never answered (&B153). Ours is not the same as pressable — see {@link provablyStranded}.
+   */
+  private async ours(id: SessionId, record: SendRecord): Promise<boolean> {
+    if (record.fate !== 'delivered') return true;
     const proof = this.ports.retraction;
     return proof !== undefined && (await proof.unanswered(id, record).catch(() => false));
   }
@@ -1275,9 +1286,9 @@ export class SessionSendService {
       const pane = await this.ports.terminal.observe(id);
       if (!this.finishable(pane) || pane.draft === undefined) return undefined;
       const stranded = strandedSend(pane.draft, records);
-      return stranded?.fate === 'delivered' && (await this.provablyStranded(id, stranded))
-        ? stranded.sendId
-        : undefined;
+      // Flagged when provably ours, so one already repaired once is still reported and the Warden escalates it —
+      // `resubmitStuck` refuses to press it again (`provablyStranded`).
+      return stranded?.fate === 'delivered' && (await this.ours(id, stranded)) ? stranded.sendId : undefined;
     });
   }
 

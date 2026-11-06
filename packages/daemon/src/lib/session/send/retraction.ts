@@ -12,6 +12,14 @@ import type { SendRecord } from './types.ts';
  * pointer is the harness's to finish ONLY when its own user record is in the transcript and NOTHING names it as
  * a parent. Anything less — another harness, a record outside what was read, an unreadable file — is
  * `unknown`, and an unknown is never pressed: the text stays for a person.
+ *
+ * ONE REPAIR PER SEND. The send path presses a taken-back pointer once; taken back again it is flagged and escalated,
+ * never pressed again — its earlier user records are no longer on the ledger to prove anything against.
+ *
+ * DECLARED GAP: the proof says the RECORD was never answered, not who put the text in the box now. A person who
+ * clears a taken-back pointer and types or recalls exactly the same pointer gets it pressed. That text is byte for
+ * byte this session's own unanswered turn instruction, so the press does what both meant; any edit breaks the exact
+ * match and nothing is pressed.
  */
 
 /** What the transcript proves about the answer to one user record. */

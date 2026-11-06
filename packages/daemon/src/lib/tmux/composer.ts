@@ -150,6 +150,10 @@ const COUNTLESS_CLAUDE_PASTE = /^\[Pasted text #(\d+)\]$/iu;
  * use this, and only for the chip whose counter it saw right after its own paste landed in a composer it had
  * proven empty — a replacement paste draws a new counter. On 2026-11-06 refusing it outright left a
  * 1,550-character one-line owner decision typed and unsent in a lead's box for 40 minutes.
+ *
+ * DECLARED GAP: the landing frame is the first one that shows the chip. A person who cleared our paste and pasted
+ * their own one-line draft BEFORE that frame — within the fill's first look, ~100 ms on a responsive pane — would be
+ * taken for ours. The counted chips this path always pressed have the same window for a paste of the same count.
  */
 export function countlessPasteOf(composer: string, text: string): string | undefined {
   if (composerTransport(text) !== 'paste' || text.includes('\n')) return undefined;

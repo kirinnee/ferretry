@@ -2533,6 +2533,29 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
       should(built.terminal.calls).not.containEql('submitComposer');
     });
 
+    it('repairs a send ONCE: taken back again, it is flagged and escalated but never pressed (review round 3)', async () => {
+      // Repair 1 re-opened it and the tracker settled it on its NEW user record; that one was taken back too.
+      const again = delivered({
+        submitNudges: 1,
+        evidence: { ...delivered().evidence!, key: 'e7d3ded4-47ac-4b92-ac07-c5ebc422f393' },
+      });
+      const built = taken([pane({ draft: POINTER })], new FakeRetraction(true), again);
+
+      should(await built.service.retractedDraft(ID)).equal('send-0');
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'stuck', sendId: 'send-0', tried: false });
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('reports nothing once a repaired send was answered: a later recall of it is a person’s', async () => {
+      const answered = delivered({ submitNudges: 1 });
+      const built = taken([pane({ draft: POINTER })], new FakeRetraction(false), answered);
+
+      should(await built.service.retractedDraft(ID)).be.undefined();
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'foreign' });
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
     it('never lets the tracker’s nudge press a delivered send', async () => {
       const built = taken([pane({ draft: POINTER })], new FakeRetraction(true), delivered());
 
