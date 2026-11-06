@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { TWO_FACTOR_STAGE_TTL_SECONDS } from '../../src/lib/accounts.ts';
 import { durationWords, timesWords } from '../../src/lib/common.ts';
-import { DAEMON_FEATURES, terminalRulesOffered } from '../../src/lib/daemon-features.ts';
+import { DAEMON_FEATURES, terminalRulesOffered } from '../../src/lib/daemon-features/index.ts';
 import {
   AUTOMATED_CODE_ACK_WORDS,
   AUTOMATED_CODE_WARNING,

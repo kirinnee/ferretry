@@ -78,7 +78,7 @@ characters`.
 **The rule.** A change that raises a limit, adds a request field, or leans on a route or response field
 an older daemon lacks must **gate the app on the daemon's own report**, not on the app's version:
 
-1. Name the feature in `DAEMON_FEATURES` (`packages/protocol/src/lib/daemon-features.ts`). The daemon
+1. Name the feature in `DAEMON_FEATURES` (`packages/protocol/src/lib/daemon-features/index.ts`). The daemon
    reports the list on `GET /v1/health` › `features` (`runtime/mounts/health.ts`); a daemon from before
    the list reports none.
 2. The app reads it (`useDaemonHealth`) and asks `machineOffers` / `machineLacks`

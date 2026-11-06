@@ -19,7 +19,7 @@ import {
   parseGateFollowupReference,
   parseGateReference,
 } from '../../src/lib/agenda-gate.ts';
-import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features.ts';
+import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features/index.ts';
 
 const AT = '2026-11-01T09:00:00.000Z';
 

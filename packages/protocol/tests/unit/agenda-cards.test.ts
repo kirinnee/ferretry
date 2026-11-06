@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { AgendaItemSchema, MAX_AGENDA_CARDS } from '../../src/lib/agenda.ts';
-import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features.ts';
+import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features/index.ts';
 
 const NOTICE = {
   id: 'A7',
