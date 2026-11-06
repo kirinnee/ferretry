@@ -648,13 +648,6 @@ describe('DaemonUpdater — consent', () => {
     should(terminal.report().outcome).equal('succeeded');
   });
 
-  it('accepts --anyway, which every update now is', async () => {
-    const h = harness('homebrew', { midTurn: [3] });
-    await h.run({ yes: true, anyway: true, report: '/r.json' });
-    should(h.out.text).match(/3 ferrets are mid-turn; they keep running/u);
-    should(h.report().outcome).equal('succeeded');
-  });
-
   it('waits for idle with --when-idle', async () => {
     const h = harness('homebrew', { midTurn: [2, 1, 0] });
     await h.run({ yes: true, whenIdle: true, report: '/r.json' });

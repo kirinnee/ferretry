@@ -381,11 +381,11 @@ describe('agenda brief steps and body', () => {
 });
 
 describe('agenda brief to-do asks', () => {
-  it('should make steps with no question a task, and let --task or --kind task force it', () => {
+  it('should make steps with no question a task, and let --kind todo force it', () => {
     // Arrange / Act
     const implied = add(['Log in'], { step: ['Run `fy login`'] });
     const forced = add(['Log in'], { task: true });
-    const named = add(['Log in'], { kind: 'task' });
+    const named = add(['Log in'], { kind: 'todo' });
     const open = add(['Why?'], {});
 
     // Assert
@@ -458,12 +458,12 @@ describe('agenda brief card kinds and answers', () => {
 
   it('should compose a task: Mark as done on the right, and nothing else', () => {
     // Act
-    const request = add(['Log in'], { kind: 'task' });
+    const request = add(['Log in'], { kind: 'todo' });
 
     // Assert
     should(request.kind).equal('task');
     should(request.ask).deepEqual({ kind: 'task' });
-    should(answersOf({ kind: 'task' })).deepEqual(['right:done:Mark as done']);
+    should(answersOf({ kind: 'todo' })).deepEqual(['right:done:Mark as done']);
   });
 
   it('should compose a yesno with its own Yes and No', () => {
@@ -587,7 +587,7 @@ describe('agenda brief card kinds and answers', () => {
 describe('agenda brief up answer', () => {
   it('should add Skip on the up swipe of a task, which dismisses', () => {
     // Act
-    const request = add(['Log in'], { kind: 'task', up: 'Skip it', upWhy: 'Not needed now' });
+    const request = add(['Log in'], { kind: 'todo', up: 'Skip it', upWhy: 'Not needed now' });
 
     // Assert
     should(request.answers).deepEqual([
@@ -610,10 +610,10 @@ describe('agenda brief up answer', () => {
 
   it('should take the up answer from a JSON body as a string or an object', () => {
     // Act
-    const text = add(['x'], { kind: 'task' }, parseBriefFile(JSON.stringify({ up: 'Skip' })));
+    const text = add(['x'], { kind: 'todo' }, parseBriefFile(JSON.stringify({ up: 'Skip' })));
     const object = add(
       ['x'],
-      { kind: 'task' },
+      { kind: 'todo' },
       parseBriefFile(JSON.stringify({ up: { label: 'Skip', description: 'Later' } })),
     );
 
@@ -628,7 +628,7 @@ describe('agenda brief up answer', () => {
       /--up only fits --kind todo .* or --kind permission .*, not choice/u,
     );
     should(() => add(['x'], { kind: 'review', up: 'Maybe' })).throw(/--up only fits/u);
-    should(() => add(['x'], { kind: 'task', upWhy: 'because' })).throw(/--up-why describes --up/u);
+    should(() => add(['x'], { kind: 'todo', upWhy: 'because' })).throw(/--up-why describes --up/u);
   });
 });
 

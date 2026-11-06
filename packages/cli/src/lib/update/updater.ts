@@ -39,11 +39,6 @@ export interface DaemonUpdateOptions {
   readonly yes?: boolean;
   /** Wait until no ferret is mid-turn. Without it the update goes ahead: ferrets keep running. */
   readonly whenIdle?: boolean;
-  /**
-   * Accepted and ignored: it once said "restart even though ferrets are mid-turn", which is now what
-   * every update does. Kept so a script or an older daemon's launch that passes it still works.
-   */
-  readonly anyway?: boolean;
   /** Consent to move a `nix shell` daemon into the nix profile. */
   readonly switchToProfile?: boolean;
   /** Write the outcome here as an `UpdateReport` when finished, whatever it was. */
@@ -110,7 +105,7 @@ type Applied =
  * The contract and its reasons are `docs/updating.md`. Two rules shape every branch here:
  *
  * NOTHING CHANGES WITHOUT CONSENT. A terminal is asked; a script passes `--yes`; the daemon, which
- * already asked its person in the app, passes `--yes --anyway`. A `nix shell` daemon additionally needs
+ * already asked its person in the app, passes `--yes`. A `nix shell` daemon additionally needs
  * `--switch-to-profile`, because that switch rewrites the service definition.
  *
  * THE OUTCOME ALWAYS GETS WRITTEN. With `--report`, the file is written on every path that gets past

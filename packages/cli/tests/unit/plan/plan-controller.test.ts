@@ -11,7 +11,7 @@ import {
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
-import { COPY_FERRET_REFUSAL } from '../../../src/lib/plan/controller';
+import { OWNER_COMMAND_REFUSAL } from '../../../src/lib/daemon/owner-only';
 import { PlanController } from '../../../src/lib/plan/plan-controller';
 import type { IPlanGateway, PlanPorts } from '../../../src/lib/plan/ports';
 
@@ -171,7 +171,7 @@ describe('fy plan: who may run it', () => {
       failure(withCredential.controller.revoke('feed', [], {})),
     ]);
 
-    should(new Set(refusals)).eql(new Set([COPY_FERRET_REFUSAL]));
+    should(new Set(refusals)).eql(new Set([OWNER_COMMAND_REFUSAL]));
     should([inPane.gateway.calls, withCredential.gateway.calls]).eql([[], []]);
   });
 });

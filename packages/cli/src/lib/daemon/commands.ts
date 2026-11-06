@@ -1,4 +1,4 @@
-import { type Command, Option } from 'commander';
+import type { Command } from 'commander';
 import type { StateHomeAdoptOptions, StateHomeController } from '../state-home/controller.ts';
 import type { DaemonUpdateOptions, DaemonUpdater } from '../update/updater.ts';
 import type { DaemonCommandOptions, DaemonController, DaemonResetOptions, DaemonRestartOptions } from './controller.ts';
@@ -88,7 +88,6 @@ export function registerDaemonCommands(
     .option('--to <version>', 'update to this version rather than the latest release')
     .option('-y, --yes', 'skip the confirmation; required when not on a terminal')
     .option('--when-idle', 'wait until no ferret is mid-turn before restarting; without it, ferrets keep running')
-    .addOption(new Option('--anyway', 'accepted for older scripts; every update now goes ahead mid-turn').hideHelp())
     .option(
       '--switch-to-profile',
       'move a daemon run from a nix shell into your nix profile, which fixes updates for good',

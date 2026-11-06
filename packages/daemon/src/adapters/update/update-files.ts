@@ -94,7 +94,7 @@ export interface CliUpdateLauncherOptions {
 /**
  * `<client> daemon update --yes --to <target> --report <file>`, detached.
  *
- * `--anyway` because the daemon already decided: it refused a mid-turn update without consent, or
+ * `--yes` because the daemon already decided: it refused a mid-turn update without consent, or
  * waited for idle. The child outlives the daemon's restart — the systemd unit kills only the daemon
  * (`KillMode=process`) and the launchd agent abandons its process group — and its report is the one
  * thing that crosses that restart.

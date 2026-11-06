@@ -255,10 +255,7 @@ function mountVerbs(
       .option(`-k, --kind <kind>`, `what the human does: ${ASK_KIND_NAMES.join(', ')}`)
       .option('--up <label>', 'the extra up-swipe answer of a todo (dismisses, e.g. "Skip") or a permission (approves)')
       .option('--up-why <line>', 'one line that describes the --up answer')
-      .option(
-        '--task [card]',
-        'the board card this item belongs to (F18 or &F18; your focus card when omitted); a bare --task is the older --todo',
-      )
+      .option('--task <card>', 'the board card this item belongs to (F18 or &F18; your focus card when omitted)')
       .option(
         '--offer-close',
         'give the owner a "Done · closes <card>" button: one tap resolves this item AND closes its card (needs --task, or your focus card; on by default for a to-do or review on a card waiting to be tried)',
@@ -268,10 +265,7 @@ function mountVerbs(
         '--related <id>',
         'work this belongs to: a card (F12) links it there; an agenda item (A3) is edited, not duplicated',
       )
-      .option(
-        '--new [why]',
-        'open a new agenda although open ones are listed: say why none fits (a bare --new is deprecated)',
-      )
+      .option('--new <why>', 'open a new agenda although open ones are listed: say why none fits')
       .option(
         '-o, --option <label>',
         'a choice label, or "Label: why" to add its one-line detail; repeat for each option',
@@ -458,7 +452,6 @@ function mountVerbs(
       .option('--by <time>', 'when it is needed: ISO, "in 3h" or a clock time like 17:00')
       .option('--clear-by', 'drop when it is needed')
       .option('--now', 'it is urgent: wake the item even though the owner snoozed it (at most once an hour)')
-      .option('--back', 'retired: answer with `agenda answer`, or ask anew with --kind')
       .addHelpText('after', `\n${AGENDA_BODY_RULE}`),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.edit(id, merged<AgendaEditOptions>(command));

@@ -11,12 +11,11 @@ import {
 
 /**
  * The kinds a card is raised as, keyed by the names `--kind` accepts — the older spellings included. A to-do is
- * `todo`, because "task" means a board card (`fy task`, `--task <card>`); `task` is still read, and stays the
- * wire value so a released daemon's strict add schema keeps accepting it.
+ * `todo`, because "task" means a board card (`fy task`, `--task <card>`); `task` stays the wire value so a released
+ * daemon's strict add schema keeps accepting it.
  */
 const KINDS = new Map<string, AgendaKind>([
   ['todo', 'task'],
-  ['task', 'task'],
   ['yesno', 'yesno'],
   ['permission', 'permission'],
   ['choice', 'choice'],

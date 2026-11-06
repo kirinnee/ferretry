@@ -824,7 +824,6 @@ never the owner on the strength of arriving at loopback: it is governed like any
 
 - `fy board` lists public cards. `--private` lists the private ones and `--all` both. A board scoped to one ferret
   (`--mine`, `--ferret`) is that ferret's own work, so it shows both kinds unless `--private` is given.
-  `fy task list --all` is the retired spelling of `fy board --all`.
 - `GET /v1/board` takes `visibility=public|private|all`. **Without it the daemon answers `all`**, so an app or
   script from before this change never loses a card. The CLI asks for `public` explicitly.
 - The app asks for everything and hides private cards itself, so it keeps working on a daemon of any age. A card
@@ -1546,9 +1545,6 @@ Every `fy task` verb takes `--session <id>` (act as that session instead of the 
 | `fy board status`, `fy board on\|off`             | whether the project uses the board; switching it is the owner's ([The board is opt-in](#the-board-is-opt-in)); `--project`, `--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `fy board import`                                 | import the old task files ([board-import.md](board-import.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `fy project add <path>` / `ls`                    | register a folder as a project; list projects                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-
-Retired spellings print what replaced them and exit non-zero: `fy task list` is `fy board --mine` or `fy board --all`,
-`fy task phase` and `fy task status` are `fy task move`, and `fy task feedback` is now a note.
 
 The routes behind them, all needing the `fleet` capability at operator minimum for a caller off this host
 ([grants.md](grants.md)):

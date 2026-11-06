@@ -12,15 +12,15 @@ or a shared Result or Option module.
 
 ## Current catalog
 
-| Need                                     | Current choice                                  |
-| ---------------------------------------- | ----------------------------------------------- |
-| Array transforms and searches            | Native Array methods                            |
-| Keyed lookup and uniqueness              | Map and Set                                     |
-| Object and string basics                 | Object and String methods                       |
-| Runtime parsing of unknown input         | Zod                                             |
-| Semver validation                        | isSemver and assertSemver in src/lib/version.ts |
-| Generic Result or Option values          | Not shipped yet                                 |
-| Generic collection or functional package | Not installed                                   |
+| Need                                     | Current choice                     |
+| ---------------------------------------- | ---------------------------------- |
+| Array transforms and searches            | Native Array methods               |
+| Keyed lookup and uniqueness              | Map and Set                        |
+| Object and string basics                 | Object and String methods          |
+| Runtime parsing of unknown input         | Zod                                |
+| Semver validation                        | assertSemver in src/lib/version.ts |
+| Generic Result or Option values          | Not shipped yet                    |
+| Generic collection or functional package | Not installed                      |
 
 Do not add an import for a package that is not in packages/cli/package.json. If a feature needs
 one, make the dependency decision in that feature's change and install it from the CLI workspace.

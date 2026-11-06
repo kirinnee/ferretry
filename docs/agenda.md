@@ -94,14 +94,10 @@ Open a new agenda only when none passes the test:
   the listing says what would be lost and the safe way out, `--new "<why none fits; closest is !A7>"`.
 - **`--new` bypasses the refusal, not the listing.** With `--new "<why>"` the same search runs and the same list is
   printed (to stderr, so `--json` still prints the raised item on stdout), ending "Opening a new agenda anyway: <why>";
-  then the agenda opens. A bare `--new` still works for now, with a warning that the reason is wanted.
+  then the agenda opens. `--new` always takes its reason; a bare or blank one is refused.
 - **At a terminal** the question is asked ("Should this join !A7? [y/N]"). Only `y` joins (the edit is printed and
   nothing is opened). Enter, `n` or anything else opens nothing either: the two ways out are printed, and a new
   agenda needs `--new "<why>"`.
-- **The old spelling still works.** `fy agenda add --title Deploy --premise x --context y --new "Choose region"`, from when
-  `--new` was a flag with no value, reads the words `--new` swallowed as the ask (with a warning that `--new` now takes the
-  reason). When the ask is given in words or with `--ask`, `--new` is the reason. The one ambiguity: a legacy bare
-  `--new` followed by the ask's first word, with more ask words after it, reads that first word as the reason.
 
 - **The order.** An agenda carrying the card `--task` names, or a card that one depends on or blocks, comes first
   (dependent things share one agenda); then the daemon's strong and weak related matches
@@ -156,10 +152,9 @@ only derives from the agenda: the open agendas that carry it are its asks, and w
 you": its ask is on the agenda. A notice is context, never an ask.
 
 The CLI sends `task` only to a daemon that reports `agenda.task.1`; an older one refuses the whole add over the
-field, so the item is raised without it and the CLI says so. For one release a bare `--task` (or a value that
-is not a card reference) still means a to-do; `--todo` is its name now. The kind is named `--kind todo` for the same
-reason — "task" means a board card — and `--kind task` is still read as its older spelling. The wire value stays
-`task`, so a released daemon keeps accepting the add.
+field, so the item is raised without it and the CLI says so. A to-do is `--todo`, and its kind is
+named `--kind todo` — "task" means a board card. The wire value stays `task`, so a released daemon keeps accepting
+the add.
 
 ### Done · closes &F12
 
@@ -672,7 +667,7 @@ place, and a bare `surface` is refused there. **None of them pings the owner.**
 - `fy agenda answer <id> "<text>"` — answer the owner on it: it is theirs again, in its old place.
 - `fy agenda edit <id> …` — change the card (settled answers, what is still open, its stage). Any edit by the raising agent on its own turn for more information hands the item back to the owner,
   even one that changes nothing. (Not an item resting on a reply: that edit keeps it resting, unless it answers on
-  it. `--back` is retired: the CLI refuses it and names the verbs above.)
+  it.)
 - `fy agenda rest <id> --why "…"` — take it on, quiet, while working.
 - `fy agenda surface <id> [--why "…"]` — hand a discussed item back as it stands.
 - `fy agenda done <id>` / `dismiss <id>` — close it, once nothing more is expected.
@@ -938,8 +933,7 @@ ever, and closing it would lose it when the ferret still needs something.
   replaced ask (`edit --kind …`) brings it back fresh. `fy agenda done <id>` / `dismiss <id>` closes it **without
   telling the owner** (no push, no buzz, no badge change): the CLI prints "A5 closed; the owner is not notified
   (they had already replied)", and the item shows under Resolved as usual.
-- **`--back` is retired** from the CLI, which refuses it and names `agenda answer` and `edit --kind`. The daemon
-  still takes it from an older CLI: a `--back` with the whole card refreshed (`--summary`, `--premise`, `--context`)
+- **The daemon still takes `--back`** from an older CLI: a `--back` with the whole card refreshed (`--summary`, `--premise`, `--context`)
   brings the item back fresh, and one that leaves one out is refused (`invalid`, naming the missing flags); so is a
   bare `fy agenda surface <id>` of a resting item.
 - The app lists it under **Replied (n)**; the owner can bring it back themselves ("Back to my list"). The Inbox does not wait for the next board read: a reply sent from an open Inbox item is shown as replied at once, with an Undo (see "In the Inbox").
@@ -1196,7 +1190,6 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 | `log <id> --reply\|--rest`          | Copy the owner's chat words onto the item verbatim, then answer or rest ([`fy agenda log`](#fy-agenda-log)).                               |
 | `merge <into> <from>`               | Merge `<from>` into `<into>`: one conversation, every card kept ([Merge](#merge)).                                                         |
 | `split <id> …`                      | Split a new item off `<id>`, linked both ways ([Split](#split)).                                                                           |
-| `edit <id> --back`                  | Retired: refused, naming `answer` and `edit --kind`.                                                                                       |
 | `surface <id>`                      | Hand it back to the owner, unchanged (silent). Refused for a resting item.                                                                 |
 | `snooze <id>`                       | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.                                                               |
 | `unsnooze <id>`                     | The owner's: bring a snoozed or resting item back to the list now.                                                                         |

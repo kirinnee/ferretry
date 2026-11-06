@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import { unpadInputValue } from '@ferretry/protocol';
 import should from 'should';
-import { FERRET_REFUSAL, InputController } from '../../../src/lib/input/controller';
+import { OWNER_COMMAND_REFUSAL } from '../../../src/lib/daemon/owner-only';
+import { InputController } from '../../../src/lib/input/controller';
 import {
   DELIVERY,
   DIGEST,
@@ -88,7 +89,7 @@ describe('fy input answer', () => {
     const failure = await new InputController(ports).answer('!A7', options).catch((error: unknown) => error);
 
     // Assert
-    should((failure as Error).message).equal(FERRET_REFUSAL);
+    should((failure as Error).message).equal(OWNER_COMMAND_REFUSAL);
     should(prompt.asked).have.length(0);
     should(gateway.listed).have.length(0);
     should(gateway.delivered).have.length(0);
@@ -107,7 +108,7 @@ describe('fy input answer', () => {
     ]);
 
     // Assert
-    for (const failure of failures) should((failure as Error).message).equal(FERRET_REFUSAL);
+    for (const failure of failures) should((failure as Error).message).equal(OWNER_COMMAND_REFUSAL);
     should(gateway.listed).have.length(0);
     should(gateway.cancelled).have.length(0);
   });

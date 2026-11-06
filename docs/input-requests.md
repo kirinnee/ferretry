@@ -1097,7 +1097,7 @@ echo off; never a flag. **Every write is a person route**: a ferret's call is an
 no other credential. A daemon without the `/v1/accounts*` routes answers `404 unknown_route` and `fy` says to run `fy daemon update`.
 `fy account factor add --totp` makes the same owner-only read (`GET /v1/accounts`) before it shows the warning or asks for the key, so a refused caller never gets a seed prompt, and the typed key is dropped as soon as the stage request is answered, not held through the passkey wait.
 At the machine, `fy input answer <!A7> --account <ACCOUNT>` answers a waiting card with an account (only its name is
-sent, and the daemon types it; `--secret` and `--entry` are its older spellings, still read and no longer shown), and
+sent, and the daemon types it), and
 `--save-as <ACCOUNT> [--label <text>]` keeps the value you type as an account. When the daemon matched an account to
 the card, `fy input answer` says so: "an account matches: GITHUB (GitHub) (answer with --account GITHUB)".
 Routes: `GET /v1/secrets/logins`, `GET /v1/secrets/logins/hint?site=`, `PUT /v1/secrets/logins/:id` (create or change; an omitted field is kept,

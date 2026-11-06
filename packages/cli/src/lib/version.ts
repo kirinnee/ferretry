@@ -6,11 +6,6 @@ const SEMVER_PATTERN =
 
 const SemverSchema = z.string().regex(SEMVER_PATTERN, 'version must be a valid semver string');
 
-/** True when the value is a valid SemVer 2.0.0 version string. */
-export function isSemver(value: string): boolean {
-  return SemverSchema.safeParse(value).success;
-}
-
 /** Returns the value unchanged when it is valid semver; throws otherwise (guards `--version` output). */
 export function assertSemver(value: string): string {
   return SemverSchema.parse(value);

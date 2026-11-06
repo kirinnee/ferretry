@@ -657,26 +657,7 @@ describe('agenda surface command', () => {
     should(edited.gateway.applied[0]?.request).match({ action: 'edit', id: 'A1', now: true });
   });
 
-  it('should refuse the retired --back with the verbs that replaced it, and send nothing', async () => {
-    // Arrange + Act
-    const plain = run(['agenda', 'edit', '!A1', '--summary', 'Reworded'], snapshot([]));
-    await plain.parsed;
-    const back = run(
-      ['agenda', 'edit', '!A1', '--back', '--summary', 'Which region?', '--premise', 'p', '--context', 'c'],
-      snapshot([]),
-    );
-    const refused = await back.parsed.then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-
-    // Assert
-    should(plain.gateway.applied[0]?.request).not.have.property('back');
-    should(String(refused)).match(/--back is retired.*agenda answer A1/u);
-    should(back.gateway.applied).be.empty();
-  });
-
-  it('should say in the edit help that --back is retired and how an item resting on a reply comes back', async () => {
+  it('should say in the edit help how an item resting on a reply comes back', async () => {
     // Arrange
     const gateway = new RecordingAgendaGateway(snapshot([]));
     const program = new Command().name('fy').exitOverride();
@@ -689,7 +670,6 @@ describe('agenda surface command', () => {
 
     // Assert
     const flat = help.replace(/\s+/gu, ' ');
-    should(flat).containEql('--back retired');
     should(flat).containEql('stays resting unless you answer on it (agenda answer)');
     should(flat).containEql('--kind');
   });
@@ -765,10 +745,10 @@ describe('attention needs-info command', () => {
     should(gateway.applied[0]?.request).deepEqual({ action: 'needs-info', id: 'A1', note: 'Which account?' });
   });
 
-  it('should raise a to-do with --task', async () => {
+  it('should raise a to-do with --todo', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(
-      ['agenda', 'add', 'Log in', '--title', 'Log in', '--task', '--step', 'Run it'],
+      ['agenda', 'add', 'Log in', '--title', 'Log in', '--todo', '--step', 'Run it'],
       afterAdd,
     );
     await parsed;
@@ -794,21 +774,18 @@ describe('attention needs-info command', () => {
     should(bare.out.diagnostics).be.empty();
   });
 
-  it('should keep the legacy `add --title … --new "Choose region"` working: the swallowed words are the ask', async () => {
-    // Arrange + Act — the old boolean --new came last, with the ask after it; Commander hands the ask to --new.
-    const legacy = run(
-      ['agenda', 'add', '--title', 'Deploy', '--premise', 'x', '--context', 'y', '--new', 'Choose region'],
+  it('should refuse a bare --new: it needs the reason', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(
+      ['agenda', 'add', 'Choose region', '--title', 'Deploy', '--premise', 'x', '--context', 'y', '--new'],
       afterAdd,
       [],
       true,
     );
-    await legacy.parsed;
 
     // Assert
-    should(legacy.gateway.applied).have.length(1);
-    should(legacy.gateway.applied[0]?.request).match({ action: 'add', subject: 'Choose region', title: 'Deploy' });
-    should(legacy.out.diagnostics.join('\n')).containEql('--new now takes the reason');
-    should(legacy.out.diagnostics.join('\n')).containEql('was read as your ask');
+    await should(parsed).be.rejectedWith(/--new <why>/u);
+    should(gateway.applied).be.empty();
   });
 
   it('should take --new as the reason when the ask is given as words, before or after it', async () => {
@@ -821,7 +798,6 @@ describe('attention needs-info command', () => {
     // Assert
     for (const each of [after, before]) {
       should(each.gateway.applied[0]?.request).match({ subject: 'Choose region' });
-      should(each.out.diagnostics.join('\n')).not.containEql('was read as your ask');
     }
   });
 
@@ -924,10 +900,10 @@ describe('attention needs-info command', () => {
     should(gateway.applied).have.length(0);
   });
 
-  it('should leave the card to the focus card when --offer-close comes with a bare --task', async () => {
+  it('should leave the card to the focus card when --offer-close comes with no --task', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(
-      ['agenda', 'add', 'Try it', '--title', 'Try it', '--task', '--offer-close'],
+      ['agenda', 'add', 'Try it', '--title', 'Try it', '--todo', '--offer-close'],
       afterAdd,
       [DAEMON_FEATURES.agendaOfferClose],
     );
@@ -938,18 +914,22 @@ describe('attention needs-info command', () => {
     should(gateway.applied[0]?.request).not.have.property('task');
   });
 
-  it('should keep a bare --task, a word that is not a card, and --todo as a to-do', async () => {
+  it('should refuse a --task value that is not a card, raising nothing, and read --todo as a to-do', async () => {
     // Arrange + Act
     const word = run(['agenda', 'add', '--title', 'Rotate', '--task', 'Rotate', 'the', 'key'], afterAdd, [
       DAEMON_FEATURES.agendaTask,
     ]);
-    await word.parsed;
+    const bare = run(['agenda', 'add', 'Try it', '--title', 'Try it', '--task', '--todo'], afterAdd, [
+      DAEMON_FEATURES.agendaTask,
+    ]);
     const todo = run(['agenda', 'add', 'Log in', '--title', 'Log in', '--todo'], afterAdd);
     await todo.parsed;
 
     // Assert
-    should(word.gateway.applied[0]?.request).match({ subject: 'Rotate the key', ask: { kind: 'task' } });
-    should(word.gateway.applied[0]?.request).not.have.property('task');
+    await should(word.parsed).be.rejectedWith(/--task needs a card reference.*for a to-do use --todo/u);
+    await should(bare.parsed).be.rejectedWith(/--task needs a card reference/u);
+    should(word.gateway.applied).have.length(0);
+    should(bare.gateway.applied).have.length(0);
     should(todo.gateway.applied[0]?.request).match({ ask: { kind: 'task' } });
   });
 });

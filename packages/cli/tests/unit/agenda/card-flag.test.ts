@@ -10,18 +10,17 @@ describe('the --task flag', () => {
     should(resolveCardFlag([], { task: '#B3' }).card).deepEqual({ id: 'B3' });
   });
 
-  it('should keep a bare --task and --todo as a to-do', () => {
+  it('should make a to-do of --todo alone', () => {
     // Act / Assert
-    should(resolveCardFlag(['log', 'in'], { task: true })).deepEqual({ words: ['log', 'in'], todo: true });
     should(resolveCardFlag(['log', 'in'], { todo: true })).deepEqual({ words: ['log', 'in'], todo: true });
     should(resolveCardFlag(['ask'], {})).deepEqual({ words: ['ask'], todo: false });
   });
 
-  it('should put back a word a bare --task swallowed, and keep the to-do', () => {
+  it('should refuse a value that is not a card reference, pointing at --todo', () => {
     // Act / Assert
-    should(resolveCardFlag(['the', 'key'], { task: 'Rotate' })).deepEqual({
-      words: ['Rotate', 'the', 'key'],
-      todo: true,
-    });
+    should(() => resolveCardFlag(['the', 'key'], { task: 'Rotate' })).throw(
+      '--task needs a card reference (F18 or &F18), not "Rotate"; for a to-do use --todo',
+    );
+    should(() => resolveCardFlag([], { task: 'F1x8' })).throw(/--task needs a card reference/u);
   });
 });

@@ -365,7 +365,6 @@ describe('every remaining task verb', () => {
     ['file', ['file', 'F412', 'src/a.ts'], 'file'],
     ['edit', ['edit', 'F412', '--summary', 'a line', '--term', 'x=y'], 'edit'],
     ['refile', ['refile', 'F412', '--project', 'Ferretry'], 'refile'],
-    ['feedback', ['feedback', 'F412', 'nice'], 'note'],
     ['claim', ['claim', 'F412'], 'claim'],
     ['adopt', ['adopt', 'F412', '--reason', 'both ended'], 'adopt'],
   ];
@@ -383,34 +382,6 @@ describe('every remaining task verb', () => {
       should(gateway.acted?.request).have.property('action', action);
     });
   }
-});
-
-describe('the transition shims', () => {
-  it('should refuse fy task status with the new spelling', async () => {
-    const { run } = harness();
-    await should(run('task', 'status', 'F412', 'done', '--reason', 'x')).be.rejectedWith({
-      message: /task move &F412/,
-    });
-  });
-
-  it('should refuse fy task phase with the new spelling', async () => {
-    const { run } = harness();
-    await should(run('task', 'phase', 'F412', 'review', '--reason', 'x')).be.rejectedWith({
-      message: /task move &F412/,
-    });
-  });
-
-  it('should answer fy task list as fy board --mine with a notice', async () => {
-    // Arrange
-    const { run, gateway, output } = harness();
-
-    // Act
-    await run('task', 'list');
-
-    // Assert
-    should(output.notices.join('\n')).containEql('fy board --mine');
-    should(gateway.queried).have.property('ferret', 'session-7');
-  });
 });
 
 describe('fy board', () => {

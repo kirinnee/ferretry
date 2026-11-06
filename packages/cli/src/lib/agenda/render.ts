@@ -17,7 +17,6 @@ import {
   unswipedChoices,
 } from '@ferretry/protocol';
 import { describeAnswer } from './answer.ts';
-import { displayHowToResolve } from './how-to-resolve.ts';
 import { agendaOrdinal, agendaReference } from './reference.ts';
 
 /** Widest a field is printed at before it is elided. */
@@ -101,7 +100,7 @@ function itemLines(item: AgendaItem, now?: string): string[] {
   }
   lines.push(...agendaLines(item), ...briefLines(item), ...instructionLines(item));
   if (item.why.trim() !== item.subject.trim()) lines.push(`${INDENT}why: ${compact(item.why)}`);
-  lines.push(`${INDENT}resolve: ${compact(displayHowToResolve(item.howToResolve))}`);
+  lines.push(`${INDENT}resolve: ${compact(item.howToResolve)}`);
   if (item.whereWeAre !== undefined && item.whereWeAre.trim() !== '') {
     lines.push(`${INDENT}where we are: ${compact(item.whereWeAre)}`);
   }

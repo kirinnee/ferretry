@@ -304,17 +304,15 @@ describe('agenda candidates', () => {
     should(text).endWith('  zz agenda add … --new "<why none fits; closest is !A1>"');
   });
 
-  it('should end by saying a new agenda is opening anyway, with the reason or without one', () => {
+  it('should end by saying a new agenda is opening anyway, with the reason', () => {
     // Arrange
     const candidates = agendaCandidates([agentItem('A1', 'relay region')], query);
 
     // Act
     const reasoned = renderCandidates(candidates, { binary: 'zz', request, opening: 'the region is its own call' });
-    const bare = renderCandidates(candidates, { binary: 'zz', request, opening: '' });
 
     // Assert
     should(reasoned).endWith('Opening a new agenda anyway: the region is its own call');
-    should(bare).endWith('Opening a new agenda anyway: no reason was given.');
     should(renderCandidates([], { binary: 'zz', request })).equal('');
   });
 });
