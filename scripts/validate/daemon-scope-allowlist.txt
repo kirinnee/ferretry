@@ -39,11 +39,9 @@ retain packages/pwa/src/lib/relay-carrier.ts:livenessChecks # a WeakMap from a l
 retain packages/pwa/src/lib/relay-carrier.ts:unopened # a WeakSet of error objects from sockets that never opened. It holds no daemon data and keeps nothing alive: an error that nobody references is collected with its entry.
 retain packages/pwa/src/lib/trusted-types.ts:shared # the page's two Trusted Types policies, created once because the browser refuses a second policy of a name. They hold rules, never a daemon record, and every paired daemon is held to the same ones.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:registry # the side-pane TAB DEFINITIONS, keyed by tab id. A definition is bundle-static — what a tab is called and how it renders — and is the same for every daemon. The per-session STATE, tabStates, is daemonSessionKey'd and is not on this list.
-retain packages/pwa/src/shell/side-pane-tab-model.ts:registryVersion # a monotonic counter making useSyncExternalStore re-read the definition registry. A number, not a record.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:registryListeners # definition-registry subscribers, held by identity. Callbacks, not records.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:definitionsCache # a memo of the definition registry's sorted array. Derived from `registry`, so it holds exactly what `registry` holds.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:defaultOpenCache # a memo of which definitions open by default. Derived from `registry`, so it holds exactly what `registry` holds.
-retain packages/pwa/src/shell/side-pane-tab-model.ts:stateVersion # a monotonic counter making useSyncExternalStore re-read tab state. A number, not a record.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceSequence # a document-unique suffix for generated instance ids. Monotonic and never reused, which is the property it is here for.
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════

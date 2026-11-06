@@ -272,14 +272,12 @@ export const SIDE_PANE_BUILT_IN_TABS: readonly SidePaneTabDefinition[] = [
 // ---- registry --------------------------------------------------------------
 
 const registry = new Map<SidePaneTabId, SidePaneTabDefinition>(SIDE_PANE_BUILT_IN_TABS.map(def => [def.id, def]));
-let registryVersion = 0;
 const registryListeners = new Set<() => void>();
 
 let definitionsCache: readonly SidePaneTabDefinition[] | null = null;
 let defaultOpenCache: SidePaneTabsState | null = null;
 
 function bumpRegistry(): void {
-  registryVersion += 1;
   definitionsCache = null;
   defaultOpenCache = null;
   for (const listener of registryListeners) listener();
@@ -317,21 +315,8 @@ export function subscribeSidePaneTabRegistry(listener: () => void): () => void {
 export function resetSidePaneTabRegistry(): void {
   registry.clear();
   for (const definition of SIDE_PANE_BUILT_IN_TABS) registry.set(definition.id, definition);
-  instanceBodies.clear();
   bumpRegistry();
 }
-
-// ---- instance bodies -------------------------------------------------------
-//
-// `registerSidePaneTab` covers singleton tabs; an instance KIND registers one
-// body for every tab of that kind. The side pane renders file and browser
-// instances through its own switch (they need the files tree and browser
-// surface plumbing); the terminals deck claims its kind from its own module
-// scope, exactly like `registerSidePaneTab`.
-
-type SidePaneInstanceBody = (props: SidePaneTabRenderProps) => ReactNode;
-
-const instanceBodies = new Map<SidePaneInstanceKind, SidePaneInstanceBody>();
 
 // ---- per-(daemon, session) state -------------------------------------------
 
@@ -353,8 +338,6 @@ const NO_INSTANCES: Readonly<Record<SidePaneTabId, SidePaneTabInstance>> = Objec
 /** Keyed by `daemonSessionKey`: a matching session id from a different daemon
  *  is a different strip, always. */
 const tabStates = new Map<string, SidePaneTabsState>();
-let stateVersion = 0;
-const stateListeners = new Set<() => void>();
 /** Monotonic insertion counter for instance ordering and page ids. */
 let instanceSequence = 0;
 
@@ -368,11 +351,6 @@ function defaultState(): SidePaneTabsState {
     instances: NO_INSTANCES,
   };
   return defaultOpenCache;
-}
-
-function notifyState(): void {
-  stateVersion += 1;
-  for (const listener of stateListeners) listener();
 }
 
 /** Stable-identity read: the same object comes back until the next write to
@@ -433,7 +411,6 @@ export function sortSidePaneTabs(
 
 function write(scope: DaemonSessionScope, next: SidePaneTabsState): void {
   tabStates.set(daemonSessionKey(scope), next);
-  notifyState();
 }
 
 /** Add a tab to the strip if absent and make it active. The single open path:
@@ -561,11 +538,9 @@ export function forgetDaemonSidePaneTabs(daemonId: string): void {
     const [cachedDaemonId] = JSON.parse(key) as [string, string];
     if (cachedDaemonId === daemonId) tabStates.delete(key);
   }
-  notifyState();
 }
 
 /** Test seam — the memory is module state, so tests must start from nothing. */
 export function resetSidePaneTabsStates(): void {
   tabStates.clear();
-  notifyState();
 }
