@@ -187,17 +187,14 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   private async loadDigested(sessionId: string): Promise<{ ledger: AgendaLedger; digest: string } | null> {
     const name = AGENDA_FILES.ledger;
     const now = await this.files.identity(sessionId, name);
-    if (now === undefined) {
-      this.cache.delete(sessionId);
-      return null;
-    }
     const cached = this.cache.get(sessionId);
-    if (cached !== undefined && cached.identity === now) {
+    if (now !== undefined && cached !== undefined && cached.identity === now) {
       this.cache.delete(sessionId);
       this.cache.set(sessionId, cached);
       return cached;
     }
-    const read = await this.files.readIdentified(sessionId, name);
+    // No file, or one that went between the look and the read: there is no agenda, and nothing cached for it.
+    const read = now === undefined ? undefined : await this.files.readIdentified(sessionId, name);
     if (read === undefined) {
       this.cache.delete(sessionId);
       return null;
