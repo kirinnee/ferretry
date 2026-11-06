@@ -1,6 +1,7 @@
 import type { LimitsView } from '@ferretry/protocol';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
+import type { ModuleContribution } from '../modules.ts';
 
 /**
  * Ferret limits: `GET /v1/cgroups/config`, read-only.
@@ -33,4 +34,16 @@ export function cgroupRoutes(subsystem: LimitsSubsystem): readonly ApiRoute[] {
       handle: async () => jsonResponse(await subsystem.view()),
     },
   ];
+}
+
+/**
+ * What the cgroups module adds to the daemon: its one route. It has no audit rule — the route only reads.
+ *
+ * Resource limits register beside the fleet they bound, and are governed by the same capability for the same
+ * reason: this is a machine-wide setting about the agents this daemon runs. The path is the one fixed literal
+ * `/v1/cgroups/config`, which no other subsystem uses, so this table can neither shadow nor be shadowed by
+ * anything around it.
+ */
+export function cgroupsContribution(subsystem: LimitsSubsystem): ModuleContribution {
+  return { routes: cgroupRoutes(subsystem) };
 }

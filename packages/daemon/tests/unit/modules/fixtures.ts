@@ -1,4 +1,5 @@
 import type { BuiltModule } from '../../../src/lib/runtime/modules.ts';
+import { builtCgroups } from './cgroups/fixture.ts';
 import { builtLearning } from './learning/fixture.ts';
 
 /**
@@ -8,4 +9,4 @@ import { builtLearning } from './learning/fixture.ts';
  * inputs (see `learning/fixture.ts`). EXTRACTING A MODULE adds its builder to the list below — one line — and the
  * mounted-surface fixture (`../runtime/mounts/surface-mounted.ts`) composes whatever this returns.
  */
-export const builtModules = (): readonly BuiltModule<unknown, object>[] => [builtLearning()];
+export const builtModules = (): readonly BuiltModule<unknown, object>[] => [builtLearning(), builtCgroups()];

@@ -283,11 +283,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
       },
     },
   },
-  cgroups: {
-    view: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-  },
   configFiles: {
     service: {
       status: async () => {
