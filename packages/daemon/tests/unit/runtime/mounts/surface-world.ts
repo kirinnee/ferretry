@@ -24,7 +24,6 @@ import { SharedDraftPresence } from '../../../../src/lib/shared-drafts/index.ts'
 import { SignInRuleService, SignInRuleSuggestions } from '../../../../src/lib/sign-in-rules/index.ts';
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
 import { TaskPlanService } from '../../../../src/lib/task-plans/index.ts';
-import { renderService } from '../../../support/renders.ts';
 import { MemoryTranscript } from '../../../support/transcript-images.ts';
 import { agentToolWorld } from '../../agent-tools/support.ts';
 import { fixedClock } from '../../api/support.ts';
@@ -46,7 +45,6 @@ import {
   FakeSessionSend,
   FakeSessionSignal,
   FakeSpeedups,
-  FakeSttEnhancer,
   FakeTerminals,
   FakeWarden,
   fleetEventSubsystem,
@@ -372,7 +370,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
     enrolledDevices: async () => 0,
   },
   pins: pinService([]),
-  renders: renderService(),
   sharedDrafts: sharedDraftService(['s1']),
   sharedDraftStream: {
     presence: new SharedDraftPresence(),
@@ -660,10 +657,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
   legacyTasks: { now: () => '2026-07-30T12:00:00.000Z' },
   board: boardSubsystem(),
   boardGitHub: { arm: () => () => undefined },
-  workSearch: {
-    search: async () => ({ hits: [], total: 0, indexed: { tasks: 0, agenda: 0 } }),
-    related: async () => ({ matches: [] }),
-  },
   tidy: {
     plan: async sessionId => ({
       ok: true,
@@ -804,7 +797,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
   }),
   names: nameSubsystem(),
   recommend: recommendSubsystem(),
-  sttEnhancement: new FakeSttEnhancer(),
   speedups: new FakeSpeedups(),
   models: {
     view: async () => ({ published: { origin: 'https://ferretry.pages.dev', enabled: false }, catalogs: [] }),

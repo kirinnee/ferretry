@@ -125,10 +125,7 @@ export const callers: readonly string[] = [
   'GET /v1/projects operator any',
   'GET /v1/push/subscriptions operator person',
   'GET /v1/push/vapid operator any',
-  'GET /v1/renders/:id operator any',
-  'GET /v1/renders/:id/meta operator any',
   'GET /v1/restarts operator any',
-  'GET /v1/search operator any',
   'GET /v1/secrets operator any',
   'GET /v1/secrets/logins operator person',
   'GET /v1/secrets/logins/hint operator any',
@@ -301,9 +298,7 @@ export const callers: readonly string[] = [
   'POST /v1/push/seen operator person',
   'POST /v1/push/subscriptions operator person',
   'POST /v1/recommend operator any',
-  'POST /v1/renders operator any',
   'POST /v1/restarts operator any',
-  'POST /v1/search/related operator any',
   'POST /v1/secrets operator person',
   'POST /v1/secrets/exports/:importId operator person',
   'POST /v1/secrets/imports operator person',
@@ -377,7 +372,6 @@ export const callers: readonly string[] = [
   'POST /v1/speedups/:provider/test operator any',
   'POST /v1/step-up operator person',
   'POST /v1/step-up/options operator person',
-  'POST /v1/stt/enhance operator any',
   'POST /v1/system/open-url operator any',
   'POST /v1/terminals/close-finished operator any',
   'POST /v1/tidy/plan operator any',
@@ -451,8 +445,6 @@ export const notAudited: Readonly<Record<string, string>> = {
     'proposes, edits or confirms a project board’s lanes; a board layout changes nobody’s access, and the lane set records who proposed and who confirmed it',
   'PUT /v1/board/projects/:projectId/switch':
     'switches whether a project uses the board; owner-only, it changes nobody’s access, and the switch records that the owner set it and when',
-  'POST /v1/search/related':
-    'a read: a POST only because a title and an ask do not fit a URL; it weighs them against the board and changes nothing',
   'POST /v1/tidy/plan':
     'a read: a POST only so a plan is never cached by a proxy; it decides what one ferret could tidy and changes nothing',
   'POST /v1/sessions/:sessionId/stop': 'drives an existing session; its journal records it',
@@ -504,8 +496,6 @@ export const notAudited: Readonly<Record<string, string>> = {
     "the owner dismissing, snoozing or resolving a machine notice; the item's own history records it, and it widens nobody's access",
   'POST /v1/sessions/:sessionId/notify': 'an agent notifying; its payload is labelled with the agent (see L5)',
   'POST /v1/sessions/:sessionId/pins': 'a bookmark in a transcript',
-  'POST /v1/renders':
-    'saves a picture a ferret made into the daemon’s state home, validated and size-capped; it changes nobody’s access, and a ferret or the owner at the machine is the only caller',
   'POST /v1/sessions/:sessionId/pin': "the owner's own sidebar preference; it widens nobody's access",
   'POST /v1/sessions/:sessionId/unpin': "the owner's own sidebar preference; it widens nobody's access",
   'POST /v1/sessions/:sessionId/shared-draft':
@@ -589,7 +579,6 @@ export const notAudited: Readonly<Record<string, string>> = {
     'switches whether one ferret is told about sub-ferrets at its next launch; it grants nothing a start could not',
   'POST /v1/pack/recommend': 'a read with a body: lists the models usable now for a task',
   'POST /v1/recommend': 'a read with a body: recommends a model for a task',
-  'POST /v1/stt/enhance': 'a read with a body: tidies dictated text',
   'POST /v1/webrtc/offer':
     'opens a peer-to-peer path, not an act: every session on it proves its device again and meets the same guard',
   'POST /v1/models/refresh': 'asks the hosted app for a newer model catalog; labels and ids, grants nothing',

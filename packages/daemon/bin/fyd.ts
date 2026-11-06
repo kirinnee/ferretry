@@ -322,7 +322,6 @@ import {
   ProjectMcpServers,
   probeBundledWorker,
   RuntimeEnvironment,
-  SECRETS_DOCUMENT,
   SocketViewerDownstream,
   SqliteHomeLockFactory,
   STACK_SAMPLER_VARIABLE,
@@ -389,7 +388,6 @@ import {
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
-import { FileRenderRepository } from '../src/adapters/renders/index.ts';
 import { releaseAcquired, terminationGate } from '../src/adapters/runtime/termination-gate.ts';
 import {
   AccountAutoResumeAvailability,
@@ -624,13 +622,9 @@ import { StuckInputList } from '../src/lib/warden/input-stuck-list.ts';
 import { OrphanList } from '../src/lib/warden/orphan-list.ts';
 import { withBatchMembers } from '../src/lib/warden/report-overdue.ts';
 import { isTerminalStatus } from '../src/lib/warden/types.ts';
-import { WorkSearchService } from '../src/lib/work-search/index.ts';
 
 /** How many owner-start keys the daemon remembers (see `cardStartResults`). */
 const CARD_START_KEYS_KEPT = 256;
-
-/** How long after boot the work search builds its index: after the boot's own reads, before anyone searches. */
-const WORK_SEARCH_WARM_DELAY_MS = 5_000;
 
 import { GitHubWatcher, UnfiledRefiler } from '../src/lib/board-github/index.ts';
 import { BoardImporter, LaneSetImportProjects, type TaskAssigneeCandidate } from '../src/lib/board-import/index.ts';
@@ -1109,7 +1103,6 @@ import {
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   RememberedHandoverReceipts,
-  RenderService,
   RestartBusy,
   RestartService,
   type RestartSubject,
@@ -1269,7 +1262,6 @@ import {
   StructuredQuestionAttemptPaused,
   StructuredQuestionRefused,
   StructuredQuestionService,
-  SttEnhancementService,
   type SttEnhancementSubsystem,
   SttyTerminalModes,
   SurfaceControl,
@@ -1413,8 +1405,11 @@ import type { BuiltModule, ModuleLifecycle } from '../src/lib/runtime/modules.ts
 import { analyticsModule } from './modules/analytics.ts';
 import { cgroupsModule, createCgroupLaunchLimits } from './modules/cgroups.ts';
 import { learningModule } from './modules/learning.ts';
+import { rendersModule } from './modules/renders.ts';
 import { type ModuleHandles, seamsOf } from './modules/seams.ts';
 import { updateModule } from './modules/update.ts';
+import { createSttEnhancement, voiceModule } from './modules/voice.ts';
+import { workSearchModule } from './modules/work-search.ts';
 import { type WorktreeComposition, worktreesModule } from './modules/worktrees.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
 import {
@@ -2050,12 +2045,6 @@ export interface DaemonWorld {
      * supplied.
      */
     browserLogin: BrowserLoginLifecycle,
-    /**
-     * Dictation enhancement, passed IN for the same reason as every other host adapter here: one call
-     * spends the operator's provider credential over the network. A test substitutes this and keeps
-     * the route, the credentials and the dispatcher exactly as production builds them.
-     */
-    sttEnhancement: SttEnhancementSubsystem,
     /** Local paths are configuration, so the catalog is constructed against this exact document. */
     catalogs: CatalogSubsystem,
     /** Operator-owned API-equivalent pricing for this daemon's analytics only. */
@@ -9687,7 +9676,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       reviver,
       preflight,
       browserLogin,
-      sttEnhancement,
       catalogs,
       worktrees,
       analyticsStore,
@@ -10624,37 +10612,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           .filter(entry => entry.directory && isAgendaSessionId(entry.name))
           .map(entry => entry.name);
       // ONE search over every card and agenda item (docs/work-search.md): the finder, `fy search` and the related
-      // check. It reads the board store's in-memory cards and the agenda ledgers through their own caches, indexes
-      // only scrubbed text, and rebuilds whenever the secret or login vault file changes (its epoch).
-      const workSearch = new WorkSearchService({
-        cards: {
-          cards: async () => (await boardWorld.store.read()).cards,
-          laneSet: async projectId => await laneSets.laneSet(projectId),
+      // check. The module also watches the card directory and builds the index a few seconds after boot.
+      const workSearchModuleBuilt = workSearchModule.build(
+        {
+          paths,
+          stateFiles,
+          board: boardWorld.store,
+          laneSets,
+          agendaSessionIds,
+          agendaBoards,
+          machineBoards,
+          secretRedactor,
+          fileEvents,
+          clock,
         },
-        agenda: {
-          sessions: async () => [...(await agendaSessionIds()), MACHINE_AGENDA_ID],
-          ledger: async sessionId =>
-            await (sessionId === MACHINE_AGENDA_ID ? machineBoards : agendaBoards).read(sessionId),
-        },
-        redaction: {
-          batch: async work => await secretRedactor.batch(scrub => work(text => scrub.text(text))),
-          epoch: async () =>
-            (
-              await Promise.all(
-                [SECRETS_DOCUMENT, LOGIN_SECRETS_DOCUMENT].map(
-                  async name => (await stateFiles.identity?.(join(paths.state, name))) ?? '-',
-                ),
-              )
-            ).join('|'),
-        },
-        now: () => Date.parse(clock.now()),
-        warn: message => process.stderr.write(`${message}\n`),
-      });
-      // A card file edited by hand reaches the board (and so the search) as soon as its directory says so; the hub
-      // closes the watch at shutdown. The index is built a few seconds after boot, off the boot path, so the
-      // first search rarely waits for it.
-      boardWorld.store.watch((directory, listener) => fileEvents.subscribeDirectory(directory, () => listener()));
-      setTimeout(() => workSearch.warm(), WORK_SEARCH_WARM_DELAY_MS).unref();
+        seamsOf.workSearch(world),
+        lifecycle,
+      );
+      const workSearch = workSearchModuleBuilt.provides;
       // Released and To test are one lane now: every stored set that still has both is folded into one at boot,
       // its cards moved with it, and the owner is asked nothing. A `quick` set from before To test gains it the same
       // way, and every lane stored before stages gets the stage its fields already describe, written out. Then the Unfiled cards that belong on a project's board are refiled there (`UnfiledRefiler`), so a
@@ -12856,6 +12831,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         seamsOf.worktrees(world),
         lifecycle,
       );
+      // Saved pictures: svg and html a ferret keeps as daemon files (docs/renders.md): inert until a request.
+      const renders = rendersModule.build({ paths, stateFiles, clock }, seamsOf.renders(world), lifecycle);
+      // Dictation enhancement: the enhancer is the world's seam, so a test substitutes it and keeps the route.
+      const voice = voiceModule.build(undefined, seamsOf.voice(world), lifecycle);
       const mounted: Omit<
         MountedSubsystems,
         | 'sessionMcp'
@@ -13051,9 +13030,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // next process would restart.
           { next: () => crypto.randomUUID() },
         ),
-        // Saved pictures: svg and html a ferret keeps as daemon files (docs/renders.md). Its saves run one at a time
-        // on a queue of their own: the collision check and the quotas read the whole store.
-        renders: new RenderService(new FileRenderRepository(paths, stateFiles), clock, new KeyedSerialExecutor()),
         // The owner's unsent composer, live across their devices. Its own write queue for the same reason
         // pins have one, and its own timer: a draft is written a second after it last changed.
         sharedDrafts: sharedDraftService,
@@ -13273,10 +13249,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
         },
         boardGitHub,
-        workSearch: {
-          search: async query => await workSearch.search(query),
-          related: async request => await workSearch.related(request),
-        },
         tidy: new TidyService({
           board: boardWorld.board,
           switches: boardWorld.switches,
@@ -13354,7 +13326,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         names: createNameSubsystem(storage),
         recommend: createRecommendSubsystem(advisorOver, usage),
-        sttEnhancement,
         // Names-only status over the store's listing, and a Test that spends a key once through the
         // outbound holder above. Jev's Test goes through the same guard the Warden will use.
         // The model catalogs in effect, and the published one this machine follows (docs/model-catalog.md).
@@ -13980,19 +13951,25 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       };
       return {
         mounted: builtSubsystems,
-        modules: { cgroups, learning, analytics, update, worktrees: managedWorktrees },
+        modules: {
+          cgroups,
+          learning,
+          analytics,
+          update,
+          worktrees: managedWorktrees,
+          renders,
+          voice,
+          workSearch: workSearchModuleBuilt,
+        },
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: millisecondClock,
-    sttEnhancement: new SttEnhancementService(outboundAuthorizer, speedupStopwatch, {
-      cleanup: () => configFiles.current().evaluation.effective.voice.postProcessing,
-      // One line per call, sizes and reasons only: the report type has no field a transcript could ride in.
-      report: report =>
-        process.stdout.write(
-          `${JSON.stringify({ at: new Date().toISOString(), type: 'stt.enhance', data: report })}\n`,
-        ),
-    }),
+    sttEnhancement: createSttEnhancement(
+      outboundAuthorizer,
+      speedupStopwatch,
+      () => configFiles.current().evaluation.effective.voice.postProcessing,
+    ),
     untilShutdown: untilTerminated,
   };
 }
@@ -14513,7 +14490,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     reviver,
     world.migratePreflight,
     world.browserLogin.window,
-    world.sttEnhancement,
     catalogs,
     {
       operations: world.worktrees,

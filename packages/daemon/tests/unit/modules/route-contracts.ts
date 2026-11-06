@@ -30,7 +30,10 @@ import * as analytics from './analytics/route-contract.ts';
 import * as cgroups from './cgroups/route-contract.ts';
 import * as learning from './learning/route-contract.ts';
 import * as legacy from './legacy/route-contract.ts';
+import * as renders from './renders/route-contract.ts';
 import * as update from './update/route-contract.ts';
+import * as voice from './voice/route-contract.ts';
+import * as workSearch from './work-search/route-contract.ts';
 import * as worktrees from './worktrees/route-contract.ts';
 
 /** One module's reviewed lines. */
@@ -47,6 +50,9 @@ export const FRAGMENTS: Readonly<Record<string, RouteContractFragment>> = {
   analytics,
   update,
   worktrees,
+  renders,
+  voice,
+  workSearch,
 };
 
 /** The concatenation of every fragment's `callers`: one line per route, both tables. */
