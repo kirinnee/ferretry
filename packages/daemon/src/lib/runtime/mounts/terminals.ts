@@ -16,12 +16,16 @@ import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import type { AuditedRouteRule, AuditedSocketRule } from '../../audit/routes.ts';
+import type { ModuleContribution } from '../modules.ts';
 import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
 import type { InputRequestService } from '../../input-requests/service.ts';
 import type { TerminalCloseTrigger } from '../../terminal/contracts.ts';
 import { decideTerminalOpener } from '../../terminal/ownership.ts';
 import { TerminalPolicyError } from '../../terminal/policy.ts';
 import { answered, ownerOf } from './input-requests.ts';
+import { type SessionConsoleSubsystem, sessionConsoleRoutes } from './session-console-input.ts';
+import type { SessionDirectorySubsystem } from './sessions.ts';
 
 /**
  * Independent shell terminals attached to a session's working directory.
@@ -335,4 +339,59 @@ export function terminalSocketRoutes(
       },
     },
   ];
+}
+
+/**
+ * The security log's rules for the terminal surface. Opening a terminal records the session; typing into the session's
+ * own pane from the Console is counted on the session and folded per window, exactly as a terminal socket's
+ * keystrokes are — the request body is never read.
+ */
+const TERMINAL_AUDIT_RULES: readonly AuditedRouteRule[] = [
+  { method: 'POST', path: '/v1/sessions/:sessionId/terminals', event: 'terminal.opened', subject: 'sessionId' },
+  // Typing into the session's own pane from the Console: counted on the session and folded per window,
+  // exactly as a terminal socket's keystrokes are — the request body is never read.
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/console/input',
+    event: 'terminal.input',
+    subject: 'sessionId',
+    detail: { mode: 'console' },
+  },
+];
+
+/** The terminal stream socket: opening it is recorded, and so is each binary frame typed into it (folded, never captured). */
+const TERMINAL_AUDIT_SOCKETS: readonly AuditedSocketRule[] = [
+  {
+    path: '/v1/sessions/:sessionId/terminals/:terminalId/stream',
+    event: 'terminal.opened',
+    subject: 'terminalId',
+    inputEvent: 'terminal.input',
+  },
+];
+
+/** What the terminal module serves: the shell terminals, and the Console's input into a session's own pane. */
+export interface TerminalSubsystems {
+  readonly terminals: TerminalSubsystem;
+  readonly sessionConsole: SessionConsoleSubsystem;
+  readonly sessions: SessionDirectorySubsystem;
+  /** The quarantine a stream's `reveal` is checked against. */
+  readonly inputRequests: Pick<InputRequestService, 'revealed'>;
+}
+
+/**
+ * What the terminal module adds to the daemon: the terminal lifecycle routes, the Console input route, the terminal
+ * stream socket, and their audit rules. It claims no protocol feature.
+ *
+ * Every path is a literal no other subsystem uses (`/v1/terminals`) or sits under `/v1/sessions/:sessionId` ending in
+ * `terminals…` or `console/input`, so none can shadow or be shadowed.
+ */
+export function terminalsContribution(subsystems: TerminalSubsystems): ModuleContribution {
+  return {
+    routes: [
+      ...terminalRoutes(subsystems.terminals),
+      ...sessionConsoleRoutes(subsystems.sessionConsole, subsystems.sessions),
+    ],
+    sockets: terminalSocketRoutes(subsystems.terminals, subsystems.inputRequests),
+    audit: { routes: TERMINAL_AUDIT_RULES, sockets: TERMINAL_AUDIT_SOCKETS },
+  };
 }

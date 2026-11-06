@@ -25,7 +25,6 @@ import {
   boardSubsystem,
   CREDENTIALS,
   configChangeSubsystem,
-  consoleSubsystem,
   dialogSubsystem,
   emptyFeed,
   FakeBrowserLogin,
@@ -34,7 +33,6 @@ import {
   FakeSessionResume,
   FakeSessionSend,
   FakeSessionSignal,
-  FakeTerminals,
   FakeWarden,
   fleetEventSubsystem,
   grantSubsystem,
@@ -549,7 +547,6 @@ export const subsystems = (): MountedSubsystems => ({
     },
     arm: () => () => undefined,
   },
-  terminals: new FakeTerminals(),
   browserLogin: new FakeBrowserLogin(),
   browserProxy: {
     tester: new BrowserProxyTester({
@@ -726,7 +723,6 @@ export const subsystems = (): MountedSubsystems => ({
     { tag: async () => new Uint8Array(32), matches: async () => false },
   ),
   sessionAttach: attachSubsystem(),
-  sessionConsole: consoleSubsystem(),
   sessionProcesses: {
     list: async sessionId => ({ sessionId, observedAt: '2026-10-29T00:00:00.000Z', available: true, processes: [] }),
     output: async () => {

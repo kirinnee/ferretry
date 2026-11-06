@@ -278,16 +278,6 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     refusalCode: true,
     detail: { action: 'local-skill-remove', scope: 'runtime' },
   },
-  { method: 'POST', path: '/v1/sessions/:sessionId/terminals', event: 'terminal.opened', subject: 'sessionId' },
-  // Typing into the session's own pane from the Console: counted on the session and folded per window,
-  // exactly as a terminal socket's keystrokes are — the request body is never read.
-  {
-    method: 'POST',
-    path: '/v1/sessions/:sessionId/console/input',
-    event: 'terminal.input',
-    subject: 'sessionId',
-    detail: { mode: 'console' },
-  },
   // Stopping one of the ferret's processes from the Processes tab: an act on its pane, like Ctrl-C into the
   // Console, counted on the session the same way and never naming which one.
   {
@@ -1179,12 +1169,6 @@ export interface AuditedSocketRule {
  * `tests/unit/modules/<id>/route-contract.ts` (`notAudited`).
  */
 export const AUDITED_SOCKET_ROUTES: readonly AuditedSocketRule[] = [
-  {
-    path: '/v1/sessions/:sessionId/terminals/:terminalId/stream',
-    event: 'terminal.opened',
-    subject: 'terminalId',
-    inputEvent: 'terminal.input',
-  },
   { path: '/v1/sessions/:sessionId/browser/stream', event: 'browser.opened', subject: 'sessionId' },
 ];
 

@@ -16,7 +16,6 @@ import {
   AUDIT_FOLD_WINDOW_MS,
   AUDIT_INVALID_TEXT,
   AUDIT_KEPT_DAILY_ALLOWANCE,
-  AUDITED_SOCKET_ROUTES,
   type AuditEntry,
   AuditedPairingService,
   type AuditJournalPort,
@@ -2149,10 +2148,27 @@ class FakeDownstream implements SocketDownstream {
   }
 }
 
+/** The terminal stream and the browser stream, the two audited sockets, in the order the tables below index them. */
+const TERMINAL_STREAM_PATH = '/v1/sessions/:sessionId/terminals/:terminalId/stream';
+const BROWSER_STREAM_PATH = '/v1/sessions/:sessionId/browser/stream';
+
+/**
+ * The audited socket rules as the daemon composes them: the legacy ones plus each module's `contributes.audit`
+ * (`AUDITED_SOCKET_ROUTES` is only what the `legacy` module contributes, so it shrinks as modules are extracted).
+ */
+function composedSocketRules() {
+  const composed = composedAuditRules().sockets;
+  return [TERMINAL_STREAM_PATH, BROWSER_STREAM_PATH].map(path => {
+    const rule = composed.find(candidate => candidate.path === path);
+    if (rule === undefined) throw new Error(`no composed audit rule for the socket ${path}`);
+    return rule;
+  });
+}
+
 function socketTable(accept: SocketRoute['accept']) {
   const { journal, log, failures } = auditLog();
   const received: SocketFrame[] = [];
-  const routes = AUDITED_SOCKET_ROUTES.map(
+  const routes = composedSocketRules().map(
     (rule): SocketRoute => ({
       method: 'GET',
       path: rule.path,
@@ -2175,6 +2191,7 @@ function socketTable(accept: SocketRoute['accept']) {
       failures: { auditWriteFailed: message => failures.push(message) },
     },
     [...routes, fleetFeed],
+    composedSocketRules(),
   );
   return { journal, failures, received, wrapped, fleetFeed };
 }
@@ -2274,12 +2291,13 @@ describe('auditedSocketRoutes', () => {
       [
         {
           method: 'GET',
-          path: AUDITED_SOCKET_ROUTES[0]?.path ?? '',
+          path: TERMINAL_STREAM_PATH,
           minimum: 'operator',
           caller: 'any',
           accept: async () => attach,
         },
       ],
+      composedSocketRules(),
     );
 
     // Act

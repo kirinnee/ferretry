@@ -86,7 +86,6 @@ import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answ
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
 import { type SessionCompactAtSubsystem, sessionCompactAtRoutes } from './session-compact-at.ts';
-import { type SessionConsoleSubsystem, sessionConsoleRoutes } from './session-console-input.ts';
 import { knownLaunchRoots, type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { type SessionCredentialSubsystem, sessionCredentialRoutes } from './session-credential.ts';
 import { type SessionDialogSubsystem, sessionDialogRoutes } from './session-dialog.ts';
@@ -112,7 +111,6 @@ import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './session-ar
 import { stepUpRoutes } from './step-up.ts';
 import { type SystemOpenSubsystem, systemOpenRoutes } from './system-open.ts';
 import { taskPlanRoutes } from './task-plans.ts';
-import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
 import { tunnelRoutes } from './tunnel.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 import { type WebRtcSignallingSubsystem, webrtcRoutes } from './webrtc.ts';
@@ -357,8 +355,6 @@ export interface MountedSubsystems {
    *  background loop nothing constructs is the same absent capability as an
    *  unserved route, and an analytics store nothing writes to answers every query with an empty fleet. */
   readonly analyticsIngest: AnalyticsIngestionLoop;
-  /** Independent shell terminals attached to a session's working directory. */
-  readonly terminals: TerminalSubsystem;
   /** The daemon-global human browser-login window: a private X display, served over loopback VNC, that
    *  a person signs into by hand so the agent's browser profile is primed. Per-session browser
    *  AUTOMATION is not mounted — the mount's own header names what is missing and why. */
@@ -433,8 +429,6 @@ export interface MountedSubsystems {
   readonly transcriptImages: TranscriptImages;
   /** A short-lived, freshly validated tmux identity for a local human attach. */
   readonly sessionAttach: SessionAttachSubsystem;
-  /** Typing into a session's own pane — the Console — governed as a session terminal is. */
-  readonly sessionConsole: SessionConsoleSubsystem;
   /** A ferret's own processes — listed, their output followed, one stopped — governed as the Console is. */
   readonly sessionProcesses: SessionProcessSubsystem;
   /** Answering the harness's permission prompt on a session's own pane, governed as the Console is. */
@@ -656,7 +650,6 @@ export function legacyModule(
               // `/v1/sign-in-rules` is a literal no other subsystem uses; `/v1/accounts/:id/sign-in-rules/revoke` ends in two
               // literals no account route has, so neither can shadow or be shadowed.
               ...signInRuleRoutes(subsystems.signInRules, subsystems.signInRuleSuggestions),
-              ...terminalRoutes(subsystems.terminals),
               // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
               // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the
               // literal `browser`, which distinguishes it from every other `/v1/sessions/:id/...` route above.
@@ -682,9 +675,6 @@ export function legacyModule(
               // The attach proof sits with the operator reads but is its own capability: unlike a screen or a
               // transcript it authorizes a local process action, and its mount revalidates the pane identity.
               ...sessionAttachRoutes(subsystems.sessionAttach, subsystems.sessions),
-              // The Console's input: two segments deep under `/v1/sessions/:sessionId`, ending in the literal
-              // `console/input` no other route uses, so it can neither shadow nor be shadowed.
-              ...sessionConsoleRoutes(subsystems.sessionConsole, subsystems.sessions),
               // The Processes tab: one to three segments under `/v1/sessions/:sessionId` starting with the literal
               // `processes` no other route uses, so they can neither shadow nor be shadowed.
               ...sessionProcessRoutes(subsystems.sessionProcesses, subsystems.sessions),
@@ -707,7 +697,6 @@ function legacySockets(subsystems: MountedSubsystems): readonly SocketRoute[] {
     // Fixed literal first; it cannot shadow the deeper terminal pattern and makes the fleet feed's
     // optional session filter one route rather than a second dispatcher.
     ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions, subsystems.configChanges),
-    ...terminalSocketRoutes(subsystems.terminals, subsystems.inputRequests),
     ...browserSocketRoutes(subsystems.browser),
   ];
 }

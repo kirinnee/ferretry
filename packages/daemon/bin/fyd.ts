@@ -91,8 +91,6 @@ import {
   StartSessionRequestSchema,
   sessionAgendaEnabled,
   sessionHypermediaEnabled,
-  TERMINAL_MAX_GLOBAL,
-  TERMINAL_MAX_PER_SESSION,
   type TranscriptProvenance,
   terminalRulesOffered,
   type WardenGuardConfig,
@@ -472,17 +470,7 @@ import { NodeStateHomes } from '../src/adapters/system/node-state-homes.ts';
 import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
 import { machineProgramHomes } from '../src/adapters/system/profile-program.ts';
 import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader.ts';
-import {
-  ManagedTerminalService,
-  RedactingTerminalStreamService,
-  StorageTerminalOwnerDirectory,
-  systemLoginShell,
-  TerminalRuntimeError,
-  TerminalServiceError,
-  TerminalStreamBridge,
-  type TerminalStreamScheduler,
-  TmuxTerminalRuntime,
-} from '../src/adapters/terminal/index.ts';
+import { systemLoginShell, TmuxTerminalRuntime } from '../src/adapters/terminal/index.ts';
 import {
   BunTmuxProcess,
   ControlModeTmuxProcess,
@@ -680,7 +668,6 @@ import {
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
-  type AuditSink,
   ARCHIVE_AFTER_VARIABLE,
   ARCHIVE_PASS_LIMIT_DEFAULT,
   AutoResumeService,
@@ -1160,12 +1147,8 @@ import {
   TEST_MODE_VARIABLE,
   TEST_TIMINGS_VARIABLE,
   TeamAdvisor,
-  TerminalMountError,
   TerminalReapService,
   type TerminalRuntimePort,
-  type TerminalSessionResolver,
-  type TerminalSubsystem,
-  type TextRedactor,
   TmuxController,
   type TmuxLaunchGuard,
   type TranscriptEvent,
@@ -1289,6 +1272,7 @@ import { type CallsignClaims, namesModule } from './modules/names.ts';
 import { rendersModule } from './modules/renders.ts';
 import { type ModuleHandles, seamsOf } from './modules/seams.ts';
 import { sharedDraftsModule } from './modules/shared-drafts.ts';
+import { terminalModule } from './modules/terminal.ts';
 import { updateModule } from './modules/update.ts';
 import { usageModule } from './modules/usage.ts';
 import { createSttEnhancement, voiceModule } from './modules/voice.ts';
@@ -6257,36 +6241,6 @@ function priorMigrations(config: Readonly<Record<string, unknown>>): { from: str
   return parsed.data.migration === undefined ? [] : [parsed.data.migration];
 }
 
-/**
- * Real one-shot timers for the terminal redraw poll.
- *
- * The bridge asks for a cancellable timer rather than accepting a runtime handle, so the only place
- * in the daemon that ever touches `setTimeout` for a stream is here. A handle typed `unknown` and
- * cast back at the cancel site would be the same thing with a cast in it.
- */
-const terminalScheduler: TerminalStreamScheduler = {
-  schedule: (callback, milliseconds) => {
-    const handle = setTimeout(callback, milliseconds);
-    return { cancel: () => clearTimeout(handle) };
-  },
-};
-
-/**
- * Independent shell terminals, over the session's own working directory.
- *
- * THE ERROR TRANSLATION IS THE POINT OF THIS FUNCTION. `ManagedTerminalService` and the tmux runtime
- * behind it raise adapter-owned error classes, and a route in `src/lib` may not import them. Naming
- * them here — in the one place allowed to see both sides — is what lets a full terminal list answer
- * 409 and a tmux failure answer 502, instead of both surfacing as a 500 about a class nobody outside
- * `src/adapters` can name.
- *
- * The limits come from the PROTOCOL constants rather than the service's own defaults, so the ceiling
- * the API advertises in `limits` and the ceiling the service enforces cannot drift apart.
- *
- * The session resolver reads the authoritative configuration: a terminal opens in the session's own
- * `cwd`, and a session the index does not hold resolves to nothing rather than to the daemon's own
- * working directory.
- */
 /** The folder a session works in, from its own document; nothing when the session is unknown. */
 async function sessionFolder(storage: DaemonStorage, sessionId: string): Promise<string | undefined> {
   const id = tryParseSessionId(sessionId);
@@ -6346,112 +6300,6 @@ function createConfigFilesSubsystem(input: {
     },
   };
 }
-
-function createTerminalSubsystem(
-  storage: DaemonStorage,
-  runtime: TerminalRuntimePort,
-  clock: MillisecondClockPort,
-  redactor: TextRedactor,
-  quarantine: QuarantineRegistry,
-  audit: AuditSink,
-): TerminalSubsystem {
-  const sessions: TerminalSessionResolver = {
-    resolve: async reference => {
-      const id = tryParseSessionId(reference);
-      if (id === undefined || storage.findSession(id) === undefined) return undefined;
-      const config = SessionConfigSchema.safeParse(await storage.readConfig(id));
-      return config.success ? { id, cwd: config.data.cwd } : undefined;
-    },
-  };
-  const service = new ManagedTerminalService(
-    runtime,
-    sessions,
-    clock,
-    // A terminal id is twelve hex characters by protocol. Minting it from a UUID's own randomness
-    // beats a counter the next process would restart at one and collide on.
-    { next: () => crypto.randomUUID().replaceAll('-', '').slice(0, 12) },
-    {
-      maximumPerSession: TERMINAL_MAX_PER_SESSION,
-      maximumGlobal: TERMINAL_MAX_GLOBAL,
-      idleTimeoutMs: TERMINAL_IDLE_TIMEOUT_MS,
-      isDirectory: async path => {
-        try {
-          // Absolute before it leaves the loop: a relative name on an I/O thread could resolve inside a macOS
-          // descriptor bracket's folder (packages/fleet/src/adapters/descriptor-calls.ts).
-          return (await stat(resolvePath(path))).isDirectory();
-        } catch {
-          return false;
-        }
-      },
-      owners: new StorageTerminalOwnerDirectory(storage),
-      onClosed: async (holder, trigger) =>
-        await audit.record({
-          event: 'terminal.closed',
-          actor: { kind: 'host' },
-          cause: 'daemon',
-          subject: holder.sessionId,
-          outcome: 'succeeded',
-          detail: { count: holder.count, status: holder.status, trigger },
-        }),
-    },
-  );
-  /** Adapter refusals, restated in the protocol's vocabulary so the mount can answer them. */
-  const translate = (error: unknown): never => {
-    if (error instanceof TerminalServiceError) throw new TerminalMountError(error.code, error.message);
-    if (error instanceof TerminalRuntimeError) throw new TerminalMountError('upstream_failed', error.message);
-    throw error;
-  };
-  return {
-    holders: async () => await service.holders().catch(translate),
-    closeFinished: async trigger => await service.closeFinished(trigger).catch(translate),
-    list: async sessionId => await service.list(sessionId).catch(translate),
-    // The opener the mount DERIVED from the request's credential, forwarded unchanged. The service
-    // is deliberately not given the request body's `agentSessionId`: ownership is decided where the
-    // credential is, and a service that could read a claimed owner would eventually be asked to.
-    create: async (sessionId, input, openedBy) =>
-      await service
-        .create(sessionId, {
-          title: input.title,
-          cols: input.cols,
-          rows: input.rows,
-          ...(input.name === undefined ? {} : { name: input.name }),
-          ...(input.folder === undefined ? {} : { folder: input.folder }),
-          ...(openedBy === undefined ? {} : { openedBy }),
-        })
-        .catch(translate),
-    get: async (sessionId, terminalId) => await service.get(sessionId, terminalId).catch(translate),
-    rename: async (sessionId, terminalId, title) => await service.rename(sessionId, terminalId, title).catch(translate),
-    close: async (sessionId, terminalId) => await service.close(sessionId, terminalId).catch(translate),
-    write: async (sessionId, terminalId, bytes) => await service.write(sessionId, terminalId, bytes).catch(translate),
-    text: async (sessionId, terminalId, lines) => await service.text(sessionId, terminalId, lines).catch(translate),
-    foreground: async (sessionId, terminalId) => await service.foreground(sessionId, terminalId).catch(translate),
-    /**
-     * One viewer socket, over the SAME lifecycle service the routes use.
-     *
-     * That sharing is the point: the bridge writes and captures through the service, so a keystroke
-     * bumps the same activity instant the idle policy reads and a stream cannot keep a pane alive
-     * that the lifecycle believes it closed. The bridge itself refuses an oversized or malformed
-     * frame, bounds unwritten input, and drops output for a viewer that has stopped reading — the
-     * mount hands it a socket and nothing more.
-     */
-    stream: async (sessionId, terminalId, downstream, options) =>
-      new TerminalStreamBridge(
-        new RedactingTerminalStreamService(
-          service,
-          redactor,
-          options?.reveal === true ? undefined : (session, terminal) => quarantine.until(session, [terminal]),
-        ),
-        sessionId,
-        terminalId,
-        downstream,
-        terminalScheduler,
-      ),
-  };
-}
-
-/** How long a terminal nobody is watching stays open. One hour, matching the service's own default;
- *  stated here so the number the API reports is the number the daemon enforces. */
-const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
 
 /**
  * The human browser-login window, over the daemon's own private profile and a private X display.
@@ -11482,13 +11330,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // with its last known word rather than a "Checking" that would outlive the read.
       credentialList = async () => await fleetCredentials.list({ settled: true });
       paneLimits = async () => await storagePaneLimits(storage, Date.now());
-      const terminalSubsystem = createTerminalSubsystem(
-        storage,
-        terminals,
-        { now: () => Date.now() },
-        secretRedactor,
-        quarantined,
-        auditLog,
+      const terminal = terminalModule.build(
+        {
+          storage,
+          runtime: terminals,
+          clock: { now: () => Date.now() },
+          redactor: secretRedactor,
+          quarantine: quarantined,
+          audit: auditLog,
+          sessions,
+          sessionAttach,
+          tmux: launchTmuxCommands,
+          inputRequests: inputRequestService,
+        },
+        seamsOf.terminal(world),
+        lifecycle,
       );
       // A session browser nobody watches or drives stops after this long, so a forgotten one does not
       // hold the one shared profile away from every other session.
@@ -11928,7 +11784,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           storage,
           clock,
           clientName: CLIENT_NAME,
-          terminals: terminalSubsystem,
+          terminals: terminal.provides,
           browser: browserHost,
           audit: auditLog,
           policy: agentControl,
@@ -12476,7 +12332,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         boardGitHub,
         analyticsIngest: analytics.provides.ingestion,
-        terminals: terminalSubsystem,
         browserLogin,
         browser: browserHost,
         inputRequests: inputRequestService,
@@ -12748,8 +12603,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionReads: operatorReads,
         transcriptImages: createTranscriptImageReader(storage),
         sessionAttach,
-        // The Console types into the pane the attach proof names, on the same private tmux server.
-        sessionConsole: new SessionConsoleService(sessionAttach, launchTmuxCommands),
         // The Processes tab walks the pane that same attach proof names — that subtree and nothing else —
         // and scrubs every command line and every byte of output with the vault redactor, failing closed.
         sessionProcesses: new SessionProcessService({
@@ -13139,6 +12992,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           housekeeping,
           names,
           conversationImport,
+          terminal,
         },
       };
     },
@@ -14123,7 +13977,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const reapNow = (): void => {
     lane.submit('terminal reaper', () => terminalReaper.sweep());
     lane.submit('terminal reclaim', async () => {
-      await subsystems.terminals.closeFinished('sweep');
+      await modules.terminal.jobs.closeFinished('sweep');
     });
   };
   let reapSoon: ReturnType<typeof setTimeout> | undefined;

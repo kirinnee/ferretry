@@ -12,6 +12,7 @@ import { builtNames } from './names/fixture.ts';
 import { builtModels } from './models/fixture.ts';
 import { builtRenders } from './renders/fixture.ts';
 import { builtSharedDrafts } from './shared-drafts/fixture.ts';
+import { builtTerminal } from './terminal/fixture.ts';
 import { builtUpdate } from './update/fixture.ts';
 import { builtUsage } from './usage/fixture.ts';
 import { builtVoice } from './voice/fixture.ts';
@@ -52,4 +53,5 @@ const defaultBuiltModules = (): readonly BuiltModule<unknown, object>[] => [
   builtHousekeeping(),
   builtNames(),
   builtConversationImport(),
+  builtTerminal(),
 ];
