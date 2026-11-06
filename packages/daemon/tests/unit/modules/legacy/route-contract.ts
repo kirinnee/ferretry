@@ -109,7 +109,6 @@ export const callers: readonly string[] = [
   'GET /v1/imports/history/:importId operator any',
   'GET /v1/machine/agenda operator person',
   'GET /v1/mcp operator any',
-  'GET /v1/models operator any',
   'GET /v1/names operator any',
   'GET /v1/pack operator any',
   'GET /v1/pack/inventory operator any',
@@ -270,8 +269,6 @@ export const callers: readonly string[] = [
   'POST /v1/imports/conversations/adopt operator person',
   'POST /v1/machine/agenda operator person',
   'POST /v1/mcp/check operator any',
-  'POST /v1/models/local/refresh operator any',
-  'POST /v1/models/refresh operator any',
   'POST /v1/pack/new operator any',
   'POST /v1/pack/recommend operator any',
   'POST /v1/pack/routing/accept operator person',
@@ -534,9 +531,6 @@ export const notAudited: Readonly<Record<string, string>> = {
   'POST /v1/recommend': 'a read with a body: recommends a model for a task',
   'POST /v1/webrtc/offer':
     'opens a peer-to-peer path, not an act: every session on it proves its device again and meets the same guard',
-  'POST /v1/models/refresh': 'asks the hosted app for a newer model catalog; labels and ids, grants nothing',
-  'POST /v1/models/local/refresh':
-    'reads the model names Ollama has installed on this machine, as `ollama list` does; spends and changes nothing',
   // Protocol-switching routes the log does not record (the socket table).
   'GET /v1/events': 'the fleet event feed is a read: it shows what the caller could already list',
   'GET /v1/sessions/:sessionId/shared-draft/stream':

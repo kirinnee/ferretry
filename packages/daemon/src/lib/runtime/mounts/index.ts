@@ -76,7 +76,7 @@ import { type LegacyTaskSubsystem, legacyTaskRoutes } from './legacy-tasks.ts';
 import { type LocalSkillInstallSubsystem, localSkillInstallRoutes } from './local-skill-installs.ts';
 import { type McpInventorySubsystem, mcpInventoryRoutes } from './mcp-inventory.ts';
 import { type McpOAuthSubsystem, mcpOAuthRoutes } from './mcp-oauth.ts';
-import { type ModelsSubsystem, modelRoutes } from './models.ts';
+import type { ModelsSubsystem } from './models.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
 import { type PackSubsystem, packRoutes } from './pack.ts';
 import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from './pairing.ts';
@@ -429,7 +429,8 @@ export interface MountedSubsystems {
   /** Optional provider keys (Jev, Groq, Cerebras): which are set, and a Test that spends one once through
    *  the daemon's outbound holder. No key travels on either route — see `mounts/speedups.ts`. */
   readonly speedups: SpeedupsSubsystem;
-  /** The model catalogs in effect and the published catalog this machine follows (docs/model-catalog.md). */
+  /** The model catalogs in effect and the published catalog this machine follows (docs/model-catalog.md). The routes come from the
+   *  models module; this field is read only by the first read of the models Ollama has installed, which `start()` arms. */
   readonly models: ModelsSubsystem;
   /** How this machine's daemon was installed, the latest release, and starting an update. The
    *  subsystem owns its check loop as well as its routes — see `mounts/daemon-update.ts`. */
@@ -720,8 +721,6 @@ export function legacyModule(
               ...recommendRoutes(subsystems.recommend),
               // Fixed literals under `/v1/speedups`, which no other subsystem uses: none can shadow or be shadowed.
               ...speedupRoutes(subsystems.speedups),
-              // Fixed literals under `/v1/models`, which no other subsystem uses: none can shadow or be shadowed.
-              ...modelRoutes(subsystems.models),
               // The working-tree read registers last among the per-session subsystems: three of its four paths are
               // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
               // its one-segment `fs`, so nothing here can shadow or be shadowed.

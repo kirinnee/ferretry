@@ -8,6 +8,7 @@ import type { AnalyticsJobs, AnalyticsProvides } from './analytics.ts';
 import type { AgentToolsProvides } from './agent-tools.ts';
 import type { InputRequestsProvides } from './input-requests.ts';
 import type { LearningSeams } from './learning.ts';
+import type { ModelsJobs, ModelsProvides } from './models.ts';
 import type { UpdateJobs, UpdateProvides } from './update.ts';
 import type { VoiceSeams } from './voice.ts';
 
@@ -34,6 +35,8 @@ export const seamsOf = {
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the tmux, the terminals, the agenda and the vault are needs). */
   inputRequests: (_world: DaemonWorld): void => undefined,
   learning: (world: DaemonWorld): LearningSeams => ({ userHome: world.userHome }),
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the outbound holder is a `buildWorld` value, a need). */
+  models: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the saved-pictures store is a need). */
   renders: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the user home and the harness resolution are needs). */
@@ -58,6 +61,7 @@ export interface ModuleHandles {
   readonly fleetLogin: BuiltModule<HarnessLoginService>;
   readonly inputRequests: BuiltModule<InputRequestsProvides>;
   readonly learning: BuiltModule<LearningSubsystem>;
+  readonly models: BuiltModule<ModelsProvides, ModelsJobs>;
   readonly renders: BuiltModule<RenderService>;
   readonly update: BuiltModule<UpdateProvides, UpdateJobs>;
   readonly voice: BuiltModule<SttEnhancementSubsystem>;

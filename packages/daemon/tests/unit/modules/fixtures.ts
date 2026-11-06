@@ -5,6 +5,7 @@ import { builtCgroups } from './cgroups/fixture.ts';
 import { builtFleetLogin } from './fleet-login/fixture.ts';
 import { builtInputRequests } from './input-requests/fixture.ts';
 import { builtLearning } from './learning/fixture.ts';
+import { builtModels } from './models/fixture.ts';
 import { builtRenders } from './renders/fixture.ts';
 import { builtUpdate } from './update/fixture.ts';
 import { builtVoice } from './voice/fixture.ts';
@@ -30,4 +31,5 @@ export const builtModules = (): readonly BuiltModule<unknown, object>[] => [
   builtInputRequests(),
   builtAgentTools(),
   builtFleetLogin(),
+  builtModels(),
 ];
