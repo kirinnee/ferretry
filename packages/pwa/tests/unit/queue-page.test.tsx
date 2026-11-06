@@ -79,41 +79,50 @@ const text = (node: ReactTestInstance): string =>
 const buttons = (root: ReactTestInstance, label: string) => root.findAll(n => n.type === 'button' && text(n) === label);
 
 describe('QueuePageView', () => {
-  test('lists each message with its tick count, reason and chips, and counts what waits', () => {
+  test('lists each message with its tick count and reason, and counts what waits', () => {
     mounted = view();
     const root = mounted.root;
     expect(text(root.findByType('h1'))).toBe('All queues');
     expect(root.findAll(n => n.props['data-queue-row'] !== undefined)).toHaveLength(4);
     expect(root.findByProps({ 'data-queue-row': 'o1' }).findByProps({ 'data-queue-ticks': 1 })).toBeDefined();
     expect(root.findByProps({ 'data-queue-row': 'q22' }).findByProps({ 'data-queue-ticks': 4 })).toBeDefined();
-    expect(text(root.findByProps({ 'data-queue-row': 'q333' }).findByProps({ 'data-queue-chip': 'from' }))).toBe(
-      'From Mira',
+    expect(text(root.findByProps({ 'data-queue-row': 'q333' }).findByProps({ 'data-queue-meta': 'from' }))).toBe(
+      'Mira',
     );
     expect(JSON.stringify(mounted.toJSON())).toContain('waiting for connection');
     expect(JSON.stringify(mounted.toJSON())).toContain('3 messages are waiting');
   });
 
-  test('each message names who it is for, who sent it, its kind and when it was queued', () => {
+  test('a row is one plain line: no chips, no ferret name, no sender for your own, no kind for an action', () => {
     mounted = view({ now: Date.parse('2026-10-30T10:15:00.000Z') });
-    const chip = (id: string, part: string) =>
-      text(mounted!.root.findByProps({ 'data-queue-row': id }).findByProps({ 'data-queue-chip': part }));
-    expect(chip('o1', 'to')).toBe('To Casen');
-    expect(chip('o1', 'from')).toBe('From You');
-    expect(chip('o1', 'kind')).toBe('action');
-    expect(chip('q333', 'from')).toBe('From Mira');
-    const time = mounted.root.findByProps({ 'data-queue-row': 'o1' }).findByType('time');
-    expect(text(time)).toBe('Queued 15m ago');
+    const row = (id: string) => mounted!.root.findByProps({ 'data-queue-row': id });
+    const parts = (id: string) =>
+      row(id)
+        .findAll(n => n.props['data-queue-meta'] !== undefined)
+        .map(n => n.props['data-queue-meta']);
+    expect(
+      mounted.root.findAll(n => typeof n.props.className === 'string' && n.props.className.includes('kt-badge')),
+    ).toHaveLength(0);
+    expect(parts('o1')).toEqual(['status']);
+    expect(parts('q333')).toEqual(['from', 'status']);
+    expect(text(row('o1'))).not.toContain('Casen');
+    expect(text(row('o1').findByProps({ 'data-queue-meta': 'status' }))).toBe(
+      'On this device · waiting for connection',
+    );
+    expect(text(row('q1').findByProps({ 'data-queue-meta': 'status' }))).toBe('waiting for its turn');
+    const time = row('o1').findByType('time');
+    expect(text(time)).toBe('15m ago');
     expect(time.props.dateTime).toBe('2026-10-30T10:00:05.000Z');
   });
 
-  test("a ferret's label shows as the kind chip, and a blocker marks its row", () => {
+  test("a ferret's label shows as the kind, and a blocker marks its row", () => {
     mounted = view({
       groups: [group([queued('q1', 'queued', { label: 'blocker' }), queued('q22', 'queued', { label: 'fyi' })])],
     });
     const row = (id: string) => mounted!.root.findByProps({ 'data-queue-row': id });
-    expect(text(row('q1').findByProps({ 'data-queue-chip': 'kind' }))).toBe('blocker');
+    expect(text(row('q1').findByProps({ 'data-queue-meta': 'kind' }))).toBe('blocker');
     expect(row('q1').props['data-queue-kind']).toBe('blocker');
-    expect(text(row('q22').findByProps({ 'data-queue-chip': 'kind' }))).toBe('fyi');
+    expect(text(row('q22').findByProps({ 'data-queue-meta': 'kind' }))).toBe('fyi');
   });
 
   test('marks the one message that is delivered next per ferret, in delivery order, not screen order', () => {
@@ -133,7 +142,7 @@ describe('QueuePageView', () => {
       'q22',
       'q4444',
     ]);
-    expect(text(mounted.root.findByProps({ 'data-queue-row': 'q22' }).findByProps({ 'data-queue-chip': 'next' }))).toBe(
+    expect(text(mounted.root.findByProps({ 'data-queue-row': 'q22' }).findByProps({ 'data-queue-meta': 'next' }))).toBe(
       'Next up',
     );
   });

@@ -113,7 +113,7 @@ const isHeld = (row: QueueRow, now: number): boolean => row.holdUntil !== undefi
  * time; the owner's own messages go first, each alone. Then, if ANY pending ferret message is due (no hold, or its
  * hold ended), the daemon flushes every pending ferret message together — held ones included — in the order the
  * queue accepted them, and the daemon's own notices (Board, Warden…) go after that batch. If none is due, a notice
- * may pass the held ferret messages. What is finished comes last. The kind chip says how soon a ferret's message is
+ * may pass the held ferret messages. What is finished comes last. The kind says how soon a ferret's message is
  * due; it does not reorder the list by itself.
  */
 const rankerFor = (rows: readonly QueueRow[], now: number): ((row: QueueRow) => number) => {
@@ -140,10 +140,10 @@ export const nextRowId = (rows: readonly QueueRow[], now: number = Date.now()): 
 /** Who the message is from: the sender's name, or "You" for the owner's own. */
 export const fromLabel = (row: QueueRow): string => row.sender ?? 'You';
 
-/** "Queued 14m ago" — the time chip. Nothing is claimed when the instant cannot be read. */
+/** "14m ago" — how long it has waited. Empty (nothing is claimed) when the instant cannot be read. */
 export const queuedAgo = (at: string, now: number): string => {
   const ago = relativeTime(at, now);
-  return ago === '—' ? 'Queued' : ago === 'now' ? 'Queued just now' : `Queued ${ago}`;
+  return ago === '—' ? '' : ago === 'now' ? 'just now' : ago;
 };
 
 /** A message past this many lines, characters or a code block, shows a clamp with "Show more". */

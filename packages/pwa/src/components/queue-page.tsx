@@ -28,9 +28,10 @@ import { useAppStore, useConnectionSnapshot } from '../lib/store.tsx';
 import { ChatProse } from './chat-prose.tsx';
 import { DaemonTaskReferences } from './daemon-task-references.tsx';
 
+/** Where a message is, in words; a queued one is on the machine's queue, which is what this page is. */
 const STATE_LABEL: Readonly<Record<QueueRow['state'], string>> = {
   saved: 'On this device',
-  queued: 'On the machine’s queue',
+  queued: '',
   typing: 'Typing',
   delivered: 'Typed',
   read: 'Read',
@@ -50,38 +51,13 @@ const STATE_TICKS: Readonly<Record<QueueRow['state'], number>> = {
   failed: 0,
 };
 
+/** "On this device · waiting for connection"; a message on the machine's queue says only why it waits. */
+const statusLine = (row: QueueRow): string =>
+  STATE_LABEL[row.state] === '' ? row.why : `${STATE_LABEL[row.state]} · ${row.why}`;
+
 export interface QueueRowHandlers {
   readonly edit: (row: QueueRow, text: string) => Promise<void>;
   readonly cancel: (row: QueueRow) => Promise<void>;
-}
-
-const KIND_TONE: Readonly<Record<QueueRow['kind'], 'err' | 'accent' | undefined>> = {
-  blocker: 'err',
-  action: 'accent',
-  fyi: undefined,
-};
-
-function Chip({
-  children,
-  tone,
-  part,
-  title,
-}: {
-  readonly children: string;
-  readonly tone?: 'err' | 'accent' | 'ok' | 'warn' | undefined;
-  readonly part: string;
-  readonly title?: string;
-}) {
-  return (
-    <span
-      className="kt-badge fy-queue-chip"
-      data-queue-chip={part}
-      {...(tone === undefined ? {} : { 'data-tone': tone })}
-      title={title}
-    >
-      {children}
-    </span>
-  );
 }
 
 /** A message's words, drawn as the chat draws them, folded behind "Show more" when they run long. */
@@ -126,6 +102,7 @@ function QueueRowView({
   readonly next: boolean;
   readonly now: number;
 }) {
+  const ago = queuedAgo(row.at, now);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(row.text);
   const [note, setNote] = useState<string | null>(null);
@@ -147,25 +124,26 @@ function QueueRowView({
       data-queue-row={row.id}
       data-queue-state={row.state}
     >
-      <div className="fy-queue-chips">
+      {/* One quiet line, plain words. The ferret is the heading and the owner is the default sender, so
+          neither is repeated; the kind shows only when it is not the ordinary `action`. */}
+      <p className="fy-queue-meta" data-queue-ticks={STATE_TICKS[row.state]}>
         {next ? (
-          <Chip part="next" tone="ok">
+          <span className="fy-queue-next" data-queue-meta="next">
             Next up
-          </Chip>
+          </span>
         ) : null}
-        <Chip part="to">{`To ${row.ferret}`}</Chip>
-        <Chip part="from">{`From ${fromLabel(row)}`}</Chip>
-        <Chip part="kind" tone={KIND_TONE[row.kind]}>
-          {row.kind}
-        </Chip>
-        <time className="fy-queue-time" dateTime={row.at} title={absoluteTime(row.at)}>
-          {queuedAgo(row.at, now)}
-        </time>
-      </div>
-      <p className="fy-queue-why" data-queue-ticks={STATE_TICKS[row.state]}>
-        <span className="fy-queue-state">{STATE_LABEL[row.state]}</span>
-        <span aria-hidden="true"> · </span>
-        {row.why}
+        {row.sender === undefined ? null : <span data-queue-meta="from">{fromLabel(row)}</span>}
+        {row.kind === 'action' ? null : (
+          <span className="fy-queue-kind" data-queue-meta="kind" data-queue-tone={row.kind}>
+            {row.kind}
+          </span>
+        )}
+        <span data-queue-meta="status">{statusLine(row)}</span>
+        {ago === '' ? null : (
+          <time dateTime={row.at} title={absoluteTime(row.at)}>
+            {ago}
+          </time>
+        )}
       </p>
       {editing ? (
         <div className="fy-queue-edit">
@@ -208,7 +186,7 @@ function QueueRowView({
       {row.editable && !editing ? (
         <div className="fy-queue-actions">
           <button
-            className="kt-btn"
+            className="fy-queue-action"
             onClick={() => {
               setText(row.text);
               setEditing(true);
@@ -218,8 +196,8 @@ function QueueRowView({
             Edit
           </button>
           <button
-            className="kt-btn"
-            data-variant="danger"
+            className="fy-queue-action"
+            data-tone="danger"
             onClick={() => void act(() => handlers.cancel(row))}
             type="button"
           >
@@ -242,7 +220,7 @@ export interface QueuePageViewProps {
   readonly loading: boolean;
   /** Wraps one ferret's card — the host puts what its messages' references need (a machine's cards) around it. */
   readonly wrapGroup?: (group: QueueGroup, content: ReactNode) => ReactNode;
-  /** The clock the "Queued … ago" chips read; the page passes the present, a test passes a fixed instant. */
+  /** The clock the "… ago" times read; the page passes the present, a test passes a fixed instant. */
   readonly now?: number;
 }
 
@@ -291,15 +269,15 @@ export function QueuePageView({
             <Fragment key={group.key}>
               {wrapGroup(
                 group,
-                <section aria-label={group.ferret} className="kt-panel fy-queue-group" data-queue-group={group.key}>
+                <section aria-label={group.ferret} className="fy-queue-group" data-queue-group={group.key}>
                   <h2 className="fy-queue-group-head">
                     <button className="fy-queue-ferret" onClick={() => onOpenFerret(group)} type="button">
                       {group.ferret}
                     </button>
                     {showMachine ? <span className="fy-queue-machine">{group.machine}</span> : null}
-                    <span className="fy-queue-group-count" title="Messages waiting for this ferret">
-                      {group.rows.filter(isWaitingRow).length}
-                    </span>
+                    {shown.length > 1 ? (
+                      <span className="fy-queue-group-count">{`${group.rows.filter(isWaitingRow).length} waiting`}</span>
+                    ) : null}
                   </h2>
                   <ul className="fy-queue-list">
                     {group.rows.map(row => (

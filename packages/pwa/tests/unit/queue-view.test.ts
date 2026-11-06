@@ -144,7 +144,7 @@ describe('waiting', () => {
   });
 });
 
-describe('kind, sender and age chips', () => {
+describe('kind, sender and age', () => {
   test("the kind is the sender's label, or action when it set none", () => {
     expect(queueRowOf('d', 's', 'f', message()).kind).toBe('action');
     expect(queueRowOf('d', 's', 'f', message({ label: 'blocker' })).kind).toBe('blocker');
@@ -161,11 +161,11 @@ describe('kind, sender and age chips', () => {
 
   test('says how long ago it was queued, and never invents an age', () => {
     const now = Date.parse('2026-10-30T10:30:00.000Z');
-    expect(queuedAgo('2026-10-30T10:00:00.000Z', now)).toBe('Queued 30m ago');
-    expect(queuedAgo('2026-10-30T07:30:00.000Z', now)).toBe('Queued 3h ago');
-    expect(queuedAgo('2026-10-28T10:30:00.000Z', now)).toBe('Queued 2d ago');
-    expect(queuedAgo('2026-10-30T10:29:50.000Z', now)).toBe('Queued just now');
-    expect(queuedAgo('not a time', now)).toBe('Queued');
+    expect(queuedAgo('2026-10-30T10:00:00.000Z', now)).toBe('30m ago');
+    expect(queuedAgo('2026-10-30T07:30:00.000Z', now)).toBe('3h ago');
+    expect(queuedAgo('2026-10-28T10:30:00.000Z', now)).toBe('2d ago');
+    expect(queuedAgo('2026-10-30T10:29:50.000Z', now)).toBe('just now');
+    expect(queuedAgo('not a time', now)).toBe('');
   });
 });
 

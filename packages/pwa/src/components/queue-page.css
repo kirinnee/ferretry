@@ -1,7 +1,7 @@
-/* THE QUEUE PAGE (&B160). One readable column — the chat's own measure — of cards: each queued message is
-   a row of chips (who it is for, who sent it, its kind, when it was queued), the sentence for why it waits,
-   its words drawn by the chat's renderer (folded behind "Show more" when long) and real buttons. Colours,
-   radii and type all come from the theme tokens; nothing here names a colour. */
+/* THE QUEUE PAGE (&B160). A wide, plain list: each ferret is a heading, each queued message a row set off by a
+   hairline — one quiet line of words (who sent it if not you, its kind if not an action, why it waits, how long
+   ago), the message drawn by the chat's renderer (folded behind "Show more" when long) and text buttons. No
+   chips, no boxes inside boxes. Colours, radii and type all come from the theme tokens; nothing names a colour. */
 .fy-queue-page {
   display: flex;
   flex: 1 1 0;
@@ -16,7 +16,7 @@
   flex-direction: column;
   gap: 16px;
   width: 100%;
-  max-width: var(--chat-column, 760px);
+  max-width: 64rem;
   min-width: 0;
   margin-inline: auto;
 }
@@ -39,16 +39,15 @@
 .fy-queue-group {
   flex: none;
   min-width: 0;
-  overflow: hidden;
 }
 .fy-queue-group-head {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: baseline;
+  gap: 10px;
   margin: 0;
-  padding: 10px 14px;
-  border-bottom: var(--divider-width, 1px) solid var(--divider-color, var(--border-soft));
-  font-size: 1rem;
+  padding: 0 0 8px;
+  border-bottom: var(--divider-width, 1px) solid var(--divider-color, var(--border));
+  font-size: 1.05rem;
 }
 .fy-queue-ferret {
   min-width: 0;
@@ -69,74 +68,58 @@
 }
 .fy-queue-group-count {
   margin-inline-start: auto;
-  min-width: 1.6em;
-  padding: 0 6px;
-  border: var(--stroke, 1px) solid var(--border);
-  border-radius: var(--radius-badge, 999px);
   color: var(--muted);
-  font-size: var(--text-xs, 0.75rem);
-  text-align: center;
+  font-size: var(--text-sm, 0.875rem);
+  white-space: nowrap;
 }
 .fy-queue-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
   margin: 0;
-  padding: 10px;
+  padding: 0;
   list-style: none;
 }
 .fy-queue-row {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  padding: 12px;
-  border: var(--stroke, 1px) solid var(--border-soft);
-  border-radius: var(--radius-control, 8px);
-  background: var(--surface-2);
+  padding: 14px 0;
+  border-bottom: var(--divider-width, 1px) solid var(--border-soft);
 }
-.fy-queue-row[data-queue-next] {
-  border-color: var(--ok-border, var(--accent));
+.fy-queue-row:last-child {
+  border-bottom: 0;
 }
+/* The one row that needs a person's eye: a blocker. A quiet rule on its edge and a coloured word, no fill. */
 .fy-queue-row[data-queue-kind='blocker'] {
-  border-color: var(--err-border, var(--err));
-  background: var(--err-bg, var(--surface-2));
+  padding-inline-start: 12px;
+  border-inline-start: 3px solid var(--err);
 }
-.fy-queue-chips {
+.fy-queue-meta {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-/* The ferret and the sender are names, not states: quiet outlines, so kind and "Next up" are what colour says. */
-.fy-queue-chip[data-queue-chip='to'],
-.fy-queue-chip[data-queue-chip='from'],
-.fy-queue-chip[data-queue-chip='kind']:not([data-tone]) {
-  max-width: 100%;
-  overflow: hidden;
-  border-color: var(--border);
-  background: var(--surface);
-  color: var(--fg);
-  text-overflow: ellipsis;
-  text-transform: none;
-}
-.fy-queue-chip[data-queue-chip='kind']:not([data-tone]) {
-  color: var(--muted);
-  text-transform: var(--label-transform);
-}
-.fy-queue-time {
-  margin-inline-start: auto;
-  color: var(--muted);
-  font-size: var(--text-xs, 0.75rem);
-  white-space: nowrap;
-}
-.fy-queue-why {
+  align-items: baseline;
   margin: 0;
   color: var(--muted);
-  font-size: var(--text-xs, 0.8rem);
-  overflow-wrap: anywhere;
+  font-size: var(--text-sm, 0.85rem);
 }
-.fy-queue-state {
+.fy-queue-meta > * + *::before {
+  content: '·';
+  margin-inline: 0.5em;
+}
+.fy-queue-meta time {
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+.fy-queue-meta time::before {
+  content: none;
+}
+.fy-queue-next {
+  color: var(--ok);
+  font-weight: var(--weight-strong, 600);
+}
+.fy-queue-kind[data-queue-tone='blocker'] {
+  color: var(--err);
   font-weight: var(--weight-strong, 600);
 }
 .fy-queue-message {
@@ -169,18 +152,15 @@
   max-height: 9.5rem;
   overflow: hidden;
 }
-/* The fold fades into the card's own surface, so it reads as "more below" in every theme. */
+/* The fold fades into the page, so it reads as "more below" in every theme. */
 .fy-queue-body[data-queue-clamped]::after {
   content: '';
   position: absolute;
   inset-inline: 0;
   bottom: 0;
   height: 3rem;
-  background: linear-gradient(to bottom, transparent, var(--surface-2));
+  background: linear-gradient(to bottom, transparent, var(--bg, var(--surface)));
   pointer-events: none;
-}
-.fy-queue-row[data-queue-kind='blocker'] .fy-queue-body[data-queue-clamped]::after {
-  background: linear-gradient(to bottom, transparent, var(--err-bg, var(--surface-2)));
 }
 .fy-queue-more {
   min-width: 0;
@@ -193,7 +173,24 @@
 .fy-queue-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px 16px;
+}
+/* Edit / Cancel are quiet text buttons; Save and Keep (while editing) stay real buttons. */
+.fy-queue-action {
+  min-width: 0;
+  padding: 2px 0;
+  color: var(--muted);
+  font-size: var(--text-sm, 0.875rem);
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+}
+.fy-queue-action:hover,
+.fy-queue-action:focus-visible {
+  color: var(--fg);
+}
+.fy-queue-action[data-tone='danger'] {
+  color: var(--err);
 }
 .fy-queue-edit {
   display: flex;
@@ -237,14 +234,15 @@
   .fy-queue-page {
     padding: 12px;
   }
-  .fy-queue-actions .kt-btn,
+  .fy-queue-edit .kt-btn,
   .fy-queue-ferret,
   .fy-queue-head .kt-btn,
   .fy-queue-empty .kt-btn {
     min-height: 44px;
   }
-  .fy-queue-actions .kt-btn {
-    flex: 1 1 8rem;
+  .fy-queue-action {
+    min-height: 44px;
+    padding-inline: 4px;
   }
   .fy-queue-more {
     min-height: 44px;
