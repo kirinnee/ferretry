@@ -669,6 +669,9 @@ export class DeferredAgendaActions {
   #state: DeferredAgendaState = { pending: [], sending: [], failed: [] };
   readonly #timers = new Map<string, unknown>();
   readonly #listeners = new Set<() => void>();
+  /** How many Undo toasts are on screen now: see {@link offerUndo}. */
+  #undoSurfaces = 0;
+  #unoffered: unknown;
 
   constructor(
     private readonly commit: Commit,
@@ -724,6 +727,31 @@ export class DeferredAgendaActions {
   /** Forgets a refusal once the reader has seen it. */
   clearFailure(key: string): void {
     this.#publish({ ...this.#state, failed: this.#state.failed.filter(failed => failed.key !== key) });
+  }
+
+  /**
+   * An Undo toast is on screen; call what this returns when it goes. THE WINDOW IS ONLY WORTH ITS WAIT WHILE UNDO CAN BE
+   * PRESSED: once the last toast has gone (the owner left the Inbox for the chat, say) everything still held is sent at
+   * once, rather than leaving that chat, every other device and the ferret showing the item open for the rest of the
+   * five seconds. Checked a tick after the last one goes, so a toast that moves (floating to inline) keeps the window.
+   */
+  offerUndo(): () => void {
+    this.#undoSurfaces += 1;
+    if (this.#unoffered !== undefined) {
+      this.timers.clearTimeout(this.#unoffered);
+      this.#unoffered = undefined;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#undoSurfaces -= 1;
+      if (this.#undoSurfaces > 0 || this.#unoffered !== undefined) return;
+      this.#unoffered = this.timers.setTimeout(() => {
+        this.#unoffered = undefined;
+        if (this.#undoSurfaces === 0) this.flush();
+      }, 0);
+    };
   }
 
   /** Sends everything still held, now. */

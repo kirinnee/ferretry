@@ -54,6 +54,9 @@ export function AgendaUndoToast({ inbox, clock = Date.now, inline = false }: Age
   const pending = inbox.deferredState.pending;
   const latest = pending.at(-1);
   const [, setTick] = useState(0);
+  // While this toast is mounted Undo can be pressed; once the last one goes, what is held is sent at once.
+  const deferred = inbox.deferred;
+  useEffect(() => deferred.offerUndo(), [deferred]);
   useEffect(() => {
     if (pending.length === 0) return;
     const timer = setInterval(() => setTick(tick => tick + 1), TICK_MS);

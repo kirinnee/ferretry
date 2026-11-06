@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgendaItem, AgendaSnapshot, ResolvedAgendaItem, SessionAgendaSummary } from '@ferretry/protocol';
+import { answerAction, type InboxAction, withAskVersion } from '../../src/lib/agenda-answers.ts';
 import {
   actionSentence,
   agendaConversationPath,
@@ -42,7 +43,6 @@ import {
   withFerretCards,
   withFerretSessions,
 } from '../../src/lib/agenda-inbox.ts';
-import { answerAction, type InboxAction, withAskVersion } from '../../src/lib/agenda-answers.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -481,6 +481,74 @@ describe('the undo window', () => {
     expect(sent).toEqual([]);
     advance(2_000);
     expect(sent).toEqual(['Dismiss']);
+  });
+
+  test('sends what is held at once when the last Undo toast goes, and not while one is still on screen', () => {
+    // Arrange — two toasts on screen (the floating one and an inline one), one answer held
+    const { timers, advance } = fakeTimers();
+    const sent: string[] = [];
+    const deferred = new DeferredAgendaActions(async target => {
+      sent.push(target.item.id);
+    }, timers);
+    const floating = deferred.offerUndo();
+    const inline = deferred.offerUndo();
+    deferred.schedule(card('A1'), DONE_ACTION);
+
+    // Act / Assert — one toast going leaves Undo on screen: still held
+    floating();
+    advance(0);
+    expect(sent).toEqual([]);
+    // the last toast going (the owner left the Inbox): Undo can no longer be pressed, so it is sent now, not at 5 s
+    inline();
+    expect(sent).toEqual([]);
+    advance(0);
+    expect(sent).toEqual(['A1']);
+    expect(deferred.getSnapshot().pending).toEqual([]);
+    advance(UNDO_WINDOW_MS);
+    expect(sent).toEqual(['A1']);
+  });
+
+  test('keeps the window when a toast moves: the next toast mounts before the check runs', () => {
+    // Arrange
+    const { timers, advance } = fakeTimers();
+    const sent: string[] = [];
+    const deferred = new DeferredAgendaActions(async target => {
+      sent.push(target.item.id);
+    }, timers);
+    const first = deferred.offerUndo();
+    deferred.schedule(card('A1'), DONE_ACTION);
+
+    // Act — the floating toast unmounts and the inline one mounts in the same commit
+    first();
+    first();
+    const moved = deferred.offerUndo();
+    advance(0);
+
+    // Assert — still undoable, sent only when its window closes
+    expect(sent).toEqual([]);
+    expect(deferred.undo()?.card.item.id).toBe('A1');
+    advance(UNDO_WINDOW_MS);
+    expect(sent).toEqual([]);
+    moved();
+  });
+
+  test('a refusal after an early send comes back as a failure, never as success', async () => {
+    // Arrange
+    const { timers, advance } = fakeTimers();
+    const deferred = new DeferredAgendaActions(async () => {
+      throw new Error('That item was already answered.');
+    }, timers);
+    const toast = deferred.offerUndo();
+    deferred.schedule(card('A1'), DONE_ACTION);
+
+    // Act — the owner leaves the Inbox
+    toast();
+    advance(0);
+    await settled();
+
+    // Assert — the card is back with the daemon's words
+    expect(deferred.hiddenKeys().has(card('A1').key)).toBe(false);
+    expect(deferred.getSnapshot().failed.map(failure => failure.message)).toEqual(['That item was already answered.']);
   });
 
   test('flush sends everything held at once', () => {

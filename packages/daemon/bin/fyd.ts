@@ -892,6 +892,7 @@ import {
   type DecodedInitialAttachment,
   DeferredMemberSessions,
   type DeliveredAttachment,
+  DetachedAgendaObserver,
   DeviceGrantService,
   DirectSession,
   DONE_MARKER_FILENAME,
@@ -11115,8 +11116,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new AgendaReplyDelivery(agendaReplies, CLIENT_NAME),
           // A board that now leaves an idle ferret stopped on the owner, or an item whose deadline is near.
           agendaBuzz,
-          // An item that no longer needs the owner takes its alerts down on every device.
-          alertClearer,
+          // An item that no longer needs the owner takes its alerts down on every device. DETACHED: that is a web push
+          // to every device after two reads of the whole notification ledger, and the owner's answer used to wait for
+          // it. If the daemon stops before the clear is recorded, the start-up sweep takes the alert down (it rechecks
+          // alerts with no clear recorded). A clear that was recorded but whose push never went out is NOT retried by
+          // the sweep — as before, when the request awaited the push.
+          new DetachedAgendaObserver(alertClearer),
           // An item that closes takes its reply-box draft with it; a replied (parked) item keeps its own.
           new AgendaItemDraftDiscard({
             discard: async (sessionId, item) => await sharedDraftsHolder.service?.discard(sessionId, item),
@@ -11125,11 +11130,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new InputCardClosedObserver(async (sessionId, id) => await inputRequests?.cardDismissed(sessionId, id)),
           // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
           // pane for seconds, and the answer is already on the board.
-          {
-            changed: async (sessionId, change) => {
-              void harnessAnswerDelivery.changed(sessionId, change).catch(() => undefined);
-            },
-          },
+          new DetachedAgendaObserver(harnessAnswerDelivery),
         ]),
         // An add that names no card belongs to the raising session's focus card (board-design.md §2.6) —
         // the CLI's, a harness question's and a Warden escalation's alike.
@@ -11169,7 +11170,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock,
         { has: async id => id === MACHINE_AGENDA_ID },
         notifications,
-        new AgendaChangeFanout([{ changed: async sessionId => await workSearch.changed(sessionId) }, alertClearer]),
+        new AgendaChangeFanout([
+          { changed: async sessionId => await workSearch.changed(sessionId) },
+          new DetachedAgendaObserver(alertClearer),
+        ]),
       );
       const machineAgenda = new MachineAgenda(
         machineAgendaService,

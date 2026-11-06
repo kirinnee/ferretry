@@ -611,3 +611,134 @@ describe('DaemonFleetStore keeps what an action published against an older read'
     should(store.session(scope)?.state.status).equal('starting');
   });
 });
+
+describe('DaemonFleetStore.refreshSession — a read that starts after now is published', () => {
+  const scope = daemonSessionScope(daemonA, 'row');
+  const oldRow = session('row', { attention: 0 });
+  const newRow = session('row', { attention: 1 });
+
+  const paired = async (): Promise<{ port: RecordingPort; store: DaemonFleetStore }> => {
+    const port = new RecordingPort();
+    const store = new DaemonFleetStore(port);
+    const listed = store.hydrate(daemonA);
+    port.lists[0]?.resolve([oldRow]);
+    await listed;
+    return { port, store };
+  };
+
+  it("(a) follows another caller's in-flight read with a second one and publishes the second answer", async () => {
+    const { port, store } = await paired();
+    ignore(store.fetchSession(daemonA, scope));
+    should(port.getCalls).have.length(1);
+
+    store.refreshSession(daemonA, scope);
+    should(port.getCalls).have.length(1);
+    port.gets[0]?.resolve(oldRow);
+    await settle();
+
+    should(port.getCalls).have.length(2);
+    port.gets[1]?.resolve(newRow);
+    await settle();
+    should(store.session(scope)).equal(newRow);
+  });
+
+  it('(b) collapses three refreshes during one read into one trailing read', async () => {
+    const { port, store } = await paired();
+    ignore(store.fetchSession(daemonA, scope));
+
+    store.refreshSession(daemonA, scope);
+    store.refreshSession(daemonA, scope);
+    store.refreshSession(daemonA, scope);
+    port.gets[0]?.resolve(oldRow);
+    await settle();
+    should(port.getCalls).have.length(2);
+
+    port.gets[1]?.resolve(newRow);
+    await settle();
+    should(port.getCalls).have.length(2);
+  });
+
+  it('(c) still starts the trailing read when the first one is rejected', async () => {
+    const { port, store } = await paired();
+    ignore(store.fetchSession(daemonA, scope));
+
+    store.refreshSession(daemonA, scope);
+    port.gets[0]?.reject(new Error('offline'));
+    await settle();
+    should(port.getCalls).have.length(2);
+
+    port.gets[1]?.resolve(newRow);
+    await settle();
+    should(store.session(scope)).equal(newRow);
+  });
+
+  it('(d) starts no trailing read, and recreates no entry, after the daemon is cleared', async () => {
+    const { port, store } = await paired();
+    ignore(store.fetchSession(daemonA, scope));
+    store.refreshSession(daemonA, scope);
+
+    store.clearDaemon(daemonA.daemonId);
+    port.gets[0]?.resolve(oldRow);
+    await settle();
+
+    should(port.getCalls).have.length(1);
+    should(store.fleet(daemonA.daemonId).sessions).be.null();
+    should(store.getSnapshot().daemons.size).equal(0);
+  });
+
+  it('(e) starts no trailing read through the old connection after a same-id re-pair', async () => {
+    const { port, store } = await paired();
+    ignore(store.fetchSession(daemonA, scope));
+    store.refreshSession(daemonA, scope);
+
+    const reread = store.hydrate(daemonAMoved);
+    port.lists[1]?.resolve([session('other')]);
+    await reread;
+    port.gets[0]?.resolve(oldRow);
+    await settle();
+
+    should(port.getCalls).have.length(1);
+    should(store.fleet(daemonA.daemonId).sessions?.map(view => view.config.id)).deepEqual(['other']);
+  });
+
+  it('(f) does nothing for a connection that is not the current entry, or has no entry', async () => {
+    const port = new RecordingPort();
+    const store = new DaemonFleetStore(port);
+    store.refreshSession(daemonA, scope);
+    should(port.getCalls).have.length(0);
+    should(store.getSnapshot().daemons.size).equal(0);
+
+    ignore(store.fetchSession(daemonA, scope));
+    should(port.getCalls).have.length(1);
+    store.refreshSession(daemonAMoved, daemonSessionScope(daemonAMoved, 'row'));
+    store.refreshSession(daemonARotated, daemonSessionScope(daemonARotated, 'row'));
+    store.refreshSession(daemonA, daemonSessionScope(daemonB, 'row'));
+    port.gets[0]?.resolve(oldRow);
+    await settle();
+
+    should(port.getCalls).have.length(1);
+  });
+
+  it('(g) starts a read at once when none is in flight, and swallows its failure', async () => {
+    const { port, store } = await paired();
+
+    store.refreshSession(daemonA, scope);
+    should(port.getCalls).have.length(1);
+
+    port.gets[0]?.reject(new Error('offline'));
+    await settle();
+    should(store.session(scope)).equal(oldRow);
+  });
+
+  it('swallows a port that throws instead of returning a promise', async () => {
+    const { port, store } = await paired();
+    port.get = () => {
+      throw new Error('boom');
+    };
+
+    store.refreshSession(daemonA, scope);
+    await settle();
+
+    should(store.session(scope)).equal(oldRow);
+  });
+});

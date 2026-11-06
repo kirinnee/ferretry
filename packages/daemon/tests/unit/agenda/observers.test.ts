@@ -12,6 +12,7 @@ import {
   type AgendaMutation,
   AgendaReplyDelivery,
   AgendaService,
+  DetachedAgendaObserver,
   SessionAgendaProjection,
   type SessionAgendaState,
 } from '../../../src/lib/agenda/index.ts';
@@ -848,5 +849,78 @@ describe('a forged gate follow-up (docs/agenda.md § Reserved sourceRefs)', () =
 
     // Assert
     should(messenger.sent).be.empty();
+  });
+});
+
+describe('DetachedAgendaObserver', () => {
+  const change = { change: 'resolved', actor: HUMAN, via: 'board' } as unknown as AgendaBoardChange;
+
+  it('answers the board change before the slow work it starts has finished, and still runs it', async () => {
+    // Arrange — a clear that takes as long as a web push does
+    let release!: () => void;
+    const pushed = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const done: string[] = [];
+    const slow = {
+      changed: async (sessionId: string) => {
+        await pushed;
+        done.push(sessionId);
+      },
+    };
+    const fanout = new AgendaChangeFanout([new DetachedAgendaObserver(slow)]);
+
+    // Act — the fanout settles while the push is still on its way
+    await fanout.changed(SESSION, change);
+
+    // Assert
+    should(done).be.empty();
+    release();
+    await pushed;
+    await Promise.resolve();
+    should(done).deepEqual([SESSION]);
+  });
+
+  it('starts each change in commit order', async () => {
+    // Arrange
+    const started: string[] = [];
+    const detached = new DetachedAgendaObserver({
+      changed: async sessionId => {
+        started.push(sessionId);
+        await new Promise(resolve => setTimeout(resolve, 0));
+      },
+    });
+
+    // Act
+    await detached.changed('s1', change);
+    await detached.changed('s2', change);
+
+    // Assert
+    should(started).deepEqual(['s1', 's2']);
+  });
+
+  it('never fails the change: a rejection or a throw is handed to its reporter', async () => {
+    // Arrange
+    const failures: string[] = [];
+    const report = (error: unknown): void => {
+      failures.push(error instanceof Error ? error.message : String(error));
+    };
+    const rejects = new DetachedAgendaObserver({ changed: async () => Promise.reject(new Error('push down')) }, report);
+    const throws = new DetachedAgendaObserver(
+      {
+        changed: () => {
+          throw new Error('not started');
+        },
+      },
+      report,
+    );
+
+    // Act
+    await rejects.changed(SESSION, change);
+    await throws.changed(SESSION, change);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Assert
+    should(failures.sort()).deepEqual(['not started', 'push down']);
   });
 });
