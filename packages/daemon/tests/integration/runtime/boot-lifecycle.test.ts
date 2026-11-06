@@ -6371,7 +6371,9 @@ describe('daemon boot lifecycle', () => {
       should(omission[0]).containEql('http://0.0.0.0:');
       // The raw document wrote neither legacy bind key. Schema defaults must never be reported as
       // stale lines the operator should remove from a file where they do not exist.
-      should(said.stated.filter(message => message.includes('superseded'))).be.empty();
+      should(
+        said.stated.filter(message => message.includes('is superseded by its explicit carriers entry')),
+      ).be.empty();
     });
 
     it('should omit a reverse-proxy path from the carrier wire while boot and --check stay healthy', async () => {
@@ -6511,8 +6513,10 @@ describe('daemon boot lifecycle', () => {
       const converted = said.steps.filter(step => step.startsWith('configuration converted'));
       should(converted).have.length(1);
       should(converted[0]).match(/\(host\); the original is kept at /u);
-      should(said.stated.filter(message => message.startsWith('the legacy'))).be.empty();
-      should(said.stated.filter(message => message.includes('superseded'))).be.empty();
+      should(said.stated.filter(message => message.startsWith('the legacy "'))).be.empty();
+      should(
+        said.stated.filter(message => message.includes('is superseded by its explicit carriers entry')),
+      ).be.empty();
       const written = JSON.parse(await readFile(join(home, 'config', 'daemon.json'), 'utf8')) as Record<
         string,
         unknown
