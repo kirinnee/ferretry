@@ -27,3 +27,48 @@ export interface AgendaFileStore {
     name: string,
   ): Promise<{ readonly text: string; readonly identity: string } | undefined>;
 }
+
+/**
+ * The names a ferret's agenda files carried before the agenda rename (`attention.json`,
+ * `attention-replies.json`). No reader opens them: they exist only so a home that still holds one is
+ * REFUSED at start. Read as empty, such a home would silently lose its agenda, and the next raise would
+ * write a fresh `agenda.json` over the hidden items.
+ */
+export const PRE_RENAME_AGENDA_FILES: readonly string[] = ['attention.json', 'attention-replies.json'];
+
+/** One directory that may hold agenda files, and the names directly inside it. */
+export interface AgendaDirectoryEntries {
+  readonly path: string;
+  readonly names: readonly string[];
+}
+
+/** Every directory that may hold agenda files — each session directory, however the index lists it, and the machine's. */
+export interface AgendaDirectoryListing {
+  /** One directory read per directory; no file is opened. */
+  list(): Promise<readonly AgendaDirectoryEntries[]>;
+}
+
+/** How many offending paths the refusal names before it only counts the rest. */
+const NAMED_PRE_RENAME_PATHS = 5;
+
+/** The start refusal for a home that still holds agenda files under their pre-rename names. */
+export class PreRenameAgendaFilesError extends Error {
+  constructor(readonly found: readonly string[]) {
+    const named = found.slice(0, NAMED_PRE_RENAME_PATHS).join(', ');
+    const more = found.length > NAMED_PRE_RENAME_PATHS ? ', …' : '';
+    super(
+      `these sessions still hold agenda files from before the agenda rename: ${named}${more} (${String(found.length)} in all). ` +
+        'Start Ferretry 4.291.0 or older once to move them, or rename attention.json → agenda.json and ' +
+        'attention-replies.json → agenda-replies.json in each, then start again.',
+    );
+    this.name = 'PreRenameAgendaFilesError';
+  }
+}
+
+/** Refuses (rejects with {@link PreRenameAgendaFilesError}) when any listed directory holds a pre-rename agenda file. */
+export async function refusePreRenameAgendaFiles(listing: AgendaDirectoryListing): Promise<void> {
+  const found = (await listing.list()).flatMap(directory =>
+    PRE_RENAME_AGENDA_FILES.filter(name => directory.names.includes(name)).map(name => `${directory.path}/${name}`),
+  );
+  if (found.length > 0) throw new PreRenameAgendaFilesError(found);
+}

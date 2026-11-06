@@ -560,4 +560,47 @@ export function agendaVersionStoreContract() {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('refuses a nonempty store with no user_version and leaves it byte-identical', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agenda-version-unversioned-'));
+    try {
+      const directory = join(root, AGENDA_VERSIONS_DIRECTORY);
+      await mkdir(directory);
+      const file = join(directory, 'A1.sqlite');
+      const db = new Database(file);
+      db.exec('CREATE TABLE somebody_elses (id TEXT PRIMARY KEY)');
+      db.close();
+      const before = await readFile(file);
+      const store = new FileAgendaVersionStore(() => root);
+      try {
+        await should(store.record(SESSION, [draft(entryOf(raised.ledger), 'created', T(1))])).be.rejectedWith(
+          /A1\.sqlite has no agenda schema version \(user_version 0\) but is not empty/u,
+        );
+        await should(store.list(SESSION, 'A1')).be.rejectedWith(/no agenda schema version/u);
+      } finally {
+        store.close();
+      }
+      should(Buffer.compare(await readFile(file), before)).equal(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('initializes an empty store a crash left between create and commit', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agenda-version-empty-'));
+    try {
+      const directory = join(root, AGENDA_VERSIONS_DIRECTORY);
+      await mkdir(directory);
+      await writeFile(join(directory, 'A1.sqlite'), '');
+      const store = new FileAgendaVersionStore(() => root);
+      try {
+        await store.record(SESSION, [draft(entryOf(raised.ledger), 'created', T(1))]);
+        should((await store.list(SESSION, 'A1')).map(row => row.version)).deepEqual([1]);
+      } finally {
+        store.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 }

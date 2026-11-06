@@ -816,7 +816,7 @@ no archive text; changing versions releases that cached thread. Listing reads on
 the new snapshot and its ordered references in one SQLite transaction, with new words inserted once. Its work depends
 on the current thread, not the number or size of historical versions; unchanged words take no additional text storage.
 This avoids repeated full-archive scans while keeping independently readable complete snapshots and uncapped words.
-A store whose `user_version` is not 2 is refused by name and left untouched.
+A store whose `user_version` is not 2 is refused by name and left untouched. `user_version` 0 is built only for a file with no schema at all (new, or left empty by a crash between create and commit), under an IMMEDIATE transaction; a nonempty file at 0 is refused the same way.
 
 Pruning a closed item cold-archives its complete thread, final snapshot and any carried legacy snapshot before
 removing its `conversations` and `carriedEntries` keys from the hot ledger. Previously orphaned keys follow the same
@@ -1982,6 +1982,11 @@ know, and the handover counts are a strict object an older reader refuses an unk
 ### On disk
 
 A ferret's session directory holds the agenda as `agenda.json` and its held answers as `agenda-replies.json`.
+
+Nothing reads the names they had before the rename (`attention.json`, `attention-replies.json`). A home that still holds
+one — in any session directory, indexed or not, or in `machine-agenda` — **refuses to start**, naming the paths: read as
+empty, it would hide the items and the next raise would write a fresh `agenda.json` over them. Start Ferretry 4.291.0
+or older once to move them, or rename the files by hand. `*.migrated` backups are ignored.
 
 - **The ledger says its shape** (`version`, 4 since stored conversations): it is read as 1 when absent and brought to
   4 as it is read ([the channel migration](#the-migration-ledger-version-2) and [the conversation

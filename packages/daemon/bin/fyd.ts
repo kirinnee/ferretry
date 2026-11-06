@@ -116,6 +116,7 @@ import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-o
 import { FileAgendaSeenStore, FileAgendaVersionStore } from '../src/adapters/agenda/file-agenda-versions.ts';
 import { FileMachineMembers } from '../src/adapters/agenda/file-machine-members.ts';
 import { KeyedAgendaReplyTimers } from '../src/adapters/agenda/keyed-agenda-reply-timers.ts';
+import { FileSystemAgendaDirectoryListing } from '../src/adapters/agenda/pre-rename-agenda-listing.ts';
 import {
   LedgerAgendaReceipts,
   PaneAgendaComposer,
@@ -1079,6 +1080,7 @@ import {
   refuseExhaustedCandidates,
   refuseHeldStateHome,
   refuseOccupiedAddress,
+  refusePreRenameAgendaFiles,
   refuseStateHomeStart,
   refuseUnbindableAddress,
   relaunchCommand,
@@ -13611,6 +13613,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     await opened.storage.close();
   });
   world.notices.step('state home opened', opened.paths.home);
+  // A session still holding agenda files under their pre-rename names would read as empty: refuse before any reader runs.
+  await refusePreRenameAgendaFiles(
+    new FileSystemAgendaDirectoryListing(opened.fileSystem, opened.paths.sessions, opened.paths.state),
+  );
   // A page left by a `fy pair --open` that was killed holds a dead code; the daemon owns the home now, so it clears it.
   await world.boot.sweepPairingRedirects?.(opened.paths.home);
   // Before any session or terminal is launched: a long-lived tmux server may still hold a ferret's credential.

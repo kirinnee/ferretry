@@ -29,8 +29,13 @@ const STORE_VERSION = 2;
 const userVersion = (db: Database): number =>
   db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0;
 
+const schemaObjects = (db: Database): number =>
+  db.query<{ n: number }, []>('SELECT count(*) AS n FROM sqlite_master').get()?.n ?? 0;
+
 const unsupportedStore = (file: string, found: number): string =>
-  `the agenda version archive ${file} has user_version ${String(found)}; this daemon reads only user_version ${String(STORE_VERSION)}, so it was left untouched`;
+  found === 0
+    ? `the agenda version archive ${file} has no agenda schema version (user_version 0) but is not empty; this daemon reads only user_version ${String(STORE_VERSION)}, so it was left untouched`
+    : `the agenda version archive ${file} has user_version ${String(found)}; this daemon reads only user_version ${String(STORE_VERSION)}, so it was left untouched`;
 
 const summaryOf = (version: AgendaVersion): AgendaVersionSummary => ({
   version: version.version,
@@ -52,7 +57,7 @@ interface CachedVersion {
  * and per-version ordered word references. Appends inspect only the largest primary key, never historical payloads.
  * SQLite commits a version and all its references together; an interrupted append cannot publish half a version.
  * The caller serializes writes per session. Connections close after each operation; at most one read version is cached.
- * A store whose `user_version` is not 2 is refused by name, never upgraded or emptied.
+ * A store whose `user_version` is not 2 is refused by name, never upgraded or emptied; only a file with no schema at all is initialized.
  */
 export class SqliteAgendaVersionStore implements AgendaVersionStore {
   private cached: CachedVersion | undefined;
@@ -90,11 +95,13 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
     try {
       const stored = userVersion(db);
       if (stored === STORE_VERSION) return db;
-      // 0 is a file just created above: the only store that is built here rather than found.
       if (stored !== 0) throw new Error(unsupportedStore(file, stored));
+      // 0 is built here only when the file holds no schema at all: a file just created above, or one a crash left
+      // between create and commit. IMMEDIATE takes the write lock before the recheck, so two openers cannot both build.
       db.transaction(() => {
-        // Another process may have finished initialization since the check above.
-        if (userVersion(db) === STORE_VERSION) return;
+        const rechecked = userVersion(db);
+        if (rechecked === STORE_VERSION) return;
+        if (rechecked !== 0 || schemaObjects(db) > 0) throw new Error(unsupportedStore(file, rechecked));
         db.exec(`
           CREATE TABLE mutations (id TEXT PRIMARY KEY) WITHOUT ROWID;
           CREATE TABLE versions (version INTEGER PRIMARY KEY, snapshot TEXT NOT NULL, summary TEXT NOT NULL);
@@ -105,7 +112,7 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
           ) WITHOUT ROWID;
         `);
         db.exec(`PRAGMA user_version = ${STORE_VERSION}`);
-      })();
+      }).immediate();
       return db;
     } catch (error) {
       db.close();

@@ -56,7 +56,7 @@ class Ledgers implements AgendaLedgerRepository {
   }
 }
 
-/** The ferrets &F291 passed through, in order, each change of hands raising its gate again before B138. */
+/** Five ferrets that hold the same card in turn, each change of hands raising its gate again on the one agenda item. */
 const F291_FERRETS = ['coleson', 'khristina', 'dyani', 'rayce', 'avary'] as const;
 
 /** `lead` started `child`, which started `grandchild`; the card is `child`'s, worked by `grandchild`. */
