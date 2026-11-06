@@ -49,14 +49,14 @@ import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { browserFetch } from '../lib/runtime-models.ts';
 import { canSubmitComposer } from '../lib/session-screens.ts';
 import { useSendOutbox } from '../lib/store.tsx';
-import type { LiveComposerBridge, LiveComposerObserver } from '../lib/voice-chat/live-assembly.ts';
-import type { LiveReadingSource } from '../lib/voice-chat/live-reader.ts';
-import type { SendTicket } from '../lib/voice-chat/ports.ts';
-import type { ReplySource } from '../lib/voice-chat/reply-feed.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import { REINSERT_TRANSCRIPTION_EVENT, reinsertTranscriptionText } from '../lib/stt/reinsert-transcription.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
 import { useDaemonHealth } from '../lib/use-daemon-health.ts';
+import type { LiveComposerBridge, LiveComposerObserver } from '../lib/voice-chat/live-assembly.ts';
+import type { LiveReadingSource } from '../lib/voice-chat/live-reader.ts';
+import type { SendTicket } from '../lib/voice-chat/ports.ts';
+import type { ReplySource } from '../lib/voice-chat/reply-feed.ts';
 import type { WorkSearchPort } from '../lib/work-search.ts';
 import { addMenuActions, ComposerAddMenu } from './composer-add-menu.tsx';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
@@ -78,9 +78,9 @@ import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 import { useSharedComposerItems } from './composer-shared-items.ts';
 import { ContextRing } from './context-ring.tsx';
 import { DictationControl } from './dictation-control.tsx';
-import { type LiveVoiceControlProps, useLiveVoiceControl } from './live-voice-control.tsx';
 import { ImageViewer, type ViewerImage } from './image-viewer.tsx';
 import { LiveMarkdownEditor } from './live-markdown-editor.tsx';
+import { type LiveVoiceControlProps, useLiveVoiceControl } from './live-voice-control.tsx';
 import { type LocationDraft, PendingLocationChip } from './location-chip.tsx';
 import { Markdown } from './markdown.tsx';
 import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
@@ -576,9 +576,11 @@ export function Composer({
    * effect after it. Live's own writes carry the text it just put there, which it recognises as its own.
    */
   const liveObserver = useRef<LiveComposerObserver | null>(null);
+  /** True only while this composer takes its OWN sent words out of the shared draft: that emptying is not typing. */
+  const emptyingSent = useRef(false);
   const setDraft = useCallback(
     (text: string) => {
-      liveObserver.current?.edited(text);
+      if (!emptyingSent.current) liveObserver.current?.edited(text);
       setDraftState({ key: daemonSessionKey(scope), text });
     },
     [scope],
@@ -977,7 +979,14 @@ export function Composer({
     sent: ComposerSent,
     requestId?: string,
   ): void => {
-    const left = shared.sent(mark, requestId);
+    // The shared draft hands the emptied box back through `setDraft` while this runs: the send's own clear.
+    emptyingSent.current = true;
+    let left: string | null;
+    try {
+      left = shared.sent(mark, requestId);
+    } finally {
+      emptyingSent.current = false;
+    }
     if (left === null || daemonSessionKey(sentScope) !== scopeKeyNow.current) {
       draftStore.clear(sentScope);
       onSent?.(sent);

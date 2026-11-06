@@ -608,6 +608,44 @@ describe('sessionReplyFeed', () => {
     should(seen).deepEqual(['done']);
   });
 
+  it('a turn that was already working at the send is not its reply: the new turn must work and finish', () => {
+    const fake = source(snap('working', 'w1'));
+    const watch = sessionReplyFeed(fake.api).arm();
+    const seen: ReplySignal['kind'][] = [];
+    // The prior turn finishes inside the send's await, even with a new time on it.
+    fake.set(snap('your-turn', 'prior-done'));
+    watch.attach(signal => void seen.push(signal.kind));
+    should(seen).deepEqual([]);
+    fake.set(snap('your-turn', 'prior-done-again'));
+    should(seen).deepEqual([]);
+    // The new turn starts and ends: that one is the reply.
+    fake.set(snap('working', 'w2'));
+    should(seen).deepEqual(['working']);
+    fake.set(snap('your-turn', 'w2-done'));
+    should(seen).deepEqual(['working', 'done']);
+  });
+
+  it('a prior turn that is still running stays Working, and a question it ends on is still surfaced', () => {
+    const fake = source(snap('working', 'w1'));
+    const seen: ReplySignal['kind'][] = [];
+    sessionReplyFeed(fake.api)
+      .arm()
+      .attach(signal => void seen.push(signal.kind));
+    should(seen).deepEqual(['working']);
+    fake.set(snap('needs-input', 'q1'));
+    should(seen).deepEqual(['working', 'needs-input']);
+  });
+
+  it('a queued message folded into the running turn never reads that turn as its reply (End is the way out)', () => {
+    const fake = source(snap('working', 'w1'));
+    const seen: ReplySignal['kind'][] = [];
+    sessionReplyFeed(fake.api)
+      .arm()
+      .attach(signal => void seen.push(signal.kind));
+    fake.set(snap('your-turn', 'w1-done'));
+    should(seen).deepEqual(['working']);
+  });
+
   it('still ignores a stale your-turn that never moved before the ack', () => {
     const fake = source(snap('your-turn', 't1'));
     const watch = sessionReplyFeed(fake.api).arm();

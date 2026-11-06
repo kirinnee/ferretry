@@ -987,7 +987,11 @@ a typed message. The only code that sends from voice is `hooks/use-live-voice.ts
   waits for **Resume**. Typing (or **Hold**) while a reply is being **read** is different: the speech stops AT
   ONCE and Live lands On hold on the spot — a sticky stop, microphone shut, draft preserved, explicit **Resume**
   required (hiding the tab and **End** stop a reading too). Your draft is never touched, and nothing the room
-  says — or the speaker says — can send it.
+  says — or the speaker says — can send it. The hold is latched
+  **even once Live's own send is on the wire** (it cannot be taken back, but typing still counts): another device
+  replacing the shared draft with its next instruction while the first send waits for its acknowledgement holds Live
+  after the reply, the same as typing here. The composer's own emptying of the box after a successful send is **not**
+  typing (`emptyingSent` in `composer.tsx`), so an ordinary turn still reopens the microphone.
 - **Text you typed never rides along with a voice send.** If the message box holds any text Live did not put
   there (typed before Live started, or since) when a countdown would start, the turn is not counted down: its
   words are added after your text and Live goes **On hold**. Only **Send now** (your own press) sends them.
@@ -1332,6 +1336,15 @@ hiding the tab mid-send, another message taking the voice). `live-runner.ts` own
 through ports (`lib/voice-chat/ports.ts`: level frames, take, send, reply feed, reader, voice, earcons, haptics, wake
 lock, visibility, clock, mic lock; `live-reader.ts` is the reader and the voice over the page's read-aloud controller) and drops every stale async answer by generation. `reply-feed.ts` counts a reply as finished only
 once `working` was seen or `turnStateAt` changed — never by comparing clocks.
+
+**A turn that was already working when you spoke is not the reply to your message.** Live can send while the ferret
+is mid-turn (the message queues behind it). If the session was `working` when the send began, that turn stopping —
+whatever time it carries, and even when it ends inside the send's acknowledgement — is **never** read as this
+message's reply and **never** reopens the microphone: the watch keeps going until a turn begins after it (`working`
+seen again) and only that turn's end counts (`tests/unit/composer-live-real.test.tsx`, through the real composer,
+runner and feed). A question (`needs-input`) still surfaces, because it only holds Live. If the queued message was
+folded into the running turn so no second `working` ever shows, Live stays **Working** until you press **End**: the
+safe side of the doubt, because this loop never opens the microphone when it is unsure.
 
 ### Latency: last word to sent
 

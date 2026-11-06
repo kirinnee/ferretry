@@ -10,6 +10,7 @@ import type {
   ReadEnd,
   ReadWhat,
   ReplySignal,
+  ReplyWatch,
   SendOutcome,
   SendTicket,
   TakeHandle,
@@ -78,6 +79,17 @@ export const fakeLive = (options: { reader?: boolean } = {}): FakeLive => {
   const sendResult = { current: { kind: 'sent', sentAtMs: 0 } as SendOutcome };
   let onFrame: (frame: LevelFrame) => void = () => undefined;
   let reply: ((signal: ReplySignal) => void) | null = null;
+  const watch = (): ReplyWatch => ({
+    attach: listener => {
+      reply = listener;
+      return () => {
+        reply = null;
+      };
+    },
+    cancel: () => {
+      reply = null;
+    },
+  });
   let visible = true;
   const visibility = new Set<(visible: boolean) => void>();
 
@@ -141,17 +153,7 @@ export const fakeLive = (options: { reader?: boolean } = {}): FakeLive => {
       },
     },
     reply: {
-      arm: () => ({
-        attach: listener => {
-          reply = listener;
-          return () => {
-            reply = null;
-          };
-        },
-        cancel: () => {
-          reply = null;
-        },
-      }),
+      arm: () => watch(),
     },
     reader: options.reader
       ? {

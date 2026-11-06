@@ -18,6 +18,7 @@ import type {
   LevelMeterHandle,
   ReplyFeedPort,
   ReplySignal,
+  ReplyWatch,
   SendOutcome,
   SendTicket,
   TakeHandle,
@@ -175,6 +176,20 @@ const rig = (
   let visible = true;
   const visibilityListeners = new Set<(visible: boolean) => void>();
   let replyListener: ((signal: ReplySignal) => void) | null = null;
+  const replyWatch = (armed: string): ReplyWatch => {
+    log.push(armed);
+    return {
+      attach: listener => {
+        replyListener = listener;
+        log.push('reply.watch');
+        return () => {
+          replyListener = null;
+          log.push('reply.stop');
+        };
+      },
+      cancel: () => void log.push('reply.cancel'),
+    };
+  };
   const typed = { current: '' };
   const sendResult: Rig['sendResult'] = { current: { kind: 'sent', sentAtMs: 0 } };
   let releaseSend: (outcome: SendOutcome) => void = () => undefined;
@@ -264,20 +279,7 @@ const rig = (
       },
     },
     reply: options.reply ?? {
-      arm: () => {
-        log.push('reply.arm');
-        return {
-          attach: listener => {
-            replyListener = listener;
-            log.push('reply.watch');
-            return () => {
-              replyListener = null;
-              log.push('reply.stop');
-            };
-          },
-          cancel: () => void log.push('reply.cancel'),
-        };
-      },
+      arm: () => replyWatch('reply.arm'),
     },
     reader: options.speaker
       ? {
