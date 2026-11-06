@@ -35,6 +35,10 @@
  *          turn's and is consumed).
  *      A previous completion that arrives late is dated before the acceptance; a replayed older `working`
  *      is at or below the floor. With no boundary yet, nothing is read. A newer send REPLACES the token.
+ *      THE OLD TURN'S END IS REMEMBERED. Once the completion of the turn that was running at the press has
+ *      been consumed (`passedAt`), only a completion dated AFTER it can be the send's own: the same
+ *      completion looked at again — its last transcript row arriving, a snapshot replayed — must not pass
+ *      just because nothing is "in flight" any more.
  *   4. TEXT-SETTLED GUARD. The last words of a reply and the daemon's whose-turn flip arrive separately and
  *      in either order. It waits until nothing new has arrived for `TEXT_SETTLED_MS` (500 ms), and says how
  *      long to wait (`recheckInMs`) so the caller sets one timer, not a polling loop.
@@ -47,6 +51,13 @@
  */
 
 export const TEXT_SETTLED_MS = 500;
+
+/**
+ * How long a send's finished turn waits for the transcript to show the send's OWN message (and so the rows
+ * of its reply) before it gives up and stays silent. A late transcript read is normal; a historical answer
+ * read as the reply is never acceptable.
+ */
+export const EVIDENCE_WAIT_MS = 5_000;
 
 export type WatchedTurn = 'working' | 'your-turn' | 'needs-input';
 
@@ -70,6 +81,12 @@ interface SentWork {
   readonly inFlight: number | null;
   /** The newest completion date seen while the tab was hidden before this send could be proven: never read. */
   readonly hiddenAt: number | null;
+  /**
+   * The newest completion date already REJECTED as the end of the turn that was running at the press (it is
+   * consumed, never the reply). The send's own completion must be dated AFTER it: the same completion looked
+   * at again (its last transcript row arriving, a snapshot replayed) is still the old turn's.
+   */
+  readonly passedAt?: number | null;
 }
 
 type ArmedTurn = WatchedWork | SentWork;
@@ -177,20 +194,24 @@ export const observeTurn = (before: TurnWatch, input: WatchInput): WatchStep => 
   } else {
     // A completion seen while hidden is remembered even if it cannot be tied to the send yet.
     const hiddenAt = input.visible ? armed.hiddenAt : newest(armed.hiddenAt, at);
-    const noted = (inFlight: number | null): TurnWatch => ({
+    const noted = (inFlight: number | null, passedAt?: number): TurnWatch => ({
       ...ended,
-      armed: { ...armed, inFlight, hiddenAt },
+      armed: { ...armed, inFlight, hiddenAt, ...(passedAt === undefined ? {} : { passedAt }) },
     });
     const { boundary, visible } = input;
     // NO PROOF OF THE SEND'S OWN TURN, NO COMPLETION: it needs the daemon's acceptance of the send and an end
     // the daemon dated after it. A previous turn's completion arriving late is dated before the acceptance.
     if (!finite(boundary) || !(at > boundary)) return quiet(noted(armed.inFlight));
+    // The old turn's end, already rejected, looked at again: not newer than what was passed, so not the reply.
+    if (armed.passedAt != null && !(at > armed.passedAt)) return quiet(noted(armed.inFlight));
     if (armed.working !== null) {
       // A `working` of the new turn was seen: it must itself be the send's (at or after the acceptance), and the end after it.
       if (armed.working < boundary || !(at > armed.working)) return quiet(noted(armed.inFlight));
     } else if (armed.inFlight !== null) {
       // The turn already running at the press ends first; that end is not the reply.
-      return quiet(noted(at > armed.inFlight ? null : armed.inFlight));
+      return at > armed.inFlight
+        ? quiet(noted(null, newest(armed.passedAt ?? null, at)))
+        : quiet(noted(armed.inFlight));
     }
     // Proven. Seen hidden — now or before it could be proven — it is gone for good.
     if (!visible || (armed.hiddenAt !== null && at <= armed.hiddenAt)) return quiet(stopWatching(ended));

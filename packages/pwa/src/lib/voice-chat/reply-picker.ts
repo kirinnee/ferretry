@@ -27,6 +27,8 @@ export interface PickerRow {
   readonly text: string;
   readonly at?: number;
   readonly sent?: unknown;
+  /** The delivered send a person's row IS (the transcript's own join to the daemon's ledger): the exact proof of whose row it is. */
+  readonly send?: { readonly sendId: string } | undefined;
   readonly pack?: unknown;
   readonly peer?: unknown;
 }
@@ -140,6 +142,57 @@ export const pickReply = (
 export const pickLatestReply = (rows: readonly PickerRow[], whatToRead: WhatToRead = 'last'): ReplyPick => {
   const held = Array.isArray(rows) ? rows : [];
   return replyOf(held.slice(held.findLastIndex(isPersonsRow) + 1).filter(isAssistantWords), whatToRead);
+};
+
+/** What the daemon's ledger says about a send from this page: enough to recognise the send's own row in the transcript. */
+export interface SendEvidence {
+  readonly sendId: string;
+  /** The message as sent (the ledger's `message`); absent when the ledger entry is not at hand. */
+  readonly message?: string | undefined;
+  /** When the daemon accepted it (ms, the daemon's clock); null when unreadable. */
+  readonly acceptedAt: number | null;
+}
+
+const normalized = (value: string): string => value.normalize('NFC').trim().replace(/\s+/gu, ' ');
+
+/**
+ * Is this row of the person's the send's own? By identity when the transcript joined it to the ledger
+ * (`row.send`): exactly that send, and no other. A row not joined yet counts only when its words are the
+ * send's message and it is dated no earlier than the daemon accepted the send (the harness records it after
+ * the daemon accepted it, on the daemon's own machine: no slack, because a missed match only costs a wait
+ * while a false one reads the wrong reply), so an older row with the same words is never mistaken for it.
+ */
+const isOwnRow = (row: PickerRow, send: SendEvidence): boolean => {
+  if (!isPersonsRow(row)) return false;
+  if (row.send !== undefined) return row.send.sendId === send.sendId;
+  const message = typeof send.message === 'string' ? normalized(send.message) : '';
+  return (
+    message !== '' &&
+    send.acceptedAt !== null &&
+    row.at !== undefined &&
+    row.at >= send.acceptedAt &&
+    normalized(row.text) === message
+  );
+};
+
+/**
+ * The reply to ONE send from this page, or null while there is no evidence it is in the rows: the words are
+ * the assistant text after THE SEND'S OWN ROW (and before the next row of the person's), so nothing from
+ * before the send — the previous turn's answer, a transcript that has not caught up — can be picked. Null
+ * says "wait for the transcript"; a send whose row is there but whose turn wrote no text says "Done. No
+ * message.".
+ */
+export const pickReplyToSend = (
+  rows: readonly PickerRow[],
+  send: SendEvidence,
+  whatToRead: WhatToRead = 'last',
+): ReplyPick | null => {
+  const held = Array.isArray(rows) ? rows : [];
+  const own = held.findLastIndex(row => isOwnRow(row, send));
+  if (own === -1) return null;
+  const after = held.slice(own + 1);
+  const next = after.findIndex(isPersonsRow);
+  return replyOf((next === -1 ? after : after.slice(0, next)).filter(isAssistantWords), whatToRead);
 };
 
 /** The question a `needs-input` turn is waiting on: the shape of the daemon's `pendingQuestion`. */

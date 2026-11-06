@@ -6,6 +6,7 @@ import {
   pickLatestReply,
   pickQuestion,
   pickReply,
+  pickReplyToSend,
   QUESTION_KEY,
   QUESTION_ON_SCREEN_WORDS,
   SILENT_TURN_KEY,
@@ -319,5 +320,85 @@ describe('pickLatestReply: the last assistant text after the last row of the per
     expect(pickLatestReply(rows).markdown).toBe('bye');
     expect(pickLatestReply([]).reason).toBe('no-message');
     expect(pickLatestReply('nope' as unknown as readonly PickerRow[]).reason).toBe('no-message');
+  });
+});
+
+describe('pickReplyToSend: the reply to ONE send, with evidence the send’s own row is in the rows', () => {
+  const send = { sendId: 's2', message: 'and this', acceptedAt: T0 + 30_000 };
+  const old = [row('u1', 'user', 'fix it', 0), row('a1', 'assistant', 'Old answer.', 5)];
+
+  test('null while the send’s own row is not there: the previous answer is never the reply', () => {
+    expect(pickReplyToSend(old, send)).toBeNull();
+    expect(pickReplyToSend([], send)).toBeNull();
+    expect(pickReplyToSend('nope' as unknown as readonly PickerRow[], send)).toBeNull();
+  });
+
+  test('by identity: the row the transcript joined to THIS send; another send’s row, same words, is not it', () => {
+    const rows = [
+      ...old,
+      row('u2', 'user', 'and this', 31, { send: { sendId: 's2' } }),
+      row('a2', 'assistant', 'New answer.', 40),
+    ];
+    expect(pickReplyToSend(rows, send)).toEqual({ key: 'a2', markdown: 'New answer.', reason: 'reply' });
+    const other = [row('u2', 'user', 'and this', 31, { send: { sendId: 's1' } }), row('a2', 'assistant', 'Old.', 40)];
+    expect(pickReplyToSend(other, send)).toBeNull();
+    // Identity needs neither the words nor a date.
+    const bare = { sendId: 's2', acceptedAt: null };
+    expect(pickReplyToSend([row('u2', 'user', 'anything', undefined, { send: { sendId: 's2' } })], bare)?.reason).toBe(
+      'no-message',
+    );
+  });
+
+  test('by words and time when the row is not joined: the same words, dated no earlier than the daemon accepted the send', () => {
+    const rows = [...old, row('u2', 'user', '  and\n this ', 31), row('a2', 'assistant', 'New answer.', 40)];
+    expect(pickReplyToSend(rows, send)?.markdown).toBe('New answer.');
+    // The very moment of acceptance counts…
+    expect(pickReplyToSend([row('u2', 'user', 'and this', 30), row('a2', 'assistant', 'A.', 40)], send)?.key).toBe(
+      'a2',
+    );
+    // …an older identical row (a message sent before, even a moment before) is not this send’s.
+    expect(pickReplyToSend([row('u0', 'user', 'and this', 29), row('a0', 'assistant', 'Old.', 40)], send)).toBeNull();
+    expect(pickReplyToSend([row('u0', 'user', 'and this', 5), row('a0', 'assistant', 'Old.', 6)], send)).toBeNull();
+  });
+
+  test('words alone are not evidence: different words, no date, no message, no acceptance', () => {
+    const answer = row('a2', 'assistant', 'Answer.', 40);
+    expect(pickReplyToSend([row('u2', 'user', 'something else', 31), answer], send)).toBeNull();
+    expect(pickReplyToSend([row('u2', 'user', 'and this'), answer], send)).toBeNull();
+    expect(pickReplyToSend([row('u2', 'user', 'and this', 31), answer], { sendId: 's2', acceptedAt: T0 })).toBeNull();
+    expect(
+      pickReplyToSend([row('u2', 'user', 'and this', 31), answer], { sendId: 's2', message: '  ', acceptedAt: T0 }),
+    ).toBeNull();
+    expect(pickReplyToSend([row('u2', 'user', 'and this', 31), answer], { sendId: 's2', acceptedAt: T0 })).toBeNull();
+    expect(pickReplyToSend([row('u2', 'user', 'and this', 31), answer], { ...send, acceptedAt: null })).toBeNull();
+    // A ferret’s message with the same words, and an assistant row, are never the person’s row.
+    const peer = row('p', 'user', 'and this', 31, { peer: { from: 'x' } });
+    expect(pickReplyToSend([peer, answer], send)).toBeNull();
+    expect(pickReplyToSend([row('x', 'assistant', 'and this', 31), answer], send)).toBeNull();
+  });
+
+  test('only what comes AFTER the send’s own row and before the next row of the person’s; the last own row wins', () => {
+    const rows = [
+      row('u2', 'user', 'and this', 31),
+      row('a2', 'assistant', 'First thought.', 33),
+      row('a3', 'assistant', 'The answer.', 40),
+      row('u3', 'user', 'and more', 41),
+      row('a4', 'assistant', 'Reply to the next one.', 50),
+    ];
+    expect(pickReplyToSend(rows, send)).toEqual({ key: 'a3', markdown: 'The answer.', reason: 'reply' });
+    expect(pickReplyToSend(rows, send, 'every')?.markdown).toBe('First thought.\n\nThe answer.');
+    // A silent turn says so: its own row is there, nothing follows.
+    expect(pickReplyToSend([row('u2', 'user', 'and this', 31), row('t', 'tool', 'ran', 32)], send)).toEqual({
+      key: SILENT_TURN_KEY,
+      markdown: NO_MESSAGE_WORDS,
+      reason: 'no-message',
+    });
+    // Sent twice, the later row (the send’s own, within the window) is the one answered.
+    const twice = [
+      row('u2', 'user', 'and this', 31),
+      row('a2', 'assistant', 'Too early.', 33),
+      row('u2b', 'user', 'and this', 35),
+    ];
+    expect(pickReplyToSend(twice, send)?.reason).toBe('no-message');
   });
 });

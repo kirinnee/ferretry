@@ -271,7 +271,14 @@ describe("observeTurn: a send is judged against the daemon's acceptance of it", 
     });
     const old = look(press, { turn: 'your-turn', turnAt: at(40_000), boundary: BOUNDARY });
     expect(old.fire).toBeNull();
-    expect(old.watch.armed).toEqual({ kind: 'sent', floor: at(25_000), working: null, inFlight: null, hiddenAt: null });
+    expect(old.watch.armed).toEqual({
+      kind: 'sent',
+      floor: at(25_000),
+      working: null,
+      inFlight: null,
+      hiddenAt: null,
+      passedAt: at(40_000),
+    });
     expect(old.watch.busyAt).toBeNull();
     // The send’s own turn follows, whether or not its working is rendered.
     expect(look(old.watch, { turn: 'your-turn', turnAt: at(45_000), boundary: BOUNDARY }).fire).toEqual({
@@ -457,5 +464,48 @@ describe('observeTurn: a completion seen hidden before the send could be proven 
       inFlight: null,
       hiddenAt: at(10_000),
     });
+  });
+});
+
+describe('observeTurn: the old turn’s rejected end is remembered (final round)', () => {
+  const BOUNDARY = at(300);
+  /** working@100 is running; the person presses send; the daemon accepts it @300. */
+  const pressedWhileRunning = (): TurnWatch => armOnSend(look(IDLE_WATCH, { turn: 'working', turnAt: at(100) }).watch);
+
+  test('REGRESSION: the running turn’s end@400 is rejected, and looked at AGAIN (its last row arrives) it is still not the reply', () => {
+    const first = look(pressedWhileRunning(), { turn: 'your-turn', turnAt: at(400), boundary: BOUNDARY });
+    expect(first.fire).toBeNull();
+    expect(first.watch.armed).toMatchObject({ kind: 'sent', inFlight: null, passedAt: at(400) });
+    // The final transcript row lands: the SAME completion is evaluated again, now with nothing "in flight".
+    const again = look(first.watch, { turn: 'your-turn', turnAt: at(400), boundary: BOUNDARY });
+    expect(again.fire).toBeNull();
+    expect(again.recheckInMs).toBeNull();
+    expect(again.watch.armed).not.toBeNull();
+    // …and over and over, with the token still waiting for the send’s own turn.
+    expect(look(again.watch, { turn: 'your-turn', turnAt: at(400), boundary: BOUNDARY }).fire).toBeNull();
+  });
+
+  test('a NEWER completion after the rejected one is the send’s own, with or without a rendered working', () => {
+    const first = look(pressedWhileRunning(), { turn: 'your-turn', turnAt: at(400), boundary: BOUNDARY });
+    expect(look(first.watch, { turn: 'your-turn', turnAt: at(900), boundary: BOUNDARY }).fire).toEqual({
+      startedAt: null,
+      outcome: 'your-turn',
+    });
+    const rendered = run(first.watch, [
+      { turn: 'working', turnAt: at(500), boundary: BOUNDARY },
+      { turn: 'your-turn', turnAt: at(900), boundary: BOUNDARY },
+    ]);
+    expect(rendered.fire).toEqual({ startedAt: null, outcome: 'your-turn' });
+  });
+
+  test('a completion dated BEFORE the rejected one (a replay) is no more the reply', () => {
+    const first = look(pressedWhileRunning(), { turn: 'your-turn', turnAt: at(400), boundary: BOUNDARY });
+    expect(look(first.watch, { turn: 'your-turn', turnAt: at(350), boundary: BOUNDARY }).fire).toBeNull();
+  });
+
+  test('a completion that is not later than the running turn keeps it in flight and passes nothing', () => {
+    const early = look(pressedWhileRunning(), { turn: 'your-turn', turnAt: at(100), boundary: null });
+    expect(early.watch.armed).toMatchObject({ inFlight: at(100) });
+    expect((early.watch.armed as { passedAt?: number | null }).passedAt).toBeUndefined();
   });
 });

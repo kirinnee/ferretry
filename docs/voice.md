@@ -688,9 +688,11 @@ in that order. Only when none has readable words does it say "The ferret needs y
 
 Never read: the person's own messages, **other ferrets' messages**, agenda and system rows, notices, thinking and tool calls (they are not
 assistant text at all), a message the ferret _sent to another ferret_, and Pack commands. The turn is what came after the person's last
-message, so a silent turn can never fall back to the previous turn's reply. The reply to a send from this page is simply **the last
-assistant text after the last message of the person's that is in the conversation when the turn is seen to end** ("Done. No message." when
-there is none) — there is no per-send bookkeeping of which row is whose. A turn that was only watched is cut by its start time: the last message of the
+message, so a silent turn can never fall back to the previous turn's reply. The reply to a send from this page is **the last
+assistant text after THAT SEND'S OWN message** ("Done. No message." when there is none): the row the transcript joined to the send's id, else a
+row of the person's with the ledger's words dated no earlier than the daemon accepted the send. While that row is not in the transcript
+yet — a slow read — the reading **waits** (up to five seconds, then the usual quiet guard once it shows) and, if it never shows, **stays
+silent**: it never falls back to "the last answer in the transcript", which on a transcript that has not caught up is the previous turn's. A turn that was only watched is cut by its start time: the last message of the
 person's at or before the start (a later one moves it only when the clock is skewed, it is the first, and the agent has not answered before it).
 Code, tables and pictures are described, not read (the
 speakable rules above), and one reading stops at the **longest reading** setting with "There's more on screen."
@@ -723,7 +725,9 @@ deliberately no guess for an old daemon: a guess timed by "3 seconds of quiet" r
    it does). A newer send drops whatever was waiting on the older one, and a send whose request failed drops its token. The press itself
    reads nothing, and the acknowledgement of a press the composer already announced stops nothing — above all not a fast reply already
    being read. A message sent without going through the composer's press (answering a form) stops a reading and is followed like any
-   other turn.
+   other turn. **The old turn's end is remembered:** once the end of the turn that was running at the press has been consumed, only a
+   completion dated **after** it can be the send's own — the same completion looked at again (the last row of the old turn arriving, a
+   snapshot replayed) is still the old turn's and reads nothing.
 4. **Hidden before the ledger answers.** A completion seen while the tab is hidden is remembered by the send's token even when the
    ledger has not yet shown the send; once it has, that completion (and anything dated at or before it) is consumed silently and the
    token is spent — so coming back and the acknowledgement arriving can never read it.
