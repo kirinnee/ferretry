@@ -96,7 +96,7 @@ describe('voice worker runtime', () => {
     }
     const subject = fixture(new NotInstalledVoiceRecognizer(description));
     await subject.request({ version: 2, type: 'load', recognizers: [description] });
-    await subject.request({ type: 'load', recognizers: [{ ...description, threads: 2 }] });
+    await subject.request({ type: 'load', recognizers: [{ ...description, modelId: 'other' }] });
     expect(subject.sent.slice(1)).toMatchObject([
       { type: 'error', code: 'worker_protocol' },
       { type: 'error', code: 'worker_protocol' },

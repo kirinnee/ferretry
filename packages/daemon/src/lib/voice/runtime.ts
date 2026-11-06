@@ -98,8 +98,11 @@ export class VoiceWorkerRuntime {
     );
   }
 }
+/** Threads are the host's wish; the effective count is the clamped one this child was started with (policy owns it). */
 function sameDescription(left: VoiceRecognizerDescription, right: VoiceRecognizerDescription): boolean {
-  return Object.entries(left).every(([key, value]) => right[key as keyof VoiceRecognizerDescription] === value);
+  return Object.entries(left).every(
+    ([key, value]) => key === 'threads' || right[key as keyof VoiceRecognizerDescription] === value,
+  );
 }
 
 /** Deliberately the only shipped recognizer. Native loading and model selection are separate slices. */
