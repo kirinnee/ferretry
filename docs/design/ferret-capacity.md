@@ -1,8 +1,10 @@
 # Ferret capacity: starting a ferret waits for room instead of failing
 
-Status: **plan, not built.** Nothing in this document is implemented by the change that adds it. It
-plans card **&F1302 Ferret Capacity Requests**. The "Decisions for the owner" section lists the choices
-only the owner makes; everything else here is a proposal a slice may correct when it measures something.
+Status: **plan, not built; decided D1 (a), D2 (b), D3 (c, dynamic) on 2026-11-06 (!A426); the build waits
+for C50 (plugin split) and C52 (compat removal).** Nothing in this document is implemented by the change
+that adds it. It plans card
+**&F1302 Ferret Capacity Requests**. The "Decisions" section records the three choices only the owner
+makes; everything else here is a proposal a slice may correct when it measures something.
 
 The owner's words (card &F1302), verbatim:
 
@@ -23,7 +25,7 @@ else is an estimate and says so.
 3. **Two kinds of limit.** The **per-lead limit** (`interactiveChildren` / `autoChildren` in `pack.yaml`)
    stays, but becomes a queue threshold: the 16th child waits for a sibling to finish. The **machine
    limit** is new: memory, CPU pressure, disk pressure, the daemon's own health, and a ceiling on live
-   ferrets (D3).
+   ferrets that is derived from the machine's memory at run time, never configured (D3).
 4. **One rule with two lines per signal** (close / reopen), so the gate does not flap (§3).
 5. **Who goes first** (D2): the owner's own starts, then sub-ferrets, then housekeeping; within a class,
    one lead cannot starve another; a request that waits long moves up.
@@ -32,21 +34,25 @@ else is an estimate and says so.
    with its whole brief.
 8. **Everyone can see it**, in plain words: `fy new`, `fy status`, `fy daemon status`, the app's session
    list and the child's board card: _"waiting for memory: 2 ahead of you"_.
-9. **When the machine is too small, the owner is told once**, on the agenda, with numbers and options —
-   never as a stream of notifications (§7).
-10. **Voice never waits.** The voice worker is admitted by its own rules, and the gate counts its
+9. **A queued ferret never looks stalled.** The Warden skips it, `fy wait` does not count its queue
+   time, its board card says _"Waiting for room"_ with the staleness clock paused (§6.1).
+10. **When the machine is too small, the owner is told once**, on the agenda, with numbers and options —
+    never as a stream of notifications (§7).
+11. **Voice never waits.** The voice worker is admitted by its own rules, and the gate counts its
     reservation as a fixed amount, so the queue never waits on it either (§8).
 
 ---
 
-## Decisions for the owner
+## Decisions
 
-Three choices. Each has a recommendation; none is decided by this plan.
+Three choices, **decided by the owner on 2026-11-06 (!A426)**: D1 (a), D2 (b), D3 (c, with the ceiling
+derived as below). The other options stay listed so the reasoning is on record. The build waits
+for C50 (plugin split) and C52 (compat removal).
 
-**D1 — When there is no room, what does `fy new` do?**
+**D1 — When there is no room, what does `fy new` do?** — **decided (a)**
 
 - (a) **Return at once with a queued ferret** — id, place in line, what it waits for; exit 0. The
-  ferret carries on and calls `fy wait <id>` when it needs the result. ← **recommended**: no brief is
+  ferret carries on and calls `fy wait <id>` when it needs the result. ← **decided**: no brief is
   lost and no lead sits blocked; `fy wait` already does the right thing; a lead that would rather do the
   work itself runs `fy stop <id>`.
 - (b) Block until it starts (or a timeout), then answer as today. Simple for the caller, but a lead
@@ -54,30 +60,31 @@ Three choices. Each has a recommendation; none is decided by this plan.
 - (c) Refuse as today, with a "try again in N minutes" hint. No queue at all: the brief is still lost
   and every ferret writes its own retry loop.
 
-**D2 — Who goes first?**
+**D2 — Who goes first?** — **decided (b)**
 
 - (a) Strict first come, first served. Simple and predictable, but one lead that fans out 15 children
   puts every other lead — and the owner's own next start — behind all 15.
 - (b) **Owner first, then fair turns between leads, with ageing.** Starts a person made go first; then
   sub-ferrets of a lead a person is at; then sub-ferrets of unattended leads; then housekeeping (Warden
   investigations, learning scans, clean-up). Within a class, leads take turns, one start each. A request
-  that has waited 30 minutes moves up one class. ← **recommended**: the owner never waits behind a
+  that has waited 30 minutes moves up one class. ← **decided**: the owner never waits behind a
   fan-out, a busy lead cannot starve a quiet one, and nothing waits forever.
 - (c) Numeric priorities (`fy new --priority 1..5`), highest first. Flexible, but every ferret will
   mark its own work urgent.
 
-**D3 — How is the machine limit set?**
+**D3 — How is the machine limit set?** — **decided (c), dynamic**
 
-- (a) Measured signals only — memory, CPU, disk and daemon health — no fixed number. Adapts to light
+- (a) Measured signals only — memory, CPU, disk and daemon health — no ceiling. Adapts to light
   and heavy ferrets, but reacts late: 20 ferrets admitted while idle can all start a build at once.
 - (b) One fixed number of live ferrets. Easy to understand, but blind: 25 ferrets running test suites
   are not 25 ferrets reading code.
-- (c) **Both: the measured signals decide, under a ceiling on live ferrets worked out from the memory
-  budget** (on this box today: **36** once I36's 53 GiB fleet slice lands, **34** until then on the
-  57 GiB user slice; §10.2), which the owner may lower freely or raise with a confirmation.
-  ← **recommended**: the signals catch heavy work, the ceiling catches the burst the signals have not
-  seen yet. Under the 2026-11-05 caps the ceiling was 28 and would have held the 29th ferret; the
-  signals hold back more whenever the admitted ferrets get busy.
+- (c) **Both: the measured signals decide, under a ceiling on live ferrets that is derived from the
+  machine's memory at run time.** No number is written in config, so the ceiling grows by itself after
+  the planned resize to 256 GB. "Full" means the live signals (memory, CPU, disk pressure, daemon
+  health); the ceiling is itself worked out from memory (§3.3). ← **decided**: the signals catch heavy
+  work, the ceiling catches the burst the signals have not seen yet. Today it works out to **36** once
+  I36's 53 GiB fleet slice lands and **34** until then on the 57 GiB user slice (§10.2); under the
+  2026-11-05 caps it was 28 and would have held the 29th ferret.
 
 ---
 
@@ -158,8 +165,9 @@ set: `memory`, `cpu`, `disk`, `daemon`, `ferret_slots` (the machine ceiling), `l
 own limit), `quota`.
 
 - **`fy wait <id>`** blocks through `queued` → `running` → done and prints the result, as today. While
-  queued it prints one line when its place changes (_"still waiting for memory: 1 ahead"_), never more
-  often than once a minute.
+  queued it shows _"waiting for room (N ahead)"_, printing a new line only when N changes and never
+  more often than once a minute. **Queue time does not count toward its limit**: the limit starts when
+  the child starts.
 - **`fy stop <id>`** on a queued ferret cancels it: status `stopped`, its card closed as cancelled,
   nothing launched.
 - **A person's own `fy start`** in a terminal waits in the foreground, first in line (D2), and offers
@@ -208,16 +216,17 @@ that was mid-admission when the daemon died is `starting` and is settled as toda
 
 Each signal has a **close line** and a **reopen line**. A signal closes when its reading reaches the
 close line, and reopens only after its reading has stayed at or below the reopen line for **30 s**. The
-gate is open when every signal is open.
+gate is open when every signal is open; **"full" means one of these live signals is closed**, never a
+number someone typed.
 
-| Signal        | Linux reading                                                                    | macOS reading                           | Close at             | Reopen at            |
-| ------------- | -------------------------------------------------------------------------------- | --------------------------------------- | -------------------- | -------------------- |
-| Memory used   | working set = `memory.current` − `inactive_file` of the budget's cgroup (§3.2)   | sum of ferret process-tree RSS + daemon | 90 % of budget       | 80 % of budget       |
-| Memory stalls | `/proc/pressure/memory` `some avg10`                                             | `memory_pressure` level                 | 10 %                 | 2 %                  |
-| CPU           | `/proc/pressure/cpu` `some avg60`, and load1 per usable core                     | load1 per usable core                   | 50 %, or 1.5 / core  | 25 %, and 1.0 / core |
-| Disk          | `/proc/pressure/io` `full avg10`                                                 | none (GAP)                              | 25 %                 | 10 %                 |
-| Daemon health | the event-loop meter (`GET /v1/health` `loop`): any stall ≥ 2 s, or lag ≥ 250 ms | same                                    | in the last 60 s     | 60 s clean           |
-| Ferret slots  | live ferrets (any status but finished or `queued`)                               | same                                    | ≥ ceiling (D3, §3.3) | < ceiling            |
+| Signal        | Linux reading                                                                    | macOS reading                           | Close at            | Reopen at            |
+| ------------- | -------------------------------------------------------------------------------- | --------------------------------------- | ------------------- | -------------------- |
+| Memory used   | working set = `memory.current` − `inactive_file` of the budget's cgroup (§3.2)   | sum of ferret process-tree RSS + daemon | 90 % of budget      | 80 % of budget       |
+| Memory stalls | `/proc/pressure/memory` `some avg10`                                             | `memory_pressure` level                 | 10 %                | 2 %                  |
+| CPU           | `/proc/pressure/cpu` `some avg60`, and load1 per usable core                     | load1 per usable core                   | 50 %, or 1.5 / core | 25 %, and 1.0 / core |
+| Disk          | `/proc/pressure/io` `full avg10`                                                 | none (GAP)                              | 25 %                | 10 %                 |
+| Daemon health | the event-loop meter (`GET /v1/health` `loop`): any stall ≥ 2 s, or lag ≥ 250 ms | same                                    | in the last 60 s    | 60 s clean           |
+| Ferret slots  | live ferrets (any status but finished or `queued`)                               | same                                    | ≥ ceiling (§3.3)    | < ceiling            |
 
 **Usable cores** are the host's cores, minus voice's C cores while the voice worker is loaded (§8.2).
 
@@ -272,17 +281,20 @@ If they hold, it starts. **One start at a time:** the next request is considered
 reaches `running` or 20 s have passed, whichever is first — so the readings have a moment to show the
 new ferret before the next is admitted, and a burst drains at the speed of real starts, not all at once.
 
-**The ceiling on live ferrets** (D3 c) is derived, unless the owner set `capacity.yaml` `maxLive`:
+**The ceiling on live ferrets** (D3 c) is **always derived** from the machine's memory at run time;
+there is no config key for it:
 
 ```text
 ceiling = floor( (85 % × budget − non-ferret working set − voice reservation) / R )
 ```
 
-recomputed at boot and every hour, never between two admissions. "Non-ferret working set" is the
+recomputed at boot and every hour, never between two admissions, so it grows by itself when the
+machine does (the planned 256 GB resize needs no edit). "Non-ferret working set" is the
 budget cgroup's working set minus the fleet's (daemon, terminal multiplexer, browser pages, the
 person's shell), measured. "Voice reservation" counts only when the voice worker is inside the budget
 cgroup. When the budget is the I36 fleet slice, both are zero, because they live outside it (§3.2).
-On this box today the ceiling is **36** with I36's fleet slice and **34** before I36 lands (§10.2).
+Today it works out to **36** on this box with I36's fleet slice and **34** before I36 lands (§10.2);
+those are examples, not settings.
 
 ### 3.4 Why it will not flap
 
@@ -358,7 +370,7 @@ _"waiting for a slot under rhett (15 running)"_, _"waiting for quota: claude-llm
 | `fy status`, `--subtree` | state `queued` and the sentence in the LAST column                                                      |
 | `fy daemon status`       | a **Capacity** block (below)                                                                            |
 | The app: session list    | a **Waiting** group at the top with each ferret's sentence; **Start now** and **Cancel** for a person   |
-| The child's board card   | its Status reads _"Waiting for memory — 2 ahead"_; the card does not move lanes until the ferret starts |
+| The child's board card   | its Status reads _"Waiting for room"_; staleness is paused; no lane move until the ferret starts (§6.1) |
 | The lead's pane          | the `fy new` answer, `fy wait`'s position lines, and the one message on start or expiry (§2.3)          |
 
 ```text
@@ -373,6 +385,19 @@ Capacity   full — 3 waiting, oldest 6 min
   voice    4 cores held for voice (loaded; its memory is outside the fleet slice)
 ```
 
+### 6.1 A queued ferret never looks stalled
+
+Waiting is not stalling, so every part that watches ferrets treats it that way:
+
+- **The Warden skips a ferret that has not started yet.** A queued ferret gets no stall detection, no
+  nudge and no escalation.
+- **A lead's `fy wait` does not count queue time toward its limit**, and shows _"waiting for room (N
+  ahead)"_ (§2.2).
+- **The child's board card shows _"Waiting for room"_, and its staleness clock is paused while it is
+  queued.** The clock restarts when the ferret starts.
+- **One agenda item if nothing has started for 30 minutes**, not a stream. It is the one item of §7,
+  kept up to date in place.
+
 ---
 
 ## 7. "This machine is too small"
@@ -381,7 +406,8 @@ The queue is the evidence. The daemon counts, per day, **machine-limited minutes
 something waited because of memory, CPU, disk, the daemon's health or the ferret ceiling. Waits for a
 lead's own slots or for quota are not counted: they say nothing about the machine.
 
-- **The signal:** at least **60 machine-limited minutes on 3 of the last 7 days**, or one request that
+- **The signal:** nothing has started for **30 minutes** while requests wait for a machine reason
+  (§6.1), or at least **60 machine-limited minutes on 3 of the last 7 days**, or one request that
   waited longer than **30 minutes** for a machine reason, twice in one day.
 - **How the owner is told:** **one agenda item**, kept up to date in place, never a notification. It
   says what happened (peak live ferrets, peak memory, longest wait, which signal closed most) and the
@@ -391,9 +417,9 @@ lead's own slots or for quota are not counted: they say nothing about the machin
   3. **More memory for ferrets** — raise the budget, when the host has room above it (here little is
      left: since 2026-11-06 the user slice's `MemoryHigh` is 57 GiB of the 61 GiB host). A loosening,
      so it waits for the owner's confirmation.
-  4. **A bigger machine** — on EC2, the next size up (64 cores / 128 GiB on this family is an estimate).
-     Everything Ferretry keeps is under `$FY_HOME` on the instance's disk, so a stop / change type /
-     start keeps it; the daemon re-derives the ceiling at boot.
+  4. **A bigger machine** — on EC2, the next size up (the planned resize is to 256 GB). Everything
+     Ferretry keeps is under `$FY_HOME` on the instance's disk, so a stop / change type / start keeps
+     it; the daemon re-derives the ceiling at boot, so nothing needs editing.
   5. **A second machine** — needs ferrets placed across machines, the parked mesh work. Named as
      future, not designed here.
 - A dismissed item stays quiet for **14 days**.
@@ -447,12 +473,12 @@ weighs 200 against the fleet's 100). So:
   `limits.autoChildren` keep their numbers; only what happens past them changes. `limits.queuedChildren`
   is new (default 20). `maxDepth` is unchanged.
 - **`capacity.yaml` is new** (one file per building block, `docs/config-files.md`): `queue` (on/off),
-  `queue.timeout`, `queue.max`, `maxLive` (absent = derived), `memory.budget` (absent = derived), and the
-  close/reopen lines. `queue: false` brings back today's refusals for the per-lead limit and turns the
-  machine gate off.
+  `queue.timeout`, `queue.max`, `memory.budget` (absent = derived), and the close/reopen lines. **There
+  is no key for the ceiling on live ferrets**: it is derived from memory at run time (§3.3).
+  `queue: false` brings back today's refusals for the per-lead limit and turns the machine gate off.
 - **What needs the owner.** The queue's default-on behaviour is what this card asks for, so it ships on
   once the owner approves this plan. After that, the usual rule holds (`fy config guide`): raising
-  `maxLive`, the budget, any close line or `queue.max`, or setting `queue: false`, **loosens** what the
+  the budget, any close line or `queue.max`, or setting `queue: false`, **loosens** what the
   machine may run and is held for the owner's confirmation; lowering them takes effect at once.
 
 ---
@@ -482,7 +508,8 @@ weighs 200 against the fleet's 100). So:
 ### 10.2 Today: the caps the owner set on 2026-11-06
 
 User slice `MemoryHigh` 57 GiB / `MemoryMax` 60 GiB, `user@1000.service` `MemoryLow` 4 GiB; R still
-1.25 GiB (no measurements yet). These are the numbers D3 is decided on.
+1.25 GiB (no measurements yet). These are the numbers D3 was decided on; today the ceiling works out
+to the figures below, and the next resize changes them without any edit.
 
 | Budget comes from                          | Budget | Closes at | Reopens at | Forecast line | Ceiling                                  |
 | ------------------------------------------ | ------ | --------- | ---------- | ------------- | ---------------------------------------- |
