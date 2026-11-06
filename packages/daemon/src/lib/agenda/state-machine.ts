@@ -253,64 +253,9 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
    * gate's follow-up conversation, which the owner opened by saying Not good. Only the daemon raises one so.
    */
   readonly discussion?: true;
-  /**
-   * The gate item this new one REPLACES on another ferret's agenda, because its card changed hands: the new item
-   * goes on as that one stood (`AgendaCarried`). Only the daemon carries one (a gate item moved on a hand-over, an item moved to its agenda home).
-   */
-  readonly carried?: AgendaCarried;
   /** What the item needs from the owner now (`--stage`); its kind says when absent (`agendaStageOfKind`). */
   readonly stage?: AgendaStage;
 }
-
-/**
- * What a gate item moved to its card's new ferret keeps of the one it replaces (docs/board.md § Gates ask the
- * owner): when it began waiting, the owner's snooze, whose turn it is, and the conversation and edits so far.
- */
-export type AgendaCarried = Pick<
-  AgendaItem,
-  | 'waitingSince'
-  | 'parked'
-  | 'waitingOn'
-  | 'askedAt'
-  | 'waitingFor'
-  | 'infoRequests'
-  | 'history'
-  | 'revisions'
-  | 'conversation'
-  | 'urgentAt'
-  | 'resting'
-  | 'stage'
-  | 'stages'
-  | 'cardAsks'
-  | 'gateAttached'
-  | 'gateAttachedChangedAt'
->;
-
-const CARRIED_FIELDS = [
-  'waitingSince',
-  'parked',
-  'waitingOn',
-  'askedAt',
-  'waitingFor',
-  'infoRequests',
-  'history',
-  'revisions',
-  'conversation',
-  'urgentAt',
-  'resting',
-  'stage',
-  'stages',
-  // An agenda carried to another ferret takes its card asks with it: they are the card's, not the ferret's.
-  'cardAsks',
-  'gateAttached',
-  'gateAttachedChangedAt',
-] as const satisfies readonly (keyof AgendaCarried)[];
-
-/** The carried fields an item has, and only those: an absent one stays absent. */
-const agendaCarriedOf = (item: AgendaCarried): AgendaCarried =>
-  Object.fromEntries(
-    CARRIED_FIELDS.flatMap(field => (item[field] === undefined ? [] : [[field, item[field]]])),
-  ) as AgendaCarried;
 
 /** One RESTING item a nudge is about: which rest (`since`) and how many nudges it had had when the Warden looked. */
 export interface AgendaNudgeTarget {
@@ -1562,9 +1507,6 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   ) {
     return failure('forbidden', 'only the daemon raises a gate item, its follow-up or a card ask');
   }
-  if (request.carried !== undefined && actor.kind !== 'daemon') {
-    return failure('forbidden', 'only the daemon carries an item over to another ferret\u2019s agenda');
-  }
   const noticeProblem = agendaNoticeProblems(request)[0];
   if (noticeProblem !== undefined) return failure('invalid', noticeProblem);
   const offerCloseProblem = agendaOfferCloseProblems(request)[0];
@@ -1675,15 +1617,12 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
         ? { waitingOn: 'ferret' as const, askedAt: command.at, waitingFor: 'discussion' as const }
         : {}),
       ...firstStage(request.stage ?? agendaStageOfKind(agendaCardKind(request)), command.at),
-      // A gate item moved to its card's new ferret goes on as the one it replaces stood.
-      ...(request.carried === undefined ? {} : agendaCarriedOf(request.carried)),
     },
     actor,
   );
   // A card agenda opens with its card asks, the first open one mirrored for an app that predates them.
-  // One that carries its talk over from another ferret's is not sealed: it reads its activity lines, as one from before the seal does.
   const asked = request.cardAsks === undefined ? raised : withCardAsks(raised, request.cardAsks);
-  const item = request.cardAsks === undefined || request.carried !== undefined ? asked : sealCardAsks(asked);
+  const item = request.cardAsks === undefined ? asked : sealCardAsks(asked);
   const next: AgendaLedger = {
     ...ledger,
     nextId: ledger.nextId + 1,
