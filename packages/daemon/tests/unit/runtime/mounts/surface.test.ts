@@ -32,8 +32,8 @@ import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts'
 import { SharedDraftPresence } from '../../../../src/lib/shared-drafts/index.ts';
 import { SignInRuleService, SignInRuleSuggestions } from '../../../../src/lib/sign-in-rules/index.ts';
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
-import { renderService } from '../../../support/renders.ts';
 import { TaskPlanService } from '../../../../src/lib/task-plans/index.ts';
+import { renderService } from '../../../support/renders.ts';
 import { MemoryTranscript } from '../../../support/transcript-images.ts';
 import { agentToolWorld, PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { fixedClock, jsonBody, request } from '../../api/support.ts';
