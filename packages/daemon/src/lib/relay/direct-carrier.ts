@@ -50,6 +50,7 @@ import {
   type RelayStreamDispatch,
 } from './link.ts';
 import type { SessionArrival } from './tunnel.ts';
+import { SessionTraffic, type SessionTrafficSnapshot } from './session-traffic.ts';
 
 /**
  * How many direct sessions this daemon carries at once.
@@ -122,6 +123,7 @@ export interface DirectSessionEnd {
   readonly bytesOut: number;
   /** Whether a device proved itself on it: an unproven session is a probe, a refusal or a scan. */
   readonly proved: boolean;
+  readonly traffic?: SessionTrafficSnapshot;
 }
 
 export interface DirectSessionLog {
@@ -144,6 +146,7 @@ export class DirectSession implements SocketHandler {
   #ended = false;
   /** Where this session's life is reported — only for a tunnel arrival — and what is reported. */
   readonly #log: DirectSessionLog | undefined;
+  readonly #traffic: SessionTraffic | undefined;
   readonly #clock: RelayLinkClock;
   readonly #openedAt: number;
   #lastFrameAt: number;
@@ -165,6 +168,7 @@ export class DirectSession implements SocketHandler {
     if (sessionId === null) throw new Error('the session identifier generator produced an unusable identifier');
     this.#sessionId = sessionId;
     this.#log = arrival?.carrier === 'tunnel' ? deps.sessionLog : undefined;
+    this.#traffic = this.#log === undefined ? undefined : new SessionTraffic();
     this.#clock = deps.clock;
     this.#openedAt = deps.clock.now();
     this.#lastFrameAt = this.#openedAt;
@@ -220,6 +224,7 @@ export class DirectSession implements SocketHandler {
         },
       },
       ...(arrival === undefined ? {} : { arrival }),
+      ...(this.#traffic === undefined ? {} : { traffic: this.#traffic }),
     });
   }
 
@@ -306,6 +311,7 @@ export class DirectSession implements SocketHandler {
       bytesIn: this.#bytesIn,
       bytesOut: this.#bytesOut,
       proved: this.#proved,
+      ...(this.#traffic === undefined ? {} : { traffic: this.#traffic.snapshot() }),
     });
   }
 

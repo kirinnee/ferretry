@@ -1,4 +1,4 @@
-import { describe, it } from 'bun:test';
+import { describe, it, spyOn } from 'bun:test';
 import { type CapabilityAxis, type DaemonCapability, StepUpRequiredBodySchema } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -26,6 +26,8 @@ import {
   type WardenRemedyGrant,
   type WardenRemedyPresentation,
 } from '../../../src/lib/api/index.ts';
+import { isPublishedResponse, publishResponse } from '../../../src/lib/api/response-generation.ts';
+import { tunnelAnswerRecords } from '../../../src/lib/relay/answer.ts';
 import { jsonBody, request } from './support.ts';
 
 /**
@@ -63,6 +65,44 @@ const dispatcherFor = (...routes: readonly ApiRoute[]) =>
   new ApiDispatcher(new ApiRouter(routes), credentials, NO_GOVERNED_ROUTES_GUARD);
 
 describe('ApiDispatcher authorization', () => {
+  it('should spend a route’s standing and fresh proofs only for its session-proven device', async () => {
+    // Arrange
+    const spent: unknown[] = [];
+    const fresh: unknown[] = [];
+    const subject = new ApiDispatcher(
+      new ApiRouter([
+        {
+          ...echo('/v1/proof', 'authenticated'),
+          handle: async context => {
+            context.spendStepUp?.();
+            context.spendFreshStepUp?.();
+            return jsonResponse({ ok: true });
+          },
+        },
+      ]),
+      credentials,
+      NO_GOVERNED_ROUTES_GUARD,
+      undefined,
+      {
+        held: () => true,
+        spend: device => {
+          spent.push(device);
+        },
+        spendFresh: device => {
+          fresh.push(device);
+        },
+      },
+    );
+
+    // Act
+    await subject.dispatch(request({ path: '/v1/proof', headers: { authorization: 'Bearer admin-secret' } }));
+    await subject.dispatch({ ...request({ path: '/v1/proof' }), device: DEVICE });
+
+    // Assert
+    should(spent).eql([DEVICE]);
+    should(fresh).eql([DEVICE]);
+  });
+
   it('should serve a public route with no token at all', async () => {
     // Arrange
     const dispatcher = dispatcherFor(echo('/healthz', 'none'));
@@ -541,6 +581,48 @@ describe('ApiDispatcher error handling', () => {
     should(jsonBody(finalised(response))).deepEqual({ shown: 'spelling 2' });
     should(jsonBody(finalised(response))).deepEqual({ shown: 'spelling 3' });
   });
+
+  for (const noStore of [false, true]) {
+    it(`should preserve compressed late generations through dispatcher policy (noStore=${String(noStore)})`, async () => {
+      // Arrange — production's dispatcher must not turn a publication into a fresh generation per seal.
+      const gzip = new Uint8Array(262_144).fill(71);
+      let current = publishResponse({ ...jsonResponse({ shown: 'first' }), gzip });
+      const route: ApiRoute = {
+        method: 'GET',
+        path: '/late',
+        minimum: 'none',
+        caller: 'any',
+        noStore,
+        handle: async () => ({ ...current, late: () => current }),
+      };
+      const response = await dispatcherFor(route).dispatch(request({ path: '/late' }));
+      const first = finalised(response);
+      const records = tunnelAnswerRecords(7, response);
+      const encoder = spyOn(TextEncoder.prototype, 'encode');
+      try {
+        // Act
+        const permitted = records.map(record => record.permit?.());
+
+        // Assert — a known producer never falls back or republishes on an unchanged permit.
+        should(isPublishedResponse(first)).be.true();
+        should(finalised(response)).equal(first);
+        should(permitted.every(value => value === true)).be.true();
+        should(encoder.mock.calls.length).equal(0);
+        should(first.headers.get('cache-control')).equal(noStore ? 'no-store' : undefined);
+
+        // Act — a source edit is published once, and immediately invalidates its stale parts.
+        gzip.fill(72);
+        current = publishResponse({ ...jsonResponse({ shown: 'last' }), gzip });
+
+        // Assert
+        should(records[0]?.permit?.()).be.false();
+        should(finalised(response)).not.equal(first);
+        should(finalised(response).gzip).eql(gzip);
+      } finally {
+        encoder.mockRestore();
+      }
+    });
+  }
 
   it('should answer a refusal raised by a route last word like any other', async () => {
     const route: ApiRoute = {

@@ -19,7 +19,7 @@ import { parseBody } from '../../api/body.ts';
 import { grantRefusalCode } from '../../api/capability.ts';
 import { SESSION_ID_HEADER } from '../../api/dispatcher.ts';
 import { ApiError } from '../../api/error.ts';
-import { type ApiResponse, headerValue } from '../../api/http.ts';
+import { type ApiResponse, headerValue, type PlainApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { auditActorOf } from '../../audit/policy.ts';
@@ -224,7 +224,7 @@ const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
 
 /** A hold taken since the service answered still wins, now and again as the dispatcher sends the body. */
 function published(service: AgentToolService, result: AgentToolResult): ApiResponse {
-  const spell = (): ApiResponse => {
+  const spell = (): PlainApiResponse => {
     try {
       return jsonResponse(service.publish(result));
     } catch (error) {

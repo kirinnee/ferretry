@@ -370,6 +370,7 @@ export class MemberDispatcher {
     if (lookup.kind === 'not-found') return noStore(unknownRouteResponse(request.method, request.path));
     if (lookup.kind === 'method-not-allowed')
       return noStore(methodNotAllowedResponse(request.method, request.path, lookup.allowed));
+    request.onRoute?.(`${lookup.route.method.toUpperCase()} ${lookup.route.path}`);
     try {
       // Re-read on EVERY request: a revoked key or catalog takes effect on the next one, not at session end.
       const access = await this.deps.members.access(member.keyId);

@@ -39,9 +39,11 @@ import {
   arrivedOnHost,
   arrivedPrivileged,
   headerValue,
+  type PlainApiResponse,
   type RouteParameters,
 } from './http.ts';
 import { compressed, type ResponseCompressor } from './compression.ts';
+import { isPublishedResponse, type PublishedApiResponse, publishResponse } from './response-generation.ts';
 import { errorResponse, jsonResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
 import type {
   ApiRoute,
@@ -161,6 +163,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       response: errorResponse(403, `the request may not use ${request.method} ${request.path}`, 'forbidden'),
     };
   const lookup = router.lookup(request.method, request.path);
+  if (lookup.kind === 'matched') request.onRoute?.(`${lookup.route.method.toUpperCase()} ${lookup.route.path}`);
   // The public shortcut answers before authentication is even attempted, which is the whole point of
   // being public — but it is a shortcut past EVERY check below, so it may only be taken by a route
   // that asks for none of them. Privileged arrival is the one exception it can answer itself: a
@@ -652,7 +655,7 @@ export class ApiDispatcher {
 }
 
 /** How a route that threw is answered: a refusal it named keeps its own status; anything else is a bare 500. */
-export const failureResponse = (error: unknown): ApiResponse =>
+export const failureResponse = (error: unknown): PlainApiResponse =>
   error instanceof ApiError
     ? errorResponse(error.status, error.message, error.code, error.extra)
     : errorResponse(500, 'the daemon failed to handle this request', 'internal_error');
@@ -669,11 +672,16 @@ async function run(route: ApiRoute, context: RouteContext): Promise<ApiResponse>
   if (spell === undefined) return policy(built);
   // The body is spelled again here, after the route's last await, and its last word travels on with the
   // response: every carrier calls it (`finalised`) as the final synchronous step before the bytes leave.
-  const last = (): ApiResponse => {
+  let cached: { readonly source: PublishedApiResponse; readonly answer: PublishedApiResponse } | undefined;
+  const last = (): PlainApiResponse | PublishedApiResponse => {
     try {
-      return policy(spell());
+      const next = spell();
+      if (!isPublishedResponse(next)) return route.noStore === true ? noStore(next) : next;
+      if (cached?.source !== next) cached = { source: next, answer: publishResponse(policy(next)) };
+      return cached.answer;
     } catch (error) {
-      return policy(failureResponse(error));
+      const failure = failureResponse(error);
+      return route.noStore === true ? noStore(failure) : failure;
     }
   };
   return { ...last(), late: last };

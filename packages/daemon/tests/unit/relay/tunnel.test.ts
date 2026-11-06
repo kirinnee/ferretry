@@ -12,7 +12,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { MAX_TUNNEL_BODY_BYTES } from '@ferretry/protocol';
 import { fromBase64Url, MAX_PLAINTEXT_BYTES, SESSION_PROTOCOL_ID, toBase64Url, utf8Bytes } from '@ferretry/relay';
 import should from 'should';
-import { type ApiResponse, BodyTooLargeError } from '../../../src/lib/api/http.ts';
+import { type ApiResponse, BodyTooLargeError, type PlainApiResponse } from '../../../src/lib/api/http.ts';
 import {
   decodeTunnelClientMessage,
   encodeTunnelMessage,
@@ -261,7 +261,7 @@ describe('the session tunnel envelope', () => {
   });
 
   describe('answers', () => {
-    const response = (body: string, status = 200): ApiResponse => ({
+    const response = (body: string, status = 200): PlainApiResponse => ({
       status,
       headers: new Map([['content-type', 'application/json']]),
       body,

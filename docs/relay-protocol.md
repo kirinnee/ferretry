@@ -1930,6 +1930,14 @@ The rules, each of which is a reason it can be trusted:
   daemon mints is also the answer to a `POST`, which is never compressed whatever the route says. A
   terminal or event stream is never compressed either: see below.
 
+**Late answers keep a source-owned wire generation.** A compressed late source publishes an immutable answer
+with `publishResponse` after each change (including an in-place edit to its source gzip bytes), and returns that
+same publication until its next change. The dispatcher preserves its identity through cache policy. Tunnel
+permits compare generations in constant time and re-render only a new generation; unchanged parts never scan
+the whole gzip body again. A changed generation still compares each pending part's original bytes immediately
+before sending, so a matching prefix may leave but a changed or missing part cannot. Uncompressed late sources
+may still spell an answer afresh, with status, ordered headers and body checked on each permit.
+
 **A live feed starts where the reader already is**, to spend fewer bytes in the same way. A session view carries
 `journalSequence`, the journal's last sequence read just before its documents, and a reader that has
 the view opens `/v1/events?sessionId=…&after=<journalSequence>` rather than `after=0`: replaying a
@@ -3174,7 +3182,14 @@ partial one. The operator runbook is
   `tunnel session opened` line and one `tunnel session closed` line: who ended it (the browser side, or
   this daemon), the close code with what it means and the reason quoted on one line, how long it
   lived, how long before the end the last client frame arrived (a `fy-ping` counts), the bytes each
-  way, and whether a device proved itself on it. A peer that vanished is `1006`; the reason a peer sends
+  way, and whether a device proved itself on it. Request sessions also name their **top five routes by
+  sent bytes**, for example `; top routes: GET /v1/sessions 41× 38.2 MB`. Counts are answers, not parts;
+  bytes are the frames actually sent after gzip/base64 and sealing, including record envelopes and tags.
+  Names come from the existing router's registered templates, never raw paths, ids, queries, headers or
+  bodies. Each session keeps at most 32 distinct templates; further routes and unmatched requests go
+  into `other`. Event and terminal streams name their socket route template, sent payload frame count
+  and bytes; acceptance and lease records are not payload. These are log-only counters, with no new API.
+  A peer that vanished is `1006`; the reason a peer sends
   is cut to one printable line so it cannot forge a second log line. No address, device or key is in
   either line (`packages/daemon/src/lib/tunnel/session-log.ts`). Sessions on the direct listener are
   not logged.

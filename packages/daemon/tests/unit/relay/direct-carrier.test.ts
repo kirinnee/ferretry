@@ -46,6 +46,10 @@ import {
 } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
+import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../src/lib/api/capability.ts';
+import { ApiRouter } from '../../../src/lib/api/router.ts';
+import { ApiSocketDispatcher } from '../../../src/lib/api/socket.ts';
 import { OTHER_TABLE_CALLERS } from '../modules/route-contracts.ts';
 import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
 import type { SocketDownstream, SocketHandler } from '../../../src/lib/api/socket.ts';
@@ -66,6 +70,7 @@ import {
   MAX_DIRECT_UNPROVEN_SESSIONS,
 } from '../../../src/lib/relay/direct-carrier.ts';
 import { transcriptKey } from '../../../src/lib/relay/link.ts';
+import type { RelayStreamDispatch } from '../../../src/lib/relay/link.ts';
 import type { MemberJoinCarrier, RelayMemberSessions } from '../../../src/lib/relay/member-port.ts';
 import { directCarrierSocketRoute } from '../../../src/lib/runtime/mounts/direct-carrier.ts';
 import { request } from '../api/support.ts';
@@ -170,6 +175,7 @@ function carrier(
     readonly connections?: LiveDeviceConnections;
     readonly sessionLog?: DirectSessionLog;
     readonly members?: RelayMemberSessions;
+    readonly sockets?: RelayStreamDispatch;
   } = {},
 ) {
   const connections = options.connections ?? new LiveDeviceConnections();
@@ -182,7 +188,7 @@ function carrier(
       requests.push(request);
       return (await options.answer?.(request)) ?? { status: 200, headers: new Map(), body: '{"ok":true}' };
     },
-    sockets: { upgrade: async () => ({ outcome: 'unclaimed' }), reauthorize: () => true },
+    sockets: options.sockets ?? { upgrade: async () => ({ outcome: 'unclaimed' }), reauthorize: () => true },
     devices: {
       deviceKey: async deviceId => (deviceId === DEVICE_ID ? deviceKeyText : undefined),
       seen: () => undefined,
@@ -740,6 +746,111 @@ describe('what a tunnel session reports about its own life', () => {
     const log: DirectSessionLog = { opened: () => opened.push(clock.at), closed: end => ends.push(end) };
     return { opened, ends, clock, log };
   };
+
+  it('should count actual gzip/base64 wire bytes by router template and keep raw ids and queries out of its log', async () => {
+    // Arrange — a real dispatcher, parameterized route and compressed multi-part answer.
+    const seen = recorder();
+    const gzip = new Uint8Array(90_000).fill(71);
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter([
+        {
+          method: 'GET',
+          path: '/v1/sessions/:id/events',
+          minimum: 'authenticated',
+          caller: 'any',
+          handle: async () => ({ status: 200, headers: new Map(), body: 'plain body is not the wire size', gzip }),
+        },
+      ]),
+      { admin: 'unused', warden: 'unused', devices: { has: () => true } },
+      NO_GOVERNED_ROUTES_GUARD,
+    );
+    const { route } = carrier({ sessionLog: seen.log, answer: input => dispatcher.dispatch(input) });
+    const { handler, wire, sessionId } = await connect(route, { carrier: 'tunnel' });
+    const { channel, transcript } = await handshake(handler, wire, sessionId);
+    let outgoing = await send(handler, wire, channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceId: DEVICE_ID,
+      appSession: APP_SESSION,
+      proof: await signDeviceProof(crypto_, deviceKey, deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION)),
+    });
+    const before = wire.binary.length;
+
+    // Act
+    outgoing = await send(handler, wire, outgoing, {
+      t: 'req',
+      id: 1,
+      method: 'GET',
+      path: '/v1/sessions/PRIVATE-ID/events',
+      query: [['private-query', 'PRIVATE-VALUE']],
+    });
+    await wire.until(() => wire.binary.slice(before).filter(frame => frame.kind === FRAME_KINDS.data).length === 2);
+    handler.close({ code: 1000, reason: '' });
+
+    // Assert — bytes include base64 expansion, envelopes and sealing, counted once after each send.
+    const expected = wire.binary
+      .slice(before)
+      .filter(frame => frame.kind === FRAME_KINDS.data)
+      .reduce((total, frame) => total + encodeFrame(frame).byteLength, 0);
+    should(expected).be.above(gzip.byteLength);
+    should(seen.ends[0]?.traffic).eql({
+      routes: [{ route: 'GET /v1/sessions/:id/events', answers: 1, bytes: expected }],
+    });
+    should(JSON.stringify(seen.ends[0]?.traffic)).not.containEql('PRIVATE');
+  });
+
+  it('should name event and terminal streams by their socket router template and count sent frames', async () => {
+    // Arrange
+    for (const path of ['/v1/events', '/v1/sessions/:id/terminals/:terminalId/stream']) {
+      const seen = recorder();
+      const output: { downstream?: SocketDownstream } = {};
+      const sockets = new ApiSocketDispatcher(
+        new ApiRouter([
+          {
+            method: 'GET',
+            path,
+            minimum: 'authenticated',
+            caller: 'any',
+            accept: async () => async (downstream: SocketDownstream) => {
+              output.downstream = downstream;
+              return { open: async () => undefined, fromClient: () => undefined, close: () => undefined };
+            },
+          },
+        ]),
+        { admin: 'unused', warden: 'unused', devices: { has: () => true } },
+        NO_GOVERNED_ROUTES_GUARD,
+      );
+      const { route } = carrier({ sessionLog: seen.log, sockets });
+      const { handler, wire, sessionId } = await connect(route, { carrier: 'tunnel' });
+      const { channel, transcript } = await handshake(handler, wire, sessionId);
+      await send(handler, wire, channel, {
+        t: 'stream',
+        protocol: SESSION_PROTOCOL_ID,
+        deviceId: DEVICE_ID,
+        appSession: APP_SESSION,
+        proof: await signDeviceProof(
+          crypto_,
+          deviceKey,
+          deviceAuthMessage(transcript, 'stream', DEVICE_ID, APP_SESSION),
+        ),
+        path: path.replace(':id', 'PRIVATE-ID').replace(':terminalId', 'PRIVATE-TERMINAL'),
+      });
+      const before = dataFrames(wire);
+
+      // Act
+      output.downstream?.send('one');
+      output.downstream?.send(Uint8Array.of(1, 2, 3));
+      await wire.until(() => dataFrames(wire) === before + 2);
+      handler.close({ code: 1000, reason: '' });
+
+      // Assert — acceptance and lease records are not stream payload frames.
+      const expected = wire.binary
+        .filter(frame => frame.kind === FRAME_KINDS.data)
+        .slice(-2)
+        .reduce((total, frame) => total + encodeFrame(frame).byteLength, 0);
+      should(seen.ends[0]?.traffic).eql({ routes: [], stream: { route: `GET ${path}`, frames: 2, bytes: expected } });
+    }
+  });
 
   it('should report a proved tunnel session the browser side cut, with the code, its age, the last frame and the bytes', async () => {
     // Arrange
