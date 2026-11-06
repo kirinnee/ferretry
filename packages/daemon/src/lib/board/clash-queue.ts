@@ -28,16 +28,18 @@ const QUOTED_PATH_LENGTH = 400;
 export const CLASH_QUEUED_PREFIX = 'queued behind';
 
 /**
- * A claim as compared: no leading `./`, no repeated or trailing `/`. The empty string is the repository root (`.`,
- * `./`), which holds every path.
+ * A claim as compared, segment by segment: empty and `.` segments dropped, a `..` folding the segment before it (one
+ * that would climb out of the repository is kept, so it matches only itself). The empty string is the repository
+ * root (`.`, `./`), which holds every path.
  */
 export const normaliseClaim = (path: string): string => {
-  const normal = path
-    .trim()
-    .replace(/\/{2,}/gu, '/')
-    .replace(/^(?:\.\/)+/u, '')
-    .replace(/\/+$/u, '');
-  return normal === '.' ? '' : normal;
+  const segments: string[] = [];
+  for (const segment of path.trim().split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..' && segments.length > 0 && segments.at(-1) !== '..') segments.pop();
+    else segments.push(segment);
+  }
+  return segments.join('/');
 };
 
 /** Whether two claims touch the same files: the same path, or one is a folder the other sits inside. */
@@ -48,9 +50,12 @@ export const claimsClash = (a: string, b: string): boolean => {
   return left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
 };
 
-/** One card a claim clashes with, and the first pair of paths that clash. */
+/** One card a claim queues behind, and the first pair of paths that clash. */
 interface Clash {
+  /** The card to wait on: the one whose PR ships the clashing work ({@link shippingCard}). */
   readonly task: TaskRef;
+  /** The card that claims the clashing path, when it is not {@link task} itself (a helper of it). */
+  readonly via?: TaskRef;
   /** The path this card claims. */
   readonly ours: string;
   /** The path the other card already claims. */
@@ -91,6 +96,31 @@ const inQueue = (card: BoardTask, laneSets: LaneSets): boolean => {
   return category !== undefined && !isBlockerDone(category, 'shipped');
 };
 
+/**
+ * The card whose PR ships a card's work: the card itself when it links a PR or has no parent here, else its parent's
+ * shipping card. A helper sub-card with no PR of its own closes when its ferret finishes, long before its lead's PR
+ * merges, so waiting on the helper would release the queue too early.
+ */
+const shippingCard = (card: BoardTask, index: BoardIndex): BoardTask => {
+  const seen = new Set<string>();
+  let current = card;
+  while (current.links.prs.length === 0 && current.parent !== null && !seen.has(current.id)) {
+    seen.add(current.id);
+    const parent = index.get(current.parent);
+    if (parent === undefined) break;
+    current = parent;
+  }
+  return current;
+};
+
+/** Whether two cards link a PR in common: they ship in the same merge, so neither may wait on the other. */
+const sharePr = (left: BoardTask, right: BoardTask): boolean =>
+  left.links.prs.some(mine =>
+    right.links.prs.some(
+      theirs => theirs.number === mine.number && theirs.repo.toLowerCase() === mine.repo.toLowerCase(),
+    ),
+  );
+
 /** Whether the card's ferret already took this card out of its queue on purpose (`fy task undepend`). */
 const releasedOnPurpose = (card: BoardTask, other: TaskRef): boolean =>
   card.history.some(event => event.type === 'undepended' && event.task.id === other.id);
@@ -104,9 +134,11 @@ const firstClash = (claimed: readonly string[], theirs: readonly string[]): Omit
 };
 
 /**
- * The cards a claim queues this card behind. Skipped: the card itself, its ancestors and descendants (a sub-card
- * overlaps its lead's claims by design), cards on other boards, cards it already depends on or took out of its
- * queue on purpose, and cards not in the queue. A clash whose dependency would close a cycle is reported, not added.
+ * The cards a claim queues this card behind: for each open, unshipped card on the same board whose claims clash, its
+ * {@link shippingCard}. Skipped: the card's own family (itself, its ancestors and descendants: a sub-card overlaps its
+ * lead's claims by design), a shipping card in that family or sharing a PR with the card (they merge together), one
+ * not in the queue, and one it already depends on or took out of its queue on purpose. A clash whose dependency would
+ * close a cycle, or would pass the most dependencies a card may hold, is reported, not added.
  */
 export const planClashes = (
   card: BoardTask,
@@ -118,17 +150,28 @@ export const planClashes = (
   const family = new Set([card.id, ...ancestorIds(card, index), ...descendantIds(card, index)]);
   const waits: Clash[] = [];
   const unqueued: (Clash & { why: string })[] = [];
+  const ours = shippingCard(card, index);
+  const decided = new Set<string>();
   let room = MAX_BOARD_DEPENDENCIES - card.dependsOn.length;
   for (const other of index.cards) {
     if (family.has(other.id) || other.projectId !== card.projectId || other.files.length === 0) continue;
-    if (card.dependsOn.some(dependency => dependency.task.id === other.id && index.isLocal(dependency.task))) continue;
-    if (!inQueue(other, laneSets) || releasedOnPurpose(card, other)) continue;
+    if (!inQueue(other, laneSets)) continue;
     const pair = firstClash(claimed, other.files);
     if (pair === undefined) continue;
-    const clash: Clash = { task: { id: other.id }, ...pair };
+    const target = shippingCard(other, index);
+    if (decided.has(target.id) || family.has(target.id) || !inQueue(target, laneSets)) continue;
+    decided.add(target.id);
+    if (sharePr(card, target) || sharePr(ours, target) || sharePr(card, other)) continue;
+    if (card.dependsOn.some(dependency => dependency.task.id === target.id && index.isLocal(dependency.task))) continue;
+    if (releasedOnPurpose(card, target)) continue;
+    const clash: Clash = {
+      task: { id: target.id },
+      ...(target.id === other.id ? {} : { via: { id: other.id } }),
+      ...pair,
+    };
     const cycle = dependencyCycle(index, card.id, clash.task);
     if (cycle !== null) {
-      unqueued.push({ ...clash, why: `${formatTaskRef(other)} already waits on this card (${cycle})` });
+      unqueued.push({ ...clash, why: `${formatTaskRef(target)} already waits on this card (${cycle})` });
     } else if (room <= 0) {
       unqueued.push({ ...clash, why: `this card already has the most dependencies a card may hold` });
     } else {
@@ -142,10 +185,13 @@ export const planClashes = (
 const quoted = (path: string): string =>
   path.length <= QUOTED_PATH_LENGTH ? path : `${path.slice(0, QUOTED_PATH_LENGTH - 1)}…`;
 
-const overlap = (clash: Clash): string =>
-  normaliseClaim(clash.ours) === normaliseClaim(clash.theirs)
-    ? `both claim ${quoted(clash.ours)}`
-    : `${quoted(clash.ours)} overlaps its claim ${quoted(clash.theirs)}`;
+const overlap = (clash: Clash): string => {
+  const words =
+    normaliseClaim(clash.ours) === normaliseClaim(clash.theirs)
+      ? `both claim ${quoted(clash.ours)}`
+      : `${quoted(clash.ours)} overlaps its claim ${quoted(clash.theirs)}`;
+  return clash.via === undefined ? words : `${words} (claimed by ${formatTaskRef(clash.via)}, which ships in it)`;
+};
 
 /** The note a queued card carries: who it waits on and why. */
 const queuedNote = (clash: Clash): string =>

@@ -7,6 +7,8 @@ import {
   BoardTaskCreateRequestSchema,
   type LaneSet,
   MAX_BOARD_DEPENDENCIES,
+  type PrLink,
+  PrLinkSchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -69,6 +71,13 @@ describe('claimsClash', () => {
     should(normaliseClaim('./')).equal('');
     should(normaliseClaim('.')).equal('');
     should(claimsClash('.', 'anything/at/all.ts')).be.true();
+  });
+
+  it('should read dot segments inside a path as the path they name', () => {
+    should(normaliseClaim('packages/daemon/./src/../src/a.ts')).equal('packages/daemon/src/a.ts');
+    should(claimsClash('packages/daemon/./src/a.ts', 'packages/daemon/src/a.ts')).be.true();
+    should(normaliseClaim('../outside.ts')).equal('../outside.ts');
+    should(claimsClash('../outside.ts', 'outside.ts')).be.false();
   });
 });
 
@@ -172,6 +181,67 @@ describe('planClashes', () => {
     // Assert
     should(result.waits).eql([]);
     should(result.unqueued[0]?.why).containEql('most dependencies');
+  });
+});
+
+describe('planClashes and merge units', () => {
+  const prLink = (number: number): PrLink =>
+    PrLinkSchema.parse({
+      url: `https://github.com/kirinnee/ferretry/pull/${String(number)}`,
+      number,
+      repo: 'kirinnee/ferretry',
+      state: 'open',
+      draft: false,
+      checks: 'passing',
+      mergedAt: null,
+      mergeSha: null,
+      releasedIn: null,
+      polledAt: NOW,
+    });
+  const linking = (...prs: PrLink[]): Pick<BoardTask, 'links'> => ({
+    links: { prs, branch: null, commits: [], docs: [] },
+  });
+
+  it('should never queue a card behind one that ships in the same PR', () => {
+    // Arrange
+    const subject = card({ id: 'F2', ...linking(prLink(42)) });
+    const first = card({ id: 'F1', files: ['knip.json'], ...linking(prLink(42)) });
+
+    // Act
+    const result = plan(subject, ['knip.json'], [first]);
+
+    // Assert
+    should(result).eql({ waits: [], unqueued: [] });
+  });
+
+  it("should queue behind the card whose PR ships a helper's claim, not the helper that closes early", () => {
+    // Arrange
+    const lead = card({ id: 'F1', laneId: 'implement', ...linking(prLink(42)) });
+    const helper = card({ id: 'F2', parent: { id: 'F1' }, files: ['knip.json'] });
+
+    // Act
+    const result = plan(card({ id: 'F3' }), ['knip.json'], [lead, helper]);
+
+    // Assert
+    should(result.waits).eql([{ task: { id: 'F1' }, via: { id: 'F2' }, ours: 'knip.json', theirs: 'knip.json' }]);
+  });
+
+  it("should queue once per shipping card, and not behind the claimer's own lead", () => {
+    // Arrange — two helpers of F1 clash with the claimer; the claimer's sibling ships with it.
+    const lead = card({ id: 'F1', ...linking(prLink(42)) });
+    const helpers = [
+      card({ id: 'F2', parent: { id: 'F1' }, files: ['knip.json'] }),
+      card({ id: 'F4', parent: { id: 'F1' }, files: ['knip.json'] }),
+    ];
+    const sibling = card({ id: 'F6', parent: { id: 'F5' }, files: ['knip.json'] });
+    const claimerLead = card({ id: 'F5' });
+    const subject = card({ id: 'F7', parent: { id: 'F5' } });
+
+    // Act
+    const result = plan(subject, ['knip.json'], [lead, ...helpers, claimerLead, sibling]);
+
+    // Assert
+    should(result.waits.map(wait => wait.task.id)).eql(['F1']);
   });
 });
 
@@ -286,6 +356,26 @@ describe('the board service queues clashing claims', () => {
       lead,
     );
     should(ports.sections).eql([]);
+  });
+
+  it('should name the cards it could not read when it answers the merge gate', async () => {
+    // Arrange
+    const ports = world({ store: new MemoryBoardStore([card()], [{ id: 'F9', reason: 'torn file' }]) });
+
+    // Act
+    const answer = await new BoardService(ports).mergeGate('https://github.com/kirinnee/ferretry/pull/42');
+
+    // Assert
+    should(answer.unreadable).eql(['F9']);
+  });
+
+  it('should refuse a merge gate for something that is not a PR URL', async () => {
+    const { service } = serviceWith([]);
+    const refused = await service.mergeGate('F12').then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    should((refused as BoardError).code).equal('invalid');
   });
 
   it('should let a sub-ferret claim files on the card it holds, and on no other', async () => {

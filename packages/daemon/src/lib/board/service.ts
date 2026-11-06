@@ -19,6 +19,7 @@ import {
   type BoardEditableField,
   BoardEditableFieldSchema,
   type BoardIdsResponse,
+  type BoardMergeGateResponse,
   type BoardProjectId,
   type BoardQuery,
   type BoardReopenAttachments,
@@ -69,6 +70,7 @@ import {
 } from './card-actions.ts';
 import { queueBehindClashes } from './clash-queue.ts';
 import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
+import { mergeGateOf } from './merge-gate.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
 import { gateEntry } from './gate-policy.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
@@ -521,6 +523,20 @@ export class BoardService {
   async ids(): Promise<BoardIdsResponse> {
     const { cards } = await this.ports.store.read();
     return { ids: cards.map(card => card.id) };
+  }
+
+  /**
+   * Whether a PR may merge as far as the queue goes (`mergeGateOf`, docs/design/clash-queue.md), from one read of
+   * the board: the cards it could not read are named, since any of them might link the PR.
+   */
+  async mergeGate(pr: string): Promise<BoardMergeGateResponse> {
+    const snapshot = await this.ports.store.read();
+    const laneSets = await this.laneSetsOf(snapshot.cards.map(card => card.projectId));
+    const index = new BoardIndex(snapshot.cards, this.requireMachine());
+    const unreadable = snapshot.quarantined.map(card => card.id);
+    const answer = mergeGateOf(pr, { index, laneSets, unreadable });
+    if (answer === null) throw new BoardError('invalid', `not a GitHub pull request URL: ${pr}`);
+    return answer;
   }
 
   /** One card, in full, with its board's lanes. */

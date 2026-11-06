@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { BoardQueryInput, BoardResponse, BoardTaskEvent, BoardTaskResponse } from '@ferretry/protocol';
+import type { BoardMergeGateResponse, BoardTaskEvent, BoardTaskResponse } from '@ferretry/protocol';
 import should from 'should';
 import { BoardController } from '../../../src/lib/board/board-controllers';
 import { queuedLines } from '../../../src/lib/board/clash-notes';
@@ -7,10 +7,10 @@ import {
   MERGE_GATE_UNREADABLE,
   MERGE_GATE_WAITING,
   MergeGateController,
-  mergeGateWaits,
+  mergeGateLines,
 } from '../../../src/lib/board/merge-gate';
 import type { IBoardGateway } from '../../../src/lib/board/ports';
-import { AT, card, DENISHA, directory, laneSet, listing, pr, response, taskResponse } from './fixtures';
+import { AT, card, DENISHA, directory, laneSet, listing, response, taskResponse } from './fixtures';
 
 const PR = 'https://github.com/kirinnee/ferretry/pull/42';
 const QUEUED =
@@ -65,103 +65,83 @@ describe('queuedLines', () => {
   });
 });
 
-describe('mergeGateWaits', () => {
-  it('should name every open card linking the PR that still waits, with how far', () => {
-    // Arrange
-    const cards = [
-      card({
-        id: 'F20',
-        links: {
-          prs: [pr({ url: 'https://github.com/KirinNee/Ferretry/pull/42', repo: 'KirinNee/Ferretry' })],
-          branch: null,
-          commits: [],
-          docs: [],
-        },
-        dependsOn: [{ task: { id: 'F18' }, until: 'shipped' }],
-        blockedBy: [{ id: 'F18' }],
-      }),
-      card({ id: 'F21', links: { prs: [pr({ url: PR })], branch: null, commits: [], docs: [] } }),
-      card({ id: 'F22', blockedBy: [{ id: 'F18' }], dependsOn: [{ task: { id: 'F18' }, until: 'shipped' }] }),
-    ];
-
+describe('mergeGateLines', () => {
+  it('should say one line per waiting card, with how far each blocker must get', () => {
     // Act
-    const waits = mergeGateWaits({ repo: 'kirinnee/ferretry', number: 42 }, cards);
+    const lines = mergeGateLines({
+      waits: [
+        { task: { id: 'F20' }, on: { id: 'F18' }, until: 'shipped' },
+        { task: { id: 'F20' }, on: { id: 'F19' }, until: 'released' },
+        { task: { id: 'F21' }, on: { id: 'F18' }, until: 'shipped' },
+      ],
+    });
 
     // Assert
-    should(waits.map(wait => [wait.card.id, wait.blockers])).eql([['F20', ['&F18 (until shipped)']]]);
+    should(lines).eql([
+      '&F20 waits on &F18 (until shipped), &F19 (until released)',
+      '&F21 waits on &F18 (until shipped)',
+    ]);
   });
 });
 
 describe('MergeGateController', () => {
-  const gate = (pages: readonly BoardResponse[] | Error) => {
+  const answer = (overrides: Partial<BoardMergeGateResponse> = {}): BoardMergeGateResponse => ({
+    pr: PR,
+    unit: [],
+    waits: [],
+    unreadable: [],
+    ...overrides,
+  });
+  const gate = (reply: BoardMergeGateResponse | Error) => {
     const io = new Io();
-    const queries: BoardQueryInput[] = [];
+    const asked: string[] = [];
     const controller = new MergeGateController({
       gateway: {
-        board: async query => {
-          queries.push(query);
-          if (pages instanceof Error) throw pages;
-          return pages[queries.length - 1] ?? response();
+        mergeGate: async pr => {
+          asked.push(pr);
+          if (reply instanceof Error) throw reply;
+          return reply;
         },
       },
       io,
     });
-    return { controller, io, queries };
+    return { controller, io, asked };
   };
 
   it('should exit 0 and say nothing when the PR waits on nothing', async () => {
-    const { controller, io } = gate([
-      response({ cards: [card({ links: { prs: [pr()], branch: null, commits: [], docs: [] } })] }),
-    ]);
-    await controller.check(PR);
+    const { controller, io, asked } = gate(answer({ unit: [{ id: 'F20' }] }));
+    await controller.check(` ${PR} `);
     should(io.exitCode).equal(0);
     should(io.reports).eql([]);
+    should(asked).eql([PR]);
   });
 
-  it('should exit 1 with the waits, reading every open card on every board page by page', async () => {
-    // Arrange
-    const waiting = card({
-      id: 'F20',
-      links: { prs: [pr()], branch: null, commits: [], docs: [] },
-      dependsOn: [{ task: { id: 'F18' }, until: 'released' }],
-      blockedBy: [{ id: 'F18' }],
-    });
-    const { controller, io, queries } = gate([
-      response({ projectId: null, laneSet: null, cards: [card({ id: 'F1' })], nextCursor: 'next' }),
-      response({ projectId: null, laneSet: null, cards: [waiting] }),
-    ]);
-
-    // Act
+  it('should exit 1 with the waits', async () => {
+    const { controller, io } = gate(answer({ waits: [{ task: { id: 'F20' }, on: { id: 'F18' }, until: 'shipped' }] }));
     await controller.check(PR);
-
-    // Assert
     should(io.exitCode).equal(MERGE_GATE_WAITING);
-    should(io.reports).eql(['&F20 waits on &F18 (until released)']);
-    should(queries).eql([
-      { state: 'open', visibility: 'all', limit: 500 },
-      { state: 'open', visibility: 'all', limit: 500, cursor: 'next' },
-    ]);
+    should(io.reports).eql(['&F20 waits on &F18 (until shipped)']);
   });
 
-  it('should exit 2 when the board cannot be read, so the merger fails closed', async () => {
+  it('should exit 2 when a card cannot be read, since it might link the PR', async () => {
+    const { controller, io } = gate(answer({ unreadable: ['F9'] }));
+    await controller.check(PR);
+    should(io.exitCode).equal(MERGE_GATE_UNREADABLE);
+    should(io.diagnostics[0]).containEql('&F9');
+  });
+
+  it('should exit 2 when the daemon cannot answer, so the merger fails closed', async () => {
     const { controller, io } = gate(new Error('daemon is not running'));
     await controller.check(PR);
     should(io.exitCode).equal(MERGE_GATE_UNREADABLE);
     should(io.diagnostics[0]).containEql('daemon is not running');
   });
 
-  it('should exit 2 for something that is not a PR URL', async () => {
-    const { controller, io, queries } = gate([]);
+  it('should exit 2 for something that is not a PR URL, without asking', async () => {
+    const { controller, io, asked } = gate(answer());
     await controller.check('kirinnee/ferretry#42');
     should(io.exitCode).equal(MERGE_GATE_UNREADABLE);
-    should(queries).eql([]);
-  });
-
-  it('should exit 2 rather than loop on a board that never ends', async () => {
-    const endless = Array.from({ length: 41 }, () => response({ projectId: null, laneSet: null, nextCursor: 'more' }));
-    const { controller, io } = gate(endless);
-    await controller.check(PR);
-    should(io.exitCode).equal(MERGE_GATE_UNREADABLE);
+    should(asked).eql([]);
   });
 });
 

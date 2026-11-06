@@ -43,6 +43,7 @@ import { AgendaBriefInput } from '../src/adapters/agenda/brief-input';
 import { BoardCardTies } from '../src/adapters/agenda/card-ties';
 import { registerBoardCommands } from '../src/adapters/board/board-commands';
 import { FyBoardGateway } from '../src/adapters/board/fy-board-gateway';
+import { FyMergeGateGateway } from '../src/adapters/board/fy-merge-gate-gateway';
 import { registerBoardImportCommand } from '../src/adapters/board-import/board-import-command';
 import { FyBoardImportGateway } from '../src/adapters/board-import/fy-board-import-gateway';
 import { FyLaneGateway } from '../src/adapters/board-lanes/fy-lane-gateway';
@@ -965,7 +966,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       environmentSessionId: ownSessionId,
       related: relatedCheck(world, client),
     });
-    const mergeGate = new MergeGateController({ gateway: new FyBoardGateway(client), io: world.io });
+    const mergeGate = new MergeGateController({ gateway: new FyMergeGateGateway(client), io: world.io });
     registerTaskCommands(program, { board, mergeGate });
     registerBoardCommands(program, board);
   },

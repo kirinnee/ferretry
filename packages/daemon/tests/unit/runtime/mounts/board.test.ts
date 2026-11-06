@@ -63,6 +63,10 @@ const recording = (overrides: Partial<ServiceWorld> = {}) => {
       calls.push({ route: 'ids', value: null });
       return await service.ids();
     },
+    mergeGate: async pr => {
+      calls.push({ route: 'merge-gate', value: pr });
+      return await service.mergeGate(pr);
+    },
     task: async id => {
       calls.push({ route: 'task', value: id });
       return await service.task(id);
@@ -615,6 +619,53 @@ describe('the board mount', () => {
     const response = await (await dispatcher(board, { use: false, configure: false })).dispatch(
       request({ path: '/v1/board/ids', device: phone }),
     );
+
+    // Assert
+    should(response.status).equal(403);
+    should(calls).eql([]);
+  });
+});
+
+describe('GET /v1/board/merge-gate', () => {
+  it("should answer the PR's merge unit from the board, never cached", async () => {
+    // Arrange
+    const { calls, board } = recording();
+    const url = 'https://github.com/kirinnee/ferretry/pull/42';
+
+    // Act
+    const response = await (
+      await dispatcher(board)
+    ).dispatch(request({ path: '/v1/board/merge-gate', query: [['pr', url]], headers: human }));
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.headers.get('cache-control')).equal('no-store');
+    should(calls).eql([{ route: 'merge-gate', value: url }]);
+    should(jsonBody(response)).eql({ pr: url, unit: [], waits: [], unreadable: [] });
+  });
+
+  it('should refuse a request that names no PR, or something that is not one', async () => {
+    // Arrange
+    const { board } = recording();
+    const api = await dispatcher(board);
+
+    // Act
+    const none = await api.dispatch(request({ path: '/v1/board/merge-gate', headers: human }));
+    const wrong = await api.dispatch(request({ path: '/v1/board/merge-gate', query: [['pr', 'F12']], headers: human }));
+
+    // Assert
+    should(none.status).equal(400);
+    should(wrong.status).equal(400);
+  });
+
+  it('should keep the gate from a remote device when the fleet grant is off', async () => {
+    // Arrange
+    const { calls, board } = recording();
+
+    // Act
+    const response = await (
+      await dispatcher(board, { use: false, configure: false })
+    ).dispatch(request({ path: '/v1/board/merge-gate', query: [['pr', 'x']], device: phone }));
 
     // Assert
     should(response.status).equal(403);

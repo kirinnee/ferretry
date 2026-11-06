@@ -13,11 +13,11 @@ Paths are relative to `packages/daemon/` unless they start with `packages/`, `sc
 2. **Two claims clash when one path is the other, or sits inside it.** `packages/daemon/` clashes with
    `packages/daemon/bin/fyd.ts`; `packages/daemon` does not clash with `packages/daemon-x`.
 3. **The daemon adds the depends-on itself**, the moment a claim lands: the card that claimed LATER depends on
-   every open card on the same board that already claims a clashing path, `until: shipped`, with a history note
-   that names the path. First come, first merged.
+   every open card on the same board that already claims a clashing path (on the card whose PR ships that work,
+   §2), `until: shipped`, with a history note that names the path. First come, first merged.
 4. **Work still runs in parallel; only the merge waits** (the one owner decision, §6). The dependent card is
    built and reviewed as usual. Its PR does not merge until the card it waits on has merged.
-5. **The merger checks the board.** A new read, `fy task merge-gate <pr-url>`, exits 0 when the PR's card waits
+5. **The merger checks the board.** A new read, `fy task merge-gate <pr-url>`, exits 0 when the cards the PR ships wait
    on nothing, 1 (with the blockers) when it does, 2 when it cannot tell. `merge-all.sh` merges only on 0. The patch is
    `/tmp/claude-1000/merge-all-clash-gate.patch`; the script itself is not edited here.
 
@@ -39,7 +39,8 @@ Known hot files are claimed like any other file. `fy task file --help`, `fy task
 
 One pure function, `claimsClash(a, b)` in `src/lib/board/clash-queue.ts`:
 
-- normalise each path: drop a leading `./`, a trailing `/`, and repeated `/`; `.` and `./` are the whole
+- normalise each path segment by segment: drop empty and `.` segments, fold a `..` into the segment before it
+  (one that would climb out of the repository is kept, so it matches only itself); `.` and `./` are the whole
   repository, which clashes with every path;
 - clash when the paths are equal, or one starts with the other followed by `/`.
 
@@ -47,10 +48,17 @@ A card is **in the queue** (can hold another card back) when it is on the same b
 work has not shipped: `isBlockerDone(category, 'shipped', …)` is false. A backlog card counts: it claimed the area
 first, and a lead who wants the other card first removes the dependency (§4).
 
+**Who is waited on: the shipping card.** A clashing card's work ships in its own PR, or — for a helper sub-card
+with no PR — in its lead's. So the dependency goes on the clashing card's shipping card: itself when it links a PR
+or has no parent, else its parent's shipping card. Waiting on the helper would end the wait when the helper closes
+(as soon as its ferret finishes), not when the work merges.
+
 Skipped, so the rule never deadlocks:
 
 - the card itself, its ancestors and its descendants (a sub-card overlaps its lead's claims by design, and the
-  lead ships through it);
+  lead ships through it), and a shipping card in that family (siblings under one lead ship together);
+- a shipping card that links a PR the card (or the card's own shipping card) links: they merge together, and the gate
+  would hold the PR on itself;
 - a card it already depends on (no second entry), and a card it took out of its queue with `fy task undepend`
   (a re-claim does not put back what the lead removed on purpose);
 - a card past the most dependencies a card may hold (128): noted, not added;
@@ -86,14 +94,19 @@ move it, so the card shows its real progress while it waits.
 
 ## 5. The merge gate
 
-`fy task merge-gate <pr-url>` (CLI only, over the board read the CLI already has):
+`fy task merge-gate <pr-url>` asks the daemon, `GET /v1/board/merge-gate?pr=<url>` (`src/lib/board/merge-gate.ts`),
+which answers from ONE read of the board — paging through the board view could miss a card that moved between pages:
 
-1. read every open card whose links include that PR (paging through the board read, all projects, public and
-   private);
-2. exit **0** and print nothing when no card waits on anything (or no card links the PR);
-3. exit **1** and print `&F20 waits on &F18 (until shipped)` when any linked card has an unfinished `blockedBy`;
-4. exit **2** when the daemon cannot be read, the URL is not a PR, or the board runs past 40 pages. The merger treats 2 like 1: **it fails closed** and merges nothing it
-   cannot check.
+1. the PR's **merge unit**: the open cards linking it, and their open sub-cards that link no PR of their own (a
+   helper's dependency is its lead's PR's dependency);
+2. the unit's **waits**: each unfinished `blockedBy` of a unit card on a card outside the unit that does not link
+   the same PR (a card merging in the same PR never holds it, even when its link arrived after the claim queued it);
+3. the **unreadable** cards: quarantined cards could link the PR, so the gate cannot call it free.
+
+The CLI exits **0** and prints nothing when there are no waits and nothing unreadable; **1** and
+`&F20 waits on &F18 (until shipped)` per waiting card; **2** when the daemon cannot answer (down, or older than the
+route), a card is unreadable, or the URL is not a PR. The merger treats 2 like 1: **it fails closed** and merges nothing it
+cannot check.
 
 The patch to `/tmp/claude-1000/merge-all.sh` adds one check after the approval check, and tells the lead once per
 PR (the same `merge-conflict-told` pattern) that an approved PR is queued behind a card. **Apply it only after the
@@ -117,15 +130,21 @@ and would hold every PR.
 - **No race between two claims.** Dependency writes are already serialised board-wide (`DEPENDENCY_SECTION` in
   `service.ts`); a claim and a create with claims join that section, so two clashing claims cannot miss each other.
 - **Another machine's cards** are not seen (the board's existing GAP).
+- **A queued helper keeps waiting on its lead's shipping card** even if it later opens a PR of its own: the
+  dependency was decided at claim time. Its lead removes it with `fy task undepend` when that matters.
+- **One unreadable card holds every PR.** Fail closed is the point; the merger's note names the card.
 
 ## 8. The build (one PR)
 
-- `src/lib/board/clash-queue.ts`: `claimsClash`, `planClashes`, `queueBehindClashes` (pure, unit-tested).
+- `src/lib/board/clash-queue.ts`: `claimsClash`, `shippingCard`, `planClashes`, `queueBehindClashes` (pure).
+- `src/lib/board/merge-gate.ts`: `mergeGateOf` (pure); `BoardService.mergeGate` and the `GET /v1/board/merge-gate`
+  route (`runtime/mounts/board.ts`); `BoardMergeGateResponseSchema` in `packages/protocol`.
 - `src/lib/board/card-actions.ts`: the `file` action queues; `service.ts`: a claim runs in the dependency section,
   a create with claims re-reads the board in it and queues, and `file` joins `holderOnly`.
-- `packages/cli`: `fy task merge-gate` (`lib/board/merge-gate.ts`), and `file`/`create` print the queue notes
-  (`lib/board/clash-notes.ts`).
+- `packages/cli`: `fy task merge-gate` (`lib/board/merge-gate.ts`, `adapters/board/fy-merge-gate-gateway.ts`), and
+  `file`/`create` print the queue notes (`lib/board/clash-notes.ts`).
 - `docs/board.md` § Clashing claims queue the later card; this doc; the merge-all patch (outside the repo).
 - Not changed: the ferrets' Board rules line. Its size is pinned by the system-prompt budget tests; the help
   texts and board.md carry the rule instead.
-- Tests: `packages/daemon/tests/unit/board/clash-queue.test.ts`, `packages/cli/tests/unit/board/clash-queue.test.ts`.
+- Tests: `packages/daemon/tests/unit/board/{clash-queue,merge-gate}.test.ts`, the route in
+  `tests/unit/runtime/mounts/board.test.ts`, and `packages/cli/tests/unit/board/clash-queue.test.ts`.

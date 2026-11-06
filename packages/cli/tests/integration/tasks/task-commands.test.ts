@@ -23,7 +23,7 @@ import { boardResponse, FERRETRY_ID, listing, taskResponse } from '../board/fixt
 /** A merge gate nothing here asks: these tests are about the other verbs. */
 const quietGate = (): MergeGateController =>
   new MergeGateController({
-    gateway: { board: () => Promise.resolve(boardResponse()) },
+    gateway: { mergeGate: () => Promise.reject(new Error('not asked')) },
     io: { report: () => {}, diagnostic: () => {}, setExitCode: () => {} },
   });
 

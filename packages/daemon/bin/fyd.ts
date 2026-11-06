@@ -13574,6 +13574,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         board: {
           board: async query => await boardWorld.board.board(query),
           ids: async () => await boardWorld.board.ids(),
+          mergeGate: async pr => await boardWorld.board.mergeGate(pr),
           task: async id => await boardWorld.board.task(id),
           taskByLegacyRef: async legacyRef => await boardWorld.board.taskByLegacyRef(legacyRef),
           create: async (request, caller) => await boardWorld.board.create(request, caller),

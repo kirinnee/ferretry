@@ -1378,19 +1378,26 @@ for that feature to be built before merging."_ (&I38; the design is
   Claim the shared hot files when the work touches them: `packages/daemon/bin/fyd.ts`, `knip.json`,
   `packages/protocol/src/lib/daemon-features.ts`.
 - **Two claims clash** when the paths are the same, or one is a folder the other sits inside (`packages/daemon`
-  holds `packages/daemon/bin/fyd.ts`, not `packages/daemon-x`). `.` is the whole repository.
+  holds `packages/daemon/bin/fyd.ts`, not `packages/daemon-x`). `.` is the whole repository, and `./` or `..`
+  inside a path are read as the path they name.
 - **The daemon queues the later claim.** In the same write as the claim, the claiming card gets a `dependsOn`
-  (`until: shipped`) on every card on the same board that already claims a clashing path and has not shipped
-  (backlog included), plus a note: `queued behind &F18 to merge: both claim knip.json …`. Both are recorded as the
+  (`until: shipped`) for every open card on the same board that already claims a clashing path and has not shipped
+  (backlog included), plus a note: `queued behind &F18 to merge: both claim knip.json …`. The dependency is on the
+  card whose PR **ships** the clashing work: the claiming card itself when it links a PR or has no parent, else its
+  parent's shipping card, because a helper sub-card with no PR closes when its ferret finishes, long before its lead's
+  PR merges. Both are recorded as the
   daemon's, acting for the session that claimed. The command prints the note back. Claims and dependency writes
   share one board-wide section, so two clashing claims cannot miss each other.
-- **Never queued:** the card's ancestors and descendants (a sub-card overlaps its lead by design), a card it already
-  depends on, a card it took out of its queue with `fy task undepend`, and a card that already waits on it (that
-  clash leaves a note instead of closing a cycle).
+- **Never queued:** the card's ancestors and descendants (a sub-card overlaps its lead by design), a card that ships
+  in the same PR or under the same lead, a card it already depends on, a card it took out of its queue with
+  `fy task undepend`, and a card that already waits on it (that clash leaves a note instead of closing a cycle).
 - **Only the merge waits**, as the owner put it: _"wait for that feature to be built before merging"_. Both cards are built at once; the later one's PR
-  merges after the first ships, then rebases. `fy task merge-gate <pr-url>` answers for the merger: exit 0 when no
-  open card linking that PR waits on anything, 1 (printing `&F20 waits on &F18 (until shipped)`) when one does,
-  and 2 when the board cannot be read or the URL is not a PR, which the merger treats as "do not merge".
+  merges after the first ships, then rebases. `fy task merge-gate <pr-url>` (over `GET /v1/board/merge-gate?pr=`)
+  answers for the merger from ONE read of the board. A PR ships a **merge unit**: the open cards linking it and
+  their open sub-cards that link no PR of their own. Exit 0 when no card of the unit waits on a card outside it that
+  is not done; 1 (printing `&F20 waits on &F18 (until shipped)`) when one does; 2 when it cannot tell — the daemon
+  is down or predates the gate, a card on the machine is unreadable (it might link the PR), or the URL is not a PR.
+  The merger treats 2 as "do not merge". A card inside the unit, or one linking the same PR, never holds it.
 - **To jump the queue**, the card's lead runs `fy task undepend <id> <other> --reason "<why>"`, or the owner
   overrides it. Releasing a claim does not remove a dependency.
 
@@ -1518,7 +1525,7 @@ Every `fy task` verb takes `--session <id>` (act as that session instead of the 
 | `fy task skip "<why>"`                            | record that this work needs no card                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `fy task block` / `unblock`                       | mark or clear an external block                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `fy task depend` / `undepend`                     | add or remove a dependency; `--until`, `--override <why>` (owner)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `fy task merge-gate <pr-url>`                     | whether a PR may merge as far as the queue goes: exit 0 free, 1 its card waits on another, 2 cannot tell ([Clashing claims](#clashing-claims-queue-the-later-card))                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `fy task merge-gate <pr-url>`                     | whether a PR may merge as far as the queue goes: exit 0 free, 1 a card it ships waits on another, 2 cannot tell ([Clashing claims](#clashing-claims-queue-the-later-card))                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `fy task drop --reason`                           | drop a card                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `fy task reopen <id> --to <lane> --ask "<words>"` | reopen a finished card with the owner's new ask                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `fy task clarify <id> --source`                   | append verbatim words to the original ask                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -1543,6 +1550,7 @@ The routes behind them, all needing the `fleet` capability at operator minimum f
 | ----------------------------------------------- | ----------------------------------------------------------------------------- |
 | `GET /v1/board`                                 | the board view; `visibility=public\|private\|all` (default `all`)             |
 | `GET /v1/board/ids`                             | every card id on the machine, ids only: what `&F12` is proved against         |
+| `GET /v1/board/merge-gate?pr=`                  | whether a PR may merge as far as the queue goes, from one read of the board   |
 | `POST /v1/board/tasks`                          | create a card                                                                 |
 | `GET /v1/board/tasks?legacyRef=`                | find the card an imported task became                                         |
 | `GET, POST /v1/board/tasks/:taskId`             | read a card, or apply one action to it                                        |

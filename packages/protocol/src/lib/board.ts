@@ -827,6 +827,30 @@ export type BoardIdsResponse = z.infer<typeof BoardIdsResponseSchema>;
 
 const PrUrlSchema = z.string().max(MAX_BOARD_LINK_LENGTH).regex(PR_URL, 'a GitHub pull request URL');
 
+/** One card of a PR's merge unit still waiting on a card outside it, and how far that card must get. */
+export const BoardMergeWaitSchema = z.strictObject({
+  task: TaskRefSchema,
+  on: TaskRefSchema,
+  until: DependencyUntilSchema,
+});
+export type BoardMergeWait = z.infer<typeof BoardMergeWaitSchema>;
+
+/**
+ * `GET /v1/board/merge-gate?pr=<url>` (docs/board.md § Clashing claims queue the later card): whether a PR may merge as
+ * far as the board's queue goes, decided from ONE read of the board. The PR may merge when `waits` and `unreadable`
+ * are both empty.
+ */
+export const BoardMergeGateResponseSchema = z.strictObject({
+  pr: PrUrlSchema,
+  /** The cards that ship in this PR: the open cards linking it, and their open sub-cards that link no PR of their own. */
+  unit: z.array(TaskRefSchema),
+  /** Each wait of a unit card on a card outside the unit that is not done yet. */
+  waits: z.array(BoardMergeWaitSchema),
+  /** Cards this daemon could not read: any of them might link the PR, so the gate cannot call it free. */
+  unreadable: z.array(BoardTaskIdSchema),
+});
+export type BoardMergeGateResponse = z.infer<typeof BoardMergeGateResponseSchema>;
+
 /**
  * A new card. Who creates it is the caller, never a field; the daemon fills the machine, the counter id,
  * the lane (the variant's first backlog lane unless one is named) and the history.
