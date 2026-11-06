@@ -13,7 +13,7 @@
  * the board is said to be unavailable on its machine — never "Updating", which is only a first read in flight.
  */
 
-import { type AgendaItem, MACHINE_AGENDA_ID, type SessionView } from '@ferretry/protocol';
+import { type AgendaItem, MACHINE_AGENDA_ID, isMachineAgendaId, type SessionView } from '@ferretry/protocol';
 import {
   createContext,
   useCallback,
@@ -375,7 +375,11 @@ export function useAgendaInboxModel(
           {
             id: daemonSessionKey(scope),
             key: agendaSummaryKey(entry.attention),
-            read: () => client.revalidate(connection, scope),
+            // The fleet stream owns machine-board freshness; rendering its held board needs no refresh.
+            read: () =>
+              isMachineAgendaId(scope.sessionId)
+                ? client.hydrate(connection, scope)
+                : client.revalidate(connection, scope),
             held: () => client.store.agenda(scope) !== undefined,
           },
         ];

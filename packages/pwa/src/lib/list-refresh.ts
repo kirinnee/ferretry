@@ -10,7 +10,7 @@ export interface ListRefreshEnvironment {
 
 export const browserListRefreshEnvironment: ListRefreshEnvironment = { now: () => Date.now(), schedule: realSchedule };
 
-/** One in-flight read and one trailing read. Even a slow or queued transport gets a full cooldown. */
+/** One in-flight read and one trailing read. The cooldown starts when the request starts. */
 export class ListRefresh<T> {
   #active: Promise<T> | undefined;
   #queued:
@@ -64,7 +64,6 @@ export class ListRefresh<T> {
   #run(): Promise<T> {
     this.#last = this.environment.now();
     const promise = new Promise<T>(resolve => resolve(this.read())).finally(() => {
-      this.#last = this.environment.now();
       this.#active = undefined;
       if (this.#dirty) {
         this.#dirty = false;

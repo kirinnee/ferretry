@@ -45,7 +45,7 @@ describe('ListRefresh', () => {
     pending.resolve(1);
     await first;
     // Assert
-    expect(reads).toBe(1);
+    expect(reads).toBe(2);
     await clock.advance(LIST_REFRESH_MIN_MS);
     expect(reads).toBe(2);
     subject.stop();

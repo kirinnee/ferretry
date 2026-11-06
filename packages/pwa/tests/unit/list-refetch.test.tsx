@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { type FyEvent, MACHINE_AGENDA_ID, type SessionView } from '@ferretry/protocol';
 import { useEffect, useSyncExternalStore } from 'react';
+import { useAgendaInboxModel } from '../../src/hooks/use-agenda-inbox.ts';
 import {
   useMachinesPoll,
   type FleetPollEnvironment,
@@ -251,10 +252,22 @@ describe('shared whole-list traffic', () => {
     // Assert
     expect(subject.reads.sessions).toBe(2);
     expect(subject.reads.agenda).toBe(2);
-    // Drain the final coalesced invalidation before measuring events that move neither list.
+    // Assert final counts after draining every pending burst invalidation.
     await subject.clock.advance(10_000);
+    expect(subject.reads).toEqual({ sessions: 2, agenda: 2, writes: 0 });
     const before = { ...subject.reads };
-    for (const type of ['surface.driving', 'board.changed', 'output.delta', 'browser.changed', 'terminal.output'])
+    for (const type of [
+      'surface.driving',
+      'surface.opened',
+      'surface.asked',
+      'surface.takeover',
+      'surface.handback',
+      'surface.handed',
+      'board.changed',
+      'output.delta',
+      'browser.changed',
+      'terminal.output',
+    ])
       subject.stream().event(event(type));
     await subject.clock.advance(10_000);
     expect(subject.reads).toEqual(before);
@@ -418,5 +431,71 @@ describe('shared whole-list traffic', () => {
         scope,
       ),
     ).toThrow('scope');
+  });
+});
+const inboxMachines = [{ connection: machine, name: 'Machine', sessions: [] }];
+function RealInbox({ subject }: { subject: Subject }) {
+  const inbox = useAgendaInboxModel(subject.agenda, inboxMachines, {
+    now: subject.clock.environment.now,
+    setTimeout: subject.clock.setTimeout,
+    clearTimeout: subject.clock.clearTimeout,
+  });
+  return <span>{inbox.total}</span>;
+}
+
+describe('shared list freshness regressions', () => {
+  it.each(['interaction.help', 'session.resumed', 'turn.prompt', 'control.send_accepted', 'new.state-event'])(
+    'refreshes %s status within 10 seconds',
+    async type => {
+      const subject = setup();
+      view = await mount(<Poller subject={subject} />);
+      subject.stream().idle();
+      subject.sessions([sessionView('s', { state: { status: 'waiting' } })]);
+      subject.stream().event(event(type));
+      await subject.clock.advance(10_000);
+      expect(subject.fleet.session(daemonSessionScope(machine, 's'))?.state.status).toBe('waiting');
+    },
+  );
+
+  it('does not refetch an already held machine board merely to render the real Inbox', async () => {
+    const subject = setup();
+    view = await mount(
+      <>
+        <Poller subject={subject} />
+        <RealInbox subject={subject} />
+      </>,
+    );
+    subject.stream().idle();
+    await interact(async () => {
+      await flushListReads();
+    });
+    expect(subject.reads.agenda).toBe(1);
+    await interact(async () => {
+      await subject.clock.advance(10_000);
+    });
+    expect(subject.reads.agenda).toBe(1);
+  });
+
+  it('refreshes a dirty machine list within 10 seconds even when the opening response takes 5 seconds', async () => {
+    const clock = listClock();
+    const pending = listDeferred<readonly SessionView[]>();
+    let reads = 0;
+    const fleet = new DaemonFleetStore(
+      {
+        list: () =>
+          ++reads === 1 ? pending.promise : Promise.resolve([sessionView('s', { state: { status: 'waiting' } })]),
+        get: async () => sessionView('s'),
+      },
+      clock.environment.now,
+      { schedule: clock.environment.schedule },
+    );
+    const first = fleet.ensure(machine);
+    await clock.advance(1_000);
+    fleet.invalidate(machine);
+    await clock.advance(4_000);
+    pending.resolve([sessionView('s')]);
+    await first;
+    await clock.advance(6_000);
+    expect(fleet.session(daemonSessionScope(machine, 's'))?.state.status).toBe('waiting');
   });
 });

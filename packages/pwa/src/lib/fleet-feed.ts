@@ -7,9 +7,9 @@
  * (`/v1/events` with no session). With `tail=0` the feed replays nothing, so opening it costs a socket
  * and nothing else, and the daemon proves it live with an idle frame the moment it opens.
  *
- * So this holds one fleet feed per machine and says WHEN to re-read: once after a burst of events has
- * settled, at most every {@link FLEET_FEED_MIN_INTERVAL_MS}. The read itself is the list the poll always
- * made, which the daemon answers `304` when nothing moved. While the feed is live, the poll beside it
+ * So this holds one fleet feed per machine and immediately invalidates the shared list source.
+ * That source owns the single coalescing budget across every reader. The read itself is the list
+ * the poll always made, which the daemon answers `304` when nothing moved. While the feed is live, the poll beside it
  * becomes a slow safety net (`use-machines-poll.ts`).
  *
  * A DAEMON FROM BEFORE `tail` refuses the feed outright (400, before any frame). That is not an
@@ -19,14 +19,8 @@
  * because a feed with no replay cannot say what changed while it was away.
  */
 
-import { type FyEvent, isMachineAgendaId } from '@ferretry/protocol';
+import { type FyEvent, isMachineAgendaId, SURFACE_EVENT_TYPES } from '@ferretry/protocol';
 import { sessionEventStreamDeadlineMs, sessionEventStreamDelayMs } from '../components/session-event-stream-model.ts';
-import { LIST_REFRESH_MIN_MS } from './list-refresh.ts';
-
-/** How long a burst of events is let settle before the one read it asks for. */
-export const FLEET_FEED_SETTLE_MS = 500;
-/** The shortest gap between two reads a feed asks for, however busy the fleet. */
-export const FLEET_FEED_MIN_INTERVAL_MS = LIST_REFRESH_MIN_MS;
 
 /** What the poll beside a feed is told: whether it may stand back. */
 export type FleetFeedStatus = 'connecting' | 'live' | 'down' | 'unsupported';
@@ -73,12 +67,22 @@ export interface FleetFeedControl {
 /** A daemon that does not know `tail` refuses the upgrade with 400; nothing else says "too old". */
 const refusedAsTooOld = (reason: unknown): boolean => (reason as { readonly status?: unknown } | null)?.status === 400;
 
-/** A surface's control facts and the board's card changes move nothing on a session list row. */
+/** Payload-only events have no session-row facts. Unknown state events must still invalidate. */
+const LIST_NEUTRAL_EVENTS = new Set([
+  ...Object.values(SURFACE_EVENT_TYPES),
+  'surface.control',
+  'board.changed',
+  'output.delta',
+  'terminal.output',
+  'browser.changed',
+]);
+
+// Lifecycle, observer, send, resume and signal transitions (including interaction.help) all
+// change row facts. Agenda summaries are changed by agenda.changed / attention.changed;
+// the machine board belongs only to the agenda source. Default to reading new event types.
 const movesTheList = (event: FyEvent): boolean =>
-  event.type.startsWith('session.') ||
-  event.type.startsWith('turn.') ||
-  event.type.startsWith('control.') ||
-  (!isMachineAgendaId(event.sessionId) && (event.type === 'agenda.changed' || event.type === 'attention.changed'));
+  !LIST_NEUTRAL_EVENTS.has(event.type) &&
+  !(isMachineAgendaId(event.sessionId) && (event.type === 'agenda.changed' || event.type === 'attention.changed'));
 
 export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
   const environment = options.environment ?? browserFleetFeedEnvironment;
@@ -90,8 +94,6 @@ export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
   let abort: AbortController | undefined;
   let retry: unknown;
   let silence: unknown;
-  let settle: unknown;
-  let lastChangeAt = Number.NEGATIVE_INFINITY;
 
   const publish = (next: FleetFeedStatus): void => {
     if (next === status) return;
@@ -103,16 +105,7 @@ export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
     return undefined;
   };
 
-  const change = (): void => {
-    if (settle !== undefined) return;
-    const wait = Math.max(FLEET_FEED_SETTLE_MS, lastChangeAt + FLEET_FEED_MIN_INTERVAL_MS - environment.now());
-    settle = environment.setTimeout(() => {
-      settle = undefined;
-      if (stopped) return;
-      lastChangeAt = environment.now();
-      options.onChange();
-    }, wait);
-  };
+  const change = (): void => options.onChange();
 
   function open(): void {
     const controller = new AbortController();
@@ -183,7 +176,6 @@ export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
       stopped = true;
       retry = clear(retry);
       silence = clear(silence);
-      settle = clear(settle);
       abort?.abort();
     },
   };
