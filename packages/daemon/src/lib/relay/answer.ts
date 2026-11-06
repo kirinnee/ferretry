@@ -1,4 +1,5 @@
 import { finalised, type ApiResponse } from '../api/http.ts';
+import { isPublishedResponse } from '../api/response-generation.ts';
 import { encodeTunnelMessage, tunnelResponseMessages } from './tunnel.ts';
 
 export interface TunnelAnswerRecord {
@@ -14,13 +15,12 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
-/** Only facts that affect the wire. Copy the mutable containers so in-place edits are seen too. */
+/** Uncompressed legacy sources may still edit their headers in place. */
 function snapshot(response: ApiResponse): ApiResponse {
   return {
     status: response.status,
     headers: new Map(response.headers),
     body: response.body,
-    ...(response.gzip === undefined ? {} : { gzip: response.gzip.slice() }),
   };
 }
 
@@ -31,8 +31,7 @@ function sameAnswer(left: ApiResponse, right: ApiResponse): boolean {
   if (left.headers.size !== entries.length) return false;
   if (![...left.headers].every(([key, value], index) => entries[index]?.[0] === key && entries[index]?.[1] === value))
     return false;
-  if (left.gzip === undefined) return right.gzip === undefined && left.body === right.body;
-  return right.gzip !== undefined && sameBytes(left.gzip, right.gzip);
+  return left.body === right.body;
 }
 
 /**
@@ -44,7 +43,7 @@ function sameAnswer(left: ApiResponse, right: ApiResponse): boolean {
  */
 export function tunnelAnswerRecords(id: number, response: ApiResponse): readonly TunnelAnswerRecord[] {
   const initial = finalised(response);
-  let current = response.late === undefined ? initial : snapshot(initial);
+  let current = response.late === undefined || isPublishedResponse(initial) ? initial : snapshot(initial);
   const render = (answer: ApiResponse) => tunnelResponseMessages(id, answer).map(encodeTunnelMessage);
   let encoded = render(current);
   return encoded.map((plaintext, index) => ({
@@ -56,8 +55,11 @@ export function tunnelAnswerRecords(id: number, response: ApiResponse): readonly
           permit: (): boolean => {
             try {
               const next = finalised(response);
-              if (!sameAnswer(current, next)) {
-                current = snapshot(next);
+              if (
+                next !== current &&
+                (isPublishedResponse(current) || isPublishedResponse(next) || !sameAnswer(current, next))
+              ) {
+                current = isPublishedResponse(next) ? next : snapshot(next);
                 encoded = render(current);
               }
               const again = encoded[index];

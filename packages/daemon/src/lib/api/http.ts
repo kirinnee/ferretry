@@ -7,6 +7,8 @@
  * exercised in the unit tier without binding a port.
  */
 
+import type { PublishedApiResponse } from './response-generation.ts';
+
 /** Request headers, keyed by their LOWERCASED name. HTTP header names are case-insensitive and a
  *  map that preserved case would let `Authorization` and `authorization` disagree. */
 export type ApiHeaders = ReadonlyMap<string, string>;
@@ -119,7 +121,9 @@ export interface ApiResponse {
    * route has finished and keeps it on the response; each carrier calls it again, synchronously, as the very
    * last step before the bytes leave (`finalised`), and sends what it returns.
    */
-  readonly late?: () => ApiResponse;
+  // Compressed late answers must be immutable publications: scanning a mutable gzip body on every
+  // part is quadratic. Its source republishes when it changes, including after an in-place edit.
+  readonly late?: () => PlainApiResponse | PublishedApiResponse;
   /**
    * The gzip form of `body`, attached by the dispatcher when the caller asked for one and the policy
    * allows it (`compression.ts`). `body` stays the plain text, so the tag, the audit and every test read
@@ -131,6 +135,11 @@ export interface ApiResponse {
    * then the session concludes with `4440`, so the app can tell "I left" from "I was refused".
    */
   readonly endsSession?: true;
+}
+
+/** An uncompressed late answer may still be spelled afresh at every hand-off. */
+export interface PlainApiResponse extends ApiResponse {
+  readonly gzip?: never;
 }
 
 /**

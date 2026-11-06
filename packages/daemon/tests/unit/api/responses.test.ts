@@ -6,6 +6,7 @@ import {
   entityTag,
   errorResponse,
   jsonResponse,
+  jsonTextResponse,
   methodNotAllowedResponse,
   noStore,
   PROMETHEUS_CONTENT_TYPE,
@@ -42,6 +43,24 @@ describe('jsonResponse', () => {
     should(response.status).equal(201);
     should(response.headers.get('cache-control')).equal('no-store');
   });
+});
+
+describe('jsonTextResponse', () => {
+  for (const status of [undefined, 201]) {
+    it(`should preserve pre-serialized JSON with status ${String(status ?? 200)}`, () => {
+      // Arrange — whitespace must survive; this body must not be serialized a second time.
+      const body = '{\n  "text": "already spelled"\n}';
+
+      // Act
+      const actual = jsonTextResponse(body, status);
+
+      // Assert
+      should(actual.status).equal(status ?? 200);
+      should(actual.body).equal(body);
+      should(actual.headers.get('content-type')).equal('application/json; charset=utf-8');
+      should(actual.headers.get(FY_VERSION_HEADER)).equal(daemonVersion);
+    });
+  }
 });
 
 describe('textResponse', () => {

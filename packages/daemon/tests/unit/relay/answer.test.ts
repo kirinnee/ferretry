@@ -1,11 +1,12 @@
 import { describe, it, spyOn } from 'bun:test';
 import { MAX_PLAINTEXT_BYTES, utf8Text } from '@ferretry/relay';
 import should from 'should';
-import type { ApiResponse } from '../../../src/lib/api/http.ts';
+import type { ApiResponse, PlainApiResponse } from '../../../src/lib/api/http.ts';
+import { publishResponse } from '../../../src/lib/api/response-generation.ts';
 import { tunnelAnswerRecords } from '../../../src/lib/relay/answer.ts';
 import { encodeTunnelMessage, tunnelResponseMessages } from '../../../src/lib/relay/tunnel.ts';
 
-const answer = (body = 'hello'): ApiResponse => ({ status: 200, headers: new Map(), body });
+const answer = (body = 'hello'): PlainApiResponse => ({ status: 200, headers: new Map(), body });
 
 describe('a tunnel answer generation', () => {
   it('should encode the ordinary wire contract once, with no permit for a static answer', () => {
@@ -57,7 +58,8 @@ describe('a tunnel answer generation', () => {
   it('should encode a gzip body only once while rechecking all of its parts', () => {
     // Arrange
     const gzip = new Uint8Array(MAX_PLAINTEXT_BYTES * 3).fill(71);
-    const input: ApiResponse = { ...answer(), late: () => ({ ...answer(), gzip }) };
+    const current = publishResponse({ ...answer(), gzip });
+    const input: ApiResponse = { ...answer(), late: () => current };
     const encoder = spyOn(TextEncoder.prototype, 'encode');
     try {
       // Act
@@ -72,10 +74,68 @@ describe('a tunnel answer generation', () => {
     }
   });
 
+  for (const size of [262_144, 786_432]) {
+    it(`should read gzip bytes only during publication and rendering for ${String(size)} bytes`, () => {
+      // Arrange — count copies, iteration AND numeric reads, including on every derived slice.
+      // Counting encoder calls alone missed the old whole-gzip comparison in every permit.
+      let work = 0;
+      const counted = (bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
+        new Proxy(bytes, {
+          get(target, key) {
+            if (key === Symbol.iterator)
+              return function* () {
+                for (const byte of target) {
+                  work += 1;
+                  yield byte;
+                }
+              };
+            if (typeof key === 'string' && /^\d+$/u.test(key)) work += 1;
+            const value: unknown = Reflect.get(target, key, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+      const originalSlice = Uint8Array.prototype.slice;
+      const copies = spyOn(Uint8Array.prototype, 'slice').mockImplementation(function (
+        this: Uint8Array,
+        start?: number,
+        end?: number,
+      ) {
+        const result = originalSlice.call(this, start, end);
+        work += result.byteLength;
+        return counted(result);
+      });
+      try {
+        const current = publishResponse({ ...answer(), gzip: counted(new Uint8Array(size).fill(71)) });
+        let checks = 0;
+        const records = tunnelAnswerRecords(3, {
+          ...answer(),
+          late: () => {
+            checks += 1;
+            return current;
+          },
+        });
+        const renderedWork = work;
+
+        // Act
+        const permitted = records.map(record => record.permit?.());
+
+        // Assert — O(size) total byte work and zero further byte reads across all N permits.
+        should(records.length).be.above(5);
+        should(permitted.every(value => value === true)).be.true();
+        should(checks).equal(records.length + 1);
+        should(renderedWork).be.aboveOrEqual(size);
+        should(work).be.belowOrEqual(size * 6);
+        should(work).equal(renderedWork);
+      } finally {
+        copies.mockRestore();
+      }
+    });
+  }
+
   it('should still permit an unchanged prefix but stop the later part that changed between seals', () => {
     // Arrange
     const prefix = 'x'.repeat(MAX_PLAINTEXT_BYTES * 2);
-    let current = answer(`${prefix}before`);
+    let current: PlainApiResponse = answer(`${prefix}before`);
     const records = tunnelAnswerRecords(1, { ...current, late: () => current });
 
     // Act
@@ -89,7 +149,7 @@ describe('a tunnel answer generation', () => {
 
   it('should refuse parts missing from a shorter new answer, including one behind a credit wait', () => {
     // Arrange
-    let current = answer('x'.repeat(MAX_PLAINTEXT_BYTES * 2));
+    let current: PlainApiResponse = answer('x'.repeat(MAX_PLAINTEXT_BYTES * 2));
     const records = tunnelAnswerRecords(1, { ...current, late: () => current });
 
     // Act
@@ -107,7 +167,7 @@ describe('a tunnel answer generation', () => {
         ['one', '1'],
         ['two', '2'],
       ]);
-      let current: ApiResponse = { ...answer(), headers };
+      let current: PlainApiResponse = { ...answer(), headers };
       const records = tunnelAnswerRecords(1, { ...current, late: () => current });
 
       // Act
@@ -128,14 +188,16 @@ describe('a tunnel answer generation', () => {
     // Arrange
     for (const change of ['bytes', 'length', 'plain', 'gzip'] as const) {
       const gzip = Uint8Array.of(1, 2, 3);
-      let current: ApiResponse = change === 'gzip' ? answer() : { ...answer(), gzip };
+      let source: ApiResponse = change === 'gzip' ? answer() : { ...answer(), gzip };
+      let current = publishResponse(source);
       const records = tunnelAnswerRecords(1, { ...current, late: () => current });
 
       // Act
       if (change === 'bytes') gzip[1] = 8;
-      else if (change === 'length') current = { ...current, gzip: Uint8Array.of(1) };
-      else if (change === 'plain') current = answer();
-      else current = { ...current, gzip };
+      else if (change === 'length') source = { ...source, gzip: Uint8Array.of(1) };
+      else if (change === 'plain') source = answer();
+      else source = { ...source, gzip };
+      current = publishResponse(source);
 
       // Assert
       should(records[0]?.permit?.()).be.false();
@@ -144,11 +206,11 @@ describe('a tunnel answer generation', () => {
 
   it('should compare the compressed wire bytes even when the plain body changed', () => {
     // Arrange
-    let current: ApiResponse = { ...answer(), gzip: Uint8Array.of(1, 2, 3) };
+    let current = publishResponse({ ...answer(), gzip: Uint8Array.of(1, 2, 3) });
     const records = tunnelAnswerRecords(1, { ...current, late: () => current });
 
     // Act
-    current = { ...answer('different'), gzip: Uint8Array.of(1, 2, 3) };
+    current = publishResponse({ ...answer('different'), gzip: Uint8Array.of(1, 2, 3) });
 
     // Assert
     should(records[0]?.permit?.()).be.true();

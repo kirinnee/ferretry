@@ -77,7 +77,7 @@ import {
 } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
-import type { ApiRequest, ApiResponse, SessionMember } from '../../../src/lib/api/http.ts';
+import type { ApiRequest, ApiResponse, PlainApiResponse, SessionMember } from '../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
 import type {
   SocketDownstream,
@@ -401,7 +401,7 @@ const accepts = (stream: FakeStream) => async (): Promise<SocketUpgradeDecision>
   },
 });
 
-const json = (status: number, body: unknown): ApiResponse => ({
+const json = (status: number, body: unknown): PlainApiResponse => ({
   status,
   headers: new Map([['content-type', 'application/json']]),
   body: JSON.stringify(body),
@@ -752,7 +752,7 @@ describe('a relayed session', () => {
   it('should not send an answer whose last word changed while it queued and sealed, and end the session instead', async () => {
     // Arrange — the answer reads one way when it is spelled and another by the time it would leave.
     let spellings = 0;
-    const spelled = (): ApiResponse => {
+    const spelled = (): PlainApiResponse => {
       spellings += 1;
       return json(200, { text: spellings === 1 ? 'pane-CANARY' : 'held' });
     };
@@ -779,7 +779,7 @@ describe('a relayed session', () => {
 
   it('should treat an answer that cannot be spelled again as changed', async () => {
     let spellings = 0;
-    const late = (): ApiResponse => {
+    const late = (): PlainApiResponse => {
       spellings += 1;
       if (spellings > 1) throw new Error('cannot spell');
       return json(200, { text: 'once' });

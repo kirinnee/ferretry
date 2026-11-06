@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { FY_VERSION_HEADER } from '@ferretry/protocol';
 import { daemonVersion } from '../version.ts';
-import type { ApiResponse } from './http.ts';
+import type { ApiResponse, PlainApiResponse } from './http.ts';
 
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
 
@@ -18,7 +18,11 @@ function baseHeaders(contentType: string): Map<string, string> {
 }
 
 /** A JSON response. `extra` wins over the defaults so a route can set its own cache policy. */
-export function jsonResponse(value: unknown, status = 200, extra: Readonly<Record<string, string>> = {}): ApiResponse {
+export function jsonResponse(
+  value: unknown,
+  status = 200,
+  extra: Readonly<Record<string, string>> = {},
+): PlainApiResponse {
   const headers = baseHeaders(JSON_CONTENT_TYPE);
   for (const [name, headerValue] of Object.entries(extra)) headers.set(name.toLowerCase(), headerValue);
   return { status, headers, body: JSON.stringify(value) };
@@ -28,7 +32,7 @@ export function jsonResponse(value: unknown, status = 200, extra: Readonly<Recor
  * A JSON response whose body the caller has already spelled — for a body too large to build as a value and
  * serialise on the loop in one piece. The caller owns that it is valid JSON.
  */
-export function jsonTextResponse(body: string, status = 200): ApiResponse {
+export function jsonTextResponse(body: string, status = 200): PlainApiResponse {
   return { status, headers: baseHeaders(JSON_CONTENT_TYPE), body };
 }
 
@@ -51,7 +55,7 @@ export function errorResponse(
   message: string,
   code?: string,
   extra: Readonly<Record<string, unknown>> = {},
-): ApiResponse {
+): PlainApiResponse {
   return jsonResponse(code === undefined ? { ...extra, error: message } : { ...extra, error: message, code }, status);
 }
 
@@ -119,6 +123,8 @@ export function conditionalWithTag(response: ApiResponse, etag: string, ifNoneMa
 }
 /** Marks a response as never cacheable. Used for anything carrying credentials or working-tree
  *  bytes, and for the machine feeds, whose whole value is freshness. */
+export function noStore(response: PlainApiResponse): PlainApiResponse;
+export function noStore(response: ApiResponse): ApiResponse;
 export function noStore(response: ApiResponse): ApiResponse {
   const headers = new Map(response.headers);
   headers.set('cache-control', 'no-store');

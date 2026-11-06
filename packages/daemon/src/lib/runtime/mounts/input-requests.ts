@@ -13,7 +13,7 @@ import {
 import { isAgentCaller, OWNER_ONLY_CODE, ownerOnlyWords } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import type { ApiResponse } from '../../api/http.ts';
+import type { ApiResponse, PlainApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { InputRequestError } from '../../input-requests/errors.ts';
@@ -103,7 +103,7 @@ async function list(service: InputRequestService, context: RouteContext, all: bo
   const names = refusedAccountNames(context, 'read the accounts a card names') === undefined;
   // A hold taken since the service answered still wins, now and again as the dispatcher sends it, under any of the
   // terminal's names (its key, the pane's name and its id), as the agent-tools path checks them.
-  const spell = (): ApiResponse => {
+  const spell = (): PlainApiResponse => {
     const body: InputRequestList = {
       requests: requests.map(request => service.resealed(names ? request : nameless(request))),
     };

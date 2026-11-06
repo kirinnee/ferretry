@@ -1930,6 +1930,14 @@ The rules, each of which is a reason it can be trusted:
   daemon mints is also the answer to a `POST`, which is never compressed whatever the route says. A
   terminal or event stream is never compressed either: see below.
 
+**Late answers keep a source-owned wire generation.** A compressed late source publishes an immutable answer
+with `publishResponse` after each change (including an in-place edit to its source gzip bytes), and returns that
+same publication until its next change. The dispatcher preserves its identity through cache policy. Tunnel
+permits compare generations in constant time and re-render only a new generation; unchanged parts never scan
+the whole gzip body again. A changed generation still compares each pending part's original bytes immediately
+before sending, so a matching prefix may leave but a changed or missing part cannot. Uncompressed late sources
+may still spell an answer afresh, with status, ordered headers and body checked on each permit.
+
 **A live feed starts where the reader already is**, to spend fewer bytes in the same way. A session view carries
 `journalSequence`, the journal's last sequence read just before its documents, and a reader that has
 the view opens `/v1/events?sessionId=…&after=<journalSequence>` rather than `after=0`: replaying a
