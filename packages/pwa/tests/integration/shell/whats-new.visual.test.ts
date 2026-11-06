@@ -79,6 +79,24 @@ const closed = async (tab: Page): Promise<boolean> => {
   return true;
 };
 
+/**
+ * Types into the finder and waits until it has STOPPED MOVING: the whole text is in the box, the machine's
+ * search for exactly that text has been answered (the filter row stops being busy), and two frames have
+ * painted since. Only then is a row's box a place a finger can aim at, because the filter row appears with
+ * the first letter and the answer lands after the debounce.
+ */
+const typeIntoFinder = async (tab: Page, text: string): Promise<void> => {
+  await tab.keyboard.type(text);
+  await tab.waitForFunction(
+    typed => document.querySelector<HTMLInputElement>('[placeholder^="Search places"]')?.value === typed,
+    text,
+  );
+  await tab.waitForSelector('fieldset[aria-label="Narrow cards and agenda"][aria-busy="false"]');
+  await tab.evaluate(
+    async () => await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+  );
+};
+
 const touchScroll = async (context: BrowserContext, tab: Page, x: number, from: number, to: number): Promise<void> => {
   const cdp = await context.newCDPSession(tab);
   const point = async (type: 'touchStart' | 'touchMove' | 'touchEnd', y: number) =>
@@ -253,7 +271,7 @@ describe('whats new, on a phone', () => {
           await touch('touchEnd', spec.width / 2, 320);
           await tab.waitForSelector('[placeholder^="Search places"]');
           await tab.tap('[placeholder^="Search places"]');
-          await tab.keyboard.type('what');
+          await typeIntoFinder(tab, 'what');
           await tab.waitForSelector('text=What’s new');
           await shoot(tab, `${spec.name}-6-pull-finder`);
           const box = await tab.locator('text=What’s new').first().boundingBox();
