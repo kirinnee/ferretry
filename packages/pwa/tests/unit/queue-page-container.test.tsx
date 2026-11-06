@@ -206,6 +206,50 @@ describe('QueuePage', () => {
     expect(JSON.stringify(mounted.toJSON())).toContain('newer words');
   });
 
+  test('after loading every older page the rows are exactly the full history, each once, in order', async () => {
+    const at = (minute: number) => `2026-10-30T10:0${String(minute)}:00.000Z`;
+    const finished = (id: string, minute: number) => ({
+      ...queued(id, `words of ${id}`),
+      state: 'read',
+      enqueuedAt: at(minute),
+    });
+    const { store, calls } = await open({
+      // The window: the two newest and the one still waiting from long ago.
+      '/v1/sessions/s1/queue': {
+        messages: [{ ...queued('q0', 'waiting words'), enqueuedAt: at(0) }, finished('q4', 4), finished('q5', 5)],
+        nextCursor: 'q4',
+      },
+      '/v1/sessions/s1/queue?before=q4': { messages: [finished('q2', 2), finished('q3', 3)], nextCursor: 'q2' },
+      '/v1/sessions/s1/queue?before=q2': { messages: [finished('q1', 1)], nextCursor: null },
+    });
+    mounted = render(
+      <RouterProvider>
+        <StoreProvider store={store}>
+          <QueuePage daemonId={alpha.daemonId} sessionId="s1" />
+        </StoreProvider>
+      </RouterProvider>,
+    );
+    const rowIds = (): string[] =>
+      (
+        mounted?.root.findAll(node => typeof node.type === 'string' && node.props['data-queue-row'] !== undefined) ?? []
+      ).map(node => String(node.props['data-queue-row']));
+    await settleUntil(() => rowIds().length === 3, 'window shown', runAsync);
+    expect(rowIds()).toEqual(['q0', 'q4', 'q5']);
+
+    for (const expected of [5, 6]) {
+      await runAsync(async () => mounted?.root.findByProps({ 'data-queue-older': '' }).props.onClick());
+      await settleUntil(() => rowIds().length === expected, `${String(expected)} rows`, runAsync);
+    }
+
+    // The waiting message first, then the history oldest to newest: no message twice, none missing.
+    expect(rowIds()).toEqual(['q0', 'q1', 'q2', 'q3', 'q4', 'q5']);
+    expect(calls.filter(call => call.includes('before'))).toEqual([
+      'GET /v1/sessions/s1/queue?before=q4',
+      'GET /v1/sessions/s1/queue?before=q2',
+    ]);
+    expect(mounted.root.findAllByProps({ 'data-queue-older': '' })).toHaveLength(0);
+  });
+
   test('a failed read of older messages says so, keeps what is shown and lets the person try again', async () => {
     const finished = { ...queued('q2', 'newer words'), state: 'read' };
     const { store } = await open({
