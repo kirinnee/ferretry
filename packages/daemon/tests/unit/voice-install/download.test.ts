@@ -192,6 +192,75 @@ describe('downloadArchive', () => {
     should(error.message).match(/404/u);
   });
 
+  describe('a 206 answer is trusted only when it is the rest of the pinned file', () => {
+    const LAST = BODY.length - 1;
+    const rangeAnswer = (contentRange: string | undefined, rest: Uint8Array, headers: Record<string, string> = {}) =>
+      new Response(rest, {
+        status: 206,
+        headers: { ...(contentRange === undefined ? {} : { 'content-range': contentRange }), ...headers },
+      });
+    const resume = async (answer: Response) => {
+      const { files, archive, progress } = fixture();
+      files.files.set(DESTINATION, BODY.slice(0, 100));
+      const run = async () =>
+        await downloadArchive(
+          { files, fetch: async () => answer },
+          archive,
+          DESTINATION,
+          done => progress.push(done),
+          () => undefined,
+          new AbortController().signal,
+        );
+      return { files, run };
+    };
+
+    it.each([
+      ['an end before the start', 'bytes 100-0/1'],
+      ['a missing header', undefined],
+      ['an unparseable header', 'bytes */100000'],
+      ['a start that is not the first missing byte', `bytes 50-${String(LAST)}/${String(BODY.length)}`],
+      ['an end short of the file', `bytes 100-${String(LAST - 1)}/${String(BODY.length)}`],
+      ['an end past the file', `bytes 100-${String(LAST + 1)}/${String(BODY.length)}`],
+      ['a total that is not the pinned size', `bytes 100-${String(LAST)}/${String(BODY.length + 1)}`],
+    ])('should refuse %s, keep the part, and append nothing', async (_label, contentRange) => {
+      // Arrange
+      const { files, run } = await resume(rangeAnswer(contentRange, BODY.slice(100)));
+
+      // Act
+      const error = await failure(run());
+
+      // Assert
+      should(error.code).equal(VOICE_ENGINE_CODES.download);
+      should(error.message).match(/not the rest of the/u);
+      should(files.files.get(DESTINATION)?.length).equal(100);
+    });
+
+    it('should refuse a body whose announced length is not what the range says', async () => {
+      // Arrange
+      const { files, run } = await resume(
+        rangeAnswer(`bytes 100-${String(LAST)}/${String(BODY.length)}`, BODY.slice(100), { 'content-length': '5' }),
+      );
+
+      // Act
+      const error = await failure(run());
+
+      // Assert
+      should(error.code).equal(VOICE_ENGINE_CODES.download);
+      should(files.files.get(DESTINATION)?.length).equal(100);
+    });
+
+    it('should accept the rest of the file when the server does not know the total', async () => {
+      // Arrange
+      const { files, run } = await resume(rangeAnswer(`bytes 100-${String(LAST)}/*`, BODY.slice(100)));
+
+      // Act
+      await run();
+
+      // Assert
+      should(sha256(files.files.get(DESTINATION) ?? new Uint8Array())).equal(sha256(BODY));
+    });
+  });
+
   it('should verify a part that is already complete without fetching anything', async () => {
     // Arrange
     const { files, run, network } = fixture();

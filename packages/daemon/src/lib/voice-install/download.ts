@@ -17,10 +17,22 @@ async function hashFile(files: VoiceInstallFiles, path: string, into = createHas
   return into;
 }
 
-/** `bytes <start>-<end>/<total>` → `start`, or `undefined` when the header is absent or not that shape. */
-function contentRangeStart(header: string | null): number | undefined {
-  const match = /^bytes (\d+)-\d+\/(?:\d+|\*)$/.exec(header ?? '');
-  return match === null ? undefined : Number.parseInt(match[1] ?? '', 10);
+/**
+ * Whether a `206` really is the rest of the pinned file from `offset`: `Content-Range: bytes <start>-<end>/<total>`
+ * must start where we asked, run to the file's last byte, and (when the server says) name the pinned size as
+ * the total — and the body it announces must be exactly that long. Anything else is some other piece of some
+ * other file, and appending it would only fail the hash after the whole download.
+ */
+function isRestOfFile(response: Response, archive: VoiceArchive, offset: number): boolean {
+  const match = /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(response.headers.get('content-range') ?? '');
+  if (match === null) return false;
+  const start = Number.parseInt(match[1] ?? '', 10);
+  const end = Number.parseInt(match[2] ?? '', 10);
+  const total = match[3] === '*' ? undefined : Number.parseInt(match[3] ?? '', 10);
+  if (start !== offset || end < start || end !== archive.bytes - 1) return false;
+  if (total !== undefined && total !== archive.bytes) return false;
+  const length = response.headers.get('content-length');
+  return length === null || Number.parseInt(length, 10) === end - start + 1;
 }
 
 /**
@@ -102,12 +114,14 @@ async function fetchInto(
     await files.remove(destination);
     return await fetchInto(deps, archive, destination, 0, onProgress, signal);
   }
-  const resumed = response.status === 206 && contentRangeStart(response.headers.get('content-range')) === offset;
+  const resumed = response.status === 206 && isRestOfFile(response, archive, offset);
   if (response.status !== 200 && !resumed) {
     await response.body?.cancel().catch(() => undefined);
     throw new VoiceInstallError(
       VOICE_ENGINE_CODES.download,
-      `the download server answered ${String(response.status)} for ${archive.url}`,
+      response.status === 206
+        ? `the download server answered ${archive.url} with a range (${response.headers.get('content-range') ?? 'none'}) that is not the rest of the ${String(archive.bytes)}-byte file from byte ${String(offset)}`
+        : `the download server answered ${String(response.status)} for ${archive.url}`,
     );
   }
   if (response.body === null)

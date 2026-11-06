@@ -115,7 +115,7 @@ describe('unpackTar', () => {
   });
 
   it('should stop at the byte cap before writing the entry that crosses it', async () => {
-    // Arrange
+    // Arrange — each entry is a 512-byte header and a 1,024-byte padded body: the first fits in 2,100, the second does not.
     const out = destination();
     const tar = tarBytes([
       { name: 'top/a', body: 'a'.repeat(600) },
@@ -123,11 +123,67 @@ describe('unpackTar', () => {
     ]);
 
     // Act
-    const error = await refusal(unpackTar(chunked(tar, 512), out.sink, { ...LIMITS, maxBytes: 1000 }));
+    const error = await refusal(unpackTar(chunked(tar, 512), out.sink, { ...LIMITS, maxBytes: 2100 }));
 
     // Assert
     should(error.reason).equal('too-large');
     should([...out.written.keys()]).deepEqual(['a']);
+  });
+
+  it('should count extended headers against both caps: ten 500-byte global headers, one entry and one byte allowed', async () => {
+    // Arrange
+    const out = destination();
+    const tar = tarBytes(Array.from({ length: 10 }, () => ({ name: 'global-pax', type: 'g', body: 'x'.repeat(500) })));
+
+    // Act
+    const byEntries = await refusal(
+      unpackTar(chunked(tar, 512), out.sink, { ...LIMITS, maxBytes: 1_000_000, maxEntries: 1 }),
+    );
+    const byBytes = await refusal(unpackTar(chunked(tar, 512), out.sink, { ...LIMITS, maxBytes: 1, maxEntries: 1 }));
+
+    // Assert
+    should(byEntries.reason).equal('too-many-entries');
+    should(byBytes.reason).equal('too-large');
+  });
+
+  it('should count GNU long-name and pax records as entries too', async () => {
+    // Arrange — five long-name records before one file: six headers in all.
+    const out = destination();
+    const records = Array.from({ length: 5 }, () => ({ name: '././@LongLink', type: 'L', body: 'top/long\0' }));
+    const tar = tarBytes([...records, { name: 'top/a', body: 'x' }]);
+
+    // Act
+    const error = await refusal(unpackTar(chunked(tar, 512), out.sink, { ...LIMITS, maxEntries: 5 }));
+
+    // Assert
+    should(error.reason).equal('too-many-entries');
+  });
+
+  it('should bound the bytes of a directory payload, even though a directory holds no content', async () => {
+    // Arrange
+    const out = destination();
+    const tar = tarBytes([{ name: 'top/dir/', type: '5', body: 'x'.repeat(10_000) }]);
+
+    // Act
+    const tight = await refusal(unpackTar(chunked(tar, 512), out.sink, { ...LIMITS, maxBytes: 1 }));
+    const roomy = await refusal(unpackTar(chunked(tar, 512), out.sink, { ...LIMITS, maxBytes: 5_000 }));
+
+    // Assert
+    should(tight.reason).equal('too-large');
+    should(roomy.reason).equal('too-large');
+    should(out.directories).deepEqual([]);
+  });
+
+  it('should still unpack an archive that fits its cap exactly, headers and padding included', async () => {
+    // Arrange — header 512 + body 1,024 + two 512-byte end blocks (the second is never read) = the bytes consumed.
+    const out = destination();
+    const tar = tarBytes([{ name: 'top/a', body: 'a'.repeat(600) }]);
+
+    // Act
+    const outcome = await unpackTar(chunked(tar, 512), out.sink, { ...LIMITS, maxBytes: 512 + 1024 + 512 });
+
+    // Assert
+    should(outcome.files).deepEqual([{ path: 'a', bytes: 600 }]);
   });
 
   it('should refuse more entries than the cap', async () => {
@@ -203,6 +259,79 @@ describe('unpackTar', () => {
       () => should.fail('resolved', 'rejected'),
       error => should(error).be.instanceOf(DOMException),
     );
+  });
+});
+
+/** A tar stream cut into 512-byte chunks that records whether its `finally` ran (a decompressor being stopped). */
+function watched(bytes: Uint8Array, after?: () => void) {
+  const state = { finalized: false };
+  async function* source(): AsyncGenerator<Uint8Array> {
+    try {
+      for await (const chunk of chunked(bytes, 512)) {
+        yield chunk;
+        after?.();
+      }
+    } finally {
+      state.finalized = true;
+    }
+  }
+  return { source: source(), state };
+}
+
+describe('unpackTar finalizes its source', () => {
+  it('should finalize it after an archive that ends normally', async () => {
+    // Arrange
+    const { source, state } = watched(tarBytes([{ name: 'top/a', body: 'x' }]));
+
+    // Act
+    await unpackTar(source, destination().sink, LIMITS);
+
+    // Assert
+    should(state.finalized).be.true();
+  });
+
+  it('should finalize it when an entry is refused', async () => {
+    // Arrange
+    const { source, state } = watched(
+      tarBytes([
+        { name: 'top/../../escape', body: 'x' },
+        { name: 'top/b', body: 'y' },
+      ]),
+    );
+
+    // Act
+    const error = await refusal(unpackTar(source, destination().sink, LIMITS));
+
+    // Assert
+    should(error.reason).equal('parent-path');
+    should(state.finalized).be.true();
+  });
+
+  it('should finalize it when a cap is crossed', async () => {
+    // Arrange
+    const { source, state } = watched(tarBytes([{ name: 'top/a', body: 'x'.repeat(5_000) }]));
+
+    // Act
+    await refusal(unpackTar(source, destination().sink, { ...LIMITS, maxBytes: 2_000 }));
+
+    // Assert
+    should(state.finalized).be.true();
+  });
+
+  it('should finalize it when the install is cancelled', async () => {
+    // Arrange — the signal aborts as the first chunk has been handed over.
+    const controller = new AbortController();
+    const { source, state } = watched(tarBytes([{ name: 'top/a', body: 'x'.repeat(5_000) }]), () => controller.abort());
+
+    // Act
+    const failure = await unpackTar(source, destination().sink, LIMITS, controller.signal).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(failure).be.instanceOf(DOMException);
+    should(state.finalized).be.true();
   });
 });
 

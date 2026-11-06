@@ -27,9 +27,13 @@ import { UnsafeArchiveError, unpackTar } from './tar.ts';
 /** Install needs this many times an archive's size free: the archive itself, and room to unpack it. */
 const DISK_HEADROOM_FACTOR = 2;
 
-/** Slack on the unpack cap for tar's own padding and directory entries. */
-const UNPACK_SLACK_BYTES = 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES = 1_000;
+
+/**
+ * Slack on the unpack cap for everything in the stream that is not file content: every header (each entry may
+ * be preceded by a long-name or pax record), the padding after every body, and the end-of-archive blocks.
+ */
+const UNPACK_SLACK_BYTES = MAX_ARCHIVE_ENTRIES * 3 * 1024 + 20 * 1024;
 
 export const INSTALL_MANIFEST = 'install.json';
 
@@ -95,8 +99,23 @@ const manifestOf = (text: string | undefined): z.infer<typeof InstallManifestSch
 export class VoiceInstallService {
   #running: Running | undefined;
   #last: VoiceInstallProgress | undefined;
+  /** The tail of the queue every change to the installed files goes through; see `#exclusive`. */
+  #queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly deps: VoiceInstallDeps) {}
+
+  /**
+   * ONE MUTEX FOR EVERY CHANGE. Install (its claim and checks), remove and use take their turn here, joined to
+   * the queue before their first await, so no two of them are ever between "I checked" and "I changed" at
+   * once. Without it, an install could start after a remove had passed its own check, and the older remove
+   * would then delete the new install's download. A turn that waits is short (a few file operations); the
+   * long part of an install runs on AFTER its turn, guarded by `#running`, which every other turn checks.
+   */
+  #exclusive<T>(act: () => Promise<T>): Promise<T> {
+    const turn = this.#queue.then(act, act);
+    this.#queue = turn.catch(() => undefined);
+    return turn;
+  }
 
   // ── paths ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -224,7 +243,11 @@ export class VoiceInstallService {
         `no speech runtime is published for ${target}`,
       );
     }
-    // The claim is made before the first await: two requests that arrive together must not both pass.
+    return await this.#exclusive(async () => await this.#start(model, runtime));
+  }
+
+  /** The claim and the checks, in this turn at the mutex: after this returns, the install runs on its own. */
+  async #start(model: VoiceModel, runtime: VoiceRuntime): Promise<VoiceEngineView> {
     if (this.#running !== undefined) {
       throw new VoiceInstallError(
         VOICE_ENGINE_CODES.busy,
@@ -238,24 +261,57 @@ export class VoiceInstallService {
       progress: this.#progress(model.id, 'model', 'starting', 0, model.archive.bytes),
     };
     this.#running = claim;
+    // `done` covers the whole install, checks included, so a Cancel that arrives during them waits for the end
+    // of the install (here: it never begins) instead of answering while it is still going.
+    const ready = this.#preflight(model, runtime);
+    claim.done = ready
+      .then(
+        async () => {
+          if (controller.signal.aborted) {
+            claim.progress = {
+              ...claim.progress,
+              status: 'cancelled',
+              code: VOICE_ENGINE_CODES.cancelled,
+              message: 'the install was cancelled before it began',
+              finishedAt: this.deps.clock.now(),
+            };
+          } else {
+            await this.#run(claim, model, runtime);
+          }
+          this.#last = claim.progress;
+        },
+        () => undefined, // a refusal: thrown to the caller below, and no install to report
+      )
+      .finally(() => {
+        this.#running = undefined;
+      });
     try {
-      const engine = await this.deps.settings.read();
-      const needsRuntime =
-        engine.runtimePath === undefined &&
-        (await this.#stateOf(this.#runtimeDirectory(runtime), runtime.archive)).state !== 'installed';
-      const modelMissing = (await this.#stateOf(this.#modelDirectory(model.id), model.archive)).state !== 'installed';
-      if (modelMissing) await this.#requireDisk(model.archive);
-      if (needsRuntime) await this.#requireDisk(runtime.archive);
+      await ready;
     } catch (error) {
-      this.#running = undefined;
+      await claim.done;
       throw error;
     }
-    const done = this.#run(claim, model, runtime).finally(() => {
-      this.#last = claim.progress;
-      this.#running = undefined;
-    });
-    claim.done = done;
     return await this.view();
+  }
+
+  /** The refusals that can be known before any byte moves. */
+  async #preflight(model: VoiceModel, runtime: VoiceRuntime): Promise<void> {
+    const engine = await this.deps.settings.read();
+    const runtimeDirectory = this.#runtimeDirectory(runtime);
+    const modelDirectory = this.#modelDirectory(model.id);
+    const needsRuntime =
+      engine.runtimePath === undefined &&
+      (await this.#stateOf(runtimeDirectory, runtime.archive)).state !== 'installed';
+    const modelMissing = (await this.#stateOf(modelDirectory, model.archive)).state !== 'installed';
+    // Staging directories a killed daemon left behind are reclaimed first: they may be what the disk is short of.
+    if (modelMissing) {
+      await this.#reclaimStaging(modelDirectory);
+      await this.#requireDisk(model.archive);
+    }
+    if (needsRuntime) {
+      await this.#reclaimStaging(runtimeDirectory);
+      await this.#requireDisk(runtime.archive);
+    }
   }
 
   /** Stops the install under way. What was downloaded is kept, so the next Install resumes. */
@@ -279,6 +335,10 @@ export class VoiceInstallService {
     if (model === undefined) {
       throw new VoiceInstallError(VOICE_ENGINE_CODES.unknownModel, `there is no model "${id}" in the catalog`);
     }
+    return await this.#exclusive(async () => await this.#remove(model));
+  }
+
+  async #remove(model: VoiceModel): Promise<VoiceEngineView> {
     if (this.#running !== undefined) {
       throw new VoiceInstallError(
         VOICE_ENGINE_CODES.busy,
@@ -303,12 +363,18 @@ export class VoiceInstallService {
     if (model === undefined) {
       throw new VoiceInstallError(VOICE_ENGINE_CODES.unknownModel, `there is no model "${id}" in the catalog`);
     }
-    const state = await this.#stateOf(this.#modelDirectory(model.id), model.archive);
-    if (state.state !== 'installed') {
-      throw new VoiceInstallError(VOICE_ENGINE_CODES.notInstalled, `${model.name} is not installed; install it first`);
-    }
-    await this.deps.settings.setModel(model.role, model.id);
-    return await this.view();
+    // Its turn at the mutex: a remove that is deleting this model must finish before "installed" is read.
+    return await this.#exclusive(async () => {
+      const state = await this.#stateOf(this.#modelDirectory(model.id), model.archive);
+      if (state.state !== 'installed') {
+        throw new VoiceInstallError(
+          VOICE_ENGINE_CODES.notInstalled,
+          `${model.name} is not installed; install it first`,
+        );
+      }
+      await this.deps.settings.setModel(model.role, model.id);
+      return await this.view();
+    });
   }
 
   // ── the install itself ─────────────────────────────────────────────────────────────────────────
@@ -331,15 +397,33 @@ export class VoiceInstallService {
     };
   }
 
+  /** Deletes the staging directories a killed daemon left beside `directory` (gigabytes, for a big model). */
+  async #reclaimStaging(directory: string): Promise<void> {
+    const { files } = this.deps;
+    const parent = dirname(directory);
+    for (const name of await files.list(parent)) {
+      if (name.startsWith(`${basename(directory)}.staging-`)) await files.remove(join(parent, name));
+    }
+  }
+
+  /**
+   * Refuses when the disk cannot hold what is STILL to come. A whole archive's worth of free space is not asked
+   * for twice: the usable prefix already on disk (a cancelled download's `.part`, or a complete one waiting to
+   * be unpacked) is counted as already paid, so a tight disk can still finish what it started.
+   */
   async #requireDisk(archive: VoiceArchive): Promise<void> {
     const free = await this.deps.files.freeBytes(this.deps.root);
+    const onDisk = (await this.deps.files.size(this.#partPath(archive))) ?? 0;
+    // A part longer than the pin is junk the download will delete: it is not a prefix of anything.
+    const retained = onDisk <= archive.bytes ? onDisk : 0;
     // Twice the download is the floor; an archive that unpacks to more than its own size (Cohere: 1.7× ) needs
     // the archive AND everything it unpacks to on disk at once.
-    const needed = Math.max(archive.bytes * DISK_HEADROOM_FACTOR, archive.bytes + archive.extractedBytes);
+    const total = Math.max(archive.bytes * DISK_HEADROOM_FACTOR, archive.bytes + archive.extractedBytes);
+    const needed = total - retained;
     if (free !== undefined && free < needed) {
       throw new VoiceInstallError(
         VOICE_ENGINE_CODES.noDisk,
-        `not enough free disk: ${String(needed)} bytes are needed (the ${String(archive.bytes)}-byte download and what it unpacks to, at least twice the download) and ${String(free)} are free`,
+        `not enough free disk: ${String(needed)} more bytes are needed (the ${String(archive.bytes)}-byte download and what it unpacks to, at least twice the download${retained > 0 ? `, less the ${String(retained)} bytes already downloaded` : ''}) and ${String(free)} are free`,
       );
     }
   }
@@ -403,6 +487,7 @@ export class VoiceInstallService {
     if ((await this.#stateOf(directory, archive)).state === 'installed') return;
 
     set({ component, phase: 'starting', bytesDone: 0, bytesTotal: archive.bytes });
+    await this.#reclaimStaging(directory);
     await this.#requireDisk(archive);
     const part = this.#partPath(archive);
     await downloadArchive(
@@ -416,13 +501,10 @@ export class VoiceInstallService {
 
     set({ phase: 'unpacking', bytesDone: 0, bytesTotal: archive.extractedBytes });
     const staging = `${directory}.staging-${this.deps.clock.now().replace(/\D/g, '')}`;
-    // A daemon that was killed mid-unpack left its staging directory behind (gigabytes, for a big model).
-    const parent = dirname(directory);
-    for (const name of await files.list(parent)) {
-      if (name.startsWith(`${basename(directory)}.staging-`)) await files.remove(join(parent, name));
-    }
     let unpacked: Awaited<ReturnType<typeof unpackTar>>;
     try {
+      // The state home is trusted: the part was verified above, and whoever could swap it between that check and
+      // this read can already edit the installed files, so this slice does not defend that boundary.
       const stream = this.deps.archives.tarStream(part, archive.format, signal);
       let written = 0;
       unpacked = await unpackTar(

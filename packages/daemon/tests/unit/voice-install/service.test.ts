@@ -56,6 +56,19 @@ async function failure(promise: Promise<unknown>): Promise<VoiceInstallError> {
 
 const entry = (view: VoiceEngineView, id: string) => view.models.find(model => model.id === id);
 
+const tick = async (): Promise<void> => await new Promise<void>(resolve => setTimeout(resolve, 5));
+
+function deferred() {
+  let release!: () => void;
+  const promise = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+/** The part file an archive's download lives in while it is incomplete or waiting to be unpacked. */
+const partOf = (archive: { readonly sha256: string }): string => `${ROOT}/downloads/${archive.sha256}.part`;
+
 describe('Install', () => {
   it('should download the runtime and the model, unpack them, and report both installed', async () => {
     // Arrange
@@ -214,6 +227,105 @@ describe('Install', () => {
     should(error.code).equal(VOICE_ENGINE_CODES.noDisk);
   });
 
+  describe('with a download already on disk', () => {
+    // The whole install needs max(2 × archive, archive + unpacked) in all; what is already downloaded is paid.
+    const needsAltogether = (archive: { readonly bytes: number; readonly extractedBytes: number }): number =>
+      Math.max(archive.bytes * 2, archive.bytes + archive.extractedBytes);
+
+    it('should resume a COMPLETE cached archive on a disk that only has room to unpack it', async () => {
+      // Arrange — the archive is cached whole (a cancel, or a restart before the unpack), and the disk is tight.
+      const { service, files, settings, network, batch } = world();
+      settings.engine = { runtimePath: '/override' };
+      const archive = batch.model.archive;
+      files.files.set(partOf(archive), batch.tar);
+      files.free = needsAltogether(archive) - archive.bytes;
+
+      // Act
+      await service.install('alpha');
+      await service.settled();
+
+      // Assert
+      should((await service.view()).install?.status).equal('succeeded');
+      should(network.served).deepEqual([]);
+    });
+
+    it('should still refuse one byte short of that', async () => {
+      // Arrange
+      const { service, files, settings, batch } = world();
+      settings.engine = { runtimePath: '/override' };
+      const archive = batch.model.archive;
+      files.files.set(partOf(archive), batch.tar);
+      files.free = needsAltogether(archive) - archive.bytes - 1;
+
+      // Act
+      const error = await failure(service.install('alpha'));
+
+      // Assert
+      should(error.code).equal(VOICE_ENGINE_CODES.noDisk);
+      should(error.message).match(new RegExp(`less the ${String(archive.bytes)} bytes already downloaded`, 'u'));
+    });
+
+    it('should count only the downloaded prefix of a PARTIAL cache, and resume with a Range request', async () => {
+      // Arrange
+      const { service, files, settings, network, batch } = world();
+      settings.engine = { runtimePath: '/override' };
+      const archive = batch.model.archive;
+      files.files.set(partOf(archive), batch.tar.slice(0, 1_000));
+      files.free = needsAltogether(archive) - 1_000;
+
+      // Act
+      await service.install('alpha');
+      await service.settled();
+
+      // Assert
+      should((await service.view()).install?.status).equal('succeeded');
+      should(network.served).deepEqual([{ status: 206, range: 'bytes=1000-' }]);
+    });
+
+    it('should refuse a partial cache one byte short, and not credit a part longer than the pin', async () => {
+      // Arrange
+      const { service, files, settings, batch } = world();
+      settings.engine = { runtimePath: '/override' };
+      const archive = batch.model.archive;
+      files.files.set(partOf(archive), batch.tar.slice(0, 1_000));
+      files.free = needsAltogether(archive) - 1_001;
+      const oversized = world();
+      oversized.settings.engine = { runtimePath: '/override' };
+      oversized.files.files.set(partOf(archive), new Uint8Array(archive.bytes + 5_000));
+      oversized.files.free = needsAltogether(archive) - 1;
+
+      // Act
+      const short = await failure(service.install('alpha'));
+      const junk = await failure(oversized.service.install('alpha'));
+
+      // Assert
+      should(short.code).equal(VOICE_ENGINE_CODES.noDisk);
+      should(junk.code).equal(VOICE_ENGINE_CODES.noDisk);
+    });
+
+    it('should reclaim the staging directory a killed daemon left BEFORE judging the disk, since it may be what is short', async () => {
+      // Arrange — the volume holds 200,000 bytes in all; the install fits only once 150,000 of staging are gone.
+      const { service, files, settings, batch } = world();
+      settings.engine = { runtimePath: '/override' };
+      const archive = batch.model.archive;
+      const capacity = needsAltogether(archive) + 10;
+      files.files.set(`${ROOT}/models/alpha.staging-1/encoder.onnx`, new Uint8Array(150_000));
+      files.freeBytes = async () => {
+        let used = 0;
+        for (const bytes of files.files.values()) used += bytes.length;
+        return capacity - used;
+      };
+
+      // Act
+      await service.install('alpha');
+      await service.settled();
+
+      // Assert
+      should((await service.view()).install?.status).equal('succeeded');
+      should(files.under(`${ROOT}/models/alpha.staging-`)).deepEqual([]);
+    });
+  });
+
   it('should install when the free space cannot be read, rather than refuse on a guess', async () => {
     // Arrange
     const { service, files } = world();
@@ -255,6 +367,44 @@ describe('Cancel and resume', () => {
     should(network.served.at(-1)?.range).match(/^bytes=\d+-$/u);
     should(done.install?.status).equal('succeeded');
     should(entry(done, 'alpha')?.install.state).equal('installed');
+  });
+
+  it('should not answer a Cancel while the install is still checking, and then report it cancelled with nothing fetched', async () => {
+    // Arrange — the install parks in its very first settings read.
+    const { service, settings, network } = world();
+    const entered = deferred();
+    const gate = deferred();
+    const read = settings.read.bind(settings);
+    let first = true;
+    settings.read = async () => {
+      if (first) {
+        first = false;
+        entered.release();
+        await gate.promise;
+      }
+      return await read();
+    };
+
+    // Act
+    const installing = service.install('alpha');
+    await entered.promise;
+    let answered = false;
+    const cancelling = service.cancel().then(view => {
+      answered = true;
+      return view;
+    });
+    await tick();
+    const answeredEarly = answered;
+    gate.release();
+    const view = await cancelling;
+    await installing;
+
+    // Assert
+    should(answeredEarly).be.false();
+    should(view.install?.status).equal('cancelled');
+    should(view.install?.code).equal(VOICE_ENGINE_CODES.cancelled);
+    should(network.served).deepEqual([]);
+    should((await service.view()).install?.status).equal('cancelled');
   });
 
   it('should keep what a cancelled install finished: the runtime stays installed', async () => {
@@ -481,6 +631,109 @@ describe('Remove and Use', () => {
     // Assert
     should(busy.code).equal(VOICE_ENGINE_CODES.busy);
     should(unknown.code).equal(VOICE_ENGINE_CODES.unknownModel);
+  });
+
+  it('should hold an install that arrives while a remove is deleting, then run it whole (remove first)', async () => {
+    // Arrange — a stale download exists; the remove stops mid-delete.
+    const { service, files, network, batch } = world();
+    files.files.set(partOf(batch.model.archive), new Uint8Array(500));
+    const entered = deferred();
+    const gate = deferred();
+    const remove = files.remove.bind(files);
+    let parked = false;
+    files.remove = async path => {
+      if (!parked) {
+        parked = true;
+        entered.release();
+        await gate.promise;
+      }
+      await remove(path);
+    };
+
+    // Act
+    const removing = service.remove('alpha');
+    await entered.promise;
+    const installing = service.install('alpha');
+    await tick();
+    const startedEarly = network.served.length;
+    gate.release();
+    await removing;
+    await installing;
+    await service.settled();
+    const view = await service.view();
+
+    // Assert — the install did not start under the remove, and the remove did not delete the install's files.
+    should(startedEarly).equal(0);
+    should(view.install?.status).equal('succeeded');
+    should(entry(view, 'alpha')?.install.state).equal('installed');
+    should(files.files.has(partOf(batch.model.archive))).be.false();
+  });
+
+  it('should refuse a remove that arrives while an install is checking, and let the install finish (install first)', async () => {
+    // Arrange — the install parks in its first settings read, before it has moved a byte.
+    const { service, settings, files, network } = world();
+    const entered = deferred();
+    const gate = deferred();
+    const read = settings.read.bind(settings);
+    let first = true;
+    settings.read = async () => {
+      if (first) {
+        first = false;
+        entered.release();
+        await gate.promise;
+      }
+      return await read();
+    };
+
+    // Act
+    const installing = service.install('alpha');
+    await entered.promise;
+    const removing = failure(service.remove('alpha'));
+    await tick();
+    gate.release();
+    const refused = await removing;
+    await installing;
+    await service.settled();
+    const view = await service.view();
+
+    // Assert
+    should(refused.code).equal(VOICE_ENGINE_CODES.busy);
+    should(view.install?.status).equal('succeeded');
+    should(entry(view, 'alpha')?.install.state).equal('installed');
+    should(network.served.length).be.greaterThan(0);
+    should(files.under(`${ROOT}/models/alpha/`).length).be.greaterThan(0);
+  });
+
+  it('should make a Use wait for a Remove that is deleting the same model, then refuse it as not installed', async () => {
+    // Arrange
+    const installed = world();
+    await installed.service.install('alpha');
+    await installed.service.settled();
+    const entered = deferred();
+    const gate = deferred();
+    const remove = installed.files.remove.bind(installed.files);
+    let parked = false;
+    installed.files.remove = async path => {
+      if (!parked) {
+        parked = true;
+        entered.release();
+        await gate.promise;
+      }
+      await remove(path);
+    };
+
+    // Act
+    const removing = installed.service.remove('alpha');
+    await entered.promise;
+    const using = failure(installed.service.use('alpha'));
+    await tick();
+    gate.release();
+    await removing;
+    const refused = await using;
+
+    // Assert
+    should(refused.code).equal(VOICE_ENGINE_CODES.notInstalled);
+    should(installed.settings.writes).deepEqual([]);
   });
 
   it('should write the chosen model for its own role, and refuse one that is not installed', async () => {

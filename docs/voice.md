@@ -840,7 +840,9 @@ nothing, and a catalog row whose pin has moved reads as not installed.
 
 - **Resumes.** A download that was cancelled or cut off continues from the first missing byte with an HTTP
   `Range` request. A server that answers `200` ignored the range, so the part is emptied and the download
-  starts again — never appended to. A `416` begins again once.
+  starts again — never appended to. A `416` begins again once. A `206` is trusted only when its
+  `Content-Range` starts at the first missing byte, runs to the file's last byte and (when it names one) gives
+  the pinned size as the total; any other range is refused (`voice_download_failed`) and the part is kept.
 - **Hashed twice.** The SHA-256 is taken while the bytes arrive (a partial file is read back through the hasher
   first), and the finished file is read back from the disk once more. A wrong size or hash **deletes the file**
   and reports `voice_hash_mismatch`; resuming bytes that cannot be trusted would only repeat the failure.
@@ -848,15 +850,21 @@ nothing, and a catalog row whose pin has moved reads as not installed.
   through the machine's `bzip2 -dc` — **`bzip2` must be on the daemon's `PATH`**, and its absence is reported as
   `voice_no_decompressor` with the download kept). It only ever creates plain files and directories, itself,
   into a staging directory that is renamed into place when everything checked: an absolute path, a `..`, a
-  backslash or NUL, any link, device or FIFO, more than 1,000 entries, or more content than the catalog says the
-  archive unpacks to is `voice_unsafe_archive`, and the pin that allowed it is dropped.
+  backslash or NUL, any link, device or FIFO, more than 1,000 headers (a pax or long-name record counts as
+  one), or more decompressed bytes than the catalog says the archive unpacks to plus a fixed allowance for headers
+  and padding (directory payloads and extended-header bodies are charged like content) is `voice_unsafe_archive`, and the pin that allowed it is dropped.
 - **Cancel keeps finished parts.** `fy voice cancel` stops the install and keeps the part-downloaded archive and
   an already installed runtime, so the next Install resumes. **Remove deletes** a model's files, its part and any
   staging leftover, and clears it from `voice.yaml` if it was the chosen one. The shared runtime stays.
 - **Disk.** Install refuses when free space is under **twice the archive** — or under the archive plus what it
-  unpacks to, when that is more (Cohere unpacks to 1.7× its download) — saying how much is needed. Free space
-  that cannot be read is not a refusal.
-- **One install at a time.** A second `install` while one runs is `409 voice_install_busy`.
+  unpacks to, when that is more (Cohere unpacks to 1.7× its download) — saying how much is needed. What is
+  already downloaded counts as paid (a cancelled `.part`, or a complete one waiting to be unpacked), so a tight
+  disk can still finish what it started, and staging directories a killed daemon left are cleared before the
+  judgement. Free space that cannot be read is not a refusal.
+- **One change at a time.** A second `install` while one runs is `409 voice_install_busy`. Install, Remove and
+  Use take turns through one lock, so a Remove never deletes files an Install has just started on, and a Remove
+  or Use that meets a running install is refused or waits its turn rather than racing it. Cancel during an
+  install's first checks waits for the install to end (it never begins) before it answers.
 
 ### Commands, routes and the file
 

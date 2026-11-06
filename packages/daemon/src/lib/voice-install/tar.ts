@@ -9,8 +9,10 @@
  *
  *  - an absolute path, a `..` component, an empty component, a NUL or a backslash;
  *  - a hard link, a symbolic link, a device, a FIFO — any entry type that is not a file or a directory;
- *  - more than `maxEntries` entries, or more than `maxBytes` bytes of file content in all (a decompression
- *    bomb is stopped at the cap, not after it has filled the disk).
+ *  - more than `maxEntries` headers (an extended header or a long-name record is a header too), or more than
+ *    `maxBytes` decompressed bytes consumed in all — file content, directory payloads, extended-header bodies,
+ *    block headers and padding alike (a decompression bomb, or a pile of metadata, is stopped at the cap, not
+ *    after it has filled the disk).
  *
  * The reader understands ustar, GNU long names (`L`) and pax extended headers (`x`, `g`), which is what
  * `tar` on Linux and macOS write.
@@ -51,8 +53,9 @@ export interface TarDestination {
 }
 
 interface TarLimits {
-  /** The most file content, in bytes, that may be written. */
+  /** The most decompressed bytes of the stream, headers, bodies and padding included, that may be consumed. */
   readonly maxBytes: number;
+  /** The most tar headers (entries and extended-header records alike) that may be read. */
   readonly maxEntries: number;
 }
 
@@ -133,10 +136,39 @@ function paxPath(data: Uint8Array): string | undefined {
 class Reader {
   #buffer = new Uint8Array(0);
   #done = false;
+  #consumed = 0;
   readonly #iterator: AsyncIterator<Uint8Array>;
 
-  constructor(source: AsyncIterable<Uint8Array>) {
+  constructor(
+    source: AsyncIterable<Uint8Array>,
+    private readonly maxBytes: number,
+  ) {
     this.#iterator = source[Symbol.asyncIterator]();
+  }
+
+  /** Counts `length` bytes of the stream as consumed, and refuses once the cap is crossed. */
+  #charge(length: number): void {
+    this.#consumed += length;
+    if (this.#consumed > this.maxBytes) {
+      throw new UnsafeArchiveError('too-large', `the archive holds more than ${String(this.maxBytes)} bytes`);
+    }
+  }
+
+  /** Refuses now if consuming `length` more bytes would cross the cap, so an entry is not half-written first. */
+  require(length: number): void {
+    if (this.#consumed + length > this.maxBytes) {
+      throw new UnsafeArchiveError('too-large', `the archive holds more than ${String(this.maxBytes)} bytes`);
+    }
+  }
+
+  /** Finalizes the source (so a decompressor behind it is stopped) on every way out; never throws. */
+  async close(): Promise<void> {
+    this.#done = true;
+    try {
+      await this.#iterator.return?.();
+    } catch {
+      // Cleanup only: the outcome (or the refusal) being reported is the one that matters.
+    }
   }
 
   async #fill(): Promise<boolean> {
@@ -156,6 +188,7 @@ class Reader {
 
   /** Exactly `length` bytes, or `undefined` at a clean end of stream before any byte. */
   async exact(length: number): Promise<Uint8Array | undefined> {
+    this.#charge(length);
     while (this.#buffer.length < length) {
       if (!(await this.#fill())) {
         if (this.#buffer.length === 0) return undefined;
@@ -173,6 +206,7 @@ class Reader {
       if (!(await this.#fill())) return undefined;
     }
     const take = Math.min(limit, this.#buffer.length);
+    this.#charge(take);
     const out = this.#buffer.subarray(0, take);
     this.#buffer = this.#buffer.subarray(take);
     return out;
@@ -199,9 +233,23 @@ export async function unpackTar(
   policy: TarPolicy,
   signal?: AbortSignal,
 ): Promise<TarOutcome> {
-  const reader = new Reader(source);
+  const reader = new Reader(source, policy.maxBytes);
+  try {
+    return await unpack(reader, destination, policy, signal);
+  } finally {
+    // Every way out — the end of the archive, a refusal, a cancel — finalizes the source, so a decompressor
+    // behind it is stopped rather than left running.
+    await reader.close();
+  }
+}
+
+async function unpack(
+  reader: Reader,
+  destination: TarDestination,
+  policy: TarPolicy,
+  signal: AbortSignal | undefined,
+): Promise<TarOutcome> {
   const files: { path: string; bytes: number }[] = [];
-  let total = 0;
   let entries = 0;
   let longName: string | undefined;
   let nextPath: string | undefined;
@@ -210,6 +258,15 @@ export async function unpackTar(
     signal?.throwIfAborted();
     const header = await reader.exact(BLOCK);
     if (header === undefined || isZero(header)) break;
+    // Every header counts — an extended-header or long-name record as much as a file — so a pile of metadata
+    // cannot get past the entry cap.
+    entries += 1;
+    if (entries > policy.maxEntries) {
+      throw new UnsafeArchiveError(
+        'too-many-entries',
+        `the archive has more than ${String(policy.maxEntries)} entries`,
+      );
+    }
     const name = text(header, 0, 100);
     const prefix = text(header, 345, 155);
     const size = octal(header, 124, 12);
@@ -226,13 +283,6 @@ export async function unpackTar(
       continue;
     }
 
-    entries += 1;
-    if (entries > policy.maxEntries) {
-      throw new UnsafeArchiveError(
-        'too-many-entries',
-        `the archive has more than ${String(policy.maxEntries)} entries`,
-      );
-    }
     const fullName = longName ?? nextPath ?? (prefix === '' ? name : `${prefix}/${name}`);
     longName = undefined;
     nextPath = undefined;
@@ -248,15 +298,13 @@ export async function unpackTar(
     const wanted = relative !== undefined && (policy.include?.(relative) ?? true);
 
     if (kind === '5') {
+      // A directory has no content, but a hostile one can carry a payload: it is read past, and charged.
       await reader.skip(padded);
       if (wanted) await destination.makeDirectory(relative);
       continue;
     }
 
-    if (total + size > policy.maxBytes) {
-      throw new UnsafeArchiveError('too-large', `the archive holds more than ${String(policy.maxBytes)} bytes`);
-    }
-    total += size;
+    reader.require(padded);
     if (!wanted) {
       await reader.skip(padded);
       continue;
