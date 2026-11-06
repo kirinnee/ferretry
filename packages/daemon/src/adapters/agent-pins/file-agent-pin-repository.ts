@@ -16,6 +16,8 @@ export class FileAgentPinRepository implements AgentPinRepository {
   constructor(
     private readonly paths: FoundationPaths,
     private readonly files: FileSystemPort,
+    /** After publication, reconcile archive membership before the pin operation returns. */
+    private readonly retained?: (sessionId: string) => Promise<void>,
   ) {}
 
   async load(): Promise<readonly AgentPin[]> {
@@ -32,5 +34,6 @@ export class FileAgentPinRepository implements AgentPinRepository {
 
   async save(pins: readonly AgentPin[]): Promise<void> {
     await this.files.writeTextAtomic(agentPinsFile(this.paths), JSON.stringify({ version: 1, pins }));
+    for (const pin of pins) await this.retained?.(pin.sessionId);
   }
 }

@@ -22,6 +22,7 @@ function storage(world: Worlds, beforeLocks: () => void = () => undefined) {
     archived,
     names,
     port: {
+      retainSession: async () => undefined,
       listSessions: () => Object.keys(world).map(key => ({ id: id(key) }) as never),
       readConfig: async (session: SessionId) => {
         const entry = world[session];
@@ -215,8 +216,8 @@ describe('the storage half of the session archive', () => {
 
       should(left).equal(1);
       should(archived).deepEqual([['a-1']]);
-      // One question for the whole group, not one per session.
-      should(asked).deepEqual([['a-1', 'b-1']]);
+      // One question for the whole group, followed by the post-commit check of those that left.
+      should(asked).deepEqual([['a-1', 'b-1'], ['a-1']]);
     });
 
     it('should keep a lead live when its child gained a keep signal', async () => {

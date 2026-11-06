@@ -162,18 +162,18 @@ describe('a session whose lineage is unknown', () => {
   });
 
   it('should keep leads live while an unreadable session ended too recently to have aged out', () => {
-    should(unknownLineageBlocks([session('torn-1', { parentUnknown: true, finishedAt: ago(2) })], facts())).be.true();
+    should(unknownLineageBlocks([session('torn-1', { parentUnknown: true, finishedAt: ago(2) })])).be.true();
   });
 
-  it('should not let an unreadable session that ended long ago hold the whole archive back for good', () => {
+  it('should keep possible leads while an unreadable ended session remains live', () => {
     const torn = session('torn-1', { mode: undefined, parentUnknown: true, finishedAt: ago(100) });
 
-    should(unknownLineageBlocks([torn], facts())).be.false();
-    should(decideArchive([session('lead-1'), torn], facts()).archive).deepEqual(['lead-1']);
+    should(unknownLineageBlocks([torn])).be.true();
+    should(decideArchive([session('lead-1'), torn], facts()).archive).deepEqual([]);
   });
 
   it('should not block when every lineage is known', () => {
-    should(unknownLineageBlocks([session('a'), session('b', { parent: 'a' })], facts())).be.false();
+    should(unknownLineageBlocks([session('a'), session('b', { parent: 'a' })])).be.false();
   });
 });
 

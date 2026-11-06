@@ -1133,6 +1133,7 @@ import {
   paneShowsActiveWork,
   paneTextFor,
   parseArchiveAfter,
+  sessionsOnOpenCards,
   parseBackgroundDelay,
   parseDaemonTimings,
   parseSessionId,
@@ -2296,7 +2297,17 @@ function createBoardWorld(
   const parents = new StorageSessionParents(storage);
   const focus = new StorageSessionFocus(storage);
   // ONE store per daemon: the service and the legacy import share its id counter.
-  const store = new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), diagnostics);
+  const store = new FileBoardStore(
+    join(paths.state, 'board'),
+    stateFiles,
+    new KeyedSerialExecutor(),
+    diagnostics,
+    async card => {
+      const laneSet = await lanes.laneSet(card.projectId).catch(() => null);
+      const sets = new Map(laneSet === null ? [] : [[card.projectId, laneSet]]);
+      for (const id of sessionsOnOpenCards([card], sets)) await storage.retainSession(parseSessionId(id));
+    },
+  );
   const proposer = new InferredLaneProposer(lanes, new GitProjectFacts());
   // A ferret's first card in a repository nobody registered registers it (`ProjectAdoption`): ONE instance, so
   // its per-repository section is shared by `fy task create` and the cards a start makes.
@@ -10906,6 +10917,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         agendaFilesMigrated,
         undefined,
         agendaVersions,
+        undefined,
+        async id => await storage.retainSession(parseSessionId(id)),
       );
       // THE MACHINE AGENDA's ledger: its own directory, apart from every session's, written only by the daemon.
       const machineBoards = new FileAgendaLedgerRepository(
@@ -13178,7 +13191,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       sharedDraftsHolder.service = sharedDraftService;
       // The owner's pins live with the daemon of the machine that owns the ferret; the list carries them to every device.
       const agentPins = new AgentPinService(
-        new FileAgentPinRepository(paths, stateFiles),
+        new FileAgentPinRepository(paths, stateFiles, async id => await storage.retainSession(parseSessionId(id))),
         clock,
         new KeyedSerialExecutor(),
       );

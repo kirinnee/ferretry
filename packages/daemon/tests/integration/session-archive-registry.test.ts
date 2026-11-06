@@ -51,6 +51,10 @@ async function archivedStorage(archivedIds: readonly string[], live: readonly st
     { runAcross: async (_ids: unknown, work: () => Promise<unknown>) => await work() } as never,
     {} as never,
   );
+  // This contract isolates registry ordering; the real journal reindex is exercised by keep-publications.test.ts.
+  (storage as unknown as { syncSessionUnlocked(id: SessionId): Promise<void> }).syncSessionUnlocked = async id => {
+    rows.set(id, indexed(id));
+  };
   await storage.loadArchive();
   const registered = (): string[] => Object.keys(JSON.parse(document).sessions).sort();
   const revive = async (id: string): Promise<void> =>

@@ -40,6 +40,8 @@ import {
   tryParseSessionId,
   type YieldingSerialExecutor,
 } from '../../lib/index.ts';
+import { KeyedSerialExecutor } from '../system/keyed-serial-executor.ts';
+import { jsonObject } from '../../lib/json.ts';
 
 export class InvalidStateDocumentError extends Error {
   constructor(
@@ -330,6 +332,12 @@ export class DaemonStorage {
   private archived: ReadonlyMap<SessionId, ArchivedSession> = new Map();
   /** Registry writes, one after another: an archive pass and a revive never interleave their documents. */
   private registryWrites: Promise<void> = Promise.resolve();
+  /** Creation and archive share root lanes, separate from document lanes so nested writes cannot wait on themselves. */
+  private readonly lineages = new KeyedSerialExecutor();
+  /** A keep published during verification or registry IO cancels that finite archive commit. */
+  private retentionChanges = 0;
+  private lineageChanges = 0;
+  private configPending = 0;
 
   constructor(
     readonly paths: FoundationPaths,
@@ -1011,18 +1019,32 @@ export class DaemonStorage {
   async writeConfig(id: SessionId, value: unknown): Promise<void> {
     this.assertOpen();
     const document = serializeJsonDocument(value);
-    await this.serial.run(id, async () => {
-      await this.reviveIfArchived(id);
-      await this.ensureSessionDirectory(id);
-      // The write is inside the try: `writeTextAtomic` renames first and may throw afterwards (the chmod or
-      // the directory fsync), so a failed write can still have replaced the stored config.
-      try {
-        await this.writeDocument(createSessionPaths(this.paths, id).config, document);
-        await this.syncSessionUnlocked(id);
-      } finally {
-        this.configChanges += 1;
-      }
-    });
+    await this.configWrite(
+      async () =>
+        await this.serial.run(id, async () => {
+          await this.reviveIfArchived(id);
+          await this.ensureSessionDirectory(id);
+          // The write is inside the try: `writeTextAtomic` renames first and may throw afterwards (the chmod or
+          // the directory fsync), so a failed write can still have replaced the stored config.
+          try {
+            await this.writeDocument(createSessionPaths(this.paths, id).config, document);
+            await this.syncSessionUnlocked(id);
+          } finally {
+            this.configChanges += 1;
+          }
+        }),
+    );
+  }
+
+  /** A config that is changing cannot prove lineage to an archive, even before its publication stamp moves. */
+  private async configWrite<T>(work: () => Promise<T>): Promise<T> {
+    this.lineageChanges += 1;
+    this.configPending += 1;
+    try {
+      return await work();
+    } finally {
+      this.configPending -= 1;
+    }
   }
 
   /**
@@ -1268,28 +1290,30 @@ export class DaemonStorage {
     create?: () => unknown,
   ): Promise<JsonValue> {
     this.assertOpen();
-    return await this.serial.run(id, async () => {
-      await this.reviveIfArchived(id);
-      const paths = createSessionPaths(this.paths, id);
-      const current = await this.readDocument(id, kind);
-      const compute = current === undefined ? create : () => transform(current);
-      if (compute === undefined) throw new InvalidStateDocumentError(paths[kind], 'file is missing');
-      // The journal contract is settled BEFORE the transform runs and before any byte is written,
-      // so a session that has lost its journal keeps its documents exactly as they were. The write
-      // paths get the same gate from their own ensureSessionDirectory call.
-      await this.ensureSessionDirectory(id);
-      const next = canonicalJsonValue(await compute());
-      // The write is inside the try for the same reason as `writeConfig`: a write that threw after its rename
-      // has still changed the stored config.
-      try {
-        await this.writeDocument(paths[kind], serializeJsonDocument(next));
-        await this.syncSessionUnlocked(id);
-      } finally {
-        if (kind === 'config') this.configChanges += 1;
-      }
-      if (kind === 'state') this.publishState(id, next);
-      return next;
-    });
+    const write = async (): Promise<JsonValue> =>
+      await this.serial.run(id, async () => {
+        await this.reviveIfArchived(id);
+        const paths = createSessionPaths(this.paths, id);
+        const current = await this.readDocument(id, kind);
+        const compute = current === undefined ? create : () => transform(current);
+        if (compute === undefined) throw new InvalidStateDocumentError(paths[kind], 'file is missing');
+        // The journal contract is settled BEFORE the transform runs and before any byte is written,
+        // so a session that has lost its journal keeps its documents exactly as they were. The write
+        // paths get the same gate from their own ensureSessionDirectory call.
+        await this.ensureSessionDirectory(id);
+        const next = canonicalJsonValue(await compute());
+        // The write is inside the try for the same reason as `writeConfig`: a write that threw after its rename
+        // has still changed the stored config.
+        try {
+          await this.writeDocument(paths[kind], serializeJsonDocument(next));
+          await this.syncSessionUnlocked(id);
+        } finally {
+          if (kind === 'config') this.configChanges += 1;
+        }
+        if (kind === 'state') this.publishState(id, next);
+        return next;
+      });
+    return kind === 'config' ? await this.configWrite(write) : await write();
   }
 
   async updateConfig(id: SessionId, transform: (current: FrozenJsonValue) => unknown): Promise<JsonValue> {
@@ -1734,12 +1758,21 @@ export class DaemonStorage {
    */
   private async changeRegistry(
     change: (current: ReadonlyMap<SessionId, ArchivedSession>) => ReadonlyMap<SessionId, ArchivedSession> | undefined,
+    published?: () => Promise<void> | void,
+    valid: () => boolean = () => true,
   ): Promise<void> {
     const turn = this.registryWrites.then(async () => {
+      if (!valid()) return;
       const next = change(this.archived);
       if (next === undefined) return;
       await this.fileSystem.writeTextAtomic(this.paths.archivedSessions, serializeArchiveRegistry(next));
+      if (!valid()) {
+        // A keep landed while the rename/fsync was pending. Restore the durable registry before publishing anything.
+        await this.fileSystem.writeTextAtomic(this.paths.archivedSessions, serializeArchiveRegistry(this.archived));
+        return;
+      }
       this.archived = next;
+      await published?.();
     });
     this.registryWrites = turn.catch(() => undefined);
     await turn;
@@ -1758,36 +1791,97 @@ export class DaemonStorage {
     verify: (id: SessionId) => Promise<ArchiveVerdict | undefined>,
   ): Promise<readonly SessionId[]> {
     this.assertOpen();
-    return await this.holdSessions(ids, async () => {
-      const entries = new Map<SessionId, ArchivedSession>();
-      const archivedAt = this.clock.now();
-      for (const id of ids) {
-        const indexed = this.index.findSession(id);
-        if (indexed === undefined || this.archived.has(id)) continue;
-        const verdict = await verify(id);
-        if (verdict === undefined) continue;
-        entries.set(id, {
-          archivedAt,
-          ...(verdict.name === undefined ? {} : { name: verdict.name }),
-          ...(verdict.configTimes === undefined ? {} : { configTimes: verdict.configTimes }),
-          indexed,
-        });
-      }
-      if (entries.size === 0) return [];
-      // The delta joins the registry as it is when this turn comes: another session's revival may have landed meanwhile.
-      await this.changeRegistry(current => new Map([...current, ...entries]));
-      const left = [...entries.keys()];
-      for (const id of left) {
-        this.index.removeSession(id);
-        const paths = createSessionPaths(this.paths, id);
-        for (const file of [paths.marker, paths.config, paths.state]) {
-          this.forgetDocument(file);
-          // A watch only vouches for a cached document; the archived session's documents are no longer cached.
-          this.dropWatch(file);
-        }
-      }
-      this.recountDocumentBound();
-      return left;
+    const roots = await Promise.all(ids.map(async id => (await this.ancestors(id)).at(-1) ?? id));
+    return await this.lineages.runAcross(
+      roots,
+      async () =>
+        await this.holdSessions(ids, async () => {
+          const retention = this.retentionChanges;
+          const lineage = this.lineageChanges;
+          const entries = new Map<SessionId, ArchivedSession>();
+          const archivedAt = this.clock.now();
+          for (const id of ids) {
+            const indexed = this.index.findSession(id);
+            if (indexed === undefined || this.archived.has(id)) continue;
+            const verdict = await verify(id);
+            if (verdict === undefined) continue;
+            entries.set(id, {
+              archivedAt,
+              ...(verdict.name === undefined ? {} : { name: verdict.name }),
+              ...(verdict.configTimes === undefined ? {} : { configTimes: verdict.configTimes }),
+              indexed,
+            });
+          }
+          if (entries.size === 0) return [];
+          // The delta joins the registry as it is when this turn comes: another session's revival may have landed meanwhile.
+          const left: SessionId[] = [];
+          await this.changeRegistry(
+            current => new Map([...current, ...entries]),
+            () => {
+              left.push(...entries.keys());
+              for (const id of left) {
+                this.index.removeSession(id);
+                const paths = createSessionPaths(this.paths, id);
+                for (const file of [paths.marker, paths.config, paths.state]) {
+                  this.forgetDocument(file);
+                  // A watch only vouches for a cached document; the archived session's documents are no longer cached.
+                  this.dropWatch(file);
+                }
+              }
+              this.recountDocumentBound();
+            },
+            () => this.retentionChanges === retention && this.lineageChanges === lineage && this.configPending === 0,
+          );
+          return left;
+        }),
+    );
+  }
+
+  /** The lineage as stored now, including the named session; loops settle on a stable root key. */
+  private async ancestors(id: SessionId): Promise<readonly SessionId[]> {
+    const seen = new Set<SessionId>();
+    let current: SessionId | undefined = id;
+    while (current !== undefined && !seen.has(current)) {
+      seen.add(current);
+      const config: ReturnType<typeof jsonObject> = jsonObject(
+        await this.readConfig(current, 'proved').catch(() => undefined),
+      );
+      current = typeof config?.parent === 'string' ? tryParseSessionId(config.parent) : undefined;
+    }
+    const chain = [...seen];
+    if (current !== undefined) chain.push(chain.slice(chain.indexOf(current)).sort()[0] ?? current);
+    return chain;
+  }
+
+  /**
+   * A published pin, card or agenda item restores live membership, including its ancestors. Registry ordering makes
+   * this safe during an archive commit without taking document lanes (a board writer may already hold those lanes).
+   * Rebuild the journal index too: removing just the registry entry would leave the session absent from the live list.
+   */
+  async retainSession(id: SessionId): Promise<void> {
+    this.assertOpen();
+    this.retentionChanges += 1;
+    const lineage = await this.ancestors(id);
+    const restored: SessionId[] = [];
+    await this.changeRegistry(
+      current => {
+        if (!lineage.some(session => current.has(session))) return undefined;
+        const next = new Map(current);
+        for (const session of lineage) if (next.delete(session)) restored.push(session);
+        return next;
+      },
+      async () => {
+        for (const session of restored) await this.syncSessionUnlocked(session);
+      },
+    );
+  }
+
+  /** Child publication and the archive's final commit hold the SAME root lane. A start after a commit revives its lead. */
+  async publishChild<T>(parent: SessionId, work: () => Promise<T>): Promise<T> {
+    const lineage = await this.ancestors(parent);
+    return await this.lineages.run(lineage.at(-1) ?? parent, async () => {
+      await this.retainSession(parent);
+      return await work();
     });
   }
 
@@ -1797,12 +1891,7 @@ export class DaemonStorage {
    */
   private async reviveIfArchived(id: SessionId): Promise<void> {
     if (!this.archived.has(id)) return;
-    await this.changeRegistry(current => {
-      if (!current.has(id)) return undefined;
-      const next = new Map(current);
-      next.delete(id);
-      return next;
-    });
+    await this.retainSession(id);
   }
 
   /** An archived session's events, read straight from its journal: its index rows were let go when it left. */

@@ -17,8 +17,8 @@
  *    item. The adapter that knows those facts names the sessions; this rule never learns what they were.
  * 5. Every session that names it as `parent` is itself archived (or archivable in this very pass). A lead
  *    outlives its sub-ferrets in the live set, so a lead's children are never orphaned from it.
- * 6. No live session's lineage is UNKNOWN (its config could not be read, so whose child it is cannot be said) unless
- *    that session ended long ago itself. Until the lineage can be proved, any session might be its lead, so the pass
+ * 6. No live session's lineage is UNKNOWN (its config could not be read, so whose child it is cannot be said).
+ *    Until the lineage can be proved, any session might be its lead, so the pass
  *    archives nothing: unknown is never read as "no parent".
  */
 import { SESSION_ENDED_STATUSES } from '@ferretry/protocol';
@@ -77,16 +77,9 @@ export function selfKeepReason(session: ArchiveSession, facts: ArchiveFacts): Ar
   return undefined;
 }
 
-/**
- * Whether a live session whose lineage is unknown could still be a child of a session the pass would archive: it has
- * not itself ended and aged out, so it is, or may be, work that a lead is still waiting on.
- */
-export function unknownLineageBlocks(sessions: readonly ArchiveSession[], facts: ArchiveFacts): boolean {
-  return sessions.some(
-    session =>
-      session.parentUnknown === true &&
-      (!isEnded(session.status) || !(facts.nowMs - Date.parse(session.finishedAt ?? '') >= facts.afterMs)),
-  );
+/** Unknown lineage cannot prove that any possible lead is safe to archive while this session stays live. */
+export function unknownLineageBlocks(sessions: readonly ArchiveSession[]): boolean {
+  return sessions.some(session => session.parentUnknown === true);
 }
 
 /**
@@ -156,7 +149,7 @@ export function decideArchive(sessions: readonly ArchiveSession[], facts: Archiv
   };
   for (const id of ordered) emit(id);
   // Whose child an unreadable session is cannot be said, so nothing can be proved safe to archive until it can.
-  if (unknownLineageBlocks(sessions, facts)) return { archive: [], deferred: out.length };
+  if (unknownLineageBlocks(sessions)) return { archive: [], deferred: out.length };
   return { archive: out.slice(0, Math.max(0, facts.limit)), deferred: Math.max(0, out.length - facts.limit) };
 }
 

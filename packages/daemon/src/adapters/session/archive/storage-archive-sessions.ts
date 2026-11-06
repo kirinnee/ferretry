@@ -10,7 +10,10 @@ import { jsonObject } from '../../../lib/json.ts';
 import { parseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import type { ArchiveVerdict, DaemonStorage } from '../../storage/session-storage.ts';
 
-type ArchiveStorage = Pick<DaemonStorage, 'listSessions' | 'readConfig' | 'readState' | 'archiveSessions'>;
+type ArchiveStorage = Pick<
+  DaemonStorage,
+  'listSessions' | 'readConfig' | 'readState' | 'archiveSessions' | 'retainSession'
+>;
 
 /** Sessions read together before the loop is handed back. */
 const READ_BATCH = 25;
@@ -90,21 +93,21 @@ export class StorageArchiveSessions implements Pick<SessionArchivePorts, 'sessio
   /**
    * Archives `ids`, every one of them checked again at the commit boundary and against the WHOLE group.
    *
-   * `roster` is the snapshot the decision was made from. With the sessions' lanes held, the first check rebuilds the
-   * roster as it is now (the snapshot plus every session that appeared since, read afresh) and asks the keep signals
+   * With the lineage gates and sessions' lanes held, the first check rebuilds the
+   * roster as it is now (every current id read afresh, including existing ids) and asks the keep signals
    * again; each session is then re-read and must still qualify on its own, and its lead may leave only when every
    * session that names it as lead has left before it (`ids` come children first) or already left earlier. A child that
    * revived, or was started, between the decision and the locks therefore keeps its lead live, and so does any session
    * whose lineage is unknown.
    */
-  async archive(ids: readonly string[], roster: readonly ArchiveSession[]): Promise<number> {
+  async archive(ids: readonly string[], _roster: readonly ArchiveSession[]): Promise<number> {
     const nowMs = this.clock.nowMs();
     const facts: ArchiveFacts = { nowMs, afterMs: this.afterMs, kept: new Map<string, string>(), limit: ids.length };
     const leaving = new Set<string>();
     let boundary:
       | Promise<{ live: readonly ArchiveSession[]; kept: ReadonlyMap<string, string>; blocked: boolean }>
       | undefined;
-    const settle = (): NonNullable<typeof boundary> => (boundary ??= this.boundary(ids, roster, facts));
+    const settle = (): NonNullable<typeof boundary> => (boundary ??= this.boundary(ids));
     const left = await this.storage.archiveSessions(
       ids.map(parseSessionId),
       // Re-read as it is NOW, with the session's lane held: a session that was revived since the decision stays.
@@ -118,22 +121,33 @@ export class StorageArchiveSessions implements Pick<SessionArchivePorts, 'sessio
         return verdict;
       },
     );
-    return left.length;
+    // Reconcile a signal published during the registry IO, including an outside file edit without a publication hook.
+    // No session lane is held here: agenda and card writers can finish before these reads and revivals.
+    const late = await this.keepsNow(left);
+    const restored = new Set(late.keys());
+    const live = (await boundary)?.live ?? [];
+    const parents = new Map(live.map(session => [session.id, session.parent]));
+    for (const id of restored) {
+      const parent = parents.get(id);
+      if (parent !== undefined) restored.add(parent);
+    }
+    for (const id of left) if (restored.has(id)) await this.storage.retainSession(id);
+    return left.filter(id => !restored.has(id)).length;
   }
 
   /** The roster, the keep signals and the lineage verdict as they are at the commit boundary. */
   private async boundary(
     ids: readonly string[],
-    roster: readonly ArchiveSession[],
-    facts: ArchiveFacts,
   ): Promise<{ live: readonly ArchiveSession[]; kept: ReadonlyMap<string, string>; blocked: boolean }> {
-    const listed = new Set<string>(this.storage.listSessions().map(({ id }) => id));
-    const known = new Set(roster.map(session => session.id));
-    const appeared = await Promise.all(
-      [...listed].filter(id => !known.has(id)).map(async id => await this.read(parseSessionId(id), 'proved')),
-    );
-    const live = [...roster.filter(session => listed.has(session.id)), ...appeared];
     const kept = await this.keepsNow(ids);
-    return { live, kept, blocked: unknownLineageBlocks(live, facts) };
+    const listed = this.storage.listSessions();
+    const live: ArchiveSession[] = [];
+    for (let at = 0; at < listed.length; at += READ_BATCH) {
+      if (at > 0) await this.yieldToLoop();
+      live.push(
+        ...(await Promise.all(listed.slice(at, at + READ_BATCH).map(async ({ id }) => await this.read(id, 'proved')))),
+      );
+    }
+    return { live, kept, blocked: unknownLineageBlocks(live) };
   }
 }

@@ -89,6 +89,8 @@ export class FileBoardStore implements BoardStore {
     private readonly files: FileSystemPort,
     private readonly serial: SerialExecutor,
     private readonly diagnostics: BoardDiagnostics,
+    /** Publication hook: a newly attached owner/assignee must be live even if it was archived during this write. */
+    private readonly retained?: (card: BoardTask) => Promise<void>,
   ) {
     this.tasks = join(directory, 'tasks');
     this.counters = join(directory, 'counters.json');
@@ -134,6 +136,7 @@ export class FileBoardStore implements BoardStore {
       const written = `${JSON.stringify(task, null, 2)}\n`;
       await this.files.writeTextAtomic(this.fileOf(id), written);
       loaded.cards.set(id, task);
+      await this.retained?.(task);
       await this.remember(id, written);
       return decision.result;
     });
@@ -222,6 +225,7 @@ export class FileBoardStore implements BoardStore {
     if (card !== undefined) {
       loaded.cards.set(id, card);
       loaded.quarantined.delete(id);
+      await this.retained?.(card);
       return true;
     }
     if (problem === undefined) return false;
