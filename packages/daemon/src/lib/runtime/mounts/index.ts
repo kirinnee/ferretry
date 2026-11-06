@@ -74,8 +74,6 @@ import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LegacyTaskSubsystem, legacyTaskRoutes } from './legacy-tasks.ts';
 import { type LocalSkillInstallSubsystem, localSkillInstallRoutes } from './local-skill-installs.ts';
-import { type McpInventorySubsystem, mcpInventoryRoutes } from './mcp-inventory.ts';
-import { type McpOAuthSubsystem, mcpOAuthRoutes } from './mcp-oauth.ts';
 import type { ModelsSubsystem } from './models.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
 import { type PackSubsystem, packRoutes } from './pack.ts';
@@ -101,7 +99,6 @@ import { type SessionMediaRoot, sessionFilesystemRoutes } from './session-filesy
 import { type SessionForkSubsystem, sessionForkRoutes } from './session-fork.ts';
 import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-handover.ts';
 import { type SessionHypermediaSubsystem, sessionHypermediaRoutes } from './session-hypermedia.ts';
-import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
 import { type SessionPermissionSubsystem, sessionPermissionRoutes } from './session-permission.ts';
 import { type SessionProcessSubsystem, sessionProcessRoutes } from './session-processes.ts';
@@ -215,12 +212,6 @@ export interface MountedSubsystems {
    *  is `configure`, which a caller off this host passes only behind the passkey step-up. The routes come from the
    *  fleet-login module; this field is read only by the shutdown that ends every child a sign-in started. */
   readonly harnessLogin: HarnessLoginSubsystem;
-  /** Signing in to a remote MCP server from a browser, with the daemon as the OAuth client: tokens go
-   *  straight into the secret store and are used by launch variable name (docs/mcp-oauth.md). Every act
-   *  is `fleet.configure`. */
-  readonly mcpOAuth: McpOAuthSubsystem;
-  /** Every MCP server a ferret sees, from every scope, and checking one (docs/mcp-scopes.md). */
-  readonly mcpInventory: McpInventorySubsystem;
   /** The account model's credentials: one login stored once, its status and usage, Check now, and
    *  sign-in targeting a credential id (docs/design/account-model.md §7). */
   readonly fleetCredentials: FleetCredentialsSubsystem;
@@ -329,9 +320,6 @@ export interface MountedSubsystems {
   readonly sessionHypermedia: SessionHypermediaSubsystem;
   /** Pack mode: its settings view, recommendations, sub-ferret starts, results and the per-ferret switch (docs/pack-mode.md). */
   readonly pack: PackSubsystem;
-  /** Adding an MCP server for one ferret: to its project's `.mcp.json` (`filesystem`), or to its
-   *  login's profile (`fleet`), each previewed before it is written. */
-  readonly sessionMcp: SessionMcpSubsystem;
   /** Installing a skill or MCP setup from a signed catalog file: verified here, reviewed, then written
    *  only through the existing project and fleet write paths (docs/catalogs.md § The installer). */
   readonly catalogInstalls: CatalogInstallSubsystem;
@@ -581,10 +569,6 @@ export function legacyModule(
               ...fleetCredentialRoutes(subsystems.fleetCredentials),
               ...fleetCatalogRoutes(subsystems.fleetCatalog),
               ...fleetSetupRoutes(subsystems.fleetSetup),
-              ...mcpOAuthRoutes(subsystems.mcpOAuth),
-              // `/v1/mcp` and `/v1/mcp/check` are fixed literals no other route uses; the per-session list ends in
-              // `mcp/servers`, a literal pair the session MCP routes below do not use, so none can shadow another.
-              ...mcpInventoryRoutes(subsystems.mcpInventory),
               // The configuration files, beside the machine-wide settings they hold. Every path is under
               // `/v1/config` or is the one literal `/v1/agent/config`, which no other subsystem uses, so this
               // table can neither shadow nor be shadowed by anything around it.
@@ -667,9 +651,6 @@ export function legacyModule(
               // `/v1/pack…` is a prefix no other route uses; the two session paths end in literals (`result`,
               // `pack`) no other one-segment session route uses, so none can shadow or be shadowed.
               ...packRoutes(subsystems.pack, subsystems.stateHomes),
-              // Every path ends in literals under `mcp`, which no other route uses, and the subsystem registers its
-              // deeper `preview` paths before the shallower ones itself, so none can shadow or be shadowed.
-              ...sessionMcpRoutes(subsystems.sessionMcp),
               ...catalogInstallRoutes(subsystems.catalogInstalls),
               // Every path is under `/v1/skill-installs/local`, which no other route uses.
               ...localSkillInstallRoutes(subsystems.localSkillInstalls),

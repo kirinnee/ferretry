@@ -38,6 +38,7 @@ import {
 } from '../../../src/lib/index.ts';
 import { mcpOAuthRoutes } from '../../../src/lib/runtime/mounts/mcp-oauth.ts';
 import { jsonBody, request } from '../../unit/api/support.ts';
+import { composedAuditRules } from '../../unit/runtime/mounts/composed-audit-rules.ts';
 import { FakeProvider, type FakeProviderOptions } from '../../unit/mcp-oauth/fake-provider.ts';
 import { CREDENTIALS, GRANTED, human } from '../../unit/runtime/mounts/support.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
@@ -125,6 +126,7 @@ async function harness(
     },
   });
   const audit: AuditEntry[] = [];
+  // The composed modules' rules, passed explicitly: the MCP rules are the mcp module's, not the legacy constants.
   const routes = auditedRoutes(
     {
       log: { record: async entry => void audit.push(entry) },
@@ -132,6 +134,7 @@ async function harness(
       deviceName: async () => undefined,
     },
     mcpOAuthRoutes(service),
+    composedAuditRules().routes,
   );
 
   // Everything the process says while this runs, so "never logged" is checked rather than assumed.

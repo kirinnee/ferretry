@@ -199,36 +199,6 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'proposalId',
     detail: { action: 'apply' },
   },
-  // MCP sign-in (docs/mcp-oauth.md): the component NAME and the flow id, never an address or a token.
-  {
-    method: 'POST',
-    path: '/v1/fleet/mcp-auth/:component',
-    event: 'fleet.configured',
-    subject: 'component',
-    detail: { action: 'mcp-sign-in' },
-  },
-  {
-    method: 'POST',
-    path: '/v1/fleet/mcp-auth/flows/:flowId',
-    event: 'fleet.configured',
-    subject: 'flowId',
-    responseNames: 'component',
-    detail: { action: 'mcp-sign-in-finish' },
-  },
-  {
-    method: 'DELETE',
-    path: '/v1/fleet/mcp-auth/flows/:flowId',
-    event: 'fleet.configured',
-    subject: 'flowId',
-    detail: { action: 'mcp-sign-in-cancel' },
-  },
-  {
-    method: 'DELETE',
-    path: '/v1/fleet/mcp-auth/:component',
-    event: 'fleet.configured',
-    subject: 'component',
-    detail: { action: 'mcp-sign-out' },
-  },
   {
     method: 'POST',
     path: '/v1/fleet/machine/tools/install',
@@ -242,26 +212,6 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     path: '/v1/imports/conversations/adopt',
     event: 'fleet.configured',
     detail: { action: 'adopt-conversations' },
-  },
-  // Adding an MCP server for one ferret (`mounts/session-mcp.ts`): the session and the server's NAME, never
-  // its command, address or environment. Both change what agents launch with, the project file for
-  // everyone on the repository and the login for every ferret on it, so both are recorded as fleet
-  // configuration, told apart by `scope`.
-  {
-    method: 'POST',
-    path: '/v1/sessions/:sessionId/mcp/project',
-    event: 'fleet.configured',
-    subject: 'sessionId',
-    responseNames: 'name',
-    detail: { action: 'mcp-add', scope: 'project' },
-  },
-  {
-    method: 'POST',
-    path: '/v1/sessions/:sessionId/mcp/login',
-    event: 'fleet.configured',
-    subject: 'sessionId',
-    responseNames: 'name',
-    detail: { action: 'mcp-add', scope: 'login' },
   },
   // Installing, or removing, an item from a catalog someone else published (`mounts/catalog-installs.ts`): the
   // item's NAME, never a file, command or secret. `code` says why a refusal was one — a signature that did

@@ -69,7 +69,6 @@ import {
   MACHINE_AGENDA_ID,
   MAX_WORK_RELATED_TEXT_LENGTH,
   type MigrationConversation,
-  mcpOAuthSecretNames,
   PACK_CLEAN_UP_LABEL,
   type PackConfig,
   type PackRefusal,
@@ -278,7 +277,6 @@ import {
   LOGIN_SECRETS_DOCUMENT,
   LoadSafeWorker,
   ManifestAccountInventory,
-  MCP_OAUTH_SECRETS_DOCUMENT,
   MemberSweepTimer,
   NodeBrowserLoginRuntime,
   NodeCatalog,
@@ -337,17 +335,6 @@ import {
   XvfbDisplay,
 } from '../src/adapters/index.ts';
 import { LEARNING_MINER_LABEL } from '../src/adapters/learning/index.ts';
-import {
-  FileClaudeLocalScope,
-  FileMcpHarnessDocuments,
-  TransportMcpProbe,
-} from '../src/adapters/mcp-inventory/index.ts';
-import {
-  AccountModelMcpServers,
-  FetchMcpOAuthHttp,
-  FileMcpOAuthStateStore,
-  webCryptoMcpOAuth,
-} from '../src/adapters/mcp-oauth/index.ts';
 import { FileConversationFiles } from '../src/adapters/migrate/file-conversation-files.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { AutoTitlingSendChannel, FileNameClaimStore, FileSystemCallsignCounters } from '../src/adapters/names/index.ts';
@@ -773,7 +760,6 @@ import {
   claimStartName,
   classifyPaneProcesses,
   codexModelProvider,
-  combinedMcpOAuthServers,
   combinedReferences,
   combinedValues,
   computerConversationRoots,
@@ -902,7 +888,6 @@ import {
   JevTriageGuard,
   type JsonValue,
   jsonObject,
-  KnownAndFerretFolders,
   LaneProposalAcceptance,
   LaneSetService,
   LegacySendReproof,
@@ -929,11 +914,6 @@ import {
   locateHarnessCommand,
   lookBeforeReading,
   MachineAgenda,
-  McpCheckService,
-  type McpInventoryAccount,
-  type McpInventoryFolder,
-  McpInventoryService,
-  McpOAuthService,
   type McpSourceServer,
   MemberDispatcher,
   MemberGateway,
@@ -946,8 +926,6 @@ import {
   type MillisecondClockPort,
   type MountedSubsystems,
   mayTrustDirectLoopback,
-  mcpCheckBaseEnvironment,
-  mcpInventoryFolders,
   messageWithAttachments,
   migrateAgendaFiles,
   migrateToAgendaHomes,
@@ -988,8 +966,6 @@ import {
   PlanSignInGrants,
   type ProcRow,
   ProjectAdoption,
-  ProjectMcpLaunch,
-  ProjectMcpOAuthServers,
   type ProjectRegistrar,
   ProvedPaneCapture,
   ProviderPresetService,
@@ -1333,6 +1309,7 @@ import { cgroupsModule, createCgroupLaunchLimits } from './modules/cgroups.ts';
 import { fleetLoginModule } from './modules/fleet-login.ts';
 import { inputRequestsModule } from './modules/input-requests.ts';
 import { learningModule } from './modules/learning.ts';
+import { createMcpFoundations, mcpModule } from './modules/mcp.ts';
 import { modelsModule } from './modules/models.ts';
 import { rendersModule } from './modules/renders.ts';
 import { type ModuleHandles, seamsOf } from './modules/seams.ts';
@@ -1347,7 +1324,6 @@ import {
   type SessionCredentialSubsystem,
 } from '../src/lib/runtime/mounts/session-credential.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
-import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
 import {
   ConversationLeases,
   LeaseClaimingLaunchWrapper,
@@ -7610,6 +7586,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     homesDirectory: join(paths.fleet, 'homes'),
     sleep: milliseconds => Bun.sleep(milliseconds),
   });
+  // Signing in to a remote MCP server from a browser (docs/mcp-oauth.md) and which project a folder is in for MCP
+  // (docs/mcp-scopes.md): made here, on the line they always were, because the launch environment below is made from them.
+  const mcpFoundations = createMcpFoundations({
+    paths,
+    stateFiles,
+    configFiles,
+    configLocations,
+    accounts,
+    millisecondClock,
+    secretDirectory: secrets.directory,
+    secretVault,
+    secretCipher,
+    clock,
+  });
   /**
    * What an account's own profile supplies at launch, when the profile authenticates it instead of a
    * login. The THIRD thing in this daemon holding a vault, and the reasoning for that — plus why it
@@ -7617,75 +7607,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * `lib/fleet/launch-environment.ts`. Both launch paths get the same one, because a revived pane
    * that came back without its credential is a working agent destroyed by its own recovery.
    */
-  /**
-   * Signing in to a remote MCP server from a browser (docs/mcp-oauth.md). The daemon is the OAuth client:
-   * tokens go straight into the secret store through its WRITE half, and the vault is held only to spend
-   * a refresh token at the provider that issued it. The launch environment asks it to refresh a token a
-   * launch is about to use — that is the only refresh there is; no timer.
-   */
-  /**
-   * Which project a folder is in, for MCP — the ONE source the inventory, the sign-in (a project's
-   * `.mcp.json` servers sign in too, docs/mcp-scopes.md) and a launch all read. The known folders come
-   * from the project catalogue and the worktree service, the ferrets' folders from the session
-   * directory; all three mount with the subsystems below, and until they do there are none.
-   */
-  const mcpFolderSources: {
-    known: () => Promise<readonly McpInventoryFolder[]>;
-    ferrets: () => Promise<readonly string[]>;
-  } = { known: async () => [], ferrets: async () => [] };
-  const mcpFolders = new KnownAndFerretFolders(
-    async () => await mcpFolderSources.known(),
-    async () => await mcpFolderSources.ferrets(),
-  );
-  const mcpDocuments = new FileMcpHarnessDocuments();
-  /** The published runtimes, as the MCP inventory names them: by runtime name, harness and config directory. */
-  const mcpAccounts = async (): Promise<readonly McpInventoryAccount[]> =>
-    (await accounts.accounts()).map(account => ({
-      runtime: wrapperNameOf(account.wrapper),
-      harness: account.kind,
-      home: account.home,
-      wrapper: account.wrapper,
-    }));
-  const mcpOAuth = new McpOAuthService({
-    servers: combinedMcpOAuthServers(
-      new AccountModelMcpServers(async () => await readDeclaredAccountModel(configFiles, configLocations)),
-      new ProjectMcpOAuthServers(mcpFolders, mcpDocuments),
-    ),
-    http: new FetchMcpOAuthHttp(),
-    crypto: webCryptoMcpOAuth,
-    clock: millisecondClock,
-    state: new FileMcpOAuthStateStore(paths, stateFiles),
-    secrets: secrets.directory,
-    values: secretVault,
-    // Refresh tokens and client secrets: sealed under the same key in their own document, held by
-    // nothing but this service — no route lists them, `use` cannot spend them, `${secret:…}` cannot
-    // resolve them.
-    internal: (() => {
-      const documents = new FileSecretDocumentStore(paths, stateFiles, MCP_OAUTH_SECRETS_DOCUMENT);
-      const directory = new SecretDirectory(documents, secretCipher, clock);
-      const vault = new SecretVault(documents, secretCipher);
-      return {
-        list: async () => await directory.list(),
-        put: async (name: string, value: string) => await directory.put(name, value),
-        remove: async (name: string) => await directory.remove(name),
-        values: async () => await vault.values(),
-      };
-    })(),
-  });
   const accountLaunchEnvironment = new FleetLaunchEnvironment(
     accounts,
     secretVault,
-    mcpOAuth,
-    // A project's signed-in MCP servers reach a Claude ferret in that project as local-scope entries in
-    // its runtime's own `.claude.json` (lib/mcp-inventory/project-sign-in.ts).
-    new ProjectMcpLaunch({
-      accounts: mcpAccounts,
-      folders: mcpFolders,
-      documents: mcpDocuments,
-      secrets: secretVault,
-      renewal: mcpOAuth,
-      localScope: new FileClaudeLocalScope(),
-    }),
+    mcpFoundations.oauth,
+    mcpFoundations.launch,
   );
   /**
    * What this host can actually run: a published wrapper by its path, a harness command by name.
@@ -12313,13 +12239,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       const mounted: Omit<
         MountedSubsystems,
-        | 'sessionMcp'
-        | 'catalogInstalls'
-        | 'localSkillInstalls'
-        | 'mcpInventory'
-        | 'sharedCatalogs'
-        | 'catalogMembers'
-        | 'catalogLinks'
+        'catalogInstalls' | 'localSkillInstalls' | 'sharedCatalogs' | 'catalogMembers' | 'catalogLinks'
       > = {
         pack: {
           service: packService,
@@ -12459,7 +12379,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         tunnel,
         webrtc,
         harnessLogin: fleetLogin.provides,
-        mcpOAuth,
         // The logins list is a WATCHER: somebody has it on screen, so the environment logins' provider
         // quotas that are due are read first (at most once a minute each). The usage feed's unattended
         // refresh reads `fleetCredentials.list` directly, which never asks a provider anything.
@@ -13102,47 +13021,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           changed: () => deviceConnections.recheckAll(),
         }),
       };
-      const mcpInventory = (() => {
-        mcpFolderSources.known = mcpInventoryFolders(mounted.catalogs, mounted.worktrees);
-        mcpFolderSources.ferrets = async () => (await mounted.sessions.list()).map(view => view.config.cwd);
-        const inventory = new McpInventoryService({
-          accounts: mcpAccounts,
-          components: async () =>
-            (await mounted.fleetCatalog.components()).kinds
-              .filter(group => group.kind === 'mcp')
-              .flatMap(group => group.components)
-              .map(component => ({
-                name: component.name,
-                runtimes: component.usedBy.runtimes,
-                ...(component.detail.kind === 'mcp' && component.detail.auth === 'oauth'
-                  ? { auth: 'oauth' as const }
-                  : {}),
-              })),
-          folders: mcpFolders,
-          connections: async () => await mcpOAuth.connections(),
-          documents: mcpDocuments,
+      // Every MCP server a ferret sees, checking one, and adding one for a ferret (docs/mcp-scopes.md): built after
+      // the rest because it reads four of them — the session directory, the project catalogue and the worktree
+      // service (which say which folders are KNOWN roots), and the fleet catalogue Settings applies reviewed changes
+      // with. The sign-in half it extends was made above, beside the launch environment.
+      const mcp = mcpModule.build(
+        {
+          foundations: mcpFoundations,
           sessions: mounted.sessions,
-        });
-        return {
-          inventory,
-          check: new McpCheckService({
-            inventory,
-            probe: new TransportMcpProbe(),
-            launchEnvironment: async runtime => {
-              const account = (await mcpAccounts()).find(candidate => candidate.runtime === runtime);
-              return account === undefined ? {} : await accountLaunchEnvironment.forWrapper(account.wrapper);
-            },
-            baseEnvironment: () => mcpCheckBaseEnvironment(process.env),
-            bearer: async (subject, url) => {
-              const names = mcpOAuthSecretNames(subject, url);
-              await mcpOAuth.refreshForLaunch([names.access]);
-              return (await secretVault.values()).get(names.access);
-            },
-            redactor: secretRedactor,
-            now: () => millisecondClock.now(),
-          }),
-        };
-      })();
+          catalogs: mounted.catalogs,
+          worktrees: mounted.worktrees,
+          fleetCatalog: mounted.fleetCatalog,
+          launchEnvironment: accountLaunchEnvironment,
+          secretVault,
+          redactor: secretRedactor,
+          clock: millisecondClock,
+          environment: process.env,
+        },
+        seamsOf.mcp(world),
+        lifecycle,
+      );
 
       const sharedCatalogIdentity: CatalogIdentitySource = {
         identity: async () => {
@@ -13301,7 +13199,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         mcp: {
           servers: async (): Promise<readonly McpSourceServer[]> => {
             const model = (await fleetCatalogDeps.document()).model;
-            return (await mcpInventory.inventory.servers()).map(server => {
+            return (await mcp.provides.inventory.servers()).map(server => {
               const name = server.declaration?.name ?? '';
               const component = server.scope === 'component' ? model.components.mcp[name] : undefined;
               return {
@@ -13357,15 +13255,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       ).start(LINK_REFRESH_INTERVAL_MS);
       const builtSubsystems: MountedSubsystems = {
         ...mounted,
-        // Built after the rest because it reads three of them: the session directory, and the project
-        // catalogue and worktree service that say which folders are KNOWN roots a project write may use.
-        // The fleet half goes through the very catalogue service Settings applies reviewed changes with.
-        sessionMcp: createSessionMcpSubsystem({
-          sessions: mounted.sessions,
-          projectRoots: knownProjectRoots(mounted.catalogs, mounted.worktrees),
-          files: new FileMcpProjectFiles(),
-          fleet: mounted.fleetCatalog,
-        }),
         catalogInstalls: new CatalogInstallService({
           crypto: new WebCryptoRelayCrypto(),
           store: new FileCatalogInstallStore(paths, stateFiles),
@@ -13400,7 +13289,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           now: () => millisecondClock.now(),
           mint: prefix => `${prefix}_${randomBytes(16).toString('base64url')}`,
         }),
-        mcpInventory,
         sharedCatalogs: { catalogs: sharedCatalogs },
         catalogMembers: { members: catalogMembers },
         catalogLinks: { links: catalogLinks },
@@ -13421,6 +13309,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           fleetLogin,
           models,
           usage: usageBuilt,
+          mcp,
         },
       };
     },
