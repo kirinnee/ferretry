@@ -178,7 +178,7 @@ function advertiseRemedy(example: string): string {
  */
 function bindAndAdvertiseRemedy(example: string): string {
   return (
-    `bind every interface with "host": "${WILDCARD_BIND_HOST}", which accepts connections from other ` +
+    `bind every interface by setting "host" to "${WILDCARD_BIND_HOST}" on the bind entry in "carriers" (or the top-level "host" if the document has no bind entry), which accepts connections from other ` +
     `devices on your network, and ${advertiseRemedy(example)}. ` +
     `Commands on this machine keep reaching it on loopback`
   );
@@ -244,7 +244,7 @@ const REFUSAL_AUDIENCES: Readonly<Record<AdvertisementRefusal, string>> = {
 const REFUSAL_REMEDIES: Readonly<Record<AdvertisementRefusal, string>> = {
   'loopback-bind': bindAndAdvertiseRemedy(`http://${EXAMPLE_LAN_HOST}`),
   'wildcard-bind': advertiseRemedy(`http://${EXAMPLE_LAN_HOST}:<the port this daemon bound>`),
-  'no-port': `start the daemon once so it records the port it takes, or write "port" into ${CONFIG_DOCUMENT} yourself; "publicUrl" cannot supply an address nothing has bound`,
+  'no-port': `start the daemon once so it records the port it takes, or write "port" on the bind entry in "carriers" of ${CONFIG_DOCUMENT} yourself (or the top-level "port" if the document has no bind entry); "publicUrl" cannot supply an address nothing has bound`,
 };
 
 /** What to say when there is no address to hand out at all, per reason. */

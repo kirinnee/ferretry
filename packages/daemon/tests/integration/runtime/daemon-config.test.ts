@@ -110,12 +110,15 @@ describe('FileDaemonConfig', () => {
     should(seeded).not.have.property('publicUrl');
     should(seeded).not.have.property('bindUrl');
     should(seeded).not.have.property('port');
-    // What IS seeded is still a usable document: defaults an operator can see and change.
-    should(seeded).have.property('host', '127.0.0.1');
+    // What IS seeded is still a usable document: defaults an operator can see and change. The listener is
+    // a bind carrier — the one spelling this product writes — and no legacy `host` line exists.
+    should(seeded).not.have.property('host');
+    should(seeded.carriers).deepEqual([{ kind: 'bind', host: '127.0.0.1' }]);
   });
 
   it('should record the address this daemon took and leave every other field alone', async () => {
-    // Arrange: an operator has already set things in this document.
+    // Arrange: an operator has already set things in this document, and it still spells its listener
+    // with the legacy `host` key — no boot conversion has run over it (this calls `record` directly).
     const documents = documentStore(
       JSON.stringify({ host: '127.0.0.1', healthIntervalSeconds: 90, projectRoots: ['~/Code'] }),
     );
@@ -126,7 +129,11 @@ describe('FileDaemonConfig', () => {
     const written = JSON.parse(documents.text() ?? '{}') as Record<string, unknown>;
 
     // Assert — recording is what makes choosing safe: the next boot binds exactly this or refuses.
+    // Only the journalled boot conversion moves legacy keys, so the recorder keeps the operator's
+    // `host` where it is and writes the port beside it as the top-level `port`; no carriers bind appears.
+    should(written).have.property('host', '127.0.0.1');
     should(written).have.property('port', 7_432);
+    should(written).not.have.property('carriers');
     should(recorded.portIsRecorded).be.true();
     should(recorded.bindUrl).equal('http://127.0.0.1:7432');
     // Exactly one key is written; the operator's own settings survive untouched.
@@ -134,10 +141,28 @@ describe('FileDaemonConfig', () => {
     should(written).have.property('projectRoots', ['~/Code']);
     // And still nothing derived, so a recorded port cannot freeze an advertisement beside it.
     should(written).not.have.property('publicUrl');
-    // EXACTLY ONE KEY, literally: the document that goes back to disk is the one that came off it,
-    // plus `port`. A write that also planted every schema default would put values into a file the
-    // operator never typed, which is the only evidence anything downstream has of what they chose.
+    // The document that goes back to disk is the one that came off it plus the port. A write that also
+    // planted every schema default would put values into a file the operator never typed, which is the
+    // only evidence anything downstream has of what they chose.
     should(Object.keys(written)).deepEqual(['host', 'healthIntervalSeconds', 'projectRoots', 'port']);
+  });
+
+  it('should record the port into the bind entry of a freshly seeded document', async () => {
+    // Arrange: no document on disk, so `load` seeds the one spelling this product writes.
+    const documents = documentStore();
+    await documents.store.load();
+
+    // Act
+    await documents.store.record(7_432);
+    const written = JSON.parse(documents.text() ?? '{}') as Record<string, unknown>;
+    const recorded = await documents.store.load();
+
+    // Assert — the port lands in the bind entry; no legacy key is written beside it.
+    should(written.carriers).deepEqual([{ kind: 'bind', host: '127.0.0.1', port: 7_432 }]);
+    should(written).not.have.property('port');
+    should(written).not.have.property('host');
+    should(recorded.portIsRecorded).be.true();
+    should(recorded.bindUrl).equal('http://127.0.0.1:7432');
   });
 
   it('should record a settled port into the bind carrier rather than the key it supersedes', async () => {
@@ -533,7 +558,9 @@ describe('FileDaemonConfig', () => {
     await documents.store.record(7_433);
 
     // Assert
-    should(JSON.parse(documents.text() ?? '{}')).have.property('port', 7_433);
+    should(JSON.parse(documents.text() ?? '{}')).have.property('carriers', [
+      { kind: 'bind', host: '127.0.0.1', port: 7_433 },
+    ]);
   });
 });
 

@@ -26,9 +26,11 @@ import { DEFAULT_CAPABILITY_GRANTS } from '../grants/policy.ts';
 import { DEFAULT_SESSION_WORKER_CAP } from '../session/observer/plan.ts';
 import type { RunOverrides } from './arguments.ts';
 import {
+  type CarrierConversionOutcome,
   type DaemonCarrierSet,
   DaemonCarriersDocumentSchema,
   type DaemonTunnelCarrierEntry,
+  documentWithCarrierEntries,
   HostSchema,
   OS_CHOSEN_PORT,
   PortSchema,
@@ -87,10 +89,12 @@ export type UsageFeedConfig = z.output<typeof UsageFeedConfigSchema>;
  * reason a relay makes one reachable at all: the socket is opened from behind the NAT, and the
  * rendezvous only ever answers on a connection the daemon already made.
  *
- * THERE IS NO DEFAULT ADDRESS, and the block itself is optional. An absent block means this daemon
- * has no relay carrier — never "use the one everybody uses". The relay protocol keeps no compiled
- * carrier constant on either end (§1 of `docs/relay-protocol.md`), and inventing one here would put
- * the daemon half of that contract in a release rather than in configuration.
+ * THERE IS NO DEFAULT ADDRESS, and the block itself is optional. An absent block (with no relay carrier
+ * either) is not "no relay": it resolves to the discovery relay carrier, whose address is read at runtime
+ * from the relay directory's advertisement — never a compiled-in "one everybody uses". The relay protocol
+ * keeps no compiled carrier constant on either end (§1 of `docs/relay-protocol.md`), and inventing one
+ * here would put the daemon half of that contract in a release rather than in configuration. A block that
+ * IS written is the legacy spelling of a configured relay carrier.
  *
  * `url` IS PART OF THE SIGNATURE. The claim transcript covers the host the daemon believes it is
  * talking to, so this string has to be the one the rendezvous serves itself as; a daemon refuses to
@@ -417,7 +421,7 @@ export const DaemonConfigDocumentSchema = z
     attention: LegacyDaemonAttentionConfigSchema.optional(),
     /** The same block under its new name; wins key by key when both are written. */
     agenda: DaemonAgendaConfigSchema.optional(),
-    /** The rendezvous carrier, if this host has one. Absent means direct-only. */
+    /** The rendezvous carrier, if one is written. Absent (with no relay carrier) falls back to the discovery relay carrier. */
     relay: DaemonRelayConfigSchema.optional(),
     /** The peer-to-peer carrier: on, with Cloudflare's public STUN server, unless the operator says otherwise. */
     webrtc: DaemonWebRtcConfigSchema.prefault({}),
@@ -683,9 +687,17 @@ export function parseDaemonConfig(value: unknown): DaemonConfig {
  * The DOCUMENT rather than the parsed configuration, so no derived address is ever persisted. A
  * first boot that wrote `publicUrl` out would freeze it at the port it happened to default to, and
  * every later edit of `port` would move the bind while the advertisement stayed behind.
+ *
+ * THE LISTENER IS SPELLED AS A BIND CARRIER, never as the top-level `host`: `carriers` is the one
+ * spelling this product writes. The schema's own `host` default is therefore taken back out of the
+ * result — it is a default, not a line anybody wrote — and no `port` is seeded, so the first boot that
+ * chooses one records it into this entry (`recordedPortDocument`).
  */
-export function defaultDaemonConfigDocument(): DaemonConfigDocument {
-  return DaemonConfigDocumentSchema.parse({});
+export function defaultDaemonConfigDocument(): Omit<DaemonConfigDocument, 'host'> {
+  const { host: _loopbackDefault, ...document } = DaemonConfigDocumentSchema.parse({
+    carriers: [{ kind: 'bind', host: LOOPBACK }],
+  });
+  return document;
 }
 
 export function defaultDaemonConfig(): DaemonConfig {
@@ -711,11 +723,25 @@ export function defaultDaemonConfig(): DaemonConfig {
  * WHERE THE PORT GOES FOLLOWS WHERE IT IS READ FROM. A document with an explicit bind carrier reads
  * its address from that entry, so writing the top-level `port` there would write a key with no effect
  * on where this daemon listens: the operator watches the number change, watches the daemon come up
- * somewhere else, and has nothing to go on. Without a bind carrier the legacy key IS the bind, so it
- * is where the port belongs and it keeps getting written.
+ * somewhere else, and has nothing to go on. Without a bind carrier the legacy keys spell the bind, and
+ * the port goes beside them unless there are none (below).
  *
- * THE SUPERSEDED KEY IS LEFT EXACTLY AS TYPED, never rewritten and never deleted. It is the
- * operator's line to finish migrating, and `supersededCarrierKeys` is what tells them it is there.
+ * THREE RULES, in this order:
+ *
+ * - A document that declares a bind carrier gets the port in THAT entry. The legacy keys beside it are
+ *   superseded and are left exactly as typed — never rewritten and never deleted — because
+ *   `supersededCarrierKeys` is what tells the operator they are there.
+ * - A document with no bind carrier but a top-level `host` or `port` key gets `{...raw, port}`, the
+ *   legacy spelling, untouched otherwise. ONLY THE JOURNALLED CONVERSION MAY MOVE LEGACY KEYS
+ *   (`planCarrierConversion`: backup, pending entry, document, converted). A document that still spells its
+ *   bind that way when a port is recorded is one the conversion refused or failed on, or a `--config` file;
+ *   a recorder that deleted `host`/`port` and made a bind entry here would be a conversion with no backup
+ *   and no journal.
+ * - A document with no bind carrier and no `host`/`port` key (a fresh or empty one, or one holding only
+ *   relay or tunnel entries) gains `{ kind: 'bind', host: loopback, port }` appended to `carriers`: nothing
+ *   legacy is there to move, and the legacy spelling is not put back. A `carriers` value that is not a list
+ *   is left as it is and the legacy `port` is written as before — there is nothing to append to, and
+ *   inventing a list over what somebody typed is not this function's call.
  *
  * It is TOTAL over any JSON object, because raw means unvalidated. A `carriers` value that is not a
  * list of entries is a document the configuration parse refuses before a boot could settle anything,
@@ -727,7 +753,12 @@ export function recordedPortDocument(
 ): Record<string, unknown> {
   // The same rule the reader follows, from the one place both ends ask: see `declaredBind`.
   const listener = declaredBind(rawDocument);
-  if (listener === rawDocument) return { ...rawDocument, port };
+  if (listener === rawDocument) {
+    const spellsLegacyBind = Object.hasOwn(rawDocument, 'host') || Object.hasOwn(rawDocument, 'port');
+    const carriersIsList = !Object.hasOwn(rawDocument, 'carriers') || Array.isArray(rawDocument.carriers);
+    if (spellsLegacyBind || !carriersIsList) return { ...rawDocument, port };
+    return documentWithCarrierEntries(rawDocument, [], [{ kind: 'bind', host: LOOPBACK, port }]);
+  }
   return {
     ...rawDocument,
     carriers: (rawDocument.carriers as readonly unknown[]).map(entry =>
@@ -838,4 +869,9 @@ export interface DaemonConfigStore {
   load(): Promise<DaemonConfig>;
   /** Writes down the address this daemon took, so it is the same one next time. */
   record(port: number): Promise<void>;
+  /**
+   * Rewrites a legacy `host`/`port`/`relay` into `carriers` entries, once, keeping the original beside it —
+   * see `planCarrierConversion`. `at` is the instant, as an ISO string, that names the backup and the journal entry.
+   */
+  convertLegacyCarrierKeys(at: string): Promise<CarrierConversionOutcome>;
 }

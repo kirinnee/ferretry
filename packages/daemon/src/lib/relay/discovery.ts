@@ -405,16 +405,17 @@ export function describeAbsentRelayCarrier(input: {
 export function relayCarrierRemedy(source: RelayCarrierSource, configFile: string, host: string): readonly string[] {
   const relay =
     source.kind === 'configured'
-      ? `the "relay" block of ${configFile} is what this daemon dials — correct it or remove it, then restart.`
-      : 'a restart asks the relay directory again; to stop depending on it, point the "relay" block of ' +
-        `${configFile} at a rendezvous you operate (docs/cloudflare-relay-self-hosting.md).`;
+      ? `the relay entry in "carriers" of ${configFile} (or its top-level "relay" block) is what this daemon dials — correct it or remove it, then restart.`
+      : 'a restart asks the relay directory again; to stop depending on it, point the relay entry in "carriers" of ' +
+        `${configFile} (or its top-level "relay" block) at a rendezvous you operate (docs/cloudflare-relay-self-hosting.md).`;
   if (!isLoopbackHost(host)) {
     return ['this daemon is reachable only from this machine’s own network: nothing off it can connect.', relay];
   }
   return [
     `this daemon is bound to ${host} and dials no relay, so NO other device can reach it — and with no ` +
       'rendezvous of its own to redeem a code through, nothing can pair with it either.',
-    `to pair: set "host" in ${configFile} to "${WILDCARD_BIND_HOST}" and set "publicUrl" to this ` +
+    `to pair: set "host" to "${WILDCARD_BIND_HOST}" on the bind entry in "carriers" of ${configFile} ` +
+      '(or the top-level "host" if the document has no bind entry), set "publicUrl" to this ' +
       'machine’s URL on the local network, restart, and pair from a browser on that same network.',
     `to stay reachable once that browser leaves the network, a carrier is still needed — ${relay}`,
   ];

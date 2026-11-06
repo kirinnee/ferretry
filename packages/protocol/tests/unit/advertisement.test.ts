@@ -106,7 +106,9 @@ describe('the advertised address', () => {
     should(local.audience).containEql('http://127.0.0.1:7431');
     should(local.audience).containEql('no QR');
     // The bind comes FIRST, and the wildcard is the spelling the predicate actually recognises.
-    should(local.remedy).startWith(`bind every interface with "host": "${WILDCARD_BIND_HOST}"`);
+    should(local.remedy).startWith(
+      `bind every interface by setting "host" to "${WILDCARD_BIND_HOST}" on the bind entry in "carriers"`,
+    );
     should(local.remedy).containEql('set "publicUrl" in <FY_HOME>/config/daemon.json');
     should(local.remedy).containEql('then restart the daemon');
     // And it promises what makes the fix safe to apply: the machine's own commands do not move.
@@ -128,7 +130,7 @@ describe('the advertised address', () => {
     should(relayed.audience).not.containEql('no QR');
     // The direct bind stays on offer as the upgrade it now is, with the same honest widening.
     should(relayed.remedy).startWith('for a direct connection that no rendezvous carries');
-    should(relayed.remedy).containEql(`"host": "${WILDCARD_BIND_HOST}"`);
+    should(relayed.remedy).containEql(`setting "host" to "${WILDCARD_BIND_HOST}" on the bind entry in "carriers"`);
     should(relayed.remedy).containEql('e.g. http://192.168.1.10:7431');
     should(relayed.remedy).containEql('accepts connections from other devices on your network');
   });
@@ -159,13 +161,16 @@ describe('the advertised address', () => {
     const noPort = refusalNotice('no-port');
     should(noPort.audience).containEql('no port recorded');
     should(noPort.remedy).containEql('start the daemon once so it records the port it takes');
+    should(noPort.remedy).containEql('"port" on the bind entry in "carriers"');
     should(noPort.remedy).containEql('cannot supply an address nothing has bound');
 
     // Never emitted by the decision, kept for readers that still speak it: the two-step answer, with
     // no port known to put in the example.
     const loopback = refusalNotice('loopback-bind');
     should(loopback.audience).containEql('only advertises loopback');
-    should(loopback.remedy).startWith(`bind every interface with "host": "${WILDCARD_BIND_HOST}"`);
+    should(loopback.remedy).startWith(
+      `bind every interface by setting "host" to "${WILDCARD_BIND_HOST}" on the bind entry in "carriers"`,
+    );
   });
 });
 

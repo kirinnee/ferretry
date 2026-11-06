@@ -6,12 +6,14 @@ import type {
   AnalyticsPricingConfigurationWriteResult,
 } from '../../lib/analytics/pricing-service.ts';
 import {
+  type CarrierConversionOutcome,
   type DaemonConfig,
   DaemonConfigDocumentSchema,
   type DaemonConfigStore,
   type DaemonTunnelCarrierEntry,
   defaultDaemonConfigDocument,
   parseDaemonConfig,
+  planCarrierConversion,
   recordedPortDocument,
   tunnelEntryDocument,
 } from '../../lib/index.ts';
@@ -65,6 +67,32 @@ export class ExplicitDaemonConfig implements DaemonConfigStore, AnalyticsPricing
     const raw = (text === undefined ? {} : JSON.parse(text)) as Record<string, unknown>;
     DaemonConfigDocumentSchema.parse(raw);
     await this.write(recordedPortDocument(raw, port));
+  }
+
+  /**
+   * Writes NOTHING: a file an operator named with `--config` is theirs, and a boot never rewrites it.
+   *
+   * The state home's document is converted because the daemon made it and may keep it tidy. This file may be
+   * a symlink, a shared or read-only mode, or kept under version control; replacing it would change what it
+   * is, not only what it says. So a legacy `host`/`port`/`relay` here is reported as refused — the boot
+   * says so — and is read as the legacy spelling it still is.
+   */
+  async convertLegacyCarrierKeys(_at: string): Promise<CarrierConversionOutcome> {
+    const text = await this.read();
+    if (text === undefined) return { kind: 'unchanged' };
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      return { kind: 'unchanged' };
+    }
+    return planCarrierConversion(raw).kind === 'convert'
+      ? {
+          kind: 'refused',
+          reason:
+            'an operator-named --config file is never rewritten at boot; move host/port/relay into its "carriers" list by hand',
+        }
+      : { kind: 'unchanged' };
   }
 
   /** Writes the one tunnel entry into the exact file `--config` named — see `tunnelEntryDocument`. */

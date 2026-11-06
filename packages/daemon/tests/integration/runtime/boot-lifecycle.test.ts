@@ -17,6 +17,7 @@ import {
   type ConversionPreview,
   ConversionPreviewSchema,
   DaemonCarriersViewSchema,
+  declaredBind,
   type FyEventStreamFrame,
   FyEventStreamFrameSchema,
   HealthViewSchema,
@@ -62,6 +63,7 @@ import {
   type BunRelayCarrier,
   DaemonHealthProbe,
 } from '../../../src/adapters/index.ts';
+import { ExplicitDaemonConfig } from '../../../src/adapters/runtime/explicit-config.ts';
 import { FileSessionEnvironmentStore } from '../../../src/adapters/session/lifecycle/index.ts';
 import {
   FileSessionTranscriptMessageTokenCodec,
@@ -1428,16 +1430,18 @@ describe('daemon boot lifecycle', () => {
       sentence: 'Tunnel: up — https://quiet-otter.tunnels.example',
     });
     // Off: withdrawn from the published set, the listener closed, the tunnel released and forgotten,
-    // and the decision written as one explicit entry beside the legacy keys it does not supersede.
+    // and the decision written as one explicit entry beside the bind carrier the boot made of the seeded
+    // host and port — the document holds no legacy key any more.
     should(offView.state).equal('off');
     should(carriersAfterOff).deepEqual([{ kind: 'direct', url: base }]);
     should(listenerAfterOff).equal('refused');
     should(holdingAfterOff).equal('forgotten');
     should(service.releases.length).equal(1);
     should(documentAfterOff).deepEqual({
-      host: '127.0.0.1',
-      port,
-      carriers: [{ kind: 'tunnel', source: 'discovery', enabled: false }],
+      carriers: [
+        { kind: 'bind', host: '127.0.0.1', port },
+        { kind: 'tunnel', source: 'discovery', enabled: false },
+      ],
     });
     should(service.verdicts).deepEqual([true, true]);
     // Published after direct and before any relay, at the hostname the service provisioned.
@@ -5746,7 +5750,7 @@ describe('daemon boot lifecycle', () => {
     should(said.stated[0]).match(/HTTP 401/u);
     should(said.stated[0]).match(new RegExp(`127\\.0\\.0\\.1:${String(strangerPort)}`, 'u'));
     // It names the edit that fixes it, in the file that holds it.
-    should(said.stated[0]).match(/"port" in .*config\/daemon\.json/u);
+    should(said.stated[0]).match(/"port" on the bind entry in "carriers" .* of .*config\/daemon\.json/u);
   });
 
   it('should fail closed when the address is held by something that never answers', async () => {
@@ -5814,7 +5818,10 @@ describe('daemon boot lifecycle', () => {
     should(health.status).equal(200);
     // RECORDED, so it is the same address next time: a daemon whose address moves on its own is
     // worse than one that fails, and every client that learned where it lived would be wrong.
-    should(recorded).have.property('port', preferredPort + 1);
+    // The port lives in the bind carrier the boot converted the seeded host into, and the document
+    // holds no top-level host, port or relay at all.
+    should((declaredBind(recorded) as { readonly port?: unknown }).port).equal(preferredPort + 1);
+    should(recorded).not.have.properties(['host', 'port', 'relay']);
     // Still nothing derived in the document, so the recorded port cannot freeze an advertisement.
     should(recorded).not.have.property('publicUrl');
     // And it said which address it skipped and why, in the log the operator is already reading.
@@ -6364,7 +6371,9 @@ describe('daemon boot lifecycle', () => {
       should(omission[0]).containEql('http://0.0.0.0:');
       // The raw document wrote neither legacy bind key. Schema defaults must never be reported as
       // stale lines the operator should remove from a file where they do not exist.
-      should(said.stated.filter(message => message.includes('superseded'))).be.empty();
+      should(
+        said.stated.filter(message => message.includes('is superseded by its explicit carriers entry')),
+      ).be.empty();
     });
 
     it('should omit a reverse-proxy path from the carrier wire while boot and --check stay healthy', async () => {
@@ -6475,7 +6484,9 @@ describe('daemon boot lifecycle', () => {
       should(said.stated.filter(message => message.startsWith('direct carrier omitted'))).be.empty();
     });
 
-    it('should report only superseded legacy keys the raw document actually contains', async () => {
+    it('should convert a host a bind carrier supersedes at boot, and report no superseded key afterwards', async () => {
+      // The state home's document is converted BEFORE it is read: the superseded `host` is removed by the
+      // journalled conversion, so by the time the boot looks for superseded keys there is none to name.
       const home = await tempDirectory('fyd-carrier-superseded');
       await seedHome(home, OS_CHOSEN_PORT);
       await writeFile(
@@ -6499,10 +6510,64 @@ describe('daemon boot lifecycle', () => {
       await runCleanups(cleanups);
 
       should(code).equal(0);
-      const superseded = said.stated.filter(message => message.startsWith('the legacy'));
+      const converted = said.steps.filter(step => step.startsWith('configuration converted'));
+      should(converted).have.length(1);
+      should(converted[0]).match(/\(host\); the original is kept at /u);
+      should(said.stated.filter(message => message.startsWith('the legacy "'))).be.empty();
+      should(
+        said.stated.filter(message => message.includes('is superseded by its explicit carriers entry')),
+      ).be.empty();
+      const written = JSON.parse(await readFile(join(home, 'config', 'daemon.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      should(written).not.have.property('host');
+      should(
+        (await readdir(join(home, 'config'))).some(name => name.startsWith('daemon.json.pre-carriers.')),
+      ).be.true();
+    });
+
+    it('should still report a superseded legacy key in a --config file, which is never converted', async () => {
+      // THE LEGACY READER STAYS: a file named with `--config` is the operator's own and is left alone, so the
+      // key a bind carrier supersedes is still there to be named.
+      const home = await tempDirectory('fyd-carrier-superseded-explicit');
+      await seedHome(home, OS_CHOSEN_PORT);
+      const named = join(await tempDirectory('fyd-carrier-explicit-file'), 'operator.json');
+      await writeFile(
+        named,
+        daemonDocument({
+          host: 'box.invalid',
+          carriers: [
+            { kind: 'bind', host: '127.0.0.1', port: OS_CHOSEN_PORT },
+            { kind: 'relay', source: 'discovery', enabled: false },
+          ],
+        }),
+        { mode: 0o600 },
+      );
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+
+      const code = await start(
+        {
+          ...buildIntegrationWorld(),
+          config: new ExplicitDaemonConfig(named),
+          notices: said.port,
+          untilShutdown: async () => undefined,
+        },
+        cleanups,
+      );
+      await runCleanups(cleanups);
+
+      should(code).equal(0);
+      should(said.steps.filter(step => step.startsWith('configuration converted'))).be.empty();
+      const left = said.stated.filter(message => message.startsWith('the legacy host/port/relay keys'));
+      should(left).have.length(1);
+      should(left[0]).containEql('never rewritten at boot');
+      const superseded = said.stated.filter(message => message.startsWith('the legacy "'));
       should(superseded).have.length(1);
       should(superseded[0]).match(/legacy "host" key/u);
       should(superseded[0]).not.match(/"port"|"relay"/u);
+      should(JSON.parse(await readFile(named, 'utf8'))).have.property('host', 'box.invalid');
     });
 
     it('should dial the carrier the directory advertises when this daemon configured none', async () => {
@@ -6583,7 +6648,7 @@ describe('daemon boot lifecycle', () => {
       // one holds none, so there is no room the two could meet in either.
       should(notice[1]).match(/bound to 127\.0\.0\.1 and dials no relay/u);
       should(notice[1]).match(/nothing can pair with it either/u);
-      should(notice[2]).match(/^to pair: set "host" in/u);
+      should(notice[2]).match(/^to pair: set "host" to .* on the bind entry in "carriers" of /u);
       should(notice[2]).containEql(join(home, 'config', 'daemon.json'));
       should(notice[2]).containEql(`"${WILDCARD_BIND_HOST}"`);
       should(notice[2]).containEql('"publicUrl"');

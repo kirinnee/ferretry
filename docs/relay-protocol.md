@@ -1196,11 +1196,51 @@ consequence:
   says to ask it. An operator who wants the hosted rendezvous **and** their own writes both, which a
   single `relay` block could not express. Saying "no rendezvous, and I mean it" is that entry with
   `"enabled": false` — a decision, which is the one thing an omission can never be.
-- `host`, `port` and the `relay` block remain readable as the **legacy spelling** of a one-bind,
-  one-relay list, superseded **per kind** rather than wholesale, so a half-finished migration does not
-  silently move where the daemon listens. A legacy key that a `carriers` entry supersedes is **named
-  at boot**: a key an operator edited with no error, no message and no change in behaviour is the
+- **`carriers` is the one spelling.** Nothing in the product writes `host`, `port` or a `relay` block any
+  more, with one exception: a document whose conversion was refused or failed, or a `--config` file, still
+  spells its bind the legacy way, and recording a port into it writes the legacy `port` (only the journalled
+  conversion below moves legacy keys). A first boot seeds `"carriers": [{ "kind": "bind", "host": "127.0.0.1" }]`, and the port it takes
+  is recorded into that entry. `host`, `port` and the `relay` block are the **legacy spelling** of a
+  one-bind, one-relay list: **converted at boot, removed in a later release**. Until that release they
+  are still read, superseded **per kind** rather than wholesale, so a half-finished migration does not
+  silently move where the daemon listens; a legacy key that a `carriers` entry supersedes is **named
+  at boot** — a key an operator edited with no error, no message and no change in behaviour is the
   defect this whole shape exists to prevent.
+- **The boot conversion.** Before it reads the document, a starting daemon rewrites the **state home's**
+  `config/daemon.json` when it still has `host`, `port` or `relay` into `carriers` entries, and says so on the boot trail
+  (`configuration converted`). It writes only what the operator wrote, in the new spelling: `host` as
+  typed (loopback when absent) and `port` only if one was written — an unwritten port keeps meaning
+  "this boot may choose, once, and record" — as one `bind` entry; a `relay` block as one `relay` entry
+  with exactly its written fields, `"enabled": false` included and no default filled in. **No relay
+  block written means no relay entry added**: a document with no relay carrier and no legacy block
+  already resolves to the hosted discovery relay, before and after, so omission keeps meaning exactly
+  that. An existing `bind` or `relay` carrier already supersedes its legacy key, which is then only
+  deleted, and the tunnel entry and every other key are left alone. The step is **idempotent** (a
+  document with none of the three keys is not touched), **keeps the original** next to the document as
+  `daemon.json.pre-carriers.<timestamp>` with its original permissions, and records the conversion in
+  `<state home>/carriers-migration.json` (`{ v: 1, conversions: [{ status, at, file, backup, removedKeys,
+addedEntries }] }`, mode `0600`). **The record is written ahead of the document**, in the order backup,
+  `pending` entry, document, entry rewritten `converted`, each file replaced atomically and synced, so no
+  interruption can leave a converted document the record knows nothing about. **That guarantee belongs to
+  the boot conversion alone**: nothing else moves a legacy key — a conversion that is refused, or that
+  fails BEFORE the document is replaced (a backup or journal write error included), leaves the legacy
+  spelling as it was — its `pending` entry is abandoned at the next start — and recording the settled
+  port then writes the legacy `port` beside it rather than a `bind` entry. A failure AFTER the
+  replacement (the final journal write) leaves the converted document with its `pending` entry, which the
+  next start marks `converted`. The next start settles any
+  `pending` entry for the file first: the legacy keys gone means the replacement happened (`converted`),
+  still there means it did not (`abandoned`); the backup is kept either way, and nothing converts twice.
+  **A file named with `--config` is never converted:** it is the operator's own file — it may be a symlink,
+  shared, read-only or under version control — so a boot never replaces it. A legacy key in it is reported
+  on the boot trail as left alone (move `host`/`port`/`relay` into its `carriers` list by hand) and is
+  read as the legacy spelling it still is. **It refuses rather than
+  guesses:** the rewritten document must parse with the full configuration schema and must read
+  identically to the original — listener, port and whether it is recorded, carrier set, bind and public
+  addresses — otherwise nothing is written, the legacy keys stay as they are, and the boot trail says
+  why; the boot then runs on the legacy reading exactly as before. `fyd --check` and `fyd --print-config`
+  only read and never convert. Per machine, to confirm it converted:
+  `jq 'has("host") or has("port") or has("relay")' ~/.ferretry/config/daemon.json` prints `false`, and
+  `cat ~/.ferretry/carriers-migration.json` lists the conversion.
 - **Nothing derived is persisted.** The effective list is re-derived on every read from the document
   plus whatever this boot has since decided — a first boot that had to take a different port, a
   `--port` claimed for one run — exactly like `bindUrl` and `publicUrl`. A `carriers` array written
@@ -1390,8 +1430,9 @@ operator is not the one the owner intended.
 
 A rendezvous an operator wrote down **wins and is never overwritten** — the directory is asked only
 for an enabled `source: 'discovery'` entry, so a carrier switched off stays off rather than being
-helpfully re-enabled, and an entry carrying a `url` is already complete. The same holds for the legacy
-`relay` block, which is read as a one-relay list when `carriers` declares no rendezvous of its own.
+helpfully re-enabled, and an entry carrying a `url` is already complete. The same holds for a legacy
+`relay` block a document still carries, which is read as a one-relay list when `carriers` declares no
+rendezvous of its own — until the boot conversion has carried it into `carriers` unchanged.
 Every failure to discover narrows that entry to nothing rather than guessing an address, and the boot
 trail plus `fyd --check` state the consequence and the remedy rather than one bare clause; `--check`
 names the posture in one line: direct-only, hosted, or self-hosted, and which.
@@ -1401,7 +1442,7 @@ protocol — the claim signed with the key pairing already minted, the per-sessi
 layer, the credit window, and the §14 tunnel that turns a relayed request into the same `ApiRequest`
 the bound address serves. `packages/daemon/src/adapters/relay` is the outbound socket, its liveness,
 and the one HTTP read of the advertisement above; the `carriers` list of the daemon configuration
-document — legacy `relay` block included — is where an operator overrides all of it.
+document (a legacy `relay` block is converted into it at boot) is where an operator overrides all of it.
 
 **The browser now can.** `packages/pwa/src/lib/relay-session.ts` is the client half of §6, §7, §8 and
 §14 — the handshake against the fingerprint pairing pinned, the record layer, the credit window and the
@@ -3124,7 +3165,7 @@ partial one. The operator runbook is
   restart**: on starts a new carrier; off withdraws the published tunnel, stops `cloudflared`, closes the
   dedicated listener and releases the tunnel, and answers only once the release has. Changes are
   serialised. A document with no `carriers` key gains one holding only the tunnel, which supersedes no
-  legacy `host`, `port` or `relay` key. `fy daemon tunnel on|off|status` is the host's door to the
+  legacy `host`, `port` or `relay` key still in the document. `fy daemon tunnel on|off|status` is the host's door to the
   same route, and `fy daemon status` prints its sentence. The contract is
   `packages/protocol/src/lib/tunnel.ts`.
 - **`cloudflared` is a dependency, not a download.** The Nix package names the store's own binary

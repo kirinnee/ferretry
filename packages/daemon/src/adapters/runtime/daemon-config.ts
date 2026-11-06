@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { type CapabilityGrants, DAEMON_CAPABILITIES, type DaemonCapability } from '@ferretry/protocol';
 import {
   analyticsPricingFingerprint,
@@ -10,6 +11,7 @@ import type {
   AnalyticsPricingConfigurationWriteResult,
 } from '../../lib/analytics/pricing-service.ts';
 import {
+  type CarrierConversionOutcome,
   type DaemonConfig,
   DaemonConfigDocumentSchema,
   type DaemonTunnelCarrierEntry,
@@ -20,6 +22,7 @@ import {
   recordedPortDocument,
   tunnelEntryDocument,
 } from '../../lib/index.ts';
+import { convertLegacyCarrierKeysIn } from './carrier-conversion.ts';
 
 /**
  * A configuration document this daemon will not act on, named so a person can go and fix it.
@@ -185,6 +188,10 @@ export function prepareAnalyticsPricingWrite(
   }
 }
 
+/** The record of the carrier conversion, one small document in the daemon's home. */
+export const CARRIERS_JOURNAL_NAME = 'carriers-migration.json';
+const PRIVATE_MODE = 0o600;
+
 /** Durable daemon configuration adapter; the state filesystem keeps the document private and atomic. */
 export class FileDaemonConfig {
   constructor(
@@ -249,7 +256,9 @@ export class FileDaemonConfig {
    * exactly one key.
    *
    * WHICH key is `recordedPortDocument`'s decision, not this adapter's: a document with an explicit
-   * bind carrier reads its address from that entry, and the top-level `port` is superseded there.
+   * bind carrier reads its address from that entry, and the top-level `port` is superseded there. A document
+   * the boot conversion left in its legacy spelling (refused or failed) keeps it: only the journalled
+   * conversion moves legacy keys, so the port is then written as the legacy `port`.
    *
    * WHAT IS WRITTEN IS THE RAW DOCUMENT, not the schema's reading of it. The schema still runs — a
    * document this daemon would refuse to boot on is not one it may write over — but its OUTPUT is
@@ -265,6 +274,26 @@ export class FileDaemonConfig {
     await this.files.writeTextAtomic(
       this.paths.daemonConfig,
       `${JSON.stringify(recordedPortDocument(raw, port), null, 2)}\n`,
+    );
+  }
+
+  /**
+   * Rewrites a legacy `host`/`port`/`relay` into `carriers` entries, once, at boot — the procedure and its
+   * guard are `convertLegacyCarrierKeysIn` and `planCarrierConversion`. A `--config` file is never converted.
+   * The one-file record of it is `<home>/carriers-migration.json`.
+   */
+  async convertLegacyCarrierKeys(at: string): Promise<CarrierConversionOutcome> {
+    return await convertLegacyCarrierKeysIn(
+      {
+        readText: async path => await this.files.readText(path),
+        modeOf: async path => (await this.files.information(path))?.mode,
+        writeAtomic: async (path, text, mode) => {
+          await this.files.writeTextAtomic(path, text);
+          if (mode !== PRIVATE_MODE) await this.files.setMode(path, mode);
+        },
+      },
+      { file: this.paths.daemonConfig, journal: join(this.paths.home, CARRIERS_JOURNAL_NAME) },
+      at,
     );
   }
 

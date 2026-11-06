@@ -144,6 +144,11 @@ describe('daemon configuration', () => {
     // Nor the port: an unrecorded port is a preference this daemon may move off, and writing the
     // default out would freeze it into a claim before anything had tried to bind it.
     should(document).not.have.property('port');
+    // Nor the legacy listener keys: the one spelling this product writes is a bind carrier, so a first
+    // boot lands the port it takes in that entry and no `host` line exists to be reported as superseded.
+    should(document).not.have.property('host');
+    should(document).not.have.property('relay');
+    should(document.carriers).deepEqual([{ kind: 'bind', host: '127.0.0.1' }]);
     // Serialization is what actually reaches the disk, so assert on that rather than the object.
     should(JSON.parse(JSON.stringify(document))).not.have.property('publicUrl');
   });
@@ -505,20 +510,62 @@ describe('the document a settled port is written into', () => {
     });
   });
 
-  it('should record the legacy key when no bind carrier was declared', () => {
-    // Act + Assert — the legacy spelling is still a bind, so it is still where a settled port
-    // belongs, and a relay-only list is not a bind.
+  it('should leave a legacy spelling alone and write the legacy port, since only the journalled conversion moves keys', () => {
+    // A host-only or portless document that still spells its bind that way is one the conversion refused or
+    // failed on (or a `--config` file): recording must not delete `host`/`port` or make a bind entry.
     should(recordedPortDocument({ host: 'box.lan' }, 9_700)).deepEqual({ host: 'box.lan', port: 9_700 });
-    should(recordedPortDocument({ carriers: [{ kind: 'relay', source: 'discovery' }] }, 9_700)).deepEqual({
-      carriers: [{ kind: 'relay', source: 'discovery' }],
+    should(recordedPortDocument({ host: 'box.lan', port: OS_CHOSEN_PORT }, 9_700)).deepEqual({
+      host: 'box.lan',
       port: 9_700,
     });
-    // A port already written is replaced rather than doubled, and nothing beside it is touched.
+    should(recordedPortDocument({ port: OS_CHOSEN_PORT }, 9_700)).deepEqual({ port: 9_700 });
+    // Every other key keeps its place and its value, a legacy relay block included.
     should(recordedPortDocument({ host: 'box.lan', port: 7_431, healthIntervalSeconds: 90 }, 9_700)).deepEqual({
       host: 'box.lan',
       port: 9_700,
       healthIntervalSeconds: 90,
     });
+    should(recordedPortDocument({ relay: { url: 'wss://relay.example' }, port: 7_431 }, 9_700)).deepEqual({
+      relay: { url: 'wss://relay.example' },
+      port: 9_700,
+    });
+    should(
+      recordedPortDocument({ host: 'box.lan', carriers: [{ kind: 'relay', source: 'discovery' }] }, 9_700),
+    ).deepEqual({ host: 'box.lan', carriers: [{ kind: 'relay', source: 'discovery' }], port: 9_700 });
+  });
+
+  it('should append a loopback bind entry when the document has no bind carrier and no host or port key', () => {
+    // Nothing legacy is there to move, so the legacy spelling is not put back.
+    should(recordedPortDocument({}, 9_700)).deepEqual({ carriers: [{ kind: 'bind', host: '127.0.0.1', port: 9_700 }] });
+    // A relay-only list is not a bind: the entry is appended beside it, and the relay entry is untouched.
+    should(recordedPortDocument({ carriers: [{ kind: 'relay', source: 'discovery' }] }, 9_700)).deepEqual({
+      carriers: [
+        { kind: 'relay', source: 'discovery' },
+        { kind: 'bind', host: '127.0.0.1', port: 9_700 },
+      ],
+    });
+    should(recordedPortDocument({ relay: { url: 'wss://relay.example' } }, 9_700)).deepEqual({
+      relay: { url: 'wss://relay.example' },
+      carriers: [{ kind: 'bind', host: '127.0.0.1', port: 9_700 }],
+    });
+  });
+
+  it('should write into the bind entry of the fresh-seed document', () => {
+    // The document a first boot seeds declares a portless bind carrier: that is the entry the port lands in.
+    const seeded = recordedPortDocument(defaultDaemonConfigDocument(), 9_700);
+
+    should(seeded.carriers).deepEqual([{ kind: 'bind', host: '127.0.0.1', port: 9_700 }]);
+    should(Object.hasOwn(seeded, 'host')).equal(false);
+    should(Object.hasOwn(seeded, 'port')).equal(false);
+  });
+
+  it('should read the same listener after recording as the document named before it', () => {
+    const before = { host: 'box.lan', port: 7_431, carriers: [{ kind: 'tunnel', source: 'discovery' }] };
+
+    const recorded = parseDaemonConfig(recordedPortDocument(before, 9_700));
+
+    should(recorded.carrierSet.bind).deepEqual({ kind: 'bind', host: 'box.lan', port: 9_700 });
+    should(recorded.carrierSet.tunnel).deepEqual({ kind: 'tunnel', source: 'discovery', enabled: true });
   });
 
   it('should read the document as the operator wrote it rather than as a schema would fill it', () => {
@@ -529,8 +576,7 @@ describe('the document a settled port is written into', () => {
       port: 9_800,
     });
     should(recordedPortDocument({ carriers: [null, 'bind'] }, 9_800)).deepEqual({
-      carriers: [null, 'bind'],
-      port: 9_800,
+      carriers: [null, 'bind', { kind: 'bind', host: '127.0.0.1', port: 9_800 }],
     });
   });
 });
@@ -574,8 +620,9 @@ describe('where this daemon listens, as the command-line client reads it', () =>
 });
 
 describe('the relay carrier block', () => {
-  it('should default to no carrier and refuse an address it could not sign for', () => {
-    // Assert — an absent block is no carrier, never the address everybody else uses.
+  it('should default to no written block and refuse an address it could not sign for', () => {
+    // Assert — an absent block writes no address, and the carrier set falls back to the discovery relay
+    // carrier (read at runtime), never a compiled-in address everybody else uses.
     should(defaultDaemonConfig().relay).be.undefined();
     should(parseDaemonConfig({ relay: { url: 'https://relay.example' } }).relay).deepEqual({
       url: 'https://relay.example',

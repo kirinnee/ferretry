@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AnalyticsPricingRate } from '@ferretry/protocol';
 import should from 'should';
@@ -136,11 +136,14 @@ describe('ExplicitDaemonConfig', () => {
     // Assert
     should(seeded).not.have.property('publicUrl');
     should(seeded).not.have.property('port');
-    should(recorded).have.property('port', 9_200);
+    should(seeded).not.have.property('host');
+    should(seeded.carriers).deepEqual([{ kind: 'bind', host: '127.0.0.1' }]);
+    should(recorded.carriers).deepEqual([{ kind: 'bind', host: '127.0.0.1', port: 9_200 }]);
     should(recorded).not.have.property('publicUrl');
-    // Recording adds the settled port and nothing else — the seeded defaults an operator can see and
-    // edit are theirs from the moment they are written, and a record must not re-author them.
-    should(Object.keys(recorded)).deepEqual([...Object.keys(seeded), 'port']);
+    // Recording adds the settled port to the seeded bind and nothing else — the seeded defaults an
+    // operator can see and edit are theirs from the moment they are written, and a record must not
+    // re-author them.
+    should(Object.keys(recorded)).deepEqual(Object.keys(seeded));
     // A daemon configuration can name a secrets file and the address a machine is administered on.
     should(information.mode & 0o077).equal(0);
   });
@@ -220,5 +223,64 @@ describe('ExplicitDaemonConfig', () => {
 
     // Act + Assert
     await should(store.readPricing()).be.rejected();
+  });
+
+  it('should refuse to convert a --config file spelling legacy keys, and leave it untouched', async () => {
+    // Arrange — the file is the operator's own; a boot says it will not rewrite it.
+    const directory = await tempDirectory('fyd-explicit-legacy');
+    const path = join(directory, 'daemon.json');
+    const text = JSON.stringify({ host: '0.0.0.0', port: 9_100 });
+    await writeFile(path, text, { mode: 0o644 });
+
+    // Act
+    const outcome = await new ExplicitDaemonConfig(path).convertLegacyCarrierKeys('2026-11-06T10:20:30.456Z');
+
+    // Assert
+    should(outcome.kind).equal('refused');
+    should(await readFile(path, 'utf8')).equal(text);
+    should((await stat(path)).mode & 0o777).equal(0o644);
+    should(await readdir(directory)).deepEqual(['daemon.json']);
+  });
+
+  it('should leave a --config file that spells no legacy key unchanged', async () => {
+    // Arrange
+    const directory = await tempDirectory('fyd-explicit-no-legacy');
+    const path = join(directory, 'daemon.json');
+    const text = JSON.stringify({ carriers: [{ kind: 'bind', host: 'box.lan', port: 9_100 }] });
+    await writeFile(path, text);
+
+    // Act
+    const outcome = await new ExplicitDaemonConfig(path).convertLegacyCarrierKeys('2026-11-06T10:20:30.456Z');
+
+    // Assert
+    should(outcome).deepEqual({ kind: 'unchanged' });
+    should(await readFile(path, 'utf8')).equal(text);
+  });
+
+  it('should report a --config file that is not JSON as unchanged, leaving the parse error to the load', async () => {
+    // Arrange
+    const directory = await tempDirectory('fyd-explicit-not-json');
+    const path = join(directory, 'daemon.json');
+    await writeFile(path, '{ not json');
+
+    // Act
+    const outcome = await new ExplicitDaemonConfig(path).convertLegacyCarrierKeys('2026-11-06T10:20:30.456Z');
+
+    // Assert
+    should(outcome).deepEqual({ kind: 'unchanged' });
+    should(await readFile(path, 'utf8')).equal('{ not json');
+  });
+
+  it('should report a --config path that is not written yet as unchanged, without creating it', async () => {
+    // Arrange
+    const directory = await tempDirectory('fyd-explicit-convert-absent');
+    const path = join(directory, 'nothing-here.json');
+
+    // Act
+    const outcome = await new ExplicitDaemonConfig(path).convertLegacyCarrierKeys('2026-11-06T10:20:30.456Z');
+
+    // Assert
+    should(outcome).deepEqual({ kind: 'unchanged' });
+    await should(stat(path)).be.rejected();
   });
 });
