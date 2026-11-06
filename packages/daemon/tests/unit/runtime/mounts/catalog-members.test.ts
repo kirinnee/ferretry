@@ -234,13 +234,26 @@ describe('the route table', () => {
     should(routes.map(route => `${route.method} ${route.path}`)).deepEqual(table.map(([m, p]) => `${m} ${p}`));
   });
 
+  const generic = new Set([
+    'GET /v1/catalog-shares',
+    'GET /v1/catalog-members',
+    'PATCH /v1/catalog-members/:memberId',
+    // Removing a browser, or a person (a partial revoke plus a restart leaves a live spare invite with no person), can
+    // reopen join admission (joinNeed), so neither is a pure narrowing.
+    'DELETE /v1/catalog-members/:memberId',
+    'DELETE /v1/catalog-members/:memberId/keys/:keyId',
+  ]);
+
   for (const [method, path] of table) {
-    it(`${method} ${path} is the operator's, uncached, behind sharing.use`, () => {
+    const demand: { capability: string; axis: string; narrowing?: true } = generic.has(`${method} ${path}`)
+      ? { capability: 'sharing', axis: 'use' }
+      : { capability: 'sharing', axis: 'use', narrowing: true };
+    it(`${method} ${path} is the operator's, uncached, behind sharing.use${demand.narrowing === true ? ' as a narrowing demand' : ''}`, () => {
       const found = routes.find(route => route.method === method && route.path === path);
 
       should(found?.minimum).equal('operator');
       should(found?.noStore).equal(true);
-      should(found?.capability).deepEqual({ capability: 'sharing', axis: 'use' });
+      should(found?.capability).deepEqual(demand);
     });
   }
 });
