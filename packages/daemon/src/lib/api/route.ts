@@ -189,6 +189,8 @@ export interface ClaimFreshStepUp {
  * being matched by rules that disagree with the ones authorization applied.
  */
 export interface RoutePattern {
+  /** Named composition exception: higher values precede specificity; equal values keep the usual order. */
+  readonly precedence?: number;
   readonly method: string;
   /** A pattern of literal segments, `:name` captures and a trailing `*name` catch-all. */
   readonly path: string;

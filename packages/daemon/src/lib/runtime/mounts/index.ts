@@ -1,20 +1,18 @@
+import { type BuiltModule, composeModules } from '../modules.ts';
 import type { AgendaAgentClearer, AgendaRepliesSubsystem, AgendaRollup, AgendaService } from '../../agenda/index.ts';
 import type { AgentToolService } from '../../agent-tools/service.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
-import type { ApiCredentials } from '../../api/authentication.ts';
 import type { CapabilityGuard } from '../../api/capability.ts';
 import type { ResponseCompressor } from '../../api/compression.ts';
-import { ApiDispatcher } from '../../api/dispatcher.ts';
+import type { ApiDispatcher } from '../../api/dispatcher.ts';
 import type { ApiRoute } from '../../api/route.ts';
-import { ApiRouter } from '../../api/router.ts';
 import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
-import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
+import type { ApiSocketDispatcher, SocketRoute } from '../../api/socket.ts';
 import type { StateHomeReach } from '../../api/state-homes.ts';
 import type { AuditedRoutesSubsystem } from '../../audit/index.ts';
-import { auditedRoutes, auditedSocketRoutes } from '../../audit/routes.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
-import { type ConfigChangeSink, configAnnouncedRoutes } from '../../config-files/index.ts';
+import type { ConfigChangeSink } from '../../config-files/index.ts';
 import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { HandoverReconcileLoop } from '../../handover/index.ts';
@@ -22,7 +20,6 @@ import type { HarnessUpdateSubsystem } from '../../harness-update/index.ts';
 import type { PhoneApprovalService } from '../../input-requests/phone-approval.ts';
 import type { InputRequestService } from '../../input-requests/service.ts';
 import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
-import { observedRoutes } from '../../performance/observed-routes.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
 import type { PinService } from '../../pins/index.ts';
 import type { RenderService } from '../../renders/index.ts';
@@ -53,7 +50,6 @@ import { configFilesConfirmations } from './agenda-confirms.ts';
 import type { AgendaGatePort } from './agenda-gates.ts';
 import { agendaMachineRoutes } from './agenda-machine.ts';
 import { agendaOpenRoutes } from './agenda-open.ts';
-import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
 import { agentToolRoutes, sessionCredentialDirectory } from './agent-tools.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
@@ -104,7 +100,7 @@ import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
 import { type CopyListing, type RuleProgramHomes, secureCopyRoutes } from './secure-copy.ts';
 import { securityRoutes } from './security.ts';
-import { type SessionAddressBook, sessionAddressedRoutes, sessionAddressedSockets } from './session-addressing.ts';
+import type { SessionAddressBook } from './session-addressing.ts';
 import { type SessionAgendaModeSubsystem, sessionAgendaModeRoutes } from './session-agenda-mode.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answer.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
@@ -554,385 +550,342 @@ export interface MountedSubsystems {
   readonly audit: AuditSubsystem & AuditedRoutesSubsystem;
 }
 
-/**
- * The daemon's complete route table: the base feeds, then each mounted subsystem.
- *
- * Order matters — the router tries routes in registration order — and the base feeds are all fixed
- * literal paths (`/healthz`, `/usage`, `/metrics`), so no subsystem pattern can shadow one.
- */
-export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: MountedSubsystems): readonly ApiRoute[] {
-  // Outermost, so the audit log and the agent-control switches below see the session a name addressed
-  // rather than the name. See `session-addressing.ts`.
-  return sessionAddressedRoutes(
-    subsystems.sessionAddresses,
-    auditedRoutes(
-      subsystems.audit,
-      agentControlledRoutes(subsystems.agentControl, [
-        ...daemonApiRoutes(base),
-        // Pairing is public redemption plus the code and device operations that produce and end the
-        // credentials it hands out. It sits beside the base surface because it establishes the credential
-        // every remote route later sees — and it is governed by the `pairing` capability rather than by the
-        // `host` scope, because a browser is always a paired device and could otherwise never add a second
-        // one. See the mount's header for why that is the correct layer.
-        ...pairingRoutes(subsystems.pairing, subsystems.deviceGrants),
-        // Push enrolment registers beside pairing because it is the same subject: only a paired device may
-        // enrol, and its enrolment dies with its grant. Every path is under `/v1/push`, which no other
-        // subsystem uses, and its one pattern is registered after its two fixed literals — so it can
-        // neither shadow nor be shadowed by anything here.
-        ...pushRoutes(subsystems.push, subsystems.grants, subsystems.pushAlerts),
-        // The passkey step-up sits beside pairing too: it is how a paired device proves its owner is
-        // holding it. Every path is under `/v1/passkeys` or `/v1/step-up`, which nothing else uses, and
-        // there are no patterns among them, so it can neither shadow nor be shadowed.
-        ...stepUpRoutes(
-          subsystems.stepUp,
-          subsystems.secrets.seeds,
-          subsystems.secureCopy.plans,
-          subsystems.signInRules,
-          subsystems.secureCopy.stages,
-        ),
-        // The machine's security settings sit beside the step-up they tune. `/v1/security` is a fixed
-        // literal no other subsystem uses, so it can neither shadow nor be shadowed.
-        ...securityRoutes(subsystems.security),
-        // The grant surface sits beside pairing for the same reason pairing sits beside the base feeds:
-        // it establishes what the credential pairing hands out is then ALLOWED to do. Every path is under
-        // `/v1/grants`, which no other subsystem uses, so it can neither shadow nor be shadowed. It is
-        // registered EARLY and is itself ungoverned so a restricted UI can always read the reason it is
-        // restricted — a grant report a restricted caller could not fetch would be the greyed control
-        // with no explanation this whole feature exists to remove.
-        ...grantRoutes(subsystems.grants),
-        // The security log sits beside the grants and pairing it records. `/v1/audit` is used by nothing else.
-        ...auditRoutes(subsystems.audit),
-        // The carrier refresh sits beside pairing because it is the SECOND half of one exchange: pairing
-        // hands a device the set of ways to reach this daemon, and this is where that device asks again
-        // when the set has changed. `/v1/carriers` is a fixed literal no other subsystem uses, so it can
-        // neither shadow nor be shadowed. It is authenticated rather than operator-scoped — the remote
-        // device is the reader, and nothing here is a secret. See the mount's own header.
-        ...carrierRoutes(subsystems.carriers),
-        // The tunnel switch sits beside the carrier refresh because it changes what that refresh answers:
-        // a tunnel switched on is published there once it connects. `/v1/tunnel` is a fixed literal no
-        // other subsystem uses, so it can neither shadow nor be shadowed. See the mount's own header.
-        ...tunnelRoutes(subsystems.tunnel),
-        // The second way to reach this daemon is asked for inside the first, which is why it sits beside
-        // the carrier refresh: a paired device that reached it over the relay offers a peer-to-peer path
-        // here. `/v1/webrtc` is used by nothing else, so it can neither shadow nor be shadowed.
-        ...webrtcRoutes(subsystems.webrtc),
-        // The daemon's own health sits with the base feeds it completes: `/healthz` is the public
-        // liveness answer, and this is the scoped report the protocol declares under the same subject.
-        // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.
-        ...daemonHealthRoutes(subsystems.health),
-        ...doctorRoutes(subsystems.doctor),
-        // The performance profile sits beside the doctor: both describe this machine to its owner.
-        // `/v1/diagnostics/profile` is used by nothing else, so it can neither shadow nor be shadowed.
-        ...performanceRoutes(subsystems.performance.profiles),
-        // The account model's tables (docs/design/account-model.md §7). Fleet paths are fixed literals
-        // under their own namespace, so they cannot shadow any session route below.
-        ...fleetCredentialRoutes(subsystems.fleetCredentials),
-        ...fleetCatalogRoutes(subsystems.fleetCatalog),
-        ...fleetSetupRoutes(subsystems.fleetSetup),
-        // The sign-in surface sits directly beside the fleet it signs in, under `/v1/fleet/login` — a fixed
-        // literal with a one-segment id beneath it, so it can neither shadow nor be shadowed by anything in
-        // the fleet tables above.
-        ...harnessLoginRoutes(subsystems.harnessLogin),
-        ...mcpOAuthRoutes(subsystems.mcpOAuth),
-        // `/v1/mcp` and `/v1/mcp/check` are fixed literals no other route uses; the per-session list ends in
-        // `mcp/servers`, a literal pair the session MCP routes below do not use, so none can shadow another.
-        ...mcpInventoryRoutes(subsystems.mcpInventory),
-        // Resource limits register beside the fleet they bound, and are governed by the same capability
-        // for the same reason: this is a machine-wide setting about the agents this daemon runs. Both
-        // paths are the one fixed literal `/v1/cgroups/config`, which no other subsystem uses, so this
-        // table can neither shadow nor be shadowed by anything around it.
-        ...cgroupRoutes(subsystems.cgroups),
-        // The configuration files, beside the machine-wide settings they hold. Every path is under
-        // `/v1/config` or is the one literal `/v1/agent/config`, which no other subsystem uses, so this
-        // table can neither shadow nor be shadowed by anything around it.
-        ...configFilesRoutes(subsystems.configFiles),
-        // Imported harness history is intentionally outside `/v1/sessions`: no foreign transcript has
-        // the journal/pane evidence a managed session requires, so it cannot acquire live controls by
-        // looking like one.
-        ...foreignHistoryRoutes(subsystems.foreignHistory),
-        ...conversationImportRoutes(subsystems.conversationImport),
-        ...scratchGcRoutes(subsystems.scratchGc),
-        ...systemOpenRoutes(subsystems.systemOpen),
-        // Every secret path is under `/v1/secrets`, which no other subsystem uses, so this table can
-        // neither shadow nor be shadowed by anything around it. It registers with the daemon-wide
-        // surfaces above rather than among the per-session ones because a secret belongs to the MACHINE:
-        // it is not addressed by a session, and no session owns one.
-        ...secretRoutes(subsystems.secrets),
-        ...sharedCatalogRoutes(subsystems.sharedCatalogs),
-        ...catalogMemberRoutes(subsystems.catalogMembers),
-        ...catalogLinkRoutes(subsystems.catalogLinks),
-        // The session read comes first among the subsystems: `/v1/sessions` is a fixed literal, and the
-        // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
-        // deeper per-session routes that follow.
-        ...sessionRoutes(subsystems.sessions),
-        ...(subsystems.sessionArchive === undefined ? [] : sessionArchiveRoutes(subsystems.sessionArchive)),
-        ...catalogRoutes(subsystems.catalogs, subsystems.sessions),
-        ...boardProjectRoutes(subsystems.boardProjects, subsystems.sessions, subsystems.boardSwitches),
-        // The worktree surface registers beside the catalogs for the reason its subsystem field states.
-        // Every path is under `/v1/worktrees`, which no other subsystem uses, so it can neither shadow
-        // nor be shadowed — and its own two deeper literals are registered before the collection they
-        // sit under, which would otherwise match them first.
-        ...worktreeRoutes(subsystems.worktrees),
-        // The write surface registers AFTER the read for the same reason the read comes first: `POST
-        // /v1/sessions` is a fixed literal and the stop is a deeper pattern, so neither shadows the
-        // other and both sit above every per-session subsystem that follows.
-        ...sessionControlRoutes(subsystems.sessionControl, {
-          guard: subsystems.grants,
-          knownRoots: knownLaunchRoots(subsystems.catalogs, subsystems.worktrees),
-          ...(subsystems.stateHomes === undefined ? {} : { stateHomes: subsystems.stateHomes }),
-          sessionExists: async sessionId => (await subsystems.sessions.get(sessionId)) !== undefined,
-        }),
-        // Beside the stop it is the gentler counterpart of: a one-segment pattern under `/v1/sessions/:sessionId`
-        // with its own final literal, so it neither shadows nor is shadowed by the deeper per-session routes.
-        ...sessionCredentialRoutes(subsystems.sessionCredential),
-        // The revive registers with the rest of the write surface, above every per-session subsystem, so
-        // its one-segment pattern sits beside the stop it is the counterpart of rather than below the
-        // deeper patterns. Neither can shadow the other: they differ in their final literal segment.
-        ...sessionResumeRoutes(subsystems.sessionResume),
-        // The migration registers beside the revive it is built on: both are one-segment patterns under
-        // `/v1/sessions/:sessionId` that differ only in their final literal, so neither can shadow the
-        // other, and both belong above the deeper per-session subsystems.
-        ...sessionMigrateRoutes(subsystems.sessionMigrate),
-        // `/v1/restarts` is a prefix no other route uses, so it can neither shadow nor be shadowed.
-        ...sessionRestartRoutes(subsystems.sessionRestart),
-        // The handover registers immediately after the migration it is the cross-family counterpart of, so
-        // the two operations a caller chooses between sit together. Its three paths are one and two
-        // segments under `/v1/sessions/:sessionId` ending in the literal `handover` — and `handover/cancel`
-        // beneath it, registered in the same table after its parent — so none can shadow or be shadowed by
-        // the migrate above or the deeper per-session subsystems below.
-        ...sessionHandoverRoutes(subsystems.handover),
-        // Same shape and depth as its neighbours: the literal `fork` cannot shadow or be shadowed by a
-        // sibling, nor by the shallower session read above.
-        ...sessionForkRoutes(subsystems.sessionFork),
-        // The runtime controls register beside the migration, and for the same reason: both change what
-        // is running in a session that already exists. Both paths are one-segment patterns under
-        // `/v1/sessions/:sessionId` whose final literals (`runtime`, `runtime-models`) no other route
-        // uses, and a literal segment is matched literally — so `runtime-models` can neither shadow nor
-        // be shadowed by `runtime`, and neither can be swallowed by the one-segment `GET
-        // /v1/sessions/:sessionId` above, which is a whole segment shallower.
-        ...sessionRuntimeRoutes(subsystems.sessionRuntime),
-        // The signal registers with the rest of the write surface for the same reason the revive and the
-        // migration do: it is a one-segment pattern under `/v1/sessions/:sessionId` whose final literal
-        // (`signal`) no other route uses, so it can neither shadow nor be shadowed, and it belongs above
-        // the deeper per-session subsystems.
-        ...sessionSignalRoutes(subsystems.sessionSignal),
-        // Same shape and depth as the signal: a one-segment pattern whose final literal (`rename`) no other
-        // route uses, so it can neither shadow nor be shadowed.
-        ...sessionRenameRoutes(subsystems.sessionRename),
-        // Same shape and depth: the final literals `pin` and `unpin` belong to no other session route.
-        ...sessionPinRoutes(subsystems.sessionPin),
-        // Same shape and depth as the rename: a one-segment pattern whose final literal (`hypermedia`) no
-        // other route uses, so it can neither shadow nor be shadowed.
-        ...sessionHypermediaRoutes(subsystems.sessionHypermedia),
-        // `agenda-mode` is a final literal no other one-segment session route uses.
-        ...sessionAgendaModeRoutes(subsystems.sessionAgendaMode),
-        // `compact-at` is a final literal no other one-segment session route uses.
-        ...sessionCompactAtRoutes(subsystems.sessionCompactAt),
-        // `/v1/pack…` is a prefix no other route uses; the two session paths end in literals (`result`,
-        // `pack`) no other one-segment session route uses, so none can shadow or be shadowed.
-        ...packRoutes(subsystems.pack, subsystems.stateHomes),
-        // Every path ends in literals under `mcp`, which no other route uses, and the subsystem registers its
-        // deeper `preview` paths before the shallower ones itself, so none can shadow or be shadowed.
-        ...sessionMcpRoutes(subsystems.sessionMcp),
-        ...catalogInstallRoutes(subsystems.catalogInstalls),
-        // Every path is under `/v1/skill-installs/local`, which no other route uses.
-        ...localSkillInstallRoutes(subsystems.localSkillInstalls),
-        // The send and the interrupt register with the rest of the write surface, for the reason the
-        // revive, the migration and the signal all do: each is a one-segment pattern under
-        // `/v1/sessions/:sessionId` whose final literal no other route uses, so none can shadow or be
-        // shadowed, and all belong above the deeper per-session subsystems.
-        ...sessionSendRoutes(subsystems.sessionSend, sentDraftClearer(subsystems.sharedDrafts)),
-        ...sessionAnswerRoutes(subsystems.sessionAnswer),
-        // Attachment routes are mounted before sends may honour attachment ids. Their
-        // deeper unlock path cannot shadow this one-segment upload route.
-        ...sessionAttachmentRoutes(subsystems.sessionAttachments),
-        ...agendaRoutes(
-          subsystems.attention,
-          subsystems.notifications,
-          subsystems.agendaReplies,
-          configFilesConfirmations(subsystems.configFiles.service, subsystems.audit),
-          subsystems.gateItems,
-        ),
-        ...agendaClearRoutes(subsystems.agendaClearer),
-        ...agendaOpenRoutes(subsystems.agendaRollup),
-        ...agendaMachineRoutes(subsystems.machineAgenda),
-        ...pinRoutes(subsystems.pins),
-        ...renderRoutes(subsystems.renders),
-        ...sharedDraftRoutes(subsystems.sharedDrafts),
-        ...legacyTaskRoutes(subsystems.legacyTasks),
-        // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed
-        // literals are registered before the patterns beneath them.
-        ...boardRoutes(subsystems.board),
-        // `/v1/search` is a fixed literal no other subsystem uses.
-        ...workSearchRoutes(subsystems.workSearch),
-        // `/v1/tidy/plan` is a fixed literal no other subsystem uses.
-        ...tidyRoutes(subsystems.tidy),
-        ...analyticsRoutes(subsystems.analytics),
-        ...analyticsPricingRoutes(subsystems.analyticsPricing),
-        // The agent's route is a fixed literal under `/v1/agent`, and a person's are under
-        // `/v1/sessions/:sessionId/surfaces`, which no other subsystem uses: none can shadow or be shadowed.
-        ...agentToolRoutes(subsystems.agentTools.service, subsystems.agentTools.identities),
-        ...inputRequestRoutes(subsystems.inputRequests),
-        // `/v1/phone-approvals` and `/v1/sessions/:sessionId/phone-approvals/*` are literals no other subsystem uses.
-        ...(subsystems.phoneApprovals === undefined ? [] : phoneApprovalRoutes(subsystems.phoneApprovals)),
-        ...secureCopyRoutes(
-          subsystems.secureCopy.copies,
-          subsystems.secureCopy.rules,
-          subsystems.secureCopy.plans,
-          subsystems.secureCopy.stages,
-          subsystems.secureCopy.homes,
-        ),
-        // `/v1/task-plans` and `/v1/sessions/:sessionId/task-plans/*` are literals no other subsystem uses.
-        ...taskPlanRoutes(subsystems.secureCopy.plans),
-        // `/v1/sign-in-rules` is a literal no other subsystem uses; `/v1/accounts/:id/sign-in-rules/revoke` ends in two
-        // literals no account route has, so neither can shadow or be shadowed.
-        ...signInRuleRoutes(subsystems.signInRules, subsystems.signInRuleSuggestions),
-        ...terminalRoutes(subsystems.terminals),
-        // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
-        // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the
-        // literal `browser`, which distinguishes it from every other `/v1/sessions/:id/...` route above.
-        ...browserLoginRoutes(subsystems.browserLogin, subsystems.browser),
-        ...browserProxyRoutes(subsystems.browserProxy),
-        ...nameRoutes(subsystems.names),
-        ...learningRoutes(subsystems.learning),
-        ...recommendRoutes(subsystems.recommend),
-        // Dictation enhancement is a fixed literal under `/v1/stt`, which no other subsystem uses, so it
-        // can neither shadow nor be shadowed by anything around it. It registers with the daemon-wide
-        // surfaces rather than among the per-session ones because it belongs to the MACHINE: the
-        // credential it spends is the operator's, and no session owns a transcript.
-        ...sttEnhancementRoutes(subsystems.sttEnhancement),
-        // Fixed literals under `/v1/speedups`, which no other subsystem uses: none can shadow or be shadowed.
-        ...speedupRoutes(subsystems.speedups),
-        // Fixed literals under `/v1/models`, which no other subsystem uses: none can shadow or be shadowed.
-        ...modelRoutes(subsystems.models),
-        // Fixed literals under `/v1/daemon`, which no other subsystem uses: none can shadow or be shadowed.
-        ...daemonUpdateRoutes(subsystems.daemonUpdate),
-        // Fixed literals under `/v1/harnesses`, which no other subsystem uses: none can shadow or be shadowed.
-        ...harnessUpdateRoutes(subsystems.harnessUpdate),
-        // The working-tree read registers last among the per-session subsystems: three of its four paths are
-        // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
-        // its one-segment `fs`, so nothing here can shadow or be shadowed.
-        ...sessionFilesystemRoutes(
-          subsystems.sessionFilesystem,
-          subsystems.sessions,
-          subsystems.sessionMediaRoot,
-          subsystems.stateHomes,
-        ),
-        // Every warden path is under `/v1/warden`, which no other subsystem uses, so this table can
-        // neither shadow nor be shadowed by anything above it.
-        ...wardenRoutes(subsystems.warden),
-        // The operator reads register last, beside the working-tree read they sit alongside. All three are
-        // one-segment patterns under `/v1/sessions/:sessionId` whose final literals (`events`, `snapshot`,
-        // `logs`) no other route uses, so they can neither shadow nor be shadowed by anything above.
-        ...sessionReadRoutes(subsystems.sessionReads, subsystems.sessions, subsystems.transcriptImages),
-        // The attach proof sits with the operator reads but is its own capability: unlike a screen or a
-        // transcript it authorizes a local process action, and its mount revalidates the pane identity.
-        ...sessionAttachRoutes(subsystems.sessionAttach, subsystems.sessions),
-        // The Console's input: two segments deep under `/v1/sessions/:sessionId`, ending in the literal
-        // `console/input` no other route uses, so it can neither shadow nor be shadowed.
-        ...sessionConsoleRoutes(subsystems.sessionConsole, subsystems.sessions),
-        // The Processes tab: one to three segments under `/v1/sessions/:sessionId` starting with the literal
-        // `processes` no other route uses, so they can neither shadow nor be shadowed.
-        ...sessionProcessRoutes(subsystems.sessionProcesses, subsystems.sessions),
-        // A permission answer: one segment under `/v1/sessions/:sessionId`, ending in the literal
-        // `permission` no other route uses, so it can neither shadow nor be shadowed.
-        ...sessionPermissionRoutes(subsystems.sessionPermission, subsystems.sessions),
-        ...sessionDialogRoutes(subsystems.sessionDialog, subsystems.sessions),
-        // The event ticket counter for the socket table. `/v1/events/ticket` is a fixed literal that
-        // only the request/response table carries — the socket table's `/v1/events` matches GET on one
-        // segment less — so the two cannot shadow each other and a POST here is never an upgrade.
-      ]),
-    ),
-  );
-}
-
-/**
- * The host's credentials plus a ferret session's own, looked up through the agent tools' resolver — the
- * one lookup the agent route already makes — and audited when refused.
- */
-function withSessionCredentials(base: DaemonApiDependencies, subsystems: MountedSubsystems): ApiCredentials {
+/** Temporary inventory owner until every feature has its own module. */
+export function legacyModule(
+  base: DaemonApiDependencies | undefined,
+  subsystems: MountedSubsystems,
+): BuiltModule<void> {
   return {
-    ...base.credentials,
-    sessions: sessionCredentialDirectory(subsystems.agentTools.identities, subsystems.audit.log),
+    id: 'legacy',
+    provides: undefined,
+    jobs: {},
+    contributes: {
+      routes:
+        base === undefined
+          ? []
+          : [
+              ...daemonApiRoutes(base),
+              // Pairing is public redemption plus the code and device operations that produce and end the
+              // credentials it hands out. It sits beside the base surface because it establishes the credential
+              // every remote route later sees — and it is governed by the `pairing` capability rather than by the
+              // `host` scope, because a browser is always a paired device and could otherwise never add a second
+              // one. See the mount's header for why that is the correct layer.
+              ...pairingRoutes(subsystems.pairing, subsystems.deviceGrants),
+              // Push enrolment registers beside pairing because it is the same subject: only a paired device may
+              // enrol, and its enrolment dies with its grant. Every path is under `/v1/push`, which no other
+              // subsystem uses, and its one pattern is registered after its two fixed literals — so it can
+              // neither shadow nor be shadowed by anything here.
+              ...pushRoutes(subsystems.push, subsystems.grants, subsystems.pushAlerts),
+              // The passkey step-up sits beside pairing too: it is how a paired device proves its owner is
+              // holding it. Every path is under `/v1/passkeys` or `/v1/step-up`, which nothing else uses, and
+              // there are no patterns among them, so it can neither shadow nor be shadowed.
+              ...stepUpRoutes(
+                subsystems.stepUp,
+                subsystems.secrets.seeds,
+                subsystems.secureCopy.plans,
+                subsystems.signInRules,
+                subsystems.secureCopy.stages,
+              ),
+              // The machine's security settings sit beside the step-up they tune. `/v1/security` is a fixed
+              // literal no other subsystem uses, so it can neither shadow nor be shadowed.
+              ...securityRoutes(subsystems.security),
+              // The grant surface sits beside pairing for the same reason pairing sits beside the base feeds:
+              // it establishes what the credential pairing hands out is then ALLOWED to do. Every path is under
+              // `/v1/grants`, which no other subsystem uses, so it can neither shadow nor be shadowed. It is
+              // registered EARLY and is itself ungoverned so a restricted UI can always read the reason it is
+              // restricted — a grant report a restricted caller could not fetch would be the greyed control
+              // with no explanation this whole feature exists to remove.
+              ...grantRoutes(subsystems.grants),
+              // The security log sits beside the grants and pairing it records. `/v1/audit` is used by nothing else.
+              ...auditRoutes(subsystems.audit),
+              // The carrier refresh sits beside pairing because it is the SECOND half of one exchange: pairing
+              // hands a device the set of ways to reach this daemon, and this is where that device asks again
+              // when the set has changed. `/v1/carriers` is a fixed literal no other subsystem uses, so it can
+              // neither shadow nor be shadowed. It is authenticated rather than operator-scoped — the remote
+              // device is the reader, and nothing here is a secret. See the mount's own header.
+              ...carrierRoutes(subsystems.carriers),
+              // The tunnel switch sits beside the carrier refresh because it changes what that refresh answers:
+              // a tunnel switched on is published there once it connects. `/v1/tunnel` is a fixed literal no
+              // other subsystem uses, so it can neither shadow nor be shadowed. See the mount's own header.
+              ...tunnelRoutes(subsystems.tunnel),
+              // The second way to reach this daemon is asked for inside the first, which is why it sits beside
+              // the carrier refresh: a paired device that reached it over the relay offers a peer-to-peer path
+              // here. `/v1/webrtc` is used by nothing else, so it can neither shadow nor be shadowed.
+              ...webrtcRoutes(subsystems.webrtc),
+              // The daemon's own health sits with the base feeds it completes: `/healthz` is the public
+              // liveness answer, and this is the scoped report the protocol declares under the same subject.
+              // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.
+              ...daemonHealthRoutes(subsystems.health),
+              ...doctorRoutes(subsystems.doctor),
+              // The performance profile sits beside the doctor: both describe this machine to its owner.
+              // `/v1/diagnostics/profile` is used by nothing else, so it can neither shadow nor be shadowed.
+              ...performanceRoutes(subsystems.performance.profiles),
+              // The account model's tables (docs/design/account-model.md §7). Fleet paths are fixed literals
+              // under their own namespace, so they cannot shadow any session route below.
+              ...fleetCredentialRoutes(subsystems.fleetCredentials),
+              ...fleetCatalogRoutes(subsystems.fleetCatalog),
+              ...fleetSetupRoutes(subsystems.fleetSetup),
+              // The sign-in surface sits directly beside the fleet it signs in, under `/v1/fleet/login` — a fixed
+              // literal with a one-segment id beneath it, so it can neither shadow nor be shadowed by anything in
+              // the fleet tables above.
+              ...harnessLoginRoutes(subsystems.harnessLogin),
+              ...mcpOAuthRoutes(subsystems.mcpOAuth),
+              // `/v1/mcp` and `/v1/mcp/check` are fixed literals no other route uses; the per-session list ends in
+              // `mcp/servers`, a literal pair the session MCP routes below do not use, so none can shadow another.
+              ...mcpInventoryRoutes(subsystems.mcpInventory),
+              // Resource limits register beside the fleet they bound, and are governed by the same capability
+              // for the same reason: this is a machine-wide setting about the agents this daemon runs. Both
+              // paths are the one fixed literal `/v1/cgroups/config`, which no other subsystem uses, so this
+              // table can neither shadow nor be shadowed by anything around it.
+              ...cgroupRoutes(subsystems.cgroups),
+              // The configuration files, beside the machine-wide settings they hold. Every path is under
+              // `/v1/config` or is the one literal `/v1/agent/config`, which no other subsystem uses, so this
+              // table can neither shadow nor be shadowed by anything around it.
+              ...configFilesRoutes(subsystems.configFiles),
+              // Imported harness history is intentionally outside `/v1/sessions`: no foreign transcript has
+              // the journal/pane evidence a managed session requires, so it cannot acquire live controls by
+              // looking like one.
+              ...foreignHistoryRoutes(subsystems.foreignHistory),
+              ...conversationImportRoutes(subsystems.conversationImport),
+              ...scratchGcRoutes(subsystems.scratchGc),
+              ...systemOpenRoutes(subsystems.systemOpen),
+              // Every secret path is under `/v1/secrets`, which no other subsystem uses, so this table can
+              // neither shadow nor be shadowed by anything around it. It registers with the daemon-wide
+              // surfaces above rather than among the per-session ones because a secret belongs to the MACHINE:
+              // it is not addressed by a session, and no session owns one.
+              ...secretRoutes(subsystems.secrets),
+              ...sharedCatalogRoutes(subsystems.sharedCatalogs),
+              ...catalogMemberRoutes(subsystems.catalogMembers),
+              ...catalogLinkRoutes(subsystems.catalogLinks),
+              // The session read comes first among the subsystems: `/v1/sessions` is a fixed literal, and the
+              // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
+              // deeper per-session routes that follow.
+              ...sessionRoutes(subsystems.sessions),
+              ...(subsystems.sessionArchive === undefined ? [] : sessionArchiveRoutes(subsystems.sessionArchive)),
+              ...catalogRoutes(subsystems.catalogs, subsystems.sessions),
+              ...boardProjectRoutes(subsystems.boardProjects, subsystems.sessions, subsystems.boardSwitches),
+              // The worktree surface registers beside the catalogs for the reason its subsystem field states.
+              // Every path is under `/v1/worktrees`, which no other subsystem uses, so it can neither shadow
+              // nor be shadowed — and its own two deeper literals are registered before the collection they
+              // sit under, which would otherwise match them first.
+              ...worktreeRoutes(subsystems.worktrees),
+              // The write surface registers AFTER the read for the same reason the read comes first: `POST
+              // /v1/sessions` is a fixed literal and the stop is a deeper pattern, so neither shadows the
+              // other and both sit above every per-session subsystem that follows.
+              ...sessionControlRoutes(subsystems.sessionControl, {
+                guard: subsystems.grants,
+                knownRoots: knownLaunchRoots(subsystems.catalogs, subsystems.worktrees),
+                ...(subsystems.stateHomes === undefined ? {} : { stateHomes: subsystems.stateHomes }),
+                sessionExists: async sessionId => (await subsystems.sessions.get(sessionId)) !== undefined,
+              }),
+              // Beside the stop it is the gentler counterpart of: a one-segment pattern under `/v1/sessions/:sessionId`
+              // with its own final literal, so it neither shadows nor is shadowed by the deeper per-session routes.
+              ...sessionCredentialRoutes(subsystems.sessionCredential),
+              // The revive registers with the rest of the write surface, above every per-session subsystem, so
+              // its one-segment pattern sits beside the stop it is the counterpart of rather than below the
+              // deeper patterns. Neither can shadow the other: they differ in their final literal segment.
+              ...sessionResumeRoutes(subsystems.sessionResume),
+              // The migration registers beside the revive it is built on: both are one-segment patterns under
+              // `/v1/sessions/:sessionId` that differ only in their final literal, so neither can shadow the
+              // other, and both belong above the deeper per-session subsystems.
+              ...sessionMigrateRoutes(subsystems.sessionMigrate),
+              // `/v1/restarts` is a prefix no other route uses, so it can neither shadow nor be shadowed.
+              ...sessionRestartRoutes(subsystems.sessionRestart),
+              // The handover registers immediately after the migration it is the cross-family counterpart of, so
+              // the two operations a caller chooses between sit together. Its three paths are one and two
+              // segments under `/v1/sessions/:sessionId` ending in the literal `handover` — and `handover/cancel`
+              // beneath it, registered in the same table after its parent — so none can shadow or be shadowed by
+              // the migrate above or the deeper per-session subsystems below.
+              ...sessionHandoverRoutes(subsystems.handover),
+              // Same shape and depth as its neighbours: the literal `fork` cannot shadow or be shadowed by a
+              // sibling, nor by the shallower session read above.
+              ...sessionForkRoutes(subsystems.sessionFork),
+              // The runtime controls register beside the migration, and for the same reason: both change what
+              // is running in a session that already exists. Both paths are one-segment patterns under
+              // `/v1/sessions/:sessionId` whose final literals (`runtime`, `runtime-models`) no other route
+              // uses, and a literal segment is matched literally — so `runtime-models` can neither shadow nor
+              // be shadowed by `runtime`, and neither can be swallowed by the one-segment `GET
+              // /v1/sessions/:sessionId` above, which is a whole segment shallower.
+              ...sessionRuntimeRoutes(subsystems.sessionRuntime),
+              // The signal registers with the rest of the write surface for the same reason the revive and the
+              // migration do: it is a one-segment pattern under `/v1/sessions/:sessionId` whose final literal
+              // (`signal`) no other route uses, so it can neither shadow nor be shadowed, and it belongs above
+              // the deeper per-session subsystems.
+              ...sessionSignalRoutes(subsystems.sessionSignal),
+              // Same shape and depth as the signal: a one-segment pattern whose final literal (`rename`) no other
+              // route uses, so it can neither shadow nor be shadowed.
+              ...sessionRenameRoutes(subsystems.sessionRename),
+              // Same shape and depth: the final literals `pin` and `unpin` belong to no other session route.
+              ...sessionPinRoutes(subsystems.sessionPin),
+              // Same shape and depth as the rename: a one-segment pattern whose final literal (`hypermedia`) no
+              // other route uses, so it can neither shadow nor be shadowed.
+              ...sessionHypermediaRoutes(subsystems.sessionHypermedia),
+              // `agenda-mode` is a final literal no other one-segment session route uses.
+              ...sessionAgendaModeRoutes(subsystems.sessionAgendaMode),
+              // `compact-at` is a final literal no other one-segment session route uses.
+              ...sessionCompactAtRoutes(subsystems.sessionCompactAt),
+              // `/v1/pack…` is a prefix no other route uses; the two session paths end in literals (`result`,
+              // `pack`) no other one-segment session route uses, so none can shadow or be shadowed.
+              ...packRoutes(subsystems.pack, subsystems.stateHomes),
+              // Every path ends in literals under `mcp`, which no other route uses, and the subsystem registers its
+              // deeper `preview` paths before the shallower ones itself, so none can shadow or be shadowed.
+              ...sessionMcpRoutes(subsystems.sessionMcp),
+              ...catalogInstallRoutes(subsystems.catalogInstalls),
+              // Every path is under `/v1/skill-installs/local`, which no other route uses.
+              ...localSkillInstallRoutes(subsystems.localSkillInstalls),
+              // The send and the interrupt register with the rest of the write surface, for the reason the
+              // revive, the migration and the signal all do: each is a one-segment pattern under
+              // `/v1/sessions/:sessionId` whose final literal no other route uses, so none can shadow or be
+              // shadowed, and all belong above the deeper per-session subsystems.
+              ...sessionSendRoutes(subsystems.sessionSend, sentDraftClearer(subsystems.sharedDrafts)),
+              ...sessionAnswerRoutes(subsystems.sessionAnswer),
+              // Attachment routes are mounted before sends may honour attachment ids. Their
+              // deeper unlock path cannot shadow this one-segment upload route.
+              ...sessionAttachmentRoutes(subsystems.sessionAttachments),
+              ...agendaRoutes(
+                subsystems.attention,
+                subsystems.notifications,
+                subsystems.agendaReplies,
+                configFilesConfirmations(subsystems.configFiles.service, subsystems.audit),
+                subsystems.gateItems,
+              ),
+              ...agendaClearRoutes(subsystems.agendaClearer),
+              ...agendaOpenRoutes(subsystems.agendaRollup),
+              ...agendaMachineRoutes(subsystems.machineAgenda),
+              ...pinRoutes(subsystems.pins),
+              ...renderRoutes(subsystems.renders),
+              ...sharedDraftRoutes(subsystems.sharedDrafts),
+              ...legacyTaskRoutes(subsystems.legacyTasks),
+              // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed
+              // literals are registered before the patterns beneath them.
+              ...boardRoutes(subsystems.board),
+              // `/v1/search` is a fixed literal no other subsystem uses.
+              ...workSearchRoutes(subsystems.workSearch),
+              // `/v1/tidy/plan` is a fixed literal no other subsystem uses.
+              ...tidyRoutes(subsystems.tidy),
+              ...analyticsRoutes(subsystems.analytics),
+              ...analyticsPricingRoutes(subsystems.analyticsPricing),
+              // The agent's route is a fixed literal under `/v1/agent`, and a person's are under
+              // `/v1/sessions/:sessionId/surfaces`, which no other subsystem uses: none can shadow or be shadowed.
+              ...agentToolRoutes(subsystems.agentTools.service, subsystems.agentTools.identities),
+              ...inputRequestRoutes(subsystems.inputRequests),
+              // `/v1/phone-approvals` and `/v1/sessions/:sessionId/phone-approvals/*` are literals no other subsystem uses.
+              ...(subsystems.phoneApprovals === undefined ? [] : phoneApprovalRoutes(subsystems.phoneApprovals)),
+              ...secureCopyRoutes(
+                subsystems.secureCopy.copies,
+                subsystems.secureCopy.rules,
+                subsystems.secureCopy.plans,
+                subsystems.secureCopy.stages,
+                subsystems.secureCopy.homes,
+              ),
+              // `/v1/task-plans` and `/v1/sessions/:sessionId/task-plans/*` are literals no other subsystem uses.
+              ...taskPlanRoutes(subsystems.secureCopy.plans),
+              // `/v1/sign-in-rules` is a literal no other subsystem uses; `/v1/accounts/:id/sign-in-rules/revoke` ends in two
+              // literals no account route has, so neither can shadow or be shadowed.
+              ...signInRuleRoutes(subsystems.signInRules, subsystems.signInRuleSuggestions),
+              ...terminalRoutes(subsystems.terminals),
+              // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
+              // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the
+              // literal `browser`, which distinguishes it from every other `/v1/sessions/:id/...` route above.
+              ...browserLoginRoutes(subsystems.browserLogin, subsystems.browser),
+              ...browserProxyRoutes(subsystems.browserProxy),
+              ...nameRoutes(subsystems.names),
+              ...learningRoutes(subsystems.learning),
+              ...recommendRoutes(subsystems.recommend),
+              // Dictation enhancement is a fixed literal under `/v1/stt`, which no other subsystem uses, so it
+              // can neither shadow nor be shadowed by anything around it. It registers with the daemon-wide
+              // surfaces rather than among the per-session ones because it belongs to the MACHINE: the
+              // credential it spends is the operator's, and no session owns a transcript.
+              ...sttEnhancementRoutes(subsystems.sttEnhancement),
+              // Fixed literals under `/v1/speedups`, which no other subsystem uses: none can shadow or be shadowed.
+              ...speedupRoutes(subsystems.speedups),
+              // Fixed literals under `/v1/models`, which no other subsystem uses: none can shadow or be shadowed.
+              ...modelRoutes(subsystems.models),
+              // Fixed literals under `/v1/daemon`, which no other subsystem uses: none can shadow or be shadowed.
+              ...daemonUpdateRoutes(subsystems.daemonUpdate),
+              // Fixed literals under `/v1/harnesses`, which no other subsystem uses: none can shadow or be shadowed.
+              ...harnessUpdateRoutes(subsystems.harnessUpdate),
+              // The working-tree read registers last among the per-session subsystems: three of its four paths are
+              // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
+              // its one-segment `fs`, so nothing here can shadow or be shadowed.
+              ...sessionFilesystemRoutes(
+                subsystems.sessionFilesystem,
+                subsystems.sessions,
+                subsystems.sessionMediaRoot,
+                subsystems.stateHomes,
+              ),
+              // Every warden path is under `/v1/warden`, which no other subsystem uses, so this table can
+              // neither shadow nor be shadowed by anything above it.
+              ...wardenRoutes(subsystems.warden),
+              // The operator reads register last, beside the working-tree read they sit alongside. All three are
+              // one-segment patterns under `/v1/sessions/:sessionId` whose final literals (`events`, `snapshot`,
+              // `logs`) no other route uses, so they can neither shadow nor be shadowed by anything above.
+              ...sessionReadRoutes(subsystems.sessionReads, subsystems.sessions, subsystems.transcriptImages),
+              // The attach proof sits with the operator reads but is its own capability: unlike a screen or a
+              // transcript it authorizes a local process action, and its mount revalidates the pane identity.
+              ...sessionAttachRoutes(subsystems.sessionAttach, subsystems.sessions),
+              // The Console's input: two segments deep under `/v1/sessions/:sessionId`, ending in the literal
+              // `console/input` no other route uses, so it can neither shadow nor be shadowed.
+              ...sessionConsoleRoutes(subsystems.sessionConsole, subsystems.sessions),
+              // The Processes tab: one to three segments under `/v1/sessions/:sessionId` starting with the literal
+              // `processes` no other route uses, so they can neither shadow nor be shadowed.
+              ...sessionProcessRoutes(subsystems.sessionProcesses, subsystems.sessions),
+              // A permission answer: one segment under `/v1/sessions/:sessionId`, ending in the literal
+              // `permission` no other route uses, so it can neither shadow nor be shadowed.
+              ...sessionPermissionRoutes(subsystems.sessionPermission, subsystems.sessions),
+              ...sessionDialogRoutes(subsystems.sessionDialog, subsystems.sessions),
+              // The event ticket counter for the socket table. `/v1/events/ticket` is a fixed literal that
+              // only the request/response table carries — the socket table's `/v1/events` matches GET on one
+              // segment less — so the two cannot shadow each other and a POST here is never an upgrade.
+            ],
+      sockets: legacySockets(subsystems),
+    },
   };
 }
 
-/** The dispatcher the transport adapter serves, over the full mounted surface. */
-export function createMountedDispatcher(base: DaemonApiDependencies, subsystems: MountedSubsystems): ApiDispatcher {
-  // The guard is the SUBSYSTEM itself, so the answer a route enforces and the answer the report shows
-  // are one object rather than two that can drift.
-  // The step-up witness is the subsystem the step-up routes mint into, so a confirmation is visible to
-  // the very next request on the same session.
-  return new ApiDispatcher(
-    // A change a route makes without touching a file announces itself once the route has answered —
-    // direct and relayed alike, since both dispatch here. See `ANNOUNCED_ROUTES`.
-    // Every route is timed into the performance probe under its pattern; nothing is recorded unless a
-    // profile is open (see `observedRoutes`).
-    new ApiRouter(
-      observedRoutes(
-        configAnnouncedRoutes(subsystems.configChanges, mountedDaemonRoutes(base, subsystems)),
-        subsystems.performance.probe,
-        subsystems.performance.clock,
-      ),
-    ),
-    withSessionCredentials(base, subsystems),
-    subsystems.grants,
-    undefined,
-    subsystems.stepUp,
-    subsystems.legacyWire,
-    subsystems.compressor,
-  );
+function legacySockets(subsystems: MountedSubsystems): readonly SocketRoute[] {
+  return [
+    // Fixed literal first; it cannot shadow the deeper terminal pattern and makes the fleet feed's
+    // optional session filter one route rather than a second dispatcher.
+    ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions, subsystems.configChanges),
+    ...terminalSocketRoutes(subsystems.terminals, subsystems.inputRequests),
+    ...browserSocketRoutes(subsystems.browser),
+    ...sharedDraftSocketRoutes(subsystems.sharedDrafts, subsystems.sharedDraftStream),
+  ];
 }
 
-/**
- * Every route that answers a protocol switch rather than a response.
- *
- * A SECOND table, not a flag on the first, because the two answer different questions: an `ApiRoute`
- * returns a body, a `SocketRoute` returns something that keeps talking. Terminal streaming is the
- * only one today; the browser viewer transport is built and waits on the unit that mounts browser
- * sessions.
- */
+/** Inventory order is registration order; the dispatcher uses its own specificity-ordered copy. */
+export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: MountedSubsystems): readonly ApiRoute[] {
+  return composeModules(subsystems, [legacyModule(base, subsystems)]).routes;
+}
+
 export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly SocketRoute[] {
-  // Attaching to a live terminal or browser, and typing into a terminal, is recorded like the HTTP
-  // table above. See `auditedSocketRoutes`.
-  return sessionAddressedSockets(
-    subsystems.sessionAddresses,
-    auditedSocketRoutes(
-      subsystems.audit,
-      agentControlledSockets(subsystems.agentControl, [
-        // Fixed literal first; it cannot shadow the deeper terminal pattern and makes the fleet feed's
-        // optional session filter one route rather than a second dispatcher.
-        ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions, subsystems.configChanges),
-        ...terminalSocketRoutes(subsystems.terminals, subsystems.inputRequests),
-        ...browserSocketRoutes(subsystems.browser),
-        ...sharedDraftSocketRoutes(subsystems.sharedDrafts, subsystems.sharedDraftStream),
-      ]),
-    ),
-  );
+  return composeModules(subsystems, [legacyModule(undefined, subsystems)]).sockets;
 }
 
-/**
- * The socket dispatcher the transport adapter serves, over the same credentials as the HTTP one —
- * plus the ticket redeemer, which is deliberately given to this boundary and to no other.
- */
+/** Credentials use the same session directory for HTTP and socket requests. */
+function compositionDependencies(base: DaemonApiDependencies, subsystems: MountedSubsystems) {
+  return {
+    ...subsystems,
+    credentials: {
+      ...base.credentials,
+      sessions: sessionCredentialDirectory(subsystems.agentTools.identities, subsystems.audit.log),
+    },
+  };
+}
+
+export function createMountedDispatcher(base: DaemonApiDependencies, subsystems: MountedSubsystems): ApiDispatcher {
+  return composeModules(compositionDependencies(base, subsystems), [legacyModule(base, subsystems)]).dispatcher;
+}
+
+/** Carrier routes are appended after the module sockets have been decorated. */
 export function createMountedSocketDispatcher(
   base: DaemonApiDependencies,
   subsystems: MountedSubsystems,
-  /**
-   * Socket routes whose dependencies include THIS dispatcher — today only the direct carrier, which
-   * dispatches a session's streams back through the same table. They cannot be a mounted subsystem
-   * without a construction cycle, so the composition root hands them in.
-   */
   carriers: readonly SocketRoute[] = [],
 ): ApiSocketDispatcher {
-  return new ApiSocketDispatcher(
-    new ApiRouter([...mountedSocketRoutes(subsystems), ...carriers]),
-    withSessionCredentials(base, subsystems),
-    // The SAME guard the request/response table uses. A terminal socket that skipped it would let a
-    // browser drive a shell this machine had refused to let it open.
-    subsystems.grants,
-    undefined,
-    subsystems.stepUp,
+  return composeModules(compositionDependencies(base, subsystems), [legacyModule(base, subsystems)]).socketDispatcher(
+    carriers,
   );
 }
 
