@@ -463,6 +463,50 @@ describe('WorkerSupervisor', () => {
     should(workers[0]?.terminated).be.true();
   });
 
+  it('should wait for, then terminate, a thread still ending its clients when the daemon stops', async () => {
+    // Arrange — a drained thread was told to stop and has not answered yet.
+    const { subject, workers, advance } = rig();
+    subject.reconcile([wanted(A)]);
+    workers[0]?.ready();
+    subject.reconcile([]);
+    advance(2_000);
+
+    // Act
+    const stopping = subject.stop(1_000);
+    const terminatedBeforeAnswer = workers[0]?.terminated;
+    workers[0]?.answer({ kind: 'stopped' });
+    await stopping;
+
+    // Assert
+    should(terminatedBeforeAnswer).be.false();
+    should(workers[0]?.terminated).be.true();
+  });
+
+  it('should terminate a still-ending thread when the daemon closes, and leave no timer to fire later', () => {
+    // Arrange
+    const { subject, workers, advance } = rig();
+    subject.reconcile([wanted(A)]);
+    workers[0]?.ready();
+    subject.reconcile([]);
+    advance(2_000);
+
+    // Act
+    subject.close();
+    const terminatedAtClose = workers[0]?.terminated;
+    let terminations = 0;
+    const worker = workers[0];
+    if (worker !== undefined)
+      worker.terminate = () => {
+        terminations += 1;
+      };
+    advance(10_000);
+    worker?.answer({ kind: 'stopped' });
+
+    // Assert
+    should(terminatedAtClose).be.true();
+    should(terminations).equal(0);
+  });
+
   it('should terminate at once a thread that has itself failed or exited: there is nobody to ask', () => {
     // Arrange
     const { subject, workers } = rig();

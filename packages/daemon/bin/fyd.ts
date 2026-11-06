@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { accessSync, existsSync, constants as fsConstants, realpathSync, statSync, writeSync } from 'node:fs';
 import { access, chmod, mkdir, realpath, rm, stat } from 'node:fs/promises';
 import { homedir, hostname, tmpdir, userInfo } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import {
   AGENDA_ENV,
   ALWAYS_ON_SECTIONS,
@@ -6993,7 +6993,9 @@ function createTerminalSubsystem(
       idleTimeoutMs: TERMINAL_IDLE_TIMEOUT_MS,
       isDirectory: async path => {
         try {
-          return (await stat(path)).isDirectory();
+          // Absolute before it leaves the loop: a relative name on an I/O thread could resolve inside a macOS
+          // descriptor bracket's folder (packages/fleet/src/adapters/descriptor-calls.ts).
+          return (await stat(resolvePath(path))).isDirectory();
         } catch {
           return false;
         }
@@ -7425,7 +7427,16 @@ async function decideAddress(
  * (9.9 s of stalls on 2026-11-05). {@link OrderedLogWriter} keeps the order, and writes what is still queued
  * synchronously when the process exits.
  */
-function bootJournal(level: LogLevel = 'info'): BootNoticePort {
+/** The boot journal, plus the one thing a stopping daemon asks of it: let what it queued reach the file. */
+interface DaemonJournal extends BootNoticePort {
+  /** Waits, at most `withinMs`, for every line written so far to reach the kernel. */
+  drain(withinMs: number): Promise<void>;
+}
+
+/** How long a stopping daemon waits for its log to reach the file before it exits anyway. */
+const LOG_DRAIN_MS = 2_000;
+
+function bootJournal(level: LogLevel = 'info'): DaemonJournal {
   const startedAtMs = Date.now();
   // Milestones are `info`; the things a human must act on are `warn` and are never filtered out —
   // a log level that could hide the reason a boot refused would recreate the empty-log defect on
@@ -7445,6 +7456,7 @@ function bootJournal(level: LogLevel = 'info'): BootNoticePort {
       }
     },
     state: message => line(`! ${message}`),
+    drain: async withinMs => await log.drain(withinMs),
   };
 }
 
@@ -7729,6 +7741,12 @@ function createForkSubsystem(parts: ForkSubsystemParts): SessionForkSubsystem {
 export interface WorldSeams {
   /** This machine's user home, absolute. Both harness home directories are derived from it. */
   readonly userHome: string;
+  /**
+   * The journal every service of this world reports into. `execute` passes the ONE it built before the world,
+   * so the `ready` step that turns its writes asynchronous reaches every writer and their lines share one
+   * order; absent (a test or a probe building a world by itself), the world builds its own.
+   */
+  readonly notices?: BootNoticePort;
 }
 
 /** Builds the production adapter set. Subsystem units extend this as they land. */
@@ -7859,7 +7877,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * `+Nms` baseline, so two lines a person reads in one stream would disagree about when this daemon
    * started. Nothing else about it moved.
    */
-  const bootNotices = bootJournal(overrides.logLevel);
+  const bootNotices = seams.notices ?? bootJournal(overrides.logLevel);
   /**
    * "The configuration moved" (docs/config-files.md "Live changes"): ONE ledger every source of a change
    * announces into — a load that finds a file changed, a route that changes a login or a speed-up, a
@@ -12809,7 +12827,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // temporary folder is still one. This machine's own TMPDIR and the runtime's temp folder count too.
         scratch: async cwd => {
           // Resolved on the I/O threads: a start is a request, and a folder on a slow disk must not hold the loop.
-          const real = async (path: string): Promise<string> => await realpath(path).catch(() => path);
+          // Made absolute first, on the loop: a request may name `.`, and a relative name on an I/O thread could
+          // resolve inside a macOS descriptor bracket's folder (packages/fleet/src/adapters/descriptor-calls.ts).
+          const real = async (path: string): Promise<string> => {
+            const absolute = resolvePath(path);
+            return await realpath(absolute).catch(() => absolute);
+          };
           const roots = [...COMMON_SCRATCH_ROOTS, tmpdir(), ...(process.env.TMPDIR ? [process.env.TMPDIR] : [])];
           return isScratchPath(await real(cwd), [...roots, ...(await Promise.all(roots.map(real)))]);
         },
@@ -15724,14 +15747,15 @@ async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check
             notices.state('stopping during boot — releasing what this boot acquired so far');
             await releaseAcquired(cleanups);
           },
-          code => process.exit(code),
+          // The log first, boundedly: an exit that cut it off would end the trail at the line before the reason.
+          code => void notices.drain(LOG_DRAIN_MS).finally(() => process.exit(code)),
           process,
           () => cleanups.length > 0,
         )
       : undefined;
   try {
     const world = {
-      ...buildWorld(answer.overrides, { userHome: resolveUserHome() }),
+      ...buildWorld(answer.overrides, { userHome: resolveUserHome(), notices }),
       notices,
       ...(gate === undefined ? {} : { untilShutdown: () => gate.untilShutdown() }),
     };
@@ -15758,6 +15782,8 @@ async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check
         // Intentionally ignored: cleanup failures must not change the result.
       }
     }
+    // Last: whatever the cleanups said is in the file before `main` exits the process.
+    await notices.drain(LOG_DRAIN_MS);
   }
 }
 

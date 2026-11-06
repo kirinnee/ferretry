@@ -2,18 +2,24 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { type LogDescriptorWrites, OrderedLogWriter } from '../../src/adapters/runtime/ordered-log-writer.ts';
 
-/** A descriptor that records what reached it, with each asynchronous write held until the test lets it go. */
-function heldWrites(options: { readonly partial?: number; readonly failFirst?: boolean } = {}) {
-  const landed: string[] = [];
+/**
+ * A descriptor that records the BYTES that reached it, in order, with each asynchronous write held until the
+ * test lets it go and optionally cut short, as a kernel may.
+ */
+function heldDisk(options: { readonly partial?: number; readonly failFirst?: boolean } = {}) {
+  const landed: number[] = [];
   const held: (() => void)[] = [];
   let synchronous = 0;
   let failures = options.failFirst === true ? 1 : 0;
-  const decoder = new TextDecoder();
+  const take = (bytes: Uint8Array, offset: number): number => {
+    const count = Math.min(options.partial ?? Number.POSITIVE_INFINITY, bytes.byteLength - offset);
+    landed.push(...bytes.subarray(offset, offset + count));
+    return count;
+  };
   const writes: LogDescriptorWrites = {
-    writeSync: (_descriptor, text) => {
+    writeSync: (_descriptor, bytes, offset) => {
       synchronous += 1;
-      landed.push(text);
-      return text.length;
+      return take(bytes, offset);
     },
     write: async (_descriptor, bytes, offset) =>
       await new Promise<number>((resolve, reject) => {
@@ -23,25 +29,31 @@ function heldWrites(options: { readonly partial?: number; readonly failFirst?: b
             reject(new Error('EIO'));
             return;
           }
-          const take = Math.min(options.partial ?? Number.POSITIVE_INFINITY, bytes.byteLength - offset);
-          landed.push(decoder.decode(bytes.subarray(offset, offset + take), { stream: true }));
-          resolve(take);
+          resolve(take(bytes, offset));
         });
       }),
   };
-  const release = async (): Promise<void> => {
-    while (held.length > 0) {
-      held.shift()?.();
-      await Bun.sleep(0);
-    }
+  const releaseOne = async (): Promise<void> => {
+    held.shift()?.();
+    await Bun.sleep(0);
   };
-  return { writes, landed, release, synchronous: () => synchronous, inFlight: () => held.length };
+  const release = async (): Promise<void> => {
+    while (held.length > 0) await releaseOne();
+  };
+  return {
+    writes,
+    text: () => new TextDecoder().decode(new Uint8Array(landed)),
+    release,
+    releaseOne,
+    synchronous: () => synchronous,
+    inFlight: () => held.length,
+  };
 }
 
 describe('OrderedLogWriter', () => {
   it('should hand every line to the kernel before returning while the daemon boots', () => {
     // Arrange
-    const disk = heldWrites();
+    const disk = heldDisk();
     const log = new OrderedLogWriter(2, disk.writes);
 
     // Act
@@ -49,14 +61,26 @@ describe('OrderedLogWriter', () => {
     log.write('two\n');
 
     // Assert
-    should(disk.landed).deepEqual(['one\n', 'two\n']);
-    should(disk.synchronous()).equal(2);
+    should(disk.text()).equal('one\ntwo\n');
     should(disk.inFlight()).equal(0);
+  });
+
+  it('should resume a synchronous write the kernel cut short', () => {
+    // Arrange
+    const disk = heldDisk({ partial: 2 });
+    const log = new OrderedLogWriter(2, disk.writes);
+
+    // Act
+    log.write('héllo\n');
+
+    // Assert
+    should(disk.text()).equal('héllo\n');
+    should(disk.synchronous()).equal(4);
   });
 
   it('should return at once after boot and still deliver every line in order', async () => {
     // Arrange
-    const disk = heldWrites();
+    const disk = heldDisk();
     const log = new OrderedLogWriter(2, disk.writes);
     log.goAsync();
 
@@ -64,34 +88,33 @@ describe('OrderedLogWriter', () => {
     log.write('one\n');
     log.write('two\n');
     log.write('three\n');
-    const beforeRelease = [...disk.landed];
+    const beforeRelease = disk.text();
     await disk.release();
 
     // Assert
-    should(beforeRelease).deepEqual([]);
-    should(disk.landed.join('')).equal('one\ntwo\nthree\n');
+    should(beforeRelease).equal('');
+    should(disk.text()).equal('one\ntwo\nthree\n');
     should(disk.synchronous()).equal(0);
   });
 
   it('should finish a write the kernel took only part of before starting the next', async () => {
     // Arrange
-    const disk = heldWrites({ partial: 3 });
+    const disk = heldDisk({ partial: 3 });
     const log = new OrderedLogWriter(2, disk.writes);
     log.goAsync();
 
     // Act
     log.write('héllo wörld\n');
-    await disk.release();
     log.write('next\n');
     await disk.release();
 
     // Assert
-    should(disk.landed.join('')).equal('héllo wörld\nnext\n');
+    should(disk.text()).equal('héllo wörld\nnext\n');
   });
 
   it('should drop lines past its bound and say how many once the disk takes the rest', async () => {
     // Arrange
-    const disk = heldWrites();
+    const disk = heldDisk();
     const log = new OrderedLogWriter(2, disk.writes, 10);
     log.goAsync();
     log.write('aaaa\n');
@@ -103,30 +126,53 @@ describe('OrderedLogWriter', () => {
     await disk.release();
 
     // Assert
-    should(disk.landed.join('')).equal(
+    should(disk.text()).equal(
       'aaaa\nbbbb\ncccc\n1 log line(s) were dropped while the disk was too slow to take them\n',
     );
   });
 
-  it('should write what is still queued synchronously when the process is about to exit', () => {
-    // Arrange
-    const disk = heldWrites();
+  it('should write, at an exit that cannot wait, the unconfirmed rest of the write in flight and then the queue, in order', async () => {
+    // Arrange — the first line is in flight and the kernel has taken only its first three bytes.
+    const disk = heldDisk({ partial: 3 });
     const log = new OrderedLogWriter(2, disk.writes);
     log.goAsync();
-    log.write('in flight\n');
-    log.write('last words\n');
+    log.write('fïrst\n');
+    await disk.releaseOne();
+    log.write('second\n');
 
     // Act
     log.flushSync();
+    log.write('after\n');
+
+    // Assert — every byte once, in the order written, and the log synchronous from the flush on. (The write
+    // still held is the one an exiting process never sees finish.)
+    should(disk.text()).equal('fïrst\nsecond\nafter\n');
+    should(log.queuedLines).equal(0);
+  });
+
+  it('should let a stopping daemon wait for everything queued, and stop waiting at its bound', async () => {
+    // Arrange
+    const disk = heldDisk();
+    const log = new OrderedLogWriter(2, disk.writes);
+    log.goAsync();
+    log.write('one\n');
+    log.write('two\n');
+
+    // Act
+    const bounded = log.drain(5);
+    await bounded;
+    const draining = log.drain(1_000);
+    await disk.release();
+    await draining;
 
     // Assert
-    should(disk.landed).deepEqual(['last words\n']);
-    should(log.queuedLines).equal(0);
+    should(disk.text()).equal('one\ntwo\n');
+    should(disk.inFlight()).equal(0);
   });
 
   it('should keep writing after a write the disk refused', async () => {
     // Arrange
-    const disk = heldWrites({ failFirst: true });
+    const disk = heldDisk({ failFirst: true });
     const log = new OrderedLogWriter(2, disk.writes);
     log.goAsync();
 
@@ -137,6 +183,6 @@ describe('OrderedLogWriter', () => {
     await disk.release();
 
     // Assert
-    should(disk.landed).deepEqual(['kept\n']);
+    should(disk.text()).equal('kept\n');
   });
 });

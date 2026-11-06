@@ -8,10 +8,13 @@ set -euo pipefail
 # synchronous `fsync` there had measured 38 s before. Async calls run on the runtime's I/O threads, so the
 # loop keeps answering while the disk is slow.
 #
-# WHAT IS MATCHED. A call of any `node:fs` `…Sync` function, `spawnSync`, `execSync` or `execFileSync`, by
-# name followed by `(`, on a line that is not a comment, in tracked TypeScript under `packages/daemon/src`,
-# `packages/daemon/bin` and `packages/fleet/src` (the fleet library runs inside the daemon). Tests are out
-# of scope. Prose that explains the rule names a function in backticks without its parenthesis.
+# WHAT IS MATCHED. EVERY call — several on one line count several — of any `…Sync` function `node:fs` exports
+# (the list is read from the runtime, so a new one cannot be missed), `spawnSync`, `execSync` or `execFileSync`,
+# by name followed by `(` (spaces allowed between), on a line that is not a comment, in tracked TypeScript under
+# `packages/daemon/src`, `packages/daemon/bin` and `packages/fleet/src` (the fleet library runs inside the
+# daemon). Tests are out of scope. Prose that explains the rule names a function in backticks without its
+# parenthesis. Importing one of those names UNDER ANOTHER NAME (`readFileSync as read`) is refused outright: the
+# count is by spelling, and an alias is a spelling it cannot see.
 #
 # THE LEDGER (`scripts/validate/sync-io-allowlist.txt`) holds the exact count per file and the reason each
 # remaining call may block. EXACT BOTH WAYS: more fails (a new blocking call), fewer fails too (lower the
@@ -28,12 +31,19 @@ ledger="scripts/validate/sync-io-allowlist.txt"
   exit 2
 }
 
-names='readFileSync|writeFileSync|appendFileSync|statSync|lstatSync|fstatSync|existsSync|accessSync'
-names+='|readdirSync|opendirSync|mkdirSync|mkdtempSync|rmdirSync|rmSync|renameSync|unlinkSync|copyFileSync|cpSync'
-names+='|openSync|readSync|writeSync|closeSync|fsyncSync|fdatasyncSync|ftruncateSync|truncateSync'
-names+='|chmodSync|fchmodSync|chownSync|fchownSync|utimesSync|futimesSync'
-names+='|realpathSync|readlinkSync|symlinkSync|linkSync|spawnSync|execSync|execFileSync'
-pattern="(^|[^A-Za-z0-9_\$])(${names})\("
+# The runtime's own list of synchronous file functions, plus the three that start a child and wait for it.
+fs_names="$(bun -e 'console.log(Object.keys(require("node:fs")).filter(name => /^[a-z][A-Za-z]*Sync$/.test(name)).join("|"))' 2>/dev/null)" || fs_names=''
+case "${fs_names}" in
+*existsSync*) ;;
+*)
+  echo "❌ could not read the synchronous function list from node:fs (is bun on PATH?)" >&2
+  exit 2
+  ;;
+esac
+names="${fs_names}|spawnSync|execSync|execFileSync"
+# `[(]`, not an escaped parenthesis: the same text is an ERE for git grep and for awk, which reads escapes itself.
+pattern="(^|[^A-Za-z0-9_\$])(${names})[[:space:]]*[(]"
+alias_pattern="(^|[^A-Za-z0-9_\$])(${names})[[:space:]]+as[[:space:]]"
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT
@@ -53,7 +63,19 @@ esac
 # `path:line:text` — keep a hit whose text is code, not a `//` or ` * ` comment line.
 awk '{ text = $0; sub(/^[^:]*:[0-9]+:/, "", text); if (text !~ /^[[:space:]]*(\*|\/\/)/) print }' \
   "${tmp_dir}/hits.raw" >"${tmp_dir}/hits"
-cut -d ':' -f 1 "${tmp_dir}/hits" | sort | uniq -c | awk '{ print $2, $1 }' | sort >"${tmp_dir}/found"
+# Every CALL on a kept line, not the line: `existsSync(p) && readFileSync(p)` is two.
+awk -v pattern="${pattern}" '{
+  path = $0; sub(/:.*/, "", path)
+  text = $0; sub(/^[^:]*:[0-9]+:/, "", text)
+  calls[path] += gsub(pattern, "&", text)
+} END { for (path in calls) print path, calls[path] }' "${tmp_dir}/hits" | sort >"${tmp_dir}/found"
+
+if git grep -n -E "${alias_pattern}" -- 'packages/daemon/src/**.ts' 'packages/daemon/bin/**.ts' 'packages/fleet/src/**.ts' \
+  >"${tmp_dir}/aliases" 2>/dev/null; then
+  echo "❌ a synchronous file function is imported under another name, which this gate cannot count:" >&2
+  sed 's/^/  /' "${tmp_dir}/aliases" >&2
+  exit 1
+fi
 
 # The ledger: `<count> <path>  # …`, several lines per path summed.
 awk '!/^[[:space:]]*(#|$)/ {

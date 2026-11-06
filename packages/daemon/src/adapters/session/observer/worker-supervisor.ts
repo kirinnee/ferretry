@@ -151,6 +151,12 @@ export class WorkerSupervisor {
   private readonly retryAt = new Map<SessionId, number>();
   private readonly inline = new Set<SessionId>();
   private readonly pending = new Map<number, PendingRequest>();
+  /**
+   * Threads already ended — hosting nothing, answering nothing — that are still ending their tmux clients. Kept
+   * so a stopping daemon waits for them and terminates them like any other thread, instead of exiting while
+   * their clients are still running. `finish` is idempotent: it cancels the wait and terminates.
+   */
+  private readonly retiring = new Map<number, { readonly finish: () => void; readonly finished: Promise<void> }>();
   private nextThread = 1;
   private nextRequest = 1;
   private closed = false;
@@ -297,6 +303,7 @@ export class WorkerSupervisor {
   close(): void {
     this.closed = true;
     for (const thread of [...this.threads.values()]) this.end(thread, new Error('the session workers were closed'));
+    for (const retiring of [...this.retiring.values()]) retiring.finish();
   }
 
   /**
@@ -309,8 +316,20 @@ export class WorkerSupervisor {
   async stop(withinMs = 5_000): Promise<void> {
     this.closed = true;
     const started = [...this.threads.values()].filter(thread => thread.ready && !thread.ended);
-    await Promise.all(
-      started.map(
+    // A thread that was already ending is waited for the same way: its `stop` is already on its way to it.
+    const ending = [...this.retiring.values()].map(
+      async retiring =>
+        await new Promise<void>(resolve => {
+          const cancel = this.ports.schedule(withinMs, resolve);
+          void retiring.finished.then(() => {
+            cancel();
+            resolve();
+          });
+        }),
+    );
+    await Promise.all([
+      ...ending,
+      ...started.map(
         async thread =>
           await new Promise<void>(resolve => {
             const cancel = this.ports.schedule(withinMs, resolve);
@@ -321,7 +340,7 @@ export class WorkerSupervisor {
             this.post(thread.id, { kind: 'stop' });
           }),
       ),
-    );
+    ]);
     this.close();
   }
 
@@ -499,11 +518,20 @@ export class WorkerSupervisor {
       }
     };
     if (graceful) {
-      const cancel = this.ports.schedule(this.settings.stopMs ?? DEFAULT_WORKER_STOP_MS, terminate);
-      thread.stopped = () => {
+      let settle: () => void = () => undefined;
+      const finished = new Promise<void>(resolve => {
+        settle = resolve;
+      });
+      let cancel: () => void = () => undefined;
+      const finish = (): void => {
+        if (!this.retiring.delete(thread.id)) return;
         cancel();
         terminate();
+        settle();
       };
+      this.retiring.set(thread.id, { finish, finished });
+      cancel = this.ports.schedule(this.settings.stopMs ?? DEFAULT_WORKER_STOP_MS, finish);
+      thread.stopped = finish;
     } else terminate();
     this.threads.delete(thread.id);
   }

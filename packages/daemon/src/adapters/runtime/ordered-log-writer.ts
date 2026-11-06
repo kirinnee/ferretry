@@ -1,9 +1,10 @@
 import { write, writeSync } from 'node:fs';
 import { promisify } from 'node:util';
 
-/** The two writes the log makes, injected so a test can hold a write in flight or make one fail. */
+/** The two writes the log makes, injected so a test can hold a write in flight, cut one short, or fail one. */
 export interface LogDescriptorWrites {
-  writeSync(descriptor: number, text: string): number;
+  /** Returns how many of `bytes`, from `offset`, the kernel took. */
+  writeSync(descriptor: number, bytes: Uint8Array, offset: number): number;
   /** Resolves how many of `bytes`, from `offset`, the kernel took. */
   write(descriptor: number, bytes: Uint8Array, offset: number): Promise<number>;
 }
@@ -11,13 +12,19 @@ export interface LogDescriptorWrites {
 const writeAsync = promisify(write);
 
 const nodeLogDescriptorWrites: LogDescriptorWrites = {
-  writeSync: (descriptor, text) => writeSync(descriptor, text),
+  writeSync: (descriptor, bytes, offset) => writeSync(descriptor, bytes, offset, bytes.byteLength - offset),
   write: async (descriptor, bytes, offset) =>
     (await writeAsync(descriptor, bytes, offset, bytes.byteLength - offset)).bytesWritten,
 };
 
 /** What the log may hold unwritten while the disk is slow: a few thousand lines, never the daemon's memory. */
 const MAX_QUEUED_LOG_BYTES = 4 * 1024 * 1024;
+
+/** The bytes being written off the loop, and how many of them the kernel has confirmed. */
+interface InFlight {
+  readonly bytes: Uint8Array;
+  confirmed: number;
+}
 
 /**
  * The daemon's log lines onto one descriptor, IN ORDER — synchronously while it boots, off the loop after.
@@ -32,10 +39,15 @@ const MAX_QUEUED_LOG_BYTES = 4 * 1024 * 1024;
  * seven stalls, each while the disk was saturated. A wedged loop writes nothing either way, so after boot the
  * synchronous write bought nothing but the stalls.
  *
- * Lines leave in the order they were written: one write is in flight at a time, carrying every line queued
- * before it. A queue past {@link MAX_QUEUED_LOG_BYTES} drops lines and SAYS how many once it drains, rather
- * than growing without bound behind a disk that is not coming back. {@link flushSync} writes whatever is still
- * queued before the process exits, so an exit's last words are not lost to the switch.
+ * ORDER. One write is in flight at a time, carrying every line queued before it, and a short write is resumed
+ * from where the kernel stopped. A queue past {@link MAX_QUEUED_LOG_BYTES} drops lines and SAYS how many once it
+ * drains, rather than growing without bound behind a disk that is not coming back.
+ *
+ * EXIT. {@link drain} waits — boundedly — for everything to reach the kernel; a daemon that is stopping calls
+ * it before it exits. {@link flushSync} is for an exit that cannot wait: it writes, synchronously and in order,
+ * the unconfirmed rest of the write in flight and then the queue, and the log is synchronous from then on. The
+ * one thing it cannot know is whether an I/O thread is in the middle of that very write, so the last line can
+ * appear TWICE at the end of a log; it is never lost and never out of order, the trade a crash log wants.
  *
  * A FAILED WRITE IS SWALLOWED, as it always was: losing the log is bad, a daemon stopped by its own log is worse.
  */
@@ -44,7 +56,8 @@ export class OrderedLogWriter {
   #queue: string[] = [];
   #queuedBytes = 0;
   #dropped = 0;
-  #pumping = false;
+  #inFlight: InFlight | undefined;
+  #pump: Promise<void> | undefined;
 
   constructor(
     private readonly descriptor: number,
@@ -59,7 +72,7 @@ export class OrderedLogWriter {
 
   write(text: string): void {
     if (!this.#async) {
-      this.#writeNow(text);
+      this.#writeNow(new TextEncoder().encode(text));
       return;
     }
     if (this.#queuedBytes + text.length > this.maxQueuedBytes) {
@@ -68,13 +81,36 @@ export class OrderedLogWriter {
     }
     this.#queue.push(text);
     this.#queuedBytes += text.length;
-    if (!this.#pumping) void this.#pump();
+    this.#pump ??= this.#run().finally(() => {
+      this.#pump = undefined;
+    });
   }
 
-  /** Everything still queued, synchronously — for the moment before the process exits. */
+  /** Resolves once everything written so far has reached the kernel, or after `withinMs`, whichever is first. */
+  async drain(withinMs: number): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<'late'>(resolve => {
+      timer = setTimeout(() => resolve('late'), withinMs);
+    });
+    try {
+      for (let pump = this.#pump; pump !== undefined; pump = this.#pump)
+        if ((await Promise.race([pump.then(() => 'done' as const), late])) === 'late') return;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Everything not yet confirmed, synchronously and in order — for the moment before the process exits. From
+   * here on the log is synchronous, and the write that was in flight is abandoned rather than resumed.
+   */
   flushSync(): void {
+    this.#async = false;
+    const inFlight = this.#inFlight;
+    this.#inFlight = undefined;
+    if (inFlight !== undefined) this.#writeNow(inFlight.bytes.subarray(inFlight.confirmed));
     const pending = this.#take();
-    if (pending !== '') this.#writeNow(pending);
+    if (pending !== '') this.#writeNow(new TextEncoder().encode(pending));
   }
 
   /** How many lines are queued and not yet handed to the kernel. */
@@ -82,23 +118,22 @@ export class OrderedLogWriter {
     return this.#queue.length;
   }
 
-  async #pump(): Promise<void> {
-    this.#pumping = true;
-    try {
-      for (let chunk = this.#take(); chunk !== ''; chunk = this.#take()) {
-        const bytes = new TextEncoder().encode(chunk);
-        try {
-          for (let offset = 0; offset < bytes.byteLength; ) {
-            const written = await this.writes.write(this.descriptor, bytes, offset);
-            if (written <= 0) break;
-            offset += written;
-          }
-        } catch {
-          // Intentionally ignored: a log this daemon cannot write must not stop it.
+  async #run(): Promise<void> {
+    for (let chunk = this.#take(); chunk !== '' && this.#async; chunk = this.#take()) {
+      const inFlight: InFlight = { bytes: new TextEncoder().encode(chunk), confirmed: 0 };
+      this.#inFlight = inFlight;
+      try {
+        while (inFlight.confirmed < inFlight.bytes.byteLength) {
+          const written = await this.writes.write(this.descriptor, inFlight.bytes, inFlight.confirmed);
+          // Abandoned by an exit flush, which has already written the rest itself.
+          if (this.#inFlight !== inFlight) return;
+          if (written <= 0) break;
+          inFlight.confirmed += written;
         }
+      } catch {
+        // Intentionally ignored: a log this daemon cannot write must not stop it.
       }
-    } finally {
-      this.#pumping = false;
+      if (this.#inFlight === inFlight) this.#inFlight = undefined;
     }
   }
 
@@ -113,9 +148,14 @@ export class OrderedLogWriter {
     return text;
   }
 
-  #writeNow(text: string): void {
+  /** Every byte, synchronously, resuming a short write; a refusal ends the attempt quietly. */
+  #writeNow(bytes: Uint8Array): void {
     try {
-      this.writes.writeSync(this.descriptor, text);
+      for (let offset = 0; offset < bytes.byteLength; ) {
+        const written = this.writes.writeSync(this.descriptor, bytes, offset);
+        if (written <= 0) return;
+        offset += written;
+      }
     } catch {
       // Intentionally ignored: a stream this daemon cannot write to must not stop it starting.
     }
