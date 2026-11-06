@@ -1,9 +1,9 @@
 import { type CarrierConversionOutcome, LEGACY_CARRIER_KEYS, planCarrierConversion } from '../../lib/index.ts';
 
 /**
- * The three things the conversion needs from a filesystem, so the state-home adapter (confined, through
- * `FileSystemPort`) and the `--config` adapter (an operator's own path, through `node:fs`) share ONE
- * procedure and cannot drift into converting differently.
+ * The three things the conversion needs from a filesystem, so the procedure stays independent of
+ * `FileSystemPort` (the state home's confined filesystem). Only the state home's document is converted;
+ * a `--config` file is never converted.
  */
 export interface CarrierConversionFiles {
   readText(path: string): Promise<string | undefined>;

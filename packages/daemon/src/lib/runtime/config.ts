@@ -32,7 +32,6 @@ import {
   type DaemonTunnelCarrierEntry,
   documentWithCarrierEntries,
   HostSchema,
-  legacyBindEntry,
   OS_CHOSEN_PORT,
   PortSchema,
   resolveDaemonCarriers,
@@ -422,7 +421,7 @@ export const DaemonConfigDocumentSchema = z
     attention: LegacyDaemonAttentionConfigSchema.optional(),
     /** The same block under its new name; wins key by key when both are written. */
     agenda: DaemonAgendaConfigSchema.optional(),
-    /** The rendezvous carrier, if this host has one. Absent means direct-only. */
+    /** The rendezvous carrier, if one is written. Absent (with no relay carrier) falls back to the discovery relay carrier. */
     relay: DaemonRelayConfigSchema.optional(),
     /** The peer-to-peer carrier: on, with Cloudflare's public STUN server, unless the operator says otherwise. */
     webrtc: DaemonWebRtcConfigSchema.prefault({}),
@@ -725,19 +724,24 @@ export function defaultDaemonConfig(): DaemonConfig {
  * its address from that entry, so writing the top-level `port` there would write a key with no effect
  * on where this daemon listens: the operator watches the number change, watches the daemon come up
  * somewhere else, and has nothing to go on. Without a bind carrier the legacy keys spell the bind, and
- * this writer gives that bind a carrier entry instead of writing the port beside them (below).
+ * the port goes beside them unless there are none (below).
  *
- * A DOCUMENT WITH NO BIND CARRIER GAINS ONE rather than a top-level `port`: the boot rewrites
- * a legacy `host`/`port` into `carriers` (`planCarrierConversion`), and this writer must not put the
- * legacy spelling back. The new entry carries the host as written (loopback when none was) and the settled
- * port, and the top-level `host`/`port` it replaces are removed — they spelled this same bind, so
- * leaving them would only be a superseded line. A `carriers` value that is not a list is left as it is
- * and the legacy key is written as before: there is nothing to append to, and inventing a list over
- * what somebody typed is not this function's call.
+ * THREE RULES, in this order:
  *
- * When a bind carrier IS declared, the legacy keys beside it are superseded and are left exactly as
- * typed — never rewritten and never deleted — because `supersededCarrierKeys` is what tells the operator
- * they are there.
+ * - A document that declares a bind carrier gets the port in THAT entry. The legacy keys beside it are
+ *   superseded and are left exactly as typed — never rewritten and never deleted — because
+ *   `supersededCarrierKeys` is what tells the operator they are there.
+ * - A document with no bind carrier but a top-level `host` or `port` key gets `{...raw, port}`, the
+ *   legacy spelling, untouched otherwise. ONLY THE JOURNALLED CONVERSION MAY MOVE LEGACY KEYS
+ *   (`planCarrierConversion`: backup, pending entry, document, converted). A document that still spells its
+ *   bind that way when a port is recorded is one the conversion refused or failed on, or a `--config` file;
+ *   a recorder that deleted `host`/`port` and made a bind entry here would be a conversion with no backup
+ *   and no journal.
+ * - A document with no bind carrier and no `host`/`port` key (a fresh or empty one, or one holding only
+ *   relay or tunnel entries) gains `{ kind: 'bind', host: loopback, port }` appended to `carriers`: nothing
+ *   legacy is there to move, and the legacy spelling is not put back. A `carriers` value that is not a list
+ *   is left as it is and the legacy `port` is written as before — there is nothing to append to, and
+ *   inventing a list over what somebody typed is not this function's call.
  *
  * It is TOTAL over any JSON object, because raw means unvalidated. A `carriers` value that is not a
  * list of entries is a document the configuration parse refuses before a boot could settle anything,
@@ -750,8 +754,10 @@ export function recordedPortDocument(
   // The same rule the reader follows, from the one place both ends ask: see `declaredBind`.
   const listener = declaredBind(rawDocument);
   if (listener === rawDocument) {
-    if (Object.hasOwn(rawDocument, 'carriers') && !Array.isArray(rawDocument.carriers)) return { ...rawDocument, port };
-    return documentWithCarrierEntries(rawDocument, ['host', 'port'], [legacyBindEntry(rawDocument, port)]);
+    const spellsLegacyBind = Object.hasOwn(rawDocument, 'host') || Object.hasOwn(rawDocument, 'port');
+    const carriersIsList = !Object.hasOwn(rawDocument, 'carriers') || Array.isArray(rawDocument.carriers);
+    if (spellsLegacyBind || !carriersIsList) return { ...rawDocument, port };
+    return documentWithCarrierEntries(rawDocument, [], [{ kind: 'bind', host: LOOPBACK, port }]);
   }
   return {
     ...rawDocument,

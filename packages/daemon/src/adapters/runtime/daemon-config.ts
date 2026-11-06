@@ -256,7 +256,9 @@ export class FileDaemonConfig {
    * exactly one key.
    *
    * WHICH key is `recordedPortDocument`'s decision, not this adapter's: a document with an explicit
-   * bind carrier reads its address from that entry, and the top-level `port` is superseded there.
+   * bind carrier reads its address from that entry, and the top-level `port` is superseded there. A document
+   * the boot conversion left in its legacy spelling (refused or failed) keeps it: only the journalled
+   * conversion moves legacy keys, so the port is then written as the legacy `port`.
    *
    * WHAT IS WRITTEN IS THE RAW DOCUMENT, not the schema's reading of it. The schema still runs — a
    * document this daemon would refuse to boot on is not one it may write over — but its OUTPUT is
@@ -277,7 +279,7 @@ export class FileDaemonConfig {
 
   /**
    * Rewrites a legacy `host`/`port`/`relay` into `carriers` entries, once, at boot — the procedure and its
-   * guard are `convertLegacyCarrierKeysIn` and `planCarrierConversion`, shared with the `--config` adapter.
+   * guard are `convertLegacyCarrierKeysIn` and `planCarrierConversion`. A `--config` file is never converted.
    * The one-file record of it is `<home>/carriers-migration.json`.
    */
   async convertLegacyCarrierKeys(at: string): Promise<CarrierConversionOutcome> {

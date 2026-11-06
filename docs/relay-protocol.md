@@ -1197,7 +1197,9 @@ consequence:
   single `relay` block could not express. Saying "no rendezvous, and I mean it" is that entry with
   `"enabled": false` — a decision, which is the one thing an omission can never be.
 - **`carriers` is the one spelling.** Nothing in the product writes `host`, `port` or a `relay` block any
-  more: a first boot seeds `"carriers": [{ "kind": "bind", "host": "127.0.0.1" }]`, and the port it takes
+  more, with one exception: a document whose conversion was refused or failed, or a `--config` file, still
+  spells its bind the legacy way, and recording a port into it writes the legacy `port` (only the journalled
+  conversion below moves legacy keys). A first boot seeds `"carriers": [{ "kind": "bind", "host": "127.0.0.1" }]`, and the port it takes
   is recorded into that entry. `host`, `port` and the `relay` block are the **legacy spelling** of a
   one-bind, one-relay list: **converted at boot, removed in a later release**. Until that release they
   are still read, superseded **per kind** rather than wholesale, so a half-finished migration does not
@@ -1219,7 +1221,10 @@ consequence:
   `<state home>/carriers-migration.json` (`{ v: 1, conversions: [{ status, at, file, backup, removedKeys,
 addedEntries }] }`, mode `0600`). **The record is written ahead of the document**, in the order backup,
   `pending` entry, document, entry rewritten `converted`, each file replaced atomically and synced, so no
-  interruption can leave a converted document the record knows nothing about. The next start settles any
+  interruption can leave a converted document the record knows nothing about. **That guarantee belongs to
+  the boot conversion alone**: nothing else moves a legacy key — a conversion that is refused or fails
+  (a backup or journal write error included) leaves the legacy spelling as it was, and recording the
+  settled port then writes the legacy `port` beside it rather than a `bind` entry. The next start settles any
   `pending` entry for the file first: the legacy keys gone means the replacement happened (`converted`),
   still there means it did not (`abandoned`); the backup is kept either way, and nothing converts twice.
   **A file named with `--config` is never converted:** it is the operator's own file — it may be a symlink,

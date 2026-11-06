@@ -112,7 +112,9 @@ describe('daemon boot policy', () => {
     should(conflict.message).match(/it answered HTTP 401/u);
     // Both name the edit that fixes it; a refusal that does not is a refusal nobody can act on.
     for (const refusal of [incumbent, conflict])
-      should(refusal.message).match(/"port" in \/home\/a\/\.ferretry\/config\/daemon\.json/u);
+      should(refusal.message).match(
+        /"port" on the bind entry in "carriers" \(or at the top level if the document has no bind entry\) of \/home\/a\/\.ferretry\/config\/daemon\.json/u,
+      );
   });
 
   it('should say why a held state home stopped the boot instead of exiting in silence', () => {

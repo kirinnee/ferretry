@@ -9,6 +9,7 @@ import {
 import { CARRIERS_JOURNAL_NAME, FileDaemonConfig } from '../../../src/adapters/runtime/daemon-config.ts';
 import { ExplicitDaemonConfig } from '../../../src/adapters/runtime/explicit-config.ts';
 import type { FileSystemPort, FoundationPaths } from '../../../src/lib/index.ts';
+import { defaultDaemonConfigDocument } from '../../../src/lib/runtime/config.ts';
 
 const AT = '2026-11-06T10:20:30.456Z';
 const FILE = '/home/config/daemon.json';
@@ -320,6 +321,92 @@ describe('the two configuration stores', () => {
       conversions: [{ status: 'converted', file: FILE, backup }],
     });
     expect(await store.convertLegacyCarrierKeys(AT)).toEqual({ kind: 'unchanged' });
+  });
+
+  describe('recording the settled port after a conversion that did not happen', () => {
+    /** The state-home filesystem port over a map, failing any write whose path `failing` accepts. */
+    const stateHome = (text: string, failing: (path: string) => boolean) => {
+      const texts = new Map<string, string>([[FILE, text]]);
+      const files = {
+        readText: async (path: string) => texts.get(path),
+        information: async (path: string) => (texts.has(path) ? { mode: 0o600 } : undefined),
+        writeTextAtomic: async (path: string, written: string) => {
+          if (failing(path)) throw new Error('injected write failure');
+          texts.set(path, written);
+        },
+        setMode: async () => undefined,
+      } as unknown as FileSystemPort;
+      const store = new FileDaemonConfig({ daemonConfig: FILE, home: '/home' } as unknown as FoundationPaths, files);
+      return { texts, store };
+    };
+    const JOURNAL_PATH = `/home/${CARRIERS_JOURNAL_NAME}`;
+
+    it.each([
+      { name: 'a host only', document: { host: '127.0.0.1' } },
+      { name: 'a port of 0', document: { host: '127.0.0.1', port: 0 } },
+    ])('should keep $name spelled the legacy way when the backup cannot be written', async ({ document }) => {
+      const text = JSON.stringify(document);
+      const { texts, store } = stateHome(text, path => path.includes('.pre-carriers.'));
+
+      await expect(store.convertLegacyCarrierKeys(AT)).rejects.toThrow('injected write failure');
+      await store.record(9_100);
+
+      // The recorder is no way round the journal: no bind entry, no deleted key, no partial conversion.
+      expect(JSON.parse(texts.get(FILE) ?? '')).toEqual({ ...document, port: 9_100 });
+      expect(texts.has(JOURNAL_PATH)).toBe(false);
+      expect([...texts.keys()].filter(path => path.includes('.pre-carriers.'))).toEqual([]);
+    });
+
+    it('should keep the legacy spelling when the pending journal entry cannot be written', async () => {
+      const { texts, store } = stateHome('{"host":"127.0.0.1"}', path => path === JOURNAL_PATH);
+
+      await expect(store.convertLegacyCarrierKeys(AT)).rejects.toThrow('injected write failure');
+      await store.record(9_100);
+
+      expect(JSON.parse(texts.get(FILE) ?? '')).toEqual({ host: '127.0.0.1', port: 9_100 });
+      expect(texts.has(JOURNAL_PATH)).toBe(false);
+    });
+
+    it('should leave a refused document exactly as it is, and record nothing into it', async () => {
+      // The plan refuses a legacy document that does not parse as it stands; the recorder holds the same refusal.
+      const text = '{"host":"127.0.0.1","relay":{"url":"http://relay.example"}}';
+      const { texts, store } = stateHome(text, () => false);
+
+      const outcome = await store.convertLegacyCarrierKeys(AT);
+      await expect(store.record(9_100)).rejects.toThrow();
+
+      expect(outcome.kind).toBe('refused');
+      expect(texts.get(FILE)).toBe(text);
+      expect(texts.size).toBe(1);
+    });
+
+    it('should write the legacy port into a --config file the conversion refused', async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'fy-carriers-'));
+      try {
+        const path = join(directory, 'operator.json');
+        await writeFile(path, '{"host":"127.0.0.1"}');
+        const store = new ExplicitDaemonConfig(path);
+
+        expect((await store.convertLegacyCarrierKeys(AT)).kind).toBe('refused');
+        await store.record(9_100);
+
+        expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({ host: '127.0.0.1', port: 9_100 });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it('should still record a fresh first boot into the bind entry it seeded', async () => {
+      const { texts, store } = stateHome(JSON.stringify(defaultDaemonConfigDocument()), () => false);
+
+      expect(await store.convertLegacyCarrierKeys(AT)).toEqual({ kind: 'unchanged' });
+      await store.record(9_100);
+
+      expect(JSON.parse(texts.get(FILE) ?? '')).toMatchObject({
+        carriers: [{ kind: 'bind', host: '127.0.0.1', port: 9_100 }],
+      });
+      expect(Object.hasOwn(JSON.parse(texts.get(FILE) ?? ''), 'port')).toBe(false);
+    });
   });
 
   it('should never write into a file --config named, only say it was left alone', async () => {

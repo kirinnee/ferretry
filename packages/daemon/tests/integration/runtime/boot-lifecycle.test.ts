@@ -63,6 +63,7 @@ import {
   type BunRelayCarrier,
   DaemonHealthProbe,
 } from '../../../src/adapters/index.ts';
+import { ExplicitDaemonConfig } from '../../../src/adapters/runtime/explicit-config.ts';
 import { FileSessionEnvironmentStore } from '../../../src/adapters/session/lifecycle/index.ts';
 import {
   FileSessionTranscriptMessageTokenCodec,
@@ -6481,7 +6482,9 @@ describe('daemon boot lifecycle', () => {
       should(said.stated.filter(message => message.startsWith('direct carrier omitted'))).be.empty();
     });
 
-    it('should report only superseded legacy keys the raw document actually contains', async () => {
+    it('should convert a host a bind carrier supersedes at boot, and report no superseded key afterwards', async () => {
+      // The state home's document is converted BEFORE it is read: the superseded `host` is removed by the
+      // journalled conversion, so by the time the boot looks for superseded keys there is none to name.
       const home = await tempDirectory('fyd-carrier-superseded');
       await seedHome(home, OS_CHOSEN_PORT);
       await writeFile(
@@ -6505,10 +6508,62 @@ describe('daemon boot lifecycle', () => {
       await runCleanups(cleanups);
 
       should(code).equal(0);
-      const superseded = said.stated.filter(message => message.startsWith('the legacy'));
+      const converted = said.steps.filter(step => step.startsWith('configuration converted'));
+      should(converted).have.length(1);
+      should(converted[0]).match(/\(host\); the original is kept at /u);
+      should(said.stated.filter(message => message.startsWith('the legacy'))).be.empty();
+      should(said.stated.filter(message => message.includes('superseded'))).be.empty();
+      const written = JSON.parse(await readFile(join(home, 'config', 'daemon.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      should(written).not.have.property('host');
+      should(
+        (await readdir(join(home, 'config'))).some(name => name.startsWith('daemon.json.pre-carriers.')),
+      ).be.true();
+    });
+
+    it('should still report a superseded legacy key in a --config file, which is never converted', async () => {
+      // THE LEGACY READER STAYS: a file named with `--config` is the operator's own and is left alone, so the
+      // key a bind carrier supersedes is still there to be named.
+      const home = await tempDirectory('fyd-carrier-superseded-explicit');
+      await seedHome(home, OS_CHOSEN_PORT);
+      const named = join(await tempDirectory('fyd-carrier-explicit-file'), 'operator.json');
+      await writeFile(
+        named,
+        daemonDocument({
+          host: 'box.invalid',
+          carriers: [
+            { kind: 'bind', host: '127.0.0.1', port: OS_CHOSEN_PORT },
+            { kind: 'relay', source: 'discovery', enabled: false },
+          ],
+        }),
+        { mode: 0o600 },
+      );
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+
+      const code = await start(
+        {
+          ...buildIntegrationWorld(),
+          config: new ExplicitDaemonConfig(named),
+          notices: said.port,
+          untilShutdown: async () => undefined,
+        },
+        cleanups,
+      );
+      await runCleanups(cleanups);
+
+      should(code).equal(0);
+      should(said.steps.filter(step => step.startsWith('configuration converted'))).be.empty();
+      const left = said.stated.filter(message => message.startsWith('the legacy host/port/relay keys'));
+      should(left).have.length(1);
+      should(left[0]).containEql('never rewritten at boot');
+      const superseded = said.stated.filter(message => message.startsWith('the legacy "'));
       should(superseded).have.length(1);
       should(superseded[0]).match(/legacy "host" key/u);
       should(superseded[0]).not.match(/"port"|"relay"/u);
+      should(JSON.parse(await readFile(named, 'utf8'))).have.property('host', 'box.invalid');
     });
 
     it('should dial the carrier the directory advertises when this daemon configured none', async () => {

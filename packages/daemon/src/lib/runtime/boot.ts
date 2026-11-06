@@ -151,6 +151,13 @@ export interface BootRefusal {
   readonly message: string;
 }
 
+/**
+ * Where a remedy sends an operator to change the address: the bind entry in `carriers`, which is what the boot
+ * conversion writes. A document the conversion left alone (refused, or named with `--config`) can still spell it
+ * with the top-level keys, so the sentence says both.
+ */
+const BIND_ENTRY_IN = 'on the bind entry in "carriers" (or at the top level if the document has no bind entry) of';
+
 /** Everything a refusal names, so no part of the message is assembled from a global. */
 export interface OccupiedAddressReport {
   /** The daemon executable's own name, as it introduces itself in its log. */
@@ -159,7 +166,7 @@ export interface OccupiedAddressReport {
   readonly clientName: string;
   /** The address this boot was about to bind. */
   readonly url: string;
-  /** The configuration document whose `port` chooses a different one. */
+  /** The configuration document whose bind entry's `port` chooses a different one. */
   readonly configFile: string;
   readonly occupant: Exclude<AddressOccupant, { readonly kind: 'vacant' }>;
 }
@@ -173,7 +180,7 @@ export interface OccupiedAddressReport {
  * says what was found, where, and what to do about it.
  */
 export function refuseOccupiedAddress(report: OccupiedAddressReport): BootRefusal {
-  const choose = `choose a different address by setting "port" in ${report.configFile}, then start again`;
+  const choose = `choose a different address by setting "port" ${BIND_ENTRY_IN} ${report.configFile}, then start again`;
   if (report.occupant.kind === 'daemon')
     return {
       exitCode: EXIT_ALREADY_RUNNING,
@@ -239,7 +246,7 @@ export function refuseExhaustedCandidates(
   const last = tried[tried.length - 1];
   return {
     exitCode: EXIT_ADDRESS_CONFLICT,
-    message: `${daemonName} found no free address: every port from ${String(first)} to ${String(last)} is already taken on this host. Free one of them, or name the port this daemon should use by setting "port" in ${configFile}.`,
+    message: `${daemonName} found no free address: every port from ${String(first)} to ${String(last)} is already taken on this host. Free one of them, or name the port this daemon should use by setting "port" ${BIND_ENTRY_IN} ${configFile}.`,
   };
 }
 
@@ -253,7 +260,7 @@ export function refuseExhaustedCandidates(
 export function refuseUnbindableAddress(url: string, reason: string, configFile: string): BootRefusal {
   return {
     exitCode: EXIT_ADDRESS_CONFLICT,
-    message: `${url} could not be bound: ${reason}. Check that the address is free and that this host can listen on it, or choose another by setting "host" and "port" in ${configFile}.`,
+    message: `${url} could not be bound: ${reason}. Check that the address is free and that this host can listen on it, or choose another by setting "host" and "port" ${BIND_ENTRY_IN} ${configFile}.`,
   };
 }
 

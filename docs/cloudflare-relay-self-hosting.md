@@ -394,7 +394,7 @@ It names the relay posture in one line — direct-only, hosted, or self-hosted, 
 ([the declared limit](#read-this-before-you-start-what-you-will-and-will-not-get)), first pairing
 goes direct unless the hosted entry is also listed. That means the device must be able to reach the
 daemon's own address for the pairing itself — the daemon has to listen beyond loopback, which is
-`"host": "0.0.0.0"` plus `"publicUrl"` in the same file ([pairing.md](pairing.md)). For a daemon
+`"host": "0.0.0.0"` on the `bind` entry in `carriers` (or the top-level `host` if the document has no bind entry) plus `"publicUrl"` in the same file ([pairing.md](pairing.md)). For a daemon
 that only listens on loopback and lists only your relay, `fy pair` draws no QR and says so, because
 nothing off that machine could redeem it.
 

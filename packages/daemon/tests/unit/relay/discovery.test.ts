@@ -314,7 +314,7 @@ describe('what the daemon says about its carrier', () => {
       should(lines[1]).match(/nothing can pair with it either/u);
       // Bind everywhere before advertising one dialable URL. The wildcard keeps loopback working,
       // so the host's own command can still spend the owner-only credential after applying the fix.
-      should(lines[2]).match(/^to pair: set "host" in/u);
+      should(lines[2]).match(/^to pair: set "host" to "0\.0\.0\.0" on the bind entry in "carriers" of/u);
       should(lines[2]).containEql(CONFIG_FILE);
       should(lines[2]).containEql(`"${WILDCARD_BIND_HOST}"`);
       should(lines[2]).containEql('"publicUrl"');
@@ -333,6 +333,7 @@ describe('what the daemon says about its carrier', () => {
 
     // Assert — the specific sentence survives, and the remedy points at the block being dialled.
     should(lines[0]).containEql('not a daemon fingerprint');
+    should(lines[2]).match(/relay entry in "carriers" of .* \(or its top-level "relay" block\)/u);
     should(lines[2]).match(/correct it or remove it/u);
   });
 
