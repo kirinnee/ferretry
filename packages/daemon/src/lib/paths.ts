@@ -83,9 +83,6 @@ export interface FoundationPaths {
    */
   readonly catalogs: string;
   readonly catalogsDocument: string;
-  /** The version 1 document as it was when the upgrade to version 2 ran: how an older daemon is gone back to. */
-  readonly catalogsBackupV1: string;
-  readonly catalogsBackupV2: string;
   readonly catalogBlobs: string;
   /**
    * The people this machine shares catalogs with and the codes that let them in (docs/catalogs.md § Members).
@@ -100,8 +97,6 @@ export interface FoundationPaths {
   /** The keys of public links, sealed under `secrets.key`: the one file that can rebuild a link URL. Never read by a route. */
   readonly catalogLinkKeys: string;
   readonly catalogMembers: string;
-  /** The members file as it was before duplicate names were made unique: kept once, never read. */
-  readonly catalogMembersBeforeUniqueNames: string;
   readonly catalogShares: string;
   /** The passkeys and unlocks of members' browsers, by member KEY id: public keys and instants, never a secret. */
   readonly catalogMemberPasskeys: string;
@@ -158,13 +153,10 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     securityAudit: join(state, 'security-audit.jsonl'),
     catalogs: join(state, 'catalogs'),
     catalogsDocument: join(state, 'catalogs', 'catalogs.json'),
-    catalogsBackupV1: join(state, 'catalogs', 'catalogs.v1.json'),
-    catalogsBackupV2: join(state, 'catalogs', 'catalogs.v2.json'),
     catalogBlobs: join(state, 'catalogs', 'blobs'),
     catalogLinks: join(state, 'catalogs', 'links.json'),
     catalogLinkKeys: join(state, 'catalogs', 'link-keys.json'),
     catalogMembers: join(state, 'catalogs', 'members.json'),
-    catalogMembersBeforeUniqueNames: join(state, 'catalogs', 'members.before-unique-names.json'),
     catalogShares: join(state, 'catalogs', 'shares.json'),
     catalogMemberPasskeys: join(state, 'catalogs', 'member-passkeys.json'),
     catalogMemberUnlocks: join(state, 'catalogs', 'member-unlocks.json'),

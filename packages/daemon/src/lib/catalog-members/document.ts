@@ -78,23 +78,14 @@ const MembersShapeSchema = z.strictObject({
   members: z.array(StoredMemberSchema).max(CATALOG_MAX_MEMBERS),
 });
 
-/**
- * Every rule of the members file but one: two people may still share a name. ONLY the one-time upgrade reads a
- * file with this (docs/catalogs.md § Members): files written before a name was an ID can hold duplicates, and the
- * upgrade renames them before anything else sees the document.
- */
-export const LegacyMembersDocumentSchema = MembersShapeSchema.check(ctx =>
-  report(ctx, membersProblem(ctx.value, false)),
-);
-
 /** A member's name is their ID on this machine: no two are the same by {@link memberNameKey}. */
-export const MembersDocumentSchema = MembersShapeSchema.check(ctx => report(ctx, membersProblem(ctx.value, true)));
+export const MembersDocumentSchema = MembersShapeSchema.check(ctx => report(ctx, membersProblem(ctx.value)));
 
 function report(ctx: z.core.ParsePayload<z.infer<typeof MembersShapeSchema>>, message: string | undefined): void {
   if (message !== undefined) ctx.issues.push({ code: 'custom', message, input: ctx.value, path: ['members'] });
 }
 
-function membersProblem(document: z.infer<typeof MembersShapeSchema>, uniqueNames: boolean): string | undefined {
+function membersProblem(document: z.infer<typeof MembersShapeSchema>): string | undefined {
   const memberIds = new Set<string>();
   const keyIds = new Set<string>();
   const names = new Set<string>();
@@ -102,11 +93,9 @@ function membersProblem(document: z.infer<typeof MembersShapeSchema>, uniqueName
   for (const member of document.members) {
     if (memberIds.has(member.memberId)) return `${member.memberId} is listed twice`;
     memberIds.add(member.memberId);
-    if (uniqueNames) {
-      const name = memberNameKey(member.label);
-      if (names.has(name)) return `${member.memberId} has the same name as another member`;
-      names.add(name);
-    }
+    const name = memberNameKey(member.label);
+    if (names.has(name)) return `${member.memberId} has the same name as another member`;
+    names.add(name);
     for (const key of member.keys) {
       if (keyIds.has(key.keyId)) return `${key.keyId} is listed twice`;
       keyIds.add(key.keyId);

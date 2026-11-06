@@ -1,6 +1,6 @@
 /**
  * ACCOUNTS AND SIGN-INS: the store the saved logins became (docs/secrets.md, "Accounts and sign-ins"; the wire and
- * the pure migration are `packages/protocol/src/lib/accounts.ts`).
+ * schemas are `packages/protocol/src/lib/accounts.ts`).
  *
  * An ACCOUNT is one identity: a label, a PLAIN username, a password and its 2FA keys. A SIGN-IN is how that account
  * signs in at ONE place (a website, or a terminal tool) with its method, recipe and what the daemon saw there. It rests
@@ -8,8 +8,7 @@
  *
  * - the INDEX (`login-entries.json`, now `v: 2`): accounts by handle and sign-ins by id. Nothing in it is secret.
  * - the SEALED document (`login-secrets.json`): the secret fields, AES-GCM under the vault's key, filed under the
- *   account's immutable KEY. The migration NEVER writes it: an account keeps its saved login's key, so every sealed
- *   name is the one it always was, and only the index moves where it names it from.
+ *   account's immutable KEY.
  *
  * THE SAME SPLIT AS THE VAULT:
  *
@@ -30,7 +29,6 @@ import {
   AccountIndexDocumentSchema,
   accountIndexProblems,
   type AccountRecord,
-  type AccountsMigrationReport,
   type AddTwoFactorKeyRequest,
   accountSeedFields,
   type AccountSummary,
@@ -44,7 +42,6 @@ import {
   MAX_ACCOUNTS,
   MAX_SIGN_INS,
   MAX_SIGN_INS_PER_ACCOUNT,
-  migrateLoginIndex,
   type PatchTwoFactorKeyRequest,
   type Place,
   placeHosts,
@@ -63,7 +60,6 @@ import {
   twoFactorKeySummaryOf,
 } from '@ferretry/protocol';
 import type { ClockPort } from '../ports.ts';
-import type { LoginIndexDocument } from './logins.ts';
 import { totpCode } from './totp.ts';
 import {
   type SealedSecret,
@@ -74,25 +70,12 @@ import {
 } from './types.ts';
 
 /**
- * What the index file holds, as its store read it: a version 1 saved-login index (with the exact bytes, for the one
- * backup the migration keeps) or a version 2 account index. `undefined`: never written.
- */
-export type StoredLoginIndex =
-  | { readonly v: 1; readonly document: LoginIndexDocument; readonly bytes: string }
-  | { readonly v: 2; readonly document: AccountIndexDocument };
-
-/**
- * Durable boundary for the index. `read` answers `undefined` ONLY for an index never written; one that parses as
- * neither version raises `SecretStoreError('unreadable')`, because damaged is not empty. It WRITES only version 2.
+ * Durable boundary for the index. `read` answers `undefined` ONLY for an index never written; one that does not parse
+ * raises `SecretStoreError('unreadable')`, because damaged is not empty.
  */
 export interface LoginIndexStore {
-  read(): Promise<StoredLoginIndex | undefined>;
+  read(): Promise<AccountIndexDocument | undefined>;
   write(document: AccountIndexDocument): Promise<void>;
-  /**
-   * Keeps the version 1 bytes beside the index (`login-entries.v1.json`, `0600`) — ONLY if no such copy exists, so the
-   * first one is never overwritten. The manual downgrade path (docs/secrets.md).
-   */
-  keepVersion1(bytes: string): Promise<void>;
 }
 
 /** Why a change to an account or sign-in was refused: each is a different thing for the person to do. */
@@ -134,7 +117,7 @@ export function randomLoginKey(): string {
   return `L${randomBytes(12).toString('hex').toUpperCase()}`;
 }
 
-/** A fresh sign-in id: 64 random bits. A migrated one is derived instead (the protocol's `migratedSignInId`). */
+/** A fresh sign-in id: 64 random bits. */
 export function randomSignInId(): SignInId {
   return `si_${randomBytes(8).toString('hex')}`;
 }
@@ -155,28 +138,10 @@ export function referencedSeals(index: Pick<AccountIndexDocument, 'accounts'>): 
   return names;
 }
 
-/** Every sealed name a version 1 index points at: what the migration must find in the sealed document, and keep. */
-function referencedByVersion1(index: LoginIndexDocument): ReadonlySet<string> {
-  const names = new Set<string>();
-  for (const record of Object.values(index.entries))
-    for (const name of [record.seals.password, record.seals.totp]) if (name !== undefined) names.add(name);
-  return names;
-}
-
 const missingFrom = (names: ReadonlySet<string>, sealed: SecretVaultDocument): number =>
   [...names].filter(name => sealed.entries[name] === undefined).length;
 
 const EMPTY_INDEX: AccountIndexDocument = { v: 2, accounts: {}, signIns: {} };
-
-/** The index as a change starts from it, and the version 1 it was migrated from in memory, if it was. */
-interface IndexRead {
-  readonly document: AccountIndexDocument;
-  readonly version1?: {
-    readonly bytes: string;
-    readonly document: LoginIndexDocument;
-    readonly report: AccountsMigrationReport;
-  };
-}
 
 /**
  * ONE CHANGE AT A TIME FOR THE WHOLE STORE. Every account shares the same two files, and a change reads both, awaits
@@ -200,25 +165,11 @@ class AccountDocuments {
     readonly index: LoginIndexStore,
     readonly sealed: SecretDocumentStore,
     readonly cipher: SecretCipherPort,
-    private readonly hostName: string,
-    private readonly clock: ClockPort,
   ) {}
 
-  /**
-   * The index as version 2. A version 1 index not yet migrated is migrated IN MEMORY with the same pure function the
-   * boot step commits with (same ids), so every reader agrees before and after that commit; nothing here writes it.
-   */
-  async read(): Promise<IndexRead> {
-    const stored = await this.index.read();
-    if (stored === undefined) return { document: EMPTY_INDEX };
-    if (stored.v === 2) return { document: stored.document };
-    const migrated = migrateLoginIndex(stored.document, { hostName: this.hostName, now: this.clock.now() });
-    if (!migrated.ok)
-      throw new SecretStoreError('unreadable', `the saved logins cannot become accounts: ${migrated.error}`);
-    return {
-      document: migrated.value.document,
-      version1: { bytes: stored.bytes, document: stored.document, report: migrated.value.report },
-    };
+  /** The index, or the empty one on a state home that never saved a login. */
+  async read(): Promise<AccountIndexDocument> {
+    return (await this.index.read()) ?? EMPTY_INDEX;
   }
 
   async readSealed(): Promise<SecretVaultDocument> {
@@ -229,52 +180,19 @@ class AccountDocuments {
     return stored;
   }
 
-  /**
-   * Whether a version 1 index may become this version 2 one: every name it points at is in the sealed document, and
-   * the version 2 index points at every one of them. Either failing is a DAMAGED store: nothing is migrated, and
-   * nothing is swept against it.
-   */
-  version1Problem(version1: LoginIndexDocument, next: AccountIndexDocument, sealed: SecretVaultDocument) {
-    const before = referencedByVersion1(version1);
-    const missing = missingFrom(before, sealed);
-    if (missing > 0) return `the saved logins name ${String(missing)} sealed value(s) that are not there`;
-    const after = referencedSeals(next);
-    const lost = [...before].filter(name => !after.has(name)).length;
-    return lost > 0 ? `the accounts would lose ${String(lost)} sealed value(s) the saved logins point at` : undefined;
-  }
-
-  /**
-   * THE ONE COMMIT POINT: the index, written atomically by its store. A change still on an index migrated in memory
-   * first keeps the version 1 bytes (only if no copy exists) and checks it may migrate at all, so the downgrade path
-   * exists before the first version 2 write, wherever that write comes from.
-   */
-  async commit(read: IndexRead, next: AccountIndexDocument, sealed: SecretVaultDocument): Promise<void> {
+  /** THE ONE COMMIT POINT: the index, written atomically by its store, after the change is checked against the schema. */
+  async commit(next: AccountIndexDocument): Promise<void> {
     const checked = AccountIndexDocumentSchema.safeParse(next);
     if (!checked.success)
       throw new LoginEntryError('invalid_change', checked.error.issues[0]?.message ?? 'the change breaks the store');
-    if (read.version1 !== undefined) {
-      const problem = this.version1Problem(read.version1.document, checked.data, sealed);
-      if (problem !== undefined) throw new SecretStoreError('unreadable', `${problem}; nothing was changed`);
-      await this.index.keepVersion1(read.version1.bytes);
-    }
     await this.index.write(checked.data);
   }
 }
 
-/**
- * What the boot step did: migrated a version 1 index (in counts, and the handles of providers whose link was
- * dropped), swept unreferenced sealed values, or why it did neither. `damaged`: NOTHING was migrated or swept.
- */
+/** What the boot step did: swept unreferenced sealed values, or why it did not. `damaged`: NOTHING was swept. */
 export interface AccountsBoot {
   readonly swept: number;
   readonly damaged?: string;
-  readonly migrated?: AccountsMigrationReport & {
-    /**
-     * Accounts a saved login signed in VIA whose link the migration dropped (the provider signs in on no site, is
-     * gone, or the link went round). Named, because nothing ties them to that site's page any more (secrev-1201 L5).
-     */
-    readonly providersWithoutLink: readonly AccountId[];
-  };
 }
 
 /** A sweep's result, as before: how many sealed values went, or why none did. */
@@ -303,7 +221,7 @@ export interface AccountDraft {
 }
 
 export interface AccountDirectoryOptions {
-  /** This machine's host name: where a migrated ssh sign-in's prompt runs. */
+  /** This machine's host name: where an older client's terminal sign-in runs. */
   readonly hostName?: string;
   readonly newKey?: () => string;
   readonly newSignInId?: () => SignInId;
@@ -503,7 +421,7 @@ export class AccountDirectory {
     options: AccountDirectoryOptions = {},
   ) {
     this.hostName = options.hostName ?? 'localhost';
-    this.documents = new AccountDocuments(index, sealed, cipher, this.hostName, clock);
+    this.documents = new AccountDocuments(index, sealed, cipher);
     this.lock = options.lock ?? new LoginStoreLock();
     this.newKey = options.newKey ?? randomLoginKey;
     this.newSignInId = options.newSignInId ?? randomSignInId;
@@ -535,7 +453,7 @@ export class AccountDirectory {
 
   /** {@link list}, with each account's immutable key: what a standing sign-in rule pins and checks. */
   async keyedList(): Promise<KeyedAccountListing> {
-    const { document } = await this.documents.read();
+    const document = await this.documents.read();
     await this.documents.readSealed();
     return listingOf(document);
   }
@@ -557,14 +475,14 @@ export class AccountDirectory {
     options: { readonly sealedOptional?: boolean } = {},
   ): Promise<T> {
     return await this.lock.run(async () => {
-      const read = await this.documents.read();
+      const current = await this.documents.read();
       const sealed = await this.documents.readSealed().catch((error: unknown) => {
-        if (options.sealedOptional === true && read.version1 === undefined) return undefined;
+        if (options.sealedOptional === true) return undefined;
         throw error;
       });
       const draft: AccountDraft = {
-        accounts: { ...read.document.accounts },
-        signIns: { ...read.document.signIns },
+        accounts: { ...current.accounts },
+        signIns: { ...current.signIns },
         sealed: sealed ?? { v: 1, cipher: this.documents.cipher.algorithm, entries: {} },
         added: {},
         repoints: [],
@@ -575,15 +493,15 @@ export class AccountDirectory {
         v: 2,
         accounts: draft.accounts,
         signIns: draft.signIns,
-        ...(read.document.migrated === undefined ? {} : { migrated: read.document.migrated }),
+        ...(current.migrated === undefined ? {} : { migrated: current.migrated }),
       };
       const problem = accountIndexProblems(next)[0];
       if (problem !== undefined) throw refusalFor(problem.path, problem.message);
       const staged: SecretVaultDocument = { ...draft.sealed, entries: { ...draft.sealed.entries, ...draft.added } };
       if (Object.keys(draft.added).length > 0) await this.documents.sealed.write(staged);
-      await this.documents.commit(read, next, staged);
+      await this.documents.commit(next);
       if (sealed !== undefined) await this.sweep(next, staged);
-      await this.followDefaults(read.document.accounts, next.accounts, draft.repoints);
+      await this.followDefaults(current.accounts, next.accounts, draft.repoints);
       await this.followRules?.(listingOf(next)).catch(() => undefined);
       return result;
     });
@@ -728,7 +646,7 @@ export class AccountDirectory {
    * seeds it keeps. Never a value.
    */
   async seedTarget(id: AccountId): Promise<SeedTarget> {
-    const { document } = await this.documents.read();
+    const document = await this.documents.read();
     const account = this.accountIn(document, id);
     const factors = account.factors ?? [];
     return {
@@ -743,7 +661,7 @@ export class AccountDirectory {
 
   /** The accounts that sign in at exactly this match key (a login domain, a site's `match` host, a `tool@host`). */
   async accountsAt(matchKey: string): Promise<readonly AccountId[]> {
-    const { document } = await this.documents.read();
+    const document = await this.documents.read();
     const keys = new Set(
       Object.values(document.signIns)
         .filter(signIn => placeKeys(signIn.place).includes(matchKey))
@@ -1196,52 +1114,30 @@ export class AccountDirectory {
   }
 
   /**
-   * AT BOOT, before any route mounts, under the store lock: migrate a version 1 index, then sweep.
+   * AT BOOT, before any route mounts, under the store lock: sweep the sealed values no account points at.
    *
-   * 1. Read the index. Absent: nothing to do. Unreadable: DAMAGED — no migration, no write, no sweep.
-   * 2. A version 1 index: read the sealed document; every name the index points at must be there, and the migrated
-   *    index must point at every one of them. Otherwise DAMAGED, and nothing is migrated or swept.
-   * 3. Keep the version 1 bytes (`login-entries.v1.json`, only if no copy exists): the downgrade path.
-   * 4. Write the version 2 index: THE commit. The sealed document is not written at all.
-   * 5. Sweep against the committed index, as before.
-   *
-   * A stop before 4 leaves version 1 in place, and the next boot does the same again, to the same bytes but `at`.
+   * 1. Read the index. Absent: nothing to do. Unreadable: DAMAGED, so nothing is swept.
+   * 2. Every name the index points at must be in the sealed document. Otherwise DAMAGED, and nothing is swept.
+   * 3. Sweep against the committed index.
    */
   async prepare(): Promise<AccountsBoot> {
     return await this.lock.run(async () => {
-      let stored: StoredLoginIndex | undefined;
+      let committed: AccountIndexDocument | undefined;
       try {
-        stored = await this.documents.index.read();
+        committed = await this.documents.index.read();
       } catch (error) {
         if (error instanceof SecretStoreError) return { swept: 0, damaged: error.message };
         throw error;
       }
-      if (stored === undefined) return { swept: 0 };
+      if (committed === undefined) return { swept: 0 };
       const sealed = await this.documents.readSealed();
-      let migrated: AccountsBoot['migrated'];
-      let committed: AccountIndexDocument;
-      if (stored.v === 1) {
-        const result = migrateLoginIndex(stored.document, { hostName: this.hostName, now: this.clock.now() });
-        if (!result.ok) return { swept: 0, damaged: `the saved logins cannot become accounts: ${result.error}` };
-        const problem = this.documents.version1Problem(stored.document, result.value.document, sealed);
-        if (problem !== undefined) return { swept: 0, damaged: problem };
-        await this.documents.index.keepVersion1(stored.bytes);
-        await this.documents.index.write(result.value.document);
-        committed = result.value.document;
-        migrated = {
-          ...result.value.report,
-          providersWithoutLink: providersWithoutLink(stored.document, result.value.document),
-        };
-      } else {
-        committed = stored.document;
-        const missing = missingFrom(referencedSeals(committed), sealed);
-        if (missing > 0)
-          return { swept: 0, damaged: `the index names ${String(missing)} sealed value(s) that are not there` };
-      }
+      const missing = missingFrom(referencedSeals(committed), sealed);
+      if (missing > 0)
+        return { swept: 0, damaged: `the index names ${String(missing)} sealed value(s) that are not there` };
       const before = Object.keys(sealed.entries).length;
       await this.sweep(committed, sealed);
       const after = Object.keys((await this.documents.readSealed()).entries).length;
-      return { swept: before - after, ...(migrated === undefined ? {} : { migrated }) };
+      return { swept: before - after };
     });
   }
 
@@ -1389,22 +1285,6 @@ export function decideOn(
 }
 
 /**
- * The handles of the providers whose via link the migration dropped: a saved login went via them, and the account it
- * became goes via nothing. Nothing on that site's page ties them to it any more.
- */
-function providersWithoutLink(version1: LoginIndexDocument, migrated: AccountIndexDocument): readonly AccountId[] {
-  const named = new Set<string>();
-  for (const [handle, record] of Object.entries(version1.entries)) {
-    const via = record.method?.via;
-    if (via === undefined || !Object.hasOwn(version1.entries, via)) continue;
-    const own = signInsOf(migrated.signIns, record.key);
-    if (own.length > 0 && own.every(([, signIn]) => signIn.method?.viaKey === undefined) && handle !== via)
-      named.add(via);
-  }
-  return [...named].sort();
-}
-
-/**
  * The refusal a broken store rule reads as: a via problem, a limit, or the rest. A place an account already signs in at
  * is refused by every write before it gets here (`assertPlaceFree`, the merge's own check), so it is not one of them.
  */
@@ -1462,19 +1342,8 @@ const foldedUsername = (username: string): string => username.trim().normalize('
 export class AccountVault implements AccountSealPort {
   private readonly documents: AccountDocuments;
 
-  constructor(
-    index: LoginIndexStore,
-    sealed: SecretDocumentStore,
-    cipher: SecretCipherPort,
-    options: { readonly hostName?: string; readonly clock?: ClockPort } = {},
-  ) {
-    this.documents = new AccountDocuments(
-      index,
-      sealed,
-      cipher,
-      options.hostName ?? 'localhost',
-      options.clock ?? { now: () => new Date().toISOString() },
-    );
+  constructor(index: LoginIndexStore, sealed: SecretDocumentStore, cipher: SecretCipherPort) {
+    this.documents = new AccountDocuments(index, sealed, cipher);
   }
 
   /**
@@ -1485,13 +1354,10 @@ export class AccountVault implements AccountSealPort {
    */
   async values(): Promise<ReadonlyMap<string, string>> {
     const sealed = await this.documents.readSealed();
-    const index = await this.documents
-      .read()
-      .then(read => read.document)
-      .catch((error: unknown) => {
-        if (error instanceof SecretStoreError) return EMPTY_INDEX;
-        throw error;
-      });
+    const index = await this.documents.read().catch((error: unknown) => {
+      if (error instanceof SecretStoreError) return EMPTY_INDEX;
+      throw error;
+    });
     if (Object.keys(sealed.entries).length === 0) return new Map();
     const opened = await this.documents.cipher.openAll(sealed.entries);
     const byName = new Map<string, string>();
@@ -1522,7 +1388,7 @@ export class AccountVault implements AccountSealPort {
     nowMs: number,
     options: { readonly factor?: TwoFactorId } = {},
   ): Promise<string> {
-    const { document } = await this.documents.read();
+    const document = await this.documents.read();
     const account = Object.hasOwn(document.accounts, id) ? document.accounts[id] : undefined;
     if (account === undefined) throw new LoginEntryError('unknown_login', `there is no account ${id}`);
     if (role === 'username') {
@@ -1576,7 +1442,7 @@ export class AccountVault implements AccountSealPort {
    * from secrets, and the index is a file anyone who can read it may read.
    */
   async lookAlike(): Promise<readonly (readonly AccountId[])[]> {
-    const { document } = await this.documents.read();
+    const document = await this.documents.read();
     const sealed = await this.documents.readSealed();
     const candidates = Object.entries(document.accounts).filter(
       ([, account]) => account.username !== undefined && account.seals.password !== undefined,

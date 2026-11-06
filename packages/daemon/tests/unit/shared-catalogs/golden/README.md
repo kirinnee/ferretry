@@ -1,11 +1,14 @@
-# Golden answers of the version 1 daemon
+# Recorded answers for a fixed catalogs store
 
-`v1-state.json` is a catalogs store as the version 1 daemon left it (the `catalogs.json` text and the frozen files
-by digest). `main-output.json` is what origin/main's version 1 `SharedCatalogService` answered for that store:
-`exportCatalog` and `signedManifest` for each catalog, and `list()` and `list({ sourceState: true })`.
+`v3-state.json` is a version 3 catalogs store: the `document` that `catalogs.json` holds and the shared copies
+(`blobs`, digest → canonical text) beside it. `main-output.json` is what a known-good build's `SharedCatalogService`
+answered for that store: `exportCatalog` and `signedManifest` for each catalog, and `list()` and
+`list({ sourceState: true })`.
 
-They were made once, by the version 1 code at commit `888b96621`, with the fixed identity `newIdentity()` in
-`../support.ts` (an Ed25519 signature is deterministic, so the bytes do not change), by running that service in a
-checkout of that commit against the store in `v1-state.json`, with the fixture servers and skill folder that
-`install()` in `../legacy.ts` sets up. Nothing in this folder is produced by the current code. A test in
-`migration.test.ts` checks that `legacyState()` still builds exactly `v1-state.json`.
+Neither file is produced by the current code. `main-output.json` was recorded once from the version 1 daemon (commit
+`888b96621`) with the fixed identity `newIdentity()` in `../support.ts` (an Ed25519 signature is deterministic, so the
+bytes do not change). `v3-state.json` is that same store written once in the version 3 shape, so the answers can be
+held to it without keeping a reader for the old shape: the version 1 store the answers were recorded from was run once
+through that build's upgrade, and the result committed. `golden.test.ts` installs it under a rig and checks every
+export, manifest and list against `main-output.json` byte for byte. If the service ever answers differently, the
+answer changed; do not regenerate these files to make the test pass.

@@ -182,4 +182,32 @@ describe('a daemon upgraded onto the devices.json of the release before it', () 
       await should(repository.open('workstation')).be.rejected();
     }
   });
+
+  it('should refuse a schemaVersion 1 document with a remedy that, followed exactly, lets the daemon start with no devices', async () => {
+    // Arrange — a document from before device keys, beside the identity it names.
+    const state = home();
+    const v1 = JSON.stringify({
+      schemaVersion: 1,
+      daemonId: '__DAEMON_ID__',
+      devices: [{ id: PHONE, tokenHash: 'h'.repeat(43) }],
+    });
+    const repository = await seed(state, v1);
+    const daemonId = (JSON.parse(state.store.get(state.devicesPath) ?? '{}') as { daemonId: string }).daemonId;
+    const empty = JSON.stringify({ schemaVersion: 2, daemonId, devices: [] });
+
+    // Act — the refusal, then exactly the document it asks for.
+    const refusal = await repository.open('workstation').then(
+      () => undefined,
+      (error: unknown) => (error as Error).message,
+    );
+    state.store.set(state.devicesPath, empty);
+    const reopened = await repository.open('workstation');
+
+    // Assert
+    should(refusal).equal(
+      `${state.devicesPath} predates device keys (schemaVersion 1), so no device in it can sign in any more: replace its contents with ${empty} and pair every device again`,
+    );
+    should(reopened.devices).be.empty();
+    should(reopened.daemonId).equal(daemonId);
+  });
 });

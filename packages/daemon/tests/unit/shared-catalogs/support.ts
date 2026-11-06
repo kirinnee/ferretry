@@ -33,16 +33,10 @@ async function newIdentity(): Promise<DaemonIdentity> {
 
 class MemoryDocuments implements CatalogDocumentStore {
   writes = 0;
-  /** What the file holds: a v1 or v2 text, a v3 document, or nothing. */
+  /** What the file holds: a document, or nothing. */
   raw: RawCatalogs = { version: 'none' };
-  /** `catalogs.v1.json`, as the upgrade wrote it. */
-  backup: string | undefined;
-  /** `catalogs.v2.json`, as the upgrade wrote it. */
-  backupV2: string | undefined;
   /** Makes `write` throw, as a full disk would. */
   failWrites = false;
-  /** Makes `writeBackupV1` and `writeBackupV2` throw. */
-  failBackup = false;
   /** Every write to the stores, in order, shared with the blobs. */
   constructor(readonly events: string[] = []) {}
 
@@ -60,16 +54,6 @@ class MemoryDocuments implements CatalogDocumentStore {
     if (this.failWrites) throw new Error('disk full');
     this.writes += 1;
     this.document = document;
-  }
-  async writeBackupV1(text: string): Promise<void> {
-    this.events.push('backup');
-    if (this.failBackup) throw new Error('disk full');
-    this.backup = text;
-  }
-  async writeBackupV2(text: string): Promise<void> {
-    this.events.push('backup2');
-    if (this.failBackup) throw new Error('disk full');
-    this.backupV2 = text;
   }
 }
 

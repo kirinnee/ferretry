@@ -141,7 +141,6 @@ import {
   AccountDefaults,
   configuredReferences,
   LoginDirectory,
-  type LoginIndexDocument,
   type LoginIndexStore,
   LoginRecipeService,
   LoginVault,
@@ -158,7 +157,6 @@ import {
   SecretUseService,
   SecretVault,
   type SecretVaultDocument,
-  type StoredLoginIndex,
   TwoFactorSeedStages,
   type TwoFactorSeedStagesDeps,
 } from '../../../../src/lib/secrets/index.ts';
@@ -2082,32 +2080,20 @@ export class MemorySecretDocuments implements SecretDocumentStore {
   }
 }
 
-/**
- * The index held in memory: `undefined` until written, or a failure for a damaged one. A test may plant a version 1
- * saved-login index (what an older daemon wrote) to read through the migration; every write is version 2.
- */
+/** The index held in memory: `undefined` until written, or a failure for a damaged one. */
 export class MemoryLoginIndex implements LoginIndexStore {
-  document: LoginIndexDocument | AccountIndexDocument | undefined;
-  /** The version 1 copy the migration kept, if it kept one. */
-  version1: string | undefined;
+  document: AccountIndexDocument | undefined;
   constructor(private readonly failure?: SecretStoreError) {}
-  async read(): Promise<StoredLoginIndex | undefined> {
+  async read(): Promise<AccountIndexDocument | undefined> {
     if (this.failure !== undefined) throw this.failure;
-    const document = this.document;
-    if (document === undefined) return undefined;
-    return document.v === 1
-      ? { v: 1, document, bytes: `${JSON.stringify(document, undefined, 2)}\n` }
-      : { v: 2, document };
+    return this.document;
   }
   async write(document: AccountIndexDocument): Promise<void> {
     this.document = document;
   }
-  async keepVersion1(bytes: string): Promise<void> {
-    this.version1 ??= bytes;
-  }
-  /** The committed version 2 index; a test that reads one before anything committed fails here. */
+  /** The committed index; a test that reads one before anything committed fails here. */
   get accounts(): AccountIndexDocument {
-    if (this.document?.v !== 2) throw new Error('no version 2 index has been committed');
+    if (this.document === undefined) throw new Error('no index has been committed');
     return this.document;
   }
 }

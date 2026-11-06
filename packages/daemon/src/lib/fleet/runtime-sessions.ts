@@ -19,7 +19,7 @@ export interface RuntimeSessionRecord {
   /** What the person calls it: its teammate name, else its own name, else its id. */
   readonly name: string;
   readonly harness: HarnessKind;
-  /** `config.agent`: the runtime name it launched as (or, in an old record, the wrapper path). */
+  /** `config.agent`: the runtime name it launched as. */
   readonly agent: string;
   /** `config.command[0]`: the wrapper it launched, when the record has one. */
   readonly executable?: string;
@@ -37,7 +37,7 @@ export interface RuntimeSpellings {
 
 /** Whether a session record names this runtime, by any spelling it is known by. */
 export function sessionRunsOn(record: RuntimeSessionRecord, runtime: RuntimeSpellings): boolean {
-  const spellings = new Set([runtime.name, runtime.wrapper, ...(runtime.formerNames ?? [])]);
+  const spellings = new Set([runtime.name, ...(runtime.formerNames ?? [])]);
   if (runtime.id !== undefined) spellings.add(runtime.id);
   return spellings.has(record.agent) || (record.executable !== undefined && record.executable === runtime.wrapper);
 }
@@ -90,9 +90,8 @@ export interface SessionRuntimeRename {
 
 /**
  * A session's configuration document re-pointed from the old runtime to the new one, or `undefined`
- * when it does not name the old one. `agent` keeps its form — a name stays a name, a wrapper path
- * becomes the new wrapper path — and only `command[0]` moves in the argv, because the rest of it is
- * what the session was launched with and still is.
+ * when it does not name the old one. `agent` becomes the new name and only `command[0]` moves in the
+ * argv, because the rest of it is what the session was launched with and still is.
  */
 export function renamedSessionConfig(
   current: unknown,
@@ -100,8 +99,7 @@ export function renamedSessionConfig(
 ): Record<string, unknown> | undefined {
   if (typeof current !== 'object' || current === null || Array.isArray(current)) return undefined;
   const document = current as Readonly<Record<string, unknown>>;
-  const agent =
-    document.agent === rename.from ? rename.to : document.agent === rename.fromWrapper ? rename.toWrapper : undefined;
+  const agent = document.agent === rename.from ? rename.to : undefined;
   const command = Array.isArray(document.command) ? document.command : undefined;
   const movesCommand = command?.[0] === rename.fromWrapper;
   if (agent === undefined && !movesCommand) return undefined;

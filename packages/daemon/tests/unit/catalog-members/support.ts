@@ -23,7 +23,6 @@ import {
 import type {
   CatalogDirectory,
   MemberAuditSink,
-  MembersUpgrade,
   MemberSessionCloser,
   ShareCodeHasher,
   ShareLinkSource,
@@ -188,8 +187,6 @@ class MemoryStore<D> {
   writes = 0;
   failing = false;
   unreadable: Error | undefined;
-  /** The upgrade the next `read` is said to have found due (members only). */
-  upgrade: MembersUpgrade | undefined;
   /** Every document that reached the disk, serialised, so a test can search them. */
   readonly history: string[] = [];
   #gate: Promise<void> | undefined;
@@ -204,12 +201,6 @@ class MemoryStore<D> {
     this.reads += 1;
     if (this.unreadable !== undefined) throw this.unreadable;
     return this.document;
-  }
-
-  takeUpgrade(): MembersUpgrade | undefined {
-    const upgrade = this.upgrade;
-    this.upgrade = undefined;
-    return upgrade;
   }
 
   async write(document: D): Promise<void> {
@@ -250,15 +241,12 @@ export interface RigOptions {
   compare?: DigestComparison;
   /** Leave the documents unread, as a caller that forgot `ready` would. */
   unloaded?: boolean;
-  /** An upgrade the members file is said to have found due when it was read. */
-  upgrade?: MembersUpgrade;
 }
 
 export async function rig(options: RigOptions = {}) {
   const log: string[] = [];
   const clock = { now: T0 };
   const members = new MemoryStore<MembersDocument>(options.members ?? EMPTY_MEMBERS_DOCUMENT, 'members', log);
-  members.upgrade = options.upgrade;
   const shares = new MemoryStore<SharesDocument>(options.shares ?? EMPTY_SHARES_DOCUMENT, 'shares', log);
   const renamed: (readonly MemberRename[])[] = [];
   const audit = new MemoryAudit();

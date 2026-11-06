@@ -192,7 +192,7 @@ describe('StatePairingRepository', () => {
     const initial = await foreign.repository.open('workstation');
     await foreign.files.writeTextAtomic(
       join(foreign.paths.state, 'devices.json'),
-      `${JSON.stringify({ schemaVersion: 1, daemonId: `fy_daemon_${'z'.repeat(43)}`, devices: [] })}\n`,
+      `${JSON.stringify({ schemaVersion: 2, daemonId: `fy_daemon_${'z'.repeat(43)}`, devices: [] })}\n`,
     );
     await should(new StatePairingRepository(foreign.paths, foreign.files).open('workstation')).be.rejectedWith(
       'device grants belong to a different daemon identity',
@@ -272,29 +272,23 @@ describe('StatePairingRepository', () => {
 });
 
 describe('StatePairingRepository device keys', () => {
-  it('should persist only public keys, and drop every bearer grant a document from before device keys held', async () => {
+  it('should refuse a document from before device keys, naming the file and the remedy', async () => {
     // Arrange — a v1 document whose grants each held the digest of a bearer token.
     const { paths, files, repository } = await fixture('pairing-state-bearer');
     const first = await repository.open('workstation');
-    await files.writeTextAtomic(
-      join(paths.state, 'devices.json'),
-      `${JSON.stringify({
-        schemaVersion: 1,
-        daemonId: first.daemonId,
-        devices: [{ id: 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa', tokenHash: 'h'.repeat(43) }, { id: 'second' }],
-      })}\n`,
+    const devicesPath = join(paths.state, 'devices.json');
+    const legacy = `${JSON.stringify({
+      schemaVersion: 1,
+      daemonId: first.daemonId,
+      devices: [{ id: 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa', tokenHash: 'h'.repeat(43) }],
+    })}\n`;
+    await files.writeTextAtomic(devicesPath, legacy);
+
+    // Act / Assert — a sentence, not a schema error, naming the exact document to replace it with; the file is left as it was.
+    await should(new StatePairingRepository(paths, files, undefined, 'fy pair').open('workstation')).be.rejectedWith(
+      `${devicesPath} predates device keys (schemaVersion 1), so no device in it can sign in any more: replace its contents with ${JSON.stringify({ schemaVersion: 2, daemonId: first.daemonId, devices: [] })} and pair every device again with \`fy pair\``,
     );
-
-    // Act
-    const reopened = await new StatePairingRepository(paths, files).open('workstation');
-    const rewritten = JSON.parse((await files.readText(join(paths.state, 'devices.json'))) ?? '{}') as unknown;
-    const again = await new StatePairingRepository(paths, files).open('workstation');
-
-    // Assert — nothing in it can authenticate any more, so it lists nothing, and says how much it dropped once.
-    should(reopened.devices).be.empty();
-    should(reopened.droppedBearerGrants).equal(2);
-    should(rewritten).deepEqual({ schemaVersion: 2, daemonId: first.daemonId, devices: [] });
-    should(again.droppedBearerGrants).equal(0);
+    should(await files.readText(devicesPath)).equal(legacy);
   });
 
   it('should refuse a grant whose key is not an Ed25519 public key, rather than store a device that can never get in', async () => {

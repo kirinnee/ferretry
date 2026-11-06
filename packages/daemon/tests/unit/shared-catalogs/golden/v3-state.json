@@ -1,0 +1,187 @@
+{
+  "document": {
+    "schemaVersion": 3,
+    "items": [
+      {
+        "itemId": "itm_SSSSSSSSSSSSSSSSSSSSSS",
+        "kind": "skill",
+        "name": "demo",
+        "ownSummary": false,
+        "createdAt": "2026-01-02T00:00:00.000Z",
+        "current": 2,
+        "versions": [
+          {
+            "version": 1,
+            "publishedAt": "2026-01-02T00:00:00.000Z",
+            "summary": "Does the demo thing",
+            "source": {
+              "kind": "skill",
+              "path": "/home/me/.claude/skills/demo/SKILL.md"
+            },
+            "contentDigest": "sha256:ac27ad25dc0308eec31eb3ed95939a7ea2acb6794c0a7ecf73d54a536ad75d53",
+            "size": 424,
+            "fileCount": 2,
+            "bindings": {
+              "cat_BBBBBBBBBBBBBBBBBBBBBB": {
+                "digest": "sha256:2ac984da2bc7d8d23d02de5d2691720b7e6f65605fbeb6e221fcd7dae09c900c",
+                "size": 424
+              }
+            }
+          },
+          {
+            "version": 2,
+            "publishedAt": "2026-01-04T00:00:00.000Z",
+            "summary": "Does the demo thing",
+            "source": {
+              "kind": "skill",
+              "path": "/home/me/.claude/skills/demo/SKILL.md"
+            },
+            "contentDigest": "sha256:02a7dfe2446c09d8dd070f7a962d4e7e4b038983ee7a47c4bc379da1346dc1aa",
+            "size": 428,
+            "fileCount": 2,
+            "bindings": {
+              "cat_BBBBBBBBBBBBBBBBBBBBBB": {
+                "digest": "sha256:fec9d84042fad624a3a4a9898c8243f2a76c634670fce92888c9dc8cb2b2600a",
+                "size": 428
+              }
+            }
+          }
+        ]
+      },
+      {
+        "itemId": "itm_MMMMMMMMMMMMMMMMMMMMMM",
+        "kind": "mcp",
+        "name": "files",
+        "ownSummary": true,
+        "createdAt": "2026-01-03T00:00:00.000Z",
+        "current": 1,
+        "versions": [
+          {
+            "version": 1,
+            "publishedAt": "2026-01-03T00:00:00.000Z",
+            "summary": "files summary",
+            "source": {
+              "kind": "mcp",
+              "id": "id-files",
+              "name": "files"
+            },
+            "contentDigest": "sha256:352a93d648f0f65f8e5f5c51ecf8e0c1f496c966e7ddc8ee2d0cb64ca397a3da",
+            "size": 340,
+            "bindings": {
+              "cat_BBBBBBBBBBBBBBBBBBBBBB": {
+                "digest": "sha256:72246f0ed21651724d1d4a17ea2ad3993e47c36c980bdb9f595b15e76144e5f5",
+                "size": 340
+              }
+            }
+          }
+        ]
+      },
+      {
+        "itemId": "itm_LLLLLLLLLLLLLLLLLLLLLL",
+        "kind": "mcp",
+        "name": "files",
+        "ownSummary": true,
+        "createdAt": "2026-01-03T00:00:00.000Z",
+        "current": 1,
+        "versions": [
+          {
+            "version": 1,
+            "publishedAt": "2026-01-03T00:00:00.000Z",
+            "summary": "files summary",
+            "source": {
+              "kind": "mcp",
+              "id": "id-files",
+              "name": "files"
+            },
+            "contentDigest": "sha256:352a93d648f0f65f8e5f5c51ecf8e0c1f496c966e7ddc8ee2d0cb64ca397a3da",
+            "size": 340,
+            "bindings": {
+              "cat_CCCCCCCCCCCCCCCCCCCCCC": {
+                "digest": "sha256:7a8ab26f99010ed0910219ed5619dd1e6a89ea99d979497109252e376f76ea8e",
+                "size": 340
+              }
+            }
+          }
+        ]
+      },
+      {
+        "itemId": "itm_HHHHHHHHHHHHHHHHHHHHHH",
+        "kind": "mcp",
+        "name": "docs",
+        "harness": "claude",
+        "ownSummary": true,
+        "createdAt": "2026-01-03T00:00:00.000Z",
+        "current": 1,
+        "versions": [
+          {
+            "version": 1,
+            "publishedAt": "2026-01-03T00:00:00.000Z",
+            "summary": "docs summary",
+            "source": {
+              "kind": "mcp",
+              "id": "id-component-docs",
+              "name": "docs"
+            },
+            "contentDigest": "sha256:344d46949a05286fe034dc6b371636f0cc84f0e74a2602fde58e2861cc1d3724",
+            "size": 356,
+            "bindings": {
+              "cat_CCCCCCCCCCCCCCCCCCCCCC": {
+                "digest": "sha256:1fd117e9f4eab9d7ae59cada220db2b57af2f3639da7308992047782fcbbb06b",
+                "size": 356
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "catalogs": [
+      {
+        "id": "cat_BBBBBBBBBBBBBBBBBBBBBB",
+        "name": "Team tools",
+        "description": "for us",
+        "publisherName": "studio",
+        "visibility": "members",
+        "revision": 6,
+        "issuedAt": "2026-01-05T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "itemId": "itm_SSSSSSSSSSSSSSSSSSSSSS",
+            "addedAt": "2026-01-02T00:00:00.000Z"
+          },
+          {
+            "itemId": "itm_MMMMMMMMMMMMMMMMMMMMMM",
+            "addedAt": "2026-01-03T00:00:00.000Z",
+            "withdrawnAt": "2026-01-05T00:00:00.000Z"
+          }
+        ]
+      },
+      {
+        "id": "cat_CCCCCCCCCCCCCCCCCCCCCC",
+        "name": "Other",
+        "description": "",
+        "publisherName": "studio",
+        "visibility": "members",
+        "revision": 2,
+        "issuedAt": "2026-01-03T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "entries": [
+          {
+            "itemId": "itm_LLLLLLLLLLLLLLLLLLLLLL",
+            "addedAt": "2026-01-03T00:00:00.000Z"
+          },
+          {
+            "itemId": "itm_HHHHHHHHHHHHHHHHHHHHHH",
+            "addedAt": "2026-01-03T00:00:00.000Z"
+          }
+        ]
+      }
+    ]
+  },
+  "blobs": {
+    "sha256:ac27ad25dc0308eec31eb3ed95939a7ea2acb6794c0a7ecf73d54a536ad75d53": "{\"catalogId\":\"cat_AAAAAAAAAAAAAAAAAAAAAA\",\"format\":\"ferretry-catalog-item\",\"itemId\":\"itm_AAAAAAAAAAAAAAAAAAAAAA\",\"itemVersion\":1,\"kind\":\"skill\",\"name\":\"demo\",\"publisher\":\"fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA\",\"skill\":{\"files\":[{\"content\":\"---\\nname: demo\\ndescription: Does the demo thing\\n---\\nBody\\n\",\"path\":\"SKILL.md\"},{\"content\":\"notes\",\"path\":\"notes.txt\"}]},\"summary\":\"Does the demo thing\",\"version\":1}",
+    "sha256:02a7dfe2446c09d8dd070f7a962d4e7e4b038983ee7a47c4bc379da1346dc1aa": "{\"catalogId\":\"cat_AAAAAAAAAAAAAAAAAAAAAA\",\"format\":\"ferretry-catalog-item\",\"itemId\":\"itm_AAAAAAAAAAAAAAAAAAAAAA\",\"itemVersion\":1,\"kind\":\"skill\",\"name\":\"demo\",\"publisher\":\"fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA\",\"skill\":{\"files\":[{\"content\":\"---\\nname: demo\\ndescription: Does the demo thing\\n---\\nBody\\n\",\"path\":\"SKILL.md\"},{\"content\":\"new notes\",\"path\":\"notes.txt\"}]},\"summary\":\"Does the demo thing\",\"version\":1}",
+    "sha256:352a93d648f0f65f8e5f5c51ecf8e0c1f496c966e7ddc8ee2d0cb64ca397a3da": "{\"catalogId\":\"cat_AAAAAAAAAAAAAAAAAAAAAA\",\"format\":\"ferretry-catalog-item\",\"itemId\":\"itm_AAAAAAAAAAAAAAAAAAAAAA\",\"itemVersion\":1,\"kind\":\"mcp\",\"mcp\":{\"args\":[\"-y\",\"files\"],\"command\":\"npx\",\"env\":{},\"transport\":\"command\"},\"name\":\"files\",\"publisher\":\"fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA\",\"summary\":\"files summary\",\"version\":1}",
+    "sha256:344d46949a05286fe034dc6b371636f0cc84f0e74a2602fde58e2861cc1d3724": "{\"catalogId\":\"cat_AAAAAAAAAAAAAAAAAAAAAA\",\"format\":\"ferretry-catalog-item\",\"harness\":\"claude\",\"itemId\":\"itm_AAAAAAAAAAAAAAAAAAAAAA\",\"itemVersion\":1,\"kind\":\"mcp\",\"mcp\":{\"args\":[\"-y\",\"docs\"],\"command\":\"npx\",\"env\":{},\"transport\":\"command\"},\"name\":\"docs\",\"publisher\":\"fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA\",\"summary\":\"docs summary\",\"version\":1}"
+  }
+}

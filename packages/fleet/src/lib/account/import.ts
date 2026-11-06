@@ -166,11 +166,6 @@ export interface ImportRecordEntry {
 export interface ImportRecord {
   readonly version: 1;
   readonly components: Readonly<Record<string, ImportRecordEntry>>;
-  /**
-   * The ONE profile an import made before P7, shared by both harnesses, which later imports still
-   * extend. A record written since names {@link ImportRecord.profiles} instead.
-   */
-  readonly profile?: string;
   /** The profile an import made for each harness, which later imports extend with what is new. */
   readonly profiles?: Readonly<Partial<Record<HarnessKind, string>>>;
 }
@@ -1151,7 +1146,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   // The profiles: ONE PER IMPORTED HARNESS (P7 — a profile is Generic, Claude only or Codex only,
   // never both), each holding the generic parts and that harness's own. Import again extends the
   // profile an earlier import made for a harness, or makes one for a harness imported for the first
-  // time. A record written before P7 names one shared profile, which is extended as it always was.
+  // time.
   const anyFound = harvests.some(entry => entry.found);
   const profiles: Record<string, LayeredProfile> = {};
   const ordered = (layers: readonly LayerReferenceText[]): LayerReferenceText[] =>
@@ -1173,7 +1168,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     );
   const profileOf: Partial<Record<HarnessKind, string>> = {};
   for (const harness of imported) {
-    const known = record.profiles?.[harness] ?? record.profile;
+    const known = record.profiles?.[harness];
     if (known !== undefined && existing?.profiles[known] !== undefined) profileOf[harness] = known;
   }
   for (const known of new Set(Object.values(profileOf))) {
@@ -1267,7 +1262,6 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     record: {
       version: 1,
       components: recordEntries,
-      ...(record.profile === undefined ? {} : { profile: record.profile }),
       ...(Object.keys(recordedProfiles).length === 0 ? {} : { profiles: recordedProfiles }),
     },
   };
