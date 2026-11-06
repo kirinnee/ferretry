@@ -132,6 +132,31 @@ export function nextReadinessStep(
   return frame.promptReady ? { kind: 'ready' } : { kind: 'wait' };
 }
 
+/** What the startup-settle loop should do about this frame. */
+export type StartupSettleStep =
+  /** The harness has finished its own startup: nothing is parked behind it any more. */
+  | { readonly kind: 'settled' }
+  /** Codex is still holding the submission (`Waiting for startup`); look again. */
+  | { readonly kind: 'wait' }
+  /** The pane died while startup was running; `reason` is the harness's own last words. */
+  | { readonly kind: 'exited'; readonly reason: string };
+
+/**
+ * Decide, from one frame taken AFTER the first turn was delivered, whether the harness has finished
+ * its own startup.
+ *
+ * Codex 0.166 draws its composer before startup ends and PARKS a submission until an `account/read`
+ * round trip to chatgpt.com answers, so a delivered first turn does not yet mean a started harness.
+ * A dead pane is answered first and with the harness's own reason: Codex exits with
+ * `account/read failed during TUI bootstrap … timed out` when that round trip never answers, and the
+ * start that was waiting for it should say so rather than report a session that dies later. Every
+ * other harness never draws the line, so for them this is `settled` on the first frame.
+ */
+export function startupSettleStep(frame: DeliveryFrame): StartupSettleStep {
+  if (!frame.alive || frame.dead) return { kind: 'exited', reason: harnessExitReason(frame) };
+  return paneShowsStartupWait(frame.visible) ? { kind: 'wait' } : { kind: 'settled' };
+}
+
 /**
  * What happened after a proven composer delivery was submitted.
  *

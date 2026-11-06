@@ -292,6 +292,22 @@ describe('PackController.newChild', () => {
     should(PACK_REFUSED_EXIT_CODE).equal(2);
   });
 
+  it('should write a start whose session failed to stderr as a refusal carrying its reason, and exit non-zero', async () => {
+    // Arrange
+    const reason = 'claude-main did not start: the interactive harness exited (1)';
+    const { controller, out } = build({
+      gateway: new FakePackGateway(recommendation(), refused({ refusal: { code: 'start_failed', message: reason } })),
+    });
+
+    // Act
+    await controller.newChild(['x'], { runtime: 'r' });
+
+    // Assert
+    should(out.out).be.empty();
+    should(out.err).eql([`foo new: refused (start_failed): ${reason}`]);
+    should(out.exitCode).equal(PACK_REFUSED_EXIT_CODE);
+  });
+
   it('should print the outcome as JSON on stdout, and still exit 2 for a refusal', async () => {
     // Arrange
     const ok = build({ gateway: new FakePackGateway(recommendation(), started()) });

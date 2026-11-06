@@ -6,6 +6,7 @@ import {
   ComposerOccupiedError,
   ComposerUnconfirmedError,
   PaneDeliveryError,
+  PaneStartupExitedError,
   PaneStrandedError,
   TmuxPaneDelivery,
 } from '../../../src/adapters/index.ts';
@@ -620,6 +621,106 @@ describe('tmux pane delivery — a stalled pane', () => {
     // Assert
     should(server.submitted).deepEqual(['continue']);
     should(enters(server)).equal(1, 'a second Enter would only have queued behind the first');
+  });
+});
+
+describe('tmux pane delivery — waiting out the harness’s own startup', () => {
+  it('should not wait at all for a pane that is not parked, and call it settled', async () => {
+    // Arrange
+    const server = new FakeTmuxServer();
+    const { subject, slept } = delivery(server);
+
+    // Act
+    const settled = await subject.waitStartupSettled(SESSION);
+
+    // Assert
+    should(settled).equal('settled');
+    should(slept).deepEqual([]);
+  });
+
+  it('should poll every step while the park line is up and return settled as soon as it clears', async () => {
+    // Arrange — parked for 500 virtual ms, which only the fake's sleeps advance.
+    const server = new FakeTmuxServer();
+    server.startupWaitUntilMs = 500;
+    const { subject, slept } = delivery(server, { pollMs: 250, startupSettleMs: 30_000 });
+
+    // Act
+    const settled = await subject.waitStartupSettled(SESSION);
+
+    // Assert
+    should(settled).equal('settled');
+    should(slept).deepEqual([250, 250]);
+  });
+
+  it('should answer timed-out, not settled and not a failure, once the bound passes', async () => {
+    // Arrange — parked forever.
+    const server = new FakeTmuxServer();
+    server.startupWaitUntilMs = Number.MAX_SAFE_INTEGER;
+    const { subject, slept } = delivery(server, { pollMs: 250, startupSettleMs: 1_000 });
+
+    // Act
+    const settled = await subject.waitStartupSettled(SESSION);
+
+    // Assert — a look at 0, 250, 500, 750 and 1000 ms, and a sleep between each.
+    should(settled).equal('timed-out');
+    should(slept).deepEqual([250, 250, 250, 250]);
+  });
+
+  it('should step by at least one millisecond however small the configured poll is', async () => {
+    // Arrange — a zero step would never advance the bound, so the wait could never end.
+    const server = new FakeTmuxServer();
+    server.startupWaitUntilMs = Number.MAX_SAFE_INTEGER;
+    const { subject, slept } = delivery(server, { pollMs: 0, startupSettleMs: 3 });
+
+    // Act
+    const settled = await subject.waitStartupSettled(SESSION);
+
+    // Assert
+    should(settled).equal('timed-out');
+    should(slept).deepEqual([1, 1, 1]);
+  });
+
+  it('should fail with the harness’s own reason when the pane dies while waiting', async () => {
+    // Arrange — parked, then dead on the second look.
+    const server = new FakeTmuxServer();
+    server.startupWaitUntilMs = Number.MAX_SAFE_INTEGER;
+    const subject = new TmuxPaneDelivery(
+      new TmuxController(server),
+      async () => {
+        server.dead = true;
+        server.exitCode = '1';
+      },
+      { pollMs: 250, startupSettleMs: 30_000 },
+    );
+
+    // Act
+    const error = await subject.waitStartupSettled(SESSION).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    // Assert — the park was seen before the pane died, which is what lets the start say the turn never ran.
+    should(error).be.instanceOf(PaneDeliveryError);
+    should((error as PaneStartupExitedError).parked).be.true();
+    should((error as Error).message).match(/exited \(1\)/u);
+    should((error as Error).message).endWith(`; tmux session ${SESSION}`);
+  });
+
+  it('should fail the first look when the pane is already dead', async () => {
+    // Arrange
+    const server = new FakeTmuxServer();
+    server.dead = true;
+    server.exitCode = '137';
+    const { subject, slept } = delivery(server);
+
+    // Act + Assert — no park was ever seen, so nothing is known about whether the turn ran.
+    const error = await subject.waitStartupSettled(SESSION).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    should(error).be.instanceOf(PaneDeliveryError);
+    should((error as PaneStartupExitedError).parked).be.false();
+    should(slept).deepEqual([]);
   });
 });
 

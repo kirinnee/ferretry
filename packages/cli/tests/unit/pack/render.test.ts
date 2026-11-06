@@ -177,6 +177,83 @@ describe('renderPackNewOutcome', () => {
     should(none).not.containEql('card');
   });
 
+  it("should say how long the harness took to be ready on the started attempt's line", () => {
+    // Arrange
+    const outcome = (state: Record<string, unknown>) =>
+      started({
+        view: { ...startedView(), state: { status: 'running', ...state } } as ReturnType<typeof startedView>,
+        attempts: [
+          attempt({ runtime: 'a', outcome: 'refused', refusal: { code: 'out_of_quota', message: 'q' } }),
+          attempt({ runtime: 'b', probe: 'ran', probeMs: 3770 }),
+        ],
+      });
+
+    // Act
+    const measured = renderPackNewOutcome(outcome({ harnessStartupMs: 4_200 }), 'fy');
+    const unmeasured = renderPackNewOutcome(outcome({}), 'fy');
+
+    // Assert
+    should(measured).containEql('  started b (probe OK 3770 ms), harness ready in 4.2 s\n');
+    should(measured).containEql('  refused a — out_of_quota: q\n');
+    should(measured).not.containEql('chatgpt.com');
+    should(unmeasured).containEql('  started b (probe OK 3770 ms)\n');
+    should(unmeasured).not.containEql('harness ready');
+  });
+
+  it('should explain a Codex start of three seconds or more, once, and only for Codex', () => {
+    // Arrange
+    const outcome = (harness: string, harnessStartupMs: number) =>
+      started({
+        view: {
+          ...startedView(),
+          config: { ...startedView().config, harness },
+          state: { status: 'running', harnessStartupMs },
+        } as ReturnType<typeof startedView>,
+        attempts: [attempt({ runtime: 'b', probe: 'ran', probeMs: 640 })],
+      });
+    const note =
+      'Codex waits on an account check with chatgpt.com before it starts, so a slow start is usually the network (the first start on a new Codex home also indexes its history once) (docs/message-delivery.md).';
+
+    // Act
+    const slow = renderPackNewOutcome(outcome('codex', 4_200), 'fy');
+    const fast = renderPackNewOutcome(outcome('codex', 2_999), 'fy');
+    const claude = renderPackNewOutcome(outcome('claude', 20_000), 'fy');
+
+    // Assert
+    should(slow.split('\n').filter(line => line === note)).have.length(1);
+    should(slow).containEql(`harness ready in 4.2 s\n${note}\nWait for its result: fy wait child-1`);
+    should(fast).not.containEql('chatgpt.com');
+    should(claude).not.containEql('chatgpt.com');
+    should(claude).containEql('harness ready in 20.0 s');
+  });
+
+  it('should print a start whose session failed as a refusal with its reason, in the shapes every refusal has, never as Started', () => {
+    // Arrange
+    const reason = 'claude-main opus did not start: the interactive harness exited (1)';
+    const outcome = refused({
+      refusal: { code: 'start_failed', message: reason, remedy: 'Its session child-1 holds the evidence.' },
+      attempts: [
+        attempt({
+          runtime: 'claude-main',
+          model: 'opus',
+          outcome: 'refused',
+          probe: 'ran',
+          probeMs: 640,
+          refusal: { code: 'start_failed', message: reason },
+        }),
+      ],
+    });
+
+    // Act
+    const text = renderPackNewOutcome(outcome, 'fy');
+
+    // Assert
+    should(text.split('\n')[0]).equal(`refused (start_failed): ${reason}`);
+    should(text).containEql('Its session child-1 holds the evidence.');
+    should(text).containEql(`  refused claude-main opus (probe OK 640 ms) — start_failed: ${reason}`);
+    should(text).not.containEql('Started');
+  });
+
   it('should time a probe that passed and one that failed, and name a failed probe another start shared', () => {
     // Arrange
     const outcome = refused({
