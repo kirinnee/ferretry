@@ -33,6 +33,7 @@ import * as fleetLogin from './fleet-login/route-contract.ts';
 import * as inputRequests from './input-requests/route-contract.ts';
 import * as learning from './learning/route-contract.ts';
 import * as legacy from './legacy/route-contract.ts';
+import * as mcp from './mcp/route-contract.ts';
 import * as models from './models/route-contract.ts';
 import * as renders from './renders/route-contract.ts';
 import * as update from './update/route-contract.ts';
@@ -63,6 +64,7 @@ export const FRAGMENTS: Readonly<Record<string, RouteContractFragment>> = {
   fleetLogin,
   models,
   usage,
+  mcp,
 };
 
 /** The concatenation of every fragment's `callers`: one line per route, both tables. */

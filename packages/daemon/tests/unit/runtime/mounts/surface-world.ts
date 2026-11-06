@@ -180,19 +180,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
       throw new Error('not exercised by the surface inventory');
     },
   },
-  mcpOAuth: {
-    connections: async () => [],
-    start: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    complete: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    cancel: flowId => ({ flowId, cancelled: false }),
-    signOut: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-  },
   fleetCredentials: {
     list: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -518,21 +505,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
       throw new Error('not exercised by the surface inventory');
     },
   },
-  mcpInventory: {
-    inventory: {
-      machine: async () => {
-        throw new Error('not exercised by the surface inventory');
-      },
-      session: async () => {
-        throw new Error('not exercised by the surface inventory');
-      },
-    },
-    check: {
-      check: async () => {
-        throw new Error('not exercised by the surface inventory');
-      },
-    },
-  },
   catalogInstalls: {
     setPrefs: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -561,23 +533,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
       throw new Error('not exercised by the surface inventory');
     },
     remove: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-  },
-  sessionMcp: {
-    list: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    previewProject: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    addProject: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    previewLogin: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    addLogin: async () => {
       throw new Error('not exercised by the surface inventory');
     },
   },
