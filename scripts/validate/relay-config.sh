@@ -22,6 +22,7 @@ hosted_config="packages/relay/wrangler.hosted.json"
 byo_config="packages/relay/wrangler.jsonc"
 workflow=".github/workflows/relay-hosted.yaml"
 ci_workflow=".github/workflows/ci.yaml"
+ci_build="scripts/ci/build-checks.sh"
 worker="packages/relay/src/adapters/worker.ts"
 control="packages/relay/src/adapters/hosted-control.ts"
 
@@ -116,18 +117,22 @@ rg -q '"RELAY_DAEMON_IDS"' "${byo_config}" ||
 
 rg -qF -- '--config wrangler.hosted.json' "${workflow}" ||
   fail "${workflow} must deploy and set secrets against ${hosted_config}"
-rg -qF -- 'wrangler deploy --dry-run --config wrangler.jsonc' "${ci_workflow}" ||
-  fail "${ci_workflow} must compile the self-hosted relay configuration"
-rg -qF -- 'wrangler deploy --dry-run --config wrangler.hosted.json' "${ci_workflow}" ||
-  fail "${ci_workflow} must compile the hosted relay configuration"
+rg -qF -- './scripts/ci/quick.sh' "${ci_workflow}" || fail "${ci_workflow} must run the quick set"
+rg -qF -- './scripts/ci/build-checks.sh' scripts/ci/quick-part.sh || fail 'the quick build part must run the Worker rehearsals'
+rg -qF -- 'wrangler deploy --dry-run --config wrangler.jsonc' "${ci_build}" ||
+  fail "${ci_build} must compile the self-hosted relay configuration"
+rg -qF -- 'wrangler deploy --dry-run --config wrangler.hosted.json' "${ci_build}" ||
+  fail "${ci_build} must compile the hosted relay configuration"
 # A clean Actions checkout has no node_modules. Both the credential-free rehearsal and the real
 # deployment must install from inside the relay package before Wrangler bundles workspace imports;
 # otherwise @ferretry/protocol and zod disappear only in CI/production while a prepared developer
 # checkout keeps passing. Keep this package-local, matching the repository's other build scripts.
-for worker_workflow in "${workflow}" "${ci_workflow}"; do
-  rg -U -q 'cd packages/relay[[:space:]]*\n[[:space:]]*bun install --frozen-lockfile' "${worker_workflow}" ||
-    fail "${worker_workflow} must install locked relay workspace dependencies before Wrangler runs"
-done
+rg -U -q 'cd packages/relay[[:space:]]*\n[[:space:]]*bun install --frozen-lockfile' "${workflow}" ||
+  fail "${workflow} must install locked relay workspace dependencies before Wrangler runs"
+# The consolidated quick set installs all workspaces once before any child starts.
+rg -U -q 'scripts/ci/setup.sh\nexport FY_CI_SETUP_DONE=1' scripts/ci/quick.sh ||
+  fail 'the quick set must install locked workspace dependencies before its parallel builds'
+rg -qF -- 'bun install --frozen-lockfile' scripts/local/setup.sh || fail 'shared setup must install locked dependencies'
 if rg -qF -- 'bunx wrangler' "${workflow}"; then
   fail "${workflow} must use the flake-locked Wrangler, not resolve npm latest with bunx"
 fi
@@ -363,10 +368,10 @@ ls_operator_path="$(rg -o "LINK_STORE_OPERATOR_PATH = '[^']*'" "${ls_contract}" 
 [[ -n ${ls_operator_path} ]] || fail "${ls_contract} no longer declares LINK_STORE_OPERATOR_PATH"
 rg -qF -- "${ls_operator_path}" "${ls_workflow}" ||
   fail "${ls_workflow} does not address ${ls_operator_path}, the route LINK_STORE_OPERATOR_PATH declares"
-rg -qF -- 'wrangler deploy --dry-run --config wrangler.link-store.jsonc' "${ci_workflow}" ||
-  fail "${ci_workflow} must compile the self-hosted link-store configuration"
-rg -qF -- 'wrangler deploy --dry-run --config wrangler.link-store.hosted.json' "${ci_workflow}" ||
-  fail "${ci_workflow} must compile the hosted link-store configuration"
+rg -qF -- 'wrangler deploy --dry-run --config wrangler.link-store.jsonc' "${ci_build}" ||
+  fail "${ci_build} must compile the self-hosted link-store configuration"
+rg -qF -- 'wrangler deploy --dry-run --config wrangler.link-store.hosted.json' "${ci_build}" ||
+  fail "${ci_build} must compile the hosted link-store configuration"
 
 # ─── what a protocol merge can do to the hosted Worker ────────────────────────────────────────
 

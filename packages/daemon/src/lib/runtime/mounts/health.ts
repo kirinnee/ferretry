@@ -78,6 +78,8 @@ export interface DaemonHealthSubsystem {
   readonly legacyWire?: () => readonly LegacyWireUse[];
   /** The possible duplicate asks the last sweep left open; absent where this daemon runs none. */
   readonly duplicateAsks?: () => readonly DuplicateAsk[];
+  /** How many finished sessions have left the live count (docs/session-archive.md); absent where none are archived. */
+  readonly archivedSessions?: () => number;
 }
 
 /**
@@ -98,6 +100,7 @@ function view(
   io: IoPressureView | undefined,
   legacyWire: readonly LegacyWireUse[] | undefined,
   duplicateAsks: readonly DuplicateAsk[] | undefined,
+  archivedSessions: number | undefined,
   sessionBearerResolves: boolean,
 ): HealthView {
   return {
@@ -111,6 +114,7 @@ function view(
     running: report.running,
     monitors: report.monitors,
     unmonitoredRunning: report.unmonitoredRunning,
+    ...(archivedSessions === undefined ? {} : { archivedSessions }),
     wardenLastSweepSeconds: report.wardenSweepAgeSeconds,
     wardenTimerArmed: report.supervisesWarden,
     eventLoopLagMs: report.eventLoopLagMs,
@@ -153,6 +157,7 @@ async function health(subsystem: DaemonHealthSubsystem, request: ApiRequest): Pr
       subsystem.io?.(),
       subsystem.legacyWire?.(),
       subsystem.duplicateAsks?.(),
+      subsystem.archivedSessions?.(),
       // The very test the boundary uses before it looks a session bearer up (`presentedSession`).
       request.privilegedLoopback === true,
     ),

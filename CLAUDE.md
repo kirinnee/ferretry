@@ -276,6 +276,11 @@ GitHub watcher that moves a card when its PR or release does, and the agenda and
 The contract, the CLI verbs and the declared gaps are [docs/board.md](docs/board.md); the one-time import of the
 old per-session task files is [docs/board-import.md](docs/board-import.md). Implement against those documents.
 
+**Finished autonomous sessions are archived, not kept live.** A session with `mode: auto` that ended more than a day
+ago leaves the daemon's live set — the index, `GET /v1/sessions`, the sweeps, the board's roster — while its directory
+stays where it was and every read of it still works; a write brings it back. Interactive sessions are never archived.
+The rule, what keeps a session live, the timer and the declared gaps are [docs/session-archive.md](docs/session-archive.md).
+
 ## Project record
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security

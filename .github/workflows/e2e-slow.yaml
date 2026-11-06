@@ -17,6 +17,7 @@ on:
     - cron: '41 7 * * *'
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'packages/relay/**'
       - 'packages/protocol/src/lib/carriers.ts'
@@ -45,15 +46,16 @@ on:
 concurrency:
   group: >-
     ${{ github.workflow }}-${{
-      github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
+      github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && format('pr-{0}', github.event.pull_request.number)
       || github.run_id
     }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
 
 jobs:
   # One `[slow]` journey per shard, so the wall clock is the slowest journey (~3.5 min idle) and not
   # their sum. Adding a slow journey means adding a shard here and to the summary's count.
   journeys:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
     name: E2E Slow Shard (${{ matrix.shard }})
     permissions:
       contents: read
@@ -94,7 +96,7 @@ jobs:
     timeout-minutes: 5
     name: E2E Slow Journeys
     needs: journeys
-    if: ${{ !cancelled() }}
+    if: ${{ ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) && (!cancelled()) }}
     permissions:
       contents: read
     runs-on: ubuntu-latest

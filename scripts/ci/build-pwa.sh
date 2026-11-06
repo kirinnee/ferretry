@@ -7,10 +7,7 @@ cd "${root_dir}"
 ./scripts/validate/pinned-toolchain.sh
 ./scripts/validate/pages-config.sh
 
-cd packages/pwa
-bun install --frozen-lockfile
-
-cd "${root_dir}"
+./scripts/ci/setup.sh
 task build:pwa
 
 test -f packages/pwa/dist/_headers

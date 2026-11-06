@@ -35,6 +35,7 @@ import type {
   UsageFeedView,
 } from './service.ts';
 import type {
+  ArchivedSessions,
   AskToStopJobsResult,
   ComposerDraftRequest,
   ComposerDraftResult,
@@ -176,6 +177,8 @@ export interface IFyApiClient {
   scratchPlan(limit?: number): Promise<ScratchPlanView[]>;
   scratchSweep(force?: boolean): Promise<ScratchSweepView>;
   list(): Promise<readonly SessionView[]>;
+  /** The older finished autonomous sessions taken out of the live list; `limit` 0 asks only how many (docs/session-archive.md). */
+  archivedSessions(limit?: number): Promise<ArchivedSessions>;
   suggestNames(count?: number): Promise<string[]>;
   get(id: string, signal?: AbortSignal): Promise<SessionView>;
   start(input: StartSessionRequestInput, requestId?: string): Promise<SessionView>;

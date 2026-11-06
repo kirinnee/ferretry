@@ -156,7 +156,7 @@ export const SIGN_IN_RULE_AUTO_RECIPE_WARNING =
  * holding Enter back does not stop a reader that takes bytes as they arrive. The rule is then suspended
  * (`program-changed`: the kernel's check before Enter, or tmux's guard, saw the change), so it cannot be retried under
  * that approval. Nothing more is claimed. Terminal rules fill only while the daemon reports
- * `sign-in-rules-terminal.1` (daemon-features.ts).
+ * `sign-in-rules-terminal.1` (daemon-features/index.ts).
  */
 export const SIGN_IN_RULE_TERMINAL_HONEST_LIMIT =
   'Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a process gave itself. A ferret starts that program, so it could start another program root installed under the name sudo.';

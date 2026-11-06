@@ -29,6 +29,9 @@ set -euo pipefail
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
+# The tier's workflow and exact-head merge status are part of the test contract too.
+bun scripts/test/ci-sets.ts
+
 failures=0
 refuse() {
   echo "❌ $*" >&2

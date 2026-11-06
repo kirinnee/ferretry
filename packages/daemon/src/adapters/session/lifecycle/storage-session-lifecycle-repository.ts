@@ -200,6 +200,13 @@ export class StorageSessionLifecycleRepository implements SessionLifecycleReposi
    * would write that copy back and silently revert whatever landed in between — a turn, a turn state.
    */
   async write(record: SessionLifecycleRecord, event: SessionLifecycleEvent): Promise<void> {
+    const parent = record.config.parent;
+    if (event.type === 'session.created' && parent !== undefined)
+      return await this.storage.publishChild(parseSessionId(parent), async () => await this.writeRecord(record, event));
+    await this.writeRecord(record, event);
+  }
+
+  private async writeRecord(record: SessionLifecycleRecord, event: SessionLifecycleEvent): Promise<void> {
     const id = parseSessionId(record.config.id);
     await this.storage.upsertConfig(id, config => this.configDocument(record, fields(config)));
     await this.storage.upsertState(id, state => this.stateDocument(record, fields(state)));

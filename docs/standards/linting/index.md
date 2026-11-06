@@ -13,11 +13,17 @@ the same hooks and the same pinned tool versions run on a laptop and in CI.
 ```bash
 task lint                                        # local: every gate
 pre-commit run --all-files                       # identical, one layer down
-nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI splits it into `format` + `gates`)
+nix develop .#ci -c ./scripts/ci/pre-commit.sh   # the whole gate in one process (CI runs the hooks as per-hook buckets)
 ```
 
 `task lint` is `pre-commit run --all-files`. The CI script adds dependency installation and
 `--show-diff-on-failure`, so a formatting failure prints the patch instead of just a red X.
+
+In CI the same hooks run split by where they are cheapest (`scripts/ci/gate-hooks.ts` discovers them from
+the generated config, so there is no second inventory): Quick runs `treefmt` over every file plus every
+other hook as its own bucket, in parallel; the `Full Gates` job runs `a-deadcode`, `a-deadcode-production`
+and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Quick only.
+`scripts/test/ci-sets.ts` proves the two sets together are exactly the configured hooks.
 
 ## Hook inventory
 
@@ -26,6 +32,7 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI spli
 | `treefmt`                    | formatting: Biome (TS/JS/JSON/CSS), prettier (Markdown/YAML/HTML), actionlint, nixfmt, shfmt     |
 | `a-biome`                    | Biome lint on TS/JS (Biome formats through `treefmt`, configured in the same `biome.json`)       |
 | `typecheck`                  | `tsc --noEmit` across the workspace, one run per machine at a time (see below)                   |
+| `a-e2e-harness-typecheck`    | `tsc -p tests/e2e/tsconfig.json`: the E2E harness and `scripts/test/**` (see below)              |
 | `a-deadcode`                 | Knip, repository view (`knip.json`) — includes tests                                             |
 | `a-deadcode-production`      | Knip, production view (`knip.production.json`) — from the bin entry                              |
 | `a-shellcheck`               | shellcheck on every `*.sh` and `scripts/host/ferretry-loopback-firewall`                         |
@@ -51,9 +58,15 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI spli
 | `a-pwa-relevance`            | the PWA browser gate's path list covers every import of its harness; docs-only skips it          |
 | `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree                               |
 | `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt                        |
-| `a-test-tiers`               | every test lives in a tier; integration asserts no wall-clock or memory bound                    |
+| `a-test-tiers`               | tier placement and budgets; complete groups; Quick/Full event, verdict and run-all contracts     |
 | `a-job-ceilings`             | every workflow job states `timeout-minutes`, so a wedged job fails in minutes                    |
 | `a-commit-msg`               | conventional commit subject (`commit-msg` stage)                                                 |
+
+The root `typecheck` project does not include `scripts/test/**`, and the E2E harness project does,
+under the same strictness plus `strict`. `task test:e2e` typechecks that project before running any
+journey, so a type error in a fixture such as `ci-sets.ts` used to pass Quick and then fail every E2E
+shard in seconds (E2E is advisory, so the PR still went green). `a-e2e-harness-typecheck` runs the exact
+command `scripts/test/run-e2e.sh` runs, in Quick's parallel buckets, so it fails first.
 
 Two Knip passes exist on purpose: the production view starts from the binary entry point and
 therefore catches files that only tests reach, which the repository view considers used.

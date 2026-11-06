@@ -91,6 +91,14 @@ describe('human status rendering', () => {
     should(actual).containEql('systemd: running');
   });
 
+  it('should say how many sessions are archived when the daemon archives, so the live count is not read as the fleet', () => {
+    // Act
+    const actual = renderDaemonStatus(decideDaemonStatus('fyd', runningReport, health({ archivedSessions: 40 })), 'fy');
+
+    // Assert
+    should(actual).containEql('sessions 3 live (2 running, 0 unmonitored), 40 archived');
+  });
+
   it('should mark a degraded bootstrap, because "complete" alone would hide it', () => {
     // Act
     const actual = renderDaemonStatus(
