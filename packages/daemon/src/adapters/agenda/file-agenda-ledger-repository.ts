@@ -153,6 +153,8 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     /** Where every committed change is kept as a full version; absent, none is. */
     private readonly versions: AgendaVersionStore = NO_AGENDA_VERSIONS,
     private readonly runtime: AgendaChangeOutboxRuntime = { now: Date.now, warn: message => console.warn(message) },
+    /** A ledger publication restores its session's membership; this takes no agenda or session document lane. */
+    private readonly retained?: (sessionId: string) => Promise<void>,
   ) {
     this.files = files ?? new FileAgendaFileStore(sessionDirectory, uniqueId);
     if (versions !== NO_AGENDA_VERSIONS)
@@ -561,6 +563,7 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     try {
       await appendLogRecords(this.files, sessionId, AGENDA_ARCHIVE_FILE, archive, records);
       await this.files.writeAtomic(sessionId, AGENDA_FILES.ledger.current, document);
+      await this.retained?.(sessionId);
       await landed?.();
       // The ledger now says where history ends (or that a version-2 board has none), so no append is pending.
       await commitLogAppend(this.files, sessionId, AGENDA_ARCHIVE_FILE);

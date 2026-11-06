@@ -139,6 +139,7 @@ import {
   sharedDraftSocketRoutes,
 } from './shared-drafts.ts';
 import { signInRuleRoutes } from './sign-in-rules.ts';
+import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './session-archive.ts';
 import { type SpeedupsSubsystem, speedupRoutes } from './speedups.ts';
 import { stepUpRoutes } from './step-up.ts';
 import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
@@ -299,6 +300,8 @@ export interface MountedSubsystems {
   readonly sharedDraftStream: SharedDraftStreamSubsystem;
   /** The session read: what the fleet holds, and one session in full. */
   readonly sessions: SessionDirectorySubsystem;
+  /** The older finished sessions taken out of the live list; absent where this daemon archives none. */
+  readonly sessionArchive?: SessionArchiveSubsystem;
   /** Which session an agent NAME addresses, for every route that takes a `:sessionId`. See
    *  `session-addressing.ts`. */
   readonly sessionAddresses: SessionAddressBook;
@@ -662,6 +665,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
         // deeper per-session routes that follow.
         ...sessionRoutes(subsystems.sessions),
+        ...(subsystems.sessionArchive === undefined ? [] : sessionArchiveRoutes(subsystems.sessionArchive)),
         ...catalogRoutes(subsystems.catalogs, subsystems.sessions),
         ...boardProjectRoutes(subsystems.boardProjects, subsystems.sessions, subsystems.boardSwitches),
         // The worktree surface registers beside the catalogs for the reason its subsystem field states.

@@ -148,6 +148,7 @@ import { useAgendaDeepLink } from './hooks/use-agenda-deep-link.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
+import { useArchivedSessions } from './hooks/use-archived-sessions.ts';
 import { type BoardMachine, useBoard, useBoardActions } from './hooks/use-board.ts';
 import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
 import { useChatTasksUrl } from './hooks/use-chat-tasks-url.ts';
@@ -1100,6 +1101,9 @@ function ShellSessionsBar({
   const learnersOn = useMemo(() => allMachines?.connections ?? [connection], [allMachines, connection]);
   const daemonFetch = useDaemonFetch();
   const machineLearners = useMachinesPassiveLearning(learnersOn, daemonFetch);
+  // The quiet footer under the list: how many finished sessions this machine archived out of it
+  // (docs/session-archive.md), and the rows the reader's "Show" asks for.
+  const archived = useArchivedSessions(connection, clientFor);
   // The machine menu's update dot: each paired machine asked once, through the app's client pool.
   const updates = useMachineUpdates({
     connections,
@@ -1170,6 +1174,7 @@ function ShellSessionsBar({
       learningPassive={machineLearners.get(connection.daemonId) ?? NO_LEARNERS}
       {...(allMachines === undefined ? {} : { machineLearners })}
       projects={projects}
+      archived={archived}
       sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
       {...(allMachines === undefined ? {} : { machineSources: allMachines.sources, now })}
       {...(search === undefined ? {} : { search })}

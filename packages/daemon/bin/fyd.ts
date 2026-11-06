@@ -148,6 +148,7 @@ import {
 import { StorageHomeSessions } from '../src/adapters/agenda/storage-home-sessions.ts';
 import { StorageSessionAgendaState } from '../src/adapters/agenda/storage-session-agenda-state.ts';
 import { FileAgentPinRepository } from '../src/adapters/agent-pins/index.ts';
+import { createSessionArchive } from '../src/adapters/session/archive/index.ts';
 import { StorageCredentialedSessions } from '../src/adapters/agent-tools/index.ts';
 import {
   BunSqliteAnalyticsStoreFactory,
@@ -800,6 +801,8 @@ import {
   AuditedPairingService,
   AuditLog,
   type AuditSink,
+  ARCHIVE_AFTER_VARIABLE,
+  ARCHIVE_PASS_LIMIT_DEFAULT,
   AutoResumeService,
   adoptAgendaDefault,
   adoptedLaunchArgv,
@@ -1129,6 +1132,8 @@ import {
   packageRole,
   paneShowsActiveWork,
   paneTextFor,
+  parseArchiveAfter,
+  sessionsOnOpenCards,
   parseBackgroundDelay,
   parseDaemonTimings,
   parseSessionId,
@@ -1559,6 +1564,11 @@ const TERMINAL_REAP_SETTLE_MS = 1_000;
 /** The reaper's slow backstop, for a pane that became reapable without this daemon writing it so. */
 const TERMINAL_REAP_BACKSTOP_MS = 60_000;
 /** How long after a turn ends the Attention check reads its transcript: the last words reach the file late. */
+/** How often the session archive looks for finished sessions to take out of the live set (docs/session-archive.md). */
+const SESSION_ARCHIVE_INTERVAL_MS = 60 * 60_000;
+/** How soon the next pass follows one that left qualifying sessions behind at its bound. */
+const SESSION_ARCHIVE_BACKLOG_MS = 60_000;
+
 const AGENDA_NUDGE_SETTLE_MS = 2_000;
 
 /**
@@ -2287,7 +2297,17 @@ function createBoardWorld(
   const parents = new StorageSessionParents(storage);
   const focus = new StorageSessionFocus(storage);
   // ONE store per daemon: the service and the legacy import share its id counter.
-  const store = new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), diagnostics);
+  const store = new FileBoardStore(
+    join(paths.state, 'board'),
+    stateFiles,
+    new KeyedSerialExecutor(),
+    diagnostics,
+    async card => {
+      const laneSet = await lanes.laneSet(card.projectId).catch(() => null);
+      const sets = new Map(laneSet === null ? [] : [[card.projectId, laneSet]]);
+      for (const id of sessionsOnOpenCards([card], sets)) await storage.retainSession(parseSessionId(id));
+    },
+  );
   const proposer = new InferredLaneProposer(lanes, new GitProjectFacts());
   // A ferret's first card in a repository nobody registered registers it (`ProjectAdoption`): ONE instance, so
   // its per-repository section is shared by `fy task create` and the cards a start makes.
@@ -6513,6 +6533,9 @@ function createAnalyticsCandidateSource(storage: DaemonStorage): AnalyticsIngest
     };
   };
   return {
+    // Finished sessions the archive took out of the list keep the rows ingested when they ended; one never ingested is read on demand.
+    archived: () => storage.listArchivedSessions().map(session => session.id),
+    candidate: async id => await candidate(parseSessionId(id)),
     listCandidates: async () => {
       // Read in bounded batches rather than all at once. Each document read is small, but a fleet with
       // hundreds of sessions would hold every one of them resident under an unbounded `Promise.all`.
@@ -7102,7 +7125,20 @@ async function liveCallsigns(storage: DaemonStorage): Promise<readonly NameClaim
       });
     }),
   );
-  return sessions.filter((claim): claim is NameClaim => claim !== undefined);
+  // An archived session holds its name for the same window it always did: it left the live list, not the callsign's
+  // five days, and `fy send <name>` still resolves to it, so the name must not be handed to a new session meanwhile.
+  const archived = storage.listArchivedSessions().map(entry =>
+    entry.configTimes === undefined
+      ? undefined
+      : sessionNameClaim({
+          id: entry.id,
+          ...(entry.name === undefined ? {} : { teammate: entry.name }),
+          createdAt: entry.configTimes.createdAt,
+          updatedAt: entry.configTimes.updatedAt,
+          ...(entry.status === undefined ? {} : { status: entry.status }),
+        }),
+  );
+  return [...sessions, ...archived].filter((claim): claim is NameClaim => claim !== undefined);
 }
 
 /**
@@ -7307,9 +7343,11 @@ function createHealthSubsystem(
   sessionWorkers: () => SessionWorkerPool,
   ioPressure: IoPressurePort,
   duplicateAsks: () => readonly DuplicateAsk[],
+  archivedSessions: () => number,
 ): DaemonHealthSubsystem {
   return {
     duplicateAsks,
+    archivedSessions,
     report: async () => await health.report(),
     pid: process.pid,
     scratch,
@@ -10879,6 +10917,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         agendaFilesMigrated,
         undefined,
         agendaVersions,
+        undefined,
+        async id => await storage.retainSession(parseSessionId(id)),
       );
       // THE MACHINE AGENDA's ledger: its own directory, apart from every session's, written only by the daemon.
       const machineBoards = new FileAgendaLedgerRepository(
@@ -13151,7 +13191,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       sharedDraftsHolder.service = sharedDraftService;
       // The owner's pins live with the daemon of the machine that owns the ferret; the list carries them to every device.
       const agentPins = new AgentPinService(
-        new FileAgentPinRepository(paths, stateFiles),
+        new FileAgentPinRepository(paths, stateFiles, async id => await storage.retainSession(parseSessionId(id))),
         clock,
         new KeyedSerialExecutor(),
       );
@@ -13179,6 +13219,23 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ),
         agentPins,
       );
+      // Finished autonomous sessions leave the live set (docs/session-archive.md). The rule reads the pins, the board's
+      // cards and each session's agenda for what keeps one; the timer and the boot pass are armed where the housekeeping
+      // lane is (`subsystems.sessionArchive.run`).
+      const sessionArchive = createSessionArchive({
+        paths,
+        storage,
+        clock: { nowMs: () => Date.parse(clock.now()) },
+        afterMs: parseArchiveAfter(process.env[ARCHIVE_AFTER_VARIABLE]),
+        passLimit: ARCHIVE_PASS_LIMIT_DEFAULT,
+        yieldToLoop: () => new Promise(resolve => setImmediate(resolve)),
+        sources: {
+          pinned: async () => await agentPins.pinnedAt(),
+          board: async () => await boardWorld.board.snapshot(),
+          hasOpenAgendaItem: async id =>
+            ((await agendaBoards.read(id))?.entries ?? []).some(entry => entry.lifecycle === 'active'),
+        },
+      });
       const subtreeOutbox = new FileOutboxTail(id => createSessionPaths(paths, id).directory);
       const subtreeService = new SubtreeService({
         sessions: async () => await sessions.list(),
@@ -13223,7 +13280,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             clock,
           ),
         },
-        health: createHealthSubsystem(health, scratch, sessionWorkerPool, ioPressure, () => duplicateSweep.possible()),
+        health: createHealthSubsystem(
+          health,
+          scratch,
+          sessionWorkerPool,
+          ioPressure,
+          () => duplicateSweep.possible(),
+          () => storage.archivedCount(),
+        ),
+        sessionArchive: sessionArchive.subsystem,
         performance: {
           profiles: new PerformanceProfiler({
             recorder: profilerProbe,
@@ -15308,6 +15373,30 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
       lane.submit('fleet refresh', () => subsystems.fleetRefresh.run());
     }),
   );
+  /**
+   * The session archive (docs/session-archive.md): finished autonomous sessions older than a day leave the live set.
+   *
+   * ONE PASS AT BOOT, then hourly, both as a job of the housekeeping lane — so it waits for the lane to open after the
+   * daemon is serving, takes its turn behind the other housekeeping and never overlaps it. A pass is bounded
+   * (`ARCHIVE_PASS_LIMIT_DEFAULT`), so a first run over two thousand sessions is spread over several passes: while a
+   * pass left sessions behind the next one follows in a minute instead of an hour. The timer is armed only after a pass
+   * ran, so a slow pass can never be overtaken by its own next tick.
+   */
+  const sessionArchiveRun = subsystems.sessionArchive?.run;
+  if (sessionArchiveRun !== undefined) {
+    let archiveTimer: ReturnType<typeof setTimeout> | undefined;
+    const archivePass = async (): Promise<void> => {
+      let next = SESSION_ARCHIVE_INTERVAL_MS;
+      try {
+        const result = await sessionArchiveRun();
+        if (result !== undefined && result.deferred > 0) next = SESSION_ARCHIVE_BACKLOG_MS;
+      } finally {
+        archiveTimer = setTimeout(() => lane.submit('session archive', archivePass), next);
+      }
+    };
+    lane.submit('session archive', archivePass);
+    cleanups.push(() => clearTimeout(archiveTimer));
+  }
   /**
    * The analytics ingestion sweep.
    *

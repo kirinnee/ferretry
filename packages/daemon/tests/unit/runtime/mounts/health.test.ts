@@ -372,3 +372,17 @@ describe('the daemon health mount and the session-worker pool', () => {
     should(body).not.have.property('duplicateAsks');
   });
 });
+
+describe('the archived sessions on the health route', () => {
+  it('should say how many finished sessions are archived, so the live count is not read as the fleet', async () => {
+    const view = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem({ archivedSessions: 40 }))).body));
+
+    should(view.archivedSessions).equal(40);
+  });
+
+  it('should say nothing about an archive a daemon does not keep', async () => {
+    const view = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem())).body));
+
+    should(view.archivedSessions).be.undefined();
+  });
+});

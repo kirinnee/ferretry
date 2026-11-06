@@ -41,6 +41,8 @@ export const HealthViewSchema = z.object({
   running: NonNegativeIntegerSchema,
   monitors: NonNegativeIntegerSchema,
   unmonitoredRunning: NonNegativeIntegerSchema,
+  /** Finished autonomous sessions taken out of the live count above (docs/session-archive.md). Absent from an older daemon. */
+  archivedSessions: NonNegativeIntegerSchema.optional(),
   wardenLastSweepSeconds: NonNegativeIntegerSchema.nullable(),
   wardenTimerArmed: z.boolean(),
   eventLoopLagMs: NonNegativeFiniteSchema,

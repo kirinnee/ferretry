@@ -98,6 +98,7 @@ export * from './session/agenda-mode/index.ts';
 export * from './session/compact-at/index.ts';
 export * from './session/attach/index.ts';
 export * from './session/auto-resume/index.ts';
+export * from './session/archive/index.ts';
 export * from './session/console/index.ts';
 export * from './session/context/index.ts';
 export * from './session/dialog/index.ts';

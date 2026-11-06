@@ -1234,3 +1234,42 @@
     transition: none;
   }
 }
+
+/* ── ARCHIVED ────────────────────────────────────────────────────────────────────────────────────
+   The quiet footer under the list: how many finished sessions the daemon archived out of it, and the
+   Show that lists them again. Muted like the fold controls — it explains where ferrets went, it is not
+   itself a ferret — and its rows are the ordinary rows, dimmed as stopped rows already are. */
+.fy-sbar__archived {
+  margin-top: var(--gap-sm);
+}
+.fy-sbar__archived-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  min-height: 28px;
+  padding: 0 8px;
+}
+.fy-sbar__archived-words {
+  color: var(--muted);
+  font-size: var(--text-2xs);
+}
+.fy-sbar__show {
+  flex: none;
+  padding: 2px 6px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.fy-sbar__show:hover,
+.fy-sbar__show:focus-visible {
+  color: var(--fg);
+}
+.fy-sbar__archived .fy-sbar__session {
+  opacity: 0.75;
+}

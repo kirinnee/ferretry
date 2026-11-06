@@ -1,5 +1,6 @@
 import { basename, join } from 'node:path';
 import {
+  type ArchivedSession,
   type ClockPort,
   CURRENT_SESSION_VERSION,
   canonicalJsonValue,
@@ -19,6 +20,7 @@ import {
   type JournalFingerprint,
   type JournalProblem,
   type JsonValue,
+  parseArchiveRegistry,
   parseJsonDocument,
   parseSessionEvent,
   planIndexRebuild,
@@ -31,12 +33,15 @@ import {
   type SessionPaths,
   type SessionSource,
   scanJournalChunk,
+  serializeArchiveRegistry,
   serializeJsonDocument,
   sessionJournalRequired,
   sessionMarkerNeedsUpgrade,
   tryParseSessionId,
   type YieldingSerialExecutor,
 } from '../../lib/index.ts';
+import { KeyedSerialExecutor } from '../system/keyed-serial-executor.ts';
+import { jsonObject } from '../../lib/json.ts';
 
 export class InvalidStateDocumentError extends Error {
   constructor(
@@ -256,6 +261,13 @@ function assertFleetTailLimit(limit: number): void {
     throw new Error('fleet event limit must be an integer between 1 and 10000');
 }
 
+/** What the archive records of a session it is about to take: the name it answered to and what that name's hold runs from. */
+export interface ArchiveVerdict {
+  readonly name?: string;
+  /** The configuration's `createdAt` and `updatedAt`: what a callsign's hold on its name is measured from. */
+  readonly configTimes?: { readonly createdAt: string; readonly updatedAt: string };
+}
+
 export class DaemonStorage {
   private closed = false;
   /**
@@ -312,6 +324,18 @@ export class DaemonStorage {
   private readonly stateListeners = new Set<(id: SessionId, state: JsonValue) => void>();
   /** How many session configs THIS storage has written: {@link configWrites}. */
   private configChanges = 0;
+  /**
+   * The sessions that have left the live set, by id (docs/session-archive.md). Their directories are untouched, and the
+   * index holds no row for them: every walk of the index, the sessions directory or the survey passes them by, which is
+   * the whole point. A WRITE to one revives it ({@link reviveIfArchived}); a read does not.
+   */
+  private archived: ReadonlyMap<SessionId, ArchivedSession> = new Map();
+  /** Registry writes, one after another: an archive pass and a revive never interleave their documents. */
+  private registryWrites: Promise<void> = Promise.resolve();
+  /** Config writes and archive commits share root lanes, always taken before document lanes. */
+  private readonly lineages = new KeyedSerialExecutor();
+  /** A keep published during verification or registry IO cancels that finite archive commit. */
+  private retentionChanges = 0;
 
   constructor(
     readonly paths: FoundationPaths,
@@ -448,6 +472,7 @@ export class DaemonStorage {
         if (!entry.directory) continue;
         const id = tryParseSessionId(entry.name);
         if (id === undefined) continue;
+        if (this.archived.has(id)) continue;
         const paths = createSessionPaths(this.paths, id);
         if (!sessionMarkerNeedsUpgrade(await this.fileSystem.readText(paths.marker))) continue;
         if ((await this.ensureJournalFile(id, paths)) === undefined) continue;
@@ -641,6 +666,7 @@ export class DaemonStorage {
         });
         continue;
       }
+      if (this.archived.has(id)) continue;
       try {
         const source = await this.readSource(id, true);
         if (source) {
@@ -680,6 +706,7 @@ export class DaemonStorage {
         });
         continue;
       }
+      if (this.archived.has(id)) continue;
       try {
         const observation = await this.readObservation(id, true);
         if (observation) observations.push(observation);
@@ -698,7 +725,7 @@ export class DaemonStorage {
 
   async rebuildIndex(): Promise<RebuildResult> {
     this.assertOpen();
-    return await this.serial.runExclusive(async () => {
+    return await this.indexSweep(async () => {
       const collected = await this.collectSources();
       const plan = planIndexRebuild(collected.sources);
       this.index.replaceAll(plan);
@@ -851,7 +878,7 @@ export class DaemonStorage {
 
   async reconcile(): Promise<RebuildResult> {
     this.assertOpen();
-    return await this.serial.runExclusive(async () => {
+    return await this.indexSweep(async () => {
       const collected = await this.collectObservations();
       const observationById = new Map(
         collected.observations
@@ -990,17 +1017,89 @@ export class DaemonStorage {
   async writeConfig(id: SessionId, value: unknown): Promise<void> {
     this.assertOpen();
     const document = serializeJsonDocument(value);
-    await this.serial.run(id, async () => {
-      await this.ensureSessionDirectory(id);
-      // The write is inside the try: `writeTextAtomic` renames first and may throw afterwards (the chmod or
-      // the directory fsync), so a failed write can still have replaced the stored config.
+    await this.configWrite(
+      id,
+      async publishing =>
+        await this.serial.run(id, async () => {
+          await this.reviveIfArchived(id);
+          await this.ensureSessionDirectory(id);
+          // The write is inside the try: `writeTextAtomic` renames first and may throw afterwards (the chmod or
+          // the directory fsync), so a failed write can still have replaced the stored config.
+          try {
+            publishing();
+            await this.writeDocument(createSessionPaths(this.paths, id).config, document);
+            await this.syncSessionUnlocked(id);
+          } finally {
+            this.configChanges += 1;
+          }
+        }),
+    );
+  }
+
+  /**
+   * A config write holds its current lineage's root gate for its entire publication, just like an archive commit.
+   * A changed parent is retained AFTER releasing that gate: only one root is held at a time, so moving between
+   * lineages cannot invert their lock order. A new parent archived in that window is restored by the same keep path.
+   */
+  private async configWrite<T>(id: SessionId, work: (publishing: () => void) => Promise<T>, rootMoves = 0): Promise<T> {
+    const lineage = await this.ancestors(id);
+    const root = lineage.at(-1) ?? id;
+    let retain: SessionId | undefined;
+    let committed = false;
+    let publishing = false;
+    const result = await this.lineages.run(root, async (): Promise<{ value: T } | { error: unknown } | undefined> => {
+      // A writer ahead of us may have reparented this session while we waited. Release the obsolete gate and
+      // queue on the current root before entering the document lane; never nest two lineage gates.
+      if (((await this.ancestors(id)).at(-1) ?? id) !== root) return undefined;
+      const previous = jsonObject(await this.readConfig(id, 'proved').catch(() => undefined))?.parent;
+      let outcome: { value: T } | { error: unknown };
       try {
-        await this.writeDocument(createSessionPaths(this.paths, id).config, document);
-        await this.syncSessionUnlocked(id);
-      } finally {
-        this.configChanges += 1;
+        const value = await work(() => {
+          publishing = true;
+        });
+        committed = true;
+        outcome = { value };
+      } catch (error) {
+        // Validation, directory/journal checks and transforms can refuse before the atomic write starts.
+        // Preserve their original error: no publication needs proving or repairing in that case.
+        if (!publishing) return { error };
+        outcome = { error };
       }
+      // Even a failed atomic write can have renamed its document already.
+      try {
+        const parent = jsonObject(await this.readConfig(id, 'proved'))?.parent;
+        const parentId = typeof parent === 'string' ? tryParseSessionId(parent) : undefined;
+        if (
+          parentId !== undefined &&
+          (parent !== previous || (await this.ancestors(parentId, true)).some(session => this.archived.has(session)))
+        )
+          retain = parentId;
+      } catch (error) {
+        outcome = {
+          error: new Error(
+            `session ${id} config write ${committed ? 'is already' : 'may already be'} committed; parent proof failed: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error },
+          ),
+        };
+      }
+      return outcome;
     });
+    if (result === undefined) {
+      if (rootMoves >= 3) throw new Error(`session ${id} changed lineage repeatedly; retry the config write`);
+      return await this.configWrite(id, work, rootMoves + 1);
+    }
+    if (retain !== undefined) {
+      try {
+        await this.retainSession(retain);
+      } catch (error) {
+        throw new Error(
+          `session ${id} config write ${committed ? 'is already' : 'may already be'} committed; parent retention failed: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      }
+    }
+    if ('error' in result) throw result.error;
+    return result.value;
   }
 
   /**
@@ -1022,6 +1121,7 @@ export class DaemonStorage {
     this.assertOpen();
     const document = serializeJsonDocument(value);
     await this.serial.run(id, async () => {
+      await this.reviveIfArchived(id);
       await this.ensureSessionDirectory(id);
       await this.writeDocument(createSessionPaths(this.paths, id).state, document);
       await this.syncSessionUnlocked(id);
@@ -1085,10 +1185,7 @@ export class DaemonStorage {
    * bound it last set, so a walk counts it once per growth of the fleet, never once per read.
    */
   private documentBound(size: number): number {
-    if (size >= this.documentLimit) {
-      this.documentLimit = Math.max(DOCUMENT_CACHE_FLOOR, DOCUMENTS_PER_SESSION * this.index.listSessions().length);
-      this.trimWatches();
-    }
+    if (size >= this.documentLimit) this.recountDocumentBound();
     return this.documentLimit;
   }
 
@@ -1128,6 +1225,15 @@ export class DaemonStorage {
       this.dropWatch(path);
       surplus -= 1;
     }
+  }
+
+  /**
+   * Sets the cache and watch bound from the fleet that is live now, and lets go of the watches that no longer fit.
+   * An archive pass shrinks the live set by hundreds at once; without this the bound stays at the old fleet's size.
+   */
+  private recountDocumentBound(): void {
+    this.documentLimit = Math.max(DOCUMENT_CACHE_FLOOR, DOCUMENTS_PER_SESSION * this.index.listSessions().length);
+    this.trimWatches();
   }
 
   /** Stops watching `path`. */
@@ -1239,27 +1345,32 @@ export class DaemonStorage {
     create?: () => unknown,
   ): Promise<JsonValue> {
     this.assertOpen();
-    return await this.serial.run(id, async () => {
-      const paths = createSessionPaths(this.paths, id);
-      const current = await this.readDocument(id, kind);
-      const compute = current === undefined ? create : () => transform(current);
-      if (compute === undefined) throw new InvalidStateDocumentError(paths[kind], 'file is missing');
-      // The journal contract is settled BEFORE the transform runs and before any byte is written,
-      // so a session that has lost its journal keeps its documents exactly as they were. The write
-      // paths get the same gate from their own ensureSessionDirectory call.
-      await this.ensureSessionDirectory(id);
-      const next = canonicalJsonValue(await compute());
-      // The write is inside the try for the same reason as `writeConfig`: a write that threw after its rename
-      // has still changed the stored config.
-      try {
-        await this.writeDocument(paths[kind], serializeJsonDocument(next));
-        await this.syncSessionUnlocked(id);
-      } finally {
-        if (kind === 'config') this.configChanges += 1;
-      }
-      if (kind === 'state') this.publishState(id, next);
-      return next;
-    });
+    const write = async (publishing: () => void = () => {}): Promise<JsonValue> =>
+      await this.serial.run(id, async () => {
+        await this.reviveIfArchived(id);
+        const paths = createSessionPaths(this.paths, id);
+        const current = await this.readDocument(id, kind);
+        const compute = current === undefined ? create : () => transform(current);
+        if (compute === undefined) throw new InvalidStateDocumentError(paths[kind], 'file is missing');
+        // The journal contract is settled BEFORE the transform runs and before any byte is written,
+        // so a session that has lost its journal keeps its documents exactly as they were. The write
+        // paths get the same gate from their own ensureSessionDirectory call.
+        await this.ensureSessionDirectory(id);
+        const next = canonicalJsonValue(await compute());
+        // The write is inside the try for the same reason as `writeConfig`: a write that threw after its rename
+        // has still changed the stored config.
+        try {
+          const document = serializeJsonDocument(next);
+          publishing();
+          await this.writeDocument(paths[kind], document);
+          await this.syncSessionUnlocked(id);
+        } finally {
+          if (kind === 'config') this.configChanges += 1;
+        }
+        if (kind === 'state') this.publishState(id, next);
+        return next;
+      });
+    return kind === 'config' ? await this.configWrite(id, write) : await write();
   }
 
   async updateConfig(id: SessionId, transform: (current: FrozenJsonValue) => unknown): Promise<JsonValue> {
@@ -1288,6 +1399,7 @@ export class DaemonStorage {
     this.assertOpen();
     const validated = createSessionEvent(id, 0, this.clock.now(), type, data);
     return await this.serial.run(id, async () => {
+      await this.reviveIfArchived(id);
       const inspection = await this.inspectSession(id);
       const event = createSessionEvent(
         id,
@@ -1430,6 +1542,7 @@ export class DaemonStorage {
       throw new Error('limit must be an integer between 1 and 10000');
     }
     return await this.serial.run(id, async () => {
+      if (this.archived.has(id)) return await this.replayArchived(id, afterSequence, limit);
       await this.synchronizedSession(id);
       let pointers = this.index.eventPointers(id, afterSequence, limit + 1);
       let selected = pointers.slice(0, limit);
@@ -1562,9 +1675,10 @@ export class DaemonStorage {
     });
   }
 
+  /** A live session's index row, or the one an archived session had when it left: both are sessions that exist. */
   findSession(id: SessionId): IndexedSession | undefined {
     this.assertOpen();
-    return this.index.findSession(id);
+    return this.index.findSession(id) ?? this.archived.get(id)?.indexed;
   }
 
   listSessions(): readonly IndexedSession[] {
@@ -1580,6 +1694,7 @@ export class DaemonStorage {
         if (!entry.directory) continue;
         const id = tryParseSessionId(entry.name);
         if (id === undefined) continue;
+        if (this.archived.has(id)) continue;
         const paths = createSessionPaths(this.paths, id);
         await this.fileSystem.setMode(paths.directory, 0o700);
         for (const file of [paths.marker, paths.config, paths.state, paths.events]) {
@@ -1606,6 +1721,7 @@ export class DaemonStorage {
       if (!entry.directory) continue;
       const id = tryParseSessionId(entry.name);
       if (id === undefined) continue;
+      if (this.archived.has(id)) continue;
       const paths = createSessionPaths(this.paths, id);
       // Only PRESENCE is asked of the two documents here, so where the filesystem can answer it with one
       // `stat` it does; every read of their bytes still walks the home. The reaper surveys every session
@@ -1643,6 +1759,246 @@ export class DaemonStorage {
   forgetFromIndex(id: SessionId): void {
     this.assertOpen();
     this.index.removeSession(id);
+  }
+
+  // ---------------------------------------------------------------------------------------------------
+  // The archive (docs/session-archive.md)
+  // ---------------------------------------------------------------------------------------------------
+
+  /**
+   * Reads the archive registry and takes its sessions out of the index. Called once, at open, before anything
+   * walks the sessions directory. A damaged or absent registry is an empty one: every session is live again, which
+   * is the safe direction, and the next archive pass writes a good document.
+   */
+  async loadArchive(): Promise<number> {
+    this.assertOpen();
+    const parsed = parseArchiveRegistry(await this.fileSystem.readText(this.paths.archivedSessions));
+    this.archived = parsed ?? new Map();
+    // An archive that crashed between the registry write and the index removal leaves rows behind.
+    for (const id of this.archived.keys()) if (this.index.findSession(id) !== undefined) this.index.removeSession(id);
+    return this.archived.size;
+  }
+
+  /** How many sessions have left the live set. */
+  archivedCount(): number {
+    return this.archived.size;
+  }
+
+  /** The archived sessions, oldest archived first, as they were indexed when they left. */
+  listArchivedSessions(): readonly (IndexedSession & {
+    readonly archivedAt: string;
+    readonly name?: string;
+    readonly configTimes?: { readonly createdAt: string; readonly updatedAt: string };
+  })[] {
+    return [...this.archived.values()]
+      .map(entry => ({
+        ...entry.indexed,
+        archivedAt: entry.archivedAt,
+        ...(entry.name === undefined ? {} : { name: entry.name }),
+        ...(entry.configTimes === undefined ? {} : { configTimes: entry.configTimes }),
+      }))
+      .sort((left, right) => left.archivedAt.localeCompare(right.archivedAt) || left.id.localeCompare(right.id));
+  }
+
+  isArchived(id: SessionId): boolean {
+    return this.archived.has(id);
+  }
+
+  /**
+   * One change to the archive registry, as a READ-MODIFY-WRITE inside the registry's own queue.
+   *
+   * `change` is handed the registry as it is WHEN THIS TURN COMES, not as it was when the caller decided to change it,
+   * and answers the map to keep (or `undefined` for no change). The new map is written durably and only then
+   * published in memory, all inside the turn. Deriving the map before queueing would let two writers on different
+   * session lanes each clone the same registry and the later write lose the earlier one — a revived session archived
+   * again, or an archived one let back by an unrelated pass.
+   */
+  private async changeRegistry(
+    change: (
+      current: ReadonlyMap<SessionId, ArchivedSession>,
+    ) =>
+      | ReadonlyMap<SessionId, ArchivedSession>
+      | undefined
+      | Promise<ReadonlyMap<SessionId, ArchivedSession> | undefined>,
+    published?: () => Promise<void> | void,
+    valid: () => boolean = () => true,
+  ): Promise<void> {
+    await this.registryTurn(async () => {
+      if (!valid()) return;
+      const next = await change(this.archived);
+      if (next === undefined) return;
+      await this.fileSystem.writeTextAtomic(this.paths.archivedSessions, serializeArchiveRegistry(next));
+      if (!valid()) {
+        // A keep landed while the rename/fsync was pending. Restore the durable registry before publishing anything.
+        await this.fileSystem.writeTextAtomic(this.paths.archivedSessions, serializeArchiveRegistry(this.archived));
+        return;
+      }
+      this.archived = next;
+      await published?.();
+    });
+  }
+
+  /** Shared publication lane: an index sweep must not erase a row rebuilt before registry removal.
+   * Document barriers are acquired before this lane; retention never takes document lanes here.
+   */
+  private async indexSweep<T>(work: () => Promise<T>): Promise<T> {
+    return await this.serial.runExclusive(() => this.registryTurn(work));
+  }
+
+  private async registryTurn<T>(work: () => Promise<T>): Promise<T> {
+    const turn = this.registryWrites.then(work);
+    this.registryWrites = turn.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await turn;
+  }
+
+  /**
+   * Takes sessions out of the live set, but only those `verify` still vouches for.
+   *
+   * HELD, THEN CHECKED: the sessions' lanes are held, so a revive or a write that was already queued has landed and
+   * none can start until this is done, and `verify` re-reads each session as it is NOW. The registry is written FIRST
+   * and durably; the index rows go after it, so a crash between them leaves rows `loadArchive` removes at the next
+   * open and never a session that is in neither place. Nothing on disk moves.
+   */
+  async archiveSessions(
+    ids: readonly SessionId[],
+    verify: (id: SessionId) => Promise<ArchiveVerdict | undefined>,
+  ): Promise<readonly SessionId[]> {
+    this.assertOpen();
+    return await this.archiveAtCurrentRoots(ids, verify, 0);
+  }
+
+  private async archiveAtCurrentRoots(
+    ids: readonly SessionId[],
+    verify: (id: SessionId) => Promise<ArchiveVerdict | undefined>,
+    rootMoves: number,
+  ): Promise<readonly SessionId[]> {
+    const roots = await Promise.all(ids.map(async id => (await this.ancestors(id)).at(-1) ?? id));
+    const result = await this.lineages.runAcross(roots, async () => {
+      const currentRoots = await Promise.all(ids.map(async id => (await this.ancestors(id)).at(-1) ?? id));
+      if (currentRoots.some((root, at) => root !== roots[at])) return undefined;
+      return await this.holdSessions(ids, async () => {
+        const retention = this.retentionChanges;
+        const entries = new Map<SessionId, ArchivedSession>();
+        const archivedAt = this.clock.now();
+        for (const id of ids) {
+          const indexed = this.index.findSession(id);
+          if (indexed === undefined || this.archived.has(id)) continue;
+          const verdict = await verify(id);
+          if (verdict === undefined) continue;
+          entries.set(id, {
+            archivedAt,
+            ...(verdict.name === undefined ? {} : { name: verdict.name }),
+            ...(verdict.configTimes === undefined ? {} : { configTimes: verdict.configTimes }),
+            indexed,
+          });
+        }
+        if (entries.size === 0) return [];
+        // The delta joins the registry as it is when this turn comes: another session's revival may have landed meanwhile.
+        const left: SessionId[] = [];
+        await this.changeRegistry(
+          current => new Map([...current, ...entries]),
+          () => {
+            left.push(...entries.keys());
+            for (const id of left) {
+              this.index.removeSession(id);
+              const paths = createSessionPaths(this.paths, id);
+              for (const file of [paths.marker, paths.config, paths.state]) {
+                this.forgetDocument(file);
+                // A watch only vouches for a cached document; the archived session's documents are no longer cached.
+                this.dropWatch(file);
+              }
+            }
+            this.recountDocumentBound();
+          },
+          () => this.retentionChanges === retention,
+        );
+        return left;
+      });
+    });
+    // Like a config writer, a commit queued behind a reparent must release the obsolete gates before retrying.
+    if (result !== undefined) return result;
+    if (rootMoves >= 3) throw new Error('session archive lineage changed repeatedly; retry on the next pass');
+    return await this.archiveAtCurrentRoots(ids, verify, rootMoves + 1);
+  }
+
+  /** The lineage as stored now, including the named session; loops settle on a stable root key. */
+  private async ancestors(id: SessionId, strict = false): Promise<readonly SessionId[]> {
+    const seen = new Set<SessionId>();
+    let current: SessionId | undefined = id;
+    while (current !== undefined && !seen.has(current)) {
+      seen.add(current);
+      const config: ReturnType<typeof jsonObject> = jsonObject(
+        await this.readConfig(current, 'proved').catch(error => {
+          // Root discovery tolerates a reserved session with no config; retention must prove the whole chain.
+          if (strict) throw error;
+          return undefined;
+        }),
+      );
+      current = typeof config?.parent === 'string' ? tryParseSessionId(config.parent) : undefined;
+    }
+    const chain = [...seen];
+    if (current !== undefined) chain.push(chain.slice(chain.indexOf(current)).sort()[0] ?? current);
+    return chain;
+  }
+
+  /**
+   * A published pin, card or agenda item restores live membership, including its ancestors. Registry ordering makes
+   * this safe during an archive commit without taking document lanes (a board writer may already hold those lanes).
+   * Rebuild the journal index too: removing just the registry entry would leave the session absent from the live list.
+   */
+  async retainSession(id: SessionId): Promise<void> {
+    this.assertOpen();
+    this.retentionChanges += 1;
+    const lineage = await this.ancestors(id, true);
+    await this.changeRegistry(async current => {
+      const restore = lineage.filter(session => current.has(session) || this.index.findSession(session) === undefined);
+      if (restore.length === 0) return undefined;
+      // Publish live rows before forgetting archive membership. A failed rebuild leaves every archived entry
+      // available for retry; also repair a missing live row even when no registry entry remains.
+      for (const session of restore) {
+        await this.syncSessionUnlocked(session);
+        if (current.has(session) && this.index.findSession(session) === undefined)
+          throw new Error(`session ${session} could not be restored to the live index; archive membership retained`);
+      }
+      const next = new Map(current);
+      for (const session of lineage) next.delete(session);
+      return next;
+    });
+  }
+
+  /** Retain the lead before a child's first write; config publication owns the root gate and retains a new parent too. */
+  async publishChild<T>(parent: SessionId, work: () => Promise<T>): Promise<T> {
+    await this.retainSession(parent);
+    return await work();
+  }
+
+  /**
+   * Brings an archived session back into the live set. Called with the session's lane held, as the first step of every
+   * write to it; the write that follows indexes it. A read never calls this.
+   */
+  private async reviveIfArchived(id: SessionId): Promise<void> {
+    if (!this.archived.has(id)) return;
+    await this.retainSession(id);
+  }
+
+  /** An archived session's events, read straight from its journal: its index rows were let go when it left. */
+  private async replayArchived(id: SessionId, afterSequence: number, limit: number): Promise<ReplayPage> {
+    const source = await this.readSource(id);
+    if (source === undefined) throw new Error(`archived session ${id} has no readable journal`);
+    const pointers = planIndexRebuild([source]).events.filter(pointer => pointer.sequence > afterSequence);
+    const selected = pointers.slice(0, limit);
+    const events = await this.resolvePointers(id, selected);
+    if (events === undefined) throw new Error(`journal of archived session ${id} is inconsistent`);
+    return {
+      events,
+      rows: selected.length,
+      afterSequence,
+      nextSequence: selected.at(-1)?.sequence,
+      hasMore: pointers.length > limit,
+    };
   }
 
   async close(): Promise<void> {
