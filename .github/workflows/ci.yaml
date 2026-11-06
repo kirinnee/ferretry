@@ -605,6 +605,7 @@ jobs:
       statuses: write
       issues: write
       pull-requests: read
+      actions: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

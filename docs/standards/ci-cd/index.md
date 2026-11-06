@@ -24,17 +24,17 @@ every subsequent push with that label runs it again, proving the exact head SHA.
 Adding any other label is a no-op and uses its own concurrency group, so it cannot
 cancel a running set.
 
-| Set / job                                       | PR runner           | Other events                          | Work                                                       |
-| ----------------------------------------------- | ------------------- | ------------------------------------- | ---------------------------------------------------------- |
-| Quick Checks                                    | Namespace 8x16      | Namespace 4x8 on main; dispatch picks | units first, then format/gates/build; complete unit ledger |
-| Integration Tests                               | Namespace 8x16      | Namespace 8x16                        | six isolated groups, then the integration ledger           |
-| Full Gates                                      | Namespace 4x8       | GitHub                                | both Knip checks and route agreement (Knip needs >4GB)     |
-| Compile Binaries                                | Namespace 2x4       | GitHub                                | cross-compile and upload the binaries                      |
-| SIT, E2E shards                                 | Namespace 2x4       | GitHub                                | same binaries, journeys and advisory policy as before      |
-| PWA Settings / Gallery                          | Namespace 2x4 / 4x8 | GitHub                                | existing geometry assertions and evidence                  |
-| Realworld Tests (advisory)                      | Namespace 8x16      | Namespace 8x16                        | machine budgets on a quiet dedicated VM                    |
-| Linux smoke and macOS jobs                      | GitHub              | GitHub                                | stock platform proofs; existing macOS policy               |
-| Full CI Pending, Full CI, PWA/E2E relevance, E2E summary | GitHub | GitHub                                | seconds of API/shell work, no Nix                          |
+| Set / job                                                | PR runner           | Other events                          | Work                                                       |
+| -------------------------------------------------------- | ------------------- | ------------------------------------- | ---------------------------------------------------------- |
+| Quick Checks                                             | Namespace 8x16      | Namespace 4x8 on main; dispatch picks | units first, then format/gates/build; complete unit ledger |
+| Integration Tests                                        | Namespace 8x16      | Namespace 8x16                        | six isolated groups, then the integration ledger           |
+| Full Gates                                               | Namespace 4x8       | GitHub                                | both Knip checks and route agreement (Knip needs >4GB)     |
+| Compile Binaries                                         | Namespace 2x4       | GitHub                                | cross-compile and upload the binaries                      |
+| SIT, E2E shards                                          | Namespace 2x4       | GitHub                                | same binaries, journeys and advisory policy as before      |
+| PWA Settings / Gallery                                   | Namespace 2x4 / 4x8 | GitHub                                | existing geometry assertions and evidence                  |
+| Realworld Tests (advisory)                               | Namespace 8x16      | Namespace 8x16                        | machine budgets on a quiet dedicated VM                    |
+| Linux smoke and macOS jobs                               | GitHub              | GitHub                                | stock platform proofs; existing macOS policy               |
+| Full CI Pending, Full CI, PWA/E2E relevance, E2E summary | GitHub              | GitHub                                | seconds of API/shell work, no Nix                          |
 
 The owner's **2026-11-06 direction (Go given)** supersedes the Oct 30 prohibition
 on processes inside a job for **Quick Checks and Integration Tests only**: consolidate
@@ -252,22 +252,22 @@ waits on the entire CI workflow on `main`, where Quick and Full both always run.
 
 ## CI jobs
 
-| Job              | Check name                           | Work                                                                                                               |
-| ---------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `quick`          | Quick Checks                         | `quick.sh`: format, gates, Nix install bundle, four Worker dry-runs, PWA build, three unit groups and their ledger |
-| `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                        |
-| `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                     |
-| `full-gates`     | Full Gates                           | both Knip checks and route agreement, serially (format runs in Quick only)                                         |
-| `compile`        | Compile Binaries                     | compile and upload manifest-checked binaries                                                                       |
-| `sit`            | SIT                                  | consume those binaries                                                                                             |
-| `smoke`          | Smoke linux-\*                       | both Linux targets                                                                                                 |
-| `smoke-darwin`   | Smoke darwin-arm64                   | reusable smoke and existing owner skip/advisory policy                                                             |
-| `pwa-relevance`  | PWA Relevance                        | does this pull request change anything the PWA browser gate reads (`pwa-relevance.sh`); GitHub, no Nix            |
+| Job              | Check name                           | Work                                                                                                                                                |
+| ---------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quick`          | Quick Checks                         | `quick.sh`: format, gates, Nix install bundle, four Worker dry-runs, PWA build, three unit groups and their ledger                                  |
+| `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                                                         |
+| `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                                                      |
+| `full-gates`     | Full Gates                           | both Knip checks and route agreement, serially (format runs in Quick only)                                                                          |
+| `compile`        | Compile Binaries                     | compile and upload manifest-checked binaries                                                                                                        |
+| `sit`            | SIT                                  | consume those binaries                                                                                                                              |
+| `smoke`          | Smoke linux-\*                       | both Linux targets                                                                                                                                  |
+| `smoke-darwin`   | Smoke darwin-arm64                   | reusable smoke and existing owner skip/advisory policy                                                                                              |
+| `pwa-relevance`  | PWA Relevance                        | does this pull request change anything the PWA browser gate reads (`pwa-relevance.sh`); GitHub, no Nix                                              |
 | `pwa-screenshot` | PWA Settings Geometry / Full Gallery | `needs: pwa-relevance`; skipped (and accepted by the verdict) only when it succeeded with `run == false`; existing geometry assertions and evidence |
-| `relevance`      | E2E Relevance                        | decide whether journeys have anything to prove                                                                     |
-| `journeys`       | E2E Shard (1..3)                     | existing three fast shards                                                                                         |
-| `summary`        | E2E Journeys                         | existing relevance/advisory verdict                                                                                |
-| `full`           | Full CI                              | always judges all needed jobs when this is a full-set event; posts head-SHA status                                 |
+| `relevance`      | E2E Relevance                        | decide whether journeys have anything to prove                                                                                                      |
+| `journeys`       | E2E Shard (1..3)                     | existing three fast shards                                                                                                                          |
+| `summary`        | E2E Journeys                         | existing relevance/advisory verdict                                                                                                                 |
+| `full`           | Full CI                              | always judges all needed jobs when this is a full-set event; posts head-SHA status                                                                  |
 
 **The merge gate is the commit status `Full CI` on the exact PR head SHA.** Quick
 posts pending with `full set not run on this commit: add the full-ci label`. Full's
@@ -276,13 +276,19 @@ only the existing explicit darwin skip, the E2E relevance skip, and a skipped `p
 `pwa-relevance` succeeded with `run == false`. A skipped Full job
 on an unlabeled PR cannot turn the commit status green. Cancelled or failed jobs
 cannot supply proof. Fork tokens cannot post statuses, so they cannot create a green gate.
+**Only a `pull_request` run posts the status**: a `main` push or a `workflow_dispatch` (even on a PR branch,
+which proves the branch alone and not its merge with `main`) only exits with the verdict, so a late green
+dispatch can never replace a red pull-request status on the head.
 
 The merger reads `gh api repos/kirinnee/ferretry/commits/<headSha>/statuses` and
 requires the newest context `Full CI` from `github-actions[bot]` to be `success`,
 alongside its existing checks. A new push has a new SHA and must earn its own proof.
 After a real Full failure, the verdict removes `full-ci` from that same PR head,
 so fix pushes run Quick until the PR is relabeled. Cancelled or superseded runs,
-and skipped jobs without a real failure, do not remove it. Only the Full verdict
+and skipped jobs without a real failure, do not remove it. Re-adding `full-ci` on the same head cancels
+the old run: a cancelled job alone is ignored when a newer run of the workflow exists for that head SHA
+(`actions/runs?head_sha=…`, id above `GITHUB_RUN_ID`; the verdict has `actions: read`), so the label that
+was just re-added is never undone. A real `failure` always removes it. Only the Full verdict
 has issue-label write permission; it rechecks the current PR head before removal.
 
 Notable details:
@@ -544,10 +550,12 @@ into **`E2E Slow Journeys`**.
   NO shard left a `result.json` ("E2E harness produced no results: the journeys did not run"): every
   shard job was green, but the harness died before the first journey (a typecheck error in
   `scripts/test/**` once did this to every shard in ~20 s, and the run still went green with a warning
-  nobody reads). A partial set (some shards without a result) and failing journeys stay advisory, as
+  nobody reads). A result counts only with numeric `passed` and `failed`: a harness that dies before its
+  tally writes `null`s, and that set, or a 0-total set with any non-zero exit status, fails the same way. A
+  partial set (some shards without a result) and failing journeys stay advisory, as
   above. `a-e2e-harness-typecheck` ([Linting](../linting/index.md)) runs the harness's own `tsc` step in
   Quick so that error is caught before Full, and `scripts/test/ci-sets.ts` pins both the zero-result
-  failure and the advisory cases.
+  failure, the null/0-total cases and the advisory cases.
 - **It is NOT a required check yet.** The tier drives a real browser through Bun, and Bun 1.3 occasionally
   drops a child's pipes. The harness retries those failures, or bounds them and names them, but the real
   flake rate on hosted runners is unmeasured. It becomes a required branch-protection check after **two

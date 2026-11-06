@@ -33,6 +33,13 @@ verdict | judge)
     [[ ${state} == success ]]
     exit $?
   fi
+  # `Full CI` is the merge gate and belongs to a pull request's own run. A `main` push or a dispatch (even
+  # one on a PR branch, which proves the branch alone and not its merge with main) only exits with the
+  # verdict: posting it onto the PR head would let a late green dispatch overwrite a red pull_request run.
+  if [[ ${EVENT_NAME:-} != pull_request ]]; then
+    [[ ${state} != failure ]]
+    exit $?
+  fi
   ;;
 *) echo "❌ usage: $0 pending|verdict|judge" >&2 && exit 2 ;;
 esac
@@ -44,9 +51,20 @@ gh api --method POST "repos/${GITHUB_REPOSITORY:?repository required}/statuses/$
 # A failed proof turns the expensive tier off for fix pushes. A job that ended `cancelled` while the PR
 # head is still the tested SHA is a timeout or a manual cancel, so it counts as a real failure here; a
 # superseding push changes the head and is caught by the current-head check below. A failure caused only
-# by skipped jobs does not remove the label.
-if [[ ${mode} == verdict && ${state} == failure && ${EVENT_NAME:-} == pull_request ]] &&
-  jq -e 'any(.[]; .result == "failure" or .result == "cancelled")' <<<"${NEEDS}" >/dev/null; then
+# by skipped jobs does not remove the label. Re-adding `full-ci` on the SAME head cancels this run and
+# starts another: that cancellation is no failure, so a cancelled job alone is ignored when a newer run of
+# this workflow exists for the same head SHA. A real `failure` always counts.
+remove_label=false
+if [[ ${mode} == verdict && ${state} == failure && ${EVENT_NAME:-} == pull_request ]]; then
+  if jq -e 'any(.[]; .result == "failure")' <<<"${NEEDS}" >/dev/null; then
+    remove_label=true
+  elif jq -e 'any(.[]; .result == "cancelled")' <<<"${NEEDS}" >/dev/null; then
+    newer_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=100" \
+      --jq "any(.workflow_runs[]; .id > ${GITHUB_RUN_ID} and .name == \"${GITHUB_WORKFLOW:-CI}\")")"
+    [[ ${newer_run} == true ]] || remove_label=true
+  fi
+fi
+if [[ ${remove_label} == true ]]; then
   current_head="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER:?PR number required}" --jq .head.sha)"
   if [[ ${current_head} == "${HEAD_SHA}" ]]; then
     # Read labels first: deleting an already absent label is a 404, not another failed gate.

@@ -210,6 +210,24 @@ const e2eSkipped = {
 };
 assert.equal(judge(e2eSkipped), 0);
 assert.notEqual(judge({ ...e2eSkipped, relevance: { result: 'failure', outputs: { run: 'false' } } }), 0);
+// `pwa-screenshot` may be skipped only when PWA Relevance succeeded and said `run == false`.
+const pwaSkipped = {
+  ...successful,
+  'pwa-relevance': { result: 'success', outputs: { run: 'false' } },
+  'pwa-screenshot': { result: 'skipped' },
+};
+assert.equal(judge(pwaSkipped), 0, 'a skipped PWA gate after run=false is the documented skip');
+assert.notEqual(
+  judge({ ...pwaSkipped, 'pwa-relevance': { result: 'failure', outputs: {} } }),
+  0,
+  'a failed relevance job cannot excuse a skipped PWA gate',
+);
+assert.notEqual(
+  judge({ ...pwaSkipped, 'pwa-relevance': { result: 'success', outputs: { run: 'true' } } }),
+  0,
+  'a skipped PWA gate when relevance said run=true is not proof',
+);
+assert.notEqual(judge({ ...pwaSkipped, 'pwa-screenshot': { result: 'failure' } }), 0);
 const darwinSkipped = { ...successful, 'smoke-darwin': { result: 'skipped' } };
 assert.equal(judge(darwinSkipped, 'skip'), 0);
 assert.equal(judge(darwinSkipped, 'SKIP'), 0);
@@ -233,8 +251,8 @@ try {
     );
 
   // `E2E Journeys`: no shard leaving a result fails it; failing journeys and a partial set stay advisory.
-  const summarize = (shards: number[], env: Record<string, string> = {}) => {
-    const evidence = join(temporary, `e2e-evidence-${shards.join('-')}-${Object.keys(env).join('-')}`);
+  const summarize = (shards: number[], env: Record<string, string> = {}, override: object = {}, tag = '') => {
+    const evidence = join(temporary, `e2e-evidence-${shards.join('-')}-${Object.keys(env).join('-')}${tag}`);
     for (const shard of shards) {
       const dir = join(evidence, `e2e-result-${shard}-1`);
       mkdirSync(dir, { recursive: true });
@@ -248,6 +266,7 @@ try {
           status: 0,
           seconds: 5,
           failures: [],
+          ...override,
         }),
       );
     }
@@ -267,6 +286,21 @@ try {
     0,
     'a skipped tier has no results by design',
   );
+  // A harness that died before its tally leaves `passed: null, failed: null`: no journey ran, whatever the shard job said.
+  const died = { passed: null, failed: null, status: 1 };
+  const nullResults = summarize([1, 2, 3], {}, died, '-null');
+  assert.equal(nullResults.code, 1, 'null tallies across every shard must fail like "no results"');
+  assert.ok(nullResults.stderr.includes('E2E harness produced no results: the journeys did not run'));
+  assert.equal(
+    summarize([1, 2, 3], {}, { passed: 0, failed: 0, status: 1 }, '-zero').code,
+    1,
+    'a 0-total set with a non-zero exit status ran nothing',
+  );
+  assert.equal(
+    summarize([1, 2, 3], {}, { passed: 0, failed: 0, status: 0 }, '-empty').code,
+    0,
+    'an empty plan is fine',
+  );
   assert.equal(summarize([1]).code, 0, 'a partial set stays advisory');
   assert.equal(summarize([1, 2, 3]).code, 0, 'a failing journey stays advisory');
 
@@ -279,13 +313,14 @@ set -euo pipefail
 printf '%s\\n' "$*" >>"$CI_STATUS_CALLS"
 case "$*" in
 *'/pulls/'*) printf '%s\\n' "$CI_CURRENT_HEAD" ;;
+*'/actions/runs?'*) printf '%s\\n' "$CI_NEWER_RUN" ;;
 *'/labels --jq'*) printf '%s\\n' true ;;
 esac
 `,
   );
   chmodSync(gh, 0o755);
   const failed = { ...successful, int: { result: 'failure' } };
-  const statusCalls = (needs: object, currentHead = 'tested-head') => {
+  const statusCalls = (needs: object, currentHead = 'tested-head', eventName = 'pull_request', newerRun = false) => {
     const calls = join(temporary, 'gh-calls');
     writeFileSync(calls, '');
     const result = Bun.spawnSync(['./scripts/ci/full-status.sh', 'verdict'], {
@@ -293,7 +328,9 @@ esac
         ...process.env,
         PATH: `${temporary}:${process.env.PATH}`,
         NEEDS: JSON.stringify(needs),
-        EVENT_NAME: 'pull_request',
+        EVENT_NAME: eventName,
+        CI_NEWER_RUN: String(newerRun),
+        GITHUB_WORKFLOW: 'CI',
         PR_NUMBER: '42',
         HEAD_SHA: 'tested-head',
         CI_CURRENT_HEAD: currentHead,
@@ -317,6 +354,28 @@ esac
   assert.ok(
     !statusCalls({ ...successful, int: { result: 'cancelled' } }, 'newer-head').calls.includes('--method DELETE'),
   );
+  // Re-adding full-ci on the SAME head cancels the old run: its cancelled job is ignored when a newer run
+  // exists for this head SHA, so the label that was just re-added stays. A real failure still counts.
+  const cancelledNeeds = { ...successful, int: { result: 'cancelled' } };
+  assert.ok(!statusCalls(cancelledNeeds, 'tested-head', 'pull_request', true).calls.includes('--method DELETE'));
+  assert.ok(
+    statusCalls(cancelledNeeds, 'tested-head', 'pull_request', true).calls.includes(
+      'actions/runs?head_sha=tested-head',
+    ),
+  );
+  assert.ok(statusCalls(failed, 'tested-head', 'pull_request', true).calls.includes('--method DELETE'));
+  assert.ok(statusCalls(cancelledNeeds, 'tested-head', 'pull_request', false).calls.includes('--method DELETE'));
+  // `Full CI` is posted by a pull request's own run only: main and a dispatch on a PR branch only exit with the
+  // verdict, so a late green dispatch can never replace a red pull_request status on the head.
+  for (const eventName of ['push', 'workflow_dispatch']) {
+    for (const needs of [successful, failed]) {
+      const posted = statusCalls(needs, 'tested-head', eventName);
+      assert.ok(!posted.calls.includes('/statuses/'), `${eventName} must not post a Full CI status`);
+      assert.ok(!posted.calls.includes('--method'), `${eventName} must not write to GitHub at all`);
+      assert.equal(posted.code, needs === successful ? 0 : 1);
+    }
+  }
+  assert.ok(statusCalls(successful).calls.includes('repos/fixture/repo/statuses/tested-head'));
   // Skipped jobs alone are not a failure of this proof.
   assert.ok(!statusCalls({ ...successful, int: { result: 'skipped' } }).calls.includes('--method DELETE'));
   assert.equal(statusCalls(successful).code, 0);

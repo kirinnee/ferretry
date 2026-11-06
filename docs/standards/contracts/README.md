@@ -47,7 +47,7 @@ laundered a defect into something every gate was right to pass.
 | `no-sync-io.sh`               | `a-no-sync-io`                           | daemon code holds exactly the synchronous file calls its ledger declares, each with its reason                   |
 | `pages-config.sh`             | `a-pages-config`, `task test:gate`       | the PWA build and Pages deployment publish the same directory                                                    |
 | `pinned-toolchain.sh`         | `task test:gate`, `build-pwa.sh`         | `node` and `bun` resolve inside `/nix/store`, never to the runner image                                          |
-| `pwa-relevance.sh` | `a-pwa-relevance` | the PWA browser gate's path list covers every import of its harness; docs-only skips it |
+| `pwa-relevance.sh`            | `a-pwa-relevance`                        | the PWA browser gate's path list covers every import of its harness; docs-only skips it                          |
 | `relay-config.sh`             | `a-relay-config`, `task test:gate`       | relay code, bindings, discovery and deployment agree                                                             |
 | `route-agreement.sh`          | `a-route-agreement`                      | client/daemon paths, verbs and declared method debt agree                                                        |
 | `test-tiers.sh`               | `a-test-tiers`, `task test:gate`         | tier placement and budgets, complete groups, Quick/Full events and exact-head verdict, run-all failure reporting |
