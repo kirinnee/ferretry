@@ -271,7 +271,8 @@ describe('FileDaemonConfig: the carriers conversion on a daemon.json that still 
       // Arrange
       const text = JSON.stringify(document);
       const { store, paths } = await realStateHome(text);
-      const before = await readdir(paths.home, { recursive: true });
+      // `readdir` promises no order, so the listings are compared sorted.
+      const before = (await readdir(paths.home, { recursive: true })).toSorted();
 
       // Act
       const raised = await store.convertLegacyCarrierKeys('2026-11-06T10:20:30.456Z').catch((error: unknown) => error);
@@ -282,7 +283,7 @@ describe('FileDaemonConfig: the carriers conversion on a daemon.json that still 
       should((raised as Error).message).not.containEql('Unrecognized');
       should((raised as Error).message).not.containEql('4242');
       should(await readFile(paths.daemonConfig, 'utf8')).equal(text);
-      should(await readdir(paths.home, { recursive: true })).deepEqual(before);
+      should((await readdir(paths.home, { recursive: true })).toSorted()).deepEqual(before);
       should(before.some(entry => entry.includes(CARRIERS_JOURNAL_NAME) || entry.includes('pre-carriers'))).be.false();
     });
   }
