@@ -4,6 +4,7 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { enhancementErrorStatus, enhancementErrorView } from '../../stt/enhancement.ts';
 import { SttEnhancementError } from '../../stt/errors.ts';
+import type { ModuleContribution } from '../modules.ts';
 
 /**
  * Dictation enhancement: the daemon's ONE remaining speech-to-text route.
@@ -88,4 +89,14 @@ export function sttEnhancementRoutes(subsystem: SttEnhancementSubsystem): readon
       handle: async context => await enhance(subsystem, context),
     },
   ];
+}
+
+/**
+ * What the voice module adds to the daemon: the one dictation route. Fixed literals under `/v1/stt`, which no other
+ * subsystem uses, so it can neither shadow nor be shadowed by anything around it. It registers with the daemon-wide
+ * surfaces rather than among the per-session ones because it belongs to the MACHINE: the credential it spends is the
+ * operator's, and no session owns a transcript. It writes nothing the security log keeps, so it has no audit rule.
+ */
+export function voiceContribution(subsystem: SttEnhancementSubsystem): ModuleContribution {
+  return { routes: sttEnhancementRoutes(subsystem) };
 }

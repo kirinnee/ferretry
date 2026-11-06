@@ -21,7 +21,6 @@ import type { InputRequestService } from '../../input-requests/service.ts';
 import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
 import type { PinService } from '../../pins/index.ts';
-import type { RenderService } from '../../renders/index.ts';
 import type { PasteRuleStages } from '../../secure-copy/rule-stages.ts';
 import type { PasteRuleService } from '../../secure-copy/rules.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
@@ -88,7 +87,6 @@ import { type PerformanceSubsystem, performanceRoutes } from './performance.ts';
 import { pinRoutes } from './pins.ts';
 import { type PushAlertSubsystem, type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
-import { renderRoutes } from './renders.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
 import { type CopyListing, type RuleProgramHomes, secureCopyRoutes } from './secure-copy.ts';
@@ -131,7 +129,6 @@ import { signInRuleRoutes } from './sign-in-rules.ts';
 import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './session-archive.ts';
 import { type SpeedupsSubsystem, speedupRoutes } from './speedups.ts';
 import { stepUpRoutes } from './step-up.ts';
-import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
 import { type SystemOpenSubsystem, systemOpenRoutes } from './system-open.ts';
 import { taskPlanRoutes } from './task-plans.ts';
 import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
@@ -139,7 +136,6 @@ import { type TidySubsystem, tidyRoutes } from './tidy.ts';
 import { tunnelRoutes } from './tunnel.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 import { type WebRtcSignallingSubsystem, webrtcRoutes } from './webrtc.ts';
-import { type WorkSearchSubsystem, workSearchRoutes } from './work-search.ts';
 import type { WorktreeSubsystem } from './worktrees.ts';
 
 /**
@@ -274,8 +270,6 @@ export interface MountedSubsystems {
   /** Settles when the boot move of sub-ferret items to their agenda homes is done; the Warden sweep arms after it. */
   readonly agendaHomesMigrated?: Promise<unknown>;
   readonly pins: PinService;
-  /** The saved pictures: `svg` and `html` a ferret keeps as daemon files and cites by a short token (docs/renders.md). */
-  readonly renders: RenderService;
   /** The owner's unsent composer, shared live between their own devices and never journaled. */
   readonly sharedDrafts: SharedDraftService;
   /** The live stream each open composer holds on its session's shared draft. */
@@ -391,8 +385,6 @@ export interface MountedSubsystems {
   readonly legacyTasks: LegacyTaskSubsystem;
   /** The project boards (v2): every project's cards, one file per card, written under ownership and lineage. */
   readonly board: BoardSubsystem;
-  /** One search over every card and agenda item (docs/work-search.md): the finder, `fy search` and the related check. */
-  readonly workSearch: WorkSearchSubsystem;
   /** One ferret's clean-up of its own unwanted cards and work-tracking agenda items (docs/board.md, "Tidy"). */
   readonly tidy: TidySubsystem;
   /** The board's GitHub watcher (board-design.md §3.1): it serves no route, and it is a mounted subsystem
@@ -443,10 +435,6 @@ export interface MountedSubsystems {
   readonly names: NameSubsystem;
   /** The team recommender over the published fleet manifest and the operator's routing catalog. */
   readonly recommend: RecommendSubsystem;
-  /** Dictation's one daemon-side half: the hosted-model pass that repairs a transcript. Recognition
-   *  happens in the browser, so what is left is the call the browser cannot make — it needs a
-   *  provider credential only this daemon holds. See `mounts/stt.ts`. */
-  readonly sttEnhancement: SttEnhancementSubsystem;
   /** Optional provider keys (Jev, Groq, Cerebras): which are set, and a Test that spends one once through
    *  the daemon's outbound holder. No key travels on either route — see `mounts/speedups.ts`. */
   readonly speedups: SpeedupsSubsystem;
@@ -719,14 +707,11 @@ export function legacyModule(
               ...agendaOpenRoutes(subsystems.agendaRollup),
               ...agendaMachineRoutes(subsystems.machineAgenda),
               ...pinRoutes(subsystems.pins),
-              ...renderRoutes(subsystems.renders),
               ...sharedDraftRoutes(subsystems.sharedDrafts),
               ...legacyTaskRoutes(subsystems.legacyTasks),
               // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed
               // literals are registered before the patterns beneath them.
               ...boardRoutes(subsystems.board),
-              // `/v1/search` is a fixed literal no other subsystem uses.
-              ...workSearchRoutes(subsystems.workSearch),
               // `/v1/tidy/plan` is a fixed literal no other subsystem uses.
               ...tidyRoutes(subsystems.tidy),
               // The agent's route is a fixed literal under `/v1/agent`, and a person's are under
@@ -755,11 +740,6 @@ export function legacyModule(
               ...browserProxyRoutes(subsystems.browserProxy),
               ...nameRoutes(subsystems.names),
               ...recommendRoutes(subsystems.recommend),
-              // Dictation enhancement is a fixed literal under `/v1/stt`, which no other subsystem uses, so it
-              // can neither shadow nor be shadowed by anything around it. It registers with the daemon-wide
-              // surfaces rather than among the per-session ones because it belongs to the MACHINE: the
-              // credential it spends is the operator's, and no session owns a transcript.
-              ...sttEnhancementRoutes(subsystems.sttEnhancement),
               // Fixed literals under `/v1/speedups`, which no other subsystem uses: none can shadow or be shadowed.
               ...speedupRoutes(subsystems.speedups),
               // Fixed literals under `/v1/models`, which no other subsystem uses: none can shadow or be shadowed.

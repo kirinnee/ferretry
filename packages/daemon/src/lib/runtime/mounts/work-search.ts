@@ -1,4 +1,5 @@
 import {
+  DAEMON_FEATURES,
   type WorkRelatedRequest,
   WorkRelatedRequestSchema,
   type WorkRelatedResponse,
@@ -12,6 +13,7 @@ import { ApiError } from '../../api/error.ts';
 import { queryValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import type { ModuleContribution } from '../modules.ts';
 
 /** One search over cards and agenda items (docs/work-search.md). `WorkSearchService` satisfies this structurally. */
 export interface WorkSearchSubsystem {
@@ -77,4 +79,12 @@ export function workSearchRoutes(search: WorkSearchSubsystem): readonly ApiRoute
         jsonResponse(await search.related(await parseBody(context.request, WorkRelatedRequestSchema))),
     },
   ];
+}
+
+/**
+ * What the work-search module adds to the daemon: `/v1/search`, a fixed literal no other subsystem uses, and the
+ * protocol feature that says this daemon answers it. Searching reads and changes nothing, so it has no audit rule.
+ */
+export function workSearchContribution(search: WorkSearchSubsystem): ModuleContribution {
+  return { routes: workSearchRoutes(search), features: [DAEMON_FEATURES.workSearch] };
 }

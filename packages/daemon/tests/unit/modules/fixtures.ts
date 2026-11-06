@@ -2,7 +2,10 @@ import type { BuiltModule } from '../../../src/lib/runtime/modules.ts';
 import { builtAnalytics } from './analytics/fixture.ts';
 import { builtCgroups } from './cgroups/fixture.ts';
 import { builtLearning } from './learning/fixture.ts';
+import { builtRenders } from './renders/fixture.ts';
 import { builtUpdate } from './update/fixture.ts';
+import { builtVoice } from './voice/fixture.ts';
+import { builtWorkSearch } from './work-search/fixture.ts';
 import { builtWorktrees } from './worktrees/fixture.ts';
 
 /**
@@ -18,4 +21,7 @@ export const builtModules = (): readonly BuiltModule<unknown, object>[] => [
   builtAnalytics(),
   builtUpdate(),
   builtWorktrees(),
+  builtRenders(),
+  builtVoice(),
+  builtWorkSearch(),
 ];

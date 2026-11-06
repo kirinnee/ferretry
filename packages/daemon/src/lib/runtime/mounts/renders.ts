@@ -7,6 +7,7 @@ import { type ApiResponse, arrivedOnHost, decodeParameter } from '../../api/http
 import { jsonResponse, namesTag, textResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { RenderError, type RenderErrorCode, type RenderService } from '../../renders/index.ts';
+import type { ModuleContribution } from '../modules.ts';
 
 /**
  * The saved pictures' HTTP surface (docs/renders.md): one write and two reads.
@@ -150,4 +151,9 @@ export function renderRoutes(renders: RenderService): readonly ApiRoute[] {
       handle: safely(async context => await body(renders, context)),
     },
   ];
+}
+
+/** What the renders module adds to the daemon: the saved-pictures surface. It has no audit rule and claims no protocol feature. */
+export function rendersContribution(renders: RenderService): ModuleContribution {
+  return { routes: renderRoutes(renders) };
 }
