@@ -25,6 +25,7 @@ import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
 import { observedRoutes } from '../../performance/observed-routes.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
 import type { PinService } from '../../pins/index.ts';
+import type { RenderService } from '../../renders/index.ts';
 import type { SignInRuleService } from '../../sign-in-rules/service.ts';
 import type { SignInRuleSuggestions } from '../../sign-in-rules/suggestions.ts';
 import type { TaskPlanService } from '../../task-plans/service.ts';
@@ -96,6 +97,7 @@ import { type PerformanceSubsystem, performanceRoutes } from './performance.ts';
 import { pinRoutes } from './pins.ts';
 import { type PushAlertSubsystem, type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
+import { renderRoutes } from './renders.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
 import {
@@ -289,6 +291,8 @@ export interface MountedSubsystems {
   /** Settles when the boot move of sub-ferret items to their agenda homes is done; the Warden sweep arms after it. */
   readonly agendaHomesMigrated?: Promise<unknown>;
   readonly pins: PinService;
+  /** The saved pictures: `svg` and `html` a ferret keeps as daemon files and cites by a short token (docs/renders.md). */
+  readonly renders: RenderService;
   /** The owner's unsent composer, shared live between their own devices and never journaled. */
   readonly sharedDrafts: SharedDraftService;
   /** The live stream each open composer holds on its session's shared draft. */
@@ -749,6 +753,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...agendaOpenRoutes(subsystems.agendaRollup),
         ...agendaMachineRoutes(subsystems.machineAgenda),
         ...pinRoutes(subsystems.pins),
+        ...renderRoutes(subsystems.renders),
         ...sharedDraftRoutes(subsystems.sharedDrafts),
         ...legacyTaskRoutes(subsystems.legacyTasks),
         // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed

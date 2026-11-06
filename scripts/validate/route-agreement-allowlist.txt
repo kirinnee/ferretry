@@ -135,3 +135,6 @@ unreached POST /v1/catalog-links/:linkId/copy # CORRECT: daemon-first slice (cat
 unreached DELETE /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalogs 3f-4); the app share sheet dials download links in a later slice
 unreached PUT /v1/catalog-links/:linkId/version # CORRECT: daemon-first slice (catalogs 3f-5); the app share sheet dials download links in a later slice
 unreached PATCH /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalogs 3f-5); the app share sheet dials download links in a later slice
+unreached POST /v1/renders # CORRECT: daemon-first slice (F959 slice 2); `fy render save` dials it in slice 3
+unreached GET /v1/renders/:id/meta # CORRECT: daemon-first slice (F959 slice 2); the app reference resolver dials it in slice 4
+unreached GET /v1/renders/:id # CORRECT: daemon-first slice (F959 slice 2); the app render embed dials it in slice 4

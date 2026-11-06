@@ -652,7 +652,7 @@ export class ApiDispatcher {
 }
 
 /** How a route that threw is answered: a refusal it named keeps its own status; anything else is a bare 500. */
-const failed = (error: unknown): ApiResponse =>
+export const failureResponse = (error: unknown): ApiResponse =>
   error instanceof ApiError
     ? errorResponse(error.status, error.message, error.code, error.extra)
     : errorResponse(500, 'the daemon failed to handle this request', 'internal_error');
@@ -663,7 +663,7 @@ async function run(route: ApiRoute, context: RouteContext): Promise<ApiResponse>
   try {
     built = await route.handle(context);
   } catch (error) {
-    return policy(failed(error));
+    return policy(failureResponse(error));
   }
   const spell = built.late;
   if (spell === undefined) return policy(built);
@@ -673,7 +673,7 @@ async function run(route: ApiRoute, context: RouteContext): Promise<ApiResponse>
     try {
       return policy(spell());
     } catch (error) {
-      return policy(failed(error));
+      return policy(failureResponse(error));
     }
   };
   return { ...last(), late: last };

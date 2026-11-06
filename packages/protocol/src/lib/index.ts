@@ -101,6 +101,7 @@ export * from './plain-label.ts';
 export * from './process-incarnation.ts';
 export * from './push.ts';
 export * from './relay-session.ts';
+export * from './renders.ts';
 export * from './secret-clone.ts';
 export * from './secrets.ts';
 export * from './secure-copy.ts';
