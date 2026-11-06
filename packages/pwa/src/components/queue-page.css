@@ -90,11 +90,6 @@
 .fy-queue-row:last-child {
   border-bottom: 0;
 }
-/* The one row that needs a person's eye: a blocker. A quiet rule on its edge and a coloured word, no fill. */
-.fy-queue-row[data-queue-kind='blocker'] {
-  padding-inline-start: 12px;
-  border-inline-start: 3px solid var(--err);
-}
 .fy-queue-meta {
   display: flex;
   flex-wrap: wrap;
