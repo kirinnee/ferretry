@@ -203,6 +203,15 @@ describe('QueuePageView', () => {
     expect(row('q1').findAllByProps({ 'data-queue-detail': '' })).toHaveLength(0);
   });
 
+  test('a message whose time cannot be read keeps its empty time cell and claims no age', () => {
+    mounted = view({ groups: [group([queued('q1', 'queued', { enqueuedAt: 'not a time' })])] });
+    expect(row('q1').findAllByType('time')).toHaveLength(0);
+    const parts = (line('q1').children as ReactTestInstance[])
+      .filter(child => child.props['data-queue-sr'] === undefined)
+      .map(child => text(child));
+    expect(parts).toEqual(['Waiting', 'You', 'text q1', '']);
+  });
+
   test('the line shows your own messages as You, the owner of a ferret message by name, and only the first line of a heading', () => {
     mounted = view({
       groups: [
