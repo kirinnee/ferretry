@@ -633,9 +633,9 @@ describe('GET /v1/board/merge-gate', () => {
     const url = 'https://github.com/kirinnee/ferretry/pull/42';
 
     // Act
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(request({ path: '/v1/board/merge-gate', query: [['pr', url]], headers: human }));
+    const response = await (await dispatcher(board)).dispatch(
+      request({ path: '/v1/board/merge-gate', query: [['pr', url]], headers: human }),
+    );
 
     // Assert
     should(response.status).equal(200);
@@ -663,9 +663,9 @@ describe('GET /v1/board/merge-gate', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board, { use: false, configure: false })
-    ).dispatch(request({ path: '/v1/board/merge-gate', query: [['pr', 'x']], device: phone }));
+    const response = await (await dispatcher(board, { use: false, configure: false })).dispatch(
+      request({ path: '/v1/board/merge-gate', query: [['pr', 'x']], device: phone }),
+    );
 
     // Assert
     should(response.status).equal(403);
