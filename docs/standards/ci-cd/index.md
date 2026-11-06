@@ -32,7 +32,7 @@ cancel a running set.
 | Compile Binaries + SIT                                   | Namespace 2x4       | GitHub                                | cross-compile, upload the binaries, then SIT on those bytes |
 | E2E shards                                               | Namespace 2x4       | GitHub                                | journeys and advisory policy as before                      |
 | PWA Settings / Gallery                                   | Namespace 2x4 / 4x8 | GitHub                                | existing geometry assertions and evidence                   |
-| Realworld Tests (advisory)                               | Namespace 8x16      | Namespace 8x16                        | machine budgets on a quiet dedicated VM                     |
+| Realworld Tests (advisory, nightly only)                 | not run             | Namespace 8x16 (nightly, dispatch)    | machine budgets on a quiet dedicated VM                     |
 | Linux smoke and macOS jobs                               | GitHub              | GitHub                                | stock platform proofs; existing macOS policy                |
 | Full CI Pending, Full CI, PWA/E2E relevance, E2E summary | GitHub              | GitHub                                | seconds of API/shell work, no Nix                           |
 
@@ -122,7 +122,7 @@ the whole account**. Every run used 4 of them (Containment, Sandbox Shell (Safar
 worst 74. The queue, not the work, held pull requests up, and there is no paid pool to buy out of it
 (Namespace macOS is ten times a Linux unit's price, ~$600 a month at this pace).
 
-Within a PR’s full set, **Smoke always runs** (unless the owner’s macOS switch skips it); the three realworld proofs run **only when their inputs change**. Realworld also requires the PR’s `full-ci` label.
+Within a PR’s full set, **Smoke always runs** (unless the owner’s macOS switch skips it); the three realworld proofs run **only when their inputs change**. The Realworld timing tests (`Realworld Tests`) do not run on a pull request at all: they run nightly and on dispatch ([Realworld workflow](#realworld-workflow)).
 `main`, a manual dispatch and any doubt run all four, so a path list that missed an input shows up
 one merge later. Smoke stays in `ci.yaml` (as the `smoke-darwin` call into the reusable `smoke-darwin.yaml`, [below](#macos-runner-shortage)). The other three, and the job that decides them, are the
 realworld tier's: they live in `realworld.yaml`, so a macOS queue never holds up a pull request or a
@@ -236,15 +236,15 @@ vars.MACOS_SMOKE=skip (owner); darwin binary released unproven`.
 
 ## Workflow split
 
-| Workflow                      | Trigger                                                        | Responsibility                                                                        |
-| ----------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| CI                            | PR opened/pushed/reopened; `full-ci` labeled; `main`; dispatch | Quick every push; Full on labeled PRs and every non-PR run; exact-head Full CI status |
-| E2E Slow                      | nightly, dispatch, relevant PRs with `full-ci`                 | slow journeys, existing advisory summary                                              |
-| Realworld                     | `main`, nightly, dispatch, relevant PRs with `full-ci`         | machine budgets, macOS proofs and pinned harness contract; advisory                   |
-| Harness Contract (latest)     | nightly, dispatch                                              | upstream drift and issue reports                                                      |
-| Smoke darwin-arm64 (reusable) | called by CI and CD                                            | existing advisory PR / required release policy                                        |
-| Release                       | successful CI on `main`                                        | version, changelog and release tag                                                    |
-| CD                            | release tag                                                    | compile, required darwin smoke, publish                                               |
+| Workflow                      | Trigger                                                                                                   | Responsibility                                                                        |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| CI                            | PR opened/pushed/reopened; `full-ci` labeled; `main`; dispatch                                            | Quick every push; Full on labeled PRs and every non-PR run; exact-head Full CI status |
+| E2E Slow                      | nightly, dispatch, relevant PRs with `full-ci`                                                            | slow journeys, existing advisory summary                                              |
+| Realworld                     | nightly, dispatch (timing tests); `main` and relevant PRs with `full-ci` (macOS and tmux 3.8 proofs only) | machine budgets (nightly), macOS proofs and pinned harness contract; advisory         |
+| Harness Contract (latest)     | nightly, dispatch                                                                                         | upstream drift and issue reports                                                      |
+| Smoke darwin-arm64 (reusable) | called by CI and CD                                                                                       | existing advisory PR / required release policy                                        |
+| Release                       | successful CI on `main`                                                                                   | version, changelog and release tag                                                    |
+| CD                            | release tag                                                                                               | compile, required darwin smoke, publish                                               |
 
 The fast E2E jobs now live in `ci.yaml`; there is no separate `e2e.yaml`.
 Realworld and Slow remain advisory and outside the Full CI verdict. Release still
@@ -416,17 +416,22 @@ code, run where a failure cannot hold anything up.
 | `harness-contract`     | the pinned harness contract, Linux and `macos-15`              | GitHub         | 30 min  |
 | `report`               | `scripts/ci/realworld-report.sh`                               | GitHub         | 10 min  |
 
-- **Triggers.** A push to `main` (the same `paths-ignore` as `CI`), a nightly run at 03:43 UTC (off the
-  hour, when the fleet of scheduled jobs is thin), a manual dispatch, and a pull request that touches
-  the tier's inputs: `tests/realworld/**`, `bunfig.realworld.toml`, the workflow, its scripts, the
-  toolchain, and the inputs of the macOS jobs. A pull request that touches none of them starts no run.
-- **The `realworld` job gets a Namespace 8x16 on every selected event.** Its budgets (an idle daemon's CPU and
+- **Triggers.** The `realworld` job (the timing, memory and rate budgets) runs **only on the nightly
+  schedule (09:17 UTC, off the hour, once a day on `main`) and on manual dispatch** — on a pull request
+  or a push to `main` it is skipped. It cost ~9.4k Namespace runner-minutes a day when it ran on every
+  full pull request and every merge, for a tier that gates nothing (owner's call, 2026-11-06). To measure
+  a branch's budgets before the night, run the workflow by hand on that branch (Actions > Realworld >
+  Run workflow). The rest of the workflow keeps its triggers: a push to `main` (the same `paths-ignore`
+  as `CI`) and a pull request that touches the inputs of the macOS and tmux 3.8 jobs run those proofs
+  (`bunfig.realworld.toml`, the workflow, its scripts, the toolchain), on free GitHub runners. A pull
+  request that touches none of them starts no run.
+- **The `realworld` job gets a Namespace 8x16 on every event that runs it.** Its budgets (an idle daemon's CPU and
   memory, a 200 ms event-loop bound under a saturated disk) are the claims a busy shared runner would
   fail for the wrong reason, so it takes a quiet dedicated VM and the pool's escape hatch
   (`vars.CI_RUNNER_POOL == 'github'`) like every Namespace job. It runs the tier swept, with the
   120-second per-test timeout on the command line, no coverage ledger, no quarantine and no rerun, and uploads
   `realworld-results` (JUnit and the console log). A red test fails the job, nothing else.
-- **`report` files the failures.** On a push or a scheduled run that fails, it reads the JUnit and the
+- **`report` files the failures.** The nightly's failure is visible as that issue (and as the red scheduled run). On a push or a scheduled run that fails, it reads the JUnit and the
   console log and, for each failing test, opens one issue titled `realworld: <file> > <test>` with the
   `realworld` label (created on first use), the run and job links and the lines before the failure; a
   test already open gets a comment instead. A macOS or harness job that failed files
@@ -440,7 +445,7 @@ code, run where a failure cannot hold anything up.
   shape `ci.yaml` uses: one run running, one waiting, and a newer push replaces the waiting one. A burst
   of merges therefore runs the tier at most twice instead of once per merge (it ran 557 times in nine
   days, each on a 4x8), and a run that has started is never cancelled. Nothing is lost: the tier only
-  files issues, and the newer run proves every commit the older one held. The nightly and a manual
+  files issues, and the newer run proves every commit the older one held (the `main` group now holds only the macOS and tmux 3.8 proofs). The nightly and a manual
   dispatch keep a group of their own run id, so neither is ever superseded or supersedes a `main` run.
 
 ## Release gating
