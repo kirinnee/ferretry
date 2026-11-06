@@ -296,7 +296,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Daemon code declares every synchronous IO call";
       entry = validator "scripts/validate/no-sync-io.sh";
-      files = "^(packages/(daemon/(src|bin)|fleet/src)/.*\\.ts|scripts/validate/(no-sync-io\\.sh|sync-io-allowlist\\.txt))$";
+      files = "^(packages/(daemon/(src|bin)|fleet/src)/.*\\.ts|scripts/validate/(no-sync-io\\.(sh|ts)|sync-io-allowlist\\.txt))$";
       pass_filenames = false;
       language = "system";
     };

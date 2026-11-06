@@ -170,6 +170,34 @@ describe('OrderedLogWriter', () => {
     should(disk.inFlight()).equal(0);
   });
 
+  it('should start a new pump for a line written the moment the last write completes', async () => {
+    // Arrange — the line is written by a continuation of the very write the pump is waiting on.
+    const sent: string[] = [];
+    let finish: (count: number) => void = () => undefined;
+    const pending = new Promise<number>(resolve => {
+      finish = resolve;
+    });
+    const log = new OrderedLogWriter(2, {
+      writeSync: (_descriptor, bytes, offset) => bytes.byteLength - offset,
+      write: async (_descriptor, bytes, offset) => {
+        sent.push(new TextDecoder().decode(bytes.subarray(offset)));
+        return sent.length === 1 ? await pending : bytes.byteLength - offset;
+      },
+    });
+    log.goAsync();
+    log.write('one\n');
+    void pending.then(() => log.write('two\n'));
+
+    // Act
+    finish(4);
+    await Bun.sleep(0);
+    await log.drain(100);
+
+    // Assert
+    should(sent).deepEqual(['one\n', 'two\n']);
+    should(log.queuedLines).equal(0);
+  });
+
   it('should keep writing after a write the disk refused', async () => {
     // Arrange
     const disk = heldDisk({ failFirst: true });

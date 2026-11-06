@@ -44,10 +44,12 @@ interface InFlight {
  * drains, rather than growing without bound behind a disk that is not coming back.
  *
  * EXIT. {@link drain} waits — boundedly — for everything to reach the kernel; a daemon that is stopping calls
- * it before it exits. {@link flushSync} is for an exit that cannot wait: it writes, synchronously and in order,
- * the unconfirmed rest of the write in flight and then the queue, and the log is synchronous from then on. The
- * one thing it cannot know is whether an I/O thread is in the middle of that very write, so the last line can
- * appear TWICE at the end of a log; it is never lost and never out of order, the trade a crash log wants.
+ * it before it exits, and then nothing is in flight. {@link flushSync} is for an exit that cannot wait: it writes,
+ * synchronously, the unconfirmed rest of the write in flight and then the queue, and the log is synchronous from
+ * then on. What it cannot know is whether an I/O thread is in the middle of that very write — a write cannot be
+ * cancelled once handed over — so if that thread finishes before the process is gone, the in-flight bytes land
+ * TWICE, the second copy after the lines written behind them. NOTHING IS LOST; at an abrupt exit with a write in
+ * flight, a repeated tail is possible. That is the trade chosen for a crash log: losing its last line is worse.
  *
  * A FAILED WRITE IS SWALLOWED, as it always was: losing the log is bad, a daemon stopped by its own log is worse.
  */
@@ -57,6 +59,7 @@ export class OrderedLogWriter {
   #queuedBytes = 0;
   #dropped = 0;
   #inFlight: InFlight | undefined;
+  /** The running pump, if any. Set and cleared SYNCHRONOUSLY with the queue check, so no line is ever left behind. */
   #pump: Promise<void> | undefined;
 
   constructor(
@@ -81,9 +84,7 @@ export class OrderedLogWriter {
     }
     this.#queue.push(text);
     this.#queuedBytes += text.length;
-    this.#pump ??= this.#run().finally(() => {
-      this.#pump = undefined;
-    });
+    this.#pump ??= this.#run();
   }
 
   /** Resolves once everything written so far has reached the kernel, or after `withinMs`, whichever is first. */
@@ -118,15 +119,25 @@ export class OrderedLogWriter {
     return this.#queue.length;
   }
 
+  /**
+   * Writes until the queue is empty. The pump is cleared IN THE SAME TURN as the check that found nothing left —
+   * never in a later `finally` — so a line written after that check starts a new pump instead of waiting behind
+   * one that has already finished.
+   */
   async #run(): Promise<void> {
-    for (let chunk = this.#take(); chunk !== '' && this.#async; chunk = this.#take()) {
+    for (;;) {
+      const chunk = this.#async ? this.#take() : '';
+      if (chunk === '') {
+        this.#pump = undefined;
+        return;
+      }
       const inFlight: InFlight = { bytes: new TextEncoder().encode(chunk), confirmed: 0 };
       this.#inFlight = inFlight;
       try {
         while (inFlight.confirmed < inFlight.bytes.byteLength) {
           const written = await this.writes.write(this.descriptor, inFlight.bytes, inFlight.confirmed);
           // Abandoned by an exit flush, which has already written the rest itself.
-          if (this.#inFlight !== inFlight) return;
+          if (this.#inFlight !== inFlight) break;
           if (written <= 0) break;
           inFlight.confirmed += written;
         }
@@ -134,6 +145,11 @@ export class OrderedLogWriter {
         // Intentionally ignored: a log this daemon cannot write must not stop it.
       }
       if (this.#inFlight === inFlight) this.#inFlight = undefined;
+      else {
+        // Abandoned by an exit flush: the log is synchronous now, and nothing is left for a pump to do.
+        this.#pump = undefined;
+        return;
+      }
     }
   }
 
