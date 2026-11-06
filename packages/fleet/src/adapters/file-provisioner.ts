@@ -926,9 +926,13 @@ export class FileFleetProvisioner implements FleetProvisioner {
       const entries = await folder.list();
       for (const entry of entries.toSorted()) {
         if (keep.has(entry)) continue;
-        // A backup or staging name belongs to this very batch; sweeping one away would destroy the only
-        // copy of what a rollback needs to put back.
-        if (isMutationReservedName(entry)) continue;
+        // A backup THIS batch minted is the only copy of what a rollback needs to put back, so it stays until the
+        // commit discards it; so does what a rollback displaced (see `isStaleResidue`). Any other reserved name is
+        // residue of an earlier apply that died between moving an item aside and discarding it (a daemon update
+        // restarting mid-apply, say). This container is the plan's own outright and a runtime scans it, so that
+        // residue is loaded as a real skill for as long as it stays: it is moved aside like any other stale entry,
+        // which also keeps it recoverable if this batch rolls back.
+        if (isMutationReservedName(entry) && !journal.isStaleResidue(path.join(directory, entry))) continue;
         // capture() renames the entry aside and records the restore. It reports false only when this
         // batch already captured the path, which cannot happen here: every path this plan writes under
         // the container is in the keep set.

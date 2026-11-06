@@ -1,11 +1,11 @@
 import { afterEach, describe, it, spyOn } from 'bun:test';
 import * as fs from 'node:fs/promises';
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import { FileFleetProvisioner } from '../../src/adapters/file-provisioner.ts';
-import { isMutationReservedName } from '../../src/adapters/mutation-journal.ts';
+import { FileMutationJournal, isMutationReservedName } from '../../src/adapters/mutation-journal.ts';
 import type { FleetManifest } from '../../src/lib/manifest.ts';
 import type { FleetApplyPlan } from '../../src/lib/provisioning.ts';
 import type { SharedHistoryMigration, SharedHistoryRequest } from '../../src/lib/shared-history.ts';
@@ -937,6 +937,96 @@ describe('FileFleetProvisioner', () => {
       should(actual.prunedWrappers).deepEqual([]);
       await should(lstat(directory)).be.rejected();
       should(await Bun.file(path.join(root, 'fleet', 'manifest.json')).exists()).be.true();
+    });
+
+    it('should clear moved-aside residue an earlier interrupted apply left in a folder a runtime reads', async () => {
+      // Arrange — an apply that died between moving a skill aside and discarding it leaves
+      // `.fy-fleet-backup-…` beside the live skills. The sweep used to skip every reserved name, so the residue
+      // stayed for good and a runtime scanning the folder loaded each copy as a real skill. What a rollback
+      // displaced is different: it is state that changed under a failed apply, reported to the person, so it stays.
+      const root = await temporaryDirectory();
+      const directory = path.join(root, 'fleet', 'homes', 'one', 'skills');
+      const residue = ['.fy-fleet-backup-abc', '.fy-fleet-staged-abc'];
+      for (const name of [...residue, '.fy-fleet-displaced-abc']) {
+        await Bun.write(path.join(directory, name, 'SKILL.md'), 'a leftover copy\n');
+      }
+      await Bun.write(path.join(directory, 'kept', 'SKILL.md'), 'a live skill\n');
+      await Bun.write(path.join(directory, 'stale', 'SKILL.md'), 'a skill the profile dropped\n');
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const actual = await subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'prune-directory', path: directory, keep: ['kept'] }],
+      });
+
+      // Assert — the residue and the dropped skill are gone, nothing is reported as left aside.
+      should((await readdir(directory)).toSorted()).deepEqual(['.fy-fleet-displaced-abc', 'kept']);
+      should(actual.backupResidue).be.undefined();
+    });
+
+    it('should not move aside a backup this very batch minted, and should discard it at the commit', async () => {
+      // Arrange — the kept entry is replaced (moved aside, rewritten) and then swept in the same batch. The backup
+      // this batch just made must reach the sweep untouched, or a rollback would depend on a copy of a copy.
+      const root = await temporaryDirectory();
+      const directory = path.join(root, 'fleet', 'homes', 'one', 'skills');
+      await Bun.write(path.join(directory, 'kept'), 'the old skill\n');
+      const subject = new FileFleetProvisioner([root]);
+      const captured: string[] = [];
+      const original = FileMutationJournal.prototype.capture;
+      FileMutationJournal.prototype.capture = async function (this: FileMutationJournal, ...args) {
+        captured.push(path.basename(args[0]));
+        return await original.apply(this, args);
+      };
+
+      // Act
+      let actual: Awaited<ReturnType<typeof subject.apply>>;
+      try {
+        actual = await subject.apply({
+          manifest: manifest(),
+          manifestPath: path.join(root, 'fleet', 'manifest.json'),
+          operations: [
+            { kind: 'file', path: path.join(directory, 'kept'), content: 'the new skill\n', mode: 0o644 },
+            { kind: 'prune-directory', path: directory, keep: ['kept'] },
+          ],
+        });
+      } finally {
+        FileMutationJournal.prototype.capture = original;
+      }
+
+      // Assert — the entry itself was captured and no reserved name ever was; committed, nothing is left beside it.
+      should(captured).containEql('kept');
+      should(captured.filter(name => isMutationReservedName(name))).deepEqual([]);
+      should(await readFile(path.join(directory, 'kept'), 'utf8')).equal('the new skill\n');
+      should(await readdir(directory)).deepEqual(['kept']);
+      should(actual.backupResidue).be.undefined();
+    });
+
+    it('should put residue back when a later step fails and the batch rolls back', async () => {
+      // Arrange — the sweep has moved the earlier apply's leftover aside when the next operation fails.
+      const root = await temporaryDirectory();
+      const directory = path.join(root, 'fleet', 'homes', 'one', 'skills');
+      await Bun.write(path.join(directory, '.fy-fleet-backup-abc', 'SKILL.md'), 'a leftover copy\n');
+      await Bun.write(path.join(directory, 'kept'), 'a file, so nothing can be written beneath it\n');
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const promise = subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [
+          { kind: 'prune-directory', path: directory, keep: ['kept'] },
+          { kind: 'file', path: path.join(directory, 'kept', 'SKILL.md'), content: 'x\n', mode: 0o644 },
+        ],
+      });
+
+      // Assert — the apply failed, and the leftover is exactly where the rollback found it.
+      await should(promise).be.rejected();
+      should((await readdir(directory)).toSorted()).deepEqual(['.fy-fleet-backup-abc', 'kept']);
+      should(await readFile(path.join(directory, '.fy-fleet-backup-abc', 'SKILL.md'), 'utf8')).equal(
+        'a leftover copy\n',
+      );
     });
 
     it('should surface a named entry it cannot inspect for any reason other than its absence', async () => {

@@ -235,6 +235,22 @@ export class FileMutationJournal {
   }
 
   /**
+   * Whether `candidate`, a reserved name met while sweeping a folder the plan owns outright, is residue an earlier
+   * apply left and nothing will ever clear — as opposed to evidence something still needs.
+   *
+   * Kept: a backup THIS batch minted (a rollback needs it until the commit discards it), and anything a rollback
+   * displaced (`.fy-fleet-displaced-`), which holds state that changed under a failed apply and is reported to the
+   * person rather than swept. Residue is the rest: a moved-aside copy of an entry this plan regenerates wholesale
+   * whose discard never ran, or a staged replacement that never got published. A runtime that scans the folder
+   * loads it as a real entry for as long as it stays.
+   */
+  isStaleResidue(candidate: string): boolean {
+    const resolved = path.resolve(candidate);
+    if (path.basename(resolved).startsWith(DISPLACED_PREFIX)) return false;
+    return !this.#entries.some(entry => entry.kind === 'restore' && entry.backup === resolved);
+  }
+
+  /**
    * Runs `read` with what the capture of `target` moved aside — its re-checked folder and its name there, to read
    * THROUGH that folder — or answers `undefined` when nothing was there.
    *
