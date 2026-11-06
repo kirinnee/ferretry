@@ -325,6 +325,8 @@ const spokenReference = (reference: Reference): string => {
       return `skill ${reference.name}`;
     case 'file':
       return basename(reference.path);
+    case 'attachment':
+      return `attachment ${reference.name}`;
   }
 };
 
