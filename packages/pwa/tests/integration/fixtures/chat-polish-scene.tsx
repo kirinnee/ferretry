@@ -160,7 +160,6 @@ const busyProject = (): ComposerReferenceTask[] =>
     assignee: index % 2 === 0 ? null : 'zelda',
     touchedAt: new Date(NOW - index * MINUTE).toISOString(),
     agentAsked: index >= 50,
-    legacyId: null,
   }));
 
 const manyRows = (included: boolean, query: string): ComposerAutocompleteCandidate[] => {

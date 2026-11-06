@@ -44,7 +44,7 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      111 + // the session table and everything that is not the account model (three of them the agenda's versions: the list kept of an item, one version in full, and the device's seen mark; one of them cutting a ferret off: its credential revoked; three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (the ferret limits are read-only now: the PATCH that edited them is gone, `limits.yaml` is the one writer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
+      107 + // the session table and everything that is not the account model (three of them the agenda's versions: the list kept of an item, one version in full, and the device's seen mark; one of them cutting a ferret off: its credential revoked; three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (the ferret limits are read-only now: the PATCH that edited them is gone, `limits.yaml` is the one writer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       2 + // the owner's view of who holds the terminal slots, and closing the finished ferrets' terminals (`fy terminal close --all-finished`)
       8 + // the project boards: the board query, its card ids, a PR's merge gate (docs/design/clash-queue.md), one card, a new card, an action on a card (board-design.md §2), a ferret's skip (§3.4), and the owner's start of a new ferret on a card (docs/board.md, "Start a ferret on a card")
       1 + // bounded full-conversation reads, including historical version threads
@@ -478,15 +478,11 @@ describe('the mounted daemon surface', () => {
         'GET /v1/renders/:id',
         'GET /v1/sessions/:sessionId/shared-draft',
         'POST /v1/sessions/:sessionId/shared-draft',
-        'GET /v1/tasks',
-        'GET /v1/sessions/:sessionId/tasks',
         'GET /v1/board',
         'GET /v1/board/ids',
         'GET /v1/board/merge-gate',
         'POST /v1/board/tasks',
         'POST /v1/board/skip',
-        'GET /v1/board/tasks',
-        'POST /v1/board/import',
         'GET /v1/board/tasks/:taskId',
         'POST /v1/board/tasks/:taskId',
         'POST /v1/board/tasks/:taskId/start',

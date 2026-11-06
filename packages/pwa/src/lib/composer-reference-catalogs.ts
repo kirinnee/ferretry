@@ -24,7 +24,7 @@ import type { SessionCard } from './session-cards.ts';
 
 type ComposerReferenceCatalogFamily = 'tasks' | 'attention' | 'skills';
 /**
- * One card of this ferret's board slice: what proof needs (`id`, `legacyId`) and what the `&` menu prints on a row.
+ * One card of this ferret's board slice: what proof needs (`id`) and what the `&` menu prints on a row.
  * The board is read by the host (U10's store), never here.
  */
 export type ComposerReferenceTask = SessionCard;

@@ -1,14 +1,22 @@
 import { describe, it } from 'bun:test';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { LANE_TEMPLATES, type LaneSet } from '@ferretry/protocol';
+import { LANE_TEMPLATES, type LaneSet, laneStage } from '@ferretry/protocol';
 import should from 'should';
 import { FileLaneSetStore } from '../../../src/adapters/board-projects/file-lane-set-store.ts';
 import { LaneSetUnavailableError } from '../../../src/lib/board-projects/errors.ts';
-import { stageLanes } from '../../../src/lib/board-projects/lane-set-policy.ts';
 import { withTempRoot } from '../atomic-file/fixtures.ts';
 
 const PROJECT = '0b1f6d1e-6c1b-4f0c-8f4e-2f6f2a3c9a10' as LaneSet['projectId'];
+
+/** A sample transform: the set with every lane's stage written out, or `null` when each already has one. */
+const withStages = (current: LaneSet): LaneSet | null =>
+  current.lanes.every(lane => lane.stage !== undefined)
+    ? null
+    : {
+        ...current,
+        lanes: current.lanes.map(lane => (lane.stage === undefined ? { ...lane, stage: laneStage(lane) } : lane)),
+      };
 
 const proposal = (version: number): LaneSet => ({
   projectId: PROJECT,
@@ -92,7 +100,7 @@ describe('the lane-set store', () => {
 
       // Act
       const version = await store.transact(PROJECT, current => {
-        const next = current === null ? null : stageLanes(current);
+        const next = current === null ? null : withStages(current);
         return next === null ? { result: null } : { next, result: next.version };
       });
 
@@ -115,7 +123,7 @@ describe('the lane-set store', () => {
       await writeFile(join(directory, `${PROJECT}.json`), broken);
       await new FileLaneSetStore(directory)
         .transact(PROJECT, current => ({
-          next: current === null ? undefined : (stageLanes(current) ?? undefined),
+          next: current === null ? undefined : (withStages(current) ?? undefined),
           result: null,
         }))
         .then(

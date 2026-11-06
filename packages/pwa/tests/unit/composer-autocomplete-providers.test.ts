@@ -903,7 +903,6 @@ describe('composer task family', () => {
     assignee: 'zelda',
     touchedAt: '2026-10-01T00:00:00.000Z',
     agentAsked: false,
-    legacyId: null,
     ...patch,
   });
   const tasks: readonly ComposerReferenceTask[] = [
@@ -999,18 +998,17 @@ describe('composer task family', () => {
     expect(rows?.every(row => decodeURIComponent(row.id).includes('same/session'))).toBe(true);
   });
 
-  it('orders equals by recency then id, and finds a card by the id it had before the import', () => {
+  it('orders equals by recency then id', () => {
     const rows = createDirectReferenceProviders({
       daemon: daemonA,
       scope: scopeA,
       getTasks: () => [
         task('F6', { touchedAt: '2026-10-09T00:00:00.000Z' }),
-        task('F7', { touchedAt: 'not a date', legacyId: 'C3' }),
+        task('F7', { touchedAt: 'not a date' }),
         task('F8', { touchedAt: 'not a date' }),
       ],
     })[2]?.initialCandidates?.(context('&', 'F'))?.candidates;
     expect(rows?.map(row => row.label)).toEqual(['&F6', '&F7', '&F8']);
-    expect(rows?.find(row => row.label === '&F7')?.keywords).toContain('C3');
   });
 
   it('offers nothing, rather than inventing rows, when the host wires no tasks', () => {

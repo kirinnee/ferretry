@@ -214,14 +214,14 @@ that goes nowhere costs the reader a tap and their trust.
 
 What "proved" means per kind:
 
-| Kind        | Proof                                                                                                                     |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `agent`     | A session in **this daemon's** fleet slice holds that callsign                                                            |
-| `file`      | The session filesystem answers with a canonical, readable path                                                            |
-| `task`      | Any card on this machine's board, whatever its project, or the old id of one of this session's imported tasks (see below) |
-| `attention` | The id is in this session's agenda ledger, open or resolved                                                               |
-| `skill`     | The name is in this session's skills catalog                                                                              |
-| `surface`   | The session's owner is holding that terminal or page right now                                                            |
+| Kind        | Proof                                                          |
+| ----------- | -------------------------------------------------------------- |
+| `agent`     | A session in **this daemon's** fleet slice holds that callsign |
+| `file`      | The session filesystem answers with a canonical, readable path |
+| `task`      | Any card on this machine's board, whatever its project         |
+| `attention` | The id is in this session's agenda ledger, open or resolved    |
+| `skill`     | The name is in this session's skills catalog                   |
+| `surface`   | The session's owner is holding that terminal or page right now |
 
 **A `&task` click opens the card, not a sheet.** The card detail is the Board's own route, so the link
 survives a reload, Back leaves it, and the id is no longer dropped on the way (the Tasks sheet opened
@@ -255,14 +255,10 @@ its machine only, so the destination always carries the daemon the reference was
 > click (this machine's card route) through the one reference surface — never a second path. A surface
 > already above it wins, so a chat's own is never downgraded.
 >
-> **Old references resolve through the project read.** A card imported from one of this session's old
-> tasks carries `legacyRef = <session>:<oldId>`. `&F12` in the transcript is proved when `F12` is a card on the
-> slice, or when it is the old id of one: it stays written as `&F12` and its click opens the card that
-> replaced it. A card on the slice wins over an old id that spells the same, and so does a card id
-> anywhere on the machine; the two cannot be told apart by their text, which is the GAP — a session
-> whose old `F12` and a new machine-board `F12` both exist always means the new one. Because the lookup
-> is the board read itself, it needs no `GET /v1/board/tasks?legacyRef=` call per reference; the
-> project limit applies to old ids, so an imported task whose card sits on another project stays prose.
+> **A reference is proved by a card id, and by nothing else.** `&F12` in the transcript is proved when
+> `F12` is a card on the slice or a card id anywhere on the machine. A card carries no other id, so
+> an `&F12` written before the board existed is plain text unless a card with that id exists today, and then it means
+> that card: the text cannot say which one was meant, and a card id always means the board's.
 > A reader with no resolver for a kind cannot prove it, so that kind stays prose there. A missing
 > answer is refusal, never assumption: a fleet that has not been read yet is **not** a fleet with
 > nobody in it, and is treated as "cannot prove".

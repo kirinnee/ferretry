@@ -7,7 +7,6 @@ subject; the pages it links own their own facts.
 
 | Subject                         | Owner                                          |
 | ------------------------------- | ---------------------------------------------- |
-| Importing the old task files    | [board-import.md](board-import.md)             |
 | `&F412` and `!A48` references   | [reference-standard.md](reference-standard.md) |
 | The agenda and its items        | [agenda.md](agenda.md)                         |
 | Who may call the board's routes | [grants.md](grants.md)                         |
@@ -87,19 +86,15 @@ it runs in rides on every call. The switch lives in `<home>/board/switch.json`
 (`packages/daemon/src/lib/board-projects/board-switch.ts`); a damaged one is refused and never overwritten, and a
 board whose switch cannot be read is treated as off.
 
-**Migration.** The first daemon with the switch decides every existing board once, at boot: **on** exactly where the
-owner sent a card back (**Not good**, a `reopened` event by the owner) in the last 14 days, and **off** everywhere
-else. Unfiled is always off. Only Not good counts, because it is the one act no ferret makes (see the GAP below); on
-the machine this was built on that switched on Ferretry alone. The boot log says which
-boards it switched on and off (`board switch: on for …; off for …`); the owner flips any of them afterwards. A board
-registered later starts off.
+**A home with no switch document reads every board off**, Unfiled included. The owner flips a board on; a board
+registered later starts off. An entry written by an earlier daemon (`setBy: migration`) reads as it was written.
 
 **GAP: a ferret without its own credential has the owner's authority.** A call on the admin token with no session
 (an older `fy` or harness without `FY_SESSION_ID`, a tool outside Ferretry) cannot be told from the owner at the
 machine, so it passes every owner-only board gate — the switch included. It is no longer RECORDED as the owner: a
 card's history says `admin-token` — "the admin token (the owner at this machine, or a ferret without its own
 credential)" — and only a paired device's act reads as `owner`. A ferret on its own session credential is always
-itself (`ferret`), never the owner. That is why the migration counts only Not good. Closing the gap for good is
+itself (`ferret`), never the owner. Closing the gap for good is
 `fy` presenting the session credential in every pane (RF-3, &F291).
 
 ## Tidy: dropping what nobody asked for
@@ -408,21 +403,8 @@ A card's **workflow** (`quick`, `design-first`, `research-first`, `investigate`)
 set and cannot change after creation. In the PR templates only `design-first` and `research-first` work walks
 Plan/Design.
 
-**Released and To test became one lane.** Boards stored before board v3 had a `shipped` Released lane and a
-`verify` To test lane after it, entered when this machine ran the release. At every boot the daemon folds any set
-that still has that pair into one Released lane (`mergeReleaseLanes`): the Released lane's id and place,
-category `verify`, entered on release, gated as To test was. The cards of both end up in it, each moved card's
-history says "Released and To test are one lane now: Released", the set's version rises, its confirmation
-stands, and the owner is asked nothing. It is idempotent. Nothing else on an existing board changes: Review/CI
-stays a lane there until the owner edits it out.
-
-**Quick lanes gained To test.** A `quick` set stored before it (Todo → Doing → Closed, closing on `signal.done`) had
-nowhere for a merged card to go: facts never enter Closed, so a card whose PRs all merged sat in Doing. At every boot
-the daemon gives such a set its To test lane between Doing and Closed (`addQuickToTestLane`): every lane keeps its
-id, name and place, Closed becomes owner-gated and is no longer entered on `signal.done`, every variant walks To test
-where it walked Doing or Closed, the version rises, the confirmation stands and the owner is asked nothing. No card
-moves in the migration itself; the cards whose PRs merged then move to To test on their facts, each with its own
-history ("PR #985 merged"). It is idempotent. The Unfiled board with no stored set reads the new template directly.
+A stored lane set keeps the lanes it has: nothing rewrites it at boot. The Unfiled board with no stored set reads the
+`quick` template directly.
 
 A FIRST proposal, on a project with no lanes, is live at once but unconfirmed. The owner gets one agenda choice,
 Accept or Edit ([agenda.md](agenda.md)); accepting confirms the set. Any later change a ferret makes waits for the
@@ -463,7 +445,7 @@ an automatic step and watch its card move on, or remove Released with its cards 
   names a newer one. A proposal also carries the live version it was made against: once the live set moves on,
   accepting it is a `version-conflict`.
 - **A card goes when its proposal does.** A proposal replaced by a newer one, accepted in the lane editor, or
-  dropped (the owner's own edit, a boot migration) has its card closed on the proposer's agenda with the reason
+  dropped (the owner's own edit) has its card closed on the proposer's agenda with the reason
   ("A newer proposal replaced this one; its own card is on the agenda."), so the owner never answers a card that
   would do nothing.
 - **The owner's own edit stays immediate** and drops a waiting proposal. The owner confirming the live set itself
@@ -475,15 +457,13 @@ an automatic step and watch its card move on, or remove Released with its cards 
   drops a lane: a template cannot say where that lane's cards go, so the ferret edits instead. Once the owner has
   confirmed a set, `propose` is refused `already-confirmed` as before.
 - **Nothing flips at boot.** A set a ferret proposed before this, unconfirmed and live, stays live; only a change
-  made from now on waits. A boot migration that rewrites a set's lanes (the release merge, quick's To test) drops a
-  waiting proposal, since it was made against the lanes before.
+  made from now on waits.
 
 **No relocation but the owner's closes a card or passes a gate.** Every move of a removed lane's cards runs the
 checks an owner-less move does (`relocationProblems`): a relocation that is not the owner's never puts a card in
 a closed lane, never takes it forward out of a gate (even into another gate: that skips the owner's answer) and
 never carries it forward past one, nor into a lane the set lacks; a move back is allowed. A ferret's change moves
-no card at all (it waits, or it is a first proposal on a board with no cards), a boot migration that would need
-such a move is reported and left undone, and `BoardService.relocate` runs the same checks itself on every move
+no card at all (it waits, or it is a first proposal on a board with no cards), `BoardService.relocate` runs the same checks itself on every move
 that is not the owner's, judged from the lanes the cards were in: a card it may not move stays put, and the
 diagnostics say why.
 
@@ -580,14 +560,9 @@ So a report never takes a card anywhere the owner decides. A report after the ow
 again, and that is accepted: with every gate, every closed lane and every unshipped dependency out of its reach, it
 only reaches a lane its lead could `fy task move` it to anyway, and the history says who reported what.
 
-**Every lane's stage is written out at boot.** Every template lane states its stage. A set stored before stages has
-none, so at every boot, after the two migrations above, the daemon gives each lane without one the stage it already
-reads as (`stageLanes`): nothing a reader decides changes and no card moves, a lane that has a stage keeps it, the
-confirmation stands and the owner is asked nothing. The VERSION STAYS, unlike the migrations above, because the set
-means what it meant: an edit made against it still applies, and the Accept on a pending proposal's card still
-confirms it. A damaged set is refused by the store, as on any read, reported, and the other projects go on, and a
-staged set the next read would refuse is never written. It is idempotent: a set whose every lane has a stage does
-not match.
+**A lane without a stage reads as the one its fields describe.** Every template lane states its stage. A lane stored
+without one reads as the stage its `enterOn` and `ownerGate` already describe (`laneStage`), so nothing a reader
+decides depends on whether it is written out.
 
 ## Cards and their fields
 
@@ -616,7 +591,6 @@ fields plus the ones the daemon derives.
 | `files`                 | advisory: the files or folders the work expects to touch; a clash queues it      |
 | `order`                 | the owner's manual order within a lane                                           |
 | `history`               | every move and note, each with who and why; at least one event                   |
-| `legacyRef`             | `<sessionId>:<oldId>` for a card imported from the old per-session files         |
 
 The view adds fields that are never stored:
 
@@ -862,7 +836,7 @@ even when `askedBy: agent`: no verbatim owner message matched its ask. The app r
    itself. Only the owner talks in such a session.
 
 Everything else is **agent**: the card of a sub-ferret a lead started (`fy new`, or `fy start` from a ferret,
-whose ask is `session:<lead>`), the daemon's own cards (the board import's untriaged asks), and a card a
+whose ask is `session:<lead>`), the daemon's own cards, and a card a
 sub-ferret recorded from its own brief. Whether a session was started by a ferret is its `config.parent`, read once
 per session per board read; a session this daemon cannot read counts as the owner's, so a card is never hidden on
 a guess.
@@ -891,7 +865,7 @@ the request (the create body has no such field, so a caller cannot claim it). `d
    (A card the daemon wrote for a started session skips the next step: the ferret's brief proves nothing about the owner's words.)
 3. the ask's text matches words the OWNER said to the session it came from (`wordsSessionOf`: the session id the
    source names, in any form — `session:<id>`, `session <id>`, a turn document's path — else the recording ferret),
-   whoever wrote the card down: a ferret on the admin token is stored as `owner` and the board import as `daemon`.
+   whoever wrote the card down: a ferret on the admin token is stored as `owner`.
 
 Anything else is `agent`, including every card whose session is unknown. The owner's words
 (`adapters/board/session-owner-words.ts`) come from three records of that session:
@@ -940,9 +914,7 @@ places, and always as the daemon (`auto`, with the trigger that caused it):
 
 A sub-card with a PR still **open** stays open, whoever signals. A sub-card the lead keeps for itself (assigned to its
 own owner) is bookkeeping, not a helper: the sweep never closes it. The close goes to the lane set's Done lane, else its
-first `closed` lane, and is not a verdict: it records nothing for the owner and asks nothing of them. On boot the daemon
-also closes the sub-cards that were already waiting in a verify lane from before this rule (`closeStrandedSubCards`,
-idempotent).
+first `closed` lane, and is not a verdict: it records nothing for the owner and asks nothing of them.
 
 **No card ask and no agenda item is ever raised for a sub-card** (`gateOf` returns nothing for one in a verify lane),
 and a sub-card is never "awaiting the owner" in the app. The parent's roll-up (`rollup`) is unchanged by this: a closed
@@ -1242,14 +1214,13 @@ and the `to_test` and `waiting_on_you` filters are deprecated, and the app draws
 
 **Internal cards.** A card that is positively a ferret's own errand never asks, never buzzes and is not in the Inbox.
 Only what the daemon recorded decides it, never what a ferret wrote: the daemon made the card (`createdBy`
-`daemon`: a board import, or the card `fy new` makes for a sub-ferret — written by that start alone, kept by every
+`daemon`: the card `fy new` makes for a sub-ferret — written by that start alone, kept by every
 hand-over, refile and reopen), or the session that wrote it was started by a ferret (a sub-lead's own card); AND no
 person asked for it (`askedBy` is not `person`). Anything else — a top-level ferret's `fy task create`, whatever its
 ask's source says; a lineage that could not be read — is EXTERNAL. One function decides it for the card asks and for
 who passes the gate alike (`BoardService.audienceOf`, `cardAudience` in `origin.ts`), so an external card at a gate
 always has its ask, and an internal one always has someone who may pass it. By design a lead's `fy new` sub-card is internal even when the lead is top-level: the owner's own session card
-stays external and gated, so the owner still passes the gate that matters. An imported legacy task that recorded no
-creator is read as the owner's. A sub-card never asks at a lane the owner tries things in: the owner tests the parent.
+stays external and gated, so the owner still passes the gate that matters. A sub-card never asks at a lane the owner tries things in: the owner tests the parent.
 
 | Standing             | External card's gate | Internal card's gate |
 | -------------------- | -------------------- | -------------------- |
@@ -1261,9 +1232,7 @@ creator is read as the owner's. A sub-card never asks at a lane the owner tries 
 **The migration.** Agendas are read into card asks, read-time and losslessly ([agenda.md](agenda.md#card-asks)): an
 open gate item becomes its card's agenda (same id, history, snooze and turn), or puts its ask on the card's open thread
 and closes saying where it went; a thread's old `gateAttached` becomes its card ask. Answered gate items keep their
-receipt. Stored lane sets are renamed as progress at boot: a lane still named as the template named it
-("Released · to test", "To test") becomes "Released" or "Ready to try", and the template's Plan/Design and Review are
-no longer drawn as the owner's action. A lane the owner renamed keeps its name; no card moves.
+receipt.
 
 **GAPS.** Every guarantee here holds against a ferret on its own session credential. The admin token with no session
 (an older `fy`, `fy --as-owner`) still has the owner's authority and is only RECORDED as `admin-token`
@@ -1351,8 +1320,8 @@ than that move merges. History names the fact; no move is ever typed into a chat
 
 The watcher itself polls GitHub through the host's `gh` about once a minute while a repository has an open linked
 PR, and every ten minutes otherwise, and after `gh` is missing or signed out. Every tick also re-reads each open card's lane set
-and reconciles the card against it, PRs that can no longer change included, so a lane set that gains a lane (the
-boot migrations) moves its cards on the first tick after boot, with no call to GitHub.
+and reconciles the card against it, PRs that can no longer change included, so a lane set that gains a lane (an edit
+in the lane editor) moves its cards on the first tick after boot, with no call to GitHub.
 
 ## Dependencies
 
@@ -1412,8 +1381,7 @@ shipped)`) when it does; 2 when it cannot tell — the daemon is down or predate
 An agenda item names the card it is about. `fy agenda add --task <id>` sets it, defaulting to the calling
 session's focus card ([agenda.md](agenda.md)). The card's view then derives `openAsks` (every open agenda that
 carries it), and a card whose agenda carries its open [card ask](#cards-show-progress-their-asks-ride-the-agenda) is never stale. The link is optional
-in the agenda's schema, so an item raised with no focus card simply belongs to no card; the board import creates a
-card for the open items it finds that name none ([board-import.md](board-import.md)).
+in the agenda's schema, so an item raised with no focus card simply belongs to no card.
 
 ## Start a ferret on a card
 
@@ -1543,7 +1511,6 @@ Every `fy task` verb takes `--session <id>` (act as that session instead of the 
 | `fy board workflow show`                          | each lane in order as a GATE (its options and where each sends the card) or AUTO (what moves a card in); `--project`, `--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `fy board workflow edit --lane <id>`              | make a lane a gate (`--gate "<Label>=<next\|close\|reopen\|lane:<id>>"`, up to 3) or automatic (`--auto <trigger,...>\|none`); version-checked through the lanes edit route, so a sub-ferret is refused as for `lanes edit`                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `fy board status`, `fy board on\|off`             | whether the project uses the board; switching it is the owner's ([The board is opt-in](#the-board-is-opt-in)); `--project`, `--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `fy board import`                                 | import the old task files ([board-import.md](board-import.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `fy project add <path>` / `ls`                    | register a folder as a project; list projects                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 The routes behind them, all needing the `fleet` capability at operator minimum for a caller off this host
@@ -1555,11 +1522,9 @@ The routes behind them, all needing the `fleet` capability at operator minimum f
 | `GET /v1/board/ids`                             | every card id on the machine, ids only: what `&F12` is proved against         |
 | `GET /v1/board/merge-gate?pr=`                  | whether a PR may merge as far as the queue goes, from one read of the board   |
 | `POST /v1/board/tasks`                          | create a card                                                                 |
-| `GET /v1/board/tasks?legacyRef=`                | find the card an imported task became                                         |
 | `GET, POST /v1/board/tasks/:taskId`             | read a card, or apply one action to it                                        |
 | `POST /v1/board/tasks/:taskId/start`            | the owner's start of a NEW ferret on the card (or the live one that holds it) |
 | `POST /v1/board/skip`                           | record `fy task skip`                                                         |
-| `POST /v1/board/import`                         | run the import                                                                |
 | `GET /v1/board/projects`                        | list projects                                                                 |
 | `GET, POST /v1/board/projects/:projectId/lanes` | read, propose or edit a lane set                                              |
 | `GET, PUT /v1/board/projects/:projectId/switch` | read whether the project uses the board; set it (the owner only)              |
@@ -1607,10 +1572,3 @@ wherever it appears ([reference-standard.md](reference-standard.md)). It is **re
   or `dependsOn` that names a card on another machine resolves to nothing, so it neither blocks nor rolls up.
 - **Some messages bypass the pending-context carrier.** Quiet board events ride the next message, but agenda answer
   batches and Warden nudges are still delivered by their own paths, so they are not held for the next turn.
-- **Old `&F12` references in the PWA resolve through the project or ferret board slice.** A chat reads one board query
-  (`ferret = <session>`, `state = all`) and a reference that is the old id of a card whose `legacyRef` names this
-  session links to that card, shown as the old text; a card on the slice with the same id wins. It does not call
-  `GET /v1/board/tasks?legacyRef=` per reference. The limit is the slice: an imported card this ferret no longer
-  owns or is assigned stays plain text ([reference-standard.md](reference-standard.md)).
-- **Per-session task routes.** `/v1/sessions/:sid/tasks` and `/v1/tasks` survive as empty compatibility answers for
-  one release and then go. Nothing in the PWA requests them any more; a unit test scans its source for the spelling.

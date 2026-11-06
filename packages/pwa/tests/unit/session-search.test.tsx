@@ -56,13 +56,12 @@ const pastAnnounceDebounce = async (): Promise<void> => {
 
 /* ---------- fixtures ------------------------------------------------------- */
 
-/** One card the way the daemon serves it: owned by this ferret, imported from its old task F2. */
+/** One card the way the daemon serves it: owned by this ferret. */
 const needleCard = (patch: Record<string, unknown> = {}): BoardTaskView =>
   card('F6', {
     owner: SESSION,
     title: 'Needle task',
     summary: 'Search the current session quickly.',
-    legacyRef: `${SESSION}:F2`,
     ...patch,
   });
 
@@ -219,13 +218,12 @@ afterEach(() => {
 /* ---------- the model ------------------------------------------------------- */
 
 describe('current-session search model', () => {
-  test('matches a card locally on its id, its old id, its title, its summary and its lane', () => {
+  test('matches a card locally on its id, its title, its summary and its lane', () => {
     const cards = [
       sessionCard('F96', {
         title: 'Port the importer',
         summary: 'Moves every old task.',
         lane: 'Verify',
-        legacyId: 'F12',
       }),
       sessionCard('F7', { title: 'Unrelated work' }),
     ];
@@ -236,7 +234,7 @@ describe('current-session search model', () => {
 
     expect(ids('importer')).toEqual(['F96']);
     expect(ids('F96')).toEqual(['F96']);
-    expect(ids('F12')).toEqual(['F96']);
+    expect(ids('F12')).toEqual([]);
     expect(ids('every old')).toEqual(['F96']);
     expect(ids('verify')).toEqual(['F96']);
     expect(ids('absent')).toEqual([]);
@@ -336,7 +334,7 @@ describe('what one mounted session scope costs', () => {
   });
 
   test('is independent of board size and tree depth', async () => {
-    const many = Array.from({ length: 40 }, (_, index) => needleCard({ id: `F${index + 100}`, legacyRef: undefined }));
+    const many = Array.from({ length: 40 }, (_, index) => needleCard({ id: `F${index + 100}` }));
     const board = boardWith({ cards: many });
     const { seen, view } = await mountProvider(board, { index: fileIndexResponse({ files: indexEntries(25) }) });
     try {
@@ -444,13 +442,13 @@ describe("the ferret's cards", () => {
     };
   };
 
-  test('lists the cards this ferret owns or is assigned, with their lane names and old ids', async () => {
+  test('lists the cards this ferret owns or is assigned, with their lane names', async () => {
     const board = boardWith({
       cards: [
         needleCard(),
         card('F8', { owner: 'session-z', assignee: SESSION, title: 'Assigned to me' }),
         card('F9', { owner: 'session-z', title: "Somebody else's" }),
-        card('F10', { owner: SESSION, title: 'Another ferret imported this', legacyRef: 'session-b:F2' }),
+        card('F10', { owner: SESSION, title: 'Another of its cards' }),
       ],
     });
     const probe = await observe(board.store);
@@ -460,21 +458,7 @@ describe("the ferret's cards", () => {
       expect(search.taskError).toBeNull();
       expect(search.tasks.map(task => task.id).sort()).toEqual(['F10', 'F6', 'F8']);
       const own = search.tasks.find(task => task.id === 'F6');
-      expect(own).toMatchObject({ title: 'Needle task', lane: 'Implement', legacyId: 'F2', closed: false });
-      expect(search.tasks.find(task => task.id === 'F10')?.legacyId).toBeNull();
-    } finally {
-      probe.unmount();
-    }
-  });
-
-  test("finds a card by the id it had as an old task of this ferret, and never by another ferret's", async () => {
-    const board = boardWith({
-      cards: [needleCard(), card('F10', { owner: SESSION, title: 'Unrelated', legacyRef: 'session-b:F2' })],
-    });
-    const probe = await observe(board.store);
-    try {
-      run(() => probe.latest().setQuery('F2'));
-      expect(probe.latest().results.map(sessionSearchResultKey)).toEqual(['task:F6']);
+      expect(own).toMatchObject({ title: 'Needle task', lane: 'Implement', closed: false });
     } finally {
       probe.unmount();
     }
@@ -712,7 +696,6 @@ describe('the published scope and the published evidence never disagree', () => 
     readonly taskState: SessionSearchResourceState;
     readonly taskIds: readonly string[];
     readonly resolvesF6: boolean;
-    readonly resolvesLegacyF2: boolean;
     readonly query: string;
     readonly presenting: string | null;
     readonly activeResultKey: string | null;
@@ -745,7 +728,6 @@ describe('the published scope and the published evidence never disagree', () => 
       taskState: search.taskState,
       taskIds: search.tasks.map(task => task.id),
       resolvesF6: surface?.taskReferenceResolver?.('F6') === true,
-      resolvesLegacyF2: surface?.taskReferenceResolver?.('F2') === true,
       query: search.query,
       presenting: search.presenting,
       activeResultKey: activeResult === undefined ? null : sessionSearchResultKey(activeResult),
@@ -770,10 +752,10 @@ describe('the published scope and the published evidence never disagree', () => 
     const store = new DaemonBoardStore(
       fakePort({
         board: async connection =>
-          boardAnswer(
-            connection.daemonId === 'alpha' ? [needleCard({ owner: 'shared', legacyRef: 'shared:F2' })] : [],
-            { projectId: PROJECT, laneSet: laneSetFor() },
-          ),
+          boardAnswer(connection.daemonId === 'alpha' ? [needleCard({ owner: 'shared' })] : [], {
+            projectId: PROJECT,
+            laneSet: laneSetFor(),
+          }),
       }),
       fakeEnvironment(),
     );
@@ -795,7 +777,7 @@ describe('the published scope and the published evidence never disagree', () => 
     try {
       await settle();
       expect(seen.some(o => o.daemonId === 'alpha' && o.taskState === 'ready' && o.taskIds.includes('F6'))).toBe(true);
-      expect(seen.some(o => o.daemonId === 'alpha' && o.resolvesF6 && o.resolvesLegacyF2)).toBe(true);
+      expect(seen.some(o => o.daemonId === 'alpha' && o.resolvesF6)).toBe(true);
 
       if (control === undefined) throw new Error('scope probe never published its search controls');
       run(() => {
@@ -819,7 +801,7 @@ describe('the published scope and the published evidence never disagree', () => 
       const onBeta = seen.slice(before).filter(o => o.daemonId === 'beta');
       expect(onBeta.length).toBeGreaterThan(0);
       expect(onBeta.filter(o => o.taskIds.includes('F6'))).toEqual([]);
-      expect(onBeta.filter(o => o.resolvesF6 || o.resolvesLegacyF2)).toEqual([]);
+      expect(onBeta.filter(o => o.resolvesF6)).toEqual([]);
       expect(onBeta[0]?.taskState).toBe('loading');
       expect(seen.at(-1)).toMatchObject({
         daemonId: 'beta',

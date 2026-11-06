@@ -3,8 +3,7 @@
  * chat search, and the `&F12` proof.
  *
  * One board read (`ferret = <session>`, `state = all`) through the U10 store serves all four, so nothing
- * here asks the daemon for a card by reference. A card an old session owned before the import carries
- * `legacyRef = <session>:<old id>`; `legacyIds` is the map from that old id to the card that replaced it.
+ * here asks the daemon for a card by reference.
  */
 
 import type { BoardTaskView } from '@ferretry/protocol';
@@ -31,19 +30,9 @@ export interface SessionCard {
   readonly touchedAt: string;
   /** Its ask did not come from the human: another ferret, the Warden or an auto card raised it, and nothing waits on the owner. */
   readonly agentAsked: boolean;
-  /** The id this card had as an old task of this session, when it was imported from one. */
-  readonly legacyId: string | null;
   /** The pull requests linked to the card, so a line naming one can open it. */
   readonly prs?: readonly { readonly number: number; readonly url: string }[];
 }
-
-/** The old id a card was imported under, when it was imported from a task of `sessionId`. */
-const legacyIdOf = (task: BoardTaskView, sessionId: string): string | null => {
-  const ref = task.legacyRef;
-  if (ref === undefined) return null;
-  const at = ref.indexOf(':');
-  return ref.slice(0, at) === sessionId ? ref.slice(at + 1) : null;
-};
 
 /**
  * Whether the ask came from an agent. The daemon says so (the same fact the Tasks panel splits on);
@@ -54,7 +43,7 @@ const askedByAgent = (task: BoardTaskView): boolean => {
   return asker === null ? !isMine(task) : asker === 'agent';
 };
 
-const cardsOf = (model: BoardModel, daemonId: DaemonId, sessionId: string, keep: (task: BoardTaskView) => boolean) => {
+const cardsOf = (model: BoardModel, daemonId: DaemonId, keep: (task: BoardTaskView) => boolean) => {
   const places = cardPlaces(model);
   return model.cards
     .filter(card => card.daemonId === daemonId && keep(card.task))
@@ -71,7 +60,6 @@ const cardsOf = (model: BoardModel, daemonId: DaemonId, sessionId: string, keep:
         assignee: task.assignee,
         touchedAt: task.lastTouchedAt ?? task.createdAt,
         agentAsked: askedByAgent(task),
-        legacyId: legacyIdOf(task, sessionId),
         prs: task.links.prs.map(pr => ({ number: pr.number, url: pr.url })),
       };
     });
@@ -79,19 +67,14 @@ const cardsOf = (model: BoardModel, daemonId: DaemonId, sessionId: string, keep:
 
 /** The cards of `model` this ferret owns or is assigned, on `daemonId`. */
 export const sessionCards = (model: BoardModel, daemonId: DaemonId, sessionId: string): readonly SessionCard[] =>
-  cardsOf(model, daemonId, sessionId, task => task.owner === sessionId || task.assignee === sessionId);
+  cardsOf(model, daemonId, task => task.owner === sessionId || task.assignee === sessionId);
 
 /** Every card of `model` on `daemonId`, owned or not: a project's board as the `&` menu and the proof read it. */
-export const projectCards = (model: BoardModel, daemonId: DaemonId, sessionId: string): readonly SessionCard[] =>
-  cardsOf(model, daemonId, sessionId, () => true);
+export const projectCards = (model: BoardModel, daemonId: DaemonId): readonly SessionCard[] =>
+  cardsOf(model, daemonId, () => true);
 
-/** The card an old reference means, or `null`: a card id on this slice wins, then an imported task's old id. */
-export const resolveCardReference = (
-  cards: readonly { readonly id: string; readonly legacyId?: string | null }[],
-  written: string,
-): string | null => {
+/** The card a written reference means, in the case the card is stored in, or `null` when no card on this slice has that id. */
+export const resolveCardReference = (cards: readonly { readonly id: string }[], written: string): string | null => {
   const wanted = written.toUpperCase();
-  const own = cards.find(card => card.id.toUpperCase() === wanted);
-  if (own !== undefined) return own.id;
-  return cards.find(card => card.legacyId?.toUpperCase() === wanted)?.id ?? null;
+  return cards.find(card => card.id.toUpperCase() === wanted)?.id ?? null;
 };

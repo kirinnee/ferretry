@@ -17,7 +17,6 @@ import {
   reconcileFacts,
   shippedCloseReason,
   stageGateLanes,
-  strandedCloseReason,
   SUB_CARD_HELPER_REASON,
   SUB_CARD_SHIPPED_REASON,
   type SweepBoard,
@@ -358,67 +357,6 @@ describe('closing a helper whose ferret ended', () => {
     // Assert
     should(closed).be.false();
     should(ported.store.writes).be.empty();
-  });
-});
-
-describe('sub-cards that sat in Released · to test before they closed themselves', () => {
-  it('should close each at boot for the reason its PRs give, and touch nothing else', async () => {
-    // Arrange
-    const ported = world({
-      store: new MemoryBoardStore([
-        sub('tested', [mergedPr(RELEASE)], { id: 'F2' }),
-        sub('tested', [], { id: 'F3' }),
-        sub('tested', [pr()], { id: 'F4' }),
-        sub('tested', [mergedPr(RELEASE)], { id: 'F5', parent: null }),
-        sub('implement', [], { id: 'F6' }),
-      ]),
-    });
-    const service = new BoardService(ported);
-
-    // Act
-    const closed = await service.closeStrandedSubCards();
-    const again = await service.closeStrandedSubCards();
-
-    // Assert
-    const lane = (id: string) => (ported.store.cards.get(id) as BoardTask).laneId;
-    should(closed).equal(2);
-    should(again).equal(0);
-    should([lane('F2'), lane('F3'), lane('F4'), lane('F5'), lane('F6')]).deepEqual([
-      'closed',
-      'closed',
-      'tested',
-      'tested',
-      'implement',
-    ]);
-    should(ported.store.cards.get('F2')?.history.at(-1)).match({ reason: SUB_CARD_SHIPPED_REASON });
-    should(ported.store.cards.get('F3')?.history.at(-1)).match({ reason: SUB_CARD_HELPER_REASON });
-  });
-
-  it('should name the reason from the card, and warn when a write fails', async () => {
-    // Arrange
-    const set = templateLanes();
-
-    // Act / Assert
-    should(strandedCloseReason(sub('released', [mergedPr(RELEASE)]), set)).equal(SUB_CARD_SHIPPED_REASON);
-    should(strandedCloseReason(sub('released'), set)).equal(SUB_CARD_HELPER_REASON);
-    should(strandedCloseReason(sub('released', [pr()]), set)).be.null();
-    should(strandedCloseReason(sub('implement'), set)).be.null();
-  });
-
-  it('should report a card it cannot write and go on', async () => {
-    // Arrange
-    const store = new MemoryBoardStore([sub('tested', [mergedPr(RELEASE)])]);
-    const ported = world({ store });
-    store.write = async () => {
-      throw new Error('disk full');
-    };
-
-    // Act
-    const closed = await new BoardService(ported).closeStrandedSubCards();
-
-    // Assert
-    should(closed).equal(0);
-    should(ported.warnings).deepEqual(['board: could not close sub-card F2: disk full']);
   });
 });
 

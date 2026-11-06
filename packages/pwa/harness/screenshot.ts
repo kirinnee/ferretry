@@ -1864,7 +1864,7 @@ async function captureCardReferences(page: Page, viewport: HarnessViewport, root
   await refs().first().waitFor({ state: 'visible' });
   const written = await refs().evaluateAll(nodes => nodes.map(node => node.textContent ?? ''));
   process.stdout.write(`   references drawn: ${written.join(' ')}\n`);
-  if (!written.includes('&B21') || !written.includes('&F12'))
+  if (!written.includes('&B21') || !written.includes('&F96'))
     fail(`the chat did not draw both card references at ${viewport.name}: ${written.join(' ')}`);
   await page.waitForFunction(
     () => document.querySelectorAll('[data-fy-reference^="task"]:not([data-fy-reference-closed])').length >= 2,
@@ -1882,7 +1882,7 @@ async function captureCardReferences(page: Page, viewport: HarnessViewport, root
 
   for (const [name, text] of [
     ['new', '&B21'],
-    ['legacy', '&F12'],
+    ['second', '&F96'],
   ] as const) {
     await open('');
     await refs().first().waitFor({ state: 'visible' });

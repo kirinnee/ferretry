@@ -72,7 +72,6 @@ import { type FleetSetupSubsystem, fleetSetupRoutes } from './fleet-setup.ts';
 import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
-import { type LegacyTaskSubsystem, legacyTaskRoutes } from './legacy-tasks.ts';
 import { type LocalSkillInstallSubsystem, localSkillInstallRoutes } from './local-skill-installs.ts';
 import { type McpInventorySubsystem, mcpInventoryRoutes } from './mcp-inventory.ts';
 import { type McpOAuthSubsystem, mcpOAuthRoutes } from './mcp-oauth.ts';
@@ -374,8 +373,6 @@ export interface MountedSubsystems {
   readonly handoverReconcile: HandoverReconcileLoop;
   /** A durable conversation fork creates a separate session without changing its source. */
   readonly sessionFork: SessionForkSubsystem;
-  /** The retired per-session task store's two list reads, answered empty for older clients (see legacy-tasks.ts). */
-  readonly legacyTasks: LegacyTaskSubsystem;
   /** The project boards (v2): every project's cards, one file per card, written under ownership and lineage. */
   readonly board: BoardSubsystem;
   /** One ferret's clean-up of its own unwanted cards and work-tracking agenda items (docs/board.md, "Tidy"). */
@@ -693,7 +690,6 @@ export function legacyModule(
               ...agendaOpenRoutes(subsystems.agendaRollup),
               ...agendaMachineRoutes(subsystems.machineAgenda),
               ...sharedDraftRoutes(subsystems.sharedDrafts),
-              ...legacyTaskRoutes(subsystems.legacyTasks),
               // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed
               // literals are registered before the patterns beneath them.
               ...boardRoutes(subsystems.board),

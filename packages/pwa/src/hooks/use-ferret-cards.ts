@@ -94,10 +94,7 @@ export const useProjectCards = (
   const board = useBoard(store ?? IDLE_STORE, machines, filters, { beat: false });
   const { model, status, machines: statuses } = board;
   const daemonId = connection.daemonId;
-  const cards = useMemo(
-    () => (reading ? projectCards(model, daemonId, sessionId) : NO_CARDS),
-    [reading, model, daemonId, sessionId],
-  );
+  const cards = useMemo(() => (reading ? projectCards(model, daemonId) : NO_CARDS), [reading, model, daemonId]);
   const state: FerretCardsState = !reading
     ? 'loading'
     : status === 'ready'

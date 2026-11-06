@@ -342,24 +342,22 @@ const WORDS = [
   'pairing',
   'migration',
 ];
-const LONG_SUMMARY =
-  'Imported from the old task list: rework the settings page, the daemon route and the wording of every message a person sees.';
+const LONG_SUMMARY = 'Rework the settings page, the daemon route and the wording of every message a person sees.';
 
 /** `?subs=1` (with `big`): every fourth big card, from the third, is a sub-card of the one two before it. */
 const SUBS_ON = new URLSearchParams(window.location.search).get('subs') !== null;
 
-/** `?big=1`: sixty more cards in every lane, with long titles, long summaries and imported ones. */
+/** `?big=1`: sixty more cards in every lane, with long titles and long summaries. */
 const BIG = Array.from({ length: 40 }, (_, index) => {
   const lane = LANES[index % LANES.length] ?? 'todo';
   const merged = lane === 'merged' || lane === 'released' || lane === 'tested';
-  const imported = index % 4 === 0;
+  const wordy = index % 4 === 0;
   return card(`F${300 + index}`, {
     title: `${WORDS[index % WORDS.length]} ${WORDS[(index + 3) % WORDS.length]} follow-up ${index}`,
     laneId: lane,
     owner: DENISHA,
     assignee: index % 5 === 0 ? null : [OTTILIE, MARGOT][index % 2],
-    summary: imported ? LONG_SUMMARY : 'Short and to the point.',
-    ...(imported ? { legacyRef: `old:F${index + 1}` } : {}),
+    summary: wordy ? LONG_SUMMARY : 'Short and to the point.',
     links: merged
       ? links([pr(1_000 + index, { state: 'merged', mergedAt: ago(60 + index * 40), mergeSha: SHA })])
       : index % 3 === 0

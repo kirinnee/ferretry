@@ -2742,11 +2742,10 @@ const HARNESS_DRIVEN_READS: Readonly<Record<string, DrivenRead>> = {
 /**
  * The cards the current-session search reads: this ferret's slice of the board, `GET /v1/board?ferret=<id>&state=all`.
  *
- * The search matches them in the browser against the card's id, old id, title, summary and lane name, so the
+ * The search matches them in the browser against the card's id, title, summary and lane name, so the
  * fixture holds only what a board card carries. C3 is the load-bearing row: its title says nothing about
  * `port`, and only its summary line does. If the search ever stopped reading the summary, C3 would drop out of
- * the `port` capture and the results assertion would fail instead of passing for the wrong reason. It also
- * carries the old id this ferret knew it by (`legacyRef`), so the old text still finds the card.
+ * the `port` capture and the results assertion would fail instead of passing for the wrong reason.
  */
 const HARNESS_BOARD_OWNER = 'harness-session';
 const HARNESS_CHAT_OWNER = 'harness-workspace';
@@ -2772,10 +2771,9 @@ const HARNESS_BOARD_CARDS: readonly BoardTaskView[] = [
     summary: 'The last reader is ported onto the new home.',
     laneId: 'todo',
     owner: HARNESS_BOARD_OWNER,
-    legacyRef: `${HARNESS_BOARD_OWNER}:C1`,
     lastTouchedAt: '2026-07-30T09:00:00.000Z',
   }),
-  // The workspace chat's own cards: a current one, and one that replaced the old task this chat knew as F12.
+  // The workspace chat's own cards.
   boardCard('B21', {
     kind: 'bug',
     title: 'Chat reference opens wrong pane',
@@ -2789,7 +2787,6 @@ const HARNESS_BOARD_CARDS: readonly BoardTaskView[] = [
     summary: 'Chats read the board now; the old list is gone.',
     laneId: 'review',
     owner: HARNESS_CHAT_OWNER,
-    legacyRef: `${HARNESS_CHAT_OWNER}:F12`,
     lastTouchedAt: '2026-07-31T09:00:00.000Z',
   }),
   // The truncated-index session owns one card, so its task half is seen to survive a short file index.
@@ -7739,19 +7736,19 @@ const PEER_SENDER_LOG = [
   '[10:09:12] user/message: [ferretry] Your message to kamila (send 7f3a) did not reach it: it could not be confirmed (timeout) — it may still have landed. Decide whether to send it again with `fy send kamila …`.',
 ].join('\n');
 const PEER_VIEW = new URLSearchParams(window.location.search).get('peer');
-/** `?cards`: a chat that mentions one current card and one the chat knew by its old id, with the board wired. */
+/** `?cards`: a chat that mentions two of its own cards, with the board wired. */
 const CARDS_VIEW = new URLSearchParams(window.location.search).has('cards');
 const CARDS_ENTRIES: readonly TranscriptEntry[] = [
   {
     id: 'cards-user-0',
     kind: 'user',
-    text: 'Which cards does this chat still owe? Look at &B21 and the old &F12.',
+    text: 'Which cards does this chat still owe? Look at &B21 and &F96.',
     label: 'You',
   },
   {
     id: 'cards-assistant-0',
     kind: 'assistant',
-    text: 'Two of them. &B21 is the open bug about references opening the wrong pane. &F12 was a task of this chat before the import; it is now the card that retired the per-session task list. Tap either one to open its card.',
+    text: 'Two of them. &B21 is the open bug about references opening the wrong pane. &F96 is the card that retired the per-session task list. Tap either one to open its card.',
     label: 'hadi',
   },
 ];

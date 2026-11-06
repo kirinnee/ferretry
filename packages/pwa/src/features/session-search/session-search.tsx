@@ -148,11 +148,9 @@ const PROSE_TASK_MATCH_SCORE =
 const taskFields = (task: SessionCard): readonly FuzzyField[] => [
   { value: task.title, weight: SESSION_SEARCH_WEIGHTS.taskTitle },
   { value: task.id, weight: SESSION_SEARCH_WEIGHTS.taskId, anchored: true },
-  ...(task.legacyId === null ? [] : [{ value: task.legacyId, weight: SESSION_SEARCH_WEIGHTS.taskId, anchored: true }]),
 ];
 
-const taskHaystack = (task: SessionCard): string =>
-  [task.id, task.legacyId ?? '', task.title, task.summary, task.lane].join(' ');
+const taskHaystack = (task: SessionCard): string => [task.id, task.title, task.summary, task.lane].join(' ');
 
 const fileFields = (file: SessionSearchFile): readonly FuzzyField[] => [
   { value: file.name, weight: SESSION_SEARCH_WEIGHTS.fileName },

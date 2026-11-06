@@ -640,7 +640,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
       throw new Error('not exercised by the surface inventory');
     },
   },
-  legacyTasks: { now: () => '2026-07-30T12:00:00.000Z' },
   board: boardSubsystem(),
   boardGitHub: { arm: () => () => undefined },
   tidy: {

@@ -164,12 +164,6 @@ import { SessionOwnerWords } from '../src/adapters/board/session-owner-words.ts'
 import { type LivenessLedgerReader, StorageSessionRoster } from '../src/adapters/board/session-roster.ts';
 import { GhCliRunner, GitWorkingCopies } from '../src/adapters/board-github/index.ts';
 import {
-  AgendaImportAgenda,
-  FileBoardImportMarker,
-  FileLegacyTaskSource,
-  StorageImportSessions,
-} from '../src/adapters/board-import/index.ts';
-import {
   budgetHoldsWriter,
   claudeSubagentFiles,
   FileBudgetTold,
@@ -608,7 +602,6 @@ import { isTerminalStatus } from '../src/lib/warden/types.ts';
 const CARD_START_KEYS_KEPT = 256;
 
 import { GitHubWatcher, UnfiledRefiler } from '../src/lib/board-github/index.ts';
-import { BoardImporter, LaneSetImportProjects, type TaskAssigneeCandidate } from '../src/lib/board-import/index.ts';
 import { type MeteredFile, SpendMeter } from '../src/lib/budget/meter.ts';
 import { budgetNoticeRef, budgetNoticeRequest } from '../src/lib/budget/notice.ts';
 import { BUDGET_TICK_MS, BudgetService } from '../src/lib/budget/service.ts';
@@ -2197,16 +2190,10 @@ function createBoardWorld(
     }),
     serial: new KeyedSerialExecutor(),
   });
-  // Whether each project uses the board: one document beside the lane sets. Its one-time pass reads every card
-  // and every board, so it switches on exactly the boards the owner worked on lately.
-  const switches = new BoardSwitchService(
-    new FileBoardSwitchStore(join(paths.home, 'board', 'switch.json')),
-    {
-      cards: async () => (await store.read()).cards,
-      projects: async () => (await lanes.projects()).map(project => project.id),
-    },
-    { now: () => clock.now() },
-  );
+  // Whether each project uses the board: one document beside the lane sets; a home without one reads every board off.
+  const switches = new BoardSwitchService(new FileBoardSwitchStore(join(paths.home, 'board', 'switch.json')), {
+    now: () => clock.now(),
+  });
   const board = new BoardService({
     store,
     lanes,
@@ -2264,32 +2251,6 @@ function createBoardWorld(
     bin,
   });
   return { store, board, cards, focus, adoption, switches };
-}
-
-/**
- * Every session an assignee could name, as the three fields the resolution rule reads.
- *
- * The BOARD's own session directory is deliberately not reused, however similar it looks: it omits
- * every session without a `sessionCapabilityHash`, because a session that cannot hold a capability
- * cannot be a member of a board. That is right for authorization and wrong here — a task assigned to
- * a teammate whose session predates the credential would read as unknown — and this is a display
- * question, so it answers over every session the index holds.
- *
- * A session whose configuration document does not parse is LEFT OUT rather than guessed at, matching
- * every other reader in this root: a candidate assembled from a document the protocol schema rejected
- * is a candidate whose name nobody can vouch for, and matching a task against one would attribute it
- * to a session the daemon cannot describe.
- */
-async function assigneeCandidates(storage: DaemonStorage): Promise<readonly TaskAssigneeCandidate[]> {
-  const candidates = await Promise.all(
-    storage.listSessions().map(async (session): Promise<TaskAssigneeCandidate | undefined> => {
-      const config = SessionConfigSchema.safeParse(await storage.readConfig(session.id));
-      return config.success
-        ? { id: config.data.id, name: config.data.name, teammate: config.data.teammate ?? null }
-        : undefined;
-    }),
-  );
-  return candidates.filter((candidate): candidate is TaskAssigneeCandidate => candidate !== undefined);
 }
 
 /**
@@ -10258,63 +10219,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         lifecycle,
       );
       const workSearch = workSearchModuleBuilt.provides;
-      // Released and To test are one lane now: every stored set that still has both is folded into one at boot,
-      // its cards moved with it, and the owner is asked nothing. A `quick` set from before To test gains it the same
-      // way, and every lane stored before stages gets the stage its fields already describe, written out. Then the Unfiled cards that belong on a project's board are refiled there (`UnfiledRefiler`), so a
-      // card stuck since before projects registered themselves moves without waiting for the watcher. Each step is
-      // idempotent, so every boot runs them, once the boot has settled and before the import below.
+      // The Unfiled cards that belong on a project's board are refiled there (`UnfiledRefiler`), so a card stuck since
+      // before projects registered themselves moves without waiting for the watcher. Idempotent, so every boot runs
+      // it, once the boot has settled.
       unrefTimer(1000, () => {
-        void boardWorld.switches
-          .migrate()
-          .then(migration => {
-            if (migration !== null)
-              process.stderr.write(
-                `board switch: on for ${migration.on.join(', ') || 'no board'}; off for ${migration.off.join(', ') || 'no board'}\n`,
-              );
-          })
-          .catch(() => undefined)
-          .then(async () => await laneSets.mergeReleaseLanes())
-          .then(outcomes => {
-            for (const outcome of outcomes) {
-              process.stderr.write(
-                outcome.merged
-                  ? `board lanes: ${outcome.projectId} Released and To test merged (version ${String(outcome.version)})\n`
-                  : `board lanes: ${outcome.projectId} could not merge Released and To test: ${outcome.problem}\n`,
-              );
-            }
-          })
-          .then(async () => await laneSets.addQuickToTestLanes())
-          .then(outcomes => {
-            for (const outcome of outcomes) {
-              process.stderr.write(
-                outcome.added
-                  ? `board lanes: ${outcome.projectId} quick lanes gained To test (version ${String(outcome.version)})\n`
-                  : `board lanes: ${outcome.projectId} could not add To test to its quick lanes: ${outcome.problem}\n`,
-              );
-            }
-          })
-          .then(async () => await laneSets.stageLanes())
-          .then(outcomes => {
-            for (const outcome of outcomes) {
-              process.stderr.write(
-                outcome.staged
-                  ? `board lanes: ${outcome.projectId} lanes now state their stages (version ${String(outcome.version)})\n`
-                  : `board lanes: ${outcome.projectId} could not state its lanes' stages: ${outcome.problem}\n`,
-              );
-            }
-          })
-          .then(async () => await laneSets.progressLaneNames())
-          .then(outcomes => {
-            for (const outcome of outcomes) {
-              process.stderr.write(
-                outcome.renamed
-                  ? `board lanes: ${outcome.projectId} lanes now show progress (version ${String(outcome.version)})\n`
-                  : `board lanes: ${outcome.projectId} could not rename its lanes as progress: ${outcome.problem}\n`,
-              );
-            }
-          })
-          .then(async () => await unfiledRefiler.run())
-          .catch(() => undefined);
+        void unfiledRefiler.run().catch(() => undefined);
       });
       // Every card from before who asked was stored gets it now, from the owner's messages to the session it came
       // from. Idempotent, so every boot runs it; a card it cannot settle is reported and left for the next boot.
@@ -10330,50 +10239,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           .then(async () => await boardWorld.board.backfillVisibility())
           .then(stored => {
             if (stored > 0) process.stderr.write(`board: stored the visibility of ${String(stored)} card(s)\n`);
-          })
-          .catch(() => undefined);
-      });
-      // Sub-cards that sat in Released · to test before sub-cards closed themselves close now (docs/board.md § Sub-cards
-      // close themselves). Idempotent, so every boot runs it; a card it cannot write is reported and left for the next boot.
-      unrefTimer(3000, () => {
-        void boardWorld.board
-          .closeStrandedSubCards()
-          .then(closed => {
-            if (closed > 0) process.stderr.write(`board: closed ${String(closed)} finished sub-card(s)\n`);
-          })
-          .catch(() => undefined);
-      });
-      // The one-time import of the old per-session task files onto the project boards. It shares the board's
-      // store with the board service (one id counter), proposes lanes through the lane service above, and
-      // points the open agenda items at their cards. Total: a bad file is reported, never a failed start.
-      const boardImporter = new BoardImporter({
-        tasks: new FileLegacyTaskSource(
-          () => storage.listSessions().map(session => session.id),
-          id => join(createSessionPaths(paths, parseSessionId(id)).directory, 'tasks.json'),
-        ),
-        store: boardWorld.store,
-        projects: new LaneSetImportProjects(laneSets, new GitProjectFacts()),
-        sessions: new StorageImportSessions(
-          () => storage.listSessions().map(session => session.id),
-          async () => await assigneeCandidates(storage),
-        ),
-        agenda: new AgendaImportAgenda(agendaBoards, () => new Date(clock.now()).toISOString()),
-        marker: new FileBoardImportMarker(join(paths.home, 'board-import.json')),
-        clock: { now: () => new Date(clock.now()).toISOString() },
-        machineId: () => attachmentDaemonId,
-      });
-      unrefTimer(2000, () => {
-        void boardImporter
-          .run()
-          .then(summary => {
-            if (summary.skipped) return;
-            const said = `board import: ${summary.imported} imported, ${summary.alreadyImported} already there, ${summary.linkedAsks} asks linked, ${summary.problems.length} problems`;
-            process.stderr.write(`${said}\n`);
-            for (const problem of summary.problems) {
-              process.stderr.write(
-                `board import: ${problem.sessionId ?? '-'} ${problem.taskId ?? ''} ${problem.detail}\n`,
-              );
-            }
           })
           .catch(() => undefined);
       });
@@ -12761,13 +12626,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             return () => clearInterval(handle);
           },
         }),
-        legacyTasks: { now: () => clock.now() },
         board: {
           board: async query => await boardWorld.board.board(query),
           ids: async () => await boardWorld.board.ids(),
           mergeGate: async pr => await boardWorld.board.mergeGate(pr),
           task: async id => await boardWorld.board.task(id),
-          taskByLegacyRef: async legacyRef => await boardWorld.board.taskByLegacyRef(legacyRef),
           create: async (request, caller) => await boardWorld.board.create(request, caller),
           act: async (id, request, caller) => await boardWorld.board.act(id, request, caller),
           skip: async (request, caller) => await boardWorld.board.skip(request, caller),
@@ -12829,7 +12692,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               caller,
               key,
             ),
-          importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
         },
         boardGitHub,
         tidy: new TidyService({
