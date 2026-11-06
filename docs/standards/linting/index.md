@@ -68,11 +68,13 @@ takes a per-user `flock` in a directory only the user can write (`$XDG_RUNTIME_D
 and no one else can write — otherwise the check runs unlocked and says why) and a second run queues behind the
 first. The lock is opened append-only (`exec 9>>"$lock"`), the script writes nothing into the directory, and a
 lock path that is a link or not a regular file is refused. The directory check is best effort: someone who
-owns a parent directory can swap it after the check, which at worst defeats serialization (two checks at once,
-as before the lock) and never truncates or writes a file. A check started from inside a locked one inherits
+owns a parent directory (in practice only root or the user) can swap it after the check. At worst that defeats
+serialization (two checks at once, as before the lock), leaves an empty file created, or puts a FIFO in place so
+the open itself blocks — before the bounded wait below applies, so that commit hangs until interrupted. It can
+never truncate or write to an existing file. A check started from inside a locked one inherits
 descriptor 9; when that descriptor is the same file as the lock it reuses it (`flock -n 9` succeeds at once,
 because the lock belongs to the open file description) instead of waiting on its own ancestor, and a
-descendant that closed descriptor 9 waits like anyone else. It waits at most `TYPECHECK_LOCK_WAIT` seconds (600)
+descendant that closed descriptor 9 waits like anyone else. The wait on the lock lasts at most `TYPECHECK_LOCK_WAIT` seconds (600)
 and then checks anyway, so a stuck neighbour cannot block a commit. CI never takes the lock (`CI` is
 set and each job runs one check), and a machine with no `flock` runs unlocked as before.
 
