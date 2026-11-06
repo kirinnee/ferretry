@@ -448,8 +448,8 @@ command line `fy agenda edit A5 --kind <kind> --option … --question …` compo
 - **An answer to the old ask is refused `409 ask_changed`**, never applied to the new options: an answer request
   names the `askVersion` it was given to, and one that names an older version is refused (a stale tab, the undo
   window, a held send). **The app always names it**: it stamps the version of the ask on screen when the answer
-  action is created, keeps it through the undo window and the outbox, and sends it with the dispatch (a daemon
-  without `agenda.asks.1` ignores the field and has no replaced asks to confuse).
+  action is created, keeps it through the undo window and the outbox, and sends it with the dispatch (the current
+  app and CLI always send it, and every supported daemon accepts it).
   An answer that names none is checked only where it cannot be stale: a **human's** answer with no version is
   refused `409 ask_changed` once the ask has been replaced, so an older app is locked out of a replaced ask
   until it reloads; the answer of a ferret's own `done --choice`, and any answer to an ask never replaced, are
@@ -962,8 +962,8 @@ list, `snoozePicks`, for both; Custom… asks for the time on a sheet); on the c
   wakes it on its own, outside that throttle: an item that woke as urgent half an hour ago still wakes for a new
   blocker.
 - Only the owner snoozes and unsnoozes; only the daemon's own timer wakes. A notice is read, not snoozed.
-- **The app always offers it**: snooze and unsnooze go to the daemon like any other action, and a daemon that
-  refuses the request as an unknown action is shown as needing an update.
+- **The app always offers it**: snooze and unsnooze go to the daemon like any other action, and whatever the
+  daemon answers is shown as it said it — the app adds no "needs an update" wording of its own for a snooze.
 
 **Migration.** Replies used to close items (`disposition: 'replied'`), and before that they left an item on the
 ferret's turn. When a board is read, an item still waiting on the ferret only because of an owner reply is

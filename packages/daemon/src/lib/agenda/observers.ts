@@ -53,7 +53,7 @@ export interface SessionAgendaState {
 }
 
 /**
- * Keeps each session's `state.attention` true to its board, so a list row reads as unread exactly while
+ * Keeps each session's `state.agenda` true to its board, so a list row reads as unread exactly while
  * something waits on the owner.
  *
  * THE BOARD IS RE-READ, not the snapshot the change carried: two mutations on one board commit in

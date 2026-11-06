@@ -1,12 +1,12 @@
 /**
- * THE AGENDA INBOX, wired: every paired machine's session list read for `state.attention`, the
+ * THE AGENDA INBOX, wired: every paired machine's session list read for `state.agenda`, the
  * boards of exactly the conversations it names, and the answers held for their undo window.
  *
  * Mounted ONCE, by the shell, and handed down through `AgendaInboxContext` — so the phone's
  * Inbox tab, the sidebar's entry, the Sessions page's Needs-you deck and the inbox page all count
  * and deal the same cards, and an answer still inside its undo window survives a navigation.
  *
- * A BOARD IS READ WHEN ITS SUMMARY MOVES, and only then. The daemon rewrites `state.attention` on every
+ * A BOARD IS READ WHEN ITS SUMMARY MOVES, and only then. The daemon rewrites `state.agenda` on every
  * board change and the fleet feed re-reads the list, so a changed summary is the signal; an unchanged
  * one reads nothing. A conversation that stops being unread is not read again. A read that settles without
  * the board is the exception: it is asked again on a backoff (`inbox-board-reads.ts`), and until one lands

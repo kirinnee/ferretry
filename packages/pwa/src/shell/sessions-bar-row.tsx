@@ -4,7 +4,7 @@
  *
  * Right-click, long-press, the Menu key and Shift+F10 open the bar's one row menu (`SessionMenuContext`).
  *
- * UNREAD. A session with open Attention (`state.attention`) reads like an unread chat: its name is bold,
+ * UNREAD. A session with open Attention (`state.agenda`) reads like an unread chat: its name is bold,
  * an accent count badge sits on the right, and the row's link opens the conversation AT the first open
  * item (`?attention=A3`). The WHOLE row links there rather than the badge alone — an anchor cannot hold
  * a button, and one big target is the better thing to hit on a phone. The badge's number is spoken as

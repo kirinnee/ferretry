@@ -2,7 +2,7 @@
  * THE AGENDA INBOX, as pure decisions: which conversations read as unread, which cards the inbox
  * deals and in what order, what a swipe means, and how an answer is held back for its undo window.
  *
- * THE UNREAD SIGNAL IS THE DAEMON'S `state.attention`, and nothing else. The daemon rewrites it on every
+ * THE UNREAD SIGNAL IS THE DAEMON'S `state.agenda`, and nothing else. The daemon rewrites it on every
  * board change and removes it when nothing is open, so a row stays bold until its items are answered,
  * done or dismissed — never merely because the reader looked at the conversation. Reading it off the
  * session list costs no request: the boards themselves are read only for the sessions it names.

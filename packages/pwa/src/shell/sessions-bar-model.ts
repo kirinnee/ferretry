@@ -28,7 +28,7 @@
  *
  * ONE SIGNAL THAT A SESSION NEEDS YOU: OPEN ATTENTION.
  *
- *   The daemon puts `state.attention` on a session while it has open Agenda items and removes it when
+ *   The daemon puts `state.agenda` on a session while it has open Agenda items and removes it when
  *   none are left, so the summary rides the session list: reading it costs no request per row. An unread
  *   row gets a bold name and an accent count badge, opens the conversation AT the first item, and — while
  *   the device setting "Group Needs you at the top" is on — is gathered into "Needs you" at the top, newest

@@ -386,7 +386,7 @@ notifications as Ferretry, with the mono mark in the status bar.
 
 ## The unread signal
 
-`SessionView.state.attention` is `{ open, first, ask, latestAt }` while anything is open, and absent
+`SessionView.state.agenda` is `{ open, first, ask, latestAt }` while anything is open, and absent
 otherwise. Absent always means "nothing waits on the owner", never "unknown". It also carries
 `agendaMode` (the ferret works in agenda mode) and `stopped` (it is stopped on the owner, the instant it
 went idle), which are what the list shows beside the badge.
