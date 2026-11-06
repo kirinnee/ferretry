@@ -60,10 +60,11 @@ export class PreRenameAgendaFilesError extends Error {
       `these sessions still hold agenda files from before the agenda rename: ${named}${more} (${String(found.length)} in all). ` +
         'Back these directories up first. Then, in each, rename attention.json → agenda.json and ' +
         'attention-replies.json → agenda-replies.json only where the new name does not exist yet; ' +
-        'where both names exist, keep both and merge them by hand. ' +
-        'Ferretry 4.116.0 to 4.291.0 moved these files on start, but only for sessions in the index, ' +
-        "only on a home's first start after upgrading, and never for the machine agenda. " +
-        'Then start again.',
+        'where both names exist, merge the old file into the new-named one by hand, then rename the old file to ' +
+        '<name>.migrated so it is ignored. Every Ferretry release from 4.116.0 up to, but excluding, the release ' +
+        'that removed this move attempted it on start, but only for sessions in the index and only while the home ' +
+        'lacked agenda-files-migration.json (written only once no session failed, so failures were retried on ' +
+        'later starts); it never covered the machine agenda. Then start again.',
     );
     this.name = 'PreRenameAgendaFilesError';
   }
