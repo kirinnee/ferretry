@@ -3,7 +3,8 @@
  * person can see: standard (the app as it ships, this site is not isolated), fast (a device that would run
  * several cores), skipped (the faster mode failed here and is turned off), no-faster (an engine with no
  * faster mode) and no-data (Browser voice: nothing of ours runs, so no block at all). Phone (390) and
- * desktop (1280), the light and dark studio themes. Each shot ends well BELOW the block (its bottom edge
+ * desktop (1280), the light and dark studio themes. The dev-server link "Test speed on this device" is drawn in
+ * every state that has a block, and each shot measures it (>= 44 CSS px tall, keyboard-focusable). Each shot ends well BELOW the block (its bottom edge
  * plus padding), so a clip is never mistaken for the page. Review evidence; nothing compares the PNGs.
  *
  *   bun harness/speed-line-screenshot.tsx    # writes harness/out/speed-line-<state>-<viewport>-<scheme>.png
@@ -189,6 +190,20 @@ try {
           const target = join(outDir, `speed-${state}-${viewport.name}-${scheme}.png`);
           await page.screenshot({ path: target });
           process.stdout.write(`📸 ${target}\n`);
+          // A block with a speed block also has the dev-server link: it must be a real tap target (>= 44 px tall).
+          const link = page.locator('section[aria-label="Speed"] a[data-speed-test-link]');
+          if ((state === 'no-data') !== ((await link.count()) === 0)) fail(`${state}: speed test link count`);
+          if (state !== 'no-data') {
+            const linkBox = await link.boundingBox();
+            if (linkBox === null) fail('the speed test link has no box');
+            const linkHeight = (linkBox as { height: number }).height;
+            if (linkHeight < 44) fail(`${state} ${scheme} ${viewport.name}: link is ${linkHeight}px tall, under 44`);
+            await link.focus();
+            const focused = await page.evaluate(() => document.activeElement?.hasAttribute('data-speed-test-link'));
+            if (focused !== true) fail(`${state}: the link did not take keyboard focus`);
+            await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+            process.stdout.write(`📏 ${state} ${viewport.name} ${scheme}: link ${linkHeight} CSS px tall\n`);
+          }
         } finally {
           await context.close();
         }

@@ -372,6 +372,9 @@ export default defineConfig({
         landing: fileURLToPath(new URL('./index.html', import.meta.url)),
         app: fileURLToPath(new URL('./app/index.html', import.meta.url)),
         'get-started': fileURLToPath(new URL('./get-started/index.html', import.meta.url)),
+        // The one-click speed test page behind Settings › Voice › "Test speed on this device". Self-contained:
+        // timings only, nothing sent anywhere, models only from the app's own model files.
+        'speed-bench': fileURLToPath(new URL('./speed-bench/index.html', import.meta.url)),
       },
     },
   },

@@ -17,6 +17,8 @@ import {
   SPEED_PATH_LABEL,
   SPEED_PATH_ORDER,
   SPEED_REASON_TEXT,
+  SPEED_TEST_PATH,
+  speedTestHref,
   type SpeedPath,
   type SpeedSignals,
   speedLine,
@@ -197,6 +199,18 @@ describe('the words', () => {
     should(visible).not.match(/webassembly|webgpu|thread|worker|wasm|gpu\b/i);
   });
 
+  it('names the speed test page the production build serves', () => {
+    should(SPEED_TEST_PATH).equal('/speed-bench/');
+  });
+
+  it('opens the speed test page with the Settings path it came from, encoded', () => {
+    should(speedTestHref('/app/d/abc/settings')).equal('/speed-bench/?back=%2Fapp%2Fd%2Fabc%2Fsettings');
+  });
+
+  it('says the speed gain without naming the desktop it was measured on', () => {
+    should(SPEED_CONSEQUENCE_TEXT['wasm-threads']).not.containEql('desktop');
+  });
+
   it('says what each speed means, with a number only for the one that was measured', () => {
     should(SPEED_CONSEQUENCE_TEXT['wasm-single']).equal('Your words appear a moment after you stop talking.');
     should(SPEED_CONSEQUENCE_TEXT['wasm-threads']).containEql('2–3 times faster');
@@ -204,7 +218,9 @@ describe('the words', () => {
   });
 
   it('names the faster mode that was left out, and whether it is unavailable or turned off', () => {
-    should(SPEED_REASON_TEXT['not-isolated']).containEql('not available on this site yet');
+    should(SPEED_REASON_TEXT['not-isolated']).equal(
+      'A faster mode (several cores) is not available on this site: it needs a site setting we haven’t turned on yet.',
+    );
     should(SPEED_REASON_TEXT['failed-before']).containEql('available on this device but turned off');
     should(SPEED_REASON_TEXT['low-memory']).containEql('turned off');
   });

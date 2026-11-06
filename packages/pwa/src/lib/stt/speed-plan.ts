@@ -44,12 +44,12 @@ export const SPEED_PATH_LABEL: Readonly<Record<SpeedPath, string>> = {
 /**
  * What the speed means for the person, in one plain sentence. The only number is the one that was
  * measured (docs/voice.md › Measured): several cores finished 2.5–2.8× sooner than one on a desktop; a
- * phone and a graphics chip were not measured, so those say no number.
+ * phone and a graphics chip were not measured, so those say no number. The sentence does not name the
+ * desktop: the table is evidence, not a promise about this device.
  */
 export const SPEED_CONSEQUENCE_TEXT: Readonly<Record<SpeedPath, string>> = {
   webgpu: 'Your words appear sooner after you stop talking.',
-  'wasm-threads':
-    'Your words appear sooner after you stop talking: about 2–3 times faster than standard on a desktop we tested.',
+  'wasm-threads': 'Your words appear sooner after you stop talking: about 2–3 times faster than standard.',
   'wasm-single': 'Your words appear a moment after you stop talking.',
 };
 
@@ -221,7 +221,7 @@ export const SPEED_REASON_TEXT: Readonly<Record<SpeedReason, string>> = {
   fastest: 'This is the fastest mode this device offers.',
   'only-path': 'This voice has no faster mode.',
   'not-isolated':
-    'A faster mode (several cores) is not available on this site yet: it needs a browser setting the site has not switched on.',
+    'A faster mode (several cores) is not available on this site: it needs a site setting we haven’t turned on yet.',
   'no-gpu':
     'A faster mode (graphics chip) is not available: this device has no graphics chip the browser can use for it.',
   'low-memory': 'A faster mode (several cores) is available on this device but turned off, to save memory.',
@@ -229,3 +229,14 @@ export const SPEED_REASON_TEXT: Readonly<Record<SpeedReason, string>> = {
   'failed-before':
     'A faster mode (several cores) is available on this device but turned off for now, because it did not work here last time.',
 };
+
+/** Where the site serves the one-click speed test page (`speed-bench/index.html`, built with the app). */
+export const SPEED_TEST_PATH = '/speed-bench/';
+
+/**
+ * The speed test page's address when opened from `settingsPath` (the page Settings is on). The path rides in the
+ * query so the page's "Back to Settings" link can return to THIS machine's Settings; it is a path on this site
+ * and nothing else (the page re-checks it with {@link backToSettingsPath}).
+ */
+export const speedTestHref = (settingsPath: string): string =>
+  `${SPEED_TEST_PATH}?back=${encodeURIComponent(settingsPath)}`;

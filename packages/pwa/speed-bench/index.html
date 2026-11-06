@@ -15,20 +15,28 @@
         color: #1b1b1b;
         background: #fff;
       }
-      @media (prefers-color-scheme: dark) {
-        body {
-          color: #eee;
-          background: #161616;
-        }
-        pre {
-          background: #222;
-        }
-      }
       button {
         font: inherit;
         min-height: 48px;
         padding: 0 1.25rem;
         margin: 0.25rem 0.5rem 0.25rem 0;
+        color: #1b1b1b;
+        background: #e6e6e6;
+        border: 1px solid #767676;
+        border-radius: 6px;
+      }
+      button:disabled {
+        color: #595959;
+        background: #f3f3f3;
+        border: 1px dashed #767676;
+      }
+      a {
+        color: #0b57d0;
+      }
+      .back {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
       }
       pre {
         background: #f3f3f3;
@@ -37,21 +45,65 @@
         white-space: pre-wrap;
         word-break: break-word;
       }
+      /* Before a run both boxes are empty: show nothing rather than two grey boxes that look broken. */
+      pre:empty {
+        display: none;
+      }
       label {
-        display: block;
-        margin: 0.4rem 0;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        min-height: 44px;
+        margin: 0.25rem 0;
+      }
+      label input {
+        flex: none;
+        width: 1.5rem;
+        height: 1.5rem;
+        margin: 0;
+      }
+      #summary {
+        font-weight: 600;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          color: #eee;
+          background: #161616;
+        }
+        pre {
+          background: #222;
+        }
+        a {
+          color: #8ab4f8;
+        }
+        button {
+          color: #eee;
+          background: #333;
+          border-color: #9a9a9a;
+        }
+        button:disabled {
+          color: #c4c4c4;
+          background: #262626;
+          border: 1px dashed #9a9a9a;
+        }
       }
     </style>
   </head>
   <body>
+    <a class="back" id="back" href="/app/">Back to Settings</a>
     <h1>Speech speed benchmark</h1>
     <p>
-      Times the on-device speech engines on THIS device with one fixed synthetic-voice clip (5 s). It prints timings
-      only — no audio is recorded and no words are shown. Models that are not installed are downloaded when you press
-      the button (up to ~0.9 GB).
+      Times the speech models already installed on THIS device with one fixed synthetic-voice clip (5&nbsp;s). It prints
+      timings only — no audio is recorded and no words are shown. By default nothing is downloaded and nothing is sent
+      anywhere; a model that is not installed is skipped.
     </p>
     <p id="state" role="status" aria-live="polite">Ready.</p>
-    <label><input type="checkbox" id="install" checked /> Download models that are not installed yet</label>
+    <label
+      ><input type="checkbox" id="install" />
+      <span id="install-label"
+        >Download the speech models first (from huggingface.co, about <span id="install-size">1 GB</span>)</span
+      ></label
+    >
     <label
       ><input type="checkbox" id="threads" checked /> Also try multi-thread WebAssembly (needs an isolated page)</label
     >
@@ -60,6 +112,7 @@
       <button id="copy" type="button" disabled>Copy the JSON</button>
     </p>
     <pre id="log" aria-label="Progress"></pre>
+    <p id="summary" role="status" aria-live="polite"></p>
     <pre id="result" aria-label="Result"></pre>
     <script type="module" src="./main.ts"></script>
   </body>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { SpeedLine } from '../../../../src/features/settings/speed-line.tsx';
 import { SpeedMemoryStore } from '../../../../src/lib/stt/speed-memory.ts';
-import { NO_SIGNALS } from '../../../../src/lib/stt/speed-plan.ts';
+import { NO_SIGNALS, SPEED_TEST_PATH, speedTestHref } from '../../../../src/lib/stt/speed-plan.ts';
 import { flatSpeedPlanner, SpeedPlanner } from '../../../../src/lib/stt/speed-planner.ts';
 import { mount } from '../../../support/dom.ts';
 
@@ -13,7 +13,9 @@ describe('<SpeedLine>', () => {
     const section = view.container.querySelector('section[aria-label="Speed"]');
     expect(section?.textContent).toContain('Speech speed: standard (one core)');
     expect(section?.textContent).toContain('Your words appear a moment after you stop talking.');
-    expect(section?.textContent).toContain('A faster mode (several cores) is not available on this site yet');
+    expect(section?.textContent).toContain(
+      'A faster mode (several cores) is not available on this site: it needs a site setting we haven’t turned on yet.',
+    );
     expect(view.container.querySelector('button, input, [role="switch"]')).toBeNull();
   });
 
@@ -47,6 +49,26 @@ describe('<SpeedLine>', () => {
       const view = await mount(<SpeedLine engine={engine} planner={flatSpeedPlanner()} />);
       expect(view.container.querySelector('section')).toBeNull();
     }
+  });
+});
+
+describe('<SpeedLine> speed test link', () => {
+  it('ends with a safe, tall, plain-worded link to the speed test page, in every build', async () => {
+    const view = await mount(<SpeedLine engine="parakeet" planner={flatSpeedPlanner()} />);
+    const link = view.container.querySelector('section[aria-label="Speed"] a');
+    expect(link?.textContent).toContain('Test speed on this device');
+    expect(link?.getAttribute('href')).toBe(speedTestHref(globalThis.location.pathname));
+    expect(link?.getAttribute('href')?.startsWith(SPEED_TEST_PATH)).toBe(true);
+    expect(SPEED_TEST_PATH).toBe('/speed-bench/');
+    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(link?.className).toContain('min-h-[44px]');
+    expect(link?.textContent).toContain('(opens in a new tab)');
+  });
+
+  it('has the link for every engine that has a block', async () => {
+    const view = await mount(<SpeedLine engine="vosk-small-en" planner={flatSpeedPlanner()} />);
+    expect(view.container.querySelector('a')?.getAttribute('href')?.startsWith('/speed-bench/')).toBe(true);
   });
 });
 

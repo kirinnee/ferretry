@@ -416,14 +416,24 @@ is always a candidate, so there is no input for which nothing is chosen.
 - **Settings › Voice** shows a read-only block under the engine list, in plain words (no technical names on
   screen): **"Speech speed: standard (one core)"** or **"Speech speed: fast (several cores)"**, one sentence
   of what that means ("Your words appear a moment after you stop talking." — or, for the fast mode, "sooner…
-  about 2–3 times faster than standard on a desktop we tested", the only number, from the table above), and one
+  about 2–3 times faster than standard", the only number, from the table above, measured on a desktop), and one
   sentence of why. When a faster mode was left out the sentence names it and says which it is: "A faster mode
-  (several cores) is not available on this site yet: it needs a browser setting the site has not switched
-  on." (this page is not isolated) or "…is available on this device but turned off for now, because it did
-  not work here last time." (a failure is remembered). The words live in `SPEED_PATH_LABEL`,
+  (several cores) is not available on this site: it needs a site setting we haven’t turned on yet." (this page is not
+  isolated) or "…is available on this device but turned off for now, because it did not work here last time." (a failure is remembered). The words live in `SPEED_PATH_LABEL`,
   `SPEED_CONSEQUENCE_TEXT` and `SPEED_REASON_TEXT`; a test keeps WebAssembly, WebGPU and thread talk out of
-  them. There is nothing to press and no link to the speed test page. There is no manual override: with one
-  path available it would be a switch that does nothing.
+  them. There is nothing to press to change the mode: with one path available an override would be a switch
+  that does nothing, so there is none. The block ends with a link, **"Test speed on this device"**, to the speed
+  test page (`/speed-bench/`, below), on the deployed site as well as the dev server: at least 44 px tall on every
+  screen, a real link a keyboard reaches, opening in a new tab (`rel="noopener noreferrer"`) so Settings stays
+  where it was. The page is part of the production build (`vite.config.ts` lists it beside `index.html`, `app/`
+  and `get-started/`), so the link never points at nothing; the page is self-contained — timings only, nothing
+  sent anywhere — and runs under the site's own page policy. **By default it makes no request beyond the site's own
+  files**: it times the models already installed on the device, and a model that is not installed is a "not installed"
+  row with the line "Install the voice in Settings › Voice first, then run again." The one way to a download is the
+  person ticking "Download the speech models first (from huggingface.co, about N MB)", which starts unticked;
+  `tests/e2e/speed-bench-offline.e2e.test.ts` proves both halves against the built page under `wrangler pages dev` and the
+  real policy. Above the JSON the page says in a plain sentence what was timed and which was quickest, and its
+  "Back to Settings" link returns to the Settings page the link was opened from.
 
 ### Starting to transcribe during the send countdown
 
@@ -447,7 +457,8 @@ with near-live words on. Slice 4 (the Live loop) will call it; nothing ships cal
 ### Measuring your own device
 
 ```sh
-# one click, any device — the dev server serves a page that prints a JSON result (timings only, no words):
+# one click, any device — the deployed site (at /speed-bench/) and the dev server both serve a page that prints a JSON
+# result (timings only, no words):
 cd packages/pwa && bunx vite              # then open http://localhost:5173/speed-bench/
 FY_DEV_ISOLATED=1 bunx vite               # the same, with COOP/COEP, to measure threads (dev server only)
 adb reverse tcp:5173 tcp:5173             # a phone then reaches it as localhost, which is a secure context
@@ -459,7 +470,8 @@ bunx vite build && bun harness/stt-speed-bench.ts [--isolated] [--blob-workers] 
 The result is parsed against a strict schema before it is shown: it can hold timings, a device class
 (browser family, cores, memory, isolation, a WebGPU adapter's vendor/architecture) and a failure **code** —
 never a transcript, an address or an error message. `FY_DEV_ISOLATED` is read by the dev server only; the
-deployed site's headers are `public/_headers`, which this change does not touch.
+deployed site's headers are `public/_headers`, which this page is served under unchanged (so on the deployed site
+the page is not cross-origin isolated and the multi-thread rows read "not isolated").
 
 ## Clean-up: prompts you can edit
 
