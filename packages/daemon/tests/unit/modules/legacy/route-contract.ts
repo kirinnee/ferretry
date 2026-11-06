@@ -156,7 +156,6 @@ export const callers: readonly string[] = [
   'GET /v1/sessions/:sessionId/mcp operator any',
   'GET /v1/sessions/:sessionId/mcp/servers operator any',
   'GET /v1/sessions/:sessionId/messages operator any',
-  'GET /v1/sessions/:sessionId/pins operator any',
   'GET /v1/sessions/:sessionId/processes operator any',
   'GET /v1/sessions/:sessionId/processes/:processId/output operator any',
   'GET /v1/sessions/:sessionId/queue operator any',
@@ -170,8 +169,6 @@ export const callers: readonly string[] = [
   'GET /v1/sessions/:sessionId/skills/inventory operator any',
   'GET /v1/sessions/:sessionId/snapshot operator any',
   'GET /v1/sessions/:sessionId/subtree operator any',
-  'GET /v1/sessions/:sessionId/surfaces/browser/control operator any',
-  'GET /v1/sessions/:sessionId/surfaces/terminals/control operator any',
   'GET /v1/sessions/:sessionId/task-plans/:planId operator person',
   'GET /v1/sessions/:sessionId/task-plans/:planId/approval/:stage operator person',
   'GET /v1/sessions/:sessionId/tasks operator any',
@@ -227,7 +224,6 @@ export const callers: readonly string[] = [
   'POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId operator person',
   'POST /v1/agenda/clear-agents operator person',
   'POST /v1/agent/config none any',
-  'POST /v1/agent/tools none any',
   'POST /v1/board/import operator person',
   'POST /v1/board/projects/:projectId/lanes operator any',
   'POST /v1/board/skip operator any',
@@ -328,8 +324,6 @@ export const callers: readonly string[] = [
   'POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs operator any',
   'POST /v1/sessions/:sessionId/notify operator any',
   'POST /v1/sessions/:sessionId/permission operator person',
-  'POST /v1/sessions/:sessionId/pin operator person',
-  'POST /v1/sessions/:sessionId/pins operator any',
   'POST /v1/sessions/:sessionId/processes/:processId/stop operator any',
   'POST /v1/sessions/:sessionId/rename operator any',
   'POST /v1/sessions/:sessionId/resume operator any',
@@ -342,16 +336,11 @@ export const callers: readonly string[] = [
   'POST /v1/sessions/:sessionId/shared-draft operator person',
   'POST /v1/sessions/:sessionId/signal operator any',
   'POST /v1/sessions/:sessionId/stop operator any',
-  'POST /v1/sessions/:sessionId/surfaces/browser/control operator person',
-  'POST /v1/sessions/:sessionId/surfaces/browser/tools operator person',
-  'POST /v1/sessions/:sessionId/surfaces/terminals/control operator person',
-  'POST /v1/sessions/:sessionId/surfaces/terminals/tools operator person',
   'POST /v1/sessions/:sessionId/task-plans/:planId/approval operator person',
   'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/commit operator person',
   'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app operator person',
   'POST /v1/sessions/:sessionId/task-plans/:planId/revoke operator person',
   'POST /v1/sessions/:sessionId/terminals operator any',
-  'POST /v1/sessions/:sessionId/unpin operator person',
   'POST /v1/sign-in-rules/:id/narrow operator person',
   'POST /v1/sign-in-rules/stages operator person',
   'POST /v1/sign-in-rules/stages/:stage/bind operator person',
@@ -487,9 +476,6 @@ export const notAudited: Readonly<Record<string, string>> = {
   'POST /v1/machine/agenda':
     "the owner dismissing, snoozing or resolving a machine notice; the item's own history records it, and it widens nobody's access",
   'POST /v1/sessions/:sessionId/notify': 'an agent notifying; its payload is labelled with the agent (see L5)',
-  'POST /v1/sessions/:sessionId/pins': 'a bookmark in a transcript',
-  'POST /v1/sessions/:sessionId/pin': "the owner's own sidebar preference; it widens nobody's access",
-  'POST /v1/sessions/:sessionId/unpin': "the owner's own sidebar preference; it widens nobody's access",
   'POST /v1/sessions/:sessionId/shared-draft':
     "the owner's own unsent words, typed at keystroke rate; it widens nobody's access, and logging it would copy the draft into a log",
   'POST /v1/board/tasks': 'a work card on a project board; its own append-only history records who did what',
@@ -500,19 +486,6 @@ export const notAudited: Readonly<Record<string, string>> = {
   'POST /v1/board/import':
     'a one-time import of the old per-session task files; every card it makes ends with a migrated history event and the daemon logs the summary',
   'PATCH /v1/sessions/:sessionId/terminals/:terminalId': 'renames a terminal; opening and attaching are audited',
-  // The agent tools are audited MORE finely than this table can: a route rule may read a path parameter
-  // and response names, never the body, and what matters here — which tool, on which named surface,
-  // how much was typed — is in the body. `AgentToolService` writes one `agent.tool` record per call and
-  // one `surface.control` record per takeover or hand back itself, refusals included.
-  'POST /v1/agent/tools': 'audited per call by the agent-tools service: tool, surface name and lengths',
-  'POST /v1/sessions/:sessionId/surfaces/terminals/tools':
-    'audited per call by the agent-tools service: tool, surface name and lengths',
-  'POST /v1/sessions/:sessionId/surfaces/browser/tools':
-    'audited per call by the agent-tools service: tool, surface name and lengths',
-  'POST /v1/sessions/:sessionId/surfaces/terminals/control':
-    'audited per takeover and hand back by the agent-tools service',
-  'POST /v1/sessions/:sessionId/surfaces/browser/control':
-    'audited per takeover and hand back by the agent-tools service',
   'GET /v1/sessions/:sessionId/input-quarantines': 'a read; names and end times only',
   'POST /v1/sessions/:sessionId/task-plans/:planId/approval':
     'stages a selection, which approves nothing; a paste-only answer is audited by the task-plan service: security.changed task-plan-answered, line by line, never a value',
