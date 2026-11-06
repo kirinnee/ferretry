@@ -291,7 +291,7 @@ jobs:
           if-no-files-found: warn
 
   # Knip (twice) and the route agreement: the gates that need more than 4GB, so they are not in Quick's
-  # per-hook buckets and not in compile, whose binaries SIT, the smokes and darwin wait for. A job of
+  # per-hook buckets and not in compile, which runs SIT and whose binaries the smokes and darwin wait for. A job of
   # its own, in the verdict's needs, so it overlaps compile instead of lengthening the critical path.
   full-gates:
     if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
@@ -322,12 +322,13 @@ jobs:
 
   compile:
     if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
-    timeout-minutes: 15
-    name: Compile Binaries
+    timeout-minutes: 20
+    name: Compile Binaries + SIT
     permissions:
       contents: read
     # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners").
-    # Measured at under one and a half busy cores, so the smallest shape.
+    # Measured at under one and a half busy cores, so the smallest shape. SIT runs here, after the upload,
+    # on the same /nix cache and the files compile just wrote, so it is no instance and no queue of its own.
     runs-on: >-
       ${{
         (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
@@ -370,32 +371,10 @@ jobs:
           path: dist/bin/
           overwrite: true
           if-no-files-found: error
-
-  sit:
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
-    timeout-minutes: 10
-    name: SIT
-    needs: compile
-    permissions:
-      contents: read
-    runs-on: >-
-      ${{
-        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
-        && 'ubuntu-latest'
-        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
-      }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
-      - uses: ./.github/actions/install-nix
-      - name: Download compiled binaries
-        uses: ./.github/actions/download-binaries
+      # SIT stays a black-box test of the SHIPPED bytes: it runs against dist/bin as written above (the very
+      # files uploaded as `cli-binaries`), never a rebuild, and only after the manifest is checked again.
+      - name: Check the binaries against their manifest
+        run: ./scripts/ci/binaries-manifest.sh check dist/bin
       - name: Run SIT
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh sit
 
@@ -589,7 +568,6 @@ jobs:
         int,
         full-gates,
         compile,
-        sit,
         smoke,
         smoke-darwin,
         pwa-relevance,

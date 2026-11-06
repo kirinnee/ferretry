@@ -13,7 +13,7 @@ verdict | judge)
   # downstream jobs into a green gate. The reusable darwin verdict already owns PR advisory policy.
   if jq -e --arg macos "${MACOS_SMOKE:-}" --arg event "${EVENT_NAME:-}" '
     . as $needs |
-    ["quick", "int", "full-gates", "compile", "sit", "smoke", "pwa-relevance", "relevance", "summary"]
+    ["quick", "int", "full-gates", "compile", "smoke", "pwa-relevance", "relevance", "summary"]
       | all(.[]; $needs[.].result == "success")
     and ($needs["full-pending"].result == "success" or
       ($event != "pull_request" and $needs["full-pending"].result == "skipped"))
