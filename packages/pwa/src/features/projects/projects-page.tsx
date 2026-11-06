@@ -66,7 +66,7 @@ export function ProjectsPage({ connection }: { readonly connection: DaemonConnec
   // Discoveries are a claim about sessions, so the page that shows them reads
   // them. A failed read is a status the hub states, never a rethrow.
   useEffect(() => {
-    void fleet.hydrate(connection).catch(() => {});
+    void fleet.ensure(connection).catch(() => {});
   }, [fleet, connection]);
 
   /**

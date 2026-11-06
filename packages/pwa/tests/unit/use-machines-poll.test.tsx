@@ -11,7 +11,7 @@ import {
   useMachinesPoll,
 } from '../../src/hooks/use-machines-poll.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { FLEET_FEED_SETTLE_MS, type FleetFeedEnvironment } from '../../src/lib/fleet-feed.ts';
+import type { FleetFeedEnvironment } from '../../src/lib/fleet-feed.ts';
 import '../support/dom.ts';
 import { interact, type Mounted, mount } from '../support/dom.ts';
 
@@ -95,7 +95,11 @@ const fakeEnvironment = () => {
 
 const recorder = () => {
   const reads: DaemonConnection[] = [];
-  return { reads, fleet: { hydrate: async (daemon: DaemonConnection) => (reads.push(daemon), []) } };
+  const read = async (daemon: DaemonConnection): Promise<readonly never[]> => {
+    reads.push(daemon);
+    return [];
+  };
+  return { reads, fleet: { hydrate: read, invalidate: read } };
 };
 
 describe('useMachinesPoll', () => {
@@ -307,7 +311,6 @@ describe('useMachinesPoll with fleet feeds', () => {
     const afterBeats = reads.map(read => String(read.daemonId)).slice(opening);
     // Alpha's daemon says something moved.
     await interact(() => daemons.opened.get('alpha')?.event());
-    await time.advance(FLEET_FEED_SETTLE_MS);
     const afterEvent = reads.map(read => String(read.daemonId)).slice(opening);
     // Long enough without a read, the beat reads alpha once more as a safety net.
     fake.setTime(FLEET_FEED_SAFETY_MS);
@@ -364,7 +367,6 @@ describe('useMachinesPoll with fleet feeds', () => {
       />,
     );
     await interact(() => feed?.event());
-    await time.advance(FLEET_FEED_SETTLE_MS);
 
     // Assert — the feed was not reopened, and its read went through the new object.
     expect(daemons.opened.get('alpha')).toBe(feed);

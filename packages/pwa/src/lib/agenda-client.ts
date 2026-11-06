@@ -16,6 +16,7 @@ import {
   AgendaVersionListSchema,
   AgendaVersionSchema,
   type BoardReopenAttachments,
+  type FyEvent,
   FY_REQUEST_ID_HEADER,
   isMachineAgendaId,
 } from '@ferretry/protocol';
@@ -23,6 +24,7 @@ import { AgendaRollupStore } from './agenda-rollup.ts';
 import { DaemonAgendaStore } from './agenda-store.ts';
 import { type AgendaWire, AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
 import { ConcurrencyLimit } from './concurrency-limit.ts';
+import { ListRefresh, type ListRefreshEnvironment, browserListRefreshEnvironment } from './list-refresh.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
@@ -273,12 +275,18 @@ interface InFlight<Value> {
   readonly promise: Promise<Value>;
 }
 
+interface MachineAgendaRead {
+  connection: DaemonConnection;
+  readonly read: ListRefresh<void>;
+}
+
 /**
  * Daemon-scoped attention coordinator. It keeps request coalescing out of the
  * immutable store and fences every continuation by the concrete paired
  * connection: a same-id re-pair or unpair cannot publish stale daemon data.
  */
 export class DaemonAgendaClient {
+  readonly #machineReads = new Map<DaemonId, MachineAgendaRead>();
   readonly #fullInFlight = new Map<string, InFlight<void>>();
   readonly #countInFlight = new Map<string, InFlight<void>>();
   /** Settled-only tails: full reads wait for every write already chained here. */
@@ -297,17 +305,54 @@ export class DaemonAgendaClient {
     private readonly fetcher: DaemonFetch = browserFetch,
     /** Which spelling each machine speaks; a machine nobody has read health for is spoken to the older way. */
     readonly wires: AgendaWireDirectory = new AgendaWireDirectory(),
+    private readonly refreshEnvironment: ListRefreshEnvironment = browserListRefreshEnvironment,
   ) {
     this.rollup = new AgendaRollupStore(fetcher);
   }
 
   hydrate(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
+    assertScopeDaemon(daemon, scope);
+    if (isMachineAgendaId(scope.sessionId)) {
+      const read = this.#machineRead(daemon, scope);
+      if (this.store.status(scope) === 'ready') return Promise.resolve();
+      return read.request();
+    }
     return this.#load(daemon, scope, false);
   }
 
   /** Refreshes a complete board even when this session is already hydrated. */
   revalidate(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
+    if (isMachineAgendaId(scope.sessionId)) return this.#machineRead(daemon, scope).request();
     return this.#load(daemon, scope, true);
+  }
+
+  #machineRead(daemon: DaemonConnection, scope: DaemonSessionScope): ListRefresh<void> {
+    assertScopeDaemon(daemon, scope);
+    this.#bind(daemon);
+    const existing = this.#machineReads.get(daemon.daemonId);
+    if (existing !== undefined) {
+      existing.connection = daemon;
+      return existing.read;
+    }
+    const entry: MachineAgendaRead = {
+      connection: daemon,
+      read: new ListRefresh(() => this.#load(entry.connection, scope, true), this.refreshEnvironment),
+    };
+    this.#machineReads.set(daemon.daemonId, entry);
+    return entry.read;
+  }
+
+  /** The fleet stream also carries agenda changes, including the machine's own ledger. */
+  noteEvent(daemon: DaemonConnection, event: FyEvent): void {
+    if (event.type !== 'agenda.changed' && event.type !== 'attention.changed') return;
+    const scope = { daemonId: daemon.daemonId, sessionId: event.sessionId };
+    if (isMachineAgendaId(event.sessionId)) {
+      void this.#machineRead(daemon, scope)
+        .invalidate()
+        .catch(() => undefined);
+    } else if (this.store.status(scope) === 'ready') {
+      void this.revalidate(daemon, scope).catch(() => undefined);
+    }
   }
 
   #load(daemon: DaemonConnection, scope: DaemonSessionScope, revalidate: boolean): Promise<void> {
@@ -380,6 +425,8 @@ export class DaemonAgendaClient {
 
   hydrateCount(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
     assertScopeDaemon(daemon, scope);
+    // The count route is the same complete machine ledger: it must join the full read.
+    if (isMachineAgendaId(scope.sessionId)) return this.hydrate(daemon, scope);
     const generation = this.#bind(daemon);
     const key = daemonSessionKey(scope);
     if (this.store.count(scope) !== undefined) return Promise.resolve();
@@ -501,6 +548,8 @@ export class DaemonAgendaClient {
 
   /** Unpair one daemon without perturbing any other daemon's cache or work. */
   clearDaemon(daemonId: DaemonId): void {
+    this.#machineReads.get(daemonId)?.read.stop();
+    this.#machineReads.delete(daemonId);
     this.#generations.set(daemonId, (this.#generations.get(daemonId) ?? 0) + 1);
     this.#bindings.delete(daemonId);
     this.store.clearDaemon(daemonId);

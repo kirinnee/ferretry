@@ -65,6 +65,7 @@ describe('retrying another machine from the Sessions page', () => {
         get: () => Promise.reject(new Error('unused')),
       },
       () => NOW,
+      { refreshMinMs: 0 },
     );
     const projects = new DaemonProjectsStore({ projects: () => Promise.resolve([]) });
     const usage = new DaemonUsageStore({ usage: () => Promise.resolve({ accounts: [] }) }, { isHidden: () => true });

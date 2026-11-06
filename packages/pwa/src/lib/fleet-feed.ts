@@ -7,9 +7,9 @@
  * (`/v1/events` with no session). With `tail=0` the feed replays nothing, so opening it costs a socket
  * and nothing else, and the daemon proves it live with an idle frame the moment it opens.
  *
- * So this holds one fleet feed per machine and says WHEN to re-read: once after a burst of events has
- * settled, at most every {@link FLEET_FEED_MIN_INTERVAL_MS}. The read itself is the list the poll always
- * made, which the daemon answers `304` when nothing moved. While the feed is live, the poll beside it
+ * So this holds one fleet feed per machine and immediately invalidates the shared list source.
+ * That source owns the single coalescing budget across every reader. The read itself is the list
+ * the poll always made, which the daemon answers `304` when nothing moved. While the feed is live, the poll beside it
  * becomes a slow safety net (`use-machines-poll.ts`).
  *
  * A DAEMON FROM BEFORE `tail` refuses the feed outright (400, before any frame). That is not an
@@ -19,13 +19,8 @@
  * because a feed with no replay cannot say what changed while it was away.
  */
 
-import type { FyEvent } from '@ferretry/protocol';
+import { type FyEvent, isMachineAgendaId, SURFACE_EVENT_TYPES } from '@ferretry/protocol';
 import { sessionEventStreamDeadlineMs, sessionEventStreamDelayMs } from '../components/session-event-stream-model.ts';
-
-/** How long a burst of events is let settle before the one read it asks for. */
-export const FLEET_FEED_SETTLE_MS = 500;
-/** The shortest gap between two reads a feed asks for, however busy the fleet. */
-export const FLEET_FEED_MIN_INTERVAL_MS = 2_000;
 
 /** What the poll beside a feed is told: whether it may stand back. */
 export type FleetFeedStatus = 'connecting' | 'live' | 'down' | 'unsupported';
@@ -58,6 +53,8 @@ export interface FleetFeedOptions {
   readonly onChange: () => void;
   /** Every event the feed delivers, as it arrives; for readers that need the payload, not just "something moved". */
   readonly onEvent?: (event: FyEvent) => void;
+  /** One reconciliation after the stream returns, also for lists other than the fleet. */
+  readonly onReconnect?: () => void;
   readonly onStatus?: (status: FleetFeedStatus) => void;
   readonly environment?: FleetFeedEnvironment;
 }
@@ -70,9 +67,17 @@ export interface FleetFeedControl {
 /** A daemon that does not know `tail` refuses the upgrade with 400; nothing else says "too old". */
 const refusedAsTooOld = (reason: unknown): boolean => (reason as { readonly status?: unknown } | null)?.status === 400;
 
-/** A surface's control facts and the board's card changes move nothing on a session list row. */
+/** SurfaceControl changes only surface maps and journals them, never session config/state or agendas. */
+const LIST_NEUTRAL_EVENTS = new Set<string>(Object.values(SURFACE_EVENT_TYPES));
+
+// Lifecycle, observer, send, resume and signal transitions (including interaction.help) all
+// change row facts. Agenda summaries are changed by agenda.changed / attention.changed;
+// the machine agenda belongs only to the agenda source. Board writes can update a session's
+// focusTask and auto-title (StorageSessionFocus), so board.changed also invalidates the list.
+// Default to reading new event types.
 const movesTheList = (event: FyEvent): boolean =>
-  !event.type.startsWith('surface.') && !event.type.startsWith('board.');
+  !LIST_NEUTRAL_EVENTS.has(event.type) &&
+  !(isMachineAgendaId(event.sessionId) && (event.type === 'agenda.changed' || event.type === 'attention.changed'));
 
 export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
   const environment = options.environment ?? browserFleetFeedEnvironment;
@@ -80,11 +85,10 @@ export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
   let stopped = false;
   let attempt = 0;
   let wasLive = false;
+  let recovering = false;
   let abort: AbortController | undefined;
   let retry: unknown;
   let silence: unknown;
-  let settle: unknown;
-  let lastChangeAt = Number.NEGATIVE_INFINITY;
 
   const publish = (next: FleetFeedStatus): void => {
     if (next === status) return;
@@ -96,16 +100,7 @@ export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
     return undefined;
   };
 
-  const change = (): void => {
-    if (settle !== undefined) return;
-    const wait = Math.max(FLEET_FEED_SETTLE_MS, lastChangeAt + FLEET_FEED_MIN_INTERVAL_MS - environment.now());
-    settle = environment.setTimeout(() => {
-      settle = undefined;
-      if (stopped) return;
-      lastChangeAt = environment.now();
-      options.onChange();
-    }, wait);
-  };
+  const change = (): void => options.onChange();
 
   function open(): void {
     const controller = new AbortController();
@@ -127,7 +122,10 @@ export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
       proved = true;
       attempt = 0;
       // A feed with no replay cannot say what changed while it was gone, so coming back is one read.
-      if (wasLive) change();
+      if (wasLive || recovering) {
+        change();
+        options.onReconnect?.();
+      }
       wasLive = true;
       publish('live');
     };
@@ -140,6 +138,7 @@ export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
         return;
       }
       publish('down');
+      recovering = true;
       const delay = sessionEventStreamDelayMs(attempt, environment.random());
       attempt += 1;
       retry = environment.setTimeout(() => {
@@ -172,7 +171,6 @@ export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
       stopped = true;
       retry = clear(retry);
       silence = clear(silence);
-      settle = clear(settle);
       abort?.abort();
     },
   };

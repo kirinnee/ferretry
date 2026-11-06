@@ -26,6 +26,7 @@ import { toTestCards } from '../../src/lib/to-test-inbox.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { healthOf } from '../support/health.ts';
 import { sessionView } from '../support/sessions.ts';
+import { settleUntil } from '../support/settle.ts';
 import { laptop as boardLaptop, boardModelOf, card } from './board-support.ts';
 
 const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio' });
@@ -105,6 +106,7 @@ const fakeClient = (
     store,
     wires: new AgendaWireDirectory(),
     rollup,
+    hydrate: record('revalidate'),
     revalidate: record('revalidate'),
     respond: record('respond'),
     resolve: record('resolve'),
@@ -112,7 +114,20 @@ const fakeClient = (
     discuss: record('discuss'),
     snooze: record('snooze'),
     unsnooze: record('unsnooze'),
-  } as unknown as DaemonAgendaClient;
+  } satisfies Pick<
+    DaemonAgendaClient,
+    | 'store'
+    | 'wires'
+    | 'rollup'
+    | 'hydrate'
+    | 'revalidate'
+    | 'respond'
+    | 'resolve'
+    | 'dismiss'
+    | 'discuss'
+    | 'snooze'
+    | 'unsnooze'
+  > as unknown as DaemonAgendaClient;
   return { client, calls, rolled };
 };
 
@@ -705,8 +720,12 @@ describe('useAgendaInboxModel', () => {
     // The read is in flight and stays so.
     const inFlight = {
       ...client,
+      hydrate: () => new Promise<void>(() => undefined),
       revalidate: () => new Promise<void>(() => undefined),
-    } as unknown as DaemonAgendaClient;
+    } satisfies Pick<
+      DaemonAgendaClient,
+      'store' | 'wires' | 'rollup' | 'hydrate' | 'revalidate'
+    > as unknown as DaemonAgendaClient;
     const { timers } = manualTimers();
     let inbox: AgendaInbox | null = null;
     view = await mount(
@@ -1031,7 +1050,16 @@ describe('the roll-up lists every conversation’s parked items', () => {
     view = await mount(
       <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} />,
     );
-    await settle();
+    await settleUntil(
+      () =>
+        machines.every(
+          ({ connection }) =>
+            client.wires.openOf(connection.daemonId) !== true ||
+            client.rollup.getSnapshot().complete.has(connection.daemonId),
+        ),
+      'all supported machine roll-ups published',
+      interact,
+    );
     return () => inbox as unknown as AgendaInbox;
   };
   const oldBoard = sessionView('old', { config: { parent: 'root' } as never });
@@ -1151,7 +1179,7 @@ describe('the roll-up lists every conversation’s parked items', () => {
     client.wires.note(studio.daemonId, OPEN);
     const latest = await mountWith(client, [{ connection: studio, name: 'Studio', sessions: [root, oldBoard] }]);
     await interact(async () => latest().loadResolved());
-    await settle();
+    await settleUntil(() => !latest().resolvedReading, 'resolved roll-up read finished', interact);
     expect(rolled).toEqual(['studio', 'studio']);
     expect(latest().resolvedReading).toBe(false);
   });

@@ -79,6 +79,7 @@ const fakeClient = (boards: ReadonlyMap<string, AgendaSnapshot>) => {
     store,
     wires: new AgendaWireDirectory(),
     rollup: new AgendaRollupStore(async () => new Response('{}', { status: 404 })),
+    hydrate: record('revalidate'),
     revalidate: record('revalidate'),
     respond: record('respond'),
     resolve: record('resolve'),
@@ -86,7 +87,20 @@ const fakeClient = (boards: ReadonlyMap<string, AgendaSnapshot>) => {
     discuss: record('discuss'),
     snooze: record('snooze'),
     unsnooze: record('unsnooze'),
-  } as unknown as DaemonAgendaClient;
+  } satisfies Pick<
+    DaemonAgendaClient,
+    | 'store'
+    | 'wires'
+    | 'rollup'
+    | 'hydrate'
+    | 'revalidate'
+    | 'respond'
+    | 'resolve'
+    | 'dismiss'
+    | 'discuss'
+    | 'snooze'
+    | 'unsnooze'
+  > as unknown as DaemonAgendaClient;
   return { client, calls };
 };
 

@@ -209,7 +209,7 @@ export function ProjectDetailPage({
   );
   const fleet = snapshot.daemons.get(connection.daemonId);
   useEffect(() => {
-    void store.fleet.hydrate(connection).catch(() => {});
+    void store.fleet.ensure(connection).catch(() => {});
   }, [connection, store.fleet]);
 
   if (projects.projects === null) {

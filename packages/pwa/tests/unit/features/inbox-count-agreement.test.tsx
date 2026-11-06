@@ -122,7 +122,16 @@ const fakeClient = (hold: Gate[] | null = null) => {
     if (value !== undefined) store.applySnapshot(scope, value);
   };
   const rollup = new AgendaRollupStore(async () => new Response('{}', { status: 404 }));
-  return { store, wires: new AgendaWireDirectory(), rollup, revalidate } as unknown as DaemonAgendaClient;
+  return {
+    store,
+    wires: new AgendaWireDirectory(),
+    rollup,
+    hydrate: revalidate,
+    revalidate,
+  } satisfies Pick<
+    DaemonAgendaClient,
+    'store' | 'wires' | 'rollup' | 'hydrate' | 'revalidate'
+  > as unknown as DaemonAgendaClient;
 };
 
 const quietTimers: DeferredTimers = { setTimeout: () => 0, clearTimeout: () => undefined, now: () => NOW };

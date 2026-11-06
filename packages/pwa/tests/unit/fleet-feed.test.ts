@@ -3,8 +3,6 @@ import type { FyEvent } from '@ferretry/protocol';
 import should from 'should';
 import {
   browserFleetFeedEnvironment,
-  FLEET_FEED_MIN_INTERVAL_MS,
-  FLEET_FEED_SETTLE_MS,
   type FleetFeedEnvironment,
   type FleetFeedStatus,
   type OpenFleetFeed,
@@ -85,7 +83,7 @@ const flush = async (): Promise<void> => {
 };
 
 describe('startFleetFeed', () => {
-  it('should go live on the opening proof, and read once after a burst of events settles', async () => {
+  it('should go live on the opening proof, and invalidate immediately for each state event', async () => {
     // Arrange
     const time = handTime();
     const feed = daemon();
@@ -104,7 +102,7 @@ describe('startFleetFeed', () => {
     feed.opened[0]?.event('turn.state');
     feed.opened[0]?.event('control.send_accepted');
     feed.opened[0]?.event('turn.started');
-    await time.advance(FLEET_FEED_SETTLE_MS);
+    await time.advance(500);
     const afterBurst = reads;
     feed.opened[0]?.event('surface.driving');
     await time.advance(10_000);
@@ -112,12 +110,12 @@ describe('startFleetFeed', () => {
     // Assert
     should(initial).equal('connecting');
     should(statuses).eql(['live']);
-    should(afterBurst).equal(1);
-    should(reads).equal(1);
+    should(afterBurst).equal(3);
+    should(reads).equal(3);
     control.stop();
   });
 
-  it('should hand every event to onEvent, and let a board event move no list row', async () => {
+  it('should hand every event to onEvent, and invalidate board writes that can rename a session', async () => {
     // Arrange
     const time = handTime();
     const feed = daemon();
@@ -138,11 +136,11 @@ describe('startFleetFeed', () => {
 
     // Assert
     should(seen).eql(['board.changed', 'surface.driving']);
-    should(reads).equal(0);
+    should(reads).equal(1);
     control.stop();
   });
 
-  it('should leave at least the minimum gap between two reads, however busy the fleet', async () => {
+  it('should delegate the entire coalescing budget to the shared list source', async () => {
     // Arrange
     const time = handTime();
     const feed = daemon();
@@ -155,12 +153,12 @@ describe('startFleetFeed', () => {
 
     // Act — an event first (it proves the feed too), then another just after the read it asked for.
     feed.opened[0]?.event('turn.state');
-    await time.advance(FLEET_FEED_SETTLE_MS);
+    await time.advance(500);
     feed.opened[0]?.event('turn.state');
-    await time.advance(FLEET_FEED_MIN_INTERVAL_MS);
+    await time.advance(10_000);
 
     // Assert
-    should(at).eql([FLEET_FEED_SETTLE_MS, FLEET_FEED_SETTLE_MS + FLEET_FEED_MIN_INTERVAL_MS]);
+    should(at).eql([0, 500]);
     control.stop();
   });
 
@@ -196,7 +194,7 @@ describe('startFleetFeed', () => {
     const down = control.status();
     await time.advance(1_000);
     feed.opened[1]?.idle();
-    await time.advance(FLEET_FEED_SETTLE_MS);
+    await time.advance(500);
     const readsAfterReturn = reads;
     feed.opened[1]?.end();
     await flush();
@@ -256,7 +254,7 @@ describe('startFleetFeed', () => {
 
     // Assert
     should(feed.opened[0]?.signal.aborted).be.true();
-    should(reads).equal(0);
+    should(reads).equal(1);
     should(statuses).eql(['live']);
     should(time.pending()).equal(0);
     should(feed.opened).have.length(1);
@@ -270,7 +268,6 @@ describe('startFleetFeed', () => {
     // Act
     const control = startFleetFeed({ open: feed.open, onChange: () => (reads += 1) });
     feed.opened[0]?.event('turn.state');
-    await new Promise(resolve => setTimeout(resolve, FLEET_FEED_SETTLE_MS + 50));
     control.stop();
 
     // Assert

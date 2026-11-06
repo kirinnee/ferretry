@@ -123,7 +123,7 @@ const world = (mbpBehaviour: MbpBehaviour) => {
       get: () => Promise.reject(new Error('unused')),
     },
     () => NOW,
-    { listTimeoutMs: 15_000, schedule: clock.schedule },
+    { listTimeoutMs: 15_000, schedule: clock.schedule, refreshMinMs: 0 },
   );
   const projects = new DaemonProjectsStore({ projects: () => Promise.resolve([]) });
   const usage = new DaemonUsageStore({ usage: () => Promise.resolve({ accounts: [] }) }, { isHidden: () => true });

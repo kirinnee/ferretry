@@ -92,6 +92,17 @@ import { settleUntil } from '../support/settle.ts';
 import { FAKE_FRAGMENT } from '../support/shared-screens.ts';
 import { agendaItem, wardenAgenda, wardenInvestigation, wardenStatus } from '../support/warden.ts';
 
+/** Every Continue listing answers empty, whatever query it carries. */
+const EMPTY_CONTINUE_LISTINGS = new Proxy(
+  {},
+  {
+    get: (_target, path) =>
+      typeof path === 'string' && path.startsWith(CONVERSATION_IMPORT_PATH)
+        ? { conversations: [], matched: 0 }
+        : undefined,
+  },
+) as Readonly<Record<string, unknown>>;
+
 /** A connection-health clock whose timers never fire: a suite drives recovery by sending requests. */
 const idleConnectionHealth = {
   now: () => Date.now(),
@@ -676,6 +687,7 @@ const appStore = async (
           return sessionView(sessionId);
         },
         start: async () => sessionView('started'),
+        resume: async (sessionId: string) => sessionView(sessionId),
         // The configuration stream the shell keeps open for the machine on screen: like the live feed
         // below, it runs until it is cancelled, and a cancelled one ends.
         configChanges: async (_onFrame: unknown, signal?: AbortSignal) =>
@@ -2681,6 +2693,77 @@ describe('AppShell', () => {
       expect(paths).toContain('/v1/fleet/runtimes');
       expect(paths).toContain('/v1/fleet/credentials');
       expect(paths.filter(path => path.endsWith('/check'))).toEqual([]);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('publishes the own-start response before the opened session can be read', async () => {
+    // Arrange: the later session GET stays open, so only the start response can populate the list.
+    const { view, store } = await renderShell(`/d/${ALPHA}/new`, [alpha.daemonId], {
+      sessionGate: new Promise<void>(() => undefined),
+    });
+    try {
+      await settle();
+      const field = must(view.container.querySelector<HTMLInputElement>('#fy-new-session-agent'), 'the runtime field');
+      // Act
+      await interact(() => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, 'claude-default');
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await interact(() =>
+        must(
+          [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+            button => button.textContent === 'interactive',
+          ),
+          'interactive mode',
+        ).click(),
+      );
+      const create = must(
+        [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+          button => button.textContent === 'Create session',
+        ),
+        'Create session',
+      );
+      expect(create.disabled).toBe(false);
+      await interact(() => create.click());
+      await settle();
+      // Assert
+      expect(window.location.pathname).toBe(`/d/${ALPHA}/session/started`);
+      expect(store.fleet.session(daemonSessionScope(alpha, 'started'))).toEqual(sessionView('started'));
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('publishes the own-resume response while the opened session read is still outstanding', async () => {
+    // Arrange
+    const { view, store } = await renderShell(`/d/${ALPHA}/new#continue`, [alpha.daemonId], {
+      sessions: ['stopped-ferret'],
+      sessionStatus: () => 'stopped',
+      sessionGate: new Promise<void>(() => undefined),
+      fleet: EMPTY_CONTINUE_LISTINGS,
+    });
+    try {
+      await settle();
+      expect(store.fleet.session(daemonSessionScope(alpha, 'stopped-ferret'))?.state.status).toBe('stopped');
+      // Act
+      await interact(() =>
+        must(
+          view.container.querySelector<HTMLButtonElement>('[data-continue-session="stopped-ferret"]'),
+          'the stopped ferret',
+        ).click(),
+      );
+      await interact(() =>
+        must(
+          view.container.querySelector<HTMLButtonElement>('[data-continue-action="session:stopped-ferret"]'),
+          'Resume',
+        ).click(),
+      );
+      await settle();
+      // Assert
+      expect(window.location.pathname).toBe(`/d/${ALPHA}/session/stopped-ferret`);
+      expect(store.fleet.session(daemonSessionScope(alpha, 'stopped-ferret'))?.state.status).toBe('running');
     } finally {
       await view.unmount();
     }
@@ -5345,17 +5428,6 @@ describe('the navigation cache', () => {
       await view.unmount();
     }
   });
-
-  /** Every Continue listing answers empty, whatever query it carries. */
-  const EMPTY_CONTINUE_LISTINGS = new Proxy(
-    {},
-    {
-      get: (_target, path) =>
-        typeof path === 'string' && path.startsWith(CONVERSATION_IMPORT_PATH)
-          ? { conversations: [], matched: 0 }
-          : undefined,
-    },
-  ) as Readonly<Record<string, unknown>>;
 
   it('opens Continue from the #continue address and writes the choice into it in place', async () => {
     // Arrange

@@ -772,7 +772,7 @@ function ContinueFromMachine({
     () => fleet.fleet(connection.daemonId),
   );
   useEffect(() => {
-    void fleet.hydrate(connection).catch(() => {});
+    void fleet.ensure(connection).catch(() => {});
   }, [fleet, connection]);
   return (
     <ContinueConversation
@@ -810,7 +810,7 @@ function ProjectCatalogField({ projects, fleet, connection, value, onValueChange
     () => fleet.fleet(connection.daemonId),
   );
   useEffect(() => {
-    void fleet.hydrate(connection).catch(() => {});
+    void fleet.ensure(connection).catch(() => {});
   }, [fleet, connection]);
   const catalog = useMemo(
     () => projectPickerOptions(registry.projects, sessions.sessions),

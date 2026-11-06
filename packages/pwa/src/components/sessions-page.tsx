@@ -275,7 +275,7 @@ export function SessionsPage({ scopeNavigation, clock, ...props }: SessionsPageP
   const inbox = useAgendaInbox();
 
   useEffect(() => {
-    void props.fleet.hydrate(props.connection).catch(() => {});
+    void props.fleet.ensure(props.connection).catch(() => {});
   }, [props.connection, props.fleet]);
 
   const dashboard = <DashboardContent {...props} navigation={navigation} now={now} />;

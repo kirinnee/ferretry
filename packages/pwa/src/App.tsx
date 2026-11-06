@@ -968,8 +968,16 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
       machineName={daemonDisplayName(record ?? connection)}
       fleet={store.fleet}
       projects={store.projects}
-      startSession={async (daemon, request) => await (await store.clients.client(daemon)).start(request)}
-      resumeSession={async (daemon, sessionId) => await (await store.clients.client(daemon)).resume(sessionId)}
+      startSession={async (daemon, request) => {
+        const view = await (await store.clients.client(daemon)).start(request);
+        store.fleet.upsertSession(daemon.daemonId, view);
+        return view;
+      }}
+      resumeSession={async (daemon, sessionId) => {
+        const view = await (await store.clients.client(daemon)).resume(sessionId);
+        store.fleet.upsertSession(daemon.daemonId, view);
+        return view;
+      }}
       usage={store.usage}
       onNavigate={navigate}
       onBack={back}
@@ -2624,6 +2632,7 @@ export function AppShell() {
     openFleetFeed,
     browserFleetFeedEnvironment,
     useCallback((daemonId, event) => store.board.noteEvent(daemonId, event), [store.board]),
+    store.attention,
   );
   const lockedMachines = useLockedMachines(store.unlockGate);
   const toTest = useToTestCards(store.board, everyPairedMachine);

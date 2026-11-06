@@ -13,7 +13,7 @@
  * the board is said to be unavailable on its machine — never "Updating", which is only a first read in flight.
  */
 
-import { type AgendaItem, MACHINE_AGENDA_ID, type SessionView } from '@ferretry/protocol';
+import { type AgendaItem, MACHINE_AGENDA_ID, isMachineAgendaId, type SessionView } from '@ferretry/protocol';
 import {
   createContext,
   useCallback,
@@ -325,7 +325,7 @@ export function useAgendaInboxModel(
   // The machine's own agenda is read like a conversation's board and listed first among the machine's conversations.
   useEffect(() => {
     for (const { connection } of machines) {
-      client.revalidate(connection, daemonSessionScope(connection, MACHINE_AGENDA_ID)).catch(() => undefined);
+      client.hydrate(connection, daemonSessionScope(connection, MACHINE_AGENDA_ID)).catch(() => undefined);
     }
   }, [client, machines]);
   const withMachine = useMemo(
@@ -375,7 +375,11 @@ export function useAgendaInboxModel(
           {
             id: daemonSessionKey(scope),
             key: agendaSummaryKey(entry.attention),
-            read: () => client.revalidate(connection, scope),
+            // The fleet stream owns machine-board freshness; rendering its held board needs no refresh.
+            read: () =>
+              isMachineAgendaId(scope.sessionId)
+                ? client.hydrate(connection, scope)
+                : client.revalidate(connection, scope),
             held: () => client.store.agenda(scope) !== undefined,
           },
         ];
