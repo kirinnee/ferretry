@@ -41,8 +41,8 @@ export interface TreeWalkOptions {
 /**
  * Measure `root`, and open it for removal when asked to.
  *
- * `root` itself is assumed to exist; the caller has already decided what an absent tree means, and the
- * two callers mean different things by it.
+ * `root` must be a present directory, not a symbolic link: the caller has already checked, so an absent
+ * root is not handled here.
  */
 export async function walkTree(root: string, options: TreeWalkOptions): Promise<TreeWalk> {
   const walk: TreeWalk = { files: 0, bytes: 0, escapingLinks: [] };
