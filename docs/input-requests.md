@@ -679,9 +679,8 @@ the facts. The card says so and the agent's answer tells it to hand the page ove
 
 The bridge is also a small **password manager**. A saved login is a **labelled entry**: a label the owner
 reads ("GitHub (kirinnee)"), what it is for (`match`), and its fields. The wire is
-`packages/protocol/src/lib/login-entries.ts`; the store is the account store
-(`packages/daemon/src/lib/secrets/accounts.ts`, [secrets](secrets.md#accounts-and-sign-ins-the-store)), and
-`logins.ts` projects it as saved logins for one release.
+`packages/protocol/src/lib/login-entries.ts` (the shared field, method and card-offer shapes); the store is the
+account store (`packages/daemon/src/lib/secrets/accounts.ts`, [secrets](secrets.md#accounts-and-sign-ins-the-store)).
 
 | Field      | Kind               | Where it rests                                        | Who sees it                                              |
 | ---------- | ------------------ | ----------------------------------------------------- | -------------------------------------------------------- |
@@ -726,8 +725,6 @@ is for (`match`, the site the work is on):
 
 ### The ferret's hint: `account_hint`
 
-`account_hint` and `account_propose` were `login_hint` and `login_propose`; the daemon still accepts the old tool names, read as the new ones through the same checks.
-
 Before a sign-in, a ferret calls **`account_hint`** (a page by name, so the daemon reads the host from where the page
 **is**, or a site) and gets **one line per sign-in** for that site, then the provider sign-ins they lead to
 (`accountHintsFor`): the **sign-in id** (`si_…`, what `account_propose` names), the account's **handle, label and
@@ -738,9 +735,8 @@ matched sign-in, so it never says which accounts lack a password. Never a passwo
 fields exist, the 2FA parameters, seal names, auto-apply or proposals (`AccountHintSchema` has no field for one).
 Every answer ends "passkeys are off". The tool answers the lines as its summary; the structured hint is
 `GET /v1/accounts/hint?site=` (`secrets` use), and an `fy` from before sign-ins, which reads a result strictly, is
-given no field it does not know. The owner sees saved-login words with `fy account hint <site>`
-(`GET /v1/secrets/logins/hint`, one release). It is not more than a ferret could list before (`GET /v1/secrets/logins`
-was already readable with the admin token); it is a narrower view, offered at the moment it helps.
+given no field it does not know. The owner sees the same words with `fy account hint <site>`
+(`GET /v1/accounts/hint`). It is a narrower view than the owner's listing, offered at the moment it helps.
 
 ### Login recipes: how it signs in, and what the daemon saw
 
@@ -803,17 +799,13 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   the card's own observation.
 - **The ferret reads both** in `account_hint`, and the agent instruction says to read it before a sign-in.
 - **The ferret proposes, the owner decides.** After a sign-in a ferret may call `account_propose` (`signIn`, the
-  whole new `recipe`, `why`). It is keyed by the **sign-in**: the older `{ login }` (and `login.propose`) is
-  accepted by the same one schema and resolved to that account's **only** sign-in before any check runs; an account
-  that signs in at several places is refused ("That account signs in at 2 places; name one as signIn (si*…, si*…)."),
-  and one that signs in nowhere too. A rule suggestion (`preapprove`) resolves the sign-in with the same decision,
-  codes and words, so the two halves of one call never answer differently. The audit names the sign-in it resolved to. The proposal waits on that sign-in (three at most;
+  whole new `recipe`, `why`). It is keyed by the **sign-in**, which the one schema requires. A rule suggestion (`preapprove`) resolves the
+  sign-in with the same decision, codes and words, so the two halves of one call never answer differently. The audit names the sign-in. The proposal waits on that sign-in (three at most;
   a fourth pushes out the oldest and closes its card) and on an agenda card, "Recipe change on github.com" (the place only: agenda text is every ferret's to
   read, so no daemon card names an account's label or username), that shows the changed lines and "The ferret says: …". **The card approves nothing**: the owner
   approves or declines in Settings › Accounts › the account › the place › Recipe, or with
   `fy account site recipe approve|decline <sign-in> <proposal>`, through the owner-only
-  `POST /v1/accounts/sign-ins/:si/recipe/proposals/:proposalId` (or `/v1/secrets/logins/:id/…`, which finds the
-  proposal on whichever of the account's sign-ins holds it; `secrets` configure, a kept `secrets.changed` record).
+  `POST /v1/accounts/sign-ins/:si/recipe/proposals/:proposalId` (`secrets` configure, a kept `secrets.changed` record).
   An approval is refused (`stale_proposal`) when the recipe changed after the proposal was made, because the owner
   was shown a diff from the older text. Only an owner who turns **auto-apply** on for that ONE sign-in lets a
   proposal apply at once; that is audited (`login-recipe-auto`, with the sign-in) and marked as the ferret's.
@@ -1100,9 +1092,8 @@ At the machine, `fy input answer <!A7> --account <ACCOUNT>` answers a waiting ca
 sent, and the daemon types it), and
 `--save-as <ACCOUNT> [--label <text>]` keeps the value you type as an account. When the daemon matched an account to
 the card, `fy input answer` says so: "an account matches: GITHUB (GitHub) (answer with --account GITHUB)".
-Routes: `GET /v1/secrets/logins`, `GET /v1/secrets/logins/hint?site=`, `PUT /v1/secrets/logins/:id` (create or change; an omitted field is kept,
-`null` removes it), `POST /v1/secrets/logins/:id/rename`, `DELETE /v1/secrets/logins/:id`, `POST /v1/secrets/logins/:id/recipe/proposals/:proposalId`, all `secrets`
-capability (`use` to list, `configure` to change) and each change a kept `secrets.changed` record.
+Routes: `/v1/accounts*` ([secrets](secrets.md#accounts-and-sign-ins-the-store)), all `secrets` capability (`use` to list,
+`configure` to change) and each change a kept `secrets.changed` record.
 
 ### Accounts and sign-ins (data model)
 

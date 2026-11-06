@@ -661,7 +661,7 @@ inside and still asks `loosen-config`; revoking a device (`DELETE /v1/pair/devic
 device's grants (`PATCH /v1/pair/devices/:deviceId/grants`), where a widen in the same patch is judged inside and
 still wants a passkey proved for it. These must be instant in an emergency. **Not** on the list, deliberately: **deleting stored
 data** (a 2FA key, a sign-in or an account: `DELETE /v1/accounts/:id/factors/:factor`,
-`DELETE /v1/accounts/sign-ins/:signIn`, `DELETE /v1/accounts/:id` and its older `/v1/secrets/logins/:id`), which
+`DELETE /v1/accounts/sign-ins/:signIn`, `DELETE /v1/accounts/:id`), which
 cannot be undone, so "ask again for each act" still asks for it. Removing a default through the configuration
 file itself (`PUT /v1/config/file`, the owner's own door) follows the same decision: the daemon compares the version in effect
 with the new text, and a write that only removes lines needs no `loosen-config` approval, while one that adds a line or
