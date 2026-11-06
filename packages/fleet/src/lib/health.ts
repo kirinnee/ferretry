@@ -12,7 +12,6 @@
  * requires.
  */
 import type { CredentialState } from './identity.ts';
-import type { FleetManifestAccount } from './manifest.ts';
 
 /**
  * How long a conclusive verdict stays trustworthy.
@@ -41,9 +40,4 @@ export interface LocalCredentialReading {
   readonly fingerprint?: string;
   /** Epoch milliseconds the access token expires, when the credential said so. */
   readonly expiresAt?: number;
-}
-
-/** Reading and classifying one account home's credential. The sole impure boundary. */
-export interface FleetCredentialClassifier {
-  classify(account: FleetManifestAccount): Promise<LocalCredentialReading>;
 }

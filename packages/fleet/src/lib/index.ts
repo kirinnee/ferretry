@@ -1,6 +1,3 @@
-/** Stable role exposed by this workspace package's initial public surface. */
-export const packageRole = 'fleet' as const;
-
 export * from './account/adapt.ts';
 export * from './account/budget.ts';
 export * from './account/clone-base.ts';
@@ -31,7 +28,6 @@ export * from './defaults.ts';
 export * from './env-profiles.ts';
 export * from './harness.ts';
 export * from './harness-env.ts';
-export * from './harness-login.ts';
 export * from './health.ts';
 export * from './identity.ts';
 export * from './manifest.ts';

@@ -110,7 +110,7 @@ The feed is `WatchedUsageFeed`, then its `.unattended` half, then `CachedUsageFe
 - Passive reading first. Then, if `needsActiveUsageRead` (`:525`) finds no passive reading younger than the
   interval, `#activeRead` (`:666`) runs:
   - a classify, which is **spawn 1**;
-  - the probe's own material read, **spawn 2** (`AnthropicUsageProbe.probeCredential`);
+  - at the time of this measurement, the probe re-read the store itself, **spawn 2** (the probe now takes the material the classify already read, via `AnthropicUsageProbe.probeMaterial`, and reads no store);
   - `GET https://api.anthropic.com/api/oauth/usage` with a bearer token and a 20 s timeout, or
     `GET https://chatgpt.com/backend-api/wham/usage`.
 - Then `#view` classifies again: **spawn 3**.
@@ -175,14 +175,14 @@ it opens 120 s after serving. While a 5 s fleet pass is on the lane, the 5 s rea
 
 ### 2.1 One new program: `bin/housekeeping.worker.ts`
 
-| Job kind                | Replaces (on main today)                                                         | Inputs it is sent                                                                                  | Returns                                                                                                              |
-| ----------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `credential.local`      | `#classify`, `material`→`readCodexAuthFacts`, `#emails`, the sha256              | a `StoredCredentialResolution`: paths, keychain service/account names, harness                     | `{state, expiresAt?, fingerprint?, codex?: {exp?, lastRefresh?, accountId?}, email?}` — **facts, never material**    |
-| `credential.active`     | `#activeRead`'s classify + `probeCredential` (material, then bearer, then fetch) | the resolution, timeout                                                                            | `{result: FleetUsageProbeResult, fingerprint?}`, where the fingerprint is of the very material whose bearer was used |
-| `usage.passive.claude`  | `FilePassiveUsageStore.read`                                                     | the credential id                                                                                  | `PassiveUsageRecord` or nothing                                                                                      |
-| `usage.passive.codex`   | `credentialPassiveUsage`'s rollout read and decompress                           | `[{credential, files[]}]`, an attribution main computed from its index and cached config documents | the newest `rate_limits` per credential                                                                              |
-| `codex.discover` (PR 4) | the Codex rollout walk                                                           | the Codex home, the claimed ids, a cursor                                                          | candidate bindings `{session, file}` for main to apply                                                               |
-| `probe`                 | —                                                                                | `{probe: true}`                                                                                    | `{probe: true}` (the `bundled-worker.ts:51-95` contract)                                                             |
+| Job kind                | Replaces (on main today)                                                       | Inputs it is sent                                                                                  | Returns                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `credential.local`      | `#classify`, `material`→`readCodexAuthFacts`, `#emails`, the sha256            | a `StoredCredentialResolution`: paths, keychain service/account names, harness                     | `{state, expiresAt?, fingerprint?, codex?: {exp?, lastRefresh?, accountId?}, email?}` — **facts, never material**    |
+| `credential.active`     | `#activeRead`'s classify + `probeMaterial` (material, then bearer, then fetch) | the resolution, timeout                                                                            | `{result: FleetUsageProbeResult, fingerprint?}`, where the fingerprint is of the very material whose bearer was used |
+| `usage.passive.claude`  | `FilePassiveUsageStore.read`                                                   | the credential id                                                                                  | `PassiveUsageRecord` or nothing                                                                                      |
+| `usage.passive.codex`   | `credentialPassiveUsage`'s rollout read and decompress                         | `[{credential, files[]}]`, an attribution main computed from its index and cached config documents | the newest `rate_limits` per credential                                                                              |
+| `codex.discover` (PR 4) | the Codex rollout walk                                                         | the Codex home, the claimed ids, a cursor                                                          | candidate bindings `{session, file}` for main to apply                                                               |
+| `probe`                 | —                                                                              | `{probe: true}`                                                                                    | `{probe: true}` (the `bundled-worker.ts:51-95` contract)                                                             |
 
 The worker keeps no state between jobs. All memory lives on main: heads, the cached facts, the model, the
 flights. So a crash loses nothing (§2.5).

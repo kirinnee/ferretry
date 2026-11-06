@@ -9,7 +9,6 @@ import {
   builtInModelCatalogs,
   loginModelCatalog,
   loginModelCatalogId,
-  modelCatalogFileText,
   modelCatalogFileValue,
   modelCatalogs,
   parseModelCatalog,
@@ -94,11 +93,6 @@ describe('the built-in model catalogs', () => {
     should(new BuiltInModelCatalogError('acme', 'models: required').message).equal(
       'built-in model catalog acme does not check: models: required',
     );
-  });
-
-  it('should answer the text a machine copy starts from, and nothing for an unknown id', () => {
-    should(modelCatalogFileText('zai')).equal(BUILT_IN_MODEL_CATALOG_TEXTS.zai);
-    should(modelCatalogFileText('nobody')).be.undefined();
   });
 });
 

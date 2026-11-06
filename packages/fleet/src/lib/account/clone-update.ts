@@ -40,7 +40,6 @@
  */
 import {
   CLONE_OUTCOME_CHOICES,
-  CLONE_REVIEW_STALE,
   CLONE_SKILLS_DIRECTORY,
   type CloneChoice,
   type CloneDecisions,
@@ -1581,11 +1580,6 @@ function ownsFile(component: Value, path: string): boolean {
   if (component.file === path) return true;
   if (typeof component.directory === 'string' && path.startsWith(`${component.directory}/`)) return true;
   return strings(component.items).some(item => path.startsWith(`${CLONE_SKILLS_DIRECTORY}/${item}/`));
-}
-
-/** The sentence an apply is refused with when the review it names is not the one this machine answers with now. */
-export function checkCloneReviewed(analysis: CloneAnalysis, reviewed: string | undefined): void {
-  if (reviewed === undefined || reviewed !== analysis.fingerprint) throw new CloneRefusal(CLONE_REVIEW_STALE);
 }
 
 const plural = (count: number, one: string, many = `${one}s`): string => `${String(count)} ${count === 1 ? one : many}`;

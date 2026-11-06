@@ -3,12 +3,11 @@
  * reads a real Codex home: every sessions tree is built under a temporary directory.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
-  listRollouts,
   newestRateLimitsInRollout,
   newestRolloutRateLimits,
   type RolloutFile,
@@ -120,8 +119,8 @@ describe('newestRateLimitsInRollout', () => {
   });
 });
 
-describe('listRollouts and newestRolloutRateLimits', () => {
-  async function tree(): Promise<{ root: string; plain: string; packed: string }> {
+describe('newestRolloutRateLimits', () => {
+  async function tree(): Promise<{ root: string; plain: string; packed: string; files: RolloutFile[] }> {
     const root = await sessions();
     const day = join(root, '2026', '10', '13');
     const older = join(root, '2026', '09', '01');
@@ -134,50 +133,16 @@ describe('listRollouts and newestRolloutRateLimits', () => {
       packed,
       Bun.zstdCompressSync(Buffer.from(`${tokenCount('2026-09-01T07:05:00.000Z', limits(70, 7))}\n`)),
     );
-    await writeFile(join(day, 'not-a-rollout.txt'), 'token_count');
-    await utimes(plain, new Date('2026-10-13T07:05:00Z'), new Date('2026-10-13T07:05:00Z'));
-    await utimes(packed, new Date('2026-09-01T07:05:00Z'), new Date('2026-09-01T07:05:00Z'));
-    return { root, plain, packed };
+    const files: RolloutFile[] = [
+      { path: plain, modifiedAt: at('2026-10-13T07:05:00.000Z'), conversationId: CONVERSATION },
+      { path: packed, modifiedAt: at('2026-09-01T07:05:00.000Z'), conversationId: OTHER },
+    ];
+    return { root, plain, packed, files };
   }
-
-  it('should list every rollout in the nested day directories, newest first', async () => {
-    // Arrange
-    const { root, plain, packed } = await tree();
-
-    // Act
-    const actual = await listRollouts(root);
-
-    // Assert
-    should(actual.map(file => [file.path, file.conversationId])).deepEqual([
-      [plain, CONVERSATION],
-      [packed, OTHER],
-    ]);
-    should(actual[0]?.modifiedAt).equal(at('2026-10-13T07:05:00.000Z'));
-  });
-
-  it('should list nothing for a sessions directory that does not exist', async () => {
-    // Arrange
-    const root = await sessions();
-
-    // Act / Assert
-    should(await listRollouts(join(root, 'missing'))).deepEqual([]);
-  });
-
-  it('should not walk deeper than a sessions tree goes', async () => {
-    // Arrange
-    const root = await sessions();
-    const deep = join(root, 'a', 'b', 'c', 'd', 'e');
-    await mkdir(deep, { recursive: true });
-    await writeFile(join(deep, `rollout-x-${CONVERSATION}.jsonl`), '');
-
-    // Act / Assert
-    should(await listRollouts(root)).deepEqual([]);
-  });
 
   it('should read the newest file first, decompressing an older .zst one only when the newer says nothing', async () => {
     // Arrange
-    const { root, plain } = await tree();
-    const files = await listRollouts(root);
+    const { plain, files } = await tree();
 
     // Act
     const newest = await newestRolloutRateLimits(files);
@@ -288,41 +253,5 @@ describe('listRollouts and newestRolloutRateLimits', () => {
 
     // Assert
     should(found?.fiveHour?.usedPercent).equal(31);
-  });
-
-  it('should leave out a rollout it can list but not inspect', async () => {
-    // Arrange — a directory that can be read but not searched names its files and refuses to stat them.
-    const root = await sessions();
-    const readable = join(root, '2026', '10');
-    const listOnly = join(root, '2026', '09');
-    await mkdir(readable, { recursive: true });
-    await mkdir(listOnly, { recursive: true });
-    const kept = join(readable, `rollout-2026-10-13T07-00-00-${CONVERSATION}.jsonl`);
-    await writeFile(kept, '');
-    await writeFile(join(listOnly, `rollout-2026-09-01T07-00-00-${OTHER}.jsonl`), '');
-    await chmod(listOnly, 0o400);
-
-    // Act
-    const actual = await listRollouts(root);
-    await chmod(listOnly, 0o700);
-
-    // Assert
-    should(actual.map(file => file.path)).deepEqual([kept]);
-  });
-
-  it('should skip a day directory it cannot read', async () => {
-    // Arrange
-    const root = await sessions();
-    const unreadable = join(root, '2026');
-    await mkdir(unreadable, { recursive: true });
-    await writeFile(join(unreadable, `rollout-x-${CONVERSATION}.jsonl`), '');
-    await chmod(unreadable, 0o000);
-
-    // Act
-    const actual = await listRollouts(root);
-    await chmod(unreadable, 0o700);
-
-    // Assert — a directory that cannot be read contributes nothing.
-    should(actual).deepEqual([]);
   });
 });

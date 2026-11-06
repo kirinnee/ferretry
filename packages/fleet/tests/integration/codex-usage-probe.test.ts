@@ -5,30 +5,18 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { QuotaFetch, QuotaRequest, StoredMaterialSource } from '../../src/adapters/anthropic-usage-probe.ts';
+import type { QuotaFetch, QuotaRequest } from '../../src/adapters/anthropic-usage-probe.ts';
 import { CODEX_USAGE_URL, CodexUsageProbe } from '../../src/adapters/codex-usage-probe.ts';
-import type { CodexStoreResolution } from '../../src/lib/account/credentials.ts';
 import type { CredentialMaterial } from '../../src/lib/identity.ts';
 
 const NOW = 1_800_000_000_000;
 const TOKEN = 'placeholder-codex-access';
 const ACCOUNT = 'placeholder-account-id';
 
-const resolution: CodexStoreResolution = {
-  harness: 'codex',
-  store: 'ferretry',
-  canonicalFile: '/fleet/credentials/codex-work/auth.json',
-  ownedDirectory: '/fleet/credentials/codex-work',
-};
-
-const stored = (material: CredentialMaterial): StoredMaterialSource => ({
-  storedMaterial: () => Promise.resolve(material),
-});
-
-const signedIn = stored({
+const SIGNED_IN: CredentialMaterial = {
   outcome: 'found',
   blob: JSON.stringify({ tokens: { access_token: TOKEN, refresh_token: 'r', account_id: ACCOUNT } }),
-});
+};
 
 interface Reply {
   readonly status?: number;
@@ -63,8 +51,7 @@ const usageBody = JSON.stringify({
   },
 });
 
-const probe = (fetch: QuotaFetch, source: StoredMaterialSource = signedIn) =>
-  new CodexUsageProbe({ fetch, stored: source, now: () => NOW });
+const probe = (fetch: QuotaFetch) => new CodexUsageProbe({ fetch, now: () => NOW });
 
 describe('CodexUsageProbe', () => {
   it('should read both windows with exactly a bearer and an account id, and conclude nothing about the login', async () => {
@@ -72,7 +59,7 @@ describe('CodexUsageProbe', () => {
     const { fetch, requests } = transport({ text: usageBody });
 
     // Act
-    const actual = await probe(fetch).probeCredential(resolution);
+    const actual = await probe(fetch).probeMaterial(SIGNED_IN);
 
     // Assert — no client impersonation: no originator, no OpenAI-Beta, nothing but the two headers.
     should(requests).have.length(1);
@@ -98,9 +85,11 @@ describe('CodexUsageProbe', () => {
     });
 
     // Act
-    const actual = await new CodexUsageProbe({ fetch, stored: signedIn, now: () => NOW, timeoutMs: 5 }).probeCredential(
-      resolution,
-    );
+    const actual = await new CodexUsageProbe({
+      fetch,
+      now: () => NOW,
+      timeoutMs: 5,
+    }).probeMaterial(SIGNED_IN);
 
     // Assert
     should(requests[0]?.timeoutMs).equal(5);
@@ -130,7 +119,7 @@ describe('CodexUsageProbe', () => {
       const { fetch } = transport(reply);
 
       // Act
-      const actual = await probe(fetch).probeCredential(resolution);
+      const actual = await probe(fetch).probeMaterial(SIGNED_IN);
 
       // Assert — and the token never reaches the sentence.
       should(actual.ok).be.false();
@@ -153,7 +142,7 @@ describe('CodexUsageProbe', () => {
       const { fetch, requests } = transport({ text: usageBody });
 
       // Act
-      const actual = await probe(fetch, stored(material)).probeCredential(resolution);
+      const actual = await probe(fetch).probeMaterial(material);
 
       // Assert
       should(requests).be.empty();
@@ -161,23 +150,4 @@ describe('CodexUsageProbe', () => {
       should(actual).not.have.property('credentialSignal');
     });
   }
-
-  it('should decline a Claude credential without asking anybody', async () => {
-    // Arrange
-    const { fetch, requests } = transport({ text: usageBody });
-
-    // Act
-    const actual = await probe(fetch).probeCredential({
-      harness: 'claude',
-      store: 'host',
-      secureStorage: '',
-      storageDirectory: '/home/someone/.claude',
-      credentialFile: '/home/someone/.claude/.credentials.json',
-    });
-
-    // Assert
-    should(requests).be.empty();
-    should(actual.usageBased).be.false();
-    should(actual).not.have.property('credentialSignal');
-  });
 });

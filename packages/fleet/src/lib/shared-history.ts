@@ -214,12 +214,7 @@ export interface SharedHistoryRefusal {
   readonly reason: string;
 }
 
-/**
- * The exact read-only report used by dry-run and returned after a successful materialization.
- *
- * `emptiedSourceDirectories` and `refusals` are optional only so that an older literal still
- * type-checks; the planner always supplies both, and an absent field means "none".
- */
+/** The exact read-only report used by dry-run and returned after a successful materialization. */
 export interface SharedHistoryPreview {
   readonly kind: HarnessKind;
   readonly pool: string;
@@ -237,14 +232,14 @@ export interface SharedHistoryPreview {
    * migration rolled back if anything appeared in one meanwhile, so this names mutations that really
    * happen rather than intentions.
    */
-  readonly emptiedSourceDirectories?: readonly string[];
+  readonly emptiedSourceDirectories: readonly string[];
   /**
    * Homes excluded from this plan because the filesystem refused to read them.
    *
    * A dry run stays truthful and read-only: the remaining homes are still planned in full, and a
    * materialization refuses outright rather than migrating a fleet it could only partly observe.
    */
-  readonly refusals?: readonly SharedHistoryRefusal[];
+  readonly refusals: readonly SharedHistoryRefusal[];
 }
 
 export type SharedHistoryAction =
@@ -553,30 +548,12 @@ function renderJsonlLines(lines: readonly string[]): string {
 }
 
 /**
- * The union of prompt-history documents: what a pooled file is supposed to end up holding.
- *
- * A line's identity is its exact text, and its multiplicity is the LARGEST number of times that
- * text occurs in any single document — never the sum across documents. The same prompt typed twice
- * in one history is two pieces of evidence and both survive; pooling the same history a second time
- * contributes nothing, so re-running a migration cannot grow the pooled file. Lines keep their
- * first-appearance order, stably re-sorted by timestamp, and a line that cannot be parsed is kept
- * verbatim at the end rather than being erased.
- */
-export function mergeSharedHistoryJsonl(...documents: readonly string[]): string {
-  const counts = new Map<string, number>();
-  for (const document of documents) {
-    for (const [line, count] of countJsonlLines(document)) {
-      counts.set(line, Math.max(counts.get(line) ?? 0, count));
-    }
-  }
-  return renderJsonlLines([...counts].flatMap(([line, count]) => Array.from({ length: count }, () => line)));
-}
-
-/**
  * The part of `source` a pooled document does not already hold, and nothing else.
  *
- * This is the union of {@link mergeSharedHistoryJsonl} expressed as something that can only be
- * appended. The pooled file is never rewritten and never truncated, because the only way to write a
+ * The pooled file's union with `source`, expressed as something that can only be appended. A line's
+ * identity is its exact text, and its multiplicity is the LARGEST number of times that text occurs in
+ * either document — never the sum — so pooling the same history a second time contributes nothing. The
+ * pooled file is never rewritten and never truncated, because the only way to write a
  * whole new body is to erase whatever a concurrent writer appended in the meantime — and erasing
  * prompt history is the one thing this migration must never do. The cost is ordering: additions
  * land after everything already pooled rather than being interleaved by timestamp.
@@ -1559,7 +1536,7 @@ export class SharedHistoryMigration {
 
 /** A partly observed fleet is never migrated: the plan may show it, but an apply refuses it. */
 function assertNoRefusals(plan: SharedHistoryPlan): void {
-  const refusals = plan.refusals ?? [];
+  const refusals = plan.refusals;
   if (refusals.length === 0) return;
   throw new Error(
     `refusing to migrate ${plan.kind} history while ${refusals.length} account home(s) cannot be read: ${refusals

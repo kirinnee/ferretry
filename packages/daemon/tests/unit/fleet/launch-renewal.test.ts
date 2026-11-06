@@ -12,7 +12,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  type CredentialCloneOutcome,
   type CredentialReading,
   type FleetCredentialStore,
   type FleetIdentity,
@@ -102,10 +101,6 @@ class CountingStore implements FleetCredentialStore {
   async read(kind: HarnessKind, member: FleetIdentityMember): Promise<CredentialReading> {
     this.reads.push(`${kind} ${member.accountId}`);
     return this.reading;
-  }
-
-  async clone(): Promise<CredentialCloneOutcome> {
-    return { ok: true };
   }
 }
 

@@ -45,9 +45,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { ferretryCredentialDirectory } from '../lib/account/credential-directory.ts';
-import type { StoredCredentialResolution } from '../lib/account/credentials.ts';
 import type { CredentialMaterial } from '../lib/identity.ts';
-import type { FleetManifestAccount, HarnessKind } from '../lib/manifest.ts';
 import {
   parseStoredUsageBody,
   type QuotaReading,
@@ -56,7 +54,6 @@ import {
 } from '../lib/quota.ts';
 import {
   CREDENTIAL_USAGE_FILE,
-  type FleetUsageProbe,
   type FleetUsageProbeResult,
   type PassiveUsageRecord,
   PassiveUsageRecordSchema,
@@ -133,21 +130,8 @@ export interface QuotaRequest {
 /** Performing one bounded HTTP request. The only thing here that touches a network. */
 export type QuotaFetch = (request: QuotaRequest) => Promise<QuotaResponse>;
 
-/** Reading one home's raw credential. Satisfied structurally by the platform credential store. */
-export interface CredentialMaterialSource {
-  material(kind: HarnessKind, home: string): Promise<CredentialMaterial>;
-}
-
-/** Reading one account-model credential's raw material from its one store. Satisfied by the platform store. */
-export interface StoredMaterialSource {
-  storedMaterial(resolution: StoredCredentialResolution): Promise<CredentialMaterial>;
-}
-
 export interface AnthropicUsageProbeDeps {
   readonly fetch: QuotaFetch;
-  readonly credentials: CredentialMaterialSource;
-  /** The account model's reader, by credential store rather than by home. */
-  readonly stored?: StoredMaterialSource;
   readonly timeoutMs?: number;
   /** Where the usage read goes: {@link ANTHROPIC_USAGE_URL} unless a loopback test server stands in. */
   readonly url?: string;
@@ -422,33 +406,8 @@ function acceptedScopeFailure(response: ProviderResponseFingerprint, body: unkno
   return jsonContent && root?.type === 'error' && error?.type === 'permission_error';
 }
 
-export class AnthropicUsageProbe implements FleetUsageProbe {
+export class AnthropicUsageProbe {
   constructor(private readonly deps: AnthropicUsageProbeDeps) {}
-
-  async probe(account: FleetManifestAccount): Promise<FleetUsageProbeResult> {
-    if (account.kind !== 'claude') {
-      // NO `credentialSignal`, deliberately. This probe has not looked at a Codex account and is not
-      // entitled to classify one — an absent signal is how the health verdict reaches "liveness
-      // unproven" instead of inventing a conclusion from a probe that declined to run.
-      return failure(`no Anthropic quota probe applies to a ${account.kind} account`, { usageBased: false });
-    }
-
-    return await this.#withMaterial(await this.deps.credentials.material('claude', account.home));
-  }
-
-  /**
-   * The same single free read for an account-model CREDENTIAL (design §8.1.2): one read per credential
-   * however many runtimes use it, with the token taken from the credential's one store.
-   */
-  async probeCredential(resolution: StoredCredentialResolution): Promise<FleetUsageProbeResult> {
-    if (resolution.harness !== 'claude') {
-      return failure('no Anthropic quota probe applies to a codex credential', { usageBased: false });
-    }
-    if (this.deps.stored === undefined) {
-      return failure('this probe was built without a credential store reader', { credentialSignal: 'inconclusive' });
-    }
-    return await this.#withMaterial(await this.deps.stored.storedMaterial(resolution));
-  }
 
   /**
    * The same free read, with material the CALLER read from the credential's one store — so a caller

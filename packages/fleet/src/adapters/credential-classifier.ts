@@ -1,9 +1,9 @@
 /**
- * Classifying one account home's credential, and digesting it so a REPLACEMENT can be detected.
+ * Digesting a credential so a REPLACEMENT can be detected.
  *
  * This is an adapter because it needs the secret. `lib/health.ts` decides verdicts from a state and
  * an opaque digest and can therefore be a pure module; somebody has to read the keychain item or the
- * `auth.json` first, and that is here.
+ * `auth.json` first, and that is done at the adapters.
  *
  * ## The digest, and why it is not a "hash of the token"
  *
@@ -27,20 +27,8 @@
  * test against one previous value, and a shorter string is one less thing to mistake for a token in a
  * log line. It is still never logged.
  */
-import type { FleetCredentialClassifier, LocalCredentialReading } from '../lib/health.ts';
-import { classifyCredential, type CredentialMaterial } from '../lib/identity.ts';
-import type { FleetManifestAccount, HarnessKind } from '../lib/manifest.ts';
+import type { CredentialMaterial } from '../lib/identity.ts';
 import type { StoredCredentialResolution } from '../lib/account/credentials.ts';
-
-/** Reading one home's raw credential. Satisfied structurally by the platform credential store. */
-export interface CredentialMaterialReader {
-  material(kind: HarnessKind, home: string): Promise<CredentialMaterial>;
-}
-
-export interface StoreCredentialClassifierDeps {
-  readonly credentials: CredentialMaterialReader;
-  readonly now: () => number;
-}
 
 /** Hex characters kept from the digest. See the note above on why it is truncated. */
 export const CREDENTIAL_FINGERPRINT_LENGTH = 32;
@@ -56,46 +44,7 @@ export function credentialFingerprint(blob: string): string {
   return new Bun.CryptoHasher('sha256').update(blob).digest('hex').slice(0, CREDENTIAL_FINGERPRINT_LENGTH);
 }
 
-export class StoreCredentialClassifier implements FleetCredentialClassifier {
-  constructor(private readonly deps: StoreCredentialClassifierDeps) {}
-
-  async classify(account: FleetManifestAccount): Promise<LocalCredentialReading> {
-    return localReading(
-      account.kind,
-      await this.deps.credentials.material(account.kind, account.home),
-      this.deps.now(),
-    );
-  }
-}
-
-function localReading(kind: HarnessKind, material: CredentialMaterial, now: number): LocalCredentialReading {
-  const reading = classifyCredential(kind, material, now);
-  return {
-    state: reading.state,
-    ...(reading.expiresAt === undefined ? {} : { expiresAt: reading.expiresAt }),
-    // Only material that was actually found has a digest. See the note above.
-    ...(material.outcome === 'found' ? { fingerprint: credentialFingerprint(material.blob) } : {}),
-  };
-}
-
 /** Reading one account-model credential's raw material from its one store. Satisfied by the platform store. */
 export interface StoredCredentialMaterialReader {
   storedMaterial(resolution: StoredCredentialResolution): Promise<CredentialMaterial>;
-}
-
-export interface StoredCredentialClassifierDeps {
-  readonly credentials: StoredCredentialMaterialReader;
-  readonly now: () => number;
-}
-
-/**
- * The same classification and digest, for a CREDENTIAL rather than an account home (design §3.2 C5):
- * one credential is one store and one rate-limit pool, so it is read once however many runtimes use it.
- */
-export class StoredCredentialClassifier {
-  constructor(private readonly deps: StoredCredentialClassifierDeps) {}
-
-  async classify(resolution: StoredCredentialResolution): Promise<LocalCredentialReading> {
-    return localReading(resolution.harness, await this.deps.credentials.storedMaterial(resolution), this.deps.now());
-  }
 }

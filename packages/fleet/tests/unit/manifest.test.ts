@@ -6,10 +6,8 @@ import {
   FleetManifestRuntimeSchema,
   FleetManifestSchema,
   MANIFEST_VERSION,
-  availableAccounts,
   buildFleetManifest,
   findAccountById,
-  isModelSelectable,
   manifestRuntimes,
   selectableModelIds,
   wrapperName,
@@ -181,8 +179,6 @@ describe('selectableModelIds', () => {
 
     // Assert
     should(actual).deepEqual(expected);
-    should(isModelSelectable(subject, 'model-down')).be.false();
-    should(isModelSelectable(subject, 'model-up')).be.true();
   });
 
   it('should offer nothing at all from an unavailable account', () => {
@@ -194,7 +190,6 @@ describe('selectableModelIds', () => {
 
     // Assert
     should(actual).deepEqual([]);
-    should(isModelSelectable(subject, 'model-one')).be.false();
   });
 });
 
@@ -289,7 +284,7 @@ describe('buildFleetManifest', () => {
 
     // Assert
     should(actual.accounts.length).equal(2);
-    should(availableAccounts(actual).map(entry => entry.id)).deepEqual([ID_ONE]);
+    should(actual.accounts.filter(entry => entry.available).map(entry => entry.id)).deepEqual([ID_ONE]);
   });
 });
 

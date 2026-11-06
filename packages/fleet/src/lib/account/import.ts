@@ -1034,14 +1034,6 @@ function previewOf(scan: HostHarnessScan, entry: HarnessHarvest | undefined): Ha
 }
 
 /**
- * The scan as the first run shows it (§7 `/v1/fleet/setup/scan`): what each harness has, and no
- * value of anything. Secret-looking keys are named; their values are not in this result at all.
- */
-export function importPreview(scans: readonly HostHarnessScan[]): ImportPreview {
-  return planImport(scans, { digest: text => text }).preview;
-}
-
-/**
  * Plan an import of the given harnesses' setups (§4.3 steps 2–4, Import again).
  *
  * Total: a document that cannot be read becomes a problem sentence in the preview and the rest of

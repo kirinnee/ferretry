@@ -7,7 +7,6 @@ import {
   type HostDocumentRead,
   type HostHarnessScan,
   type ImportPlan,
-  importPreview,
   looksSecret,
   mergeImport,
   mergeImportRecord,
@@ -743,9 +742,9 @@ describe('planImport — Import again (O6)', () => {
   });
 });
 
-describe('importPreview', () => {
+describe('the import preview', () => {
   it('should be the plan preview, with names and no values', () => {
-    const preview = importPreview(fullScans());
+    const { preview } = planImport(fullScans(), { digest: text => text });
     should(JSON.stringify(preview).includes(FAKE_KEY)).be.false();
     should(preview.harnesses.map(harness => harness.mcpServers)).deepEqual([
       ['github', 'notes', 'docs'],

@@ -17,11 +17,10 @@
  * dropped. A failure message is built from statuses and fixed sentences, never from material or from
  * the provider's body.
  */
-import type { StoredCredentialResolution } from '../lib/account/credentials.ts';
 import type { CredentialMaterial } from '../lib/identity.ts';
 import { parseCodexUsageBody } from '../lib/quota.ts';
 import type { FleetUsageProbeResult } from '../lib/usage.ts';
-import type { QuotaFetch, StoredMaterialSource } from './anthropic-usage-probe.ts';
+import type { QuotaFetch } from './anthropic-usage-probe.ts';
 
 export const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 
@@ -32,7 +31,6 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 
 export interface CodexUsageProbeDeps {
   readonly fetch: QuotaFetch;
-  readonly stored: StoredMaterialSource;
   readonly now: () => number;
   readonly timeoutMs?: number;
   /** Where the usage read goes: {@link CODEX_USAGE_URL} unless a loopback test server stands in. */
@@ -63,13 +61,6 @@ function codexBearer(material: CredentialMaterial): { readonly token: string; re
 
 export class CodexUsageProbe {
   constructor(private readonly deps: CodexUsageProbeDeps) {}
-
-  async probeCredential(resolution: StoredCredentialResolution): Promise<FleetUsageProbeResult> {
-    if (resolution.harness !== 'codex') {
-      return { ...failure('no Codex usage read applies to a claude credential'), usageBased: false };
-    }
-    return await this.probeMaterial(await this.deps.stored.storedMaterial(resolution));
-  }
 
   /**
    * The same free read, with `auth.json` material the CALLER read from the credential's one store — so

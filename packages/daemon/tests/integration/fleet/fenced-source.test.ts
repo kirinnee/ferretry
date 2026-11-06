@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { openFolderOutsideStateHomes } from '@ferretry/fleet';
 import {
-  copyFencedSource,
   copyFencedSourceInto,
   FencedSourceError,
   NodeGuardDisk,
@@ -58,6 +57,23 @@ const refusalOf = async (work: Promise<unknown>): Promise<FencedSourceError> => 
   return error;
 };
 
+/** The provisioner's form: open the checked destination folder under `root`, copy `source` to its new entry `leaf`. */
+async function copyInto(
+  fence: Awaited<ReturnType<typeof resolveSourceFence>>,
+  source: string,
+  root: string,
+  leaf: string,
+) {
+  await mkdir(root, { recursive: true });
+  const opened = await openFolderOutsideStateHomes(root, fence.homes, new NodeGuardDisk());
+  if (!opened.ok) throw new Error(`the destination did not open: ${opened.rule}`);
+  try {
+    await copyFencedSourceInto(fence, source, opened.value, leaf);
+  } finally {
+    await opened.value.close();
+  }
+}
+
 describe('the fenced copy on a real disk', () => {
   it('should copy into a checked folder, and refuse by rule a source in the home', async () => {
     // Arrange — the provisioner's form: the destination is a folder it opened and checked, written through.
@@ -87,7 +103,7 @@ describe('the fenced copy on a real disk', () => {
     await symlink(path.join(outside, 'CLAUDE.md'), path.join(outside, 'linked.md'));
 
     // Act
-    await copyFencedSource(fence, outside, path.join(root, 'copy'));
+    await copyInto(fence, outside, root, 'copy');
 
     // Assert
     should(await readFile(path.join(root, 'copy', 'linked.md'), 'utf8')).eql('Outside guidance.\n');
@@ -103,10 +119,10 @@ describe('the fenced copy on a real disk', () => {
 
     // Act
     const refusals = [
-      await refusalOf(copyFencedSource(fence, path.join(home, 'api-token'), path.join(root, 'a'))),
-      await refusalOf(copyFencedSource(fence, path.join(store, 'twin.md'), path.join(root, 'b'))),
-      await refusalOf(copyFencedSource(fence, loop, path.join(root, 'c'))),
-      await refusalOf(copyFencedSource(fence, path.join(root, 'nowhere'), path.join(root, 'd'))),
+      await refusalOf(copyInto(fence, path.join(home, 'api-token'), root, 'a')),
+      await refusalOf(copyInto(fence, path.join(store, 'twin.md'), root, 'b')),
+      await refusalOf(copyInto(fence, loop, root, 'c')),
+      await refusalOf(copyInto(fence, path.join(root, 'nowhere'), root, 'd')),
     ];
 
     // Assert: the stand-in store is this user's, so it proves nothing and its hard link is refused too.

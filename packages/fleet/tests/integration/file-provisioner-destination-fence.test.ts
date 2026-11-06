@@ -626,23 +626,9 @@ describe('the destination side — what each refusal says', () => {
       const sweep = await settled(
         subject.apply(plan([{ kind: 'prune-directory', path: runtime, keep: [], only: ['x'] }])),
       );
-      const sidecar = await settled(
-        subject.apply(
-          plan([
-            {
-              kind: 'codex-sqlite-ownership',
-              path: path.join(runtime, 'config.toml'),
-              markerPath: path.join(runtime, '.ferretry-sqlite-home.json'),
-              sqliteHome: path.join(runtime, 'sqlite'),
-              enabled: false,
-            },
-          ]),
-        ),
-      );
 
-      // Assert — neither is mistaken for an absent file.
+      // Assert — it is not mistaken for an absent file.
       should((sweep as Error).message).match(/EACCES|could not be installed as the working directory/u);
-      should((sidecar as Error).message).match(/EACCES|could not be installed as the working directory/u);
     } finally {
       await chmod(runtime, 0o700);
     }

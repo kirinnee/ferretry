@@ -11,7 +11,7 @@ import { MAX_ROUTING_PROMPT_CHARS } from '@ferretry/protocol';
 import should from 'should';
 import {
   AGENDA_INSTRUCTION,
-  AGENT_INSTRUCTION,
+  ALWAYS_ON_SECTIONS,
   AGENT_TOOLS_INSTRUCTION,
   BOARD_INSTRUCTION,
   CLAUDE_NO_QUESTIONS_FLAG,
@@ -359,7 +359,10 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     (harness, on) => {
       // Arrange
       const env = Object.fromEntries(SWITCHES.map(section => [section.env, on.includes(section) ? '1' : '0']));
-      const expected = [AGENT_INSTRUCTION('fy'), ...on.map(section => section.text)].join('\n\n');
+      const expected = [
+        ...ALWAYS_ON_SECTIONS('fy').map(section => section.text),
+        ...on.map(section => section.text),
+      ].join('\n\n');
 
       // Act
       const args = launchArguments(wrapperFor(harness), env);

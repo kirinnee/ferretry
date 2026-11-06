@@ -10,14 +10,8 @@ import {
   builtInPresets,
   parsePresetText,
   presetCatalog,
-  presetFileText,
 } from '../../src/lib/presets/catalog.ts';
-import {
-  credentialFromPreset,
-  presetDefaultEnv,
-  presetLoginRefusal,
-  presetSecrets,
-} from '../../src/lib/presets/login.ts';
+import { credentialFromPreset, presetDefaultEnv, presetLoginRefusal } from '../../src/lib/presets/login.ts';
 import {
   PresetVariableSchema,
   type ProviderPreset,
@@ -132,11 +126,6 @@ describe('the built-in preset catalogue', () => {
     should(ProviderPresetFileSchema.safeParse({ group: 'favourite' }).error?.issues.map(i => i.path[0])).containEql(
       'group',
     );
-  });
-
-  it('should give the text to start a copy from, and nothing for an unknown id', () => {
-    should(presetFileText('kimi')).equal(BUILT_IN_PRESET_TEXTS.kimi);
-    should(presetFileText('nope')).be.undefined();
   });
 });
 
@@ -310,25 +299,6 @@ describe('a login from a preset', () => {
     should(credential.codex?.env).containDeep({ DEEPSEEK_API_KEY: secretReference('DEEPSEEK_API_KEY') });
     should(credential.env).deepEqual({ FUTURE_VARIABLE: 'kept' });
     should(CredentialSchema.safeParse(credential).error?.issues ?? []).deepEqual([]);
-  });
-});
-
-describe('presetSecrets', () => {
-  it('should name each secret once, by every variable that carries it, required when any of them is', () => {
-    // Arrange — deepseek's one secret authenticates two variables, one per half
-    const deepseek = preset('deepseek');
-
-    // Act
-    const actual = presetSecrets(deepseek);
-
-    // Assert
-    should(actual).deepEqual([
-      { name: 'DEEPSEEK_API_KEY', variables: ['DEEPSEEK_API_KEY', 'ANTHROPIC_AUTH_TOKEN'], required: true },
-    ]);
-  });
-
-  it('should name nothing for a preset with no secret variable', () => {
-    should(presetSecrets(preset('ollama-codex'))).deepEqual([]);
   });
 });
 

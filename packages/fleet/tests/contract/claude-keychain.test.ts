@@ -17,10 +17,11 @@
  */
 import { afterAll, beforeAll, describe, it } from 'bun:test';
 import { mkdir, readdir } from 'node:fs/promises';
+import { userInfo } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import {
-  harnessKeychainAccount,
+  claudeKeychainAccount,
   PlatformFleetCredentialStore,
   SpawnCredentialCommand,
 } from '../../src/adapters/credential-store.ts';
@@ -150,7 +151,7 @@ describe.skipIf(!(contract.enabled && keychainWritable))(
           platform: process.platform,
           command: new SpawnCredentialCommand(),
           now: () => Date.now(),
-          keychainAccount: harnessKeychainAccount([process.env.USER]),
+          keychainAccount: claudeKeychainAccount(process.env.USER, () => userInfo().username),
         });
         const resolution = resolveCredentialStore(
           'claude-you',
@@ -158,7 +159,7 @@ describe.skipIf(!(contract.enabled && keychainWritable))(
           { fleetRoot: path.join(w.root, 'fleet'), userHome: path.join(w.root, 'home') },
         );
         if (resolution.store === 'environment' || 'unavailable' in resolution) throw new Error('fixture');
-        should((await store.readStored(resolution)).state).equal(
+        should((await store.inspectStored(resolution)).reading.state).equal(
           'valid',
           'Ferretry read a different item than the one Claude reads',
         );

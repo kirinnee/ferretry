@@ -126,8 +126,8 @@ async function machine(platform: 'linux' | 'darwin'): Promise<Machine> {
     },
   };
   const world = { clock: NOW };
-  const anthropic = new AnthropicUsageProbe({ fetch: fetchOf(), credentials: store });
-  const codex = new CodexUsageProbe({ fetch: fetchOf(), stored: counted, now: () => world.clock });
+  const anthropic = new AnthropicUsageProbe({ fetch: fetchOf() });
+  const codex = new CodexUsageProbe({ fetch: fetchOf(), now: () => world.clock });
   const credentialReads = new CachedCredentialReads({
     reads: new MaterialCredentialReads({
       store: counted,

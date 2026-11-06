@@ -395,16 +395,6 @@ export function selectableModelIds(account: FleetManifestAccount): readonly stri
   return account.models.filter(model => model.available).map(model => model.id);
 }
 
-/** Whether `modelId` may be routed to `account`. The only sanctioned selection check. */
-export function isModelSelectable(account: FleetManifestAccount, modelId: string): boolean {
-  return selectableModelIds(account).includes(modelId);
-}
-
-/** Accounts that can serve work right now, in manifest order. */
-export function availableAccounts(manifest: FleetManifest): readonly FleetManifestAccount[] {
-  return manifest.accounts.filter(account => account.available);
-}
-
 /** Look an account up by its only legitimate join key. */
 export function findAccountById(manifest: FleetManifest, id: string): FleetManifestAccount | undefined {
   return manifest.accounts.find(account => account.id === id);

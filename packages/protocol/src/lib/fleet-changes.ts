@@ -70,13 +70,6 @@ export const FleetWriteOperationSchema = z.discriminatedUnion('kind', [
     layerCount: z.number().int().nonnegative(),
   }),
   z.strictObject({
-    kind: z.literal('codex-sqlite-ownership'),
-    path: z.string().min(1),
-    markerPath: z.string().min(1),
-    sqliteHome: z.string().min(1),
-    enabled: z.boolean(),
-  }),
-  z.strictObject({
     kind: z.literal('prune'),
     path: z.string().min(1),
     marker: z.string().min(1),

@@ -62,24 +62,6 @@ export function presetDefaultEnv(preset: ProviderPreset): Readonly<Record<string
 }
 
 /**
- * The secrets a login from the preset needs, each NAME once however many variables carry it: what a
- * one-click form asks for. `required` when some required variable carries it.
- */
-export function presetSecrets(
-  preset: ProviderPreset,
-): readonly { readonly name: string; readonly variables: readonly string[]; readonly required: boolean }[] {
-  const byName = new Map<string, { variables: string[]; required: boolean }>();
-  for (const [variable, declared] of Object.entries(loginVariables(preset))) {
-    if (declared.secretName === undefined) continue;
-    const entry = byName.get(declared.secretName) ?? { variables: [], required: false };
-    entry.variables.push(variable);
-    entry.required ||= declared.required;
-    byName.set(declared.secretName, entry);
-  }
-  return [...byName].map(([name, entry]) => ({ name, ...entry }));
-}
-
-/**
  * Why `input` cannot make a login from `preset`, in one sentence, or `undefined` when it can. Every
  * sentence names the variable to fix.
  */

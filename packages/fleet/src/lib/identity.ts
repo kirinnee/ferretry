@@ -1,11 +1,8 @@
 /**
- * Identity — which accounts share one provider login, and how one credential reaches all of them.
+ * Identity — which accounts share one provider login, and what each home holds.
  *
- * This is the shape the whole fleet rests on. Every lane of one account (`alex`, `auto-alex`,
- * `f5-alex`, …) is the **same provider account**, but each home keeps its own credential copy: a
- * per-home keychain item for Claude, a per-home `auth.json` for Codex. So a fleet of thirty wrappers
- * on six provider accounts needs **six** browser approvals, not thirty — the other twenty-four are
- * copies.
+ * Every lane of one account (`alex`, `auto-alex`, `f5-alex`, …) is the **same provider account**, so a
+ * fleet of thirty wrappers on six provider accounts needs **six** browser approvals, not thirty.
  *
  * Getting there is three decisions, all of them here and all of them pure:
  *
@@ -13,8 +10,8 @@
  *    what it declares — never from a name infix, which would let renaming a wrapper silently move it
  *    to another provider account.
  * 2. **Classify.** Each member's credential is `valid`, `refreshable`, `missing`, or `unreadable`.
- * 3. **Pick a donor and clone it.** The freshest usable credential is copied onto the siblings that
- *    need one. Only an identity with no usable credential anywhere needs a human.
+ * 3. **Pick a donor.** The freshest usable credential is the one the siblings that need one would
+ *    receive. Only an identity with no usable credential anywhere needs a human.
  *
  * ## `unreadable` is a state, and that is the point
  *
@@ -26,13 +23,13 @@
  *
  * So `unreadable` is distinct here, and it is load-bearing:
  *
- * - it can never be a **donor** — a credential nobody could classify is never cloned onto siblings,
- *   because cloning one broken credential across an identity turns one broken lane into thirty;
+ * - it can never be a **donor** — a credential nobody could classify is never offered to siblings,
+ *   because one broken credential would turn one broken lane into thirty;
  * - it can never be a **target** — a sibling whose credential could not be read is refused and
  *   reported, never overwritten;
  * - an identity with no donor and any unreadable member is **indeterminate**, not "needs login".
  *
- * Nothing in this module reads a credential, writes one, or names one in a message. Classification
+ * Nothing in this module reads a credential or names one in a message. Classification
  * takes material a caller already holds and returns a verdict; the material itself stays behind
  * {@link FleetCredentialStore}, in an adapter, and never reaches a log line.
  */
@@ -193,16 +190,6 @@ export function credentialShape(kind: HarnessKind, material: CredentialMaterial)
   return kind === 'claude' ? claudeShape(material) : codexShape(material);
 }
 
-/** Classify a Claude Code OAuth credential blob. */
-export function classifyClaudeCredential(material: CredentialMaterial, now: number): CredentialReading {
-  return classifyShape(claudeShape(material), now);
-}
-
-/** Classify a Codex `auth.json`. Its access token carries its own expiry, as a JWT claim. */
-export function classifyCodexCredential(material: CredentialMaterial, now: number): CredentialReading {
-  return classifyShape(codexShape(material), now);
-}
-
 /** Classify whichever credential shape this harness keeps. */
 export function classifyCredential(kind: HarnessKind, material: CredentialMaterial, now: number): CredentialReading {
   return classifyShape(credentialShape(kind, material), now);
@@ -282,7 +269,7 @@ export interface FleetIdentityStatus {
   readonly verdict: FleetIdentityVerdict;
   /** Siblings that need a credential and would receive the donor's. */
   readonly targets: readonly FleetIdentityMember[];
-  /** Siblings refused a clone because their own credential could not be read. */
+  /** Siblings refused the donor credential because their own credential could not be read. */
   readonly refused: readonly FleetIdentityMemberStatus[];
 }
 
@@ -311,55 +298,6 @@ export function pickDonor(members: readonly FleetIdentityMemberStatus[]): FleetI
   );
   const best = ranked[0];
   return best !== undefined && DONOR_RANK[best.reading.state] > 0 ? best : undefined;
-}
-
-/**
- * WHOSE WRAPPER shows the browser. Not whose credential this is, and it used to decide both.
- *
- * ## The defect this replaces
- *
- * This was `chooseLoginMember`, and it answered one question that was really two: it returned the
- * identity's **interactive** lane whatever the caller asked for, and that one member was then treated
- * as the account being signed in. So signing `claude-review` in ran the approval through
- * `claude-default`'s wrapper and left the credential in `claude-default`'s home. The account somebody
- * was trying to fix stayed signed out, and nothing said so.
- *
- * The old reasoning — "a browser approval is interactive" — is sound, and it is about which WRAPPER
- * can talk to a person. It was never a licence to decide WHICH ACCOUNT keeps the credential. That
- * fact belongs to the request, which names the accounts whose own homes are read and proved before
- * any of them is reported signed in.
- *
- * ## The rule
- *
- * **A named account drives its own login.** A harness writes its credential into the home of the
- * wrapper that was launched, so launching the named account's own wrapper is the only arrangement
- * where the credential lands where it was asked to land BY CONSTRUCTION rather than by a copy that can
- * fail — and on macOS it must, because Claude derives its keychain item name from the home path, so
- * "the same credential" in two homes is two separate writes.
- *
- * The interactive preference survives for the case it was actually about: a pass where NOBODY was
- * named. One approval covers the whole identity there, so some lane has to be chosen, and a lane
- * declared `interactive` is the one built for a person to sit in front of.
- *
- * A lane is interactive by its declared `mode`, never because a wrapper is called `auto-something`.
- *
- * ## What this gives up, on purpose
- *
- * An account's declared harness flags are composed ahead of the login subcommand, and Codex's parser
- * refuses an unknown root argument — so an auto lane carrying an operator-declared root-only flag can
- * fail to offer a sign-in at all. That failure is loud, names the account, and is a pinned defect of
- * the generated wrappers with its own fix. Borrowing a sibling would paper over it by authenticating a
- * DIFFERENT account and reporting success, which is the defect this function exists to end.
- */
-export function chooseLoginDriver(
-  members: readonly FleetIdentityMemberStatus[],
-  preferredAccountId?: string,
-): FleetIdentityMember | undefined {
-  const preferred =
-    preferredAccountId === undefined
-      ? undefined
-      : members.find(status => status.member.accountId === preferredAccountId)?.member;
-  return preferred ?? members.find(status => status.member.mode === 'interactive')?.member ?? members[0]?.member;
 }
 
 /**
@@ -411,38 +349,23 @@ export function decideIdentity(
 }
 
 /**
- * Reading and copying credential material.
+ * Reading credential material.
  *
- * The material never crosses this boundary. `read` returns a classification and `clone` performs the
- * copy end to end, so no secret ever reaches a service, a renderer, or a log line — the only way to
- * keep that promise is for the caller never to hold one.
+ * The material never crosses this boundary. `read` returns a classification, so no secret ever
+ * reaches a service, a renderer, or a log line — the only way to keep that promise is for the caller
+ * never to hold one.
  */
 export interface FleetCredentialStore {
   read(kind: HarnessKind, member: FleetIdentityMember): Promise<CredentialReading>;
-  clone(kind: HarnessKind, donor: FleetIdentityMember, target: FleetIdentityMember): Promise<CredentialCloneOutcome>;
-}
-
-export type CredentialCloneOutcome = { readonly ok: true } | { readonly ok: false; readonly reason: string };
-
-export interface FleetIdentityCloneResult {
-  readonly accountId: string;
-  readonly outcome: CredentialCloneOutcome;
 }
 
 /**
- * Surveys identities and clones credentials across them.
+ * Surveys identities.
  *
- * Reads are concurrent because a keychain read can block for seconds and an identity has many homes;
- * clones are sequential because they write.
+ * Reads are concurrent because a keychain read can block for seconds and an identity has many homes.
  */
 export class FleetIdentityService {
   constructor(private readonly store: FleetCredentialStore) {}
-
-  async survey(identities: readonly FleetIdentity[]): Promise<readonly FleetIdentityStatus[]> {
-    const surveyed: FleetIdentityStatus[] = [];
-    for (const identity of identities) surveyed.push(await this.surveyOne(identity));
-    return surveyed;
-  }
 
   /**
    * Read every available home in one identity and decide what to do.
@@ -466,41 +389,12 @@ export class FleetIdentityService {
     return decideIdentity(identity, members, unavailable);
   }
 
-  /**
-   * Clone the donor's credential onto the targets this status named.
-   *
-   * A status whose verdict is not `sync` yields nothing. The guard is here rather than at the call
-   * site because it is the one place that can guarantee it: a caller that forgot to check cannot
-   * cause a write.
-   */
-  async sync(status: FleetIdentityStatus): Promise<readonly FleetIdentityCloneResult[]> {
-    if (status.verdict.kind !== 'sync') return [];
-    const donor = status.verdict.donor;
-    const results: FleetIdentityCloneResult[] = [];
-    for (const target of status.targets) {
-      results.push({ accountId: target.accountId, outcome: await this.#clone(status.identity.kind, donor, target) });
-    }
-    return results;
-  }
-
   /** A store that throws is a read that failed, not a home with no credential. */
   async #read(kind: HarnessKind, member: FleetIdentityMember): Promise<CredentialReading> {
     try {
       return await this.store.read(kind, member);
     } catch (error) {
       return { state: 'unreadable', reason: failureMessage(error, 'the credential could not be read') };
-    }
-  }
-
-  async #clone(
-    kind: HarnessKind,
-    donor: FleetIdentityMember,
-    target: FleetIdentityMember,
-  ): Promise<CredentialCloneOutcome> {
-    try {
-      return await this.store.clone(kind, donor, target);
-    } catch (error) {
-      return { ok: false, reason: failureMessage(error, 'the credential could not be copied') };
     }
   }
 }

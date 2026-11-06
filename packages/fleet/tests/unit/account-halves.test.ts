@@ -5,7 +5,6 @@ import {
   credentialHalf,
   credentialHalves,
   credentialHarnesses,
-  credentialServes,
   credentialVariables,
   type HalvedCredential,
   hasHalves,
@@ -95,14 +94,6 @@ describe('credentialHarnesses', () => {
   it('should be the one half for a sign-in or a legacy environment login', () => {
     should(credentialHarnesses(SIGN_IN)).deepEqual(['claude']);
     should(credentialHarnesses(LEGACY_ENV)).deepEqual(['codex']);
-  });
-});
-
-describe('credentialServes', () => {
-  it('should be true for a half the login drives and false for the other', () => {
-    should(credentialServes(DUAL, 'claude')).be.true();
-    should(credentialServes(DUAL, 'codex')).be.true();
-    should(credentialServes(LEGACY_ENV, 'claude')).be.false();
   });
 });
 

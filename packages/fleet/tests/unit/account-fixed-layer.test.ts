@@ -5,7 +5,6 @@ import {
   AGENDA_ENV,
   AGENDA_INSTRUCTION,
   AGENT_BASE_INSTRUCTION,
-  AGENT_INSTRUCTION,
   AGENT_TOOLS_INSTRUCTION,
   ALWAYS_ON_SECTIONS,
   applyFixedLayer,
@@ -45,6 +44,12 @@ import {
 import { type ResolvedProfile, resolveProfile } from '../../src/lib/account/layering.ts';
 import { parseAccountModel } from '../../src/lib/account/schema.ts';
 import type { HarnessKind } from '../../src/lib/manifest.ts';
+
+/** What every lead agent is told: the always-on sections, in order, joined as the wrapper joins them. */
+const leadInstruction = (fy: string): string =>
+  ALWAYS_ON_SECTIONS(fy)
+    .map(section => section.text)
+    .join('\n\n');
 
 const CWD = '/home/me/work.repo';
 const FY = '/opt/fy/bin/fy';
@@ -769,9 +774,9 @@ describe('NOTIFY_INSTRUCTION', () => {
 
   it('should ride in the always-on instruction after the settings rules, not behind a switch', () => {
     // Assert
-    should(AGENT_INSTRUCTION('fy')).containEql(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n`);
-    should(AGENT_INSTRUCTION('fy').indexOf(SET_UP_FERRETRY_INSTRUCTION('fy'))).be.below(
-      AGENT_INSTRUCTION('fy').indexOf(NOTIFY_INSTRUCTION('fy')),
+    should(leadInstruction('fy')).containEql(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n`);
+    should(leadInstruction('fy').indexOf(SET_UP_FERRETRY_INSTRUCTION('fy'))).be.below(
+      leadInstruction('fy').indexOf(NOTIFY_INSTRUCTION('fy')),
     );
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('notify');
   });
@@ -960,7 +965,7 @@ describe('BOARD_INSTRUCTION', () => {
 
   it('should ride last in the always-on instruction, after the notify rule, not behind a switch', () => {
     // Assert
-    should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n${BOARD_INSTRUCTION('fy')}`);
+    should(leadInstruction('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n${BOARD_INSTRUCTION('fy')}`);
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
     // 757 → 814 for the owner's board rules (&C48): never ask, public/private, planning, sitrep titles, read → edit and
     // the three-part status (cap 760 → 820).
@@ -975,7 +980,9 @@ describe('ALWAYS_ON_SECTIONS', () => {
 
     // Assert
     should(sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify', 'board']);
-    should(sections.map(section => section.text).join('\n\n')).equal(AGENT_INSTRUCTION('zz'));
+    should(sections.map(section => section.text).join('\n\n')).equal(
+      `${AGENT_BASE_INSTRUCTION('zz')}\n\n${LEAD_RULES_INSTRUCTION('zz')}`,
+    );
   });
 });
 
@@ -1215,8 +1222,8 @@ describe('SUB_FERRET_INSTRUCTION', () => {
 
   it('should leave the lead prompt byte-identical and make the sub-ferret prompt the smaller one', () => {
     // Assert
-    should(AGENT_INSTRUCTION('fy')).equal(`${AGENT_BASE_INSTRUCTION('fy')}\n\n${LEAD_RULES_INSTRUCTION('fy')}`);
-    const lead = AGENT_INSTRUCTION('fy').length;
+    should(leadInstruction('fy')).equal(`${AGENT_BASE_INSTRUCTION('fy')}\n\n${LEAD_RULES_INSTRUCTION('fy')}`);
+    const lead = leadInstruction('fy').length;
     const sub = `${AGENT_BASE_INSTRUCTION('fy')}\n\n${SUB_FERRET_INSTRUCTION('fy')}`.length;
     should(sub).be.below(lead);
     // 759 → 840 for the card-status line (&C48, cap 760 → 880); still smaller than the lead's prompt.

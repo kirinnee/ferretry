@@ -1,6 +1,5 @@
 /**
- * The credential store — where each harness keeps one home's provider login, and how a credential is
- * copied from one home to another.
+ * The credential store — where each harness keeps one home's provider login.
  *
  * Three storage shapes, all of them the harness's own and none of them this product's invention:
  *
@@ -47,35 +46,32 @@
  * §8.2.1), so {@link PlatformFleetCredentialStore.storedMaterial} reads by the resolution
  * `resolveCredentialStore` produced: for Claude, the ONE keychain item named from the
  * `CLAUDE_SECURESTORAGE_CONFIG_DIR` value (the bare item for `""`, the person's own login) and the
- * storage directory's file; for Codex, the canonical `auth.json`. {@link FileCredentialStoreLinks}
- * puts each Codex runtime's link in place. Nothing in that path copies a credential, and nothing links
- * a Claude one.
+ * storage directory's file; for Codex, the canonical `auth.json`. Nothing in that path copies a
+ * credential, and nothing links a Claude one.
  *
  * ## THAT ONE ITEM IS NAMED BY TWO ATTRIBUTES, AND READING BY ONE OF THEM SIGNED THE OWNER OUT
  *
  * Claude looks its item up by the PAIR (`acct`, `svce`): `find-generic-password -a <user> -w -s
  * <service>` (claude-code 2.1.296), where `<user>` is `$USER`, else the OS login name ({@link claudeKeychainAccount}). `security` asked by `-s` alone
  * answers with WHICHEVER item of that name it meets first — and a Mac that ever ran an older Ferretry
- * holds a second `Claude Code-credentials` beside the harness's, under another `acct` (see
- * {@link harnessKeychainAccount}). Reading that stale copy, `storedMaterial` reported a login Claude
+ * holds a second `Claude Code-credentials` beside the harness's, under another `acct`. Reading that stale copy, `storedMaterial` reported a login Claude
  * had just written as `missing`, and a web sign-in that succeeded ended with "no usable login was
  * written". So the account model reads with `-a` as well, and therefore reads exactly the item Claude
  * itself would read — never a stranger with the same name.
  *
- * **Credential material never leaves this adapter layer.** `read` returns a classification and `clone` copies
- * end to end, so no service, renderer or log line is ever handed a token. Nothing here writes a
- * message containing material, and the classifiers it calls are pure functions over it.
+ * **Credential material never leaves this adapter layer.** `read` returns a classification, so no
+ * service, renderer or log line is ever handed a token. Nothing here writes a message containing
+ * material, and the classifiers it calls are pure functions over it.
  *
  * **A failed read is not an empty home.** `security` exits 44 for "no such item", which is an absence;
  * every other non-zero exit — a locked keychain, a denied prompt, a timeout, a machine with no
  * `security` at all — is `unreadable`. That distinction is the whole reason a sibling's working
  * credential does not get overwritten by a read that merely failed.
  */
-import { createHash, randomUUID } from 'node:crypto';
-import { chmod, lstat, mkdir, readlink, rename, symlink, unlink, writeFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { lstat } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
-  type CredentialCloneOutcome,
   type CredentialMaterial,
   type CredentialReading,
   classifyCredential,
@@ -83,7 +79,7 @@ import {
   type FleetIdentityMember,
 } from '../lib/identity.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
-import type { CodexCredentialLink, StoredCredentialResolution } from '../lib/account/credentials.ts';
+import type { StoredCredentialResolution } from '../lib/account/credentials.ts';
 import type { CredentialStoreCheck, CredentialStoreInspection } from '../lib/account/store-inspection.ts';
 
 /** What running one command produced. `stdout` may be credential material, so it is never logged. */
@@ -142,7 +138,6 @@ export function keychainReadFailure(code: number): string {
   return `${KEYCHAIN_FAILURES[code] ?? 'the keychain read failed'} (security exit ${String(code)})`;
 }
 
-const CREDENTIAL_FILE_MODE = 0o600;
 const DEFAULT_KEYCHAIN_TIMEOUT_MS = 5_000;
 
 /**
@@ -200,10 +195,9 @@ export interface PlatformCredentialStoreDeps {
   readonly now: () => number;
   /**
    * The keychain `acct` attribute Claude uses on this host: the one an account-model credential is READ
-   * under (Claude looks its item up by `acct` and `svce` together), and the one written when the item
-   * being written does not exist yet and the donor item does not name one. Supplied by the composition
-   * root, which is the only place that may read the environment. See {@link harnessKeychainAccount} for
-   * why it must never be empty.
+   * under (Claude looks its item up by `acct` and `svce` together). Supplied by the composition root,
+   * which is the only place that may read the environment. It must never be empty: an empty `acct`
+   * names no item the harness would look up.
    */
   readonly keychainAccount: string;
   /**
@@ -215,9 +209,6 @@ export interface PlatformCredentialStoreDeps {
   readonly defaultClaudeHome?: string;
   readonly keychainTimeoutMs?: number;
 }
-
-/** The `acct` attribute in `security find-generic-password` attribute output. */
-const KEYCHAIN_ACCOUNT_PATTERN = /"acct"<blob>="([^"]*)"/;
 
 /**
  * Read a file as credential material, keeping absence and unreadability apart.
@@ -233,35 +224,6 @@ async function readFileMaterial(path: string): Promise<CredentialMaterial> {
   if (!(await file.exists())) return { outcome: 'absent' };
   const blob = (await file.text()).trim();
   return blob.length === 0 ? { outcome: 'absent' } : { outcome: 'found', blob };
-}
-
-/**
- * Replace a file with owner-only content, atomically, and never through a link.
- *
- * The content goes to a temporary file created exclusively at the final mode and is then renamed over
- * the destination, so a crash or a harness refreshing the same credential at the same moment leaves
- * the old file or the new one and never a truncated credential. A destination that is a symlink is
- * refused rather than replaced: somebody linked it on purpose — a home sharing one login file — and
- * neither writing through the link nor silently breaking it is this copy's decision to make.
- */
-async function replaceOwnerOnlyFile(path: string, content: string): Promise<void> {
-  const existing = await lstat(path).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return undefined;
-    throw error;
-  });
-  if (existing?.isSymbolicLink() === true) {
-    throw new Error(`${path} is a symbolic link, so it was left as it is rather than replaced`);
-  }
-  const temporary = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
-  try {
-    await writeFile(temporary, content, { flag: 'wx', mode: CREDENTIAL_FILE_MODE });
-    // `wx` honours the umask, which can only narrow; this pins the mode the harness expects.
-    await chmod(temporary, CREDENTIAL_FILE_MODE);
-    await rename(temporary, path);
-  } catch (error) {
-    await unlink(temporary).catch(() => undefined);
-    throw error;
-  }
 }
 
 /**
@@ -316,25 +278,6 @@ async function checkedFile(
   return material;
 }
 
-/** A harness config file, read for a merge: absent, a JSON object, or something that is neither. */
-type JsonObjectReading =
-  | { readonly kind: 'absent' }
-  | { readonly kind: 'object'; readonly value: Record<string, unknown> }
-  | { readonly kind: 'unusable' };
-
-async function readJsonObject(path: string): Promise<JsonObjectReading> {
-  const material = await readFileMaterial(path);
-  if (material.outcome !== 'found') return { kind: 'absent' };
-  try {
-    const parsed = JSON.parse(material.blob) as unknown;
-    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? { kind: 'object', value: parsed as Record<string, unknown> }
-      : { kind: 'unusable' };
-  } catch {
-    return { kind: 'unusable' };
-  }
-}
-
 /**
  * This host's credential store.
  *
@@ -346,33 +289,6 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
 
   async read(kind: HarnessKind, member: FleetIdentityMember): Promise<CredentialReading> {
     return classifyCredential(kind, await this.#material(kind, member), this.deps.now());
-  }
-
-  /**
-   * Copy the donor's credential onto the target.
-   *
-   * The donor is re-read and re-classified here, not trusted from the survey that chose it. A
-   * credential can change between the two, and this is the last point at which a copy can be refused:
-   * cloning something that is no longer usable turns one broken lane into every lane.
-   */
-  async clone(
-    kind: HarnessKind,
-    donor: FleetIdentityMember,
-    target: FleetIdentityMember,
-  ): Promise<CredentialCloneOutcome> {
-    const material = await this.#material(kind, donor);
-    if (material.outcome !== 'found') {
-      return { ok: false, reason: 'the donor credential could not be read at copy time' };
-    }
-    const reading = classifyCredential(kind, material, this.deps.now());
-    if (reading.state !== 'valid' && reading.state !== 'refreshable') {
-      return { ok: false, reason: `the donor credential is no longer usable (${reading.state})` };
-    }
-
-    const written = await this.#write(kind, target, material.blob);
-    if (!written.ok) return written;
-    if (kind === 'claude') await this.#copyOauthAccount(donor.home, target.home);
-    return { ok: true };
   }
 
   /**
@@ -405,14 +321,9 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
     return await this.#walkStored(resolution, []);
   }
 
-  /** {@link storedMaterial}, classified: the verdict, never the secret. */
-  async readStored(resolution: StoredCredentialResolution): Promise<CredentialReading> {
-    return classifyCredential(resolution.harness, await this.storedMaterial(resolution), this.deps.now());
-  }
-
   /**
-   * {@link readStored} with its trail: every place the store was looked in, and what each held — so a
-   * sign-in that found no usable login can say WHERE it looked and WHY nothing there counted.
+   * {@link storedMaterial}, classified, with its trail: every place the store was looked in, and what each
+   * held — so a sign-in that found no usable login can say WHERE it looked and WHY nothing there counted.
    *
    * Total: a file that throws is recorded as unreadable rather than thrown, because the trail up to that
    * point is exactly what the person needs. Names locations, never values.
@@ -475,14 +386,6 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
     return await this.material(kind, member.home);
   }
 
-  async #write(kind: HarnessKind, target: FleetIdentityMember, blob: string): Promise<CredentialCloneOutcome> {
-    if (kind === 'claude' && this.deps.platform === 'darwin') return await this.#writeKeychain(target.home, blob);
-    // A write that fails throws: the service turns that into a refusal with the underlying reason,
-    // and duplicating the conversion here would mean two definitions of a failed copy.
-    await replaceOwnerOnlyFile(kind === 'codex' ? codexPath(target.home) : claudeFilePath(target.home), blob);
-    return { ok: true };
-  }
-
   /**
    * Read the first keychain item this home could have been written under.
    *
@@ -521,115 +424,9 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
     return keychainServices(home, this.deps.defaultClaudeHome);
   }
 
-  /**
-   * Add or update the target's keychain item, with the material never in an argument list.
-   *
-   * `security add-generic-password -w <blob>` put the credential in argv, where `ps` shows it to every
-   * local process for as long as the command runs. So the command is handed to `security -i` on its
-   * standard input instead, carrying the material hex-encoded through `-X` so no quoting of the
-   * credential is ever needed; only the item's name and `acct` are quoted, and one that cannot be
-   * quoted safely is refused.
-   *
-   * `security -i` does not reliably report a command that failed through its own exit status, so the
-   * write is then PROVED by reading the item back under the same (`acct`, `svce`) pair and comparing
-   * — inside this adapter, where the material already is.
-   */
-  async #writeKeychain(home: string, blob: string): Promise<CredentialCloneOutcome> {
-    const { service, account } = await this.#writeTarget(home);
-    const line = keychainWriteLine(account, service, blob);
-    if (line === undefined) {
-      return {
-        ok: false,
-        reason: 'the keychain write was refused, because it could not be made without exposing the credential',
-      };
-    }
-    const { code } = await this.deps.command.run(['security', '-i'], this.#timeout(), line);
-    if (code !== 0) return { ok: false, reason: `the keychain write failed (exit ${code})` };
-    const stored = await this.deps.command.run(
-      ['security', 'find-generic-password', '-a', account, '-s', service, '-w'],
-      this.#timeout(),
-    );
-    return stored.code === 0 && stored.stdout.trim() === blob
-      ? { ok: true }
-      : { ok: false, reason: `the keychain write could not be confirmed (exit ${stored.code})` };
-  }
-
-  /**
-   * Which item to write, and under whose `acct`.
-   *
-   * `add-generic-password -U` matches on the PAIR (`acct`, `svce`), so both halves have to be the
-   * ones the harness itself uses or the write silently adds a second item beside the harness's
-   * instead of updating it — after which this store's own `-s` read can return either one. An
-   * existing item therefore decides both: its name is the name this home is already stored under,
-   * and its `acct` is the one the harness will look the item up by.
-   */
-  async #writeTarget(home: string): Promise<{ readonly service: string; readonly account: string }> {
-    const services = this.#services(home);
-    for (const service of services) {
-      const { code, stdout } = await this.deps.command.run(
-        ['security', 'find-generic-password', '-s', service],
-        this.#timeout(),
-      );
-      if (code !== 0) continue;
-      const found = KEYCHAIN_ACCOUNT_PATTERN.exec(stdout)?.[1];
-      return { service, account: found !== undefined && found.length > 0 ? found : this.deps.keychainAccount };
-    }
-    return { service: services[0], account: this.deps.keychainAccount };
-  }
-
-  /**
-   * Copy the donor's `oauthAccount` — the email and organization the harness displays — onto the
-   * target, so `/status` and usage attribution name the account the credential actually belongs to.
-   *
-   * Display metadata only. A failure here is swallowed: the credential copy already succeeded, and
-   * reporting the wrong email is not worth undoing a working login over.
-   *
-   * The target is MERGED into, so it is written only when it is absent or parsed as a JSON object. A
-   * file that is there but unreadable as one — damaged, mid-edit, or a format this build does not
-   * know — holds the harness's projects, trust decisions and MCP servers, and replacing it with
-   * `{ oauthAccount }` would delete all of them to fix a display name. It is left byte for byte.
-   */
-  async #copyOauthAccount(donorHome: string, targetHome: string): Promise<void> {
-    try {
-      const donor = await readJsonObject(claudeConfigPath(donorHome));
-      if (donor.kind !== 'object' || donor.value.oauthAccount === undefined) return;
-      const path = claudeConfigPath(targetHome);
-      const target = await readJsonObject(path);
-      if (target.kind === 'unusable') return;
-      const merged = { ...(target.kind === 'object' ? target.value : {}), oauthAccount: donor.value.oauthAccount };
-      await replaceOwnerOnlyFile(path, `${JSON.stringify(merged, null, 2)}\n`);
-    } catch {
-      /* display-only metadata — never fail a completed credential copy over it */
-    }
-  }
-
   #timeout(): number {
     return this.deps.keychainTimeoutMs ?? DEFAULT_KEYCHAIN_TIMEOUT_MS;
   }
-}
-
-/**
- * The longest command line handed to `security -i`. Its interactive reader takes a line into a fixed
- * buffer of a few kilobytes, and a line cut short there would store a truncated credential — so a
- * longer one is refused, never split and never moved back into an argument.
- */
-export const KEYCHAIN_INTERACTIVE_LINE_LIMIT = 4_000;
-
-/** An `acct` or `svce` value that a double-quoted `security -i` word carries literally. */
-const KEYCHAIN_QUOTABLE = /^[^"'\\\r\n]+$/u;
-
-/**
- * The `security -i` line that writes one keychain item, or `undefined` when it cannot be written safely.
- *
- * The material travels as `-X <hex>`, which has nothing to quote. The two names are double-quoted, and
- * a name holding a quote, a backslash or a line break is refused rather than escaped, because the
- * escaping rules of that reader are not a contract anyone publishes.
- */
-export function keychainWriteLine(account: string, service: string, blob: string): string | undefined {
-  if (!KEYCHAIN_QUOTABLE.test(account) || !KEYCHAIN_QUOTABLE.test(service)) return undefined;
-  const hex = Buffer.from(blob, 'utf8').toString('hex');
-  const line = `add-generic-password -U -a "${account}" -s "${service}" -X ${hex}\n`;
-  return line.length <= KEYCHAIN_INTERACTIVE_LINE_LIMIT ? line : undefined;
 }
 
 /** The item name Claude Code uses when no `CLAUDE_CONFIG_DIR` names a home for it. */
@@ -678,29 +475,6 @@ const normalizeHome = (home: string): string => home.replace(/\/+$/u, '');
 export const FALLBACK_KEYCHAIN_ACCOUNT = 'claude-code-user';
 
 /**
- * The `acct` attribute to store a keychain item under, from the environment names the harness reads.
- *
- * IT MUST NEVER BE EMPTY, and it used to be: the composition roots passed `USER ?? ''`, and
- * `security add-generic-password -U` matches on the pair (`acct`, `svce`) — so an empty `acct` does
- * not update the harness's item, it adds a second one beside it under the same service name. A
- * later `-s`-only read then returns whichever of the two the keychain yields first, which is how a
- * home that had just been signed in could keep reading as the stale copy this store wrote.
- *
- * Pure, and takes candidates rather than reading them: the composition root owns the environment.
- * `claude-code-user` is the harness's own last resort, spelled the same way here so that a host with
- * no `USER` at all still agrees with it.
- */
-export function harnessKeychainAccount(candidates: readonly (string | undefined)[]): string {
-  for (const candidate of candidates) {
-    const named = candidate?.trim() ?? '';
-    // The harness falls back to its own name for an account outside this alphabet, so this does too:
-    // an item stored under a name the harness would never look up is a login it cannot see.
-    if (named.length > 0) return HARNESS_KEYCHAIN_ACCOUNT.test(named) ? named : FALLBACK_KEYCHAIN_ACCOUNT;
-  }
-  return FALLBACK_KEYCHAIN_ACCOUNT;
-}
-
-/**
  * The keychain `acct` Claude Code itself uses on this host — its own rule, spelled out (claude-code
  * 2.1.281 and 2.1.303 alike): `$USER` when it is set to anything, otherwise the OS login name, and
  * {@link FALLBACK_KEYCHAIN_ACCOUNT} when that lookup throws or the name is outside its alphabet.
@@ -708,7 +482,7 @@ export function harnessKeychainAccount(candidates: readonly (string | undefined)
  * **`LOGNAME` is not in it, and neither is falling back to `claude-code-user` while a login name
  * exists.** A daemon started by launchd or systemd is handed a bare environment, so `USER` can be unset
  * there; the Claude child it launches then names its item after the OS login name. Reading with
- * {@link harnessKeychainAccount}`([USER, LOGNAME])` there asked for `claude-code-user` — an item Claude
+ * `$USER` / `LOGNAME` there asked for `claude-code-user` — an item Claude
  * never writes — and a sign-in that had just written the login ended "no usable login was written".
  *
  * `loginName` is the composition root's `os.userInfo().username`, passed in because the root is the only
@@ -735,69 +509,4 @@ export function claudeFilePath(home: string): string {
 /** Where Codex keeps its credential, on every platform. */
 export function codexPath(home: string): string {
   return join(home, 'auth.json');
-}
-
-/** The harness config file that carries the displayed account identity. */
-export function claudeConfigPath(home: string): string {
-  return join(home, '.claude.json');
-}
-
-const CREDENTIAL_DIRECTORY_MODE = 0o700;
-
-/** What putting one Codex runtime's credential link in place did. */
-export type CodexLinkOutcome =
-  | { readonly ok: true; readonly change: 'linked' | 'unchanged' | 'relinked' }
-  | { readonly ok: false; readonly reason: string };
-
-/**
- * Making a credential's store reachable on disk: Ferretry's own store directory, and each Codex
- * runtime's link to its one canonical `auth.json` (design §8.2.1).
- *
- * There is deliberately no Claude counterpart to {@link linkCodex}: a Claude runtime reaches its store
- * through `CLAUDE_SECURESTORAGE_CONFIG_DIR`, and a linked Claude credential is forked by its first
- * refresh. Nothing here ever copies a credential, and nothing here ever deletes one.
- */
-export class FileCredentialStoreLinks {
-  /** Create a `store: ferretry` credential's directory, owner-only, so a sign-in has somewhere to write. */
-  async prepare(resolution: StoredCredentialResolution): Promise<void> {
-    if (resolution.ownedDirectory === undefined) return;
-    await mkdir(resolution.ownedDirectory, { recursive: true, mode: CREDENTIAL_DIRECTORY_MODE });
-    await chmod(resolution.ownedDirectory, CREDENTIAL_DIRECTORY_MODE);
-  }
-
-  /**
-   * Point one Codex runtime's `auth.json` at the canonical file, by absolute path.
-   *
-   * A link that already points there is left alone; a link to another credential — the runtime was
-   * moved to a different login — is replaced atomically (a new link renamed over it). A REGULAR file is
-   * refused: it is a credential of its own, and replacing it would delete a login. Moving one into a
-   * store is migration's job, never a link's. The canonical file need not exist yet: an empty slot is
-   * linked before its sign-in, and Codex writes through the link.
-   */
-  async linkCodex(link: CodexCredentialLink): Promise<CodexLinkOutcome> {
-    const existing = await lstat(link.path).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return undefined;
-      throw error;
-    });
-    if (existing === undefined) {
-      await symlink(link.target, link.path);
-      return { ok: true, change: 'linked' };
-    }
-    if (!existing.isSymbolicLink()) {
-      return {
-        ok: false,
-        reason: `${link.path} holds a credential of its own, so it was left as it is rather than replaced by a link`,
-      };
-    }
-    if ((await readlink(link.path)) === link.target) return { ok: true, change: 'unchanged' };
-    const temporary = join(dirname(link.path), `.${basename(link.path)}.${randomUUID()}.tmp`);
-    try {
-      await symlink(link.target, temporary);
-      await rename(temporary, link.path);
-    } catch (error) {
-      await unlink(temporary).catch(() => undefined);
-      throw error;
-    }
-    return { ok: true, change: 'relinked' };
-  }
 }
