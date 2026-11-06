@@ -169,13 +169,6 @@ import {
   FileLegacyTaskSource,
   StorageImportSessions,
 } from '../src/adapters/board-import/index.ts';
-import {
-  budgetHoldsWriter,
-  claudeSubagentFiles,
-  FileBudgetTold,
-  readBudgetHoldsSync,
-  StorageBudgetSessions,
-} from '../src/adapters/budget/ports.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
@@ -214,7 +207,6 @@ import {
 } from '../src/adapters/housekeeping/index.ts';
 import {
   AgendaLaneAgenda,
-  AnalyticsTranscriptSpend,
   AsyncActivityScope,
   accountName,
   afterAsActivity,
@@ -564,7 +556,6 @@ import {
   WorktreeOperationQueue,
 } from '../src/adapters/worktrees/index.ts';
 import { type AgendaMutation, closestAgenda, isAgendaSessionId } from '../src/lib/agenda/index.ts';
-import { snapshotAnalyticsUsagePricing } from '../src/lib/analytics/pricing.ts';
 import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts';
 import {
   AgendaCardLinks,
@@ -609,10 +600,6 @@ const CARD_START_KEYS_KEPT = 256;
 
 import { GitHubWatcher, UnfiledRefiler } from '../src/lib/board-github/index.ts';
 import { BoardImporter, LaneSetImportProjects, type TaskAssigneeCandidate } from '../src/lib/board-import/index.ts';
-import { type MeteredFile, SpendMeter } from '../src/lib/budget/meter.ts';
-import { budgetNoticeRef, budgetNoticeRequest } from '../src/lib/budget/notice.ts';
-import { BUDGET_TICK_MS, BudgetService } from '../src/lib/budget/service.ts';
-import { budgetAlternative, budgetedLogins } from '../src/lib/budget/state.ts';
 import {
   ConfigChangeLedger,
   ConfigChangeStreamService,
@@ -1006,7 +993,7 @@ import {
   type ProjectRegistrar,
   ProvedPaneCapture,
   ProviderPresetService,
-  ProviderQuotaService,
+  type ProviderQuotaService,
   PublishedCarrierSet,
   type PublishedCarrierView,
   PublishedFleetInventory,
@@ -1350,6 +1337,7 @@ import { modelsModule } from './modules/models.ts';
 import { rendersModule } from './modules/renders.ts';
 import { type ModuleHandles, seamsOf } from './modules/seams.ts';
 import { updateModule } from './modules/update.ts';
+import { usageModule } from './modules/usage.ts';
 import { createSttEnhancement, voiceModule } from './modules/voice.ts';
 import { workSearchModule } from './modules/work-search.ts';
 import { type WorktreeComposition, worktreesModule } from './modules/worktrees.ts';
@@ -7811,7 +7799,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * Environment logins' provider quotas (docs/provider-quotas.md), once the subsystems are mounted. The
    * usage feed is built before them and lays these readings over its rows; until then it has none.
    */
-  let providerQuota: ProviderQuotaService | undefined;
+  const providerQuota = lateBound<ProviderQuotaService>();
   // Claude's own rule, never LOGNAME: under launchd or systemd USER can be unset, and Claude then
   // names its item after the OS login name — which is what every keychain read must ask for too.
   const claudeKeychain = claudeKeychainAccount(process.env.USER, () => userInfo().username);
@@ -8972,7 +8960,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // for a cadence at all, so it keeps the default rather than being given one by a refusal.
           { refreshMs: await declaredUsageRefreshMs() },
         ),
-        () => providerQuota,
+        () => providerQuota.current(),
       );
     },
     createPairing: async (config, pairingClock, carriers, discoveredRelayUrl) => {
@@ -11596,37 +11584,40 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         seamsOf.models(world),
         lifecycle,
       );
-      // Provider quotas for environment logins (docs/provider-quotas.md): read through the SAME outbound
-      // holder, only when somebody watches, at most once a minute per login, and never inference. The
-      // fallback is what this machine's own sessions on the login cost, from the analytics index.
-      const quotaReader = new ProviderQuotaService({
-        logins: async () => {
-          const [{ entries }, presets, manifest] = await Promise.all([
-            fleetCredentialCatalog.entries(),
-            providerPresets.presets(),
-            publishedManifest(),
-          ]);
-          const runtimes = manifest === undefined ? [] : manifestRuntimes(manifest);
-          return entries
-            .filter(entry => entry.credential.store === 'environment')
-            .map(entry => ({
-              id: entry.id,
-              credential: entry.credential,
-              preset: presets.find(preset => preset.id === entry.credential.preset),
-              agents: runtimes
-                .filter(runtime => runtime.credential === entry.id)
-                .map(runtime => wrapperNameOf(runtime.wrapper)),
-            }));
-        },
-        authorizer: outboundAuthorizer,
-        spend: new AnalyticsTranscriptSpend(analytics.provides.ingestion),
-        clock: { nowMs: () => millisecondClock.now() },
-      });
-      providerQuota = quotaReader;
-      /** Spend budgets (docs/budgets.md): made below, once the fleet catalogue it republishes exists. */
       // Filled in once the Warden is built: a ferret past its hard budget is offered to its move before it is stopped.
       const wardenBudgetMover: { relocate?: (sessionId: string) => Promise<boolean> } = {};
-      let budgets: BudgetService | undefined;
+      // Provider quotas for environment logins (docs/provider-quotas.md) and the spend budgets (docs/budgets.md). The quota
+      // reader reads only when somebody watches; the budgets are made here but read and started below, once the fleet
+      // catalogue they republish exists, on the line they always started on.
+      const usageBuilt = usageModule.build(
+        {
+          paths,
+          storage,
+          stateFiles,
+          configFiles,
+          publishedManifest,
+          daemonConfigStore,
+          modelCatalogs: models.provides.catalogs,
+          transcriptSources,
+          transcriptFiles: () => createTranscriptFileResolver(storage),
+          millisecondClock,
+          activities,
+          credentialCatalog: fleetCredentialCatalog,
+          presets: providerPresets,
+          authorizer: outboundAuthorizer,
+          ingestion: analytics.provides.ingestion,
+          sends,
+          sessionControl,
+          machineAgenda,
+          wardenBudgetMover,
+          republishFleet: () => fleetCatalog.republish(),
+          machineName: () => analyticsMachineName ?? hostname(),
+          clientName: CLIENT_NAME,
+        },
+        seamsOf.usage(world),
+        lifecycle,
+      );
+      providerQuota.bind(usageBuilt.provides.providerQuota);
       const fleetCredentials = createFleetCredentialsSubsystem({
         catalog: fleetCredentialCatalog,
         status: credentialStatus,
@@ -11646,8 +11637,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             ),
           test: async (subject, consent) => await models.provides.providerProbe.test(subject, consent),
         },
-        providerQuota: quotaReader,
-        budget: { view: id => budgets?.view(id) },
+        providerQuota: usageBuilt.provides.providerQuota,
+        budget: { view: id => usageBuilt.provides.budgets.current()?.view(id) },
         // One list answers every reader for a moment: the runtime catalogue, a start's readiness check and
         // the usage feed each asked for it on their own, and each list reads every login's status.
         listCache: { now: () => millisecondClock.now(), freshMs: CREDENTIAL_LIST_FRESH_MS },
@@ -11692,7 +11683,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         modelCatalogs: async () => await models.provides.catalogs.sources(),
         publishedManifest: async () => await publishedManifest(),
         lastAutoResume: async () => await autoResumeSummary.read(),
-        budgetHolds: () => budgets?.holds() ?? {},
+        budgetHolds: () => usageBuilt.provides.budgets.current()?.holds() ?? {},
       };
       /**
        * First-run import, Import again, tool install, and the Clone export and import
@@ -11928,115 +11919,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         setTimer: (run, ms) => afterAsActivity(activities, 'disable expiry', run, ms, { unref: true }),
       });
-      /**
-       * Spend budgets (docs/budgets.md), on their own minute timer so the hard limit holds with the Warden off.
-       * The meter reads this machine's transcripts — sub-agents' too — priced with the analytics catalog; a
-       * login past its trigger is republished unavailable; one past its hard limit has its ferrets interrupted
-       * and stopped with their turns saved, and the owner is told once per period.
-       */
-      const budgetSessions = new StorageBudgetSessions(storage);
-      const budgetResolver = createTranscriptFileResolver(storage);
-      const budgetHoldsPath = join(paths.state, 'budget-holds.json');
-      /**
-       * Interrupt first, so the turn in flight ends at a request boundary and its transcript is whole; a session with
-       * no turn to interrupt (idle, or its pane already gone) refuses, which is fine. Then wait for it to settle.
-       */
-      const settleBudgetSession = async (id: SessionId): Promise<void> => {
-        await sends.interrupt(id).catch(() => undefined);
-        for (let waited = 0; waited < 15_000; waited += 500) {
-          const status = sessionStatusOf(await storage.readState(id).catch(() => undefined));
-          if (status === undefined || !['running', 'thinking', 'tool_running', 'retrying'].includes(status)) break;
-          await Bun.sleep(500);
-        }
-      };
-      budgets = new BudgetService(
-        {
-          config: async () => {
-            const effective = configFiles.current().evaluation.effective;
-            // A manifest that cannot be read is NOT "no runtimes": that would read every budget as $0 spent and
-            // publish every hold lifted. The read throws instead, and the tick keeps what it had.
-            const manifest = await publishedManifest();
-            const logins = budgetedLogins(effective.model, manifest);
-            if (manifest === undefined && logins.length > 0)
-              throw new Error('no fleet manifest is published yet; budgets are judged once one is');
-            return {
-              ...(effective.model.machine.timeZone === undefined ? {} : { timeZone: effective.model.machine.timeZone }),
-              logins,
-            };
-          },
-          hostTimeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
-          meter: new SpendMeter({
-            sessions: async sinceMs => await budgetSessions.sessions(sinceMs),
-            files: async session => {
-              const files: MeteredFile[] = [];
-              const file = await budgetResolver.file(session.id);
-              if (file !== undefined) {
-                files.push({ path: file, harness: session.harness });
-                if (session.harness === 'claude')
-                  for (const path of await claudeSubagentFiles(file)) files.push({ path, harness: 'claude' });
-              }
-              // A converted conversation was rewritten without its usage records: what it spent is in the old file.
-              const converted = await budgetSessions.convertedFrom(session.id);
-              if (converted !== undefined && converted.path !== file) files.push(converted);
-              return files;
-            },
-            window: (file, harness, sinceIso) => {
-              const source = transcriptSources.find(candidate => candidate.harness === harness);
-              if (source === undefined) throw new Error(`no transcript reader for ${harness}`);
-              return source.window(file, { start: { at: 'since', instant: sinceIso } });
-            },
-            pricing: async () => {
-              const read = await daemonConfigStore.readPricing();
-              const rates = effectiveAnalyticsPricing(
-                read.kind === 'unavailable' ? [] : read.configuration.catalog,
-                await models.provides.catalogs.catalogs(),
-              );
-              return usage => {
-                const priced = snapshotAnalyticsUsagePricing(usage, rates);
-                return priced.kind === 'priced' ? priced.equivalentApiCostUsdMicros : undefined;
-              };
-            },
-          }),
-          nowMs: () => millisecondClock.now(),
-          republish: async () => {
-            await fleetCatalog.republish();
-          },
-          liveSessions: async agents => await budgetSessions.live(agents),
-          recentSession: async agents => await budgetSessions.recent(agents),
-          // The Warden moves it only when the owner switched `autoMigrate` on for budgets; it answers `false` otherwise.
-          relocate: async session => {
-            const relocate = wardenBudgetMover.relocate;
-            if (relocate === undefined) return false;
-            await settleBudgetSession(parseSessionId(session.id));
-            return await relocate(session.id);
-          },
-          stop: async (session, reason) => {
-            await settleBudgetSession(parseSessionId(session.id));
-            await sessionControl.stop(session.id, reason);
-          },
-          alternative: async (login, holds) =>
-            budgetAlternative(configFiles.current().evaluation.effective.model, login, millisecondClock.now(), holds),
-          notify: async notice => {
-            const {
-              source: _source,
-              sourceRef,
-              ...request
-            } = budgetNoticeRequest(
-              notice,
-              CLIENT_NAME,
-              analyticsMachineName ?? hostname(),
-              new Date(millisecondClock.now()).toISOString(),
-            );
-            await machineAgenda.raiseOrUpdate(sourceRef ?? budgetNoticeRef(notice), request);
-          },
-          told: new FileBudgetTold(stateFiles, join(paths.state, 'budget-told.json')),
-          remember: budgetHoldsWriter(stateFiles, budgetHoldsPath),
-        },
-        readBudgetHoldsSync(budgetHoldsPath),
-      );
-      const budgetTick = asActivity(activities, 'spend budgets', async () => await budgets?.tick());
-      setInterval(budgetTick, BUDGET_TICK_MS).unref();
-      budgetTick();
+      usageBuilt.jobs.startBudgets();
       // Ferret limits (docs/ferret-limits.md): the memory watch, the one-time `limits.yaml` migration and the
       // read-only service behind `GET /v1/cgroups/config` — `limits.yaml` is the one writer's, so it has no save.
       const cgroups = cgroupsModule.build(
@@ -12585,7 +12468,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           test: fleetCredentials.test.bind(fleetCredentials),
           presets: fleetCredentials.presets.bind(fleetCredentials),
           list: async () => {
-            await quotaReader.watch();
+            await usageBuilt.provides.providerQuota.watch();
             return await fleetCredentials.list();
           },
         },
@@ -12903,7 +12786,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             );
             await disableExpiry.rearm();
             // A budget written, raised or lowered is judged at once rather than at the next minute.
-            void budgets?.tick();
+            void usageBuilt.provides.budgets.current()?.tick();
           },
         }),
         names: createNameSubsystem(storage),
@@ -13537,6 +13420,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           agentTools,
           fleetLogin,
           models,
+          usage: usageBuilt,
         },
       };
     },

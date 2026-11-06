@@ -10,6 +10,7 @@ import type { InputRequestsProvides } from './input-requests.ts';
 import type { LearningSeams } from './learning.ts';
 import type { ModelsJobs, ModelsProvides } from './models.ts';
 import type { UpdateJobs, UpdateProvides } from './update.ts';
+import type { UsageJobs, UsageProvides } from './usage.ts';
 import type { VoiceSeams } from './voice.ts';
 
 /**
@@ -41,6 +42,8 @@ export const seamsOf = {
   renders: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the user home and the harness resolution are needs). */
   update: (_world: DaemonWorld): void => undefined,
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the outbound holder, the storage and the clocks are `buildWorld` values, needs). */
+  usage: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the Git operations arrive in `WorktreeComposition`, a need). */
   worktrees: (_world: DaemonWorld): void => undefined,
   /** The dictation enhancer spends the operator's provider credential, so `DaemonWorld` carries it as `sttEnhancement` and a test replaces it. */
@@ -64,6 +67,7 @@ export interface ModuleHandles {
   readonly models: BuiltModule<ModelsProvides, ModelsJobs>;
   readonly renders: BuiltModule<RenderService>;
   readonly update: BuiltModule<UpdateProvides, UpdateJobs>;
+  readonly usage: BuiltModule<UsageProvides, UsageJobs>;
   readonly voice: BuiltModule<SttEnhancementSubsystem>;
   readonly workSearch: BuiltModule<WorkSearchService>;
   readonly worktrees: BuiltModule<ManagedWorktreeService>;
