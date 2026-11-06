@@ -1,5 +1,4 @@
 import type { DaemonId } from '@ferretry/protocol';
-import { BrowserProxyTester } from '../../../../src/lib/browser/proxy/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
 import { NO_PERFORMANCE_PROBE } from '../../../../src/lib/performance/recorder.ts';
@@ -25,16 +24,13 @@ import {
   boardSubsystem,
   CREDENTIALS,
   configChangeSubsystem,
-  consoleSubsystem,
   dialogSubsystem,
   emptyFeed,
-  FakeBrowserLogin,
   FakeSessionControl,
   FakeSessionMigrate,
   FakeSessionResume,
   FakeSessionSend,
   FakeSessionSignal,
-  FakeTerminals,
   FakeWarden,
   fleetEventSubsystem,
   grantSubsystem,
@@ -353,20 +349,6 @@ export const subsystems = (): MountedSubsystems => ({
   sessionAnswer: {
     answer: async id => sessionView(id),
   },
-  sessionAttachments: {
-    upload: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    download: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    unlock: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    lock: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-  },
   sessionSignal: new FakeSessionSignal(),
   sessionRename: {
     rename: async () => {
@@ -549,70 +531,6 @@ export const subsystems = (): MountedSubsystems => ({
     },
     arm: () => () => undefined,
   },
-  terminals: new FakeTerminals(),
-  browserLogin: new FakeBrowserLogin(),
-  browserProxy: {
-    tester: new BrowserProxyTester({
-      saved: async () => undefined,
-      secrets: async () => new Map(),
-      probe: {
-        run: async () => {
-          throw new Error('not exercised by the surface inventory');
-        },
-      },
-      now: () => 0,
-    }),
-    state: () => ({ state: 'stopped' }),
-  },
-  browser: {
-    status: async sessionId => ({
-      state: 'stopped',
-      sessionId,
-      viewport: { width: 1280, height: 800 },
-      viewers: 0,
-      persistentProfile: true,
-      profileKind: 'shared',
-      idleTimeoutSeconds: 0,
-      pages: [],
-      capacity: { running: 0, maximum: 3 },
-    }),
-    act: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    attachViewer: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    dispatchHumanInput: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    openPage: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    actOnPage: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    filesOnPage: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    scriptOnPage: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    closePage: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    inputOnPage: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    lifecycleOnPage: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    adoptPage: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    releaseSession: async () => undefined,
-    closeAll: async () => undefined,
-    stream: async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined }),
-  },
   agentTools: (() => {
     const world = agentToolWorld();
     return { service: world.service, identities: world.identities };
@@ -726,7 +644,6 @@ export const subsystems = (): MountedSubsystems => ({
     { tag: async () => new Uint8Array(32), matches: async () => false },
   ),
   sessionAttach: attachSubsystem(),
-  sessionConsole: consoleSubsystem(),
   sessionProcesses: {
     list: async sessionId => ({ sessionId, observedAt: '2026-10-29T00:00:00.000Z', available: true, processes: [] }),
     output: async () => {

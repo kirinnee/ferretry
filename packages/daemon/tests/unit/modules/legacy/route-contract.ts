@@ -36,10 +36,8 @@ export const callers: readonly string[] = [
   'DELETE /v1/restarts operator any',
   'DELETE /v1/secrets/:name operator person',
   'DELETE /v1/secrets/logins/:id operator person',
-  'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock operator any',
   'DELETE /v1/sessions/:sessionId/queue/:messageId operator any',
   'DELETE /v1/sessions/:sessionId/task-plans/:planId/approval/:stage operator person',
-  'DELETE /v1/sessions/:sessionId/terminals/:terminalId operator any',
   'DELETE /v1/sign-in-rules/:id operator person',
   'DELETE /v1/sign-in-rules/stages/:stage operator person',
   'DELETE /v1/sign-in-rules/suggestions/:sid operator person',
@@ -64,8 +62,6 @@ export const callers: readonly string[] = [
   'GET /v1/board/projects/:projectId/switch operator any',
   'GET /v1/board/tasks operator any',
   'GET /v1/board/tasks/:taskId operator any',
-  'GET /v1/browser/login operator person',
-  'GET /v1/browser/state operator any',
   'GET /v1/carriers authenticated any',
   'GET /v1/catalog-installs operator any',
   'GET /v1/catalog-items operator any',
@@ -125,8 +121,6 @@ export const callers: readonly string[] = [
   'GET /v1/sessions/:sessionId/agenda/:id/versions operator any',
   'GET /v1/sessions/:sessionId/agenda/:id/versions/:version operator any',
   'GET /v1/sessions/:sessionId/attach operator person',
-  'GET /v1/sessions/:sessionId/attachments/:attachmentId operator any',
-  'GET /v1/sessions/:sessionId/browser operator any',
   'GET /v1/sessions/:sessionId/compact-at operator any',
   'GET /v1/sessions/:sessionId/copies operator person',
   'GET /v1/sessions/:sessionId/events operator any',
@@ -157,8 +151,6 @@ export const callers: readonly string[] = [
   'GET /v1/sessions/:sessionId/task-plans/:planId operator person',
   'GET /v1/sessions/:sessionId/task-plans/:planId/approval/:stage operator person',
   'GET /v1/sessions/:sessionId/tasks operator any',
-  'GET /v1/sessions/:sessionId/terminals operator any',
-  'GET /v1/sessions/:sessionId/terminals/:terminalId operator any',
   'GET /v1/sessions/:sessionId/transcript-images/:handle operator any',
   'GET /v1/sessions/by-request/:requestId operator any',
   'GET /v1/sign-in-rules operator person',
@@ -170,7 +162,6 @@ export const callers: readonly string[] = [
   'GET /v1/skills/file operator any',
   'GET /v1/task-plans operator person',
   'GET /v1/tasks operator any',
-  'GET /v1/terminals operator any',
   'GET /v1/tunnel authenticated any',
   'GET /v1/usage authenticated any',
   'GET /v1/warden/agenda authenticated any',
@@ -193,7 +184,6 @@ export const callers: readonly string[] = [
   'PATCH /v1/sessions/:sessionId/hypermedia operator any',
   'PATCH /v1/sessions/:sessionId/pack operator person',
   'PATCH /v1/sessions/:sessionId/queue/:messageId operator any',
-  'PATCH /v1/sessions/:sessionId/terminals/:terminalId operator any',
   'PATCH /v1/warden/config operator person',
   'POST /v1/accounts/:id/apart operator person',
   'POST /v1/accounts/:id/factors operator person',
@@ -213,8 +203,6 @@ export const callers: readonly string[] = [
   'POST /v1/board/tasks operator any',
   'POST /v1/board/tasks/:taskId operator any',
   'POST /v1/board/tasks/:taskId/start operator person',
-  'POST /v1/browser/login operator person',
-  'POST /v1/browser/proxy/test operator person',
   'POST /v1/catalog-installs/project operator person',
   'POST /v1/catalog-installs/project/preview operator any',
   'POST /v1/catalog-installs/runtime operator person',
@@ -275,11 +263,7 @@ export const callers: readonly string[] = [
   'POST /v1/sessions/:sessionId/agenda operator any',
   'POST /v1/sessions/:sessionId/agenda/replies operator person',
   'POST /v1/sessions/:sessionId/answer operator person',
-  'POST /v1/sessions/:sessionId/attachments operator any',
-  'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock operator any',
-  'POST /v1/sessions/:sessionId/browser operator any',
   'POST /v1/sessions/:sessionId/composer operator person',
-  'POST /v1/sessions/:sessionId/console/input operator person',
   'POST /v1/sessions/:sessionId/conversion-preview operator any',
   'POST /v1/sessions/:sessionId/copy-plans/:planId/approve operator person',
   'POST /v1/sessions/:sessionId/dialog operator person',
@@ -306,7 +290,6 @@ export const callers: readonly string[] = [
   'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/commit operator person',
   'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app operator person',
   'POST /v1/sessions/:sessionId/task-plans/:planId/revoke operator person',
-  'POST /v1/sessions/:sessionId/terminals operator any',
   'POST /v1/sign-in-rules/:id/narrow operator person',
   'POST /v1/sign-in-rules/stages operator person',
   'POST /v1/sign-in-rules/stages/:stage/bind operator person',
@@ -319,7 +302,6 @@ export const callers: readonly string[] = [
   'POST /v1/step-up operator person',
   'POST /v1/step-up/options operator person',
   'POST /v1/system/open-url operator any',
-  'POST /v1/terminals/close-finished operator any',
   'POST /v1/unlock operator person',
   'POST /v1/unlock/options operator person',
   'POST /v1/warden/investigate operator person',
@@ -340,8 +322,6 @@ export const callers: readonly string[] = [
   'PUT /v1/tunnel operator person',
   // Task plans (docs/secure-copy.md): a ferret never reads, answers, stages, confirms, drops or revokes one.
   'GET /v1/events operator any',
-  'GET /v1/sessions/:sessionId/browser/stream operator any',
-  'GET /v1/sessions/:sessionId/terminals/:terminalId/stream operator any',
 ];
 
 /**
@@ -413,9 +393,6 @@ export const notAudited: Readonly<Record<string, string>> = {
     'a read with a body: shows the full review of a skill on this machine and writes nothing; the apply is audited',
   'GET /v1/skill-installs/local': 'a read: lists the copies this machine recorded; changes nothing',
   'POST /v1/sessions/:sessionId/interrupt': 'drives an existing session; its journal records it',
-  'POST /v1/sessions/:sessionId/attachments': 'a file handed to an agent; the transcript is that history',
-  'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock': 'opens an attachment to its own session only',
-  'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock': 'closes an attachment again',
   'POST /v1/sessions/:sessionId/agenda':
     'an agent raising an agenda item (the agenda spelling of the agenda route above); the agenda list is that history',
   'PUT /v1/sessions/:sessionId/agenda/:id/seen':
@@ -433,7 +410,6 @@ export const notAudited: Readonly<Record<string, string>> = {
     'a ferret recording on its own session why its work has no card; the session config keeps the reason and when',
   'POST /v1/board/import':
     'a one-time import of the old per-session task files; every card it makes ends with a migrated history event and the daemon logs the summary',
-  'PATCH /v1/sessions/:sessionId/terminals/:terminalId': 'renames a terminal; opening and attaching are audited',
   'GET /v1/sessions/:sessionId/input-quarantines': 'a read; names and end times only',
   'POST /v1/sessions/:sessionId/task-plans/:planId/approval':
     'stages a selection, which approves nothing; a paste-only answer is audited by the task-plan service: security.changed task-plan-answered, line by line, never a value',
@@ -470,10 +446,6 @@ export const notAudited: Readonly<Record<string, string>> = {
     'only narrows; audited by the task-plan service: security.changed task-plan-ended',
   'POST /v1/sessions/:sessionId/input-quarantines/:key/end':
     'audited by the input-request service: input.quarantine_ended, names and flags only',
-  'POST /v1/terminals/close-finished':
-    'audited by the terminal service: terminal.closed, a count and the stopped ferret only',
-  'DELETE /v1/sessions/:sessionId/terminals/:terminalId':
-    'closes a terminal, which removes access rather than adding it',
   'PATCH /v1/sessions/:sessionId/hypermedia':
     'switches what one ferret is told about presentation at its next launch; changes no access',
   'PATCH /v1/sessions/:sessionId/agenda-mode':

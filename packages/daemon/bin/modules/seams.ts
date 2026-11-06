@@ -6,6 +6,7 @@ import type { SttEnhancementSubsystem } from '../../src/lib/runtime/mounts/stt.t
 import type { WorkSearchService } from '../../src/lib/work-search/index.ts';
 import type { AnalyticsJobs, AnalyticsProvides } from './analytics.ts';
 import type { AgentToolsProvides } from './agent-tools.ts';
+import type { BrowserProvides } from './browser.ts';
 import type { ConversationImportProvides } from './conversation-import.ts';
 import type { HousekeepingProvides } from './housekeeping.ts';
 import type { InputRequestsProvides } from './input-requests.ts';
@@ -14,6 +15,8 @@ import type { McpProvides } from './mcp.ts';
 import type { ModelsJobs, ModelsProvides } from './models.ts';
 import type { NamesProvides } from './names.ts';
 import type { SharedDraftService } from '../../src/lib/shared-drafts/index.ts';
+import type { TerminalJobs, TerminalProvides } from './terminal.ts';
+import type { TransferProvides } from './transfer.ts';
 import type { UpdateJobs, UpdateProvides } from './update.ts';
 import type { UsageJobs, UsageProvides } from './usage.ts';
 import type { VoiceSeams } from './voice.ts';
@@ -34,6 +37,8 @@ export const seamsOf = {
   agentTools: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the analytics store is opened by `start()`, a need). */
   analytics: (_world: DaemonWorld): void => undefined,
+  /** No seam: the module replaces no adapter `DaemonWorld` carries beyond the sign-in window and the browser launcher, which `start()` passes into `createSubsystems` (needs); the session service, the viewer stream and the proxy probe are fixed production adapters, and the session directory, the typed identities, the saved proxy and the firewall reading are needs. */
+  browser: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the measured host is a `buildWorld` seam, a need). */
   cgroups: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the child launcher, the callback delivery, the timer and the port reader are fixed production adapters; the credential catalog, the clock and the environment are needs). */
@@ -55,6 +60,10 @@ export const seamsOf = {
   renders: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the draft repository, the timer and the generation source are fixed production adapters; the agenda ledgers, the clock and the paired devices are needs). */
   sharedDrafts: (_world: DaemonWorld): void => undefined,
+  /** No seam: the module replaces no adapter `DaemonWorld` carries beyond the terminal runtime, which `start()` passes into `createSubsystems` (a need); the shell service, the stream bridge and the Console are fixed production adapters, and the storage, the redactor, the quarantine and the tmux commands are needs. */
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the originals adapter and the in-memory PDF decryption are fixed production adapters; the state directory, the pairing identity and the session directory are needs). */
+  transfer: (_world: DaemonWorld): void => undefined,
+  terminal: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the user home and the harness resolution are needs). */
   update: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the outbound holder, the storage and the clocks are `buildWorld` values, needs). */
@@ -75,6 +84,7 @@ export const seamsOf = {
 export interface ModuleHandles {
   readonly agentTools: BuiltModule<AgentToolsProvides>;
   readonly analytics: BuiltModule<AnalyticsProvides, AnalyticsJobs>;
+  readonly browser: BuiltModule<BrowserProvides>;
   readonly cgroups: BuiltModule<LimitsService>;
   readonly conversationImport: BuiltModule<ConversationImportProvides>;
   readonly fleetLogin: BuiltModule<HarnessLoginService>;
@@ -86,6 +96,8 @@ export interface ModuleHandles {
   readonly names: BuiltModule<NamesProvides>;
   readonly renders: BuiltModule<RenderService>;
   readonly sharedDrafts: BuiltModule<SharedDraftService>;
+  readonly terminal: BuiltModule<TerminalProvides, TerminalJobs>;
+  readonly transfer: BuiltModule<TransferProvides>;
   readonly update: BuiltModule<UpdateProvides, UpdateJobs>;
   readonly usage: BuiltModule<UsageProvides, UsageJobs>;
   readonly voice: BuiltModule<SttEnhancementSubsystem>;

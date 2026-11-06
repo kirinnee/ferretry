@@ -6,9 +6,10 @@ import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { scratchGcRoutes } from '../../../../src/lib/runtime/mounts/scratch-gc.ts';
+import { builtTerminalOver } from '../../modules/terminal/fixture.ts';
 import { builtSharedDraftsKnowing } from '../../modules/shared-drafts/fixture.ts';
 import { FRAGMENTS, NOT_AUDITED, OTHER_TABLE_CALLERS, ROUTE_CALLERS } from '../../modules/route-contracts.ts';
-import { agentIn, CREDENTIALS, grantSubsystem, human } from './support.ts';
+import { agentIn, CREDENTIALS, FakeTerminals, grantSubsystem, human } from './support.ts';
 import {
   createMountedDispatcher,
   createMountedSocketDispatcher,
@@ -739,7 +740,8 @@ describe('the mounted daemon surface', () => {
     // which is the correct fail-closed reading and not the state a serving daemon is ever in.
     const mounted = subsystems();
     await mounted.grants.refresh();
-    const dispatcher = createMountedDispatcher(base, mounted);
+    // The terminal module over the fixture's terminals, which know the session this table lists (s1).
+    const dispatcher = createMountedDispatcher(base, mounted, [builtTerminalOver(new FakeTerminals())]);
 
     // Act
     const health = await dispatcher.dispatch(request({ path: '/healthz' }));

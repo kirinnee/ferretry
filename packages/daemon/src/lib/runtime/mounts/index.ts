@@ -11,7 +11,6 @@ import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts
 import type { ApiSocketDispatcher, SocketRoute } from '../../api/socket.ts';
 import type { StateHomeReach } from '../../api/state-homes.ts';
 import { AUDITED_ROUTES, AUDITED_SOCKET_ROUTES, type AuditedRoutesSubsystem } from '../../audit/index.ts';
-import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { ConfigChangeSink } from '../../config-files/index.ts';
 import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
@@ -49,8 +48,6 @@ import { sessionCredentialDirectory } from './agent-tools.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
 import { type BoardSubsystem, boardRoutes } from './board.ts';
 import { type BoardProjectsSubsystem, type BoardSwitchSubsystem, boardProjectRoutes } from './board-projects.ts';
-import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
-import { type BrowserProxySubsystem, browserProxyRoutes } from './browser-proxy.ts';
 import { carrierRoutes } from './carriers.ts';
 import { type CatalogInstallSubsystem, catalogInstallRoutes } from './catalog-installs.ts';
 import { type CatalogLinkSubsystem, catalogLinkRoutes } from './catalog-links.ts';
@@ -84,9 +81,7 @@ import type { SessionAddressBook } from './session-addressing.ts';
 import { type SessionAgendaModeSubsystem, sessionAgendaModeRoutes } from './session-agenda-mode.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answer.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
-import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
 import { type SessionCompactAtSubsystem, sessionCompactAtRoutes } from './session-compact-at.ts';
-import { type SessionConsoleSubsystem, sessionConsoleRoutes } from './session-console-input.ts';
 import { knownLaunchRoots, type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { type SessionCredentialSubsystem, sessionCredentialRoutes } from './session-credential.ts';
 import { type SessionDialogSubsystem, sessionDialogRoutes } from './session-dialog.ts';
@@ -112,7 +107,6 @@ import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './session-ar
 import { stepUpRoutes } from './step-up.ts';
 import { type SystemOpenSubsystem, systemOpenRoutes } from './system-open.ts';
 import { taskPlanRoutes } from './task-plans.ts';
-import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
 import { tunnelRoutes } from './tunnel.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 import { type WebRtcSignallingSubsystem, webrtcRoutes } from './webrtc.ts';
@@ -281,8 +275,6 @@ export interface MountedSubsystems {
   readonly queueDelivery: Pick<QueueDeliverer, 'arm' | 'stop'>;
   /** Answering a live structured form, after a pane-bound confirmation. */
   readonly sessionAnswer: SessionAnswerSubsystem;
-  /** Durable encrypted attachment originals plus process-local unlock state. */
-  readonly sessionAttachments: SessionAttachmentSubsystem;
   /** Reviving a stopped or dead session with its conversation intact, and typing a next turn into a
    *  live one. This is the nearest thing the daemon has to a send: the resume domain plans one when
    *  the pane it found is genuinely alive rather than replacing it. */
@@ -357,16 +349,6 @@ export interface MountedSubsystems {
    *  background loop nothing constructs is the same absent capability as an
    *  unserved route, and an analytics store nothing writes to answers every query with an empty fleet. */
   readonly analyticsIngest: AnalyticsIngestionLoop;
-  /** Independent shell terminals attached to a session's working directory. */
-  readonly terminals: TerminalSubsystem;
-  /** The daemon-global human browser-login window: a private X display, served over loopback VNC, that
-   *  a person signs into by hand so the agent's browser profile is primed. Per-session browser
-   *  AUTOMATION is not mounted — the mount's own header names what is missing and why. */
-  readonly browserLogin: BrowserLoginLifecycle;
-  /** One browser host per daemon, owning the real worker, page projection and viewer socket. */
-  readonly browser: BrowserMountedSubsystem;
-  /** "Test proxy" and the machine-wide browser state: owner-only, over fake-able ports. */
-  readonly browserProxy: BrowserProxySubsystem;
   /** Terminals and browser pages driven by name — by an agent through its own session credential, and
    *  by a person through the CLI or the app — with take over / hand back. */
   readonly agentTools: { readonly service: AgentToolService; readonly identities: AgentIdentityResolver };
@@ -433,8 +415,6 @@ export interface MountedSubsystems {
   readonly transcriptImages: TranscriptImages;
   /** A short-lived, freshly validated tmux identity for a local human attach. */
   readonly sessionAttach: SessionAttachSubsystem;
-  /** Typing into a session's own pane — the Console — governed as a session terminal is. */
-  readonly sessionConsole: SessionConsoleSubsystem;
   /** A ferret's own processes — listed, their output followed, one stopped — governed as the Console is. */
   readonly sessionProcesses: SessionProcessSubsystem;
   /** Answering the harness's permission prompt on a session's own pane, governed as the Console is. */
@@ -627,9 +607,6 @@ export function legacyModule(
               // shadowed, and all belong above the deeper per-session subsystems.
               ...sessionSendRoutes(subsystems.sessionSend, sentDraftClearer(subsystems.sharedDrafts)),
               ...sessionAnswerRoutes(subsystems.sessionAnswer),
-              // Attachment routes are mounted before sends may honour attachment ids. Their
-              // deeper unlock path cannot shadow this one-segment upload route.
-              ...sessionAttachmentRoutes(subsystems.sessionAttachments),
               ...agendaRoutes(
                 subsystems.attention,
                 subsystems.notifications,
@@ -656,12 +633,6 @@ export function legacyModule(
               // `/v1/sign-in-rules` is a literal no other subsystem uses; `/v1/accounts/:id/sign-in-rules/revoke` ends in two
               // literals no account route has, so neither can shadow or be shadowed.
               ...signInRuleRoutes(subsystems.signInRules, subsystems.signInRuleSuggestions),
-              ...terminalRoutes(subsystems.terminals),
-              // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
-              // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the
-              // literal `browser`, which distinguishes it from every other `/v1/sessions/:id/...` route above.
-              ...browserLoginRoutes(subsystems.browserLogin, subsystems.browser),
-              ...browserProxyRoutes(subsystems.browserProxy),
               ...recommendRoutes(subsystems.recommend),
               // The working-tree read registers last among the per-session subsystems: three of its four paths are
               // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
@@ -682,9 +653,6 @@ export function legacyModule(
               // The attach proof sits with the operator reads but is its own capability: unlike a screen or a
               // transcript it authorizes a local process action, and its mount revalidates the pane identity.
               ...sessionAttachRoutes(subsystems.sessionAttach, subsystems.sessions),
-              // The Console's input: two segments deep under `/v1/sessions/:sessionId`, ending in the literal
-              // `console/input` no other route uses, so it can neither shadow nor be shadowed.
-              ...sessionConsoleRoutes(subsystems.sessionConsole, subsystems.sessions),
               // The Processes tab: one to three segments under `/v1/sessions/:sessionId` starting with the literal
               // `processes` no other route uses, so they can neither shadow nor be shadowed.
               ...sessionProcessRoutes(subsystems.sessionProcesses, subsystems.sessions),
@@ -707,8 +675,6 @@ function legacySockets(subsystems: MountedSubsystems): readonly SocketRoute[] {
     // Fixed literal first; it cannot shadow the deeper terminal pattern and makes the fleet feed's
     // optional session filter one route rather than a second dispatcher.
     ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions, subsystems.configChanges),
-    ...terminalSocketRoutes(subsystems.terminals, subsystems.inputRequests),
-    ...browserSocketRoutes(subsystems.browser),
   ];
 }
 
