@@ -1,3 +1,9 @@
+## [4.291.0](https://github.com/kirinnee/ferretry/compare/v4.290.2...v4.291.0) (2026-11-06)
+
+### Features
+
+* **daemon:** convert host/port/relay into carriers once at boot ([#1541](https://github.com/kirinnee/ferretry/issues/1541)) ([e045b23](https://github.com/kirinnee/ferretry/commit/e045b23ef305975fcbe8f13dbfcb0a2b27f03cae))
+
 ## [4.290.2](https://github.com/kirinnee/ferretry/compare/v4.290.1...v4.290.2) (2026-11-06)
 
 ### Performance

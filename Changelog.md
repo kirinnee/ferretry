@@ -1,3 +1,9 @@
+## [4.291.1](https://github.com/kirinnee/ferretry/compare/v4.291.0...v4.291.1) (2026-11-06)
+
+### Performance
+
+* **pwa:** coalesce session and agenda list refetches ([#1549](https://github.com/kirinnee/ferretry/issues/1549)) ([84aa937](https://github.com/kirinnee/ferretry/commit/84aa9372870620b0ceb8cd838056f7cc80154fcd))
+
 ## [4.291.0](https://github.com/kirinnee/ferretry/compare/v4.290.2...v4.291.0) (2026-11-06)
 
 ### Features
