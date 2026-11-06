@@ -266,10 +266,6 @@ export const historyRows = (history: readonly BoardTaskEvent[], context: History
 // Asks
 // ---------------------------------------------------------------------------------------------------
 
-/** The card's open asks that are NOT also stopping the ferret: the rest of `openAsks`. */
-export const nonBlockingAsks = (task: Pick<BoardTaskView, 'openAsks' | 'waitingOnOwner'>): readonly AgendaRef[] =>
-  task.openAsks.filter(ask => !(task.waitingOnOwner ?? []).some(waiting => waiting.id === ask.id));
-
 // ---------------------------------------------------------------------------------------------------
 // The card's asks, joined to the agenda
 // ---------------------------------------------------------------------------------------------------

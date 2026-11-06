@@ -52,7 +52,7 @@ const STEP_IDS: ReadonlySet<string> = new Set(ONBOARDING_STEPS.map(step => step.
 export const isMachineSetupStepId = (value: string): value is MachineSetupStepId => STEP_IDS.has(value);
 
 /** What the person did with a step. A step they never reached has no state. */
-export type MachineSetupStepState = 'done' | 'skipped';
+type MachineSetupStepState = 'done' | 'skipped';
 
 /** Where the setup starts from: walk through each step, or copy another machine's settings first. */
 export type MachineSetupStart = 'fresh' | 'clone';
@@ -274,10 +274,6 @@ export const onboardingDoneRows = (
 export const onboardingNeedsRuntime = (facts: OnboardingDoneFacts): boolean =>
   facts.runtimes !== undefined &&
   Object.values(facts.runtimes).every(names => names === undefined || names.length === 0);
-
-/** The steps still to do, in words: "Speed-ups and Warden", for Done's heading line. */
-export const onboardingSkippedSteps = (progress: MachineSetupProgress): readonly MachineSetupTaskId[] =>
-  ONBOARDING_TASKS.filter(id => progress.states[id] !== 'done');
 
 // ── Warden ───────────────────────────────────────────────────────────────────────────────────────
 

@@ -153,7 +153,3 @@ export const findSessionAction = (
   sections: readonly SessionActionSection[],
   id: string,
 ): SessionActionEntry | undefined => sections.flatMap(section => section.entries).find(entry => entry.id === id);
-
-/** Every row the keyboard can land on, in drawn order. */
-export const focusableEntries = (sections: readonly SessionActionSection[]): SessionActionEntry[] =>
-  sections.flatMap(section => section.entries).filter(entry => entry.unavailable === undefined);

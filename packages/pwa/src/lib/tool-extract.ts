@@ -29,11 +29,6 @@ export interface ToolResultData {
   readonly [key: string]: unknown;
 }
 
-export interface ToolResultImage {
-  readonly mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
-  readonly data: string;
-}
-
 export type ToolKind = 'bash' | 'read' | 'write' | 'edit' | 'patch' | 'search' | 'plan' | 'wait' | 'generic';
 
 export interface ExtractedTool {
@@ -133,7 +128,7 @@ const patchSummary = (patch: string): ExtractedTool => ({
 /** The synthetic call the transcript files a run of picture-only rows under: one `Read`, however many pictures. */
 export const IMAGE_READ_TOOL = 'ferretry:image-read';
 
-export const imageReadHeadline = (count: number): string => `${count} image${count === 1 ? '' : 's'}`;
+const imageReadHeadline = (count: number): string => `${count} image${count === 1 ? '' : 's'}`;
 
 export const extractToolSummary = (name: string | undefined, input: unknown): ExtractedTool => {
   const lower = (name ?? '').toLowerCase();
@@ -378,28 +373,6 @@ export const langFromPath = (path?: string): string | undefined => {
   return EXTENSION_LANGUAGES[extension];
 };
 
-const INLINE_IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
-
-/**
- * Images a tool result already carried to the browser. Parsing stays narrow —
- * base64 raster blocks only, never SVG — so transcript data cannot turn into an
- * active document inside the page.
- */
-export const resultImages = (result: ToolResultData): readonly ToolResultImage[] => {
-  if (!Array.isArray(result.content)) return [];
-  const images: ToolResultImage[] = [];
-  for (const part of result.content) {
-    if (!part || typeof part !== 'object') continue;
-    const block = part as { type?: unknown; source?: unknown };
-    if (block.type !== 'image' || !block.source || typeof block.source !== 'object') continue;
-    const source = block.source as { type?: unknown; media_type?: unknown; data?: unknown };
-    if (source.type !== 'base64' || typeof source.media_type !== 'string' || typeof source.data !== 'string') continue;
-    if (!INLINE_IMAGE_MEDIA_TYPES.has(source.media_type) || !source.data) continue;
-    images.push({ mediaType: source.media_type as ToolResultImage['mediaType'], data: source.data });
-  }
-  return images;
-};
-
 /** Best-effort readable text of a tool result. */
 export const resultText = (result: ToolResultData): string | null => {
   if (typeof result.text === 'string') return result.text;
@@ -429,7 +402,7 @@ export interface AskedQuestion {
 const QUESTION_TOOLS = /^(askuserquestion|request_user_input)$/iu;
 
 /** Whether a tool name is the structured question tool of either harness. */
-export const isQuestionTool = (name: string | undefined): boolean => name !== undefined && QUESTION_TOOLS.test(name);
+const isQuestionTool = (name: string | undefined): boolean => name !== undefined && QUESTION_TOOLS.test(name);
 
 const textOf = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() !== '' ? value : undefined;

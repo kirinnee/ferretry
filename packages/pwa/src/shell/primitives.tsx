@@ -15,8 +15,8 @@
 import type { ComponentPropsWithRef } from 'react';
 import { cn } from '../lib/class-names.ts';
 
-export type ButtonVariant = 'primary' | 'ghost' | 'outline' | 'danger';
-export type ButtonSize = 'sm' | 'md';
+type ButtonVariant = 'primary' | 'ghost' | 'outline' | 'danger';
+type ButtonSize = 'sm' | 'md';
 
 export interface ButtonProps extends ComponentPropsWithRef<'button'> {
   readonly variant?: ButtonVariant;

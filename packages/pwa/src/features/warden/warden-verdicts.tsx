@@ -14,7 +14,7 @@ import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { relativeTime } from '../../lib/session-screens.ts';
 import { displayCallsign } from '../../lib/callsign.ts';
 
-export type WardenVerdictKind = 'killed' | 'revived' | 'nudged' | 'cleared' | 'needs_human' | 'unknown';
+type WardenVerdictKind = 'killed' | 'revived' | 'nudged' | 'cleared' | 'needs_human' | 'unknown';
 
 /** Provenance is optional for reports written by an older daemon. */
 export interface WardenVerdictSpawnInfo {
@@ -68,7 +68,7 @@ export const verdictProvenanceLine = (spawn?: WardenVerdictSpawnInfo): string =>
   return `${spawn.agent} · ${verdictModelCopy(spawn)} · ${spawn.harness ?? 'harness unknown'}`;
 };
 
-export const switchedAccountCopy = (spawn?: WardenVerdictSpawnInfo): string | null =>
+const switchedAccountCopy = (spawn?: WardenVerdictSpawnInfo): string | null =>
   spawn?.failedOver ? 'switched AI login' : null;
 
 /** State why the Warden used a different account, without inventing a reason. */
@@ -123,12 +123,7 @@ export function WardenVerdicts({ connection, verdicts, now = Date.now(), onOpenR
 }
 
 /** Pure rows; the daemon-bound host owns fetching and rendering a full report. */
-export function VerdictRows({
-  connection,
-  verdicts,
-  now = Date.now(),
-  onOpenReport,
-}: WardenVerdictsProps): React.JSX.Element {
+function VerdictRows({ connection, verdicts, now = Date.now(), onOpenReport }: WardenVerdictsProps): React.JSX.Element {
   return (
     <ul className="m-0 list-none divide-y divide-border-soft border-t border-border-soft p-0">
       {verdicts.map(verdict => {

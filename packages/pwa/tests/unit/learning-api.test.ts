@@ -9,7 +9,6 @@ import {
   fetchLearningConfig,
   fetchLearningProposals,
   fetchLearningScan,
-  fetchLearningStatus,
   fetchSessionLearning,
   isApplyConflict,
   learningErrorMessage,
@@ -33,18 +32,8 @@ describe('learning transport', () => {
   it('dials every learning route on the paired daemon with the stated verb and body', async () => {
     const daemon = fakeLearningDaemon();
     daemon.state.sessions = [{ sessionId: 's', passive: true, since: AT, setBy: 'owner' }];
-    const status = {
-      enabled: true,
-      intervalMinutes: 60,
-      pending: { total: 0, strong: 0, weak: 0 },
-      totals: { observations: 0, proposals: 0, tombstones: 0 },
-      running: false,
-      passiveDefault: true,
-    };
-    daemon.once('GET /v1/learning/status', { body: status });
     const fetcher = daemon.fetch;
 
-    expect(await fetchLearningStatus(learningDaemon, fetcher)).toEqual(status);
     expect(await fetchLearningConfig(learningDaemon, fetcher)).toEqual(config());
     expect((await patchLearningConfig(learningDaemon, { passiveDefault: false }, fetcher)).passiveDefault).toBe(false);
     expect(await fetchLearningProposals(learningDaemon, fetcher)).toEqual([lesson()]);
@@ -63,7 +52,6 @@ describe('learning transport', () => {
     expect((await cancelLearningScan(learningDaemon, fetcher)).state).toBe('cancelled');
 
     expect(daemon.calls.map(call => `${call.method} ${call.path}`)).toEqual([
-      'GET /v1/learning/status',
       'GET /v1/learning/config',
       'PATCH /v1/learning/config',
       'GET /v1/learning/proposals',

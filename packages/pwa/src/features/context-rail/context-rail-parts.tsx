@@ -15,14 +15,14 @@ import type { ContextLoader } from './context-rail-ports.ts';
 
 // ── A lazy read ──────────────────────────────────────────────────────────────────────────────────
 
-export type ContextLoad<T> =
+type ContextLoad<T> =
   | { readonly kind: 'idle' }
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly value: T }
   | { readonly kind: 'failed'; readonly reason: string; readonly outdated?: OutdatedMachine };
 
 /** A machine whose daemon predates the route a read asked for: not a fault, a version. */
-export interface OutdatedMachine {
+interface OutdatedMachine {
   /** The version the daemon stamped on its answer, when it did. */
   readonly daemonVersion?: string;
 }
@@ -36,7 +36,7 @@ export const loadFailureReason = (error: unknown): string =>
  * no such route. The rail's MCP, Skills and SKILL.md reads lean on routes a daemon gained in 4.82; the app
  * deploys before the machine updates, so this is a normal state, and the daemon's own 404 is the report.
  */
-export const outdatedMachine = (error: unknown): OutdatedMachine | undefined =>
+const outdatedMachine = (error: unknown): OutdatedMachine | undefined =>
   error instanceof FyHttpError && error.status === 404 && error.code === 'unknown_route'
     ? { ...(error.daemonVersion === undefined ? {} : { daemonVersion: error.daemonVersion }) }
     : undefined;

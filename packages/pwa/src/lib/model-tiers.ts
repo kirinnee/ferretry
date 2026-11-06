@@ -10,7 +10,7 @@
 export type ModelTier = 'best' | 'balanced' | 'fast';
 
 /** Most capable first: the order a picker lists the tiers in. */
-export const MODEL_TIERS: readonly ModelTier[] = ['best', 'balanced', 'fast'];
+const MODEL_TIERS: readonly ModelTier[] = ['best', 'balanced', 'fast'];
 
 /** Each tier's heading. */
 export const MODEL_TIER_LABELS: Readonly<Record<ModelTier, string>> = {

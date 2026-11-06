@@ -5,7 +5,6 @@ import {
   chatCards,
   chatChip,
   chatDrawn,
-  chatChipSentence,
   chatSiblings,
   descendantSessionIds,
 } from '../../src/lib/board-chat.ts';
@@ -170,7 +169,6 @@ describe('chatChip', () => {
   it('says no card when the session has no focus card', () => {
     const chip = chatChip(undefined, null, undefined, 'ready');
     expect(chip).toEqual({ kind: 'none' });
-    expect(chatChipSentence(chip)).toBe('No card');
   });
 
   it('names the card, its lane and how it is doing', async () => {
@@ -187,7 +185,6 @@ describe('chatChip', () => {
       tone: 'ok',
     });
     if (chip.kind !== 'card') throw new Error('expected a card chip');
-    expect(chatChipSentence(chip)).toBe('&F18, Board system, Plan/Design, active');
     expect(chatCardLabel(chip)).toBe('&F18 (Plan/Design)');
   });
 
@@ -227,7 +224,6 @@ describe('chatChip', () => {
     const closed = chatChip(focus, null, undefined, 'ready');
     expect(closed).toMatchObject({ kind: 'card', activity: 'closed' });
     if (closed.kind !== 'card') throw new Error('expected a card chip');
-    expect(chatChipSentence(closed)).toBe('&F18, closed');
     expect(chatCardLabel(closed)).toBe('&F18');
   });
 });

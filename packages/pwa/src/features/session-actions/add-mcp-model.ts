@@ -15,7 +15,7 @@ import {
   type SessionMcpServer,
 } from '@ferretry/protocol';
 
-export type McpTransport = 'command' | 'url';
+type McpTransport = 'command' | 'url';
 
 export interface McpDraft {
   readonly scope: SessionMcpScope;

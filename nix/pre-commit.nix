@@ -114,7 +114,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Composition-root reachability";
       entry = validator "scripts/validate/composition-reachability.sh";
-      files = "^(packages/.*\\.ts|packages/[^/]+/package\\.json|scripts/validate/composition-reachability\\.(sh|ts)|scripts/validate/reachability-allowlist\\.txt)$";
+      files = "^(packages/.*\\.tsx?|packages/[^/]+/package\\.json|scripts/validate/composition-reachability\\.(sh|ts)|scripts/validate/reachability-allowlist\\.txt)$";
       pass_filenames = false;
       language = "system";
     };

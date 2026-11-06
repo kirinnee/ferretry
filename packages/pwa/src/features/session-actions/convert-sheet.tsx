@@ -27,13 +27,13 @@ import { HARNESS_SHORT, otherHarness } from '../fleet/credentials/credentials-mo
 import { type ConversionFailure, conversionFailure, conversionSentences } from './conversion-model.ts';
 import { refusedCause } from './session-operations.ts';
 
-export type ReadConversionPreview = (
+type ReadConversionPreview = (
   connection: DaemonConnection,
   scope: DaemonSessionScope,
   agent: string,
 ) => Promise<ConversionPreview>;
 
-export type MoveToOtherHarness = (
+type MoveToOtherHarness = (
   connection: DaemonConnection,
   view: SessionView,
   agent: string,

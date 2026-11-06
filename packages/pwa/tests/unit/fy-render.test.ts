@@ -10,7 +10,6 @@ import {
   type FyRenderBlock,
   type FyRenderParseResult,
   fyRenderMediaMime,
-  fyRenderPayloadBytes,
   fyRenderPresentation,
   fyRenderRasterRefusal,
   fyRenderReadBoundedBytes,
@@ -1062,21 +1061,6 @@ describe('fy-render media blocks', () => {
       isFyRenderMediaBlock(block(body('type: image', 'alt: A pixel', 'mime: image/png', '---', PIXEL))),
     ).be.false();
     should(isFyRenderMediaBlock(block(body('type: svg', 'alt: A square', '---', SQUARE)))).be.false();
-  });
-
-  test('should report no payload bytes for a media block, whatever its type', () => {
-    // Assert — the consent control names this number, and a src block's bytes
-    // are not known until they are read.
-    should(fyRenderPayloadBytes(block(body('type: image', 'alt: A file', 'src: @a.png', '---')))).equal(0);
-    should(fyRenderPayloadBytes(block(body('type: audio', 'alt: A song', 'src: @a.mp3', '---')))).equal(0);
-  });
-
-  test('should report the bytes an inline payload actually spends', () => {
-    // Assert — UTF-8 bytes for text, decoded bytes for base64.
-    should(fyRenderPayloadBytes(block(body('type: html', 'alt: A widget', '---', 'é')))).equal(2);
-    should(fyRenderPayloadBytes(block(body('type: image', 'alt: A pixel', 'mime: image/png', '---', PIXEL)))).equal(
-      png(1, 1).byteLength,
-    );
   });
 });
 

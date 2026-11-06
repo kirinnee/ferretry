@@ -43,12 +43,12 @@ import {
 } from './about-machine-model.ts';
 
 /** How often the panel re-reads while an update is waiting or running. */
-export const ABOUT_POLL_MS = 3_000;
+const ABOUT_POLL_MS = 3_000;
 
 export type AboutClient = Pick<IFyApiClient, 'daemonUpdate' | 'startDaemonUpdate' | 'updateDaemonUpdateSettings'>;
 export type AboutClientFactory = (connection: DaemonConnection) => Promise<AboutClient>;
 
-export interface AboutMachinePanelProps {
+interface AboutMachinePanelProps {
   readonly view: DaemonUpdateView;
   /** The app's own version, or `undefined` for a build that was stamped with none. */
   readonly appVersion: string | undefined;
@@ -150,7 +150,7 @@ function UpdateAction({
 }
 
 /** The panel, drawn from one view. Every request goes out through the callbacks. */
-export function AboutMachinePanel({
+function AboutMachinePanel({
   view,
   appVersion: app,
   now,

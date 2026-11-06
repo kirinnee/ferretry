@@ -29,13 +29,13 @@ import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { type FeedAwarePollEnvironment, type LiveFeedSignal, startFeedAwarePoll } from '../../lib/feed-aware-poll.ts';
 
 /** How often the page list is re-read while no live feed is saying what changed. */
-export const SESSION_BROWSER_POLL_MS = 10_000;
+const SESSION_BROWSER_POLL_MS = 10_000;
 
 /** The safety-net re-read while the feed is live, for a page closed or moved without a journal entry. */
 export const SESSION_BROWSER_LIVE_POLL_MS = 120_000;
 
 /** A feed event that may have changed the session's pages: a surface or a browser one. */
-export const movesBrowserPages = (event: { readonly type: string }): boolean =>
+const movesBrowserPages = (event: { readonly type: string }): boolean =>
   event.type.startsWith('surface.') || event.type.startsWith('browser.');
 
 export interface SessionBrowserDependencies {
@@ -68,7 +68,7 @@ const NO_SESSION_BROWSER: SessionBrowser = Object.freeze({
 });
 
 /** The browser route of one session. */
-export const sessionBrowserPath = (scope: DaemonSessionScope): string =>
+const sessionBrowserPath = (scope: DaemonSessionScope): string =>
   `/v1/sessions/${encodeURIComponent(scope.sessionId)}/browser`;
 
 /** Every fact about a page that a list row or a proof reads — and nothing that merely ticks. */

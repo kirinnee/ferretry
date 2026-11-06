@@ -122,7 +122,7 @@ function SecurityList({ records, nowMs }: { readonly records: readonly AuditReco
 }
 
 /** The loaded log, separated from the read so its every state can be rendered without a client. */
-export function SecurityLog({
+function SecurityLog({
   view,
   nowMs,
   older = NO_OLDER,

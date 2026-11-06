@@ -50,7 +50,7 @@ export const utcDay = (instant: Date): string => instant.toISOString().slice(0, 
  * The calendar day an instant falls on in `timeZone` (an IANA name), or UTC's when none is given — the
  * same spelling as the daemon's `day` label, which the daemon counts in the same zone.
  */
-export const zonedDay = (instant: Date, timeZone?: string): string => {
+const zonedDay = (instant: Date, timeZone?: string): string => {
   if (timeZone === undefined) return utcDay(instant);
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -410,7 +410,7 @@ export const overviewGroups = (
     });
 
 /** Rows grouped into session trees per machine. */
-export const overviewTopSessions = (rows: readonly OverviewRow[]): readonly OverviewTopSession[] =>
+const overviewTopSessions = (rows: readonly OverviewRow[]): readonly OverviewTopSession[] =>
   [...groupBy(rows, row => `${row.daemonId}\n${row.tree}`).values()].map(members => {
     const first = members[0]!;
     const root = members.find(member => member.id === first.tree) ?? first;

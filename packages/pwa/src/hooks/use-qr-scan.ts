@@ -16,7 +16,7 @@ import { type QrPreview, type QrScanHost, ScanError, type ScanErrorCode } from '
  * `failed` carries a sentence; `idle` is both "not started" and "stopped on
  * purpose", because a reader who pressed stop needs no explanation of it.
  */
-export type QrScanPhase = 'idle' | 'scanning' | 'failed';
+type QrScanPhase = 'idle' | 'scanning' | 'failed';
 
 export interface QrScanController {
   readonly phase: QrScanPhase;

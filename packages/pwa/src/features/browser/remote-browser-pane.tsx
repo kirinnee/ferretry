@@ -72,7 +72,7 @@ export type RemoteBrowserDelay = (callback: () => void, delayMs: number) => () =
  * Long enough that a phone's rotation animation and an on-screen keyboard
  * settle before the daemon is asked to re-lay out the real page.
  */
-export const REMOTE_BROWSER_RESIZE_DEBOUNCE_MS = 250;
+const REMOTE_BROWSER_RESIZE_DEBOUNCE_MS = 250;
 
 const defaultObserveSize: RemoteBrowserSizeObserver = (element, onResize) => {
   // A runtime without ResizeObserver cannot report a container box at all. The

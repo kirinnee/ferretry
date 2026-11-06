@@ -29,7 +29,7 @@ import type {
 } from './account-picker-catalog.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 
-export type AccountPickerLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
+type AccountPickerLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface DaemonAccountPickerSlice {
   /** Opaque connection generation; never derived from a credential. */

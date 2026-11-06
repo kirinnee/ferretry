@@ -12,14 +12,14 @@
 /** Movement below this is a tap or a wobble; no direction is decided yet. */
 export const SWIPE_LOCK_SLOP_PX = 10;
 /** Sideways must beat vertical by this factor to read as a swipe. */
-export const SWIPE_HORIZONTAL_RATIO = 1.5;
+const SWIPE_HORIZONTAL_RATIO = 1.5;
 /** A slow, deliberate drag must travel this far. */
 export const SWIPE_DISTANCE_PX = 64;
 /** A flick: shorter travel, but fast. */
 export const SWIPE_FLICK_DISTANCE_PX = 28;
-export const SWIPE_FLICK_VELOCITY = 0.5;
+const SWIPE_FLICK_VELOCITY = 0.5;
 
-export type SwipeAxis = 'undecided' | 'horizontal' | 'vertical';
+type SwipeAxis = 'undecided' | 'horizontal' | 'vertical';
 
 export interface TabSwipe {
   readonly startX: number;

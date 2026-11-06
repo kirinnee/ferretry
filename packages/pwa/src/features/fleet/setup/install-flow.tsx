@@ -18,7 +18,7 @@ import { SetupNote } from './setup-ui.tsx';
 import { SETUP_HARNESS_NAMES, type SetupHarness } from './setup-words.ts';
 import { ToolInstall } from './tool-install.tsx';
 
-export const INSTALL_FLOW_KIND = 'install';
+const INSTALL_FLOW_KIND = 'install';
 
 export interface InstallToolProps extends MachineTabProps {
   readonly harness: SetupHarness;

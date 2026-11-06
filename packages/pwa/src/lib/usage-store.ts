@@ -51,7 +51,7 @@ import { DaemonUsageIndex, type ResolvedQuota } from './usage.ts';
  */
 export const USAGE_POLL_MS = 120_000;
 
-export type UsageLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
+type UsageLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 /**
  * One daemon's account feed as a screen renders it.

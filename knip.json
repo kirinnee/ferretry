@@ -37,6 +37,7 @@
     "packages/pwa": {
       "entry": [
         "src/main.tsx",
+        "src/worker/service-worker.ts",
         "vite.config.ts",
         "tests/**/*.test.{ts,tsx}",
         "tests/support/dom-leak-guard.ts",

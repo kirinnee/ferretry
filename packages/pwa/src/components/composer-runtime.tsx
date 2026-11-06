@@ -100,7 +100,7 @@ export const codexReasoningObservationChanged = (
 ): boolean => before.effort !== current.effort || before.observedAt !== current.observedAt;
 
 /** Where a submitted switch stands: nothing in flight, awaiting the harness, or given up on. */
-export type RuntimeSwitchState = 'settled' | 'pending' | 'unconfirmed';
+type RuntimeSwitchState = 'settled' | 'pending' | 'unconfirmed';
 
 /**
  * How long a chip may say "switching…" before it admits the switch was not confirmed. Long enough

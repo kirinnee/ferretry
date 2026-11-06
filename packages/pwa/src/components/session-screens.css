@@ -6,8 +6,6 @@
   --fy-border: var(--border);
   --fy-accent: var(--accent);
 }
-.fy-session-list,
-.fy-session-details,
 .fy-transcript-shell,
 .fy-composer,
 .fy-question-form {
@@ -311,87 +309,10 @@
   font-size: 0.875em;
   margin: 0;
 }
-.fy-screen-heading,
-.fy-detail-header,
-.fy-composer-actions,
-.fy-session-row {
+.fy-composer-actions {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-.fy-session-header {
-  align-items: center;
-  background: var(--fy-surface);
-  border-bottom: var(--divider-width) solid var(--divider-color);
-  color: var(--fy-fg);
-  display: flex;
-  gap: 12px;
-  min-height: 56px;
-  padding: 8px 12px;
-}
-.fy-session-header-mobile-actions {
-  display: flex;
-  gap: 4px;
-}
-.fy-session-header-mobile-actions button,
-.fy-session-header-details {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-control);
-  color: inherit;
-  display: inline-flex;
-  font-size: 20px;
-  justify-content: center;
-  min-height: 40px;
-  min-width: 40px;
-}
-.fy-session-header-mobile-actions button:hover,
-.fy-session-header-mobile-actions button:focus-visible,
-.fy-session-header-details:hover,
-.fy-session-header-details:focus-visible {
-  background: var(--fy-surface-2);
-  outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: var(--focus-offset);
-}
-.fy-session-header-identity {
-  min-width: 0;
-}
-.fy-session-header-identity .fy-eyebrow {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fy-session-header-identity h1 {
-  font-size: 16px;
-  line-height: 1.2;
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fy-session-header-id {
-  color: var(--fy-muted);
-  display: block;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fy-session-header-meta {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
-}
-.fy-session-header-details {
-  font-size: 14px;
-  letter-spacing: 1px;
-}
-.fy-screen-heading,
-.fy-detail-header {
-  justify-content: space-between;
 }
 .fy-eyebrow {
   color: var(--fy-muted);
@@ -402,78 +323,6 @@
   margin: 0;
   text-transform: var(--label-transform);
 }
-.fy-screen-heading h1,
-.fy-detail-header h2 {
-  font-size: 20px;
-  margin: 2px 0 0;
-}
-.fy-count {
-  background: var(--fy-surface-2);
-  border: var(--stroke) solid var(--fy-border);
-  border-radius: var(--radius-badge);
-  padding: 2px 8px;
-}
-.fy-session-rows {
-  border: var(--stroke-panel) solid var(--fy-border);
-  border-radius: var(--radius-panel);
-  margin-top: 16px;
-  overflow: hidden;
-}
-.fy-session-row {
-  background: var(--fy-surface);
-  border: 0;
-  border-bottom: var(--divider-width) solid var(--divider-color);
-  color: inherit;
-  cursor: pointer;
-  min-height: 52px;
-  padding: 8px 12px;
-  text-align: left;
-  width: 100%;
-}
-.fy-session-row:last-child {
-  border-bottom: 0;
-}
-.fy-session-row:hover,
-.fy-session-row:focus-visible {
-  background: var(--fy-surface-2);
-  outline: 2px solid var(--fy-accent);
-  outline-offset: -2px;
-}
-.fy-session-identity {
-  display: grid;
-  min-width: 154px;
-}
-.fy-session-identity small,
-.fy-session-task,
-.fy-session-meta,
-.fy-session-age {
-  color: var(--fy-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fy-session-task {
-  flex: 1;
-}
-.fy-session-meta {
-  min-width: 95px;
-}
-.fy-quota-readout {
-  align-items: center;
-  display: inline-flex;
-  flex: 0 1 auto;
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 12px;
-  gap: 5px;
-  min-width: 0;
-  white-space: nowrap;
-}
-.fy-session-quota {
-  color: var(--fy-muted);
-}
-.fy-quota-muted {
-  color: var(--fy-muted);
-}
 .fy-quota-divider {
   color: var(--fy-border);
 }
@@ -482,103 +331,6 @@
 }
 .fy-quota-error {
   color: var(--err);
-}
-.fy-quota-limit {
-  background: var(--err-bg);
-  border-radius: var(--radius-badge);
-  color: var(--err);
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 5px;
-  text-transform: uppercase;
-}
-.fy-session-age {
-  min-width: 52px;
-  text-align: right;
-}
-.fy-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 128px;
-  text-transform: capitalize;
-}
-.fy-mode-badge {
-  align-self: center;
-  flex: 0 0 auto;
-  justify-self: start;
-  width: fit-content;
-}
-.fy-mode-badge-auto {
-  font-weight: 500;
-}
-.fy-empty {
-  border: var(--stroke) dashed var(--fy-border);
-  border-radius: var(--radius-panel);
-  color: var(--fy-muted);
-  padding: 24px;
-  text-align: center;
-}
-.fy-session-details {
-  background: var(--fy-surface);
-  border: var(--stroke-panel) solid var(--fy-border);
-  border-radius: var(--radius-panel);
-  padding: 16px;
-}
-.fy-session-context {
-  background: var(--fy-surface);
-  border-top: var(--divider-width) solid var(--divider-color);
-  color: var(--fy-fg);
-  font-family: var(--font-body);
-  font-size: var(--font-size-base);
-  line-height: var(--leading-base);
-  padding-top: 12px;
-}
-.fy-session-context h2 {
-  font-size: 16px;
-  margin: 0;
-}
-.fy-session-context p {
-  color: var(--fy-muted);
-  margin: 4px 0 0;
-}
-.fy-session-context button {
-  align-items: center;
-  background: var(--fy-surface);
-  border: var(--stroke-control) solid var(--fy-border);
-  border-radius: var(--radius-control);
-  color: inherit;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  margin-top: 12px;
-  min-height: 44px;
-  padding: 8px 12px;
-  text-align: left;
-  width: 100%;
-}
-.fy-session-context button:hover,
-.fy-session-context button:focus-visible {
-  background: var(--fy-surface-2);
-  outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: var(--focus-offset);
-}
-.fy-session-context button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-.fy-session-context button small {
-  color: var(--fy-muted);
-  margin-left: 12px;
-}
-.fy-session-context .fy-session-context-warning {
-  color: var(--warn);
-}
-.fy-session-context .fy-session-context-error {
-  color: var(--err);
-}
-.fy-session-context .fy-session-context-notice {
-  color: var(--ok);
 }
 .fy-remote-browser {
   background: var(--fy-surface);
@@ -679,42 +431,6 @@
 .fy-remote-browser-error button:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: var(--focus-offset);
-}
-@media (max-width: 700px) {
-  .fy-session-context button {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .fy-session-context button small {
-    margin-left: 0;
-  }
-}
-.fy-session-details dl {
-  margin: 16px 0 0;
-}
-.fy-detail-row {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 100px minmax(0, 1fr);
-  padding: 8px 0;
-}
-.fy-detail-row dt {
-  color: var(--fy-muted);
-}
-.fy-detail-row dd {
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fy-icon-button {
-  border: 0;
-  border-radius: var(--radius-control);
-  cursor: pointer;
-  font-size: 24px;
-  height: 44px;
-  width: 44px;
 }
 /* THE CHAT MEASURE lives in `styles/index.css` (`.kt-chat-surface`), beside the composer's half of
  * it: one owner, so the text column and the composer cannot drift apart. */
@@ -2317,47 +2033,6 @@ button.fy-receipt {
   width: 1px;
 }
 @media (max-width: 700px) {
-  .fy-session-header {
-    gap: 6px;
-    min-height: 52px;
-    padding: 4px 8px;
-  }
-  .fy-session-header-identity {
-    flex: 1;
-  }
-  .fy-session-header-identity .fy-eyebrow,
-  .fy-session-header-id,
-  .fy-session-header-meta {
-    display: none;
-  }
-  .fy-session-header-mobile-actions button,
-  .fy-session-header-details {
-    min-height: 44px;
-    min-width: 44px;
-  }
-  .fy-session-row {
-    align-items: flex-start;
-    display: grid;
-    grid-template-columns: 1fr auto;
-  }
-  .fy-session-task,
-  .fy-session-meta {
-    display: none;
-  }
-  .fy-session-quota {
-    grid-column: 1;
-    grid-row: 2;
-  }
-  .fy-session-age {
-    grid-column: 2;
-    grid-row: 2;
-  }
-  .fy-status {
-    min-width: auto;
-  }
-  .fy-session-details {
-    border-radius: var(--radius-panel) var(--radius-panel) 0 0;
-  }
   .fy-message {
     max-width: 95%;
   }
@@ -2413,12 +2088,9 @@ button.fy-receipt {
    token-driven surface around them grew. They follow the phone body token now (17px; styles/index.css
    DENSITY RAMP), and the reader's own bubble text does too. */
 @media (max-width: 640px) {
-  .fy-session-list,
-  .fy-session-details,
   .fy-transcript-shell,
   .fy-composer,
-  .fy-question-form,
-  .fy-session-context {
+  .fy-question-form {
     font-size: var(--font-size-base);
   }
   .kt-bubble .kt-user-copy {

@@ -11,7 +11,6 @@ import {
   type DeferredTimers,
   DISMISS_ACTION,
   DONE_ACTION,
-  directionOfAction,
   gateHolders,
   historyLine,
   type InboxCard,
@@ -22,9 +21,7 @@ import {
   inboxParked,
   inboxResolved,
   inboxUnavailable,
-  NEEDS_INFO_ACTION,
   needsYouCount,
-  needsYouItems,
   RESOLVED_READ_LIMIT,
   SWIPE_SLOP_PX,
   sessionAgenda,
@@ -310,13 +307,6 @@ describe('swipes', () => {
   test('the threshold is bounded for narrow and wide cards', () => {
     expect(swipeThreshold(100)).toBe(96);
     expect(swipeThreshold(2_000)).toBe(160);
-  });
-
-  test('finds the swipe an answer sits on by meaning, not by identity', () => {
-    const map = swipeMap(card({ ask: { kind: 'task' } }));
-    expect(directionOfAction(map, { kind: 'resolve', label: 'Mark as done' })).toBe('right');
-    expect(directionOfAction(map, { ...NEEDS_INFO_ACTION, label: 'Need more info' })).toBeNull();
-    expect(directionOfAction(map, { ...DISMISS_ACTION })).toBeNull();
   });
 
   test('options follow the swipe order, recommended first', () => {
@@ -674,7 +664,6 @@ describe('items in discussion', () => {
     expect(needsYouCount({ open: 3, discussing: 1 })).toBe(2);
     expect(needsYouCount({ open: 3 })).toBe(3);
     expect(needsYouCount({ open: 1, discussing: 4 })).toBe(0);
-    expect(needsYouItems([item('A1', 1), discussed('A2', 2)])).toBe(1);
   });
 
   test('should count and badge only the needs-you part of a session', () => {
@@ -797,10 +786,6 @@ describe('parked items', () => {
 
   test('should list nothing for a source whose conversations have not been read', () => {
     expect(inboxParked([{ daemonId: STUDIO, name: 'Studio', sessions: null }], boardFor)).toEqual([]);
-  });
-
-  test('should not count a parked item as needing the owner', () => {
-    expect(needsYouItems([item('A1', 1), snoozedItem('A2', 2, 10), repliedItem('A3', 20)])).toBe(1);
   });
 
   test('should build the snooze and unsnooze actions', () => {

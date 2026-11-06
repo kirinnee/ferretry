@@ -329,8 +329,8 @@ export const remoteCanvasPoint = (
   };
 };
 
-export const REMOTE_MULTI_CLICK_MS = 500;
-export const REMOTE_MULTI_CLICK_SLOP = 5;
+const REMOTE_MULTI_CLICK_MS = 500;
+const REMOTE_MULTI_CLICK_SLOP = 5;
 export const REMOTE_MAX_CLICK_COUNT = 3;
 
 export interface RemoteClickRun {

@@ -137,7 +137,7 @@ import { speedPlannerFor } from './stt/speed-planner.ts';
 import type { SpeedGlobalLike } from './stt/speed-signals.ts';
 import { DeviceSpeedupKeys, IndexedDbSpeedupKeyRecords } from './stt/speedup-keys.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
-import { TranscriptionLog, type TranscriptionLogSnapshot } from './stt/transcription-log.ts';
+import { TranscriptionLog } from './stt/transcription-log.ts';
 import { IndexedDbTranscriptionLogRecords } from './stt/transcription-log-records.ts';
 import { readTunnelService, type TunnelServiceState } from './tunnel-service.ts';
 import { keptTunnel, TunnelSwitchStore } from './tunnel-switch.ts';
@@ -1515,15 +1515,6 @@ export function useLiveVoiceSettingsStore(): LiveVoiceSettingsStore | null {
 /** This device's transcription log, or `null` outside a store. */
 export function useTranscriptionLog(): TranscriptionLog | null {
   return useContext(StoreContext)?.transcriptionLog ?? null;
-}
-
-const NO_LOG: TranscriptionLogSnapshot = Object.freeze({ enabled: false, entries: [], saved: false });
-const noLogSnapshot = (): TranscriptionLogSnapshot => NO_LOG;
-
-/** What the transcription log holds right now; off and empty outside a store. */
-export function useTranscriptionLogSnapshot(): TranscriptionLogSnapshot {
-  const log = useTranscriptionLog();
-  return useSyncExternalStore(log?.subscribe ?? noSubscription, log?.snapshot ?? noLogSnapshot);
 }
 
 /**

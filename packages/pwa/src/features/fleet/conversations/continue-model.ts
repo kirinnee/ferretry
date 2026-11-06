@@ -90,7 +90,7 @@ export type ContinueEntry =
       readonly ferret: FerretMark;
     };
 
-export const entryActivityAt = (entry: ContinueEntry): string =>
+const entryActivityAt = (entry: ContinueEntry): string =>
   entry.kind === 'conversation' ? entry.conversation.lastActivityAt : sessionActivityAt(entry.view);
 
 const words = (text: string): readonly string[] =>

@@ -22,7 +22,7 @@ import {
  */
 export const CONNECTIONS_KEY = 'fy-connections-v2';
 export const CONNECTIONS_VERSION = 2 as const;
-export const MAX_CONNECTIONS = 20;
+const MAX_CONNECTIONS = 20;
 
 /** One paired daemon and the reader-local metadata used to order the picker. */
 export interface DaemonConnectionRecord extends DaemonConnection {

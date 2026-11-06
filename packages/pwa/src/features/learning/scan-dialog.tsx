@@ -37,7 +37,7 @@ import {
 } from './learning-model.ts';
 import type { LearningScanControl } from './use-learning-scan.ts';
 
-export const ESTIMATE_DELAY_MS = 400;
+const ESTIMATE_DELAY_MS = 400;
 
 export interface ScanDialogProps {
   readonly connection: DaemonConnection;

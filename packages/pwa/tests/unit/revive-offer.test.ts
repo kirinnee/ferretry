@@ -8,7 +8,6 @@ import {
 import { sessionActionSections } from '../../src/features/session-actions/registry.ts';
 import { keptConversationAction } from '../../src/features/fleet/conversations/continue-model.ts';
 import { reviveOffer } from '../../src/shell/revive-offer.ts';
-import { rowMenuActionSpecs } from '../../src/shell/agent-sidebar-model.ts';
 import { sessionActionSpecs } from '../../src/shell/session-actions.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -33,10 +32,6 @@ const surfaces: readonly { readonly name: string; readonly offers: (view: Sessio
   {
     name: 'the chat bar and the sidebar (sessionActionSpecs)',
     offers: view => sessionActionSpecs(view, true).some(spec => spec.action === 'resume'),
-  },
-  {
-    name: 'a list row’s menu',
-    offers: view => rowMenuActionSpecs(view, true).some(spec => spec.action === 'resume'),
   },
   {
     name: 'the chat Actions menu',

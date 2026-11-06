@@ -56,7 +56,6 @@ import {
   browserPushEnrolment,
   browserQrScan,
   installOnce,
-  isTextEntryTarget,
   pairedPushMachines,
   pushMachineLabel,
   routeAnnouncement,
@@ -3467,25 +3466,6 @@ describe('the global destination and settings finder', () => {
     await interact(() => scroller.dispatchEvent(touchEvent('touchend', 0, 0)));
     expect(paletteOpen(view.container)).toBe(true);
     await view.unmount();
-  });
-});
-
-describe('isTextEntryTarget', () => {
-  it('recognises the elements that own a keystroke, and nothing else', () => {
-    const element = (tagName: string, contentEditable = false): EventTarget =>
-      ({ tagName, isContentEditable: contentEditable }) as unknown as EventTarget;
-
-    expect(isTextEntryTarget(element('INPUT'))).toBe(true);
-    expect(isTextEntryTarget(element('textarea'))).toBe(true);
-    expect(isTextEntryTarget(element('Select'))).toBe(true);
-    expect(isTextEntryTarget(element('DIV', true))).toBe(true);
-    expect(isTextEntryTarget(element('DIV'))).toBe(false);
-    expect(isTextEntryTarget(element('BUTTON'))).toBe(false);
-    // A target that is not an element at all — `window`, a `MessagePort`, or a
-    // detached node from another realm — must not be mistaken for a field.
-    expect(isTextEntryTarget({} as EventTarget)).toBe(false);
-    expect(isTextEntryTarget(window as unknown as EventTarget)).toBe(false);
-    expect(isTextEntryTarget(null)).toBe(false);
   });
 });
 

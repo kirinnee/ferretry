@@ -50,14 +50,14 @@ import { SwitchList, SwitchRow } from './switch-row.tsx';
 type AgentPermissions = FleetMachineView['agentPermissions'];
 type AgentControlKind = keyof FleetAgentControl;
 
-export const AGENT_PERMISSION_WORDS: Readonly<Record<AgentPermissions, string>> = {
+const AGENT_PERMISSION_WORDS: Readonly<Record<AgentPermissions, string>> = {
   auto: 'Auto mode',
   skip: 'Skip all permission checks',
 };
 
 /** "What agents may control" (T): each switch's label and what it covers — the fourth, Ferretry settings,
  *  is the `config.*` tools (docs/config-files.md); the fifth, Page scripts, is `browser.eval`. */
-export const AGENT_CONTROL_WORDS: Readonly<
+const AGENT_CONTROL_WORDS: Readonly<
   Record<AgentControlKind, { readonly title: string; readonly hint?: string; readonly detail: string }>
 > = {
   terminals: { title: 'Terminals', detail: 'Open, read and type into session terminals.' },
@@ -359,7 +359,7 @@ export function ConversationsSection({
 }
 
 /** "Auto-resume after restart": each choice's words. */
-export const AUTO_RESUME_WORDS: Readonly<Record<'on' | 'off', { readonly title: string; readonly detail: string }>> = {
+const AUTO_RESUME_WORDS: Readonly<Record<'on' | 'off', { readonly title: string; readonly detail: string }>> = {
   on: {
     title: 'On',
     detail:
@@ -372,7 +372,7 @@ export const AUTO_RESUME_WORDS: Readonly<Record<'on' | 'off', { readonly title: 
 };
 
 /** The summary of the last pass, as the sentence the row leads with. */
-export const autoResumeSentence = (resumed: number): string =>
+const autoResumeSentence = (resumed: number): string =>
   `Resumed ${resumed} ${resumed === 1 ? 'ferret' : 'ferrets'} after restart`;
 
 export function AutoResumeSection({
@@ -441,7 +441,7 @@ export function AutoResumeSection({
 }
 
 /** "Agenda mode" for new ferrets: each choice's words. */
-export const AGENDA_MODE_WORDS: Readonly<Record<'on' | 'off', { readonly title: string; readonly detail: string }>> = {
+const AGENDA_MODE_WORDS: Readonly<Record<'on' | 'off', { readonly title: string; readonly detail: string }>> = {
   on: {
     title: 'On',
     detail:

@@ -27,7 +27,7 @@ import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
  * A sweep result changes on the warden's own schedule, minutes apart, and its configuration arrives on
  * the config stream; kteam's thirty seconds re-read an unchanged strip twice a minute on an idle page.
  */
-export const WARDEN_POLL_MS = 60_000;
+const WARDEN_POLL_MS = 60_000;
 
 /**
  * Reads one daemon's warden status. The caller owns the transport — and must

@@ -76,7 +76,7 @@ export const tunnelSwitchOffer = (
 export const TUNNEL_OFFER_QUESTION = 'Turn on a Cloudflare tunnel for this machine?';
 
 /** What saying yes does, and how to undo it. */
-export const TUNNEL_OFFER_DETAIL =
+const TUNNEL_OFFER_DETAIL =
   'Ferretry’s hosted service gives this machine its own Cloudflare hostname. Cloudflare carries the ' +
   'encrypted session and cannot read it. Turn it off again at the machine with fy daemon tunnel off.';
 

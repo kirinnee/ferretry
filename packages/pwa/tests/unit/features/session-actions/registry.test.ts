@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import { Copy } from 'lucide-react';
 import {
   findSessionAction,
-  focusableEntries,
   SESSION_ACTION_GROUP_LABEL,
   SESSION_ACTION_GROUPS,
   type SessionActionContribution,
@@ -100,21 +99,5 @@ describe('findSessionAction', () => {
   it('answers undefined for an id that is not drawn', () => {
     const sections = build([contribution('session', 10, run('rename'))]);
     expect(findSessionAction(sections, 'missing')).toBeUndefined();
-  });
-});
-
-describe('focusableEntries', () => {
-  it('lists every entry across sections in drawn order, dropping unavailable ones', () => {
-    const sections = build([
-      contribution('session', 10, run('rename')),
-      contribution('move', 10, run('machine', { unavailable: 'later' })),
-      contribution('danger', 10, run('stop')),
-    ]);
-    expect(focusableEntries(sections).map(entry => entry.id)).toEqual(['rename', 'stop']);
-  });
-
-  it('answers an empty list when every entry is unavailable', () => {
-    const sections = build([contribution('move', 10, run('machine', { unavailable: 'later' }))]);
-    expect(focusableEntries(sections)).toEqual([]);
   });
 });

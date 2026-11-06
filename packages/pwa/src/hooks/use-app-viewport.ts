@@ -16,7 +16,7 @@ import { KEYBOARD_ATTRIBUTE } from './use-keyboard-open.ts';
 
 export const KEYBOARD_MIN_PX = 120;
 
-export interface ViewportMetrics {
+interface ViewportMetrics {
   readonly height: number;
   readonly offsetTop: number;
 }

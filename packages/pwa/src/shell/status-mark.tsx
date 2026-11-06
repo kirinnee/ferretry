@@ -50,9 +50,9 @@ export const WAITING_STATUSES: ReadonlySet<SessionStatus> = new Set<SessionStatu
   'rate_limited',
 ]);
 
-export type StatusShape = 'circle' | 'diamond' | 'square';
-export type StatusClass = 'active' | 'waiting' | 'finished';
-export type StatusTone = 'ok' | 'warn' | 'err' | 'pend' | 'accent';
+type StatusShape = 'circle' | 'diamond' | 'square';
+type StatusClass = 'active' | 'waiting' | 'finished';
+type StatusTone = 'ok' | 'warn' | 'err' | 'pend' | 'accent';
 
 export interface StatusMarkInfo {
   readonly shape: StatusShape;
@@ -121,7 +121,7 @@ export function statusMark(view: SessionView): StatusMarkInfo {
  * Only a surface that has the pane's evidence (`lib/session-activity.ts`) may
  * claim it; the daemon's own `running` cannot tell the two apart.
  */
-export const READY_MARK: StatusMarkInfo = Object.freeze({
+const READY_MARK: StatusMarkInfo = Object.freeze({
   shape: 'circle',
   klass: 'active',
   tone: 'ok',
@@ -130,7 +130,7 @@ export const READY_MARK: StatusMarkInfo = Object.freeze({
 });
 
 /** The daemon says it is the person's turn: parked on them, so a diamond, in the calm `ok` tone. */
-export const YOUR_TURN_MARK: StatusMarkInfo = Object.freeze({
+const YOUR_TURN_MARK: StatusMarkInfo = Object.freeze({
   shape: 'diamond',
   klass: 'waiting',
   tone: 'ok',
@@ -139,7 +139,7 @@ export const YOUR_TURN_MARK: StatusMarkInfo = Object.freeze({
 });
 
 /** Blocked on a person — a permission prompt or a question — in the same accent a question uses. */
-export const NEEDS_INPUT_MARK: StatusMarkInfo = Object.freeze({
+const NEEDS_INPUT_MARK: StatusMarkInfo = Object.freeze({
   shape: 'diamond',
   klass: 'waiting',
   tone: 'accent',
@@ -148,7 +148,7 @@ export const NEEDS_INPUT_MARK: StatusMarkInfo = Object.freeze({
 });
 
 /** Blocked on a harness's own dialog (hooks to review, a sign-in): named for what it needs, drawn like any needs-input. */
-export const NEEDS_DIALOG_MARK: StatusMarkInfo = Object.freeze({
+const NEEDS_DIALOG_MARK: StatusMarkInfo = Object.freeze({
   shape: 'diamond',
   klass: 'waiting',
   tone: 'accent',
@@ -157,7 +157,7 @@ export const NEEDS_DIALOG_MARK: StatusMarkInfo = Object.freeze({
 });
 
 /** Blocked on a tool-permission prompt: the same mark as any other needs-input, named for what it needs. */
-export const NEEDS_APPROVAL_MARK: StatusMarkInfo = Object.freeze({
+const NEEDS_APPROVAL_MARK: StatusMarkInfo = Object.freeze({
   shape: 'diamond',
   klass: 'waiting',
   tone: 'accent',

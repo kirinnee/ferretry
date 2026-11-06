@@ -123,7 +123,7 @@ interface MediaStreamLike {
  * `getUserMedia` takes `MediaStreamConstraints`, and only a method position is
  * lax enough about its parameter for the real one to satisfy this port.
  */
-export interface QrMediaLike {
+interface QrMediaLike {
   getUserMedia?(constraints: unknown): Promise<MediaStreamLike>;
 }
 

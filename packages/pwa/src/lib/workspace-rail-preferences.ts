@@ -10,7 +10,7 @@
 import { browserWorkspaceStorage, type WorkspaceStorage } from './workspace-layout-store.ts';
 
 export const WORKSPACE_RAILS_KEY = 'fy-workspace-rails-v1';
-export const WORKSPACE_RAILS_VERSION = 1;
+const WORKSPACE_RAILS_VERSION = 1;
 
 export type WorkspaceRailSide = 'left' | 'right';
 

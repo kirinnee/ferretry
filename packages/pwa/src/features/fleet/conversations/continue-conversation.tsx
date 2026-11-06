@@ -43,9 +43,9 @@ import { DATE_FILTERS, type DateFilter, runtimeChoice } from './conversation-pic
 import { adoptConversations, readConversationPreview, readImportableConversations } from './conversations-api.ts';
 
 /** How many matches one search shows, newest first. */
-export const CONTINUE_LIMIT = 50;
+const CONTINUE_LIMIT = 50;
 /** How many kept conversations are read to describe the stopped ferrets. */
-export const KEPT_LIMIT = 1_000;
+const KEPT_LIMIT = 1_000;
 /** How long typing pauses before the daemon is searched. */
 const SEARCH_DEBOUNCE_MS = 250;
 

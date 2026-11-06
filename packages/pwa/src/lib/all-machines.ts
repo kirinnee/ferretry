@@ -96,7 +96,7 @@ export interface MachineSource {
 }
 
 /** A session in the pinned group, carrying the machine it belongs to. */
-export interface NeedsYouEntry {
+interface NeedsYouEntry {
   readonly daemonId: DaemonId;
   readonly machineName: string;
   readonly view: SessionView;

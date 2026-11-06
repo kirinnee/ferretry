@@ -43,7 +43,7 @@ export interface DictionaryEntry {
   readonly aliases: readonly string[];
 }
 
-export type SubstitutionReason =
+type SubstitutionReason =
   /** An exact, case-insensitive hit on a declared alias. Highest confidence. */
   | 'dictionary-alias'
   /** A near-miss against a dictionary term. */
@@ -53,7 +53,7 @@ export type SubstitutionReason =
   /** A near-miss against a word mined from the recent conversation. */
   | 'context-fuzzy';
 
-export interface Substitution {
+interface Substitution {
   /** Index into the word-token sequence, not a character offset. */
   readonly index: number;
   readonly from: string;

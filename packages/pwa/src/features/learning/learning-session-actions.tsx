@@ -26,7 +26,7 @@ export interface LearningActionContext {
   readonly canControl: boolean;
 }
 
-export const LEARNING_ACTION_IDS = { passive: 'passive-learning', scan: 'scan-ferret' } as const;
+const LEARNING_ACTION_IDS = { passive: 'passive-learning', scan: 'scan-ferret' } as const;
 
 export interface LearningSessionActionsOptions {
   readonly connection: DaemonConnection;

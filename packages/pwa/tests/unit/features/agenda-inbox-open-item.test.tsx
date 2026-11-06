@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { DAEMON_FEATURES } from '@ferretry/protocol';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
-import { AgendaSwipeDeck, deckIntent, dragOffset } from '../../../src/features/agenda/agenda-swipe-deck.tsx';
+import { AgendaSwipeDeck, dragOffset } from '../../../src/features/agenda/agenda-swipe-deck.tsx';
 import { swipeTargets } from '../../../src/lib/agenda-answers.ts';
 import type { InboxCard } from '../../../src/lib/agenda-inbox.ts';
 import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
@@ -372,13 +372,6 @@ describe('the Inbox list says who and what', () => {
 
 describe('the deck: ↓ is Skip', () => {
   const targets = swipeTargets(agendaItem('A1', { ask: choices('Yes', 'No') }));
-
-  it('reads a mostly-downward drag as a skip only when the deck can skip', () => {
-    expect(deckIntent(0, 200, 300, targets, true)).toEqual({ direction: 'down', progress: 1, committed: true });
-    expect(deckIntent(0, 40, 300, targets, true).committed).toBe(false);
-    expect(deckIntent(0, 200, 300, targets, false).direction).toBeNull();
-    expect(deckIntent(-200, 10, 300, targets, true).direction).toBe('left');
-  });
 
   it('follows a downward drag only when it can skip', () => {
     expect(dragOffset(0, 80, targets, true)).toEqual({ dx: 0, dy: 80 });

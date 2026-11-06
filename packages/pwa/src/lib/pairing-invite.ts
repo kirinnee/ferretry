@@ -166,18 +166,6 @@ export function pairingRefusal(reason: string): string {
 }
 
 /**
- * Whether a failure was the operator's decision or something else.
- *
- * The daemon distinguishes them by CODE — `grant_*` per reason — precisely so a UI does not have to read
- * prose to tell "you are not allowed" from "nothing answered". Getting this wrong in either direction is
- * a dead end: a network error dressed as a permission problem sends somebody to the wrong screen, and a
- * permission problem dressed as an outage sends them to reboot a daemon that is working.
- */
-export function isGrantRefusal(code: string | undefined): boolean {
-  return code?.startsWith('grant_') === true;
-}
-
-/**
  * The partial patch one toggle sends.
  *
  * `configure` implies `use`, because a device that may change how a capability behaves but not use it

@@ -13,7 +13,6 @@ import {
   useDictationDebug,
   useDictationDebugSnapshot,
   useTranscriptionLog,
-  useTranscriptionLogSnapshot,
 } from '../../src/lib/store.tsx';
 import { DictationDebugLog } from '../../src/lib/stt/dictation-debug.ts';
 import { TranscriptionLog } from '../../src/lib/stt/transcription-log.ts';
@@ -48,14 +47,11 @@ const records = {
 
 function Probe() {
   const debug = useDictationDebugSnapshot();
-  const log = useTranscriptionLogSnapshot();
   return (
     <span
       data-debug={String(debug.enabled)}
       data-held={String(useDictationDebug() !== null)}
-      data-log={String(log.enabled)}
       data-logged={String(useTranscriptionLog() !== null)}
-      data-saved={String(log.saved)}
     />
   );
 }
@@ -88,8 +84,6 @@ describe('the dictation debug ring and transcription log in the app store', () =
     const view = await mount(<Probe />);
 
     expect(view.container.querySelector('span')?.getAttribute('data-debug')).toBe('false');
-    expect(view.container.querySelector('span')?.getAttribute('data-log')).toBe('false');
-    expect(view.container.querySelector('span')?.getAttribute('data-saved')).toBe('false');
     expect(view.container.querySelector('span')?.getAttribute('data-held')).toBe('false');
     expect(view.container.querySelector('span')?.getAttribute('data-logged')).toBe('false');
     await view.unmount();
@@ -106,15 +100,13 @@ describe('the dictation debug ring and transcription log in the app store', () =
     const attribute = (name: string) => view.container.querySelector('span')?.getAttribute(name);
 
     expect(attribute('data-debug')).toBe('false');
-    expect(attribute('data-log')).toBe('true');
+    expect(attribute('data-logged')).toBe('true');
     expect(attribute('data-held')).toBe('true');
     await interact(() => {
       dictationDebug.setEnabled(true);
-      transcriptionLog.setEnabled(false);
     });
 
     expect(attribute('data-debug')).toBe('true');
-    expect(attribute('data-log')).toBe('false');
     await view.unmount();
   });
 });

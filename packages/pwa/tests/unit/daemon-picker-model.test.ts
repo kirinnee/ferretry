@@ -4,7 +4,6 @@ import {
   type AccountUsageRow,
   accountLabel,
   accountPickerOptions,
-  accountQuotaSummary,
   findAccountOption,
   firstUsableAccountOption,
   fleetHarnessLabel,
@@ -174,26 +173,6 @@ describe('accountPickerOptions', () => {
     expect(findAccountOption(options, 'codex-auto-forge')?.id).toBe(CODEX_ID);
     expect(findAccountOption(options, 'codex-auto-missing')).toBeNull();
     expect(findAccountOption(null, 'codex-auto-forge')).toBeNull();
-  });
-});
-
-describe('accountQuotaSummary', () => {
-  it('keeps a numeric zero reading distinct from missing evidence', () => {
-    const summary = accountQuotaSummary(usageRow({ fiveHourPercent: 0, atLimit: false, authOk: true }));
-
-    expect(summary.fiveHourPercent).toBe(0);
-    expect(summary.weeklyPercent).toBeNull();
-    expect(summary.atLimit).toBeFalse();
-    expect(summary.authOk).toBeTrue();
-  });
-
-  it('reports every field as missing when there is no row at all', () => {
-    expect(accountQuotaSummary(null)).toEqual({
-      fiveHourPercent: null,
-      weeklyPercent: null,
-      atLimit: null,
-      authOk: null,
-    });
   });
 });
 

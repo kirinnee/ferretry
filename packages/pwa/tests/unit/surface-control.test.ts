@@ -17,7 +17,6 @@ import {
   nextDrivingLapse,
   openedSurfaces,
   askedSurfaces,
-  surfaceAskFor,
   type SurfaceControlState,
   surfaceDrivingFor,
   surfaceTakeoverFor,
@@ -282,10 +281,6 @@ describe('agent-opened and asked surfaces', () => {
     // Act + Assert
     should(openedSurfaces(state).map(entry => entry.id)).deepEqual(['PAGE1', 'a1b2c3d4e5f6']);
     should(askedSurfaces(state).map(entry => entry.id)).deepEqual(['PAGE1', 'a1b2c3d4e5f6']);
-    should(surfaceAskFor(state, 'terminal', 'dev')?.message).equal('Enter the code');
-    should(surfaceAskFor(state, 'terminal', 'a1b2c3d4e5f6')?.id).equal('a1b2c3d4e5f6');
-    should(surfaceAskFor(state, 'terminal', 'nope')).be.undefined();
-    should(surfaceAskFor(UNREAD_SURFACE_CONTROL, 'terminal', 'dev')).be.undefined();
     should(openedSurfaces(UNREAD_SURFACE_CONTROL)).deepEqual([]);
     should(askedSurfaces(UNREAD_SURFACE_CONTROL)).deepEqual([]);
   });

@@ -132,7 +132,7 @@ const PAGE_TOKENS: ReadonlySet<string> = new Set(FY_RENDER_HTML_PAGE_TOKENS);
  * column's ink and font. Values handed to the shell as data, re-read on every theme switch; nothing of the app
  * beyond what is already on screen. No background: the page is transparent on the column's own surface.
  */
-export const paintFrom = (element: Element | null, scheme: FyRenderSandboxTheme): FyRenderHtmlPaint => {
+const paintFrom = (element: Element | null, scheme: FyRenderSandboxTheme): FyRenderHtmlPaint => {
   const unpainted: FyRenderHtmlPaint = { scheme, tokens: {} };
   if (element === null) return unpainted;
   try {

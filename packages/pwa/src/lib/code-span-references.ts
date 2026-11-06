@@ -35,20 +35,20 @@ import type { ProvenReference, ReferenceResolvers, ResolvedReference } from './r
 import { provenReferences } from './references.ts';
 
 /** A run of code text with no reference in it. */
-export interface CodeTextNode {
+interface CodeTextNode {
   readonly kind: 'text';
   readonly text: string;
 }
 
 /** One highlighter token, which may nest further tokens. */
-export interface CodeSpanNode {
+interface CodeSpanNode {
   readonly kind: 'span';
   readonly className: string;
   readonly children: readonly CodeNode[];
 }
 
 /** A proved reference occupying an exact slice of the code text. */
-export interface CodeReferenceNode {
+interface CodeReferenceNode {
   readonly kind: 'reference';
   readonly text: string;
   readonly reference: ResolvedReference;

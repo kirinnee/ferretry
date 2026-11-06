@@ -9,7 +9,7 @@ export interface WardenSurfaceProps {
   readonly machineName?: string;
 }
 
-export interface WardenPageSlots {
+interface WardenPageSlots {
   /** The whole page body: status line, groups and histories, bound to one daemon. */
   readonly Overview: ComponentType<WardenSurfaceProps>;
   /** The daemons' numbers added up, drawn above the sections while the page shows All. Absent: no line. */

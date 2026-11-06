@@ -26,7 +26,7 @@ export interface PackActionContext {
   readonly canControl: boolean;
 }
 
-export const PACK_ACTION_ID = 'pack';
+const PACK_ACTION_ID = 'pack';
 
 export interface PackSessionActions {
   readonly contributions: readonly SessionActionContribution<PackActionContext>[];

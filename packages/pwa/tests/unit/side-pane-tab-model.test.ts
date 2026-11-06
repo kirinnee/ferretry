@@ -2,36 +2,23 @@ import { beforeEach, describe, expect, it } from 'bun:test';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
-  activateSidePaneTab,
   type BrowserDestination,
-  deactivateSidePane,
   forgetDaemonSidePaneTabs,
-  getSidePaneInstanceBody,
-  getSidePaneTabDefinition,
   getSidePaneTabDefinitions,
-  getSidePaneTabRegistryVersion,
-  getSidePaneTabsVersion,
   openSidePaneBrowserTab,
   openSidePaneFileTab,
   openSidePaneTab,
   openSidePaneTerminalTab,
   parseSidePaneInstanceTabId,
-  readSidePaneTabInstance,
   readSidePaneTabsState,
-  registerSidePaneInstanceBody,
   registerSidePaneTab,
-  removeSidePaneTab,
   resetSidePaneTabRegistry,
   resetSidePaneTabsStates,
   resolveSidePaneTab,
   SIDE_PANE_BUILT_IN_TABS,
-  setSidePaneInstanceLabel,
   sidePaneInstanceTabId,
   sortSidePaneTabs,
-  subscribeSidePaneInstanceClose,
   subscribeSidePaneTabRegistry,
-  subscribeSidePaneTabsState,
-  writeSidePaneTabsState,
 } from '../../src/shell/side-pane-tab-model.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a-token' });
@@ -96,8 +83,9 @@ describe('the default strip', () => {
 // asking for them — #63 owns pins, #17 owns Attention.
 describe('pins and attention are not side-pane tabs', () => {
   it('registers neither id', () => {
-    expect(getSidePaneTabDefinition('pins')).toBeUndefined();
-    expect(getSidePaneTabDefinition('attention')).toBeUndefined();
+    const ids = getSidePaneTabDefinitions().map(def => def.id);
+    expect(ids).not.toContain('pins');
+    expect(ids).not.toContain('attention');
   });
 
   it('keeps both out of the default strip', () => {
@@ -107,8 +95,6 @@ describe('pins and attention are not side-pane tabs', () => {
   });
 
   it('refuses to open either one rather than parking a tab that resolves to nothing', () => {
-    const before = getSidePaneTabsVersion();
-
     openSidePaneTab(scopeA, 'pins');
     openSidePaneTab(scopeA, 'attention');
 
@@ -116,7 +102,15 @@ describe('pins and attention are not side-pane tabs', () => {
     expect(state.open).not.toContain('pins');
     expect(state.open).not.toContain('attention');
     expect(state.active).toBeNull();
-    expect(getSidePaneTabsVersion()).toBe(before);
+  });
+
+  it('still opens an instance tab that is already live, which is not registered either', () => {
+    const id = openSidePaneFileTab(scopeA, 'src/api.ts');
+    openSidePaneTab(scopeA, 'skills');
+
+    openSidePaneTab(scopeA, id);
+
+    expect(readSidePaneTabsState(scopeA).active).toBe(id);
   });
 
   it('refuses any unregistered id, not just the two that left', () => {
@@ -124,15 +118,6 @@ describe('pins and attention are not side-pane tabs', () => {
 
     expect(readSidePaneTabsState(scopeA).open).not.toContain('ghost');
     expect(readSidePaneTabsState(scopeA).active).toBeNull();
-  });
-
-  it('still opens an instance tab that is already live, which is not registered either', () => {
-    const id = openSidePaneFileTab(scopeA, 'src/api.ts');
-    activateSidePaneTab(scopeA, 'skills');
-
-    openSidePaneTab(scopeA, id);
-
-    expect(readSidePaneTabsState(scopeA).active).toBe(id);
   });
 
   it('lets a caller register a pins tab of its own — the model bans neither name', () => {
@@ -154,8 +139,8 @@ describe('pins and attention are not side-pane tabs', () => {
 
 describe('registry', () => {
   it('exposes the built-ins by id and in strip order', () => {
-    expect(getSidePaneTabDefinition('lineage')?.shortLabel).toBe('Lineage');
-    expect(getSidePaneTabDefinition('nope')).toBeUndefined();
+    expect(getSidePaneTabDefinitions().find(def => def.id === 'lineage')?.shortLabel).toBe('Lineage');
+    expect(getSidePaneTabDefinitions().find(def => def.id === 'nope')).toBeUndefined();
     expect(getSidePaneTabDefinitions().map(def => def.id)).toEqual([
       'skills',
       'lineage',
@@ -194,7 +179,6 @@ describe('registry', () => {
 
   it('notifies subscribers on registration and stops after unsubscribe', () => {
     let notifications = 0;
-    const before = getSidePaneTabRegistryVersion();
     const unsubscribe = subscribeSidePaneTabRegistry(() => {
       notifications += 1;
     });
@@ -208,11 +192,10 @@ describe('registry', () => {
       order: 15,
     });
     expect(notifications).toBe(1);
-    expect(getSidePaneTabRegistryVersion()).toBeGreaterThan(before);
 
     unregister();
     expect(notifications).toBe(2);
-    expect(getSidePaneTabDefinition('search')).toBeUndefined();
+    expect(getSidePaneTabDefinitions().find(def => def.id === 'search')).toBeUndefined();
 
     unsubscribe();
     registerSidePaneTab({ id: 'x', label: 'X', shortLabel: 'X', closeLabel: 'Close X', icon: 'tasks', order: 1 });
@@ -220,20 +203,19 @@ describe('registry', () => {
   });
 
   it('lets the last registration win and refuses a stale unregister', () => {
-    const first = {
+    const unregisterFirst = registerSidePaneTab({
       id: 'dupe',
       label: 'First',
       shortLabel: 'A',
       closeLabel: 'Close',
       icon: 'tasks',
       order: 1,
-    } as const;
-    const unregisterFirst = registerSidePaneTab(first);
+    });
     registerSidePaneTab({ id: 'dupe', label: 'Second', shortLabel: 'B', closeLabel: 'Close', icon: 'tasks', order: 1 });
 
     unregisterFirst();
 
-    expect(getSidePaneTabDefinition('dupe')?.label).toBe('Second');
+    expect(getSidePaneTabDefinitions().find(def => def.id === 'dupe')?.label).toBe('Second');
   });
 
   it('opens a newly registered default tab for strips that have not been touched', () => {
@@ -255,24 +237,7 @@ describe('registry', () => {
     resetSidePaneTabRegistry();
 
     expect(getSidePaneTabDefinitions()).toHaveLength(SIDE_PANE_BUILT_IN_TABS.length);
-    expect(getSidePaneTabDefinition('temp')).toBeUndefined();
-  });
-});
-
-describe('instance bodies', () => {
-  it('registers one body per kind, replaceable, with a stale unregister that cannot tear down its replacement', () => {
-    const first = () => null;
-    const second = () => null;
-
-    const unregisterFirst = registerSidePaneInstanceBody('terminal', first);
-    expect(getSidePaneInstanceBody('terminal')).toBe(first);
-
-    registerSidePaneInstanceBody('terminal', second);
-    unregisterFirst();
-    expect(getSidePaneInstanceBody('terminal')).toBe(second);
-
-    registerSidePaneInstanceBody('terminal', first)();
-    expect(getSidePaneInstanceBody('terminal')).toBeUndefined();
+    expect(getSidePaneTabDefinitions().find(def => def.id === 'temp')).toBeUndefined();
   });
 });
 
@@ -282,7 +247,6 @@ describe('daemon isolation', () => {
 
     expect(readSidePaneTabsState(scopeA).open).toContain('file:src/api.ts');
     expect(readSidePaneTabsState(scopeB).open).not.toContain('file:src/api.ts');
-    expect(readSidePaneTabInstance(scopeB, 'file:src/api.ts')).toBeUndefined();
   });
 
   it('resolves an instance id only within the daemon that opened it', () => {
@@ -314,11 +278,11 @@ describe('opening singleton tabs', () => {
 
   it('is a no-op when the tab is already open and already active', () => {
     openSidePaneTab(scopeA, 'files');
-    const before = getSidePaneTabsVersion();
+    const before = readSidePaneTabsState(scopeA);
 
     openSidePaneTab(scopeA, 'files');
 
-    expect(getSidePaneTabsVersion()).toBe(before);
+    expect(readSidePaneTabsState(scopeA)).toBe(before);
   });
 
   it('re-activates an already open tab without duplicating it', () => {
@@ -450,145 +414,6 @@ describe('one tab per terminal', () => {
   });
 });
 
-describe('retitling a live instance', () => {
-  it('renames without touching focus or strip membership', () => {
-    const id = openSidePaneBrowserTab(scopeA, destination('https://x.test/', 'x.test'));
-    openSidePaneFileTab(scopeA, 'src/api.ts');
-
-    setSidePaneInstanceLabel(scopeA, id, {
-      label: 'Example',
-      title: 'https://x.test/deep',
-      destination: destination('https://x.test/deep', 'x.test'),
-    });
-
-    const state = readSidePaneTabsState(scopeA);
-    expect(state.active).toBe('file:src/api.ts');
-    expect(state.instances[id]?.label).toBe('Example');
-    expect(state.instances[id]?.destination?.href).toBe('https://x.test/deep');
-  });
-
-  it('keeps the previous title when the caller supplies only a label', () => {
-    const id = openSidePaneTerminalTab(scopeA, 't1', 'build');
-
-    setSidePaneInstanceLabel(scopeA, id, { label: 'build (2)' });
-
-    expect(readSidePaneTabInstance(scopeA, id)?.title).toBe('build');
-  });
-
-  it('ignores a tab that is not open', () => {
-    const before = getSidePaneTabsVersion();
-
-    setSidePaneInstanceLabel(scopeA, 'file:missing.ts', { label: 'x' });
-
-    expect(getSidePaneTabsVersion()).toBe(before);
-  });
-});
-
-describe('activation', () => {
-  it('switches between open tabs', () => {
-    activateSidePaneTab(scopeA, 'skills');
-
-    expect(readSidePaneTabsState(scopeA).active).toBe('skills');
-  });
-
-  it('refuses to activate a tab outside the strip and re-activating the current one', () => {
-    activateSidePaneTab(scopeA, 'skills');
-    const before = getSidePaneTabsVersion();
-
-    activateSidePaneTab(scopeA, 'files');
-    activateSidePaneTab(scopeA, 'skills');
-
-    expect(getSidePaneTabsVersion()).toBe(before);
-    expect(readSidePaneTabsState(scopeA).active).toBe('skills');
-  });
-
-  it('closes the pane but keeps the strip the reader chose', () => {
-    activateSidePaneTab(scopeA, 'skills');
-    deactivateSidePane(scopeA);
-
-    const state = readSidePaneTabsState(scopeA);
-    expect(state.active).toBeNull();
-    expect(state.open).toContain('skills');
-
-    const before = getSidePaneTabsVersion();
-    deactivateSidePane(scopeA);
-    expect(getSidePaneTabsVersion()).toBe(before);
-  });
-});
-
-describe('removal', () => {
-  it('ignores an id that is not in the strip', () => {
-    const before = getSidePaneTabsVersion();
-
-    removeSidePaneTab(scopeA, 'files');
-
-    expect(getSidePaneTabsVersion()).toBe(before);
-  });
-
-  it('activates the following tab when the active one is removed', () => {
-    activateSidePaneTab(scopeA, 'skills');
-
-    removeSidePaneTab(scopeA, 'skills');
-
-    expect(readSidePaneTabsState(scopeA).active).toBe('lineage');
-  });
-
-  it('falls back to the preceding tab when the removed one was last', () => {
-    activateSidePaneTab(scopeA, 'analytics');
-
-    removeSidePaneTab(scopeA, 'analytics');
-
-    expect(readSidePaneTabsState(scopeA).active).toBe('mcp');
-  });
-
-  it('closes the pane when the last tab goes', () => {
-    writeSidePaneTabsState(scopeA, { open: ['skills'], active: 'skills', instances: {} });
-
-    removeSidePaneTab(scopeA, 'skills');
-
-    const state = readSidePaneTabsState(scopeA);
-    expect(state.open).toEqual([]);
-    expect(state.active).toBeNull();
-  });
-
-  it('leaves the other tabs alone when an inactive tab is removed', () => {
-    activateSidePaneTab(scopeA, 'lineage');
-
-    removeSidePaneTab(scopeA, 'skills');
-
-    expect(readSidePaneTabsState(scopeA).active).toBe('lineage');
-  });
-
-  it('disposes an instance and tells its owner, leaving no phantom tab behind', () => {
-    const closed: string[] = [];
-    const unsubscribe = subscribeSidePaneInstanceClose((scope, instance) => {
-      closed.push(`${scope.daemonId}:${instance.id}`);
-    });
-    const id = openSidePaneFileTab(scopeA, 'src/api.ts');
-
-    removeSidePaneTab(scopeA, id);
-
-    const state = readSidePaneTabsState(scopeA);
-    expect(state.open).not.toContain(id);
-    expect(state.instances[id]).toBeUndefined();
-    expect(closed).toEqual(['daemon-a:file:src/api.ts']);
-    expect(state.open).not.toContain('files');
-
-    unsubscribe();
-    removeSidePaneTab(scopeA, openSidePaneFileTab(scopeA, 'README.md'));
-    expect(closed).toHaveLength(1);
-  });
-
-  it('keeps a retained singleton in the registry when it leaves the strip', () => {
-    openSidePaneTab(scopeA, 'terminals');
-
-    removeSidePaneTab(scopeA, 'terminals');
-
-    expect(readSidePaneTabsState(scopeA).open).not.toContain('terminals');
-    expect(getSidePaneTabDefinition('terminals')?.retain).toBe(true);
-  });
-});
-
 describe('strip order', () => {
   it('sorts utility tabs by registry order and instances after them, grouped by kind', () => {
     openSidePaneTerminalTab(scopeA, 't1');
@@ -622,29 +447,5 @@ describe('strip order', () => {
 
   it('resolves nothing for an id that is neither registered nor a live instance', () => {
     expect(resolveSidePaneTab(scopeA, 'ghost')).toBeUndefined();
-  });
-});
-
-describe('whole-state writes', () => {
-  it('sorts the strip it is handed and notifies subscribers', () => {
-    let notifications = 0;
-    const unsubscribe = subscribeSidePaneTabsState(() => {
-      notifications += 1;
-    });
-
-    writeSidePaneTabsState(scopeA, { open: ['analytics', 'skills'], active: 'skills', instances: {} });
-
-    expect(readSidePaneTabsState(scopeA).open).toEqual(['skills', 'analytics']);
-    expect(notifications).toBe(1);
-
-    unsubscribe();
-    writeSidePaneTabsState(scopeA, { open: ['skills'], active: 'skills', instances: {} });
-    expect(notifications).toBe(1);
-  });
-
-  it('treats a missing instances map as no instances', () => {
-    writeSidePaneTabsState(scopeA, { open: ['skills'], active: null } as never);
-
-    expect(readSidePaneTabsState(scopeA).instances).toEqual({});
   });
 });

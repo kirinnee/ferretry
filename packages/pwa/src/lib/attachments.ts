@@ -9,8 +9,8 @@
 
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 
-export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
-export const DOCUMENT_MIME_TYPES = [
+const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
+const DOCUMENT_MIME_TYPES = [
   'application/pdf',
   'text/plain',
   'text/markdown',
@@ -19,9 +19,9 @@ export const DOCUMENT_MIME_TYPES = [
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ] as const;
 /** Voice notes and recordings: the agent is handed the file and transcribes or plays it itself. */
-export const AUDIO_MIME_TYPES = ['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm', 'audio/ogg'] as const;
-export const ATTACHMENT_MIME_TYPES = [...IMAGE_MIME_TYPES, ...DOCUMENT_MIME_TYPES, ...AUDIO_MIME_TYPES] as const;
-export type AttachmentMime = (typeof ATTACHMENT_MIME_TYPES)[number];
+const AUDIO_MIME_TYPES = ['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm', 'audio/ogg'] as const;
+const ATTACHMENT_MIME_TYPES = [...IMAGE_MIME_TYPES, ...DOCUMENT_MIME_TYPES, ...AUDIO_MIME_TYPES] as const;
+type AttachmentMime = (typeof ATTACHMENT_MIME_TYPES)[number];
 
 export type AttachmentErrorCode =
   | 'invalid_identifier'
@@ -39,15 +39,10 @@ export type AttachmentErrorCode =
   | 'decryption_failed';
 
 /** Another password can help only for this daemon verdict. */
-export const RETRYABLE_UNLOCK_ERROR_CODES: readonly AttachmentErrorCode[] = ['wrong_password'];
+const RETRYABLE_UNLOCK_ERROR_CODES: readonly AttachmentErrorCode[] = ['wrong_password'];
 
 export const isRetryableUnlockError = (code: string | undefined): boolean =>
   code !== undefined && (RETRYABLE_UNLOCK_ERROR_CODES as readonly string[]).includes(code);
-
-export interface UnlockFailure {
-  readonly message: string;
-  readonly retryable: boolean;
-}
 
 export interface TextExtraction {
   readonly method: 'pdfjs' | 'docx-xml';
@@ -57,7 +52,7 @@ export interface TextExtraction {
   readonly pagesRead?: number;
 }
 
-export const TEXT_EXTRACTION_FAILURE_CODES = [
+const TEXT_EXTRACTION_FAILURE_CODES = [
   'password_protected_document',
   'no_extractable_text',
   'unreadable_document',
@@ -109,7 +104,7 @@ export interface StoredTranscriptAttachment {
 /** Compatibility name while transcript callers migrate from image-only UI. */
 export type StoredTranscriptImage = StoredTranscriptAttachment;
 
-export interface InlineTranscriptImage {
+interface InlineTranscriptImage {
   readonly kind: 'inline';
   readonly src: string;
   readonly alt: string;
@@ -119,7 +114,7 @@ export interface InlineTranscriptImage {
  * An image the session's own transcript holds — a pasted screenshot, a tool's screenshot, a generated
  * picture — named by the handle its log line carries, never by a stored attachment id.
  */
-export interface TranscriptRecordImage {
+interface TranscriptRecordImage {
   readonly kind: 'transcript';
   readonly sessionId: string;
   /** The handle as the log spells it: `4096.3145728.0`. */
@@ -248,10 +243,6 @@ export const validateAttachmentFile = (file: Pick<File, 'size' | 'type'>): Attac
   return (ATTACHMENT_MIME_TYPES as readonly string[]).includes(normalized) ? null : 'unsupported_mime';
 };
 
-/** Is this a recording the composer previews as audio? */
-export const isAudioMime = (mime: string | undefined): boolean =>
-  (AUDIO_MIME_TYPES as readonly string[]).includes(normalizeAttachmentMime(mime));
-
 export const normalizeAttachmentMime = (mime: string | undefined): string => {
   const bare = (mime ?? '').split(';', 1)[0]?.trim().toLowerCase() ?? '';
   return MIME_ALIASES[bare] ?? bare;
@@ -376,33 +367,6 @@ export const isTransientUploadFailure = (error: unknown): boolean => {
   const status = httpStatus(error);
   if (status !== undefined) return status === 408 || status === 429 || status >= 500;
   return error instanceof Error;
-};
-
-export const unlockFailure = (error: unknown): UnlockFailure => {
-  const code =
-    error !== null && typeof error === 'object' && typeof (error as { readonly code?: unknown }).code === 'string'
-      ? (error as { readonly code: string }).code
-      : undefined;
-  return { message: attachmentErrorMessage(error), retryable: isRetryableUnlockError(code) };
-};
-
-export const attachmentFromView = (sessionId: string, view: AttachmentView): StoredTranscriptAttachment => {
-  const textExtraction = isTextExtraction(view.textExtraction) ? view.textExtraction : undefined;
-  const textExtractionFailure = isTextExtractionFailure(view.textExtractionFailure)
-    ? view.textExtractionFailure
-    : undefined;
-  const encrypted = isAttachmentEncryption(view.encrypted) ? view.encrypted : undefined;
-  return {
-    kind: 'attachment',
-    sessionId,
-    attachmentId: view.id,
-    filename: view.filename,
-    mime: view.mime,
-    size: view.size,
-    ...(textExtraction !== undefined && textExtractionFailure === undefined ? { textExtraction } : {}),
-    ...(textExtractionFailure !== undefined && textExtraction === undefined ? { textExtractionFailure } : {}),
-    ...(encrypted === undefined ? {} : { encrypted }),
-  };
 };
 
 export const attachmentApiPath = (sessionId: string, attachmentId: string): string =>

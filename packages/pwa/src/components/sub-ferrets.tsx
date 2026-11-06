@@ -59,7 +59,7 @@ export function SubFerretStateLabel({ reading }: { readonly reading: SubFerretRe
 }
 
 /** One sub-ferret: name (a link when it can open), state and model. */
-export function SubFerretRow({ item }: { readonly item: SubFerretItem }) {
+function SubFerretRow({ item }: { readonly item: SubFerretItem }) {
   return (
     <li className="fy-sub-ferret-row" data-sub-ferret={item.id}>
       {item.onOpen === undefined ? (

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem, AgendaVersionList } from '@ferretry/protocol';
-import { DiffToggle, VersionDiffPanel } from '../../../src/features/agenda/agenda-version-diff.tsx';
+import { VersionDiffPanel } from '../../../src/features/agenda/agenda-version-diff.tsx';
 import type { AgendaVersionsView } from '../../../src/features/agenda/use-item-lifecycle.ts';
 import { agendaItem } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
@@ -64,19 +64,6 @@ const draw = async (versions: AgendaVersionsView): Promise<HTMLElement> => {
   );
   return root;
 };
-
-describe('the Changes button', () => {
-  test('says whether the comparison is open and toggles it', async () => {
-    let toggled = 0;
-    view = await mount(<DiffToggle controls="diff" onToggle={() => (toggled += 1)} open={false} />);
-    const button = must(view.container.querySelector<HTMLElement>('[data-agenda-diff-toggle]'), 'toggle');
-    expect(button.getAttribute('aria-expanded')).toBe('false');
-    expect(button.getAttribute('aria-controls')).toBe('diff');
-    expect(button.textContent).toContain('Changes');
-    await interact(() => button.click());
-    expect(toggled).toBe(1);
-  });
-});
 
 describe('the comparison', () => {
   test('defaults to what changed since this device last looked, and reads both versions once', async () => {

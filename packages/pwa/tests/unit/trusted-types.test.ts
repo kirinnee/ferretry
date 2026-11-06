@@ -10,7 +10,6 @@ import {
   fragmentParsingPolicy,
   isHighlightMarkup,
   isWorkerScriptUrl,
-  TRUSTED_TYPE_POLICIES,
   type TrustedTypePolicyFactoryLike,
   trustedHighlight,
   trustedTypes,
@@ -40,7 +39,13 @@ describe('the policy names', () => {
   it('are exactly the ones public/_headers allows', () => {
     const headers = readFileSync(join(import.meta.dir, '../../public/_headers'), 'utf8');
     expect(headers).toContain("require-trusted-types-for 'script'");
-    expect(headers).toContain(`trusted-types ${TRUSTED_TYPE_POLICIES.join(' ')}`);
+
+    const made = factory();
+    createTrustedTypes(made.value);
+    fragmentParsingPolicy(made.value);
+    const directive = /(?:^|[\s;])trusted-types\s+([^;\n]+)/u.exec(headers)?.[1] ?? '';
+    expect(directive.trim().split(/\s+/u).sort()).toEqual([...made.created].sort());
+    expect([...made.created].sort()).toEqual(['fy-fragment', 'fy-highlight', 'fy-worker']);
   });
 });
 

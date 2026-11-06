@@ -34,24 +34,15 @@ retain packages/pwa/src/hooks/use-density.ts:firstLoadDefault # the reader's den
 retain packages/pwa/src/hooks/use-dialog-focus.ts:ESCAPE_LAYERS # the Escape-key layering stack, holding opaque DOM tokens in arrival order. Entries are identities of mounted overlays, never daemon records.
 retain packages/pwa/src/lib/theme-fonts.ts:preloaded # the font files already hinted in one document's head. It describes this page's own <link> elements, never a daemon's records, and a font file is the same whichever daemon is paired.
 retain packages/pwa/src/hooks/use-project-scope.ts:browserNavigation # the lazily built window-navigation adapter. A stable identity is required because it is an effect dependency; it wraps `window` and reads nothing from a daemon.
-retain packages/pwa/src/lib/pin-bridge.ts:controllers # mounted pin-jump controllers, held by identity for dispatch. The bridge routes to a controller; the SCOPE it routes with is the argument, not the set.
-retain packages/pwa/src/lib/pin-bridge.ts:listeners # foreground-change subscribers, held by identity. Callbacks, not records.
 retain packages/pwa/src/lib/pin-bridge.ts:foreground # holds a DaemonSessionScope and nothing else, and compares by daemonSessionKey. It IS the daemon scope the rest of the bridge is keyed by; there is no second thing here to key.
 retain packages/pwa/src/lib/relay-carrier.ts:livenessChecks # a WeakMap from a live RelayClientSession object to its own ping function. Keyed by the session object, which the router already holds per daemon and which an unpair closes; a session that ends drops its entry, and nothing in it is a daemon answer.
 retain packages/pwa/src/lib/relay-carrier.ts:unopened # a WeakSet of error objects from sockets that never opened. It holds no daemon data and keeps nothing alive: an error that nobody references is collected with its entry.
-retain packages/pwa/src/lib/search-focus.ts:listeners # search-focus subscribers, held by identity. Callbacks, not records.
 retain packages/pwa/src/lib/trusted-types.ts:shared # the page's two Trusted Types policies, created once because the browser refuses a second policy of a name. They hold rules, never a daemon record, and every paired daemon is held to the same ones.
-retain packages/pwa/src/hooks/use-details-tab.ts:lastTab # the map escapes into readDetailsTab/touchDetailsTab, which this pass cannot follow. Both take a DaemonSessionScope and go through daemonSessionKey (use-details-tab.ts:17,22,25), so every entry is daemon-keyed; the map is a parameter only so a test can supply its own.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:registry # the side-pane TAB DEFINITIONS, keyed by tab id. A definition is bundle-static — what a tab is called and how it renders — and is the same for every daemon. The per-session STATE, tabStates, is daemonSessionKey'd and is not on this list.
-retain packages/pwa/src/shell/side-pane-tab-model.ts:registryVersion # a monotonic counter making useSyncExternalStore re-read the definition registry. A number, not a record.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:registryListeners # definition-registry subscribers, held by identity. Callbacks, not records.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:definitionsCache # a memo of the definition registry's sorted array. Derived from `registry`, so it holds exactly what `registry` holds.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:defaultOpenCache # a memo of which definitions open by default. Derived from `registry`, so it holds exactly what `registry` holds.
-retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceBodies # renderers for each side-pane instance KIND, keyed by kind. A render function, not a record.
-retain packages/pwa/src/shell/side-pane-tab-model.ts:stateVersion # a monotonic counter making useSyncExternalStore re-read tab state. A number, not a record.
-retain packages/pwa/src/shell/side-pane-tab-model.ts:stateListeners # tab-state subscribers, held by identity. Callbacks, not records.
 retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceSequence # a document-unique suffix for generated instance ids. Monotonic and never reused, which is the property it is here for.
-retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceCloseListeners # instance-close subscribers, held by identity. Callbacks, not records.
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 # INVALIDATE — daemon-scoped caches the connection registry does not hold, and what clears them
@@ -62,7 +53,6 @@ retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceCloseListeners # in
 # daemon ids are DURABLE ACROSS A RE-PAIR (see lib/daemon-connection.ts), so the next pairing with
 # the same id reads the last one's records back.
 
-invalidate DaemonSessionCache # the keyed-cache PRIMITIVE, not a cache. Stores are built out of it and are registered themselves; registering the class would be registering the concept.
 invalidate DaemonUsageIndex # owned by DaemonUsageStore, which IS registered and forwards clearDaemon to it (lib/usage-store.ts:226).
 invalidate DaemonAgendaStore # owned by DaemonAgendaClient, which forwards clearDaemon to it (lib/agenda-client.ts:188).
 invalidate AgendaRollupStore # owned by DaemonAgendaClient, which forwards clearDaemon to it (lib/agenda-client.ts:330), and DaemonAgendaClient IS registered.

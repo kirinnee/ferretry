@@ -28,8 +28,6 @@ import {
   type LearningScanRequest,
   type LearningScanView,
   LearningScanViewSchema,
-  type LearningStatus,
-  LearningStatusSchema,
   type ProposalState,
   type ProposalView,
   ProposalViewSchema,
@@ -77,9 +75,6 @@ const learningCall = async <Value>(
   if (!response.ok) throw await errorFor(response);
   return schema.parse(await response.json());
 };
-
-export const fetchLearningStatus = (daemon: DaemonConnection, fetcher: DaemonFetch): Promise<LearningStatus> =>
-  learningCall(fetcher, daemon, '/v1/learning/status', LearningStatusSchema);
 
 export const fetchLearningConfig = (daemon: DaemonConnection, fetcher: DaemonFetch): Promise<LearningConfig> =>
   learningCall(fetcher, daemon, '/v1/learning/config', LearningConfigSchema);

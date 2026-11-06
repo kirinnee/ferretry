@@ -8,7 +8,6 @@ import {
   PermissionPromptGone,
   permissionOptionWords,
   permissionPhrase,
-  permissionSentence,
   permissionWords,
   shortPath,
   shortPermissionWhat,
@@ -106,26 +105,6 @@ describe('answerPermissionRequest', () => {
 });
 
 describe('the plain words for a permission request', () => {
-  it('says each action as a person would', () => {
-    const cases: readonly [Partial<PermissionRequest>, string][] = [
-      [{}, 'Hadi wants to read /etc/hostname'],
-      [
-        { tool: 'Bash', action: 'run', what: 'curl -s https://example.com | head' },
-        'Hadi wants to run `curl -s https://example.com | head`',
-      ],
-      [{ tool: 'Edit', action: 'edit', what: 'a.txt' }, 'Hadi wants to edit a.txt'],
-      [{ tool: 'Write', action: 'create', what: 'new.txt' }, 'Hadi wants to create new.txt'],
-      [
-        { tool: 'WebFetch', action: 'fetch', what: 'https://example.com/docs' },
-        'Hadi wants to fetch https://example.com/docs',
-      ],
-      [{ tool: 'deploy', action: 'use', what: 'deploy - release(…)' }, 'Hadi wants to use deploy - release(…)'],
-      [{ tool: 'ExitPlanMode', action: 'exit-plan', what: undefined }, 'Hadi wants to exit plan mode and start'],
-      [{ tool: 'Mystery', action: 'other', what: 'x' }, 'Hadi needs permission to use Mystery'],
-    ];
-    for (const [overrides, sentence] of cases) expect(permissionSentence('Hadi', request(overrides))).toBe(sentence);
-  });
-
   it('names the kind of thing when the prompt names nothing', () => {
     const bare = (action: PermissionRequest['action'], tool = 'Tool') => {
       const { what: _what, ...rest } = request({ action, tool });

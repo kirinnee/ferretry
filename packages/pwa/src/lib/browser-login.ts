@@ -76,7 +76,7 @@ export const BROWSER_LOGIN_OPEN_POLL_MS = 2_000;
 export const BROWSER_LOGIN_CLOSED_POLL_MS = 30_000;
 
 /** A failed read is deliberately not made to look like a closed window. */
-export interface BrowserLoginUnknown {
+interface BrowserLoginUnknown {
   readonly state: 'unknown';
   readonly error: string;
 }
@@ -122,7 +122,7 @@ export const browserLoginPort = (client: IFyApiClient): BrowserLoginPort => ({
 });
 
 /** Cancels the poll it was returned from, and nothing else. */
-export type CancelBrowserLoginPoll = () => void;
+type CancelBrowserLoginPoll = () => void;
 
 /**
  * Schedules one daemon's next poll. The canceller is the return value rather

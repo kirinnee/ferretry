@@ -41,7 +41,7 @@ import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-pan
 import { credentialName, finishSignInLabel, signedInSentence, signInCoverage } from './credentials-model.ts';
 
 /** How often a waiting sign-in is re-read. */
-export const SIGN_IN_POLL_MS = 2_000;
+const SIGN_IN_POLL_MS = 2_000;
 
 export interface CredentialSignInProps {
   readonly credential: FleetCredentialView;

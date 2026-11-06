@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { machineDisplayOrder } from '../../src/lib/all-machines.ts';
 import { parseControlsRecord } from '../../src/lib/controls.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { moveMachine, reconcileMachineOrder, stepMachine } from '../../src/lib/machine-order.ts';
+import { moveMachine, reconcileMachineOrder } from '../../src/lib/machine-order.ts';
 
 const ids = (...names: string[]) => names as DaemonId[];
 const [A, B, C, D] = ids('a', 'b', 'c', 'd') as [DaemonId, DaemonId, DaemonId, DaemonId];
@@ -34,16 +34,6 @@ describe('moveMachine and stepMachine', () => {
     expect(moveMachine(order, B, B, 'after')).toBe(order);
     expect(moveMachine(order, D, A, 'before')).toBe(order);
     expect(moveMachine(order, A, D, 'before')).toBe(order);
-  });
-
-  test('steps one place among the machines on screen, and stops at either end', () => {
-    expect(stepMachine([A, B, C], [A, B, C], B, -1)).toEqual([B, A, C]);
-    expect(stepMachine([A, B, C], [A, B, C], B, 1)).toEqual([A, C, B]);
-    const order = [A, B, C];
-    expect(stepMachine(order, [A, B, C], A, -1)).toBe(order);
-    expect(stepMachine(order, [A, B, C], C, 1)).toBe(order);
-    // A machine hidden by a filter is stepped over: A swaps with C, the one on screen beside it.
-    expect(stepMachine([A, B, C], [A, C], A, 1)).toEqual([B, C, A]);
   });
 });
 

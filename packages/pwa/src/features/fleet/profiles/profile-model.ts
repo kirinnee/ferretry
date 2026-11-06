@@ -37,7 +37,7 @@ import {
   SCOPE_WORDS,
 } from '../components/component-model.ts';
 
-export const PROFILE_PREFIX = 'profile/';
+const PROFILE_PREFIX = 'profile/';
 
 /** What one item in a profile is: a component of one kind, another profile, or text nothing reads. */
 export type ItemKind = FleetComponentKind | 'profile' | 'unknown';

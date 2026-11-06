@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ResolvedAgendaItem } from '@ferretry/protocol';
-import { byNewestResolution, ResolvedRow, resolvedWhen } from '../../../src/features/agenda/agenda-resolved.tsx';
+import { ResolvedRow, resolvedWhen } from '../../../src/features/agenda/agenda-resolved.tsx';
 import '../../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
@@ -38,12 +38,6 @@ afterEach(async () => {
 });
 
 describe('the resolved records', () => {
-  test('sort the newest resolution first', () => {
-    const older = record('A1', '2026-07-31T10:00:00.000Z');
-    const newer = record('A2', '2026-07-31T11:00:00.000Z');
-    expect([older, newer].sort(byNewestResolution).map(r => r.id)).toEqual(['A2', 'A1']);
-  });
-
   test('the time reads short, without a year or seconds', () => {
     const stamp = resolvedWhen('2026-10-23T08:54:30.000Z', 'UTC');
     expect(stamp).toContain('Oct');

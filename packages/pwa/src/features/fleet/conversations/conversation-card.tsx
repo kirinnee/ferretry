@@ -32,13 +32,13 @@ const MARK_ICON: Readonly<Record<ConversationSourceMark, typeof Asterisk>> = {
 };
 
 /** A mark's icon: the CLI's own, a paw for Ferretry, or a laptop for what is only on this computer. */
-export function SourceIcon({ source, size = 12 }: { readonly source: ConversationSourceMark; readonly size?: number }) {
+function SourceIcon({ source, size = 12 }: { readonly source: ConversationSourceMark; readonly size?: number }) {
   const Icon = MARK_ICON[source];
   return <Icon size={size} aria-hidden="true" className="shrink-0" />;
 }
 
 /** A coloured, iconed tag naming a CLI or a ferret. */
-export function SourceBadge({
+function SourceBadge({
   source,
   children,
   data,

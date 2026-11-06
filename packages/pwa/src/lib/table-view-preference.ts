@@ -8,9 +8,9 @@
  * device-wide choice, and every table on screen follows it: flipping one flips them all, because a
  * reader comparing two tables wants them in the same shape.
  *
- * Deliberately NOT daemon-scoped: it is a property of the reader's screen, like the side pane's width
- * (`side-pane-preferences.ts`, whose shape this follows — an injected storage, a defensive parse, a
- * denied storage treated as an ordinary browser condition, one identity-stable snapshot).
+ * Deliberately NOT daemon-scoped: it is a property of the reader's screen, like a pane's width. It takes an
+ * injected storage, a defensive parse, treats denied storage as an ordinary browser condition, and keeps one
+ * identity-stable snapshot.
  */
 
 /** The sole browser-storage key for the Markdown table view. */

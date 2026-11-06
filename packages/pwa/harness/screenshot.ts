@@ -390,17 +390,12 @@ const SECTIONS = [
   'harness-session-screen',
   'harness-references',
   'harness-composer-markdown',
-  'harness-lineage',
   'harness-marks',
   'harness-chat-width',
   'harness-dead-pane',
-  'harness-fleet-sidebar',
   'harness-terminal-deck',
-  'harness-surface-references',
   'harness-runtime-controls',
   'harness-pending-sends',
-  'harness-skills',
-  'harness-thinking-indicator',
   // The install stage is deliberately absent: it is taller than a phone, and an
   // element capture inside this fixed gallery clips its top away. It gets a
   // page of its own below instead.
@@ -496,31 +491,6 @@ const VISUAL_VIEWPORT_SHIM = `(() => {
 function fail(message: string): never {
   process.stderr.write(`❌ ${message}\n`);
   process.exit(1);
-}
-
-/**
- * The full-screen browser frame's box, measured once its own transitions have finished.
- *
- * The harness runs under `prefers-reduced-motion: reduce`, and `styles/index.css` answers that with
- * `transition-duration: 1ms` on every element — while `transition-property` still defaults to `all`.
- * So the frame's move from the 520px pane to the full viewport is a real 1ms transition, and a
- * measurement that lands in the frame where it starts reads the OLD width (520 at a 1440 viewport) on a
- * loaded runner. `getAnimations()` flushes style first, so the transition is registered before this
- * waits on it; a frame that genuinely stays 520 wide still fails, it just fails after settling.
- */
-async function measureFullBrowserFrame(exitBrowser: Locator) {
-  return exitBrowser.evaluate(async button => {
-    const frame = button.closest('aside')?.parentElement;
-    await Promise.all((frame?.getAnimations() ?? []).map(animation => animation.finished.catch(() => undefined)));
-    const box = frame?.getBoundingClientRect();
-    return {
-      fixed: frame === null || frame === undefined ? false : getComputedStyle(frame).position === 'fixed',
-      width: box === undefined ? null : Math.round(box.width),
-      height: box === undefined ? null : Math.round(box.height),
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-    };
-  });
 }
 
 /**
@@ -2656,12 +2626,6 @@ try {
             await captureElement(page, page.locator('[data-density-region="app-bar"]').first(), statusTopBarTarget);
             process.stdout.write(`📸 top bar status ${viewport.name} -> ${statusTopBarTarget}\n`);
 
-            if (viewport.name === 'desktop') {
-              const fleetRailTarget = join(outDir, `fleet-navigation-rail-${viewport.name}.png`);
-              await captureElement(page, page.getByLabel('Fleet navigation rail preview'), fleetRailTarget);
-              process.stdout.write(`📸 fleet navigation rail -> ${fleetRailTarget}\n`);
-            }
-
             // Scoped to its own card: the unified browser surface renders the SAME
             // pane, display and live frame, so a page-wide locator for any of them
             // is ambiguous by design rather than by accident.
@@ -3727,22 +3691,6 @@ try {
           }
           if (parts.has('sessions')) {
             await page.goto(server.url.toString());
-            // A four-kind ledger is taller than a phone viewport. Chrome may cull
-            // unpainted rows during an element screenshot, so temporarily borrow
-            // a tall viewport to capture the full, real phone-width board.
-            const agendaTarget = join(outDir, `attention-${viewport.name}.png`);
-            await page.setViewportSize({ width: viewport.width, height: 2_400 });
-            const agenda = page.getByLabel('Inbox ledger');
-            await agenda.locator('summary').filter({ hasText: 'Resolution audit' }).click();
-            await captureElement(page, agenda, agendaTarget);
-            await page.setViewportSize({ width: viewport.width, height: viewport.height });
-            process.stdout.write(`📸 Inbox ledger -> ${agendaTarget}\n`);
-            const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);
-            await captureElement(page, page.getByLabel('Pins trigger'), pinsTriggerTarget);
-            process.stdout.write(`📸 Pins trigger -> ${pinsTriggerTarget}\n`);
-            const pinsTarget = join(outDir, `pins-${viewport.name}.png`);
-            await captureElement(page, page.getByLabel('Pins ledger'), pinsTarget);
-            process.stdout.write(`📸 Pins ledger -> ${pinsTarget}\n`);
             // Three pairing screens, because they are three different screens: the
             // cold open a first-timer sees, the confirmation a scanned QR lands
             // on, and what the surface becomes once a daemon is connected.
@@ -3917,12 +3865,6 @@ try {
             );
             process.stdout.write(`📸 Session dashboard states -> ${dashboardStatesTarget}\n`);
 
-            const unlockTarget = join(outDir, `attachment-unlock-${viewport.name}.png`);
-            await page.goto(`${server.url}?attachment-unlock`);
-            await captureElement(page, page.getByRole('dialog', { name: 'Unlock encrypted PDF' }), unlockTarget);
-            process.stdout.write(`📸 attachment unlock -> ${unlockTarget}\n`);
-            await page.goto(server.url.toString());
-
             // The harness stacks every ported surface down one column, so most of it
             // is below the fold. A full-page stitch cannot prove those: the app bar
             // is sticky, and Chrome repaints a fixed layer into every stitched tile.
@@ -3936,22 +3878,6 @@ try {
               await captureElement(page, element, sectionTarget);
               process.stdout.write(`📸 ${viewport.name} ${section} -> ${sectionTarget}\n`);
             }
-
-            // #43: a Skills row carries two actions, and the second one's whole
-            // point is a state the resting frame cannot show. Expand one detail
-            // and capture the section again, so a reviewer sees the disclosed
-            // content and the primary/secondary hierarchy beside it rather than
-            // two buttons and a promise.
-            const skills = page.locator('#harness-skills');
-            await skills.scrollIntoViewIfNeeded();
-            await skills
-              .getByRole('button', { name: /^More for/u })
-              .first()
-              .click();
-            await page.getByRole('menuitem', { name: 'Show detail' }).click();
-            const skillsDetailTarget = join(outDir, `${viewport.name}-harness-skills-detail.png`);
-            await captureElement(page, skills, skillsDetailTarget);
-            process.stdout.write(`📸 ${viewport.name} skills detail -> ${skillsDetailTarget}\n`);
 
             const ledgerTarget = join(outDir, `send-ledger-${viewport.name}.png`);
             await captureElement(page, page.getByLabel('Send ledger rows'), ledgerTarget);
@@ -3988,46 +3914,6 @@ try {
             await page.locator('[role="option"]').last().waitFor({ state: 'visible' });
             await page.screenshot({ path: paletteTarget });
             process.stdout.write(`📸 ${viewport.name} command palette -> ${paletteTarget}\n`);
-
-            const rowMenuTarget = join(outDir, `${viewport.name}-row-menu.png`);
-            await page.goto(`${server.url}#row-menu`);
-            await page.reload();
-            await page.locator('[role="menuitem"]').last().waitFor({ state: 'visible' });
-            await page.screenshot({ path: rowMenuTarget });
-            process.stdout.write(`📸 ${viewport.name} session row menu -> ${rowMenuTarget}\n`);
-
-            // The bulk-stop confirmation is a fixed overlay like the menu and the
-            // palette, and its two states are different screens: what will die, and
-            // what did.
-            for (const [fragment, name] of [
-              ['#stop', 'stop-confirm'],
-              ['#stop-results', 'stop-results'],
-            ] as const) {
-              const stopTarget = join(outDir, `${viewport.name}-${name}.png`);
-              await page.goto(`${server.url}${fragment}`);
-              await page.reload();
-              await page.getByRole('dialog', { name: /confirm|results/ }).waitFor({ state: 'visible' });
-              await page.screenshot({ path: stopTarget });
-              process.stdout.write(`📸 ${viewport.name} ${name} -> ${stopTarget}\n`);
-            }
-
-            // The fleet drawer only exists below the drawer breakpoint, and only while
-            // it is open, so a page-flow capture at 390px correctly shows nothing.
-            const drawerTarget = join(outDir, `${viewport.name}-fleet-drawer.png`);
-            await page.goto(`${server.url}#fleet-drawer`);
-            await page.reload();
-            const drawer = page.getByRole('dialog', { name: 'Fleet sessions' });
-            if (await drawer.isVisible().catch(() => false)) {
-              await page.screenshot({ path: drawerTarget });
-              process.stdout.write(`📸 ${viewport.name} fleet drawer -> ${drawerTarget}\n`);
-            }
-
-            const renameTarget = join(outDir, `${viewport.name}-rename.png`);
-            await page.goto(`${server.url}#rename`);
-            await page.reload();
-            await page.getByRole('dialog', { name: 'Rename session' }).waitFor({ state: 'visible' });
-            await page.screenshot({ path: renameTarget });
-            process.stdout.write(`📸 ${viewport.name} rename sheet -> ${renameTarget}\n`);
 
             const migrateTarget = join(outDir, `${viewport.name}-migrate.png`);
             await page.goto(`${server.url}#migrate`);
@@ -4125,33 +4011,6 @@ try {
             await page.locator('[data-workspace-console]').waitFor({ state: 'visible' });
             await page.screenshot({ path: workspacePaneTarget });
             process.stdout.write(`📸 ${viewport.name} session workspace, Console shown -> ${workspacePaneTarget}\n`);
-
-            // The real remote browser gets this route of its own so this is the
-            // production side-pane layout taking the whole screen, not a gallery
-            // card sized to look like one. The visible Exit control is the phone
-            // escape hatch; Escape then proves the keyboard route returns to the
-            // exact pane/sheet it started from.
-            const fullBrowserTarget = join(outDir, `${viewport.name}-browser-full-viewport.png`);
-            await page.goto(`${server.url}#browser-full-viewport`);
-            await page.reload();
-            await page.locator('#harness-browser-full-viewport-page').waitFor({ state: 'visible' });
-            await page.getByLabel('Expand browser to fill the viewport').click();
-            const exitBrowser = page.getByLabel('Exit full-screen browser');
-            await exitBrowser.waitFor({ state: 'visible' });
-            const fullBrowserGeometry = await measureFullBrowserFrame(exitBrowser);
-            if (
-              !fullBrowserGeometry.fixed ||
-              fullBrowserGeometry.width !== fullBrowserGeometry.viewportWidth ||
-              fullBrowserGeometry.height !== fullBrowserGeometry.viewportHeight
-            ) {
-              fail(
-                `the full browser does not occupy the ${viewport.name} viewport: ${JSON.stringify(fullBrowserGeometry)}`,
-              );
-            }
-            await page.screenshot({ path: fullBrowserTarget });
-            process.stdout.write(`📸 ${viewport.name} browser full viewport -> ${fullBrowserTarget}\n`);
-            await page.keyboard.press('Escape');
-            await page.getByLabel('Expand browser to fill the viewport').waitFor({ state: 'visible' });
 
             /**
              * THE PICKERS, EACH ON ITS OWN PAGE, WITH THE LIST ACTUALLY OPEN.

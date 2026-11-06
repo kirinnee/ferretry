@@ -7,7 +7,6 @@ import {
   type AgendaInboxPageProps,
   AgendaNeedsYou,
   inboxCardOrigin,
-  waitingWords,
 } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import { secondsLeft } from '../../../src/features/agenda/agenda-undo-toast.tsx';
 import type { AgendaInbox } from '../../../src/hooks/use-agenda-inbox.ts';
@@ -100,11 +99,6 @@ describe('agenda inbox helpers', () => {
     expect(secondsLeft(5_000, 0)).toBe(5);
     expect(secondsLeft(5_000, 4_001)).toBe(1);
     expect(secondsLeft(5_000, 9_000)).toBe(0);
-  });
-
-  it('names the head count', () => {
-    expect(waitingWords(0)).toBe('Nothing waiting');
-    expect(waitingWords(2)).toBe('2 waiting on you');
   });
 
   it('names a card origin as the sidebar does, linked to the conversation at the item', () => {

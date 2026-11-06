@@ -4,7 +4,6 @@ import {
   type SessionFsChanges,
   SessionFsChangesSchema,
   type SessionFsEntry,
-  type SessionFsEntryType,
   type SessionFsFile,
   SessionFsFileSchema,
   type SessionFsListing,
@@ -22,7 +21,6 @@ import { useDaemonFetch } from '../lib/store.tsx';
 import { baseName, isOpenableName, isOpenablePath, parentRel } from './files-model.ts';
 
 // The wire shapes are the protocol's. These names stay because the views already speak them.
-export type FsEntryType = SessionFsEntryType;
 export type FsEntry = SessionFsEntry;
 export type FsListing = SessionFsListing;
 export type FsChange = SessionGitChange;
@@ -42,10 +40,10 @@ const query = (path: string, extra?: Record<string, string>): string => {
 export const listUrl = (scope: DaemonSessionScope, path: string) => `${root(scope)}${query(path)}`;
 export const fileUrl = (scope: DaemonSessionScope, path: string, rev?: 'head') =>
   `${root(scope)}/file${query(path, rev ? { rev } : undefined)}`;
-export const previewUrl = (scope: DaemonSessionScope, path: string) =>
+const previewUrl = (scope: DaemonSessionScope, path: string) =>
   `${root(scope)}/file${query(path, { format: 'base64' })}`;
 /** One file of the session's MEDIA folder, as base64 — the daemon names the folder; a caller never does. */
-export const mediaPreviewUrl = (scope: DaemonSessionScope, path: string) =>
+const mediaPreviewUrl = (scope: DaemonSessionScope, path: string) =>
   `${root(scope)}/file${query(path, { format: 'base64', scope: 'media' })}`;
 export const indexUrl = (scope: DaemonSessionScope) => `${root(scope)}/index`;
 export const changesUrl = (scope: DaemonSessionScope) => `${root(scope)}/changes`;
@@ -268,8 +266,7 @@ export const isUnknownRoute = (error: unknown): boolean =>
  * Matched on the CODE rather than on the status, because 501 is a shape a proxy or a tunnel can also
  * produce, and prose is not a contract.
  */
-export const isUnsupported = (error: unknown): boolean =>
-  error instanceof DaemonResponseError && error.code === 'unsupported';
+const isUnsupported = (error: unknown): boolean => error instanceof DaemonResponseError && error.code === 'unsupported';
 /**
  * The sentence a failed file read shows.
  *

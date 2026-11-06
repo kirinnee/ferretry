@@ -409,7 +409,7 @@ with its own `fy-…-vN` key, its own `browserStorage()` with its own `try/catch
 `typeof` parser, and mostly its own store class with `#listeners`/`snapshot()`/`subscribe`.
 
 They do not even agree on behaviour: `parseThemePreference` falls back **per field** so one corrupt
-value does not reset the others; `parseSidePanePreferences` resets **everything** on a version
+value does not reset the others; the side-pane preference parser (since removed with its never-mounted pane) reset **everything** on a version
 mismatch. Two answers to "what did a partially-bad document mean", neither chosen.
 
 And `zod` is already a direct dependency of `packages/pwa`, used in **three** files. Twelve hand-rolled

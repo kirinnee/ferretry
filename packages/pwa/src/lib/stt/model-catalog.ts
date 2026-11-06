@@ -17,13 +17,12 @@
  */
 
 import { RESEARCH } from './research-numbers.ts';
-import { formatMegabytes, type PinnedBundle, type PinnedFile } from './model-store.ts';
+import { type PinnedBundle, type PinnedFile } from './model-store.ts';
 import {
   ORT_RUNTIME_FILE,
   ORT_RUNTIME_VERSION,
   PARAKEET_CACHE,
   PARAKEET_MODEL_FILES,
-  PARAKEET_MODEL_ORIGIN,
   PARAKEET_REPOSITORY,
   PARAKEET_REVISION,
   PARAKEET_VERSION_LABEL,
@@ -232,9 +231,6 @@ export const onDeviceModel = (id: string | null | undefined): OnDeviceModel | nu
 export const modelDownloadBytes = (model: OnDeviceModel): number =>
   model.files.reduce((total, file) => total + file.bytes, 0) + SPEECH_RUNTIMES[model.runtime].file.bytes;
 
-/** The download, said the way storage settings say it. */
-export const modelDownloadSize = (model: OnDeviceModel): string => formatMegabytes(modelDownloadBytes(model));
-
 /** The model's own files as a store bundle. */
 export const modelBundle = (model: OnDeviceModel): PinnedBundle => ({
   name: model.shortName,
@@ -312,7 +308,3 @@ export function validateModelCatalog(
   }
   return problems;
 }
-
-/** Where a model's files come from, for the copy that names it. */
-export const modelSourceUrl = (model: OnDeviceModel): string =>
-  `${PARAKEET_MODEL_ORIGIN}/${model.source.repository}/tree/${model.source.revision}`;

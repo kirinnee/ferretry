@@ -11,7 +11,6 @@ import should from 'should';
 import {
   deviceAxisControl,
   deviceGrantPatch,
-  isGrantRefusal,
   isThisDevice,
   orderedPairedDevices,
   PAIRING_EXPIRY_NOTE,
@@ -144,16 +143,6 @@ describe('pairing refusals', () => {
     should(explained).equal('the operator of this machine has not granted the UI the use of device pairing.');
     should(explained).not.containEql('never restricted');
     should(silent).startWith('This daemon did not say why.');
-  });
-
-  it('tells the operator’s decision from an outage by the daemon’s code, never by its prose', () => {
-    // Getting this wrong is a dead end in both directions: an outage dressed as a permission problem
-    // sends somebody hunting for a grant they have, and the reverse sends them to reboot a working daemon.
-    // Arrange, Act, Assert
-    should(isGrantRefusal('grant_not_granted')).be.true();
-    should(isGrantRefusal('grant_undetermined')).be.true();
-    should(isGrantRefusal('pairing_refused')).be.false();
-    should(isGrantRefusal(undefined)).be.false();
   });
 
   it('states the two-minute window and its remedy in one sentence', () => {

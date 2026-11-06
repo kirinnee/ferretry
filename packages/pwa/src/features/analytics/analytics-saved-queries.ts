@@ -6,7 +6,7 @@
 
 export const SAVED_QUERIES_KEY = 'fy-analytics-saved-queries-v1';
 export const MAX_SAVED_QUERIES = 50;
-export const MAX_SAVED_NAME_CHARS = 80;
+const MAX_SAVED_NAME_CHARS = 80;
 
 export interface SavedAnalyticsQuery {
   readonly id: string;

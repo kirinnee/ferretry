@@ -19,17 +19,26 @@
  * So reachability here means: starting at the composition root, some symbol of the module is
  * transitively demanded. Loading a module is not using it.
  *
- * Composition roots are the package's `bin` entries when it has any, otherwise its `exports`
+ * Composition roots are, in order of precedence: the package's own `compositionRoots` list (a
+ * package whose programs are not `bin` entries — the PWA's `src/main.tsx` and its worker programs —
+ * names them there, exact paths, `.ts` or `.tsx`), else its `bin` entries, else its `exports`
  * entries (a library package with no binary has its public surface as its contract).
  *
- * The parser is lexical, not a regex over raw source: comments and string literals are removed
- * before any statement is matched, so an identifier inside a comment or a string is never mistaken
- * for an import. Two tripwires guard against parser drift — `assertNoMissedEdges` and the
+ * A bundler-query import (`./x.ts?worker&url`) is not a module edge: the bundler builds `x.ts` as a
+ * program of its own, so it has to be a composition root itself, and the gate still checks it exists.
+ *
+ * The parser is lexical for `.ts` and a real syntax tree for `.tsx`. A `.ts` module has its comments and
+ * string literals removed before any statement is matched, so an identifier inside a comment or a string is
+ * never mistaken for an import. A `.tsx` module is parsed by `oxc-parser` (JSX text holds quotes and slashes
+ * the lexer would take for string and comment starts) and only the imports and exports the tree reports reach
+ * the lexer, so nothing a comment, a string or JSX text mentions becomes an edge. Candidates are every
+ * tracked `.ts` and `.tsx` module under `src/`. Two tripwires guard against parser drift — `assertNoMissedEdges` and the
  * unresolvable-name failure — and both exit 2 rather than silently under-reporting.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { parseSync } from 'oxc-parser';
 
 /** Sentinel demand meaning "every exported name". A space keeps it out of the identifier space. */
 const ALL = ' all';
@@ -214,7 +223,7 @@ interface PlainImport {
   readonly names: ReadonlySet<string>;
 }
 
-interface ModuleFacts {
+export interface ModuleFacts {
   readonly localExports: ReadonlySet<string>;
   readonly imports: readonly PlainImport[];
   readonly namedReexports: readonly NamedReexport[];
@@ -286,6 +295,56 @@ function importedNames(clause: string): Set<string> {
     .trim();
   if (/^[A-Za-z_$][\w$]*$/.test(head)) names.add('default');
   return names;
+}
+
+/** A source range, as `oxc-parser` records one for a statement or a dynamic import's argument. */
+interface Range {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * The module-level statements of a `.tsx` file, as TypeScript the lexer can read.
+ *
+ * JSX text holds quotes, apostrophes and slashes that the lexer would take for string and comment
+ * starts ("don't"), swallowing the `export` lines after it, and a regex over the raw text cannot tell
+ * code from a comment or a string. So a real parser (`oxc-parser`, the one `no-sync-io.ts` uses; this
+ * repository's `typescript` is the native compiler, which has no JavaScript API) says where the
+ * statements are, and only what it found is handed to the lexer: each static `import`, each re-export
+ * (`export … from`), one synthesized `export` line per local export name, and an `import('...')` for every
+ * dynamic import whose argument is a plain string literal. Nothing a comment, a string or JSX text
+ * mentions can become an edge. `assertNoMissedEdges` still checks the result against Bun's own scan of
+ * the whole file, so a statement this misses is a hard error, never a silent gap.
+ */
+function moduleStatements(file: string, source: string): string {
+  const parsed = parseSync(file, source, { lang: 'tsx', sourceType: 'module' });
+  const error = parsed.errors[0];
+  if (error !== undefined) fail(`cannot parse ${file}: ${error.message}`);
+  const { staticImports, staticExports, dynamicImports } = parsed.module;
+  const text = (range: Range): string => source.slice(range.start, range.end);
+  const kept: string[] = [];
+  for (const statement of staticImports) kept.push(text(statement));
+  for (const statement of staticExports) {
+    for (const entry of statement.entries) {
+      const { moduleRequest, importName, exportName } = entry;
+      if (moduleRequest !== null) {
+        // oxc reports `export { X }` of an imported binding as a re-export too, so every re-export is
+        // rebuilt from its entry instead of sliced out of the source.
+        const from = JSON.stringify(moduleRequest.value);
+        if (importName.kind === 'AllButDefault') kept.push(`export * from ${from};`);
+        else if (importName.kind === 'All' && exportName.name !== null)
+          kept.push(`export * as ${exportName.name} from ${from};`);
+        else if (importName.kind === 'Name' && exportName.name !== null)
+          kept.push(`export { ${importName.name} as ${exportName.name} } from ${from};`);
+      } else if (exportName.kind === 'Default') kept.push('export default 0;');
+      else if (exportName.name !== null) kept.push(`export { ${exportName.name} };`);
+    }
+  }
+  for (const dynamic of dynamicImports) {
+    const argument = text(dynamic.moduleRequest).trim();
+    if (/^(['"])[^'"\n]+\1$/.test(argument)) kept.push(`import(${argument});`);
+  }
+  return kept.join('\n');
 }
 
 function parseModule(source: string): ModuleFacts {
@@ -379,12 +438,17 @@ function fail(message: string): never {
 /** Resolve a relative specifier to a repo-relative `.ts` path, or null when it is not our code. */
 function resolveSpecifier(importer: string, specifier: string, root: string): string | null {
   if (!specifier.startsWith('.')) return null;
-  const base = resolve(root, dirname(importer), specifier);
+  const query = specifier.indexOf('?');
+  const base = resolve(root, dirname(importer), query < 0 ? specifier : specifier.slice(0, query));
+  if (query >= 0) {
+    if (!existsSync(base)) return fail(`cannot resolve '${specifier}' imported by ${importer}`);
+    return null;
+  }
   if (base.endsWith('.json')) return null;
-  // A bundled asset (the terminal's font, a provider preset or a prompt imported as text) is a URL or a string the
+  // A bundled asset (the terminal's font, a stylesheet, a provider preset or a prompt imported as text) is a URL or a string the
   // bundler hands back, not a module with exports or a composition root of its own — there is nothing
   // in it to reach. It must still exist. (`.pub` is the hosted app's release key, compiled into the daemon; `scripts/host/*` is the firewall script and unit the CLI prints.)
-  if (/\.(woff2?|png|svg|webp|yaml|txt|pub|service)$/u.test(base) || /(^|\/)scripts\/host\/[^/]+$/u.test(base)) {
+  if (/\.(woff2?|png|svg|webp|css|yaml|txt|pub|service)$/u.test(base) || /(^|\/)scripts\/host\/[^/]+$/u.test(base)) {
     if (!existsSync(base)) return fail(`cannot resolve '${specifier}' imported by ${importer}`);
     return null;
   }
@@ -424,6 +488,13 @@ function assertNoMissedEdges(file: string, source: string, facts: ModuleFacts): 
   }
 }
 
+/** What one module imports and exports, cross-checked against Bun's own scan of the same source. */
+export function moduleFacts(file: string, source: string): ModuleFacts {
+  const parsed = parseModule(file.endsWith('.tsx') ? moduleStatements(file, source) : source);
+  assertNoMissedEdges(file, source, parsed);
+  return parsed;
+}
+
 class ModuleGraph {
   private readonly facts = new Map<string, ModuleFacts>();
   private readonly exportNamesCache = new Map<string, ReadonlySet<string>>();
@@ -433,9 +504,7 @@ class ModuleGraph {
   factsFor(file: string): ModuleFacts {
     const cached = this.facts.get(file);
     if (cached) return cached;
-    const source = readFileSync(resolve(this.root, file), 'utf8');
-    const parsed = parseModule(source);
-    assertNoMissedEdges(file, source, parsed);
+    const parsed = moduleFacts(file, readFileSync(resolve(this.root, file), 'utf8'));
     this.facts.set(file, parsed);
     return parsed;
   }
@@ -569,17 +638,27 @@ function reachableFrom(graph: ModuleGraph, roots: readonly string[]): ReadonlySe
 interface Manifest {
   readonly bin?: Record<string, string>;
   readonly exports?: Record<string, string>;
+  readonly compositionRoots?: readonly string[];
 }
 
-/** Composition roots for a package: its `bin` entries, or its public `exports` when it has none. */
+/** Composition roots for a package: its `compositionRoots`, else its `bin` entries, else its public `exports`. */
 function compositionRoots(root: string, packageDir: string): string[] {
   const manifestPath = join(packageDir, 'package.json');
   const manifest = JSON.parse(readFileSync(resolve(root, manifestPath), 'utf8')) as Manifest;
+  const named = manifest.compositionRoots;
+  if (named !== undefined && !(Array.isArray(named) && named.length > 0 && named.every(e => /\.tsx?$/.test(e)))) {
+    fail(`${manifestPath} compositionRoots must be a non-empty list of exact .ts/.tsx paths`);
+  }
   const entries = Object.keys(manifest.bin ?? {}).length > 0 ? manifest.bin : manifest.exports;
-  const declared = Object.values(entries ?? {})
-    .filter(entry => typeof entry === 'string' && entry.endsWith('.ts'))
-    .map(entry => join(packageDir, entry));
-  if (declared.length === 0) fail(`${manifestPath} declares no bin or exports entry to use as a composition root`);
+  const declared =
+    named !== undefined
+      ? named.map(entry => join(packageDir, entry))
+      : Object.values(entries ?? {})
+          .filter(entry => typeof entry === 'string' && entry.endsWith('.ts'))
+          .map(entry => join(packageDir, entry));
+  if (declared.length === 0) {
+    fail(`${manifestPath} declares no compositionRoots, bin or exports entry to use as a composition root`);
+  }
   // A worker-thread program beside a bin entry is compiled into the same binary as an entry of its own
   // (`scripts/release/compile-executable.ts` embeds every `bin/*.worker.ts`), so what it imports ships
   // and runs even though no bin entry imports it.
@@ -629,7 +708,8 @@ function readAllowlist(path: string, label: string): ReadonlySet<string> {
     if (reason.length === 0) fail(`${at}: entry needs a non-empty reason`);
     if (/[*?[\]]/.test(entry)) fail(`${at}: globs are forbidden — name the exact file (${entry})`);
     if (entry.endsWith('/')) fail(`${at}: directories are forbidden — name the exact file (${entry})`);
-    if (!entry.endsWith('.ts')) fail(`${at}: only .ts modules can be allowlisted (${entry})`);
+    if (!entry.endsWith('.ts') && !entry.endsWith('.tsx'))
+      fail(`${at}: only .ts and .tsx modules can be allowlisted (${entry})`);
     if (allowed.has(entry)) fail(`${at}: duplicate entry (${entry})`);
     allowed.add(entry);
   }
@@ -639,55 +719,59 @@ function readAllowlist(path: string, label: string): ReadonlySet<string> {
 
 // ─── entry point ──────────────────────────────────────────────────────────────────────────────
 
-const [rootArgument, allowlistArgument] = process.argv.slice(2);
-if (rootArgument === undefined || allowlistArgument === undefined) fail(USAGE);
-const repoRoot = resolve(rootArgument);
-const graph = new ModuleGraph(repoRoot);
+function main(): void {
+  const [rootArgument, allowlistArgument] = process.argv.slice(2);
+  if (rootArgument === undefined || allowlistArgument === undefined) fail(USAGE);
+  const repoRoot = resolve(rootArgument);
+  const graph = new ModuleGraph(repoRoot);
 
-const packageDirectories = trackedFiles(repoRoot, 'packages/*/package.json')
-  .map(file => dirname(file))
-  .sort();
-if (packageDirectories.length === 0) fail('no workspace packages found under packages/');
+  const packageDirectories = trackedFiles(repoRoot, 'packages/*/package.json')
+    .map(file => dirname(file))
+    .sort();
+  if (packageDirectories.length === 0) fail('no workspace packages found under packages/');
 
-const unreachable: string[] = [];
-for (const packageDirectory of packageDirectories) {
-  const modules = trackedFiles(repoRoot, `${packageDirectory}/src`).filter(
-    file => file.endsWith('.ts') && !file.endsWith('.d.ts'),
+  const unreachable: string[] = [];
+  for (const packageDirectory of packageDirectories) {
+    const modules = trackedFiles(repoRoot, `${packageDirectory}/src`).filter(
+      file => (file.endsWith('.ts') || file.endsWith('.tsx')) && !file.endsWith('.d.ts'),
+    );
+    if (modules.length === 0) continue;
+    // Parse every module, not only the ones the walk visits, so the lexer tripwires cover the whole
+    // tree. Otherwise a parse bug hides in exactly the files this gate has already flagged, and
+    // surfaces later as a confusing exit 2 in the PR that wires them.
+    for (const file of modules) graph.factsFor(file);
+    const reachable = reachableFrom(graph, compositionRoots(repoRoot, packageDirectory));
+    unreachable.push(...modules.filter(file => !reachable.has(file)));
+  }
+  unreachable.sort();
+
+  const allowlist = readAllowlist(resolve(repoRoot, allowlistArgument), allowlistArgument);
+  const unreachableSet = new Set(unreachable);
+  const stale = [...allowlist].filter(entry => !unreachableSet.has(entry)).sort();
+  const violations = unreachable.filter(file => !allowlist.has(file));
+
+  let failed = false;
+
+  if (violations.length > 0) {
+    failed = true;
+    process.stderr.write('❌ production modules are never used by their package composition root:\n');
+    for (const file of violations) process.stderr.write(`   ${file}\n`);
+    process.stderr.write(
+      `   Wire each one into the composition root, or add an exact path and reason to ${allowlistArgument}.\n`,
+    );
+  }
+
+  if (stale.length > 0) {
+    failed = true;
+    process.stderr.write(`❌ stale allowlist entries in ${allowlistArgument} — these are wired now, delete them:\n`);
+    for (const entry of stale) process.stderr.write(`   ${entry}\n`);
+  }
+
+  if (failed) process.exit(1);
+
+  process.stdout.write(
+    `✅ Every production module is used by its composition root (allowlist: ${allowlist.size} entries)\n`,
   );
-  if (modules.length === 0) continue;
-  // Parse every module, not only the ones the walk visits, so the lexer tripwires cover the whole
-  // tree. Otherwise a parse bug hides in exactly the files this gate has already flagged, and
-  // surfaces later as a confusing exit 2 in the PR that wires them.
-  for (const file of modules) graph.factsFor(file);
-  const reachable = reachableFrom(graph, compositionRoots(repoRoot, packageDirectory));
-  unreachable.push(...modules.filter(file => !reachable.has(file)));
-}
-unreachable.sort();
-
-const allowlist = readAllowlist(resolve(repoRoot, allowlistArgument), allowlistArgument);
-const unreachableSet = new Set(unreachable);
-const stale = [...allowlist].filter(entry => !unreachableSet.has(entry)).sort();
-const violations = unreachable.filter(file => !allowlist.has(file));
-
-let failed = false;
-
-if (violations.length > 0) {
-  failed = true;
-  process.stderr.write('❌ production modules are never used by their package composition root:\n');
-  for (const file of violations) process.stderr.write(`   ${file}\n`);
-  process.stderr.write(
-    `   Wire each one into the composition root, or add an exact path and reason to ${allowlistArgument}.\n`,
-  );
 }
 
-if (stale.length > 0) {
-  failed = true;
-  process.stderr.write(`❌ stale allowlist entries in ${allowlistArgument} — these are wired now, delete them:\n`);
-  for (const entry of stale) process.stderr.write(`   ${entry}\n`);
-}
-
-if (failed) process.exit(1);
-
-process.stdout.write(
-  `✅ Every production module is used by its composition root (allowlist: ${allowlist.size} entries)\n`,
-);
+if (import.meta.main) main();

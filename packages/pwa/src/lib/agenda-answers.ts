@@ -31,7 +31,6 @@ import {
   type AgendaResponse,
   type AgendaUndeliveredReply,
   type BoardReopenAttachments,
-  agendaCanDiscuss,
   agendaCardAnswers,
   agendaKindLabel,
   agendaInDiscussion,
@@ -165,10 +164,6 @@ export const undeliveredAction = (reply: AgendaUndeliveredReply): InboxAction =>
       return { kind: 'discuss', label: RETRY_LABEL, ...note };
   }
 };
-
-/** Whether the owner can ask to discuss this item now: a ferret raised it, and it is not already in discussion. */
-export const canDiscussNow = (item: AnswerSource): boolean =>
-  item.raisedBy !== undefined && agendaCanDiscuss({ raisedBy: item.raisedBy }) && !agendaInDiscussion(item);
 
 /** An old choice's option past the third, as an action: a button only, never a swipe. */
 export const optionAction = (option: AgendaAskOption, reply: string): InboxAction =>

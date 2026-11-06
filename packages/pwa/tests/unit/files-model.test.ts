@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   UNOPENABLE_NAME_REASON,
-  changeRowLabel,
-  countLabel,
   crumbs,
-  dirPrefix,
   entryRefusal,
   formatBytes,
   isMarkdownPath,
@@ -55,9 +52,6 @@ describe('files model', () => {
   it('renders porcelain details in both the chip and accessible row label', () => {
     const chip = statusChip('MM');
     expect(chip).toMatchObject({ code: 'M', label: 'Modified', detail: 'staged and unstaged' });
-    expect(changeRowLabel('src/a.ts', chip, 'src/old.ts')).toBe(
-      'Modified (staged and unstaged): src/a.ts from src/old.ts. Open diff',
-    );
     expect(statusChip('AA')).toMatchObject({ code: 'U', detail: 'unmerged' });
   });
 
@@ -80,10 +74,7 @@ describe('files model', () => {
     expect(binary).toMatchObject({ binary: true, truncated: true, total: 2 });
     expect(parseUnifiedDiff('@@ nonsense\nplain').lines.map(line => line.kind)).toEqual(['hunk', 'ctx']);
     expect(isPlumbingMeta({ kind: 'meta', text: 'index abcd..0123' })).toBeTrue();
-    expect(dirPrefix('src/a.ts')).toBe('src/');
     expect(formatBytes(10 * 1024 * 1024 * 1024)).toBe('10 GB');
     expect(formatBytes(-1)).toBe('');
-    expect(countLabel(1, 'file')).toBe('1 file');
-    expect(countLabel(2, 'child', 'children')).toBe('2 children');
   });
 });

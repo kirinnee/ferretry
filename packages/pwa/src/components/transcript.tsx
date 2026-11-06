@@ -68,7 +68,7 @@ export interface TranscriptProps {
 export const withAgentName = (entry: TranscriptEntry, agentName: string): TranscriptEntry =>
   entry.kind !== 'assistant' || agentName === '' ? entry : { ...entry, label: agentName };
 
-export { type QuoteSelectionLike, quotableTranscriptSelectionText } from './quote-menu.tsx';
+export { quotableTranscriptSelectionText } from './quote-menu.tsx';
 
 /**
  * Return `value`, except while `hold` is engaged — then keep returning what it was when the hold

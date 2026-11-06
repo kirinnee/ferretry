@@ -8,7 +8,7 @@
 
 export type ClassValue = string | number | bigint | null | undefined | boolean | ClassValue[] | ClassDictionary;
 
-export interface ClassDictionary {
+interface ClassDictionary {
   readonly [key: string]: unknown;
 }
 

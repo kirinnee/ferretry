@@ -71,7 +71,7 @@ export const migrateSessionWithDaemon = async (
   return await client.migrate(scope.sessionId, input.agent, input.model, input.allowContextDowngrade, requestId);
 };
 
-export type AskToStopJobs = (connection: DaemonConnection, scope: DaemonSessionScope) => Promise<AskToStopJobsResult>;
+type AskToStopJobs = (connection: DaemonConnection, scope: DaemonSessionScope) => Promise<AskToStopJobsResult>;
 
 type AskClient = Pick<IFyApiClient, 'askToStopJobs'>;
 

@@ -215,7 +215,11 @@ top-level prefix.
 
 `composition-reachability.sh` fails when a production module under `packages/*/src/**` is never
 _used_ by its package's composition root — `packages/cli/bin/fy.ts`, `packages/daemon/bin/fyd.ts`,
-or, for a package with no binary, the entries in its `exports` map.
+or, for a package with no binary, the entries in its `exports` map. A package whose programs are not
+binaries names them itself in a `compositionRoots` list in its `package.json` (exact `.ts`/`.tsx`
+paths, taking precedence): `packages/pwa` lists `src/main.tsx` and its service and speech worker
+programs. A `./x.ts?worker&url` import is not a module edge — the bundler builds `x.ts` as a program of
+its own — so a worker is a root, and the gate only checks that it exists.
 
 It exists because the same defect appeared in three unrelated reviews: a unit builds a subsystem,
 tests it to 100%, and never constructs it in the composition root. The daemon boots without it, so
@@ -229,8 +233,13 @@ the capability does not exist in the product while every gate stays green. Two m
   the names an importer actually demands, so a barrel line is not a mounting.
 
 The walk itself lives in `composition-reachability.ts`, because a real module graph needs resolved
-specifiers and named-import tracking rather than text matching. It parses lexically — comments and
-string literals are removed before any statement is read — and carries two tripwires that exit `2`
+specifiers and named-import tracking rather than text matching. It reads a `.ts` module lexically —
+comments and string literals are removed before any statement is read — and a `.tsx` module with
+`oxc-parser`, so a commented-out import, a dynamic `import('…')` inside a string, template or JSX
+text, and an apostrophe in JSX text can neither invent an edge nor hide one. Every tracked `.ts` and
+`.tsx` module under `src/` is a candidate, and an allowlist entry may name either. The gate's own
+planted violations are `packages/daemon/tests/unit/support/composition-reachability-gate.test.ts`. It
+carries two tripwires that exit `2`
 instead of under-reporting: every import Bun's own transpiler sees must be one the walker also saw,
 and a demanded name that no module exports is a parser bug, not a silent miss.
 

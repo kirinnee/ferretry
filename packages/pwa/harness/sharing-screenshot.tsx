@@ -2,12 +2,12 @@
  * The Sharing page as a marketplace (docs/catalogs.md, &B131 A3): Subscriptions with a store page (one item Installed,
  * the rest with Install; an install with a newer version offers Update and See changes, and Stay, Skip and Move to version under More, and
  * a local edit offers keep or replace), My catalogs, a catalog with + Publish skills and its picker, and People; and the places that
- * lead to it: the phone's More sheet, the desktop top bar, the sidebar footer and the narrow rail. On a phone and a
+ * lead to it: the phone's More sheet, the desktop top bar and the sidebar footer. On a phone and a
  * desktop, light and dark.
  *
  *   bun harness/sharing-screenshot.tsx      # writes harness/out/sharing-*.png
  *
- * It renders the REAL `SharingPage`, `AppBar`, `AppTabBar`, `SessionsBar` and `FleetNavigationRail` against
+ * It renders the REAL `SharingPage`, `AppBar`, `AppTabBar` and `SessionsBar` against
  * invented machines, catalogs, people and skills. Nothing here is a real key, code or pairing; the member
  * subscription is the throwaway one the unit tests use. It fails if any frame scrolls sideways.
  */
@@ -35,7 +35,6 @@ import { createRoot } from 'react-dom/client';
 import { SharingPage } from '../../src/features/sharing/sharing-page.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { AppBar, AppTabBar } from '../../src/shell/app-bar.tsx';
-import { FleetNavigationRail } from '../../src/shell/fleet-navigation-rail.tsx';
 import { SessionsBar } from '../../src/shell/sessions-bar.tsx';
 import { ThemeToggle } from '../../src/shell/theme-toggle.tsx';
 import { sessionView } from '../../tests/support/sessions.ts';
@@ -216,15 +215,6 @@ if (['catalogs', 'shared', 'people', 'update'].includes(view)) {
           />
         </div>
       </div>
-    </div>,
-  );
-} else if (view === 'rail') {
-  createRoot(root).render(
-    <div className="bg-bg text-fg" data-shot="" style={{ width: 52, height: 420 }}>
-      <FleetNavigationRail
-        daemon="studio" sessionCount={2} mode="all" modeCounts={{ all: 2, auto: 0, interactive: 2 }} rcOnly={false} includeFinished={false}
-        onExpand={noop} onSetMode={noop} onSetRcOnly={noop} onSetIncludeFinished={noop} onNavigate={noop}
-      />
     </div>,
   );
 } else {
@@ -412,8 +402,6 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
     await page.locator('[data-catalogs-list]').waitFor({ state: 'visible' });
     await shot(page, 'desktop-full-page', theme, vp, '[data-shot]');
     await shot(page, 'desktop-sidebar-footer', theme, vp, '[data-sessions-bar="column"]');
-    await open(page, theme, 'rail');
-    await shot(page, 'desktop-narrow-rail', theme, vp, '[data-shot]');
   }
 };
 

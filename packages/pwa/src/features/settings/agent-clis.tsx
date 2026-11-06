@@ -45,7 +45,7 @@ import {
 } from './agent-clis-model.ts';
 
 /** How often the panel re-reads while an update runs. */
-export const AGENT_CLIS_POLL_MS = 2_000;
+const AGENT_CLIS_POLL_MS = 2_000;
 
 export type AgentClisClient = Pick<IFyApiClient, 'harnessUpdate' | 'startHarnessUpdate'>;
 export type AgentClisClientFactory = (connection: DaemonConnection) => Promise<AgentClisClient>;
@@ -56,7 +56,7 @@ export interface AgentCliPendingConfirm {
   readonly target?: string;
 }
 
-export interface AgentClisPanelProps {
+interface AgentClisPanelProps {
   readonly view: HarnessUpdateView;
   readonly now: number;
   /** The harness whose request is in flight. */
@@ -272,7 +272,7 @@ function HarnessCard({ view, props }: { readonly view: HarnessCliView; readonly 
 }
 
 /** The panel, drawn from one view. Every request goes out through the callbacks. */
-export function AgentClisPanel(props: AgentClisPanelProps) {
+function AgentClisPanel(props: AgentClisPanelProps) {
   return (
     <section className="kt-panel flex min-w-0 flex-col gap-3 p-panel" aria-labelledby="agent-clis-heading">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">

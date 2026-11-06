@@ -398,7 +398,7 @@ export const controlsFor = (record: ControlsRecord, daemonId: DaemonId): UiContr
 });
 
 /** Field-wise equality, used to reuse a merged object that did not change. */
-export const sameControls = (left: UiControls, right: UiControls): boolean =>
+const sameControls = (left: UiControls, right: UiControls): boolean =>
   left.projectScope === right.projectScope && DEVICE_KEYS.every(key => left[key] === right[key]);
 
 const scopesForNextSeq = (

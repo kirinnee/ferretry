@@ -59,7 +59,7 @@ import {
 export type ConfigFilesClientFactory = (connection: DaemonConnection) => Promise<ConfigFilesClient>;
 
 /** Each kind of file, as the group a person looks for it under. */
-export const CONFIG_KIND_WORDS: Readonly<Record<ConfigFileKind, string>> = {
+const CONFIG_KIND_WORDS: Readonly<Record<ConfigFileKind, string>> = {
   machine: 'Machine',
   login: 'AI logins',
   component: 'Components',
@@ -107,7 +107,7 @@ export const issueLocation = (issue: ConfigIssue): string =>
 export const absoluteConfigPath = (directory: string, path: string): string =>
   `${directory.replace(/\/+$/u, '')}/${path}`;
 
-export function ConfigIssueList({ issues }: { readonly issues: readonly ConfigIssue[] }) {
+function ConfigIssueList({ issues }: { readonly issues: readonly ConfigIssue[] }) {
   return (
     <ul className="m-0 flex list-none flex-col gap-2 p-0" data-config-issues="">
       {issues.map((issue, index) => (
@@ -252,7 +252,7 @@ function FileRow({
 }
 
 /** The loaded panel, apart from the reads, so every state it shows can be rendered from plain values. */
-export function ConfigFilesPanel({
+function ConfigFilesPanel({
   view,
   write,
   confirming,

@@ -67,20 +67,10 @@ export const KIND_ONE: Readonly<Record<FleetComponentKind, string>> = {
   modelSets: 'Model set',
 };
 
-/** Several of a kind: "Skip, add no MCP servers". */
-export const KIND_MANY: Readonly<Record<FleetComponentKind, string>> = {
-  instructions: 'Instructions',
-  mcp: 'MCP servers',
-  skills: 'Skills',
-  settings: 'Settings',
-  hooks: 'Hooks',
-  modelSets: 'Model sets',
-};
-
 /** Settings and hooks belong to one harness; the other kinds may be generic (K2). */
 export const harnessBound = (kind: FleetComponentKind): boolean => kind === 'settings' || kind === 'hooks';
 
-export type ComponentBadgeTone = 'pend' | 'accent' | 'warn';
+type ComponentBadgeTone = 'pend' | 'accent' | 'warn';
 
 export interface ComponentBadge {
   readonly text: string;
@@ -149,9 +139,6 @@ export const profilesWithLayer = (reference: string, profiles: readonly FleetLay
   profiles.filter(profile => profile.layers.includes(reference)).map(profile => profile.name);
 
 // ── Drafts ───────────────────────────────────────────────────────────────────────────────────────
-
-/** One line of a settings edit: a value typed, or a hidden one kept as is. */
-export type SettingsLine = { readonly key: string; readonly hidden: true };
 
 /**
  * What the edit and new forms hold. Every kind's text lives in `body`, the way the prototype's form
@@ -407,6 +394,3 @@ export function componentChange(draft: ComponentDraft, create: boolean): FleetAc
       });
   }
 }
-
-/** What the "saved for reuse" list calls something made inside a flow: "Instructions Team rules". */
-export const reuseLabel = (kind: FleetComponentKind, name: string): string => `${KIND_ONE[kind]} ${name}`;

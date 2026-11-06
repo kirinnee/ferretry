@@ -3,7 +3,7 @@ import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
 import { asModelTier, type ModelTier } from './model-tiers.ts';
 
-export interface RuntimeReasoningChoice {
+interface RuntimeReasoningChoice {
   readonly value: string;
   readonly description?: string;
 }

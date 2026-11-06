@@ -1116,7 +1116,7 @@ const introducer = (method: ConnectionMethod): boolean => method.kind === 'direc
 export const TUNNEL_LOOKUP_REUSE_MS = 30_000;
 
 /** The deadline on one lookup, so a walk waiting on it is never held by a question nobody answers. */
-export const TUNNEL_LOOKUP_TIMEOUT_MS = 10_000;
+const TUNNEL_LOOKUP_TIMEOUT_MS = 10_000;
 
 /** Said when a carrier-control request has neither a direct address nor a relay to travel. */
 export const CONTROL_UNREACHABLE =

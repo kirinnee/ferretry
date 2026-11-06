@@ -216,7 +216,7 @@ const StreamCloseSchema = z.strictObject({
   reason: z.string().max(200),
 });
 
-export const RelayTunnelDaemonMessageSchema = z.union([
+const RelayTunnelDaemonMessageSchema = z.union([
   z.discriminatedUnion('t', [
     z.strictObject({
       t: z.literal('authenticated'),
@@ -468,7 +468,7 @@ export interface SessionDeviceClaim {
 }
 
 /** Which member key proves this session, the key that proves it, and the running copy of the app it is. */
-export interface SessionMemberClaim {
+interface SessionMemberClaim {
   readonly keyId: string;
   readonly key: PrivateKeyHandle;
   readonly appSession: string;
@@ -530,7 +530,7 @@ export type RelayJoinOutcome =
   | { readonly kind: 'challenge'; readonly memberLabel: string; readonly options: JoinProofOptions };
 
 /** The one reason a join is refused with. One sentence for every cause: a used, expired, ended or unknown link. */
-export const JOIN_REFUSED_REASON = 'join_refused' as const;
+const JOIN_REFUSED_REASON = 'join_refused' as const;
 
 /**
  * The publisher refused this join, inside the channel — a RESULT, not a transport failure.

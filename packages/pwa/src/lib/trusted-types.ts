@@ -36,9 +36,6 @@
 import { escapeHtml } from './highlight.ts';
 import { RELEASE_WORKER_FILE } from './release-manifest.ts';
 
-/** The policy names `public/_headers` allows, and nothing else may create one. */
-export const TRUSTED_TYPE_POLICIES = ['fy-highlight', 'fy-worker', 'fy-fragment'] as const;
-
 interface TrustedTypePolicyLike {
   createHTML?(input: string): unknown;
   createScriptURL?(input: string): unknown;

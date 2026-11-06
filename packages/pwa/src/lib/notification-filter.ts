@@ -97,7 +97,7 @@ export function notificationCategoryFor(kind: PushNotificationKind): Notificatio
   }
 }
 
-export type NotificationCategoryPrefs = Readonly<Record<NotificationCategory, boolean>>;
+type NotificationCategoryPrefs = Readonly<Record<NotificationCategory, boolean>>;
 
 const MINUTES_PER_DAY = 1_440;
 

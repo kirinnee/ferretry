@@ -7,7 +7,7 @@
  */
 
 import type { AgendaItem, AgendaViewTab } from '@ferretry/protocol';
-import { ChevronRight, GitCompareArrows } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import {
   BASIS_WORDS,
@@ -22,31 +22,6 @@ import {
   versionLabel,
 } from '../../lib/agenda-diff.ts';
 import type { AgendaVersionsView } from './use-item-lifecycle.ts';
-
-/** The button in the version slot: it opens and closes the comparison. */
-export function DiffToggle({
-  open,
-  controls,
-  onToggle,
-}: {
-  readonly open: boolean;
-  readonly controls: string;
-  readonly onToggle: () => void;
-}) {
-  return (
-    <button
-      aria-controls={controls}
-      aria-expanded={open}
-      className="fy-diff__toggle"
-      data-agenda-diff-toggle=""
-      onClick={onToggle}
-      type="button"
-    >
-      <GitCompareArrows aria-hidden="true" size={14} />
-      Changes
-    </button>
-  );
-}
 
 type Loaded =
   | { readonly state: 'loading' }

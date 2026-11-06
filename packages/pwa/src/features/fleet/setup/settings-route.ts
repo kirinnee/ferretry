@@ -16,7 +16,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { panelTab } from '../shell/machine-panels.ts';
 import { MACHINES_SECTION, type MachineTabId, machineHash } from '../shell/machine-route.ts';
 
-export const SETTINGS_FLOWS = ['setup', 'import', 'clone', 'export', 'install-claude', 'install-codex'] as const;
+const SETTINGS_FLOWS = ['setup', 'import', 'clone', 'export', 'install-claude', 'install-codex'] as const;
 
 export type SettingsFlow = (typeof SETTINGS_FLOWS)[number];
 
@@ -51,10 +51,6 @@ export const machinePanelFromHash = (hash: string, tab: MachineTabId = 'machine'
   const item = tabItem(hash, tab);
   return item === null || FLOWS.has(item) || panelTab(item) !== tab ? null : item;
 };
-
-/** `#machines/<machine>/<tab>/<panel>`, on the tab that opens the panel. */
-export const machinePanelHash = (machine: string, panel: string): string =>
-  machineItemHash(machine, panelTab(panel) ?? 'machine', panel);
 
 export interface SettingsFlowRoute {
   readonly flow: SettingsFlow | null;

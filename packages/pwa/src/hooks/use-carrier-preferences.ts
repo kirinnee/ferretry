@@ -38,7 +38,7 @@ export function useTunnelService(read: () => Promise<TunnelServiceState>): Tunne
 const SETTLED: ReadonlySet<string> = new Set(['off', 'unavailable', 'up']);
 
 /** How often a machine whose tunnel is being set up is asked again, while something shows it. */
-export const TUNNEL_SWITCH_POLL_MS = 3_000;
+const TUNNEL_SWITCH_POLL_MS = 3_000;
 
 /**
  * Every listed machine's tunnel switch, asked when the list mounts and again every

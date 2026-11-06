@@ -178,7 +178,7 @@ export interface PushSubscriptionHandle extends PushSubscriptionLike {
   unsubscribe(): Promise<boolean>;
 }
 
-export interface PushManagerLike {
+interface PushManagerLike {
   getSubscription(): Promise<PushSubscriptionHandle | null>;
   subscribe(options: {
     readonly userVisibleOnly: true;

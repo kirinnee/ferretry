@@ -24,7 +24,7 @@ import {
 import type { PickerAccount } from '../../lib/account-picker-catalog.ts';
 
 /** Whether the Jev key is in this machine's secret store. `unknown` when that could not be read. */
-export type JevKeyState = 'set' | 'missing' | 'unknown';
+type JevKeyState = 'set' | 'missing' | 'unknown';
 
 export interface JevKeyStatus {
   readonly state: JevKeyState;
@@ -100,7 +100,7 @@ const autoMigrateErrors = (config: WardenConfig): WardenFormErrors => {
 export const hasWardenFormErrors = (errors: WardenFormErrors): boolean => Object.keys(errors).length > 0;
 
 /** What can make the Warden move a ferret, in the words the form and the summary use. */
-export const AUTO_MIGRATE_TRIGGER_WORDS: Readonly<Record<WardenAutoMigrateTrigger, string>> = {
+const AUTO_MIGRATE_TRIGGER_WORDS: Readonly<Record<WardenAutoMigrateTrigger, string>> = {
   rate_limited: 'its login hits a usage limit',
   budget_exceeded: 'its login passes its hard spend budget',
 };

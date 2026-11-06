@@ -14,7 +14,7 @@
 import type { SessionStatus, SessionView } from '@ferretry/protocol';
 import { displayCallsign, shortSessionId } from './callsign.ts';
 
-export type SubFerretState = 'starting' | 'working' | 'needs-you' | 'idle' | 'done' | 'failed' | 'stopped';
+type SubFerretState = 'starting' | 'working' | 'needs-you' | 'idle' | 'done' | 'failed' | 'stopped';
 
 export interface SubFerretReading {
   readonly state: SubFerretState;
@@ -75,10 +75,6 @@ export const subFerretName = (view: SessionView): string =>
 
 /** The model it runs on, as observed when the harness said, else as it was started. */
 export const subFerretModel = (view: SessionView): string | undefined => view.state.observedModel ?? view.config.model;
-
-/** The effort it runs at, as observed, else as launched. */
-export const subFerretEffort = (view: SessionView): string | undefined =>
-  view.state.observedReasoningEffort ?? view.config.launchReasoningEffort;
 
 /** The sub-ferrets of `parentId` among `sessions`, newest first. */
 export const subFerretsOf = (parentId: string, sessions: readonly SessionView[]): readonly SessionView[] =>

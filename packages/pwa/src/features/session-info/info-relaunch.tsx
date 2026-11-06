@@ -19,11 +19,11 @@ export type InfoRelaunchRead =
   | { readonly kind: 'ready'; readonly settings: SessionRelaunchSettings }
   | { readonly kind: 'failed'; readonly reason: string };
 
-export const INFO_RELAUNCH_HINT =
+const INFO_RELAUNCH_HINT =
   'A running CLI keeps the settings it started with. Login settings (permission mode, profile, MCP servers, skills, instructions) apply on its next restart; Restart keeps the conversation, the model and the effort.';
 
 /** Each reason, in words. */
-export const RELAUNCH_REASON: Readonly<Record<SessionRelaunchDrift, string>> = {
+const RELAUNCH_REASON: Readonly<Record<SessionRelaunchDrift, string>> = {
   arguments: 'Ferretry now starts this CLI with arguments it is missing.',
   settings: 'This login’s settings changed after it started.',
 };

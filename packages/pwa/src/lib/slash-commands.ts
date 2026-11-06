@@ -29,7 +29,7 @@
  */
 
 /** `ok` for standard output (or none), `err` once the command wrote to stderr. */
-export type SlashCommandTone = 'ok' | 'err';
+type SlashCommandTone = 'ok' | 'err';
 
 /** One slash command as the transcript shows it. */
 export interface SlashCommand {

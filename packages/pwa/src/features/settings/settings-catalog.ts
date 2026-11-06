@@ -590,7 +590,7 @@ export const settingsSectionForSetting = (id: SettingId): SettingsSectionId => {
   return section;
 };
 
-export const SETTINGS_DESTINATION = {
+const SETTINGS_DESTINATION = {
   id: 'open-settings',
   label: 'Open settings',
   description: 'Appearance and behaviour on this browser, and every paired machine.',

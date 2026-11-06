@@ -45,9 +45,6 @@ export const ITEM_VIEW_PARTS = [
 ] as const;
 export type ItemViewPart = (typeof ITEM_VIEW_PARTS)[number];
 
-/** The parts drawn folded until the owner opens them. */
-export const FOLDED_PARTS: ReadonlySet<ItemViewPart> = new Set(['detail', 'references', 'conversation', 'activity']);
-
 /** What each part is called on screen. */
 export const PART_TITLES: Readonly<Record<Exclude<ItemViewPart, 'head' | 'premise'>, string>> = {
   detail: 'Detailed context',

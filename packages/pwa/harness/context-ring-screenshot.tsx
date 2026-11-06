@@ -1,12 +1,12 @@
 /**
- * The context ring: on the composer's status line next to the model chips and the quota, and on the
- * sidebar row (only from 90%) — at 12%, 75% and 95%, plus a compaction in flight. Desktop 1440 and phone
+ * The context ring on the composer's status line, next to the model chips and the quota — at 12%, 75% and 95%,
+ * plus a compaction in flight. Desktop 1440 and phone
  * 390, light and dark. Review evidence; nothing compares the PNGs.
  *
  *   bun harness/context-ring-screenshot.tsx [out-dir]   # writes context-pie-<state>-<viewport>-<scheme>.png
  *
  * The status line is the REAL `ComposerRuntimeWithKeyboard`, `ContextRing` and `ComposerQuota` inside the
- * composer's own status-line markup; the sidebar row is the REAL `SidebarRow`. It fails if a width
+ * composer's own status-line markup. It fails if a width
  * scrolls sideways or the ring leaves its row.
  */
 import { spawnSync } from 'node:child_process';
@@ -35,9 +35,6 @@ import type { SessionView } from '@ferretry/protocol';
 import { ComposerQuota } from '../../src/components/composer-quota.tsx';
 import { ComposerRuntimeWithKeyboard } from '../../src/components/composer-runtime.tsx';
 import { ContextRing } from '../../src/components/context-ring.tsx';
-import { daemonId } from '../../src/lib/daemon-connection.ts';
-import { buildLineage, nestByLineage } from '../../src/lib/lineage.ts';
-import { SidebarRow } from '../../src/shell/agent-sidebar-rows.tsx';
 
 const AT = '2026-10-30T08:00:00.000Z';
 const params = new URLSearchParams(location.search);
@@ -75,7 +72,6 @@ const view = {
 } as unknown as SessionView;
 
 const quota = { fiveHourPercent: 11, weeklyPercent: 38, atLimit: false, authOk: true };
-const rows = nestByLineage([view], buildLineage([view]));
 
 createRoot(document.getElementById('root')).render(
   <div className="kt-shell flex min-h-full flex-col gap-panel bg-bg p-panel">
@@ -88,12 +84,6 @@ createRoot(document.getElementById('root')).render(
           <ComposerQuota quota={quota} />
         </span>
       </div>
-    </section>
-    <section className="kt-panel flex w-full max-w-xs flex-col gap-1 p-panel" data-shot="sidebar">
-      <p className="kt-label m-0">Sidebar row · {state}</p>
-      <ul className="m-0 list-none p-0">
-        <SidebarRow active={false} byId={new Map([[view.config.id, view]])} canMutate daemonId={daemonId('alpha')} row={rows[0]} />
-      </ul>
     </section>
   </div>,
 );
@@ -173,9 +163,6 @@ try {
             return ring === undefined || panel === undefined || ring.right > panel.right || ring.left < panel.left;
           });
           if (outside) fail(`${where}: the ring leaves its row`);
-          const sidebarRing = await page.locator('[data-shot="sidebar"] [data-context-ring]').count();
-          const expected = state === '95' || state === 'compacting' ? 1 : 0;
-          if (sidebarRing !== expected) fail(`${where}: sidebar ring count ${sidebarRing}, expected ${expected}`);
           const target = join(outDir, `context-pie-${state}-${viewport.name}-${scheme}.png`);
           await page.screenshot({ path: target, fullPage: true });
           process.stdout.write(`📸 ${target}\n`);

@@ -7,7 +7,6 @@ import {
   HARNESS_DIALOG_GONE,
   HarnessDialogGone,
   harnessDialogHint,
-  harnessDialogNotice,
   harnessDialogSentence,
   harnessTrustNote,
   harnessWord,
@@ -105,10 +104,6 @@ describe('the plain words for a harness dialog', () => {
 
   it('says the dialog as a card heading and as a notification', () => {
     expect(harnessDialogSentence('Hadi', dialog())).toBe('Hadi’s Codex is waiting: Hooks need review');
-    expect(harnessDialogNotice('Hadi', dialog())).toBe('Hadi is waiting on Codex: Hooks need review');
-    expect(harnessDialogNotice('Hadi', dialog({ harness: 'claude', title: 'New MCP server found' }))).toBe(
-      'Hadi is waiting on Claude Code: New MCP server found',
-    );
   });
 
   it('says what trusting grants, per kind', () => {

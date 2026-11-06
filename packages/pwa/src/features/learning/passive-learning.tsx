@@ -24,7 +24,7 @@ import type { DaemonFetch } from '../../lib/runtime-models.ts';
  * itself, so a quick beat here was a steady share of an idle page's traffic for an answer that almost
  * never changes.
  */
-export const PASSIVE_LEARNING_POLL_MS = 300_000;
+const PASSIVE_LEARNING_POLL_MS = 300_000;
 
 export interface PassiveLearningState {
   /** `null` until the first read answers — and for a daemon that cannot answer it. */

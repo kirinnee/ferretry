@@ -9,11 +9,6 @@ import { useCallback, useSyncExternalStore } from 'react';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import type { WorkspaceLayout } from '../../lib/workspace-layout.ts';
 import type { WorkspaceLayoutStore } from '../../lib/workspace-layout-store.ts';
-import type {
-  WorkspaceRailPreferences,
-  WorkspaceRailPreferenceStore,
-  WorkspaceRailSide,
-} from '../../lib/workspace-rail-preferences.ts';
 
 export interface WorkspaceLayoutBinding {
   readonly layout: WorkspaceLayout;
@@ -32,20 +27,4 @@ export function useWorkspaceLayout(store: WorkspaceLayoutStore, scope: DaemonSes
     [store, daemonId, sessionId],
   );
   return { layout, setLayout };
-}
-
-export interface WorkspaceRailsBinding {
-  readonly rails: WorkspaceRailPreferences;
-  readonly setRailWidth: (side: WorkspaceRailSide, width: number) => void;
-}
-
-export function useWorkspaceRails(store: WorkspaceRailPreferenceStore): WorkspaceRailsBinding {
-  const rails = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
-  const setRailWidth = useCallback(
-    (side: WorkspaceRailSide, width: number) => {
-      store.setWidth(side, width);
-    },
-    [store],
-  );
-  return { rails, setRailWidth };
 }

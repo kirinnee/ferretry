@@ -8,8 +8,6 @@ import {
   attachedGateView,
   gateAnswerAction,
   gateAsksWords,
-  gateHeld,
-  gateReopenOption,
   gateWhySubject,
   gateWordsFor,
   isGateItem,
@@ -109,14 +107,10 @@ describe('which answers wait for words', () => {
 
   test('Not good needs words: held without them, sent with them', () => {
     expect(gateWordsFor(item, send('Not good'))).toBe('required');
-    expect(gateHeld(item, send('Not good'))).toBe(true);
-    expect(gateHeld(item, send('Not good', '   '))).toBe(true);
-    expect(gateHeld(item, send('Not good', 'blank'))).toBe(false);
   });
 
   test('the forward option needs none', () => {
     expect(gateWordsFor(item, send('Done'))).toBe('none');
-    expect(gateHeld(item, send('Done'))).toBe(false);
   });
 
   test('Not yet, an ask option outside gate.options, takes words but never needs them', () => {
@@ -127,7 +121,6 @@ describe('which answers wait for words', () => {
       ],
     } as Partial<AgendaItem>);
     expect(gateWordsFor(one, send('Not yet'))).toBe('optional');
-    expect(gateHeld(one, send('Not yet'))).toBe(false);
     expect(gateWordsFor(one, send('OK to build'))).toBe('none');
   });
 
@@ -141,10 +134,6 @@ describe('which answers wait for words', () => {
     const plain = agendaItem('A1');
     expect(isGateItem(plain)).toBe(false);
     expect(gateWordsFor(plain, send('Not good'))).toBe('none');
-  });
-
-  test('finds the reopen option', () => {
-    expect(gateReopenOption(item as never)?.label).toBe('Not good');
   });
 });
 
@@ -222,7 +211,6 @@ describe('a gate attached to a thread', () => {
     const marked = gateAnswerAction('Not good', '', true);
     expect(marked).toMatchObject({ gate: true });
     expect(gateWordsFor(thread, marked)).toBe('required');
-    expect(gateHeld(thread, marked)).toBe(true);
     expect(gateAsksWords(thread, marked)).toBe(true);
     expect(gateWordsFor(thread, gateAnswerAction('Not good', ''))).toBe('none');
     expect(gateWordsFor(thread, gateAnswerAction('Done', '', true))).toBe('none');

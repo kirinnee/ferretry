@@ -184,7 +184,7 @@ export function ItemChips({ scope, children }: { scope: ProfileItem['scope']; ch
 }
 
 /** A scope chip, shown only for an item narrowed to one tool. */
-export function ScopeTag({ scope }: { scope: ProfileItem['scope'] }) {
+function ScopeTag({ scope }: { scope: ProfileItem['scope'] }) {
   if (scope === 'generic') return null;
   const words = { claude: 'Claude only', codex: 'Codex only', mixed: 'Mixed' } as const;
   return (

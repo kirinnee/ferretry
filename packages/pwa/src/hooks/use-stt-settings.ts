@@ -12,7 +12,6 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import {
   DEFAULT_STT_SETTINGS,
-  STT_SETTINGS_KEY,
   type SttSettings,
   type SttSettingsPatch,
   type SttSettingsStore,
@@ -37,34 +36,4 @@ export function useSttSettings(store: SttSettingsStore): SttSettingsHandle {
   const settings = useSyncExternalStore(store.subscribe, store.get, () => DEFAULT_STT_SETTINGS);
   const update = useCallback((patch: SttSettingsPatch) => void store.update(patch), [store]);
   return { settings, update, persisted: store.persisted };
-}
-
-/** The `storage` event surface, narrowed so a test does not need a window. */
-export interface StorageEventTarget {
-  addEventListener(type: 'storage', listener: (event: StorageEvent) => void): void;
-  removeEventListener(type: 'storage', listener: (event: StorageEvent) => void): void;
-}
-
-/**
- * Bridges another tab's write into this one.
- *
- * `key === null` is a whole-storage clear, which affects us too. Anything else
- * that is not our key is somebody else's business.
- */
-export function useSttSettingsSync(store: SttSettingsStore, target: StorageEventTarget | null): void {
-  const subscribe = useCallback(
-    (onChange: () => void) => {
-      if (target === null) return () => undefined;
-      const listener = (event: StorageEvent): void => {
-        if (event.key === null || event.key === STT_SETTINGS_KEY) {
-          store.reload();
-          onChange();
-        }
-      };
-      target.addEventListener('storage', listener);
-      return () => target.removeEventListener('storage', listener);
-    },
-    [store, target],
-  );
-  useSyncExternalStore(subscribe, store.get, () => DEFAULT_STT_SETTINGS);
 }

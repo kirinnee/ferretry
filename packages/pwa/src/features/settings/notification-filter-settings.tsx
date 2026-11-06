@@ -17,7 +17,7 @@ import {
 } from '../../lib/notification-filter.ts';
 import { Toggle } from './notification-settings.tsx';
 
-export const NOTIFICATION_FILTER_SCOPE_NOTE =
+const NOTIFICATION_FILTER_SCOPE_NOTE =
   'Every paired machine sends every event now. These switches decide what this browser shows — they apply to every machine at once. Muting one machine alone is in its row above.';
 
 export interface NotificationFilterSettingsViewProps {

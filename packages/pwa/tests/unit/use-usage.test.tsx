@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import type { SessionView, UsageFeedView } from '@ferretry/protocol';
+import type { UsageFeedView } from '@ferretry/protocol';
 
-import { useMachinesUsage, useSessionQuota, useUsage, useUsageSlice } from '../../src/hooks/use-usage.ts';
+import { useMachinesUsage, useUsage } from '../../src/hooks/use-usage.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../../src/lib/usage-store.ts';
 import { interact, mount } from '../support/dom.ts';
@@ -23,12 +23,6 @@ const feed = (percent: number): UsageFeedView => ({
   accounts: [{ agent: 'claude', fiveHourPercent: percent, weeklyPercent: 4, atLimit: false, authOk: true }],
 });
 
-const session = (): SessionView =>
-  ({
-    config: { id: 'sess-1', agent: 'claude', harness: 'claude', cwd: '/repo', mode: 'auto' },
-    state: {},
-  }) as unknown as SessionView;
-
 const port = (reads: string[]): DaemonUsagePort => ({
   usage: async daemon => {
     reads.push(daemon.daemonId);
@@ -39,17 +33,6 @@ const port = (reads: string[]): DaemonUsagePort => ({
 function Percent({ store, daemon }: { readonly store: DaemonUsageStore; readonly daemon: typeof laptop }) {
   const slice = useUsage(store, daemon);
   return <output>{`${slice.status}:${slice.feed?.accounts[0]?.fiveHourPercent ?? '—'}`}</output>;
-}
-
-function Passive({ store, daemon }: { readonly store: DaemonUsageStore; readonly daemon: typeof laptop }) {
-  const slice = useUsageSlice(store, daemon.daemonId);
-  return <output>{`${slice.status}:${slice.feed?.accounts[0]?.fiveHourPercent ?? '—'}`}</output>;
-}
-
-function Quota({ store, daemon }: { readonly store: DaemonUsageStore; readonly daemon: typeof laptop }) {
-  useUsage(store, daemon);
-  const quota = useSessionQuota(store, daemon.daemonId, session());
-  return <output>{quota === null ? 'unknown' : `5h ${quota.fiveHourPercent}%`}</output>;
 }
 
 describe('useUsage', () => {
@@ -99,49 +82,6 @@ describe('useUsage', () => {
     const stopped = reads.length;
     await interact(async () => await new Promise(resolve => setTimeout(resolve, 16)));
     expect(reads).toHaveLength(stopped);
-  });
-});
-
-describe('useUsageSlice', () => {
-  it('reads what is already known without asking the daemon for anything', async () => {
-    const reads: string[] = [];
-    const store = new DaemonUsageStore(port(reads), { pollMs: 60_000, isHidden: () => true });
-    const passive = await mount(<Passive store={store} daemon={laptop} />);
-    expect(passive.container.textContent).toBe('idle:—');
-    expect(reads).toEqual([]);
-
-    const active = await mount(<Percent store={store} daemon={laptop} />);
-    expect(passive.container.textContent).toBe('ready:42');
-    await active.unmount();
-    await passive.unmount();
-  });
-});
-
-describe('useSessionQuota', () => {
-  it('renders unknown before the feed lands and the resolved percentage after', async () => {
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    const store = new DaemonUsageStore(
-      {
-        usage: async () => {
-          await gate;
-          return feed(42);
-        },
-      },
-      { pollMs: 60_000, isHidden: () => true },
-    );
-
-    const { container, unmount } = await mount(<Quota store={store} daemon={laptop} />);
-    expect(container.textContent).toBe('unknown');
-
-    await interact(async () => {
-      release();
-      await new Promise(resolve => setTimeout(resolve, 0));
-    });
-    expect(container.textContent).toBe('5h 42%');
-    await unmount();
   });
 });
 

@@ -72,7 +72,7 @@ export const answerPermissionRequest = async (
 /* ---------- plain words ---------------------------------------------------- */
 
 /** How long a `what` may be in a notification or a status line before it is shortened. */
-export const PERMISSION_WHAT_SHORT = 48;
+const PERMISSION_WHAT_SHORT = 48;
 
 const isPathAction = (request: PermissionRequest): boolean =>
   request.action === 'read' || request.action === 'edit' || request.action === 'create';
@@ -146,12 +146,6 @@ export const permissionWords = (agent: string, request: PermissionRequest): Perm
     return { lead: `${agent} wants to ${permissionPhrase(request)}` };
   return { lead: `${agent} wants to ${request.action}`, what: request.what };
 };
-
-/** The whole sentence as text: "Hadi wants to read /etc/hostname", "… needs permission to use Foo". */
-export const permissionSentence = (agent: string, request: PermissionRequest, what = request.what): string =>
-  request.action === 'other'
-    ? `${agent} needs permission to use ${request.tool}`
-    : `${agent} wants to ${permissionPhrase(request, what)}`;
 
 /** One answer button: what it does in the app's words, and what the harness said, which is never hidden. */
 export interface PermissionOptionWords {

@@ -3,7 +3,6 @@ import {
   attachmentApiPath,
   attachmentErrorCopy,
   attachmentErrorMessage,
-  attachmentFromView,
   attachmentLockCopy,
   attachmentTypeLabel,
   formatAttachmentSize,
@@ -19,7 +18,6 @@ import {
   SIGNED_OUT_COPY,
   textExtractionFailureCopy,
   UPLOAD_CONNECTION_DROPPED_COPY,
-  unlockFailure,
   validateAttachmentFile,
 } from '../../src/lib/attachments.ts';
 
@@ -99,48 +97,9 @@ describe('attachments', () => {
     expect(attachmentErrorMessage(undefined)).toBe('File could not be attached — try again');
     expect(isRetryableUnlockError('wrong_password')).toBe(true);
     expect(isRetryableUnlockError('decryption_failed')).toBe(false);
-    expect(unlockFailure({ code: 'wrong_password' })).toMatchObject({ retryable: true });
-    expect(unlockFailure({ code: 'decryption_failed' })).toMatchObject({ retryable: false });
-    expect(unlockFailure({ code: 42 })).toMatchObject({ retryable: false });
-    expect(unlockFailure(new Error('boom'))).toMatchObject({ retryable: false });
-    expect(unlockFailure(null)).toMatchObject({
-      message: 'File could not be attached — try again',
-      retryable: false,
-    });
-  });
-
-  test('keeps a well-formed extraction failure on the transcript record and drops a malformed one', () => {
-    const base = {
-      id: 'att_2',
-      filename: 'scan.pdf',
-      mime: 'application/pdf',
-      size: 10,
-      sha256: 'b'.repeat(64),
-      createdAt: '2026-08-01T00:00:00Z',
-    };
-    const failure = { code: 'no_extractable_text', message: 'The file has no readable text.' };
-    const kept = attachmentFromView('session-a', { ...base, textExtractionFailure: failure });
-    expect(kept.textExtractionFailure).toEqual(failure);
-    expect(kept.textExtraction).toBeUndefined();
-    const dropped = attachmentFromView('session-a', {
-      ...base,
-      textExtractionFailure: { code: 'Bad Code', message: ' padded ' },
-    });
-    expect(dropped.textExtractionFailure).toBeUndefined();
   });
 
   test('derives safe transcript records, endpoint paths, and display sizes', () => {
-    const attachment = attachmentFromView('session/a', {
-      id: 'att_1',
-      filename: 'statement.pdf',
-      mime: 'application/pdf',
-      size: 1_024,
-      sha256: 'a'.repeat(64),
-      createdAt: '2026-08-01T00:00:00Z',
-      textExtraction: { method: 'pdfjs', characters: 10, truncated: false },
-      encrypted: { kind: 'pdf', locked: true },
-    });
-    expect(attachment).toMatchObject({ sessionId: 'session/a', attachmentId: 'att_1', encrypted: { locked: true } });
     expect(attachmentApiPath('session/a', 'att 1')).toBe('/v1/sessions/session%2Fa/attachments/att%201');
     expect(formatAttachmentSize()).toBe('');
     expect(formatAttachmentSize(-1)).toBe('');

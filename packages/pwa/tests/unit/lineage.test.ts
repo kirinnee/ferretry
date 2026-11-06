@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import {
-  buildLineage,
-  byNewestActivity,
-  lineageIndent,
-  lineageLabel,
-  nestByLineage,
-  parentDisplay,
-} from '../../src/lib/lineage.ts';
+import { buildLineage, byNewestActivity, lineageLabel } from '../../src/lib/lineage.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const session = (id: string, options: { parent?: string; teammate?: string; name?: string; activity?: string } = {}) =>
@@ -56,44 +49,11 @@ describe('lineage labels', () => {
     expect(lineageLabel(session('redundant-id', { teammate: 'meghan', name: '[Legacy] Meghan' })).text).toBe('Meghan');
     expect(lineageLabel(session('deadbeef0011', { name: '' })).text).toBe('deadbeef…');
   });
-
-  it('resolves a live parent and identifies a purged parent without inventing one', () => {
-    const parent = session('parent-123456', { teammate: 'meghan' });
-    const byId = new Map([[parent.config.id, parent]]);
-    expect(parentDisplay(parent.config.id, byId)).toMatchObject({
-      kind: 'resolved',
-      name: 'Meghan · task parent-123456',
-    });
-    expect(parentDisplay('deadbeef0011', byId)).toEqual({ kind: 'missing', shortId: 'deadbeef…' });
-    expect(parentDisplay(undefined, byId)).toBeNull();
-  });
 });
 
-describe('nestByLineage', () => {
-  it('nests visible same-group parents, marks flattened children, and caps indentation', () => {
-    const root = session('root');
-    const child = session('child', { parent: 'root' });
-    const grandchild = session('grandchild', { parent: 'child' });
-    const deep = session('deep', { parent: 'grandchild' });
-    const hidden = session('hidden-child', { parent: 'hidden' });
-    const all = [root, child, grandchild, deep, hidden];
-    const nested = nestByLineage(all, buildLineage(all));
-    expect(nested[0]?.children[0]?.children[0]?.children[0]?.depth).toBe(3);
-    expect(nested[1]?.spawnedBy).toBe('hidden');
-    expect([lineageIndent(-1), lineageIndent(0), lineageIndent(1), lineageIndent(2), lineageIndent(99)]).toEqual([
-      0, 0, 10, 20, 20,
-    ]);
-  });
-
-  it('orders roots by newest descendant and siblings by their own activity', () => {
+describe('byNewestActivity', () => {
+  it('sorts a session with an unreadable activity time after a dated one', () => {
     const idle = session('idle', { activity: '2026-07-25T01:00:00.000Z' });
-    const active = session('active', { activity: '2026-07-25T00:00:00.000Z' });
-    const older = session('older', { parent: 'active', activity: '2026-07-25T02:00:00.000Z' });
-    const newer = session('newer', { parent: 'active', activity: '2026-07-25T03:00:00.000Z' });
-    const all = [idle, active, older, newer];
-    const nested = nestByLineage(all, buildLineage(all));
-    expect(nested.map(row => row.view.config.id)).toEqual(['active', 'idle']);
-    expect(nested[0]?.children.map(row => row.view.config.id)).toEqual(['newer', 'older']);
     expect(byNewestActivity(session('bad', { activity: 'not-a-date' }), idle)).toBeGreaterThan(0);
   });
 });

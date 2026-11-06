@@ -17,7 +17,6 @@ import {
   onboardingNeedsRuntime,
   onboardingRailMarker,
   onboardingSetCount,
-  onboardingSkippedSteps,
   onboardingStepLabel,
   skipOnboardingStep,
   wardenStartingDraft,
@@ -321,18 +320,6 @@ describe('what Done says', () => {
     it('says nothing when the default is not known', () => {
       expect(row(rows(progress()), 'learning').detail).toBeUndefined();
     });
-  });
-});
-
-describe('the steps still to do', () => {
-  it('lists every step that is not set, in rail order, skipped or never visited', () => {
-    const kept = progress({ states: { pair: 'done', start: 'done', voice: 'skipped', learning: 'done' } });
-    expect(onboardingSkippedSteps(kept)).toEqual(['claude', 'codex', 'speedups', 'voice', 'warden', 'controls']);
-  });
-
-  it('lists nothing once every step is set', () => {
-    const states = Object.fromEntries(ONBOARDING_TASKS.map(id => [id, 'done'] as const));
-    expect(onboardingSkippedSteps(progress({ states }))).toEqual([]);
   });
 });
 

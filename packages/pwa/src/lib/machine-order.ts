@@ -40,14 +40,3 @@ export const moveMachine = (
   const next = [...rest.slice(0, at), id, ...rest.slice(at)];
   return next.every((candidate, index) => candidate === order[index]) ? order : next;
 };
-
-/** One place up (-1) or down (+1) among the machines on screen; the same list at either end. */
-export const stepMachine = (
-  order: readonly DaemonId[],
-  visible: readonly DaemonId[],
-  id: DaemonId,
-  delta: -1 | 1,
-): readonly DaemonId[] => {
-  const neighbour = visible[visible.indexOf(id) + delta];
-  return neighbour === undefined ? order : moveMachine(order, id, neighbour, delta < 0 ? 'before' : 'after');
-};

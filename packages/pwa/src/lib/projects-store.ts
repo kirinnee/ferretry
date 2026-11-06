@@ -35,7 +35,7 @@ import { daemonRequest } from './daemon-transport.ts';
 import type { FleetProject } from './fleet-grouping.ts';
 import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
-export type ProjectsLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
+type ProjectsLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 /**
  * One daemon's registered folders.

@@ -25,7 +25,7 @@ export interface MigrationContextDecision {
   readonly conversationTooLarge: boolean;
 }
 
-export type MigrationFailureKind =
+type MigrationFailureKind =
   | 'context-downgrade'
   | 'preflight-refused'
   | 'conversation-unresumable'

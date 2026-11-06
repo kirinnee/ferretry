@@ -34,7 +34,7 @@ export const BROWSER_ENGINE_LABEL = 'Phone/browser voice';
 /** The honest half of the browser engine's name, shown with it everywhere it is offered. */
 export const BROWSER_ENGINE_DISCLOSURE = 'sent to your browser vendor’s servers';
 
-export const PARAKEET_ENGINE_SUMMARY =
+const PARAKEET_ENGINE_SUMMARY =
   'Private and works offline: the Parakeet speech model runs inside this browser. Download it once to this device.';
 export const BROWSER_ENGINE_SUMMARY =
   'Nothing to download: your phone’s or browser’s own speech recognition. Chrome, Android and Safari send the audio to Google or Apple to turn it into text, so it needs a connection and their privacy policy applies.';

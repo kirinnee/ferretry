@@ -90,7 +90,7 @@ export interface UrgentNotificationOptions {
  */
 const PHONE_APPROVAL_TAG = /(?:^|:)pa-pa_[0-9a-f]{24}$/u;
 
-export const isPhoneApprovalTag = (tag: string): boolean => PHONE_APPROVAL_TAG.test(tag);
+const isPhoneApprovalTag = (tag: string): boolean => PHONE_APPROVAL_TAG.test(tag);
 
 /**
  * What a push asks the platform for beyond an ordinary one: a HIGH push, and every approve-on-phone push, stay on
@@ -259,7 +259,7 @@ export interface PageNotificationLike {
   close(): void;
 }
 
-export interface PageNotificationOptions {
+interface PageNotificationOptions {
   readonly icon: string;
   readonly badge: string;
   readonly body: string;

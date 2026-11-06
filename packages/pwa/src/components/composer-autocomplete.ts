@@ -249,9 +249,9 @@ export interface ComposerAutocompleteProvider {
   candidates(context: ComposerProviderContext): Promise<ComposerProviderResult> | ComposerProviderResult;
 }
 
-export type ComposerAutocompleteStatus = 'idle' | 'loading' | 'ready' | 'error';
+type ComposerAutocompleteStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-export interface ComposerAutocompleteSnapshot {
+interface ComposerAutocompleteSnapshot {
   readonly open: boolean;
   readonly status: ComposerAutocompleteStatus;
   readonly provider: ComposerAutocompleteProvider | null;

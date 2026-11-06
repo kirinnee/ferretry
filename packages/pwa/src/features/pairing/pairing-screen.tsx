@@ -43,7 +43,7 @@ import { daemonDisplayName } from '../settings/daemon-settings.tsx';
 import { PairScanner } from './pair-scanner.tsx';
 
 /** Exchanges the code; `deviceName` is what the person called this device on the confirm screen. */
-export type PairingExchange = (seed: PairingSeed, deviceName: string) => Promise<void>;
+type PairingExchange = (seed: PairingSeed, deviceName: string) => Promise<void>;
 
 /** What this browser is called before the person changes it: browser, system and a short suffix. */
 const browserDeviceName = (): string =>
