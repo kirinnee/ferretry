@@ -57,7 +57,6 @@ import { type CatalogLinkSubsystem, catalogLinkRoutes } from './catalog-links.ts
 import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type ConfigFilesSubsystem, configFilesRoutes } from './config-files.ts';
-import { type ConversationImportSubsystem, conversationImportRoutes } from './conversation-import.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetCatalogSubsystem, fleetCatalogRoutes } from './fleet-catalog.ts';
 import { type FleetCredentialsSubsystem, fleetCredentialRoutes } from './fleet-credentials.ts';
@@ -68,7 +67,6 @@ import {
 } from './fleet-events.ts';
 import type { HarnessLoginSubsystem } from './fleet-login.ts';
 import { type FleetSetupSubsystem, fleetSetupRoutes } from './fleet-setup.ts';
-import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LegacyTaskSubsystem, legacyTaskRoutes } from './legacy-tasks.ts';
@@ -226,10 +224,6 @@ export interface MountedSubsystems {
    *  deliberately NOT part of it — that evidence costs a real model turn, so it is collected only for
    *  a caller who asked. */
   readonly fleetRefresh: FleetRefreshLoop;
-  /** Read-only Claude/Codex conversations that existed before Ferretry. */
-  readonly foreignHistory: ForeignHistorySubsystem;
-  /** Existing Claude/Codex conversations the owner may keep as ferrets: listed, searched and adopted. */
-  readonly conversationImport: ConversationImportSubsystem;
   readonly attention: AgendaService;
   /** Audited direct and committed-Agenda presentation through the sole push fan-out. */
   readonly notifications: DirectNotificationSubsystem;
@@ -552,11 +546,6 @@ export function legacyModule(
               // `/v1/config` or is the one literal `/v1/agent/config`, which no other subsystem uses, so this
               // table can neither shadow nor be shadowed by anything around it.
               ...configFilesRoutes(subsystems.configFiles),
-              // Imported harness history is intentionally outside `/v1/sessions`: no foreign transcript has
-              // the journal/pane evidence a managed session requires, so it cannot acquire live controls by
-              // looking like one.
-              ...foreignHistoryRoutes(subsystems.foreignHistory),
-              ...conversationImportRoutes(subsystems.conversationImport),
               ...systemOpenRoutes(subsystems.systemOpen),
               // Every secret path is under `/v1/secrets`, which no other subsystem uses, so this table can
               // neither shadow nor be shadowed by anything around it. It registers with the daemon-wide

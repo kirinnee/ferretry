@@ -284,55 +284,6 @@ export const subsystems = (): MountedSubsystems => ({
   // Like the monitor loop, this serves no route. Its presence proves the daemon
   // constructs the unattended evidence pass rather than leaving its timer as unreachable code.
   fleetRefresh: { run: async () => undefined, arm: async () => () => undefined },
-  conversationImport: {
-    list: async () => ({ conversations: [], matched: 0, skipped: 0 }),
-    preview: async () => undefined,
-    adopt: async () => ({ adopted: [], refused: [] }),
-  },
-  foreignHistory: {
-    list: async () => ({
-      conversations: [
-        {
-          id: 'imported-one',
-          harness: 'claude' as const,
-          title: 'Fixture imported transcript',
-          source: '/fixture/claude/projects/project/one.jsonl',
-          eventCount: 5,
-          readOnly: true as const,
-        },
-      ],
-      skipped: [
-        {
-          harness: 'codex' as const,
-          source: '/fixture/codex/sessions/one.jsonl',
-          reason: 'invalid-json',
-        },
-        {
-          harness: 'codex' as const,
-          source: '/fixture/codex/sessions/two.jsonl',
-          reason: 'invalid-json',
-        },
-      ],
-    }),
-    get: async id =>
-      id === 'imported-one'
-        ? ({
-            id,
-            harness: 'claude',
-            title: 'Fixture imported transcript',
-            source: '/fixture/claude/projects/project/one.jsonl',
-            eventCount: 5,
-            readOnly: true,
-            events: [
-              { kind: 'message', role: 'user', text: 'record identifier', recordId: 'record' },
-              { kind: 'message', role: 'assistant', text: 'item identifier', itemId: 'item' },
-              { kind: 'message', role: 'system', text: 'message identifier', messageId: 'message' },
-              { kind: 'message', role: 'tool', text: 'must not be exposed' },
-              { kind: 'notice' },
-            ],
-          } as never)
-        : undefined,
-  },
   attention: agendaService(),
   agendaReplies: NO_HELD_REPLIES,
   machineAgenda: {} as never,

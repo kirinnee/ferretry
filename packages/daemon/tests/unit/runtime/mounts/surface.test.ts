@@ -756,8 +756,10 @@ describe('the mounted daemon surface', () => {
     const agenda = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/agenda', headers: human }));
     const analytics = await dispatcher.dispatch(request({ path: '/v1/analytics', headers: human }));
     const importedHistory = await dispatcher.dispatch(request({ path: '/v1/imports/history', headers: human }));
+    // The id is the importer's opaque route key for the one readable transcript the module's fixture holds.
+    const importedId = (JSON.parse(importedHistory.body) as { conversations: { id: string }[] }).conversations[0]?.id;
     const importedConversation = await dispatcher.dispatch(
-      request({ path: '/v1/imports/history/imported-one', headers: human }),
+      request({ path: `/v1/imports/history/${importedId ?? 'missing'}`, headers: human }),
     );
     const missingImportedConversation = await dispatcher.dispatch(
       request({ path: '/v1/imports/history/not-found', headers: human }),

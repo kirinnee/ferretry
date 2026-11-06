@@ -26,7 +26,6 @@ import {
   runtimeIdsPath,
   SUB_FERRET_ENV,
   sanitizeHarnessEnv,
-  sharedHistoryPoolDirectory,
   stateHomeFence,
   wrapperNameOf,
 } from '@ferretry/fleet';
@@ -257,7 +256,6 @@ import {
   FileSecretKey,
   FileSignInRuleStore,
   FileTunnelHolding,
-  foreignHistoryRoots,
   GitProjectFacts,
   GitRepositoryProbe,
   HostedRelayDirectory,
@@ -277,7 +275,6 @@ import {
   MemberSweepTimer,
   NodeBrowserLoginRuntime,
   NodeCatalog,
-  NodeConversationFiles,
   NodeConversationLinker,
   NodeDataChannelEngine,
   NodeForeignHistoryFiles,
@@ -307,7 +304,6 @@ import {
   StateSecuritySettingsDocument,
   StateUnlockLedger,
   StateVapidKeys,
-  StorageConversationOwners,
   StorageSessionFacts,
   StorageSessionProjectStamp,
   SystemClock,
@@ -503,9 +499,7 @@ import {
   NodeTranscriptRecordScanner,
   NodeTranscriptSource,
   TranscriptParseWorker,
-  WorkerConversationDescriber,
   WorkerConversationIndex,
-  WorkerForeignTranscriptReader,
   WorkerTranscriptImages,
   WorkerTranscriptSource,
 } from '../src/adapters/transcript/index.ts';
@@ -645,7 +639,6 @@ import {
 import {
   AccountDefaults,
   type AccountInventoryPort,
-  AccountModelConversationListPolicy,
   type AccountsBoot,
   ActivityLedger,
   type AgendaActor,
@@ -739,7 +732,6 @@ import {
   type ConversationConvert,
   ConversationDigestError,
   type ConversationFilesPort,
-  ConversationImportService,
   ConversationIndex,
   type ConversationLinker,
   type ConversionCheckPort,
@@ -755,7 +747,6 @@ import {
   codexModelProvider,
   combinedReferences,
   combinedValues,
-  computerConversationRoots,
   configuredAt,
   connectorBaseEnvironment,
   connectSignInRules,
@@ -812,8 +803,6 @@ import {
   type ExecutableResolverPort,
   effectiveAnalyticsPricing,
   expandProjectRoots,
-  FileConversationDescriber,
-  FileForeignTranscriptReader,
   type FileSystemPort,
   FixedSettingsUnreadableError,
   type FleetEventSource,
@@ -826,7 +815,6 @@ import {
   FleetRefreshService,
   FleetSecretReferences,
   FleetWardenAgents,
-  ForeignHistoryImporter,
   type FoundationPaths,
   fastStartRefusal,
   findAccountByAgent,
@@ -1296,6 +1284,7 @@ import { inputRequestsModule } from './modules/input-requests.ts';
 import { learningModule } from './modules/learning.ts';
 import { createMcpFoundations, mcpModule } from './modules/mcp.ts';
 import { modelsModule } from './modules/models.ts';
+import { conversationImportModule } from './modules/conversation-import.ts';
 import { type CallsignClaims, namesModule } from './modules/names.ts';
 import { rendersModule } from './modules/renders.ts';
 import { type ModuleHandles, seamsOf } from './modules/seams.ts';
@@ -7922,22 +7911,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     new ConversationIndex(inlineTranscriptSources, new NodeTranscriptFileRuntime(), LOOP_PARSE_PACING),
   );
   /**
-   * A separate read surface for conversations that existed before Ferretry.
-   *
-   * It shares the exact parser instances used by managed sessions, but its filesystem capability
-   * has no mutation method and it is deliberately not backed by the session store: a foreign JSONL
-   * has neither a Ferretry journal nor a live pane and must never be presented as resumable.
-   */
-  const foreignHistoryFiles = new NodeForeignHistoryFiles();
-  const foreignHistory = new ForeignHistoryImporter(
-    foreignHistoryFiles,
-    foreignHistoryRoots(userHome),
-    new WorkerForeignTranscriptReader(
-      transcriptParseWorker,
-      new FileForeignTranscriptReader(foreignHistoryFiles, pacedTranscriptParsers),
-    ),
-  );
-  /**
    * A session's own transcript, over the provenance its start recorded.
    *
    * Per opened storage because both halves read documents: the resolver reads the provenance record
@@ -9873,57 +9846,46 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         },
       );
-      /**
-       * The owner's existing conversations, found in Ferretry's shared history FIRST (where every
-       * runtime already sees them, and what Continue lists) and then in the CLI's own home on this
-       * computer, as the daemon inherited it (which only importing lists). Read through the same
-       * parsers managed sessions use; adopted through the same start machinery. A transcript's hand-off
-       * pointer is read back only from a session's own folder, or as an agent coordinator's turn file
-       * (`~/.<coordinator>/<agent>/turns/turn-NNN.md`, kteam's layout).
-       */
-      const conversationFiles = new NodeConversationFiles();
-      const conversationImport = new ConversationImportService(
-        conversationFiles,
-        [
-          { harness: 'claude', home: sharedHistoryPoolDirectory(paths.fleet, 'claude'), source: 'ferretry' },
-          { harness: 'codex', home: sharedHistoryPoolDirectory(paths.fleet, 'codex'), source: 'ferretry' },
-          ...computerConversationRoots({
-            claudeConfigDir: process.env.CLAUDE_CONFIG_DIR,
-            codexHome: process.env.CODEX_HOME,
-            userHome,
-          }),
-        ],
-        // Read and described on the transcript worker, which was told the same hand-off scope.
-        new WorkerConversationDescriber(
-          transcriptParseWorker,
-          new FileConversationDescriber(conversationFiles, pacedTranscriptParsers, conversationHandoffScope),
-        ),
-        new StorageConversationOwners(storage),
-        createConversationAdopter(
+      // The foreign history of the CLIs' own homes and the import that keeps an existing conversation as a ferret: every
+      // constructor is pure. Adopting is a session start, so the adopter stays here with the session code and is a need.
+      const conversationImport = conversationImportModule.build(
+        {
           storage,
-          sessions,
-          createSessionLifecycle,
-          planner,
-          launcher,
-          accounts,
-          executables,
-          sessionIds,
-          names.provides.claims,
-          transcriptProvenance,
-          new NodeWorkingDirectoryResolver(),
-          spawnProvenance,
-          clock,
-          // An adopted conversation is a top-level ferret: told about Pack mode like any other new one.
-          async id => {
-            await packHooks.adopt(id, true, undefined).catch(() => undefined);
-            await adoptAgenda(id, true).catch(() => undefined);
-            await adoptLearning(id);
-          },
-          id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
-          new NodeConversationLinker(),
-          async (executable, harness) => await launchSettings.fixedSettings(executable, harness),
-        ),
-        new AccountModelConversationListPolicy(declaredAccountModel),
+          userHome,
+          fleetDirectory: paths.fleet,
+          environment: process.env,
+          transcriptWorker: transcriptParseWorker,
+          parsers: pacedTranscriptParsers,
+          handoffScope: conversationHandoffScope,
+          foreignHistoryFiles: new NodeForeignHistoryFiles(),
+          accountModel: declaredAccountModel,
+          adopter: createConversationAdopter(
+            storage,
+            sessions,
+            createSessionLifecycle,
+            planner,
+            launcher,
+            accounts,
+            executables,
+            sessionIds,
+            names.provides.claims,
+            transcriptProvenance,
+            new NodeWorkingDirectoryResolver(),
+            spawnProvenance,
+            clock,
+            // An adopted conversation is a top-level ferret: told about Pack mode like any other new one.
+            async id => {
+              await packHooks.adopt(id, true, undefined).catch(() => undefined);
+              await adoptAgenda(id, true).catch(() => undefined);
+              await adoptLearning(id);
+            },
+            id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
+            new NodeConversationLinker(),
+            async (executable, harness) => await launchSettings.fixedSettings(executable, harness),
+          ),
+        },
+        seamsOf.conversationImport(world),
+        lifecycle,
       );
       const wardenPaths = createWardenPaths(paths.home);
       // Built after the agenda it reads and writes; an owner's dismissal heard before then has nothing to cancel, and a
@@ -12284,8 +12246,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // document shares, so this never disagrees with what the catalogue or a start just read.
         agentControl,
         fleetSetup,
-        foreignHistory,
-        conversationImport,
         // This owns no cache and no provider policy: the daemon usage feed already owns those. One
         // service per opened state home serializes only this daemon's timer ticks, so a slow read in
         // another daemon can neither join nor delay it. It is deliberately NOT handed the fleet: the
@@ -13178,6 +13138,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           sharedDrafts,
           housekeeping,
           names,
+          conversationImport,
         },
       };
     },
