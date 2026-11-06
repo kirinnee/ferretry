@@ -14,7 +14,7 @@
  *    `setTimeout 30000`); and the catalog member sweep, link reconcile and link refresh, each written by
  *    the real method as `first sweep: ...` (its immediate first run) followed by the `setInterval` that
  *    repeats it. The remaining `setInterval` / `setTimeout` lines are the other timers built in that stretch.
- *    The agenda resurfacer is off unless the configuration sets `attention.resurfaceAfterMinutes`, so it is
+ *    The agenda resurfacer is off unless the configuration sets `agenda.resurfaceAfterMinutes`, so it is
  *    in none of the four boots below; `CONSTRUCTION_WITH_THE_RESURFACER_ON` is the same stretch with it on.
  */
 

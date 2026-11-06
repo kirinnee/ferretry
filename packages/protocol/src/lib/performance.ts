@@ -152,7 +152,10 @@ export type WorkerStats = z.infer<typeof WorkerStatsSchema>;
  * (`sessionWorkers.max`, default 2); one thread per agent is `max` at or above the running count.
  */
 export const SessionWorkerPoolSchema = z.object({
-  /** `false` when `sessionWorkers.enabled` is off and every session is observed on the main thread. */
+  /**
+   * `false` from an older daemon that had its session workers switched off, observing every session on the main
+   * thread. A current daemon always reports `true`; the field stays so an older daemon's report still parses.
+   */
   enabled: z.boolean(),
   max: z.number().int().positive(),
   /** Threads running now. */

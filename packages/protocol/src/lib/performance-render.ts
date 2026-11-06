@@ -6,7 +6,7 @@ import type { DaemonServiceFacts, DurationStats, PerformanceReport, SessionWorke
  */
 export function describeSessionWorkerPool(pool: SessionWorkerPool): string {
   if (!pool.enabled)
-    return 'off — every running session is observed on the main thread (sessionWorkers.enabled: false)';
+    return 'off — this daemon reports every running session observed on the main thread (an older daemon with its session workers switched off)';
   const size = `pool of ${String(pool.max)}`;
   if (pool.threads === 0) return `${size} · no thread running (no session is running)`;
   const spread = pool.sessionsPerThread.join(', ');

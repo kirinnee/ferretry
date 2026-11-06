@@ -20,7 +20,7 @@ export interface BuzzSink {
   woke(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void>;
 }
 
-/** The deadline an item's `neededBy` is warned at: this long before it, by default (`attention.deadlineWarnHours`). */
+/** The deadline an item's `neededBy` is warned at: this long before it, by default (`agenda.deadlineWarnHours`). */
 export const DEFAULT_DEADLINE_WARN_HOURS = 3;
 
 /**

@@ -41,7 +41,7 @@ is, a notice without `--ping`, the owner's own moves — moves the Inbox badge a
 | #   | Moment                                                                                                                                            | Push                                                              | How often                               |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------- |
 | 1   | The ferret **stops on the owner**: it went idle with at least one item on the owner's turn                                                        | ONE grouped push: "<ferret> is stopped · N need you"              | Once per stop (however many items wait) |
-| 2   | An item's **`neededBy`** comes within `attention.deadlineWarnHours` (default 3 hours)                                                             | The item's title; "Needed in 25 min" / "Overdue" ahead of its ask | Once per item                           |
+| 2   | An item's **`neededBy`** comes within `agenda.deadlineWarnHours` (default 3 hours)                                                                | The item's title; "Needed in 25 min" / "Overdue" ahead of its ask | Once per item                           |
 | 3   | A notice with **`--ping`**                                                                                                                        | The notice's summary                                              | Once per notice                         |
 | 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**                                                                     | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
 | 5   | A card the owner asked for **reaches a gate**: its ask is put on its agenda ([board.md](board.md#cards-show-progress-their-asks-ride-the-agenda)) | The agenda's title; "&F12 <card> is at <lane>: Done or Not good"  | Once per card ask, when it is put on    |
@@ -110,9 +110,9 @@ old ledger loads.
 **Deadlines** are checked when a board changes, and by a sweep every five minutes. The sweep looks at
 deadlines only.
 
-| Key in `config/daemon.json`   | Default | Range (hours) | What it bounds                               |
-| ----------------------------- | ------- | ------------- | -------------------------------------------- |
-| `attention.deadlineWarnHours` | 3       | 0.25–168      | how near `neededBy` must be for its one push |
+| Key in `config/daemon.json` | Default | Range (hours) | What it bounds                               |
+| --------------------------- | ------- | ------------- | -------------------------------------------- |
+| `agenda.deadlineWarnHours`  | 3       | 0.25–168      | how near `neededBy` must be for its one push |
 
 Read at start; a change needs a restart.
 
@@ -178,7 +178,7 @@ cannot set it. A Focus mode can still hold a code push on an iPhone.
 The payload says `urgency: "high"` and never the code, the value or anything typed: only what an ordinary push says
 (the push service is a third party). Every input card pushes ONCE the moment it is raised, while its ferret still waits in
 `input_wait`: its expiry is its deadline, and an input card always counts as inside the warning window whatever
-`attention.deadlineWarnHours` says (`buzz.ts`, `deadlineDue`). A code card's push is high priority; every other card's
+`agenda.deadlineWarnHours` says (`buzz.ts`, `deadlineDue`). A code card's push is high priority; every other card's
 is normal. A service worker older than this field cannot read the payload and shows its
 plain "something is waiting in your Inbox" notification instead: never nothing.
 

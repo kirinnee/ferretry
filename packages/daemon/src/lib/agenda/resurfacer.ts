@@ -12,7 +12,7 @@ export interface AgendaSweepTimers {
 }
 
 /**
- * THE TIMER BEHIND `attention.resurfaceAfterMinutes`: an ask that has sat in discussion longer than that
+ * THE TIMER BEHIND `agenda.resurfaceAfterMinutes`: an ask that has sat in discussion longer than that
  * is moved onto the owner's queue, with a history note saying the timer did it. A ferret that forgot to
  * `surface` what the owner never answered therefore cannot strand it in a chat nobody is reading. Off
  * unless configured; the sweep only reads each board and surfaces what is overdue, one item at a time, so

@@ -20,10 +20,15 @@ export class FakeConfigFiles implements IConfigFiles {
     private readonly found: readonly ConfigFileText[] = [],
     private readonly notRead: readonly string[] = [],
     private readonly record: AcceptedConfigFiles = {},
+    private readonly daemon: unknown = undefined,
   ) {}
 
   list() {
     return Promise.resolve({ files: this.found, unreadable: this.notRead });
+  }
+
+  daemonDocument() {
+    return Promise.resolve(this.daemon);
   }
 
   accepted() {

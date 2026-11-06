@@ -204,6 +204,6 @@ The state home's layout version is 2. A version-1 home is upgraded in place — 
 so paired devices, sessions and secrets survive, and an older Ferretry refuses the upgraded home rather
 than acting on a configuration nobody edits.
 
-A `config/daemon.json` that still has an `accountModel` key, or the retired `fleet.prepareDefaults`
-key (which every earlier boot wrote itself), still boots; the key is ignored and the boot says so
-once. Delete it.
+A `config/daemon.json` that still has a retired key — `attention` (now `agenda`), `accountModel`, `fleet`
+(`fleet.prepareDefaults`, which every earlier boot wrote itself) or `sessionWorkers.enabled` — is refused: the boot
+and `fy config check` both name the key and say what to do. Delete or rename it.

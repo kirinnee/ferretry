@@ -1,4 +1,11 @@
-import { type ConfigCheckContext, configJsonSchema, evaluateConfigFiles, setUpFerretrySkill } from '@ferretry/fleet';
+import {
+  type ConfigCheckContext,
+  configJsonSchema,
+  DAEMON_DOCUMENT_FILE,
+  evaluateConfigFiles,
+  retiredDaemonKeyIssues,
+  setUpFerretrySkill,
+} from '@ferretry/fleet';
 import {
   CONFIG_SCHEMA_IDS,
   ConfigInvalidBodySchema,
@@ -104,9 +111,14 @@ export class ConfigController {
       digest: text => this.digest(text),
       context: this.checkContext,
     });
-    const report = { files: evaluation.files.length, issues: evaluation.issues, pending: evaluation.pending };
+    // The daemon refuses a daemon.json that still holds a retired key, so the check says so too.
+    const issues = [
+      ...evaluation.issues,
+      ...retiredDaemonKeyIssues(DAEMON_DOCUMENT_FILE, await this.files.daemonDocument()),
+    ];
+    const report = { files: evaluation.files.length, issues, pending: evaluation.pending };
     this.out.success(options.json === true ? JSON.stringify(report, null, 2) : renderConfigReport(report, this.bin));
-    if (evaluation.issues.some(issue => issue.severity === 'error')) this.out.setExitCode(1);
+    if (issues.some(issue => issue.severity === 'error')) this.out.setExitCode(1);
   }
 
   /** What the daemon has in effect, and what it reported. */

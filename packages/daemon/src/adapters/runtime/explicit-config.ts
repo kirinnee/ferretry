@@ -17,7 +17,7 @@ import {
   recordedPortDocument,
   tunnelEntryDocument,
 } from '../../lib/index.ts';
-import { prepareAnalyticsPricingWrite, readAnalyticsPricingConfiguration } from './daemon-config.ts';
+import { prepareAnalyticsPricingWrite, readAnalyticsPricingConfiguration, refuseRetiredKeys } from './daemon-config.ts';
 
 /**
  * The configuration document an operator named on the command line.
@@ -39,6 +39,7 @@ export class ExplicitDaemonConfig implements DaemonConfigStore, AnalyticsPricing
     const text = await this.read();
     if (text === undefined) return { document: undefined, config: parseDaemonConfig({}) };
     const document = JSON.parse(text) as Record<string, unknown>;
+    refuseRetiredKeys(this.path, document);
     return { document, config: parseDaemonConfig(document) };
   }
 
@@ -49,7 +50,9 @@ export class ExplicitDaemonConfig implements DaemonConfigStore, AnalyticsPricing
       await this.write(document);
       return parseDaemonConfig(document);
     }
-    return parseDaemonConfig(JSON.parse(text));
+    const document: unknown = JSON.parse(text);
+    refuseRetiredKeys(this.path, document);
+    return parseDaemonConfig(document);
   }
 
   /**
@@ -65,6 +68,7 @@ export class ExplicitDaemonConfig implements DaemonConfigStore, AnalyticsPricing
   async record(port: number): Promise<void> {
     const text = await this.read();
     const raw = (text === undefined ? {} : JSON.parse(text)) as Record<string, unknown>;
+    refuseRetiredKeys(this.path, raw);
     DaemonConfigDocumentSchema.parse(raw);
     await this.write(recordedPortDocument(raw, port));
   }
@@ -99,6 +103,7 @@ export class ExplicitDaemonConfig implements DaemonConfigStore, AnalyticsPricing
   async writeTunnelEntry(entry: DaemonTunnelCarrierEntry): Promise<void> {
     const text = await this.read();
     const raw = (text === undefined ? {} : JSON.parse(text)) as Record<string, unknown>;
+    refuseRetiredKeys(this.path, raw);
     DaemonConfigDocumentSchema.parse(raw);
     await this.write(tunnelEntryDocument(raw, entry));
   }

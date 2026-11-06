@@ -86,6 +86,40 @@ describe('fy config check', () => {
     should(out.exitCode).equal(1);
   });
 
+  it('should report each retired daemon.json key as an error with its remedy, name no value, and exit 1', async () => {
+    // Arrange
+    const daemon = { attention: { replySettleSeconds: 4242 }, sessionWorkers: { enabled: false }, port: 7431 };
+    const { controller, out } = subject(new FakeConfigFiles([{ path: 'voice.yaml', text: '' }], [], {}, daemon));
+
+    // Act
+    await controller.check({});
+
+    // Assert
+    should(out.text).match(/^daemon\.json error: "attention" is retired/mu);
+    should(out.text).containEql('fix: rename `attention` to `agenda` in config/daemon.json');
+    should(out.text).match(/^daemon\.json error: "sessionWorkers\.enabled" is retired/mu);
+    should(out.text).containEql('fix: remove `enabled` from `sessionWorkers` in config/daemon.json');
+    should(out.text).not.containEql('4242');
+    should(out.text).match(/1 file checked: 2 errors, 0 warnings, 0 waiting for confirmation\.$/u);
+    should(out.exitCode).equal(1);
+  });
+
+  it('should say nothing about a daemon.json with only live keys, or none at all', async () => {
+    // Arrange
+    const live = subject(new FakeConfigFiles([], [], {}, { agenda: { replySettleSeconds: 30 }, port: 7431 }));
+    const absent = subject(new FakeConfigFiles());
+
+    // Act
+    await live.controller.check({});
+    await absent.controller.check({});
+
+    // Assert
+    should(live.out.text).equal('0 files checked: 0 errors, 0 warnings, 0 waiting for confirmation.');
+    should(absent.out.text).equal('0 files checked: 0 errors, 0 warnings, 0 waiting for confirmation.');
+    should(live.out.exitCode).be.undefined();
+    should(absent.out.exitCode).be.undefined();
+  });
+
   it('should leave the exit code alone when nothing is wrong', async () => {
     // Arrange
     const { controller, out } = subject(new FakeConfigFiles([{ path: 'voice.yaml', text: '' }]));

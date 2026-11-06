@@ -186,7 +186,7 @@ describe('describeSessionWorkerPool', () => {
   it.each([
     [
       { enabled: false, max: 2, threads: 0, sessionsPerThread: [] },
-      'off — every running session is observed on the main thread (sessionWorkers.enabled: false)',
+      'off — this daemon reports every running session observed on the main thread (an older daemon with its session workers switched off)',
     ],
     [
       { enabled: true, max: 2, threads: 0, sessionsPerThread: [] },

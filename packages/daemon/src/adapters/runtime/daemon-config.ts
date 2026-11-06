@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { retiredDaemonKeysSentence } from '@ferretry/fleet';
 import { type CapabilityGrants, DAEMON_CAPABILITIES, type DaemonCapability } from '@ferretry/protocol';
 import {
   analyticsPricingFingerprint,
@@ -46,6 +47,33 @@ export class DaemonConfigDocumentError extends Error {
   }
 }
 
+/**
+ * A document refused because it still holds a key this daemon retired. The sentence names the keys and the
+ * remedy and never a value, so unlike the schema's own dump it is safe to hand to a caller that must not see the
+ * document's contents (the pricing paths).
+ */
+export class RetiredDaemonKeysError extends DaemonConfigDocumentError {
+  constructor(
+    path: string,
+    readonly sentence: string,
+  ) {
+    super(path, new Error(sentence));
+    this.name = 'RetiredDaemonKeysError';
+  }
+}
+
+/**
+ * Refuses a document that still holds a key this daemon retired, by a sentence naming the key and what to do.
+ *
+ * It runs BEFORE the schema because the schema's own answer to a retired key is "Unrecognized key", which
+ * is true and tells the operator nothing they can act on. The list is `@ferretry/fleet`'s, shared with
+ * `fy config check`, so the boot and the check say the same thing. Only key names are read, never values.
+ */
+export function refuseRetiredKeys(path: string, raw: unknown): void {
+  const sentence = retiredDaemonKeysSentence(raw);
+  if (sentence !== undefined) throw new RetiredDaemonKeysError(path, sentence);
+}
+
 type ParsedDaemonConfigDocument = ReturnType<typeof DaemonConfigDocumentSchema.parse>;
 
 export type PreparedAnalyticsPricingWrite =
@@ -66,6 +94,7 @@ function rawDocument(path: string, text: string | undefined): Record<string, unk
 }
 
 function checkedDocument(path: string, raw: unknown): ParsedDaemonConfigDocument {
+  refuseRetiredKeys(path, raw);
   const parsed = DaemonConfigDocumentSchema.safeParse(raw);
   if (!parsed.success) throw new DaemonConfigDocumentError(path, parsed.error);
   return parsed.data;
@@ -89,7 +118,13 @@ export function readAnalyticsPricingConfiguration(
     };
   } catch (error) {
     if (error instanceof DaemonConfigDocumentError) {
-      return { kind: 'unavailable', message: 'the daemon configuration document cannot be read as pricing' };
+      return {
+        kind: 'unavailable',
+        message:
+          error instanceof RetiredDaemonKeysError
+            ? error.sentence
+            : 'the daemon configuration document cannot be read as pricing',
+      };
     }
     throw error;
   }
@@ -181,7 +216,13 @@ export function prepareAnalyticsPricingWrite(
     if (error instanceof DaemonConfigDocumentError) {
       return {
         kind: 'refuse',
-        result: { kind: 'unavailable', message: 'the daemon configuration document cannot be written as pricing' },
+        result: {
+          kind: 'unavailable',
+          message:
+            error instanceof RetiredDaemonKeysError
+              ? error.sentence
+              : 'the daemon configuration document cannot be written as pricing',
+        },
       };
     }
     throw error;
@@ -281,8 +322,23 @@ export class FileDaemonConfig {
    * Rewrites a legacy `host`/`port`/`relay` into `carriers` entries, once, at boot — the procedure and its
    * guard are `convertLegacyCarrierKeysIn` and `planCarrierConversion`. A `--config` file is never converted.
    * The one-file record of it is `<home>/carriers-migration.json`.
+   *
+   * A DOCUMENT THAT STILL HOLDS A RETIRED KEY IS REFUSED BEFORE ANYTHING IS WRITTEN: no backup, no journal
+   * entry and no rewritten document, so the file the operator must edit is the file they wrote, and the boot
+   * says which key to remove instead of the schema's "Unrecognized key". Text that is not JSON is left to
+   * the conversion, which refuses it in its own words.
    */
   async convertLegacyCarrierKeys(at: string): Promise<CarrierConversionOutcome> {
+    const text = await this.files.readText(this.paths.daemonConfig);
+    if (text !== undefined) {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        raw = undefined;
+      }
+      refuseRetiredKeys(this.paths.daemonConfig, raw);
+    }
     return await convertLegacyCarrierKeysIn(
       {
         readText: async path => await this.files.readText(path),
@@ -425,12 +481,14 @@ export class FileDaemonConfig {
   /** The refusal, separated from the reading, so `record` can hold a document to this bar without
    *  writing the defaulted result of it back over the operator's own file. */
   private checked(raw: unknown): ReturnType<typeof DaemonConfigDocumentSchema.parse> {
+    refuseRetiredKeys(this.paths.daemonConfig, raw);
     const parsed = DaemonConfigDocumentSchema.safeParse(raw);
     if (!parsed.success) throw new DaemonConfigDocumentError(this.paths.daemonConfig, parsed.error);
     return parsed.data;
   }
 
   private configured(document: unknown): DaemonConfig {
+    refuseRetiredKeys(this.paths.daemonConfig, document);
     try {
       return parseDaemonConfig(document);
     } catch (error) {
