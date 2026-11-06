@@ -1,13 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { QueuedMessage } from '@ferretry/protocol';
 import {
-  CLAMP_CHARS,
-  CLAMP_LINES,
   ferretRows,
   fromLabel,
   groupNextSend,
   isWaitingRow,
-  needsClamp,
   nextRowId,
   orderedRows,
   outboxRowOf,
@@ -274,20 +271,6 @@ describe('delivery order and the next message', () => {
   });
 });
 
-describe('needsClamp', () => {
-  test('a short message is shown whole; one past the line or character limit folds', () => {
-    expect(needsClamp('hello')).toBe(false);
-    expect(needsClamp(Array.from({ length: CLAMP_LINES }, () => 'x').join('\n'))).toBe(false);
-    expect(needsClamp(Array.from({ length: CLAMP_LINES + 1 }, () => 'x').join('\n'))).toBe(true);
-    expect(needsClamp('x'.repeat(CLAMP_CHARS))).toBe(false);
-    expect(needsClamp('x'.repeat(CLAMP_CHARS + 1))).toBe(true);
-  });
-
-  test('blank edges do not count toward the length', () => {
-    expect(needsClamp(`\n\n${'x'.repeat(CLAMP_CHARS)}\n\n`)).toBe(false);
-  });
-});
-
 describe('unsent listing order', () => {
   test('the longest-waiting message decides, even when delivery order lists a newer one first', () => {
     const rowsOf = (sessionId: string, items: Partial<QueuedMessage>[]) =>
@@ -474,13 +457,28 @@ describe('status, listing and search', () => {
     expect(listingGroups([group('g', mira, mine)], 'unsent', 'mira').flatMap(g => g.rows)).toEqual([mira]);
   });
 
-  test('limitRows keeps the first rows in the order shown, across ferrets', () => {
-    const g1 = group('a', row('read', { id: '1' }), row('read', { id: '2' }));
-    const g2 = group('b', row('read', { id: '3' }), row('read', { id: '4' }));
-    expect(limitRows([g1, g2], 3).map(g => g.rows.map(r => r.id))).toEqual([['1', '2'], ['3']]);
+  test('limitRows keeps the NEWEST rows across ferrets, each ferret in its own order', () => {
+    const at = (hour: number) => `2026-10-30T${String(hour).padStart(2, '0')}:00:00.000Z`;
+    // Ferret a is chatty and old-ish; ferret b has the single newest message and one old one.
+    const g1 = group(
+      'a',
+      row('read', { id: 'a3', enqueuedAt: at(11) }),
+      row('read', { id: 'a2', enqueuedAt: at(10) }),
+      row('read', { id: 'a1', enqueuedAt: at(9) }),
+    );
+    const g2 = group('b', row('read', { id: 'b2', enqueuedAt: at(12) }), row('read', { id: 'b1', enqueuedAt: at(1) }));
+    expect(limitRows([g1, g2], 3).map(g => g.rows.map(r => r.id))).toEqual([['a3', 'a2'], ['b2']]);
     expect(countRows(limitRows([g1, g2], 2))).toBe(2);
     expect(limitRows([g1, g2], 10)).toEqual([g1, g2]);
     expect(limitRows([g1], 0)).toEqual([]);
+  });
+
+  test('a message the machine refused is Failed, not Waiting, and stays in the unsent list', () => {
+    const refused = outboxRowOf('f', { ...entry(), refused: true });
+    expect(STATUS_LABEL[rowStatus(refused)]).toBe('Failed');
+    expect(listingOf(refused)).toBe('unsent');
+    expect(refused.editable).toBe(true);
+    expect(STATUS_LABEL[rowStatus(outboxRowOf('f', entry()))]).toBe('Waiting');
   });
 
   test('firstLine is the first non-blank line without its markdown mark', () => {

@@ -405,7 +405,8 @@ export function QueuePageView({
         ) : null}
         {shown.map(group => {
           // Next up is the ferret's whole queue's next send, found before any search narrowed the rows.
-          const next = nextRowId(groups.find(item => item.key === group.key)?.rows ?? group.rows, now);
+          const whole = groups.find(item => item.key === group.key) ?? group;
+          const next = nextRowId(whole.rows, now);
           return (
             <Fragment key={group.key}>
               {wrapGroup(
@@ -416,7 +417,7 @@ export function QueuePageView({
                       {group.ferret}
                     </button>
                     {showMachine ? <span className="fy-queue-machine">{group.machine}</span> : null}
-                    {listing === 'unsent' ? <GroupNextSend group={group} now={now} /> : null}
+                    {listing === 'unsent' ? <GroupNextSend group={whole} now={now} /> : null}
                     {shown.length > 1 ? (
                       <span className="fy-queue-group-count">{`${group.rows.length} ${listing === 'sent' ? 'sent' : 'not sent'}`}</span>
                     ) : null}

@@ -149,16 +149,6 @@ export const queuedAgo = (at: string, now: number): string => {
   return ago === '—' ? '' : ago === 'now' ? 'just now' : ago;
 };
 
-/** A message past this many lines, characters or a code block, shows a clamp with "Show more". */
-export const CLAMP_LINES = 6;
-export const CLAMP_CHARS = 420;
-
-/** Whether a message body is long enough to fold behind "Show more". */
-export const needsClamp = (text: string): boolean => {
-  const body = text.trim();
-  return body.length > CLAMP_CHARS || body.split('\n').length > CLAMP_LINES;
-};
-
 /** A ferret's rows: its machine's queue and this device's outbox, each message once (the queue wins). */
 export const ferretRows = (
   daemonId: string,
@@ -206,6 +196,8 @@ export type RowStatus = 'waiting' | 'sending' | 'delivered' | 'read' | 'failed' 
 export const rowStatus = (row: QueueRow): RowStatus => {
   switch (row.state) {
     case 'saved':
+      // A message the machine refused is not retried: it is stuck, not waiting.
+      return row.refused === true ? 'failed' : 'waiting';
     case 'queued':
       return 'waiting';
     case 'typing':
@@ -283,16 +275,24 @@ export const listingGroups = (
 export const countRows = (groups: readonly QueueGroup[]): number =>
   groups.reduce((sum, group) => sum + group.rows.length, 0);
 
-/** The first `limit` rows, ferret by ferret in the order shown; the rest wait behind "Show older". */
+/**
+ * The newest `limit` rows across every ferret — what a page of the Sent list holds — each ferret keeping its own
+ * order; the rest wait behind "Show older". Chosen over all rows at once, so one chatty ferret cannot push another's
+ * latest message onto a later page.
+ */
 export const limitRows = (groups: readonly QueueGroup[], limit: number): readonly QueueGroup[] => {
-  let left = limit;
-  const out: QueueGroup[] = [];
-  for (const group of groups) {
-    if (left <= 0) break;
-    out.push(group.rows.length <= left ? group : { ...group, rows: group.rows.slice(0, left) });
-    left -= group.rows.length;
-  }
-  return out;
+  const newest = groups
+    .flatMap(group => group.rows)
+    .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id))
+    .slice(0, Math.max(0, limit));
+  const keep = new Set(newest.map(row => row.id));
+  return groups
+    .map(group =>
+      group.rows.every(row => keep.has(row.id))
+        ? group
+        : { ...group, rows: group.rows.filter(row => keep.has(row.id)) },
+    )
+    .filter(group => group.rows.length > 0);
 };
 
 /** The first line of a message with its markdown marks off the front: what a one-line row shows of it. */

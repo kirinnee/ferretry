@@ -266,6 +266,23 @@ describe('QueuePageView', () => {
     expect(row('q22').props['data-queue-next']).toBeUndefined();
   });
 
+  test('a search does not change the ferret\u2019s next-send promise in its heading', () => {
+    mounted = view({
+      now: Date.parse('2026-11-04T11:00:00.000Z'),
+      groups: [
+        group([
+          queued('q1', 'queued', { text: 'alpha', holdUntil: '2026-11-04T11:20:00.000Z' }),
+          queued('q22', 'queued', { text: 'beta', holdUntil: '2026-11-04T11:30:00.000Z' }),
+        ]),
+      ],
+    });
+    const earliest = '2026-11-04T11:20:00.000Z';
+    expect(mounted.root.findAllByProps({ 'data-queue-group-send': earliest })).toHaveLength(1);
+    searchFor('beta');
+    expect(rowIds(mounted.root)).toEqual(['q22']);
+    expect(mounted.root.findAllByProps({ 'data-queue-group-send': earliest })).toHaveLength(1);
+  });
+
   test('search finds messages by their words and by their sender, in any case, in either list', () => {
     mounted = view({
       groups: [
