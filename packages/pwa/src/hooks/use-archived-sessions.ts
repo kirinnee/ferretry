@@ -4,7 +4,8 @@
  * the reader presses "Show".
  *
  * TWO READS, TWO CADENCES. The count is one number (`limit=0`) asked on mount and at most every
- * {@link ARCHIVED_COUNT_POLL_MS} — slower than the list's own beat, because a count that lags a minute
+ * {@link ARCHIVED_COUNT_POLL_MS} — slower than the list's own beat, because the daemon archives hourly and the idle request budget is held in CI (`idle-request-budget.test.tsx`: a minute-beat
+ * cost the fleet page 1.0 of its 4 requests a minute), so a count that lags ten minutes
  * hurts nobody — and never while the tab is hidden, with one read owed when it is shown again. The
  * rows are the reader's OWN act: one `limit=100` read per "Show", never a poll. Pressing Show again
  * after a Hide re-reads only when the count has moved since the rows were loaded, so the list never
@@ -31,7 +32,7 @@ import type { SessionsBarArchived } from '../shell/sessions-bar-archived.tsx';
 export type ArchivedSessionsClient = Pick<IFyApiClient, 'archivedSessions'>;
 
 /** The count's beat: at most this often, and never while the tab is hidden. */
-export const ARCHIVED_COUNT_POLL_MS = 60_000;
+export const ARCHIVED_COUNT_POLL_MS = 10 * 60_000;
 
 /** How many archived rows one "Show" lists: the newest, as the route's own default caps it. */
 export const ARCHIVED_SESSIONS_LIMIT = 100;

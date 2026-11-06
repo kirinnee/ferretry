@@ -20,6 +20,7 @@ describe('FyApiClient construction and generic requests', () => {
       'answer',
       'applyCatalogInstall',
       'applyLocalSkillInstall',
+      'archivedSessions',
       'askToStopJobs',
       'attachTarget',
       'cancelHandover',
