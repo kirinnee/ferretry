@@ -54,9 +54,16 @@ export interface BuiltModule<Provides, Jobs extends object = Record<never, never
   readonly contributes: ModuleContribution;
 }
 
+/**
+ * `build` is SYNCHRONOUS on purpose. Construction inside `createSubsystems` is synchronous today, and an
+ * `await` between module builds would be a real yield in the middle of construction: work started earlier
+ * (the agenda waker's first tick, the member sweeps) would run its continuation mid-construction instead of
+ * after `createSubsystems` returns. A module that ever needs asynchronous set-up does it in a job armed by
+ * `start()`, never in `build`.
+ */
 export interface DaemonModule<Seams, Needs, Provides, Jobs extends object = Record<never, never>> {
   readonly id: string;
-  readonly build: (needs: Needs, seams: Seams, lifecycle: ModuleLifecycle) => Promise<BuiltModule<Provides, Jobs>>;
+  readonly build: (needs: Needs, seams: Seams, lifecycle: ModuleLifecycle) => BuiltModule<Provides, Jobs>;
 }
 
 /** Filled once by the composition root; each consumer preserves its own early-read behaviour. */
