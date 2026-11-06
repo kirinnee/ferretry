@@ -23,10 +23,10 @@ import {
   type AgendaMessageKind,
   type AgendaMessagePart,
   type AgendaItem,
-  type AgendaSnapshot,
+  type AgendaListSnapshot,
   agendaTitle,
   parseAgendaMessage,
-  type ResolvedAgendaItem,
+  type AgendaListRecord,
   agendaChatReply,
 } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
@@ -36,7 +36,7 @@ import { Markdown } from './markdown.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
 
 /** An item as the agenda holds it, open or resolved. */
-type AgendaItemOrResolved = AgendaItem | ResolvedAgendaItem;
+type AgendaItemOrResolved = AgendaItem | AgendaListRecord;
 
 /** Finds an item of this session's agenda by id; `undefined` when the board is unread or does not hold it. */
 export type AgendaItemLookup = (id: string) => AgendaItemOrResolved | undefined;
@@ -63,7 +63,7 @@ export function AgendaItemsProvider({
   snapshot,
   children,
 }: {
-  readonly snapshot: AgendaSnapshot | null | undefined;
+  readonly snapshot: AgendaListSnapshot | null | undefined;
   readonly children: ReactNode;
 }) {
   const lookup = useMemo((): AgendaItemLookup => {

@@ -1,9 +1,10 @@
 import {
+  isAgendaHeader,
   type AgendaActionRequest,
   type AgendaClearAgentsResult,
   type AgendaId,
   type AgendaLink,
-  type AgendaSnapshot,
+  type AgendaListSnapshot,
   agendaBriefRequiredProblems,
   DAEMON_FEATURES,
   formatTaskRef,
@@ -235,7 +236,9 @@ export class AgendaController {
     const snapshot = await this.gateway.snapshot(sessionId);
     const open = snapshot.items.find(item => item.id === id);
     const resolved = snapshot.resolved.find(item => item.id === id);
-    const found = open ?? resolved;
+    const listed = open ?? resolved;
+    const found =
+      listed !== undefined && isAgendaHeader(listed) ? await this.gateway.readItem?.(sessionId, id) : listed;
     if (found === undefined) throw new Error(`no agenda item ${agendaReference(id)} in ${sessionId}`);
     if (options.tab !== undefined) {
       this.out.success(tabText(found, options.tab));
@@ -333,7 +336,7 @@ export class AgendaController {
    * is to be opened, and what to do instead was said.
    */
   async #searchCheckOpen(
-    own: AgendaSnapshot,
+    own: AgendaListSnapshot,
     request: Extract<AgendaActionRequest, { action: 'add' }>,
     card: TaskRef | undefined,
     options: AgendaAddOptions,
@@ -892,7 +895,7 @@ export class AgendaController {
     throw new Error('no session id — run inside a session or pass --session <id>');
   }
 
-  #report(snapshot: AgendaSnapshot, options: AgendaCommandOptions, human: () => string): void {
+  #report(snapshot: AgendaListSnapshot, options: AgendaCommandOptions, human: () => string): void {
     this.out.success(options.json === true ? JSON.stringify(snapshot, null, 2) : human());
   }
 }
@@ -930,7 +933,7 @@ function text(value: string | undefined): string | undefined {
 }
 
 /** The single id present after a write and absent before it, if the write produced exactly one. */
-function onlyNewId(before: AgendaSnapshot, after: AgendaSnapshot): AgendaId | undefined {
+function onlyNewId(before: AgendaListSnapshot, after: AgendaListSnapshot): AgendaId | undefined {
   const known = new Set(before.items.map(item => item.id));
   const added = after.items.filter(item => !known.has(item.id));
   const [first] = added;

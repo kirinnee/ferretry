@@ -34,6 +34,7 @@ import { type LineageTitles, lineageTitles, mergeCandidates, mergeOffered } from
 import { useAgendaConversationOffered } from '../../lib/agenda-wire-react.tsx';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { useDaemonFetch } from '../../lib/store.tsx';
 
 /** The versions of the open item, as the diff control reads them. */
 export interface AgendaVersionsView {
@@ -78,12 +79,12 @@ export interface UseItemLifecycleInput {
   /** The open items on the same board: what a merge can join. */
   readonly board: readonly AgendaItem[];
   /** The resolved records on the same board: an item merged into another is closed, so its title is read from here. */
-  readonly records?: readonly AgendaItem[];
+  readonly records?: readonly Pick<AgendaItem, 'id' | 'title' | 'subject'>[];
 }
 
 const NONE = { conversation: null } as const;
 const NO_TITLES: LineageTitles = {};
-const NO_RECORDS: readonly AgendaItem[] = [];
+const NO_RECORDS: readonly Pick<AgendaItem, 'id' | 'title' | 'subject'>[] = [];
 const NO_ENTRIES: readonly AgendaConversationEntry[] = [];
 
 export const useItemLifecycle = ({
@@ -94,6 +95,7 @@ export const useItemLifecycle = ({
   board,
   records = NO_RECORDS,
 }: UseItemLifecycleInput): ItemLifecycle => {
+  const fetcher = useDaemonFetch();
   const machineKeeps = useAgendaConversationOffered(connection?.daemonId) === true;
   const offered = machineKeeps && connection !== undefined && !isMachineAgendaId(scope.sessionId);
   const id = item?.id;
@@ -115,7 +117,7 @@ export const useItemLifecycle = ({
     let live = true;
     void (async () => {
       try {
-        const list = await fetchAgendaVersions(connection, scope, id);
+        const list = await fetchAgendaVersions(connection, scope, id, fetcher);
         if (!live) return;
         // The baseline is the mark BEFORE this opening wrote its own; later reads of the same opening keep it.
         setRead(current => ({
@@ -125,7 +127,7 @@ export const useItemLifecycle = ({
         }));
         if (list.latest >= 1 && list.latest > (marked.current.get(key) ?? 0)) {
           marked.current.set(key, list.latest);
-          await markAgendaVersionSeen(connection, scope, id, list.latest);
+          await markAgendaVersionSeen(connection, scope, id, list.latest, fetcher);
         }
       } catch {
         if (live) setRead(current => (current.key === key ? current : { key, list: null, baseline: undefined }));
@@ -134,7 +136,7 @@ export const useItemLifecycle = ({
     return () => {
       live = false;
     };
-  }, [open, key, versionCount]);
+  }, [open, key, versionCount, fetcher]);
 
   const cache = useRef(new Map<string, Promise<AgendaItem>>());
   const load = useCallback(
@@ -143,14 +145,14 @@ export const useItemLifecycle = ({
       const at = `${key}:${String(version)}`;
       const kept = cache.current.get(at);
       if (kept !== undefined) return kept;
-      const next = fetchAgendaVersion(connection, scope, id as AgendaId, version).then(
+      const next = fetchAgendaVersion(connection, scope, id as AgendaId, version, fetcher).then(
         found => found.item as AgendaItem,
       );
       next.catch(() => cache.current.delete(at));
       cache.current.set(at, next);
       return next;
     },
-    [connection, scope, id, key],
+    [connection, scope, id, key, fetcher],
   );
 
   const mine = read.key === key ? read : null;
@@ -187,7 +189,7 @@ export const useItemLifecycle = ({
     }
     let live = true;
     setReading({ key: thread, count: earlierCount, state: 'loading' });
-    fetchAgendaConversation(connection, scope, id, { from: have.length, until: earlierCount })
+    fetchAgendaConversation(connection, scope, id, { from: have.length, until: earlierCount }, fetcher)
       .then(read => {
         if (!live) return;
         earlier.current.set(thread, [...have, ...read.entries]);
@@ -199,7 +201,7 @@ export const useItemLifecycle = ({
     return () => {
       live = false;
     };
-  }, [stored, whole, thread, count, earlierCount]);
+  }, [stored, whole, thread, count, earlierCount, fetcher]);
   const inHand = whole ? [] : (earlier.current.get(thread) ?? []).slice(0, earlierCount);
   const missing = earlierCount - inHand.length;
   const state = reading?.key === thread ? reading.state : 'loading';
@@ -225,7 +227,16 @@ export const useItemLifecycle = ({
     [item, board, records],
   );
   const named = Object.keys(titles).length === 0 ? {} : { lineageTitles: titles };
-  if (!open) return { ...NONE, ...named };
+  if (!open) {
+    // A one-item read already supplied these words. Reading the stored tail needs no health feature or extra route
+    // (the machine agenda has no conversation endpoint); an incomplete tail says exactly what could not be read.
+    if (item === undefined || !hasStoredConversation(item)) return { ...NONE, ...named };
+    return {
+      conversation: tail,
+      ...named,
+      ...(earlierCount > 0 ? { conversationGap: { at: 0, count: earlierCount, state: 'failed' as const } } : {}),
+    };
+  }
   return {
     conversation,
     ...named,

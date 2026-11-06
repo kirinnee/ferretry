@@ -10,6 +10,7 @@ import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
+import { browserFetch } from '../../../src/lib/runtime-models.ts';
 import { agendaItem } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount } from '../../support/dom.ts';
 import { healthOf } from '../../support/health.ts';
@@ -103,7 +104,7 @@ const draw = async (
 ): Promise<void> => {
   const wires = new AgendaWireDirectory();
   wires.note(connection.daemonId, machine);
-  const store = { agendaWire: wires } as unknown as AppStore;
+  const store = { agendaWire: wires, carrier: { fetch: browserFetch } } as unknown as AppStore;
   const input: UseItemLifecycleInput = {
     connection,
     scope,
@@ -316,6 +317,15 @@ describe('what an open item knows about its own life', () => {
       records: [agendaItem('A6', { subject: 'Where do ferrets sleep?' })],
     });
     expect(latest?.lineageTitles).toEqual({ A6: 'Where do ferrets sleep?' });
+  });
+
+  test('uses words already supplied by a full item read even before health is known, with an honest gap for an incomplete tail', async () => {
+    await draw(OLD, base({ conversationCount: 1, conversation: [entry('Already read.')] }));
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['Already read.']);
+    expect(latest?.conversationGap).toBeUndefined();
+    await draw(OLD, base({ conversationCount: 3, conversation: [entry('Last entry.')] }));
+    expect(latest?.conversation?.map(each => each.text)).toEqual(['Last entry.']);
+    expect(latest?.conversationGap).toEqual({ at: 0, count: 2, state: 'failed' });
   });
 
   test('draws the rebuilt thread when the item stores no words', async () => {

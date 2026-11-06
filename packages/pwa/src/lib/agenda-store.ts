@@ -1,4 +1,4 @@
-import { AgendaCountResponseSchema, type AgendaSnapshot, AgendaSnapshotSchema } from '@ferretry/protocol';
+import { AgendaCountResponseSchema, type AgendaListSnapshot, AgendaListSnapshotSchema } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 
@@ -9,7 +9,7 @@ export type AgendaLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
  * Keys are opaque daemon/session pairs: no session-only API is available.
  */
 export interface DaemonAgendaSnapshot {
-  readonly snapshots: ReadonlyMap<string, AgendaSnapshot>;
+  readonly snapshots: ReadonlyMap<string, AgendaListSnapshot>;
   readonly counts: ReadonlyMap<string, number>;
   readonly statuses: ReadonlyMap<string, AgendaLoadStatus>;
 }
@@ -41,7 +41,7 @@ export class DaemonAgendaStore {
     return this.#snapshot;
   }
 
-  agenda(scope: DaemonSessionScope): AgendaSnapshot | undefined {
+  agenda(scope: DaemonSessionScope): AgendaListSnapshot | undefined {
     return this.#snapshot.snapshots.get(daemonSessionKey(scope));
   }
 
@@ -63,7 +63,7 @@ export class DaemonAgendaStore {
 
   /** Applies a complete authoritative response, rejecting a mismatched scope. */
   applySnapshot(scope: DaemonSessionScope, value: unknown): boolean {
-    const parsed = AgendaSnapshotSchema.safeParse(value);
+    const parsed = AgendaListSnapshotSchema.safeParse(value);
     if (!parsed.success || parsed.data.sessionId !== scope.sessionId) {
       this.fail(scope);
       return false;

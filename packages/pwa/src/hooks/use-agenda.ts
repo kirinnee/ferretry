@@ -1,4 +1,4 @@
-import type { AgendaSnapshot } from '@ferretry/protocol';
+import type { AgendaListSnapshot } from '@ferretry/protocol';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { DaemonAgendaClient } from '../lib/agenda-client.ts';
 import type { AgendaLoadStatus } from '../lib/agenda-store.ts';
@@ -24,7 +24,7 @@ export const useAgendaSession = (
 export const useAgendaSnapshot = (
   client: Pick<DaemonAgendaClient, 'store'>,
   scope: DaemonSessionScope | null,
-): AgendaSnapshot | null => {
+): AgendaListSnapshot | null => {
   const store = useSyncExternalStore(
     client.store.subscribe.bind(client.store),
     () => client.store.getSnapshot(),

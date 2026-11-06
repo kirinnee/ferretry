@@ -6,7 +6,7 @@
  * Inbox's "Resolved" filter draws {@link ResolvedRow} across every conversation.
  */
 
-import type { ResolvedAgendaItem } from '@ferretry/protocol';
+import type { AgendaListRecord } from '@ferretry/protocol';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
@@ -77,11 +77,13 @@ export function ResolvedRow({
   id,
   highlighted = false,
   origin,
+  onOpen,
 }: {
-  readonly record: ResolvedAgendaItem;
+  readonly record: AgendaListRecord;
   readonly id: string;
   readonly highlighted?: boolean;
   readonly origin?: ResolvedOrigin;
+  readonly onOpen?: () => void;
 }) {
   const badge = resolutionBadge(record);
   const BadgeIcon = badge.icon;
@@ -99,7 +101,11 @@ export function ResolvedRow({
         </p>
       )}
       <p className="fy-attn-panel__record-subject">
-        {origin === undefined ? (
+        {onOpen !== undefined ? (
+          <button className="fy-attn-panel__record-link" onClick={onOpen} type="button">
+            {record.subject}
+          </button>
+        ) : origin === undefined ? (
           record.subject
         ) : (
           <RouteLink className="fy-attn-panel__record-link" onNavigate={origin.onNavigate} to={origin.href}>

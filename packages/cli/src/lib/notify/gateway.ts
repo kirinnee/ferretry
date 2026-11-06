@@ -1,5 +1,5 @@
 import {
-  AgendaSnapshotSchema,
+  AgendaListSnapshotSchema,
   type SessionAgendaMode,
   SessionAgendaModePatchResultSchema,
   SessionAgendaModePatchSchema,
@@ -39,7 +39,7 @@ export class ProtocolNotifyGateway implements INotifyGateway {
 
   async raise(sessionId: string, request: NoticeRequest): Promise<void> {
     const body = NoticeRequestSchema.parse(request);
-    await requestWithRouteFallback(this.client, boardRoutes(sessionId), AgendaSnapshotSchema, {
+    await requestWithRouteFallback(this.client, boardRoutes(sessionId), AgendaListSnapshotSchema, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...this.#headers },
       body: JSON.stringify(body),

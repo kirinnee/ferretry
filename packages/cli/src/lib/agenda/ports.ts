@@ -1,7 +1,8 @@
 import type {
   AgendaActionRequest,
   AgendaClearAgentsResult,
-  AgendaSnapshot,
+  AgendaListSnapshot,
+  AgendaReadItem,
   IFyApiClient,
   TaskRef,
 } from '@ferretry/protocol';
@@ -23,11 +24,13 @@ export interface IAgendaOutput {
  */
 export interface IAgendaGateway {
   /** Read the target session's agenda board, active items and resolutions together. */
-  snapshot(sessionId: string): Promise<AgendaSnapshot>;
+  snapshot(sessionId: string): Promise<AgendaListSnapshot>;
+  /** Complete document for a projected list entry. Optional for older embedded clients. */
+  readItem?(sessionId: string, id: string): Promise<AgendaReadItem>;
   /** Raise, resolve or dismiss an item and return the board as the daemon left it. */
-  apply(sessionId: string, request: AgendaActionRequest): Promise<AgendaSnapshot>;
+  apply(sessionId: string, request: AgendaActionRequest): Promise<AgendaListSnapshot>;
   /** Deliver the answers held for the ferret now, skipping the settle window; the board as it was left. */
-  sendReplies(sessionId: string): Promise<AgendaSnapshot>;
+  sendReplies(sessionId: string): Promise<AgendaListSnapshot>;
   /** The owner's bulk clear of the agent ferrets' open items; `dryRun` only counts them. */
   clearAgents(dryRun: boolean): Promise<AgendaClearAgentsResult>;
   /** The features the daemon reports (`DAEMON_FEATURES`); throws `DaemonFeaturesUnreadable` when it cannot be asked. */

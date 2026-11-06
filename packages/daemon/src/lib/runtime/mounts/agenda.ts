@@ -10,6 +10,7 @@ import {
   type AgendaVersionList,
   type AgendaErrorCode,
   type AgendaSnapshot,
+  agendaListSnapshot,
   clipAtWord,
   type DirectNotificationRequest,
   DirectNotificationRequestSchema,
@@ -153,7 +154,9 @@ async function list(agenda: AgendaService, replies: HeldReplies, context: RouteC
   const sessionId = pathSessionId(context);
   const result = await agenda.list(sessionId);
   return result.ok
-    ? jsonResponse(servedAgendaSnapshot(context, await withReplies(replies, sessionId, result.value)))
+    ? jsonResponse(
+        agendaListSnapshot(servedAgendaSnapshot(context, await withReplies(replies, sessionId, result.value))),
+      )
     : refusal(result.error);
 }
 
@@ -175,7 +178,7 @@ async function sendReplies(
 }
 
 /** The item id in the path, or a 400: the same grammar the board uses. */
-function pathItemId(context: RouteContext): string {
+export function pathItemId(context: RouteContext): string {
   const parsed = AgendaIdSchema.safeParse(decodeParameter(context.params.get('id') ?? ''));
   if (!parsed.success) throw new ApiError(400, 'the item id in the path is not an agenda id', 'invalid');
   return parsed.data;
@@ -444,6 +447,22 @@ export function agendaRoutes(
     await apply(agenda, notifications, replies, config, gates, context);
   const handleReplies: ApiRoute['handle'] = async context => await sendReplies(agenda, replies, context);
   const routes: readonly ApiRoute[] = [
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/agenda/:id',
+      minimum: 'operator',
+      caller: 'any',
+      noStore: true,
+      handle: async context => {
+        const result = await agenda.list(pathSessionId(context));
+        if (!result.ok) return refusal(result.error);
+        const snapshot = servedAgendaSnapshot(context, result.value);
+        const id = pathItemId(context);
+        const item = snapshot.items.find(item => item.id === id) ?? snapshot.resolved.find(item => item.id === id);
+        if (item === undefined) throw new ApiError(404, 'agenda item not found', 'not-found');
+        return jsonResponse(item);
+      },
+    },
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/agenda',

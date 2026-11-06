@@ -1,10 +1,12 @@
 import { describe, it } from 'bun:test';
 import {
   type AgendaItem,
+  agendaListSnapshot,
   DAEMON_FEATURES,
   MAX_AGENDA_SUBJECT_LENGTH,
   type WorkRelatedResponse,
 } from '@ferretry/protocol';
+import { projectionRecord, projectionSnapshot } from '../../../../protocol/tests/fixtures/agenda-projection.ts';
 import should from 'should';
 import { AgendaController } from '../../../src/lib/agenda/controller';
 import { DEFAULT_HOW_TO_RESOLVE } from '../../../src/lib/agenda/how-to-resolve';
@@ -78,6 +80,31 @@ describe('agenda controller targeting', () => {
 });
 
 describe('agenda controller reads', () => {
+  it('should fetch the full document when show opens a resolved list header', async () => {
+    // Arrange
+    const { gateway, out } = build(SESSION);
+    const read: string[] = [];
+    const controller = new AgendaController(
+      {
+        snapshot: async () => ({ ...agendaListSnapshot(projectionSnapshot(0, 1)), sessionId: SESSION }),
+        readItem: async (session, id) => {
+          read.push(`${session}:${id}`);
+          return projectionRecord();
+        },
+        apply: gateway.apply.bind(gateway),
+        sendReplies: gateway.sendReplies.bind(gateway),
+        clearAgents: gateway.clearAgents.bind(gateway),
+        features: gateway.features.bind(gateway),
+      },
+      out,
+      SESSION,
+    );
+    // Act
+    await controller.show('A1', { tab: 'Notes' });
+    // Assert
+    should(read).deepEqual([`${SESSION}:A1`]);
+    should(out.messages[0]).containEql('Fixture notes.');
+  });
   it('should render the unresolved listing', async () => {
     // Arrange
     const { controller, out } = build(SESSION);

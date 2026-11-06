@@ -12,7 +12,7 @@ import {
   ADMIN_TOKEN_ACTOR_WORDS,
   type AgendaItem,
   type AgendaRef,
-  type AgendaSnapshot,
+  type AgendaListSnapshot,
   attachmentsPhrase,
   type BoardActor,
   type BoardActorVia,
@@ -24,7 +24,7 @@ import {
   type LaneCategory,
   type LaneSet,
   type PrLink,
-  type ResolvedAgendaItem,
+  type AgendaListRecord,
   type TaskRef,
 } from '@ferretry/protocol';
 import type { FerretNames } from './board-present.ts';
@@ -273,7 +273,7 @@ export const historyRows = (history: readonly BoardTaskEvent[], context: History
 /** One ferret's agenda, as read: `null` until it has been. */
 export interface SessionAgenda {
   readonly sessionId: string;
-  readonly snapshot: AgendaSnapshot | null;
+  readonly snapshot: AgendaListSnapshot | null;
 }
 
 export interface OpenAskRow {
@@ -287,7 +287,7 @@ export interface OpenAskRow {
 /** An answered or dismissed ask, with the ferret whose ledger keeps it — the card a click opens is its. */
 interface ResolvedAskRow {
   readonly sessionId: string;
-  readonly item: ResolvedAgendaItem;
+  readonly item: AgendaListRecord;
 }
 
 export interface CardAsks {

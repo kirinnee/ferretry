@@ -12,6 +12,7 @@ import {
 import type { AgendaApiClient } from '../../../src/lib/agenda/ports';
 import { DAEMON_HEALTH_PATH, DaemonFeaturesUnreadable } from '../../../src/lib/daemon/features';
 import { humanItem, SESSION, snapshot } from './fixtures';
+import { projectionRecord } from '../../../../protocol/tests/fixtures/agenda-projection.ts';
 
 interface Call {
   path: string;
@@ -58,6 +59,19 @@ describe('protocol attention gateway', () => {
     await should(gateway.apply(MACHINE_AGENDA_ID, { action: 'dismiss', id: 'A1' })).be.rejectedWith(/ask them/u);
     await should(gateway.sendReplies(MACHINE_AGENDA_ID)).be.rejectedWith(/ask them/u);
     should(calls).be.empty();
+  });
+
+  it('should read a full resolved document and refuse another item in its place', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const input = projectionRecord();
+    const gateway = new ProtocolAgendaGateway(fakeClient(input, calls));
+    // Act
+    const actual = await gateway.readItem(SESSION, 'A1');
+    // Assert
+    should(actual).deepEqual(input);
+    should(calls[0]?.path).equal(`/v1/sessions/${SESSION}/agenda/A1`);
+    await should(gateway.readItem(SESSION, 'A2')).be.rejectedWith(/another agenda item/u);
   });
   it('should read the board with a plain GET', async () => {
     // Arrange

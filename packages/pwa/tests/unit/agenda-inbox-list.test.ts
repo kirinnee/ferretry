@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test';
+import { agendaListSnapshot } from '@ferretry/protocol';
+import { projectionSnapshot } from '../../../protocol/tests/fixtures/agenda-projection.ts';
 import type { InboxResolved } from '../../src/lib/agenda-inbox.ts';
 import {
   filterInboxCards,
@@ -25,6 +27,16 @@ import { sessionView } from '../support/sessions.ts';
 const MIGRATE = sessionView('dm', { config: { teammate: 'johnnie', name: 'diene-migrate' } });
 const RELAY = sessionView('ra', { config: { teammate: 'hadi', name: 'Relay advertisement' } });
 const LAPTOP = daemonId('laptop');
+
+it('keeps a resolved header findable by the reason the full record carried', () => {
+  // Arrange
+  const input = projectionSnapshot(0, 1);
+  const record = agendaListSnapshot(input).resolved[0];
+  if (record === undefined) throw new Error('fixture needs one resolved record');
+  const row: InboxResolved = { key: 'resolved:A1', daemonId: LAPTOP, machineName: 'Laptop', view: MIGRATE, record };
+  // Act + Assert
+  expect(filterInboxResolved([row], { machine: null, query: 'build passed' })).toEqual([row]);
+});
 
 const a10 = inboxCard(
   agendaItem('A10', { title: 'Finish the org setup', subject: 'Do the owner-only settings' } as never),

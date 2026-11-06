@@ -1983,6 +1983,25 @@ reads every item; the CLI checks the feature first and says the daemon needs an 
 an app talking to a daemon without the feature still reconstructs the conversation from session transcripts
 (`item-conversation.ts`) and shows no diff or merge control.
 
+### Lists and complete items
+
+`GET /v1/sessions/:sessionId/agenda`, its legacy `/attention` spelling, and `GET /v1/machine/agenda` return
+`AgendaListSnapshot`: active items (including resting and snoozed ones) in full, and every addressed item as a
+`projection: header` record. A header keeps its id, title, kind, author, resolution time and disposition,
+conversation count, card and reference links, the short reason searched by Find, and the outcome metadata the Resolved rows display. The document's
+tabs, revisions, history, conversation text and full picture travel only on an item read. Stored ledgers and mutation
+responses retain the full `AgendaSnapshot` shape. List readers also accept full records from older daemons.
+
+`GET /v1/sessions/:sessionId/agenda/:id` returns one complete active or addressed item, with the same operator
+minimum and caller policy as the session list. `GET /v1/machine/agenda/:id` does the same for a machine item and is
+owner-only, exactly as its list is. Both are no-store reads; an unknown item is a 404. The existing conversation
+cursor still reads words outside the item's bounded tail.
+
+The PWA reads a resolved item's full document when it opens, before drawing its tabs, conversation and edits.
+The Resolved lists need only header metadata; none of the last ten records needs a full-document exception.
+Machine records open in the Inbox because they have no ferret conversation to navigate to. A failed item read keeps
+a visible retry; it never presents a header as an empty document.
+
 ### Both spellings, one window
 
 | Older name (still answered)               | Agenda name                       | Today                                                                      |

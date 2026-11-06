@@ -145,6 +145,7 @@ import { AgendaCardsHost } from './agenda-cards-host.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
+import { ResolvedItemView } from './resolved-item-view.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { ownsKeys } from './agenda-swipe-gesture.ts';
@@ -887,11 +888,13 @@ function InboxResolvedList({
   rows,
   onNavigate,
   onClear,
+  onOpenMachine,
 }: {
   readonly inbox: AgendaInbox;
   readonly rows: readonly InboxResolved[];
   readonly onNavigate: (to: string) => void;
   readonly onClear: () => void;
+  readonly onOpenMachine: (row: InboxResolved) => void;
 }) {
   if (rows.length === 0)
     return inbox.resolved.length > 0 ? (
@@ -912,6 +915,7 @@ function InboxResolvedList({
             key={`${row.key}:${row.record.resolvedAt}`}
             origin={resolvedOrigin(row, onNavigate)}
             record={row.record}
+            {...(isMachineAgendaId(row.view.config.id) ? { onOpen: () => onOpenMachine(row) } : {})}
           />
         ))}
       </ul>
@@ -1512,6 +1516,8 @@ export function AgendaInboxPage({
   onItemOpened,
 }: AgendaInboxPageProps) {
   const headingId = useId();
+  const [resolvedMachine, setResolvedMachine] = useState<InboxResolved | null>(null);
+  const resolvedConnection = resolvedMachine === null ? undefined : inbox.connectionFor(resolvedMachine.daemonId);
   useAnsweredSuggestionSweep(inbox.cards, inbox.connectionFor);
   const [cursor, setCursor] = useState<string | null>(null);
   const [deckAt, setDeckAt] = useState<string | null>(initialOpen ?? null);
@@ -1611,7 +1617,7 @@ export function AgendaInboxPage({
   // j/k and ↑/↓ walk the rows on a wider screen, unless the reader is typing.
   const keyState = useRef({ navigable, selectedKey });
   keyState.current = { navigable, selectedKey };
-  const keysLive = !phone && filter === 'open' && !deckOpen && !finding;
+  const keysLive = resolvedMachine === null && !phone && filter === 'open' && !deckOpen && !finding;
   useEffect(() => {
     if (!keysLive || typeof window === 'undefined') return;
     const onKey = (event: KeyboardEvent): void => {
@@ -1681,11 +1687,23 @@ export function AgendaInboxPage({
           card => card.daemonId === open.daemonId && card.view.config.id === open.sessionId && card.item.id === open.id,
         );
   const openCardKey = openCard?.key;
+  const openRecord =
+    open === null || !isMachineAgendaId(open.sessionId)
+      ? undefined
+      : inbox.resolved.find(
+          row => row.daemonId === open.daemonId && row.view.config.id === open.sessionId && row.record.id === open.id,
+        );
   // biome-ignore lint/correctness/useExhaustiveDependencies: `openAt` and the host callback are re-made every render; the target and what it resolves to are the inputs
   useEffect(() => {
     // The request is gone from the address once it was honoured: a later tap for the same item is a new one.
     if (wantedKey === null) openedFor.current = null;
     if (wantedKey === null || openedFor.current === wantedKey) return;
+    if (openRecord !== undefined) {
+      openedFor.current = wantedKey;
+      setResolvedMachine(openRecord);
+      onOpenSettled?.(true);
+      return;
+    }
     if (openCardKey !== undefined) {
       openedFor.current = wantedKey;
       setFilter('open');
@@ -1705,7 +1723,7 @@ export function AgendaInboxPage({
     }
     const timer = setTimeout(giveUp, OPEN_WAIT_MS);
     return () => clearTimeout(timer);
-  }, [wantedKey, openCardKey, openSettled, inbox.reading]);
+  }, [wantedKey, openCardKey, openRecord, openSettled, inbox.reading]);
 
   // Paging away or closing the deck leaves the item the tap was for: opening one from the list starts at its top.
   const askedKey = askAt?.key;
@@ -1791,7 +1809,7 @@ export function AgendaInboxPage({
       else if (event.key === 'ArrowDown') setDeckAt(skipSelection(runOrder, stepRow.key));
     }
   };
-  const runKeysLive = !phone && (cardOpen || allDone);
+  const runKeysLive = resolvedMachine === null && !phone && (cardOpen || allDone);
   useEffect(() => {
     if (!runKeysLive || typeof window === 'undefined') return;
     const onKey = (event: KeyboardEvent): void => {
@@ -1936,6 +1954,21 @@ export function AgendaInboxPage({
         )}
       </div>
     );
+
+  if (resolvedMachine !== null && resolvedConnection !== undefined) {
+    return (
+      <main aria-label="Inbox" className="fy-attn-inbox" data-agenda-inbox="card">
+        <DaemonTaskReferences connection={resolvedConnection} onNavigate={onNavigate}>
+          <ResolvedItemView
+            row={resolvedMachine}
+            connection={resolvedConnection}
+            onClose={() => setResolvedMachine(null)}
+          />
+        </DaemonTaskReferences>
+        <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
+      </main>
+    );
+  }
 
   if (allDone && filter === 'open') {
     return (
@@ -2160,6 +2193,7 @@ export function AgendaInboxPage({
           onClear={clearFilters}
           onNavigate={onNavigate}
           rows={filterInboxResolved(inbox.resolved, listFilter)}
+          onOpenMachine={setResolvedMachine}
         />
       ) : (
         openBody

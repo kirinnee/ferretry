@@ -9,6 +9,7 @@
  */
 
 import type {
+  AgendaId,
   AgendaSnapshot,
   AnalyticsResponse,
   BoardTaskView,
@@ -283,6 +284,7 @@ import {
 } from '../tests/unit/board-support.ts';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
 import { AgendaChatHarness } from './agenda-chat.tsx';
+import { RESOLVED_AGENDA_LIST } from './agenda-projection-fixture.ts';
 import {
   ANALYTICS_FIXTURE_MACHINES,
   ANALYTICS_FIXTURE_NOW,
@@ -3856,9 +3858,35 @@ const PALETTE_SETTINGS: PaletteSettingsSource = (daemon, query) => settingsPalet
  * rather than just the render.
  */
 function AgendaHarness() {
+  if (new URLSearchParams(window.location.search).has('agenda-projection')) return <AgendaProjectionHarness />;
   return (
     <Card className="overflow-hidden" data-harness="agenda" style={{ height: 520 }}>
       <AgendaChatHarness board={AGENDA} now={HARNESS_NOW} />
+    </Card>
+  );
+}
+
+function AgendaProjectionHarness() {
+  const [target, setTarget] = useState<AgendaId | null>(null);
+  const connection = useMemo(
+    () =>
+      daemonConnection({
+        daemonId: 'studio',
+        baseUrl: window.location.origin,
+        deviceId: 'harness',
+      }),
+    [],
+  );
+  return (
+    <Card className="flex flex-col overflow-hidden" data-harness="agenda-projection" style={{ height: 720 }}>
+      {target === null ? (
+        <button type="button" data-open-resolved-fixture="" onClick={() => setTarget('A1' as AgendaId)}>
+          Open resolved item
+        </button>
+      ) : null}
+      <div className="min-h-0 flex-1" data-agenda-projection-slot="">
+        <AgendaChatHarness board={RESOLVED_AGENDA_LIST} connection={connection} now={HARNESS_NOW} target={target} />
+      </div>
     </Card>
   );
 }

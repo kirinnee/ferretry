@@ -2,6 +2,7 @@ export * from './accounts.ts';
 export * from './address.ts';
 export * from './advertisement.ts';
 export * from './agenda.ts';
+export * from './agenda-list.ts';
 export * from './agenda-card.ts';
 export * from './agenda-card-asks.ts';
 export * from './agenda-form.ts';
