@@ -57,7 +57,7 @@
   gap: 6px;
   min-height: 32px;
   padding: 0 12px;
-  border-radius: calc(var(--radius-control, 8px) - 2px);
+  border-radius: var(--radius-sm);
   color: var(--muted);
   font-size: var(--text-sm, 0.875rem);
   font-weight: var(--weight-strong, 600);
@@ -74,7 +74,7 @@
 .fy-queue-toggle-count {
   min-width: 1.4em;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--accent-soft, var(--surface-2));
   color: var(--accent);
   font-size: var(--text-xs, 0.75rem);
@@ -202,7 +202,7 @@
 }
 /* The next message to go keeps a quiet accent edge (its words — "Next up" — are in the open row and read aloud). */
 .fy-queue-row[data-queue-next] {
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset calc(2 * var(--stroke, 1px)) 0 0 var(--accent);
 }
 /* ONE line. A fixed status column so the words line up down the page; the snippet takes what is left and ends in
    an ellipsis; nothing wraps, so no line can begin with a stray separator. */
