@@ -15,13 +15,19 @@ import {
   composerInput,
   countlessPasteOf,
   frameCursor,
-  type LandingEvidence,
   needsQueueKey,
   queuedWhere,
   readComposer,
   type TmuxController,
 } from '../../lib/tmux/index.ts';
-import { ComposerUnconfirmedError, captureFrame, type DeliverySleep, fillComposer } from './composer-fill.ts';
+import {
+  type ComposerLanding,
+  ComposerUnconfirmedError,
+  captureFrame,
+  type DeliverySleep,
+  fillComposerLanding,
+} from './composer-fill.ts';
+import { blockedByDialog } from './pane-delivery.ts';
 
 export interface PaneQueueOptions {
   /** Times the composer may be filled from scratch. */
@@ -91,14 +97,21 @@ export class TmuxPaneQueue {
    * for a message the harness consumed seconds earlier.
    */
   async queue(session: string, text: string): Promise<PaneQueueOutcome> {
-    const evidence = await this.fill(session, text);
+    const { evidence, chip } = await this.fill(session, text);
     // Somebody typed beside the payload after the fill: Enter would queue their words with it (B144).
     const before = await captureFrame(this.tmux, session);
-    // &B153: except the countless chip (`[Pasted text #30]`) Claude draws a one-line paste as, on the frame right after
-    // this fill proved its own paste landed in an empty composer — the chip carries no count to agree with.
+    // &B153: a prompt or dialog that came up after the fill would take Enter as its answer.
+    if (blockedByDialog(before.visible))
+      throw new ComposerUnconfirmedError(
+        `the message was typed into tmux session ${session}, and a prompt came up on screen before Enter; Enter was not pressed`,
+        1,
+      );
+    // &B153: except the countless chip (`[Pasted text #30]`) Claude draws a one-line paste as, carrying the counter the
+    // fill read off the very frame that proved its own paste landed in an empty composer — the chip has no count.
+    // A person who replaced it draws a new counter.
     const ownChip =
-      evidence === 'placeholder' &&
-      countlessPasteOf(composerInput(readComposer(before.visible, frameCursor(before))), text) !== undefined;
+      chip !== undefined &&
+      countlessPasteOf(composerInput(readComposer(before.visible, frameCursor(before))), text) === chip;
     if (!ownChip && composerHoldsOtherText(before.visible, frameCursor(before), text))
       throw new ComposerUnconfirmedError(
         `the message was typed into tmux session ${session}, and other text joined it in the composer before Enter; Enter was not pressed`,
@@ -111,7 +124,8 @@ export class TmuxPaneQueue {
     if (!submitted) throw new PaneQueueError(`tmux could not submit into the queue of session ${session}`);
     await this.sleep(this.settings.submitSettleMs);
     let frame = await captureFrame(this.tmux, session);
-    if (needsQueueKey(frame, text, evidence)) {
+    // Tab moves a selection in a prompt that came up meanwhile: it is pressed only at an undialogued pane.
+    if (needsQueueKey(frame, text, evidence) && !blockedByDialog(frame.visible)) {
       await this.tmux.sendKey(session, 'Tab');
       await this.sleep(this.settings.queueKeySettleMs);
       frame = await captureFrame(this.tmux, session);
@@ -121,7 +135,7 @@ export class TmuxPaneQueue {
     return where === 'composer' ? 'typed' : 'left';
   }
 
-  private async fill(session: string, text: string): Promise<LandingEvidence> {
-    return await fillComposer(this.tmux, this.sleep, this.settings, session, text);
+  private async fill(session: string, text: string): Promise<ComposerLanding> {
+    return await fillComposerLanding(this.tmux, this.sleep, this.settings, session, text);
   }
 }

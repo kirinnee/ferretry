@@ -21,7 +21,6 @@ import {
   draftBlockingReadiness,
   frameCursor,
   type InjectionOutcome,
-  type LandingEvidence,
   nextReadinessStep,
   paneBlockingDialog,
   paneBlockingPermission,
@@ -39,7 +38,8 @@ import {
   ComposerUnconfirmedError,
   captureFrame,
   type DeliverySleep,
-  fillComposer,
+  type ComposerLanding,
+  fillComposerLanding,
 } from './composer-fill.ts';
 
 export interface PaneDeliveryOptions {
@@ -143,6 +143,15 @@ export class PaneStrandedError extends PaneDeliveryError {
   }
 }
 
+/** Whether a frame shows a prompt, permission request or dialog that would take an Enter as its answer. */
+export function blockedByDialog(visible: string): boolean {
+  return (
+    paneBlockingPrompt(visible) !== undefined ||
+    paneBlockingPermission(visible) !== undefined ||
+    paneBlockingDialog(visible) !== undefined
+  );
+}
+
 export class TmuxPaneDelivery {
   private readonly settings: Required<PaneDeliveryOptions>;
 
@@ -222,8 +231,8 @@ export class TmuxPaneDelivery {
   ): Promise<InjectionOutcome> {
     await this.waitReady(session, options);
     await beforeWrite?.();
-    const evidence = await this.fill(session, text);
-    return await this.submit(session, text, evidence);
+    const landing = await this.fill(session, text);
+    return await this.submit(session, text, landing);
   }
 
   /**
@@ -250,8 +259,8 @@ export class TmuxPaneDelivery {
     }
   }
 
-  private async fill(session: string, text: string): Promise<LandingEvidence> {
-    return await fillComposer(this.tmux, this.sleep, this.settings, session, text);
+  private async fill(session: string, text: string): Promise<ComposerLanding> {
+    return await fillComposerLanding(this.tmux, this.sleep, this.settings, session, text);
   }
 
   /**
@@ -265,13 +274,20 @@ export class TmuxPaneDelivery {
    * window before the next Enter, which would otherwise only queue behind the first and spend the
    * bounded attempts on a pane that was always going to submit.
    */
-  private async submit(session: string, text: string, evidence: LandingEvidence): Promise<InjectionOutcome> {
-    // &B153: the countless chip (`[Pasted text #30]`) this fill's own one-line paste was drawn as, by its counter,
-    // pinned on the first look after landing. Every later Enter needs the SAME counter: a person who cleared our
-    // paste and pasted their own line draws a new one.
-    let ownChip: string | undefined;
+  private async submit(session: string, text: string, landing: ComposerLanding): Promise<InjectionOutcome> {
+    // &B153: a countless chip (`[Pasted text #30]`) is pressed only when it carries the counter the fill read off the
+    // very frame that proved its own paste landed: a person who cleared ours and pasted their own line draws a new one.
+    const { evidence, chip: ownChip } = landing;
     for (let attempt = 0; attempt < this.settings.submitAttempts; attempt++) {
       const before = await captureFrame(this.tmux, session);
+      // &B153: a prompt, permission request or dialog that came up after the fill takes Enter as its answer — a
+      // background agent's permission prompt was up beside marge's turn on 2026-11-06. Nothing is pressed; the send
+      // is typed and unconfirmed, and the stranded-send repair presses only at an undialogued pane.
+      if (blockedByDialog(before.visible))
+        throw new ComposerUnconfirmedError(
+          `the turn was typed into tmux session ${session}, and a prompt came up on screen before Enter; Enter was not pressed`,
+          1,
+        );
       // A person who typed after the fill shares the composer with the payload now: Enter would submit their
       // words with it. Nothing is pressed; the send is typed and unconfirmed, and never typed again.
       if (composerHoldsOtherText(before.visible, frameCursor(before), text)) {
@@ -279,12 +295,11 @@ export class TmuxPaneDelivery {
           evidence === 'placeholder'
             ? countlessPasteOf(composerInput(readComposer(before.visible, frameCursor(before))), text)
             : undefined;
-        if (chip === undefined || (attempt > 0 && chip !== ownChip))
+        if (chip === undefined || chip !== ownChip)
           throw new ComposerUnconfirmedError(
             `the turn was typed into tmux session ${session}, and other text joined it in the composer before Enter; Enter was not pressed`,
             1,
           );
-        ownChip = chip;
       }
       await this.tmux.sendKey(session, 'Enter');
       // Polls counted from the pane's first repaint after this Enter; until then, time against the ceiling.

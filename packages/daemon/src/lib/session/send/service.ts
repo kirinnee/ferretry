@@ -1212,8 +1212,6 @@ export class SessionSendService {
     by: 'send' | 'daemon' | 'queue' | 'warden',
   ): Promise<{ readonly outcome: ComposerSubmitOutcome; readonly record: SendRecord }> {
     const outcome = await this.ports.terminal.submitComposer(target.id, record.matchText ?? record.message);
-    // &B153: a delivered pointer the harness took back keeps its fate — it did reach the conversation once, and
-    // the turn it started is already counted — so it is not re-opened as `entered` would; the journal says why.
     const retracted = record.fate === 'delivered';
     await this.ports.repository.journal(target.id, 'control.send_resubmitted', {
       sendId: record.sendId,
@@ -1225,7 +1223,32 @@ export class SessionSendService {
           ? 'typed but not submitted'
           : 'pointer typed but not submitted',
     });
-    return { outcome, record: outcome === 'submitted' && !retracted ? await this.entered(target, record) : record };
+    if (outcome !== 'submitted') return { outcome, record };
+    return {
+      outcome,
+      record: retracted ? await this.reopenedRetraction(target.id, record) : await this.entered(target, record),
+    };
+  }
+
+  /**
+   * &B153: a delivered pointer the harness took back, Entered again, is OPEN again: its delivery was the user record
+   * the harness rewound, and only the record this Enter writes can prove it now. Left `delivered` on the old record,
+   * it would read "never answered" for good — the new turn answers the NEW record — and a person's later Up-arrow
+   * recall of it would qualify for another press.
+   *
+   * The old evidence STAYS on the record while it is open: every key on the ledger is claimed, so the tracker can
+   * only settle it on a new user record, never on the rewound one again. Its turn is not started again (it already
+   * was), and the attempt clock restarts now, like any Enter that took.
+   */
+  private async reopenedRetraction(id: SessionId, record: SendRecord): Promise<SendRecord> {
+    const settled = await this.ports.ledger.settle(id, record.sendId, {
+      fate: 'accepted',
+      fateAt: undefined,
+      typedNotSent: undefined,
+      deadlineAt: undefined,
+      attemptAt: this.ports.clock.now(),
+    });
+    return settled ?? record;
   }
 
   /**

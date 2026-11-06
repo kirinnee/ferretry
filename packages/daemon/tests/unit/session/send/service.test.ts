@@ -2491,25 +2491,35 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
       for (const built of cases) should(await built.service.retractedDraft(ID)).be.undefined();
     });
 
-    it('lets the Warden press a proven one once, keeping it delivered and starting no second turn', async () => {
+    it('lets the Warden press a proven one once, re-opening it on its old evidence and starting no second turn', async () => {
       const built = taken([pane({ draft: POINTER })], new FakeRetraction(true), delivered());
 
       should(await built.service.resubmitStuck(ID, 'send-0')).equal('submitted');
 
       should(built.terminal.calls.filter(call => call === 'submitComposer')).have.length(1);
-      should(built.ledger.records.get('send-0')).match({ fate: 'delivered', submitNudges: 1 });
+      // Open again, so only the user record this Enter writes can settle it; the rewound one stays claimed.
+      should(built.ledger.records.get('send-0')).match({
+        fate: 'accepted',
+        submitNudges: 1,
+        attemptAt: NOW,
+        evidence: { key: 'aeeeefa4-973d-452a-aff6-c7cde97456e8' },
+      });
+      should(built.ledger.records.get('send-0')?.fateAt).be.undefined();
       should(built.repository.journal_.at(0)).match({
         event: 'control.send_resubmitted',
         data: { by: 'warden', reason: 'pointer taken back into the composer by the harness' },
       });
       should(built.repository.transitions).be.empty();
+      should(built.tracked).eql([ID]);
+      // Open, it is no longer a delivered pointer: a person's later recall of it cannot qualify on the old record.
+      should(await built.service.retractedDraft(ID)).be.undefined();
     });
 
     it('lets the queue finish a proven one rather than wait behind it as a draft', async () => {
       const built = taken([pane({ draft: POINTER })], new FakeRetraction(true), delivered());
 
       should(await built.service.finishOwnDraft(ID)).eql({ kind: 'clear' });
-      should(built.ledger.records.get('send-0')).match({ fate: 'delivered', submitNudges: 1 });
+      should(built.ledger.records.get('send-0')).match({ fate: 'accepted', submitNudges: 1 });
     });
 
     it('presses nothing past the limit, so a harness that keeps taking it back is escalated', async () => {

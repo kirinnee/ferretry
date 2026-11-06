@@ -899,4 +899,65 @@ describe('tmux pane delivery — a one-line paste Claude draws with no count (&B
     await should(subject.deliver(SESSION, `${ONE_LINE}\nand a second line`)).be.rejectedWith(ComposerUnconfirmedError);
     should(enters(server)).equal(1);
   });
+
+  /** A pane that changes once the fill has seen its paste land: on the capture after the landing one. */
+  class ChangingAfterLanding extends FakeTmuxServer {
+    // One frame is two captures (its text and its colours): the landing frame is the first two showing the chip.
+    private capturesShowingChip = 0;
+    constructor(private readonly change: (pane: FakeTmuxServer) => void) {
+      super();
+      this.countlessOneLinePaste = true;
+    }
+    override async execute(argv: readonly string[], stdin?: string) {
+      if (argv[0] === 'capture-pane' && this.composer === '[Pasted text #1]' && ++this.capturesShowingChip === 3)
+        this.change(this);
+      return await super.execute(argv, stdin);
+    }
+  }
+
+  it('should never press for a chip replaced between the landing frame and the first Enter (review round 2)', async () => {
+    const server = new ChangingAfterLanding(pane => {
+      pane.composer = '[Pasted text #31]';
+    });
+    const { subject } = delivery(server);
+
+    await should(subject.deliver(SESSION, ONE_LINE)).be.rejectedWith(ComposerUnconfirmedError);
+    should(enters(server)).equal(0);
+    should(server.submitted).be.empty();
+  });
+
+  it('should never press Enter into a permission prompt that came up after the paste landed (review round 2)', async () => {
+    const prompt = (
+      await readFile(join(import.meta.dir, '../../fixtures/permission-prompts/claude-2.1.281-bash.txt'), 'utf8')
+    ).trimEnd();
+    const server = new ChangingAfterLanding(pane => {
+      pane.modal = prompt;
+    });
+    server.modalReplacesComposer = true;
+    const { subject } = delivery(server);
+
+    await should(subject.deliver(SESSION, ONE_LINE)).be.rejectedWith(ComposerUnconfirmedError);
+    should(enters(server)).equal(0);
+  });
+
+  it('should never press a retry Enter into a permission prompt that came up after the first was swallowed', async () => {
+    const prompt = (
+      await readFile(join(import.meta.dir, '../../fixtures/permission-prompts/claude-2.1.281-bash.txt'), 'utf8')
+    ).trimEnd();
+    const server = new FakeTmuxServer();
+    server.countlessOneLinePaste = true;
+    server.swallowEnters = 1;
+    server.modalReplacesComposer = true;
+    server.afterSwallow = composer => {
+      server.modal = prompt;
+      return composer;
+    };
+    const { subject } = delivery(server);
+
+    // The prompt hides the composer, so the delivery stops looking; what matters is that no Enter answers the prompt.
+    // Only the transcript settles the send's fate.
+    await subject.deliver(SESSION, ONE_LINE).catch(() => undefined);
+    should(enters(server)).equal(1);
+    should(server.modal).equal(prompt);
+  });
 });

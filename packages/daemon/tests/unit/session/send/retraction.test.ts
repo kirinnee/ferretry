@@ -1,7 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { parseSessionId } from '../../../../src/lib/index.ts';
+import type { ObservedHumanInput } from '../../../../src/lib/transcript/types.ts';
 import {
+  judgeWatchedSends,
   replyProofInTail,
   type SendRecord,
   type SendTranscriptTail,
@@ -102,5 +104,54 @@ describe('the retraction proof a send path asks', () => {
     should(await proof.unanswered(ID, delivered({ fate: 'accepted' }))).be.false();
     should(await new TranscriptRetractionProof(new Tail(undefined)).unanswered(ID, delivered())).be.false();
     should(await new TranscriptRetractionProof(new Tail(new Error('EACCES'))).unanswered(ID, delivered())).be.false();
+  });
+});
+
+describe('a re-opened retraction settles only on the user record its new Enter wrote (review round 2)', () => {
+  const POINTER =
+    'Read the file /state/sessions/mw4m80sx-5624d777/turns/turn-007.md now, then carefully follow every instruction inside it. This is your complete task for this turn.';
+  const input = (key: string, observedAt: string): ObservedHumanInput => ({
+    harness: 'claude',
+    text: POINTER,
+    proof: 'normal-user-record',
+    observedAt,
+    proofKey: key,
+    shapeVersion: 1,
+  });
+
+  it('never binds to the rewound record its old evidence names, and binds to the new one', () => {
+    const reopened: SendRecord = {
+      sendId: 'turn-007',
+      acceptedAt: '2026-11-06T08:23:30.847Z',
+      acceptedTurn: 6,
+      path: 'turn-file',
+      message: 'turn seven',
+      matchText: POINTER,
+      turn: 7,
+      fate: 'accepted',
+      attempt: 1,
+      attemptAt: '2026-11-06T11:01:00.000Z',
+      evidence: {
+        key: TAKEN_BACK,
+        harness: 'claude',
+        kind: 'chat.user',
+        proof: 'normal-user-record',
+        observedAt: '2026-11-06T08:23:31.388Z',
+        shapeVersion: 1,
+        matchedTurn: 7,
+        tier: 'turn-instruction',
+      },
+    };
+    const claimed = new Set([TAKEN_BACK]);
+    const rewound = input(TAKEN_BACK, '2026-11-06T08:23:31.388Z');
+
+    should(judgeWatchedSends([reopened], claimed, [rewound], 5_000).get('turn-007')?.delivered).be.undefined();
+    const verdict = judgeWatchedSends(
+      [reopened],
+      claimed,
+      [rewound, input(ANSWERED, '2026-11-06T11:01:00.500Z')],
+      5_000,
+    ).get('turn-007');
+    should(verdict?.delivered?.key).equal(ANSWERED);
   });
 });

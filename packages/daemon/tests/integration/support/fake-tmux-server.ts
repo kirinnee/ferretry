@@ -35,6 +35,11 @@ export class FakeTmuxServer implements TmuxCommandPort {
   modal: string | undefined;
   /** How many modals may be cleared; a modal beyond this one comes straight back. */
   modalsToClear = Number.MAX_SAFE_INTEGER;
+  /**
+   * Whether the modal takes the composer's place, as Claude's permission prompt does (&B153); by default it is
+   * drawn above a still-visible composer, as the startup dialogs are.
+   */
+  modalReplacesComposer = false;
   /** Captures to serve before the harness finishes booting and draws its prompt. */
   bootCaptures = 0;
   /** True once a submitted payload started a turn. */
@@ -212,6 +217,7 @@ export class FakeTmuxServer implements TmuxCommandPort {
     if (this.modal !== undefined) rendered.push(...this.modal.split('\n'));
     if (this.working) rendered.push('✻ Lollygagging… (34s · ⚒ 2.1k tokens)');
     if (this.nowMs < this.startupWaitUntilMs) return [...rendered, 'Waiting for startup · esc cancel'];
+    if (this.modal !== undefined && this.modalReplacesComposer) return rendered;
     return [...rendered, `> ${this.composer === '' ? this.placeholder : this.composer}`];
   }
 
