@@ -10,15 +10,24 @@
       ],
       "leakGuard": true
     },
-    { "name": "pwa", "prefixes": ["packages/pwa/"] },
-    { "name": "everything-else", "prefixes": ["packages/"] }
+    {
+      "name": "pwa",
+      "prefixes": ["packages/pwa/"]
+    },
+    {
+      "name": "everything-else",
+      "prefixes": ["packages/"]
+    }
   ],
   "int": [
     {
       "name": "daemon-runtime",
-      "prefixes": ["packages/daemon/tests/integration/runtime/", "packages/pwa/tests/integration/agenda-"]
+      "prefixes": ["packages/daemon/tests/integration/runtime/"]
     },
-    { "name": "daemon", "prefixes": ["packages/daemon/"] },
+    {
+      "name": "daemon",
+      "prefixes": ["packages/daemon/"]
+    },
     {
       "name": "pwa-render",
       "prefixes": [
@@ -35,7 +44,8 @@
         "packages/pwa/tests/integration/add-to-chat",
         "packages/pwa/tests/integration/release-",
         "packages/pwa/tests/integration/chat-history",
-        "packages/pwa/tests/integration/snooze"
+        "packages/pwa/tests/integration/snooze",
+        "packages/pwa/tests/integration/agenda-"
       ]
     },
     {
@@ -46,6 +56,10 @@
         "packages/pwa/tests/integration/inbox-"
       ]
     },
-    { "name": "everything-else", "prefixes": ["packages/"], "processes": 2 }
+    {
+      "name": "everything-else",
+      "prefixes": ["packages/"],
+      "processes": 2
+    }
   ]
 }

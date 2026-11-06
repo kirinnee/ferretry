@@ -316,8 +316,8 @@ jobs:
   # 225s (p90 ~450s, the last job to finish in 103 of 153 runs) against `daemon` 127, `pwa-surfaces`
   # 110, `pwa-render` 95, `pwa-chat` 63, `daemon-runtime` 48 — a sum of ~670s that balanced is ~115-150s a
   # group. `everything-else` held 40 PWA browser-walk files (~350s of per-file test time, all in one
-  # process because the PWA is one package); 17 of them now sit in `daemon-runtime` (the `agenda-`
-  # walks), `pwa-render`, `pwa-chat` and `pwa-surfaces`. A first deal-out left `pwa-chat` at 237s and
+  # process because the PWA is one package); 17 of them now sit in `pwa-render`, `pwa-chat` (with the `agenda-`
+  # walks: in `daemon-runtime` they pushed a 4 GB 2x4 to 91% RAM and it was killed) and `pwa-surfaces`. A first deal-out left `pwa-chat` at 237s and
   # `everything-else` at 256s, so the groups were re-cut on the measured file times; each group now has
   # about 130-235s of test time on the PR run that measured it (`daemon` 234s, untouched and the
   # slowest; `pwa-surfaces` 212s; p50 of `daemon` is 127s). The PWA
