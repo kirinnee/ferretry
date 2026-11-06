@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { ForkSessionOutcome, SessionView } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { ForkForm } from '../../../../src/features/session-actions/fork-form.tsx';
+import { forkThroughLatest } from '../../../../src/features/session-actions/session-operations.ts';
 import type { SessionActionFormHost } from '../../../../src/features/session-actions/registry.ts';
 import { interact, mount, must, type Mounted } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
@@ -69,6 +71,45 @@ const submitForm = async (root: HTMLElement): Promise<void> => {
 };
 
 describe('ForkForm', () => {
+  it('keeps the dialog open with a fresh-choice message after the API refuses stale selection evidence', async () => {
+    let reads = 0;
+    const h = await open(() =>
+      forkThroughLatest(
+        {
+          messages: async () => {
+            reads += 1;
+            return {
+              v: 1,
+              sessionId: 'a1',
+              messages: [
+                {
+                  point: { v: 1, byteOffset: reads, blockIndex: 0 },
+                  role: 'user',
+                  text: 'hello',
+                  selectionBinding: `bind-${reads}`,
+                },
+              ],
+              nextCursor: null,
+            };
+          },
+          fork: async () => {
+            throw new FyHttpError('the fork could not be completed', 409, 'selection_stale');
+          },
+          rename: async () => VIEW,
+        },
+        VIEW,
+        undefined,
+        'req-stale',
+      ),
+    );
+    await submitForm(h.root);
+    expect(h.root.textContent).toContain('The conversation changed — choose the message again.');
+    expect(reads).toBe(2);
+    expect(h.closes).toEqual([]);
+    expect(h.forked).toEqual([]);
+    expect(h.submit.disabled).toBe(false);
+  });
+
   it('names the source by its callsign, and says what the fork carries', async () => {
     const h = await open(async () => OUTCOME);
     expect(h.root.textContent).toContain('Hadi’s conversation');

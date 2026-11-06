@@ -43,16 +43,20 @@ export class StorageTranscriptProvenanceStore implements TranscriptProvenanceSto
   async record(sessionId: string, provenance: TranscriptProvenance, expected?: TranscriptProvenance): Promise<void> {
     const id = tryParseSessionId(sessionId);
     if (id === undefined) return;
-    await this.storage.updateConfig(id, current => {
-      // A relaunch or another resolver may have replaced this evidence while we awaited IO.
-      if (
-        expected !== undefined &&
-        JSON.stringify(storedTranscriptProvenance(current)) !==
-          JSON.stringify(TranscriptProvenanceSchema.parse(expected))
-      )
-        return current;
-      return { ...fields(current), transcript: provenance };
-    });
+    await this.storage.updateConfig(
+      id,
+      current => {
+        // A relaunch or another resolver may have replaced this evidence while we awaited IO.
+        if (
+          expected !== undefined &&
+          JSON.stringify(storedTranscriptProvenance(current)) !==
+            JSON.stringify(TranscriptProvenanceSchema.parse(expected))
+        )
+          return current;
+        return { ...fields(current), transcript: provenance };
+      },
+      { unlessArchived: true },
+    );
   }
 }
 

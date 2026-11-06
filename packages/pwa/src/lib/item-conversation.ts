@@ -21,6 +21,7 @@ import {
   type SessionTranscriptMessage,
 } from '@ferretry/protocol';
 import type { TranscriptEntry } from './session-screens.ts';
+import { withFreshMessageCursor } from './message-cursor.ts';
 
 export type ItemConversationClient = Pick<IFyApiClient, 'health' | 'messages' | 'messagesTail'>;
 
@@ -122,18 +123,19 @@ export const readItemConversation = async (
   sessionId: string,
   itemId: string,
   since?: number,
-): Promise<readonly TranscriptEntry[]> => {
-  const thread = threadOf(itemId);
-  if (await offersTail(client)) {
-    thread.feed(await readFromTail(client, sessionId, since));
+): Promise<readonly TranscriptEntry[]> =>
+  withFreshMessageCursor(async () => {
+    const thread = threadOf(itemId);
+    if (await offersTail(client)) {
+      thread.feed(await readFromTail(client, sessionId, since));
+      return thread.kept;
+    }
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_FORWARD_PAGES; page += 1) {
+      const read = await client.messages(sessionId, cursor, FORWARD_PAGE);
+      thread.feed(read.messages);
+      if (read.nextCursor === null) break;
+      cursor = read.nextCursor;
+    }
     return thread.kept;
-  }
-  let cursor: string | undefined;
-  for (let page = 0; page < MAX_FORWARD_PAGES; page += 1) {
-    const read = await client.messages(sessionId, cursor, FORWARD_PAGE);
-    thread.feed(read.messages);
-    if (read.nextCursor === null) break;
-    cursor = read.nextCursor;
-  }
-  return thread.kept;
-};
+  });

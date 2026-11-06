@@ -231,6 +231,12 @@ describe('forkRefusal', () => {
     expect(forkRefusal(42).message).toBe('the fork could not be completed');
   });
 
+  it('keeps the stale selection code with a safe actionable sentence', () => {
+    const refusal = forkRefusal(new TransferPrepareError('selection_stale', 'private transcript comparison detail'));
+    expect(refusal.failure).toBe('selection_stale');
+    expect(refusal.message).toBe('The conversation changed — choose the message again.');
+  });
+
   it('never publishes producer prose for a 500 failure', () => {
     const privatePath = '/daemon/private/state/target-1/transfer-plan.json';
 

@@ -288,14 +288,18 @@ describe('transcript provenance storage', () => {
       { now: () => NOW },
     );
     // Act
+    const before = storage.configWrites();
     await subject.file(id, storedTranscriptProvenance(await storage.readConfig(id)));
     const first = await storage.readConfig(id);
+    const stale = provenance;
+    await Promise.all(Array.from({ length: 8 }, () => subject.file(id, stale)));
     await subject.file(id, storedTranscriptProvenance(first));
     const actual = await storage.readConfig(id);
     // Assert
     should(storedTranscriptProvenance(actual)).not.have.property('baseline');
     should(actual).have.property('unrelated', { keep: true });
     should(actual).eql(first);
+    should(storage.configWrites()).equal(before + 1);
     await storage.close();
   });
 
@@ -313,6 +317,7 @@ describe('transcript provenance storage', () => {
     const next = { ...old, correlationToken: '/new' };
     await storage.writeConfig(id, { id, transcript: next });
     // Act
+    const before = storage.configWrites();
     await new StorageTranscriptProvenanceStore(storage).record(
       id,
       {
@@ -326,8 +331,68 @@ describe('transcript provenance storage', () => {
     );
     // Assert
     should(storedTranscriptProvenance(await storage.readConfig(id))).eql(next);
+    should(storage.configWrites()).equal(before);
     await storage.close();
   });
+
+  for (const racing of [false, true]) {
+    it(`should keep a correlated fork source and its ancestors archived${racing ? ' when archival wins the cleanup race' : ''}`, async () => {
+      const storage = await openTemporaryStorage();
+      try {
+        const parent = parseSessionId('20260801-archived-parent');
+        const id = parseSessionId('20260801-archived-source');
+        const provenance: TranscriptProvenance = {
+          v: 1,
+          home: '/codex',
+          identity: 'correlated',
+          baseline: ['old'],
+          harnessSessionId: 'mine',
+          file: '/mine.jsonl',
+          resolvedAt: NOW,
+        };
+        await storage.writeConfig(parent, { id: parent });
+        await storage.writeConfig(id, { id, parent, transcript: provenance });
+        const subject = new SessionTranscriptResolver(
+          { candidates: async () => [] },
+          { claimed: async () => [] },
+          new StorageTranscriptProvenanceStore(storage),
+          { now: () => NOW },
+        );
+        let release = () => {};
+        let entered = () => {};
+        const held = new Promise<void>(resolve => {
+          release = resolve;
+        });
+        const started = new Promise<void>(resolve => {
+          entered = resolve;
+        });
+        const archive = storage.archiveSessions([id, parent], async () => {
+          entered();
+          if (racing) await held;
+          return {};
+        });
+        if (racing) await started;
+        else await archive;
+        const before = storage.configWrites();
+        const reading = subject.file(id, provenance);
+        release();
+        should(await reading).equal('/mine.jsonl');
+        await archive;
+        should(storage.isArchived(id)).be.true();
+        should(storage.isArchived(parent)).be.true();
+        should(storage.listSessions()).be.empty();
+        should(storage.configWrites()).equal(before);
+        should(storedTranscriptProvenance(await storage.readConfig(id))?.baseline).eql(['old']);
+        // A real publication revives the source; its next read can then retire the baseline.
+        await storage.append(id, 'session.note', { text: 'real revival' });
+        should(storage.isArchived(id)).be.false();
+        await subject.file(id, storedTranscriptProvenance(await storage.readConfig(id)));
+        should(storedTranscriptProvenance(await storage.readConfig(id))).not.have.property('baseline');
+      } finally {
+        await storage.close();
+      }
+    });
+  }
 
   it('should merge a resolved record into the configuration and read it back', async () => {
     // Arrange

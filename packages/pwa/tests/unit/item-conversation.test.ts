@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { DAEMON_FEATURES } from '@ferretry/protocol';
 import { type ItemConversationClient, itemSince, readItemConversation } from '../../src/lib/item-conversation.ts';
 
@@ -70,6 +71,48 @@ describe('readItemConversation', () => {
     expect(entries.map(entry => [entry.kind, entry.text])).toEqual(expected);
     expect(entries[1]?.at).toBe(Date.parse('2026-08-01T10:05:00.000Z'));
     expect(client.tails).toEqual([]);
+  });
+
+  for (const tail of [false, true]) {
+    it(
+      'reloads once without old cursor evidence when ' + (tail ? 'tail' : 'forward') + ' history goes stale',
+      async () => {
+        const fake = daemonOf(rows, { tail });
+        const cursors: unknown[] = [];
+        let reads = 0;
+        const serve = async (cursor: string | undefined) => {
+          cursors.push(cursor);
+          reads += 1;
+          if (reads === 2) throw new FyHttpError('legacy cursor', 409, 'message_cursor_stale');
+          return {
+            messages: reads === 1 ? [row(999, 'user', 'obsolete !A4')] : rows,
+            nextCursor: reads === 1 ? 'legacy' : null,
+            previousCursor: reads === 1 ? 'legacy' : null,
+          } as never;
+        };
+        const client = {
+          ...fake,
+          messages: async (_id: string, cursor?: string) => serve(cursor),
+          messagesTail: async (_id: string, options?: { through?: string }) => serve(options?.through),
+        };
+        const entries = await readItemConversation(client, 'sess', 'A4');
+        expect(entries.map(entry => [entry.kind, entry.text])).toEqual(expected);
+        expect(cursors).toEqual([undefined, 'legacy', undefined]);
+      },
+    );
+  }
+
+  it('surfaces a second stale refusal instead of retrying forever', async () => {
+    let reads = 0;
+    const client = {
+      ...daemonOf([], { tail: true }),
+      messagesTail: async () => {
+        reads += 1;
+        throw new FyHttpError('still stale', 409, 'message_cursor_stale');
+      },
+    };
+    await expect(readItemConversation(client, 'sess', 'A4')).rejects.toThrow('still stale');
+    expect(reads).toBe(2);
   });
 
   it('walks a machine without backward reads forward from the start, a page of 1000 at a time', async () => {
