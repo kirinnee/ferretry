@@ -44,6 +44,11 @@ describe('isDocsOrTestsPath', () => {
       'packages/daemon/src/lib/tests-helper.ts',
       'packages/daemon/src/attest.ts',
       'src/contest/a.ts',
+      // The session harness is shipped code, though its folder is called harness.
+      'packages/daemon/src/lib/session/harness/runtime-switch.ts',
+      'packages/daemon/src/adapters/session/harness/service.ts',
+      'packages/cli/src/lib/harness/fast-mode.ts',
+      'harness/run.ts',
     ]) {
       should([path, isDocsOrTestsPath(path)]).eql([path, false]);
     }

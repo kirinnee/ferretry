@@ -7,6 +7,7 @@ import {
   AgendaSnapshotSchema,
   agendaBadgeCount,
   agendaState,
+  awaitsOwnAnswer,
   cardAgendaReference,
   gateReference,
   MAX_AGENDA_DETAIL_LENGTH,
@@ -4872,7 +4873,11 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         // Arrange — the ferret asks its own question, a try-it card ask arrives, the owner replies in words
         const carried = attachAt(raised(AGENT, FOCUS).ledger, GATE, SECOND);
         const replied = ownerReplies(carried.ledger, THIRD);
-        should(agendaState(replied.item!).state).equal('resting');
+        // The reply answered the question and nothing more: the try-it takes over as the item's ask, in Needs you.
+        should(agendaState(replied.item!).state).equal('needs-you');
+        should(replied.item?.parked).be.undefined();
+        should(replied.item?.ownAskRepliedTo).be.a.String();
+        should(openCardAsks(replied.item!)).have.length(1);
         should(replied.item?.ownerAnswer).be.undefined();
 
         // Act — the card ask is answered Done
@@ -4912,7 +4917,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
           const reasked = version === 1 ? asked : edit(asked.ledger, { kind: FOCUS.kind }, THIRD);
           should(reasked.item?.askVersion ?? 1).equal(version);
           const replied = ownerReplies(attachAt(reasked.ledger, GATE, FOURTH).ledger, FIFTH);
-          should(agendaState(replied.item!).state).equal('resting');
+          should(agendaState(replied.item!).state).equal('needs-you');
           should(replied.item?.ownAskRepliedTo).be.a.String();
 
           // Act — the daemon carries the item to another agenda, as the home migration does, then the card ask is answered
@@ -5109,7 +5114,7 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
         should(agendaState(replied.item!).state).equal('needs-you');
       });
 
-      it('still parks a thread that asks its own question beside the card ask, and records the answer to it', () => {
+      it('keeps a thread that asks its own question in Needs you after the owner’s reply while the card ask waits, and records the answer to it', () => {
         const own = {
           subject: 'Should the badge also change keyboard focus?',
           ask: { kind: 'open-question' as const },
@@ -5120,10 +5125,85 @@ describe('card-ask (docs/agenda.md § Card asks)', () => {
 
         const replied = reply(carried.ledger, 'yes, focus too');
 
-        should(replied.item?.parked).containDeep({ reason: 'replied' });
+        // The reply answers THAT question; the try-it is the item's ask now, so nothing parks it.
+        should(replied.item?.parked).be.undefined();
         should(replied.item?.ownAskRepliedTo).be.a.String();
         should(openCardAsks(replied.item!)).have.length(1);
+        should(agendaState(replied.item!).state).equal('needs-you');
+        should(replied.item?.history?.at(-1)).containDeep({ kind: 'replied', note: 'yes, focus too' });
+
+        // Good then answers the item: nothing is left, and it rests on the answer it already had.
+        const good = succeeded(answer(replied.ledger));
+        should(openCardAsks(good.item!)).have.length(0);
+        should(agendaState(good.item!).state).equal('resting');
+      });
+
+      it('lets the try-it take over in the same item: a question open, answered, then the try-it asked (still Needs you)', () => {
+        // Arrange — an own question stands beside the card ask: it is the one ask
+        const carried = attach(
+          raised(AGENT, {
+            subject: 'Should keyboard focus change too?',
+            ask: { kind: 'open-question' as const },
+            kind: 'reply' as const,
+          }).ledger,
+        );
+        should(agendaState(carried.item!).state).equal('needs-you');
+        should(awaitsOwnAnswer(carried.item!, carried.item!.cardAsks ?? [])).be.true();
+
+        // Act — the owner answers it
+        const replied = reply(carried.ledger, 'no, keep it');
+
+        // Assert — the question is answered, the SAME item is still theirs, and its ask is the try-it
+        should(awaitsOwnAnswer(replied.item!, replied.item!.cardAsks ?? [])).be.false();
+        should(agendaState(replied.item!).state).equal('needs-you');
+        should(openCardAsks(replied.item!).map(each => each.gate.cardId)).deepEqual([GATE.cardId]);
+        should(replied.item?.id).equal(carried.item?.id);
+      });
+
+      it('rests on the reply when the card ask was set aside with Not yet: nothing is waiting but their answer', () => {
+        const carried = attach(
+          raised(AGENT, {
+            subject: 'Should keyboard focus change too?',
+            ask: { kind: 'open-question' as const },
+            kind: 'reply' as const,
+          }).ledger,
+        );
+        const notYet = succeeded(ask(carried.ledger, { kind: 'not-yet', reference: gateReference(GATE) }));
+
+        const replied = reply(notYet.ledger, 'no, keep it');
+
+        should(replied.item?.parked).containDeep({ reason: 'replied' });
         should(agendaState(replied.item!).state).equal('resting');
+      });
+
+      it('keeps an own choice the owner answered in Needs you while the try-it waits, then rests it on the try-it’s Good', () => {
+        // Arrange — a choice of the ferret's carries a try-it
+        const choice = attach(
+          raised(AGENT, {
+            kind: 'permission' as const,
+            subject: 'May I rename the flag?',
+            ask: { kind: 'permission' as const },
+          }).ledger,
+        );
+        should(awaitsOwnAnswer(choice.item!, choice.item!.cardAsks ?? [])).be.true();
+
+        // Act — the owner answers the choice
+        const chosen = succeeded(
+          applyAgendaCommand(choice.ledger, {
+            action: 'answer',
+            actor: HUMAN,
+            id: 'A1',
+            response: { kind: 'permission', decision: 'approve' },
+            at: THIRD,
+          } as never),
+        );
+
+        // Assert — the choice is answered; the try-it is the item's ask in the same item
+        should(chosen.item?.ownerAnswer).not.be.undefined();
+        should(chosen.item?.parked).be.undefined();
+        should(agendaState(chosen.item!).state).equal('needs-you');
+        const good = succeeded(answer(chosen.ledger));
+        should(agendaState(good.item!).state).equal('resting');
       });
     });
   });

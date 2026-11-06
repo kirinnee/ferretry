@@ -40,6 +40,27 @@ describe('the owner-surface words gate', () => {
     ).toEqual([]);
   });
 
+  test('finds the board\'s engine words in owner text: "is the gate of", "at the gate", "the card\'s lane"', () => {
+    expect(found("const a = 'A1 is the gate of &F12 from an older version.';", 'example.ts')).toEqual([
+      '"gate"/"lane" jargon',
+    ]);
+    expect(found('const a = <p>The card is waiting at the gate.</p>;')).toEqual(['"gate"/"lane" jargon']);
+    expect(found("const a = 'It left the card\u2019s lane.';", 'example.ts')).toEqual(['"gate"/"lane" jargon']);
+    expect(found("const a = 'Moved out of the lane.';", 'example.ts')).toEqual(['"gate"/"lane" jargon']);
+    // The plain wording, a bare identifier and a comment are not read.
+    expect(
+      found("// is the gate of &F12\nconst gateOf = 1; const a = 'A1 is an older question about &F12.';", 'example.ts'),
+    ).toEqual([]);
+  });
+
+  test('finds narration of a second ask to come: "It is asked here once you have answered"', () => {
+    expect(
+      found("const a = 'Next: try it, for &F12. It is asked here once you have answered.';", 'example.ts'),
+    ).toEqual(['"it is asked here" narration']);
+    expect(found('const a = <p>This will be asked here next.</p>;')).toEqual(['"it is asked here" narration']);
+    expect(found("const a = 'Next: try it, for &F12 Badge colour.';", 'example.ts')).toEqual([]);
+  });
+
   test('reads nothing nobody sees: comments, identifiers, data attributes, selectors and module paths', () => {
     expect(
       found(`

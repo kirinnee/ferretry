@@ -15,14 +15,16 @@ export const PR_FILES_READ = 100;
 
 /**
  * The paths that are docs, design or tests. A directory name matches at any depth (`packages/x/tests/…`); `docs/` only
- * at the top, since a `docs/` folder inside a package may well be shipped. A Markdown file anywhere is a doc.
+ * at the top, since a `docs/` folder inside a package may well be shipped. A Markdown file anywhere is a doc. A
+ * `harness/` folder counts only at a package's top (`packages/pwa/harness/`, the screenshot and bench pages): the
+ * `harness/` folders under `src/` are the session harness the product runs, so they are code.
  */
 const DOCS_TESTS: readonly RegExp[] = [
   /^docs\//u,
   /\.mdx?$/iu,
   /(?:^|\/)tests\//u,
   /(?:^|\/)__tests__\//u,
-  /(?:^|\/)harness\//u,
+  /^packages\/[^/]+\/harness\//u,
   /(?:^|\/)fixtures\//u,
   /(?:^|\/)[^/]+\.(?:test|spec)\.[^/]+$/u,
 ];

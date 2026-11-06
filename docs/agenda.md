@@ -51,7 +51,11 @@ all those"_, _"how many times I said cards have no actions"_). Every other secti
 | **try-it**      | an ask to try something that shipped, answered Done or Not good             |
 
 "Card ask", "gate" and "lane" are the daemon's words for its bookkeeping (below, and in [board.md](board.md)); they
-never reach an owner-facing string. `scripts/validate/owner-surface-words.sh` fails the build when one does.
+never reach an owner-facing string. `scripts/validate/owner-surface-words.sh` fails the build on exactly these shapes
+in a string a screen can show (comments and identifiers are not read): "card ask", "your answer for the card", a
+"Card &F12:" heading, the card narrated as the one acting ("the card goes back", "the card stays"), the board's engine
+words ("is the gate of", "at the gate", "the card's lane", "in the lane"), and narration of a second ask to come ("it is
+asked here"). A new shape is added to its list with a test the day it is seen on a screen.
 
 **Superseded.** From 2026-10-30 to 2026-11-01 the owner asked for Done / Not good buttons on cards ("embed button to
 immediately mark a task as done", the Inbox's cards to test, "stage can have request user options"). The rule of
@@ -107,7 +111,7 @@ stage.
 **What a PR changed.** The GitHub watcher reads the files of each PR in its one GraphQL query and caches the verdict on
 the PR link (`PrLink.changes`: `docs-tests` or `code`; absent means not read). A PR is `docs-tests` when it has at most
 100 files and every one is a doc or a test: anything under `docs/`, any `*.md` or `*.mdx`, anything under a `tests/`,
-`__tests__/`, `harness/` or `fixtures/` folder, and any `*.test.*` or `*.spec.*` file (`pr-changes.ts`). More than 100 files
+`__tests__/` or `fixtures/` folder or a package's top-level `harness/` (the `harness/` folders under `src/` are shipped code), and any `*.test.*` or `*.spec.*` file (`pr-changes.ts`). More than 100 files
 is `code`. A file list that GitHub cut short or did not give leaves the kind unknown. **A kind is bound to the commit it was read
 at** (`PrLink.changesRevision`: the head commit while the PR is open, the merge commit once merged): a poll that cannot
 read the files keeps the kind only for that same commit, so a docs-only PR that gets code pushed, or is merged, with
@@ -336,6 +340,16 @@ each answer does to the card).
     was taken at with it, so an answered question stays answered there. Once a ferret rewords the question, adds to it or re-asks it, it no longer matches: no earlier
     reply ever answers a NEW question, which stays in Needs you after the card ask's Good. A choice, yes/no,
     permission, task or review still takes its own answer.
+  - **The next ask takes over, in the same item.** "Does the item still wait on its own question?" is ONE function both
+    ends read, `awaitsOwnAnswer` (`@ferretry/protocol`; it reads `ownerAnswer` and the `ownAskRepliedTo` digest, `ownAskDigest`,
+    computed the same way on the daemon and in the app). While it holds, the question is the item's one ask and a try-it
+    waits behind it as one "Next" line. The moment it stops holding — a permission the owner already approved, a reply to the
+    question, a choice taken — the card's try-it is the item's ask: Good / Not good are drawn, the old question and its buttons are not,
+    and the item says "Test" in the list and in the open item. So a topic whose feature reaches Released AFTER the owner
+    answered it asks the try-it, not the old question again. **Answering the question never parks an item whose try-it still
+    waits** (a reply, or a tap on its own buttons): the item stays in Needs you with the try-it as its ask, and rests
+    only on the try-it's answer (or when the owner has said Not yet to it). If the try-it goes away first (the card moved
+    on), the item rests on the answer the owner already gave.
 - **Who.** The owner at the machine, or a paired device the `fleet` grant lets use the board (the same grant guards
   Not needed on an agenda with an open card ask). A ferret, its lead and the daemon's other producers are refused.
 - **Leaving.** A card that leaves the gate some other way has its open ask withdrawn quietly. When no open ask
@@ -1761,7 +1775,7 @@ row.
   so they go as an ordinary reply about the item. Nothing is said back above Good (no "You wrote … tap Good"). They never move the card by themselves, **and they never move the item:** the words are logged and the
   ferret reads them, but the card ask is still open, so the item **stays in Needs you** with its Good (the app does not hide it
   as replied, and the daemon does not park it — `replyKeepsCardAskOpen`). A reply on an item that asks its own question beside
-  the card ask is that question's answer and parks it as any reply does. Anything not plainly positive (a "but", a
+  the card ask is that question's answer: while a try-it still waits, the item stays in Needs you and the try-it takes over as its ask. Anything not plainly positive (a "but", a
   negation, a question, a longer message, or any words at an approval) stays a Not good (or Not yet) with the words.
 
 The wording lives in one place, read by the daemon and the app (`agenda-gate-wording.ts` in `@ferretry/protocol`, from the

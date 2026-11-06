@@ -112,7 +112,7 @@ describe('a withdrawn ask, and the turn it woke the thread out of', () => {
     should(after.parked).be.undefined();
   });
 
-  it('leaves it there too when the owner’s words are the item’s latest answer, or the ferret asked for more info', () => {
+  it('rests it on the owner’s answer that the ask kept in Needs you, and leaves it there when the ferret asked for more info', () => {
     // Arrange
     const { apply } = world();
     const woken = changed(apply(thread({ resting: { sub: 'working', at: at(-30) } }), attach('F3'), 1));
@@ -127,8 +127,10 @@ describe('a withdrawn ask, and the turn it woke the thread out of', () => {
     const afterInfo = changed(apply(asked as unknown as AgendaItem, withdraw('F3'), 5));
 
     // Assert
-    should(agendaState(afterAnswer).state).equal('needs-you');
-    should(afterAnswer.resting).be.undefined();
+    // The answer was kept open only by the waiting ask; with it gone, nothing is left for the owner (and the thread does not
+    // go back to the turn it was woken out of: it is waiting on the ferret that was given the answer).
+    should(agendaState(afterAnswer).state).equal('resting');
+    should(afterAnswer.resting?.sub).equal('waiting-on-ferret');
     should(agendaState(afterInfo).state).equal('needs-you');
     should(afterInfo.resting).be.undefined();
   });

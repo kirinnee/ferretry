@@ -122,7 +122,8 @@ describe('the item view’s parts', () => {
   test('the head says where the item stands and the stage it is at now', async () => {
     await draw(full);
     expect(one('[data-agenda-part="head"] [data-agenda-state]').textContent).toBe('Needs you');
-    expect(one('[data-agenda-part="head"] [data-agenda-stage]').textContent).toBe('Question');
+    // The chip says the word the Inbox's list row says for this kind (a choice is a Decision), so the two never disagree.
+    expect(one('[data-agenda-part="head"] [data-agenda-stage]').textContent).toBe('Decision');
     // The version picker is the head's too, behind its ⋯ — never a row of its own on the card.
     expect(root().querySelector('.fy-card [data-agenda-version-picker]')).toBeNull();
     await interact(() => one<HTMLButtonElement>('[data-agenda-menu-toggle]').click());
@@ -323,9 +324,7 @@ describe('what it needs from you', () => {
     await draw(full);
     const needs = one('[data-agenda-part="needs"]');
     expect(needs.querySelector('[data-agenda-card-ask]')).toBeNull();
-    expect(one('[data-agenda-card-ask-later]').textContent).toBe(
-      'Next: try it, for &F12 Badge colour. It is asked here once you have answered.',
-    );
+    expect(one('[data-agenda-card-ask-later]').textContent).toBe('Next: try it, for &F12 Badge colour.');
     expect(root().querySelectorAll('[data-agenda-option="Done"]')).toHaveLength(0);
     expect(root().querySelectorAll('[data-agenda-option="Blue"]')).toHaveLength(1);
     expect(root().querySelectorAll('[data-agenda-need]')).toHaveLength(1);
@@ -399,7 +398,9 @@ describe('what it needs from you', () => {
     expect(root().textContent).not.toMatch(/your answer for the card|Card &F12|card ask/iu);
     expect(root().textContent?.match(/&F12 Badge colour/gu)).toHaveLength(1);
     const steps = must(ask.querySelector('[data-agenda-card-ask-test]'), 'the test steps');
-    expect(steps.textContent).toContain('How to test');
+    // The steps follow the ask's own heading ("Try it"): no second "How to test" label.
+    expect(steps.textContent).not.toContain('How to test');
+    expect(steps.textContent).toContain('Open the badge.');
     expect(steps.textContent).toContain('Open the badge.');
     await unmount();
     await draw(asking);
@@ -455,9 +456,7 @@ describe('what it needs from you', () => {
       const blocks = [...root().querySelectorAll('[data-agenda-card-ask]')];
       expect(blocks.map(block => block.getAttribute('data-agenda-card-ask'))).toEqual(['gate:F12:tested:3']);
       expect(one('[data-agenda-card-ask-ref]').textContent).toBe('For &F12 Badge colour');
-      expect(one('[data-agenda-card-ask-later]').textContent).toBe(
-        'Next: try it, for &F13 Badge shape. It is asked here once you have answered.',
-      );
+      expect(one('[data-agenda-card-ask-later]').textContent).toBe('Next: try it, for &F13 Badge shape.');
       expect(root().querySelectorAll('[data-agenda-option="Done"]')).toHaveLength(1);
       expect(root().textContent).not.toMatch(/your answer|Card &F1|card ask/iu);
     });

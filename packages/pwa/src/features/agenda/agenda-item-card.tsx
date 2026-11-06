@@ -38,7 +38,7 @@ import {
 import { Check } from 'lucide-react';
 import { type ReactNode, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { optionAction } from '../../lib/agenda-answers.ts';
+import { kindWord, optionAction } from '../../lib/agenda-answers.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { readTab, writeTab } from '../../lib/agenda-fold.ts';
@@ -54,7 +54,6 @@ import {
   planAskWord,
   type ReferenceRow,
   referenceRows,
-  STAGE_WORDS,
   stateChip,
 } from '../../lib/agenda-item-sections.ts';
 import type { LineageTitles } from '../../lib/agenda-merge.ts';
@@ -364,11 +363,14 @@ function CardAskBlock({
   const steps = ask.howToTest === null || ask.howToTest.trim() === '' ? null : ask.howToTest;
   return (
     <div className="fy-card__gate-row" data-agenda-attached-gate={ask.gate.cardId} data-agenda-card-ask={ask.key}>
-      <h5 className="fy-card__label fy-card__card-ask-title" data-agenda-card-ask-title="">
-        {attachedGateHeading(ask.gate)}
-      </h5>
-      <div className="fy-card__gate-lead" data-agenda-card-ask-ref="">
-        {renderProse(attachedGateReference(ask.gate))}
+      {/* The verb and the one reference line share a row when they fit: one line of the block, not two. */}
+      <div className="fy-card__ask-head">
+        <h5 className="fy-card__label fy-card__card-ask-title" data-agenda-card-ask-title="">
+          {attachedGateHeading(ask.gate)}
+        </h5>
+        <div className="fy-card__gate-lead" data-agenda-card-ask-ref="">
+          {renderProse(attachedGateReference(ask.gate))}
+        </div>
       </div>
       {typed ? (
         <>
@@ -382,8 +384,8 @@ function CardAskBlock({
       ) : (
         <>
           {steps === null ? null : (
+            // The steps follow the ask's own heading ("Try it"): a second "How to test" label would only say it again.
             <div className="fy-card__need-part" data-agenda-card-ask-test="">
-              <h5 className="fy-card__label">How to test</h5>
               <HowToTest renderProse={renderProse} text={steps} />
             </div>
           )}
@@ -411,7 +413,7 @@ function CardAskLater({ ask, renderProse }: { readonly ask: ItemCardAsk; readonl
   return (
     <div className="fy-card__card-ask-later" data-agenda-card-ask-later={ask.key}>
       {renderProse(
-        `Next: ${attachedGateHeading(ask.gate).toLowerCase()}, ${attachedGateReference(ask.gate).replace(/^For /u, 'for ')}. It is asked here once you have answered.`,
+        `Next: ${attachedGateHeading(ask.gate).toLowerCase()}, ${attachedGateReference(ask.gate).replace(/^For /u, 'for ')}.`,
       )}
     </div>
   );
@@ -513,7 +515,7 @@ export function AgendaItemCard({
   // A choice (one question): its options are listed with what each means, and answered on the row. Any other shape
   // offers none, whatever options an item raised before the rule still carries.
   const shape = model.shape;
-  const choosing = shape === 'choice' || shape === 'yesno';
+  const choosing = (shape === 'choice' || shape === 'yesno') && !plan.ownAnswered;
   const options = choosing ? itemOptions(item) : [];
   const lettered = item.gate === undefined && cardLettered(options);
   const onRow = new Set(model.answers.map(answer => answer.label.trim().toLowerCase()));
@@ -619,7 +621,8 @@ export function AgendaItemCard({
     (model.notice || model.answers.length > 0 || requestChanges !== undefined);
   const state = stateChip(current, ferret, now);
   const stage = itemStage(current);
-  // The chip says the same word the Inbox's list row does (`itemAskWord`): a card to try is a Test in both.
+  // The chip says the same word the Inbox's list row does, for every kind: a card to try is a Test (`itemAskWord`), anything
+  // else its kind's word (`kindWord`: Decision, Question, …), so the list and the open item never disagree.
   const askWord = planAskWord(plan);
 
   return (
@@ -650,7 +653,7 @@ export function AgendaItemCard({
                 data-agenda-type={meta.kind}
                 data-tone={meta.tone}
               >
-                {askWord ?? STAGE_WORDS[stage]}
+                {askWord ?? kindWord(item)}
               </span>
             )}
             {latest ? null : (
@@ -696,7 +699,8 @@ export function AgendaItemCard({
       <TermLayer renderProse={renderProse} terms={terms}>
         {/* 2. PREMISE AND CONTEXT (a held config change first, which stands in for the premise). */}
         {latest ? <AgendaConfigChange item={item} /> : null}
-        {gated || (premise === null && context === null) ? null : (
+        {/* A notice about cards is answered by its one form: its premise ("these cards have no ferret") only says its title again. */}
+        {gated || cardsForm !== undefined || (premise === null && context === null) ? null : (
           <div className="fy-card__part" data-agenda-part="premise">
             <Situation context={context} premise={premise} renderProse={renderProse} />
           </div>
@@ -756,7 +760,7 @@ export function AgendaItemCard({
               ) : null}
               {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
               {cardsForm}
-              {plan.ownRowHeld && plan.asks[0] !== undefined ? (
+              {plan.ownRowHeld && !plan.ownAnswered && plan.asks[0] !== undefined ? (
                 <p className="fy-card__card-ask-later" data-agenda-own-row-held="">
                   First answer the {attachedGateHeading(plan.asks[0].gate) === 'Try it' ? 'try-it' : 'approval'} below;
                   the buttons for this come back once it is answered.

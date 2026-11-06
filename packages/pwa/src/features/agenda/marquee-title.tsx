@@ -27,8 +27,14 @@ function useReducedMotion(): boolean {
 export function MarqueeTitle({
   title,
   wrap,
+  wrapped = false,
 }: {
   readonly title: string;
+  /**
+   * The title is a sentence the owner reads before they act (a notice about cards), so it is NEVER cut or scrolled: it
+   * wraps onto as many lines as it needs. Every other title keeps its one line.
+   */
+  readonly wrapped?: boolean;
   /** Draws the words as something else (a link). A tap then belongs to that, so the title cannot be tapped open. */
   readonly wrap?: (text: string) => ReactNode;
 }) {
@@ -42,7 +48,7 @@ export function MarqueeTitle({
 
   useEffect(() => {
     const outer = box.current;
-    if (outer === null || text.current === null) return undefined;
+    if (wrapped || outer === null || text.current === null) return undefined;
     const measure = (): void => {
       // Read the words' box each time: it moves into the toggle button once the title turns out too long.
       const inner = text.current;
@@ -79,7 +85,7 @@ export function MarqueeTitle({
       fonts?.removeEventListener('loadingdone', remeasure);
       watch?.disconnect();
     };
-  }, [title, reduced]);
+  }, [title, reduced, wrapped]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new title starts folded
   useEffect(() => setExpanded(false), [title]);
@@ -114,6 +120,7 @@ export function MarqueeTitle({
       data-agenda-title=""
       {...(marquee === null ? {} : { 'data-marquee': '' })}
       {...(expanded ? { 'data-expanded': '' } : {})}
+      {...(wrapped ? { 'data-wrapped': '' } : {})}
       {...(cut === null ? {} : { 'data-cut': '' })}
       ref={box}
       style={style}

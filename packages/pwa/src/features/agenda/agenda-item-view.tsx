@@ -374,7 +374,7 @@ export function AgendaItemView({
                   </span>
                 )
               }
-              title={<MarqueeTitle title={head.title} />}
+              title={<MarqueeTitle title={head.title} wrapped={answersWithCardsForm(item)} />}
               {...(hasMenu
                 ? {
                     menu: (

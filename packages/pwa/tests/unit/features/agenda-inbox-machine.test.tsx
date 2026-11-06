@@ -265,7 +265,13 @@ describe('the Machine group in the Inbox', () => {
     expect(view?.container.querySelectorAll('[data-agenda-cards-send]').length).toBe(1);
     expect(view?.container.querySelector('[data-agenda-clear]')).toBeNull();
     expect(text).not.toContain('Tap Got it to dismiss this notice.');
-    expect(text.split(line('B1')).length).toBe(2);
+    // The title is a sentence read before acting: it wraps (never scrolled or cut mid-glyph), and the premise that only
+    // says it again is not drawn above the form.
+    expect(view?.container.querySelector('[data-agenda-title]')?.hasAttribute('data-wrapped')).toBe(true);
+    expect(view?.container.querySelector('[data-agenda-part="premise"]')).toBeNull();
+    // Each card is said once, in one compact row; the daemon's long sentence is not repeated above or under the form.
+    expect(text.split('&B1 Fix it').length).toBe(2);
+    expect(text).not.toContain('no ferret is assigned');
     expect(text).not.toContain('Nothing to decide');
   });
 
@@ -288,8 +294,8 @@ describe('the Machine group in the Inbox', () => {
 
     // Assert
     const text = view?.container.querySelector('[data-inbox-open]')?.textContent ?? '';
-    expect(view?.container.querySelector('[data-agenda-card-line]')?.textContent).toBe(line);
-    expect(text.split(line).length).toBe(2);
+    expect(view?.container.querySelector('[data-agenda-card-line]')?.textContent).toBe('&B1 Fix it · in Review/CI');
+    expect(text.split('&B1 Fix it').length).toBe(2);
   });
 
   test('links its item to the Inbox, not to a conversation', () => {

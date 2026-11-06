@@ -8,6 +8,8 @@ import { gateReference, parseGateFollowupReference } from './agenda-gate.ts';
 import { gateAskLine } from './agenda-gate-wording.ts';
 import type { AgendaStage } from './agenda-state.ts';
 import type { TaskRef } from './board-refs.ts';
+import { canonicalJson } from './canonical-json.ts';
+import { sha256Hex } from './mcp-oauth.ts';
 
 /** The prefix of the `sourceRef` of the agenda the daemon opens for a card: `card-agenda:<card>`. */
 const CARD_AGENDA_REFERENCE_PREFIX = 'card-agenda:';
@@ -112,6 +114,51 @@ export const itemAsksOwnQuestion = (
   // With no questions there is no single question to read: the ask line is the subject.
   const line = item.subject.trim();
   return line !== '' && !isGeneratedCardAgendaAsk(item) && !askLineRepeatsCardAsk(line, asks);
+};
+
+/**
+ * The digest of the item's OWN ask as it now stands — its ask line (the subject, trimmed), questions, fields, steps,
+ * ask and ask version — stored by the daemon as `ownAskRepliedTo` when the owner answers the item in words. Anything a
+ * ferret does to the question (rewords it, adds a question or a field, re-asks it under the next version) changes it,
+ * so a reply to an earlier question never answers a later one. `undefined` when it has no canonical spelling. The ONE
+ * spelling both ends read: the daemon writes it and rests the item by it, the app reads it to know the question is answered.
+ */
+export const ownAskDigest = (
+  item: Pick<AgendaItem, 'subject' | 'questions' | 'fields' | 'steps' | 'ask' | 'askVersion'>,
+): string | undefined => {
+  const spelled = canonicalJson({
+    line: item.subject.trim(),
+    ...(item.questions === undefined ? {} : { questions: item.questions }),
+    ...(item.fields === undefined ? {} : { fields: item.fields }),
+    ...(item.steps === undefined ? {} : { steps: item.steps }),
+    ...(item.ask === undefined ? {} : { ask: item.ask }),
+    version: item.askVersion ?? 1,
+  });
+  return spelled.ok ? sha256Hex(spelled.text).slice(0, 32) : undefined;
+};
+
+/** Whether the owner answered the item's own ask, as it now stands, in words (`ownAskRepliedTo`). */
+export const repliedToOwnAsk = (
+  item: Pick<AgendaItem, 'subject' | 'questions' | 'fields' | 'steps' | 'ask' | 'askVersion' | 'ownAskRepliedTo'>,
+): boolean => item.ownAskRepliedTo !== undefined && item.ownAskRepliedTo === ownAskDigest(item);
+
+/**
+ * Whether the item still has an ask of its OWN for the owner, and no answer of theirs on it: a choice, yes/no,
+ * permission, task or review that has no answer yet, or a question the item asks in its own words beside `asks`
+ * (`itemAsksOwnQuestion`) that no reply has answered (`ownAskRepliedTo`, while the question stands unchanged). A notice,
+ * and an item the owner has answered (`ownerAnswer`), ask nothing of their own. The ONE rule the daemon rests an item by
+ * and the app reads to decide whether the item's own question or its card's try-it is the ask now: once this is false the
+ * card ask takes over in the same item. Pure and total.
+ */
+export const awaitsOwnAnswer = (
+  item: Parameters<typeof itemAsksOwnQuestion>[0] &
+    Pick<AgendaItem, 'notice' | 'ownerAnswer' | 'ownAskRepliedTo' | 'askVersion'>,
+  asks: readonly CardAskWords[],
+): boolean => {
+  if (item.notice === true || item.ownerAnswer !== undefined) return false;
+  if (item.ask !== undefined && item.ask.kind !== 'open-question') return true;
+  if (repliedToOwnAsk(item)) return false;
+  return itemAsksOwnQuestion(item, asks);
 };
 
 /** A card ask's stable name: its gate's reference, one per entry of the card into the lane. */

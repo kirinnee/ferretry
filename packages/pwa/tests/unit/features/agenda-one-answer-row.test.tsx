@@ -5,14 +5,21 @@
  * the card the one asking. A new kind, or a new path that draws a second row, fails here.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaGate, AgendaItem } from '@ferretry/protocol';
+import { type AgendaGate, type AgendaItem, ownAskDigest } from '@ferretry/protocol';
 import { Markdown } from '../../../src/components/markdown.tsx';
 import { AgendaCard } from '../../../src/features/agenda/agenda-card.tsx';
 import { AgendaCardsList } from '../../../src/features/agenda/agenda-cards-list.tsx';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
+import { kindWord } from '../../../src/lib/agenda-answers.ts';
 import type { InboxAction } from '../../../src/lib/agenda-inbox.ts';
 import type { HistoryEvent } from '../../../src/lib/agenda-history.ts';
-import { itemAskPlan, itemCardAsks, itemSwipeTargets, typedCardAsk } from '../../../src/lib/agenda-item-sections.ts';
+import {
+  itemAskPlan,
+  itemAskWord,
+  itemCardAsks,
+  itemSwipeTargets,
+  typedCardAsk,
+} from '../../../src/lib/agenda-item-sections.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { type Mounted, mount, must } from '../../support/dom.ts';
 
@@ -577,4 +584,111 @@ describe('a card agenda from before the daemon recorded its own subject', () => 
     const item = carrying(daemonsOwn);
     expect(itemAskPlan(item, itemCardAsks(item)).ownLine).toBe(false);
   });
+});
+
+describe('the item’s own question answered: its try-it takes over as the item’s ask, in the same item (&B165 review)', () => {
+  const asked: Partial<AgendaItem> = {
+    kind: 'reply',
+    subject: 'Should a capacity request wait for the owner?',
+    ask: { kind: 'open-question' },
+  } as unknown as Partial<AgendaItem>;
+  /** The same thread once the owner replied to its question: the digest the daemon stored at that moment. */
+  const repliedTo = (fields: Partial<AgendaItem>): AgendaItem => {
+    const open = carrying(fields);
+    return { ...open, ownAskRepliedTo: ownAskDigest(open) } as AgendaItem;
+  };
+
+  test('open: the question is the one ask and the try-it waits as one "Next" line', async () => {
+    const item = carrying(asked);
+    expect(itemAskPlan(item, itemCardAsks(item))).toMatchObject({ ownFirst: true, ownAnswered: false, asks: [] });
+    const root = await draw(item, false);
+    expect(root.textContent).toContain('Type your answer below.');
+    expect(root.querySelector('[data-agenda-card-ask-later]')).not.toBeNull();
+    for (const label of ['Done', 'Good', 'Not good']) expect(answerButtons(root, label)).toHaveLength(0);
+  });
+
+  test('answered in words: the try-it is the ask — its buttons, no old question, no "Next" line', async () => {
+    const item = repliedTo(asked);
+    const plan = itemAskPlan(item, itemCardAsks(item));
+    expect(plan).toMatchObject({ ownFirst: false, ownAnswered: true, ownLine: false });
+    expect(plan.asks.map(ask => ask.gate.cardId)).toEqual(['F12']);
+    const root = await draw(item, false);
+    expect(root.querySelector('[data-agenda-card-ask="gate:F12:released:4"]')).not.toBeNull();
+    expect(answerButtons(root, 'Done')).toHaveLength(1);
+    expect(answerButtons(root, 'Not good')).toHaveLength(1);
+    expect(root.querySelector('[data-agenda-card-ask-later]')).toBeNull();
+    expect(root.textContent).not.toContain('Should a capacity request wait for the owner?');
+    expect(root.textContent).not.toContain('Type your answer below.');
+    // Still ONE answer row and one "What I need from you".
+    expect(answerRows(root)).toHaveLength(1);
+    expect(root.querySelectorAll('[data-agenda-need]')).toHaveLength(1);
+  });
+
+  test('answered, in the Inbox: Good is one tap and the words typed below are Not good', async () => {
+    const item = repliedTo(asked);
+    const root = await draw(item, true);
+    expect(answerButtons(root, 'Good')).toHaveLength(1);
+    expect(root.querySelector('[data-agenda-typed-lead]')).not.toBeNull();
+    expect(typedCardAsk(item)?.gate.cardId).toBe('F12');
+  });
+
+  test('a permission the owner already approved, whose card reached its try-it later: Good / Not good, never the old Yes', async () => {
+    const item = carrying({
+      kind: 'permission',
+      subject: 'May I deploy?',
+      ask: { kind: 'permission' },
+      ownerAnswer: {
+        at: '2026-08-01T11:30:00.000Z',
+        response: { kind: 'permission', decision: 'approve' },
+        request: 1,
+      },
+    } as unknown as Partial<AgendaItem>);
+    const plan = itemAskPlan(item, itemCardAsks(item));
+    expect(plan).toMatchObject({ ownFirst: false, ownAnswered: true });
+    const root = await draw(item, false);
+    expect(root.querySelector('[data-agenda-card-ask="gate:F12:released:4"]')).not.toBeNull();
+    expect(answerButtons(root, 'Done')).toHaveLength(1);
+    expect(answerButtons(root, 'Not good')).toHaveLength(1);
+    expect(answerButtons(root, 'Approve')).toHaveLength(0);
+    expect(root.textContent).not.toContain('May I deploy?');
+    expect(answerRows(root)).toHaveLength(1);
+  });
+
+  test('the list and the open item say the same word: a Test once the try-it is the ask, a Question before', () => {
+    const open = carrying(asked);
+    const answered = repliedTo(asked);
+    expect(itemAskWord(open)).toBeUndefined();
+    expect(itemAskWord(answered)).toBe('Test');
+  });
+
+  test('a reply that changed after the owner answered is a new question: the old answer does not answer it', () => {
+    const stale = { ...repliedTo(asked), subject: 'Should it also wait for a second owner?' } as AgendaItem;
+    expect(itemAskPlan(stale, itemCardAsks(stale))).toMatchObject({ ownFirst: true, ownAnswered: false });
+  });
+});
+
+/** The steps the daemon stores on the ask it puts on an item: the list row reads them there, with no board in hand. */
+const HOW_TO_TEST = '1. Open the badge.\n2. See it is blue.';
+
+describe('the Inbox list and the open item say the same word for every kind (&B165 screenshot finding 7)', () => {
+  for (const [name, fields] of KINDS) {
+    for (const asks of [[], [first]] as const) {
+      test(`${name}${asks.length === 0 ? '' : ', with a try-it'}`, async () => {
+        const item = agendaItem('A9', {
+          title: 'Badge colour',
+          ...fields,
+          ...(asks.length === 0
+            ? {}
+            : {
+                gateAttached: asks[0],
+                cardAsks: asks.map(gate => ({ gate, at: '2026-08-01T11:00:00.000Z', howToTest: HOW_TO_TEST })),
+              }),
+        } as unknown as Partial<AgendaItem>);
+        const root = await draw(item, false);
+        const chip = root.querySelector('[data-agenda-type]')?.textContent;
+        // The list row's word: a card to try is a Test, anything else its kind's own word.
+        expect(chip).toBe(itemAskWord(item) ?? kindWord(item));
+      });
+    }
+  }
 });

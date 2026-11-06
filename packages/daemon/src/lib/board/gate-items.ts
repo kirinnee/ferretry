@@ -437,7 +437,7 @@ export class GateItems implements CardWriteObserver {
       ? undefined
       : refused(
           'not-moved',
-          `${answer.id} is the gate of ${formatTaskRef({ id: gate.cardId })} from an older version, and it could not be moved onto an agenda: nothing was moved. Say Not needed to set it aside`,
+          `${answer.id} is an older question about ${formatTaskRef({ id: gate.cardId })} that this version could not bring up to date, so your answer moved nothing. Tap Not needed to set it aside`,
         );
   }
 

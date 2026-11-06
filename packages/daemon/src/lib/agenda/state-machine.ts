@@ -108,6 +108,7 @@ import {
   joinCardAsks,
   leaveCardAsks,
   ownAskDigest,
+  cardAskWaits,
   replyKeepsCardAskOpen,
   restRefusal,
   sealCardAsks,
@@ -1962,8 +1963,13 @@ function restAnswered(
     ...open,
     infoRequests: request,
     ownerAnswer: { at: command.at, response: command.response, ...(note === undefined ? {} : { note }), request },
-    parked: { reason: 'replied', at: command.at },
-    resting: { sub: 'waiting-on-ferret', at: command.at },
+    // A card ask (a try-it) still waiting for the owner takes over as this item's ask: the item stays in Needs you.
+    ...(cardAskWaits(item)
+      ? {}
+      : {
+          parked: { reason: 'replied' as const, at: command.at },
+          resting: { sub: 'waiting-on-ferret' as const, at: command.at },
+        }),
     history: withHistory(open.history, {
       at: command.at,
       kind: 'replied',
@@ -2761,11 +2767,16 @@ function reply(ledger: AgendaLedger, command: ReplyCommand): AgendaMutation {
   const entry = wordsOf(command.fromChat?.at ?? command.at, 'owner', 'reply', command.note, command.fromChat);
   // Words about an item whose card ask is still open, and which asks nothing of its own ("works now" under a try-it), are
   // logged but answer nothing: the item stays the owner's turn, so the Good it promised stays in Needs you.
-  if (replyKeepsCardAskOpen(target.item)) {
+  // A reply to the item's OWN question, while a card ask (a try-it) still waits for the owner, answers that question and
+  // nothing more: the item stays in Needs you and the card ask takes over as its next ask (docs/agenda.md § One ask).
+  const answersOwnQuestion = !replyKeepsCardAskOpen(target.item) && cardAskWaits(target.item);
+  if (replyKeepsCardAskOpen(target.item) || answersOwnQuestion) {
+    const digest = answersOwnQuestion ? ownAskDigest(target.item) : undefined;
     return replaceItem(
       ledger,
       {
         ...target.item,
+        ...(digest === undefined ? {} : { ownAskRepliedTo: digest }),
         history: withHistory(target.item.history, {
           at: command.at,
           kind: 'replied',

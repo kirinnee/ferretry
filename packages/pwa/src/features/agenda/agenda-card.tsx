@@ -249,7 +249,7 @@ export function AgendaCard({
           <div className="fy-attn-card__why" data-agenda-card-ask-ref="">
             {renderProse(attachedGateReference(cardAsk.gate))}
           </div>
-          {plan.ownRowHeld ? (
+          {plan.ownRowHeld && !plan.ownAnswered ? (
             <p className="m-0 text-meta text-faint" data-agenda-own-row-held="">
               The buttons for this come back once it is answered.
             </p>

@@ -88,9 +88,8 @@ describe('the cards of a notice, answered as ONE form (&B165)', () => {
     }
     expect(list.view.container.querySelectorAll('button')).toHaveLength(1);
     expect(list.view.container.querySelector('[data-agenda-cards-send]')?.textContent).toBe('Send');
-    expect(list.q('B2', '[data-agenda-card-line]')?.textContent).toContain(
-      '&B2 Fix the login page is waiting in Implement',
-    );
+    // One compact line: the card and where it waits (the place is hidden on a phone by CSS, never cut from the text).
+    expect(list.q('B2', '[data-agenda-card-line]')?.textContent).toBe('&B2 Fix the login page · in Implement');
   });
 
   it('opens only the card whose link was pressed', async () => {

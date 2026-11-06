@@ -9,8 +9,9 @@
  * A card a live ferret already holds is not started a second time: the daemon answers with that ferret, the row's line
  * says so in place of "no ferret is assigned" (which would now be untrue), and the row offers its chat instead.
  *
- * Close shows what is about to happen before Send — the card leaves the board — and the reason the daemon will record,
- * which the owner may edit. A refusal is shown on its row in the daemon's words; the notice stays open, the picks stay,
+ * Each card is ONE compact row: its name and where it waits, "Open" beside it, then the three picks. Send closes the
+ * block in normal flow, so it never covers a row. Close shows what is about to happen before Send — the card leaves the
+ * board — and the reason the daemon will record, which the owner may edit. A refusal is shown on its row in the daemon's words; the notice stays open, the picks stay,
  * and the next Send only does what has not taken yet.
  */
 
@@ -45,6 +46,16 @@ const NOBODY_TAIL = /\s+is waiting in .*, but no ferret is assigned, so nothing 
 const heldLine = (line: string, ref: string): string => {
   const head = line.replace(NOBODY_TAIL, '').trim();
   return `${head === line.trim() || head === '' ? ref : head} — a ferret has picked it up.`;
+};
+
+/**
+ * The card and where it waits, in few words: "&B1 Fix it" and, on a screen wide enough, "· in Review/CI". A line in other
+ * words is shown as it is.
+ */
+const WAITING_LINE = /^(.*?) is waiting in (.+?),(?: but)? no ferret is assigned\b.*$/su;
+const compactLine = (line: string): { readonly name: string; readonly place: string | null } => {
+  const [, name, place] = WAITING_LINE.exec(line.trim()) ?? [];
+  return name === undefined || place === undefined ? { name: line, place: null } : { name, place: ` · in ${place}` };
 };
 
 export const CLOSE_CARD_REASON = 'Closed by the owner: no ferret was working on it.';
@@ -124,14 +135,14 @@ export function AgendaCardsList({
   return (
     <form
       aria-label="What to do with each card"
-      className="m-0 flex min-w-0 flex-col gap-3"
+      className="m-0 flex min-w-0 flex-col gap-2"
       data-agenda-cards=""
       onSubmit={event => {
         event.preventDefault();
         void send();
       }}
     >
-      <ul aria-label="Cards" className="m-0 flex list-none flex-col gap-3 p-0">
+      <ul aria-label="Cards" className="m-0 flex list-none flex-col gap-2 p-0">
         {cards.map(card => {
           const id = card.task.id;
           const ref = formatTaskRef({ id });
@@ -139,33 +150,46 @@ export function AgendaCardsList({
           const pick = pickOf(id);
           return (
             <li className="flex min-w-0 flex-col gap-1" data-agenda-card-row={id} key={id}>
-              <div
-                className="min-w-0 break-words text-ui text-fg"
-                data-agenda-card-line=""
-                {...(result?.kind === 'held' ? { role: 'status' } : {})}
-              >
-                {renderProse(result?.kind === 'held' ? heldLine(card.line, ref) : card.line)}
-              </div>
-              <p className="m-0 flex flex-wrap items-center gap-x-3 text-meta" data-agenda-card-links="">
-                <a
-                  className="inline-flex items-center text-accent"
-                  data-agenda-card-open=""
-                  href={actions.cardPath(id)}
-                  onClick={linkClick(() => actions.open(id))}
+              <div className="flex min-w-0 items-center justify-between gap-x-3" data-agenda-card-links="">
+                <div
+                  className="min-w-0 break-words text-ui text-fg [&_.md]:inline [&_p]:m-0 [&_p]:inline"
+                  data-agenda-card-line=""
+                  {...(result?.kind === 'held' ? { role: 'status' } : {})}
                 >
-                  Open {ref}
-                </a>
-                {result?.kind === 'held' ? (
+                  {result?.kind === 'held' ? (
+                    renderProse(heldLine(card.line, ref))
+                  ) : (
+                    <>
+                      {renderProse(compactLine(card.line).name)}
+                      {compactLine(card.line).place === null ? null : (
+                        <span className="hidden text-muted sm:inline" data-agenda-card-place="">
+                          {compactLine(card.line).place}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+                <span className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 text-meta">
                   <a
-                    className="text-accent"
-                    data-agenda-card-chat=""
-                    href={actions.chatPath(result.ferret)}
-                    onClick={linkClick(() => actions.openChat(result.ferret))}
+                    className="inline-flex items-center whitespace-nowrap text-accent"
+                    data-agenda-card-open=""
+                    href={actions.cardPath(id)}
+                    onClick={linkClick(() => actions.open(id))}
                   >
-                    Open its ferret’s chat
+                    Open {ref}
                   </a>
-                ) : null}
-              </p>
+                  {result?.kind === 'held' ? (
+                    <a
+                      className="inline-flex items-center whitespace-nowrap text-accent"
+                      data-agenda-card-chat=""
+                      href={actions.chatPath(result.ferret)}
+                      onClick={linkClick(() => actions.openChat(result.ferret))}
+                    >
+                      Open its ferret’s chat
+                    </a>
+                  ) : null}
+                </span>
+              </div>
               {result?.kind === 'done' ? (
                 <p className="m-0 text-ui text-muted" data-agenda-card-done="" role="status">
                   {result.note}
@@ -198,9 +222,9 @@ export function AgendaCardsList({
               )}
               {pick === 'close' && !settled(result) ? (
                 <label className="flex flex-col gap-1 text-meta text-muted" data-agenda-card-close-note="">
-                  It leaves the board and nothing more will happen to it. The reason is kept on the card:
+                  It leaves the board. Reason:
                   <input
-                    className="min-h-[44px] rounded-control border border-border bg-surface px-3 text-ui text-fg"
+                    className="min-h-[40px] rounded-control border border-border bg-surface px-3 text-ui text-fg"
                     data-agenda-card-reason=""
                     disabled={sending}
                     onChange={event => {
@@ -221,8 +245,7 @@ export function AgendaCardsList({
           );
         })}
       </ul>
-      {/* Send is ALWAYS in reach: it sticks to the foot of whatever scrolls (the item's body), so three cards and a reason box
-          never push the one button out of sight. */}
+      {/* Send ends the block, in normal flow: it never lies over a row (a sticky bar did, and hid the last card's picks). */}
       <div className="fy-qr__row fy-cards-send" data-agenda-quick-replies="">
         <button
           className="kt-btn fy-qr__chip"

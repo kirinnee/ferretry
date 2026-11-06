@@ -312,7 +312,8 @@ describe('the v6 layout: title, ONE card — one column', () => {
 
   test('teaches nothing: no hint line under the type, and ⋯ is an icon, not a word', async () => {
     await draw(richItem);
-    expect(one('.fy-card__top [data-agenda-type]').textContent).toBe('Question');
+    // The word is the kind's, the same one the Inbox list row says (a choice is a Decision): list and open item agree.
+    expect(one('.fy-card__top [data-agenda-type]').textContent).toBe('Decision');
     const text = root().textContent ?? '';
     expect(text).not.toContain('it is yours to decide');
     expect(text).not.toContain('⋯');

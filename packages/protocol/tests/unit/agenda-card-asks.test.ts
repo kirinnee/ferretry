@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type AgendaCardAsk, type AgendaGate, AgendaItemSchema } from '../../src/lib/agenda.ts';
 import {
   askedCardAsks,
   askLineRepeatsCardAsk,
+  awaitsOwnAnswer,
   canCarryCardAsk,
   cardAgendaReference,
   cardAskOf,
@@ -15,9 +17,12 @@ import {
   itemAsksOwnQuestion,
   mirroredCardAsk,
   openCardAsks,
+  ownAskDigest,
   ownCardAsk,
   parseCardAgendaReference,
+  repliedToOwnAsk,
 } from '../../src/lib/agenda-card-asks.ts';
+import { canonicalJson } from '../../src/lib/canonical-json.ts';
 import { type AgendaQueueSource, needsYouQueue } from '../../src/lib/agenda-queue.ts';
 
 const AT = '2026-11-03T09:00:00.000Z';
@@ -382,5 +387,74 @@ describe('whether an item asks its own question beside its card asks', () => {
     should(
       itemAsksOwnQuestion({ ...cardAgenda, subject: 'Should the badge also change keyboard focus?' }, asks),
     ).be.true();
+  });
+});
+
+describe('whether the item’s own question still waits for the owner (awaitsOwnAnswer)', () => {
+  const asks = [open('F12')];
+  const question = {
+    raisedBy: 'agent' as const,
+    sourceRef: null,
+    ask: { kind: 'open-question' as const },
+    subject: 'Should the badge also change keyboard focus?',
+  };
+
+  it('should hold for an unanswered question, and not once the owner replied to it as it stands', () => {
+    should(awaitsOwnAnswer(question, asks)).be.true();
+    should(awaitsOwnAnswer({ ...question, ownAskRepliedTo: ownAskDigest(question) }, asks)).be.false();
+  });
+
+  it('should hold again once the question is reworded or re-asked, whatever was answered before', () => {
+    const replied = { ...question, ownAskRepliedTo: ownAskDigest(question) };
+
+    should(awaitsOwnAnswer({ ...replied, subject: 'Should it also announce itself?' }, asks)).be.true();
+    should(awaitsOwnAnswer({ ...replied, askVersion: 2 }, asks)).be.true();
+    should(repliedToOwnAsk({ ...replied, askVersion: 2 })).be.false();
+  });
+
+  it('should not hold for a notice, an owner’s answer, or an item that asks nothing of its own', () => {
+    should(awaitsOwnAnswer({ ...question, notice: true }, asks)).be.false();
+    should(
+      awaitsOwnAnswer(
+        { ...question, ownerAnswer: { at: AT, response: { kind: 'open-question', answer: 'no' }, request: 1 } },
+        asks,
+      ),
+    ).be.false();
+    should(
+      awaitsOwnAnswer(
+        {
+          raisedBy: 'daemon',
+          sourceRef: 'card-agenda:F12',
+          ask: question.ask,
+          subject: 'Try it: the badge.',
+          generatedSubject: 'Try it: the badge.',
+          cardAsks: asks,
+        },
+        asks,
+      ),
+    ).be.false();
+  });
+
+  it('should hold for a choice, permission or review with no answer yet', () => {
+    should(awaitsOwnAnswer({ ...question, ask: { kind: 'permission' as const } }, asks)).be.true();
+  });
+});
+
+describe('the digest of the item’s own ask', () => {
+  const item = { subject: ' Should the badge change? ', ask: { kind: 'open-question' as const } };
+
+  it('should be the first 32 hex digits of SHA-256 over the canonical spelling both ends share', () => {
+    const spelled = canonicalJson({ line: 'Should the badge change?', ask: item.ask, version: 1 });
+    if (!spelled.ok) throw new Error('canonical');
+
+    should(ownAskDigest(item)).equal(createHash('sha256').update(spelled.text, 'utf8').digest('hex').slice(0, 32));
+  });
+
+  it('should move with the question, its version and its fields, and not with a trailing space', () => {
+    const base = ownAskDigest(item);
+
+    should(ownAskDigest({ ...item, subject: 'Should the badge change?' })).equal(base);
+    should(ownAskDigest({ ...item, askVersion: 2 })).not.equal(base);
+    should(ownAskDigest({ ...item, steps: ['Open it'] })).not.equal(base);
   });
 });

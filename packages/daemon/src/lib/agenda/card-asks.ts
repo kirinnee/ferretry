@@ -34,14 +34,17 @@ import {
   canonicalJson,
   cardAskStage,
   formatTaskRef,
+  awaitsOwnAnswer as protocolAwaitsOwnAnswer,
   hasOpenCardAsk,
   itemAsksOwnQuestion,
   isOpenCardAsk,
   MAX_AGENDA_CARD_ASKS,
   MAX_AGENDA_REPLY_LENGTH,
   mirroredCardAsk,
+  ownAskDigest,
   openCardAsks,
   parseCardAgendaReference,
+  repliedToOwnAsk,
 } from '@ferretry/protocol';
 
 /** What the gate engine does to one agenda's card asks. */
@@ -185,29 +188,8 @@ export const sealCardAsks = (item: AgendaItem): AgendaItem => {
 const untouched = (item: AgendaItem): boolean =>
   item.cardAsksSeal !== undefined && item.cardAsksSeal === fingerprint(item);
 
-/**
- * The digest of the item's OWN ask as it now stands — its ask line (the subject, trimmed), questions, fields, steps,
- * ask and ask version — stored as `ownAskRepliedTo` when the owner answers the item in words. Anything a ferret does to
- * the question (rewords it, adds a question or a field, re-asks it under the next version) changes it, so a reply to
- * an earlier question never answers a later one. `undefined` when it has no canonical spelling.
- */
-export const ownAskDigest = (
-  item: Pick<AgendaItem, 'subject' | 'questions' | 'fields' | 'steps' | 'ask' | 'askVersion'>,
-): string | undefined => {
-  const spelled = canonicalJson({
-    line: item.subject.trim(),
-    ...(item.questions === undefined ? {} : { questions: item.questions }),
-    ...(item.fields === undefined ? {} : { fields: item.fields }),
-    ...(item.steps === undefined ? {} : { steps: item.steps }),
-    ...(item.ask === undefined ? {} : { ask: item.ask }),
-    version: item.askVersion ?? 1,
-  });
-  return spelled.ok ? createHash('sha256').update(spelled.text, 'utf8').digest('hex').slice(0, 32) : undefined;
-};
-
-/** Whether the owner answered the item's own ask, as it now stands, in words (`ownAskRepliedTo`). */
-const repliedToOwnAsk = (item: AgendaItem): boolean =>
-  item.ownAskRepliedTo !== undefined && item.ownAskRepliedTo === ownAskDigest(item);
+/** The digest of the item's own ask: one spelling for both ends (`@ferretry/protocol`). */
+export { ownAskDigest };
 
 /** Whether an owner's answer to a card ask was recorded on the item after `at`. */
 const answeredSince = (item: AgendaItem, at: string): boolean =>
@@ -225,15 +207,11 @@ const answeredSince = (item: AgendaItem, at: string): boolean =>
  * `held` is every card ask the item held when the operation began: one just withdrawn or moved away still wrote (or was
  * repeated by) the line, so the line is read against it too.
  */
-const awaitsOwnAnswer = (item: AgendaItem, held: readonly AgendaCardAsk[]): boolean => {
-  if (item.notice === true || item.ownerAnswer !== undefined) return false;
-  if (item.ask !== undefined && item.ask.kind !== 'open-question') return true;
-  if (repliedToOwnAsk(item)) return false;
-  return itemAsksOwnQuestion(
+const awaitsOwnAnswer = (item: AgendaItem, held: readonly AgendaCardAsk[]): boolean =>
+  protocolAwaitsOwnAnswer(
     { ...item, cardAsks: held },
     held.map(ask => ({ gate: ask.gate, howToTest: ask.howToTest ?? null })),
   );
-};
 
 /**
  * Whether an agenda asks the owner NOTHING BUT its card asks: it carries one still open and nothing of its own to
@@ -282,6 +260,13 @@ const restedOnAnswer = (
 /** Whether the daemon opened this agenda for its card (`card-agenda:`): it holds the card's asks and nothing of the ferret's. */
 const isCardAgenda = (item: Pick<AgendaItem, 'raisedBy' | 'sourceRef'>): boolean =>
   item.raisedBy === 'daemon' && parseCardAgendaReference(item.sourceRef) !== undefined;
+
+/**
+ * Whether the owner has answered the item's OWN question (a choice, or words in reply) while it stood unchanged. Their
+ * answer kept the item in Needs you only because a card ask waited behind it (`ownFirst`); with that ask gone nothing is left
+ * for them, so the item rests on the answer they already gave.
+ */
+const ownQuestionAnswered = (item: AgendaItem): boolean => item.ownerAnswer !== undefined || repliedToOwnAsk(item);
 
 /**
  * Whether the owner or a ferret has said anything on a card's own agenda. A sealed one is read by its seal; one from
@@ -386,7 +371,9 @@ const operate = (
       // A ferret's thread goes back to the turn the ask woke it out of, or rests when the owner's answer to another ask
       // is the last thing on it; one anybody has written on since stays as it is, in Needs you.
       const settled = !asLeft
-        ? told
+        ? ownQuestionAnswered(item) && agendaState(told).state === 'needs-you'
+          ? restedOnAnswer(told, at, item.cardAsks)
+          : told
         : answeredSince(left, target.at)
           ? restedOnAnswer(told, at, item.cardAsks)
           : backTo(told, target.woke);
@@ -397,7 +384,14 @@ const operate = (
     // A sealed card agenda somebody wrote on since stays where it is, as a ferret's thread does: the owner's reply
     // already rested it, and a ferret's answer is in front of the owner.
     if (isCardAgenda(left) && item.cardAsksSeal !== undefined && !asLeft) {
-      return { kind: 'changed', item: told, change: 'refreshed' };
+      return {
+        kind: 'changed',
+        item:
+          ownQuestionAnswered(item) && agendaState(told).state === 'needs-you'
+            ? restedOnAnswer(told, at, item.cardAsks)
+            : told,
+        change: 'refreshed',
+      };
     }
     const holdsAnswers = (left.cardAsks ?? []).length > 0 && (isCardAgenda(left) || asLeft);
     if (holdsAnswers || (isCardAgenda(left) && talkedOn(item))) {
@@ -586,6 +580,9 @@ export const applyCardAsk = (
     ? { ...outcome, item: sealCardAsks(effects.tidy({ ...outcome.item, cardAsksSeal: PLACEHOLDER_SEAL })) }
     : outcome;
 };
+
+/** Whether a card ask is waiting for the owner now: open, and not set aside with Not yet. */
+export const cardAskWaits = (item: AgendaItem): boolean => openCardAsks(item).some(ask => ask.notYet === undefined);
 
 /**
  * Whether an owner's reply on this item leaves it the owner's turn: it carries a card ask still waiting for the owner and

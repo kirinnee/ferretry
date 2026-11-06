@@ -32,7 +32,9 @@ import {
   AGENDA_KIND_LABELS,
   gateStyle,
   gateTypedLabel,
+  awaitsOwnAnswer,
   itemAsksOwnQuestion,
+  repliedToOwnAsk,
   TEST_KIND_LABEL,
   nothingToTryLine,
   openCardAsks,
@@ -368,9 +370,10 @@ const cardAskSwipeMap = (asks: readonly ItemCardAsk[]): SwipeMap => {
  *   (`later`): one thing at a time, one row. It goes first because it is always answerable: the daemon refuses the
  *   item's own Done while a card ask is open.
  * - **An item that asks a question of its OWN** (a ferret's question, a choice, a permission, a review) keeps THAT as the
- *   one ask: its answers answer its question (typed words, or its own buttons), and a try-it on the same card never
- *   shares the block (`ownFirst`). The card ask is named on one plain line, "Next", and is asked here once the question
- *   is answered. (A to-do or a notice closes the item, which the daemon refuses while a card ask is open, so there the
+ *   one ask while it stands unanswered (`awaitsOwnAnswer`, the rule the daemon rests the item by): its answers answer its
+ *   question (typed words, or its own buttons), and a try-it on the same card never shares the block (`ownFirst`). The
+ *   card ask is named on one plain line, "Next", and takes over THIS item's ask the moment the question is answered
+ *   (`ownAnswered`): the old question and its buttons are gone, the item stays in Needs you. (A to-do or a notice closes the item, which the daemon refuses while a card ask is open, so there the
  *   card ask goes first.)
  * - **Any other item with buttons of its own** keeps its question on screen, but its buttons wait (`ownRowHeld`) and
  *   come back once the card ask is answered.
@@ -389,6 +392,8 @@ export interface ItemAskPlan {
   readonly ownLine: boolean;
   /** The item's own buttons wait behind the card ask: drawn again once it is answered. */
   readonly ownRowHeld: boolean;
+  /** The item's own question is answered and its card ask has taken over: the old question and its buttons are not drawn. */
+  readonly ownAnswered: boolean;
   readonly typed: ItemCardAsk | undefined;
   readonly swipes: SwipeMap | undefined;
 }
@@ -399,6 +404,7 @@ const NO_CARD_ASKS: ItemAskPlan = {
   ownFirst: false,
   ownLine: true,
   ownRowHeld: false,
+  ownAnswered: false,
   typed: undefined,
   swipes: undefined,
 };
@@ -425,27 +431,31 @@ export const itemAskPlan = (
   // An item that asks a question of its OWN answers THAT (typed words, a choice, a permission, a review): its answers are
   // never the try-it's Done / Not good. Only a to-do or a notice, which CLOSE the item (refused by the daemon while a card
   // ask is open), let the card ask go first.
-  const own = itemAsksOwnQuestion(item, asks);
-  if (own && !closesItem(item)) {
+  const closes = closesItem(item);
+  if (!closes && awaitsOwnAnswer(item, asks)) {
     return {
       asks: [],
       later: asks,
       ownFirst: true,
       ownLine: true,
       ownRowHeld: false,
+      ownAnswered: false,
       typed: undefined,
       swipes: undefined,
     };
   }
+  // The item's own question WAS answered (its choice, or words in reply) and a card ask has come since: the card ask is
+  // the item's ask now, in the same item, and the old question is not offered again.
+  const ownAnswered = !closes && (item.ownerAnswer !== undefined || repliedToOwnAsk(item));
   // The card ask is asked FIRST: the daemon refuses the item's own Done while one is open, and always takes the ask's
   // answer, so an item's own buttons wait behind it and come back once it is answered (never the other way round).
   const ownRow = hasOwnRow(item);
   // The ONE rule the daemon reads too (`itemAsksOwnQuestion`): the item keeps its line when it asks something the card
   // asks do not, so an item shown asking stays in Needs you after the card ask is answered.
-  const ownLine = itemAsksOwnQuestion(item, asks);
+  const ownLine = !ownAnswered && itemAsksOwnQuestion(item, asks);
   // Typed words answer the card ask only when it is the item's WHOLE ask: no question, field or button of the item's
   // own, and no other ask behind it. Anything the item asks itself keeps the box as its reply.
-  const whole = !ownRow && !ownLine && rest.length === 0;
+  const whole = (!ownRow || ownAnswered) && !ownLine && rest.length === 0;
   const typed = options.typedHost === true && whole && gateTypedLabel(first.gate) !== undefined ? first : undefined;
   return {
     asks: [first],
@@ -453,6 +463,7 @@ export const itemAskPlan = (
     ownFirst: false,
     ownLine,
     ownRowHeld: ownRow,
+    ownAnswered,
     typed,
     swipes: cardAskSwipeMap([first]),
   };

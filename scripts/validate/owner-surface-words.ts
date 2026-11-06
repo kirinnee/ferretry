@@ -43,6 +43,15 @@ export const FORBIDDEN: readonly { readonly name: string; readonly pattern: RegE
     pattern:
       /\bthe card (?:goes back|goes to|stays|stay|comes back|returns|is sent back|is sent|waits|reads your|gets your|moves back)\b/iu,
   },
+  // The board's engine words in what the owner reads: an item is "the gate of &F12", a card is "at the gate" or in "the card's
+  // lane". The owner is asked a question; what the board calls the stop it makes is its own bookkeeping.
+  {
+    name: '"gate"/"lane" jargon',
+    pattern:
+      /\b(?:is|are|was) the gate of\b|\b(?:at|through|past) the gate\b|\bthe card(?:\u2019|')s lane\b|\b(?:in|into|out of|from) the lane\b/iu,
+  },
+  // Narrating a second ask that will come: "It is asked here once you have answered" (the item asks ONE thing).
+  { name: '"it is asked here" narration', pattern: /\b(?:it|this) (?:is|will be) asked here\b/iu },
   // A heading that names a card as the one asking: "Card &F12:", "Card &amp;{id}:", "Card &${id}:".
   { name: '"Card &…:" heading', pattern: /\bcard\s*&(?:amp;)?\s*(?:[A-Z]+\d+|\{\}|\$\{\})\s*:/iu },
 ];
