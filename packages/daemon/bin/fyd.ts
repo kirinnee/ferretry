@@ -1473,6 +1473,8 @@ import { IDLE_DAEMON_BUDGETS } from '../src/lib/performance/budgets.ts';
 import { PerformanceProfiler, sampleIntervalMs } from '../src/lib/performance/profiler.ts';
 import { NO_PERFORMANCE_PROBE, PerformanceRecorder } from '../src/lib/performance/recorder.ts';
 import { teeStackSampler } from '../src/lib/performance/sampler-tee.ts';
+import type { BuiltModule, ModuleLifecycle } from '../src/lib/runtime/modules.ts';
+import type { ModuleHandles } from './modules/seams.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
 import {
   SessionCredentialError,
@@ -2068,8 +2070,19 @@ export interface DaemonWorld {
    * The terminal runtime is passed IN rather than captured, so overriding `terminalRuntime` on a
    * world actually changes what the mounted subsystems get. A factory that closed over the field
    * would silently keep the production one and make the seam a lie.
+   *
+   * AWAITED ONCE by `start`, where it used to call a synchronous factory. `mounted` is what it has always
+   * returned; `modules` is what the extracted feature modules built, which `start` composes with the legacy
+   * inventory and takes the jobs of. It is empty until the first extraction.
    */
   readonly createSubsystems: (
+    /**
+     * The EFFECTIVE world — the one `start` was given, overrides included — so a module built here reads its
+     * replaceable adapters from what the test supplied (`seamsOf`), never from the production defaults.
+     */
+    world: DaemonWorld,
+    /** Where a module registers its releases: the boot's own cleanup list, in the order it is acquired. */
+    lifecycle: ModuleLifecycle,
     storage: DaemonStorage,
     terminals: TerminalRuntimePort,
     /**
@@ -2172,7 +2185,7 @@ export interface DaemonWorld {
     agenda: DaemonConfig['attention'],
     /** Whether a message to a running ferret rides its durable queue (`delivery` block). */
     delivery: DaemonConfig['delivery'],
-  ) => MountedSubsystems;
+  ) => Promise<{ readonly mounted: MountedSubsystems; readonly modules: ModuleHandles }>;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
   /** Wall-clock milliseconds. Injected rather than read from `Date.now()` at the point of use so
@@ -10032,7 +10045,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     browserLogin: createBrowserLoginWorld(paths, async () => await closeAgentBrowsers(), browserPorts),
     fileEvents,
     tmuxControl: tmux,
-    createSubsystems: (
+    createSubsystems: async (
+      // Read by the first extracted module: `seamsOf.<id>(world)` and its releases through `lifecycle`.
+      _world,
+      _lifecycle,
       storage,
       terminals,
       usage,
@@ -14455,7 +14471,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         (error: unknown) =>
           process.stderr.write(`link refresh failed: ${error instanceof Error ? error.message : String(error)}\n`),
       ).start(LINK_REFRESH_INTERVAL_MS);
-      return {
+      const builtSubsystems: MountedSubsystems = {
         ...mounted,
         // Built after the rest because it reads three of them: the session directory, and the project
         // catalogue and worktree service that say which folders are KNOWN roots a project write may use.
@@ -14505,6 +14521,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         catalogMembers: { members: catalogMembers },
         catalogLinks: { links: catalogLinks },
       };
+      return { mounted: builtSubsystems, modules: {} };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: millisecondClock,
@@ -15007,6 +15024,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // whether the boot completes or not.
   cleanups.push(async () => await tunnel.stop());
   progress.enter('mounting subsystems');
+  // What a module is given to register its releases on THIS list, at the moment it acquires them. `releasing` is
+  // the flag the warden's late `arm()` result checks below, declared here so a module can read it too.
+  let releasing = false;
+  const lifecycle: ModuleLifecycle = {
+    onRelease: (_label, release, options) => {
+      if (options?.first === true) cleanups.unshift(release);
+      else cleanups.push(release);
+    },
+    releasing: () => releasing,
+  };
   // Built here rather than inside `createSubsystems` because it needs the storage this boot opened,
   // and threading it through the same seam as the other host adapters is what lets a test replace
   // the one thing a revive cannot do twice on a developer's machine: kill and respawn a real pane. The
@@ -15015,7 +15042,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     opened.storage,
     async id => await world.createSessionLaunch(opened.storage).relaunch(id),
   );
-  const createdSubsystems = world.createSubsystems(
+  const { mounted: createdSubsystems, modules } = await world.createSubsystems(
+    world,
+    lifecycle,
     opened.storage,
     world.terminalRuntime,
     usage,
@@ -15147,7 +15176,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // its only member; recognition moved into the browser and the seam went with it.
   // Hoisted, because the relay carrier below serves this exact dispatcher rather than a second one:
   // every route a browser can reach directly it can reach relayed, on one authorization boundary.
-  const dispatcher = createMountedDispatcher(base, subsystems);
+  const builtModules: readonly BuiltModule<unknown, object>[] = Object.values(modules);
+  const dispatcher = createMountedDispatcher(base, subsystems, builtModules);
   // Hoisted for the SAME reason `dispatcher` above is: the relay carriers serve this exact socket
   // table rather than a second one. A stream a browser opens over a rendezvous passes the
   // authorization boundary, the ticket-free credential rule and the per-capability guard that the
@@ -15168,7 +15198,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   );
   if ('refusal' in direct) world.notices.state(`direct sessions unavailable — ${direct.refusal}`);
   else openWebRtcSession = direct.openSession;
-  const socketDispatcher = createMountedSocketDispatcher(base, subsystems, 'route' in direct ? [direct.route] : []);
+  const socketDispatcher = createMountedSocketDispatcher(
+    base,
+    subsystems,
+    'route' in direct ? [direct.route] : [],
+    builtModules,
+  );
   // Every route is served from here on, on the address bound at the top of this boot. Before this
   // line the staged surface answered `/healthz` alone; after it, every request reaches the very
   // dispatchers a direct bind would have served.
@@ -15541,7 +15576,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * disarm that arrives after shutdown began is run at once rather than registered too late to be.
    */
   progress.enter('arming the warden');
-  let releasing = false;
   cleanups.push(() => {
     releasing = true;
   });

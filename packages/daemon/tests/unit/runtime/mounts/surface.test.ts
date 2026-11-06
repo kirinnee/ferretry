@@ -17,6 +17,13 @@ import { agentIn, CREDENTIALS, grantSubsystem, human } from './support.ts';
 
 import { base, subsystems } from './surface-world.ts';
 
+/**
+ * The canonical order every list of mounted routes is compared in: sorted by `METHOD path`, requests and sockets
+ * in separate lists. Mount order is an implementation detail (the dispatcher orders by specificity), so no
+ * expectation here names it, and an extraction never has to move a line in a shared list. A copy: duplicates stay.
+ */
+const canonical = (lines: readonly string[]): readonly string[] => [...lines].sort();
+
 /** The daemon package, read by the route declaration inventory check. */
 const DAEMON_ROOT = new URL('../../../../', import.meta.url).pathname.replace(/\/$/u, '');
 
@@ -123,14 +130,16 @@ describe('the mounted daemon surface', () => {
     // It gained the tunnel read too: whether a machine has a tunnel is not a secret (§15).
     should(minima).deepEqual({ none: 7, authenticated: 11, operator: operatorRoutes, 'admin-token': 1 });
     should(
-      routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
-    ).deepEqual([
-      'POST /v1/agent/config',
-      'POST /v1/system/open-url',
-      'POST /v1/agent/tools',
-      'POST /v1/agent/lessons',
-      'GET /v1/sessions/:sessionId/attach',
-    ]);
+      canonical(routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`)),
+    ).deepEqual(
+      canonical([
+        'POST /v1/agent/config',
+        'POST /v1/system/open-url',
+        'POST /v1/agent/tools',
+        'POST /v1/agent/lessons',
+        'GET /v1/sessions/:sessionId/attach',
+      ]),
+    );
   });
 
   it('should serve the base feeds and every mounted subsystem from one table', () => {
@@ -138,507 +147,509 @@ describe('the mounted daemon surface', () => {
     const routes = mountedDaemonRoutes(base, subsystems()).map(route => `${route.method} ${route.path}`);
 
     // Assert
-    should(routes).deepEqual([
-      'GET /healthz',
-      'GET /usage',
-      'GET /v1/usage',
-      'GET /metrics',
-      'POST /v1/pair/code',
-      'GET /v1/pair/code/:pairingId',
-      'DELETE /v1/pair/code/:pairingId',
-      // This daemon's own id (the owner's CLI puts it in a link), then who may reach this machine, and one entry's
-      // removal. NOTE WHAT IS ABSENT: there is no route that returns a device token or its digest — the list is a
-      // projection with no field for one.
-      'GET /v1/pair/identity',
-      'GET /v1/pair/devices',
-      'DELETE /v1/pair/devices/:deviceId',
-      // One device's own grants (B5): widen at the machine, or from a device holding what it grants.
-      'PATCH /v1/pair/devices/:deviceId/grants',
-      // An agenda item the owner opened: its alerts come down on their other devices (names no device, returns none).
-      'POST /v1/push/seen',
-      // Which browsers this daemon may WAKE. NOTE WHAT IS ABSENT: no route returns a push endpoint or
-      // its key halves — that triple is a bearer capability to buzz somebody's phone, and the enrolment
-      // list is a projection with no field for one.
-      'GET /v1/push/vapid',
-      'GET /v1/push/subscriptions',
-      'POST /v1/push/subscriptions',
-      'DELETE /v1/push/subscriptions/:pushId',
-      // The passkey step-up. NOTE WHAT IS ABSENT: no route returns a challenge after it is issued, a
-      // public key or a held step-up — the daemon remembers the step-up, and the browser holds nothing.
-      'GET /v1/passkeys',
-      'POST /v1/passkeys/options',
-      'POST /v1/passkeys',
-      'POST /v1/step-up/options',
-      'POST /v1/step-up',
-      // A confirmation on opening (zero-trust B6).
-      'POST /v1/unlock/options',
-      'POST /v1/unlock',
-      // The owner's recovery path: a browser is never at the machine (B4), so only `fy passkey window`
-      // can re-open a device's passkey window. Without it a device past its first window is locked out.
-      'POST /v1/passkeys/registration-window',
-      // The machine's security settings the step-up and presence are tuned by (zero-trust B6).
-      'GET /v1/security',
-      'PATCH /v1/security',
-      // The grant surface. NOTE WHAT IS ABSENT: there is no password to set and nothing to unlock — a
-      // governed change is held behind the passkey step-up, so these three are the whole surface.
-      'GET /v1/grants',
-      'GET /v1/grants/audit',
-      'PATCH /v1/grants',
-      'GET /v1/audit',
-      // The carrier refresh, beside the pairing exchange whose second half it is. NOTE WHAT IS ABSENT:
-      // there is no POST, PUT or DELETE here — a device may read where this daemon can be reached and
-      // can never re-point it, because that is a change to the operator's own document.
-      'GET /v1/carriers',
-      // The tunnel switch: whether this machine runs one, and on or off without a restart. NOTE WHAT IS
-      // ABSENT: no address in either direction — a device may switch the tunnel, never re-point it.
-      'GET /v1/tunnel',
-      'PUT /v1/tunnel',
-      // The peer-to-peer carrier's signalling, asked for inside a session that already reached the daemon.
-      'POST /v1/webrtc/offer',
-      'GET /v1/health',
-      'GET /v1/doctor',
-      'POST /v1/diagnostics/profile',
-      'GET /v1/diagnostics/profile/:id',
-      // The account model's credentials (docs/design/account-model.md §7). NOTE WHAT IS ABSENT: no
-      // route returns a token, a refresh token or a digest — only status and usage — and there is no
-      // sign-out or label route, because both are reviewed changes.
-      'GET /v1/fleet/credentials',
-      'POST /v1/fleet/credentials/:credentialId/check',
-      // Environment logins: the preset catalogue a login is made from, and a login's Test, which spends
-      // its key once through the outbound holder and answers a code — never the key, never the reply.
-      'POST /v1/fleet/credentials/:credentialId/test',
-      'GET /v1/fleet/presets',
-      // The account model's catalogue and its reviewed changes. Every write is a staged change and its
-      // explicit apply; there is no route that edits the configuration directly.
-      'GET /v1/fleet/machine',
-      'GET /v1/fleet/components',
-      'GET /v1/fleet/profiles',
-      'POST /v1/fleet/profiles/preview',
-      'GET /v1/fleet/runtimes',
-      'POST /v1/fleet/proposals',
-      'GET /v1/fleet/proposals/:proposalId',
-      'POST /v1/fleet/proposals/:proposalId/apply',
-      // A machine's setup. The import and the clone are reviewed changes above; these are the scan they
-      // start from, the export a clone carries, and the tool install.
-      'GET /v1/fleet/setup/scan',
-      'POST /v1/fleet/machine/tools/install',
-      'GET /v1/fleet/export',
-      'POST /v1/fleet/clone/review',
-      'POST /v1/fleet/clone/forget',
-      'POST /v1/fleet/clone/keys',
-      // Driving a harness’s own sign-in. NOTE WHAT IS ABSENT: no route here accepts or returns a
-      // provider token. Two values go out — a verification URL, and for Codex a device code — and one
-      // short-lived authorization code comes in, straight to the harness child’s stdin. Every route here is
-      // `fleet.configure`, because the risk is login substitution rather than disclosure.
-      'POST /v1/fleet/login',
-      'GET /v1/fleet/login/:flowId',
-      'POST /v1/fleet/login/:flowId',
-      'DELETE /v1/fleet/login/:flowId',
-      // Signing in to a remote MCP server (docs/mcp-oauth.md). NOTE WHAT IS ABSENT: no route returns a
-      // token. The daemon is the OAuth client and files them in the secret store; an authorization URL goes
-      // out and one callback address comes in, in a body.
-      'GET /v1/fleet/mcp-auth',
-      'POST /v1/fleet/mcp-auth/:component',
-      'DELETE /v1/fleet/mcp-auth/:component',
-      'POST /v1/fleet/mcp-auth/flows/:flowId',
-      'DELETE /v1/fleet/mcp-auth/flows/:flowId',
-      'GET /v1/mcp',
-      'POST /v1/mcp/check',
-      'GET /v1/sessions/:sessionId/mcp/servers',
-      // Resource limits, beside the fleet they bound. NOTE WHAT IS ABSENT: there is no POST and no
-      // DELETE — an operator narrows or widens one saved document, and nothing here creates or
-      // destroys a slice, because the units are transient and belong to the launches that made them.
-      'GET /v1/cgroups/config',
-      // The configuration files (docs/config-files.md): what is in effect, one file, an edit and the owner's
-      // confirmation of one that loosens. NOTE WHAT IS ABSENT: no route deletes a file or edits the accepted
-      // record, and an agent's own door is the privileged `POST /v1/agent/config` below.
-      'GET /v1/config/status',
-      'GET /v1/config/file',
-      'PUT /v1/config/file',
-      'POST /v1/config/confirm',
-      'POST /v1/agent/config',
-      // Imported harness history is deliberately not a session route: it can be read but has no
-      // daemon journal, lifecycle, pane, or resume/send control.
-      'GET /v1/imports/history',
-      'GET /v1/imports/history/:importId',
-      // Existing conversations kept as ferrets: listed and searched, then adopted into sessions that
-      // RESUME them, with the last few exchanges of one on request. All are fleet.configure; none
-      // returns a whole transcript or a file path.
-      'GET /v1/imports/conversations',
-      'GET /v1/imports/conversations/:harness/:conversationId/preview',
-      'POST /v1/imports/conversations/adopt',
-      'GET /v1/gc',
-      'POST /v1/gc',
-      // Handing a web address to the OS opener. Operator + privileged arrival: a remote caller is refused.
-      'POST /v1/system/open-url',
-      // The secret store. NOTE WHAT IS ABSENT: there is no `GET /v1/secrets/:name`, and this list is
-      // the proof of it — no route returns a secret value. `use` is how a value is spent instead.
-      'GET /v1/secrets',
-      'POST /v1/secrets/use',
-      'POST /v1/secrets',
-      'DELETE /v1/secrets/:name',
-      // Copying to another machine: an offer, ciphertext only the target opens, and the names filed.
-      'POST /v1/secrets/imports',
-      'POST /v1/secrets/imports/:importId',
-      'POST /v1/secrets/exports/:importId',
-      // Saved logins: names, labels and flags out; values only ever in.
-      'GET /v1/secrets/logins',
-      'GET /v1/secrets/logins/hint',
-      'PUT /v1/secrets/logins/:id',
-      'POST /v1/secrets/logins/:id/recipe/proposals/:proposalId',
-      'POST /v1/secrets/logins/:id/rename',
-      'DELETE /v1/secrets/logins/:id',
-      'GET /v1/accounts',
-      'GET /v1/accounts/hint',
-      'GET /v1/accounts/look-alike',
-      'PUT /v1/accounts/sign-ins/:signIn',
-      'DELETE /v1/accounts/sign-ins/:signIn',
-      'POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId',
-      'PUT /v1/accounts/defaults',
-      'PUT /v1/accounts/:id',
-      'POST /v1/accounts/:id/rename',
-      'DELETE /v1/accounts/:id',
-      'POST /v1/accounts/:id/sign-ins',
-      'POST /v1/accounts/:id/merge',
-      'POST /v1/accounts/:id/apart',
-      // 2FA keys: a seed is staged, then saved only with a passkey bound to its stage; nothing answers one.
-      'POST /v1/accounts/:id/factors/seed',
-      'GET /v1/accounts/seed-stages/:stage',
-      'GET /v1/accounts/:id/factors/seed/:stage',
-      'POST /v1/accounts/:id/factors/seed/:stage/commit',
-      'POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app',
-      'DELETE /v1/accounts/:id/factors/seed/:stage',
-      'POST /v1/accounts/:id/factors',
-      'PATCH /v1/accounts/:id/factors/:factor',
-      'DELETE /v1/accounts/:id/factors/:factor',
-      // The catalogs this machine publishes (docs/catalogs.md): every one is `sharing`/`use`.
-      'GET /v1/catalogs',
-      'GET /v1/catalog-items',
-      'GET /v1/catalog-items/:itemId',
-      'GET /v1/catalog-items/:itemId/versions/:version',
-      'GET /v1/catalog-items/:itemId/changes',
-      'POST /v1/catalog-items/:itemId/versions/preview',
-      'POST /v1/catalog-items/:itemId/versions',
-      'PUT /v1/catalog-items/:itemId/current',
-      'PATCH /v1/catalog-items/:itemId/versions/:version',
-      'POST /v1/catalogs',
-      'PATCH /v1/catalogs/:id',
-      'DELETE /v1/catalogs/:id',
-      'POST /v1/catalogs/:id/items/preview',
-      'POST /v1/catalogs/:id/items',
-      'POST /v1/catalogs/:id/items/:itemId/versions',
-      'DELETE /v1/catalogs/:id/items/:itemId',
-      'POST /v1/catalog-items/quick-add',
-      'POST /v1/catalog-items/quick-add/undo',
-      'POST /v1/catalogs/:id/export',
-      'POST /v1/catalog-shares',
-      'PUT /v1/catalog-shares/:shareId/new-passkey',
-      'DELETE /v1/catalog-shares/:shareId/new-passkey',
-      'GET /v1/catalog-shares',
-      'DELETE /v1/catalog-shares/:shareId',
-      'GET /v1/catalog-members',
-      'PATCH /v1/catalog-members/:memberId',
-      'DELETE /v1/catalog-members/:memberId',
-      'DELETE /v1/catalog-members/:memberId/keys/:keyId',
-      'DELETE /v1/catalog-members/:memberId/catalogs/:catalogId',
-      'GET /v1/catalog-links/store',
-      'POST /v1/catalog-links/preview',
-      'GET /v1/catalog-links',
-      'POST /v1/catalog-links',
-      'GET /v1/catalog-links/:linkId',
-      'PUT /v1/catalog-links/:linkId/version',
-      'PATCH /v1/catalog-links/:linkId',
-      'POST /v1/catalog-links/:linkId/copy',
-      'DELETE /v1/catalog-links/:linkId',
-      'GET /v1/sessions',
-      'GET /v1/sessions/:sessionId',
-      'GET /v1/archived-sessions',
-      'GET /v1/projects',
-      'POST /v1/projects',
-      'GET /v1/sessions/:sessionId/skills',
-      'GET /v1/sessions/:sessionId/skills/inventory',
-      'GET /v1/skills',
-      'GET /v1/skills/file',
-      'GET /v1/board/projects',
-      'GET /v1/board/projects/:projectId/lanes',
-      'POST /v1/board/projects/:projectId/lanes',
-      'GET /v1/board/projects/:projectId/switch',
-      'PUT /v1/board/projects/:projectId/switch',
-      'GET /v1/worktrees/removal',
-      'POST /v1/worktrees/remove',
-      'GET /v1/worktrees',
-      'POST /v1/worktrees',
-      'POST /v1/sessions',
-      'POST /v1/sessions/:sessionId/stop',
-      'GET /v1/sessions/by-request/:requestId',
-      'POST /v1/sessions/:sessionId/revoke-credential',
-      'POST /v1/sessions/:sessionId/resume',
-      'GET /v1/sessions/:sessionId/relaunch-settings',
-      'POST /v1/sessions/:sessionId/conversion-preview',
-      'POST /v1/sessions/:sessionId/migrate',
-      'POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs',
-      'POST /v1/restarts',
-      'GET /v1/restarts',
-      'DELETE /v1/restarts',
-      'POST /v1/sessions/:sessionId/handover',
-      'GET /v1/sessions/:sessionId/handover',
-      'POST /v1/sessions/:sessionId/handover/cancel',
-      'POST /v1/sessions/:sessionId/fork',
-      'GET /v1/sessions/:sessionId/runtime-models',
-      'POST /v1/sessions/:sessionId/runtime',
-      'POST /v1/sessions/:sessionId/signal',
-      'POST /v1/sessions/:sessionId/rename',
-      'POST /v1/sessions/:sessionId/pin',
-      'POST /v1/sessions/:sessionId/unpin',
-      'PATCH /v1/sessions/:sessionId/hypermedia',
-      'GET /v1/sessions/:sessionId/agenda-mode',
-      'PATCH /v1/sessions/:sessionId/agenda-mode',
-      'GET /v1/sessions/:sessionId/compact-at',
-      'PATCH /v1/sessions/:sessionId/compact-at',
-      'GET /v1/pack',
-      'GET /v1/pack/inventory',
-      'POST /v1/pack/routing/clean-up',
-      'GET /v1/pack/routing/jobs/:jobId',
-      'POST /v1/pack/routing/accept',
-      'POST /v1/pack/routing/undo',
-      'POST /v1/pack/recommend',
-      'POST /v1/pack/new',
-      'GET /v1/sessions/:sessionId/result',
-      'GET /v1/sessions/:sessionId/subtree',
-      'PATCH /v1/sessions/:sessionId/pack',
-      'POST /v1/sessions/:sessionId/mcp/project/preview',
-      'POST /v1/sessions/:sessionId/mcp/login/preview',
-      'POST /v1/sessions/:sessionId/mcp/project',
-      'POST /v1/sessions/:sessionId/mcp/login',
-      'GET /v1/sessions/:sessionId/mcp',
-      'POST /v1/catalog-installs/project/preview',
-      'POST /v1/catalog-installs/runtime/preview',
-      'POST /v1/catalog-installs/project',
-      'POST /v1/catalog-installs/runtime',
-      'GET /v1/catalog-installs',
-      'DELETE /v1/catalog-installs/project/:installId',
-      'DELETE /v1/catalog-installs/runtime/:installId',
-      'PATCH /v1/catalog-installs/project/:installId',
-      'PATCH /v1/catalog-installs/runtime/:installId',
-      'POST /v1/skill-installs/local/project/preview',
-      'POST /v1/skill-installs/local/runtime/preview',
-      'POST /v1/skill-installs/local/project',
-      'POST /v1/skill-installs/local/runtime',
-      'GET /v1/skill-installs/local',
-      'DELETE /v1/skill-installs/local/project/:installId',
-      'DELETE /v1/skill-installs/local/runtime/:installId',
-      'POST /v1/sessions/:sessionId/send',
-      'POST /v1/sessions/:sessionId/interrupt',
-      'GET /v1/sessions/:sessionId/sends',
-      'GET /v1/sessions/:sessionId/queue',
-      'PATCH /v1/sessions/:sessionId/queue/:messageId',
-      'DELETE /v1/sessions/:sessionId/queue/:messageId',
-      'GET /v1/sessions/:sessionId/sends/:sendId',
-      'GET /v1/sessions/:sessionId/handoffs/:name',
-      'POST /v1/sessions/:sessionId/sends/:sendId/retry',
-      'POST /v1/sessions/:sessionId/sends/:sendId/cancel',
-      'POST /v1/sessions/:sessionId/sends/:sendId/enter',
-      'POST /v1/sessions/:sessionId/composer',
-      'POST /v1/sessions/:sessionId/answer',
-      'POST /v1/sessions/:sessionId/attachments',
-      'GET /v1/sessions/:sessionId/attachments/:attachmentId',
-      'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
-      'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
-      'GET /v1/sessions/:sessionId/agenda',
-      'POST /v1/sessions/:sessionId/agenda',
-      'GET /v1/sessions/:sessionId/agenda/:id/conversation',
-      'GET /v1/sessions/:sessionId/agenda/:id/versions',
-      'GET /v1/sessions/:sessionId/agenda/:id/versions/:version',
-      'PUT /v1/sessions/:sessionId/agenda/:id/seen',
-      'POST /v1/sessions/:sessionId/agenda/replies',
-      'GET /v1/sessions/:sessionId/attention',
-      'POST /v1/sessions/:sessionId/attention',
-      'POST /v1/sessions/:sessionId/attention/replies',
-      'POST /v1/sessions/:sessionId/notify',
-      'POST /v1/agenda/clear-agents',
-      'GET /v1/agenda/open',
-      'GET /v1/machine/agenda',
-      'POST /v1/machine/agenda',
-      'GET /v1/sessions/:sessionId/pins',
-      'POST /v1/sessions/:sessionId/pins',
-      'POST /v1/renders',
-      'GET /v1/renders/:id/meta',
-      'GET /v1/renders/:id',
-      'GET /v1/sessions/:sessionId/shared-draft',
-      'POST /v1/sessions/:sessionId/shared-draft',
-      'GET /v1/tasks',
-      'GET /v1/sessions/:sessionId/tasks',
-      'GET /v1/board',
-      'GET /v1/board/ids',
-      'GET /v1/board/merge-gate',
-      'POST /v1/board/tasks',
-      'POST /v1/board/skip',
-      'GET /v1/board/tasks',
-      'POST /v1/board/import',
-      'GET /v1/board/tasks/:taskId',
-      'POST /v1/board/tasks/:taskId',
-      'POST /v1/board/tasks/:taskId/start',
-      'GET /v1/search',
-      'POST /v1/search/related',
-      'POST /v1/tidy/plan',
-      'GET /v1/analytics',
-      'GET /v1/analytics/pricing',
-      'PATCH /v1/analytics/pricing',
-      'POST /v1/analytics/pricing/sync/preview',
-      'POST /v1/analytics/pricing/sync/apply',
-      // The agent tools. The agent's own route names no session: its session is the credential it
-      // presents. A person's live under `…/surfaces`, where nothing else can shadow them.
-      'POST /v1/agent/tools',
-      'POST /v1/sessions/:sessionId/surfaces/terminals/tools',
-      'POST /v1/sessions/:sessionId/surfaces/terminals/control',
-      'GET /v1/sessions/:sessionId/surfaces/terminals/control',
-      'POST /v1/sessions/:sessionId/surfaces/browser/tools',
-      'POST /v1/sessions/:sessionId/surfaces/browser/control',
-      'GET /v1/sessions/:sessionId/surfaces/browser/control',
-      // The owner's input requests: the lists, then deliver and cancel (the agent raises through its own tools route).
-      'GET /v1/input-requests',
-      'GET /v1/sessions/:sessionId/input-requests',
-      'GET /v1/sessions/:sessionId/input-requests/:requestId/shot',
-      'POST /v1/sessions/:sessionId/input-requests/:requestId/deliver',
-      'GET /v1/sessions/:sessionId/input-quarantines',
-      'POST /v1/sessions/:sessionId/input-quarantines/:key/end',
-      'POST /v1/sessions/:sessionId/input-requests/:requestId/cancel',
-      // Approving a sign-in on the phone: read the cards, and "Not me" (no route sets one moved-on).
-      'GET /v1/phone-approvals',
-      'GET /v1/sessions/:sessionId/phone-approvals/:approvalId',
-      'POST /v1/sessions/:sessionId/phone-approvals/:approvalId/refuse',
-      // Secure copy: a session's copies by description, the owner's pre-approval rules and the ferrets' paste plans.
-      'GET /v1/sessions/:sessionId/copies',
-      'GET /v1/copy-rules',
-      'GET /v1/copy-rules/settings',
-      'PUT /v1/copy-rules/settings',
-      'POST /v1/copy-rules/settings/stages',
-      'POST /v1/copy-rules/settings/stages/:stage/commit',
-      'POST /v1/copy-rules',
-      'POST /v1/copy-rules/stages',
-      'GET /v1/copy-rules/stages',
-      'GET /v1/copy-rules/stages/:stage',
-      'POST /v1/copy-rules/stages/:stage/commit',
-      'POST /v1/copy-rules/stages/:stage/bind',
-      'DELETE /v1/copy-rules/stages/:stage',
-      'DELETE /v1/copy-rules/:ruleId',
-      'GET /v1/copy-plans',
-      'POST /v1/sessions/:sessionId/copy-plans/:planId/approve',
-      // Task plans: read them, stage a selection (a sign-in needs its passkey to commit), confirm it in the app, revoke.
-      'GET /v1/task-plans',
-      'GET /v1/sessions/:sessionId/task-plans/:planId',
-      'POST /v1/sessions/:sessionId/task-plans/:planId/approval',
-      'GET /v1/sessions/:sessionId/task-plans/:planId/approval/:stage',
-      'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/commit',
-      'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app',
-      'DELETE /v1/sessions/:sessionId/task-plans/:planId/approval/:stage',
-      'POST /v1/sessions/:sessionId/task-plans/:planId/revoke',
-      // Standing sign-in rules: read them, stage one (it commits only with a passkey over its bytes), narrow, revoke.
-      'GET /v1/sign-in-rules/suggestions',
-      'DELETE /v1/sign-in-rules/suggestions/:sid',
-      'GET /v1/sign-in-rules',
-      'GET /v1/sign-in-rules/eligibility',
-      'POST /v1/sign-in-rules/stages',
-      'GET /v1/sign-in-rules/stages/:stage',
-      'POST /v1/sign-in-rules/stages/:stage/confirm-in-app',
-      'POST /v1/sign-in-rules/stages/:stage/bind',
-      'POST /v1/sign-in-rules/stages/:stage/commit',
-      'DELETE /v1/sign-in-rules/stages/:stage',
-      'POST /v1/sign-in-rules/:id/narrow',
-      'DELETE /v1/sign-in-rules/:id',
-      'POST /v1/accounts/:id/sign-in-rules/revoke',
-      'GET /v1/terminals',
-      'POST /v1/terminals/close-finished',
-      'GET /v1/sessions/:sessionId/terminals',
-      'POST /v1/sessions/:sessionId/terminals',
-      'GET /v1/sessions/:sessionId/terminals/:terminalId',
-      'PATCH /v1/sessions/:sessionId/terminals/:terminalId',
-      'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
-      // The human login window, and the per-session automation that is now genuinely served: the
-      // browser session runtime composes the worker and its transport into a production
-      // `BrowserViewerHost`, so the read and the action are real; its viewer opens inside a session.
-      'GET /v1/browser/login',
-      'POST /v1/browser/login',
-      'GET /v1/sessions/:sessionId/browser',
-      'POST /v1/sessions/:sessionId/browser',
-      'GET /v1/browser/state',
-      'POST /v1/browser/proxy/test',
-      'GET /v1/names',
-      'GET /v1/learning/status',
-      'GET /v1/learning/config',
-      'GET /v1/learning/proposals',
-      'POST /v1/learning/proposals/:id',
-      'GET /v1/learning/proposals/:id/patch',
-      'POST /v1/learning/run',
-      'PATCH /v1/learning/config',
-      'GET /v1/learning/proposals/:id/apply-preview',
-      'POST /v1/learning/proposals/:id/apply',
-      'GET /v1/learning/sessions',
-      'PATCH /v1/sessions/:sessionId/learning',
-      'POST /v1/learning/scan/estimate',
-      'POST /v1/learning/scan/cancel',
-      'GET /v1/learning/scan',
-      'POST /v1/learning/scan',
-      'POST /v1/agent/lessons',
-      'POST /v1/recommend',
-      // Dictation enhancement: the daemon's one remaining speech-to-text route, and a fixed literal
-      // under a prefix no other subsystem uses. Recognition happens in the browser.
-      'POST /v1/stt/enhance',
-      // Speed-up keys: which are set (by name), and a Test that spends one once. No key on either.
-      'GET /v1/speedups',
-      'POST /v1/speedups/:provider/test',
-      // The model catalogs: the list, a check for a newer published catalog, and a read of the models Ollama
-      // has installed on this machine. Fixed literals, no other user.
-      'GET /v1/models',
-      'POST /v1/models/refresh',
-      'POST /v1/models/local/refresh',
-      // Updating this daemon: the view, starting an update, and the automatic-install setting.
-      'GET /v1/daemon/update',
-      'POST /v1/daemon/update',
-      'PATCH /v1/daemon/update/settings',
-      // Updating the agent CLIs: the view, and starting one harness's update.
-      'GET /v1/harnesses/update',
-      'POST /v1/harnesses/update',
-      // The working-tree read. Its four deeper paths come before the one-segment `fs`, which is what
-      // keeps `fs/file` reachable at all: the router matches in registration order.
-      'GET /v1/sessions/:sessionId/fs/file',
-      'GET /v1/sessions/:sessionId/fs/index',
-      'GET /v1/sessions/:sessionId/fs/changes',
-      'GET /v1/sessions/:sessionId/fs/diff',
-      'GET /v1/sessions/:sessionId/fs',
-      // Fleet supervision. Every path is under `/v1/warden`, which no other subsystem uses, and the
-      // subsystem also owns the sweep TIMER — a supervision loop with no route would be invisible to
-      // the reachability gate, which is how a background subsystem ships unmounted.
-      'GET /v1/warden/status',
-      'GET /v1/warden/verdicts',
-      'GET /v1/warden/report',
-      'POST /v1/warden/run',
-      'GET /v1/warden/agenda',
-      'GET /v1/warden/attention',
-      'POST /v1/warden/investigate',
-      'POST /v1/warden/leave',
-      'GET /v1/warden/config',
-      'PATCH /v1/warden/config',
-      // The operator reads: the history the daemon recorded, the screen the agent is looking at, and
-      // the transcript it wrote. Every one of these answered `unknown_route` while the protocol
-      // client carried a method for it — see the mount's own header.
-      'GET /v1/sessions/:sessionId/events',
-      'GET /v1/sessions/:sessionId/snapshot',
-      'GET /v1/sessions/:sessionId/logs',
-      'GET /v1/sessions/:sessionId/log-page',
-      'GET /v1/sessions/:sessionId/log-search',
-      'GET /v1/sessions/:sessionId/messages',
-      'GET /v1/sessions/:sessionId/transcript-images/:handle',
-      // The attach proof. It sits with the operator reads but authorizes a local process action
-      // rather than answering a question, which is why it is its own mount and its own literal.
-      'GET /v1/sessions/:sessionId/attach',
-      'POST /v1/sessions/:sessionId/console/input',
-      'GET /v1/sessions/:sessionId/processes',
-      'GET /v1/sessions/:sessionId/processes/:processId/output',
-      'POST /v1/sessions/:sessionId/processes/:processId/stop',
-      'POST /v1/sessions/:sessionId/permission',
-      'POST /v1/sessions/:sessionId/dialog',
-    ]);
+    should(canonical(routes)).deepEqual(
+      canonical([
+        'GET /healthz',
+        'GET /usage',
+        'GET /v1/usage',
+        'GET /metrics',
+        'POST /v1/pair/code',
+        'GET /v1/pair/code/:pairingId',
+        'DELETE /v1/pair/code/:pairingId',
+        // This daemon's own id (the owner's CLI puts it in a link), then who may reach this machine, and one entry's
+        // removal. NOTE WHAT IS ABSENT: there is no route that returns a device token or its digest — the list is a
+        // projection with no field for one.
+        'GET /v1/pair/identity',
+        'GET /v1/pair/devices',
+        'DELETE /v1/pair/devices/:deviceId',
+        // One device's own grants (B5): widen at the machine, or from a device holding what it grants.
+        'PATCH /v1/pair/devices/:deviceId/grants',
+        // An agenda item the owner opened: its alerts come down on their other devices (names no device, returns none).
+        'POST /v1/push/seen',
+        // Which browsers this daemon may WAKE. NOTE WHAT IS ABSENT: no route returns a push endpoint or
+        // its key halves — that triple is a bearer capability to buzz somebody's phone, and the enrolment
+        // list is a projection with no field for one.
+        'GET /v1/push/vapid',
+        'GET /v1/push/subscriptions',
+        'POST /v1/push/subscriptions',
+        'DELETE /v1/push/subscriptions/:pushId',
+        // The passkey step-up. NOTE WHAT IS ABSENT: no route returns a challenge after it is issued, a
+        // public key or a held step-up — the daemon remembers the step-up, and the browser holds nothing.
+        'GET /v1/passkeys',
+        'POST /v1/passkeys/options',
+        'POST /v1/passkeys',
+        'POST /v1/step-up/options',
+        'POST /v1/step-up',
+        // A confirmation on opening (zero-trust B6).
+        'POST /v1/unlock/options',
+        'POST /v1/unlock',
+        // The owner's recovery path: a browser is never at the machine (B4), so only `fy passkey window`
+        // can re-open a device's passkey window. Without it a device past its first window is locked out.
+        'POST /v1/passkeys/registration-window',
+        // The machine's security settings the step-up and presence are tuned by (zero-trust B6).
+        'GET /v1/security',
+        'PATCH /v1/security',
+        // The grant surface. NOTE WHAT IS ABSENT: there is no password to set and nothing to unlock — a
+        // governed change is held behind the passkey step-up, so these three are the whole surface.
+        'GET /v1/grants',
+        'GET /v1/grants/audit',
+        'PATCH /v1/grants',
+        'GET /v1/audit',
+        // The carrier refresh, beside the pairing exchange whose second half it is. NOTE WHAT IS ABSENT:
+        // there is no POST, PUT or DELETE here — a device may read where this daemon can be reached and
+        // can never re-point it, because that is a change to the operator's own document.
+        'GET /v1/carriers',
+        // The tunnel switch: whether this machine runs one, and on or off without a restart. NOTE WHAT IS
+        // ABSENT: no address in either direction — a device may switch the tunnel, never re-point it.
+        'GET /v1/tunnel',
+        'PUT /v1/tunnel',
+        // The peer-to-peer carrier's signalling, asked for inside a session that already reached the daemon.
+        'POST /v1/webrtc/offer',
+        'GET /v1/health',
+        'GET /v1/doctor',
+        'POST /v1/diagnostics/profile',
+        'GET /v1/diagnostics/profile/:id',
+        // The account model's credentials (docs/design/account-model.md §7). NOTE WHAT IS ABSENT: no
+        // route returns a token, a refresh token or a digest — only status and usage — and there is no
+        // sign-out or label route, because both are reviewed changes.
+        'GET /v1/fleet/credentials',
+        'POST /v1/fleet/credentials/:credentialId/check',
+        // Environment logins: the preset catalogue a login is made from, and a login's Test, which spends
+        // its key once through the outbound holder and answers a code — never the key, never the reply.
+        'POST /v1/fleet/credentials/:credentialId/test',
+        'GET /v1/fleet/presets',
+        // The account model's catalogue and its reviewed changes. Every write is a staged change and its
+        // explicit apply; there is no route that edits the configuration directly.
+        'GET /v1/fleet/machine',
+        'GET /v1/fleet/components',
+        'GET /v1/fleet/profiles',
+        'POST /v1/fleet/profiles/preview',
+        'GET /v1/fleet/runtimes',
+        'POST /v1/fleet/proposals',
+        'GET /v1/fleet/proposals/:proposalId',
+        'POST /v1/fleet/proposals/:proposalId/apply',
+        // A machine's setup. The import and the clone are reviewed changes above; these are the scan they
+        // start from, the export a clone carries, and the tool install.
+        'GET /v1/fleet/setup/scan',
+        'POST /v1/fleet/machine/tools/install',
+        'GET /v1/fleet/export',
+        'POST /v1/fleet/clone/review',
+        'POST /v1/fleet/clone/forget',
+        'POST /v1/fleet/clone/keys',
+        // Driving a harness’s own sign-in. NOTE WHAT IS ABSENT: no route here accepts or returns a
+        // provider token. Two values go out — a verification URL, and for Codex a device code — and one
+        // short-lived authorization code comes in, straight to the harness child’s stdin. Every route here is
+        // `fleet.configure`, because the risk is login substitution rather than disclosure.
+        'POST /v1/fleet/login',
+        'GET /v1/fleet/login/:flowId',
+        'POST /v1/fleet/login/:flowId',
+        'DELETE /v1/fleet/login/:flowId',
+        // Signing in to a remote MCP server (docs/mcp-oauth.md). NOTE WHAT IS ABSENT: no route returns a
+        // token. The daemon is the OAuth client and files them in the secret store; an authorization URL goes
+        // out and one callback address comes in, in a body.
+        'GET /v1/fleet/mcp-auth',
+        'POST /v1/fleet/mcp-auth/:component',
+        'DELETE /v1/fleet/mcp-auth/:component',
+        'POST /v1/fleet/mcp-auth/flows/:flowId',
+        'DELETE /v1/fleet/mcp-auth/flows/:flowId',
+        'GET /v1/mcp',
+        'POST /v1/mcp/check',
+        'GET /v1/sessions/:sessionId/mcp/servers',
+        // Resource limits, beside the fleet they bound. NOTE WHAT IS ABSENT: there is no POST and no
+        // DELETE — an operator narrows or widens one saved document, and nothing here creates or
+        // destroys a slice, because the units are transient and belong to the launches that made them.
+        'GET /v1/cgroups/config',
+        // The configuration files (docs/config-files.md): what is in effect, one file, an edit and the owner's
+        // confirmation of one that loosens. NOTE WHAT IS ABSENT: no route deletes a file or edits the accepted
+        // record, and an agent's own door is the privileged `POST /v1/agent/config` below.
+        'GET /v1/config/status',
+        'GET /v1/config/file',
+        'PUT /v1/config/file',
+        'POST /v1/config/confirm',
+        'POST /v1/agent/config',
+        // Imported harness history is deliberately not a session route: it can be read but has no
+        // daemon journal, lifecycle, pane, or resume/send control.
+        'GET /v1/imports/history',
+        'GET /v1/imports/history/:importId',
+        // Existing conversations kept as ferrets: listed and searched, then adopted into sessions that
+        // RESUME them, with the last few exchanges of one on request. All are fleet.configure; none
+        // returns a whole transcript or a file path.
+        'GET /v1/imports/conversations',
+        'GET /v1/imports/conversations/:harness/:conversationId/preview',
+        'POST /v1/imports/conversations/adopt',
+        'GET /v1/gc',
+        'POST /v1/gc',
+        // Handing a web address to the OS opener. Operator + privileged arrival: a remote caller is refused.
+        'POST /v1/system/open-url',
+        // The secret store. NOTE WHAT IS ABSENT: there is no `GET /v1/secrets/:name`, and this list is
+        // the proof of it — no route returns a secret value. `use` is how a value is spent instead.
+        'GET /v1/secrets',
+        'POST /v1/secrets/use',
+        'POST /v1/secrets',
+        'DELETE /v1/secrets/:name',
+        // Copying to another machine: an offer, ciphertext only the target opens, and the names filed.
+        'POST /v1/secrets/imports',
+        'POST /v1/secrets/imports/:importId',
+        'POST /v1/secrets/exports/:importId',
+        // Saved logins: names, labels and flags out; values only ever in.
+        'GET /v1/secrets/logins',
+        'GET /v1/secrets/logins/hint',
+        'PUT /v1/secrets/logins/:id',
+        'POST /v1/secrets/logins/:id/recipe/proposals/:proposalId',
+        'POST /v1/secrets/logins/:id/rename',
+        'DELETE /v1/secrets/logins/:id',
+        'GET /v1/accounts',
+        'GET /v1/accounts/hint',
+        'GET /v1/accounts/look-alike',
+        'PUT /v1/accounts/sign-ins/:signIn',
+        'DELETE /v1/accounts/sign-ins/:signIn',
+        'POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId',
+        'PUT /v1/accounts/defaults',
+        'PUT /v1/accounts/:id',
+        'POST /v1/accounts/:id/rename',
+        'DELETE /v1/accounts/:id',
+        'POST /v1/accounts/:id/sign-ins',
+        'POST /v1/accounts/:id/merge',
+        'POST /v1/accounts/:id/apart',
+        // 2FA keys: a seed is staged, then saved only with a passkey bound to its stage; nothing answers one.
+        'POST /v1/accounts/:id/factors/seed',
+        'GET /v1/accounts/seed-stages/:stage',
+        'GET /v1/accounts/:id/factors/seed/:stage',
+        'POST /v1/accounts/:id/factors/seed/:stage/commit',
+        'POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app',
+        'DELETE /v1/accounts/:id/factors/seed/:stage',
+        'POST /v1/accounts/:id/factors',
+        'PATCH /v1/accounts/:id/factors/:factor',
+        'DELETE /v1/accounts/:id/factors/:factor',
+        // The catalogs this machine publishes (docs/catalogs.md): every one is `sharing`/`use`.
+        'GET /v1/catalogs',
+        'GET /v1/catalog-items',
+        'GET /v1/catalog-items/:itemId',
+        'GET /v1/catalog-items/:itemId/versions/:version',
+        'GET /v1/catalog-items/:itemId/changes',
+        'POST /v1/catalog-items/:itemId/versions/preview',
+        'POST /v1/catalog-items/:itemId/versions',
+        'PUT /v1/catalog-items/:itemId/current',
+        'PATCH /v1/catalog-items/:itemId/versions/:version',
+        'POST /v1/catalogs',
+        'PATCH /v1/catalogs/:id',
+        'DELETE /v1/catalogs/:id',
+        'POST /v1/catalogs/:id/items/preview',
+        'POST /v1/catalogs/:id/items',
+        'POST /v1/catalogs/:id/items/:itemId/versions',
+        'DELETE /v1/catalogs/:id/items/:itemId',
+        'POST /v1/catalog-items/quick-add',
+        'POST /v1/catalog-items/quick-add/undo',
+        'POST /v1/catalogs/:id/export',
+        'POST /v1/catalog-shares',
+        'PUT /v1/catalog-shares/:shareId/new-passkey',
+        'DELETE /v1/catalog-shares/:shareId/new-passkey',
+        'GET /v1/catalog-shares',
+        'DELETE /v1/catalog-shares/:shareId',
+        'GET /v1/catalog-members',
+        'PATCH /v1/catalog-members/:memberId',
+        'DELETE /v1/catalog-members/:memberId',
+        'DELETE /v1/catalog-members/:memberId/keys/:keyId',
+        'DELETE /v1/catalog-members/:memberId/catalogs/:catalogId',
+        'GET /v1/catalog-links/store',
+        'POST /v1/catalog-links/preview',
+        'GET /v1/catalog-links',
+        'POST /v1/catalog-links',
+        'GET /v1/catalog-links/:linkId',
+        'PUT /v1/catalog-links/:linkId/version',
+        'PATCH /v1/catalog-links/:linkId',
+        'POST /v1/catalog-links/:linkId/copy',
+        'DELETE /v1/catalog-links/:linkId',
+        'GET /v1/sessions',
+        'GET /v1/sessions/:sessionId',
+        'GET /v1/archived-sessions',
+        'GET /v1/projects',
+        'POST /v1/projects',
+        'GET /v1/sessions/:sessionId/skills',
+        'GET /v1/sessions/:sessionId/skills/inventory',
+        'GET /v1/skills',
+        'GET /v1/skills/file',
+        'GET /v1/board/projects',
+        'GET /v1/board/projects/:projectId/lanes',
+        'POST /v1/board/projects/:projectId/lanes',
+        'GET /v1/board/projects/:projectId/switch',
+        'PUT /v1/board/projects/:projectId/switch',
+        'GET /v1/worktrees/removal',
+        'POST /v1/worktrees/remove',
+        'GET /v1/worktrees',
+        'POST /v1/worktrees',
+        'POST /v1/sessions',
+        'POST /v1/sessions/:sessionId/stop',
+        'GET /v1/sessions/by-request/:requestId',
+        'POST /v1/sessions/:sessionId/revoke-credential',
+        'POST /v1/sessions/:sessionId/resume',
+        'GET /v1/sessions/:sessionId/relaunch-settings',
+        'POST /v1/sessions/:sessionId/conversion-preview',
+        'POST /v1/sessions/:sessionId/migrate',
+        'POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs',
+        'POST /v1/restarts',
+        'GET /v1/restarts',
+        'DELETE /v1/restarts',
+        'POST /v1/sessions/:sessionId/handover',
+        'GET /v1/sessions/:sessionId/handover',
+        'POST /v1/sessions/:sessionId/handover/cancel',
+        'POST /v1/sessions/:sessionId/fork',
+        'GET /v1/sessions/:sessionId/runtime-models',
+        'POST /v1/sessions/:sessionId/runtime',
+        'POST /v1/sessions/:sessionId/signal',
+        'POST /v1/sessions/:sessionId/rename',
+        'POST /v1/sessions/:sessionId/pin',
+        'POST /v1/sessions/:sessionId/unpin',
+        'PATCH /v1/sessions/:sessionId/hypermedia',
+        'GET /v1/sessions/:sessionId/agenda-mode',
+        'PATCH /v1/sessions/:sessionId/agenda-mode',
+        'GET /v1/sessions/:sessionId/compact-at',
+        'PATCH /v1/sessions/:sessionId/compact-at',
+        'GET /v1/pack',
+        'GET /v1/pack/inventory',
+        'POST /v1/pack/routing/clean-up',
+        'GET /v1/pack/routing/jobs/:jobId',
+        'POST /v1/pack/routing/accept',
+        'POST /v1/pack/routing/undo',
+        'POST /v1/pack/recommend',
+        'POST /v1/pack/new',
+        'GET /v1/sessions/:sessionId/result',
+        'GET /v1/sessions/:sessionId/subtree',
+        'PATCH /v1/sessions/:sessionId/pack',
+        'POST /v1/sessions/:sessionId/mcp/project/preview',
+        'POST /v1/sessions/:sessionId/mcp/login/preview',
+        'POST /v1/sessions/:sessionId/mcp/project',
+        'POST /v1/sessions/:sessionId/mcp/login',
+        'GET /v1/sessions/:sessionId/mcp',
+        'POST /v1/catalog-installs/project/preview',
+        'POST /v1/catalog-installs/runtime/preview',
+        'POST /v1/catalog-installs/project',
+        'POST /v1/catalog-installs/runtime',
+        'GET /v1/catalog-installs',
+        'DELETE /v1/catalog-installs/project/:installId',
+        'DELETE /v1/catalog-installs/runtime/:installId',
+        'PATCH /v1/catalog-installs/project/:installId',
+        'PATCH /v1/catalog-installs/runtime/:installId',
+        'POST /v1/skill-installs/local/project/preview',
+        'POST /v1/skill-installs/local/runtime/preview',
+        'POST /v1/skill-installs/local/project',
+        'POST /v1/skill-installs/local/runtime',
+        'GET /v1/skill-installs/local',
+        'DELETE /v1/skill-installs/local/project/:installId',
+        'DELETE /v1/skill-installs/local/runtime/:installId',
+        'POST /v1/sessions/:sessionId/send',
+        'POST /v1/sessions/:sessionId/interrupt',
+        'GET /v1/sessions/:sessionId/sends',
+        'GET /v1/sessions/:sessionId/queue',
+        'PATCH /v1/sessions/:sessionId/queue/:messageId',
+        'DELETE /v1/sessions/:sessionId/queue/:messageId',
+        'GET /v1/sessions/:sessionId/sends/:sendId',
+        'GET /v1/sessions/:sessionId/handoffs/:name',
+        'POST /v1/sessions/:sessionId/sends/:sendId/retry',
+        'POST /v1/sessions/:sessionId/sends/:sendId/cancel',
+        'POST /v1/sessions/:sessionId/sends/:sendId/enter',
+        'POST /v1/sessions/:sessionId/composer',
+        'POST /v1/sessions/:sessionId/answer',
+        'POST /v1/sessions/:sessionId/attachments',
+        'GET /v1/sessions/:sessionId/attachments/:attachmentId',
+        'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
+        'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
+        'GET /v1/sessions/:sessionId/agenda',
+        'POST /v1/sessions/:sessionId/agenda',
+        'GET /v1/sessions/:sessionId/agenda/:id/conversation',
+        'GET /v1/sessions/:sessionId/agenda/:id/versions',
+        'GET /v1/sessions/:sessionId/agenda/:id/versions/:version',
+        'PUT /v1/sessions/:sessionId/agenda/:id/seen',
+        'POST /v1/sessions/:sessionId/agenda/replies',
+        'GET /v1/sessions/:sessionId/attention',
+        'POST /v1/sessions/:sessionId/attention',
+        'POST /v1/sessions/:sessionId/attention/replies',
+        'POST /v1/sessions/:sessionId/notify',
+        'POST /v1/agenda/clear-agents',
+        'GET /v1/agenda/open',
+        'GET /v1/machine/agenda',
+        'POST /v1/machine/agenda',
+        'GET /v1/sessions/:sessionId/pins',
+        'POST /v1/sessions/:sessionId/pins',
+        'POST /v1/renders',
+        'GET /v1/renders/:id/meta',
+        'GET /v1/renders/:id',
+        'GET /v1/sessions/:sessionId/shared-draft',
+        'POST /v1/sessions/:sessionId/shared-draft',
+        'GET /v1/tasks',
+        'GET /v1/sessions/:sessionId/tasks',
+        'GET /v1/board',
+        'GET /v1/board/ids',
+        'GET /v1/board/merge-gate',
+        'POST /v1/board/tasks',
+        'POST /v1/board/skip',
+        'GET /v1/board/tasks',
+        'POST /v1/board/import',
+        'GET /v1/board/tasks/:taskId',
+        'POST /v1/board/tasks/:taskId',
+        'POST /v1/board/tasks/:taskId/start',
+        'GET /v1/search',
+        'POST /v1/search/related',
+        'POST /v1/tidy/plan',
+        'GET /v1/analytics',
+        'GET /v1/analytics/pricing',
+        'PATCH /v1/analytics/pricing',
+        'POST /v1/analytics/pricing/sync/preview',
+        'POST /v1/analytics/pricing/sync/apply',
+        // The agent tools. The agent's own route names no session: its session is the credential it
+        // presents. A person's live under `…/surfaces`, where nothing else can shadow them.
+        'POST /v1/agent/tools',
+        'POST /v1/sessions/:sessionId/surfaces/terminals/tools',
+        'POST /v1/sessions/:sessionId/surfaces/terminals/control',
+        'GET /v1/sessions/:sessionId/surfaces/terminals/control',
+        'POST /v1/sessions/:sessionId/surfaces/browser/tools',
+        'POST /v1/sessions/:sessionId/surfaces/browser/control',
+        'GET /v1/sessions/:sessionId/surfaces/browser/control',
+        // The owner's input requests: the lists, then deliver and cancel (the agent raises through its own tools route).
+        'GET /v1/input-requests',
+        'GET /v1/sessions/:sessionId/input-requests',
+        'GET /v1/sessions/:sessionId/input-requests/:requestId/shot',
+        'POST /v1/sessions/:sessionId/input-requests/:requestId/deliver',
+        'GET /v1/sessions/:sessionId/input-quarantines',
+        'POST /v1/sessions/:sessionId/input-quarantines/:key/end',
+        'POST /v1/sessions/:sessionId/input-requests/:requestId/cancel',
+        // Approving a sign-in on the phone: read the cards, and "Not me" (no route sets one moved-on).
+        'GET /v1/phone-approvals',
+        'GET /v1/sessions/:sessionId/phone-approvals/:approvalId',
+        'POST /v1/sessions/:sessionId/phone-approvals/:approvalId/refuse',
+        // Secure copy: a session's copies by description, the owner's pre-approval rules and the ferrets' paste plans.
+        'GET /v1/sessions/:sessionId/copies',
+        'GET /v1/copy-rules',
+        'GET /v1/copy-rules/settings',
+        'PUT /v1/copy-rules/settings',
+        'POST /v1/copy-rules/settings/stages',
+        'POST /v1/copy-rules/settings/stages/:stage/commit',
+        'POST /v1/copy-rules',
+        'POST /v1/copy-rules/stages',
+        'GET /v1/copy-rules/stages',
+        'GET /v1/copy-rules/stages/:stage',
+        'POST /v1/copy-rules/stages/:stage/commit',
+        'POST /v1/copy-rules/stages/:stage/bind',
+        'DELETE /v1/copy-rules/stages/:stage',
+        'DELETE /v1/copy-rules/:ruleId',
+        'GET /v1/copy-plans',
+        'POST /v1/sessions/:sessionId/copy-plans/:planId/approve',
+        // Task plans: read them, stage a selection (a sign-in needs its passkey to commit), confirm it in the app, revoke.
+        'GET /v1/task-plans',
+        'GET /v1/sessions/:sessionId/task-plans/:planId',
+        'POST /v1/sessions/:sessionId/task-plans/:planId/approval',
+        'GET /v1/sessions/:sessionId/task-plans/:planId/approval/:stage',
+        'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/commit',
+        'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app',
+        'DELETE /v1/sessions/:sessionId/task-plans/:planId/approval/:stage',
+        'POST /v1/sessions/:sessionId/task-plans/:planId/revoke',
+        // Standing sign-in rules: read them, stage one (it commits only with a passkey over its bytes), narrow, revoke.
+        'GET /v1/sign-in-rules/suggestions',
+        'DELETE /v1/sign-in-rules/suggestions/:sid',
+        'GET /v1/sign-in-rules',
+        'GET /v1/sign-in-rules/eligibility',
+        'POST /v1/sign-in-rules/stages',
+        'GET /v1/sign-in-rules/stages/:stage',
+        'POST /v1/sign-in-rules/stages/:stage/confirm-in-app',
+        'POST /v1/sign-in-rules/stages/:stage/bind',
+        'POST /v1/sign-in-rules/stages/:stage/commit',
+        'DELETE /v1/sign-in-rules/stages/:stage',
+        'POST /v1/sign-in-rules/:id/narrow',
+        'DELETE /v1/sign-in-rules/:id',
+        'POST /v1/accounts/:id/sign-in-rules/revoke',
+        'GET /v1/terminals',
+        'POST /v1/terminals/close-finished',
+        'GET /v1/sessions/:sessionId/terminals',
+        'POST /v1/sessions/:sessionId/terminals',
+        'GET /v1/sessions/:sessionId/terminals/:terminalId',
+        'PATCH /v1/sessions/:sessionId/terminals/:terminalId',
+        'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
+        // The human login window, and the per-session automation that is now genuinely served: the
+        // browser session runtime composes the worker and its transport into a production
+        // `BrowserViewerHost`, so the read and the action are real; its viewer opens inside a session.
+        'GET /v1/browser/login',
+        'POST /v1/browser/login',
+        'GET /v1/sessions/:sessionId/browser',
+        'POST /v1/sessions/:sessionId/browser',
+        'GET /v1/browser/state',
+        'POST /v1/browser/proxy/test',
+        'GET /v1/names',
+        'GET /v1/learning/status',
+        'GET /v1/learning/config',
+        'GET /v1/learning/proposals',
+        'POST /v1/learning/proposals/:id',
+        'GET /v1/learning/proposals/:id/patch',
+        'POST /v1/learning/run',
+        'PATCH /v1/learning/config',
+        'GET /v1/learning/proposals/:id/apply-preview',
+        'POST /v1/learning/proposals/:id/apply',
+        'GET /v1/learning/sessions',
+        'PATCH /v1/sessions/:sessionId/learning',
+        'POST /v1/learning/scan/estimate',
+        'POST /v1/learning/scan/cancel',
+        'GET /v1/learning/scan',
+        'POST /v1/learning/scan',
+        'POST /v1/agent/lessons',
+        'POST /v1/recommend',
+        // Dictation enhancement: the daemon's one remaining speech-to-text route, and a fixed literal
+        // under a prefix no other subsystem uses. Recognition happens in the browser.
+        'POST /v1/stt/enhance',
+        // Speed-up keys: which are set (by name), and a Test that spends one once. No key on either.
+        'GET /v1/speedups',
+        'POST /v1/speedups/:provider/test',
+        // The model catalogs: the list, a check for a newer published catalog, and a read of the models Ollama
+        // has installed on this machine. Fixed literals, no other user.
+        'GET /v1/models',
+        'POST /v1/models/refresh',
+        'POST /v1/models/local/refresh',
+        // Updating this daemon: the view, starting an update, and the automatic-install setting.
+        'GET /v1/daemon/update',
+        'POST /v1/daemon/update',
+        'PATCH /v1/daemon/update/settings',
+        // Updating the agent CLIs: the view, and starting one harness's update.
+        'GET /v1/harnesses/update',
+        'POST /v1/harnesses/update',
+        // The working-tree read. Its four deeper paths come before the one-segment `fs`, which is what
+        // keeps `fs/file` reachable at all: the router matches in registration order.
+        'GET /v1/sessions/:sessionId/fs/file',
+        'GET /v1/sessions/:sessionId/fs/index',
+        'GET /v1/sessions/:sessionId/fs/changes',
+        'GET /v1/sessions/:sessionId/fs/diff',
+        'GET /v1/sessions/:sessionId/fs',
+        // Fleet supervision. Every path is under `/v1/warden`, which no other subsystem uses, and the
+        // subsystem also owns the sweep TIMER — a supervision loop with no route would be invisible to
+        // the reachability gate, which is how a background subsystem ships unmounted.
+        'GET /v1/warden/status',
+        'GET /v1/warden/verdicts',
+        'GET /v1/warden/report',
+        'POST /v1/warden/run',
+        'GET /v1/warden/agenda',
+        'GET /v1/warden/attention',
+        'POST /v1/warden/investigate',
+        'POST /v1/warden/leave',
+        'GET /v1/warden/config',
+        'PATCH /v1/warden/config',
+        // The operator reads: the history the daemon recorded, the screen the agent is looking at, and
+        // the transcript it wrote. Every one of these answered `unknown_route` while the protocol
+        // client carried a method for it — see the mount's own header.
+        'GET /v1/sessions/:sessionId/events',
+        'GET /v1/sessions/:sessionId/snapshot',
+        'GET /v1/sessions/:sessionId/logs',
+        'GET /v1/sessions/:sessionId/log-page',
+        'GET /v1/sessions/:sessionId/log-search',
+        'GET /v1/sessions/:sessionId/messages',
+        'GET /v1/sessions/:sessionId/transcript-images/:handle',
+        // The attach proof. It sits with the operator reads but authorizes a local process action
+        // rather than answering a question, which is why it is its own mount and its own literal.
+        'GET /v1/sessions/:sessionId/attach',
+        'POST /v1/sessions/:sessionId/console/input',
+        'GET /v1/sessions/:sessionId/processes',
+        'GET /v1/sessions/:sessionId/processes/:processId/output',
+        'POST /v1/sessions/:sessionId/processes/:processId/stop',
+        'POST /v1/sessions/:sessionId/permission',
+        'POST /v1/sessions/:sessionId/dialog',
+      ]),
+    );
   });
 
   it('should never let a subsystem pattern shadow a base feed', () => {
@@ -878,14 +889,15 @@ describe('the mounted daemon surface', () => {
     // Arrange / Act
     const routes = mountedSocketRoutes(subsystems()).map(route => `${route.method} ${route.path}`);
 
-    // Assert — the fixed literal is registered FIRST, which is what keeps the deeper terminal pattern
-    // reachable: the router matches in registration order and neither path can shadow the other.
-    should(routes).deepEqual([
-      'GET /v1/events',
-      'GET /v1/sessions/:sessionId/terminals/:terminalId/stream',
-      'GET /v1/sessions/:sessionId/browser/stream',
-      'GET /v1/sessions/:sessionId/shared-draft/stream',
-    ]);
+    // Assert — the same set, compared in canonical order (the dispatcher orders by specificity, not mount order).
+    should(canonical(routes)).deepEqual(
+      canonical([
+        'GET /v1/events',
+        'GET /v1/sessions/:sessionId/terminals/:terminalId/stream',
+        'GET /v1/sessions/:sessionId/browser/stream',
+        'GET /v1/sessions/:sessionId/shared-draft/stream',
+      ]),
+    );
   });
 
   it("should refuse every ferret the shared draft's live stream before the protocol switches, and open it for the owner", async () => {

@@ -4476,7 +4476,7 @@ describe('daemon boot lifecycle', () => {
     const cleanups: Array<() => void | Promise<void>> = [];
     const sessionId = 'wire-priced-later';
     let release = (): void => {};
-    let mounted: ReturnType<DaemonWorld['createSubsystems']> | undefined;
+    let mounted: Awaited<ReturnType<DaemonWorld['createSubsystems']>>['mounted'] | undefined;
     const baseWorld = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
@@ -4485,9 +4485,9 @@ describe('daemon boot lifecycle', () => {
     const createSubsystems = baseWorld.createSubsystems;
     const world: DaemonWorld = {
       ...baseWorld,
-      createSubsystems: (...args: Parameters<DaemonWorld['createSubsystems']>) => {
-        const subsystems = createSubsystems(...args);
-        mounted = subsystems;
+      createSubsystems: async (...args: Parameters<DaemonWorld['createSubsystems']>) => {
+        const subsystems = await createSubsystems(...args);
+        mounted = subsystems.mounted;
         return subsystems;
       },
     };

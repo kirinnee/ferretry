@@ -156,11 +156,14 @@ export interface BuiltModule<Provides, Jobs extends object = Record<never, never
  *    EFFECTIVE `DaemonWorld` (overrides included) by a per-module adapter (§6.1, P5), so
  *    `buildWorld(overrides)` keeps working.
  *  - `Needs`: the opened storage, the decided config and the `provides` of the modules it depends on.
- *  - `build` is always async and always awaited, so the wiring never reads `.provides` off a promise.
+ *  - `build` is SYNCHRONOUS. All construction inside `createSubsystems` is synchronous today, and an await
+ *    between two builds would let work started earlier in construction (the agenda waker tick, the member
+ *    sweeps) interleave with the rest of it — the first extraction showed exactly that in the boot trace. A
+ *    module that ever needs asynchronous set-up does it in a job armed by `start()`, never in `build`.
  */
 export interface DaemonModule<Seams, Needs, Provides, Jobs extends object = Record<never, never>> {
   readonly id: string;
-  readonly build: (needs: Needs, seams: Seams, lifecycle: ModuleLifecycle) => Promise<BuiltModule<Provides, Jobs>>;
+  readonly build: (needs: Needs, seams: Seams, lifecycle: ModuleLifecycle) => BuiltModule<Provides, Jobs>;
 }
 
 /**
@@ -212,7 +215,7 @@ export interface LearningNeeds {
 
 export const learningModule: DaemonModule<void, LearningNeeds, LearningSubsystem, Record<never, never>> = {
   id: 'learning',
-  build: async needs => {
+  build: needs => {
     const subsystem = createLearningSubsystem(/* the body at fyd.ts:7240 today, unchanged */);
     return {
       id: 'learning',
@@ -246,10 +249,10 @@ changes that factory's contract once, on purpose, with the test that wraps it:
 
 ```ts
 // inside the default createSubsystems factory (moves to start() in wave F)
-const configFiles = await configFilesModule.build({ storage, paths, changes }, seamsOf.configFiles(world), lifecycle);
+const configFiles = configFilesModule.build({ storage, paths, changes }, seamsOf.configFiles(world), lifecycle);
 const agendaLink = lateBound<AgendaProvides>(); // the board reads the agenda lazily today (fyd.ts:10403-10435)
-const board = await boardModule.build({ storage, agenda: agendaLink /* … */ }, seamsOf.board(world), lifecycle);
-const agenda = await agendaModule.build({ storage, board: board.provides /* … */ }, undefined, lifecycle);
+const board = boardModule.build({ storage, agenda: agendaLink /* … */ }, seamsOf.board(world), lifecycle);
+const agenda = agendaModule.build({ storage, board: board.provides /* … */ }, undefined, lifecycle);
 agendaLink.bind(agenda.provides);
 // … one line per module
 
@@ -695,7 +698,7 @@ contracts):
 
 **D1 — How modules are wired together.**
 
-- **(a) Explicit wiring in `fyd.ts`:** one typed `await x.build(...)` line per module. The compiler
+- **(a) Explicit wiring in `fyd.ts`:** one typed `x.build(...)` line per module. The compiler
   checks the dependency graph, and it follows [Stateless OOP + DI](../standards/stateless-oop-di/index.md)
   (no service locator). Cost: adding a module, changing what a module needs, or adding a job edits a
   line in `fyd.ts`.

@@ -54,9 +54,16 @@ export interface BuiltModule<Provides, Jobs extends object = Record<never, never
   readonly contributes: ModuleContribution;
 }
 
+/**
+ * `build` is SYNCHRONOUS on purpose. Construction inside `createSubsystems` is synchronous today, and an
+ * `await` between module builds would be a real yield in the middle of construction: work started earlier
+ * (the agenda waker's first tick, the member sweeps) would run its continuation mid-construction instead of
+ * after `createSubsystems` returns. A module that ever needs asynchronous set-up does it in a job armed by
+ * `start()`, never in `build`.
+ */
 export interface DaemonModule<Seams, Needs, Provides, Jobs extends object = Record<never, never>> {
   readonly id: string;
-  readonly build: (needs: Needs, seams: Seams, lifecycle: ModuleLifecycle) => Promise<BuiltModule<Provides, Jobs>>;
+  readonly build: (needs: Needs, seams: Seams, lifecycle: ModuleLifecycle) => BuiltModule<Provides, Jobs>;
 }
 
 /** Filled once by the composition root; each consumer preserves its own early-read behaviour. */
@@ -196,5 +203,22 @@ export function composeModules(
         undefined,
         base.stepUp,
       ),
+  };
+}
+
+/**
+ * A {@link LateBound} that is empty until the composition root binds it, and binds exactly once.
+ *
+ * It has no throwing getter on purpose: every port that reads it keeps TODAY'S answer for "not bound
+ * yet", and those answers differ, so the port says which one it keeps (see {@link LateBound}).
+ */
+export function lateBound<T>(): LateBound<T> {
+  let bound: { readonly value: T } | undefined;
+  return {
+    current: () => bound?.value,
+    bind: value => {
+      if (bound !== undefined) throw new Error('this late-bound value is already bound');
+      bound = { value };
+    },
   };
 }
