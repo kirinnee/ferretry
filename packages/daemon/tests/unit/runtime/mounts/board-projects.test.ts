@@ -144,9 +144,9 @@ describe('the board switch', () => {
 
   it('should refuse a ferret, however it asks: the owner decides', async () => {
     const state = switches();
-    const response = await (
-      await dispatcher(boards(), state)
-    ).dispatch(put(FERRETRY_ID, { on: true }, agentIn('ms8-abcd1234')));
+    const response = await (await dispatcher(boards(), state)).dispatch(
+      put(FERRETRY_ID, { on: true }, agentIn('ms8-abcd1234')),
+    );
     const own = await (await dispatcher(boards(), state)).dispatch(fromFerret(put(FERRETRY_ID, { on: true })));
 
     // The boundary refuses both: the switch is `caller: 'person'`.
@@ -200,9 +200,9 @@ describe('the board switch', () => {
 
 describe('the board projects mount', () => {
   it('should list the boards without naming a current one for the owner', async () => {
-    const response = await (
-      await dispatcher(boards())
-    ).dispatch(request({ path: '/v1/board/projects', headers: human, loopback: true }));
+    const response = await (await dispatcher(boards())).dispatch(
+      request({ path: '/v1/board/projects', headers: human, loopback: true }),
+    );
 
     should(response.status).equal(200);
     should(response.headers.get('cache-control')).equal('no-store');
@@ -213,9 +213,9 @@ describe('the board projects mount', () => {
   });
 
   it("should name the calling session's board as current", async () => {
-    const response = await (
-      await dispatcher(boards())
-    ).dispatch(request({ path: '/v1/board/projects', headers: agentIn('ms8-abcd1234'), loopback: true }));
+    const response = await (await dispatcher(boards())).dispatch(
+      request({ path: '/v1/board/projects', headers: agentIn('ms8-abcd1234'), loopback: true }),
+    );
 
     should(BoardProjectsResponseSchema.parse(jsonBody(response)).current).equal(FERRETRY_ID);
   });
@@ -241,9 +241,9 @@ describe('the board projects mount', () => {
   });
 
   it('should refuse a project id that is not one', async () => {
-    const response = await (
-      await dispatcher(boards())
-    ).dispatch(request({ path: '/v1/board/projects/not-an-id/lanes', headers: human, loopback: true }));
+    const response = await (await dispatcher(boards())).dispatch(
+      request({ path: '/v1/board/projects/not-an-id/lanes', headers: human, loopback: true }),
+    );
 
     should(response.status).equal(400);
     should(jsonBody(response)).containEql({ code: 'invalid_project_id' });

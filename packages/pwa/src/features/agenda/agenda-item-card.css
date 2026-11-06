@@ -1804,7 +1804,8 @@
   scroll-padding-inline: 24px;
   scrollbar-width: none;
   border-bottom: 0;
-  background: linear-gradient(var(--border-soft, var(--border)), var(--border-soft, var(--border))) bottom / 100%
+  background:
+    linear-gradient(var(--border-soft, var(--border)), var(--border-soft, var(--border))) bottom / 100%
     var(--stroke, 1px) no-repeat;
 }
 .fy-tabs__row[data-agenda-tab-row='scroll'] .fy-tabs__list::-webkit-scrollbar {

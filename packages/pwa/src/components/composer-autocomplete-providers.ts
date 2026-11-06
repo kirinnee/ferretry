@@ -163,7 +163,8 @@ export interface ComposerSurfacesProviderOptions extends ComposerProviderScopeOp
 }
 
 export interface ComposerAutocompleteProvidersOptions
-  extends ComposerReferenceProviderOptions, Omit<ComposerSkillsProviderOptions, 'catalog'> {
+  extends ComposerReferenceProviderOptions,
+    Omit<ComposerSkillsProviderOptions, 'catalog'> {
   readonly listTerminals?: ComposerTerminalLister;
 }
 
@@ -622,7 +623,9 @@ export function createFilesProvider({
                 ? 'line selection applies to files, not folders'
                 : undefined;
         const referenceRefusal = (
-          directoryEntry ? hasUnambiguousDirectoryToken(path) : hasUnambiguousFileToken(path, selector)
+          directoryEntry
+            ? hasUnambiguousDirectoryToken(path)
+            : hasUnambiguousFileToken(path, selector)
         )
           ? undefined
           : UNREPRESENTABLE_FILE_REFERENCE_REASON;

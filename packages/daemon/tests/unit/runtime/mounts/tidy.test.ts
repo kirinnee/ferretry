@@ -61,9 +61,9 @@ describe('POST /v1/tidy/plan', () => {
     const { asked, tidy } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(tidy)
-    ).dispatch(fromFerret(post({ headers: human, body: JSON.stringify({ sessionId: 'someone-else' }) })));
+    const response = await (await dispatcher(tidy)).dispatch(
+      fromFerret(post({ headers: human, body: JSON.stringify({ sessionId: 'someone-else' }) })),
+    );
 
     // Assert
     should(response.status).equal(200);

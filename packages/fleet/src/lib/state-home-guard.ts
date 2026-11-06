@@ -928,10 +928,9 @@ export async function openFolderBelow(
     throw error;
   }
   // Opened through the parent: by its descriptor-relative call where it has one, else by the path through it.
-  const handle = await (
-    through === undefined
-      ? parent.entry(leaf).then(async at => await disk.openDirectory(at))
-      : through.openDirectory(leaf)
+  const handle = await (through === undefined
+    ? parent.entry(leaf).then(async at => await disk.openDirectory(at))
+    : through.openDirectory(leaf)
   ).catch(() => undefined);
   if (handle === undefined) return refused('changed');
   // Reached by path (no descriptor paths here): proven to be the folder at its real place, like every later use.

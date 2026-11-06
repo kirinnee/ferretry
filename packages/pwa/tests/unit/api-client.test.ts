@@ -163,12 +163,13 @@ describe('daemon HTTP transport', () => {
     // This is deliberately a non-arrow function: on main, `this.#fetch(...)`
     // makes `this` the transport and real Window.fetch rejects that receiver.
     let receiver: unknown = Symbol('not called');
-    const transport = new DaemonHttpTransport(paired('daemon-a', 'https://daemon-a.example.test', 'token-a'), function (
-      this: unknown,
-    ): Promise<Response> {
-      receiver = this;
-      return Promise.resolve(new Response());
-    });
+    const transport = new DaemonHttpTransport(
+      paired('daemon-a', 'https://daemon-a.example.test', 'token-a'),
+      function (this: unknown): Promise<Response> {
+        receiver = this;
+        return Promise.resolve(new Response());
+      },
+    );
 
     // Act
     await transport.send('https://daemon-a.example.test/v1/health', {});

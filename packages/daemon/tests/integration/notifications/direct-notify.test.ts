@@ -43,10 +43,7 @@ class RecordingTransport implements WebPushTransport {
 }
 
 async function daemon(
-  options: {
-    readonly mode?: 'auto' | 'interactive';
-    readonly records?: readonly PushSubscriptionRecord[];
-  } = {},
+  options: { readonly mode?: 'auto' | 'interactive'; readonly records?: readonly PushSubscriptionRecord[] } = {},
 ) {
   const home = await tempDirectory('direct-notify');
   const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));

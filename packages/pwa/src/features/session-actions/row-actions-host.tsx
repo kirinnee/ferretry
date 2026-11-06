@@ -211,9 +211,12 @@ function RowActions({
       <RenameForm
         host={host}
         rename={async patch => {
-          const renamed = await (
-            await routedClient(connection)
-          ).rename(sessionId, patch.name, patch.teammate, patch.clearParent);
+          const renamed = await (await routedClient(connection)).rename(
+            sessionId,
+            patch.name,
+            patch.teammate,
+            patch.clearParent,
+          );
           publish(renamed);
           return renamed;
         }}

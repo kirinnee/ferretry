@@ -339,9 +339,11 @@ export class LinkStoreWorld {
   }
 
   /** Replace the limits with the ones in force, changed as the test needs. */
-  async limits(patch: {
-    readonly [K in keyof LinkStoreLimits]?: Partial<LinkStoreLimits[K]>;
-  }): Promise<Response> {
+  async limits(
+    patch: {
+      readonly [K in keyof LinkStoreLimits]?: Partial<LinkStoreLimits[K]>;
+    },
+  ): Promise<Response> {
     const current = (await this.view()).limits;
     const merged = Object.fromEntries(
       Object.entries(current).map(([group, values]) => [

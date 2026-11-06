@@ -77,11 +77,11 @@ export const shouldOpenInApp = (
 ): boolean =>
   Boolean(
     destination &&
-    download === undefined &&
-    !event.defaultPrevented &&
-    event.button === 0 &&
-    !event.metaKey &&
-    !event.ctrlKey &&
-    !event.shiftKey &&
-    !event.altKey,
+      download === undefined &&
+      !event.defaultPrevented &&
+      event.button === 0 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey,
   );

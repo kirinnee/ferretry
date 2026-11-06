@@ -815,9 +815,7 @@ async function openPage(private_: boolean): Promise<Page> {
 
 async function applyViewport(page: Page, viewport: Viewport): Promise<void> {
   viewports.set(pageId(page), viewport);
-  await (
-    await pageSession(page)
-  ).send('Emulation.setDeviceMetricsOverride', {
+  await (await pageSession(page)).send('Emulation.setDeviceMetricsOverride', {
     ...viewport,
     deviceScaleFactor: 1,
     mobile: false,
