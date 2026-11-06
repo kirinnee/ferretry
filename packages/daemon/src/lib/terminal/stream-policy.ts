@@ -7,7 +7,7 @@ import { MAX_TUNNEL_DATA_BYTES } from '../relay/tunnel.ts';
  * A viewer socket carries pane bytes downstream and two kinds of client frame upstream: binary
  * frames are raw terminal input, text frames are bounded resize JSON. Everything in this module is
  * a decision about those frames — framing limits, operation parsing, the input queue budget, and
- * the backpressure/redraw ladder for a viewer that falls behind. There is no IO, no timer, and no
+ * the backpressure limits for a viewer that falls behind, and the capture cadence. There is no IO, no timer, and no
  * socket here: the caller owns the socket, the clock, and the terminal service, and applies the
  * decisions this module returns.
  */
@@ -27,7 +27,7 @@ export const TERMINAL_MAX_QUEUED_INPUT_BYTES = 1024 * 1024;
 /** Downstream buffer above which a viewer counts as behind and stops receiving raw deltas. */
 export const TERMINAL_MAX_BUFFERED_OUTPUT_BYTES = 1024 * 1024;
 
-/** How long to wait before re-testing a behind viewer's socket for a redraw. */
+/** The ordinary interval between pane captures, and between re-tests of a behind viewer's socket. */
 export const TERMINAL_REDRAW_POLL_MS = 100;
 
 /**
