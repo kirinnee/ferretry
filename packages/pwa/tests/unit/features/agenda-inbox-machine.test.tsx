@@ -271,6 +271,8 @@ describe('the Machine group in the Inbox', () => {
     expect(view?.container.querySelector('[data-agenda-part="premise"]')).toBeNull();
     // Each card is said once, in one compact row; the daemon's long sentence is not repeated above or under the form.
     expect(text.split('&B1 Fix it').length).toBe(2);
+    // The open tile says the same word the list row does (the list: "Notification · !M4").
+    expect(view?.container.querySelector('[data-inbox-open] [data-agenda-type]')?.textContent).toBe('Notification');
     expect(text).not.toContain('no ferret is assigned');
     expect(text).not.toContain('Nothing to decide');
   });

@@ -214,7 +214,7 @@ export function AgendaCard({
           </p>
         )}
         {model.notice && item.body?.trim() ? <AgendaBody renderProse={renderProse} text={item.body} /> : null}
-        {showAsk ? (
+        {showAsk && !plan.ownAnswered ? (
           <AgendaBriefSections
             askShown
             {...(showAsk && asking ? { askLabel: null } : {})}
@@ -225,7 +225,7 @@ export function AgendaCard({
             {...(showAsk ? { ask: item.subject } : {})}
           />
         ) : null}
-        {listsAnswers ? (
+        {listsAnswers && !plan.ownAnswered ? (
           <WantedAnswers answers={wantedAnswers(item.questions ?? [], false)} renderProse={renderProse} />
         ) : null}
         {history === null ? null : (

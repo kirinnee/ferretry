@@ -1721,8 +1721,10 @@ movements"_). One pure rule decides it for every kind (`itemAskPlan` in `package
      beside buttons. That is the daemon's own rule (`itemAsksOwnQuestion`, [Card asks](#card-asks)), so a line the app
      keeps on screen is one the daemon keeps in Needs you after Good. With one card ask, the swipes and arrow keys
      answer it too.
-- **Good, and the words typed below** — when that one card ask is the item's WHOLE ask (the card's own agenda, or a
-  thread whose ask line only repeats it, with no questions, form fields or buttons of its own) and the host draws the box under the item (the Inbox): **Good** is one tap (the
+- **Good, and the words typed below** — when the item asks nothing of its own (the card's own agenda, or a
+  thread whose ask line only repeats it, with no questions, form fields or buttons of its own, or whose own question was
+  answered) and the host draws the box under the item (the Inbox): the FIRST card ask is the item's one ask — a second
+  card ask behind it is only a plain "Next: try it, for &F13 …" line, so one card or two a try-it reads the same way — and **Good** is one tap (the
   lane's default "Done" reads Good; a label the lane wrote itself is kept), and what is typed in the box is the other
   answer: at a try-it the lane's fail, **Not good**, the card going back with the words as the reopen ask (files ride
   along as for any Not good); at an approval **Not yet**, the card staying while its ferret reads the words (words alone: a Send with files is refused, saying so, and the box keeps the words and the files). Elsewhere
@@ -1730,18 +1732,21 @@ movements"_). One pure rule decides it for every kind (`itemAskPlan` in `package
   drawn with "type what is wrong" and nowhere to type it.
 - **An item that asks a question of its OWN answers THAT question** (a ferret's question, a choice, a permission, a review: the
   daemon's `itemAsksOwnQuestion`). Its answers are the one ask — typed words, or its own buttons — and a try-it on the same
-  card is never squeezed in beside them. The card ask is named on one plain line ("Next: try it, for &F12 Badge colour. It is
-  asked here once you have answered.") and takes the answer row when the question is answered (an item whose question was
+  card is never squeezed in beside them. The card ask is named on one plain line ("Next: try it, for &F12 Badge colour.")
+  and takes the answer row when the question is answered (an item whose question was
   answered in words rests, and the daemon keeps it in Needs you while a card ask stays open). A **to-do's Done, an info's Got it
   and a notice** close the item, which the daemon refuses while a card ask is open, so there the card ask goes FIRST and the
   item's own buttons wait behind it ("First answer the try-it below; the buttons for this come back once it is answered.").
-  Either way: one row at a time, one "What I need from you".
+  Either way: one row at a time, one "What I need from you". Answering the item's own question in words never hides it in the
+  app: while a card ask waits, the daemon keeps the item in Needs you, so the reply overlay (Replied, 30 s) is not applied and the
+  try-it shows at once. Once the question is answered, every part of it (its numbered questions, form fields, wanted answers)
+  is gone from the block, not only the one question line.
 - **A finished item** (resolved or done) is a record: how it ended is said ONCE (the settled line, or the Done chip when the host
   draws none, and never a stage chip saying Done again), and it has no "What I need from you" box to repeat its headline. The
   question or ask is also said once while open: the block leads with it, so the head does not repeat it under the title.
 - **A notice answered by a form of its cards** ("3 cards have nobody working on them": a pick per card, one Send) needs the owner:
-  its chip says Needs you, its list row is a tile like any item, its picks are one compact row per card, and its one Send sticks to
-  the foot of the view so it is always in reach.
+  its chip says Needs you, its list row is a tile like any item, its picks are one compact row per card, its Close reason box grows to show the whole text, and its one Send ends the block in
+  normal flow (never over a row). Its open view says the same kind word as its list row (Notification).
 - **Which card ask is first**: the first one still waiting for an answer. One the owner said **Not yet** to waits behind
   the others (still named, asked again once they are answered; of several, the one set aside longest ago first), so a
   deferred approval never blocks the next one. The app, the daemon's `gateAttached` mirror and an older app's unnamed

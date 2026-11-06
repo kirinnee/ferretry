@@ -58,6 +58,13 @@ const compactLine = (line: string): { readonly name: string; readonly place: str
   return name === undefined || place === undefined ? { name: line, place: null } : { name, place: ` · in ${place}` };
 };
 
+/** A reason box shows its whole text: it grows to the lines it needs instead of cutting one line at the edge. */
+const growToFit = (field: HTMLTextAreaElement | null): void => {
+  if (field === null) return;
+  field.style.height = 'auto';
+  field.style.height = `${String(field.scrollHeight + 2)}px`;
+};
+
 export const CLOSE_CARD_REASON = 'Closed by the owner: no ferret was working on it.';
 
 /** The owner's pick for one card. */
@@ -223,15 +230,23 @@ export function AgendaCardsList({
               {pick === 'close' && !settled(result) ? (
                 <label className="flex flex-col gap-1 text-meta text-muted" data-agenda-card-close-note="">
                   It leaves the board. Reason:
-                  <input
-                    className="min-h-[40px] rounded-control border border-border bg-surface px-3 text-ui text-fg"
+                  <textarea
+                    className="min-h-[40px] resize-none overflow-hidden rounded-control border border-border bg-surface px-3 py-2 text-ui text-fg"
                     data-agenda-card-reason=""
                     disabled={sending}
                     onChange={event => {
                       const reason = event.currentTarget.value;
+                      growToFit(event.currentTarget);
                       setReasons(current => ({ ...current, [id]: reason }));
                     }}
-                    type="text"
+                    onKeyDown={event => {
+                      // One reason, one paragraph: Enter sends the form like it did in a single line.
+                      if (event.key !== 'Enter' || event.shiftKey) return;
+                      event.preventDefault();
+                      event.currentTarget.form?.requestSubmit();
+                    }}
+                    ref={growToFit}
+                    rows={1}
                     value={reasons[id] ?? CLOSE_CARD_REASON}
                   />
                 </label>

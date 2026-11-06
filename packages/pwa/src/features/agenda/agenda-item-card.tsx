@@ -563,8 +563,8 @@ export function AgendaItemCard({
   const steps = item.steps ?? [];
   // What the segment already says is not said again below it: an approval's effect, a review's links (they stay under
   // "What to review", beside the buttons, so the table does not list them twice), a to-do's steps.
-  const effectInNeed = shape === 'approval' && item.impact !== undefined;
-  const linksInNeed = shape === 'review' && item.links !== undefined;
+  const effectInNeed = shape === 'approval' && item.impact !== undefined && !plan.ownAnswered;
+  const linksInNeed = shape === 'review' && item.links !== undefined && !plan.ownAnswered;
   const references = referenceRows(linksInNeed ? { terms: item.terms } : item);
   const stepsInNeed = shape === 'todo';
   const requestChanges =
@@ -646,7 +646,7 @@ export function AgendaItemCard({
             )}
             {/* A standalone card gate says its stage in its own meta line (Test, Plan to approve): said once. A finished
                 item's stage is not said at all: it is the state, and the state is said once. */}
-            {gated || finished || cardsForm !== undefined ? null : (
+            {gated || finished ? null : (
               <span
                 className="fy-card__type"
                 data-agenda-stage={stage}
@@ -791,7 +791,7 @@ export function AgendaItemCard({
                   <LinksList links={item.links} renderProse={renderProse} />
                 </div>
               ) : null}
-              {shape === 'form' ? (
+              {shape === 'form' && !plan.ownAnswered ? (
                 <AgendaFormFields
                   disabled={busy || !answerable}
                   fields={formFields}
@@ -801,7 +801,7 @@ export function AgendaItemCard({
                   renderProse={renderProse}
                 />
               ) : null}
-              {shape === 'answers' ? (
+              {shape === 'answers' && !plan.ownAnswered ? (
                 <WantedAnswers answers={wantedAnswers(questions, steps.length > 0)} renderProse={renderProse} />
               ) : null}
               {stepsInNeed && steps.length > 0 ? (

@@ -1912,3 +1912,13 @@
 .fy-card__card-asks .fy-card__try-steps .md {
   font-size: var(--text-sm);
 }
+/* The words line and the plain "Next" line are quiet small lines under the one ask, never the size of the ask. */
+.fy-card__card-asks .fy-card__need-lead[data-agenda-typed-lead],
+.fy-card__card-asks .fy-card__card-ask-later,
+.fy-card__card-asks .fy-card__card-ask-later .md {
+  font-size: var(--text-sm);
+}
+.fy-card__card-asks .fy-card__card-ask-later,
+.fy-card__card-asks .fy-card__card-ask-later .md {
+  color: var(--muted);
+}

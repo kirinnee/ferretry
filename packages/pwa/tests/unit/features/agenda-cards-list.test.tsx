@@ -121,8 +121,8 @@ describe('the cards of a notice, answered as ONE form (&B165)', () => {
     const list = await draw(ONE);
     await list.pick('B1', 'close');
     expect(list.q('B1', '[data-agenda-card-close-note]')?.textContent).toContain('It leaves the board');
-    expect((list.q('B1', '[data-agenda-card-reason]') as HTMLInputElement).value).toBe(CLOSE_CARD_REASON);
-    await typeInto(list.q('B1', '[data-agenda-card-reason]'), 'Duplicate of B2');
+    expect((list.q('B1', '[data-agenda-card-reason]') as HTMLTextAreaElement).value).toBe(CLOSE_CARD_REASON);
+    await typeInto(list.q('B1', '[data-agenda-card-reason]'), 'Duplicate of B2', 'textarea');
     await list.send();
     expect(list.calls).toEqual(['close:B1:Duplicate of B2']);
   });
@@ -130,7 +130,7 @@ describe('the cards of a notice, answered as ONE form (&B165)', () => {
   it('closes with the reason offered when the owner emptied it', async () => {
     const list = await draw(ONE);
     await list.pick('B1', 'close');
-    await typeInto(list.q('B1', '[data-agenda-card-reason]'), '   ');
+    await typeInto(list.q('B1', '[data-agenda-card-reason]'), '   ', 'textarea');
     await list.send();
     expect(list.calls).toEqual([`close:B1:${CLOSE_CARD_REASON}`]);
   });
@@ -276,5 +276,16 @@ describe('each pick as the board’s own write', () => {
 
     expect(await actions.start('B1' as BoardTaskId)).toEqual({ ok: false, message: 'only the owner may do that' });
     expect(await actions.close('B1' as BoardTaskId, 'x')).toEqual({ ok: false, message: 'only the owner may do that' });
+  });
+});
+
+describe('the Close reason box shows its whole text (&B165 round 2)', () => {
+  it('is a box that grows to its lines, not a one-line field that cuts the text at the edge', async () => {
+    const list = await draw(ONE);
+    await list.pick('B1', 'close');
+    const box = list.q('B1', '[data-agenda-card-reason]');
+    expect(box?.tagName).toBe('TEXTAREA');
+    expect(box?.getAttribute('rows')).toBe('1');
+    expect(box?.className).not.toContain('truncate');
   });
 });

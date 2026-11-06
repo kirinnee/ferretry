@@ -101,29 +101,31 @@ const KINDS: readonly (readonly [string, Partial<AgendaItem>, OneAsk])[] = [
   ],
 ] as const;
 
+const viewOf = (item: AgendaItem, typedAnswer: boolean, history: readonly HistoryEvent[] = []) => (
+  <AgendaItemView
+    busy={false}
+    error={null}
+    ferret="Zoe"
+    history={history}
+    howToTestFor={() => '1. Open the badge.\n2. See it is blue.'}
+    item={item}
+    itemKey={`laptop/sess-1/${item.id}`}
+    now={Date.parse('2026-08-01T12:00:00.000Z')}
+    onAct={() => undefined}
+    onClose={() => undefined}
+    position={{ index: 0, total: 1 }}
+    renderProse={text => <Markdown text={text} />}
+    swipeable={false}
+    {...(typedAnswer ? { typedAnswer } : {})}
+  />
+);
+
 const draw = async (
   item: AgendaItem,
   typedAnswer: boolean,
   history: readonly HistoryEvent[] = [],
 ): Promise<HTMLElement> => {
-  view = await mount(
-    <AgendaItemView
-      busy={false}
-      error={null}
-      ferret="Zoe"
-      history={history}
-      howToTestFor={() => '1. Open the badge.\n2. See it is blue.'}
-      item={item}
-      itemKey={`laptop/sess-1/${item.id}`}
-      now={Date.parse('2026-08-01T12:00:00.000Z')}
-      onAct={() => undefined}
-      onClose={() => undefined}
-      position={{ index: 0, total: 1 }}
-      renderProse={text => <Markdown text={text} />}
-      swipeable={false}
-      {...(typedAnswer ? { typedAnswer } : {})}
-    />,
-  );
+  view = await mount(viewOf(item, typedAnswer, history));
   return must(view.container, 'the view');
 };
 
@@ -664,6 +666,126 @@ describe('the itemâ€™s own question answered: its try-it takes over as the itemâ
   test('a reply that changed after the owner answered is a new question: the old answer does not answer it', () => {
     const stale = { ...repliedTo(asked), subject: 'Should it also wait for a second owner?' } as AgendaItem;
     expect(itemAskPlan(stale, itemCardAsks(stale))).toMatchObject({ ownFirst: true, ownAnswered: false });
+  });
+});
+
+describe('every try-it reads the same way in the Inbox, one card or two (&B165 round 2)', () => {
+  for (const asks of [[first], [first, second]] as const) {
+    test(`${asks.length === 1 ? 'one card' : 'two cards'}: Good, one line for Not good, and the second card only a plain line`, async () => {
+      const root = await draw(
+        carrying(
+          {
+            kind: 'reply',
+            subject: 'Try it: Badge colour',
+            ask: { kind: 'open-question' },
+            raisedBy: 'daemon',
+            source: 'task',
+            sourceRef: 'card-agenda:F12',
+            task: { id: 'F12' },
+          } as unknown as Partial<AgendaItem>,
+          asks,
+        ),
+        true,
+      );
+      expect(answerButtons(root, 'Good')).toHaveLength(1);
+      expect(answerButtons(root, 'Done')).toHaveLength(0);
+      expect(answerButtons(root, 'Not good')).toHaveLength(0);
+      expect(root.querySelector('[data-agenda-typed-lead]')?.textContent).toBe(
+        'Not good? Type what is wrong below and send.',
+      );
+      expect(root.textContent).not.toContain('tries again');
+      expect(answerRows(root)).toHaveLength(1);
+      expect(root.querySelectorAll('[data-agenda-card-ask]')).toHaveLength(1);
+      const later = root.querySelectorAll('[data-agenda-card-ask-later]');
+      expect(later).toHaveLength(asks.length - 1);
+      if (asks.length === 2) expect(later[0]?.textContent).toBe('Next: try it, for &F13 Badge shape.');
+    });
+  }
+
+  test('the typed words answer the first card, even with a second behind it', () => {
+    const item = carrying(
+      {
+        kind: 'reply',
+        subject: 'Try it: Badge colour',
+        ask: { kind: 'open-question' },
+      } as unknown as Partial<AgendaItem>,
+      [first, second],
+    );
+    expect(typedCardAsk(item)?.gate.cardId).toBe('F12');
+  });
+});
+
+describe('an answered multi-question reply or form shows only its try-it (&B165 round 2)', () => {
+  const needs = (root: HTMLElement): HTMLElement =>
+    must(root.querySelector<HTMLElement>('[data-agenda-part="needs"]'), 'the block');
+  const severalQuestions: Partial<AgendaItem> = {
+    kind: 'reply',
+    subject: 'Three things',
+    ask: { kind: 'open-question' },
+    questions: [{ question: 'Which shade?' }, { question: 'Which size?' }, { question: 'Which shape?' }],
+  } as unknown as Partial<AgendaItem>;
+  const aForm: Partial<AgendaItem> = {
+    kind: 'form',
+    subject: 'Badge colour',
+    ask: { kind: 'open-question' },
+    fields: [
+      { id: 'shade', type: 'text', label: 'Which shade?' },
+      { id: 'size', type: 'one', label: 'Which size?', options: [{ label: 'Small' }, { label: 'Large' }] },
+    ],
+  } as unknown as Partial<AgendaItem>;
+  const repliedTo = (item: AgendaItem): AgendaItem => ({ ...item, ownAskRepliedTo: ownAskDigest(item) }) as AgendaItem;
+  const formAnswered = (item: AgendaItem): AgendaItem =>
+    ({
+      ...item,
+      ownerAnswer: {
+        at: '2026-08-01T11:30:00.000Z',
+        response: { kind: 'form', answers: [{ id: 'shade', picked: 'Blue' }] },
+        request: 1,
+      },
+    }) as unknown as AgendaItem;
+  const noFormLeft = (root: HTMLElement): void => {
+    const block = needs(root);
+    for (const old of ['Which shade?', 'Which size?', 'Which shape?']) expect(block.textContent).not.toContain(old);
+    expect(block.querySelector('[data-agenda-wanted]')).toBeNull();
+    expect(block.querySelector('[data-agenda-form]')).toBeNull();
+    expect(block.querySelector('[data-agenda-form-field]')).toBeNull();
+    expect(block.querySelector('[data-agenda-question-line]')).toBeNull();
+    expect(block.textContent).not.toMatch(/Reply with your answers|fill in/iu);
+    // The one row is the try-it's, and it is the only thing to do.
+    expect(answerButtons(root, 'Done').length + answerButtons(root, 'Good').length).toBe(1);
+    expect(answerRows(root)).toHaveLength(1);
+  };
+
+  for (const [name, fields, answer] of [
+    ['several questions', severalQuestions, repliedTo],
+    ['a form (answered on the card)', aForm, formAnswered],
+    ['a form (answered in words)', aForm, repliedTo],
+  ] as const) {
+    for (const typedAnswer of [false, true]) {
+      test(`${name}, with the try-it there from the start${typedAnswer ? ', in the Inbox' : ''}`, async () => {
+        const root = await draw(answer(carrying(fields)), typedAnswer);
+        noFormLeft(root);
+        if (typedAnswer) expect(typedCardAsk(answer(carrying(fields)))?.gate.cardId).toBe('F12');
+      });
+
+      test(`${name}, with the try-it attached later${typedAnswer ? ', in the Inbox' : ''}`, async () => {
+        // First: the question is open, nothing is waiting behind it.
+        const bare = agendaItem('A9', { title: 'Badge colour', ...fields } as unknown as Partial<AgendaItem>);
+        const before = await draw(bare, typedAnswer);
+        expect(needs(before).textContent).toContain('Which shade?');
+        // Then the owner answers it and the card reaches its try-it, on the same open item.
+        const attached = answer({ ...carrying(fields) });
+        await view?.render(viewOf(attached, typedAnswer));
+        noFormLeft(must(view?.container, 'the view'));
+      });
+    }
+  }
+
+  test('while the question is open the form and its numbered questions are still drawn, the try-it only a "Next" line', async () => {
+    const several = await draw(carrying(severalQuestions), false);
+    expect(needs(several).querySelector('[data-agenda-wanted]')).not.toBeNull();
+    expect(answerButtons(several, 'Good')).toHaveLength(0);
+    expect(several.querySelector('[data-agenda-card-ask-later]')).not.toBeNull();
   });
 });
 

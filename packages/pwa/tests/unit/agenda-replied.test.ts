@@ -81,6 +81,25 @@ describe('the replied overlay', () => {
     expect(replied.getSnapshot().entries).toEqual([]);
   });
 
+  it('does not park an item a card ask still waits on: the daemon keeps it in Needs you, so the try-it must stay in sight', () => {
+    const gate = {
+      cardId: 'F12',
+      laneId: 'released',
+      laneName: 'Released',
+      entry: 4,
+      projectId: 'p1',
+      cardTitle: 'Badge colour',
+      options: [],
+    };
+    const waiting = { gate, at: '2026-08-01T11:00:00.000Z' };
+    const withAsk = (extra: object) => ({ ...card.item, cardAsks: [{ ...waiting, ...extra }] }) as never;
+    expect(parksOnReply(withAsk({}))).toBe(false);
+    // A try-it set aside with Not yet does not wait for the owner: the reply parks the item as ever.
+    expect(parksOnReply(withAsk({ notYet: { at: '2026-08-01T11:30:00.000Z' } }))).toBe(true);
+    // One that was answered is no longer open.
+    expect(parksOnReply(withAsk({ answer: { label: 'Done', at: '2026-08-01T11:30:00.000Z' } }))).toBe(true);
+  });
+
   it('agrees once the board shows the item parked or gone, or asking again; never for a board not read', () => {
     const { replied } = agenda();
     replied.mark(card, { words: 'hi' });

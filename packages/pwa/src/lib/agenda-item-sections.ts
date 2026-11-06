@@ -453,9 +453,10 @@ export const itemAskPlan = (
   // The ONE rule the daemon reads too (`itemAsksOwnQuestion`): the item keeps its line when it asks something the card
   // asks do not, so an item shown asking stays in Needs you after the card ask is answered.
   const ownLine = !ownAnswered && itemAsksOwnQuestion(item, asks);
-  // Typed words answer the card ask only when it is the item's WHOLE ask: no question, field or button of the item's
-  // own, and no other ask behind it. Anything the item asks itself keeps the box as its reply.
-  const whole = (!ownRow || ownAnswered) && !ownLine && rest.length === 0;
+  // Typed words answer the FIRST card ask when the item asks nothing of its own: no question, field or button of the
+  // item's own. A second card ask behind it is only a plain "Next" line, so one card or two a try-it reads the same way
+  // (Good, and words for Not good). Anything the item asks itself keeps the box as its reply.
+  const whole = (!ownRow || ownAnswered) && !ownLine;
   const typed = options.typedHost === true && whole && gateTypedLabel(first.gate) !== undefined ? first : undefined;
   return {
     asks: [first],
@@ -494,6 +495,9 @@ export const planAskWord = (plan: Pick<ItemAskPlan, 'asks'>): string | undefined
 };
 
 export const itemAskWord = (item: AgendaItem): string | undefined => planAskWord(itemAskPlan(item, itemCardAsks(item)));
+
+/** Whether the item's own question is answered and its card's try-it is the ask now (`ItemAskPlan.ownAnswered`): its old form or question is no longer offered. */
+export const ownQuestionAnswered = (item: AgendaItem): boolean => itemAskPlan(item, itemCardAsks(item)).ownAnswered;
 
 /** Whether the item is a notice about cards, answered by its one form (`AgendaCardsList`) and nothing else. */
 export const answersWithCardsForm = (item: Pick<AgendaItem, 'cards'>): boolean => (item.cards?.length ?? 0) > 0;

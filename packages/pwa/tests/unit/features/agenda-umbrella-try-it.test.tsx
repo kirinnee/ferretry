@@ -128,7 +128,8 @@ describe('an umbrella card’s try-it from an older daemon (&C50)', () => {
     expect(root.querySelector('[data-agenda-answer-option="Not good"]')).toBeNull();
     expect(root.querySelector('[data-agenda-option="Not good"]')).toBeNull();
     // What typing does is said in the owner’s terms, never as the card moving.
-    expect(root.textContent).toContain('The ferret gets your words and tries again.');
+    expect(root.textContent).toContain('Not good? Type what is wrong below and send.');
+    expect(root.textContent).not.toContain('tries again');
     expect(root.textContent).not.toMatch(/the card (?:goes|stays)/iu);
   });
 

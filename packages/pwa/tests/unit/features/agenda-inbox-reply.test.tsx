@@ -2,6 +2,7 @@ import '../../support/dom.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import { AgendaInboxComposer } from '../../../src/features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from '../../../src/features/agenda/agenda-inbox-page.tsx';
+import { type AgendaItem, ownAskDigest } from '@ferretry/protocol';
 import type { AgendaInbox } from '../../../src/hooks/use-agenda-inbox.ts';
 import type { InboxCard } from '../../../src/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
@@ -329,6 +330,66 @@ describe('a reply from an Inbox card moves the Inbox on', () => {
     expect(toast(run.mounted)).toBeNull();
     expect(run.mounted.container.querySelectorAll('[data-agenda-answer-option]').length).toBe(1);
     expect(run.mounted.container.querySelector('[data-agenda-answer-option="Done"]')).not.toBeNull();
+    await run.mounted.unmount();
+  });
+});
+
+describe('an answer to the item’s own question, with a try-it waiting on the same item (&B165 round 2)', () => {
+  const gate = {
+    cardId: 'F12',
+    laneId: 'released',
+    laneName: 'Released',
+    entry: 4,
+    projectId: 'p1',
+    cardTitle: 'Badge colour',
+    options: [
+      { id: 'done', label: 'Done', outcome: 'close' },
+      { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+    ],
+  } as const;
+  const thread = {
+    kind: 'reply',
+    subject: 'Should a capacity request wait for the owner?',
+    ask: { kind: 'open-question' },
+    gateAttached: gate,
+    cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z', howToTest: '1. Open the badge.\n2. See it is blue.' }],
+  } as unknown as Partial<AgendaItem>;
+  const open = inboxCard(
+    agendaItem('A7', thread),
+    sessionView('sess-7', { config: { teammate: 'zoe', name: 'Capacity' } as never }),
+  );
+
+  it('keeps the item in Needs you after the answer is sent: no Replied overlay, no toast', async () => {
+    const run = await rig([open], async () => ({ disposition: 'queued', sendId: 'm1' }));
+    // Before: the question is the one ask, the try-it only waits as a line.
+    expect(run.mounted.container.querySelector('[data-agenda-card-ask-later]')).not.toBeNull();
+    await type(run.mounted, 'No, it should not wait');
+
+    await send(run.mounted);
+
+    expect(run.sent).toEqual([{ sessionId: 'sess-7', message: '!A7 No, it should not wait' }]);
+    // The daemon keeps the item in Needs you (a try-it still waits), so the app must not hide it for 30 s.
+    expect(keys(run.latest().cards)).toEqual([open.key]);
+    expect(run.latest().parked).toEqual([]);
+    expect(run.fake.replied.getSnapshot().entries).toEqual([]);
+    expect(toast(run.mounted)).toBeNull();
+    await run.mounted.unmount();
+  });
+
+  it('then shows the try-it at once: Good, one line for Not good, and no old question', async () => {
+    const answered = inboxCard({ ...open.item, ownAskRepliedTo: ownAskDigest(open.item) } as AgendaItem, open.view);
+    const run = await rig([answered], async () => ({ disposition: 'queued', sendId: 'm1' }));
+    const root = run.mounted.container;
+    expect(root.querySelector('[data-agenda-card-ask-later]')).toBeNull();
+    expect(root.querySelectorAll('[data-agenda-answer-option]')).toHaveLength(1);
+    expect(root.querySelector('[data-agenda-answer-option="Done"]')?.textContent).toContain('Good');
+    expect(root.querySelector('[data-agenda-typed-lead]')?.textContent).toBe(
+      'Not good? Type what is wrong below and send.',
+    );
+    // The title still names the thread; what the owner is asked (the block) is only the try-it.
+    expect(root.querySelector('[data-agenda-part="needs"]')?.textContent).not.toContain(
+      'Should a capacity request wait',
+    );
     await run.mounted.unmount();
   });
 });

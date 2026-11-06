@@ -84,7 +84,7 @@ import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { STALE_ASK_COPY, type TypedAnswerTarget, typedGateAnswer } from '../../lib/agenda-gate-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
-import { itemAskWord, itemSwipeTargets, typedCardAsk } from '../../lib/agenda-item-sections.ts';
+import { itemAskWord, itemSwipeTargets, ownQuestionAnswered, typedCardAsk } from '../../lib/agenda-item-sections.ts';
 import {
   actionSentence,
   agendaConversationPath,
@@ -2208,7 +2208,9 @@ export function AgendaInboxPage({
                   <FocusHandoff key={deck[0].key} flag={composerHandoff} root={composerRoot} />
                   {renderComposer(
                     deck[0],
-                    deck[0].item.kind === 'form' ? () => answerForm(host, deck[0] as InboxCard) : undefined,
+                    deck[0].item.kind === 'form' && !ownQuestionAnswered(deck[0].item)
+                      ? () => answerForm(host, deck[0] as InboxCard)
+                      : undefined,
                     typedAnswerFor(host, deck[0]),
                   )}
                 </div>
