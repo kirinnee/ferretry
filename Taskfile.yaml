@@ -33,6 +33,11 @@ includes:
       TIMEOUT: --timeout 120000
 
 tasks:
+  ci:quick:
+    desc: Run the quick CI set locally (at most two heavy parts by default)
+    cmds:
+      - ./scripts/ci/quick.sh
+
   setup:
     desc: Install locked workspace dependencies
     cmds:

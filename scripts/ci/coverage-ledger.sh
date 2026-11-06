@@ -3,7 +3,7 @@
 # groups (config/test-groups.json), each of which is a serial run of its own share of the files.
 #
 #   coverage-ledger.sh <unit|int> <lcov>...
-#   coverage-ledger.sh <unit|int> --groups <dir>   # <dir>/coverage-<mode>-<group>/lcov.info, every group
+#   coverage-ledger.sh <unit|int> --groups <dir>   # <dir>/<group>/lcov.info, every group
 #
 # It asserts every path is inside the tier's scope (`src/lib/` for unit, `src/adapters/` for int),
 # the ledger is non-empty, every line is hit, and no source file is missing from it.
@@ -34,7 +34,12 @@ if [[ $1 == "--groups" ]]; then
   mapfile -t names < <(jq -r --arg mode "${mode}" '.[$mode] // [] | .[].name' config/test-groups.json)
   [[ ${#names[@]} -eq 0 ]] && echo "❌ config/test-groups.json names no ${mode} test groups" >&2 && exit 1
   ledgers=()
-  for name in "${names[@]}"; do ledgers+=("$2/coverage-${mode}-${name}/lcov.info"); done
+  for name in "${names[@]}"; do
+    ledger="$2/${name}/lcov.info"
+    # Also accept the former download-artifact layout for saved CI evidence/local diagnosis.
+    [[ ! -f ${ledger} && -f $2/coverage-${mode}-${name}/lcov.info ]] && ledger="$2/coverage-${mode}-${name}/lcov.info"
+    ledgers+=("${ledger}")
+  done
   set -- "${ledgers[@]}"
 fi
 

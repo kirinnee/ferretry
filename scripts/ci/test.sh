@@ -32,7 +32,7 @@ if [[ ${mode} == "realworld" ]]; then
   exit 0
 fi
 # THE REPOSITORY CONTRACTS ARE NOT CHECKED HERE. Pages config, the hosted relay config, macOS relevance and
-# the test tiers each have a pre-commit hook, and `Pre-Commit (gates)` runs every hook over every file on
+# the test tiers each have a pre-commit hook, and Quick's gates part runs every hook over every file on
 # every pull request and `main` push (pages-config also runs in `Build Checks`). Running them again here
 # cost ~23 s in each of the ten test jobs (13.6 s of macOS relevance alone) to prove nothing about tests.
 
@@ -100,7 +100,7 @@ fi
 
 # The integration tier starts real Chromes, and the first one on a fresh runner is slow — paid once
 # here rather than inside whichever test happens to start it (see the script).
-[[ ${mode} == "int" ]] && ./scripts/ci/warm-chrome.sh
+[[ ${mode} == "int" && ${FY_CI_CHROME_WARM:-} != 1 ]] && ./scripts/ci/warm-chrome.sh
 
 echo "🧪 Running ${mode} tests with coverage..."
 rm -f "${coverage_file}"
