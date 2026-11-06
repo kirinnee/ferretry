@@ -4,6 +4,7 @@ import type { LearningSubsystem, LimitsService, ManagedWorktreeService, RenderSe
 import type { SttEnhancementSubsystem } from '../../src/lib/runtime/mounts/stt.ts';
 import type { WorkSearchService } from '../../src/lib/work-search/index.ts';
 import type { AnalyticsJobs, AnalyticsProvides } from './analytics.ts';
+import type { InputRequestsProvides } from './input-requests.ts';
 import type { LearningSeams } from './learning.ts';
 import type { UpdateJobs, UpdateProvides } from './update.ts';
 import type { VoiceSeams } from './voice.ts';
@@ -24,6 +25,8 @@ export const seamsOf = {
   analytics: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the measured host is a `buildWorld` seam, a need). */
   cgroups: (_world: DaemonWorld): void => undefined,
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the tmux, the terminals, the agenda and the vault are needs). */
+  inputRequests: (_world: DaemonWorld): void => undefined,
   learning: (world: DaemonWorld): LearningSeams => ({ userHome: world.userHome }),
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the saved-pictures store is a need). */
   renders: (_world: DaemonWorld): void => undefined,
@@ -45,6 +48,7 @@ export const seamsOf = {
 export interface ModuleHandles {
   readonly analytics: BuiltModule<AnalyticsProvides, AnalyticsJobs>;
   readonly cgroups: BuiltModule<LimitsService>;
+  readonly inputRequests: BuiltModule<InputRequestsProvides>;
   readonly learning: BuiltModule<LearningSubsystem>;
   readonly renders: BuiltModule<RenderService>;
   readonly update: BuiltModule<UpdateProvides, UpdateJobs>;

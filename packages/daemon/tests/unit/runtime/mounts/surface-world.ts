@@ -2,10 +2,6 @@ import type { DaemonId } from '@ferretry/protocol';
 import { BrowserProxyTester } from '../../../../src/lib/browser/proxy/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
-import {
-  type PhoneApprovalDependencies,
-  PhoneApprovalService,
-} from '../../../../src/lib/input-requests/phone-approval.ts';
 import { NO_PERFORMANCE_PROBE } from '../../../../src/lib/performance/recorder.ts';
 import {
   fixedCarrierView,
@@ -745,8 +741,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
     return { service: world.service, identities: world.identities };
   })(),
   inputRequests: inputRequestService().service,
-  // Only its routes are read here: nothing is raised, so none of its ports is reached.
-  phoneApprovals: new PhoneApprovalService({ enabled: () => false } as unknown as PhoneApprovalDependencies),
   secureCopy: (() => {
     const rules = new PasteRuleService({
       store: { read: async () => undefined, write: async () => undefined },

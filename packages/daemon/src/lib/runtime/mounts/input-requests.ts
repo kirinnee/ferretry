@@ -1,4 +1,5 @@
 import {
+  DAEMON_FEATURES,
   type InputActor,
   InputCancelBodySchema,
   InputDeliverBodySchema,
@@ -21,6 +22,7 @@ import type { PhoneApprovalService } from '../../input-requests/phone-approval.t
 import type { InputCaller } from '../../input-requests/ports.ts';
 import type { InputRequestService } from '../../input-requests/service.ts';
 import { refusedAccountNames, refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
+import type { ModuleContribution } from '../modules.ts';
 
 /**
  * THE OWNER'S ROUTES FOR INPUT REQUESTS (docs/input-requests.md).
@@ -300,4 +302,23 @@ export function phoneApprovalRoutes(service: PhoneApprovalService): readonly Api
       },
     },
   ];
+}
+
+/**
+ * What the input-requests module adds to the daemon: the owner's answers to an agent's request for a password, a code
+ * or an answer, and the phone approvals, with the protocol feature that says this daemon draws the approval card.
+ *
+ * Every path is a literal no other subsystem uses (`/v1/input-requests`, `/v1/phone-approvals`) or sits under
+ * `/v1/sessions/:sessionId` ending in `input-requests` or `phone-approvals`, so none can shadow or be shadowed. The
+ * security log is written by the services themselves (`input.delivered`, `input.cancelled`, `phone-approval.refused`),
+ * so the module has no audit rule of its own.
+ */
+export function inputRequestsContribution(
+  service: InputRequestService,
+  approvals: PhoneApprovalService,
+): ModuleContribution {
+  return {
+    routes: [...inputRequestRoutes(service), ...phoneApprovalRoutes(approvals)],
+    features: [DAEMON_FEATURES.phoneApproval],
+  };
 }
