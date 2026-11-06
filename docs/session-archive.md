@@ -2,8 +2,9 @@
 
 A daemon keeps every session it ever ran, and nearly all of them are finished. Dozens of jobs walk the whole set on
 every tick — the sweeps, the watchers, the session list the app polls, the board's roster — so the cost of a finished
-session never stopped. **Finished autonomous sessions older than a day leave the live set.** They are archived,
-not deleted.
+session never stopped. **Automatic archiving is off by default.** When enabled with a 24-hour age, finished autonomous
+sessions older than a day leave the live set. They are archived, not deleted. Archive routes, revival, `fy` commands
+and the app's archive footer remain available while the automatic pass is off.
 
 ## What it does
 
@@ -85,6 +86,9 @@ the pin document or changing its place or time.
 
 ## When it runs
 
+The following schedule runs only after explicitly enabling the automatic pass (see **Setting**). The owner plans to
+enable it on **2026-11-07**, after a clean day; that is a rollout plan, not a scheduled or automatic activation.
+
 - **Once at boot**, as a job of the housekeeping lane, so it waits until the daemon is serving and takes its turn
   behind the other housekeeping.
 - **Hourly after that**, as the same job. The timer is armed after a pass finishes, so a pass can never be overtaken
@@ -134,13 +138,29 @@ the pin document or changing its place or time.
 
 ## Setting
 
-| Variable                          | Meaning                                                             |
-| --------------------------------- | ------------------------------------------------------------------- |
-| `FYD_SESSION_ARCHIVE_AFTER_HOURS` | Whole hours a finished autonomous session stays live. Default `24`. |
-|                                   | `off` archives nothing more; what is archived stays archived.       |
+| Variable                          | Meaning                                                                                                          |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `FYD_SESSION_ARCHIVE_AFTER_HOURS` | Whole hours a finished autonomous session stays live; set `24` to enable the daily age.                          |
+|                                   | Default **off** (unset, empty or `off`): no boot pass or timer; existing archives remain readable and revivable. |
 
-A daemon is configured by environment here, not by `machine.yaml`: archiving loosens neither spend nor authority, so
-it needs no owner confirmation, and a malformed value stops the daemon at boot naming the variable.
+This is the existing daemon **environment** switch, not a key in `machine.yaml` or `config/daemon.json`.
+Changing it takes effect at the **next daemon start**; a release update restarts the daemon anyway.
+A malformed value stops the daemon at boot naming the variable.
+
+On Linux, create `~/.config/systemd/user/fyd.service.d/archive.conf` (or
+`$XDG_CONFIG_HOME/systemd/user/fyd.service.d/archive.conf` when set):
+
+```ini
+[Service]
+Environment="FYD_SESSION_ARCHIVE_AFTER_HOURS=24"
+```
+
+Then run `systemctl --user daemon-reload` and `fy daemon restart`. The drop-in survives `fy daemon install`.
+To disable it again, set the same variable to `off` and reload/restart.
+
+On macOS, run `launchctl setenv FYD_SESSION_ARCHIVE_AFTER_HOURS 24`, then `fy daemon restart`.
+This lasts until logout or reboot; a login item can reapply it. Set it to `off` and restart to disable it.
+For a foreground daemon, start it with `FYD_SESSION_ARCHIVE_AFTER_HOURS=24 fyd`.
 
 ## Declared gaps
 

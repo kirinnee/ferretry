@@ -1019,13 +1019,14 @@ export class DaemonStorage {
     const document = serializeJsonDocument(value);
     await this.configWrite(
       id,
-      async () =>
+      async publishing =>
         await this.serial.run(id, async () => {
           await this.reviveIfArchived(id);
           await this.ensureSessionDirectory(id);
           // The write is inside the try: `writeTextAtomic` renames first and may throw afterwards (the chmod or
           // the directory fsync), so a failed write can still have replaced the stored config.
           try {
+            publishing();
             await this.writeDocument(createSessionPaths(this.paths, id).config, document);
             await this.syncSessionUnlocked(id);
           } finally {
@@ -1040,11 +1041,12 @@ export class DaemonStorage {
    * A changed parent is retained AFTER releasing that gate: only one root is held at a time, so moving between
    * lineages cannot invert their lock order. A new parent archived in that window is restored by the same keep path.
    */
-  private async configWrite<T>(id: SessionId, work: () => Promise<T>, rootMoves = 0): Promise<T> {
+  private async configWrite<T>(id: SessionId, work: (publishing: () => void) => Promise<T>, rootMoves = 0): Promise<T> {
     const lineage = await this.ancestors(id);
     const root = lineage.at(-1) ?? id;
     let retain: SessionId | undefined;
     let committed = false;
+    let publishing = false;
     const result = await this.lineages.run(root, async (): Promise<{ value: T } | { error: unknown } | undefined> => {
       // A writer ahead of us may have reparented this session while we waited. Release the obsolete gate and
       // queue on the current root before entering the document lane; never nest two lineage gates.
@@ -1052,10 +1054,15 @@ export class DaemonStorage {
       const previous = jsonObject(await this.readConfig(id, 'proved').catch(() => undefined))?.parent;
       let outcome: { value: T } | { error: unknown };
       try {
-        const value = await work();
+        const value = await work(() => {
+          publishing = true;
+        });
         committed = true;
         outcome = { value };
       } catch (error) {
+        // Validation, directory/journal checks and transforms can refuse before the atomic write starts.
+        // Preserve their original error: no publication needs proving or repairing in that case.
+        if (!publishing) return { error };
         outcome = { error };
       }
       // Even a failed atomic write can have renamed its document already.
@@ -1064,7 +1071,7 @@ export class DaemonStorage {
         const parentId = typeof parent === 'string' ? tryParseSessionId(parent) : undefined;
         if (
           parentId !== undefined &&
-          (parent !== previous || (await this.ancestors(parentId)).some(session => this.archived.has(session)))
+          (parent !== previous || (await this.ancestors(parentId, true)).some(session => this.archived.has(session)))
         )
           retain = parentId;
       } catch (error) {
@@ -1338,7 +1345,7 @@ export class DaemonStorage {
     create?: () => unknown,
   ): Promise<JsonValue> {
     this.assertOpen();
-    const write = async (): Promise<JsonValue> =>
+    const write = async (publishing: () => void = () => {}): Promise<JsonValue> =>
       await this.serial.run(id, async () => {
         await this.reviveIfArchived(id);
         const paths = createSessionPaths(this.paths, id);
@@ -1353,7 +1360,9 @@ export class DaemonStorage {
         // The write is inside the try for the same reason as `writeConfig`: a write that threw after its rename
         // has still changed the stored config.
         try {
-          await this.writeDocument(paths[kind], serializeJsonDocument(next));
+          const document = serializeJsonDocument(next);
+          publishing();
+          await this.writeDocument(paths[kind], document);
           await this.syncSessionUnlocked(id);
         } finally {
           if (kind === 'config') this.configChanges += 1;
@@ -1916,13 +1925,17 @@ export class DaemonStorage {
   }
 
   /** The lineage as stored now, including the named session; loops settle on a stable root key. */
-  private async ancestors(id: SessionId): Promise<readonly SessionId[]> {
+  private async ancestors(id: SessionId, strict = false): Promise<readonly SessionId[]> {
     const seen = new Set<SessionId>();
     let current: SessionId | undefined = id;
     while (current !== undefined && !seen.has(current)) {
       seen.add(current);
       const config: ReturnType<typeof jsonObject> = jsonObject(
-        await this.readConfig(current, 'proved').catch(() => undefined),
+        await this.readConfig(current, 'proved').catch(error => {
+          // Root discovery tolerates a reserved session with no config; retention must prove the whole chain.
+          if (strict) throw error;
+          return undefined;
+        }),
       );
       current = typeof config?.parent === 'string' ? tryParseSessionId(config.parent) : undefined;
     }
@@ -1939,7 +1952,7 @@ export class DaemonStorage {
   async retainSession(id: SessionId): Promise<void> {
     this.assertOpen();
     this.retentionChanges += 1;
-    const lineage = await this.ancestors(id);
+    const lineage = await this.ancestors(id, true);
     await this.changeRegistry(async current => {
       const restore = lineage.filter(session => current.has(session) || this.index.findSession(session) === undefined);
       if (restore.length === 0) return undefined;

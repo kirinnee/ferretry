@@ -2,6 +2,9 @@ import { expect, test } from 'bun:test';
 import { fixture, ended } from './session-archive-commit-contract.ts';
 import { parseSessionId } from '../../src/lib/session-id.ts';
 import { StorageSessionLifecycleRepository } from '../../src/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+import { createSessionArchive } from '../../src/adapters/session/archive/session-archive.ts';
+import { createFoundationPaths } from '../../src/lib/paths.ts';
+import { parseArchiveAfter } from '../../src/lib/session/archive/policy.ts';
 
 function deferred() {
   let resolve!: () => void;
@@ -29,6 +32,62 @@ function writable(world: ReturnType<typeof fixture>) {
 }
 
 export function sessionArchiveConfigRetentionContract(): void {
+  test('the default disables automatic passes, explicit hours enable them, and reads and revival stay available', async () => {
+    const world = fixture();
+    const archive = (raw: string | undefined) =>
+      createSessionArchive({
+        paths: createFoundationPaths('/tmp/review-only-no-io' as never),
+        storage: world.storage,
+        clock: { nowMs: () => Date.parse('2026-11-06T12:00:00.000Z') },
+        afterMs: parseArchiveAfter(raw),
+        passLimit: 200,
+        sources: {
+          pinned: async () => new Map(),
+          board: async () => ({ cards: [], laneSets: new Map() }),
+          hasOpenAgendaItem: async () => false,
+        },
+        yieldToLoop: async () => {},
+      });
+    const disabled = archive(undefined);
+    expect(disabled.enabled).toBe(false);
+    expect(disabled.subsystem.run).toBeUndefined();
+    expect(await disabled.subsystem.count()).toBe(0);
+    expect(await disabled.subsystem.list(10)).toEqual([]);
+    const enabled = archive('24');
+    expect(enabled.enabled).toBe(true);
+    await enabled.subsystem.run?.();
+    expect(await disabled.subsystem.count()).toBe(1);
+    await world.storage.retainSession(parseSessionId('lead-1'));
+    expect(await disabled.subsystem.count()).toBe(0);
+    expect(world.rows.has('lead-1')).toBe(true);
+  });
+
+  for (const method of ['writeConfig', 'updateConfig', 'upsertConfig'] as const) {
+    test(
+      method + ': preserves the original error before config publication even if parent proof would fail',
+      async () => {
+        const world = fixture();
+        const internal = writable(world);
+        const original = new TypeError('foreign session directory');
+        let refused = false;
+        internal.ensureSessionDirectory = async () => {
+          refused = true;
+          throw original;
+        };
+        const read = world.storage.readConfig.bind(world.storage);
+        world.storage.readConfig = async (id, freshness) => {
+          if (refused) throw new Error('foreign directory has no proved config');
+          return await read(id, freshness);
+        };
+        const id = parseSessionId('lead-1');
+        const written =
+          method === 'writeConfig' ? world.storage.writeConfig(id, {}) : world.storage[method](id, () => ({}));
+        await expect(written).rejects.toBe(original);
+        expect(world.docs.get(id)?.config).toEqual({ mode: 'auto' });
+      },
+    );
+  }
+
   for (const method of ['writeConfig', 'updateConfig', 'upsertConfig'] as const) {
     test(`${method} already publishing holds its current root gate until the index is published`, async () => {
       const world = fixture({
@@ -447,4 +506,76 @@ export function sessionArchiveConfigRetentionContract(): void {
     expect(world.storage.isArchived(lead)).toBe(false);
     expect(world.rows.has(lead)).toBe(true);
   });
+
+  for (const method of ['writeConfig', 'updateConfig', 'upsertConfig'] as const) {
+    for (const unchanged of [false, true]) {
+      test(
+        method +
+          ': an unreadable ' +
+          (unchanged ? 'unchanged' : 'new') +
+          ' parent lineage rejects and an identical retry repairs every ancestor',
+        async () => {
+          const world = fixture({
+            docs: new Map([
+              ['old-lead', ended()],
+              ['grand-lead', ended()],
+              ['parent-1', ended('grand-lead')],
+              [
+                'kid-1',
+                { config: { mode: 'auto', parent: unchanged ? 'parent-1' : 'old-lead' }, state: { status: 'running' } },
+              ],
+            ]),
+          });
+          const grand = parseSessionId('grand-lead');
+          const parent = parseSessionId('parent-1');
+          const kid = parseSessionId('kid-1');
+          // Also exercise the repair decision when the immediate parent is already live.
+          if (unchanged) await world.storage.archiveSessions([grand], async () => ({}));
+          else await world.archive.subsystem.run?.();
+          expect(world.storage.isArchived(grand)).toBe(true);
+          expect(world.storage.isArchived(parent)).toBe(!unchanged);
+          const internal = writable(world);
+          const writeDocument = internal.writeDocument;
+          let published = false;
+          internal.writeDocument = async (path, text) => {
+            await writeDocument(path, text);
+            published = true;
+          };
+          const read = world.storage.readConfig.bind(world.storage);
+          const failure = new Error('one-shot EIO proving the intermediate parent');
+          let failed = false;
+          world.storage.readConfig = async (id, freshness) => {
+            if (published && id === parent && !failed) {
+              expect(freshness).toBe('proved');
+              failed = true;
+              throw failure;
+            }
+            return await read(id, freshness);
+          };
+          const next = { mode: 'auto', parent: 'parent-1' };
+          const write = () =>
+            method === 'writeConfig' ? world.storage.writeConfig(kid, next) : world.storage[method](kid, () => next);
+          let error: unknown;
+          try {
+            await write();
+          } catch (caught) {
+            error = caught;
+          }
+          expect(failed).toBe(true);
+          expect(error).toBeInstanceOf(Error);
+          expect((error as Error).message).toContain('config write is already committed');
+          expect((error as Error).cause).toBe(failure);
+          expect(world.docs.get(kid)?.config?.parent).toBe('parent-1');
+          expect(world.storage.isArchived(grand)).toBe(true);
+          expect(world.storage.isArchived(parent)).toBe(!unchanged);
+          // The parent no longer changes on retry; it still owes the entire lineage restoration.
+          await write();
+          for (const id of [parent, grand]) {
+            expect(world.storage.isArchived(id)).toBe(false);
+            expect(world.rows.has(id)).toBe(true);
+          }
+        },
+      );
+    }
+  }
 }

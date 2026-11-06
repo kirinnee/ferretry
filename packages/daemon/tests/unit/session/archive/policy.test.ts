@@ -199,12 +199,13 @@ describe('the sessions that keep a lead live at the commit boundary', () => {
 });
 
 describe('the archive age setting', () => {
-  it('should default to one day', () => {
-    should(parseArchiveAfter(undefined)).equal(ARCHIVE_AFTER_MS_DEFAULT);
-    should(parseArchiveAfter('  ')).equal(ARCHIVE_AFTER_MS_DEFAULT);
+  it('should default to off until explicitly enabled', () => {
+    should(parseArchiveAfter(undefined)).be.undefined();
+    should(parseArchiveAfter('  ')).be.undefined();
   });
 
   it('should take a whole number of hours', () => {
+    should(parseArchiveAfter('24')).equal(ARCHIVE_AFTER_MS_DEFAULT);
     should(parseArchiveAfter('72')).equal(72 * HOUR);
   });
 

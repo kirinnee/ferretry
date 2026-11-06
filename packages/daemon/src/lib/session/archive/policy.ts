@@ -157,14 +157,13 @@ export function decideArchive(sessions: readonly ArchiveSession[], facts: Archiv
 export const ARCHIVE_AFTER_VARIABLE = 'FYD_SESSION_ARCHIVE_AFTER_HOURS';
 
 /**
- * The age for this `FYD_SESSION_ARCHIVE_AFTER_HOURS` value, in milliseconds: absent or empty is a day, `off` is
+ * The age for this `FYD_SESSION_ARCHIVE_AFTER_HOURS` value, in milliseconds: absent, empty or `off` is
  * `undefined` (nothing is archived), and anything that is not a whole number of hours, one or more, throws naming the
  * variable — so a typo is heard at boot rather than silently archiving at the wrong age.
  */
 export function parseArchiveAfter(raw: string | undefined): number | undefined {
   const text = raw?.trim().toLowerCase() ?? '';
-  if (text === '') return ARCHIVE_AFTER_MS_DEFAULT;
-  if (text === 'off') return undefined;
+  if (text === '' || text === 'off') return undefined;
   if (!/^[1-9]\d*$/u.test(text))
     throw new Error(`${ARCHIVE_AFTER_VARIABLE} must be a whole number of hours (1 or more) or "off": ${raw ?? ''}`);
   return Number(text) * 60 * 60_000;

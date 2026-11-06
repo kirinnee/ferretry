@@ -34,6 +34,21 @@ terminals open is one of them (`terminals.shell`, [terminals.md](terminals.md)).
 `fy config path`, `check`, `schema` and `guide` need no daemon. `status`, `show`, `write` and `confirm` ask it:
 `fy config write <file> [--if-match <etag>]` reads the text from stdin and is refused whole unless it checks.
 
+## Daemon archive setting
+
+The automatic session archive pass is **off by default**. Its existing switch is the daemon environment variable
+`FYD_SESSION_ARCHIVE_AFTER_HOURS`: unset, empty or `off` disables automatic passes; `24` enables archiving finished
+autonomous sessions after 24 hours. Archive routes, revival, `fy` commands and the app's archive footer stay available.
+This is not a key in `machine.yaml` or `config/daemon.json`.
+Changing it takes effect at the **next daemon start**; a release update restarts the daemon anyway.
+
+On Linux, put `[Service]` followed by `Environment="FYD_SESSION_ARCHIVE_AFTER_HOURS=24"` in
+`~/.config/systemd/user/fyd.service.d/archive.conf` (under `$XDG_CONFIG_HOME` instead of `~/.config` when set),
+then run `systemctl --user daemon-reload` and `fy daemon restart`. On macOS, use
+`launchctl setenv FYD_SESSION_ARCHIVE_AFTER_HOURS 24` and `fy daemon restart`; reapply after logout or reboot.
+See [session archive](session-archive.md#setting) for the full examples and how to switch it off again.
+The owner plans to enable it on **2026-11-07 after a clean day**; nothing activates itself on that date.
+
 ## How a file is read
 
 Each file is checked on its own — YAML syntax, then the raw-secret detector, then its schema — and the
