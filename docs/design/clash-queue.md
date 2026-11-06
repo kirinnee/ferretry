@@ -112,8 +112,17 @@ which answers from ONE read of the board — paging through the board view could
 
 1. the PR's **merge unit**: every card not dropped that links it, and every card not dropped that rides one of those
    cards' shipping units (§2): a helper of a linking card, finished or not, and an umbrella lead above one;
-2. the unit's **waits**: each unfinished `blockedBy` of a unit card on a card outside the unit that does not link
-   the same PR (a card merging in the same PR never holds it, even when its link arrived after the claim queued it);
+2. the unit's **waits**, derived from the board as it is now, because units change after a claim lands (a card
+   opens its PR, a helper finishes, a card is reparented) and the daemon's claim-time depends-on can go stale:
+   - the **live clash order**: for every other unit whose claims clash with this unit's, the unit whose own cards
+     claimed first (the last `file-claimed` of each path, else the card's creation) merges first. A card riding both
+     units, an umbrella lead, sits out that pair. One rule decides both sides of every pair, so two PRs never wait
+     on each other through it. A unit that shipped or was dropped holds nothing, and neither does an umbrella lead's
+     own unit once it has child units (it never ships by itself; its claims count through them). A unit card that
+     removed a wait on that unit's shipping card with `fy task undepend` waives it;
+   - the **dependencies a person added**: each unfinished `blockedBy` of a unit card on a card outside the unit
+     that does not link the same PR, except the daemon's own claim-time ones (their latest `depended` is the
+     daemon's), which the live order stands in for;
 3. the **unreadable** cards: quarantined cards could link the PR, so the gate cannot call it free.
 
 The CLI exits **0** and prints nothing when there are no waits and nothing unreadable; **1** and
@@ -145,8 +154,14 @@ and would hold every PR.
 - **Another machine's cards** are not seen (the board's existing GAP).
 - **A queued helper keeps waiting on its lead's shipping card** even if it later opens a PR of its own: the
   dependency was decided at claim time. Its lead removes it with `fy task undepend` when that matters.
-- **A hand-made dependency can still cross two PRs into a cycle.** The unit cycle check guards the daemon's own
-  waits; `fy task depend` keeps its card-level check. The merger then names both waits and the lead undepends one.
+- **A hand-made dependency can still cross two PRs into a cycle**, and so can one against the live clash order.
+  The merger names both waits and the lead undepends one.
+- **The board's depends-on is the claim-time view.** It is not rewritten when units change later; the gate's live
+  order is what holds a merge. A wait the gate names with no depends-on behind it is waived by `fy task depend`
+  then `fy task undepend`.
+- **`fy task undepend` matches a dependency by id alone** (pre-existing, `card-actions.ts`): naming another
+  machine's card with a local id removes the local one. The gate's waiver reads local refs only, so this cannot
+  free a clash, but it is worth fixing on its own.
 - **An umbrella lead's wait holds every child PR**, and a finished helper's wait holds its lead's next PR too: the
   board cannot tell which PR carried a helper's work, so it keeps the wait until the blocker ships.
 - **One unreadable card holds every PR.** Fail closed is the point; the merger's note names the card.

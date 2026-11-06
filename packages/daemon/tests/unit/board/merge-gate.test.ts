@@ -162,6 +162,122 @@ describe('mergeGateOf', () => {
     });
   }
 
+  describe('the live clash order', () => {
+    const at = (minute: number): string => `2026-10-30T10:${String(minute).padStart(2, '0')}:00.000Z`;
+    /** A card claiming each path at its minute, in that order. */
+    const claiming = (id: string, claims: readonly (readonly [string, number])[], rest: Partial<BoardTask> = {}) =>
+      card({
+        id: id as BoardTask['id'],
+        files: claims.map(([path]) => path),
+        history: [
+          { seq: 1, at: at(0), actor: { kind: 'ferret', sessionId: 'lead' }, type: 'created', laneId: 'todo' },
+          ...claims.map(([path, minute], n) => ({
+            seq: n + 2,
+            at: at(minute),
+            actor: { kind: 'ferret' as const, sessionId: 'lead' },
+            type: 'file-claimed' as const,
+            path,
+          })),
+        ],
+        ...rest,
+      });
+    const gateFor = (number: number, cards: readonly BoardTask[]) =>
+      mergeGateOf(`https://github.com/kirinnee/ferretry/pull/${String(number)}`, {
+        index: new BoardIndex(cards, MACHINE),
+        laneSets,
+        unreadable: [],
+      });
+
+    it('should queue siblings that claimed before either had a PR, in claim order', () => {
+      // Arrange — F2 and F3 sat under PR-free F1 when they claimed x.ts (F2 first); each opened its own PR later.
+      const cards = [
+        card({ id: 'F1' }),
+        claiming('F2', [['x.ts', 1]], { parent: { id: 'F1' }, ...linking(prLink(42)) }),
+        claiming('F3', [['x.ts', 2]], { parent: { id: 'F1' }, ...linking(prLink(43)) }),
+      ];
+
+      // Act / Assert
+      should(gateFor(43, cards)?.waits).eql([{ task: { id: 'F3' }, on: { id: 'F2' }, until: 'shipped' }]);
+      should(gateFor(42, cards)?.waits).eql([]);
+    });
+
+    it("should never hold two PRs on each other through an umbrella lead's claims", () => {
+      // Arrange — PR-free F1 claimed x.ts first; its child F2 (PR 42) claimed z.ts last; F3 (PR 43) claimed z.ts, then x.ts.
+      const cards = [
+        claiming('F1', [['x.ts', 1]], { laneId: 'implement' }),
+        claiming('F2', [['z.ts', 4]], { parent: { id: 'F1' }, ...linking(prLink(42)) }),
+        claiming(
+          'F3',
+          [
+            ['z.ts', 2],
+            ['x.ts', 3],
+          ],
+          linking(prLink(43)),
+        ),
+      ];
+
+      // Act
+      const forty2 = gateFor(42, cards)?.waits ?? [];
+      const forty3 = gateFor(43, cards)?.waits ?? [];
+
+      // Assert — exactly one of them waits, on the other.
+      should(forty2).eql([]);
+      should(forty3).eql([{ task: { id: 'F3' }, on: { id: 'F2' }, until: 'shipped' }]);
+    });
+
+    it("should not weigh the daemon's stale claim-time dependency", () => {
+      // Arrange — F3 was queued behind F1 when it claimed, but F1 no longer claims anything that clashes.
+      const f3 = claiming('F3', [['x.ts', 2]], { ...linking(prLink(43)), ...waitsOn('F1') });
+      const stale = {
+        ...f3,
+        history: [
+          ...f3.history,
+          {
+            seq: 3,
+            at: at(2),
+            actor: { kind: 'daemon' as const, sessionId: 'lead' },
+            type: 'depended' as const,
+            task: { id: 'F1' as BoardTask['id'] },
+            until: 'shipped' as const,
+          },
+        ],
+      };
+
+      // Act / Assert
+      should(gateFor(43, [card({ id: 'F1', laneId: 'implement' }), stale])?.waits).eql([]);
+    });
+
+    it('should let a lead waive a wait by removing it on purpose', () => {
+      // Arrange
+      const f3 = claiming('F3', [['x.ts', 2]], linking(prLink(43)));
+      const waiving = {
+        ...f3,
+        history: [
+          ...f3.history,
+          {
+            seq: 3,
+            at: at(3),
+            actor: { kind: 'ferret' as const, sessionId: 'lead' },
+            type: 'undepended' as const,
+            task: { id: 'F2' as BoardTask['id'] },
+            reason: 'F3 goes first',
+          },
+        ],
+      };
+
+      // Act / Assert
+      should(gateFor(43, [claiming('F2', [['x.ts', 1]], linking(prLink(42))), waiving])?.waits).eql([]);
+    });
+
+    it('should not hold a PR on a unit that already shipped', () => {
+      const cards = [
+        claiming('F2', [['x.ts', 1]], { laneId: 'merged', ...linking(prLink(42)) }),
+        claiming('F3', [['x.ts', 2]], linking(prLink(43))),
+      ];
+      should(gateFor(43, cards)?.waits).eql([]);
+    });
+  });
+
   it('should name the cards it could not read', () => {
     should(gate([], ['F7'])?.unreadable).eql(['F7']);
   });

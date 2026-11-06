@@ -1397,12 +1397,16 @@ for that feature to be built before merging."_ (&I38; the design is
   merges after the first ships, then rebases. `fy task merge-gate <pr-url>` (over `GET /v1/board/merge-gate?pr=`)
   answers for the merger from ONE read of the board. A PR ships a **merge unit**: every card not dropped that links
   it, and every card not dropped riding one of those cards' units (its helpers, finished or not, and an umbrella lead
-  above it). Exit 0 when no card of the unit waits on a card outside it that
-  is not done; 1 (printing `&F20 waits on &F18 (until shipped)`) when one does; 2 when it cannot tell — the daemon
-  is down or predates the gate, a card on the machine is unreadable (it might link the PR), or the URL is not a PR.
-  The merger treats 2 as "do not merge". A card inside the unit, or one linking the same PR, never holds it.
-- **To jump the queue**, the card's lead runs `fy task undepend <id> <other> --reason "<why>"`, or the owner
-  overrides it. Releasing a claim does not remove a dependency.
+  above it). Units change after a claim lands (a card opens its PR, a helper finishes), so the gate does not trust
+  the daemon's claim-time depends-on: it derives the **clash order live** — of two units whose claims clash, the one
+  whose own cards claimed first merges first (a card riding both, an umbrella lead, sits out the pair) — and adds the
+  dependencies a person made. Exit 0 when the unit waits on nothing; 1 (printing `&F20 waits on &F18 (until
+shipped)`) when it does; 2 when it cannot tell — the daemon is down or predates the gate, a card on the machine is
+  unreadable (it might link the PR), or the URL is not a PR. The merger treats 2 as "do not merge". A card inside the
+  unit, or one linking the same PR, never holds it; nor does a unit that shipped or was dropped.
+- **To jump the queue**, the card's lead removes the wait on purpose: `fy task undepend <id> <other> --reason
+"<why>"` (when the gate names a wait the board has no depends-on for, `fy task depend` it first). The owner may
+  override instead. Releasing a claim does not remove a dependency.
 
 ## Agenda and cards
 
