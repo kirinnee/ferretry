@@ -1,3 +1,10 @@
+## [4.290.2](https://github.com/kirinnee/ferretry/compare/v4.290.1...v4.290.2) (2026-11-06)
+
+### Performance
+
+* **daemon:** count tunnel route bytes and avoid repeated answer encoding ([#1537](https://github.com/kirinnee/ferretry/issues/1537)) ([46c4329](https://github.com/kirinnee/ferretry/commit/46c432939242cba89e62b42a25fefbc086beb639))
+* **session:** retire resolved transcript baselines ([#1538](https://github.com/kirinnee/ferretry/issues/1538)) ([3997f9c](https://github.com/kirinnee/ferretry/commit/3997f9c762dcbf24708f019499fd3631ddedd024))
+
 ## [4.290.1](https://github.com/kirinnee/ferretry/compare/v4.290.0...v4.290.1) (2026-11-06)
 
 ### Fixes

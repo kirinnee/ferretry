@@ -1,3 +1,9 @@
+## [4.290.1](https://github.com/kirinnee/ferretry/compare/v4.290.0...v4.290.1) (2026-11-06)
+
+### Fixes
+
+* **daemon:** show the CPU weights the kernel holds for the daemon and voice in status ([#1533](https://github.com/kirinnee/ferretry/issues/1533)) ([dfcd156](https://github.com/kirinnee/ferretry/commit/dfcd1563de8e91aa38720d385e9f921d6ac2d6ff))
+
 ## [4.290.0](https://github.com/kirinnee/ferretry/compare/v4.289.0...v4.290.0) (2026-11-06)
 
 ### Features
