@@ -192,7 +192,7 @@ describe('StatePairingRepository', () => {
     const initial = await foreign.repository.open('workstation');
     await foreign.files.writeTextAtomic(
       join(foreign.paths.state, 'devices.json'),
-      `${JSON.stringify({ schemaVersion: 1, daemonId: `fy_daemon_${'z'.repeat(43)}`, devices: [] })}\n`,
+      `${JSON.stringify({ schemaVersion: 2, daemonId: `fy_daemon_${'z'.repeat(43)}`, devices: [] })}\n`,
     );
     await should(new StatePairingRepository(foreign.paths, foreign.files).open('workstation')).be.rejectedWith(
       'device grants belong to a different daemon identity',
