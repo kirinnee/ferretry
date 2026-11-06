@@ -31,6 +31,7 @@ on:
     - cron: '43 3 * * *'
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - 'packages/*/tests/realworld/**'
       - 'bunfig*.toml'
@@ -83,27 +84,28 @@ on:
 concurrency:
   group: >-
     ${{ github.workflow }}-${{
-      github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
+      github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && format('pr-{0}', github.event.pull_request.number)
       || (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'main'
       || github.run_id
     }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
 
 jobs:
   # The Linux realworld tier: the machine-dependent tests, in one process, on a quiet dedicated VM.
   realworld:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
     name: Realworld Tests
     timeout-minutes: 30
     permissions:
       contents: read
-    # Namespace 4x8 on EVERY event, `main` and the nightly included: a timing or memory budget is only
+    # Namespace 8x16 on EVERY selected event, `main` and the nightly included: a timing or memory budget is only
     # worth measuring on a machine nothing else is using, and a shared runner's noise was the reason
     # these tests left the blocking tier. `vars.CI_RUNNER_POOL == 'github'` is the same escape hatch the
     # other jobs have.
     runs-on: >-
       ${{
         vars.CI_RUNNER_POOL == 'github' && 'ubuntu-latest'
-        || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-8x16-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
       - uses: actions/checkout@v5
@@ -146,6 +148,7 @@ jobs:
   # job and not a `paths` filter, and what is deliberately generous). `main`, the nightly and manual
   # dispatch decide `true` for all of them. A job it leaves out is SKIPPED, which counts as passed.
   changes:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
     name: Optional Job Relevance
     timeout-minutes: 5
     permissions:
@@ -177,7 +180,7 @@ jobs:
     # a warning, and `macos-advisory` below says when no runner came. On `main` and the nightly it is not masked.
     continue-on-error: ${{ github.event_name == 'pull_request' }}
     needs: changes
-    if: needs.changes.outputs.containment == 'true'
+    if: ${{ ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) && (needs.changes.outputs.containment == 'true') }}
     permissions:
       contents: read
     # `macos-15`: GitHub retires `macos-14` on 2026-11-02, and its October brownout windows fail jobs
@@ -203,7 +206,7 @@ jobs:
     # a warning, and `macos-advisory` below says when no runner came. On `main` and the nightly it is not masked.
     continue-on-error: ${{ github.event_name == 'pull_request' }}
     needs: changes
-    if: needs.changes.outputs.safari == 'true'
+    if: ${{ ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) && (needs.changes.outputs.safari == 'true') }}
     permissions:
       contents: read
     # `macos-15`, NOT `macos-14`. macOS 14 entered deprecation on 2026-07-06 with October brownout
@@ -246,6 +249,7 @@ jobs:
           if-no-files-found: warn
 
   harness-contract:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
     name: Harness Contract (${{ matrix.os }})
     timeout-minutes: 30
     needs: changes
@@ -303,7 +307,7 @@ jobs:
     name: macOS Advisory
     timeout-minutes: 5
     needs: [darwin-confinement, safari-sandbox-shell, harness-contract]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    if: ${{ ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) && (!cancelled() && github.event_name == 'pull_request') }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -326,7 +330,7 @@ jobs:
     name: Integration Tests (tmux 3.8, ${{ matrix.group }})
     timeout-minutes: 20
     needs: changes
-    if: needs.changes.outputs.tmux38 == 'true'
+    if: ${{ ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) && (needs.changes.outputs.tmux38 == 'true') }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -351,7 +355,7 @@ jobs:
     name: Report failed realworld tests
     needs: [realworld, darwin-confinement, safari-sandbox-shell, harness-contract, tmux-38]
     # `failure()` is true when any needed job failed; a skipped macOS job is not a failure.
-    if: ${{ failure() && github.event_name != 'pull_request' }}
+    if: ${{ ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) && (failure() && github.event_name != 'pull_request') }}
     timeout-minutes: 10
     runs-on: ubuntu-latest
     permissions:

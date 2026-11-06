@@ -69,7 +69,7 @@ Every `*.test.ts(x)` lives in exactly one of those directories (or in `tests/con
   while the disk is saturated, a daemon stops within its bound, a worker holds under 25 MB. These are
   real and worth defending, and they cannot be deterministic, so they cannot block a merge. They run
   in their own workflow (`.github/workflows/realworld.yaml`) on a quiet dedicated runner, on every
-  push to `main`, nightly, on demand, and on a pull request that touches them. A failure there files one
+  push to `main`, nightly, on demand, and on a `full-ci` pull request that touches them. A failure there files one
   issue per failing test (`realworld: <file> > <test>`, label `realworld`); it never fails a pull
   request's required checks and never holds a release (see [CI/CD](../ci-cd/index.md#release-gating)).
   Also part of this tier, and already shaped like it: the daily `harness-contract-latest.yaml`, which
@@ -117,9 +117,9 @@ adapter cannot borrow coverage from the domain. If a line is uncovered in its ow
 genuinely untested.
 
 **CI runs the unit and integration tiers in test groups, judged per file.** `config/test-groups.json`
-splits each tier into shares that run on parallel runners (`./scripts/ci/test.sh <unit|int> <group>`); each test
+splits each tier into shares that run as isolated parallel processes in one job (`./scripts/ci/test.sh <unit|int> <group>`); each test
 file belongs to the first group with a prefix of its path. Each group writes its own ledger and the
-`Unit Tests` / `Integration Tests` job holds them together to the 100% gate
+`Quick Checks` / `Integration Tests` job holds them together to the 100% gate
 (`./scripts/ci/coverage-ledger.sh <unit|int> --groups <dir>`). **A source file passes only when one group
 alone covers it 100%.** Line counts cannot be added up across groups: Bun reports a function it
 never ran as one coarse range, blank and comment lines included, so groups disagree about which
@@ -492,7 +492,7 @@ behaviour — exit codes, stdout/stderr content, and journeys completing — not
 
 **No required E2E gate yet.** The E2E tier exists (`tests/e2e/`, [its README](../../../tests/e2e/README.md)):
 it drives the compiled binaries, the real PWA bundle and a real Chrome through the product journeys,
-and CI runs it as the advisory `E2E` workflow. It is not a required check until two weeks of runs
+and CI runs its fast journeys as the advisory E2E jobs inside `ci.yaml`’s Full set. It is not a required check until two weeks of runs
 have measured its flake rate ([CI/CD](../ci-cd/index.md#e2e-tier)). Browser tests are the most
 brittle and expensive tests there are, so its journeys cover what only a whole product can show and
 leave edge cases to the tiers below.
