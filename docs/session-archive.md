@@ -18,6 +18,10 @@ not deleted.
      sub-ferrets in the live set.
 - **When unsure, it keeps the session.** A session whose documents cannot be read, and a keep signal that cannot be
   read, both keep it.
+- **Unknown is never "no parent".** A live session whose config cannot be read, or whose `parent` means nothing, has an
+  _unknown lineage_: whose child it is cannot be said, so any lead might be its lead. While one exists that has not
+  itself ended and aged out, the pass archives nothing. A torn config on a session that ended long ago does not hold
+  the archive back for good.
 
 ## What keeps a session live
 
@@ -83,6 +87,17 @@ same storage. The registry entry is removed first and the index row is rebuilt b
   cache. The registry is written once per pass.
 - Archiving holds the sessions' lanes and re-reads each one as it is **now** before it goes, so a session revived
   between the decision and the act stays live.
+- That check is of the **whole group**, not of each session alone. At the commit boundary the roster is rebuilt (the
+  decision's snapshot plus every session that appeared since, read afresh) and the keep signals are asked again; a lead
+  goes only when every session naming it as lead has gone before it in the same commit. A child that revived, or was
+  started, between the decision and the locks keeps its lead live; a pin, card or agenda item that appeared meanwhile
+  keeps its session live. The signals live in other subsystems and take no lane, so this narrows the window, it cannot
+  close it — see the gaps.
+- The registry is changed by a **read-modify-write inside its own queue**: the new map is derived from the registry as
+  it is when the change's turn comes, then written durably, then published. A revival and an archive pass on different
+  sessions therefore never overwrite one another's change.
+- Archiving **closes the file watches** held on the session's marker, config and state documents and recounts the
+  cache and watch bound for the smaller live set. A later read of an archived session may watch again, within the bound.
 
 ## Seeing it
 
@@ -115,6 +130,11 @@ it needs no owner confirmation, and a malformed value stops the daemon at boot n
 - **Scratch**: the scratch collector walks the live list, with the same 24-hour age as the archive. A session archived
   before the collector's sweep reached it keeps its small scratch files (snapshots, turn captures) until a write revives
   it. They are the bulk of an archived session's directory, so they are the first thing to reclaim if disk matters.
+- **External keep signals** (a pin, a card, an agenda item) are asked again at the commit boundary but not under a lock:
+  one that appears in the instants between that question and the registry write is not seen. The session stays
+  readable and a write revives it, so the cost is a session archived a moment early, never one lost.
+- **No reclaim of the session's own weight**: archiving takes a session out of the live set. It does not delete
+  directories, transcripts, worktrees or panes.
 - **Memory**: the registry holds one small row per archived session in memory. It is a few hundred bytes each, against
   the full index (event pointers included) that it replaces.
 
