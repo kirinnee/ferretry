@@ -187,7 +187,7 @@ describe('module audit contributions', () => {
       'terminal.opened',
     ]);
   });
-  it('falls back to shared rules only when a table has no contribution, preserving an explicitly empty union', async () => {
+  it('applies no audit when no module contributes rules, and reports an empty inventory', async () => {
     const mounted = subsystems();
     const entries: AuditEntry[] = [];
     const audit = {
@@ -202,10 +202,13 @@ describe('module audit contributions', () => {
     const socketRule = AUDITED_SOCKET_ROUTES[0];
     if (httpRule === undefined || socketRule === undefined) throw new Error('the shared audit inventories must exist');
     const contribution = { routes: [http(httpRule.path, httpRule.method)], sockets: [socket(socketRule.path)] };
-    for (const auditRules of [undefined, { routes: [], sockets: [] }]) {
+    // Three shapes of "no rules": no audit key, an audit with no arrays, and explicitly empty arrays.
+    const shapes = [undefined, {}, { routes: [], sockets: [] }];
+    for (const auditRules of shapes) {
+      entries.length = 0;
       const host = composeModules({ ...mounted, audit }, [
         {
-          id: 'legacy',
+          id: 'extracted',
           provides: undefined,
           jobs: {},
           contributes: { ...contribution, ...(auditRules === undefined ? {} : { audit: auditRules }) },
@@ -215,7 +218,45 @@ describe('module audit contributions', () => {
         await route.handle({ request: request({ method: route.method, path: route.path }), params: new Map() });
       for (const route of host.sockets)
         await route.accept({ request: request({ path: route.path }), params: new Map() });
-      expect(entries.map(entry => entry.event)).toEqual([httpRule.event, socketRule.event]);
+      expect(entries).toEqual([]);
+      expect(host.audit).toEqual({ routes: [], sockets: [] });
+    }
+  });
+  it('does not inherit shared rules from an unrelated module that contributes an empty union', async () => {
+    const mounted = subsystems();
+    const entries: AuditEntry[] = [];
+    const audit = {
+      ...mounted.audit,
+      log: {
+        record: async (entry: AuditEntry) => {
+          entries.push(entry);
+        },
+      },
+    };
+    const httpRule = AUDITED_ROUTES[0];
+    const socketRule = AUDITED_SOCKET_ROUTES[0];
+    if (httpRule === undefined || socketRule === undefined) throw new Error('the shared audit inventories must exist');
+    const mounting: BuiltModule<void> = {
+      id: 'mounting',
+      provides: undefined,
+      jobs: {},
+      contributes: { routes: [http(httpRule.path, httpRule.method)], sockets: [socket(socketRule.path)] },
+    };
+    const empty: BuiltModule<void> = {
+      id: 'empty',
+      provides: undefined,
+      jobs: {},
+      contributes: { audit: { routes: [], sockets: [] } },
+    };
+    for (const modules of [[mounting], [mounting, empty], [empty, mounting]]) {
+      entries.length = 0;
+      const host = composeModules({ ...mounted, audit }, modules);
+      for (const route of host.routes)
+        await route.handle({ request: request({ method: route.method, path: route.path }), params: new Map() });
+      for (const route of host.sockets)
+        await route.accept({ request: request({ path: route.path }), params: new Map() });
+      expect(entries).toEqual([]);
+      expect(host.audit).toEqual({ routes: [], sockets: [] });
     }
   });
 });

@@ -170,7 +170,7 @@ reach this log too. The one exception is declared below.
 
 **Nothing that changes state goes unreviewed.** `tests/unit/runtime/mounts/surface.test.ts` fails when
 a mounted non-`GET` route or a socket is neither audited nor on the reviewed list in
-`packages/daemon/tests/unit/audit/not-audited.ts`, where every entry says why. That list only shrinks.
+`packages/daemon/tests/unit/modules/<id>/route-contract.ts` (`notAudited`), where every entry says why. That list only shrinks.
 
 ## GAPs — declared
 

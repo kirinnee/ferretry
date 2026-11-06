@@ -98,7 +98,7 @@ nobody controls. Ferretry's own tools server is not checked: every ferret starts
 `POST /v1/mcp/check` can start a command, so it is governed as running one (`terminal`/use): a caller
 who may open a terminal here could run that command anyway, and one who may not, may not have Ferretry
 run it for them. It is not audited — it changes no configuration and grants nobody anything
-(`tests/unit/audit/not-audited.ts`).
+(`tests/unit/modules/<id>/route-contract.ts` (`notAudited`)).
 
 ## Which project a folder is in
 

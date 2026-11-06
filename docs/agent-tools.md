@@ -553,7 +553,7 @@ release. It is also a **bearer class** of its own, `session`, beside the admin a
 ### Who a ferret may be: every route says
 
 Every route declares `caller: 'person' | 'any'` — required by the type, with no default, and pinned for
-every route by a contract test (`tests/unit/runtime/mounts/route-callers.ts`), so changing one is a reviewed
+every route by a contract test (`tests/unit/modules/<id>/route-contract.ts` (`callers`)), so changing one is a reviewed
 diff. One predicate, `callerIsAgent`, says whether a caller is an agent: a **session** credential always is,
 a **warden** always is, a paired **device** never is, and the **admin token** is one only when it names a
 ferret's session in `x-ferretry-session-id` (the honest-client fallback for a pane that has no credential of

@@ -87,6 +87,11 @@ interface ModuleInventory {
   /** Decorated inventories preserve module and registration order. */
   readonly routes: readonly ApiRoute[];
   readonly sockets: readonly SocketRoute[];
+  /** The union of every module's `contributes.audit`, as the audit layers receive it. */
+  readonly audit: {
+    readonly routes: readonly AuditedRouteRule[];
+    readonly sockets: readonly AuditedSocketRule[];
+  };
 }
 interface ComposedModules extends ModuleInventory {
   readonly dispatcher: ApiDispatcher;
@@ -138,8 +143,6 @@ export function composeModules(
 ): ModuleInventory | ComposedModules {
   const routeRules = modules.flatMap(module => module.contributes.audit?.routes ?? []);
   const socketRules = modules.flatMap(module => module.contributes.audit?.sockets ?? []);
-  const hasRouteRules = modules.some(module => module.contributes.audit?.routes !== undefined);
-  const hasSocketRules = modules.some(module => module.contributes.audit?.sockets !== undefined);
   const routes = sessionAddressedRoutes(
     base.sessionAddresses,
     auditedRoutes(
@@ -148,7 +151,7 @@ export function composeModules(
         base.agentControl,
         modules.flatMap(module => module.contributes.routes ?? []),
       ),
-      hasRouteRules ? routeRules : undefined,
+      routeRules,
     ),
   );
   const sockets = sessionAddressedSockets(
@@ -159,13 +162,15 @@ export function composeModules(
         base.agentControl,
         modules.flatMap(module => module.contributes.sockets ?? []),
       ),
-      hasSocketRules ? socketRules : undefined,
+      socketRules,
     ),
   );
-  if (!('credentials' in base)) return { routes, sockets };
+  const audit = { routes: routeRules, sockets: socketRules };
+  if (!('credentials' in base)) return { routes, sockets, audit };
   return {
     routes,
     sockets,
+    audit,
     dispatcher: new ApiDispatcher(
       new ApiRouter(
         orderRoutesBySpecificity(
