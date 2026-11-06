@@ -28,6 +28,7 @@
  */
 import * as agentTools from './agent-tools/route-contract.ts';
 import * as browser from './browser/route-contract.ts';
+import * as transfer from './transfer/route-contract.ts';
 import * as analytics from './analytics/route-contract.ts';
 import * as cgroups from './cgroups/route-contract.ts';
 import * as conversationImport from './conversation-import/route-contract.ts';
@@ -77,6 +78,7 @@ export const FRAGMENTS: Readonly<Record<string, RouteContractFragment>> = {
   conversationImport,
   terminal,
   browser,
+  transfer,
 };
 
 /** The concatenation of every fragment's `callers`: one line per route, both tables. */

@@ -81,7 +81,6 @@ import type { SessionAddressBook } from './session-addressing.ts';
 import { type SessionAgendaModeSubsystem, sessionAgendaModeRoutes } from './session-agenda-mode.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answer.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
-import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
 import { type SessionCompactAtSubsystem, sessionCompactAtRoutes } from './session-compact-at.ts';
 import { knownLaunchRoots, type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { type SessionCredentialSubsystem, sessionCredentialRoutes } from './session-credential.ts';
@@ -276,8 +275,6 @@ export interface MountedSubsystems {
   readonly queueDelivery: Pick<QueueDeliverer, 'arm' | 'stop'>;
   /** Answering a live structured form, after a pane-bound confirmation. */
   readonly sessionAnswer: SessionAnswerSubsystem;
-  /** Durable encrypted attachment originals plus process-local unlock state. */
-  readonly sessionAttachments: SessionAttachmentSubsystem;
   /** Reviving a stopped or dead session with its conversation intact, and typing a next turn into a
    *  live one. This is the nearest thing the daemon has to a send: the resume domain plans one when
    *  the pane it found is genuinely alive rather than replacing it. */
@@ -610,9 +607,6 @@ export function legacyModule(
               // shadowed, and all belong above the deeper per-session subsystems.
               ...sessionSendRoutes(subsystems.sessionSend, sentDraftClearer(subsystems.sharedDrafts)),
               ...sessionAnswerRoutes(subsystems.sessionAnswer),
-              // Attachment routes are mounted before sends may honour attachment ids. Their
-              // deeper unlock path cannot shadow this one-segment upload route.
-              ...sessionAttachmentRoutes(subsystems.sessionAttachments),
               ...agendaRoutes(
                 subsystems.attention,
                 subsystems.notifications,

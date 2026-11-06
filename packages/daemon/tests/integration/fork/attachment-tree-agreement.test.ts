@@ -39,7 +39,7 @@ afterEach(async () => {
   await cleanupTempDirectories();
 });
 
-/** The store exactly as `bin/fyd.ts` composes it: its originals adapter over `attachmentDirectory`. */
+/** The store exactly as `bin/modules/transfer.ts` composes it: its originals adapter over `attachmentDirectory`. */
 function singletonStore(state: string): SessionAttachmentStore {
   return new SessionAttachmentStore({
     daemonId: DAEMON_ID,

@@ -349,20 +349,6 @@ export const subsystems = (): MountedSubsystems => ({
   sessionAnswer: {
     answer: async id => sessionView(id),
   },
-  sessionAttachments: {
-    upload: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    download: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    unlock: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    lock: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-  },
   sessionSignal: new FakeSessionSignal(),
   sessionRename: {
     rename: async () => {

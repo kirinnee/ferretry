@@ -16,6 +16,7 @@ import type { ModelsJobs, ModelsProvides } from './models.ts';
 import type { NamesProvides } from './names.ts';
 import type { SharedDraftService } from '../../src/lib/shared-drafts/index.ts';
 import type { TerminalJobs, TerminalProvides } from './terminal.ts';
+import type { TransferProvides } from './transfer.ts';
 import type { UpdateJobs, UpdateProvides } from './update.ts';
 import type { UsageJobs, UsageProvides } from './usage.ts';
 import type { VoiceSeams } from './voice.ts';
@@ -60,6 +61,8 @@ export const seamsOf = {
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the draft repository, the timer and the generation source are fixed production adapters; the agenda ledgers, the clock and the paired devices are needs). */
   sharedDrafts: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries beyond the terminal runtime, which `start()` passes into `createSubsystems` (a need); the shell service, the stream bridge and the Console are fixed production adapters, and the storage, the redactor, the quarantine and the tmux commands are needs. */
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the originals adapter and the in-memory PDF decryption are fixed production adapters; the state directory, the pairing identity and the session directory are needs). */
+  transfer: (_world: DaemonWorld): void => undefined,
   terminal: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the user home and the harness resolution are needs). */
   update: (_world: DaemonWorld): void => undefined,
@@ -94,6 +97,7 @@ export interface ModuleHandles {
   readonly renders: BuiltModule<RenderService>;
   readonly sharedDrafts: BuiltModule<SharedDraftService>;
   readonly terminal: BuiltModule<TerminalProvides, TerminalJobs>;
+  readonly transfer: BuiltModule<TransferProvides>;
   readonly update: BuiltModule<UpdateProvides, UpdateJobs>;
   readonly usage: BuiltModule<UsageProvides, UsageJobs>;
   readonly voice: BuiltModule<SttEnhancementSubsystem>;

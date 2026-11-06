@@ -137,8 +137,6 @@ import {
   WorkerAnalyticsPersister,
 } from '../src/adapters/analytics/index.ts';
 import {
-  decryptPdfInMemory,
-  FileAttachmentOriginals,
   FileSessionAttachmentStore,
   NodeRawDeflate,
   probePdfDecryptWorker,
@@ -490,9 +488,6 @@ import {
 } from '../src/adapters/transcript/index.ts';
 import { CliRolloutFormatProbe } from '../src/adapters/transcript/rollout-format-probe.ts';
 import {
-  FileSessionAttachmentCopier,
-  FileSessionTransferBriefWriter,
-  FileSessionTransferTargetPlanStore,
   GitTransferWorkspaceProbe,
   SessionAttachmentTransferReader,
   StorageTransferConversationReader,
@@ -1039,7 +1034,7 @@ import {
   type SessionAncestor,
   SessionAnswerError,
   type SessionAnswerSubsystem,
-  SessionAttachmentStore,
+  type SessionAttachmentStore,
   SessionAttachService,
   SessionBoardResolver,
   SessionCompactAtService,
@@ -1130,7 +1125,6 @@ import {
   sendRecordFor,
   sendRecordView,
   sessionHealthSettingsAt,
-  sessionScopedAttachments,
   shareLinkTarget,
   stampedProjectOf,
   startupEffort,
@@ -1270,6 +1264,7 @@ import { conversationImportModule } from './modules/conversation-import.ts';
 import { type CallsignClaims, namesModule } from './modules/names.ts';
 import { rendersModule } from './modules/renders.ts';
 import { type ModuleHandles, seamsOf } from './modules/seams.ts';
+import { transferModule, type TransferProvides } from './modules/transfer.ts';
 import { sharedDraftsModule } from './modules/shared-drafts.ts';
 import { terminalModule } from './modules/terminal.ts';
 import { updateModule } from './modules/update.ts';
@@ -6605,6 +6600,11 @@ interface ForkSubsystemParts {
    * store, in the one place that holds both.
    */
   readonly attachmentOriginals: (sessionId: string) => string;
+  /**
+   * The transfer module's factory for the target plan store, the brief writer and the attachment copier. It is CALLED
+   * inside `createForkSubsystem` at the point those ports were always constructed, never ahead of it.
+   */
+  readonly transferPorts: TransferProvides['transferPorts'];
   readonly transcriptSources: readonly TranscriptSource[];
   readonly gateway: GitWorktreeGateway;
   readonly accounts: SessionForkStartAccountResolver;
@@ -6678,20 +6678,10 @@ function createForkSubsystem(parts: ForkSubsystemParts): SessionForkSubsystem {
       lineage: new LineageFacetContributor(),
     },
   });
-  /**
-   * The target's own `transfer-plan.json`, installed before import and re-read on every replay.
-   *
-   * TARGET-ONLY BY CONSTRUCTION. `FileSessionTransferTargetPlanStore` holds nothing but this
-   * document, so the fork composition has no global transfer-receipt capability at all — the durable
-   * fork receipt is `FileSessionForkReceiptStore`, and it is the single owner of that fact.
-   */
-  const planStore = new FileSessionTransferTargetPlanStore(id =>
-    join(createSessionPaths(parts.paths, id).directory, 'transfer-plan.json'),
-  );
-  const briefWriter = new FileSessionTransferBriefWriter(
-    id => createSessionPaths(parts.paths, parseSessionId(id)).directory,
-  );
-  const attachmentCopier = new FileSessionAttachmentCopier(parts.attachmentOriginals);
+  const { planStore, briefWriter, attachmentCopier } = parts.transferPorts({
+    paths: parts.paths,
+    attachmentOriginals: parts.attachmentOriginals,
+  });
   /**
    * ONE resolver instance, handed to both halves.
    *
@@ -9083,24 +9073,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // captured by closures, so its narrowing does not survive into one, and a second reader that
       // re-checked could disagree with this one about which daemon's tree it is addressing.
       const attachmentsDaemonId = attachmentDaemonId;
-      // The ONE resolver for this daemon's attachment tree: the store's originals adapter and the fork's
-      // copier both take it, so neither can address a directory the other never reads.
-      const attachmentOriginals = (id: string): string => attachmentDirectory(paths.state, attachmentsDaemonId, id);
-      const attachmentStore = new SessionAttachmentStore({
-        daemonId: attachmentsDaemonId,
-        originals: new FileAttachmentOriginals(attachmentOriginals),
-        decrypt: decryptPdfInMemory,
-        // An unlocked plaintext nobody reads again is still zeroed at its expiry, not at process exit.
-        // Unref'd, so a pending eviction never holds the daemon open.
-        scheduleEviction: (delayMs, evict) => {
-          setTimeout(evict, delayMs).unref();
-        },
-      });
-      // A session that is gone, or is stopped through the control route, has its plaintext zeroed.
-      const sessionAttachments = sessionScopedAttachments(
-        attachmentStore,
-        async id => (await sessions.get(id)) !== undefined,
+      const transfer = transferModule.build(
+        { stateDirectory: paths.state, daemonId: attachmentsDaemonId, sessions },
+        seamsOf.transfer(world),
+        lifecycle,
       );
+      // The store and the ONE resolver for this daemon's attachment tree: the store's originals adapter and the fork's
+      // copier both take the resolver, so neither can address a directory the other never reads.
+      const { store: attachmentStore, originals: attachmentOriginals } = transfer.provides;
       // ONE resume service for this opened storage, shared by the revive and the migration: its
       // executor and its launch gate are what stop two relaunches of one session racing, and a
       // second service would give each caller a private copy of both. See the revive's own header.
@@ -10962,6 +10942,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // The resolver the store's originals adapter was built from, never a plausible-looking
         // directory beside the session.
         attachmentOriginals,
+        transferPorts: transfer.provides.transferPorts,
         transcriptSources,
         gateway,
         accounts: async agent => await resolveStartAccount(accounts, agent, executables, CLIENT_NAME),
@@ -12151,7 +12132,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           }),
         ),
         sessionAnswer,
-        sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals, boardWorld.cards),
         sessionRename: createSessionRenameSubsystem(storage, sessions, names.provides.claims, clock),
         sessionAgendaMode,
@@ -12906,6 +12886,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           conversationImport,
           terminal,
           browser,
+          transfer,
         },
       };
     },
