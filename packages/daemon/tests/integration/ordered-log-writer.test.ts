@@ -1,4 +1,7 @@
 import { describe, it } from 'bun:test';
+import { mkdtemp, open, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import should from 'should';
 import { type LogDescriptorWrites, OrderedLogWriter } from '../../src/adapters/runtime/ordered-log-writer.ts';
 
@@ -196,6 +199,59 @@ describe('OrderedLogWriter', () => {
     // Assert
     should(sent).deepEqual(['one\n', 'two\n']);
     should(log.queuedLines).equal(0);
+  });
+
+  it('should put every line in a real file in order, before and after it goes asynchronous', async () => {
+    // Arrange
+    const directory = await mkdtemp(join(tmpdir(), 'ferretry-log-'));
+    const file = await open(join(directory, 'fyd.log'), 'a');
+    const log = new OrderedLogWriter(file.fd);
+
+    // Act
+    try {
+      log.write('booting\n');
+      log.goAsync();
+      log.write('ready\n');
+      log.write('serving\n');
+      await log.drain(5_000);
+    } finally {
+      await file.close();
+    }
+    const written = await readFile(join(directory, 'fyd.log'), 'utf8');
+    await rm(directory, { recursive: true, force: true });
+
+    // Assert
+    should(written).equal('booting\nready\nserving\n');
+  });
+
+  it('should leave a write an exit flush took over to that flush, and stay synchronous after it', async () => {
+    // Arrange — a line in flight when the process is told to exit.
+    const disk = heldDisk();
+    const log = new OrderedLogWriter(2, disk.writes);
+    log.goAsync();
+    log.write('in flight\n');
+
+    // Act — the flush writes it, and THEN the I/O thread finishes the original write too.
+    log.flushSync();
+    await disk.release();
+    log.write('after\n');
+
+    // Assert — nothing lost; the documented repeat of the in-flight tail, and no pump left behind.
+    should(disk.text()).equal('in flight\nin flight\nafter\n');
+    should(disk.inFlight()).equal(0);
+  });
+
+  it('should swallow a synchronous write the descriptor refuses', () => {
+    // Arrange
+    const log = new OrderedLogWriter(2, {
+      writeSync: () => {
+        throw new Error('EBADF');
+      },
+      write: async () => await Promise.resolve(0),
+    });
+
+    // Act / Assert
+    should(() => log.write('nowhere\n')).not.throw();
   });
 
   it('should keep writing after a write the disk refused', async () => {

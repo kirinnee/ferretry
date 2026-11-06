@@ -119,6 +119,36 @@ describe('ListedSessionIndex', () => {
     should(subject.findSession(id(1))?.status).equal('running');
   });
 
+  it('should pass every event read, a single appended event and its close to the index beneath', async () => {
+    // Arrange
+    const inner = memoryIndex();
+    const subject = new ListedSessionIndex(inner);
+    subject.listSessions();
+
+    // Act
+    subject.appendEvent(session(1, { lastSequence: 1 }), pointer(1, 1));
+    subject.appendEvent(session(1, { lastSequence: 2 }), pointer(1, 2));
+
+    // Assert
+    should(subject.listSessions().map(row => row.lastSequence)).deepEqual([2]);
+    should(subject.eventPointers(id(1), 0, 10)).deepEqual(inner.eventPointers(id(1), 0, 10));
+    should(subject.fleetEventPointers(10)).deepEqual(inner.fleetEventPointers(10));
+    should(subject.countEvents(id(1))).equal(2);
+    await subject.close();
+  });
+
+  it('should answer a lookup from the index beneath until the first listing', () => {
+    // Arrange
+    const subject = new ListedSessionIndex(memoryIndex());
+
+    // Act
+    subject.refreshSession(session(4));
+
+    // Assert
+    should(subject.findSession(id(4))?.id).equal(id(4));
+    should(subject.findSession(id(5))).be.undefined();
+  });
+
   it('should reload everything after the whole index is replaced', () => {
     // Arrange
     const subject = new ListedSessionIndex(memoryIndex());
