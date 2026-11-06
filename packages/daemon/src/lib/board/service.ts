@@ -402,19 +402,16 @@ export class BoardService {
       if (current.laneId !== expect.laneId || gateEntry(current) !== expect.entry) return { task: null, result: null };
       const context = await this.context(current, caller);
       const lane = context.laneSet.lanes.find(candidate => candidate.id === current.laneId);
-      const verdict =
-        lane === undefined
-          ? undefined
-          : tryItVerdict(
-              {
-                ...current,
-                blockedBy: blockedBy(current, context.index, context.laneSets),
-                building: stillBuilding(current, context.index, context.laneSets),
-              },
-              { options: [...stageGateLanes.options(lane)] },
-            );
-      if (verdict?.kind !== 'nothing' || nothingToTryReason(verdict.why) !== reason)
-        return { task: null, result: null };
+      // A lane this board does not know offers no options: no try-it, so the verdict asks and nothing closes.
+      const verdict = tryItVerdict(
+        {
+          ...current,
+          blockedBy: blockedBy(current, context.index, context.laneSets),
+          building: stillBuilding(current, context.index, context.laneSets),
+        },
+        { options: lane === undefined ? [] : [...stageGateLanes.options(lane)] },
+      );
+      if (verdict.kind !== 'nothing' || nothingToTryReason(verdict.why) !== reason) return { task: null, result: null };
       const task = closeNothingToTry(current, reason, context);
       return { task: task === null ? null : requireValidCard(task), result: task };
     });

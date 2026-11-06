@@ -288,4 +288,18 @@ describe('the Close reason box shows its whole text (&B165 round 2)', () => {
     expect(box?.getAttribute('rows')).toBe('1');
     expect(box?.className).not.toContain('truncate');
   });
+
+  it('sends the form on Enter, as the one-line field did; Shift+Enter is a new line, not a Send', async () => {
+    const list = await draw(ONE);
+    await list.pick('B1', 'close');
+    const box = list.q('B1', '[data-agenda-card-reason]') as HTMLTextAreaElement;
+    const press = async (shiftKey: boolean) => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey, bubbles: true, cancelable: true }));
+      await settle();
+    };
+    await press(true);
+    expect(list.calls).toEqual([]);
+    await press(false);
+    expect(list.calls).toEqual([`close:B1:${CLOSE_CARD_REASON}`]);
+  });
 });

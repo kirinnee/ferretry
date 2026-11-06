@@ -41,7 +41,7 @@ import {
   openCardAsks,
   parseGateReference,
 } from '@ferretry/protocol';
-import { type SwipeTargets, swipeTargets } from './agenda-answers.ts';
+import { type InboxAction, type SwipeTarget, type SwipeTargets, swipeTargets } from './agenda-answers.ts';
 import { cardModel } from './agenda-card-model.ts';
 import { type SwipeMap, swipeMap } from './agenda-inbox.ts';
 import { revisionStamp } from './agenda-revisions.ts';
@@ -526,12 +526,16 @@ export const itemSwipeTargets = (item: AgendaItem, typedHost = false): SwipeTarg
     const option = first.gate.options.find(entry => entry.label === label);
     return option === undefined || !typed ? label : gateButtonLabel(first.gate, option);
   };
+  // A direction that answers (an action) is marked for the card's ask; one that only shows a label is kept as it is.
+  const marked = (target: SwipeTarget, action: InboxAction): SwipeTarget => ({
+    ...target,
+    label: wording(target.label),
+    action: toGateAction(action, first.gate),
+  });
   return Object.fromEntries(
     Object.entries(swipeTargets(first.view)).map(([direction, target]) => [
       direction,
-      target === undefined || target.action === null
-        ? target
-        : { ...target, label: wording(target.label), action: toGateAction(target.action, first.gate) },
+      target?.action == null ? target : marked(target, target.action),
     ]),
   );
 };

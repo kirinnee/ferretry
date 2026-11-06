@@ -2766,6 +2766,23 @@ describe('the close judges the verdict again inside the card’s write', () => {
   });
 });
 
+describe('a card that moves on before the daemon can close it', () => {
+  it('asks nothing and leaves the card where it is when the close finds the card already moved', async () => {
+    // Arrange — a private card (nothing to try), but the board refuses the close: the card moved on meanwhile
+    const world = fixture([external({ visibility: 'private', visibilitySource: 'chosen' })]);
+    world.board.closeWhereNothingToTry = async () => false;
+
+    // Act
+    await world.board.trigger('F1', 'release.running');
+    await world.gates.written('F1');
+
+    // Assert — not closed by the gates, and nobody asked
+    should(world.stored().laneId).equal('tested');
+    should(world.open()).have.length(0);
+    should(world.closed()).have.length(0);
+  });
+});
+
 describe('an umbrella or internal card never gets a try-it (&C50, 2026-11-06)', () => {
   // The owner's case: the umbrella &C50 "Split fyd.ts", a chore, had a prerequisite PR linked to it. Its release moved the
   // card to the try-it lane, and an older daemon raised "Try it: Split fyd.ts…" with a box asking the owner about the card.
