@@ -66,9 +66,13 @@ x64), and a machine running many agents commits from many worktrees at once. `ty
 takes a per-user `flock` in a directory only the user can write (`$XDG_RUNTIME_DIR`, else
 `${XDG_CACHE_HOME:-$HOME/.cache}/ferretry`, created `0700`, used only if it is a real directory that user owns
 and no one else can write — otherwise the check runs unlocked and says why) and a second run queues behind the
-first, saying which pid and worktree holds it. A check started from inside a locked one sees
-`FY_TYPECHECK_LOCK_HELD` and skips the lock instead of waiting on its own ancestor. It waits at most
-`TYPECHECK_LOCK_WAIT` seconds (600)
+first. The lock is opened append-only (`exec 9>>"$lock"`), the script writes nothing into the directory, and a
+lock path that is a link or not a regular file is refused. The directory check is best effort: someone who
+owns a parent directory can swap it after the check, which at worst defeats serialization (two checks at once,
+as before the lock) and never truncates or writes a file. A check started from inside a locked one inherits
+descriptor 9; when that descriptor is the same file as the lock it reuses it (`flock -n 9` succeeds at once,
+because the lock belongs to the open file description) instead of waiting on its own ancestor, and a
+descendant that closed descriptor 9 waits like anyone else. It waits at most `TYPECHECK_LOCK_WAIT` seconds (600)
 and then checks anyway, so a stuck neighbour cannot block a commit. CI never takes the lock (`CI` is
 set and each job runs one check), and a machine with no `flock` runs unlocked as before.
 

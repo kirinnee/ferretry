@@ -32,14 +32,31 @@ tsc="./node_modules/.bin/tsc"
 # symlink), owned by this user, and not group/other-writable; if none qualifies the
 # check runs WITHOUT the lock and says why — a commit is never failed over the lock.
 #
-# The lock is named after the product and held for the whole run. A run that finds
-# it taken says who holds it, waits at most `TYPECHECK_LOCK_WAIT` seconds (600 by
-# default), then runs anyway rather than failing a commit over a stuck neighbour.
-# After acquiring, the run exports `FY_TYPECHECK_LOCK_HELD=<lock path>`, so a check
-# started from inside this one (a hook calling a hook) does not queue behind its
-# own ancestor. A run that gave up waiting never claims the lock. CI runs one check
-# per job, so it never takes the lock; neither does a machine without `flock`
-# (macOS ships none), which runs as before.
+# That validation is BEST EFFORT and deliberately small: it checks the leaf only, and
+# the lock is opened by path with `exec 9>>"$lock"` — an append-open, which writes
+# no byte and cannot truncate. The script writes NOTHING into the lock directory (no
+# holder note). A lock path that is a symlink or anything but a regular file (a FIFO
+# would block the open forever, a dangling link would have its target created) is
+# refused BEFORE the open, with a warning and an unlocked run.
+#
+# Residual, accepted: that check-then-open gap, like the directory check itself, can
+# only be exploited by someone who can write in (or swap) the user-owned 0700
+# directory — in practice the user, or an owner of a parent directory. At worst they
+# defeat serialization (two checks at once — the behaviour before this lock existed),
+# make the open block, or leave an empty file created; they can never truncate or
+# write to an existing file.
+#
+# The wait is bounded: at most `TYPECHECK_LOCK_WAIT` seconds (600 by default), then
+# the check runs anyway rather than failing a commit over a stuck neighbour. CI runs
+# one check per job, so it never takes the lock; neither does a machine without
+# `flock` (macOS ships none), which runs as before.
+#
+# A check started from inside a locked one (a hook calling a hook) inherits
+# descriptor 9, an open file description the ancestor already holds the lock on. If
+# descriptor 9 is open AND is the same file as the lock, this run reuses it, and
+# `flock -n 9` succeeds at once because flock locks belong to the description. No
+# environment marker is involved, so a descendant that closed descriptor 9 simply
+# opens the lock fresh and waits like anyone else.
 lock_wait="${TYPECHECK_LOCK_WAIT:-600}"
 
 # Succeeds when "$1" is a directory only this user can write, creating it (0700)
@@ -55,6 +72,11 @@ trusted_lock_dir() {
   [ -z "$(find "${candidate}" -maxdepth 0 \( -perm -020 -o -perm -002 \) 2>/dev/null)" ]
 }
 
+# Prints "device:inode" of what "$1" resolves to; fails when it does not exist.
+file_id() {
+  stat -L -c '%d:%i' "$1" 2>/dev/null || stat -L -f '%d:%i' "$1" 2>/dev/null
+}
+
 if [ -z "${CI:-}" ] && command -v flock >/dev/null 2>&1; then
   lock_dir=""
   for candidate in "${XDG_RUNTIME_DIR:-}" "${HOME:+${XDG_CACHE_HOME:-${HOME}/.cache}/ferretry}"; do
@@ -66,35 +88,22 @@ if [ -z "${CI:-}" ] && command -v flock >/dev/null 2>&1; then
   product="$(jq -r '.name // empty' package.json 2>/dev/null)" || product=""
 
   if [ -z "${lock_dir}" ] || [ -z "${product}" ]; then
-    echo "⚠️  no trusted per-user directory for the typecheck lock (need an own-only directory under \$XDG_RUNTIME_DIR or \$HOME/.cache, and a package name); checking without it" >&2
+    echo '⚠️  no trusted per-user directory for the typecheck lock (need an own-only directory under XDG_RUNTIME_DIR or ~/.cache, and a package name); checking without it' >&2
   else
     lock="${lock_dir}/${product}-typecheck.lock"
-    holder="${lock}.holder"
-    if [ "${FY_TYPECHECK_LOCK_HELD:-}" = "${lock}" ]; then
-      : # an ancestor of this run already holds this lock and is waiting on us
-    elif [ -L "${lock}" ] || ! { exec 9>>"${lock}"; } 2>/dev/null; then
+    have_lock_fd=0
+    fd9_id="$(file_id /dev/fd/9)" || fd9_id=""
+    lock_id="$(file_id "${lock}")" || lock_id=""
+    if [ -n "${fd9_id}" ] && [ "${fd9_id}" = "${lock_id}" ]; then
+      have_lock_fd=1 # an ancestor's open lock descriptor, inherited
+    elif [ -L "${lock}" ] || { [ -e "${lock}" ] && [ ! -f "${lock}" ]; } || ! { exec 9>>"${lock}"; } 2>/dev/null; then
       echo "⚠️  cannot open the typecheck lock ${lock}; checking without it" >&2
     else
-      acquired=1
-      if ! flock -n 9; then
-        holder_note="holder unknown"
-        if [ ! -L "${holder}" ] && [ -f "${holder}" ]; then
-          holder_note="$(cat "${holder}" 2>/dev/null)" || holder_note="holder unknown"
-        fi
-        echo "⏳ another typecheck holds ${lock} (${holder_note}); waiting up to ${lock_wait}s" >&2
-        if ! flock -w "${lock_wait}" 9; then
-          acquired=0
-          echo "⚠️  the typecheck lock is still held after ${lock_wait}s; checking anyway" >&2
-        fi
-      fi
-      if [ "${acquired}" = 1 ]; then
-        # Replace the holder note by rename, so a link planted at its name is
-        # replaced rather than written through.
-        if printf 'pid %s in %s since %s\n' "$$" "${root_dir}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"${holder}.$$" 2>/dev/null; then
-          mv -f "${holder}.$$" "${holder}" 2>/dev/null || rm -f "${holder}.$$"
-        fi
-        export FY_TYPECHECK_LOCK_HELD="${lock}"
-      fi
+      have_lock_fd=1
+    fi
+    if [ "${have_lock_fd}" = 1 ] && ! flock -n 9; then
+      echo "⏳ waiting for another typecheck on this machine (up to ${lock_wait} s)" >&2
+      flock -w "${lock_wait}" 9 || echo "⚠️  the typecheck lock is still held after ${lock_wait} s; checking anyway" >&2
     fi
   fi
 fi
