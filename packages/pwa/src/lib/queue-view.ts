@@ -1,8 +1,8 @@
 // THE QUEUE VIEWS, AS PURE DECISIONS.
 //
-// One row per message that has not finished its way to the ferret: still on this device (the outbox, tick 1),
-// on the machine's queue, typed and awaiting proof, or read. The views draw these rows; nothing here reads
-// a network or a clock.
+// One row per message on a ferret's queue — not yet delivered (saved on this device, queued, being typed, unconfirmed,
+// failed) or sent (delivered, read). The page shows the two as separate lists, filtered by a search. The views draw
+// these rows; nothing here reads a network or a clock.
 
 import type { QueuedMessage } from '@ferretry/protocol';
 import { relativeTime } from './session-screens.ts';
@@ -102,12 +102,16 @@ export const outboxRowOf = (ferret: string, entry: OutboxEntry): QueueRow => ({
   ...(entry.refused === true ? { refused: true as const } : {}),
 });
 
-/** Messages the ferret has not finished with — what "waiting" means in the All-queues view. */
+/** A saved message the machine refused is never retried: it is stuck, not waiting. */
+const isRefused = (row: QueueRow): boolean => row.state === 'saved' && row.refused === true;
+
+/** Messages the ferret has not finished with — what "waiting" means in the header count. */
 export const isWaitingRow = (row: QueueRow): boolean =>
-  row.state === 'saved' || row.state === 'queued' || row.state === 'typing' || row.state === 'unconfirmed';
+  !isRefused(row) &&
+  (row.state === 'saved' || row.state === 'queued' || row.state === 'typing' || row.state === 'unconfirmed');
 
 /** Not yet typed into the ferret: the rows whose turn is still to come. */
-const isPendingRow = (row: QueueRow): boolean => row.state === 'saved' || row.state === 'queued';
+const isPendingRow = (row: QueueRow): boolean => !isRefused(row) && (row.state === 'saved' || row.state === 'queued');
 
 const isHeld = (row: QueueRow, now: number): boolean => row.holdUntil !== undefined && Date.parse(row.holdUntil) > now;
 
@@ -149,16 +153,6 @@ export const queuedAgo = (at: string, now: number): string => {
   return ago === '—' ? '' : ago === 'now' ? 'just now' : ago;
 };
 
-/** A message past this many lines, characters or a code block, shows a clamp with "Show more". */
-export const CLAMP_LINES = 6;
-export const CLAMP_CHARS = 420;
-
-/** Whether a message body is long enough to fold behind "Show more". */
-export const needsClamp = (text: string): boolean => {
-  const body = text.trim();
-  return body.length > CLAMP_CHARS || body.split('\n').length > CLAMP_LINES;
-};
-
 /** A ferret's rows: its machine's queue and this device's outbox, each message once (the queue wins). */
 export const ferretRows = (
   daemonId: string,
@@ -196,16 +190,146 @@ export interface QueueGroup {
 const oldestAt = (rows: readonly QueueRow[]): string =>
   rows.reduce((oldest, row) => (oldest === '' || row.at < oldest ? row.at : oldest), '');
 
-/** Only ferrets with something waiting, the longest-waiting first. */
-export const waitingGroups = (groups: readonly QueueGroup[]): readonly QueueGroup[] =>
-  groups
-    .map(group => ({ ...group, rows: group.rows.filter(isWaitingRow) }))
-    .filter(group => group.rows.length > 0)
-    .sort((a, b) => oldestAt(a.rows).localeCompare(oldestAt(b.rows)) || a.key.localeCompare(b.key));
+/** When the newest message of these rows was queued. */
+const newestAt = (rows: readonly QueueRow[]): string =>
+  rows.reduce((newest, row) => (row.at > newest ? row.at : newest), '');
 
-/** "3 waiting for connection" — the one line a count of saved-on-device messages reads as. */
-export const waitingCountLine = (count: number): string =>
-  count === 0 ? 'nothing is waiting' : count === 1 ? '1 message is waiting' : `${count} messages are waiting`;
+/** Where a message stands, in the one word the Queue page leads each row with. */
+export type RowStatus = 'waiting' | 'sending' | 'delivered' | 'read' | 'failed' | 'cancelled';
+
+export const rowStatus = (row: QueueRow): RowStatus => {
+  switch (row.state) {
+    case 'saved':
+      return isRefused(row) ? 'failed' : 'waiting';
+    case 'queued':
+      return 'waiting';
+    case 'typing':
+    case 'unconfirmed':
+      return 'sending';
+    case 'delivered':
+      return 'delivered';
+    case 'read':
+      return 'read';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'cancelled';
+  }
+};
+
+export const STATUS_LABEL: Readonly<Record<RowStatus, string>> = {
+  waiting: 'Waiting',
+  sending: 'Sending',
+  delivered: 'Delivered',
+  read: 'Read',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
+
+/** The two lists the page offers: what has not reached the ferret (Waiting, Sending, Failed), and what has. */
+export type QueueListing = 'unsent' | 'sent';
+
+export const listingOf = (row: QueueRow): QueueListing | undefined => {
+  switch (rowStatus(row)) {
+    case 'waiting':
+    case 'sending':
+    case 'failed':
+      return 'unsent';
+    case 'delivered':
+    case 'read':
+      return 'sent';
+    case 'cancelled':
+      return undefined;
+  }
+};
+
+/** Whether a message matches what was typed in the search box: its words or its sender, any case. */
+export const matchesSearch = (row: QueueRow, query: string): boolean => {
+  const needle = query.trim().toLowerCase();
+  return needle === '' || row.text.toLowerCase().includes(needle) || fromLabel(row).toLowerCase().includes(needle);
+};
+
+/**
+ * What one listing shows for a search: only its rows (not-yet-delivered ones stay in delivery order, sent ones
+ * newest first), only the ferrets that still have a row. Ferrets with the longest-waiting message come first in
+ * the unsent listing, the one with the newest message first in the sent one.
+ */
+export const listingGroups = (
+  groups: readonly QueueGroup[],
+  listing: QueueListing,
+  query: string,
+): readonly QueueGroup[] =>
+  groups
+    .map(group => {
+      const rows = group.rows.filter(row => listingOf(row) === listing && matchesSearch(row, query));
+      return {
+        ...group,
+        rows:
+          listing === 'sent' ? [...rows].sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id)) : rows,
+      };
+    })
+    .filter(group => group.rows.length > 0)
+    .sort((a, b) =>
+      listing === 'sent'
+        ? newestAt(b.rows).localeCompare(newestAt(a.rows)) || a.key.localeCompare(b.key)
+        : oldestAt(a.rows).localeCompare(oldestAt(b.rows)) || a.key.localeCompare(b.key),
+    );
+
+export const countRows = (groups: readonly QueueGroup[]): number =>
+  groups.reduce((sum, group) => sum + group.rows.length, 0);
+
+/**
+ * The newest `limit` rows across every ferret — what a page of the Sent list holds — each ferret keeping its own
+ * order; the rest wait behind "Show older". Chosen over all rows at once, so one chatty ferret cannot push another's
+ * latest message onto a later page.
+ */
+export const limitRows = (groups: readonly QueueGroup[], limit: number): readonly QueueGroup[] => {
+  const newest = groups
+    .flatMap(group => group.rows)
+    .sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id))
+    .slice(0, Math.max(0, limit));
+  const keep = new Set(newest.map(row => row.id));
+  return groups
+    .map(group =>
+      group.rows.every(row => keep.has(row.id))
+        ? group
+        : { ...group, rows: group.rows.filter(row => keep.has(row.id)) },
+    )
+    .filter(group => group.rows.length > 0);
+};
+
+/** The first line of a message with its markdown marks off the front: what a one-line row shows of it. */
+export const firstLine = (text: string): string => {
+  const line = text.split('\n').find(item => item.trim() !== '') ?? '';
+  return line
+    .trim()
+    .replace(/^(?:#{1,6}\s+|>\s*|[-*]\s+)/, '')
+    .slice(0, 300);
+};
+
+/** Stuck messages: the ones the Not sent tab counts beyond the waiting ones. */
+export const isFailedRow = (row: QueueRow): boolean => rowStatus(row) === 'failed';
+
+/**
+ * The header's count, in the tab's own terms: Not sent = waiting + failed, so a failure is named, never hidden in a
+ * bigger number. "2 waiting · 1 failed"; with nothing failed it keeps the plain "3 messages are waiting".
+ */
+export const queueCountLine = (waiting: number, failed: number = 0): string => {
+  if (failed === 0)
+    return waiting === 0
+      ? 'nothing is waiting'
+      : waiting === 1
+        ? '1 message is waiting'
+        : `${waiting} messages are waiting`;
+  return waiting === 0 ? `${failed} failed` : `${waiting} waiting · ${failed} failed`;
+};
+
+/**
+ * The header while a search is active: how many of the list's messages match, in the same "N of M" the tab shows.
+ * "0 of 3 not sent match"; the unfiltered header keeps `queueCountLine`.
+ */
+export const queueMatchLine = (matching: number, total: number, listing: QueueListing): string =>
+  `${matching} of ${total} ${listing === 'sent' ? 'sent' : 'not sent'} match`;
 
 /** What a queued message with no time says it waits for. */
 export const TURN_ENDS_COPY = 'when its turn ends';

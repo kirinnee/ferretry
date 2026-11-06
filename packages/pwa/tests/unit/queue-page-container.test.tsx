@@ -162,6 +162,7 @@ describe('QueuePage', () => {
       await runAsync(async () =>
         row.findAll(node => node.type === 'button' && text(node) === label)[0]?.props.onClick(),
       );
+    await runAsync(async () => row.findByProps({ 'data-queue-line': '' }).props.onClick());
     await runAsync(async () =>
       row.findAll(node => node.type === 'button' && text(node) === 'Edit')[0]?.props.onClick(),
     );

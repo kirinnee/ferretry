@@ -1,13 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { QueuedMessage } from '@ferretry/protocol';
 import {
-  CLAMP_CHARS,
-  CLAMP_LINES,
   ferretRows,
   fromLabel,
   groupNextSend,
+  isFailedRow,
   isWaitingRow,
-  needsClamp,
   nextRowId,
   orderedRows,
   outboxRowOf,
@@ -15,8 +13,16 @@ import {
   type QueueGroup,
   queueRowOf,
   rowSend,
-  waitingCountLine,
-  waitingGroups,
+  queueCountLine,
+  queueMatchLine,
+  countRows,
+  firstLine,
+  limitRows,
+  listingGroups,
+  listingOf,
+  matchesSearch,
+  rowStatus,
+  STATUS_LABEL,
 } from '../../src/lib/queue-view.ts';
 import type { OutboxEntry } from '../../src/lib/send-outbox.ts';
 
@@ -134,16 +140,38 @@ describe('waiting', () => {
     });
     const early = queueRowOf('d', 's', 'f', message({ enqueuedAt: '2026-10-30T09:00:00.000Z' }));
     const late = queueRowOf('d', 's', 'f', message({ enqueuedAt: '2026-10-30T11:00:00.000Z' }));
-    const groups = waitingGroups([group('b', late), group('empty', row('read')), group('c', early), group('a', early)]);
+    const groups = listingGroups(
+      [group('b', late), group('empty', row('read')), group('c', early), group('a', early)],
+      'unsent',
+      '',
+    );
     expect(groups.map(item => item.key)).toEqual(['a', 'c', 'b']);
   });
 
   test('the count line', () => {
-    expect([0, 1, 3].map(waitingCountLine)).toEqual([
+    expect([0, 1, 3].map(count => queueCountLine(count, 0))).toEqual([
       'nothing is waiting',
       '1 message is waiting',
       '3 messages are waiting',
     ]);
+  });
+
+  test('the count line names failures, so it adds up to the Not sent tab', () => {
+    expect(queueCountLine(2, 1)).toBe('2 waiting · 1 failed');
+    expect(queueCountLine(0, 3)).toBe('3 failed');
+    expect(queueCountLine(1, 1)).toBe('1 waiting · 1 failed');
+  });
+
+  test('the match line says N of M for the list on screen', () => {
+    expect(queueMatchLine(0, 3, 'unsent')).toBe('0 of 3 not sent match');
+    expect(queueMatchLine(12, 60, 'sent')).toBe('12 of 60 sent match');
+  });
+
+  test('a failed row, and only a failed row, is a failed row', () => {
+    const rowOf = (state: QueuedMessage['state']) => queueRowOf('d', 's', 'f', message({ state }));
+    expect(isFailedRow(rowOf('failed'))).toBe(true);
+    expect(isFailedRow(rowOf('queued'))).toBe(false);
+    expect(isFailedRow(rowOf('read'))).toBe(false);
   });
 });
 
@@ -263,21 +291,7 @@ describe('delivery order and the next message', () => {
   });
 });
 
-describe('needsClamp', () => {
-  test('a short message is shown whole; one past the line or character limit folds', () => {
-    expect(needsClamp('hello')).toBe(false);
-    expect(needsClamp(Array.from({ length: CLAMP_LINES }, () => 'x').join('\n'))).toBe(false);
-    expect(needsClamp(Array.from({ length: CLAMP_LINES + 1 }, () => 'x').join('\n'))).toBe(true);
-    expect(needsClamp('x'.repeat(CLAMP_CHARS))).toBe(false);
-    expect(needsClamp('x'.repeat(CLAMP_CHARS + 1))).toBe(true);
-  });
-
-  test('blank edges do not count toward the length', () => {
-    expect(needsClamp(`\n\n${'x'.repeat(CLAMP_CHARS)}\n\n`)).toBe(false);
-  });
-});
-
-describe('waitingGroups order', () => {
+describe('unsent listing order', () => {
   test('the longest-waiting message decides, even when delivery order lists a newer one first', () => {
     const rowsOf = (sessionId: string, items: Partial<QueuedMessage>[]) =>
       ferretRows(
@@ -305,7 +319,7 @@ describe('waitingGroups order', () => {
     );
     const mid = group('mid', rowsOf('mid', [{ id: 'c', sender: 'human', enqueuedAt: '2026-10-30T10:00:00.000Z' }]));
     expect(old.rows[0]?.id).toBe('b');
-    expect(waitingGroups([mid, old]).map(item => item.key)).toEqual(['old', 'mid']);
+    expect(listingGroups([mid, old], 'unsent', '').map(item => item.key)).toEqual(['old', 'mid']);
   });
 });
 describe('when a queued message goes', () => {
@@ -392,5 +406,108 @@ describe('when a queued message goes', () => {
     expect(groupNextSend(group([later, at('soon', '2026-11-04T11:00:00.001Z')]), NOW)).toEqual({
       at: '2026-11-04T11:00:00.001Z',
     });
+  });
+});
+
+describe('status, listing and search', () => {
+  const row = (state: QueuedMessage['state'], extra: Partial<QueuedMessage> = {}) =>
+    queueRowOf('d', 's', 'f', message({ state, ...extra }));
+  const group = (key: string, ...rows: ReturnType<typeof row>[]) => ({
+    key,
+    daemonId: 'd',
+    machine: 'm',
+    sessionId: key,
+    ferret: key,
+    rows,
+  });
+
+  test('every state has one status word, and the two lists split them', () => {
+    const states = ['queued', 'typing', 'unconfirmed', 'delivered', 'read', 'failed', 'cancelled'] as const;
+    expect(states.map(state => STATUS_LABEL[rowStatus(row(state))])).toEqual([
+      'Waiting',
+      'Sending',
+      'Sending',
+      'Delivered',
+      'Read',
+      'Failed',
+      'Cancelled',
+    ]);
+    expect(STATUS_LABEL[rowStatus(outboxRowOf('f', entry()))]).toBe('Waiting');
+    expect(states.map(state => listingOf(row(state)))).toEqual([
+      'unsent',
+      'unsent',
+      'unsent',
+      'sent',
+      'sent',
+      'unsent',
+      undefined,
+    ]);
+  });
+
+  test('the sent list is newest first, ferrets with the newest message first; the unsent list is not reordered', () => {
+    const at = (day: number) => `2026-10-${String(day).padStart(2, '0')}T10:00:00.000Z`;
+    const a = group('a', row('read', { id: 'a1', enqueuedAt: at(2) }), row('read', { id: 'a2', enqueuedAt: at(9) }));
+    const b = group(
+      'b',
+      row('delivered', { id: 'b1', enqueuedAt: at(20) }),
+      row('queued', { id: 'b2', enqueuedAt: at(1) }),
+    );
+    const sent = listingGroups([a, b], 'sent', '');
+    expect(sent.map(item => [item.key, item.rows.map(r => r.id)])).toEqual([
+      ['b', ['b1']],
+      ['a', ['a2', 'a1']],
+    ]);
+    expect(listingGroups([a, b], 'unsent', '').map(item => item.rows.map(r => r.id))).toEqual([['b2']]);
+  });
+
+  test('search matches the words and the sender, ignoring case and outer spaces', () => {
+    const mira = row('queued', { text: 'Deploy blocked', sender: 'agent', by: { kind: 'ferret', name: 'Mira' } });
+    const mine = row('queued', { text: 'Please rerun CI' });
+    expect(
+      ['', '  ', 'DEPLOY', 'mira', ' rerun ', 'you', 'zzz'].map(q => [matchesSearch(mira, q), matchesSearch(mine, q)]),
+    ).toEqual([
+      [true, true],
+      [true, true],
+      [true, false],
+      [true, false],
+      [false, true],
+      [false, true],
+      [false, false],
+    ]);
+    expect(listingGroups([group('g', mira, mine)], 'unsent', 'mira').flatMap(g => g.rows)).toEqual([mira]);
+  });
+
+  test('limitRows keeps the NEWEST rows across ferrets, each ferret in its own order', () => {
+    const at = (hour: number) => `2026-10-30T${String(hour).padStart(2, '0')}:00:00.000Z`;
+    // Ferret a is chatty and old-ish; ferret b has the single newest message and one old one.
+    const g1 = group(
+      'a',
+      row('read', { id: 'a3', enqueuedAt: at(11) }),
+      row('read', { id: 'a2', enqueuedAt: at(10) }),
+      row('read', { id: 'a1', enqueuedAt: at(9) }),
+    );
+    const g2 = group('b', row('read', { id: 'b2', enqueuedAt: at(12) }), row('read', { id: 'b1', enqueuedAt: at(1) }));
+    expect(limitRows([g1, g2], 3).map(g => g.rows.map(r => r.id))).toEqual([['a3', 'a2'], ['b2']]);
+    expect(countRows(limitRows([g1, g2], 2))).toBe(2);
+    expect(limitRows([g1, g2], 10)).toEqual([g1, g2]);
+    expect(limitRows([g1], 0)).toEqual([]);
+  });
+
+  test('a message the machine refused is Failed, not Waiting, and stays in the unsent list', () => {
+    const refused = outboxRowOf('f', { ...entry(), refused: true });
+    expect(STATUS_LABEL[rowStatus(refused)]).toBe('Failed');
+    expect(listingOf(refused)).toBe('unsent');
+    expect(refused.editable).toBe(true);
+    // Stuck, so it neither counts as waiting nor claims Next up from a message that is really still to go.
+    expect(isWaitingRow(refused)).toBe(false);
+    const live = outboxRowOf('f', entry({ id: 'live', createdAt: '2026-10-30T10:00:09.000Z' }));
+    expect(nextRowId([refused, live])).toBe('live');
+    expect(STATUS_LABEL[rowStatus(outboxRowOf('f', entry()))]).toBe('Waiting');
+  });
+
+  test('firstLine is the first non-blank line without its markdown mark', () => {
+    expect(['\n\n  hello \nworld', '## Title\nbody', '> quoted', '- item', '', 'x'.repeat(400)].map(firstLine)).toEqual(
+      ['hello', 'Title', 'quoted', 'item', '', 'x'.repeat(300)],
+    );
   });
 });
