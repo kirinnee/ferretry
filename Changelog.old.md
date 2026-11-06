@@ -1,3 +1,9 @@
+## [4.291.2](https://github.com/kirinnee/ferretry/compare/v4.291.1...v4.291.2) (2026-11-06)
+
+### Fixes
+
+* **daemon:** refuse machine agenda aliases on session routes ([#1559](https://github.com/kirinnee/ferretry/issues/1559)) ([f4036a2](https://github.com/kirinnee/ferretry/commit/f4036a2b574c76172a34fc0d3a45c6716fb805da))
+
 ## [4.291.1](https://github.com/kirinnee/ferretry/compare/v4.291.0...v4.291.1) (2026-11-06)
 
 ### Performance

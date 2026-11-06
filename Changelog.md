@@ -1,3 +1,9 @@
+## [4.291.3](https://github.com/kirinnee/ferretry/compare/v4.291.2...v4.291.3) (2026-11-06)
+
+### Performance
+
+* **agenda:** serve resolved list items as headers ([#1555](https://github.com/kirinnee/ferretry/issues/1555)) ([125635d](https://github.com/kirinnee/ferretry/commit/125635d45749e11e5868f05190035336386fd14f))
+
 ## [4.291.2](https://github.com/kirinnee/ferretry/compare/v4.291.1...v4.291.2) (2026-11-06)
 
 ### Fixes
