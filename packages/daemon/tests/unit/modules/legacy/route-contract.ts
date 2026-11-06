@@ -63,8 +63,6 @@ export const callers: readonly string[] = [
   'GET /v1/board/projects/:projectId/switch operator any',
   'GET /v1/board/tasks operator any',
   'GET /v1/board/tasks/:taskId operator any',
-  'GET /v1/browser/login operator person',
-  'GET /v1/browser/state operator any',
   'GET /v1/carriers authenticated any',
   'GET /v1/catalog-installs operator any',
   'GET /v1/catalog-items operator any',
@@ -125,7 +123,6 @@ export const callers: readonly string[] = [
   'GET /v1/sessions/:sessionId/agenda/:id/versions/:version operator any',
   'GET /v1/sessions/:sessionId/attach operator person',
   'GET /v1/sessions/:sessionId/attachments/:attachmentId operator any',
-  'GET /v1/sessions/:sessionId/browser operator any',
   'GET /v1/sessions/:sessionId/compact-at operator any',
   'GET /v1/sessions/:sessionId/copies operator person',
   'GET /v1/sessions/:sessionId/events operator any',
@@ -208,8 +205,6 @@ export const callers: readonly string[] = [
   'POST /v1/board/tasks operator any',
   'POST /v1/board/tasks/:taskId operator any',
   'POST /v1/board/tasks/:taskId/start operator person',
-  'POST /v1/browser/login operator person',
-  'POST /v1/browser/proxy/test operator person',
   'POST /v1/catalog-installs/project operator person',
   'POST /v1/catalog-installs/project/preview operator any',
   'POST /v1/catalog-installs/runtime operator person',
@@ -272,7 +267,6 @@ export const callers: readonly string[] = [
   'POST /v1/sessions/:sessionId/answer operator person',
   'POST /v1/sessions/:sessionId/attachments operator any',
   'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock operator any',
-  'POST /v1/sessions/:sessionId/browser operator any',
   'POST /v1/sessions/:sessionId/composer operator person',
   'POST /v1/sessions/:sessionId/conversion-preview operator any',
   'POST /v1/sessions/:sessionId/copy-plans/:planId/approve operator person',
@@ -332,7 +326,6 @@ export const callers: readonly string[] = [
   'PUT /v1/tunnel operator person',
   // Task plans (docs/secure-copy.md): a ferret never reads, answers, stages, confirms, drops or revokes one.
   'GET /v1/events operator any',
-  'GET /v1/sessions/:sessionId/browser/stream operator any',
 ];
 
 /**

@@ -6,6 +6,7 @@ import type { SttEnhancementSubsystem } from '../../src/lib/runtime/mounts/stt.t
 import type { WorkSearchService } from '../../src/lib/work-search/index.ts';
 import type { AnalyticsJobs, AnalyticsProvides } from './analytics.ts';
 import type { AgentToolsProvides } from './agent-tools.ts';
+import type { BrowserProvides } from './browser.ts';
 import type { ConversationImportProvides } from './conversation-import.ts';
 import type { HousekeepingProvides } from './housekeeping.ts';
 import type { InputRequestsProvides } from './input-requests.ts';
@@ -35,6 +36,8 @@ export const seamsOf = {
   agentTools: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the analytics store is opened by `start()`, a need). */
   analytics: (_world: DaemonWorld): void => undefined,
+  /** No seam: the module replaces no adapter `DaemonWorld` carries beyond the sign-in window and the browser launcher, which `start()` passes into `createSubsystems` (needs); the session service, the viewer stream and the proxy probe are fixed production adapters, and the session directory, the typed identities, the saved proxy and the firewall reading are needs. */
+  browser: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the measured host is a `buildWorld` seam, a need). */
   cgroups: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the child launcher, the callback delivery, the timer and the port reader are fixed production adapters; the credential catalog, the clock and the environment are needs). */
@@ -78,6 +81,7 @@ export const seamsOf = {
 export interface ModuleHandles {
   readonly agentTools: BuiltModule<AgentToolsProvides>;
   readonly analytics: BuiltModule<AnalyticsProvides, AnalyticsJobs>;
+  readonly browser: BuiltModule<BrowserProvides>;
   readonly cgroups: BuiltModule<LimitsService>;
   readonly conversationImport: BuiltModule<ConversationImportProvides>;
   readonly fleetLogin: BuiltModule<HarnessLoginService>;

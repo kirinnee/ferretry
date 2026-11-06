@@ -11,7 +11,6 @@ import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts
 import type { ApiSocketDispatcher, SocketRoute } from '../../api/socket.ts';
 import type { StateHomeReach } from '../../api/state-homes.ts';
 import { AUDITED_ROUTES, AUDITED_SOCKET_ROUTES, type AuditedRoutesSubsystem } from '../../audit/index.ts';
-import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { ConfigChangeSink } from '../../config-files/index.ts';
 import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
@@ -49,8 +48,6 @@ import { sessionCredentialDirectory } from './agent-tools.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
 import { type BoardSubsystem, boardRoutes } from './board.ts';
 import { type BoardProjectsSubsystem, type BoardSwitchSubsystem, boardProjectRoutes } from './board-projects.ts';
-import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
-import { type BrowserProxySubsystem, browserProxyRoutes } from './browser-proxy.ts';
 import { carrierRoutes } from './carriers.ts';
 import { type CatalogInstallSubsystem, catalogInstallRoutes } from './catalog-installs.ts';
 import { type CatalogLinkSubsystem, catalogLinkRoutes } from './catalog-links.ts';
@@ -355,14 +352,6 @@ export interface MountedSubsystems {
    *  background loop nothing constructs is the same absent capability as an
    *  unserved route, and an analytics store nothing writes to answers every query with an empty fleet. */
   readonly analyticsIngest: AnalyticsIngestionLoop;
-  /** The daemon-global human browser-login window: a private X display, served over loopback VNC, that
-   *  a person signs into by hand so the agent's browser profile is primed. Per-session browser
-   *  AUTOMATION is not mounted — the mount's own header names what is missing and why. */
-  readonly browserLogin: BrowserLoginLifecycle;
-  /** One browser host per daemon, owning the real worker, page projection and viewer socket. */
-  readonly browser: BrowserMountedSubsystem;
-  /** "Test proxy" and the machine-wide browser state: owner-only, over fake-able ports. */
-  readonly browserProxy: BrowserProxySubsystem;
   /** Terminals and browser pages driven by name — by an agent through its own session credential, and
    *  by a person through the CLI or the app — with take over / hand back. */
   readonly agentTools: { readonly service: AgentToolService; readonly identities: AgentIdentityResolver };
@@ -650,11 +639,6 @@ export function legacyModule(
               // `/v1/sign-in-rules` is a literal no other subsystem uses; `/v1/accounts/:id/sign-in-rules/revoke` ends in two
               // literals no account route has, so neither can shadow or be shadowed.
               ...signInRuleRoutes(subsystems.signInRules, subsystems.signInRuleSuggestions),
-              // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
-              // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the
-              // literal `browser`, which distinguishes it from every other `/v1/sessions/:id/...` route above.
-              ...browserLoginRoutes(subsystems.browserLogin, subsystems.browser),
-              ...browserProxyRoutes(subsystems.browserProxy),
               ...recommendRoutes(subsystems.recommend),
               // The working-tree read registers last among the per-session subsystems: three of its four paths are
               // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
@@ -697,7 +681,6 @@ function legacySockets(subsystems: MountedSubsystems): readonly SocketRoute[] {
     // Fixed literal first; it cannot shadow the deeper terminal pattern and makes the fleet feed's
     // optional session filter one route rather than a second dispatcher.
     ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions, subsystems.configChanges),
-    ...browserSocketRoutes(subsystems.browser),
   ];
 }
 

@@ -208,7 +208,6 @@ import {
   afterAsActivity,
   asActivity,
   type BrowserDisplayPort,
-  BrowserLoginWindowService,
   BrowserProfileStore,
   BrowserWorkerClient,
   BunApiServer,
@@ -271,7 +270,6 @@ import {
   LoadSafeWorker,
   ManifestAccountInventory,
   MemberSweepTimer,
-  NodeBrowserLoginRuntime,
   NodeCatalog,
   NodeConversationLinker,
   NodeDataChannelEngine,
@@ -311,7 +309,6 @@ import {
   systemSweepClock,
   TmuxPaneSnapshot,
   TranscriptFileExposure,
-  TunnelProxyProbe,
   unmeasuredHostFacts,
   type ViewerSocket,
   WebCryptoPasskeyCrypto,
@@ -692,9 +689,7 @@ import {
   type BootRefusal,
   BrowserCopyPages,
   type BrowserLoginLifecycle,
-  BrowserProxyTester,
   type BrowserSessionLauncher,
-  BrowserSessionService,
   type BrowserViewerHost,
   BrowserViewerStream,
   type BrowserWorkerProgram,
@@ -723,7 +718,6 @@ import {
   type ConversationLinker,
   type ConversionCheckPort,
   type ConversionSummary as ConvertedConversationSummary,
-  type CopyPageHost,
   type CredentialAgentIdentities,
   CredentialUsageSource,
   canServeModel,
@@ -915,7 +909,6 @@ import {
   ownerHoldReason,
   PacedTranscriptParser,
   PageCopyRecords,
-  type PageInputHost,
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
@@ -1260,6 +1253,12 @@ import { teeStackSampler } from '../src/lib/performance/sampler-tee.ts';
 import { type BuiltModule, lateBound, type ModuleLifecycle } from '../src/lib/runtime/modules.ts';
 import { agentIdentities, agentToolsModule } from './modules/agent-tools.ts';
 import { analyticsModule } from './modules/analytics.ts';
+import {
+  type BrowserLoginWorld,
+  type BrowserProvides,
+  browserModule,
+  createBrowserLoginWorld,
+} from './modules/browser.ts';
 import { cgroupsModule, createCgroupLaunchLimits } from './modules/cgroups.ts';
 import { fleetLoginModule } from './modules/fleet-login.ts';
 import { housekeepingModule } from './modules/housekeeping.ts';
@@ -2006,18 +2005,6 @@ function untilTerminated(): Promise<void> {
   return new Promise<void>(resolve => {
     for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => resolve());
   });
-}
-
-/**
- * The human login window and the teardown of everything it put on the host.
- *
- * TWO members rather than one, because the window's own lifecycle contract has no release: `start`
- * and `stop` are a person's intent about one sign-in, and the X display outlives any single window by
- * design (see `XvfbDisplay`). So the intent goes on the route and the release goes to `cleanups`.
- */
-export interface BrowserLoginWorld {
-  readonly window: BrowserLoginLifecycle;
-  readonly close: () => Promise<void>;
 }
 
 /**
@@ -6301,47 +6288,6 @@ function createConfigFilesSubsystem(input: {
   };
 }
 
-/**
- * The human browser-login window, over the daemon's own private profile and a private X display.
- *
- * ONE PROFILE for the whole daemon, inside the state home. It is the artefact the window exists to
- * produce: a person signs in once, the profile is marked primed, and every later browser run reuses
- * the cookies that sign-in left. The store keeps its lease, its Chrome pid and its primed marker
- * beside the profile, so a second window — or a crashed daemon's leftovers — is refused rather than
- * corrupting it.
- *
- * THE SECRET FILE SHARES THE PROFILE'S DIRECTORY rather than a temp path. x11vnc reads the password
- * once and deletes it (`-passwdfile rm:`), but between the write and that read it is a live
- * credential on disk, and the browser directory is the daemon's own 0700 tree.
- *
- * EVERY EXECUTABLE IS A PATH LOOKUP AT THE POINT OF USE, matching `executables` above: a host that
- * installs x11vnc after the daemon booted must be able to open a window without a restart, and a host
- * that has none refuses with a sentence naming what is missing rather than spawning whatever answers
- * to the name.
- */
-function createBrowserLoginWorld(
-  paths: FoundationPaths,
-  closeAgentBrowsers: () => Promise<void>,
-  ports: () => Promise<ResolvedBrowserPorts>,
-): BrowserLoginWorld {
-  const profile = new BrowserProfileStore(paths.home);
-  const which = (name: string) => () => Bun.which(name, { PATH: process.env.PATH }) ?? undefined;
-  const runtime = new NodeBrowserLoginRuntime({
-    display: new XvfbDisplay({ executable: which('Xvfb'), authorityDirectory: profile.displayDirectory }),
-    secretsDirectory: profile.browserDirectory,
-    x11vncExecutable: which('x11vnc'),
-    timeoutExecutable: which('timeout'),
-    ports,
-    // The operator's explicit Chrome, honoured ahead of this platform's candidate list. The domain
-    // names the variable in its own refusal, so the name is read here rather than invented.
-    chromeOverride: () => process.env.FY_CHROME_BIN,
-  });
-  return {
-    window: new BrowserLoginWindowService({ profile, runtime, closeAgentBrowsers }),
-    close: async () => await runtime.close(),
-  };
-}
-
 /** Where this daemon's browser worker is: beside the daemon in every release channel (under its
  * installed name or its compile-output name), the TypeScript worker in a source checkout, or —
  * for a compiled daemon with neither — a plain refusal naming the fix. The executable is looked for
@@ -7042,8 +6988,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const configLocations = { configDirectory: paths.config, fleetDirectory: paths.fleet };
   // The login window is created before a state home is opened, while browser sessions are created
   // from that opened home. Keep the callback live so a human login always closes the real workers
-  // that currently hold the shared profile rather than racing their lease.
-  let closeAgentBrowsers: () => Promise<void> = async () => undefined;
+  // that currently hold the shared profile rather than racing their lease. Filled where the browser module is built;
+  // until then there are no agent browsers to close.
+  const agentBrowser = lateBound<BrowserProvides>();
   const daemonConfigMutations = new KeyedSerialExecutor();
   const stateHomeDaemonConfigStore = new FileDaemonConfig(paths, stateFiles);
   /**
@@ -8914,7 +8861,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         })),
       };
     },
-    browserLogin: createBrowserLoginWorld(paths, async () => await closeAgentBrowsers(), browserPorts),
+    browserLogin: createBrowserLoginWorld(
+      paths,
+      async () => await agentBrowser.current()?.host.closeAll(),
+      browserPorts,
+    ),
     fileEvents,
     tmuxControl: tmux,
     createSubsystems: async (
@@ -9597,8 +9548,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clientName: CLIENT_NAME,
       });
       // A stopped session's browser pages close, and its incognito contexts are discarded. Assigned once
-      // the browser service below exists; a stop before then has no pages to close.
-      let releaseBrowserSession: (sessionId: string) => Promise<void> = async () => undefined;
+      // the browser module below is built; a stop before then has no pages to close.
+      const releaseBrowserSession = async (sessionId: string): Promise<void> =>
+        await agentBrowser.current()?.host.releaseSession(sessionId);
       // A new ferret's passive-learning default, assigned once the learning subsystem below exists.
       let adoptLearning: (sessionId: SessionId) => Promise<void> = async () => undefined;
       // A new ferret's agenda-mode default (docs/agenda.md), assigned once the agenda switch below exists.
@@ -10333,8 +10285,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       setTimeout(sweepDeadlines, 30_000).unref();
       // Secure copy (docs/secure-copy.md): a value an agent may name and never read. It lives in this process's
       // memory only and is masked by the same registry as a value typed for the owner, from the moment it is read.
-      // The browser is built further down; a page copy reaches it through the same hand-off as a page request.
-      let pageHost: (PageInputHost & CopyPageHost) | undefined;
       // Pages a value was copied from (not pictured while they show that document) and pages the agent read.
       const copyPageRecords = new PageCopyRecords({ now: () => Date.now() });
       const secureCopies = new SecureCopyService({
@@ -10345,7 +10295,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         masking: justTyped,
         redact: async text => await secretRedactor.redact(text),
         pages: new BrowserCopyPages({
+          // The browser is built further down; a page copy reaches it through the same hand-off as a page request.
           copyOnPage: async (sessionId, key, job) => {
+            const pageHost = agentBrowser.current()?.pages;
             if (pageHost === undefined) throw new Error('the agent browser is not running yet');
             return await pageHost.copyOnPage(sessionId, key, job);
           },
@@ -10478,6 +10430,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // The browser is built further down; a request on a page reaches it through this hand-off once it is.
           pages: {
             inputOnPage: async (sessionId, key, work) => {
+              const pageHost = agentBrowser.current()?.pages;
               if (pageHost === undefined) throw new Error('the agent browser is not running yet');
               return await pageHost.inputOnPage(sessionId, key, work);
             },
@@ -11346,54 +11299,25 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         seamsOf.terminal(world),
         lifecycle,
       );
-      // A session browser nobody watches or drives stops after this long, so a forgotten one does not
-      // hold the one shared profile away from every other session.
-      const browserService = new BrowserSessionService(
-        sessions,
-        browserLauncher,
-        () => Date.now(),
+      const browser = browserModule.build(
         {
-          timeoutMs: 15 * 60_000,
-          after: (milliseconds, action) => {
-            const timer = setTimeout(action, milliseconds);
-            return { cancel: () => clearTimeout(timer) };
+          sessions,
+          launcher: browserLauncher,
+          login: browserLogin,
+          // Who a page is signing in, as the ferret typed it, is dropped by the runtime itself on every act that may have
+          // changed it, whoever made it: the toolbar route, the live view, the agent tools, an act that failed partway.
+          signIns: typedIdentities,
+          proxy: {
+            saved: async () => (await declaredAccountModel())?.machine.browserProxy,
+            secrets: async () => await secretVault.values(),
           },
+          firewall: loopbackFirewall,
         },
-        // Who a page is signing in, as the ferret typed it, is dropped by the runtime itself on every act that may have
-        // changed it, whoever made it: the toolbar route, the live view, the agent tools, an act that failed partway.
-        typedIdentities,
+        seamsOf.browser(world),
+        lifecycle,
       );
-      pageHost = browserService;
+      agentBrowser.bind(browser.provides);
       const agentControl = new AccountModelAgentControlPolicy(declaredAccountModel);
-      closeAgentBrowsers = async () => await browserService.closeAll();
-      releaseBrowserSession = async sessionId => await browserService.releaseSession(sessionId);
-      const browserHost: MountedSubsystems['browser'] = {
-        ...browserService,
-        status: browserService.status.bind(browserService),
-        act: browserService.act.bind(browserService),
-        attachViewer: browserService.attachViewer.bind(browserService),
-        dispatchHumanInput: browserService.dispatchHumanInput.bind(browserService),
-        releaseSession: browserService.releaseSession.bind(browserService),
-        openPage: browserService.openPage.bind(browserService),
-        actOnPage: browserService.actOnPage.bind(browserService),
-        filesOnPage: browserService.filesOnPage.bind(browserService),
-        scriptOnPage: browserService.scriptOnPage.bind(browserService),
-        closePage: browserService.closePage.bind(browserService),
-        lifecycleOnPage: browserService.lifecycleOnPage.bind(browserService),
-        inputOnPage: browserService.inputOnPage.bind(browserService),
-        adoptPage: browserService.adoptPage.bind(browserService),
-        closeAll: browserService.closeAll.bind(browserService),
-        stream: async (sessionId, downstream) => {
-          let viewer: BrowserViewerStream | undefined;
-          return {
-            open: async () => {
-              viewer = await BrowserViewerStream.connect(browserService, sessionId, downstream, new SystemFrameClock());
-            },
-            fromClient: frame => viewer?.fromClient(frame),
-            close: () => viewer?.close(),
-          };
-        },
-      };
       // Hoisted so the Warden reads the same redacted transcript and screen an operator does: the evidence
       // its Jev guard is shown passes the same scrubbing as every other read of a ferret.
       // The three operator reads, each over the evidence that actually holds the answer: the durable
@@ -11785,7 +11709,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock,
           clientName: CLIENT_NAME,
           terminals: terminal.provides,
-          browser: browserHost,
+          browser: browser.provides.host,
           audit: auditLog,
           policy: agentControl,
           input: inputRequestService,
@@ -12332,8 +12256,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         boardGitHub,
         analyticsIngest: analytics.provides.ingestion,
-        browserLogin,
-        browser: browserHost,
         inputRequests: inputRequestService,
         signInRules,
         signInRuleSuggestions,
@@ -12351,16 +12273,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             accountName(() => userInfo().username),
             process.getuid?.(),
           ),
-        },
-        browserProxy: {
-          tester: new BrowserProxyTester({
-            saved: async () => (await declaredAccountModel())?.machine.browserProxy,
-            secrets: async () => await secretVault.values(),
-            probe: new TunnelProxyProbe(),
-            now: () => performance.now(),
-          }),
-          state: () => browserService.overview(),
-          firewall: loopbackFirewall,
         },
         agentTools: agentTools.provides,
         configFiles: createConfigFilesSubsystem({
@@ -12993,6 +12905,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           names,
           conversationImport,
           terminal,
+          browser,
         },
       };
     },

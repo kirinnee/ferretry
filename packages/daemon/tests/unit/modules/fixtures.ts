@@ -1,6 +1,7 @@
 import type { BuiltModule } from '../../../src/lib/runtime/modules.ts';
 import { builtAgentTools } from './agent-tools/fixture.ts';
 import { builtAnalytics } from './analytics/fixture.ts';
+import { builtBrowser } from './browser/fixture.ts';
 import { builtCgroups } from './cgroups/fixture.ts';
 import { builtConversationImport } from './conversation-import/fixture.ts';
 import { builtFleetLogin } from './fleet-login/fixture.ts';
@@ -54,4 +55,5 @@ const defaultBuiltModules = (): readonly BuiltModule<unknown, object>[] => [
   builtNames(),
   builtConversationImport(),
   builtTerminal(),
+  builtBrowser(),
 ];

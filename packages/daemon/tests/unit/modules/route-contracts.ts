@@ -27,6 +27,7 @@
  * A fragment is a diff somebody reads, so a module's reviewed answers now change in the module's own file.
  */
 import * as agentTools from './agent-tools/route-contract.ts';
+import * as browser from './browser/route-contract.ts';
 import * as analytics from './analytics/route-contract.ts';
 import * as cgroups from './cgroups/route-contract.ts';
 import * as conversationImport from './conversation-import/route-contract.ts';
@@ -75,6 +76,7 @@ export const FRAGMENTS: Readonly<Record<string, RouteContractFragment>> = {
   names,
   conversationImport,
   terminal,
+  browser,
 };
 
 /** The concatenation of every fragment's `callers`: one line per route, both tables. */

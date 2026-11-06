@@ -718,25 +718,6 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'memberId',
     responseFields: { catalogId: ['catalogId'] },
   },
-  { method: 'POST', path: '/v1/browser/login', event: 'browser.opened', detail: { action: 'sign-in-window' } },
-  // A proxy test makes this machine dial a proxy with the stored credentials, so it is kept by name: only whether
-  // it reached, how long it took and the error class — never an address, a header or a credential. A refused
-  // caller (an agent) reaches the handler and is recorded as refused.
-  {
-    method: 'POST',
-    path: '/v1/browser/proxy/test',
-    event: 'browser.proxy-tested',
-    fixedSubject: 'browser-proxy',
-    responseSettings: [],
-    responseNames: 'errorClass',
-  },
-  {
-    method: 'POST',
-    path: '/v1/sessions/:sessionId/browser',
-    event: 'browser.opened',
-    subject: 'sessionId',
-    detail: { action: 'control' },
-  },
   { method: 'POST', path: '/v1/sessions', event: 'session.opened', detail: { action: 'start' } },
   // A person cutting a ferret off: named by the session, never by the credential it held.
   {
@@ -1168,9 +1149,7 @@ export interface AuditedSocketRule {
  * contract in `tests/unit/runtime/mounts/surface.test.ts` holds it to the reviewed list in
  * `tests/unit/modules/<id>/route-contract.ts` (`notAudited`).
  */
-export const AUDITED_SOCKET_ROUTES: readonly AuditedSocketRule[] = [
-  { path: '/v1/sessions/:sessionId/browser/stream', event: 'browser.opened', subject: 'sessionId' },
-];
+export const AUDITED_SOCKET_ROUTES: readonly AuditedSocketRule[] = [];
 
 /**
  * The socket table, with every attach a rule names recorded as `detail.mode: 'attach'`.

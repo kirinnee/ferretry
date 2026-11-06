@@ -1,5 +1,5 @@
 import type { SocketRoute } from '../../../src/lib/api/socket.ts';
-import { AUDITED_ROUTES, AUDITED_SOCKET_ROUTES } from '../../../src/lib/audit/routes.ts';
+import { AUDITED_ROUTES } from '../../../src/lib/audit/routes.ts';
 import type { AuditEntry } from '../../../src/lib/audit/types.ts';
 import { describe, expect, it } from 'bun:test';
 import type { ApiRoute, RoutePattern } from '../../../src/lib/api/route.ts';
@@ -199,8 +199,8 @@ describe('module audit contributions', () => {
       },
     };
     const httpRule = AUDITED_ROUTES[0];
-    const socketRule = AUDITED_SOCKET_ROUTES[0];
-    if (httpRule === undefined || socketRule === undefined) throw new Error('the shared audit inventories must exist');
+    const socketRule = { path: '/v1/sessions/:sessionId/browser/stream' };
+    if (httpRule === undefined) throw new Error('the shared audit inventories must exist');
     const contribution = { routes: [http(httpRule.path, httpRule.method)], sockets: [socket(socketRule.path)] };
     // Three shapes of "no rules": no audit key, an audit with no arrays, and explicitly empty arrays.
     const shapes = [undefined, {}, { routes: [], sockets: [] }];
@@ -234,8 +234,8 @@ describe('module audit contributions', () => {
       },
     };
     const httpRule = AUDITED_ROUTES[0];
-    const socketRule = AUDITED_SOCKET_ROUTES[0];
-    if (httpRule === undefined || socketRule === undefined) throw new Error('the shared audit inventories must exist');
+    const socketRule = { path: '/v1/sessions/:sessionId/browser/stream' };
+    if (httpRule === undefined) throw new Error('the shared audit inventories must exist');
     const mounting: BuiltModule<void> = {
       id: 'mounting',
       provides: undefined,
