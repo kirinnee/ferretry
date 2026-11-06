@@ -1,3 +1,9 @@
+## [4.291.4](https://github.com/kirinnee/ferretry/compare/v4.291.3...v4.291.4) (2026-11-06)
+
+### Fixes
+
+* **daemon:** finish sends left typed in a ferret's box (&B153) ([#1577](https://github.com/kirinnee/ferretry/issues/1577)) ([0784b06](https://github.com/kirinnee/ferretry/commit/0784b062cc238513455e2f6f20ebddff57b71063)), closes [#30](https://github.com/kirinnee/ferretry/issues/30) [#N](https://github.com/kirinnee/ferretry/issues/N)
+
 ## [4.291.3](https://github.com/kirinnee/ferretry/compare/v4.291.2...v4.291.3) (2026-11-06)
 
 ### Performance
