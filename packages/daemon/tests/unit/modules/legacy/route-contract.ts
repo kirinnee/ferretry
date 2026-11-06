@@ -156,7 +156,6 @@ export const callers: readonly string[] = [
   'GET /v1/sessions/:sessionId/runtime-models operator any',
   'GET /v1/sessions/:sessionId/sends operator any',
   'GET /v1/sessions/:sessionId/sends/:sendId operator any',
-  'GET /v1/sessions/:sessionId/shared-draft operator person',
   'GET /v1/sessions/:sessionId/skills operator any',
   'GET /v1/sessions/:sessionId/skills/inventory operator any',
   'GET /v1/sessions/:sessionId/snapshot operator any',
@@ -310,7 +309,6 @@ export const callers: readonly string[] = [
   'POST /v1/sessions/:sessionId/sends/:sendId/cancel operator any',
   'POST /v1/sessions/:sessionId/sends/:sendId/enter operator any',
   'POST /v1/sessions/:sessionId/sends/:sendId/retry operator any',
-  'POST /v1/sessions/:sessionId/shared-draft operator person',
   'POST /v1/sessions/:sessionId/signal operator any',
   'POST /v1/sessions/:sessionId/stop operator any',
   'POST /v1/sessions/:sessionId/task-plans/:planId/approval operator person',
@@ -354,7 +352,6 @@ export const callers: readonly string[] = [
   // Task plans (docs/secure-copy.md): a ferret never reads, answers, stages, confirms, drops or revokes one.
   'GET /v1/events operator any',
   'GET /v1/sessions/:sessionId/browser/stream operator any',
-  'GET /v1/sessions/:sessionId/shared-draft/stream operator person',
   'GET /v1/sessions/:sessionId/terminals/:terminalId/stream operator any',
 ];
 
@@ -443,8 +440,6 @@ export const notAudited: Readonly<Record<string, string>> = {
     "the owner dismissing every open agenda item of the agent ferrets; each item's own history records the dismissal and its note, and it widens nobody's access",
   'POST /v1/machine/agenda':
     "the owner dismissing, snoozing or resolving a machine notice; the item's own history records it, and it widens nobody's access",
-  'POST /v1/sessions/:sessionId/shared-draft':
-    "the owner's own unsent words, typed at keystroke rate; it widens nobody's access, and logging it would copy the draft into a log",
   'POST /v1/board/tasks': 'a work card on a project board; its own append-only history records who did what',
   'POST /v1/board/tasks/:taskId': 'a work card on a project board; its own append-only history records who did what',
   'POST /v1/board/tasks/:taskId/start': "resumes the card's own ferret; its session journal records it",
@@ -507,6 +502,4 @@ export const notAudited: Readonly<Record<string, string>> = {
     'opens a peer-to-peer path, not an act: every session on it proves its device again and meets the same guard',
   // Protocol-switching routes the log does not record (the socket table).
   'GET /v1/events': 'the fleet event feed is a read: it shows what the caller could already list',
-  'GET /v1/sessions/:sessionId/shared-draft/stream':
-    "the owner's own unsent words at keystroke rate, to the owner's own devices; logging it would copy the draft into a log",
 };

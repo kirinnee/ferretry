@@ -16,6 +16,7 @@ import {
   type SharedDraftStreamTarget,
   sharedDraftOrigin,
 } from '../../shared-drafts/index.ts';
+import type { ModuleContribution } from '../modules.ts';
 import type { SentDraftClearer } from './session-send.ts';
 
 /**
@@ -242,4 +243,16 @@ export function sentDraftClearer(drafts: Pick<SharedDraftService, 'edit'>): Sent
       { metered: false, ...(sent.slot === undefined ? {} : { slot: sent.slot }) },
     );
   };
+}
+
+/**
+ * What the shared-drafts module adds to the daemon: the draft's two routes and its live stream socket. It has no
+ * audit rule (an edit is the owner typing, which the security log deliberately does not record) and claims no
+ * protocol feature.
+ */
+export function sharedDraftsContribution(
+  drafts: SharedDraftService,
+  stream: SharedDraftStreamSubsystem,
+): ModuleContribution {
+  return { routes: sharedDraftRoutes(drafts), sockets: sharedDraftSocketRoutes(drafts, stream) };
 }

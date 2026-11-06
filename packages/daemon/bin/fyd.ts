@@ -346,7 +346,6 @@ import {
   FileRoutingMigrationBackup,
   readSessionResult,
 } from '../src/adapters/pack/index.ts';
-import { FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
 import { releaseAcquired, terminationGate } from '../src/adapters/runtime/termination-gate.ts';
@@ -472,7 +471,6 @@ import {
 } from '../src/adapters/session/transcript/index.ts';
 import { StorageTurnPorts, storagePaneLimits } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
-import { FileSharedDraftRepository } from '../src/adapters/shared-drafts/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import { NodeStateHomes } from '../src/adapters/system/node-state-homes.ts';
@@ -659,7 +657,6 @@ import {
   AgendaBuzz,
   AgendaChangeFanout,
   AgendaConversation,
-  AgendaDraftSessions,
   AgendaHomes,
   AgendaItemDraftDiscard,
   AgendaReplyBatcher,
@@ -1142,8 +1139,7 @@ import {
   type SessionTranscriptSearch,
   type SessionTranscriptTail,
   SharedCatalogService,
-  SharedDraftPresence,
-  SharedDraftService,
+  type SharedDraftService,
   SharedFleetBacklog,
   type SharingRepairOutcome,
   SignalRefused,
@@ -1310,6 +1306,7 @@ import { createMcpFoundations, mcpModule } from './modules/mcp.ts';
 import { modelsModule } from './modules/models.ts';
 import { rendersModule } from './modules/renders.ts';
 import { type ModuleHandles, seamsOf } from './modules/seams.ts';
+import { sharedDraftsModule } from './modules/shared-drafts.ts';
 import { updateModule } from './modules/update.ts';
 import { usageModule } from './modules/usage.ts';
 import { createSttEnhancement, voiceModule } from './modules/voice.ts';
@@ -9703,7 +9700,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       let gateItems: GateItems | undefined;
       // The owner's shared drafts are built with the rest of the subsystems, further down; an item that closes
       // deletes its draft through this, which reads nothing until requests flow.
-      const sharedDraftsHolder: { service?: SharedDraftService } = {};
+      const sharedDraftsLink = lateBound<SharedDraftService>();
       let agendaHomesMigrated: Promise<unknown> = Promise.resolve();
       // One carrier for both halves: a Not good from the Board and one answered on the agenda move files the same way.
       const boardAttachments = new StoreBoardAttachments(attachmentStore);
@@ -10400,7 +10397,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           alertClearer,
           // An item that closes takes its reply-box draft with it; a replied (parked) item keeps its own.
           new AgendaItemDraftDiscard({
-            discard: async (sessionId, item) => await sharedDraftsHolder.service?.discard(sessionId, item),
+            discard: async (sessionId, item) => await sharedDraftsLink.current()?.discard(sessionId, item),
           }),
           // The owner dismissing an input card without its form cancels the request behind it.
           new InputCardClosedObserver(
@@ -12122,20 +12119,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         lifecycle,
       );
       const agentPins = agentTools.provides.agentPins;
-      const sharedDraftService = new SharedDraftService(
-        new AgendaDraftSessions(new FilePinSessionDirectory(paths, stateFiles), agendaBoards),
-        new FileSharedDraftRepository(paths, stateFiles, new KeyedSerialExecutor()),
-        clock,
-        {
-          after: (milliseconds, action) => {
-            const timer = setTimeout(action, milliseconds);
-            return { cancel: () => clearTimeout(timer) };
-          },
-        },
-        // A generation must never repeat across restarts, so it is random rather than counted.
-        { next: () => crypto.randomUUID() },
+      const sharedDrafts = sharedDraftsModule.build(
+        { paths, stateFiles, agendaBoards, clock, pairing },
+        seamsOf.sharedDrafts(world),
+        lifecycle,
       );
-      sharedDraftsHolder.service = sharedDraftService;
+      sharedDraftsLink.bind(sharedDrafts.provides);
       const pinnedSessions = withPinned(
         withRevive(
           withContext(
@@ -12408,14 +12397,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         machineAgenda: machineAgendaService,
         // The owner's unsent composer, live across their devices. Its own write queue for the same reason
         // pins have one, and its own timer: a draft is written a second after it last changed.
-        sharedDrafts: sharedDraftService,
-        // Who has each session's composer open, and on which of the owner's devices. Memory only.
-        sharedDraftStream: {
-          presence: new SharedDraftPresence(),
-          deviceName: async deviceId => (await pairing.devices()).find(device => device.id === deviceId)?.name,
-          nextPeer: () => crypto.randomUUID(),
-          clock: { nowMs: () => Date.now() },
-        },
+        sharedDrafts: sharedDrafts.provides,
         sessions: pinnedSessions,
         // A name in any `:sessionId` is resolved over the same candidates the send and signal domains read,
         // so a route, the attribution on a message and a declared wait agree on which agent a name means.
@@ -13300,6 +13282,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           models,
           usage: usageBuilt,
           mcp,
+          sharedDrafts,
         },
       };
     },

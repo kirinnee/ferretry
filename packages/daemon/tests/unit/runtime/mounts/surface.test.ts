@@ -5,6 +5,7 @@ import { MemberDispatcher, type SharedRouteDeps } from '../../../../src/lib/cata
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { jsonBody, request } from '../../api/support.ts';
+import { builtSharedDraftsKnowing } from '../../modules/shared-drafts/fixture.ts';
 import { FRAGMENTS, NOT_AUDITED, OTHER_TABLE_CALLERS, ROUTE_CALLERS } from '../../modules/route-contracts.ts';
 import { agentIn, CREDENTIALS, grantSubsystem, human } from './support.ts';
 import {
@@ -704,9 +705,14 @@ describe('the mounted daemon surface', () => {
     // Arrange — the real table: session addressing, agent control and the audit wrappers all in front.
     const mounted = subsystems();
     await mounted.grants.refresh();
-    const dispatcher = createMountedDispatcher(base, mounted);
+    const drafts = builtSharedDraftsKnowing(['s1']);
+    const dispatcher = createMountedDispatcher(base, mounted, [drafts]);
     const device = { deviceId: `fy_device_id_${'d'.repeat(22)}`, appSession: 'app-one' } as const;
-    const edit = JSON.stringify({ generation: 'gen-1', epoch: 0, base: 0, text: ['unsent words'] });
+    // The module mints a random generation per boot, so the edit names the one the first read answers with.
+    const opened = jsonBody(await dispatcher.dispatch(request({ path: '/v1/sessions/s1/shared-draft', device }))) as {
+      generation: string;
+    };
+    const edit = JSON.stringify({ generation: opened.generation, epoch: 0, base: 0, text: ['unsent words'] });
 
     // Act
     const written = await dispatcher.dispatch(
@@ -722,6 +728,7 @@ describe('the mounted daemon surface', () => {
     should(jsonBody(byDevice)).match({ text: 'unsent words' });
     should(byAgent.status).equal(403);
     should(JSON.stringify(jsonBody(byAgent))).not.containEql('unsent');
+    await drafts.provides.close();
   });
 
   it('should dispatch a base feed and a subsystem route through the same dispatcher', async () => {
@@ -897,7 +904,7 @@ describe('the mounted daemon surface', () => {
     // Arrange
     const mounted = subsystems();
     await mounted.grants.refresh();
-    const dispatcher = createMountedSocketDispatcher(base, mounted);
+    const dispatcher = createMountedSocketDispatcher(base, mounted, [], [builtSharedDraftsKnowing(['s1'])]);
     const path = '/v1/sessions/s1/shared-draft/stream';
     const ferrets: readonly Record<string, string>[] = [
       { authorization: `Bearer ${PREFIXED_S1}` },

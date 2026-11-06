@@ -15,7 +15,6 @@ import { PasteRuleService, PasteRuleStages } from '../../../../src/lib/secure-co
 import { SecuritySettingsService } from '../../../../src/lib/security/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
-import { SharedDraftPresence } from '../../../../src/lib/shared-drafts/index.ts';
 import { SignInRuleService, SignInRuleSuggestions } from '../../../../src/lib/sign-in-rules/index.ts';
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
 import { TaskPlanService } from '../../../../src/lib/task-plans/index.ts';
@@ -352,12 +351,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
     enrolledDevices: async () => 0,
   },
   sharedDrafts: sharedDraftService(['s1']),
-  sharedDraftStream: {
-    presence: new SharedDraftPresence(),
-    deviceName: async () => 'Phone',
-    nextPeer: () => 'peer-1',
-    clock: { nowMs: () => 0 },
-  },
   sessions: sessionDirectory([sessionView('s1')]),
   sessionArchive: { count: () => 0, list: async () => [] },
   sessionAddresses: {
