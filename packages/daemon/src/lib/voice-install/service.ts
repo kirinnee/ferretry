@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import {
   VOICE_ENGINE_CODES,
   type VoiceArchive,
@@ -416,7 +416,11 @@ export class VoiceInstallService {
 
     set({ phase: 'unpacking', bytesDone: 0, bytesTotal: archive.extractedBytes });
     const staging = `${directory}.staging-${this.deps.clock.now().replace(/\D/g, '')}`;
-    await files.remove(staging);
+    // A daemon that was killed mid-unpack left its staging directory behind (gigabytes, for a big model).
+    const parent = dirname(directory);
+    for (const name of await files.list(parent)) {
+      if (name.startsWith(`${basename(directory)}.staging-`)) await files.remove(join(parent, name));
+    }
     let unpacked: Awaited<ReturnType<typeof unpackTar>>;
     try {
       const stream = this.deps.archives.tarStream(part, archive.format, signal);

@@ -386,6 +386,21 @@ describe('failures', () => {
     should(files.under(`${ROOT}/models/`)).deepEqual([]);
   });
 
+  it('should clear a staging directory a killed daemon left behind before it unpacks again', async () => {
+    // Arrange
+    const { service, files } = world();
+    files.files.set(`${ROOT}/models/alpha.staging-20261105000000/encoder.onnx`, new Uint8Array(9));
+    files.files.set(`${ROOT}/models/other.staging-1/keep`, new Uint8Array(1));
+
+    // Act
+    await service.install('alpha');
+    await service.settled();
+
+    // Assert
+    should(files.under(`${ROOT}/models/alpha.staging-`)).deepEqual([]);
+    should(files.files.has(`${ROOT}/models/other.staging-1/keep`)).be.true();
+  });
+
   it('should install again after a failure', async () => {
     // Arrange
     const { service, files } = world();
