@@ -2044,7 +2044,10 @@ const HARNESS_PAIRING_CLIENT: PairingClientFactory = async connection => {
         devices = { ...devices, devices: devices.devices.filter(device => device.id !== id) };
         return devices;
       }
-      return devices;
+      // The note under a device's Revoke reads the sign-in rules: none are standing here.
+      if (path === '/v1/sign-in-rules') return { health: 'ok', rules: [], stages: [] } satisfies SignInRuleList;
+      if (path === '/v1/pair/devices') return devices;
+      throw new Error(`the harness pairing client does not answer ${init?.method ?? 'GET'} ${path}`);
     }) as PairingClient['request'],
   };
 };
