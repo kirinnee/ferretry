@@ -54,13 +54,3 @@ export function idleDeadline(lastActivityAtMs: number, viewerCount: number, idle
     throw new TerminalPolicyError('terminal viewer count must be non-negative');
   return viewerCount === 0 ? lastActivityAtMs + idleTimeoutMs : undefined;
 }
-
-export function isTerminalIdle(
-  lastActivityAtMs: number,
-  viewerCount: number,
-  nowMs: number,
-  idleTimeoutMs: number,
-): boolean {
-  const deadline = idleDeadline(lastActivityAtMs, viewerCount, idleTimeoutMs);
-  return deadline !== undefined && nowMs >= deadline;
-}

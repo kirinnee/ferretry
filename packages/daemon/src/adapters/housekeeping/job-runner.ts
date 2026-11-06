@@ -111,9 +111,9 @@ export function hostHousekeepingPorts(
 ): HousekeepingJobPorts {
   let keychainHadLogin = false;
   const command: CredentialCommand = {
-    run: async (argv, timeoutMs, stdin) => {
+    run: async (argv, timeoutMs) => {
       const started = now();
-      const result = await spawn.run(argv, timeoutMs, stdin);
+      const result = await spawn.run(argv, timeoutMs);
       counters.children.push({ argv: [...argv], wallMs: Math.max(0, now() - started) });
       keychainHadLogin = keychainAnswered(result.code, result.stdout);
       return result;

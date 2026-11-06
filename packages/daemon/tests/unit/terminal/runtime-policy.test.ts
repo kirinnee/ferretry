@@ -1,11 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  hexInputChunks,
-  terminalMetadataIsSane,
-  terminalPaneTarget,
-  terminalTmuxSessionName,
-} from '../../../src/lib/terminal/index.ts';
+import { hexInputChunks, terminalPaneTarget, terminalTmuxSessionName } from '../../../src/lib/terminal/index.ts';
 
 describe('terminal runtime policy', () => {
   it('should create stable bounded tmux session names without trusting display characters', () => {
@@ -35,26 +30,5 @@ describe('terminal runtime policy', () => {
     // Act + Assert
     should(() => hexInputChunks(new Uint8Array(), 0)).throw(RangeError);
     should(() => hexInputChunks(new Uint8Array(), 0.5)).throw(RangeError);
-  });
-
-  it('should accept only plausible recovered terminal metadata', () => {
-    // Arrange
-    const valid = {
-      id: '0123456789ab',
-      owner: 'session-a',
-      title: 'Terminal 1',
-      root: '/tmp/worktree',
-      tmuxSession: 'fy-webterm-session-a-deadbeef-0123456789ab',
-      createdAtMs: 1,
-      lastActivityAtMs: 2,
-      cols: 100,
-      rows: 30,
-    };
-
-    // Act + Assert
-    should(terminalMetadataIsSane(valid)).be.true();
-    should(terminalMetadataIsSane({ ...valid, id: 'unsafe' })).be.false();
-    should(terminalMetadataIsSane({ ...valid, root: 'relative' })).be.false();
-    should(terminalMetadataIsSane({ ...valid, lastActivityAtMs: 0 })).be.false();
   });
 });

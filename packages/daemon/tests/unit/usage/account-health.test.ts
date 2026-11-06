@@ -7,7 +7,6 @@ import {
   spentPercent,
   unusableAccountReason,
   usableAccount,
-  usageForAgent,
 } from '../../../src/lib/usage/index.ts';
 
 const usage = (overrides: Partial<AccountUsage> = {}): AccountUsage => ({ agent: 'agent-primary', ...overrides });
@@ -123,20 +122,5 @@ describe('unusableAccountReason', () => {
   it('should report an account that is simply spent', () => {
     // Arrange / Act / Assert
     should(unusableAccountReason(usage({ atLimit: true }))).equal('the account is at its usage limit');
-  });
-});
-
-describe('usageForAgent', () => {
-  it('should find the row for an executable name', () => {
-    // Arrange
-    const rows = [usage({ agent: 'agent-a' }), usage({ agent: 'agent-b', atLimit: true })];
-
-    // Act / Assert
-    should(usageForAgent(rows, 'agent-b')?.atLimit).be.true();
-  });
-
-  it('should find nothing when the feed carries no row for it', () => {
-    // Arrange / Act / Assert
-    should(usageForAgent([], 'agent-a')).be.undefined();
   });
 });

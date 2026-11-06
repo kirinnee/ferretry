@@ -46,18 +46,6 @@ export function hexInputChunks(
   return chunks;
 }
 
-export function terminalMetadataIsSane(value: TerminalRuntimeMetadata): boolean {
-  return (
-    /^[a-f0-9]{12}$/u.test(value.id) &&
-    value.owner.length > 0 &&
-    value.root.startsWith('/') &&
-    value.tmuxSession.startsWith(TERMINAL_TMUX_PREFIX) &&
-    Number.isFinite(value.createdAtMs) &&
-    Number.isFinite(value.lastActivityAtMs) &&
-    value.lastActivityAtMs >= value.createdAtMs
-  );
-}
-
 /**
  * The tmux option that marks a session as a terminal; other subsystems must not disturb one. Here, in a
  * module with no value imports, so a lean session-worker thread can read it without loading the terminal

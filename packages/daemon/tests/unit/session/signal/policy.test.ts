@@ -9,7 +9,6 @@ import {
   parkedSeconds,
   parseDeadline,
   PROTECTED_SIGNAL_STATUSES,
-  signalDisplayName,
   signalStatusOf,
   waitDetail,
   type SignalTarget,
@@ -167,14 +166,6 @@ describe('the credit a park earns back', () => {
 
     // Assert
     should(credited).equal(30);
-  });
-});
-
-describe('how a signal names a session to a human', () => {
-  it('should prefer the callsign and fall back to the id', () => {
-    // Arrange / Act / Assert
-    should(signalDisplayName(target({ teammate: 'hayden' }))).equal('hayden');
-    should(signalDisplayName(target())).equal(ID);
   });
 });
 

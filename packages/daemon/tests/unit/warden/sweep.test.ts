@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  collapseUnsupervisedMonitors,
+  collapseUnwatchedFleet,
   UNSUPERVISED_FLEET_KEY,
   WARDEN_LABEL,
   wardenEscalationSourceRef,
@@ -39,7 +39,7 @@ describe('collapsing an unwatched fleet into one fault', () => {
 
   it('should leave the anomalies alone when the daemon does run monitors', () => {
     // Arrange / Act
-    const actual = collapseUnsupervisedMonitors([dead('s1'), dead('s2')], true);
+    const actual = collapseUnwatchedFleet([dead('s1'), dead('s2')], undefined);
 
     // Assert
     should(actual).have.length(2);
@@ -47,7 +47,7 @@ describe('collapsing an unwatched fleet into one fault', () => {
 
   it('should leave the anomalies alone when nothing was flagged as unmonitored', () => {
     // Arrange / Act
-    const actual = collapseUnsupervisedMonitors([other], false);
+    const actual = collapseUnwatchedFleet([other], 'unsupervised');
 
     // Assert
     should(actual).deepEqual([other]);
@@ -55,7 +55,7 @@ describe('collapsing an unwatched fleet into one fault', () => {
 
   it('should report one fault carrying every affected session', () => {
     // Arrange / Act
-    const actual = collapseUnsupervisedMonitors([dead('s2'), dead('s1')], false);
+    const actual = collapseUnwatchedFleet([dead('s2'), dead('s1')], 'unsupervised');
 
     // Assert
     should(actual).have.length(1);
@@ -66,7 +66,7 @@ describe('collapsing an unwatched fleet into one fault', () => {
 
   it('should never hide an unwatched fleet, so a sweep over one cannot read as clean', () => {
     // Arrange / Act
-    const actual = collapseUnsupervisedMonitors([dead('s1')], false);
+    const actual = collapseUnwatchedFleet([dead('s1')], 'unsupervised');
 
     // Assert
     should(actual).have.length(1);
@@ -75,7 +75,7 @@ describe('collapsing an unwatched fleet into one fault', () => {
 
   it('should keep every other anomaly beside the collapsed one', () => {
     // Arrange / Act
-    const actual = collapseUnsupervisedMonitors([dead('s1'), other], false);
+    const actual = collapseUnwatchedFleet([dead('s1'), other], 'unsupervised');
 
     // Assert
     should(actual.map(item => item.kind)).deepEqual(['sus_thinking', 'dead_monitor']);
@@ -83,7 +83,7 @@ describe('collapsing an unwatched fleet into one fault', () => {
 
   it('should say "session" rather than "sessions" for exactly one', () => {
     // Arrange / Act
-    const actual = collapseUnsupervisedMonitors([dead('s1')], false);
+    const actual = collapseUnwatchedFleet([dead('s1')], 'unsupervised');
 
     // Assert
     should(actual[0]?.detail).match(/1 active session unsupervised/u);
@@ -91,7 +91,7 @@ describe('collapsing an unwatched fleet into one fault', () => {
 
   it('should never ask for an assigned warden: the fault is the daemon, not a session', () => {
     // Arrange / Act
-    const actual = collapseUnsupervisedMonitors([dead('s1')], false);
+    const actual = collapseUnwatchedFleet([dead('s1')], 'unsupervised');
 
     // Assert
     should(actual[0]?.assignedWarden).be.undefined();

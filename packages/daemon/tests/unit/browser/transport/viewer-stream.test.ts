@@ -11,12 +11,12 @@ import {
   type BrowserViewerHost,
   type FrameClock,
   type FrameTimer,
-  decodeFrameEnvelope,
   type ViewerAttachment,
   type ViewerDownstream,
   type ViewerStreamOptions,
   type ViewerTerminalSignal,
 } from '../../../../src/lib/index.ts';
+import { decodeFrameEnvelope } from '../../../support/frame-envelope.ts';
 
 /** Every whole envelope a run of sent chunks carries, read exactly as a viewer reads the stream. */
 const envelopesIn = (sent: readonly Uint8Array[]): Uint8Array[] => {

@@ -42,12 +42,6 @@ export interface TranscriptNames {
   readonly generated?: string;
 }
 
-/** What the transcript calls itself: the owner's name, else the CLI's, the latest of each. */
-export function transcriptName(harness: Harness, text: string): string | undefined {
-  const { chosen, generated } = transcriptNames(harness, text);
-  return chosen ?? generated;
-}
-
 /** Each kind of name a transcript records, the latest of each. */
 export function transcriptNames(harness: Harness, text: string): TranscriptNames {
   let chosen: string | undefined;

@@ -2,10 +2,8 @@ import type { MillisecondClockPort } from '../runtime/boot.ts';
 import type { UsageFeedPort } from '../usage/types.ts';
 import type { ApiCredentials } from './authentication.ts';
 import type { ApiHeaders } from './http.ts';
-import { NO_GOVERNED_ROUTES_GUARD } from './capability.ts';
-import { ApiDispatcher } from './dispatcher.ts';
+import type { ApiDispatcher } from './dispatcher.ts';
 import type { ApiRoute } from './route.ts';
-import { ApiRouter } from './router.ts';
 import { type DaemonLivenessSource, healthRoutes } from './routes/health.ts';
 import { usageRoutes } from './routes/usage.ts';
 import type { ApiSocketDispatcher } from './socket.ts';
@@ -112,13 +110,4 @@ export function daemonApiRoutes(dependencies: DaemonApiDependencies): readonly A
     ...healthRoutes(dependencies.clock, dependencies.startedAtMs, dependencies.liveness),
     ...usageRoutes(dependencies.usage, dependencies.clock, dependencies.publicUsageFeed),
   ];
-}
-
-/** Builds the dispatcher the transport adapter serves. */
-export function createApiDispatcher(dependencies: DaemonApiDependencies): ApiDispatcher {
-  return new ApiDispatcher(
-    new ApiRouter(daemonApiRoutes(dependencies)),
-    dependencies.credentials,
-    NO_GOVERNED_ROUTES_GUARD,
-  );
 }

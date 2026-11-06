@@ -967,7 +967,7 @@ async function act(request: Request): Promise<Record<string, unknown>> {
     }
     case 'type': {
       const page = targetPage(params.pageId);
-      const target = browserElementParam(legacyTarget(params));
+      const target = browserElementParam(params.target);
       if (target === undefined) throw new Error('target is required');
       const typed = await typeInto(page, target, typeof params.text === 'string' ? params.text : '', {
         ...(params.submit === true ? { submit: true } : {}),
@@ -1055,7 +1055,7 @@ async function act(request: Request): Promise<Record<string, unknown>> {
     }
     case 'read': {
       const page = targetPage(params.pageId);
-      const target = browserElementParam(legacyTarget(params));
+      const target = browserElementParam(params.target);
       // The snapshot names what can be clicked and typed into, each with a ref an act accepts; the
       // visible text is what a person reads.
       const read = await readPage(page, {
@@ -1190,16 +1190,8 @@ async function act(request: Request): Promise<Record<string, unknown>> {
   }
 }
 
-/** A request's target — or, from a daemon older than refs, its bare `selector`. */
-function legacyTarget(params: Readonly<Record<string, unknown>>): unknown {
-  if (params.target !== undefined) return params.target;
-  return typeof params.selector === 'string' && params.selector
-    ? { kind: 'selector', selector: params.selector }
-    : undefined;
-}
-
 function requiredTarget(params: Readonly<Record<string, unknown>>): BrowserTarget {
-  const target = browserTargetParam(legacyTarget(params));
+  const target = browserTargetParam(params.target);
   if (target === undefined) throw new Error('target is required');
   return target;
 }

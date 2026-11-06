@@ -109,18 +109,6 @@ export interface WardenVerdictSourceIdentity {
   readonly anomalyKind?: WardenAnomalyKind;
 }
 
-/** Stable agenda-source identity for one exact report block. Generated
- *  report paths never contain `#`, so the suffix is an unambiguous selector. */
-export function wardenVerdictSourceRef(
-  reportPath: string | undefined,
-  anomalyKind: WardenAnomalyKind | undefined,
-): string | undefined {
-  if (reportPath !== undefined && anomalyKind !== undefined) return `warden:${reportPath}#${anomalyKind}`;
-  if (reportPath !== undefined) return `warden:${reportPath}`;
-  if (anomalyKind !== undefined) return `warden:${anomalyKind}`;
-  return undefined;
-}
-
 export function parseWardenVerdictSourceRef(sourceRef: string | undefined): WardenVerdictSourceIdentity | undefined {
   if (sourceRef === undefined || !sourceRef.startsWith('warden:')) return undefined;
   const exact = sourceRef.slice('warden:'.length);

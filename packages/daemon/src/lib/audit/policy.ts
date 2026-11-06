@@ -106,16 +106,6 @@ export function auditFoldKey(entry: AuditEntry): string | undefined {
 }
 
 /**
- * Whether a record goes to the store a flood cannot reach — before the daily allowance is applied.
- *
- * Only a SUCCESS of a kept event: a refusal is what a flood is made of, and activity is what a paired
- * device can repeat for free, so letting either in would hand the flood the one store it must not have.
- */
-export function isKeptAuditEntry(entry: AuditEntry): boolean {
-  return entry.outcome === 'succeeded' && AUDIT_KEPT_EVENTS.includes(entry.event);
-}
-
-/**
  * How many kept records of ONE event every caller who is not a person at this machine may write,
  * together, per UTC day.
  *

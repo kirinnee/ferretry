@@ -6,7 +6,6 @@ import {
   defaultSessionResumeSettings,
   findRecoveryScopeConflict,
   isTerminalForResume,
-  parseSessionResumeSettings,
   planResume,
   resolveResumePolicy,
   resumeTurnDocument,
@@ -548,27 +547,5 @@ describe('resume plan for a released structured-answer advisory', () => {
 
     // Act / Assert
     should(() => authorizeResume(asking, LIVE, OPERATOR, [])).throw(/answer or abandon/u);
-  });
-});
-
-describe('resume settings', () => {
-  it('should accept the shipped defaults', () => {
-    // Act
-    const actual = parseSessionResumeSettings({ ...SETTINGS });
-
-    // Assert
-    should(actual).deepEqual(SETTINGS);
-  });
-
-  it('should refuse a backoff ceiling below its own first step', () => {
-    // Act / Assert
-    should(() => parseSessionResumeSettings({ ...SETTINGS, retryBackoffMaxMs: 1 })).throw(
-      /retryBackoffMaxMs must be at least retryBackoffBaseMs/u,
-    );
-  });
-
-  it('should refuse an empty default prompt, which would revive an agent with no instruction', () => {
-    // Act / Assert
-    should(() => parseSessionResumeSettings({ ...SETTINGS, defaultResumePrompt: '' })).throw();
   });
 });

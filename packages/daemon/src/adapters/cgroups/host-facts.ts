@@ -11,12 +11,6 @@ import {
   parseSwapTotal,
 } from '../../lib/cgroups/index.ts';
 
-/**
- * The controllers file the unified hierarchy roots itself at. Its PRESENCE is the whole test: a host on
- * the legacy hierarchy does not have it, and neither does a host with no cgroup filesystem at all.
- */
-export const UNIFIED_HIERARCHY_MARKER = '/sys/fs/cgroup/cgroup.controllers';
-
 /** Where the kernel publishes what is read; overridable so a test can use a temporary tree. */
 export interface HostFactPlaces {
   readonly cgroupRoot: string;

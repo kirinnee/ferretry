@@ -4,7 +4,6 @@ import should from 'should';
 import {
   ApiDispatcher,
   ApiRouter,
-  createApiDispatcher,
   daemonApiRoutes,
   healthRoutes,
   NO_GOVERNED_ROUTES_GUARD,
@@ -335,7 +334,11 @@ describe('the assembled daemon surface', () => {
 
   it('should build a dispatcher that serves them', async () => {
     // Arrange
-    const dispatcher = createApiDispatcher(dependencies);
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter(daemonApiRoutes(dependencies)),
+      dependencies.credentials,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
 
     // Act
     const response = await dispatcher.dispatch(request({ path: '/metrics' }));

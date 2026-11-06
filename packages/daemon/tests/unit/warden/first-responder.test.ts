@@ -17,7 +17,6 @@ import {
   jevActLandingOn,
   jevActStanding,
   jevActsFor,
-  jevRoute,
   jevSubject,
   recordJevAct,
   reconcileBackoff,
@@ -72,14 +71,12 @@ const barOf = (verdict: TriageVerdict, policy: JevResponderPolicy): number | und
 };
 
 describe('the first responder’s decision table', () => {
-  // Every verdict × (just under | at its bar) × may act alone (on | off) × the LLM layer (on | off).
+  // Every verdict × (just under | at its bar) × may act alone (on | off).
   const rows = TRIAGE_VERDICTS.flatMap(verdict =>
-    (['under', 'at'] as const).flatMap(confidence =>
-      [true, false].flatMap(allowed => [true, false].map(llm => ({ verdict, confidence, allowed, llm }))),
-    ),
+    (['under', 'at'] as const).flatMap(confidence => [true, false].map(allowed => ({ verdict, confidence, allowed }))),
   );
 
-  it.each(rows)('$verdict, $confidence its bar, alone=$allowed, llm=$llm', ({ verdict, confidence, allowed, llm }) => {
+  it.each(rows)('$verdict, $confidence its bar, alone=$allowed', ({ verdict, confidence, allowed }) => {
     // Arrange
     const policy = { ...POLICY, mayActAlone: allowing(allowed) };
     const bar = barOf(verdict, policy) ?? policy.leaveThreshold;
@@ -87,13 +84,12 @@ describe('the first responder’s decision table', () => {
 
     // Act
     const outcome = firstResponse(decision(verdict, sure), policy);
-    const route = jevRoute(outcome, llm);
+    const route = outcome.kind;
 
     // Assert — the owner's rules, stated directly.
-    const escalation = llm ? 'investigation' : 'owner';
-    if (verdict === 'leave') should(route).equal(confidence === 'at' ? 'leave' : escalation);
-    else if (verdict === 'unsure' || verdict === 'failover') should(route).equal(escalation);
-    else should(route).equal(confidence === 'at' && allowed ? 'act' : escalation);
+    if (verdict === 'leave') should(route).equal(confidence === 'at' ? 'leave' : 'escalate');
+    else if (verdict === 'unsure' || verdict === 'failover') should(route).equal('escalate');
+    else should(route).equal(confidence === 'at' && allowed ? 'act' : 'escalate');
   });
 
   it.each([
@@ -118,8 +114,6 @@ describe('the first responder’s decision table', () => {
 
     // Assert
     should(outcome).deepEqual({ kind: 'escalate', why: 'failed', confidence: 0, failure: code });
-    should(jevRoute(outcome, true)).equal('investigation');
-    should(jevRoute(outcome, false)).equal('owner');
   });
 
   it('should act at its own bar: a confident nudge is carried out with the message Jev chose', () => {

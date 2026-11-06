@@ -93,12 +93,9 @@ export interface CredentialCommandResult {
  *
  * A seam rather than a direct spawn because the macOS keychain cannot be exercised on any other
  * platform, and a test must be able to drive every exit code this store distinguishes.
- *
- * `stdin`, when given, is written to the child and closed. It is how material reaches a command
- * without being in its argument list, which any local process can read.
  */
 export interface CredentialCommand {
-  run(command: readonly [string, ...string[]], timeoutMs: number, stdin?: string): Promise<CredentialCommandResult>;
+  run(command: readonly [string, ...string[]], timeoutMs: number): Promise<CredentialCommandResult>;
 }
 
 /** The exit code `security` uses for "the specified item could not be found in the keychain". */
@@ -153,18 +150,14 @@ const DEFAULT_KEYCHAIN_TIMEOUT_MS = 5_000;
  * the store reads a failure as unreadable rather than as a home with no credential.
  */
 export class SpawnCredentialCommand implements CredentialCommand {
-  async run(
-    command: readonly [string, ...string[]],
-    timeoutMs: number,
-    stdin?: string,
-  ): Promise<CredentialCommandResult> {
+  async run(command: readonly [string, ...string[]], timeoutMs: number): Promise<CredentialCommandResult> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const spawned = Bun.spawn({
         cmd: [...command],
         stdout: 'pipe',
         stderr: 'ignore',
-        stdin: stdin === undefined ? 'ignore' : new TextEncoder().encode(stdin),
+        stdin: 'ignore',
       });
       const collected = Promise.all([new Response(spawned.stdout).text(), spawned.exited]).then(([stdout, code]) => ({
         code,

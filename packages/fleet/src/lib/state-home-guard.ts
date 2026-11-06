@@ -9,9 +9,9 @@ import { basename, dirname, isAbsolute, join, normalize, relative, sep } from 'n
  *
  *   {@link resolveStateHomes} once — each home by name, by real path AND by device+inode;
  *   {@link openOutsideStateHomes} to read, {@link createOutsideStateHomes} to write,
- *   {@link copyTreeOutsideStateHomes} for a whole folder;
  *   {@link openFolderOutsideStateHomes} for a folder to write BELOW (the provisioner's destinations), then
- *   {@link openFolderBelow} and {@link removeEntryWithin} through that handle.
+ *   {@link copyTreeIntoFolder} for a whole folder, and {@link openFolderBelow} and {@link removeEntryWithin}
+ *   through that handle.
  *
  * Each answers a {@link Guarded} result — `ok: false` names the rule — and only an `ok` result carries a
  * handle that can read or write, so a caller cannot read a file it did not check. A path is judged as named,
@@ -1089,40 +1089,10 @@ export interface GuardTreeOptions extends GuardLinkOptions {
 }
 
 /**
- * Copies the file or folder at `source` to `destination`, following every link (like `cp -RL`) and keeping each
- * file's permission bits. EVERY file and folder is judged where it really lands, and each file is read through
- * {@link openOutsideStateHomes}; the first refusal stops the copy (what was copied stays, for the caller to
- * remove).
- *
- * WRITTEN THROUGH CHECKED FOLDERS. The destination's folder is opened by its real path and checked, then the copy
- * goes on as {@link copyTreeIntoFolder}. Without descriptor paths a folder swapped after that check can still
- * receive a NEW entry (never an overwrite), the declared residue of path writes.
- */
-export async function copyTreeOutsideStateHomes(
-  source: string,
-  destination: string,
-  homes: StateHomes,
-  disk: GuardDisk & FolderDisk,
-  options: GuardTreeOptions,
-): Promise<Guarded<{ readonly files: number; readonly bytes: number }>> {
-  const target = absolute(destination, 'the destination');
-  const parentReal = await disk.realpath(dirname(target)).catch(() => undefined);
-  if (parentReal === undefined) return refused('not-found');
-  const parent = await disk.openDirectory(parentReal).catch(() => undefined);
-  if (parent === undefined) return refused('changed');
-  const folder = checkedFolder(parent, parentReal, disk);
-  try {
-    const parentProblem = await placedFolderProblem(parentReal, parent.identity, disk);
-    if (parentProblem !== undefined) return parentProblem;
-    return await copyTreeIntoFolder(source, folder, basename(target), homes, disk, options);
-  } finally {
-    await folder.close();
-  }
-}
-
-/**
- * Copies `source` as the new entry `leaf` of the checked `folder`, as {@link copyTreeOutsideStateHomes} describes:
- * every entry is made THROUGH an open folder (its descriptor where the platform gives one), each folder the copy
+ * Copies `source` as the new entry `leaf` of the checked `folder`, following every link (like `cp -RL`) and keeping each
+ * file's permission bits. Every file and folder is judged where it really lands, each file is read through
+ * {@link openOutsideStateHomes}, and the first refusal stops the copy (what was copied stays, for the caller to
+ * remove). Every entry is made THROUGH an open folder (its descriptor where the platform gives one), each folder the copy
  * makes is opened through its parent without following a link before anything is written into it, and its mode is
  * set through that descriptor.
  *

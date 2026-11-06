@@ -31,17 +31,6 @@ export function deliveryOrder(messages: readonly QueuedMessage[], mode: Interact
     );
 }
 
-/**
- * The one message to type next, or `undefined` when none may go now.
- *
- * ONE AT A TIME: while a message is `typing` nothing else is, because two fills racing for one composer is
- * how two messages became one joined message, and how one became three copies.
- */
-export function nextToDeliver(messages: readonly QueuedMessage[], mode: InteractionMode): QueuedMessage | undefined {
-  if (messages.some(message => message.state === 'typing')) return undefined;
-  return deliveryOrder(messages, mode)[0];
-}
-
 /** What a ferret's message IS for delivery, once the live state of its receiver is read. */
 export type EffectiveLabel = PeerMessageLabel;
 

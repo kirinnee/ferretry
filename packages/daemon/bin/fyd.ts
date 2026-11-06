@@ -7028,13 +7028,6 @@ function createForkSubsystem(parts: ForkSubsystemParts): SessionForkSubsystem {
    * TARGET-ONLY BY CONSTRUCTION. `FileSessionTransferTargetPlanStore` holds nothing but this
    * document, so the fork composition has no global transfer-receipt capability at all — the durable
    * fork receipt is `FileSessionForkReceiptStore`, and it is the single owner of that fact.
-   *
-   * This replaced a shim that built the two-halved `FileSessionTransferPlanStore` and fed its receipt
-   * half a FABRICATED path, deriving a plan id from `{sourceSessionId: planId, requestId: planId}`.
-   * That receipt half was never called, but the composition still held a writer aimed at the receipt
-   * tree under a key no real fork would ever mint — a capability nothing needed and a path nothing
-   * else would recognise. Reachable-but-unused is exactly the shape that becomes a second receipt
-   * owner the first time somebody wires it up.
    */
   const planStore = new FileSessionTransferTargetPlanStore(id =>
     join(createSessionPaths(parts.paths, id).directory, 'transfer-plan.json'),

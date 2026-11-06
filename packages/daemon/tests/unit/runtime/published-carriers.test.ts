@@ -6,7 +6,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { RelayCarrierSource } from '../../../src/lib/relay/discovery.ts';
-import { fixedCarrierView, PublishedCarrierSet } from '../../../src/lib/runtime/published-carriers.ts';
+import { PublishedCarrierSet } from '../../../src/lib/runtime/published-carriers.ts';
 
 const RELAY: RelayCarrierSource = {
   kind: 'discovered',
@@ -37,15 +37,5 @@ describe('the published carrier set', () => {
     // Act / Assert — a plain-HTTP tunnel is not one Cloudflare serves.
     should(() => published.tunnel('http://quiet-otter.tunnels.example')).throw(/tunnel address must use https/u);
     should(published.current()).deepEqual([]);
-  });
-
-  it('should hold a fixed set as one parsed, frozen answer', () => {
-    // Arrange
-    const view = fixedCarrierView([{ kind: 'direct', url: 'https://workstation.example' }]);
-
-    // Act / Assert
-    should(view.current()).equal(view.current());
-    should(Object.isFrozen(view.current())).be.true();
-    should(() => fixedCarrierView([{ kind: 'relay', url: 'ws://rendezvous.example' }])).throw(/must be wss\/https/u);
   });
 });

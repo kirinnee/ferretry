@@ -14,9 +14,7 @@
  *
  * WHY IT LIVES IN THE PROTOCOL. The stamp is a field of `SessionConfig`, which means the daemon
  * writes it, the CLI reads it, and every paired browser receives it in a session view. A shape with
- * four readers in three packages has exactly one honest home, and this is it. The daemon keeps the
- * BEHAVIOUR that goes with the shape — `parseSessionProvenance`, which reads a damaged stamp as no
- * stamp — because "what to do about a record we cannot read" is a daemon decision, not a wire fact.
+ * four readers in three packages has exactly one honest home, and this is it.
  *
  * EVERY REFINEMENT IS LOAD-BEARING. Together they make an inconsistent stamp UNREADABLE rather
  * than half-true, and half-true is the dangerous state: a record claiming descent while naming no

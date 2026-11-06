@@ -4,7 +4,6 @@ import {
   DEFAULT_TERMINAL_SIZE,
   TerminalPolicyError,
   idleDeadline,
-  isTerminalIdle,
   nextTerminalTitle,
   normalizeTerminalSize,
   normalizeTerminalTitle,
@@ -48,9 +47,6 @@ describe('terminal policy', () => {
     // Act + Assert
     should(idleDeadline(1_000, 0, 500)).equal(1_500);
     should(idleDeadline(1_000, 2, 500)).equal(undefined);
-    should(isTerminalIdle(1_000, 0, 1_500, 500)).be.true();
-    should(isTerminalIdle(1_000, 0, 1_499, 500)).be.false();
-    should(isTerminalIdle(1_000, 1, 9_999, 500)).be.false();
   });
 
   it('should reject impossible idle inputs instead of silently reaping a terminal', () => {

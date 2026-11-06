@@ -47,7 +47,6 @@ import {
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
   FleetCatalogService,
-  type FleetCatalogServiceDeps,
 } from '../../fleet/catalog-service.ts';
 
 /** The machine, its components, profiles and runtimes, and every change to them. */
@@ -205,9 +204,4 @@ function freshStepUpRefusal(message: string): ApiResponse {
     } satisfies StepUpRequiredBody,
     403,
   );
-}
-
-/** Builds the catalog subsystem the composition root mounts. */
-export function createFleetCatalogSubsystem(deps: FleetCatalogServiceDeps): FleetCatalogSubsystem {
-  return new FleetCatalogService(deps);
 }

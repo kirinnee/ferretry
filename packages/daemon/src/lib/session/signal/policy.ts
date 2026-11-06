@@ -59,11 +59,6 @@ export function parseDeadline(value: string, fromMs: number, backstopMs: number 
   return new Date(Math.min(absolute, fromMs + backstopMs)).toISOString();
 }
 
-/** What a session is called when something has to name it to a human. */
-export function signalDisplayName(target: SignalTarget): string {
-  return target.teammate ?? target.id;
-}
-
 /** The wait to record, composed from the resolved peer rather than the reference the caller gave. */
 export function composeWait(
   sinceIso: string,

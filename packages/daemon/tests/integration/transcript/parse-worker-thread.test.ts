@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import should from 'should';
 import { bundledWorkerUrl, probeBundledWorker } from '../../../src/adapters/runtime/bundled-worker.ts';
 import {
-  joinPages,
   type TranscriptParsePage,
   type TranscriptParseRequest,
   type TranscriptParseResponse,
   WINDOW_LOST,
 } from '../../../src/adapters/transcript/parse-worker/protocol.ts';
+import { joinPages } from '../support/join-pages.ts';
 
 const directories: string[] = [];
 const workers: Worker[] = [];

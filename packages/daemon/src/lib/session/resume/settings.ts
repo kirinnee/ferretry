@@ -1,5 +1,3 @@
-import { z } from 'zod';
-
 /**
  * Every tunable the resume slice owns, injected rather than hard-coded.
  *
@@ -27,19 +25,6 @@ export interface SessionResumeSettings {
   readonly retryBackoffMaxMs: number;
 }
 
-export const SessionResumeSettingsSchema = z
-  .object({
-    controlLaunchWaitMs: z.number().int().positive(),
-    defaultResumePrompt: z.string().min(1),
-    turnProtocolReminder: z.string().min(1),
-    retryBackoffBaseMs: z.number().int().positive(),
-    retryBackoffMaxMs: z.number().int().positive(),
-  })
-  .refine(
-    value => value.retryBackoffMaxMs >= value.retryBackoffBaseMs,
-    'retryBackoffMaxMs must be at least retryBackoffBaseMs, or the first backoff is already capped away',
-  );
-
 export const defaultSessionResumeSettings: SessionResumeSettings = {
   controlLaunchWaitMs: 60_000,
   defaultResumePrompt: 'Continue the assigned task from where you stopped.',
@@ -47,7 +32,3 @@ export const defaultSessionResumeSettings: SessionResumeSettings = {
   retryBackoffBaseMs: 2_000,
   retryBackoffMaxMs: 5 * 60_000,
 };
-
-export function parseSessionResumeSettings(value: unknown): SessionResumeSettings {
-  return SessionResumeSettingsSchema.parse(value);
-}

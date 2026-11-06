@@ -411,12 +411,9 @@ export class BrowserWorkerClient implements BrowserAutomation {
     }
   > {
     const raw = await this.request('screenshot', { pageId, ...options });
-    return {
-      ...acted(raw),
-      screenshotBase64: boundedScreenshot(raw),
-      // An older worker sends no format; its screenshots were always PNG.
-      screenshotFormat: (raw as { screenshotFormat?: unknown }).screenshotFormat === 'jpeg' ? 'jpeg' : 'png',
-    };
+    const format = (raw as { screenshotFormat?: unknown }).screenshotFormat;
+    if (format !== 'png' && format !== 'jpeg') throw new Error('browser worker sent no screenshot format');
+    return { ...acted(raw), screenshotBase64: boundedScreenshot(raw), screenshotFormat: format };
   }
 
   async evaluate(
@@ -429,7 +426,7 @@ export class BrowserWorkerClient implements BrowserAutomation {
       ...(script.target === undefined ? {} : { target: script.target }),
       ...(script.timeoutMs === undefined ? {} : { timeoutMs: script.timeoutMs }),
     });
-    // The origin of the world the script ran in, as the worker read it; an older worker sends none (read as unknown).
+    // The origin of the world the script ran in, as the worker read it; the worker sends none when it could not read one (read as unknown).
     const origin = (raw as { scriptOrigin?: unknown }).scriptOrigin;
     return {
       ...acted(raw),

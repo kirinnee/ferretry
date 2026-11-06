@@ -20,8 +20,3 @@ export function sessionTarget(session: string): string {
 export function windowTarget(session: string, window: string): string {
   return `${segment(session, 'session')}:${segment(window, 'window')}`;
 }
-
-export function paneTarget(session: string, window: string, pane: number): string {
-  if (!Number.isSafeInteger(pane) || pane < 0) throw new TmuxAddressError('pane must be a non-negative integer');
-  return `${windowTarget(session, window)}.${pane}`;
-}

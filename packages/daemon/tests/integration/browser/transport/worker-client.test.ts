@@ -231,25 +231,25 @@ describe('browser worker client — requests', () => {
       mode: 'a11y',
     });
     should(shot.screenshotBase64).equal('AAAA');
-    // A worker that names no format is an older one, whose screenshots were always PNG.
+    // The format is the one the worker named.
     should(shot.screenshotFormat).equal('png');
   });
 
-  it('should carry the origin of the world a script ran in, and none an older worker or an over-long one names', async () => {
+  it('should carry the origin of the world a script ran in, and none a worker that read none or an over-long one names', async () => {
     // Arrange
     const client = await connect();
 
     // Act
     const moved = await client.evaluate('p1', { source: '() => moved' });
     const long = await client.evaluate('p1', { source: '() => long' });
-    const older = await client.evaluate('p1', { source: '() => 1' });
+    const unread = await client.evaluate('p1', { source: '() => 1' });
 
     // Assert — the standing rules taint by the origin the script really ran in (secrev-1282a M2); unknown taints all.
     should(moved.scriptOrigin).equal('https://gitlab.com');
     should(moved.text).equal('page text');
     should(long).not.have.property('scriptOrigin');
-    should(older).not.have.property('scriptOrigin');
-    should(reportedParams(older.url)).deepEqual({ pageId: 'p1', source: '() => 1' });
+    should(unread).not.have.property('scriptOrigin');
+    should(reportedParams(unread.url)).deepEqual({ pageId: 'p1', source: '() => 1' });
   });
 
   it('should grant the worker only the allowlisted environment, plus a forced loopback proxy bypass', async () => {

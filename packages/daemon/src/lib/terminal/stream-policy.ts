@@ -7,7 +7,7 @@ import { MAX_TUNNEL_DATA_BYTES } from '../relay/tunnel.ts';
  * A viewer socket carries pane bytes downstream and two kinds of client frame upstream: binary
  * frames are raw terminal input, text frames are bounded resize JSON. Everything in this module is
  * a decision about those frames — framing limits, operation parsing, the input queue budget, and
- * the backpressure/redraw ladder for a viewer that falls behind. There is no IO, no timer, and no
+ * the backpressure limits for a viewer that falls behind, and the capture cadence. There is no IO, no timer, and no
  * socket here: the caller owns the socket, the clock, and the terminal service, and applies the
  * decisions this module returns.
  */
@@ -27,7 +27,7 @@ export const TERMINAL_MAX_QUEUED_INPUT_BYTES = 1024 * 1024;
 /** Downstream buffer above which a viewer counts as behind and stops receiving raw deltas. */
 export const TERMINAL_MAX_BUFFERED_OUTPUT_BYTES = 1024 * 1024;
 
-/** How long to wait before re-testing a behind viewer's socket for a redraw. */
+/** The ordinary interval between pane captures, and between re-tests of a behind viewer's socket. */
 export const TERMINAL_REDRAW_POLL_MS = 100;
 
 /**
@@ -99,40 +99,6 @@ export type TerminalQueueDecision =
 export type TerminalSendDecision =
   | { readonly outcome: 'sent' }
   | { readonly outcome: 'rejected'; readonly close: TerminalStreamClose };
-
-/** What to do with one chunk of pane output for this viewer. */
-export type TerminalOutputDecision =
-  /** Forward the raw delta as-is. */
-  | { readonly action: 'forward' }
-  /** Viewer is behind: drop the delta, mark the stream desynced, and owe it a full redraw. */
-  | { readonly action: 'drop' };
-
-/** Everything the redraw ladder needs to know about the stream, as owned by the caller. */
-export interface TerminalRedrawState {
-  readonly closed: boolean;
-  readonly desynced: boolean;
-  /** True while a snapshot is already in flight. */
-  readonly redrawRunning: boolean;
-  /** True while a redraw is already scheduled to fire. */
-  readonly redrawScheduled: boolean;
-  readonly bufferedBytes: number;
-  /** Bumped by the caller on every dropped delta; identifies the desync a snapshot repairs. */
-  readonly droppedVersion: number;
-}
-
-export type TerminalRedrawDecision =
-  /** Nothing owed: the stream is closed, in sync, or already repairing itself. */
-  | { readonly action: 'idle' }
-  /** Still behind: wait `TERMINAL_REDRAW_POLL_MS` and ask again. */
-  | { readonly action: 'defer' }
-  /** Socket has drained: take a full pane snapshot and repair `version`. */
-  | { readonly action: 'snapshot'; readonly version: number };
-
-export type TerminalRedrawResolution =
-  /** The snapshot covered every dropped delta; the stream is in sync again. */
-  | { readonly outcome: 'resynced' }
-  /** Deltas were dropped while the snapshot was in flight; stay desynced and redraw again. */
-  | { readonly outcome: 'stale' };
 
 /**
  * UTF-8 size of `value`, counted without allocating an encoded copy.
@@ -232,39 +198,4 @@ export function releaseTerminalFrame(queuedBytes: number, frameBytes: number): n
 export function decideTerminalSend(sent: number | undefined): TerminalSendDecision {
   if (typeof sent === 'number' && sent < 0) return rejected(TERMINAL_STREAM_CLOSES.viewerUnavailable);
   return { outcome: 'sent' };
-}
-
-/**
- * Decide whether a viewer still gets raw pane deltas.
- *
- * Once a socket is backed up, forwarding more deltas only grows the backlog, so deltas are dropped
- * and the stream owes the viewer one bounded full redraw instead. A stream that is already
- * desynced keeps dropping until that redraw lands.
- */
-export function decideTerminalOutput(state: {
-  readonly desynced: boolean;
-  readonly bufferedBytes: number;
-}): TerminalOutputDecision {
-  if (state.desynced || state.bufferedBytes > TERMINAL_MAX_BUFFERED_OUTPUT_BYTES) return { action: 'drop' };
-  return { action: 'forward' };
-}
-
-/** Whether a redraw poll should be armed now, given one may already be armed or running. */
-export function shouldScheduleTerminalRedraw(state: TerminalRedrawState): boolean {
-  return !state.closed && !state.redrawRunning && !state.redrawScheduled;
-}
-
-/** Decide what an armed redraw poll should do when it fires. */
-export function decideTerminalRedraw(state: TerminalRedrawState): TerminalRedrawDecision {
-  if (state.closed || !state.desynced || state.redrawRunning) return { action: 'idle' };
-  if (state.bufferedBytes > TERMINAL_MAX_BUFFERED_OUTPUT_BYTES) return { action: 'defer' };
-  return { action: 'snapshot', version: state.droppedVersion };
-}
-
-/**
- * Decide whether a delivered snapshot actually repaired the stream. Deltas dropped while the
- * snapshot was in flight advance the dropped version, which makes the snapshot already stale.
- */
-export function resolveTerminalRedraw(snapshotVersion: number, droppedVersion: number): TerminalRedrawResolution {
-  return snapshotVersion === droppedVersion ? { outcome: 'resynced' } : { outcome: 'stale' };
 }

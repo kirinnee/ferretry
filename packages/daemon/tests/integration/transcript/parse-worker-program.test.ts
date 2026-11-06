@@ -11,7 +11,6 @@ import {
   type TranscriptParseScope,
 } from '../../../src/adapters/transcript/parse-worker/program.ts';
 import {
-  joinPages,
   type TranscriptParsePage,
   type TranscriptParseResponse,
   WINDOW_LOST,
@@ -27,6 +26,7 @@ import type {
   TranscriptRawRecord,
   TranscriptWindowStep,
 } from '../../../src/lib/transcript/types.ts';
+import { joinPages } from '../support/join-pages.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 type Message = Parameters<NonNullable<TranscriptParseScope['onmessage']>>[0]['data'];

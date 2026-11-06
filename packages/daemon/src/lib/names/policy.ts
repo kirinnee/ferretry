@@ -2,7 +2,6 @@ import { type AgentAddressCandidate, resolveAgentAddress } from '@ferretry/proto
 import { MAX_CALLSIGN_LENGTH, MAX_SESSION_TITLE_LENGTH, type NameClaim } from './types.ts';
 
 const CALLSIGN_PATTERN = /^[a-z][a-z0-9-]*$/;
-const POOL_CALLSIGN_PATTERN = /^[a-z]{2,32}$/;
 
 export function normalizeCallsign(raw: string): string | null {
   const normalized = raw.trim().toLowerCase();
@@ -74,18 +73,4 @@ export function resolveSessionReference(
 ): string | undefined {
   const resolution = resolveAgentAddress(reference, sessions);
   return resolution.kind === 'session' ? resolution.id : undefined;
-}
-
-export function isValidCallsignPool(pool: readonly string[]): boolean {
-  if (pool.length === 0) return false;
-  const seen = new Set<string>();
-  let previous: string | undefined;
-  for (const callsign of pool) {
-    if (!POOL_CALLSIGN_PATTERN.test(callsign)) return false;
-    if (seen.has(callsign)) return false;
-    if (previous !== undefined && callsign.localeCompare(previous) < 0) return false;
-    seen.add(callsign);
-    previous = callsign;
-  }
-  return true;
 }

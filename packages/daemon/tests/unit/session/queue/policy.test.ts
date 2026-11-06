@@ -6,7 +6,6 @@ import {
   defaultQueueCoalesceSettings,
   deliveryOrder,
   effectiveLabel,
-  nextToDeliver,
   planDelivery,
   type QueueCoalesceSettings,
   type SendTarget,
@@ -88,21 +87,6 @@ describe("the owner's own chat", () => {
 
     should(boardOnly(board, 'interactive')).be.true();
     should(deliveryOrder([board], 'interactive')).eql([]);
-  });
-});
-
-describe('one at a time', () => {
-  it('should type nothing while another message is being typed', () => {
-    const queue = [message('typing', 'agent', 0, 'typing'), message('owner', 'human', 1)];
-
-    should(nextToDeliver(queue, 'auto')).be.undefined();
-  });
-
-  it('should hand over the first in order, or nothing when nothing waits', () => {
-    const queue = [message('peer', 'agent', 0), message('owner', 'human', 1)];
-
-    should(nextToDeliver(queue, 'auto')?.id).equal('owner');
-    should(nextToDeliver([], 'auto')).be.undefined();
   });
 });
 
@@ -263,5 +247,6 @@ describe('what to deliver next, and when', () => {
 
   it('should deliver nothing while a message is being typed', () => {
     should(plan([message('t', 'agent', 0, 'typing'), ferret('b', 0, 'blocker')])).equal(undefined);
+    should(plan([message('typing', 'agent', 0, 'typing'), message('owner', 'human', 1)])).equal(undefined);
   });
 });

@@ -6,9 +6,10 @@ import { join } from 'node:path';
 import should from 'should';
 import { GuardSizeError, NodeGuardDisk } from '../../src/adapters/node-guard-disk.ts';
 import {
-  copyTreeOutsideStateHomes,
+  copyTreeIntoFolder,
   createOutsideStateHomes,
   MutableRootError,
+  openFolderOutsideStateHomes,
   openOutsideStateHomes,
   resolveImmutableRoots,
   resolveStateHomes,
@@ -207,7 +208,7 @@ describe('NodeGuardDisk — writing', () => {
   );
 });
 
-describe('copyTreeOutsideStateHomes — on a real disk', () => {
+describe('copyTreeIntoFolder — on a real disk', () => {
   it('should copy a read-only folder (as the Nix store keeps them) and give the copy its modes', async () => {
     // Arrange
     const source = join(root, 'store');
@@ -218,11 +219,13 @@ describe('copyTreeOutsideStateHomes — on a real disk', () => {
     await chmod(source, 0o555);
 
     // Act
-    const result = await copyTreeOutsideStateHomes(source, join(work, 'copy'), homes, disk, {
+    const folder = await openFolderOutsideStateHomes(work, homes, disk);
+    if (!folder.ok) throw new Error(folder.rule);
+    const result = await copyTreeIntoFolder(source, folder.value, 'copy', homes, disk, {
       maxFileBytes: 1000,
       maxTotalBytes: 10_000,
       maxFiles: 10,
-    });
+    }).finally(async () => await folder.value.close());
 
     // Assert
     should(result).deepEqual({ ok: true, value: { files: 1, bytes: 5 } });

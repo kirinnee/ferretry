@@ -324,11 +324,6 @@ export const confirmLaneSet = (
   return boardOk({ ...rest, confirmedBy: 'owner', ...(via === undefined ? {} : { confirmedVia: via }) });
 };
 
-/** What a card-creating command says when a project has no lanes: the exact command to run next. */
-export const noLaneSetMessage = (project: string, binary: string): string =>
-  `${project} has no lanes yet. Propose them first: ${binary} board lanes propose --template ` +
-  `${Object.keys(LANE_TEMPLATES).join('|')} --project ${project}`;
-
 /** A refusal in words a person or a ferret can act on. */
 export const describeLaneSetFailure = (
   failure: LaneSetProblem | { readonly code: 'not-found'; readonly projectId: string },

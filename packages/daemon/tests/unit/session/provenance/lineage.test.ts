@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  parseSessionProvenance,
+  SessionProvenanceSchema,
   resolveSpawnLabel,
   resolveWardenLineage,
   type SessionAncestor,
@@ -185,7 +185,7 @@ describe('resolveSpawnLabel', () => {
   });
 });
 
-describe('parseSessionProvenance', () => {
+describe('a persisted provenance stamp', () => {
   it('should accept a consistent stamp', () => {
     // Arrange
     const value = {
@@ -199,7 +199,7 @@ describe('parseSessionProvenance', () => {
     };
 
     // Act
-    const parsed = parseSessionProvenance(value);
+    const parsed = SessionProvenanceSchema.safeParse(value).data;
 
     /**
      * Assert: the offset is PRESERVED, not canonicalized to UTC.
@@ -244,6 +244,6 @@ describe('parseSessionProvenance', () => {
     { name: 'a missing payload', value: undefined },
   ])('should refuse $name', ({ value }) => {
     // Arrange / Act / Assert
-    should(parseSessionProvenance(value)).eql(undefined);
+    should(SessionProvenanceSchema.safeParse(value).data).eql(undefined);
   });
 });

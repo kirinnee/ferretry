@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import { WAITING_BACKSTOP_MS } from '../../warden/detect.ts';
 
 /** Every tunable the monitor slice owns, injected rather than hard-coded. */
@@ -35,20 +34,9 @@ export interface SessionMonitorSettings {
   readonly backstopMs: number;
 }
 
-export const SessionMonitorSettingsSchema = z.object({
-  tickIntervalMs: z.number().int().positive(),
-  heartbeatIntervalMs: z.number().int().positive(),
-  tickGraceMs: z.number().int().nonnegative(),
-  backstopMs: z.number().int().positive(),
-});
-
 export const defaultSessionMonitorSettings: SessionMonitorSettings = {
   tickIntervalMs: 15_000,
   heartbeatIntervalMs: 300_000,
   tickGraceMs: 30_000,
   backstopMs: WAITING_BACKSTOP_MS,
 };
-
-export function parseSessionMonitorSettings(value: unknown): SessionMonitorSettings {
-  return SessionMonitorSettingsSchema.parse(value);
-}

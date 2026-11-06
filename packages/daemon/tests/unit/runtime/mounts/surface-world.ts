@@ -4,7 +4,6 @@ import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
 import { NO_PERFORMANCE_PROBE } from '../../../../src/lib/performance/recorder.ts';
 import {
-  fixedCarrierView,
   type MountedSubsystems,
   type PairingSubsystem,
   type ScratchGcSubsystem,
@@ -147,10 +146,12 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
   stepUp: stepUpSubsystem(),
   // The published set's one view, which the pairing service reads too. Non-empty on purpose — an empty
   // one would let `PairingResponseSchema`'s default stand in for a carried-through set.
-  carriers: fixedCarrierView([
-    { kind: 'direct', url: 'https://workstation.example.test' },
-    { kind: 'relay', url: 'wss://rendezvous.example.test/fy' },
-  ]),
+  carriers: {
+    current: () => [
+      { kind: 'direct', url: 'https://workstation.example.test' },
+      { kind: 'relay', url: 'wss://rendezvous.example.test/fy' },
+    ],
+  },
   tunnel: {
     view: () => {
       throw new Error('not exercised by the surface inventory');

@@ -61,8 +61,8 @@ import {
 } from '../../../../src/lib/agenda/index.ts';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
 import {
+  deriveAnalyticsSessionRecord,
   type FinishedAnalyticsSession,
-  rebuildAnalyticsSessionIndex,
 } from '../../../../src/lib/analytics/session-record.ts';
 import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../../src/lib/analytics/store.ts';
 import type { CapabilityDemand, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
@@ -376,9 +376,7 @@ export function analyticsSubsystem(
   sessions: readonly FinishedAnalyticsSession[] = [],
   pricing: readonly AnalyticsPricingRate[] = [],
 ): AnalyticsSubsystem {
-  const rows = rebuildAnalyticsSessionIndex({ listFinishedAnalyticsSessions: () => sessions }, pricing).map(
-    record => record.raw,
-  );
+  const rows = sessions.map(session => deriveAnalyticsSessionRecord(session, pricing).raw);
   const tokenSessions = rows.filter(row => row.tokens !== null).length;
   return {
     index: () => ({

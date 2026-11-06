@@ -35,6 +35,7 @@ function snapshot(method, params) {
     canGoForward: false,
     text: 'page text',
     screenshotBase64: 'AAAA',
+    screenshotFormat: 'png',
   };
 }
 
@@ -306,7 +307,7 @@ function handle({ id, method, params }) {
     return;
   }
   // A request's own argument selects the reply behaviour, so one fixture covers every path.
-  switch (params?.url ?? params?.target?.selector ?? params?.selector ?? method) {
+  switch (params?.url ?? params?.target?.selector ?? method) {
     case 'never-replies':
       return;
     case 'refuses':

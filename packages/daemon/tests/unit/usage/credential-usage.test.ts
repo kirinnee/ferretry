@@ -3,7 +3,7 @@ import { buildFleetManifest, type FleetManifest } from '@ferretry/fleet';
 import type { FleetCredentialList, FleetCredentialView } from '@ferretry/protocol';
 import should from 'should';
 import { CredentialUsageSource, credentialUsageRows } from '../../../src/lib/usage/credential-usage.ts';
-import { quotaFromUsage, usageForAgent } from '../../../src/lib/usage/index.ts';
+import { quotaFromUsage } from '../../../src/lib/usage/index.ts';
 
 const WRITER_ID = '4c0f3b6e-7a91-4a2f-9a7f-2b1d0f5c8e31';
 const REVIEWER_ID = '9d2e1a44-3c57-4b18-8f60-7c9a5e2d1b03';
@@ -72,7 +72,7 @@ describe('credentialUsageRows', () => {
 
     // Assert
     should(rows.map(row => row.agent)).deepEqual(['claude-writer', 'claude-reviewer']);
-    should(usageForAgent(rows, 'claude-writer')).not.be.undefined();
+    should(rows.find(row => row.agent === 'claude-writer')).not.be.undefined();
     should(rows.some(row => row.agent === WRITER_ID || row.agent === 'work')).be.false();
   });
 

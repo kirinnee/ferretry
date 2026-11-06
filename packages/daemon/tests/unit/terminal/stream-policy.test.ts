@@ -2,22 +2,15 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   admitTerminalFrame,
-  decideTerminalOutput,
-  decideTerminalRedraw,
   decideTerminalSend,
   parseTerminalFrame,
   releaseTerminalFrame,
-  resolveTerminalRedraw,
-  shouldScheduleTerminalRedraw,
-  TERMINAL_MAX_BUFFERED_OUTPUT_BYTES,
   TERMINAL_MAX_CONTROL_FRAME_BYTES,
   TERMINAL_MAX_INPUT_FRAME_BYTES,
   TERMINAL_MAX_QUEUED_INPUT_BYTES,
-  TERMINAL_REDRAW_POLL_MS,
   TERMINAL_STREAM_CLOSES,
   type TerminalChargedOperation,
   type TerminalOperation,
-  type TerminalRedrawState,
   type TerminalStreamClose,
   type TerminalStreamFrame,
   utf8ByteLength,
@@ -26,16 +19,6 @@ import {
 const invalidFrame: TerminalStreamClose = TERMINAL_STREAM_CLOSES.invalidFrame;
 
 const resizeFrame = (cols: number, rows: number): string => JSON.stringify({ type: 'resize', cols, rows });
-
-const redrawState = (overrides: Partial<TerminalRedrawState> = {}): TerminalRedrawState => ({
-  closed: false,
-  desynced: true,
-  redrawRunning: false,
-  redrawScheduled: false,
-  bufferedBytes: 0,
-  droppedVersion: 1,
-  ...overrides,
-});
 
 const accepted = (frame: TerminalStreamFrame): TerminalChargedOperation => {
   const decision = parseTerminalFrame(frame);
@@ -273,129 +256,5 @@ describe('decideTerminalSend', () => {
 
     // Assert
     should(decision).deepEqual(expected);
-  });
-});
-
-describe('decideTerminalOutput', () => {
-  it('should forward deltas to a viewer that is keeping up', () => {
-    // Act
-    const decision = decideTerminalOutput({ desynced: false, bufferedBytes: TERMINAL_MAX_BUFFERED_OUTPUT_BYTES });
-
-    // Assert
-    should(decision).deepEqual({ action: 'forward' });
-  });
-
-  it('should drop deltas once the viewer socket is backed up', () => {
-    // Act
-    const decision = decideTerminalOutput({ desynced: false, bufferedBytes: TERMINAL_MAX_BUFFERED_OUTPUT_BYTES + 1 });
-
-    // Assert
-    should(decision).deepEqual({ action: 'drop' });
-  });
-
-  it('should keep dropping while desynced even after the socket drains', () => {
-    // Act
-    const decision = decideTerminalOutput({ desynced: true, bufferedBytes: 0 });
-
-    // Assert
-    should(decision).deepEqual({ action: 'drop' });
-  });
-});
-
-describe('terminal redraw ladder', () => {
-  it.each([
-    { label: 'nothing is armed', state: {}, expected: true },
-    { label: 'the stream is closed', state: { closed: true }, expected: false },
-    { label: 'a snapshot is in flight', state: { redrawRunning: true }, expected: false },
-    { label: 'a poll is already armed', state: { redrawScheduled: true }, expected: false },
-  ])('should arm a poll only when $label', ({ state, expected }) => {
-    // Act
-    const actual = shouldScheduleTerminalRedraw(redrawState(state));
-
-    // Assert
-    should(actual).equal(expected);
-    should(TERMINAL_REDRAW_POLL_MS).be.above(0);
-  });
-
-  it.each([
-    { label: 'the stream is closed', state: { closed: true } },
-    { label: 'the stream is in sync', state: { desynced: false } },
-    { label: 'a snapshot is already in flight', state: { redrawRunning: true } },
-  ])('should stay idle when $label', ({ state }) => {
-    // Act
-    const decision = decideTerminalRedraw(redrawState(state));
-
-    // Assert
-    should(decision).deepEqual({ action: 'idle' });
-  });
-
-  it('should defer while the viewer socket is still backed up', () => {
-    // Act
-    const decision = decideTerminalRedraw(redrawState({ bufferedBytes: TERMINAL_MAX_BUFFERED_OUTPUT_BYTES + 1 }));
-
-    // Assert
-    should(decision).deepEqual({ action: 'defer' });
-  });
-
-  it('should snapshot the version it repairs once the socket has drained', () => {
-    // Act
-    const decision = decideTerminalRedraw(redrawState({ bufferedBytes: 0, droppedVersion: 7 }));
-
-    // Assert
-    should(decision).deepEqual({ action: 'snapshot', version: 7 });
-  });
-
-  it.each([
-    { label: 'no delta was dropped meanwhile', dropped: 7, expected: { outcome: 'resynced' } },
-    { label: 'more deltas were dropped meanwhile', dropped: 9, expected: { outcome: 'stale' } },
-  ])('should resolve a delivered snapshot when $label', ({ dropped, expected }) => {
-    // Act
-    const resolution = resolveTerminalRedraw(7, dropped);
-
-    // Assert
-    should(resolution).deepEqual(expected);
-  });
-
-  it('should carry a slow viewer from drop through redraw back into sync', () => {
-    // Arrange: a viewer whose socket is full, then drains after one poll.
-    let desynced = false;
-    let droppedVersion = 0;
-    let bufferedBytes = TERMINAL_MAX_BUFFERED_OUTPUT_BYTES + 1;
-
-    // Act: two deltas arrive while the socket is full.
-    const actions: string[] = [];
-    for (let delta = 0; delta < 2; delta += 1) {
-      const output = decideTerminalOutput({ desynced, bufferedBytes });
-      actions.push(output.action);
-      if (output.action === 'drop') {
-        desynced = true;
-        droppedVersion += 1;
-      }
-    }
-    const deferred = decideTerminalRedraw(redrawState({ desynced, bufferedBytes, droppedVersion }));
-    bufferedBytes = 0;
-    const snapshot = decideTerminalRedraw(redrawState({ desynced, bufferedBytes, droppedVersion }));
-    const resolution =
-      snapshot.action === 'snapshot' ? resolveTerminalRedraw(snapshot.version, droppedVersion) : { outcome: 'stale' };
-    if (resolution.outcome === 'resynced') desynced = false;
-
-    // Assert
-    should(actions).deepEqual(['drop', 'drop']);
-    should(deferred).deepEqual({ action: 'defer' });
-    should(snapshot).deepEqual({ action: 'snapshot', version: 2 });
-    should(resolution).deepEqual({ outcome: 'resynced' });
-    should(decideTerminalOutput({ desynced, bufferedBytes })).deepEqual({ action: 'forward' });
-  });
-
-  it('should redraw again when deltas are dropped while a snapshot is in flight', () => {
-    // Arrange
-    const snapshot = decideTerminalRedraw(redrawState({ droppedVersion: 3 }));
-
-    // Act: a further drop advances the version before the snapshot is delivered.
-    const resolution = snapshot.action === 'snapshot' ? resolveTerminalRedraw(snapshot.version, 4) : undefined;
-
-    // Assert
-    should(resolution).deepEqual({ outcome: 'stale' });
-    should(shouldScheduleTerminalRedraw(redrawState({ droppedVersion: 4 }))).be.true();
   });
 });
