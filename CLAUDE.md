@@ -64,8 +64,8 @@ profile, nix shell, modules, deb/rpm, standalone), is [docs/updating.md](docs/up
 
 ## Layout
 
-Bun workspaces monorepo — see [README.md](README.md#layout). Only `packages/cli` is real at P0;
-`protocol`, `daemon`, `fleet`, and `pwa` are placeholders for the P1 lift.
+Bun workspaces monorepo — see [README.md](README.md#layout). `packages/cli`, `protocol`,
+`daemon`, `fleet`, `pwa` and `relay` are all live packages.
 
 `packages/relay` owns how a browser reaches a daemon: the end-to-end session protocol and the
 Cloudflare rendezvous that can carry it. The wire contract is
@@ -269,15 +269,8 @@ GitHub watcher that moves a card when its PR or release does, and the agenda and
 The contract, the CLI verbs and the declared gaps are [docs/board.md](docs/board.md); the one-time import of the
 old per-session task files is [docs/board-import.md](docs/board-import.md). Implement against those documents.
 
-## Migration context
+## Project record
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security
 design: [docs/design/split-proposal.md](docs/design/split-proposal.md). Feature backlog:
 [handover.md](handover.md).
-
-## Migration state
-
-Resuming or continuing the kteam→Ferretry migration (including on a new machine):
-[docs/migration/START-HERE.md](docs/migration/START-HERE.md) — the single entry point: bootstrap,
-work order, and cleanup. State and the `port/*` branch map are in `docs/migration/HANDOFF.md`; unit briefs in `docs/migration/units/`, source
-surveys in `docs/migration/surveys/`.
