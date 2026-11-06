@@ -4,7 +4,7 @@
  * The app deploys from `main` the moment a change merges and a machine changes only after the release
  * cut and `fy daemon update`, so a new app routinely talks to an older daemon. A change that raises a
  * limit or adds a request field therefore reads the machine's feature list first and keeps the older
- * behaviour when the name is absent (`packages/protocol/src/lib/daemon-features.ts`,
+ * behaviour when the name is absent (`packages/protocol/src/lib/daemon-features/index.ts`,
  * `docs/standards/architecture/index.md` § 'The app ships before the daemon').
  *
  * A read that has not finished, or that failed, offers NOTHING and says nothing: the app cannot tell

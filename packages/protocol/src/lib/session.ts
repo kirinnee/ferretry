@@ -946,6 +946,17 @@ export const SessionListSchema = z.array(SessionViewSchema);
 export type SessionList = z.infer<typeof SessionListSchema>;
 
 /**
+ * The older finished autonomous sessions the daemon has taken out of the live list — `GET /v1/archived-sessions`
+ * (docs/session-archive.md). `count` is every archived session; `sessions` is the newest `limit` of them, read from
+ * disk, so `limit=0` is the cheap way to ask only how many there are.
+ */
+export const ArchivedSessionsSchema = z.strictObject({
+  count: NonNegativeIntegerSchema,
+  sessions: z.array(SessionViewSchema),
+});
+export type ArchivedSessions = z.infer<typeof ArchivedSessionsSchema>;
+
+/**
  * Why a running session is on older settings than a relaunch would give it.
  *
  *   arguments  the daemon-owned launch arguments a relaunch builds now differ from the ones it runs

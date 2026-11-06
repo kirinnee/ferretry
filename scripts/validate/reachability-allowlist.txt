@@ -271,6 +271,7 @@
 packages/pwa/src/lib/text-scale-postcss.ts # build tooling for the Text size setting, reached from vite.config.ts only
 
 # The gate's roots skip .tsx entries (packages/pwa exports ./main → src/main.tsx), so a .ts module imported only from the app tree reads as unreached.
+packages/pwa/src/hooks/use-archived-sessions.ts # the sessions bar footer's count and rows of archived finished sessions (docs/session-archive.md), used by ShellSessionsBar in App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-fine-pointer.ts # used by SessionChatPage via App.tsx ← main.tsx; unreached only because the gate ignores .tsx roots
 packages/pwa/src/hooks/use-chat-tasks-url.ts # the Tasks tab expand/agents view kept in the chat address, used by App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-warden-daemon-scope.ts # the Warden page daemon filter choice kept per device, used by WardenRoute in App.tsx ← main.tsx; the gate ignores .tsx roots

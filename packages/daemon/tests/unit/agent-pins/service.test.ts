@@ -19,6 +19,8 @@ class MemoryPins implements AgentPinRepository {
   saved: readonly AgentPin[] = [];
   saves = 0;
   failLoad = false;
+  failRetention = false;
+  retentions: string[] = [];
   async load(): Promise<readonly AgentPin[]> {
     if (this.failLoad) throw new Error('disk gone');
     return this.saved;
@@ -26,6 +28,11 @@ class MemoryPins implements AgentPinRepository {
   async save(pins: readonly AgentPin[]): Promise<void> {
     this.saved = pins;
     this.saves++;
+    for (const pin of pins) await this.retain(pin.sessionId);
+  }
+  async retain(sessionId: string): Promise<void> {
+    this.retentions.push(sessionId);
+    if (this.failRetention) throw new Error('transient retention failure');
   }
 }
 
@@ -81,6 +88,18 @@ describe('AgentPinService', () => {
 
     // Assert
     should(again).equal('2026-11-01T10:00:00.000Z');
+    should(repository.saves).equal(1);
+  });
+
+  it('should retry failed live membership restoration when pinned again, without saving the pin file twice', async () => {
+    const { service, repository } = fixture();
+    repository.failRetention = true;
+    await should(service.pin('a')).be.rejectedWith('transient retention failure');
+    should(repository.saves).equal(1);
+    repository.failRetention = false;
+
+    should(await service.pin('a')).equal('2026-11-01T10:00:00.000Z');
+    should(repository.retentions).deepEqual(['a', 'a']);
     should(repository.saves).equal(1);
   });
 

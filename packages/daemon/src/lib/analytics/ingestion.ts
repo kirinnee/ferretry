@@ -7,6 +7,7 @@ import { type AnalyticsPricingRate, analyticsCatalogAliasGroups } from './pricin
 import { deriveAnalyticsSessionRecord, type FinishedAnalyticsSession } from './session-record.ts';
 import {
   type AnalyticsIndexStore,
+  type AnalyticsIngestedMarker,
   type AnalyticsStoredSession,
   analyticsIngestSignature,
   analyticsPricingCatalogFingerprint,
@@ -47,6 +48,14 @@ export interface AnalyticsTranscriptFoldSource {
 
 export interface AnalyticsIngestCandidateSource {
   listCandidates(): Promise<readonly AnalyticsIngestCandidate[]>;
+  /**
+   * The sessions the archive has taken out of the live list (docs/session-archive.md). They are finished, so the rows
+   * ingested when they ended STAY — a session that merely left the list is not a session whose documents are gone —
+   * and only one that was never ingested (a store that was rebuilt since) is read, through {@link candidate}.
+   */
+  archived?(): readonly string[];
+  /** One session's candidate, read on demand: how a never-ingested archived session is brought in. */
+  candidate?(sessionId: string): Promise<AnalyticsIngestCandidate | undefined>;
 }
 
 export interface AnalyticsIngestClock {
@@ -366,12 +375,32 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
     };
   }
 
+  /** The archived sessions the store does not hold yet, each read once; none when the source cannot read one. */
+  private async archivedCandidates(
+    archived: readonly string[],
+    stored: ReadonlyMap<string, AnalyticsIngestedMarker>,
+  ): Promise<readonly AnalyticsIngestCandidate[]> {
+    const read = this.parts.candidates.candidate;
+    if (read === undefined) return [];
+    const found: AnalyticsIngestCandidate[] = [];
+    for (const id of archived) {
+      if (stored.has(id)) continue;
+      const candidate = await read.call(this.parts.candidates, id);
+      if (candidate !== undefined) found.push(candidate);
+    }
+    return found;
+  }
+
   private async sweep(): Promise<AnalyticsIngestSummary> {
     const catalog = await this.parts.pricing();
     this.catalog = catalog;
     const pricingFingerprint = analyticsPricingCatalogFingerprint(catalog);
-    const candidates = await this.parts.candidates.listCandidates();
     const stored = this.parts.store.ingested();
+    const archived = this.parts.candidates.archived?.() ?? [];
+    const candidates = [
+      ...(await this.parts.candidates.listCandidates()),
+      ...(await this.archivedCandidates(archived, stored)),
+    ];
     const gateRefusals: Partial<Record<AnalyticsIngestRefusal, number>> = {};
     const admitted: AdmittedCandidate[] = [];
 
@@ -404,6 +433,8 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
      * ends for real.
      */
     const live = new Set(admitted.map(entry => entry.session.id));
+    // An archived session's stored row is as true as it was when the session ended: it left the list, not the disk.
+    for (const id of archived) if (stored.has(id)) live.add(id);
     this.admitted = live;
     const forgotten = [...stored.keys()].filter(id => !live.has(id));
     if (forgotten.length > 0) this.parts.store.forget(forgotten);

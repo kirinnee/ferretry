@@ -18,9 +18,17 @@ const field = (document: unknown, key: string): string | undefined => {
  * lookup, so the three cannot list different fleets and so reach different answers for one name.
  */
 export async function sessionAddressCandidates(
-  storage: Pick<DaemonStorage, 'listSessions' | 'readConfig' | 'readState'>,
+  storage: Pick<DaemonStorage, 'listSessions' | 'readConfig' | 'readState'> &
+    Partial<Pick<DaemonStorage, 'listArchivedSessions'>>,
 ): Promise<readonly AgentAddressCandidate[]> {
-  return await Promise.all(
+  // Archived sessions are still sessions a name can address: the registry kept the name each answered to, so
+  // `fy send <name>` resumes one and `fy history <name>` finds it with no read of its documents.
+  const archived: readonly AgentAddressCandidate[] = (storage.listArchivedSessions?.() ?? []).map(entry => ({
+    id: entry.id,
+    ...(entry.name === undefined ? {} : { name: entry.name }),
+    ...(entry.status === undefined ? {} : { status: entry.status }),
+  }));
+  const live = await Promise.all(
     storage.listSessions().map(async indexed => {
       const [config, state] = await Promise.all([
         storage.readConfig(indexed.id).catch(() => undefined),
@@ -35,4 +43,5 @@ export async function sessionAddressCandidates(
       };
     }),
   );
+  return [...live, ...archived];
 }
