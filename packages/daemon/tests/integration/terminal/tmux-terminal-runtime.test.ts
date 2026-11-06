@@ -35,6 +35,62 @@ const terminal = {
   rows: 30,
 };
 
+describe('TmuxTerminalRuntime launching under limits', () => {
+  const create = {
+    ownerId: terminal.ownerId,
+    id: terminal.id,
+    title: terminal.title,
+    cwd: terminal.root,
+    size: { cols: 100, rows: 30 },
+  };
+  const limiter = (seen: string[]) => ({
+    command: async (sessionId: string, command: readonly string[], kind: { readonly terminal: true }) => {
+      seen.push(`${sessionId}:${kind.terminal ? 'terminal' : ''}`);
+      return ['systemd-run', '--scope', '--', ...command];
+    },
+  });
+
+  it('should launch a terminal an agent opened through the limiter, keyed by the owning session', async () => {
+    // Arrange
+    const fake = new FakeTmux([ok()]);
+    const seen: string[] = [];
+    const subject = new TmuxTerminalRuntime(fake, () => 1_000, plainShell, limiter(seen));
+
+    // Act
+    await subject.create({ ...create, openedBy: { by: 'agent', sessionId: terminal.ownerId } });
+
+    // Assert
+    should(seen).deepEqual(['session-a:terminal']);
+    const argv = fake.received[0] as string[];
+    should(argv.slice(argv.indexOf('30') + 1, argv.indexOf(';'))).deepEqual([
+      'systemd-run',
+      '--scope',
+      '--',
+      '/bin/sh',
+      '-l',
+    ]);
+  });
+
+  it('should leave a terminal a person or the host opened, or one nobody could attest, outside the limiter', async () => {
+    // Arrange
+    const seen: string[] = [];
+    const received: string[][] = [];
+    for (const openedBy of [{ by: 'human', deviceId: 'd1' }, { by: 'local' }, undefined] as const) {
+      const fake = new FakeTmux([ok()]);
+      const subject = new TmuxTerminalRuntime(fake, () => 1_000, plainShell, limiter(seen));
+
+      // Act
+      await subject.create({ ...create, ...(openedBy === undefined ? {} : { openedBy }) });
+      received.push(fake.received[0] as string[]);
+    }
+
+    // Assert
+    should(seen).deepEqual([]);
+    for (const argv of received)
+      should(argv.slice(argv.indexOf('30') + 1, argv.indexOf(';'))).deepEqual(['/bin/sh', '-l']);
+  });
+});
+
 describe('TmuxTerminalRuntime', () => {
   it('should discover only well-formed Ferretry terminal sessions and tolerate an absent private server', async () => {
     // Arrange

@@ -187,15 +187,6 @@ const CASES: readonly MethodCase[] = [
     expected: cgroupConfigView,
   },
   {
-    name: 'updateCgroupConfig',
-    invoke: client => client.updateCgroupConfig({ enabled: true, fleet: { cpuPercent: 50 } }),
-    verb: 'PATCH',
-    path: '/v1/cgroups/config',
-    body: { enabled: true, fleet: { cpuPercent: 50 } },
-    response: () => jsonResponse(cgroupConfigView),
-    expected: cgroupConfigView,
-  },
-  {
     name: 'daemonUpdate',
     invoke: client => client.daemonUpdate(),
     verb: 'GET',

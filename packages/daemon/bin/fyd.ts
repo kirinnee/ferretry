@@ -73,6 +73,7 @@ import {
   InputQuarantineEventSchema,
   ioPressureView,
   type LearningConfig,
+  type LimitsConfig,
   localOnlyNotice,
   MACHINE_AGENDA_ID,
   MAX_WORK_RELATED_TEXT_LENGTH,
@@ -90,6 +91,7 @@ import {
   readLoopbackFirewallMarker,
   refusalNotice,
   resolveBrowserPorts,
+  resolveLimits,
   type SessionConfig,
   SessionConfigSchema,
   type SessionHandoff,
@@ -252,6 +254,7 @@ import {
   BunSqliteIndexFactory,
   bundledWorkerUrl,
   CachedUsageFeed,
+  CgroupFleetMemory,
   CliUpdateLauncher,
   CloudflaredLocator,
   ConfigGrantDocument,
@@ -264,6 +267,7 @@ import {
   daemonSecretSourceProgram,
   deliverStopSignal,
   describeWorkerProbes,
+  deviceOfPath,
   ExplicitDaemonConfig,
   FetchEnhancementTransport,
   FileAuditJournal,
@@ -272,10 +276,9 @@ import {
   FileCatalogDocumentStore,
   FileCatalogMembersStore,
   FileCatalogSharesStore,
-  FileCgroupApplyStatusStore,
-  FileCgroupConfigStore,
   FileDaemonConfig,
   FileLaneSetStore,
+  FileLegacyCgroupDocuments,
   FileLegacyWireUseStore,
   FileLinkDocumentStore,
   FileLinkKeyVault,
@@ -334,6 +337,7 @@ import {
   NpmHarnessLatest,
   type OpenedDaemonStorage,
   PaneProcessInventory,
+  PaneSessionMemory,
   PerformanceStopwatch,
   ProcCgroupPlacements,
   ProjectMcpServers,
@@ -359,6 +363,7 @@ import {
   StorageConversationOwners,
   StorageSessionFacts,
   StorageSessionProjectStamp,
+  SysfsDiskScheduler,
   SystemClock,
   SystemFrameClock,
   SystemGrantClock,
@@ -368,6 +373,7 @@ import {
   TmuxPaneSnapshot,
   TranscriptFileExposure,
   TunnelProxyProbe,
+  unmeasuredHostFacts,
   type ViewerSocket,
   WebCryptoPasskeyCrypto,
   WebCryptoRelayIdentityKeys,
@@ -417,6 +423,7 @@ import {
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
+import { FileRenderRepository } from '../src/adapters/renders/index.ts';
 import { releaseAcquired, terminationGate } from '../src/adapters/runtime/termination-gate.ts';
 import {
   AccountAutoResumeAvailability,
@@ -540,7 +547,6 @@ import {
 } from '../src/adapters/session/transcript/index.ts';
 import { StorageTurnPorts, storagePaneLimits } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
-import { FileRenderRepository } from '../src/adapters/renders/index.ts';
 import { FileSharedDraftRepository } from '../src/adapters/shared-drafts/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
@@ -828,8 +834,8 @@ import {
   CatalogLinkService,
   CatalogMemberService,
   type CatalogSubsystem,
+  type CgroupHostFacts,
   CgroupLaunchPlanner,
-  CgroupService,
   ChallengeLedger,
   ClaudeTranscriptParser,
   type ClockPort,
@@ -914,6 +920,7 @@ import {
   dialledRelayUrl,
   directCarrierSocketRoute,
   doneMarkerCertifiesTurn,
+  EnforcementRuntime,
   EphemeralAwareRedactor,
   EphemeralValues,
   EventLoopLagMeter,
@@ -929,6 +936,7 @@ import {
   FleetLaunchEnvironment,
   FleetLaunchRenewal,
   FleetManifestUnreadableError,
+  FleetMemoryWatcher,
   FleetPublication,
   FleetReading,
   FleetRefreshService,
@@ -1001,9 +1009,12 @@ import {
   LaneProposalAcceptance,
   LaneSetService,
   type LearningSubsystem,
+  LegacyLimitsMigration,
   LegacySendReproof,
   LegacyWireUseCounter,
   LessonsService,
+  LIMITS_TICK_MS,
+  LimitsService,
   LiveDeviceConnections,
   LiveMemberSessions,
   type LivenessSample,
@@ -1043,6 +1054,7 @@ import {
   MemberJoinGate,
   MemberJoinProver,
   MemberPasskeyService,
+  MemoryKillExitPort,
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
@@ -1130,6 +1142,7 @@ import {
   planStartupEffort,
   portCandidates,
   previousConversation,
+  probeEnforcement,
   publishableDirectCarrier,
   publisherLabel,
   QUEUE_ANSWER_WAIT_MS,
@@ -7747,6 +7760,8 @@ export interface WorldSeams {
    * order; absent (a test or a probe building a world by itself), the world builds its own.
    */
   readonly notices?: BootNoticePort;
+  /** The machine as the limits need it, measured (asynchronously) by `main`; absent in a world nobody measured for. */
+  readonly cgroupHost?: CgroupHostFacts;
 }
 
 /** Builds the production adapter set. Subsystem units extend this as they land. */
@@ -7899,6 +7914,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * and a held loosening are said in this boot's journal, once each, when they are first seen.
    */
   const configDirectory = new FileConfigDirectory(paths.config, stateFiles);
+  // The machine, measured ONCE and asynchronously: how much memory the USER may spend (not how much RAM there is),
+  // which the limits and the loosening check both judge a cap against (docs/ferret-limits.md).
+  const cgroupHost = seams.cgroupHost ?? unmeasuredHostFacts();
   const configFiles = new ConfigFilesService({
     directory: configDirectory,
     accepted: new FileAcceptedConfigStore(join(paths.state, CONFIG_ACCEPTED_FILE), stateFiles),
@@ -7917,6 +7935,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     changes: configChanges,
     // A component source inside this daemon's own files is an error, never in effect (docs/secrets.md).
     checkContext: {
+      memoryCeilingBytes: cgroupHost.memoryCeilingBytes,
       componentSources: {
         fence: componentSourceFence(paths),
         userHome,
@@ -8154,21 +8173,31 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * request would let the effective limit the panel displays differ from the property the next
    * launch writes.
    */
-  const cgroupConfigStore = new FileCgroupConfigStore(stateFiles, paths);
-  const cgroupHost = hostCgroupFacts();
   // Bounded. Both callers hold the session lifecycle's barrier while this runs, so a user manager
   // that accepts a connection and never answers would otherwise stall every session start, stop and
   // resume in the daemon for as long as it stayed silent.
   const cgroupCommands = new SpawnCgroupCommands();
   const sessionSpawnFacts = new FileSessionSpawnFacts(stateFiles, paths);
+  /** What this machine can enforce, asked once at boot (below) and again after a launch that failed. */
+  const limitsEnforcement = new EnforcementRuntime(
+    async () => await probeEnforcement(cgroupHost, cgroupCommands),
+    () => Date.now(),
+  );
+  /** The memory watcher, once it exists (its timer starts with the state home): the exit pass asks it about kills. */
+  const memoryKills: { watcher: FleetMemoryWatcher | undefined } = { watcher: undefined };
+  /** The `limits.yaml` in effect: the last good version, or its defaults. */
+  const limitsInEffect = async (): Promise<LimitsConfig> => (await configFiles.inEffect()).evaluation.effective.limits;
   const cgroupLaunchPlanner = new CgroupLaunchPlanner({
-    store: cgroupConfigStore,
+    limits: limitsInEffect,
     host: cgroupHost,
     commands: cgroupCommands,
     sessions: sessionSpawnFacts,
+    enforcement: limitsEnforcement,
     // A nonce per launch, from the same source as every other unguessable value here, so a relaunch
     // cannot collide with a scope that is still deactivating.
     nonce: () => crypto.randomUUID().slice(0, 8),
+    // A ferret that had to start unconfined says so in the daemon log, not only in the status.
+    warn: message => bootNotices.state(message),
   });
   /**
    * The routing catalog, with its ONE refusal restated in a taxonomy `src/lib` may name.
@@ -9533,19 +9562,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // one of its own launches is replacing it.
           // Wrapped so a settled exit also frees the conversations that session held (account model §9.3).
           exits: recordBootExits(
-            new UnwatchedPaneExits(
-              new LeaseReleasingSessionExits(
-                new TmuxSessionExitObserver(
-                  paths.home,
-                  storage,
-                  new DurableTerminalPaneStore(storage, stateFiles, paths),
-                  launchTmuxCommands,
-                  launchGate,
-                  clock,
+            new MemoryKillExitPort(
+              new UnwatchedPaneExits(
+                new LeaseReleasingSessionExits(
+                  new TmuxSessionExitObserver(
+                    paths.home,
+                    storage,
+                    new DurableTerminalPaneStore(storage, stateFiles, paths),
+                    launchTmuxCommands,
+                    launchGate,
+                    clock,
+                  ),
+                  conversationLeases(storage),
                 ),
-                conversationLeases(storage),
+                watchedPanes,
               ),
-              watchedPanes,
+              { killedRecently: (id, ms) => memoryKills.watcher?.killedRecently(id, ms) },
             ),
           ),
           events: new FileSessionHealthEventSink(stateFiles, join(paths.home, 'health-events.jsonl'), clock),
@@ -9786,6 +9818,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       () => Date.now(),
       // The owner's own shell, resolved once and read from the document at that moment (not captured).
       systemLoginShell(async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.terminals.shell),
+      // A terminal an AGENT opens runs under the same limits as that ferret, through the same planner.
+      cgroupLaunchPlanner,
     ),
     agentBrowserDisplay,
     browserLauncher: new NodeSessionBrowserLauncher(
@@ -9798,6 +9832,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       process.env,
       browserTransport.connectWorker,
       {
+        limits: cgroupLaunchPlanner,
         // Read at every launch, so a switch applies the next time the browser starts. An unreadable
         // configuration launches headless rather than not at all.
         mode: async () => (await declaredAccountModel())?.machine.browserMode ?? 'headless',
@@ -12740,6 +12775,88 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       setInterval(budgetTick, BUDGET_TICK_MS).unref();
       budgetTick();
       /**
+       * Ferret limits (docs/ferret-limits.md): what the machine can enforce, and a watch on the memory the
+       * fleet is using. The kernel's own counters are read on THIS timer only — never per request — and a
+       * ferret hears about being slowed or killed in its own journal. On macOS there are no counters, so the
+       * same timer sums each ferret's process tree and reports one over its share.
+       */
+      const limitsWatcher = new FleetMemoryWatcher({
+        fleet: new CgroupFleetMemory(cgroupHost),
+        memory: new PaneSessionMemory(
+          new RegisteredCgroupPaneLedger(
+            paths.home,
+            { list: daemonId => cgroupPanes.scan(daemonId) },
+            { list: daemonId => cgroupPanes.sessions(daemonId) },
+            new ExactTmuxPaneReaper(launchTmux),
+          ),
+          processTreeFor(),
+        ),
+        notes: {
+          note: async (sessionId, kind, data) => {
+            await storage.append(parseSessionId(sessionId), `session.${kind}`, data);
+          },
+          callsign: async sessionId =>
+            SessionConfigSchema.safeParse(await storage.readConfig(parseSessionId(sessionId))).data?.teammate,
+        },
+        now: () => Date.now(),
+        iso: milliseconds => new Date(milliseconds).toISOString(),
+      });
+      memoryKills.watcher = limitsWatcher;
+      const limitsTick = asActivity(activities, 'ferret limits', async () => {
+        const resolved = resolveLimits(await limitsInEffect(), { memoryCeilingBytes: cgroupHost.memoryCeilingBytes });
+        if (!resolved.enabled) return;
+        if (cgroupHost.platform === 'darwin') await limitsWatcher.tickWatch(resolved);
+        else if (cgroupHost.platform === 'linux' && cgroupHost.unifiedHierarchy) await limitsWatcher.tickLinux();
+      });
+      setInterval(limitsTick, LIMITS_TICK_MS).unref();
+      limitsTick();
+      // Asked once at boot, so the first status already says why nothing is enforced; never blocks the start.
+      void limitsEnforcement
+        .refresh()
+        .then(state => {
+          if (state.kind === 'direct') bootNotices.state(`ferret limits are not enforced: ${state.reason}`);
+        })
+        .catch(() => undefined);
+      // ONCE: the retired `cgroups/config.json` becomes `limits.yaml`, keeping what the operator chose.
+      const limitsFilePath = configFilePath({ kind: 'limits' });
+      const legacyLimitsDocuments = new FileLegacyCgroupDocuments(stateFiles, paths);
+      void new LegacyLimitsMigration({
+        readOld: async () => await legacyLimitsDocuments.readOld(),
+        retireOld: async () => await legacyLimitsDocuments.retireOld(),
+        readLimits: async () => {
+          const file = await configFiles.file(limitsFilePath);
+          return { exists: file.exists, text: file.exists ? file.text : '', etag: file.etag };
+        },
+        writeLimits: async (text, etag) => {
+          await configFiles.write(limitsFilePath, text, etag, false);
+        },
+      })
+        .run()
+        .then(outcome => {
+          if (outcome.outcome === 'migrated')
+            process.stderr.write(
+              `limits: cgroups/config.json is now ${limitsFilePath}; the old file is kept as config.json.migrated\n`,
+            );
+          else if (outcome.outcome === 'kept') process.stderr.write(`limits: ${outcome.because}\n`);
+        })
+        .catch((error: unknown) => {
+          process.stderr.write(
+            `limits: the cgroups/config.json migration did not run: ${error instanceof Error ? error.message : String(error)}\n`,
+          );
+        });
+      const limitsService = new LimitsService({
+        limits: limitsInEffect,
+        host: cgroupHost,
+        enforcement: limitsEnforcement,
+        disk: new SysfsDiskScheduler(async () => await deviceOfPath(paths.home)),
+        watcher: limitsWatcher,
+        placements: new ProcCgroupPlacements(),
+        daemonPid: process.pid,
+        file: limitsFilePath,
+        uid: process.getuid?.() ?? 0,
+        clock: iso => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+      });
+      /**
        * Pack mode (docs/pack-mode.md): over the same runtimes, logins and catalogs every picker reads, and
        * the same session start every surface uses — so its limits, its callsigns and its launch are the
        * ones a plain start gets. Probes run the runtime's own wrapper with its login's launch environment,
@@ -13229,46 +13346,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         agentControl,
         fleetSetup,
         /**
-         * How much of this machine the managed fleet may take.
-         *
-         * IT SHARES THE LAUNCH PATH'S COLLABORATORS — the same saved document, the same measured
-         * host, the same command runner — so the effective limits this reports are the ones the
-         * next pane is actually given. A second store here would let the panel display a ceiling no
-         * launch ever writes.
-         *
-         * IT TAKES THE SESSION LIFECYCLE'S OWN EXECUTOR, exclusively. That is the single owner of
-         * mutation ordering in this process, and taking it is what stops a save from landing in the
-         * gap between a start choosing its argv and the pane existing — and what orders two saves
-         * against each other. A private lock here would be a second owner of one question, and the
-         * two would order the same pair of operations differently.
-         *
-         * THE PANE LEDGER IS THIS DAEMON'S OWN REGISTRATIONS, read through the same two ports the
-         * reap sweep uses. A pane this daemon did not register is not one it may reconfigure.
+         * What is in force for the managed fleet and whether it is working: read-only. `limits.yaml` is the
+         * one writer's (the configuration files hold a loosening for the owner), so this has no save.
          */
-        cgroups: new CgroupService({
-          store: cgroupConfigStore,
-          // Beside the saved document, in the same directory: what this host refused to apply
-          // outlives the answer to the save that met the refusal, so a page refresh or a restart
-          // cannot report a session that kept its old cap as a current one.
-          applyStatus: new FileCgroupApplyStatusStore(stateFiles, paths),
-          host: cgroupHost,
-          commands: cgroupCommands,
-          placements: new ProcCgroupPlacements(),
-          panes: new RegisteredCgroupPaneLedger(
-            paths.home,
-            // The TOLERANT read of the same ledger the reap refuses on: a settings surface must not
-            // go dark because one registration was hand-edited, and the same observer the reap uses
-            // re-proves each pane's incarnation before its pid may be addressed.
-            { list: daemonId => cgroupPanes.scan(daemonId) },
-            { list: daemonId => cgroupPanes.sessions(daemonId) },
-            new ExactTmuxPaneReaper(launchTmux),
-          ),
-          sessions: sessionSpawnFacts,
-          serial: sessionMutations,
-          // Measured, not asserted: the surface warns if this very process turns out to be inside
-          // the slice it is capping.
-          daemonPid: process.pid,
-        }),
+        cgroups: limitsService,
         foreignHistory,
         conversationImport,
         // This owns no cache and no provider policy: the daemon usage feed already owns those. One
@@ -15755,7 +15836,7 @@ async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check
       : undefined;
   try {
     const world = {
-      ...buildWorld(answer.overrides, { userHome: resolveUserHome(), notices }),
+      ...buildWorld(answer.overrides, { userHome: resolveUserHome(), notices, cgroupHost: await hostCgroupFacts() }),
       notices,
       ...(gate === undefined ? {} : { untilShutdown: () => gate.untilShutdown() }),
     };

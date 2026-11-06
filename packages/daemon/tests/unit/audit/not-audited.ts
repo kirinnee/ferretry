@@ -31,7 +31,6 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/unlock/options': 'mints a one-time challenge; the unlock that spends it is audited',
   'POST /v1/secrets/imports':
     'mints a one-time public key for a secret copy; the import that spends it is audited under its id',
-  'PATCH /v1/cgroups/config': 'resource limits on the host’s own sessions; not who may reach the machine',
   'POST /v1/gc': 'scratch cleanup of state the daemon owns; reaches nobody',
   'POST /v1/push/seen':
     'takes an opened agenda item’s alerts down on the owner’s other devices; changes nobody’s access, and the clear is recorded in the notification ledger',

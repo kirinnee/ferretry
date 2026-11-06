@@ -32,7 +32,6 @@
 1 packages/daemon/src/adapters/browser/control/login-runtime.ts  # gap: which browser binary exists, on a login launch
 1 packages/daemon/src/adapters/budget/ports.ts  # boot: the last published budget holds, before the first publish
 2 packages/daemon/src/adapters/runtime/ordered-log-writer.ts  # boot: the log is synchronous until the daemon serves, and on exit
-1 packages/daemon/src/adapters/cgroups/host-facts.ts  # boot: whether the unified hierarchy is mounted (I36 replaces it)
 2 packages/daemon/src/adapters/file-events/node-stamps.ts  # gap: a watched folder's identity, once per watch open
 7 packages/daemon/src/adapters/runtime/performance-instruments.ts  # wrapper: the profiler replaces Bun.spawnSync and passes each call through
 9 packages/daemon/src/adapters/session/filesystem/posix-session-root-pinner.ts  # bracket: pins a session root by descriptor

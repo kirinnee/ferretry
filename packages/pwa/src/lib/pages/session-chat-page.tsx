@@ -1437,6 +1437,7 @@ export function SessionChatPage({
       analytics: async () =>
         await fetchSessionAnalytics(connection, scope, `sum ${analyticsIdQuery(scope.sessionId)}`, referenceFetch),
       relaunch: async signal => await readRelaunchSettings(connection, scope, referenceFetch, signal),
+      limits: async () => await (await routedClient(connection)).cgroupConfig(),
       folder: {
         sessionId: scope.sessionId,
         machineName: contextDependencies.machineName,

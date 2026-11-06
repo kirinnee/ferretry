@@ -1,6 +1,3 @@
-import type { CatalogLinkSubsystem } from '../../../../src/lib/runtime/mounts/catalog-links.ts';
-import type { CatalogMemberSubsystem } from '../../../../src/lib/runtime/mounts/catalog-members.ts';
-import type { SharedCatalogSubsystem } from '../../../../src/lib/runtime/mounts/shared-catalogs.ts';
 import { describe, it } from 'bun:test';
 import { ANALYTICS_PRICING_RATE_APPLICABILITY, type DaemonId } from '@ferretry/protocol';
 import should from 'should';
@@ -10,6 +7,10 @@ import { BrowserProxyTester } from '../../../../src/lib/browser/proxy/index.ts';
 import { MemberDispatcher, type SharedRouteDeps } from '../../../../src/lib/catalog-members/shared-routes.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
+import {
+  type PhoneApprovalDependencies,
+  PhoneApprovalService,
+} from '../../../../src/lib/input-requests/phone-approval.ts';
 import { NO_PERFORMANCE_PROBE } from '../../../../src/lib/performance/recorder.ts';
 import {
   createMountedDispatcher,
@@ -21,26 +22,25 @@ import {
   type PairingSubsystem,
   type ScratchGcSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
+import type { CatalogLinkSubsystem } from '../../../../src/lib/runtime/mounts/catalog-links.ts';
+import type { CatalogMemberSubsystem } from '../../../../src/lib/runtime/mounts/catalog-members.ts';
+import type { SharedCatalogSubsystem } from '../../../../src/lib/runtime/mounts/shared-catalogs.ts';
 import { PasteRuleService, PasteRuleStages } from '../../../../src/lib/secure-copy/index.ts';
-import { SignInRuleService, SignInRuleSuggestions } from '../../../../src/lib/sign-in-rules/index.ts';
-import { TaskPlanService } from '../../../../src/lib/task-plans/index.ts';
 import { SecuritySettingsService } from '../../../../src/lib/security/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
 import { SharedDraftPresence } from '../../../../src/lib/shared-drafts/index.ts';
+import { SignInRuleService, SignInRuleSuggestions } from '../../../../src/lib/sign-in-rules/index.ts';
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
+import { TaskPlanService } from '../../../../src/lib/task-plans/index.ts';
 import { renderService } from '../../../support/renders.ts';
 import { MemoryTranscript } from '../../../support/transcript-images.ts';
 import { agentToolWorld, PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { fixedClock, jsonBody, request } from '../../api/support.ts';
 import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
-import {
-  type PhoneApprovalDependencies,
-  PhoneApprovalService,
-} from '../../../../src/lib/input-requests/phone-approval.ts';
-import { OTHER_TABLE_CALLERS, ROUTE_CALLERS } from './route-callers.ts';
 import { inputRequestService } from '../../input-requests/support.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
+import { OTHER_TABLE_CALLERS, ROUTE_CALLERS } from './route-callers.ts';
 import {
   agendaService,
   agentIn,
@@ -71,11 +71,11 @@ import {
   nameSubsystem,
   permissionSubsystem,
   pinService,
-  sharedDraftService,
   recommendSubsystem,
   secretSubsystem,
   sessionDirectory,
   sessionView,
+  sharedDraftService,
 } from './support.ts';
 
 /** The daemon package, which the route-caller completeness check reads its route tables from. */
@@ -301,10 +301,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     },
   },
   cgroups: {
-    config: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    updateConfig: async () => {
+    view: async () => {
       throw new Error('not exercised by the surface inventory');
     },
   },
@@ -968,7 +965,7 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      112 + // the session table and everything that is not the account model (three of them the agenda's versions: the list kept of an item, one version in full, and the device's seen mark; one of them cutting a ferret off: its credential revoked; three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
+      111 + // the session table and everything that is not the account model (three of them the agenda's versions: the list kept of an item, one version in full, and the device's seen mark; one of them cutting a ferret off: its credential revoked; three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (the ferret limits are read-only now: the PATCH that edited them is gone, `limits.yaml` is the one writer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       2 + // the owner's view of who holds the terminal slots, and closing the finished ferrets' terminals (`fy terminal close --all-finished`)
       7 + // the project boards: the board query, its card ids, one card, a new card, an action on a card (board-design.md §2), a ferret's skip (§3.4), and the owner's start of a new ferret on a card (docs/board.md, "Start a ferret on a card")
       1 + // bounded full-conversation reads, including historical version threads
@@ -1178,7 +1175,6 @@ describe('the mounted daemon surface', () => {
       // DELETE — an operator narrows or widens one saved document, and nothing here creates or
       // destroys a slice, because the units are transient and belong to the launches that made them.
       'GET /v1/cgroups/config',
-      'PATCH /v1/cgroups/config',
       // The configuration files (docs/config-files.md): what is in effect, one file, an edit and the owner's
       // confirmation of one that loosens. NOTE WHAT IS ABSENT: no route deletes a file or edits the accepted
       // record, and an agent's own door is the privileged `POST /v1/agent/config` below.

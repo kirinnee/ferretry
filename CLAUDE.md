@@ -263,6 +263,13 @@ When a setting reaches a running ferret — live, on restart, or only for new fe
 argv is built (one builder for start, Restart CLI, migrate and revive; a revive never replays):
 [docs/launch-settings.md](docs/launch-settings.md).
 
+Ferrets are **limited by default** so the daemon stays reachable: each launches in its own memory-capped
+slice sized from what the USER may really spend (not the RAM), with a fixed 4 GiB kept for the daemon, lowest
+disk priority, and CPU weights that rank the daemon and voice above the ferrets. Configured in `limits.yaml`
+(raising a cap is held for the owner); on macOS only CPU and disk priority are lowered and memory is watched.
+What is enforced, the defaults with a worked example and the one optional owner `sudo` step are
+[docs/ferret-limits.md](docs/ferret-limits.md).
+
 `packages/daemon` also owns the **project board**: one board per project (Unfiled for work outside any git
 repository), cards with lanes in six fixed categories, authority from ownership and lineage, staleness, the
 GitHub watcher that moves a card when its PR or release does, and the agenda and dependency links between cards.

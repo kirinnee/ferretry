@@ -49,6 +49,16 @@ function isRecordId(value: string): boolean {
   return /^[a-f0-9]{12}$/u.test(value);
 }
 
+/**
+ * Puts a shell an agent opened inside the same limits as the ferret that opened it.
+ *
+ * A terminal is a separate tmux session on the daemon-owned server, so it is NOT inside the harness's scope: the
+ * heaviest work a ferret does (`bun test`, a build) runs here, and without this it ran outside every cap.
+ */
+export interface TerminalLimiter {
+  command(sessionId: string, command: readonly string[], kind: { readonly terminal: true }): Promise<readonly string[]>;
+}
+
 /** tmux-backed independent shell terminals over the daemon's injected private socket. */
 export class TmuxTerminalRuntime implements TerminalRuntimePort {
   constructor(
@@ -56,6 +66,13 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
     private readonly now: () => number,
     /** The owner's own shell, which every terminal runs as a login shell so their rc files load. */
     private readonly loginShell: LoginShellPort,
+    /**
+     * Applied to a terminal an AGENT opened and to no other. Who opened it is what the daemon DERIVED from the
+     * credential and the tool route (`lib/terminal/ownership.ts`), recorded on the pane — never anything the
+     * request body or the agent said — and the owner's own terminals (opened from the app, `local`/`human`) stay
+     * outside, because they are the person's shell and not the fleet's work.
+     */
+    private readonly limits?: TerminalLimiter,
   ) {}
 
   async list(): Promise<readonly TerminalRecord[]> {
@@ -135,6 +152,11 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
     const createdAtMs = this.now();
     const tmuxSession = terminalTmuxSessionName(input.ownerId, input.id);
     const shell = await this.loginShell.shell();
+    // The credential's opener determines caps and exemptions, even when the target is another session.
+    const argv =
+      input.openedBy?.by === 'agent' && this.limits !== undefined
+        ? await this.limits.command(input.openedBy.sessionId, [shell, '-l'], { terminal: true })
+        : [shell, '-l'];
     const result = await this.tmux.execute([
       'new-session',
       '-d',
@@ -146,8 +168,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       String(input.size.cols),
       '-y',
       String(input.size.rows),
-      shell,
-      '-l',
+      ...argv,
       ';',
       'set-option',
       '-t',

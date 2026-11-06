@@ -18,6 +18,7 @@ import { type ChatChip, chatCardLabel } from '../../lib/board-chat.ts';
 import { OutdatedGlyph, useOutdatedMarkState } from '../restart-outdated/outdated-mark.tsx';
 import { agendaOn, hypermediaOn, packOn } from './info-model.ts';
 import { InfoRow, InfoSection } from './info-parts.tsx';
+import type { MemoryNote } from './memory-note.ts';
 import { SwitchMarks, type SwitchMarksProps } from './switch-marks.tsx';
 
 export interface InfoAboutProps {
@@ -37,6 +38,8 @@ export interface InfoAboutProps {
   /** The same Restart as Actions › Restart CLI. Absent: this reader may not restart it. */
   readonly onRestart?: () => Promise<void>;
   /** The agenda in one line: the four counts and the way to the Agenda tab. Absent: this ferret has no agenda. */
+  /** What the machine's memory limits did to this ferret (`memory-note.ts`). Absent: nothing to say. */
+  readonly memory?: MemoryNote;
   readonly agenda?: {
     readonly counts: Readonly<Record<AgendaTabFilter, number>>;
     readonly onOpen: () => void;
@@ -72,7 +75,16 @@ function RestartRow({ view, onRestart }: Pick<InfoAboutProps, 'view' | 'onRestar
   );
 }
 
-export function InfoAbout({ view, subFerrets, onOpenSession, card, switches, onRestart, agenda }: InfoAboutProps) {
+export function InfoAbout({
+  view,
+  subFerrets,
+  onOpenSession,
+  card,
+  switches,
+  onRestart,
+  agenda,
+  memory,
+}: InfoAboutProps) {
   const marks: SwitchMarksProps = {
     agenda: agendaOn(view),
     ...(switches ?? { learning: false, hypermedia: hypermediaOn(view), pack: packOn(view) }),
@@ -88,6 +100,13 @@ export function InfoAbout({ view, subFerrets, onOpenSession, card, switches, onR
             <SubFerretsPack onOpenSession={onOpenSession} sessions={subFerrets} />
           )}
         </InfoRow>
+        {memory === undefined ? null : (
+          <InfoRow label="Memory">
+            <span className="fy-info-warn" data-info-memory={memory.kind}>
+              {memory.text}
+            </span>
+          </InfoRow>
+        )}
         {card === undefined ? null : (
           <InfoRow label="Card">
             {card.chip.kind === 'none' ? (

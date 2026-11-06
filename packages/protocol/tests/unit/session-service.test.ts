@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { LimitsViewSchema } from '../../src/lib/limits.ts';
 import * as service from '../../src/lib/service.ts';
 import * as session from '../../src/lib/session.ts';
 import {
@@ -521,10 +522,7 @@ const serviceCases: SchemaCase[] = [
       },
     },
   },
-  { name: 'cgroup limit', schema: service.CgroupLimitSchema, value: { cpuPercent: 50, memoryPercent: 50 } },
-  { name: 'cgroup config', schema: service.CgroupConfigSchema, value: cgroupConfigView.config },
-  { name: 'cgroup patch', schema: service.CgroupConfigPatchSchema, value: { enabled: false } },
-  { name: 'cgroup view', schema: service.CgroupConfigViewSchema, value: cgroupConfigView },
+  { name: 'limits view', schema: LimitsViewSchema, value: cgroupConfigView },
   { name: 'PWA config', schema: service.PwaConfigSchema, value: pwaConfigView.config },
   { name: 'PWA patch', schema: service.PwaConfigPatchSchema, value: { name: 'New Name', icon: 'F' } },
   { name: 'PWA view', schema: service.PwaConfigViewSchema, value: pwaConfigView },
@@ -1033,20 +1031,11 @@ describe('service schemas', () => {
     should(actual).deepEqual({ name: 'Fleet View', icon: 'F' });
   });
 
-  it('should reject invalid cgroup, PWA, attachment, and scratch correlations', () => {
+  it('should reject invalid PWA, attachment, and scratch correlations', () => {
     // Arrange
     const extraction = { method: 'pdfjs', characters: 5, truncated: false, totalPages: 1, pagesRead: 1 };
     const failure = { code: 'unreadable_document', message: 'bad document' };
     const cases: SchemaCase[] = [
-      {
-        name: 'per-agent limits above fleet',
-        schema: service.CgroupConfigSchema,
-        value: {
-          enabled: true,
-          fleet: { cpuPercent: 50, memoryPercent: 50 },
-          perAgent: { cpuPercent: 60, memoryPercent: 60 },
-        },
-      },
       { name: 'empty PWA patch', schema: service.PwaConfigPatchSchema, value: {} },
       {
         name: 'mismatched PDF page fields',

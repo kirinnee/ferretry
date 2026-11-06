@@ -43,6 +43,7 @@ Run \`${bin} config path\` for the directory. Inside it:
 | \`learning.yaml\` | lesson mining |
 | \`voice.yaml\` | who cleans up dictated text: \`postProcessing\`: \`provider\` (\`off\`, \`groq\`, \`cerebras\`, \`login\`), \`style\` (\`off\`, \`fix\`, \`polish\`), your own \`prompts\` for each style, \`useConversation\` and \`conversationMessages\` |
 | \`pack.yaml\` | Pack mode: \`enabled\`, \`decision\` (\`agent\` or \`jev\`), \`limits\` (\`interactiveChildren\`, \`autoChildren\`, \`maxDepth\`), \`probe\`, \`jev\` |
+| \`limits.yaml\` | how much of the machine ferrets may take, on by default with every number computed from this machine: \`enabled\`, \`ionice\`, \`fleet\` and \`perFerret\` caps (\`memoryHigh\`, \`memoryMax\`, \`swapMax\`, \`tasksMax\`, \`cpuWeight\`, \`cpuPercent\`; sizes are bytes, \`40G\` or a percent of the memory budget such as \`25%\`). Tightening applies at once; raising a cap, switching limits off or turning \`ionice\` off is held for the owner (docs/ferret-limits.md) |
 | \`models-guide.yaml\` | the routing prompt: \`prompt\` — plain words, at most 1,200 characters, naming model ids in the order to try them (\`fy guide clean-up\` rewrites a rough one) |
 | \`account-defaults.yaml\` | which account a sign-in card offers first: \`sites\`, \`projects\` and \`folders\` map a site or tool@host to an account handle. Only the owner sets it: every line you add, change or remove is a suggestion held until the owner confirms it |
 

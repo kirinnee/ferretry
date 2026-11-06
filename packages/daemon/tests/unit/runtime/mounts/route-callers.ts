@@ -78,7 +78,6 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/mcp/check operator any',
   'GET /v1/sessions/:sessionId/mcp/servers operator any',
   'GET /v1/cgroups/config operator any',
-  'PATCH /v1/cgroups/config operator person',
   'GET /v1/config/status operator any',
   'GET /v1/config/file operator any',
   'PUT /v1/config/file operator person',
