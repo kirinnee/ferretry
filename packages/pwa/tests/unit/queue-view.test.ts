@@ -478,6 +478,10 @@ describe('status, listing and search', () => {
     expect(STATUS_LABEL[rowStatus(refused)]).toBe('Failed');
     expect(listingOf(refused)).toBe('unsent');
     expect(refused.editable).toBe(true);
+    // Stuck, so it neither counts as waiting nor claims Next up from a message that is really still to go.
+    expect(isWaitingRow(refused)).toBe(false);
+    const live = outboxRowOf('f', entry({ id: 'live', createdAt: '2026-10-30T10:00:09.000Z' }));
+    expect(nextRowId([refused, live])).toBe('live');
     expect(STATUS_LABEL[rowStatus(outboxRowOf('f', entry()))]).toBe('Waiting');
   });
 

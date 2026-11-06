@@ -102,12 +102,16 @@ export const outboxRowOf = (ferret: string, entry: OutboxEntry): QueueRow => ({
   ...(entry.refused === true ? { refused: true as const } : {}),
 });
 
-/** Messages the ferret has not finished with — what "waiting" means in the All-queues view. */
+/** A saved message the machine refused is never retried: it is stuck, not waiting. */
+const isRefused = (row: QueueRow): boolean => row.state === 'saved' && row.refused === true;
+
+/** Messages the ferret has not finished with — what "waiting" means in the header count. */
 export const isWaitingRow = (row: QueueRow): boolean =>
-  row.state === 'saved' || row.state === 'queued' || row.state === 'typing' || row.state === 'unconfirmed';
+  !isRefused(row) &&
+  (row.state === 'saved' || row.state === 'queued' || row.state === 'typing' || row.state === 'unconfirmed');
 
 /** Not yet typed into the ferret: the rows whose turn is still to come. */
-const isPendingRow = (row: QueueRow): boolean => row.state === 'saved' || row.state === 'queued';
+const isPendingRow = (row: QueueRow): boolean => !isRefused(row) && (row.state === 'saved' || row.state === 'queued');
 
 const isHeld = (row: QueueRow, now: number): boolean => row.holdUntil !== undefined && Date.parse(row.holdUntil) > now;
 
@@ -196,8 +200,7 @@ export type RowStatus = 'waiting' | 'sending' | 'delivered' | 'read' | 'failed' 
 export const rowStatus = (row: QueueRow): RowStatus => {
   switch (row.state) {
     case 'saved':
-      // A message the machine refused is not retried: it is stuck, not waiting.
-      return row.refused === true ? 'failed' : 'waiting';
+      return isRefused(row) ? 'failed' : 'waiting';
     case 'queued':
       return 'waiting';
     case 'typing':
