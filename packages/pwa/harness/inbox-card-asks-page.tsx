@@ -1,6 +1,6 @@
 /**
  * The shell's REAL Inbox (`useAgendaInboxModel`) over one machine with cards waiting for a try, as that machine's health
- * says it handles them (built and screenshotted by `inbox-card-asks-screenshot.ts`):
+ * says it handles them (the integration scene `tests/integration/fixtures/inbox-card-asks-scene.tsx` imports it):
  *
  *   ?machine=modern   health lists `agenda.card-asks.1`: a card's ask is an agenda item, so the Inbox has no To test list
  *   ?machine=older    health does not: the Inbox keeps To test rows, their count, the quick-answer step and a snoozed row
