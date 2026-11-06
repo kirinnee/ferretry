@@ -37,9 +37,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  padding: 8px 0;
-  background: var(--bg, var(--surface));
-  border-bottom: var(--divider-width, 1px) solid var(--border-soft);
+  padding: 8px 0 10px;
+  /* Solid, so a row scrolling under it is hidden, never half-seen; a firm line marks where the list begins. */
+  background: var(--bg);
+  border-bottom: var(--divider-width, 1px) solid var(--border-strong);
+  box-shadow: var(--shadow-panel);
 }
 .fy-queue-toggle {
   display: inline-flex;
@@ -106,6 +108,10 @@
   background: var(--surface);
   color: var(--fg);
   font-size: var(--text-sm, 0.875rem);
+}
+.fy-queue-search-input::placeholder {
+  color: var(--muted);
+  opacity: 1;
 }
 .fy-queue-search-input::-webkit-search-cancel-button {
   display: none;
@@ -200,15 +206,11 @@
 .fy-queue-row:last-child {
   border-bottom: 0;
 }
-/* The next message to go keeps a quiet accent edge (its words — "Next up" — are in the open row and read aloud). */
-.fy-queue-row[data-queue-next] {
-  box-shadow: inset calc(2 * var(--stroke, 1px)) 0 0 var(--accent);
-}
-/* ONE line. A fixed status column so the words line up down the page; the snippet takes what is left and ends in
-   an ellipsis; nothing wraps, so no line can begin with a stray separator. */
+/* ONE line. The status column never shrinks (and is wide enough that "Delivered" cannot touch the sender); the sender
+   is only as wide as its name, up to a cap, and ends in an ellipsis past it; the words take everything that is left;
+   nothing wraps, so no line can begin with a stray separator. */
 .fy-queue-line {
-  display: grid;
-  grid-template-columns: 6.5rem minmax(0, 9rem) minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 0 12px;
   width: 100%;
@@ -226,6 +228,8 @@
   outline-offset: -2px;
 }
 .fy-queue-status {
+  flex: none;
+  min-width: 6.5rem;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -259,9 +263,29 @@
   white-space: nowrap;
 }
 .fy-queue-sender {
+  flex: 0 1 auto;
+  max-width: min(30%, 14rem);
   color: var(--muted);
 }
+.fy-queue-snippet {
+  flex: 1 1 0;
+}
+/* The message that goes next says so, in a word, right before its words. */
+.fy-queue-next-chip {
+  flex: none;
+  margin-inline-end: -4px;
+  padding: 0 6px;
+  /* Smaller than the words around it: a tag, not a second headline. */
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft, var(--surface-2));
+  color: var(--accent);
+  font-size: 0.6875rem;
+  font-weight: var(--weight-strong, 600);
+  line-height: 1.5;
+  white-space: nowrap;
+}
 .fy-queue-ago {
+  flex: none;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -368,7 +392,7 @@
   color: var(--muted);
 }
 /* A thumb's 44px, on a touch screen (the global floor) and on any narrow window, mouse or not. The line stays ONE line:
-   the status column narrows, the sender shrinks, the words take the rest. */
+   the status column narrows, the sender stays as short as its name (30% at most), the words take the rest. */
 @media (max-width: 640px) {
   .fy-queue-page {
     padding: 0 12px 12px;
@@ -384,11 +408,16 @@
     flex-basis: 100%;
   }
   .fy-queue-line {
-    grid-template-columns: 5.1rem minmax(0, 3.9rem) minmax(0, 1fr) auto;
-    gap: 0 6px;
+    gap: 0 8px;
     min-height: 44px;
     padding-inline: 4px;
     font-size: 0.8125rem;
+  }
+  .fy-queue-status {
+    min-width: 5.1rem;
+  }
+  .fy-queue-sender {
+    max-width: 30%;
   }
   .fy-queue-detail {
     padding-inline: 4px;

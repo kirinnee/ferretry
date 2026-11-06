@@ -307,9 +307,22 @@ export const firstLine = (text: string): string => {
     .slice(0, 300);
 };
 
-/** "3 waiting for connection" — the one line a count of saved-on-device messages reads as. */
-export const waitingCountLine = (count: number): string =>
-  count === 0 ? 'nothing is waiting' : count === 1 ? '1 message is waiting' : `${count} messages are waiting`;
+/** Stuck messages: the ones the Not sent tab counts beyond the waiting ones. */
+export const isFailedRow = (row: QueueRow): boolean => rowStatus(row) === 'failed';
+
+/**
+ * The header's count, in the tab's own terms: Not sent = waiting + failed, so a failure is named, never hidden in a
+ * bigger number. "2 waiting · 1 failed"; with nothing failed it keeps the plain "3 messages are waiting".
+ */
+export const queueCountLine = (waiting: number, failed: number = 0): string => {
+  if (failed === 0)
+    return waiting === 0
+      ? 'nothing is waiting'
+      : waiting === 1
+        ? '1 message is waiting'
+        : `${waiting} messages are waiting`;
+  return waiting === 0 ? `${failed} failed` : `${waiting} waiting · ${failed} failed`;
+};
 
 /** What a queued message with no time says it waits for. */
 export const TURN_ENDS_COPY = 'when its turn ends';

@@ -110,7 +110,8 @@ describe('QueuePageView', () => {
     expect(mounted.root.findByProps({ 'data-queue-listing': 'unsent' }).props['aria-pressed']).toBe(true);
     expect(text(mounted.root.findByProps({ 'data-queue-listing-count': 'unsent' }))).toBe('5');
     expect(text(mounted.root.findByProps({ 'data-queue-listing-count': 'sent' }))).toBe('2');
-    expect(JSON.stringify(mounted.toJSON())).toContain('4 messages are waiting');
+    // The tab says Not sent 5; the header explains it in the same words: 4 waiting + 1 failed.
+    expect(text(mounted.root.findByProps({ className: 'fy-queue-count' }))).toBe('4 waiting · 1 failed');
   });
 
   test('the Sent toggle swaps to delivered and read messages, newest first', () => {
@@ -182,10 +183,8 @@ describe('QueuePageView', () => {
       now: Date.parse('2026-10-30T10:15:00.000Z'),
       groups: [group([queued('q1', 'queued', { text: long, sender: 'agent', by: { kind: 'ferret', name: 'Mira' } })])],
     });
-    const parts = (line('q1').children as ReactTestInstance[])
-      .filter(child => child.props['data-queue-sr'] === undefined)
-      .map(child => text(child));
-    expect(parts).toEqual(['Waiting', 'Mira', 'First line of the note', '15m ago']);
+    const parts = (line('q1').children as ReactTestInstance[]).map(child => text(child));
+    expect(parts).toEqual(['Waiting', 'Mira', 'Next up', 'First line of the note', '15m ago']);
     expect(line('q1').type).toBe('button');
     expect(line('q1').props['aria-expanded']).toBe(false);
     expect(row('q1').findAllByProps({ 'data-queue-body': '' })).toHaveLength(0);
@@ -206,10 +205,8 @@ describe('QueuePageView', () => {
   test('a message whose time cannot be read keeps its empty time cell and claims no age', () => {
     mounted = view({ groups: [group([queued('q1', 'queued', { enqueuedAt: 'not a time' })])] });
     expect(row('q1').findAllByType('time')).toHaveLength(0);
-    const parts = (line('q1').children as ReactTestInstance[])
-      .filter(child => child.props['data-queue-sr'] === undefined)
-      .map(child => text(child));
-    expect(parts).toEqual(['Waiting', 'You', 'text q1', '']);
+    const parts = (line('q1').children as ReactTestInstance[]).map(child => text(child));
+    expect(parts).toEqual(['Waiting', 'You', 'Next up', 'text q1', '']);
   });
 
   test('the line shows your own messages as You, the owner of a ferret message by name, and only the first line of a heading', () => {
@@ -257,6 +254,13 @@ describe('QueuePageView', () => {
       'q22',
       'q4444',
     ]);
+    // The word is on the row itself, closed — a visible chip, not an unexplained colour — and only on the next one.
+    expect(mounted.root.findAll(n => n.props['data-queue-chip'] === 'next').map(n => text(n))).toEqual([
+      'Next up',
+      'Next up',
+    ]);
+    expect(row('q1').findAllByProps({ 'data-queue-chip': 'next' })).toHaveLength(0);
+    expect(text(row('q22').findByProps({ 'data-queue-chip': 'next' }))).toBe('Next up');
     open('q22');
     expect(text(row('q22').findByProps({ 'data-queue-meta': 'next' }))).toBe('Next up');
   });

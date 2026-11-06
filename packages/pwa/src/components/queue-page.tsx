@@ -20,6 +20,7 @@ import {
   firstLine,
   fromLabel,
   groupNextSend,
+  isFailedRow,
   isWaitingRow,
   limitRows,
   listingGroups,
@@ -34,7 +35,7 @@ import {
   rowStatus,
   STATUS_LABEL,
   TURN_ENDS_COPY,
-  waitingCountLine,
+  queueCountLine,
 } from '../lib/queue-view.ts';
 import { useRouter } from '../lib/router.tsx';
 import { absoluteTime } from '../lib/session-screens.ts';
@@ -144,15 +145,15 @@ function QueueRowView({
         onClick={() => setOpen(current => !current)}
         type="button"
       >
-        {next ? (
-          <span className="sr-only" data-queue-sr="">
-            Next up.
-          </span>
-        ) : null}
         <StatusLabel status={status} />
         <span className="fy-queue-sender" data-queue-meta="from">
           {fromLabel(row)}
         </span>
+        {next ? (
+          <span className="fy-queue-next-chip" data-queue-chip="next">
+            Next<span className="sr-only"> up</span>
+          </span>
+        ) : null}
         <span className="fy-queue-snippet" data-queue-snippet="">
           {firstLine(row.text)}
         </span>
@@ -297,6 +298,7 @@ export function QueuePageView({
   const [query, setQuery] = useState('');
   const [limit, setLimit] = useState(SENT_STEP);
   const waiting = groups.reduce((sum, group) => sum + group.rows.filter(isWaitingRow).length, 0);
+  const failed = groups.reduce((sum, group) => sum + group.rows.filter(isFailedRow).length, 0);
   // The rows each list would show for this search, so each toggle can say how many it holds.
   const lists = useMemo(
     () => ({ unsent: listingGroups(groups, 'unsent', query), sent: listingGroups(groups, 'sent', query) }),
@@ -323,7 +325,7 @@ export function QueuePageView({
       <div className="fy-queue-column">
         <header className="fy-queue-head">
           <h1 className="fy-queue-title">{title}</h1>
-          <span className="fy-queue-count">{loading ? 'Reading the queues…' : waitingCountLine(waiting)}</span>
+          <span className="fy-queue-count">{loading ? 'Reading the queues…' : queueCountLine(waiting, failed)}</span>
           {onShowAll === undefined ? null : (
             <button className="kt-btn kt-btn--sm" onClick={onShowAll} type="button">
               All queues

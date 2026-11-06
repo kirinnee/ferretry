@@ -14,7 +14,7 @@
  * (Delivered and Read, several senders, some long and multi-line, a few days old).
  *
  * Views: `waiting` (the default list), `sent` (the Sent list), `scrolled` (Sent, scrolled down — it scrolls),
- * `search` (a search typed into the Sent list), `expanded` (one row opened), `all` (every queue on two
+ * `search` (a SENDER typed into the Sent list), `search-text` (words from a message typed into it), `expanded` (one row opened), `all` (every queue on two
  * machines), `empty`, `find` (the REAL `CommandPalette` with "Queue" typed).
  */
 import { spawnSync } from 'node:child_process';
@@ -262,7 +262,17 @@ try {
         const errors: string[] = [];
         page.on('pageerror', error => errors.push(error.message));
         const rows = page.locator('[data-queue-row]');
-        for (const view of ['waiting', 'sent', 'scrolled', 'search', 'expanded', 'all', 'empty', 'find'] as const) {
+        for (const view of [
+          'waiting',
+          'sent',
+          'scrolled',
+          'search',
+          'search-text',
+          'expanded',
+          'all',
+          'empty',
+          'find',
+        ] as const) {
           const entry = view === 'all' || view === 'empty' || view === 'find' ? view : 'ferret';
           await page.goto(`${server.url}?theme=studio-${scheme}&view=${entry}`);
           if (view === 'find') {
@@ -274,9 +284,16 @@ try {
             await page.locator('[data-queue-page]').waitFor({ state: 'visible' });
             await rows.first().waitFor({ state: 'visible' });
           }
-          if (view === 'sent' || view === 'scrolled' || view === 'search' || view === 'expanded')
+          if (
+            view === 'sent' ||
+            view === 'scrolled' ||
+            view === 'search' ||
+            view === 'search-text' ||
+            view === 'expanded'
+          )
             await page.locator('[data-queue-listing="sent"]').click();
           if (view === 'search') await page.locator('[data-queue-search]').fill('mira');
+          if (view === 'search-text') await page.locator('[data-queue-search]').fill('clean');
           if (view === 'expanded') await page.locator('[data-queue-row="q8"] [data-queue-line]').click();
           if (view === 'scrolled') {
             const scrolled = await page.locator('[data-queue-page]').evaluate(node => {

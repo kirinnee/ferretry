@@ -4,6 +4,7 @@ import {
   ferretRows,
   fromLabel,
   groupNextSend,
+  isFailedRow,
   isWaitingRow,
   nextRowId,
   orderedRows,
@@ -12,7 +13,7 @@ import {
   type QueueGroup,
   queueRowOf,
   rowSend,
-  waitingCountLine,
+  queueCountLine,
   countRows,
   firstLine,
   limitRows,
@@ -147,11 +148,24 @@ describe('waiting', () => {
   });
 
   test('the count line', () => {
-    expect([0, 1, 3].map(waitingCountLine)).toEqual([
+    expect([0, 1, 3].map(count => queueCountLine(count, 0))).toEqual([
       'nothing is waiting',
       '1 message is waiting',
       '3 messages are waiting',
     ]);
+  });
+
+  test('the count line names failures, so it adds up to the Not sent tab', () => {
+    expect(queueCountLine(2, 1)).toBe('2 waiting · 1 failed');
+    expect(queueCountLine(0, 3)).toBe('3 failed');
+    expect(queueCountLine(1, 1)).toBe('1 waiting · 1 failed');
+  });
+
+  test('a failed row, and only a failed row, is a failed row', () => {
+    const rowOf = (state: QueuedMessage['state']) => queueRowOf('d', 's', 'f', message({ state }));
+    expect(isFailedRow(rowOf('failed'))).toBe(true);
+    expect(isFailedRow(rowOf('queued'))).toBe(false);
+    expect(isFailedRow(rowOf('read'))).toBe(false);
   });
 });
 
