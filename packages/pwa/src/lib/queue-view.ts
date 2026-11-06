@@ -224,10 +224,13 @@ export type RowSend = { readonly at: string } | { readonly due: true } | { reado
 
 export const rowSend = (row: QueueRow, nowMs: number): RowSend | undefined => {
   if (row.state !== 'queued') return undefined;
+  // Something other than the turn is in the way (a question, a draft, a stopped ferret…): the daemon can hold a
+  // future-dated row behind it, so no clock time is promised — the row's own reason says what it waits for.
+  if (row.waitReason !== undefined && row.waitReason !== 'busy') return undefined;
   const held = row.holdUntil === undefined ? Number.NaN : Date.parse(row.holdUntil);
   if (Number.isFinite(held) && held > nowMs && row.holdUntil !== undefined) return { at: row.holdUntil };
   if (Number.isFinite(held) && row.waitReason === undefined) return { due: true };
-  return row.waitReason === undefined || row.waitReason === 'busy' ? { turn: true } : undefined;
+  return { turn: true };
 };
 
 /**

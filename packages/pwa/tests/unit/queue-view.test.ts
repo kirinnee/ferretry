@@ -312,6 +312,23 @@ describe('when a queued message goes', () => {
   const NOW = Date.parse('2026-11-04T11:00:00.000Z');
   const row = (extra: Partial<QueuedMessage> = {}) => queueRowOf('d1', 's1', 'Casen', message(extra));
 
+  test('a hold still running behind a blocker (question, draft, stopped…) promises no time', () => {
+    const held = { holdUntil: '2026-11-04T11:20:00.000Z' };
+    for (const waitReason of ['question', 'dialog', 'draft', 'unreadable', 'stopped', 'launching']) {
+      expect(rowSend(row({ ...held, waitReason: waitReason as never }), NOW)).toBeUndefined();
+    }
+    expect(rowSend(row({ ...held, waitReason: 'busy' as never }), NOW)).toEqual({ at: held.holdUntil });
+    const group = {
+      key: 'd1/s1',
+      daemonId: 'd1',
+      machine: 'Laptop',
+      sessionId: 's1',
+      ferret: 'Casen',
+      rows: [row({ ...held, waitReason: 'question' as never })],
+    } as QueueGroup;
+    expect(groupNextSend(group, NOW)).toBeUndefined();
+  });
+
   test('a hold still running says when it ends', () => {
     expect(rowSend(row({ holdUntil: '2026-11-04T11:20:00.000Z' }), NOW)).toEqual({ at: '2026-11-04T11:20:00.000Z' });
   });

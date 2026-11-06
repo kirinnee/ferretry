@@ -149,10 +149,10 @@ const message = (id: string, text: string, extra: object = {}) => ({
 const rows = [
   queueRowOf('laptop', 's1', 'Casen', message('q1', texts.queued as string, { waitReason: 'busy' }) as never),
   queueRowOf('laptop', 's1', 'Casen', message('q2', texts.held as string, {
-    sender: 'ferret', by: { kind: 'ferret', name: 'tomi' }, label: 'fyi', holdUntil: '2026-10-30T02:20:00.000Z',
+    sender: 'agent', by: { kind: 'ferret', name: 'tomi' }, label: 'fyi', holdUntil: '2026-10-30T02:20:00.000Z',
   }) as never),
   queueRowOf('laptop', 's1', 'Casen', message('q3', 'A second held note', {
-    sender: 'ferret', by: { kind: 'ferret', name: 'avary' }, label: 'action', holdUntil: '2026-10-30T02:08:00.000Z',
+    sender: 'agent', by: { kind: 'ferret', name: 'avary' }, label: 'action', holdUntil: '2026-10-30T02:08:00.000Z',
   }) as never),
   outboxRowOf('Casen', {
     id: 'o1', daemonId: 'laptop', sessionId: 's1', message: texts.saved as string, attachmentIds: [], files: [],
