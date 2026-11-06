@@ -1,5 +1,6 @@
 import type { BuiltModule } from '../../src/lib/runtime/modules.ts';
 import type { DaemonWorld } from '../fyd.ts';
+import type { HarnessLoginService } from '../../src/lib/fleet-login/service.ts';
 import type { LearningSubsystem, LimitsService, ManagedWorktreeService, RenderService } from '../../src/lib/index.ts';
 import type { SttEnhancementSubsystem } from '../../src/lib/runtime/mounts/stt.ts';
 import type { WorkSearchService } from '../../src/lib/work-search/index.ts';
@@ -28,6 +29,8 @@ export const seamsOf = {
   analytics: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the measured host is a `buildWorld` seam, a need). */
   cgroups: (_world: DaemonWorld): void => undefined,
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the child launcher, the callback delivery, the timer and the port reader are fixed production adapters; the credential catalog, the clock and the environment are needs). */
+  fleetLogin: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the tmux, the terminals, the agenda and the vault are needs). */
   inputRequests: (_world: DaemonWorld): void => undefined,
   learning: (world: DaemonWorld): LearningSeams => ({ userHome: world.userHome }),
@@ -52,6 +55,7 @@ export interface ModuleHandles {
   readonly agentTools: BuiltModule<AgentToolsProvides>;
   readonly analytics: BuiltModule<AnalyticsProvides, AnalyticsJobs>;
   readonly cgroups: BuiltModule<LimitsService>;
+  readonly fleetLogin: BuiltModule<HarnessLoginService>;
   readonly inputRequests: BuiltModule<InputRequestsProvides>;
   readonly learning: BuiltModule<LearningSubsystem>;
   readonly renders: BuiltModule<RenderService>;

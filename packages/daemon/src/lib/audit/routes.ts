@@ -199,21 +199,6 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'proposalId',
     detail: { action: 'apply' },
   },
-  { method: 'POST', path: '/v1/fleet/login', event: 'fleet.configured', detail: { action: 'sign-in' } },
-  {
-    method: 'POST',
-    path: '/v1/fleet/login/:flowId',
-    event: 'fleet.configured',
-    subject: 'flowId',
-    detail: { action: 'sign-in-answer' },
-  },
-  {
-    method: 'DELETE',
-    path: '/v1/fleet/login/:flowId',
-    event: 'fleet.configured',
-    subject: 'flowId',
-    detail: { action: 'sign-in-cancel' },
-  },
   // MCP sign-in (docs/mcp-oauth.md): the component NAME and the flow id, never an address or a token.
   {
     method: 'POST',
