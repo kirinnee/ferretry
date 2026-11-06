@@ -141,6 +141,20 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # A pull request runs the PWA browser gate (`pwa-screenshot`) only when something it reads changes. The
+    # list lives in scripts/ci/pwa-relevance.sh; this traces the harness bundle's imports and holds the list,
+    # the workflow gate and the fail-open rules to them. It runs when any file it reads can change: the
+    # harness bundle's sources, every file of the workspace packages it traces (section 6 reads their
+    # imports), any package manifest, and any workflow (it looks for jobs that need the gate).
+    a-pwa-relevance = {
+      enable = true;
+      name = "PWA browser gate relevance";
+      entry = validator "scripts/validate/pwa-relevance.sh";
+      files = "^(scripts/(ci/(pwa-relevance|pwa-screenshot-proof)|validate/pwa-relevance)\\.sh|\\.github/workflows/[^/]+\\.ya?ml|packages/(pwa/(src|harness)/.*\\.tsx?|(protocol|relay|fleet)/.*\\.tsx?|[^/]+/package\\.json))$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # A test's tier is where it lives, and the blocking tiers' promise is a deterministic outcome: an
     # integration test that asserts a wall-clock or memory bound belongs in the realworld tier, which
     # files an issue instead of failing a merge. This also holds config/test-groups.json to the files

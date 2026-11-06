@@ -48,6 +48,7 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI spli
 | `a-no-pattern-kill`          | test code never kills processes by pattern (`pkill`, `killall`)                                  |
 | `a-no-sync-io`               | daemon code declares every synchronous file call in `scripts/validate/sync-io-allowlist.txt`     |
 | `a-pages-config`             | the PWA build and the Pages deployment publish the same directory                                |
+| `a-pwa-relevance`            | the PWA browser gate's path list covers every import of its harness; docs-only skips it          |
 | `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree                               |
 | `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt                        |
 | `a-test-tiers`               | every test lives in a tier; integration asserts no wall-clock or memory bound                    |

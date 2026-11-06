@@ -144,9 +144,41 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && runner.environment == 'self-hosted'
         run: ./scripts/ci/nix-store-hygiene.sh
 
+  # Does this pull request change anything the PWA browser gate reads? One decision for all three legs of
+  # `pwa-screenshot`: when it is `false` they are SKIPPED, which counts as passed, so a daemon-only, CLI-only
+  # or docs-only pull request skips a gate that is ~19% of the Namespace bill. scripts/ci/pwa-relevance.sh has the
+  # list and why it is a job and not `paths-ignore`; scripts/validate/pwa-relevance.sh holds it to the
+  # imports of the harness. `main`, dispatch and any doubt decide `true`.
+  # The job is self-contained: it reads the PR's file list through the API and nothing else, so it stays
+  # valid whenever and however `pwa-screenshot` is triggered.
+  pwa-relevance:
+    timeout-minutes: 5
+    name: PWA Relevance
+    permissions:
+      contents: read
+      pull-requests: read
+    # GitHub, not Namespace: a few seconds of bash with no nix shell (docs/standards/ci-cd, "Runners").
+    # It must stay that cheap: `pwa-screenshot` waits for it, so its seconds are the gate's start delay.
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - id: decide
+        name: Decide whether the PWA browser gate has anything to prove
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ./scripts/ci/pwa-relevance.sh
+
   pwa-screenshot:
     timeout-minutes: 20
     name: PWA ${{ matrix.scope == 'full' && 'Full Gallery' || 'Settings Geometry' }} (${{ matrix.scheme }}${{ matrix.viewport && format(', {0}', matrix.viewport) || '' }})
+    needs: pwa-relevance
+    if: ${{ !cancelled() && needs.pwa-relevance.outputs.run != 'false' }}
     permissions:
       contents: read
     # Linux, deliberately NOT a macOS runner: the image already ships the same Google Chrome the
