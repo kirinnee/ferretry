@@ -1,0 +1,422 @@
+import { afterEach, describe, expect, it } from 'bun:test';
+import { type FyEvent, MACHINE_AGENDA_ID, type SessionView } from '@ferretry/protocol';
+import { useEffect, useSyncExternalStore } from 'react';
+import {
+  useMachinesPoll,
+  type FleetPollEnvironment,
+  type MachineFleetFeedOpener,
+} from '../../src/hooks/use-machines-poll.ts';
+import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { daemonSessionKey, daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { DaemonFleetStore } from '../../src/lib/fleet-store.ts';
+import { listClock, listDeferred, flushListReads } from '../support/list-refresh.ts';
+import { interact, mount, type Mounted } from '../support/dom.ts';
+import { sessionView } from '../support/sessions.ts';
+
+const machine = daemonConnection({ daemonId: 'machine', baseUrl: 'https://machine.invalid', deviceId: 'device' });
+const machines = [machine];
+const scope = daemonSessionScope(machine, MACHINE_AGENDA_ID);
+const event = (type: string, sessionId = 's'): FyEvent => ({
+  sequence: 1,
+  time: '2026-11-01T00:00:00.000Z',
+  source: 'daemon',
+  sessionId,
+  type,
+  data: {},
+});
+const board = (count = 0) => ({
+  v: 1,
+  sessionId: MACHINE_AGENDA_ID,
+  items: Array.from({ length: count }, (_, index) => ({
+    id: `A${index + 1}`,
+    source: 'question',
+    sourceRef: null,
+    subject: 'Choose',
+    why: 'Decision needed',
+    waitingSince: '2026-11-01T00:00:00.000Z',
+    howToResolve: 'Reply',
+    raisedBy: 'human',
+    raisedBySession: null,
+    raisedByName: null,
+  })),
+  resolved: [],
+  count,
+  parseErrors: 0,
+  updatedAt: '2026-11-01T00:00:00.000Z',
+});
+let view: Mounted | undefined;
+afterEach(async () => {
+  await view?.unmount();
+  view = undefined;
+});
+
+const setup = () => {
+  const clock = listClock();
+  let visible = true;
+  let visibility: (() => void) | undefined;
+  let sessions = [sessionView('s')];
+  let agendaValue = board(1);
+  const reads = { sessions: 0, agenda: 0, writes: 0 };
+  const ticks = new Map<number, () => void>();
+  const environment: FleetPollEnvironment = {
+    visible: () => visible,
+    now: clock.environment.now,
+    onVisibility: callback => {
+      visibility = callback;
+      return () => {
+        visibility = undefined;
+      };
+    },
+    setInterval: (callback, ms) => {
+      ticks.set(ms, callback);
+      return ms;
+    },
+    clearInterval: handle => {
+      ticks.delete(handle as number);
+    },
+  };
+  const fleet = new DaemonFleetStore(
+    {
+      list: async () => {
+        reads.sessions += 1;
+        return sessions;
+      },
+      get: async () => sessionView('s'),
+    },
+    clock.environment.now,
+    { schedule: clock.environment.schedule },
+  );
+  const agenda = new DaemonAgendaClient(
+    undefined,
+    async (_input, init) => {
+      if (init?.method === 'POST') {
+        reads.writes += 1;
+        agendaValue = board();
+      } else reads.agenda += 1;
+      return Response.json(agendaValue);
+    },
+    undefined,
+    clock.environment,
+  );
+  const streams: { event: (event: FyEvent) => void; idle: () => void; end: () => void }[] = [];
+  const open: MachineFleetFeedOpener = (_machine, onEvent, onIdle, signal) =>
+    new Promise(resolve => {
+      streams.push({ event: onEvent, idle: () => onIdle(60), end: resolve });
+      signal.addEventListener('abort', () => resolve(), { once: true });
+    });
+  const feedEnvironment = {
+    ...clock.environment,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    random: () => 0,
+  };
+  return {
+    clock,
+    reads,
+    fleet,
+    agenda,
+    streams,
+    stream: (index = 0) => {
+      const stream = streams[index];
+      if (stream === undefined) throw new Error('Feed not opened');
+      return stream;
+    },
+    open,
+    environment,
+    feedEnvironment,
+    hide: () => {
+      visible = false;
+    },
+    show: () => {
+      visible = true;
+      visibility?.();
+    },
+    tick: () => {
+      for (const run of ticks.values()) run();
+    },
+    sessions: (value: SessionView[]) => {
+      sessions = value;
+    },
+  };
+};
+type Subject = ReturnType<typeof setup>;
+function Poller({ subject }: { subject: Subject }) {
+  useMachinesPoll(
+    subject.fleet,
+    machines,
+    machine.daemonId,
+    false,
+    subject.environment,
+    subject.open,
+    subject.feedEnvironment,
+    undefined,
+    subject.agenda,
+  );
+  return null;
+}
+function Reader({ subject }: { subject: Subject }) {
+  useEffect(() => {
+    void subject.fleet.ensure(machine);
+    void subject.agenda.hydrate(machine, scope);
+    void subject.agenda.hydrateCount(machine, scope);
+  }, [subject]);
+  const snapshot = useSyncExternalStore(subject.fleet.subscribe, subject.fleet.getSnapshot);
+  const agendaSnapshot = useSyncExternalStore(
+    listener => subject.agenda.store.subscribe(listener),
+    () => subject.agenda.store.getSnapshot(),
+  );
+  return (
+    <span>
+      {snapshot.daemons.get(machine.daemonId)?.sessions?.[0]?.state.status}:
+      {agendaSnapshot.counts.get(daemonSessionKey(scope))}
+    </span>
+  );
+}
+
+describe('shared whole-list traffic', () => {
+  it('reads through republished connection facts when a queued request starts', async () => {
+    // Arrange
+    const clock = listClock();
+    const calls: unknown[] = [];
+    const subject = new DaemonFleetStore(
+      {
+        list: async connection => {
+          calls.push(connection);
+          return [];
+        },
+        get: async () => sessionView('s'),
+      },
+      clock.environment.now,
+      { schedule: clock.environment.schedule },
+    );
+    await subject.ensure(machine);
+    const updated = daemonConnection({
+      daemonId: machine.daemonId,
+      baseUrl: machine.baseUrl,
+      deviceId: machine.deviceId,
+      daemonName: 'Republished',
+    });
+    // Act
+    const queued = subject.hydrate(machine);
+    await subject.ensure(updated);
+    await clock.advance(10_000);
+    await queued;
+    // Assert
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toBe(updated);
+  });
+
+  it('N mounted components and badge readers share one fetch, including later mounts', async () => {
+    // Arrange
+    const subject = setup();
+    // Act
+    const readers = Array.from({ length: 20 }, (_, index) => ({ id: `reader-${index}` }));
+    view = await mount(
+      <div>
+        {readers.slice(0, 10).map(reader => (
+          <Reader key={reader.id} subject={subject} />
+        ))}
+      </div>,
+    );
+    await flushListReads();
+    await view.render(
+      <div>
+        {readers.map(reader => (
+          <Reader key={reader.id} subject={subject} />
+        ))}
+      </div>,
+    );
+    // Assert
+    expect(subject.reads).toEqual({ sessions: 1, agenda: 1, writes: 0 });
+    expect([...view.container.querySelectorAll('span')].map(reader => reader.textContent)).toEqual(
+      Array.from({ length: 20 }, () => 'running:1'),
+    );
+    await subject.clock.advance(10_000);
+    expect(subject.reads.sessions).toBe(1);
+    expect(subject.reads.agenda).toBe(1);
+  });
+
+  it('50 relevant events in 10 seconds fetch each list at most twice; unrelated events fetch neither', async () => {
+    // Arrange
+    const subject = setup();
+    view = await mount(<Poller subject={subject} />);
+    subject.stream().idle();
+    // Act
+    for (let index = 0; index < 50; index += 1) {
+      subject.stream().event(event('turn.state'));
+      subject.stream().event(event('agenda.changed', MACHINE_AGENDA_ID));
+      await subject.clock.advance(200);
+    }
+    // Assert
+    expect(subject.reads.sessions).toBe(2);
+    expect(subject.reads.agenda).toBe(2);
+    // Drain the final coalesced invalidation before measuring events that move neither list.
+    await subject.clock.advance(10_000);
+    const before = { ...subject.reads };
+    for (const type of ['surface.driving', 'board.changed', 'output.delta', 'browser.changed', 'terminal.output'])
+      subject.stream().event(event(type));
+    await subject.clock.advance(10_000);
+    expect(subject.reads).toEqual(before);
+  });
+
+  it('applies the own-action result promptly while old reads and cooldowns are outstanding', async () => {
+    // Arrange
+    const subject = setup();
+    await subject.fleet.ensure(machine);
+    await subject.agenda.hydrate(machine, scope);
+    view = await mount(<Reader subject={subject} />);
+    const refresh = subject.agenda.revalidate(machine, scope);
+    subject.fleet.hydrate(machine);
+    // Act
+    await interact(async () => {
+      subject.fleet.upsertSession(machine.daemonId, sessionView('s', { state: { status: 'stopped' } }));
+      await subject.agenda.dismiss(machine, scope, 'A1');
+    });
+    // Assert: no clock advance and no extra GET for either action.
+    expect(subject.fleet.session(daemonSessionScope(machine, 's'))?.state.status).toBe('stopped');
+    expect(subject.agenda.store.count(scope)).toBe(0);
+    expect(view.container.textContent).toBe('stopped:0');
+    expect(subject.reads).toEqual({ sessions: 1, agenda: 1, writes: 1 });
+    await subject.clock.advance(10_000);
+    await refresh;
+  });
+
+  it('reconnect reconciles each list once, even when the reconnect is inside the cooldown', async () => {
+    // Arrange
+    const subject = setup();
+    view = await mount(<Poller subject={subject} />);
+    subject.stream().idle();
+    // Act
+    subject.stream().end();
+    await flushListReads();
+    await subject.clock.advance(1_000);
+    subject.stream(1).idle();
+    await subject.clock.advance(9_000);
+    // Assert
+    expect(subject.reads.sessions).toBe(2);
+    expect(subject.reads.agenda).toBe(2);
+    await subject.clock.advance(10_000);
+    expect(subject.reads.sessions).toBe(2);
+    expect(subject.reads.agenda).toBe(2);
+  });
+
+  it('uses only the slow safety beat while down, and skips live-busy and hidden lists', async () => {
+    // Arrange
+    const subject = setup();
+    view = await mount(<Poller subject={subject} />);
+    subject.stream().idle();
+    // Act: a live, recently read list has no safety traffic.
+    subject.tick();
+    await flushListReads();
+    expect(subject.reads.sessions).toBe(1);
+    expect(subject.reads.agenda).toBe(1);
+    for (let index = 0; index < 5; index += 1) {
+      subject.stream().idle();
+      await subject.clock.advance(60_000);
+    }
+    subject.tick();
+    await flushListReads();
+    expect(subject.reads.sessions).toBe(2);
+    expect(subject.reads.agenda).toBe(2);
+    subject.stream().end();
+    await flushListReads();
+    await subject.clock.advance(60_000);
+    subject.tick();
+    await flushListReads();
+    expect(subject.reads.sessions).toBe(3);
+    expect(subject.reads.agenda).toBe(3);
+    // Assert: hidden safety beats do nothing; returning reconciles once through the same budget.
+    subject.hide();
+    await subject.clock.advance(60_000);
+    subject.tick();
+    expect(subject.reads.sessions).toBe(3);
+    expect(subject.reads.agenda).toBe(3);
+    subject.show();
+    await flushListReads();
+    expect(subject.reads.sessions).toBe(4);
+    expect(subject.reads.agenda).toBe(4);
+  });
+
+  it('keeps one network read in flight even after a caller deadline and publishes a late answer', async () => {
+    // Arrange
+    const clock = listClock();
+    const pending = listDeferred<readonly SessionView[]>();
+    let reads = 0;
+    const subject = new DaemonFleetStore(
+      {
+        list: () => {
+          reads += 1;
+          return pending.promise;
+        },
+        get: async () => sessionView('s'),
+      },
+      clock.environment.now,
+      { schedule: clock.environment.schedule },
+    );
+    const first = subject.hydrate(machine).catch(() => undefined);
+    // Act
+    await clock.advance(15_000);
+    await first;
+    const next = subject.hydrate(machine);
+    expect(reads).toBe(1);
+    pending.resolve([sessionView('s')]);
+    await next;
+    // Assert
+    expect(subject.fleet(machine.daemonId).status).toBe('ready');
+    expect(reads).toBe(1);
+  });
+
+  it('clears queued reads on re-pair, without publishing data from the former connection', async () => {
+    // Arrange
+    const subject = setup();
+    await subject.fleet.ensure(machine);
+    await subject.agenda.hydrate(machine, scope);
+    const queuedFleet = subject.fleet.hydrate(machine);
+    const queuedAgenda = subject.agenda.revalidate(machine, scope);
+    const moved = daemonConnection({
+      daemonId: machine.daemonId,
+      baseUrl: 'https://moved.invalid',
+      deviceId: 'new-device',
+    });
+    // Act
+    await subject.fleet.ensure(moved);
+    await subject.agenda.hydrate(moved, scope);
+    // Assert
+    await expect(queuedFleet).rejects.toThrow('cleared');
+    await expect(queuedAgenda).rejects.toThrow('cleared');
+    await subject.clock.advance(10_000);
+    expect(subject.reads.sessions).toBe(2);
+    expect(subject.reads.agenda).toBe(2);
+    subject.agenda.clearDaemon(machine.daemonId);
+    expect(subject.agenda.store.status(scope)).toBe('idle');
+  });
+
+  it('routes only agenda events to boards, including a previously unread machine ledger', async () => {
+    // Arrange
+    const subject = setup();
+    // Act
+    subject.agenda.noteEvent(machine, event('output.delta', MACHINE_AGENDA_ID));
+    subject.agenda.noteEvent(machine, event('agenda.changed', 'unread-session'));
+    expect(subject.reads.agenda).toBe(0);
+    subject.agenda.noteEvent(machine, event('attention.changed', MACHINE_AGENDA_ID));
+    await flushListReads();
+    expect(subject.reads.agenda).toBe(1);
+    let reads = 0;
+    const sessionClient = new DaemonAgendaClient(undefined, async () => {
+      reads += 1;
+      return Response.json({ ...board(), sessionId: 's' });
+    });
+    await sessionClient.hydrate(machine, daemonSessionScope(machine, 's'));
+    sessionClient.noteEvent(machine, event('agenda.changed'));
+    await flushListReads();
+    // Assert
+    expect(reads).toBe(2);
+    expect(() =>
+      subject.agenda.hydrate(
+        daemonConnection({ daemonId: 'other', baseUrl: 'https://other.invalid', deviceId: 'other' }),
+        scope,
+      ),
+    ).toThrow('scope');
+  });
+});

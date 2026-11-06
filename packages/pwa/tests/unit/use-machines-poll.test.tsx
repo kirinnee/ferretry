@@ -95,7 +95,11 @@ const fakeEnvironment = () => {
 
 const recorder = () => {
   const reads: DaemonConnection[] = [];
-  return { reads, fleet: { hydrate: async (daemon: DaemonConnection) => (reads.push(daemon), []) } };
+  const read = async (daemon: DaemonConnection): Promise<readonly never[]> => {
+    reads.push(daemon);
+    return [];
+  };
+  return { reads, fleet: { hydrate: read, invalidate: read } };
 };
 
 describe('useMachinesPoll', () => {

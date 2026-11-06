@@ -325,7 +325,7 @@ export function useAgendaInboxModel(
   // The machine's own agenda is read like a conversation's board and listed first among the machine's conversations.
   useEffect(() => {
     for (const { connection } of machines) {
-      client.revalidate(connection, daemonSessionScope(connection, MACHINE_AGENDA_ID)).catch(() => undefined);
+      client.hydrate(connection, daemonSessionScope(connection, MACHINE_AGENDA_ID)).catch(() => undefined);
     }
   }, [client, machines]);
   const withMachine = useMemo(

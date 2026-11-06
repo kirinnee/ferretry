@@ -80,6 +80,9 @@ class RecordingPort implements DaemonFleetPort {
   }
 }
 
+// Snapshot reconciliation tests below disable the cooldown; list-refetch.test.tsx exercises the
+// production ten-second budget with one shared API, event feed and hand-driven clock.
+
 /** Swallows a rejection the test asserts on elsewhere, so bun sees no leak. */
 const ignore = (promise: Promise<unknown>): void => {
   void promise.catch(() => undefined);
@@ -105,7 +108,7 @@ describe('DaemonFleetStore reads', () => {
    */
   it('keeps subscribe and getSnapshot working detached, as useSyncExternalStore takes them', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
     const { subscribe, getSnapshot } = store;
 
     should(getSnapshot().daemons.size).equal(0);
@@ -126,7 +129,7 @@ describe('DaemonFleetStore reads', () => {
 
   it('publishes loading, then the daemon rows, and notifies its listeners', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
     let notifications = 0;
     const unsubscribe = store.subscribe(() => {
       notifications += 1;
@@ -152,7 +155,7 @@ describe('DaemonFleetStore reads', () => {
 
   it('keeps two daemons apart when both own the same session id, whatever the completion order', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const first = store.hydrate(daemonA);
     const second = store.hydrate(daemonB);
@@ -171,7 +174,7 @@ describe('DaemonFleetStore reads', () => {
 
   it('coalesces concurrent list reads for one daemon and never across daemons', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const first = store.hydrate(daemonA);
     const second = store.hydrate(daemonA);
@@ -193,7 +196,7 @@ describe('DaemonFleetStore reads', () => {
 
   it('reports a failed refresh without blanking rows that were correct a moment ago', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const first = store.hydrate(daemonA);
     port.lists[0]?.resolve([session('shared')]);
@@ -216,7 +219,7 @@ describe('DaemonFleetStore reads', () => {
 
   it('renders a non-Error rejection as a sentence rather than dropping it', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const request = store.hydrate(daemonA);
     port.lists[0]?.reject('the daemon closed the connection');
@@ -232,7 +235,7 @@ describe('DaemonFleetStore reads', () => {
 
   it('reuses the object of a structurally unchanged session across a whole-list reconcile', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const first = store.hydrate(daemonA);
     port.lists[0]?.resolve([session('shared'), session('other')]);
@@ -251,7 +254,7 @@ describe('DaemonFleetStore reads', () => {
 
   it('treats a view it cannot serialize as changed instead of throwing out of the read', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const first = store.hydrate(daemonA);
     port.lists[0]?.resolve([session('shared')]);
@@ -275,7 +278,7 @@ describe('DaemonFleetStore.fetchSession', () => {
 
   it('coalesces the exact scope only, so the same id on two daemons is two reads', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const first = store.fetchSession(daemonA, scopeA);
     should(store.fetchSession(daemonA, scopeA)).equal(first);
@@ -302,7 +305,7 @@ describe('DaemonFleetStore.fetchSession', () => {
 
   it('refuses an answer for a different session than the one asked for', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const request = store.fetchSession(daemonA, scopeA);
     port.gets[0]?.resolve(session('someone-else'));
@@ -318,7 +321,7 @@ describe('DaemonFleetStore.fetchSession', () => {
 
   it('propagates a read failure without inventing a row', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const request = store.fetchSession(daemonA, scopeA);
     port.gets[0]?.reject(new Error('nope'));
@@ -336,7 +339,7 @@ describe('DaemonFleetStore.fetchSession', () => {
 describe('DaemonFleetStore mutations', () => {
   const readyStore = async (): Promise<{ port: RecordingPort; store: DaemonFleetStore }> => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
     const request = store.hydrate(daemonA);
     port.lists[0]?.resolve([session('shared')]);
     await request;
@@ -351,7 +354,7 @@ describe('DaemonFleetStore mutations', () => {
 
   it('seeds an unread slice, prepends a new session, replaces a known one, and ignores a repeat', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
     // An entry with no rows yet: the list read is still in flight.
     store.hydrate(daemonA);
 
@@ -407,7 +410,7 @@ describe('DaemonFleetStore mutations', () => {
 describe('DaemonFleetStore generations', () => {
   it('forgets one daemon only, and reports whether anything was there', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     should(store.clearDaemon(daemonB.daemonId)).be.false();
 
@@ -425,7 +428,7 @@ describe('DaemonFleetStore generations', () => {
 
   it('forgets a connection that has a read in flight but no rows yet', () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
     ignore(store.fetchSession(daemonA, scopeA));
     should(store.getSnapshot().daemons.has(daemonA.daemonId)).be.false();
     should(store.clearDaemon(daemonA.daemonId)).be.true();
@@ -433,7 +436,7 @@ describe('DaemonFleetStore generations', () => {
 
   it('never lets a list read from before a clear repopulate the cache or satisfy a fresh read', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const stale = store.hydrate(daemonA);
     store.clearDaemon(daemonA.daemonId);
@@ -454,7 +457,7 @@ describe('DaemonFleetStore generations', () => {
 
   it('never lets a session read from before a clear repopulate the cache', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const stale = store.fetchSession(daemonA, scopeA);
     store.clearDaemon(daemonA.daemonId);
@@ -473,7 +476,7 @@ describe('DaemonFleetStore generations', () => {
 
   it('treats a new base URL for the same daemon as a re-pair and drops the old read', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const first = store.hydrate(daemonA);
     port.lists[0]?.resolve([session('shared', { turn: 3 })]);
@@ -497,7 +500,7 @@ describe('DaemonFleetStore generations', () => {
 
   it('treats a rotated device token as a re-pair, and an identical connection as the same one', () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
 
     const first = store.hydrate(daemonA);
     should(store.hydrate(daemonA)).equal(first);
@@ -527,6 +530,7 @@ describe('DaemonFleetStore — when a machine was last read', () => {
         get: async () => session('one'),
       },
       () => now,
+      { refreshMinMs: 0 },
     );
     should(store.fleet(daemonA.daemonId).readAt).be.undefined();
     await store.hydrate(daemonA);
@@ -545,7 +549,7 @@ describe('DaemonFleetStore keeps what an action published against an older read'
 
   it('does not put a stopped view back over the starting one a Resume just published', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
     const scope = daemonSessionScope(daemonA, 'revive-me');
     const first = store.hydrate(daemonA);
     port.lists[0]?.resolve([stopped]);
@@ -564,7 +568,7 @@ describe('DaemonFleetStore keeps what an action published against an older read'
 
   it('does not lose a session published while a list read was out, nor bring back one removed', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
     const first = store.hydrate(daemonA);
     port.lists[0]?.resolve([session('gone'), session('kept')]);
     await first;
@@ -581,7 +585,7 @@ describe('DaemonFleetStore keeps what an action published against an older read'
 
   it('still takes a newer read once nothing has been published since it left', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
     const scope = daemonSessionScope(daemonA, 'revive-me');
     const first = store.hydrate(daemonA);
     port.lists[0]?.resolve([stopped]);
@@ -597,7 +601,7 @@ describe('DaemonFleetStore keeps what an action published against an older read'
 
   it('does not let a single-session read that left before the publish replace it', async () => {
     const port = new RecordingPort();
-    const store = new DaemonFleetStore(port);
+    const store = new DaemonFleetStore(port, Date.now, { refreshMinMs: 0 });
     const scope = daemonSessionScope(daemonA, 'revive-me');
     const first = store.hydrate(daemonA);
     port.lists[0]?.resolve([stopped]);

@@ -1,7 +1,7 @@
 /**
  * A machine whose list read never answers must not pin its slot forever: the store gives up after its
- * deadline, says the machine did not answer, asks again on the next poll — and another machine's list is
- * never waiting on any of it.
+ * deadline and says the machine did not answer. The network slot stays shared until its transport
+ * settles, so retrying cannot overlap it; another machine's list never waits on any of it.
  */
 import { describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
@@ -73,12 +73,15 @@ describe('DaemonFleetStore list deadline', () => {
     });
     expect(store.fleet(awake.daemonId).status).toBe('ready');
 
-    // The slot was released: the next poll asks again rather than joining the dead read.
-    void store.hydrate(asleep).catch(() => undefined);
-    expect(asleepReads).toHaveLength(2);
+    // Waiting timed out, but the transport is still active: the next poll joins it.
+    const joined = store.hydrate(asleep);
+    expect(asleepReads).toHaveLength(1);
+    asleepReads[0]?.resolve([sessionView('late')]);
+    await joined;
+    expect(store.fleet(asleep.daemonId).status).toBe('ready');
   });
 
-  it('publishes a late answer, but never one older than an answer already published', async () => {
+  it('publishes a late answer while preserving a newer own-action result', async () => {
     const clock = manualClock();
     const reads: ReturnType<typeof deferred<readonly SessionView[]>>[] = [];
     const store = new DaemonFleetStore(
@@ -96,11 +99,10 @@ describe('DaemonFleetStore list deadline', () => {
     void store.hydrate(asleep).catch(() => undefined);
     clock.fire();
     await settle();
-    void store.hydrate(asleep).catch(() => undefined);
-    reads[1]?.resolve([sessionView('fresh')]);
-    await settle();
-    expect(store.fleet(asleep.daemonId).sessions?.map(view => view.config.id)).toEqual(['fresh']);
-    reads[0]?.resolve([sessionView('stale')]);
+    const joined = store.hydrate(asleep);
+    store.upsertSession(asleep.daemonId, sessionView('fresh'));
+    reads[0]?.resolve([]);
+    await joined;
     await settle();
     expect(store.fleet(asleep.daemonId).sessions?.map(view => view.config.id)).toEqual(['fresh']);
 
@@ -109,7 +111,7 @@ describe('DaemonFleetStore list deadline', () => {
     clock.fire();
     await settle();
     expect(store.fleet(awake.daemonId).status).toBe('error');
-    reads[2]?.resolve([sessionView('late')]);
+    reads[1]?.resolve([sessionView('late')]);
     await settle();
     expect(store.fleet(awake.daemonId)).toMatchObject({ status: 'ready', error: null });
   });

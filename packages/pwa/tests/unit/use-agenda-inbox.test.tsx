@@ -105,6 +105,7 @@ const fakeClient = (
     store,
     wires: new AgendaWireDirectory(),
     rollup,
+    hydrate: record('revalidate'),
     revalidate: record('revalidate'),
     respond: record('respond'),
     resolve: record('resolve'),

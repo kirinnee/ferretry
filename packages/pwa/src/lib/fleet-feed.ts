@@ -19,13 +19,14 @@
  * because a feed with no replay cannot say what changed while it was away.
  */
 
-import type { FyEvent } from '@ferretry/protocol';
+import { type FyEvent, isMachineAgendaId } from '@ferretry/protocol';
 import { sessionEventStreamDeadlineMs, sessionEventStreamDelayMs } from '../components/session-event-stream-model.ts';
+import { LIST_REFRESH_MIN_MS } from './list-refresh.ts';
 
 /** How long a burst of events is let settle before the one read it asks for. */
 export const FLEET_FEED_SETTLE_MS = 500;
 /** The shortest gap between two reads a feed asks for, however busy the fleet. */
-export const FLEET_FEED_MIN_INTERVAL_MS = 2_000;
+export const FLEET_FEED_MIN_INTERVAL_MS = LIST_REFRESH_MIN_MS;
 
 /** What the poll beside a feed is told: whether it may stand back. */
 export type FleetFeedStatus = 'connecting' | 'live' | 'down' | 'unsupported';
@@ -58,6 +59,8 @@ export interface FleetFeedOptions {
   readonly onChange: () => void;
   /** Every event the feed delivers, as it arrives; for readers that need the payload, not just "something moved". */
   readonly onEvent?: (event: FyEvent) => void;
+  /** One reconciliation after the stream returns, also for lists other than the fleet. */
+  readonly onReconnect?: () => void;
   readonly onStatus?: (status: FleetFeedStatus) => void;
   readonly environment?: FleetFeedEnvironment;
 }
@@ -72,7 +75,10 @@ const refusedAsTooOld = (reason: unknown): boolean => (reason as { readonly stat
 
 /** A surface's control facts and the board's card changes move nothing on a session list row. */
 const movesTheList = (event: FyEvent): boolean =>
-  !event.type.startsWith('surface.') && !event.type.startsWith('board.');
+  event.type.startsWith('session.') ||
+  event.type.startsWith('turn.') ||
+  event.type.startsWith('control.') ||
+  (!isMachineAgendaId(event.sessionId) && (event.type === 'agenda.changed' || event.type === 'attention.changed'));
 
 export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
   const environment = options.environment ?? browserFleetFeedEnvironment;
@@ -80,6 +86,7 @@ export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
   let stopped = false;
   let attempt = 0;
   let wasLive = false;
+  let recovering = false;
   let abort: AbortController | undefined;
   let retry: unknown;
   let silence: unknown;
@@ -127,7 +134,10 @@ export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
       proved = true;
       attempt = 0;
       // A feed with no replay cannot say what changed while it was gone, so coming back is one read.
-      if (wasLive) change();
+      if (wasLive || recovering) {
+        change();
+        options.onReconnect?.();
+      }
       wasLive = true;
       publish('live');
     };
@@ -140,6 +150,7 @@ export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
         return;
       }
       publish('down');
+      recovering = true;
       const delay = sessionEventStreamDelayMs(attempt, environment.random());
       attempt += 1;
       retry = environment.setTimeout(() => {
