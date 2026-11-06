@@ -19,7 +19,6 @@ import type { HandoverReconcileLoop } from '../../handover/index.ts';
 import type { InputRequestService } from '../../input-requests/service.ts';
 import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
-import type { PinService } from '../../pins/index.ts';
 import type { PasteRuleStages } from '../../secure-copy/rule-stages.ts';
 import type { PasteRuleService } from '../../secure-copy/rules.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
@@ -47,7 +46,7 @@ import { configFilesConfirmations } from './agenda-confirms.ts';
 import type { AgendaGatePort } from './agenda-gates.ts';
 import { agendaMachineRoutes } from './agenda-machine.ts';
 import { agendaOpenRoutes } from './agenda-open.ts';
-import { agentToolRoutes, sessionCredentialDirectory } from './agent-tools.ts';
+import { sessionCredentialDirectory } from './agent-tools.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
 import { type BoardSubsystem, boardRoutes } from './board.ts';
 import { type BoardProjectsSubsystem, type BoardSwitchSubsystem, boardProjectRoutes } from './board-projects.ts';
@@ -82,7 +81,6 @@ import { type NameSubsystem, nameRoutes } from './names.ts';
 import { type PackSubsystem, packRoutes } from './pack.ts';
 import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { type PerformanceSubsystem, performanceRoutes } from './performance.ts';
-import { pinRoutes } from './pins.ts';
 import { type PushAlertSubsystem, type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
@@ -106,7 +104,6 @@ import { type SessionHypermediaSubsystem, sessionHypermediaRoutes } from './sess
 import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
 import { type SessionPermissionSubsystem, sessionPermissionRoutes } from './session-permission.ts';
-import { type SessionPinSubsystem, sessionPinRoutes } from './session-pin.ts';
 import { type SessionProcessSubsystem, sessionProcessRoutes } from './session-processes.ts';
 import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
@@ -267,7 +264,6 @@ export interface MountedSubsystems {
   readonly gateItems?: AgendaGatePort;
   /** Settles when the boot move of sub-ferret items to their agenda homes is done; the Warden sweep arms after it. */
   readonly agendaHomesMigrated?: Promise<unknown>;
-  readonly pins: PinService;
   /** The owner's unsent composer, shared live between their own devices and never journaled. */
   readonly sharedDrafts: SharedDraftService;
   /** The live stream each open composer holds on its session's shared draft. */
@@ -324,8 +320,6 @@ export interface MountedSubsystems {
   /** Renaming an agent: a new first name, claimed through the same allocator a start uses, and a new
    *  task title. */
   readonly sessionRename: SessionRenameSubsystem;
-  /** Pinning an agent to the top of the owner's sidebar, and unpinning it. */
-  readonly sessionPin: SessionPinSubsystem;
   /** Whether a ferret keeps an agenda, from its next launch (docs/agenda.md). */
   readonly sessionAgendaMode: SessionAgendaModeSubsystem;
   /** Where a ferret compacts its conversation, from its next launch (docs/compact-at.md). */
@@ -665,8 +659,6 @@ export function legacyModule(
               // Same shape and depth as the signal: a one-segment pattern whose final literal (`rename`) no other
               // route uses, so it can neither shadow nor be shadowed.
               ...sessionRenameRoutes(subsystems.sessionRename),
-              // Same shape and depth: the final literals `pin` and `unpin` belong to no other session route.
-              ...sessionPinRoutes(subsystems.sessionPin),
               // Same shape and depth as the rename: a one-segment pattern whose final literal (`hypermedia`) no
               // other route uses, so it can neither shadow nor be shadowed.
               ...sessionHypermediaRoutes(subsystems.sessionHypermedia),
@@ -702,7 +694,6 @@ export function legacyModule(
               ...agendaClearRoutes(subsystems.agendaClearer),
               ...agendaOpenRoutes(subsystems.agendaRollup),
               ...agendaMachineRoutes(subsystems.machineAgenda),
-              ...pinRoutes(subsystems.pins),
               ...sharedDraftRoutes(subsystems.sharedDrafts),
               ...legacyTaskRoutes(subsystems.legacyTasks),
               // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed
@@ -710,9 +701,6 @@ export function legacyModule(
               ...boardRoutes(subsystems.board),
               // `/v1/tidy/plan` is a fixed literal no other subsystem uses.
               ...tidyRoutes(subsystems.tidy),
-              // The agent's route is a fixed literal under `/v1/agent`, and a person's are under
-              // `/v1/sessions/:sessionId/surfaces`, which no other subsystem uses: none can shadow or be shadowed.
-              ...agentToolRoutes(subsystems.agentTools.service, subsystems.agentTools.identities),
               ...secureCopyRoutes(
                 subsystems.secureCopy.copies,
                 subsystems.secureCopy.rules,

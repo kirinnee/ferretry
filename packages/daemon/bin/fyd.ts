@@ -137,9 +137,7 @@ import {
 } from '../src/adapters/agenda/storage-harness-prompt.ts';
 import { StorageHomeSessions } from '../src/adapters/agenda/storage-home-sessions.ts';
 import { StorageSessionAgendaState } from '../src/adapters/agenda/storage-session-agenda-state.ts';
-import { FileAgentPinRepository } from '../src/adapters/agent-pins/index.ts';
 import { createSessionArchive } from '../src/adapters/session/archive/index.ts';
-import { StorageCredentialedSessions } from '../src/adapters/agent-tools/index.ts';
 import {
   BunSqliteAnalyticsStoreFactory,
   InlineAnalyticsPersister,
@@ -299,7 +297,6 @@ import {
   ManifestAccountInventory,
   MCP_OAUTH_SECRETS_DOCUMENT,
   MemberSweepTimer,
-  NodeAgentFilesystem,
   NodeBrowserLoginRuntime,
   NodeCatalog,
   NodeConversationFiles,
@@ -381,7 +378,7 @@ import {
   FileRoutingMigrationBackup,
   readSessionResult,
 } from '../src/adapters/pack/index.ts';
-import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
+import { FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
 import { releaseAcquired, terminationGate } from '../src/adapters/runtime/termination-gate.ts';
@@ -689,7 +686,6 @@ import {
 } from '../src/lib/imports/conversation-text.ts';
 import {
   AccountDefaults,
-  type AccountDirectory,
   type AccountInventoryPort,
   AccountModelConversationListPolicy,
   type AccountsBoot,
@@ -712,19 +708,10 @@ import {
   AgendaService,
   AgendaTurnNudge,
   AgendaWaker,
-  type AgentCopyPagesPort,
-  type AgentCopyPort,
-  AgentFiles,
-  type AgentInputPort,
   type AgentJob,
   type AgentJobControl,
   AgentJobStopper,
-  type AgentPhoneApprovalPort,
-  AgentPinService,
-  AgentPinSubsystem,
-  type AgentPlanPort,
   AgentSendFailureNotifier,
-  AgentToolService,
   ANALYTICS_BACKSTOP_MS,
   ANSWER_MAY_HAVE_LANDED,
   ANSWER_NOT_DELIVERED,
@@ -801,8 +788,7 @@ import {
   type ConversionCheckPort,
   type ConversionSummary as ConvertedConversationSummary,
   type CopyPageHost,
-  CredentialAgentIdentities,
-  CredentialDigestLocations,
+  type CredentialAgentIdentities,
   CredentialUsageSource,
   canServeModel,
   chooseRelayCarrierSources,
@@ -951,7 +937,6 @@ import {
   LOOPBACK_FIREWALL_CHECK_MS,
   LocalModelsService,
   LoginDirectory,
-  type LoginObserver,
   LoginRecipeService,
   LoginVault,
   type LogLevel,
@@ -1024,7 +1009,6 @@ import {
   PasskeysChangedSignal,
   PasteRuleService,
   PasteRuleStages,
-  PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
   PlanSignInGrants,
@@ -1228,7 +1212,6 @@ import {
   SkillsInventoryService,
   type SocketRoute,
   SpeedupsService,
-  STAGED_FILE_TTL_MS,
   STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
   type StackSamplerPort,
   StagedApiSurface,
@@ -1240,11 +1223,9 @@ import {
   StructuredQuestionRefused,
   StructuredQuestionService,
   type SttEnhancementSubsystem,
-  SurfaceControl,
   SystemCallsignIssuer,
   searchTranscript,
   searchTranscriptRecords,
-  secretsMatch,
   selectBrowserWorker,
   sendRecordFor,
   sendRecordView,
@@ -1292,7 +1273,6 @@ import {
   type TwoFactorSeedAgendaPort,
   type TwoFactorSeedCardPort,
   TwoFactorSeedStages,
-  type TypedIdentities,
   tailPage,
   tailTranscriptEvents,
   temporaryFilePath,
@@ -1376,6 +1356,7 @@ import { PerformanceProfiler, sampleIntervalMs } from '../src/lib/performance/pr
 import { NO_PERFORMANCE_PROBE, PerformanceRecorder } from '../src/lib/performance/recorder.ts';
 import { teeStackSampler } from '../src/lib/performance/sampler-tee.ts';
 import { type BuiltModule, lateBound, type ModuleLifecycle } from '../src/lib/runtime/modules.ts';
+import { agentIdentities, agentToolsModule } from './modules/agent-tools.ts';
 import { analyticsModule } from './modules/analytics.ts';
 import { cgroupsModule, createCgroupLaunchLimits } from './modules/cgroups.ts';
 import { inputRequestsModule } from './modules/input-requests.ts';
@@ -6393,121 +6374,12 @@ const terminalScheduler: TerminalStreamScheduler = {
  * `cwd`, and a session the index does not hold resolves to nothing rather than to the daemon's own
  * working directory.
  */
-/**
- * The agent tools: terminals and browser pages driven by name, over the SAME terminal and browser
- * subsystems the person's routes serve, so a shell an agent opens is the shell a person sees.
- *
- * The agent is identified by its session credential — hashed and matched against the live sessions'
- * stored hashes through the same directory the task boards authenticate with. Control changes are
- * published to the session's own journal, which `/v1/events` streams to every viewer.
- *
- * "What agents may control" is the machine settings' own port, read per call. Takeovers and hand-overs
- * are replayed from the same journal, so they outlive a restart.
- */
-function createAgentToolsSubsystem(input: {
-  readonly storage: DaemonStorage;
-  readonly terminals: TerminalSubsystem;
-  readonly browser: MountedSubsystems['browser'];
-  readonly audit: AuditLog;
-  readonly policy: AgentControlPolicy;
-  readonly input: AgentInputPort;
-  readonly phoneApprovals: AgentPhoneApprovalPort;
-  readonly scrub: (sessionId: string, text: string) => string;
-  readonly quarantinedUntil: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
-  readonly files: AgentFiles;
-  /** The vault redactor every operator read is scrubbed by; a page's text goes through it too. */
-  readonly redactor: Pick<SecretRedactor, 'batch'>;
-  readonly copy: AgentCopyPort;
-  readonly plans: AgentPlanPort;
-  readonly copyPages: AgentCopyPagesPort;
-  /** The account directory (never the vault): `account.hint` reads each sign-in's non-secret projection from it. */
-  readonly accounts: Pick<AccountDirectory, 'list'>;
-  /** The calling session's project, folder and the owner's defaults, which order `account.hint`'s "default". */
-  readonly signInChoice: SignInChoicePort;
-  /** A ferret's recipe proposals, and where its acts are told so a steered sign-in fact is not kept. */
-  readonly recipes: Pick<LoginRecipeService, 'propose' | 'scrubbedAccounts'>;
-  /** A ferret's suggestion of a standing rule: a card for the owner and nothing else. */
-  readonly ruleSuggestions: Pick<SignInRuleSuggestions, 'suggest'>;
-  readonly loginActs: Pick<LoginObserver, 'acted'>;
-  /** Who a page is signing in: what the agent typed into an identifier field, for the owner's card only. */
-  readonly typedIdentities: Pick<TypedIdentities, 'typed' | 'seen' | 'cleared' | 'forget'>;
-  /** Told where every page script runs, machine-wide: a standing rule pinned to that host stops filling. */
-  readonly scriptedOrigins?: { scriptedOn(host: string | undefined): void; running?(): () => void };
-}): MountedSubsystems['agentTools'] {
-  const clock = { now: () => Date.now() };
-  const control = new SurfaceControl(
-    {
-      publish: async (sessionId, type, data) => {
-        const id = tryParseSessionId(sessionId);
-        if (id !== undefined) await input.storage.append(id, type, data);
-      },
-      history: async sessionId => {
-        const id = tryParseSessionId(sessionId);
-        const events: { readonly type: string; readonly data: unknown }[] = [];
-        if (id === undefined || input.storage.findSession(id) === undefined) return events;
-        for (let after = 0; ; ) {
-          const page = await input.storage.replay(id, after, 10_000);
-          for (const event of page.events) if (event.type.startsWith('surface.')) events.push(event);
-          if (!page.hasMore || page.nextSequence === undefined) return events;
-          after = page.nextSequence;
-        }
-      },
-    },
-    clock,
-  );
-  return {
-    service: new AgentToolService({
-      terminals: input.terminals,
-      browser: input.browser,
-      control,
-      policy: input.policy,
-      files: input.files,
-      audit: input.audit,
-      input: input.input,
-      phoneApprovals: input.phoneApprovals,
-      scrub: input.scrub,
-      quarantinedUntil: input.quarantinedUntil,
-      copy: input.copy,
-      plans: input.plans,
-      copyPages: input.copyPages,
-      accounts: input.accounts,
-      signInChoice: input.signInChoice,
-      recipes: input.recipes,
-      ruleSuggestions: input.ruleSuggestions,
-      loginActs: input.loginActs,
-      typedIdentities: input.typedIdentities,
-      ...(input.scriptedOrigins === undefined ? {} : { scriptedOrigins: input.scriptedOrigins }),
-      redactor: input.redactor,
-      binaryName: CLIENT_NAME,
-      clock,
-      sleep: async milliseconds => await Bun.sleep(milliseconds),
-    }),
-    identities: agentIdentities(input.storage),
-  };
-}
-
 /** The folder a session works in, from its own document; nothing when the session is unknown. */
 async function sessionFolder(storage: DaemonStorage, sessionId: string): Promise<string | undefined> {
   const id = tryParseSessionId(sessionId);
   if (id === undefined || storage.findSession(id) === undefined) return undefined;
   const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
   return config.success ? config.data.cwd : undefined;
-}
-
-/** Who an agent is, from the session credential it presents — the one resolver every agent route uses. */
-function agentIdentities(storage: DaemonStorage): CredentialAgentIdentities {
-  return new CredentialAgentIdentities(
-    new StorageCredentialedSessions({
-      sessionIds: () => storage.listSessions().map(session => session.id),
-      readConfig: async id => await storage.readConfig(id as SessionId),
-      readState: async id => await storage.readState(id as SessionId),
-    }),
-    capability => createHash('sha256').update(capability, 'utf8').digest('hex'),
-    secretsMatch,
-    new CredentialDigestLocations(),
-    // Every config this daemon writes (a rotation or a new session included) moves it; see CredentialAgentIdentities.
-    () => String(storage.configWrites()),
-  );
 }
 
 /**
@@ -12479,57 +12351,50 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sends,
       );
       // Built before the mounts so the Warden can read whether a ferret handed a surface to the owner.
-      const agentToolsMounted = createAgentToolsSubsystem({
-        storage,
-        terminals: terminalSubsystem,
-        browser: browserHost,
-        audit: auditLog,
-        policy: agentControl,
-        input: inputRequestService,
-        phoneApprovals,
-        scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
-        quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
-        copy: {
-          capture: async (sessionId, request, context) => await secureCopies.capture(sessionId, request, context),
-          list: sessionId => secureCopies.list(sessionId),
-          discard: (sessionId, name) => secureCopies.discard(sessionId, name),
+      const pinnedSessionsLink = lateBound<SessionDirectorySubsystem>();
+      const agentTools = agentToolsModule.build(
+        {
+          paths,
+          stateFiles,
+          storage,
+          clock,
+          clientName: CLIENT_NAME,
+          terminals: terminalSubsystem,
+          browser: browserHost,
+          audit: auditLog,
+          policy: agentControl,
+          input: inputRequestService,
+          phoneApprovals,
+          scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
+          quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
+          copy: {
+            capture: async (sessionId, request, context) => await secureCopies.capture(sessionId, request, context),
+            list: sessionId => secureCopies.list(sessionId),
+            discard: (sessionId, name) => secureCopies.discard(sessionId, name),
+          },
+          plans: {
+            propose: async (sessionId, call) => await copyPlans.propose(sessionId, call),
+          },
+          copyPages: copyPageRecords,
+          accounts: accountDirectory,
+          signInChoice,
+          recipes: loginRecipes,
+          ruleSuggestions: signInRuleSuggestions,
+          loginActs: loginObserver,
+          typedIdentities,
+          // Every page script, in any session, taints its page's host for the owner's standing rules (R3c §7.3).
+          scriptedOrigins: signInRuleGrants,
+          folderOf: async sessionId => await sessionFolder(storage, sessionId),
+          attachments: attachmentStore,
+          stateHomeKeys: stateHomeKeys(paths),
+          activities,
+          pinnedSessions: pinnedSessionsLink,
+          redactor: secretRedactor,
         },
-        plans: {
-          propose: async (sessionId, call) => await copyPlans.propose(sessionId, call),
-        },
-        copyPages: copyPageRecords,
-        accounts: accountDirectory,
-        signInChoice,
-        recipes: loginRecipes,
-        ruleSuggestions: signInRuleSuggestions,
-        loginActs: loginObserver,
-        typedIdentities,
-        // Every page script, in any session, taints its page's host for the owner's standing rules (R3c §7.3).
-        scriptedOrigins: signInRuleGrants,
-        files: (() => {
-          const agentFiles = new AgentFiles({
-            fs: new NodeAgentFilesystem(),
-            folderOf: async sessionId => await sessionFolder(storage, sessionId),
-            readAttachment: async (sessionId, attachmentId) => {
-              const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
-              return { filename: attachment.filename, bytes };
-            },
-            uploadDirectory: join(paths.temporary, 'browser-upload'),
-            // Every file tool stays out of these however a path reaches them (docs/agent-tools.md#files).
-            stateHomes: [paths.home, paths.state, paths.config],
-            // Its key files and folders by identity too, so a bind mount of one of them alone is still refused.
-            pinned: stateHomeKeys(paths),
-            token: () => crypto.randomUUID().replaceAll('-', ''),
-            now: () => Date.now(),
-          });
-          // Upload copies outlive their call by the staging time; swept at boot and on a timer, not only by the next upload.
-          const sweep = asActivity(activities, 'browser-upload sweep', async () => await agentFiles.sweep());
-          setInterval(sweep, STAGED_FILE_TTL_MS).unref();
-          setTimeout(sweep, 30_000).unref();
-          return agentFiles;
-        })(),
-        redactor: secretRedactor,
-      });
+        seamsOf.agentTools(world),
+        lifecycle,
+      );
+      const agentPins = agentTools.provides.agentPins;
       const sharedDraftService = new SharedDraftService(
         new AgendaDraftSessions(new FilePinSessionDirectory(paths, stateFiles), agendaBoards),
         new FileSharedDraftRepository(paths, stateFiles, new KeyedSerialExecutor()),
@@ -12544,12 +12409,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         { next: () => crypto.randomUUID() },
       );
       sharedDraftsHolder.service = sharedDraftService;
-      // The owner's pins live with the daemon of the machine that owns the ferret; the list carries them to every device.
-      const agentPins = new AgentPinService(
-        new FileAgentPinRepository(paths, stateFiles, async id => await storage.retainSession(parseSessionId(id))),
-        clock,
-        new KeyedSerialExecutor(),
-      );
       const pinnedSessions = withPinned(
         withRevive(
           withContext(
@@ -12574,6 +12433,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ),
         agentPins,
       );
+      pinnedSessionsLink.bind(pinnedSessions);
       // Finished autonomous sessions leave the live set (docs/session-archive.md). The rule reads the pins, the board's
       // cards and each session's agenda for what keeps one; the timer and the boot pass are armed where the housekeeping
       // lane is (`subsystems.sessionArchive.run`).
@@ -12812,15 +12672,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         agendaClearer: new AgendaAgentClearer(new StorageAgentSessions(storage), agendaBoards, agenda),
         agendaRollup: new AgendaRollup(agendaBoards, () => storage.listSessions().map(session => session.id)),
         machineAgenda: machineAgendaService,
-        pins: new PinService(
-          new FilePinSessionDirectory(paths, stateFiles),
-          // Its own queue: a pin mutation must not serialize behind storage-wide or session work.
-          new FilePinRepository(paths, stateFiles, new KeyedSerialExecutor(), clock),
-          clock,
-          // A pin id is a protocol UUID, so it is minted as one rather than derived from a counter the
-          // next process would restart.
-          { next: () => crypto.randomUUID() },
-        ),
         // The owner's unsent composer, live across their devices. Its own write queue for the same reason
         // pins have one, and its own timer: a draft is written a second after it last changed.
         sharedDrafts: sharedDraftService,
@@ -12832,7 +12683,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock: { nowMs: () => Date.now() },
         },
         sessions: pinnedSessions,
-        sessionPin: new AgentPinSubsystem(pinnedSessions, agentPins),
         // A name in any `:sessionId` is resolved over the same candidates the send and signal domains read,
         // so a route, the attribution on a message and a declared wait agree on which agent a name means.
         sessionAddresses: {
@@ -13080,7 +12930,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           state: () => browserService.overview(),
           firewall: loopbackFirewall,
         },
-        agentTools: agentToolsMounted,
+        agentTools: agentTools.provides,
         configFiles: createConfigFilesSubsystem({
           activities,
           service: configFiles,
@@ -13170,7 +13020,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                   planAwaitingOwner: id => copyPlans.awaitingOwner(id),
                   heldSecrets: id => secureCopies.heldCount(id),
                   surfaceAsked: async (id, surface) =>
-                    (await agentToolsMounted.service.controlView(id, surface)).asked.length > 0,
+                    (await agentTools.provides.service.controlView(id, surface)).asked.length > 0,
                   state: async id => await storage.readState(parseSessionId(id)),
                 },
                 sessionId,
@@ -13751,6 +13601,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           voice,
           workSearch: workSearchModuleBuilt,
           inputRequests,
+          agentTools,
         },
       };
     },

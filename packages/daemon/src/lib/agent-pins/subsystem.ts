@@ -11,7 +11,7 @@ import { AgentPinError } from './types.ts';
  */
 export class AgentPinSubsystem {
   constructor(
-    private readonly reader: SessionDirectorySubsystem,
+    private readonly reader: Pick<SessionDirectorySubsystem, 'get'>,
     private readonly pins: AgentPinService,
   ) {}
 

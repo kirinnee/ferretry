@@ -4,6 +4,7 @@ import type { LearningSubsystem, LimitsService, ManagedWorktreeService, RenderSe
 import type { SttEnhancementSubsystem } from '../../src/lib/runtime/mounts/stt.ts';
 import type { WorkSearchService } from '../../src/lib/work-search/index.ts';
 import type { AnalyticsJobs, AnalyticsProvides } from './analytics.ts';
+import type { AgentToolsProvides } from './agent-tools.ts';
 import type { InputRequestsProvides } from './input-requests.ts';
 import type { LearningSeams } from './learning.ts';
 import type { UpdateJobs, UpdateProvides } from './update.ts';
@@ -21,6 +22,8 @@ import type { VoiceSeams } from './voice.ts';
 type SeamReaders = Readonly<Record<string, (world: DaemonWorld) => unknown>>;
 
 export const seamsOf = {
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the file tools and the pin lists are built directly; the terminals, the browser and the ports to other modules are needs). */
+  agentTools: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the analytics store is opened by `start()`, a need). */
   analytics: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the measured host is a `buildWorld` seam, a need). */
@@ -46,6 +49,7 @@ export const seamsOf = {
  * and `jobs`. Deleted in the same tidy-up PR as {@link seamsOf}.
  */
 export interface ModuleHandles {
+  readonly agentTools: BuiltModule<AgentToolsProvides>;
   readonly analytics: BuiltModule<AnalyticsProvides, AnalyticsJobs>;
   readonly cgroups: BuiltModule<LimitsService>;
   readonly inputRequests: BuiltModule<InputRequestsProvides>;

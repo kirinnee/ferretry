@@ -49,7 +49,6 @@ import {
   NO_HELD_REPLIES,
   nameSubsystem,
   permissionSubsystem,
-  pinService,
   recommendSubsystem,
   secretSubsystem,
   sessionDirectory,
@@ -365,7 +364,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
     agendaDelivered: async () => 0,
     enrolledDevices: async () => 0,
   },
-  pins: pinService([]),
   sharedDrafts: sharedDraftService(['s1']),
   sharedDraftStream: {
     presence: new SharedDraftPresence(),
@@ -447,14 +445,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
   sessionSignal: new FakeSessionSignal(),
   sessionRename: {
     rename: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-  },
-  sessionPin: {
-    pin: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    unpin: async () => {
       throw new Error('not exercised by the surface inventory');
     },
   },

@@ -24,7 +24,11 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { auditActorOf } from '../../audit/policy.ts';
 import type { AuditSink } from '../../audit/types.ts';
+import type { PinService } from '../../pins/index.ts';
 import { decideTerminalOpener } from '../../terminal/ownership.ts';
+import type { ModuleContribution } from '../modules.ts';
+import { pinRoutes } from './pins.ts';
+import { type SessionPinSubsystem, sessionPinRoutes } from './session-pin.ts';
 
 /**
  * THE AGENT TOOLS, OVER HTTP — terminals and browser pages driven by name.
@@ -363,4 +367,21 @@ export function agentToolRoutes(service: AgentToolService, identities: AgentIden
       handle: async context => jsonResponse(await service.controlView(sessionOf(context), 'browser')),
     },
   ];
+}
+
+/**
+ * What the agent-tools module adds to the daemon: the agent's tool route and the person's surface-control routes, the
+ * notes on a session's pin board, and pinning a ferret to the sidebar. It has no audit rule (the agent-tools service
+ * writes the security log itself) and claims no protocol feature.
+ *
+ * Every path is a literal no other subsystem uses (`/v1/agent/tools`) or sits under `/v1/sessions/:sessionId` ending in
+ * `surfaces`, `pins`, `pin` or `unpin`, so none can shadow or be shadowed.
+ */
+export function agentToolsContribution(
+  service: AgentToolService,
+  identities: AgentIdentityResolver,
+  pins: PinService,
+  sessionPin: SessionPinSubsystem,
+): ModuleContribution {
+  return { routes: [...agentToolRoutes(service, identities), ...pinRoutes(pins), ...sessionPinRoutes(sessionPin)] };
 }

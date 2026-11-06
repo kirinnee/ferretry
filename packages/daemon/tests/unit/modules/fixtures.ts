@@ -1,4 +1,5 @@
 import type { BuiltModule } from '../../../src/lib/runtime/modules.ts';
+import { builtAgentTools } from './agent-tools/fixture.ts';
 import { builtAnalytics } from './analytics/fixture.ts';
 import { builtCgroups } from './cgroups/fixture.ts';
 import { builtInputRequests } from './input-requests/fixture.ts';
@@ -26,4 +27,5 @@ export const builtModules = (): readonly BuiltModule<unknown, object>[] => [
   builtVoice(),
   builtWorkSearch(),
   builtInputRequests(),
+  builtAgentTools(),
 ];
