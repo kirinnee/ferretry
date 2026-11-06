@@ -8,6 +8,7 @@ import {
   activeScheduler,
   CGROUP_COMMAND_TIMEOUT_CODE,
   CgroupFleetMemory,
+  CgroupServiceWeights,
   DEFAULT_CGROUP_COMMAND_TIMEOUT_MS,
   deviceOfPath,
   FileLegacyCgroupDocuments,
@@ -498,6 +499,100 @@ describe('reading the fleet slice', () => {
     // Act + Assert
     should(await new CgroupFleetMemory(host).read()).equal(undefined);
     should(await new CgroupFleetMemory(host).largest('x.scope')).deepEqual([]);
+  });
+});
+
+describe('reading the daemon and voice CPU weights', () => {
+  const MANAGER = '/user.slice/user-1000.slice/user@1000.service';
+  const OWN = `${MANAGER}/app.slice/fyd.service`;
+  const hostOf = (ownCgroup?: string) => ({
+    ...unmeasuredHostFacts(),
+    platform: 'linux',
+    ...(ownCgroup === undefined ? {} : { ownCgroup }),
+  });
+
+  async function tree(): Promise<{ readonly root: string; readonly voice: string }> {
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-weights-'));
+    await mkdir(join(root, OWN), { recursive: true });
+    await writeFile(join(root, OWN, 'cpu.weight'), '1000\n');
+    return { root, voice: join(root, MANAGER, 'ferretry_voice.slice') };
+  }
+
+  it('should read the weight of the daemon’s own cgroup, not a constant', async () => {
+    // Arrange
+    const { root } = await tree();
+
+    // Act
+    const actual = await new CgroupServiceWeights(hostOf(OWN), root, 'ferretry_voice.slice').read();
+
+    // Assert
+    should(actual).deepEqual({ daemon: 1000, voiceState: 'not-running' });
+  });
+
+  it('should read the voice slice weight while a worker scope is alive in it', async () => {
+    // Arrange
+    const { root, voice } = await tree();
+    await mkdir(join(voice, 'ferretry-voice-1.scope'), { recursive: true });
+    await writeFile(join(voice, 'cpu.weight'), '200\n');
+
+    // Act
+    const actual = await new CgroupServiceWeights(hostOf(OWN), root, 'ferretry_voice.slice').read();
+
+    // Assert
+    should(actual).deepEqual({ daemon: 1000, voice: 200, voiceState: 'running' });
+  });
+
+  it('should call a voice slice with no worker not running, whatever weight it still shows', async () => {
+    // Arrange
+    const { root, voice } = await tree();
+    await mkdir(voice, { recursive: true });
+    await writeFile(join(voice, 'cpu.weight'), '200\n');
+
+    // Act
+    const actual = await new CgroupServiceWeights(hostOf(OWN), root, 'ferretry_voice.slice').read();
+
+    // Assert
+    should(actual).deepEqual({ daemon: 1000, voiceState: 'not-running' });
+  });
+
+  it('should answer unknown, never "not running", when the voice slice exists but cannot be listed', async () => {
+    // Arrange — a slice that cannot be read as a directory (ENOTDIR here; EACCES or EIO on a host): a reading
+    // failure says nothing about whether the worker runs. A file stands in because CI may run as root.
+    const { root, voice } = await tree();
+    await mkdir(join(root, MANAGER), { recursive: true });
+    await writeFile(voice, 'not a directory\n');
+
+    // Act
+    const actual = await new CgroupServiceWeights(hostOf(OWN), root, 'ferretry_voice.slice').read();
+
+    // Assert
+    should(actual).deepEqual({ daemon: 1000, voiceState: 'unknown' });
+  });
+
+  it('should leave a weight out, not guess it, when its file is unreadable or malformed', async () => {
+    // Arrange
+    const { root, voice } = await tree();
+    await writeFile(join(root, OWN, 'cpu.weight'), 'banana\n');
+    await mkdir(join(voice, 'ferretry-voice-1.scope'), { recursive: true });
+
+    // Act
+    const actual = await new CgroupServiceWeights(hostOf(OWN), root, 'ferretry_voice.slice').read();
+
+    // Assert
+    should(actual).deepEqual({ voiceState: 'running' });
+  });
+
+  it('should answer unknown when the daemon is not under a user manager or has no cgroup', async () => {
+    // Arrange
+    const { root } = await tree();
+
+    // Act
+    const system = await new CgroupServiceWeights(hostOf('/system.slice/fyd.service'), root).read();
+    const none = await new CgroupServiceWeights(hostOf(), root).read();
+
+    // Assert
+    should(system.voiceState).equal('unknown');
+    should(none).deepEqual({ voiceState: 'unknown' });
   });
 });
 

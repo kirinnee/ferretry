@@ -35,7 +35,7 @@ daemon is never launched through the wrapper.
 
 | Where           | Setting         | Default                          |
 | --------------- | --------------- | -------------------------------- |
-| the fleet slice | `CPUWeight`     | 50 (daemon 100, voice 200)       |
+| the fleet slice | `CPUWeight`     | 50 (voice 200; daemon: its unit) |
 |                 | `MemoryHigh`    | budget − 4 GiB (slows)           |
 |                 | `MemoryMax`     | budget − 2 GiB (kills inside)    |
 |                 | `MemorySwapMax` | 10 % of the budget               |
@@ -215,6 +215,11 @@ CPU weights compare **siblings**. Under the user's manager the siblings are `app
 fleet slice (50) and the voice slice (200, `docs/design/voice-modes.md` §2.5), so when the machine is busy the
 daemon gets twice a busy fleet's share and voice more than either. The daemon's own unit adds `CPUWeight=200`,
 which only orders it against the other services inside `app.slice`.
+
+**`fy daemon status` and the app's Limits panel print what the kernel holds, not these defaults.** The daemon's
+weight is read from its own cgroup's `cpu.weight` and the voice worker's from `<product>_voice.slice`, counted only
+while a worker scope is alive in it (otherwise "not running; gets 200 when it starts"). A file that cannot be read
+is "unknown", and macOS prints neither. So `systemctl --user set-property` or an edited unit shows up as what it is.
 
 The slice names carry **no dash** on purpose: systemd reads a dash in a slice name as hierarchy
 (`systemd.slice(5)`), so `<product>-fleet.slice` would have sat inside a `<product>.slice` — a second root-level

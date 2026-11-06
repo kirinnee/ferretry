@@ -117,8 +117,10 @@ export const DEFAULT_LIMITS_CONFIG: LimitsConfig = {};
 
 // ── The numbers ──────────────────────────────────────────────────────────────────────────────────
 
-/** The CPU weights this product assigns. The daemon's own is 100 (the systemd default). */
-export const DAEMON_CPU_WEIGHT = 100;
+/**
+ * The CPU weights this product assigns. The voice slice's is what it will be given when it starts; the
+ * daemon's own is NOT a constant here — its unit sets it, so the view reads it back from the kernel.
+ */
 export const VOICE_CPU_WEIGHT = 200;
 export const DEFAULT_FLEET_CPU_WEIGHT = 50;
 export const DEFAULT_FERRET_CPU_WEIGHT = 100;
@@ -399,8 +401,12 @@ export const LimitsViewSchema = z.object({
   configured: z
     .object({ fleet: FleetLimitsViewFields.required(), perFerret: FerretLimitsViewFields.required() })
     .optional(),
-  daemonCpuWeight: PositiveIntegerSchema,
-  voiceCpuWeight: PositiveIntegerSchema,
+  /** The CPU weight the kernel holds for the daemon's own cgroup; absent when it could not be read. */
+  daemonCpuWeight: PositiveIntegerSchema.optional(),
+  /** The voice slice's weight as the kernel holds it; absent unless the voice worker is running and readable. */
+  voiceCpuWeight: PositiveIntegerSchema.optional(),
+  /** Whether the voice worker's slice is live (so `voiceCpuWeight` is applied); absent where there are no cgroups. */
+  voiceState: z.enum(['running', 'not-running', 'unknown']).optional(),
   disk: z.object({
     ionice: z.boolean(),
     scheduler: z.string().optional(),

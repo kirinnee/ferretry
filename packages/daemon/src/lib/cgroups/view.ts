@@ -8,7 +8,6 @@
  * Pure: no IO, no clock, no globals.
  */
 import {
-  DAEMON_CPU_WEIGHT,
   GIBIBYTE,
   type LimitsConfig,
   type LimitsDiskEffect,
@@ -18,7 +17,7 @@ import {
 } from '@ferretry/protocol';
 import type { EnforcementState } from './enforcement.ts';
 import { ownerStep } from './owner-step.ts';
-import type { AppliedCaps, CgroupHostFacts, DiskSchedulerReading } from './ports.ts';
+import type { AppliedCaps, CgroupHostFacts, DiskSchedulerReading, ServiceWeights } from './ports.ts';
 import type { MemoryWatchState } from './watch.ts';
 
 /** `40.8 GiB`, `48 GiB`, `512 MiB`. */
@@ -58,6 +57,8 @@ export interface LimitsViewInput {
   /** The latest launch that could not be limited, if no later one could. */
   readonly launchFailure?: string;
   readonly disk: DiskSchedulerReading;
+  /** The daemon's and the voice worker's CPU weights as the kernel holds them (Linux). */
+  readonly services: ServiceWeights;
   readonly live: MemoryWatchState;
   readonly file: string;
   /** This user's id, for the one-time owner step. */
@@ -66,6 +67,15 @@ export interface LimitsViewInput {
   readonly warnings: readonly string[];
   /** `2026-11-05T23:04:00Z` → `23:04`, in the machine’s own time. */
   readonly clock: (iso: string) => string;
+}
+
+/** What the kernel holds for the daemon and the voice worker; a worker that is not running has nothing applied. */
+function servicesText(services: ServiceWeights): string {
+  const voice =
+    services.voiceState === 'not-running'
+      ? `not running; gets ${VOICE_CPU_WEIGHT} when it starts`
+      : (services.voice ?? 'unknown');
+  return `daemon ${services.daemon ?? 'unknown'}, voice ${voice}`;
 }
 
 const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`;
@@ -162,7 +172,7 @@ export function buildLimitsView(input: LimitsViewInput): LimitsView {
     const notYet =
       appliedFleet === undefined ? 'configured, not yet applied (the first ferret you start puts it in force): ' : '';
     lines.push(
-      `${notYet}ferrets: memory ${memory(fleetShown.memoryHigh)} soft / ${memory(fleetShown.memoryMax)} hard of a ${formatBytes(host.memoryCeilingBytes)} user budget · CPU weight ${fleetShown.cpuWeight ?? 'unknown'} (daemon ${DAEMON_CPU_WEIGHT}, voice ${VOICE_CPU_WEIGHT}) · disk priority: ${diskText}`,
+      `${notYet}ferrets: memory ${memory(fleetShown.memoryHigh)} soft / ${memory(fleetShown.memoryMax)} hard of a ${formatBytes(host.memoryCeilingBytes)} user budget · CPU weight ${fleetShown.cpuWeight ?? 'unknown'} (${servicesText(input.services)}) · disk priority: ${diskText}`,
       `each ferret: memory ${memory(ferretMemoryHigh)} soft / ${memory(ferretMemoryMax)} hard · up to ${ferretTasks === undefined ? 'unknown' : (ferretTasks ?? 'any number of')} processes${
         runningFerrets.length === 0 ? ' (set for ferrets you start; none is running under limits yet)' : ''
       }`,
@@ -280,8 +290,10 @@ export function buildLimitsView(input: LimitsViewInput): LimitsView {
         cpuPercent: resolved.perFerret.cpuPercent,
       },
     },
-    daemonCpuWeight: DAEMON_CPU_WEIGHT,
-    voiceCpuWeight: VOICE_CPU_WEIGHT,
+    // Applied values only, like the fleet's: omitted where the kernel was not asked or could not say.
+    ...(kind === 'cgroups' && input.services.daemon !== undefined ? { daemonCpuWeight: input.services.daemon } : {}),
+    ...(kind === 'cgroups' && input.services.voice !== undefined ? { voiceCpuWeight: input.services.voice } : {}),
+    ...(kind === 'cgroups' ? { voiceState: input.services.voiceState } : {}),
     disk: {
       ionice: resolved.ionice,
       ...(input.disk.scheduler === undefined ? {} : { scheduler: input.disk.scheduler }),

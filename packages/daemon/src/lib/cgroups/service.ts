@@ -8,7 +8,13 @@
  */
 import type { LimitsConfig, LimitsView } from '@ferretry/protocol';
 import { failureText } from './apply.ts';
-import type { CgroupHostFacts, CgroupPlacementPort, DiskSchedulerPort } from './ports.ts';
+import type {
+  CgroupHostFacts,
+  CgroupPlacementPort,
+  DiskSchedulerPort,
+  ServiceWeights,
+  ServiceWeightsPort,
+} from './ports.ts';
 import type { EnforcementRuntime } from './runtime.ts';
 import { FLEET_SLICE, placedUnderSlice } from './scope.ts';
 import { buildLimitsView } from './view.ts';
@@ -19,6 +25,7 @@ export interface LimitsServicePorts {
   readonly host: CgroupHostFacts;
   readonly enforcement: EnforcementRuntime;
   readonly disk: DiskSchedulerPort;
+  readonly services: ServiceWeightsPort;
   readonly watcher: FleetMemoryWatcher;
   readonly placements: CgroupPlacementPort;
   readonly daemonPid: number;
@@ -32,9 +39,10 @@ export class LimitsService {
   constructor(private readonly ports: LimitsServicePorts) {}
 
   async view(): Promise<LimitsView> {
-    const [config, disk, live, warnings] = await Promise.all([
+    const [config, disk, services, live, warnings] = await Promise.all([
       this.ports.limits(),
       this.ports.disk.read().catch(() => ({})),
+      this.ports.services.read().catch((): ServiceWeights => ({ voiceState: 'unknown' })),
       this.ports.watcher.state(),
       this.daemonWarnings(),
     ]);
@@ -45,6 +53,7 @@ export class LimitsService {
       enforcement: this.ports.enforcement.last(),
       ...(launchFailure === undefined ? {} : { launchFailure }),
       disk,
+      services,
       live,
       file: this.ports.file,
       uid: this.ports.uid,

@@ -6,4 +6,5 @@ export * from './legacy-documents.ts';
 export * from './pane-session-memory.ts';
 export * from './proc-placements.ts';
 export * from './registered-pane-ledger.ts';
+export * from './service-weights.ts';
 export * from './spawn-cgroup-commands.ts';

@@ -41,6 +41,9 @@ import { productName } from '../version.ts';
 /** The aggregate every managed agent shares. */
 export const FLEET_SLICE = `${productName.replaceAll('-', '_')}_fleet.slice`;
 
+/** The speech worker's slice, a sibling of the fleet's (docs/design/voice-modes.md §2.5). */
+export const VOICE_SLICE = `${productName.replaceAll('-', '_')}_voice.slice`;
+
 /** A shared allowance for the agent Chrome and its worker, below the fleet ceiling. */
 export const BROWSER_SLICE = `${FLEET_SLICE.slice(0, -6)}-browser.slice`;
 
