@@ -325,7 +325,7 @@ kept exactly, including where there is none (the deadline timers are only `unref
 there is written down and fixed in its own PR, never during the move. The P5 boot trace records these
 starts and the immediate sweep, so a move that shifts them fails.
 
-The kernel also keeps `api/`, `core/`, `runtime/`, `performance/`, `legacy-wire/`, health and doctor,
+The kernel also keeps `api/`, `core/`, `runtime/`, `performance/`, health and doctor,
 and the shared stores (`paths`, `stateFiles`, the config store, clocks). The shared stores move to a
 `kernel.ts` beside `fyd.ts`.
 

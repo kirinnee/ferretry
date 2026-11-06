@@ -25,8 +25,6 @@ nobody's turn. The summary is the whole notification; `--body` is the longer rea
 - Progress and finishing are never notices. A ferret that is only waiting, or has just finished, tells nobody.
 - `fy attention notify` is the same command under its old name (deprecated, like the rest of `fy attention`).
 - A notice's summary cannot be exactly `agenda`: `fy notify agenda` is the mode switch below.
-- The legacy `POST /v1/sessions/:id/notify` route raises the same notice, as the daemon's own act when the
-  caller is a person.
 
 Every ferret is told this rule, whatever its mode (`NOTIFY_INSTRUCTION` in `@ferretry/fleet`, quoted
 verbatim; `fy` is the binary name):
@@ -397,7 +395,7 @@ went idle), which are what the list shows beside the badge.
   change. It re-reads the board under one lock per session, so an out-of-order notice can never show an
   answered item as open.
 - Notices are not counted: a notice moves the Inbox, not the "needs you" mark.
-- Every board change also journals `agenda.changed` (`attention.changed` before `agenda.wire.1`). The fleet feed
+- Every board change also journals `agenda.changed` (`attention.changed` in older releases). The fleet feed
   refetches on any event that is not `surface.*`, so lists update
   without polling.
 - On start, the daemon reconciles every session once, in the background.
@@ -502,7 +500,7 @@ recorded push errored or reached no device, plus a `notification log` note for s
 | A sign-in to approve on the phone                    | daemon `PhoneApprovalService`               | **One push** at the raise and one per new number read (at most four), high inside the caps.                                        |
 | An item is created, edited, surfaced or answered     | daemon                                      | **Never pushed.** Inbox badge only. (The per-turn grouped push, the surfaced push and the more-info push are retired.)             |
 | A pushed item is handled, rests, sleeps or is opened | daemon `AgendaAlertClearer`                 | **One clear** per push: its line comes down on every device, content-free (see When an alert is cleared).                          |
-| A notice without `--ping`                            | `fy notify`, legacy `POST …/notify`         | **Never pushed.** Inbox badge only.                                                                                                |
+| A notice without `--ping`                            | `fy notify`                                 | **Never pushed.** Inbox badge only.                                                                                                |
 | Enrolment confirmation                               | daemon `PushService.register`               | Kept. One push, only to the browser that just enrolled.                                                                            |
 | A new device was paired                              | daemon audit log                            | Kept. This is a security alert.                                                                                                    |
 | A harness parks on its own prompt                    | daemon `HarnessPromptAgenda`                | **An item** like any other: it buzzes through a stop, not by itself.                                                               |
