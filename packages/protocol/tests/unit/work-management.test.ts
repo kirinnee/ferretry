@@ -2,8 +2,19 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import * as agenda from '../../src/lib/agenda.ts';
 import * as pins from '../../src/lib/pins.ts';
+import * as tasks from '../../src/lib/tasks.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
+
+const taskMessage = { text: 'Build it', source: 'message-1' };
+
+const taskCases: SchemaCase[] = [
+  { name: 'task kind', schema: tasks.TaskKindSchema, value: 'feature' },
+  { name: 'task id', schema: tasks.TaskIdSchema, value: 'F1' },
+  { name: 'task title', schema: tasks.TaskTitleSchema, value: 'Build typed protocol' },
+  { name: 'workflow', schema: tasks.TaskWorkflowSchema, value: 'quick' },
+  { name: 'task message', schema: tasks.TaskMessageSchema, value: taskMessage },
+];
 
 const permissionAsk = { kind: 'permission' };
 const agendaItem = {
@@ -429,6 +440,17 @@ const pinCases: SchemaCase[] = [
   { name: 'pin action', schema: pins.PinActionRequestSchema, value: { action: 'add', kind: 'note', text: 'Note' } },
   { name: 'pin error', schema: pins.PinErrorCodeSchema, value: 'invalid' },
 ];
+
+describe('task schemas', () => {
+  it('should round-trip every public task schema', () => {
+    // Arrange
+    const cases = taskCases;
+
+    // Act + Assert
+    assertRoundTrips(cases);
+    assertCoversEverySchema(tasks, cases);
+  });
+});
 
 describe('attention schemas', () => {
   it('should round-trip every public attention schema', () => {

@@ -22,7 +22,7 @@ const BoardSwitchEntrySchema = z.strictObject({
 
 export const BoardSwitchDocumentSchema = z.strictObject({
   v: z.literal(1),
-  /** When the one-time pass ran: its marker. */
+  /** A timestamp the document keeps: set at the first switch write on a home that had none. */
   migratedAt: InstantSchema,
   boards: z.record(z.string(), BoardSwitchEntrySchema),
 });

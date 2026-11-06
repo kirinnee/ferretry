@@ -13,9 +13,7 @@
  *   paired daemon, so it is not on the wire at all.
  * - **History is append-only and gap-free**, and a move back or a reopen always says why.
  *
- * Names the v1 per-session store (`tasks.ts`) already exports carry a `Board` prefix here; U18 deletes v1
- * and drops it. The kind, title rule and workflow names are v1's own schemas, reused, because they are
- * the same facts.
+ * `tasks.ts` holds the shared task primitives the board uses: the kind, id, title rule, workflow and message schemas.
  */
 import { z } from 'zod';
 import { AgendaIdSchema, unnestBullets } from './agenda.ts';

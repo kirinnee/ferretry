@@ -191,8 +191,7 @@ const authorityOf = (actor: LaneActor): RelocationAuthority =>
 export const LANE_CARD_WITHDRAWN = {
   replaced: 'A newer proposal replaced this one; its own card is on the agenda.',
   accepted: 'Accepted in the Board lane editor.',
-  dropped:
-    'The lanes changed since this was proposed (the owner edited them, or Ferretry updated them when it started), so this proposal is gone.',
+  dropped: 'The lanes changed since this was proposed (the owner edited them), so this proposal is gone.',
 } as const;
 
 const defaultLaneSet = (projectId: BoardProjectId): LaneSet | null =>
