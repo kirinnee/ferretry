@@ -799,17 +799,47 @@ pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the 
 - **Café/TV** — see above.
 - **No screen yet.** The Live bar, the countdown and the loop that uses these events come in later slices.
 
+## On my machine: the speech worker — plumbing only, no engine yet
+
+The daemon has a hidden `voice-worker` child entry and one lazy worker host. Recognition runs only
+in that child, with typed audio over advanced IPC; the daemon never decodes. This slice ships no
+speech model, native runtime, download or browser stream route. The shipped recognizer answers
+`voice_not_installed`; Install and the real engine come in separate slices (D1/D2).
+
+There are at most two streams per machine and one per device, sharing one FIFO decode queue.
+Unprocessed audio is limited to two seconds per stream, and a final decode must answer within five
+seconds, including queue time. The worker exits after ten minutes without a stream. A crash fails
+its streams; the next use starts a fresh child after the previous child has exited.
+
+The thread budget is one quarter of the machine's cores, rounded down and clamped to 1–4. Linux with
+cgroup v2 and a working user manager gets a sibling `<product>-voice.slice`, with CPU weight 200
+against the fleet's default 100 (D3: voice gets priority under load). Its worker scope caps CPU at
+that thread budget. Memory is capped at the larger of 1.5 GB and 1.25 times the combined declared
+peak resident memory of the loaded models, so heavier choices can declare their needs.
+Only the active set loads: at most one batch and one streaming recognizer. Loading requires their
+combined model bytes plus 1 GiB of available host memory. A switch checks the new set's headroom
+first and refuses with `voice_no_memory` if it cannot fit; an accepted switch unloads the old set
+before loading the replacement. Active streams must end before switching.
+
+Other hosts, or a refused scope launch, run at the daemon's priority with an RSS watchdog using the
+same memory ceiling. This is **not hard-capped**; the reason is retained in worker status.
+`fyd --check` prints a voice line: engine not installed and hard-capped yes/no with the reason.
+An idle worker reports no active cap; placement is verified when a stream first starts it.
+
+Failures are explicit: `voice_busy` (admission), `voice_no_memory` (load headroom),
+`engine_behind` (audio backlog), `engine_timeout` (deadline), `worker_crashed` (including a memory
+kill, with its reason), `worker_protocol` (invalid IPC), or `voice_cancelled` (closed stream).
+There is no fallback to device recognition.
+
 ## Not built yet
 
 - **Live voice** (listen, notice the pause, send after a visible countdown, read the reply aloud):
   only its end-of-turn detector exists so far — see [Pause detection](#pause-detection-the-end-of-a-spoken-turn).
   There is no Live button, bar or loop yet.
-- **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):
-  downloaded once to the daemon, usable by every paired device, audio crossing only the end-to-end
-  channel to your own machine. It needs a native sherpa-onnx addon inside the compiled `fyd` binary (per
-  platform, and inside the Nix build's pinned dependency hash), a 460 MB archive download and
-  extraction on the daemon, an audio route plus its PWA dial and a `grants` capability for it. That is
-  its own change, not part of this one.
+- **Speech recognition on your machine:** the process plumbing above exists; the downloaded,
+  pinned runtime and model, Install, the stream route and device controls are separate slices of
+  [the voice modes plan](design/voice-modes.md). D1 chooses Parakeet v3 int8 by default, a streaming
+  model for streaming dictation, and a machine model chooser. D2 downloads on Install.
 - ~~A machine-wide default chosen during onboarding~~ — done: New machine setup's Voice step renders
   `VoiceEngineChoice` and saves the choice as `voice.yaml`'s `defaultEngine`; a device that has not picked an
   engine dictates with it until it picks its own. Settings › Dictation still shows the device's own choice

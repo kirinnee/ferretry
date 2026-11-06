@@ -34,6 +34,7 @@ export interface RunOverrides {
  * to answer, so the caller must build one; nothing they do writes to it.
  */
 export type ArgumentAnswer =
+  | { readonly kind: 'voice-worker' }
   | { readonly kind: 'boot'; readonly overrides: RunOverrides }
   | { readonly kind: 'check'; readonly overrides: RunOverrides }
   | { readonly kind: 'print-config'; readonly overrides: RunOverrides }
@@ -136,6 +137,7 @@ const QUERY_MODES = { '--print-config': 'print-config', '--check': 'check' } as 
 export function answerArguments(argv: readonly string[], usage: DaemonUsage): ArgumentAnswer {
   if (argv.length === 0) return { kind: 'boot', overrides: {} };
   const [first] = argv;
+  if (first === 'voice-worker' && argv.length === 1) return { kind: 'voice-worker' };
   if (first === '--version' || first === '-v')
     return argv.length === 1
       ? { kind: 'print', text: usage.version, exitCode: 0 }
