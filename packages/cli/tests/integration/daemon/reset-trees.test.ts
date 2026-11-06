@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { FileResetTrees } from '../../../src/adapters/daemon/reset-trees.ts';
-import { FileRetiredArtifacts } from '../../../src/adapters/daemon/retired-artifacts.ts';
 
 /**
  * The trees a reset destroys, against a real filesystem.
@@ -61,7 +60,7 @@ async function installation(root: string): Promise<{ home: string; artifacts: st
 afterEach(async () => {
   for (const root of roots) {
     // The fixtures seal directories read-only, so the tidy-up needs the same unsealing the subject does.
-    await new FileRetiredArtifacts().retire(root);
+    await new FileResetTrees().remove(root).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
   roots.clear();
@@ -247,8 +246,7 @@ describe('removing the trees a reset destroys', () => {
 
   it('should surface a removal it cannot complete, rather than swallowing it as a value', async () => {
     // Arrange — the tree is unsealable but its PARENT is not writable, so the final unlink is refused.
-    // This is the opposite contract from the retired-artifact port next door: tidying may fail silently,
-    // a reset may not, because somebody has already been told their data is gone.
+    // A reset may not fail silently, because somebody has already been told their data is gone.
     const root = await createTemporaryRoot();
     const home = join(root, 'sealed', '.ferretry');
     await mkdir(home, { recursive: true });

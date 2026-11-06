@@ -9,12 +9,9 @@ function errorCode(error: unknown): string | undefined {
 /**
  * The two trees a reset destroys, measured and then removed.
  *
- * **EVERY FAILURE THROWS**, which is the opposite of the retired-artifact port sitting next to it and
- * is the whole reason both exist. Retiring an artifact an earlier release left is tidying: it may never
- * fail a lifecycle verb, so it reports its problems as values. A reset has already told somebody
- * exactly what it was going to remove and has already stopped their daemon — a removal that quietly
- * did not happen leaves them believing they are on a clean slate when they are on the half-state this
- * verb exists to stop people reaching by hand.
+ * **EVERY FAILURE THROWS.** A reset has already told somebody exactly what it was going to remove and
+ * has already stopped their daemon — a removal that quietly did not happen leaves them believing they
+ * are on a clean slate when they are on the half-state this verb exists to stop people reaching by hand.
  *
  * **A ROOT THAT IS ITSELF A SYMBOLIC LINK IS REFUSED.** Removing the link would unlink one entry and
  * leave every byte of the tree behind, while this reported a clean slate — a lie with no error in it.

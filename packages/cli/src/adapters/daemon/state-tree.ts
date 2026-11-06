@@ -2,12 +2,12 @@ import { chmod, lstat, readdir, readlink } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 
 /**
- * ONE WALK OVER A TREE THIS CLIENT OWNS, shared by the two verbs that remove one.
+ * ONE WALK OVER A TREE THIS CLIENT OWNS, used to measure it and to remove it.
  *
- * `retire` clears the snapshot store an earlier release left; `reset` clears the whole installation.
- * They differ in what a failure means and in whether they remove at all — never in how a tree is
- * counted, whether a symbolic link is followed, or how a sealed directory is opened. Those three are
- * exactly the properties that are dangerous to get wrong twice, so they are written once.
+ * `reset` clears the whole installation, and measures it first. Measuring and removing differ in
+ * whether they modify the tree — never in how it is counted, whether a symbolic link is followed, or
+ * how a sealed directory is opened. Those three are exactly the properties that are dangerous to get
+ * wrong twice, so they are written once.
  *
  * A SYMBOLIC LINK IS COUNTED AND NEVER FOLLOWED. `lstat` is what makes that true rather than a
  * comment: the garbage-collection roots are links into the Nix store, and `FY_HOME` may hold one
@@ -30,8 +30,8 @@ export interface TreeWalkOptions {
   /**
    * Force write permission back onto each directory before its children are read.
    *
-   * The retired snapshot store sealed every snapshot directory to mode 0555 when its build finished,
-   * and an entry inside a directory can only be unlinked by somebody who may write to that directory —
+   * A store an earlier release left can be sealed, every directory in it at mode 0555, and
+   * an entry inside a directory can only be unlinked by somebody who may write to that directory —
    * so an ordinary recursive remove fails with EACCES on the first one it reaches. Off for a
    * measurement, which must not modify the tree it is only looking at.
    */
@@ -41,8 +41,8 @@ export interface TreeWalkOptions {
 /**
  * Measure `root`, and open it for removal when asked to.
  *
- * `root` itself is assumed to exist; the caller has already decided what an absent tree means, and the
- * two callers mean different things by it.
+ * `root` must be a present directory, not a symbolic link: the caller has already checked, so an absent
+ * root is not handled here.
  */
 export async function walkTree(root: string, options: TreeWalkOptions): Promise<TreeWalk> {
   const walk: TreeWalk = { files: 0, bytes: 0, escapingLinks: [] };

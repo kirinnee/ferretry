@@ -285,8 +285,7 @@ export function renderDaemonStatusJson(view: DaemonStatusView, extra: Readonly<R
 /**
  * Reclaimed disk, in the unit a person recognises. One decimal is as much precision as this means.
  *
- * Shared by the two verbs that report disk they took back — retiring the snapshot store an earlier
- * release left, and resetting the installation outright — so the two cannot disagree about what a
+ * Shared by the verbs that report disk they took back, so they cannot disagree about what a
  * megabyte is while sitting one screen apart.
  */
 export function megabytes(bytes: number): string {

@@ -25,7 +25,6 @@ import {
   FakePrompt,
   FakeResetInventory,
   FakeResetTrees,
-  FakeRetiredArtifacts,
   FakeSessionTerminals,
   FakeStateHomeClaim,
   FakeSupervisor,
@@ -49,7 +48,6 @@ interface Harness {
   readonly logs: FakeLogs;
   readonly clock: SteppingClock;
   readonly nix: FakeNixGcRoot;
-  readonly retired: FakeRetiredArtifacts;
   readonly lifecycle: FakeLifecycleLock;
   readonly resetTrees: FakeResetTrees;
   readonly prompt: FakePrompt;
@@ -68,7 +66,6 @@ function harness(options: {
   logs?: FakeLogs;
   step?: number;
   nix?: FakeNixGcRoot;
-  retired?: FakeRetiredArtifacts;
   lifecycle?: FakeLifecycleLock;
   resetTrees?: FakeResetTrees;
   inventory?: { readonly secrets: number; readonly devices: number } | undefined;
@@ -88,7 +85,6 @@ function harness(options: {
   const logs = options.logs ?? new FakeLogs();
   const clock = new SteppingClock(options.step ?? 100);
   const nix = options.nix ?? new FakeNixGcRoot();
-  const retired = options.retired ?? new FakeRetiredArtifacts();
   const lifecycle = options.lifecycle ?? new FakeLifecycleLock();
   const resetTrees = options.resetTrees ?? new FakeResetTrees();
   const prompt = options.prompt ?? new FakePrompt();
@@ -103,7 +99,6 @@ function harness(options: {
     nix,
     lifecycle,
     installedDaemon: () => installedDaemon(),
-    retired,
     resetTrees,
     // `in` rather than `??`: an explicit `undefined` is the meaningful case — a daemon that is up but
     // will not answer the inventory routes — so it must not fall back to the default counts.
@@ -128,7 +123,6 @@ function harness(options: {
     logs,
     clock,
     nix,
-    retired,
     lifecycle,
     resetTrees,
     prompt,
@@ -1685,125 +1679,6 @@ describe('nix garbage-collection root', () => {
 });
 
 /**
- * The daemon snapshot store an earlier release left behind, and why a lifecycle verb removes it.
- *
- * An upgraded host has roughly 100MB of copies of an executable it already has installed, plus one Nix
- * root per copy. Leaving it there means every operator carries that forever and finds a directory
- * nothing accounts for; telling them to remove it in release notes is an instruction almost nobody
- * follows. The cleanup runs, it says what it did, and it never fails the verb it is attached to.
- */
-describe('retired snapshot store', () => {
-  const ROOTS = layout().legacySnapshotGcRootDirectory;
-  const STORE = layout().legacySnapshotRoot;
-
-  /** A host that ran the release with the snapshot store: a populated store and one root per copy. */
-  function upgraded(options: Parameters<typeof harness>[0] = {}): ReturnType<typeof harness> {
-    const nix = options.nix ?? new FakeNixGcRoot();
-    nix.heldNames = [`sha256-${'a'.repeat(64)}`, `sha256-${'b'.repeat(64)}`];
-    const retired = options.retired ?? new FakeRetiredArtifacts();
-    retired.answers.set(ROOTS, { kind: 'removed', files: 2, bytes: 0 });
-    retired.answers.set(STORE, { kind: 'removed', files: 6, bytes: 104_857_600 });
-    return harness({ ...options, nix, retired });
-  }
-
-  it('should say nothing at all on a host that never had one', async () => {
-    // Arrange — the ordinary case, and the one that must not narrate. A fresh install has no store.
-    const subject = harness({ probes: [undefined, health()], serviceReports: [stoppedReport] });
-
-    // Act
-    await subject.controller.start();
-
-    // Assert — it still LOOKS, because an upgraded host is indistinguishable until it does.
-    should(subject.retired.retired).deepEqual([ROOTS, STORE]);
-    should(subject.out.text).equal('ok: fyd ready (pid 4242)');
-  });
-
-  it.each([
-    { verb: 'install' as const, options: { probes: [undefined, health()] } },
-    {
-      verb: 'start' as const,
-      options: { probes: [undefined, health()], serviceReports: [stoppedReport] as DaemonSupervisorReport[] },
-    },
-    {
-      verb: 'restart' as const,
-      options: {
-        probes: [health(), undefined, health()],
-        serviceReports: [runningReport, stoppedReport] as DaemonSupervisorReport[],
-      },
-    },
-    { verb: 'uninstall' as const, options: {} },
-  ])('should remove the store and its roots on $verb, and say how much came back', async ({ verb, options }) => {
-    // Arrange
-    const subject = upgraded(options);
-
-    // Act
-    await subject.controller[verb]();
-
-    // Assert — every per-snapshot root is released through the Nix port, both directories go, and the
-    // reclaimed disk is stated once rather than quietly deleted.
-    should(subject.nix.released.filter(path => path.startsWith(`${ROOTS}/`))).deepEqual([
-      `${ROOTS}/sha256-${'a'.repeat(64)}`,
-      `${ROOTS}/sha256-${'b'.repeat(64)}`,
-    ]);
-    should(subject.retired.retired).deepEqual([ROOTS, STORE]);
-    should(subject.out.text).containEql('removed the retired fyd snapshot store (8 files, 104.9MB)');
-    should(subject.out.text).containEql('runs the daemon installed on this host instead of a copy of it');
-  });
-
-  it('should remove it only after the definition no longer names anything inside it', async () => {
-    // Arrange — THE SAFETY ARGUMENT. An upgraded host's unit file still names an artifact inside the
-    // store, so a removal that ran first would leave a service that cannot launch. `start` rewrites
-    // the definition with the installed executable's absolute path, and only then is nothing pointing
-    // at the store.
-    const trail: string[] = [];
-    const retired = new FakeRetiredArtifacts();
-    const subject = upgraded({ probes: [undefined, health()], serviceReports: [stoppedReport], retired });
-    const start = subject.service.start.bind(subject.service);
-    subject.service.start = async executable => {
-      trail.push('start');
-      return await start(executable);
-    };
-    const retire = retired.retire.bind(retired);
-    retired.retire = async path => {
-      trail.push('retire');
-      return await retire(path);
-    };
-
-    // Act
-    await subject.controller.start();
-
-    // Assert
-    should(trail).deepEqual(['start', 'retire', 'retire']);
-  });
-
-  it('should leave the store alone when the start it was attached to failed', async () => {
-    // Arrange — the definition was rewritten but the daemon never served, so the operator may still
-    // need whatever is on this host. Tidying is not worth taking that away mid-incident.
-    const subject = upgraded({ probes: [undefined], serviceFallback: stoppedReport });
-
-    // Act + Assert
-    await should(subject.controller.start()).be.rejectedWith(DaemonStartupFailedError);
-    should(subject.retired.retired).be.empty();
-  });
-
-  it('should name what it could not remove instead of failing the verb', async () => {
-    // Arrange — reclaiming disk is tidying; the daemon in front of the operator is the work.
-    const retired = new FakeRetiredArtifacts();
-    retired.answers.set(STORE, { kind: 'failed', reason: 'EACCES' });
-    const subject = harness({ probes: [undefined, health()], serviceReports: [stoppedReport], retired });
-
-    // Act
-    await subject.controller.start();
-
-    // Assert
-    should(subject.out.text).containEql(`could not remove its retired snapshot store at ${STORE} (EACCES)`);
-    should(subject.out.text).containEql('safe to delete by hand');
-    should(subject.out.text).containEql('ok: fyd ready (pid 4242)');
-    should(subject.out.exitCode).be.undefined();
-  });
-});
-
-/**
  * Two `fy daemon` invocations are unrelated, so nothing in this object can order them.
  *
  * Each mutating verb holds the executable's garbage-collection root and then writes a service
@@ -1887,7 +1762,6 @@ describe('daemon lifecycle serialization', () => {
     // Act + Assert
     await should(subject.controller.start()).be.rejectedWith(/still holds/u);
     should(subject.service.calls).be.empty();
-    should(subject.retired.retired).be.empty();
     should(subject.nix.pinned).be.empty();
     should(subject.lifecycle.releasedPaths).be.empty();
   });
@@ -1926,7 +1800,6 @@ describe('daemon lifecycle serialization', () => {
     should(subject.lifecycle.requests.map(request => request.lockPath)).deepEqual(lockPaths);
     should(subject.lifecycle.releasedPaths).deepEqual([...acquired].reverse());
     should(subject.service.calls).be.empty();
-    should(subject.retired.retired).be.empty();
     should(subject.nix.pinned).be.empty();
   });
 
@@ -1986,7 +1859,6 @@ describe('daemon controller defaults', () => {
       nix: new FakeNixGcRoot(),
       lifecycle: new FakeLifecycleLock(),
       installedDaemon: () => installedDaemon(),
-      retired: new FakeRetiredArtifacts(),
       resetTrees: new FakeResetTrees(),
       resetInventory: new FakeResetInventory(undefined),
       sessionTerminals: new FakeSessionTerminals(),

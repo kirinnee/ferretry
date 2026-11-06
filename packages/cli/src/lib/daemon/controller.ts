@@ -29,11 +29,9 @@ import type {
   INixGcRootPort,
   IResetInventoryPort,
   IResetTreePort,
-  IRetiredArtifactPort,
   IServiceDefinitionSupervisor,
   ISessionTerminalServerPort,
   IStateHomeClaimPort,
-  RetiredArtifactOutcome,
 } from './ports.ts';
 import { launchdThrottled, livenessOf, servesOutsideSupervisor } from './probe.ts';
 import {
@@ -48,7 +46,6 @@ import {
 import {
   type DaemonStatusView,
   decideDaemonStatus,
-  megabytes,
   renderDaemonStatus,
   renderDaemonStatusJson,
   renderInstalled,
@@ -166,8 +163,6 @@ export interface DaemonControllerDeps {
    * unit file naming a path chosen by default.
    */
   readonly installedDaemon: () => InstalledDaemonBinary;
-  /** Removes CLI-owned artifact trees an earlier release wrote and this one no longer keeps. */
-  readonly retired: IRetiredArtifactPort;
   /** Measures and removes the two trees `reset` destroys. */
   readonly resetTrees: IResetTreePort;
   /** Counts what a reset destroys unrecoverably, from the daemon that still holds it. */
@@ -366,7 +361,6 @@ export class DaemonController {
     await this.#holdDaemonClosure(daemon.path);
     await this.#step(`Installing the ${this.#name} service`, () => service.install(daemon.path));
     const health = await this.#awaitReady(service, {});
-    await this.#retireLegacyArtifacts();
     this.deps.out.success(renderInstalled(this.#name, service.definitionPath, health.pid));
   }
 
@@ -383,7 +377,6 @@ export class DaemonController {
     // exactly as installed after this verb as it was before it. It is released when the installed
     // daemon stops being a store path, and named here because a held store path an operator cannot
     // account for is its own kind of surprise.
-    await this.#retireLegacyArtifacts();
     this.deps.out.success(
       `${this.#name} user service removed; the installed daemon's Nix closure stays held by ${this.deps.layout.nixGcRoot} so a later ${this.deps.clientName} daemon start still works`,
     );
@@ -419,7 +412,6 @@ export class DaemonController {
     await this.#holdDaemonClosure(daemon.path);
     const handle = await this.#step(`Starting ${this.#name}`, () => owner.start(daemon.path));
     const health = await this.#awaitReady(owner, handle);
-    await this.#retireLegacyArtifacts();
     this.deps.out.success(`${this.#name} ready (pid ${String(health.pid)})`);
   }
 
@@ -450,7 +442,6 @@ export class DaemonController {
     } finally {
       await marker?.clear();
     }
-    await this.#retireLegacyArtifacts();
     this.deps.out.success(`${this.#name} restarted (pid ${String(ready.pid)})`);
   }
 
@@ -850,52 +841,6 @@ export class DaemonController {
       `${this.#name} runs from the Nix store but its runtime closure could not be pinned against ` +
         `garbage collection (${failure}); a later nix-collect-garbage may remove ${storePath} and the ` +
         `service will not start — install with \`nix profile install\` to have Nix hold it instead`,
-    );
-  }
-
-  /**
-   * Remove the daemon snapshot store, and its roots, that an earlier release left on this host.
-   *
-   * **Only ever called after a verb has actually recorded or removed a service definition**, and that
-   * ordering is the whole safety argument. An upgraded host's unit file still names an artifact inside
-   * the store, so deleting the store first would leave a service that cannot launch. `install`,
-   * `start` and `restart` rewrite the definition with the installed executable's absolute path before
-   * they reach this, and `uninstall` has removed it; only then is nothing pointing at the store.
-   *
-   * It runs rather than telling somebody to run it because the store is roughly 100MB of copies of an
-   * executable that is already installed, it is ours, and an instruction in release notes is an
-   * instruction almost nobody follows. What it removed is said OUT LOUD, once, on the one invocation
-   * that does it — a machine quietly deleting 100MB and mentioning nothing is worse than the disk.
-   *
-   * NOTHING HERE MAY FAIL A VERB either. Reclaiming disk is tidying; the daemon is the work.
-   */
-  async #retireLegacyArtifacts(): Promise<void> {
-    const layout = this.deps.layout;
-    for (const root of await this.deps.nix.held(layout.legacySnapshotGcRootDirectory)) {
-      await this.deps.nix.release(root.path);
-    }
-    const attempts: ReadonlyArray<readonly [string, RetiredArtifactOutcome]> = [
-      [layout.legacySnapshotGcRootDirectory, await this.deps.retired.retire(layout.legacySnapshotGcRootDirectory)],
-      [layout.legacySnapshotRoot, await this.deps.retired.retire(layout.legacySnapshotRoot)],
-    ];
-    let files = 0;
-    let bytes = 0;
-    for (const [path, outcome] of attempts) {
-      if (outcome.kind === 'removed') {
-        files += outcome.files;
-        bytes += outcome.bytes;
-      }
-      if (outcome.kind === 'failed') {
-        this.deps.out.warn(
-          `${this.#name} could not remove its retired snapshot store at ${path} (${outcome.reason}); ` +
-            `nothing reads it any more, so it is safe to delete by hand`,
-        );
-      }
-    }
-    if (files === 0) return;
-    this.deps.out.warn(
-      `removed the retired ${this.#name} snapshot store (${String(files)} files, ${megabytes(bytes)}); ` +
-        `${this.#name} now runs the daemon installed on this host instead of a copy of it`,
     );
   }
 

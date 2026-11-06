@@ -280,18 +280,28 @@ fy daemon restart         # stops the stray, then systemd starts its own
 
 ### Upgrading from a release with the daemon snapshot store
 
-Earlier releases copied `fyd` into a content-addressed store under
-`$XDG_STATE_HOME/ferretry/daemon-snapshots/fyd` and launched the copy, with `fy daemon snapshot
-build|list|promote` to manage it. Every property that store added — content addressing, verification,
-immutability, an atomic pointer, rollback — is one `/nix/store` already provides for a Nix
-installation and one your package manager owns for every other, so it is gone, and so are those three
-verbs.
+Earlier releases kept a content-addressed copy of `fyd` under
+`$XDG_STATE_HOME/ferretry/daemon-snapshots/fyd` and launched the copy. Nothing reads it any more, and
+the `fy daemon snapshot …` verbs are gone: `fy` runs the daemon executable installed on the host.
 
-Nothing you have to do. The first `fy daemon install`, `start`, `restart` or `uninstall` after the
-upgrade records the installed executable's absolute path, and only then removes the store and its
-per-snapshot Nix roots — roughly 100MB on a host that used it. It says what it removed. If the removal
-fails it says that too, names the directory, and carries on: nothing reads it any more, so it is safe
-to delete by hand.
+If that directory is still there it is safe to delete by hand, but only once no service definition
+names it. First run `fy daemon install` or `fy daemon restart` with the new `fy` (either rewrites the
+systemd unit or launchd plist to the installed executable's absolute path), or `fy daemon uninstall`.
+`fy daemon start` is not enough: when the daemon is already running it returns without rewriting the
+definition.
+
+Then delete the snapshot store and its Nix GC roots (symlinks into `/nix/store` that keep the retired
+closures alive; `rm -rf` removes the links and never follows them). The store is sealed read-only, so
+make it writable first:
+
+```bash
+state="${XDG_STATE_HOME:-$HOME/.local/state}/ferretry"
+chmod -R u+w "$state/daemon-snapshots/fyd"
+rm -rf "$state/daemon-snapshots/fyd" "$state/nix/snapshots/fyd"
+```
+
+Keep `ferretry/nix/fyd` (the live GC root of the installed daemon) and the `.…lifecycle.lock` file
+in `daemon-snapshots/`: an older `fy` and this one use that file to exclude each other.
 
 ## GitHub release (one-line installer)
 
