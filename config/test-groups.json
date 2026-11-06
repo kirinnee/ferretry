@@ -21,13 +21,6 @@
   ],
   "int": [
     {
-      "name": "daemon-session-archive",
-      "prefixes": [
-        "packages/daemon/tests/integration/session/archive/",
-        "packages/daemon/tests/integration/session-archive-"
-      ]
-    },
-    {
       "name": "daemon-runtime",
       "prefixes": ["packages/daemon/tests/integration/runtime/"]
     },
