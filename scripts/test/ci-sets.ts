@@ -179,6 +179,21 @@ const prRunner = (name: string) =>
   evaluate(runsOnExpression(name), event('pull_request', 'synchronize', ['full-ci']), {}, {});
 assert.ok(prRunner('full-gates').includes('nscloud-ubuntu-24.04-amd64-4x8-with-cache'), 'Knip needs the 4x8');
 assert.ok(prRunner('compile').includes('nscloud-ubuntu-24.04-amd64-2x4-with-cache'), 'compile stays a 2x4');
+// SIT is steps of compile, not a job: it runs on the files compile wrote, after the manifest is written and
+// the upload steps, never a rebuild and never a download.
+assert.equal(ci.jobs.sit, undefined, 'SIT is a step of compile, not a job of its own');
+{
+  const stepNames = need(jobOf(ci, 'compile').steps, "'steps' of job 'compile'").map(step => step.name);
+  const at = (name: string) => {
+    const index = stepNames.indexOf(name);
+    assert.ok(index >= 0, `compile has no step '${name}'`);
+    return index;
+  };
+  assert.ok(at('List the binaries') < at('Upload binaries (retry)'), 'the manifest is written before the upload');
+  assert.ok(at('Upload binaries (retry)') < at('Check the binaries against their manifest'));
+  assert.ok(at('Check the binaries against their manifest') < at('Run SIT'), 'SIT runs on checked, shipped bytes');
+  assert.equal(stepNames.includes('Download compiled binaries'), false, 'SIT must not download the artifact again');
+}
 assert.equal(evaluate(runsOnExpression('full-gates'), event('push'), {}, {}), 'ubuntu-latest');
 assert.ok(
   jobOf(ci, 'full').permissions?.['pull-requests'] === 'read',

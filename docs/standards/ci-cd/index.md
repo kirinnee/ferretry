@@ -24,17 +24,17 @@ every subsequent push with that label runs it again, proving the exact head SHA.
 Adding any other label is a no-op and uses its own concurrency group, so it cannot
 cancel a running set.
 
-| Set / job                                                | PR runner           | Other events                          | Work                                                       |
-| -------------------------------------------------------- | ------------------- | ------------------------------------- | ---------------------------------------------------------- |
-| Quick Checks                                             | Namespace 8x16      | Namespace 4x8 on main; dispatch picks | units first, then format/gates/build; complete unit ledger |
-| Integration Tests                                        | Namespace 8x16      | Namespace 8x16                        | six isolated groups, then the integration ledger           |
-| Full Gates                                               | Namespace 4x8       | GitHub                                | both Knip checks and route agreement (Knip needs >4GB)     |
-| Compile Binaries                                         | Namespace 2x4       | GitHub                                | cross-compile and upload the binaries                      |
-| SIT, E2E shards                                          | Namespace 2x4       | GitHub                                | same binaries, journeys and advisory policy as before      |
-| PWA Settings / Gallery                                   | Namespace 2x4 / 4x8 | GitHub                                | existing geometry assertions and evidence                  |
-| Realworld Tests (advisory)                               | Namespace 8x16      | Namespace 8x16                        | machine budgets on a quiet dedicated VM                    |
-| Linux smoke and macOS jobs                               | GitHub              | GitHub                                | stock platform proofs; existing macOS policy               |
-| Full CI Pending, Full CI, PWA/E2E relevance, E2E summary | GitHub              | GitHub                                | seconds of API/shell work, no Nix                          |
+| Set / job                                                | PR runner           | Other events                          | Work                                                        |
+| -------------------------------------------------------- | ------------------- | ------------------------------------- | ----------------------------------------------------------- |
+| Quick Checks                                             | Namespace 8x16      | Namespace 4x8 on main; dispatch picks | units first, then format/gates/build; complete unit ledger  |
+| Integration Tests                                        | Namespace 8x16      | Namespace 8x16                        | six isolated groups, then the integration ledger            |
+| Full Gates                                               | Namespace 4x8       | GitHub                                | both Knip checks and route agreement (Knip needs >4GB)      |
+| Compile Binaries + SIT                                   | Namespace 2x4       | GitHub                                | cross-compile, upload the binaries, then SIT on those bytes |
+| E2E shards                                               | Namespace 2x4       | GitHub                                | journeys and advisory policy as before                      |
+| PWA Settings / Gallery                                   | Namespace 2x4 / 4x8 | GitHub                                | existing geometry assertions and evidence                   |
+| Realworld Tests (advisory)                               | Namespace 8x16      | Namespace 8x16                        | machine budgets on a quiet dedicated VM                     |
+| Linux smoke and macOS jobs                               | GitHub              | GitHub                                | stock platform proofs; existing macOS policy                |
+| Full CI Pending, Full CI, PWA/E2E relevance, E2E summary | GitHub              | GitHub                                | seconds of API/shell work, no Nix                           |
 
 The owner's **2026-11-06 direction (Go given)** supersedes the Oct 30 prohibition
 on processes inside a job for **Quick Checks and Integration Tests only**: consolidate
@@ -175,7 +175,7 @@ about **how a missing runner is read**, never about spending: every macOS job as
 | **Release tag** (`cd.yaml`) | red; nothing is published                                                          | re-queued up to 3 times, then red, saying the runner was unavailable                           |
 
 The Linux jobs are never softened: `Smoke linux-x64-baseline`, `Smoke linux-arm64`, `Unit`/`Integration`
-Tests and SIT stay required within every full set. The Linux leg of `Harness Contract`
+Tests and SIT (a step of `Compile Binaries + SIT`) stay required within every full set. The Linux leg of `Harness Contract`
 keeps its unmasked result inside the advisory Realworld workflow.
 
 - **Smoke is one reusable workflow, `smoke-darwin.yaml`.** `ci.yaml` (needs `compile`) and `cd.yaml`
@@ -258,8 +258,7 @@ waits on the entire CI workflow on `main`, where Quick and Full both always run.
 | `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                                                         |
 | `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                                                      |
 | `full-gates`     | Full Gates                           | both Knip checks and route agreement, serially (format runs in Quick only)                                                                          |
-| `compile`        | Compile Binaries                     | compile and upload manifest-checked binaries                                                                                                        |
-| `sit`            | SIT                                  | consume those binaries                                                                                                                              |
+| `compile`        | Compile Binaries + SIT               | compile, list and upload the binaries, then check `dist/bin` against its manifest and run SIT against those very files                              |
 | `smoke`          | Smoke linux-\*                       | both Linux targets                                                                                                                                  |
 | `smoke-darwin`   | Smoke darwin-arm64                   | reusable smoke and existing owner skip/advisory policy                                                                                              |
 | `pwa-relevance`  | PWA Relevance                        | does this pull request change anything the PWA browser gate reads (`pwa-relevance.sh`); GitHub, no Nix                                              |
@@ -324,14 +323,18 @@ Notable details:
   issue; the rerun's coverage is merged into the ledger before the 100% gate reads it. Any failure
   not on the list, or any error Bun reports outside a test, stays red. The rules are in
   [Testing](../testing/index.md#flaky-tests-and-the-quarantine).
-- **SIT runs against the artifact, not a rebuild.** `compile` uploads the binaries and `sit`
-  downloads them, which is what makes it a black-box test of the shipped thing.
-  `download-artifact` drops the executable bit; the scripts restore it.
+- **SIT runs against the artifact, not a rebuild.** SIT is the last steps of `compile`: it
+  runs `scripts/ci/test.sh sit` on `dist/bin` after the manifest is written, uploaded and checked
+  again, so it tests the very bytes that were uploaded as `cli-binaries` and never a rebuild — which
+  is what makes it a black-box test of the shipped thing. It was a job of its own (an instance, a
+  queue wait and a ~25-35 s artifact download for ~1-2 min of tests); folding it in removes all three. The cost is that
+  `smoke` and `smoke-darwin` (needs `compile`) now start after SIT passes, not beside it. The scripts
+  restore the executable bit the artifact download drops.
 - **A download is held to a manifest.** `actions/download-artifact` can stop part-way and still exit
   0 (actions/download-artifact#454): its log ends at `Starting download of artifact` with no digest
   line. That left `Smoke linux-x64-baseline` on `main` with no daemon in `dist/bin` while the other
   two smoke jobs took the same artifact whole. So `compile` writes `dist/bin/SHA256SUMS`
-  (`scripts/ci/binaries-manifest.sh write`), and `sit` and `smoke` take the binaries only through
+  (`scripts/ci/binaries-manifest.sh write`), and `smoke` takes the binaries only through
   `.github/actions/download-binaries`, which checks every file against it and, if one is short or
   missing, downloads once more into an empty directory with a `::warning::`. A second short download
   fails the step as an incomplete download, never as whatever ran next.
@@ -586,7 +589,7 @@ hung inside a test and held its runner for two hours, three runs in a row, befor
   `darwin-confinement` 20, `safari-sandbox-shell` 20, `report` 10, `changes` 5. A machine-dependent test
   that hangs is a red realworld job, never a held runner.
 - Every other job, sized at two to three times its p95 over the week to 2026-10-29: `CI` —
-  `quick` 20, `pwa-screenshot` 20, `pwa-relevance` 5, `full-gates` 15, `compile` 15, `sit` 10,
+  `quick` 20, `pwa-screenshot` 20, `pwa-relevance` 5, `full-gates` 15, `compile` (with SIT) 20,
   `smoke` 10, `full-pending` and `full` 5; E2E relevance and summary 5; `Harness Contract (latest)`
   20 and its report 10; `CD` `compile` 15, `goreleaser` 30 and `sign` 15; the darwin smoke
   (`smoke-darwin.yaml`) attempts 10 each, backoffs 5 and 8, verdict 5; `macOS Advisory` 5; `Deploy PWA to Pages` build 15, sign 10,
@@ -681,7 +684,7 @@ installer, and the in-repo Homebrew cask. See
 
 Every job that needs Nix calls `uses: ./.github/actions/install-nix` (with `shell: .#releaser` in
 `CD`), never `cachix/install-nix-action` directly. It is the one bespoke setup action (the other local
-action, `download-binaries`, is described under the `sit` job above), and it exists
+action, `download-binaries`, is described under the SIT bullet above), and it exists
 because the network failed whole jobs, including on `main`, where a red CI skips a release:
 
 - **The installer's download.** `cachix/install-nix-action` fetches its installer five times one
