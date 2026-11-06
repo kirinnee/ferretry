@@ -139,6 +139,29 @@ describe('mergeGateOf', () => {
     should(answer?.waits).eql([{ task: { id: 'F1' }, on: { id: 'F1', machineId: 'machine-2' }, until: 'released' }]);
   });
 
+  for (const order of ['F1 first', 'F2 first'] as const) {
+    it(`should count a helper of a card that shares its unit through another PR (${order})`, () => {
+      // Arrange — F1 links 42; F2 links 42 and 43 (one unit); F3 is F2's PR-free helper, waiting on F9.
+      const f1 = card({ id: 'F1', ...linking(prLink(42)) });
+      const f2 = card({ id: 'F2', ...linking(prLink(42), prLink(43)) });
+      const rest = [
+        card({ id: 'F9', laneId: 'implement' }),
+        card({ id: 'F3', parent: { id: 'F2' }, ...waitsOn('F9') }),
+      ];
+      const cards = order === 'F1 first' ? [f1, f2, ...rest] : [f2, f1, ...rest];
+
+      // Act
+      const answer = mergeGateOf('https://github.com/kirinnee/ferretry/pull/43', {
+        index: new BoardIndex(cards, MACHINE),
+        laneSets,
+        unreadable: [],
+      });
+
+      // Assert
+      should(answer?.waits).eql([{ task: { id: 'F3' }, on: { id: 'F9' }, until: 'shipped' }]);
+    });
+  }
+
   it('should name the cards it could not read', () => {
     should(gate([], ['F7'])?.unreadable).eql(['F7']);
   });

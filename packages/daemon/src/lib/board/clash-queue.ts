@@ -81,8 +81,8 @@ const inQueue = (card: BoardTask, laneSets: LaneSets): boolean => {
 };
 
 /** Whether the card's ferret already took this card out of its queue on purpose (`fy task undepend`). */
-const releasedOnPurpose = (card: BoardTask, other: TaskRef): boolean =>
-  card.history.some(event => event.type === 'undepended' && event.task.id === other.id);
+const releasedOnPurpose = (card: BoardTask, other: TaskRef, index: BoardIndex): boolean =>
+  card.history.some(event => event.type === 'undepended' && event.task.id === other.id && index.isLocal(event.task));
 
 const firstClash = (claimed: readonly string[], theirs: readonly string[]): Omit<Clash, 'task'> | undefined => {
   for (const ours of claimed) {
@@ -162,7 +162,7 @@ export const planClashes = (
     if (decided.has(target.id) || target.id === card.id || !inQueue(target, laneSets)) continue;
     decided.add(target.id);
     if (card.dependsOn.some(dependency => dependency.task.id === target.id && index.isLocal(dependency.task))) continue;
-    if (releasedOnPurpose(card, target)) continue;
+    if (releasedOnPurpose(card, target, index)) continue;
     const clash: Clash = {
       task: { id: target.id },
       ...(target.id === other.id ? {} : { via: { id: other.id } }),

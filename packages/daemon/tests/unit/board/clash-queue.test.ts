@@ -154,6 +154,30 @@ describe('planClashes', () => {
     should(result).eql({ waits: [], unqueued: [] });
   });
 
+  it("should not read removing another machine's card as removing the local card with the same id", () => {
+    // Arrange
+    const subject = card({
+      id: 'F3',
+      history: [
+        { seq: 1, at: NOW, actor: { kind: 'ferret', sessionId: 'lead' }, type: 'created', laneId: 'todo' },
+        {
+          seq: 2,
+          at: NOW,
+          actor: { kind: 'ferret', sessionId: 'lead' },
+          type: 'undepended',
+          task: { id: 'F2', machineId: 'machine-2' },
+          reason: 'that one is elsewhere',
+        },
+      ],
+    });
+
+    // Act
+    const result = plan(subject, ['x.ts'], [card({ id: 'F2', laneId: 'implement', files: ['x.ts'] })]);
+
+    // Assert
+    should(result.waits.map(wait => wait.task.id)).eql(['F2']);
+  });
+
   it('should report, not add, a clash whose dependency would close a cycle', () => {
     // Arrange
     const other = card({ id: 'F2', files: ['knip.json'], dependsOn: [{ task: { id: 'F1' }, until: 'shipped' }] });

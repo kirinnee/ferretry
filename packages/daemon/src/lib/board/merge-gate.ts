@@ -32,10 +32,13 @@ const sameRef = (index: BoardIndex, left: TaskRef, right: TaskRef): boolean =>
 /** The cards that ship in this PR (see the module doc), in store order. */
 const mergeUnit = (linksPr: (card: BoardTask) => boolean, index: BoardIndex): readonly BoardTask[] => {
   const live = index.cards.filter(card => card.dropped === null);
-  const linking = new Set(live.filter(linksPr).map(card => card.id));
-  if (linking.size === 0) return [];
+  const linking = live.filter(linksPr);
+  if (linking.length === 0) return [];
   const units = new ShippingUnits(index);
-  return live.filter(card => linking.has(card.id) || [...units.rides(card)].some(key => linking.has(key)));
+  // Unit KEYS, not card ids: a linking card may share its unit (and so its key) with a card that links another PR too.
+  const ids = new Set(linking.map(card => card.id));
+  const keys = new Set(linking.map(card => units.key(card)));
+  return live.filter(card => ids.has(card.id) || [...units.rides(card)].some(key => keys.has(key)));
 };
 
 /**
