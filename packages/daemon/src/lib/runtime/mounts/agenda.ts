@@ -15,6 +15,7 @@ import {
   DirectNotificationRequestSchema,
   DirectNotificationResponseSchema,
   legacyAgendaSnapshot,
+  isMachineAgendaId,
   MAX_AGENDA_SUBJECT_LENGTH,
   readsAgendaChannel,
   restoredLegacyAgendaReply,
@@ -117,6 +118,8 @@ function refusal(error: AgendaFailure): never {
 function pathSessionId(context: RouteContext): string {
   const decoded = decodeParameter(context.params.get('sessionId') ?? '');
   if (decoded === undefined) throw new ApiError(400, 'the session id in the path is not usable', 'invalid_session_id');
+  if (isMachineAgendaId(decoded))
+    throw new ApiError(404, 'the machine agenda is available only at /v1/machine/agenda', 'not-found');
   return decoded;
 }
 
@@ -440,7 +443,7 @@ export function agendaRoutes(
   const handleApply: ApiRoute['handle'] = async context =>
     await apply(agenda, notifications, replies, config, gates, context);
   const handleReplies: ApiRoute['handle'] = async context => await sendReplies(agenda, replies, context);
-  return [
+  const routes: readonly ApiRoute[] = [
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/agenda',
@@ -558,4 +561,18 @@ export function agendaRoutes(
       handle: async context => await notify(agenda, notifications, context),
     },
   ];
+  // Every session agenda route passes here, including future item reads. Refuse the reserved ledger before
+  // parsing a body or cursor, consulting gates, delivering replies, or touching any service.
+  const guarded = new Map<ApiRoute['handle'], ApiRoute['handle']>();
+  return routes.map(route => {
+    let handle = guarded.get(route.handle);
+    if (handle === undefined) {
+      handle = async context => {
+        pathSessionId(context);
+        return await route.handle(context);
+      };
+      guarded.set(route.handle, handle);
+    }
+    return { ...route, handle };
+  });
 }

@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { MACHINE_AGENDA_ID } from '@ferretry/protocol';
 import should from 'should';
 import type { z } from 'zod';
 import {
@@ -36,6 +37,28 @@ describe('attention routes', () => {
 });
 
 describe('protocol attention gateway', () => {
+  it('uses the owner machine route for machine reads and actions, in both wire spellings', async () => {
+    const calls: Call[] = [];
+    const gateway = new ProtocolAgendaGateway(fakeClient({ ...snapshot([]), sessionId: MACHINE_AGENDA_ID }, calls));
+    await gateway.snapshot(MACHINE_AGENDA_ID);
+    await gateway.apply(MACHINE_AGENDA_ID, { action: 'dismiss', id: 'A1' });
+    should(calls.map(call => call.path)).deepEqual(['/v1/machine/agenda', '/v1/machine/agenda']);
+    should(() => agendaBoardPath(MACHINE_AGENDA_ID)).throw(/use \/v1\/machine\/agenda/u);
+    should(() => legacyAttentionBoardPath(MACHINE_AGENDA_ID)).throw(/use \/v1\/machine\/agenda/u);
+    should(() => agendaRepliesPath(MACHINE_AGENDA_ID)).throw(/use \/v1\/machine\/agenda/u);
+    should(() => repliesPath(MACHINE_AGENDA_ID)).throw(/use \/v1\/machine\/agenda/u);
+    await should(gateway.sendReplies(MACHINE_AGENDA_ID)).be.rejectedWith(/has no replies/u);
+    should(calls).have.length(2);
+  });
+
+  it('tells a ferret to ask the owner for machine agenda access, without making a request', async () => {
+    const calls: Call[] = [];
+    const gateway = new ProtocolAgendaGateway(fakeClient(snapshot([]), calls), 's1');
+    await should(gateway.snapshot(MACHINE_AGENDA_ID)).be.rejectedWith(/the machine agenda is the owner's; ask them/u);
+    await should(gateway.apply(MACHINE_AGENDA_ID, { action: 'dismiss', id: 'A1' })).be.rejectedWith(/ask them/u);
+    await should(gateway.sendReplies(MACHINE_AGENDA_ID)).be.rejectedWith(/ask them/u);
+    should(calls).be.empty();
+  });
   it('should read the board with a plain GET', async () => {
     // Arrange
     const calls: Call[] = [];

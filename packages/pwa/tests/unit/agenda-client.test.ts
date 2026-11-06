@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AgendaResponse, DAEMON_FEATURES } from '@ferretry/protocol';
+import { type AgendaResponse, DAEMON_FEATURES, MACHINE_AGENDA_ID } from '@ferretry/protocol';
 import should from 'should';
 import {
   AGENDA_READS_PER_DAEMON,
@@ -67,6 +67,25 @@ const tick = async (): Promise<void> => {
 };
 
 describe('attention transport', () => {
+  it('refuses machine history, seen and replies without dialing a session alias', async () => {
+    const machine = daemonSessionScope(daemonA, MACHINE_AGENDA_ID);
+    let calls = 0;
+    const fetcher = async () => {
+      calls += 1;
+      return response({});
+    };
+    const operations = [
+      () => fetchAgendaVersions(daemonA, machine, 'A1', fetcher),
+      () => fetchAgendaVersion(daemonA, machine, 'A1', 1, fetcher),
+      () => fetchAgendaConversation(daemonA, machine, 'A1', {}, fetcher),
+      () => markAgendaVersionSeen(daemonA, machine, 'A1', 1, fetcher),
+      () => sendAgendaReplies(daemonA, machine, fetcher),
+      () => sendAgendaReplies(daemonA, machine, fetcher, 'agenda'),
+    ];
+    for (const operation of operations)
+      await should(operation()).be.rejectedWith(/unavailable on \/v1\/machine\/agenda/u);
+    should(calls).equal(0);
+  });
   it('should opt into the channel on Send now and retain its request identity', async () => {
     await sendAgendaReplies(daemonA, scopeA, async (_input, init) => {
       should(new Headers(init?.headers).get('x-fy-agenda-channel')).equal('1');
