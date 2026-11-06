@@ -81,6 +81,10 @@ async function changedLineAreas(sha: string): Promise<Set<string>> {
     } else if (line.startsWith('+') && !line.startsWith('+++')) touched.add(after[newLine++ - 1] ?? 'index');
     else if (line.startsWith('-') && !line.startsWith('---')) touched.add(before[oldLine++ - 1] ?? 'index');
   }
+  // `index` imports and spreads every area file, so a commit that adds the first entry of an area or removes
+  // the last one also edits `index`, even though no changed line lives there.
+  const present = (areas: readonly string[]) => [...new Set(areas.filter(area => area !== 'index'))].sort().join(' ');
+  if (present(before) !== present(after)) touched.add('index');
   return touched;
 }
 

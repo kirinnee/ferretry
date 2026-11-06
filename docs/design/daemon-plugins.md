@@ -38,7 +38,7 @@ runtime and nothing a user writes runs in the daemon. Third-party plugins are a 
 5. **Modelled effect on daemon composition:** of the 224 PR pairs that were open at the same time
    and both edited `fyd.ts` since 2026-11-01 00:00 UTC, **81–123 (36–55%) would no longer share a
    daemon composition file**. 75 of the 80 `knip.json` edits would not have been needed, and
-   `DAEMON_FEATURES` overlaps drop from 40 pairs to 12 (§7). These are exposure scenarios, not
+   `DAEMON_FEATURES` overlaps drop from 40 pairs to 17 (§7). These are exposure scenarios, not
    counted rebases.
 6. **Two owner decisions** are in §10. Each has my pick.
 
@@ -151,8 +151,8 @@ export interface BuiltModule<Provides, Jobs extends object = Record<never, never
 /**
  * A feature module.
  *  - `Seams`: the production adapters a test may replace. Until the tidy-up PR these are READ FROM
- *    TODAY'S `DaemonWorld` FIELDS by a per-module adapter (§6.1, P5), so `buildWorld(overrides)` keeps
- *    working unchanged.
+ *    EFFECTIVE `DaemonWorld` (overrides included) by a per-module adapter (§6.1, P5), so
+ *    `buildWorld(overrides)` keeps working.
  *  - `Needs`: the opened storage, the decided config and the `provides` of the modules it depends on.
  *  - `build` is always async and always awaited, so the wiring never reads `.provides` off a promise.
  */
@@ -225,12 +225,22 @@ export const learningModule: DaemonModule<void, LearningNeeds, LearningSubsystem
 ### 3.3 The host (`fyd.ts`)
 
 **Where the wiring lives during the migration.** Today `start()` calls `world.createSubsystems(...)`
-once (`fyd.ts:14810`), and a test replaces that factory to capture the exact analytics-ingestion
-instance that gets mounted (`boot-lifecycle.test.ts:4475-4487`). So until wave F, the module wiring
-below lives **inside the default `createSubsystems` factory** that `buildWorld` returns. It is still
-invoked once, from the same place, and an override still replaces the whole set with the same instance
-identity. P5 adds the `ModuleLifecycle` to that factory's parameters. Wave F moves the wiring into
-`start()` and moves that test onto a module seam in the same PR.
+once (`fyd.ts:14810`) and uses the result synchronously. Its declared return is `MountedSubsystems`
+(`:2157`). A test replaces that factory to capture the exact analytics-ingestion instance that gets
+mounted (`boot-lifecycle.test.ts:4475-4487`, used at `:4594`). So until wave F, the module wiring below
+lives **inside the default `createSubsystems` factory**, still invoked once from the same place. P5
+changes that factory's contract once, on purpose, with the test that wraps it:
+
+- **Input.** It gains the **effective world** (the one `start()` was given, overrides included), so
+  `seamsOf.<id>(world)` reads overridden seams, plus the `ModuleLifecycle`.
+- **Output.** It becomes `Promise<{ readonly mounted: MountedSubsystems; readonly modules: ModuleHandles }>`.
+  `ModuleHandles` is a typed record of the extracted modules' `BuiltModule`s. It starts empty in P5 and
+  each extraction PR adds its own field, so `start()` can hand them to `composeModules` and arm their
+  jobs. It is deleted in wave F, when the wiring itself moves into `start()`.
+- **The one call is awaited** in `start()`. In the same P5 PR, the capture test's wrapper becomes
+  `async`, awaits the original factory, and types its capture as
+  `Awaited<ReturnType<DaemonWorld['createSubsystems']>>['mounted']`. P5's trace and identity checks
+  prove the wrapped and unwrapped boots still mount the same instances.
 
 ```ts
 // inside the default createSubsystems factory (moves to start() in wave F)
@@ -241,8 +251,11 @@ const agenda = await agendaModule.build({ storage, board: board.provides /* … 
 agendaLink.bind(agenda.provides);
 // … one line per module
 
+return { mounted: legacyMounted, modules: { configFiles, board, agenda /* … */ } };
+
 // back in start(), where the routes are mounted today
-const host = composeModules(base, [pairing, access, configFiles, board, agenda /* … */]);
+const { mounted, modules } = await world.createSubsystems(world, lifecycle /* , today's arguments */);
+const host = composeModules(base, [legacyModule(mounted), modules.configFiles, modules.board, modules.agenda /* … */]);
 const dispatcher = host.dispatcher;
 // The direct carrier needs the HTTP dispatcher AND the socket dispatcher it is part of, so it stays a
 // kernel step after composition, exactly as today (fyd.ts:14952-14963): its socket route is appended
@@ -292,6 +305,21 @@ today, with the same signature, await and release rule (§3.1). Adding a new job
 That is deliberate: when a job runs relative to the others is a fact about the whole boot, not about
 one feature.
 
+**Named exception: jobs that start while their subsystem is built.** Some jobs are not armed in
+`start()` today; they start inside `createSubsystems`, at a specific point in construction:
+
+- the agenda resurfacer and waker (`fyd.ts:11334-11351`) and its deadline sweep interval and timeout
+  (`:11364-11365`);
+- the catalog member, link-reconcile and link-refresh sweeps (`:14177-14182`, `:14243-14256`).
+  `MemberSweepTimer.start()` runs one sweep at once before setting its interval
+  (`adapters/catalog-members/sweep-timer.ts:25-31`).
+
+These **stay where they are**: inside their module's `build`, at the same point in that module's
+construction. Each extraction PR keeps the module's construction order. Today's cleanup behaviour is
+kept exactly, including where there is none (the deadline timers are only `unref`ed). A gap found
+there is written down and fixed in its own PR, never during the move. The P5 boot trace records these
+starts and the immediate sweep, so a move that shifts them fails.
+
 The kernel also keeps `api/`, `core/`, `runtime/`, `performance/`, `legacy-wire/`, health and doctor,
 and the shared stores (`paths`, `stateFiles`, the config store, clocks). The shared stores move to a
 `kernel.ts` beside `fyd.ts`.
@@ -340,7 +368,8 @@ change is how the file is laid out:
 
 - **One file per area.** It splits into `packages/protocol/src/lib/daemon-features/<area>.ts`, each
   exporting one `as const` fragment. `daemon-features/index.ts` spreads them back into the same object
-  with the same keys and values, and keeps `NOT_YET_REPORTED` and the helpers.
+  with the same keys and values, and keeps `NOT_YET_REPORTED` and the helpers. Adding the first feature of a new area (or removing an
+  area's last) also edits `index`, to import or drop that file; §7 counts that.
 - **A guard test.** A protocol unit test fails if two fragments use the same key or the same wire
   value.
 - **A completeness test on the daemon side.** The union of the modules' `contributes.features` must
@@ -451,13 +480,13 @@ while moving is written down and fixed in its own PR.
 
 ### 6.1 Prerequisites
 
-| PR  | What                                                                                                                                                                                                                                                                                                             | Proof                                                                                                                                                                                                                                                                                                                                                                                                    |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P1  | Knip globs (§4.4)                                                                                                                                                                                                                                                                                                | `knip` and `knip --production` give the same report before and after                                                                                                                                                                                                                                                                                                                                     |
-| P2  | Split `DAEMON_FEATURES` by area; duplicate test; health feature snapshot for privileged-loopback and remote requests (§4.3)                                                                                                                                                                                      | `daemonFeatureList()` deep-equals its old value; both health snapshots pass before and after                                                                                                                                                                                                                                                                                                             |
-| P3  | `src/lib/runtime/modules.ts` types and `composeModules`. `mountedDaemonRoutes`/`mountedSocketRoutes` become `composeModules` over one temporary `legacy` module that returns today's lists. Add the **dispatch-equivalence test**. Switch the inventory comparison and `ROUTE_CALLERS` to canonical order (§4.2) | The `METHOD path minimum caller` table, both socket tables and the carrier route (present, refused and absent), in canonical order, stays **byte-identical**; the dispatch test passes; the only `surface.test.ts` change is the canonical-order comparison                                                                                                                                              |
-| P4  | Per-module contract fragments and `contributes.audit` (§4.2). The fragments start empty; `legacy` holds every line and rule                                                                                                                                                                                      | `surface.test.ts` passes; the composed lists and rule sets deep-equal today's                                                                                                                                                                                                                                                                                                                            |
-| P5  | **The migration bridge.** `ModuleLifecycle` over today's `cleanups`; `LateBound<T>`; a per-module `seamsOf.<id>(world)` that reads today's `DaemonWorld` fields; the lifecycle parameter on the default `createSubsystems`; a **boot and shutdown trace test**                                                   | The trace test records each boot step, job arm and cleanup, in order, for four cases: a clean boot and stop, a stop during boot, a boot that throws after storage opens, and a stop that lands before the warden's late `arm()` result. It also pins each late-bound port's early-read answer (§3.1) and that a `createSubsystems` override still sees the mounted instances. It passes before and after |
+| PR  | What                                                                                                                                                                                                                                                                                                             | Proof                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | Knip globs (§4.4)                                                                                                                                                                                                                                                                                                | `knip` and `knip --production` give the same report before and after                                                                                                                                                                                                                                                                                                                                                                                                          |
+| P2  | Split `DAEMON_FEATURES` by area; duplicate test; health feature snapshot for privileged-loopback and remote requests (§4.3)                                                                                                                                                                                      | `daemonFeatureList()` deep-equals its old value; both health snapshots pass before and after                                                                                                                                                                                                                                                                                                                                                                                  |
+| P3  | `src/lib/runtime/modules.ts` types and `composeModules`. `mountedDaemonRoutes`/`mountedSocketRoutes` become `composeModules` over one temporary `legacy` module that returns today's lists. Add the **dispatch-equivalence test**. Switch the inventory comparison and `ROUTE_CALLERS` to canonical order (§4.2) | The `METHOD path minimum caller` table, both socket tables and the carrier route (present, refused and absent), in canonical order, stays **byte-identical**; the dispatch test passes; the only `surface.test.ts` change is the canonical-order comparison                                                                                                                                                                                                                   |
+| P4  | Per-module contract fragments and `contributes.audit` (§4.2). The fragments start empty; `legacy` holds every line and rule                                                                                                                                                                                      | `surface.test.ts` passes; the composed lists and rule sets deep-equal today's                                                                                                                                                                                                                                                                                                                                                                                                 |
+| P5  | **The migration bridge.** `ModuleLifecycle` over today's `cleanups`; `LateBound<T>`; a per-module `seamsOf.<id>(world)` over the effective world; the async `createSubsystems` contract (§3.3), with the capture test in `boot-lifecycle.test.ts` adapted in the same PR; a **boot and shutdown trace test**     | The trace test records each boot step, job arm, construction-time job start (with the member sweep's immediate run) and cleanup, in order, for four cases: a clean boot and stop, a stop during boot, a boot that throws after storage opens, and a stop that lands before the warden's late `arm()` result. It also pins each late-bound port's early-read answer (§3.1) and that a `createSubsystems` override still sees the mounted instances. It passes before and after |
 
 **The dispatch-equivalence test (P3).** For every pair of mounted routes that share a verb and
 could match the same concrete path, it asserts that specificity order picks the same route as
@@ -475,12 +504,14 @@ between them, into one PR). It moves:
 2. its `buildWorld` and `createSubsystems` statements;
 3. its routes out of `legacy`, its contract lines out of the `legacy` fragment, its audit rules, and
    its `features` claims;
-4. its jobs, into `jobs`. The arming line in `start()` stays exactly where it is and only changes
-   which object it calls.
+4. its jobs: a job armed in `start()` today goes into `jobs`, and its arming line stays exactly where
+   it is and only changes which object it calls. A job started during construction today stays in
+   `build` at the same point (§3.4, named exception);
+5. its `ModuleHandles` field (P5), so `start()` can compose it.
 
-`DaemonWorld` keeps its shape. The module reads its seams through P5's `seamsOf.<id>` and is built
-inside the default `createSubsystems`, so `buildWorld(overrides)` and a `createSubsystems` override
-behave the same.
+`DaemonWorld` keeps the shape P5 gave it. The module reads its seams from the effective world through
+`seamsOf.<id>` and is built inside the default `createSubsystems`, so `buildWorld(overrides)` and a
+`createSubsystems` override behave the same.
 
 Each PR is proven by:
 
@@ -538,8 +569,9 @@ new file on its next rebase. It does not need to wait.
 4. `DAEMON_FEATURES` commits are attributed per changed line to the **file it would live in after the
    split**. An entry of the object, and the comment above it, go to its area's file. Every other line
    (the header, `NOT_YET_REPORTED`, the helpers) goes to the shared `index`, even when it names a
-   single feature, because those stay in one file. Two PRs clash when they share an area file or both
-   touch `index`.
+   single feature, because those stay in one file. A commit that adds an area's first entry or removes
+   its last also touches `index`, because `index` imports every area file. Two PRs clash when they share
+   an area file or both touch `index`.
 
 ### 7.2 Results (cut-offs 3, 6 and 12)
 
@@ -548,7 +580,7 @@ new file on its next rebase. It does not need to wait.
 | Overlapping PR pairs that both edited `fyd.ts`                          |         224 |                     — | —            |
 | … still sharing a **feature module** after the split                    |           — |               101–106 | −53% to −55% |
 | … still sharing a module **or both touching wiring**                    |           — |               130–143 | −36% to −42% |
-| `DAEMON_FEATURES`: overlapping pairs (same file → same area or `index`) |          40 |                    12 | −70%         |
+| `DAEMON_FEATURES`: overlapping pairs (same file → same area or `index`) |          40 |                    17 | −58%         |
 | `knip.json`: commits that needed an edit                                |          80 |                     5 | −94%         |
 
 Per commit, at cut-off 6:
