@@ -133,7 +133,7 @@ never converted** — the sentence tells the person to move it aside and set the
 There is no switch, no old reader and no migration: the old account system is deleted.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
-`$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one
+`$skill`, `%terminal:<key>`, `%browser:<key>`, `%attachment:<name>` — through one grammar, one proof-before-link gate, one
 renderer and one click behaviour. The authoring and implementation contract is
 [docs/reference-standard.md](docs/reference-standard.md) — implement against that document, and
 extend the grammar there rather than adding a second one.

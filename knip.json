@@ -194,6 +194,7 @@
         "harness/compaction-screenshot.tsx",
         "harness/context-ring-screenshot.tsx",
         "harness/handoff-screenshot.tsx",
+        "harness/attachment-reference-screenshot.tsx",
         "harness/chat-images-screenshot.tsx",
         "harness/read-aloud-screenshot.tsx",
         "harness/agenda-message-screenshot.tsx",

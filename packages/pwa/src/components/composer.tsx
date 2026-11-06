@@ -32,6 +32,7 @@ import {
   shiftedComposerEnterAction,
 } from '../lib/composer-keybinding.ts';
 import type { ComposerReferenceTask } from '../lib/composer-reference-catalogs.ts';
+import { insertAtSelection } from '../lib/composer-references.ts';
 import { initialVimState, normalVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { machineOffers } from '../lib/daemon-health.ts';
@@ -42,7 +43,13 @@ import type { DaemonStreamOpener } from '../lib/event-transport.ts';
 import { applyFormat, type FormatCommand, formatShortcut } from '../lib/live-markdown.ts';
 import { asLocationError, formatLocationBlock } from '../lib/location-share.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
-import { registerComposerQuoteTarget } from '../lib/quote.ts';
+import {
+  announceComposerTargetChange,
+  type ComposerBlock,
+  type ExistingAttachment,
+  type ExistingAttachmentOutcome,
+  registerComposerQuoteTarget,
+} from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
 import { carrierDelivery } from '../lib/relay-carrier.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
@@ -754,6 +761,26 @@ export function Composer({
   // re-registering on each character would churn the quote registry for nothing.
   const draftRef = useRef(draft);
   draftRef.current = draft;
+  // The same for the files: a registered target must see the chips as they are NOW, not as they were when it registered.
+  // WRITABLE: a disabled or sending composer is still mounted (a quote reads its draft) but a reference must not
+  // edit it — an insert would change a draft the reader cannot touch, and a send in flight would clear a chip
+  // added meanwhile. Published to the registry and re-announced whenever it flips, so the + disables itself.
+  const blocked: ComposerBlock | null = sending ? 'sending' : disabled ? 'disabled' : null;
+  const blockedRef = useRef(blocked);
+  blockedRef.current = blocked;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `blocked` is the trigger -- the registry is told when it flips
+  useEffect(() => {
+    announceComposerTargetChange();
+  }, [blocked]);
+  const attachExistingRef = useRef<(file: ExistingAttachment) => ExistingAttachmentOutcome>(() => 'refused');
+  attachExistingRef.current = file => {
+    if (!canAttach || blockedRef.current !== null) return 'refused';
+    // Every chip this composer shows counts — another device's too — so the same file is never named twice.
+    if (sharedItems.entries.some(entry => entry.view?.id === file.id || entry.localId === `shared:${file.id}`))
+      return 'present';
+    if (sharedItems.entries.length >= (detached?.maxAttachments ?? Number.POSITIVE_INFINITY)) return 'refused';
+    return attachments.addExisting(file) ? 'added' : 'present';
+  };
 
   // Publish this composer as the quote target for its own (daemon, session).
   // Transcript quoting addresses a scope, never "whatever textarea is visible" —
@@ -765,6 +792,22 @@ export function Composer({
         : registerComposerQuoteTarget({
             ...scope,
             draft: () => draftRef.current,
+            attachExisting: file => attachExistingRef.current(file),
+            blocked: () => blockedRef.current,
+            insertAtCaret: text => {
+              if (blockedRef.current !== null) return;
+              const input = inputRef.current;
+              const value = draftRef.current;
+              // The caret a field keeps while it is not focused is the one the reader left it at; with no field
+              // mounted the end of the draft is where a reader who never clicked in means to write.
+              const start = input?.selectionStart ?? value.length;
+              const end = input?.selectionEnd ?? start;
+              const placed = insertAtSelection(value, start, end, text);
+              setVim(initialVimState);
+              pendingSelection.current = { value: placed.draft, start: placed.caret, end: placed.caret };
+              setDraft(placed.draft);
+              input?.focus();
+            },
             replaceDraft: next => {
               // A quote or an "Add to chat" delivery is a reader who is about to
               // TYPE. Landing them in normal mode would answer their next letter

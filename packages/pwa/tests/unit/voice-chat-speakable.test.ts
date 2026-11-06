@@ -127,6 +127,10 @@ describe('speakableSegments: links, references and ids', () => {
     ]);
   });
 
+  test('an attachment reference is "attachment" and its file name', () => {
+    expect(said('Does %attachment:onboarding.png match?')).toEqual(['Does attachment onboarding.png match?']);
+  });
+
   test('a skill reference is "skill" and its name', () => {
     expect(said('Run $update-config first.')).toEqual(['Run skill update-config first.']);
   });

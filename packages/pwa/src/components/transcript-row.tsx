@@ -247,6 +247,7 @@ function OwnSendRow({
         >
           {viaFile ? (
             <HandoffView
+              at={entry.at}
               draft={draft}
               pointer={pointer}
               pointerText={entry.text}
@@ -312,12 +313,11 @@ function HandoffRow({
           <PeerMessageRow
             body={
               <HandoffBody
-                handoff={{
-                  ...reading.handoff,
-                  message: part.body,
-                  // The turn's files belong to the turn, not to a sender: they sit under the last message.
-                  ...(position === combined.parts.length - 1 ? {} : { attachments: [] }),
-                }}
+                at={entry.at}
+                handoff={{ ...reading.handoff, message: part.body }}
+                // The turn's files belong to the turn, not to a sender: their tiles sit under the last message, but every
+                // part keeps the full list so a reference in it proves against its own turn's file first.
+                showFiles={position === combined.parts.length - 1}
                 source={source}
               />
             }
@@ -334,7 +334,7 @@ function HandoffRow({
   if (parsed !== null && source !== null && reading.state === 'read')
     return (
       <PeerMessageRow
-        body={<HandoffBody handoff={{ ...reading.handoff, message: parsed.body }} source={source} />}
+        body={<HandoffBody at={entry.at} handoff={{ ...reading.handoff, message: parsed.body }} source={source} />}
         entry={entry}
         peer={parsed.envelope}
         rhythm={rhythm}
@@ -345,7 +345,9 @@ function HandoffRow({
   if (sender !== undefined && entry.send !== undefined)
     return (
       <PeerMessageRow
-        body={<HandoffView pointer={handoff} pointerText={entry.text} reading={reading} source={source} />}
+        body={
+          <HandoffView at={entry.at} pointer={handoff} pointerText={entry.text} reading={reading} source={source} />
+        }
         entry={entry}
         peer={{
           name: entry.send.fromName ?? sender,
@@ -360,7 +362,7 @@ function HandoffRow({
     );
   return (
     <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} viaTurnFile={reading.state !== 'gone'}>
-      <HandoffView pointer={handoff} pointerText={entry.text} reading={reading} source={source} />
+      <HandoffView at={entry.at} pointer={handoff} pointerText={entry.text} reading={reading} source={source} />
     </OwnMessageRow>
   );
 }

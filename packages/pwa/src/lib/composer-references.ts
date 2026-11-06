@@ -22,7 +22,12 @@
  */
 
 import type { DaemonSessionScope } from './daemon-scope.ts';
-import { composerQuoteTarget } from './quote.ts';
+import {
+  composerQuoteTarget,
+  composerTargetOpen,
+  type ExistingAttachment,
+  type ExistingAttachmentOutcome,
+} from './quote.ts';
 import { findReferences, formatReference, type Reference } from './references.ts';
 
 /**
@@ -106,4 +111,62 @@ export const addReferenceMessage = (outcome: AddReferenceOutcome, token: string)
     case 'rejected':
       return 'That reference cannot be written down, so it was not added.';
   }
+};
+
+/**
+ * What the + on an attachment tile did.
+ *
+ *   `referenced`  the token is in the draft at the caret; `chip` says what happened to the file.
+ *   `no-composer` no message box is open for that scope, so nothing was touched.
+ *   `rejected`    the file's name is not one the attachment grammar can write.
+ */
+export type ReferenceAttachmentOutcome =
+  | { readonly state: 'referenced'; readonly chip: ExistingAttachmentOutcome | 'unsupported' }
+  | { readonly state: 'no-composer' }
+  | { readonly state: 'rejected' };
+
+/**
+ * The attachment's reference: the FILE goes back into the message box as a chip — by its existing id, never
+ * re-uploaded — and the token `%attachment:<name>` is written at the caret.
+ *
+ * The chip is asked for first and the token written regardless: a composer at its attachment limit still gets
+ * the reference, because the token is what the sentence needs, and the ferret can open a file the earlier
+ * message already handed it. The name is the file's DELIVERED name (the last segment of the path the ferret
+ * was given), which is why the caller passes the tile's own filename rather than the uploaded one.
+ */
+export const referenceAttachmentInComposer = (
+  file: ExistingAttachment,
+  scope: DaemonSessionScope,
+): ReferenceAttachmentOutcome => {
+  const token = referenceToken({ kind: 'attachment', name: file.filename });
+  if (token === null) return { state: 'rejected' };
+  const target = composerQuoteTarget(scope);
+  if (target === null || target.insertAtCaret === undefined || !composerTargetOpen(target))
+    return { state: 'no-composer' };
+  const chip = target.attachExisting === undefined ? 'unsupported' : target.attachExisting(file);
+  target.insertAtCaret(token);
+  return { state: 'referenced', chip };
+};
+
+/**
+ * The text after \`inserted\` replaces \`[start, end)\` of \`draft\`: a space before when the words ahead of it
+ * need one, a space after unless one already follows, so the token keeps the left and right boundaries the
+ * grammar needs and the next word the reader types starts fresh. Returns the new draft and the caret.
+ */
+export const insertAtSelection = (
+  draft: string,
+  start: number,
+  end: number,
+  inserted: string,
+): { readonly draft: string; readonly caret: number } => {
+  const from = Math.max(0, Math.min(start, draft.length));
+  const to = Math.max(from, Math.min(end, draft.length));
+  const before = draft.slice(0, from);
+  const after = draft.slice(to);
+  const lead = before === '' || /\s$/u.test(before) ? '' : ' ';
+  const trail = /^\s/u.test(after) ? '' : ' ';
+  const written = `${lead}${inserted}${trail}`;
+  // The caret goes after the space we added, or after the token when a space already follows it.
+  const caret = from + lead.length + inserted.length + (trail === '' ? 0 : 1);
+  return { draft: `${before}${written}${after}`, caret };
 };

@@ -34,6 +34,7 @@ import {
   uploadRetryingCopy,
   validateAttachmentFile,
 } from '../lib/attachments.ts';
+import type { ExistingAttachment } from '../lib/quote.ts';
 import type { PendingAttachment } from './session-chat-model.ts';
 
 /** Uploads one file to the session this composer belongs to. */
@@ -77,6 +78,12 @@ interface ComposerAttachments {
   /** Files waiting for the connection, to be handed to the outbox with the message. */
   readonly deferred: readonly PendingAttachment[];
   readonly add: (files: Iterable<File>) => void;
+  /**
+   * Attach a file the session ALREADY stores, by its id — no upload, no bytes. Answers false when that id is
+   * already one of the chips. The chip holds an empty `File` that only carries the name and type, as another
+   * device's file does; its bytes are read from the daemon when it is opened.
+   */
+  readonly addExisting: (file: ExistingAttachment) => boolean;
   readonly remove: (entry: PendingAttachment) => void;
   readonly retry: (entry: PendingAttachment) => void;
   /** Forget every file — after a successful send, or when the session changes. */
@@ -203,6 +210,25 @@ export function useComposerAttachments(
     [start],
   );
 
+  const addExisting = useCallback((file: ExistingAttachment): boolean => {
+    if (live.current.some(entry => entry.view?.id === file.id)) return false;
+    sequence.current += 1;
+    // 0 means "not known here": the strip then states no size at all.
+    const size = file.size ?? 0;
+    const entry: PendingAttachment = {
+      localId: `local-${sequence.current}`,
+      file: new File([], file.filename, { type: file.mime }),
+      size,
+      stored: true,
+      status: 'ready',
+      view: { id: file.id, filename: file.filename, mime: file.mime, size },
+    };
+    // Written through `live` as well as state: two taps in one tick must not both pass the check above.
+    live.current = [...live.current, entry];
+    setEntries(current => [...current, entry]);
+    return true;
+  }, []);
+
   const remove = useCallback((entry: PendingAttachment) => {
     revoke(entry);
     gone.current.add(entry.localId);
@@ -247,6 +273,7 @@ export function useComposerAttachments(
     failed: entries.filter(entry => entry.status === 'failed'),
     deferred: entries.filter(entry => entry.status === 'deferred'),
     add,
+    addExisting,
     remove,
     retry,
     clear,

@@ -40,17 +40,18 @@ rule exists so a model cannot fabricate a destination by writing one.
 
 ## 2. The direct authored forms
 
-| Form               | Means               | Example                       | Notes                                                       |
-| ------------------ | ------------------- | ----------------------------- | ----------------------------------------------------------- |
-| `:name`            | An agent's session  | `:zelda`                      | Case-insensitive, 1–32 chars, letters/digits/`-`            |
-| `@path`            | A file              | `@src/api.ts`, `@./README.md` | Session-relative, `./`-relative, or absolute inside the cwd |
-| `@path:line`       | A file at one line  | `@src/api.ts:120`             | 1-based                                                     |
-| `@path:line-end`   | A file line range   | `@src/api.ts:120-140`         | Inclusive; `end` must be ≥ `line`                           |
-| `&ID`              | A task              | `&F12`, `&B7`, `&I3`, `&C1`   | Case-insensitive prefix, up to 9 digits; machine-wide       |
-| `!AN`              | An agenda item      | `!A3`                         | Always `A` + a positive number; session-scoped              |
-| `/name` or `$name` | A skill             | `/summary`, `$summary`        | **Lowercase only**; both sigils mean the same skill         |
-| `%terminal:<key>`  | A live terminal     | `%terminal:dev`               | The terminal's name, or the daemon's id; session-scoped     |
-| `%browser:<key>`   | A live browser page | `%browser:app`                | The page's name, or the worker's page id; session-scoped    |
+| Form                 | Means                   | Example                       | Notes                                                         |
+| -------------------- | ----------------------- | ----------------------------- | ------------------------------------------------------------- |
+| `:name`              | An agent's session      | `:zelda`                      | Case-insensitive, 1–32 chars, letters/digits/`-`              |
+| `@path`              | A file                  | `@src/api.ts`, `@./README.md` | Session-relative, `./`-relative, or absolute inside the cwd   |
+| `@path:line`         | A file at one line      | `@src/api.ts:120`             | 1-based                                                       |
+| `@path:line-end`     | A file line range       | `@src/api.ts:120-140`         | Inclusive; `end` must be ≥ `line`                             |
+| `&ID`                | A task                  | `&F12`, `&B7`, `&I3`, `&C1`   | Case-insensitive prefix, up to 9 digits; machine-wide         |
+| `!AN`                | An agenda item          | `!A3`                         | Always `A` + a positive number; session-scoped                |
+| `/name` or `$name`   | A skill                 | `/summary`, `$summary`        | **Lowercase only**; both sigils mean the same skill           |
+| `%terminal:<key>`    | A live terminal         | `%terminal:dev`               | The terminal's name, or the daemon's id; session-scoped       |
+| `%browser:<key>`     | A live browser page     | `%browser:app`                | The page's name, or the worker's page id; session-scoped      |
+| `%attachment:<name>` | A file attached earlier | `%attachment:shot.png`        | The file's **delivered name**; case-sensitive; session-scoped |
 
 Both skill sigils are accepted because the harnesses differ: Claude invokes a skill as `/name` and
 Codex as `$name`. Whichever you type is what the reader keeps seeing — a reference is never rewritten
@@ -72,6 +73,47 @@ dashes, unique within its session, and it may never be twelve hex characters: th
 written before names existed, and a name that could also be an id would make one key mean two shells.
 The key grammar below is unchanged — a name is already a valid key.
 
+### Attachments are files, not live surfaces
+
+`%attachment:shot.png` points back at a file that was attached to an earlier message of THIS session. It
+shares the `%kind:key` family with the surfaces and nothing else: a stored file is never "closed", so there is
+no tombstone, and no live owner to ask — the proof is the transcript itself (section 6).
+
+- **`<name>` is the file's DELIVERED name**: the basename the ferret was handed, with anything outside
+  `[A-Za-z0-9_.-]` turned into `-` (the daemon's `deliveredFilename` rule). That is exactly the last segment of
+  the path under "Attached files — open them from these paths", so the ferret matches the token to the file
+  with no daemon help. A file named `My Notes (1).md` is written `%attachment:My-Notes-1-.md`.
+- **The grammar**: `[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}` that does **not end** in `.` or `-`. The last rule is why
+  `see %attachment:shot.png.` links `shot.png` and keeps the full stop, and why `%attachment:shot.png-` is not a
+  reference at all rather than a link to some other file called `shot`. A file whose delivered name cannot be
+  written this way (it ends in `.` or `-` — `My file (1)` is delivered as `My-file-1-` — or is longer than 128
+  characters) has no token and no **+**. Only ONE trailing full stop belongs to the sentence, so a token followed
+  by an ellipsis (`%attachment:shot.png...`) stays prose.
+- **Case matters**: `%attachment:Shot.PNG` and `%attachment:shot.png` are two files. The `attachment` kind word,
+  like `terminal`, is case-folded.
+- **Where it comes from**: the **+** on a file in the conversation (below) writes it. A person can type one by
+  hand, and a ferret can write one in its own message; either is a chip only when proved.
+
+The **+** is the way in. Every **stored** attachment tile the chat draws — the files of a message handed to
+the agent through a turn file, which is every message that carries files, whoever sent it — has a small **+**, with a
+44px hit area (always visible — on a picture, a document card and audio alike, on a touch screen and with a pointer — never hover-only) labelled
+"Reference `shot.png` in your message". Tapping it:
+
+1. attaches the file to the composer **by its existing id — no re-upload** (skipped when it is already a chip);
+2. writes `%attachment:shot.png` **at the caret**, with a space on either side where the neighbouring words need
+   one — through the composer's registry (`quote.ts`), the same one "Add to chat" uses;
+3. returns focus to the composer.
+
+The composer it writes into is named by the surface that draws the tile (`AttachmentReferenceTarget`): the chat
+names its session's composer. A surface with a composer slot of its own — an agenda card's draft slot — names that
+instead by wrapping the gallery the same way; the agenda card view draws no stored files today, so that is wiring
+for when it does, not a behaviour to look for. The **+** is disabled, with the reason, while no message box is open (a question
+has replaced it) or the open one cannot be written to (it is disabled, or a send is in flight) — the composer publishes
+that as `blocked` (`disabled` or `sending`, and the copy says which) and the registry re-announces it when it flips, and the composer refuses the insert and the chip
+itself as well; it is not drawn at all outside a session. When the composer is at its attachment limit the
+token is still written and the chip is refused, because the sentence needs the token. **Inline** pictures and
+**transcript-record** images (a tool's screenshot) have no stored attachment id, so they have no **+**.
+
 ### What is NOT a reference
 
 - `#F12` and `?A3` — the pre-Ferretry sigils. Gone as output; use `&F12` and `!A3`. The CLI still
@@ -81,7 +123,7 @@ The key grammar below is unchanged — a name is already a valid key.
 - `/plugin:skill`, `$apps/web:deploy` — a harness may accept these invocation forms; the reference
   grammar does not, because `:` and `/` are its own token boundaries.
 - `$HOME`, `$PATH` — skill names are lowercase, so a shell variable is never read as a skill.
-- `50%`, `100%` — a `%` only opens a surface candidate before `terminal:` or `browser:`.
+- `50%`, `100%` — a `%` only opens a candidate before `terminal:`, `browser:` or `attachment:`.
 
 ### Boundaries
 
@@ -102,15 +144,24 @@ never rewritten.
 
 ## 4. What each click opens
 
-| Reference    | Click opens                                                                           |
-| ------------ | ------------------------------------------------------------------------------------- |
-| `:agent`     | That agent's session, **on the daemon the reference was proved against**              |
-| `@file`      | A file tab in the session workspace, scrolled to the referenced line or range         |
-| `&task`      | The card detail on **this machine's board** (`/d/<daemon>/board/<id>`), in a chat too |
-| `!attention` | That item's view over this conversation (a full page on a phone), whatever its state  |
-| `/skill`     | The Skills tab of this session's "This folder" context                                |
-| `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open                |
-| `%browser:`  | That page's workspace tab, opened if it is not open, with the page in view            |
+| Reference      | Click opens                                                                           |
+| -------------- | ------------------------------------------------------------------------------------- |
+| `:agent`       | That agent's session, **on the daemon the reference was proved against**              |
+| `@file`        | A file tab in the session workspace, scrolled to the referenced line or range         |
+| `&task`        | The card detail on **this machine's board** (`/d/<daemon>/board/<id>`), in a chat too |
+| `!attention`   | That item's view over this conversation (a full page on a phone), whatever its state  |
+| `/skill`       | The Skills tab of this session's "This folder" context                                |
+| `%terminal:`   | That exact terminal instance's workspace tab, opened if it is not open                |
+| `%browser:`    | That page's workspace tab, opened if it is not open, with the page in view            |
+| `%attachment:` | The message that carries the file: scrolled into view, its tile ringed for a moment   |
+
+A proved `%attachment:` chip — a file icon and the token — **scrolls to the tile and rings it**, for images as
+well as documents (one behaviour; the tile's own tap opens the image viewer from there). The tile in the SAME
+message as the clicked chip wins — a message marks its words and tiles with `data-attachment-message`, wherever it
+is drawn (a turn, a combined part, a peer's message) — and failing that the newest tile of that file. Both are looked
+up inside the clicked chip's own session, because an attachment id is a content hash and one file has the same id in
+every session. A message that has
+scrolled out of the loaded transcript has no tile to reach, and the click then does nothing rather than guess.
 
 The `!attention` reference kind keeps its name in the grammar and in the proof table below; it points at the
 agenda (renamed in a later release).
@@ -140,6 +191,10 @@ one of the tokens in section 2.
 | `$`     | Skills              | `/name` on Claude, `$name` on Codex |
 | `/`     | Commands and skills | `/name` on Claude, `$name` on Codex |
 | `%`     | Live surfaces       | `%terminal:<key>`                   |
+
+The `%` menu offers live surfaces only. Attachments are not listed in it: a file is added to a message by the
+**+** on its tile (section 2), which also puts the file back in the composer — a menu that inserted only the
+token would name a file the new message does not carry.
 
 Every family is reachable two ways, and both ways read one source. The repeated-`@` ladder is the
 DISCOVERABLE one — a single sigil, repeated, teaches four families from a legend — and the direct
@@ -214,14 +269,15 @@ that goes nowhere costs the reader a tap and their trust.
 
 What "proved" means per kind:
 
-| Kind        | Proof                                                                                                                     |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `agent`     | A session in **this daemon's** fleet slice holds that callsign                                                            |
-| `file`      | The session filesystem answers with a canonical, readable path                                                            |
-| `task`      | Any card on this machine's board, whatever its project, or the old id of one of this session's imported tasks (see below) |
-| `attention` | The id is in this session's agenda ledger, open or resolved                                                               |
-| `skill`     | The name is in this session's skills catalog                                                                              |
-| `surface`   | The session's owner is holding that terminal or page right now                                                            |
+| Kind         | Proof                                                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `agent`      | A session in **this daemon's** fleet slice holds that callsign                                                            |
+| `file`       | The session filesystem answers with a canonical, readable path                                                            |
+| `task`       | Any card on this machine's board, whatever its project, or the old id of one of this session's imported tasks (see below) |
+| `attention`  | The id is in this session's agenda ledger, open or resolved                                                               |
+| `skill`      | The name is in this session's skills catalog                                                                              |
+| `surface`    | The session's owner is holding that terminal or page right now                                                            |
+| `attachment` | The name is the delivered name of a **stored attachment in this session's loaded transcript** (see below)                 |
 
 **A `&task` click opens the card, not a sheet.** The card detail is the Board's own route, so the link
 survives a reload, Back leaves it, and the id is no longer dropped on the way (the Tasks sheet opened
@@ -271,6 +327,23 @@ its machine only, so the destination always carries the daemon the reference was
 the carrier router, so a session on a daemon that only the relay reaches proves its paths too; and
 the answer is parsed against the protocol's listing schema before any entry is believed, so a body
 that is not a listing proves nothing rather than promoting a path.
+
+**An attachment is proved by the transcript it points into.** There is no daemon route for it: each hand-off
+message that has been read records the stored files it carries in a per-session index (`attachment-references.ts`),
+so a name is proved by the very tile it points back at, and a file that is not in the loaded transcript — or
+that belongs to another session or daemon — stays prose. A missing answer is refusal; there is no "closed"
+third answer, because a stored file is not a live surface.
+
+> **Which file a name means (GAP).** Two different files in one session can share a delivered name. A
+> reference resolves to the file of that name on the **same message** first, otherwise to the **newest** one in
+> the session ("newest" follows the transcript's chronology — the time the carrying row landed — so a queued send
+> ranks by when it was sent, not by the order its document was read; a row with no known time falls back to the
+> document name: `turn-<n>` counts up, and a queued send, not delivered yet, is newer than any turn; time ranks
+> the files of a name only when every one of them has it, so the answer never depends on the order the rows were read). A combined delivery keeps the full list
+> of the turn's files as same-message proof for every part, though the tiles are drawn once. An older file of the same name is reachable only through its own message's references. The
+> **+** re-attaches the exact file, so the ferret still receives the one the person meant even when the token
+> alone would resolve to the newer. The envelope carries the stored attachment id, so a click re-proves the
+> same file, not merely the same name.
 
 **Surfaces have a third answer, and it is visible.** For every other family "we cannot prove it" and
 "it is not there" are the same answer, so both render as prose. For a surface they are not: the
@@ -333,6 +406,10 @@ The grammar is meant to be extended in one place, not forked. To add a kind:
    list them for you.
 4. Add its opener to the renderer and to the per-session surface. A kind with no opener stays prose,
    which is the correct intermediate state to ship.
+
+`%attachment:` is the worked example of a kind that is **not** a live surface: it has its own `Reference` arm, its
+own resolver (`ReferenceResolvers.attachment`, proved by an index its host fills) and its own opener
+(`onAttachmentOpen`), and a host with no index simply cannot prove it.
 
 `%browser:` went through exactly that intermediate state: it parsed and encoded for months while
 nothing could prove it. The surface resolver now reads the session's browser status as well as its

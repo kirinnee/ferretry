@@ -23,7 +23,9 @@ import type { StoredTranscriptAttachment } from '../lib/attachments.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { AgendaMessageOr } from './agenda-message.tsx';
 import { TranscriptAttachmentGallery } from './attachment-gallery.tsx';
+import { AttachmentReferenceSurface, useRecordAttachments } from './attachment-reference-surface.tsx';
 import { Markdown } from './markdown.tsx';
+import { useReferenceSurface } from './reference-surface.tsx';
 
 /** The one line that says why a message travelled as a file. */
 export const TURN_FILE_EXPLANATION =
@@ -151,6 +153,7 @@ export function HandoffView({
   reading,
   source,
   draft,
+  at,
 }: {
   /** Absent for a send not handed over yet: there is no pointer, only the message on its way. */
   readonly pointer?: HandoffPointer | undefined;
@@ -160,11 +163,13 @@ export function HandoffView({
   readonly source: HandoffSource | null;
   /** The message as its send knows it, drawn until the document has been read. */
   readonly draft?: HandoffDraft | undefined;
+  /** When the row landed in the transcript: it orders this message's files against another's of the same name. */
+  readonly at?: number | undefined;
 }) {
   return (
     <div className="fy-handoff" data-handoff={pointer?.name} data-handoff-state={reading.state}>
       {reading.state === 'read' && source !== null ? (
-        <HandoffBody handoff={reading.handoff} source={source} />
+        <HandoffBody at={at} handoff={reading.handoff} source={source} />
       ) : reading.state === 'reading' && draft !== undefined ? (
         <HandoffDraftBody draft={draft} />
       ) : reading.state === 'reading' ? (
@@ -179,7 +184,23 @@ export function HandoffView({
   );
 }
 
-export function HandoffBody({ handoff, source }: { readonly handoff: SessionHandoff; readonly source: HandoffSource }) {
+export function HandoffBody({
+  handoff,
+  source,
+  at,
+  showFiles = true,
+}: {
+  readonly handoff: SessionHandoff;
+  readonly source: HandoffSource;
+  /** When the row landed in the transcript (`TranscriptEntry.at`): the chronology that ranks its files. */
+  readonly at?: number | undefined;
+  /**
+   * Draw the files' tiles and chips. A combined delivery draws one body per part and the turn's files sit under
+   * the last, so the others pass `false` — but every part still receives the FULL hand-off, because the files
+   * are what a reference in ANY part proves against first.
+   */
+  readonly showFiles?: boolean;
+}) {
   const stored = useMemo(
     () =>
       handoff.attachments.flatMap((attachment): StoredTranscriptAttachment[] =>
@@ -200,23 +221,33 @@ export function HandoffBody({ handoff, source }: { readonly handoff: SessionHand
   // A listed file that is not one of this session's stored attachments cannot be fetched, so it keeps
   // its name as a plain chip rather than becoming a thumbnail that would ask for somebody else's file.
   const named = handoff.attachments.filter(attachment => attachment.attachmentId === undefined);
+  // What this message carries, by the name the ferret was handed: it proves `%attachment:name` in this very
+  // message first, and every later message's references after it.
+  const files = useMemo(
+    () => stored.map(file => ({ attachmentId: file.attachmentId, filename: file.filename })),
+    [stored],
+  );
+  useRecordAttachments(handoff.name, files, at);
   return (
-    <>
-      {handoff.message.trim() === '' ? null : <HandoffText text={handoff.message} />}
-      {stored.length === 0 ? null : (
-        <TranscriptAttachmentGallery className="fy-handoff-files" daemon={source.daemon} images={stored} />
-      )}
-      {named.length === 0 ? null : (
-        <ul className="fy-handoff-chips">
-          {named.map(file => (
-            <li className="fy-handoff-chip" key={`${file.filename}\u0000${file.mime}`} title={file.mime}>
-              <FileText aria-hidden="true" size={14} />
-              <span>{file.filename}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </>
+    <AttachmentReferenceSurface local={files}>
+      {/* Marks the message that owns these words and tiles, so a reference chip reveals ITS message's tile. */}
+      <div className="fy-attachment-message" data-attachment-message={handoff.name}>
+        {handoff.message.trim() === '' ? null : <HandoffText text={handoff.message} />}
+        {!showFiles || stored.length === 0 ? null : (
+          <TranscriptAttachmentGallery className="fy-handoff-files" daemon={source.daemon} images={stored} />
+        )}
+        {!showFiles || named.length === 0 ? null : (
+          <ul className="fy-handoff-chips">
+            {named.map(file => (
+              <li className="fy-handoff-chip" key={`${file.filename}\u0000${file.mime}`} title={file.mime}>
+                <FileText aria-hidden="true" size={14} />
+                <span>{file.filename}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </AttachmentReferenceSurface>
   );
 }
 
@@ -251,7 +282,8 @@ function HandoffDraftBody({ draft }: { readonly draft: HandoffDraft }) {
  * a batch is several paragraphs, so it travels as a file.
  */
 function HandoffText({ text }: { readonly text: string }) {
-  return <AgendaMessageOr fallback={<Markdown className="fy-handoff-text" text={text} />} text={text} />;
+  const surface = useReferenceSurface();
+  return <AgendaMessageOr fallback={<Markdown className="fy-handoff-text" text={text} {...surface} />} text={text} />;
 }
 
 /** When the file is gone the line is simply shown, because then it is the only thing explaining the faded pointer above it. */

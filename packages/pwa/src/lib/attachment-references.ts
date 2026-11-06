@@ -1,0 +1,177 @@
+/**
+ * The proof behind `%attachment:name`: an index of the stored attachments this session's LOADED transcript
+ * carries.
+ *
+ * A name proves only against a file the reader can see in this conversation. There is no daemon route for it
+ * on purpose — the transcript rows that already read their hand-off documents (`handoff-message.tsx`) record
+ * what they carry here, so a reference is proved by the very tiles it points back to, and a file that is not
+ * on the page (or in a session this page does not hold) stays plain text.
+ *
+ * WHICH FILE A NAME MEANS. Names are the DELIVERED name — the last segment of the path the ferret was
+ * handed — so two different files can share one in a long session. The rule is: the file of that name on the
+ * SAME message first, else the NEWEST in the session. That is a declared GAP, not a guess dressed as proof:
+ * an older file of the same name is reachable only through its own message. The + on a tile re-attaches the
+ * exact file, so the ferret still receives the one the reader meant.
+ *
+ * "Newest" follows the transcript's own chronology: the time the row landed (`TranscriptEntry.at`), which a
+ * delivered turn and a queued send both have. Time ranks the files of one name only when EVERY one of them
+ * knows it — mixing timed and untimed rows in one comparison is not a consistent order, so "newest" would
+ * depend on the record order. Otherwise the document's name decides: `turn-<n>` counts up, and a queued send
+ * (which has no turn number, and is not delivered yet) is newer than any turn. Equal chronology breaks the
+ * same way every time: the higher turn, then the later name. Two files on one message are ranked by the order
+ * the message lists them.
+ */
+
+import type { DaemonId } from './daemon-connection.ts';
+import { isAttachmentReferenceName, type ResolvedAttachment } from './references.ts';
+
+/** One stored file a message carries, as its tile knows it. */
+export interface IndexedAttachment {
+  readonly attachmentId: string;
+  /** The delivered name: what the reference writes. */
+  readonly filename: string;
+}
+
+interface Entry extends IndexedAttachment {
+  readonly message: string;
+  /** When the message landed in the transcript, when known. */
+  readonly at: number | undefined;
+  readonly order: number;
+}
+
+/** `turn-8` is 8; a queued send has no turn number. */
+const turnOf = (message: string): number | undefined => {
+  const turn = /^turn-(\d{1,9})$/u.exec(message);
+  return turn?.[1] === undefined ? undefined : Number(turn[1]);
+};
+
+/**
+ * Positive when `a` is the later message, negative when `b` is, zero only for the same message. `byTime` is
+ * true only when every message being ranked has a time; it is chosen once for the whole set so the order stays
+ * transitive.
+ */
+const compareMessages = (a: Entry, b: Entry, byTime: boolean): number => {
+  if (a.message === b.message) return 0;
+  if (byTime && a.at !== b.at) return (a.at ?? 0) - (b.at ?? 0);
+  const turnA = turnOf(a.message);
+  const turnB = turnOf(b.message);
+  if (turnA !== undefined && turnB !== undefined) return turnA - turnB;
+  // A turn is delivered in order; a queued send has no number and is not delivered yet, so it is the later.
+  if (turnA !== undefined) return -1;
+  if (turnB !== undefined) return 1;
+  return a.message < b.message ? -1 : 1;
+};
+
+/** The stored attachments of one session's loaded messages, observable so a reference proves once its file loads. */
+export class AttachmentIndex {
+  #entries: Entry[] = [];
+  #version = 0;
+  #listeners = new Set<() => void>();
+
+  /**
+   * Records what one message carries; recording the same message again replaces it. A message with no files
+   * records nothing: one hand-off document is drawn more than once (a combined delivery splits its words
+   * across rows and puts the files under the last), and a row that shows none of them must not erase what the
+   * row that does has recorded. `at` is when the message landed in the transcript: it is what ranks this
+   * message's files against another's, however late its document happened to be read.
+   */
+  record(message: string, files: readonly IndexedAttachment[], at?: number): void {
+    if (files.length === 0) return;
+    const next = files.map((file, order): Entry => ({ ...file, message, at, order }));
+    const before = this.#entries.filter(entry => entry.message === message);
+    if (
+      before.length === next.length &&
+      before.every(
+        (entry, position) =>
+          entry.attachmentId === next[position]?.attachmentId &&
+          entry.filename === next[position]?.filename &&
+          entry.at === at,
+      )
+    )
+      return;
+    this.#entries = [...this.#entries.filter(entry => entry.message !== message), ...next];
+    this.#version += 1;
+    for (const listener of [...this.#listeners]) listener();
+  }
+
+  /** Changes whenever what the index can prove does; the snapshot for `useSyncExternalStore`. */
+  readonly version = (): number => this.#version;
+
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  };
+
+  /** The file a name means: the one on `local` (the message the reference is written in) first, else the newest. */
+  find(name: string, local: readonly IndexedAttachment[] = []): IndexedAttachment | undefined {
+    const here = local.findLast(file => file.filename === name);
+    if (here !== undefined) return here;
+    const named = this.#entries.filter(entry => entry.filename === name);
+    const byTime = named.every(entry => entry.at !== undefined);
+    let best: Entry | undefined;
+    for (const entry of named) {
+      if (best === undefined) best = entry;
+      else {
+        const by = compareMessages(entry, best, byTime);
+        if (by > 0 || (by === 0 && entry.order > best.order)) best = entry;
+      }
+    }
+    return best;
+  }
+}
+
+/** The scope an attachment resolver answers for: one session on one daemon. */
+export interface AttachmentReferenceScope {
+  readonly daemonId: DaemonId;
+  readonly sessionId: string;
+}
+
+/**
+ * The resolver `Markdown` takes. Pass the carrying message's own files as `local` and a reference inside that
+ * message resolves to its own file before any newer file of the same name.
+ */
+export const createAttachmentReferenceResolver =
+  (scope: AttachmentReferenceScope, index: AttachmentIndex, local: readonly IndexedAttachment[] = []) =>
+  (name: string): ResolvedAttachment | null => {
+    if (!isAttachmentReferenceName(name)) return null;
+    const found = index.find(name, local);
+    return found === undefined
+      ? null
+      : { daemonId: scope.daemonId, sessionId: scope.sessionId, attachmentId: found.attachmentId, name };
+  };
+
+/** How long the tile a reference scrolled to keeps its ring. */
+const ATTACHMENT_FLASH_MS = 1_900;
+
+/**
+ * Scrolls to the tile that shows a stored attachment and rings it for a moment. The tile in the SAME message as
+ * the chip that was clicked wins (a message marks itself with `data-attachment-message`, which holds its text
+ * and its tiles alike, wherever it is drawn: a hand-off, a combined part, a peer's message), so a reference to a
+ * file its own message carries goes nowhere else; failing that, the newest tile. Both are looked up inside the
+ * clicked chip's own session (`[data-session]`) because an id is a content hash — one file has the same id in
+ * every session. Answers whether a tile was found — a message scrolled out of the loaded transcript has no tile
+ * to reach.
+ */
+export const revealAttachmentTile = (
+  root: ParentNode,
+  attachmentId: string,
+  opener?: Element | null,
+  timers: Pick<typeof globalThis, 'setTimeout'> = globalThis,
+): boolean => {
+  const selector = `[data-attachment-id="${attachmentId.replaceAll('"', '')}"]`;
+  const scope: ParentNode = opener?.closest('[data-session]') ?? root;
+  const message = opener?.closest('[data-attachment-message]')?.getAttribute('data-attachment-message');
+  const tiles = [...scope.querySelectorAll<HTMLElement>(selector)];
+  const tile =
+    (message === null || message === undefined
+      ? undefined
+      : tiles.find(
+          candidate =>
+            candidate.closest('[data-attachment-message]')?.getAttribute('data-attachment-message') === message,
+        )) ?? tiles.at(-1);
+  if (tile === undefined || tile === null) return false;
+  tile.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  tile.setAttribute('data-attachment-flash', '');
+  timers.setTimeout(() => tile.removeAttribute('data-attachment-flash'), ATTACHMENT_FLASH_MS);
+  return true;
+};

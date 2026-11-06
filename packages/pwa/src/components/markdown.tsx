@@ -47,6 +47,7 @@
  */
 
 import type { AgendaId } from '@ferretry/protocol';
+import { FileText } from 'lucide-react';
 import {
   type ComponentProps,
   createContext,
@@ -76,11 +77,13 @@ import { daemonSessionPath } from '../lib/pages/routes.ts';
 import {
   type AgendaReferenceResolver,
   type AgentReferenceResolver,
+  type AttachmentReferenceResolver,
   type CodeReference,
   findReferences,
   parseReferenceHref,
   REFERENCE_ORIGIN_ATTRIBUTE,
   type ReferenceResolvers,
+  type ResolvedAttachmentReference,
   type ResolvedReference,
   type ResolvedSurfaceReference,
   referenceHref,
@@ -285,6 +288,10 @@ export interface MarkdownProps {
   readonly surfaceReferenceResolver?: SurfaceReferenceResolver;
   /** Proves `/skill` and `$skill` against this session's own skills catalog. */
   readonly skillReferenceResolver?: SkillReferenceResolver;
+  /**
+   * Proves `%attachment:name` against the stored files of this session's loaded transcript. Without it, prose.
+   */
+  readonly attachmentReferenceResolver?: AttachmentReferenceResolver;
   /** Session filesystem context. Without it, code-shaped text stays plain. */
   readonly resolveFilePaths?: FilePathResolver;
   readonly onTaskOpen?: (id: string, opener?: HTMLElement | null) => void;
@@ -295,6 +302,8 @@ export interface MarkdownProps {
    *  in a surface that cannot open a task board. */
   readonly onSurfaceOpen?: (reference: ResolvedSurfaceReference, opener?: HTMLElement | null) => void;
   readonly onSkillOpen?: (name: string, opener?: HTMLElement | null) => void;
+  /** Takes the reader to the message that carries a proved attachment. Without it the token stays inert text. */
+  readonly onAttachmentOpen?: (reference: ResolvedAttachmentReference, opener?: HTMLElement | null) => void;
   /** In-app navigation for a proved agent reference. */
   readonly onNavigate?: (to: string) => void;
 }
@@ -373,7 +382,11 @@ function MarkdownLink({ node, href, onClick, children, ...rest }: ElementProps<'
       href={destination(target)}
       onClick={referenceClick(target, onClick)}
       {...rest}
+      {...(target.kind === 'attachment' ? { className: 'fy-attachment-ref', 'data-fy-attachment-ref': '' } : {})}
     >
+      {target.kind === 'attachment' ? (
+        <FileText size={13} className="fy-attachment-ref-icon" aria-hidden="true" />
+      ) : null}
       {children}
     </a>
   );
@@ -522,12 +535,14 @@ export const Markdown = memo(function Markdown({
   agendaReferenceResolver,
   surfaceReferenceResolver,
   skillReferenceResolver,
+  attachmentReferenceResolver,
   resolveFilePaths,
   onTaskOpen,
   onCodeReferenceOpen,
   onAgendaOpen,
   onSurfaceOpen,
   onSkillOpen,
+  onAttachmentOpen,
   onNavigate,
 }: MarkdownProps) {
   const codeReferenceCandidates = useMemo(
@@ -567,6 +582,7 @@ export const Markdown = memo(function Markdown({
     task: taskReferenceResolver,
     attention: agendaReferenceResolver,
     surface: surfaceReferenceResolver,
+    attachment: attachmentReferenceResolver,
     skill: skillReferenceResolver,
   };
   // Re-proving a rendered link asks whether its CANONICAL path is still one we
@@ -600,6 +616,9 @@ export const Markdown = memo(function Markdown({
       case 'surface':
         onSurfaceOpen?.(target, opener);
         break;
+      case 'attachment':
+        onAttachmentOpen?.(target, opener);
+        break;
       case 'skill':
         onSkillOpen?.(target.name, opener);
         break;
@@ -621,6 +640,8 @@ export const Markdown = memo(function Markdown({
         return onAgendaOpen !== undefined;
       case 'surface':
         return onSurfaceOpen !== undefined;
+      case 'attachment':
+        return onAttachmentOpen !== undefined;
       case 'skill':
         return onSkillOpen !== undefined;
     }

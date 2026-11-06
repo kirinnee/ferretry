@@ -855,6 +855,9 @@
   gap: 6px;
   min-width: 0;
 }
+.fy-attachment-message {
+  display: contents;
+}
 .fy-handoff-text {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -1775,6 +1778,13 @@ button.fy-receipt {
 .fy-live-editor [data-md='link']:not([data-md-mark]),
 .fy-live-editor [data-md='reference'] {
   color: var(--fy-accent);
+}
+/* A reference is ONE thing: it wraps to the next line whole and is never broken inside ('onboarding.pn' / 'g'),
+   whatever it names (%terminal:, %browser:, %attachment: all draw through this). A token longer than the line
+   scrolls the editor sideways rather than splitting. */
+.fy-live-editor [data-md='reference'] {
+  overflow-wrap: normal;
+  white-space: nowrap;
 }
 .fy-live-editor [data-md='link']:not([data-md-mark]) {
   text-decoration: underline;

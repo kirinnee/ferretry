@@ -100,7 +100,12 @@ export interface PendingAttachment {
   readonly file: File;
   readonly objectUrl?: string;
   readonly status: PendingAttachmentStatus;
-  readonly view?: AttachmentView;
+  /**
+   * What the daemon holds for this file. A chip made from a file the session already stored carries only what
+   * the chip and the send need — the id, the name, the type and the size — so the type requires those four and leaves the daemon's verdicts optional.
+   */
+  readonly view?: Pick<AttachmentView, 'id' | 'filename' | 'mime' | 'size'> &
+    Partial<Pick<AttachmentView, 'textExtraction' | 'textExtractionFailure' | 'encrypted'>>;
   readonly error?: string;
   /** What an upload that has not finished is doing instead — waiting its turn, or retrying a drop. */
   readonly note?: string;
@@ -109,6 +114,12 @@ export interface PendingAttachment {
    * which this one only names.
    */
   readonly size?: number;
+  /**
+   * `true` for a chip made from a file the session ALREADY stored (the + on an attachment put it back): `file`
+   * holds no bytes, only the name and type, and they are read from the daemon by `view.id` when needed. An
+   * explicit flag, because an upload of a genuinely empty file also has a zero-byte `file`.
+   */
+  readonly stored?: true;
   /** `false` for a placeholder this device cannot remove: another device's upload still on its way. */
   readonly removable?: false;
 }
