@@ -251,6 +251,27 @@ describe('the sharing files on disk', () => {
     should(JSON.parse(await readFile(paths.catalogShares, 'utf8')).schemaVersion).equal(99);
   });
 
+  it('should refuse to write two people of one name, and leave the file on disk as it was', async () => {
+    const { boot, paths } = await fixture();
+    await mintAndJoin(boot());
+    const store = new FileCatalogMembersStore(paths, new StateFileSystem(paths));
+    const document = await store.read();
+    const first = document.members[0];
+    if (first === undefined) throw new Error('fixture');
+    const twin = { ...first, memberId: `mbr_${'z'.repeat(22)}`, label: first.label.toUpperCase() };
+    const before = await readFile(paths.catalogMembers, 'utf8');
+
+    const failure = await store.write({ ...document, members: [first, twin] }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    should(failure).be.instanceOf(CatalogMemberRefusal);
+    should(failure).have.property('refusal', 'store_damaged');
+    should((failure as Error).message).containEql('members.json was not written');
+    should(await readFile(paths.catalogMembers, 'utf8')).equal(before);
+  });
+
   it('should write nothing when the owner only looks', async () => {
     const { boot, paths } = await fixture();
     await mintAndJoin(boot());
