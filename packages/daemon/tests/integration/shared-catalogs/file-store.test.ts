@@ -86,6 +86,7 @@ describe('the catalogs document on disk', () => {
 
   it('should refuse a file from before version 3, naming it as damaged and leaving it as it was', async () => {
     const { paths, documents } = await fixture();
+    await documents.write(EMPTY_CATALOGS_DOCUMENT);
     for (const schemaVersion of [1, 2]) {
       const text = `${JSON.stringify({ schemaVersion, catalogs: [] })}\n`;
       await writeFile(paths.catalogsDocument, text);

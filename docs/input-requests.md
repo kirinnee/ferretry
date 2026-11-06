@@ -1133,16 +1133,16 @@ program or other ssh destination.
 **The index is `v: 2`; the sealed document is the one the saved logins always had.** An older client still reads and
 writes a saved login, which maps onto the account model like this:
 
-| Saved login (older client)             | Is                                                                              |
-| -------------------------------------- | ------------------------------------------------------------------------------- |
-| handle, key, label, username, password | the account, verbatim                                                           |
-| 2FA seed and its parameters            | the account's first 2FA key, under the same sealed name ([2FA keys](#2fa-keys)) |
-| login domains and web `match` hosts    | one **site** sign-in                                                            |
-| each `tool@host` in `match`            | one **terminal** sign-in (ssh, scp, sftp keep the destination)                  |
-| method, via, recipe                    | every sign-in from that entry (via by the provider's key)                       |
-| auto-apply, proposals                  | the **primary** sign-in only (the site, else the first terminal)                |
-| each observed fact                     | the sign-in at its place; a fact from no place of the entry is dropped          |
-| nothing matched                        | an account with no sign-ins                                                     |
+| Saved login (older client)             | Is                                                                                           |
+| -------------------------------------- | -------------------------------------------------------------------------------------------- |
+| handle, key, label, username, password | the account, verbatim                                                                        |
+| 2FA seed and its parameters            | a seed is not saved this way: it is refused and staged for a passkey ([2FA keys](#2fa-keys)) |
+| login domains and web `match` hosts    | one **site** sign-in                                                                         |
+| each `tool@host` in `match`            | one **terminal** sign-in (ssh, scp, sftp keep the destination)                               |
+| method, via, recipe                    | every sign-in from that entry (via by the provider's key)                                    |
+| auto-apply, proposals                  | the **primary** sign-in only (the site, else the first terminal)                             |
+| each observed fact                     | the sign-in at its place; a fact from no place of the entry is dropped                       |
+| nothing matched                        | an account with no sign-ins                                                                  |
 
 The index keeps its rules on every read: each sign-in's account exists, one account never has two sign-ins at
 the same place, `via` names another account that signs in on a site and never goes round in a circle.
