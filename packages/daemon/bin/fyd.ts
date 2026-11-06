@@ -7393,7 +7393,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const loginIndex = new FileLoginIndexStore(paths, stateFiles);
   const loginSealed = new FileSecretDocumentStore(paths, stateFiles, LOGIN_SECRETS_DOCUMENT);
   const loginVault = new LoginVault(loginIndex, loginSealed, secretCipher, { hostName: hostname(), clock });
-  // The saved-login projection is built OVER the account directory, so the two share one store lock.
+  // The input bridge's login directory (its "Save as") is built OVER the account directory, so the two share one
+  // store lock.
   // The directory is handed two CLOSURES over the vault, never the vault: nothing it holds can reach `values()` or
   // `fill()`, whatever a later handler casts it to.
   const narrowVault = narrowAccountVault(loginVault);

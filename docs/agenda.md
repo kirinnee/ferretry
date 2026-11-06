@@ -1611,9 +1611,9 @@ the owner never meant to read. One owner action dismisses every open item on the
 - **CLI:** `fy agenda clear --agents [--yes]` shows the count and asks to confirm unless `--yes`. It is refused
   when `FY_SESSION_ID` is set — a ferret never clears for the owner.
 - **App:** in the Inbox, choose **Agents** in the kind filter (All / Interactive / Agents) and press **Clear all
-  from agent ferrets**. The confirm counts each machine with a dry run, then clears on every machine that offers
-  the feature; a machine without it is listed as "needs an update", and one that did not answer as "could not be
-  reached". The machines are those the Inbox shows rows from.
+  from agent ferrets**. The confirm counts each machine with a dry run, then clears on every machine that answered
+  it; a machine that refused or did not answer is listed as "could not be reached". The machines are those the
+  Inbox shows rows from.
 
 ## In the Inbox
 

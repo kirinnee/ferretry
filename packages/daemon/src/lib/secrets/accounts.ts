@@ -355,16 +355,6 @@ export function signInsOf(
   return Object.entries(signIns).filter(([, signIn]) => signIn.account === key);
 }
 
-/** The account's sign-ins with its site ones first: the first is its PRIMARY (what the compat projection reads). */
-export function primaryFirst(
-  own: readonly (readonly [SignInId, SignInRecord])[],
-): readonly (readonly [SignInId, SignInRecord])[] {
-  return [
-    ...own.filter(([, signIn]) => signIn.place.kind === 'site'),
-    ...own.filter(([, signIn]) => signIn.place.kind !== 'site'),
-  ];
-}
-
 /** An account as the owner reads it: which fields exist, its 2FA keys without their seals, its sign-ins. */
 export function accountSummary(
   id: AccountId,
@@ -545,7 +535,8 @@ export class AccountDirectory {
    *    orphan, still masked, swept by the next change or boot.
    * 4. Sealed values nothing points at any more are swept. Best effort: an orphan is still masked.
    *
-   * For the compat projection (`logins.ts`) and this class only: a route is handed the named methods.
+   * For this class and the input bridge's `LoginDirectory.saveFields` (`logins.ts`) only: a route is handed the named
+   * methods.
    */
   async transact<T>(
     work: (draft: AccountDraft) => Promise<T> | T,

@@ -16,10 +16,9 @@ import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, GRANTED, human, MemoryLoginIndex, plantSeed, secretSubsystem } from './support.ts';
 
 /**
- * `/v1/accounts*` and the saved-login routes over the account store (r1-plan §1.5, §5 invariants 1, 19, 21; lead
- * amendments 3 and 4): no answer carries a password or a seed, every write — and the look-alike read — is the
- * owner's and is refused to a ferret before its body is read, the look-alike answer is handles only and leaves no
- * trace, and an older CLI's body that cannot say which sign-in it means is a 409, never a guess.
+ * `/v1/accounts*` over the account store (r1-plan §1.5, §5 invariants 1, 19, 21; lead amendments 3 and 4): no
+ * answer carries a password or a seed, every write — and the look-alike read — is the owner's and is refused to a
+ * ferret before its body is read, and the look-alike answer is handles only and leaves no trace.
  */
 
 const PASSWORD = 'hunter2-UNIQUE-pw';
