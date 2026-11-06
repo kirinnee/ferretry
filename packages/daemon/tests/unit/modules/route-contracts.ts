@@ -30,6 +30,7 @@ import * as analytics from './analytics/route-contract.ts';
 import * as cgroups from './cgroups/route-contract.ts';
 import * as learning from './learning/route-contract.ts';
 import * as legacy from './legacy/route-contract.ts';
+import * as update from './update/route-contract.ts';
 
 /** One module's reviewed lines. */
 interface RouteContractFragment {
@@ -38,7 +39,13 @@ interface RouteContractFragment {
 }
 
 /** Every module's fragment, in the order the modules are composed. */
-export const FRAGMENTS: Readonly<Record<string, RouteContractFragment>> = { legacy, learning, cgroups, analytics };
+export const FRAGMENTS: Readonly<Record<string, RouteContractFragment>> = {
+  legacy,
+  learning,
+  cgroups,
+  analytics,
+  update,
+};
 
 /** The concatenation of every fragment's `callers`: one line per route, both tables. */
 export const ROUTE_CALLERS: readonly string[] = Object.values(FRAGMENTS).flatMap(fragment => fragment.callers);

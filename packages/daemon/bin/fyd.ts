@@ -245,7 +245,6 @@ import {
   BunSqliteIndexFactory,
   bundledWorkerUrl,
   CachedUsageFeed,
-  CliUpdateLauncher,
   CloudflaredLocator,
   ConfigGrantDocument,
   ConfigSecretRecipes,
@@ -284,18 +283,13 @@ import {
   FileSignInRuleStore,
   FileSpeedupTestLedger,
   FileTunnelHolding,
-  FileUpdateDocuments,
   foreignHistoryRoots,
-  GitHubLatestRelease,
   GitProjectFacts,
   GitRepositoryProbe,
   HostedModelCatalog,
   HostedRelayDirectory,
   HostedTunnelProvisioner,
   HostedTunnelService,
-  HostHarnessFacts,
-  HostHarnessProbe,
-  HostInstallFacts,
   HttpLinkStoreClient,
   HttpUsageSource,
   hostCgroupFacts,
@@ -322,7 +316,6 @@ import {
   NodeShareCodeHasher,
   NodeSkillFiles,
   NodeSkillFolder,
-  NpmHarnessLatest,
   type OpenedDaemonStorage,
   PaneProcessInventory,
   PerformanceStopwatch,
@@ -852,7 +845,6 @@ import {
   type DaemonConfigStore,
   type DaemonHealthSubsystem,
   type DaemonLivenessSource,
-  DaemonUpdateService,
   DEFAULT_EVENT_LOOP_LAG_POLICY,
   DEFAULT_HANDOVER_SETTINGS,
   type DecodedInitialAttachment,
@@ -925,7 +917,6 @@ import {
   HarnessPromptAgenda,
   HarnessPromptAnswerDelivery,
   HarnessQuirkService,
-  HarnessUpdateService,
   type HarnessVersionPort,
   HOSTED_APP_ORIGIN,
   type HousekeepingJobs,
@@ -1426,6 +1417,7 @@ import { analyticsModule } from './modules/analytics.ts';
 import { cgroupsModule, createCgroupLaunchLimits } from './modules/cgroups.ts';
 import { learningModule } from './modules/learning.ts';
 import { type ModuleHandles, seamsOf } from './modules/seams.ts';
+import { updateModule } from './modules/update.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
 import {
   SessionCredentialError,
@@ -1458,7 +1450,7 @@ import {
   TransferPrepareError,
   WorkspaceFacetContributor,
 } from '../src/lib/transfer/index.ts';
-import { daemonVersion, productName } from '../src/lib/version.ts';
+import { daemonVersion } from '../src/lib/version.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
@@ -12858,6 +12850,23 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         redact: async texts => await secretRedactor.batch(scrub => texts.map(text => scrub.text(text))),
         nowMs: () => Date.parse(clock.now()),
       });
+      // Updating this machine (the daemon's own update and the agent CLIs'): inert until a request or `start()` arms it.
+      const update = updateModule.build(
+        {
+          paths,
+          stateFiles,
+          userHome,
+          clientName: CLIENT_NAME,
+          daemonName: DAEMON_NAME,
+          clock: millisecondClock,
+          activities,
+          midTurn: async () => await sessionObserver.midTurn(),
+          harnessDiscovery,
+          executables,
+        },
+        seamsOf.update(world),
+        lifecycle,
+      );
       const mounted: Omit<
         MountedSubsystems,
         | 'sessionMcp'
@@ -13417,66 +13426,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock: { monotonicMs: () => speedupStopwatch.monotonicMs(), now: () => clock.now() },
           guard: new JevTriageGuard(outboundAuthorizer, speedupStopwatch),
         }),
-        // Updating this daemon (docs/updating.md): its install facts, the latest release from GitHub at
-        // boot and at most every six hours, and `fy daemon update` started detached beside this daemon.
-        daemonUpdate: (() => {
-          const directory = join(paths.state, 'update');
-          const launched = isAbsolute(process.argv0) ? process.argv0 : process.execPath;
-          return new DaemonUpdateService(
-            {
-              current: daemonVersion,
-              product: productName,
-              clientName: CLIENT_NAME,
-              install: new HostInstallFacts({
-                product: productName,
-                argv0: process.argv0,
-                execPath: process.execPath,
-                main: Bun.main,
-                homeDirectory: userHome,
-                platform: process.platform,
-                workingDirectory: process.cwd(),
-                which: name => Bun.which(name) ?? undefined,
-              }),
-              releases: new GitHubLatestRelease(productName, { userAgent: `${DAEMON_NAME}/${daemonVersion}` }),
-              documents: new FileUpdateDocuments(stateFiles, directory),
-              launcher: new CliUpdateLauncher({
-                client: join(dirname(launched), CLIENT_NAME),
-                stateHome: paths.home,
-                files: stateFiles,
-                directory,
-                environment: process.env,
-              }),
-              activity: {
-                midTurn: async () => await sessionObserver.midTurn(),
-              },
-              clock: millisecondClock,
-              // A source run has no release to compare with, and an operator or a suite can switch it off.
-              checks: Bun.main.startsWith('/$bunfs/') && process.env.FY_UPDATE_CHECK !== 'off',
-            },
-            {
-              every: (intervalMs, tick) => {
-                const handle = setInterval(asActivity(activities, 'update check', tick), intervalMs);
-                return () => clearInterval(handle);
-              },
-            },
-          );
-        })(),
-        // Updating this machine's `claude` and `codex` (docs/updating.md › "Updating Claude Code and Codex"):
-        // the file a runtime launches comes from the ONE harness resolution rule, its install facts are read
-        // exactly as this daemon's own are, and npm is asked for the newest only when somebody looks.
-        harnessUpdate: new HarnessUpdateService({
-          product: productName,
-          homeDirectory: userHome,
-          locate: kind => locateHarnessCommand(kind, harnessDiscovery, executables),
-          facts: new HostHarnessFacts({ homeDirectory: userHome, platform: process.platform }),
-          probe: new HostHarnessProbe(runPackageInstall, process.env),
-          latest: new NpmHarnessLatest({ userAgent: `${DAEMON_NAME}/${daemonVersion}` }),
-          executables,
-          run: runPackageInstall,
-          environment: process.env,
-          clock: millisecondClock,
-          checks: process.env.FY_UPDATE_CHECK !== 'off',
-        }),
+        daemonUpdate: update.provides.daemon,
         // Constructed here rather than injected: the pinner opens nothing until a request arrives, and
         // the Git reader is the same hardened runner the worktree gateway already uses. Both are
         // stateless, so one instance serves every session.
@@ -14079,7 +14029,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         catalogMembers: { members: catalogMembers },
         catalogLinks: { links: catalogLinks },
       };
-      return { mounted: builtSubsystems, modules: { cgroups, learning, analytics } };
+      return { mounted: builtSubsystems, modules: { cgroups, learning, analytics, update } };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: millisecondClock,
@@ -15168,7 +15118,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * and moves an update waiting for idle (or an opted-in automatic one) on. A failed check never fails
    * a boot — it is reported on the update view instead.
    */
-  cleanups.push(subsystems.daemonUpdate.arm());
+  cleanups.push(modules.update.jobs.arm());
   // A state write is how a turn ends, so it is when an update waiting for idle looks again.
   cleanups.push(opened.storage.subscribeStates(() => subsystems.daemonUpdate.activityChanged()));
   /**

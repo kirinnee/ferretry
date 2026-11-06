@@ -826,14 +826,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
     arm: () => () => undefined,
     activityChanged: () => undefined,
   },
-  harnessUpdate: {
-    view: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    start: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-  },
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
   systemOpen: { open: async () => ({ opened: true, host: 'example.com' }) },

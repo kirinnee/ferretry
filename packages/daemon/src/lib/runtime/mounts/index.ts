@@ -16,7 +16,6 @@ import type { ConfigChangeSink } from '../../config-files/index.ts';
 import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { HandoverReconcileLoop } from '../../handover/index.ts';
-import type { HarnessUpdateSubsystem } from '../../harness-update/index.ts';
 import type { PhoneApprovalService } from '../../input-requests/phone-approval.ts';
 import type { InputRequestService } from '../../input-requests/service.ts';
 import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
@@ -63,7 +62,6 @@ import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-memb
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type ConfigFilesSubsystem, configFilesRoutes } from './config-files.ts';
 import { type ConversationImportSubsystem, conversationImportRoutes } from './conversation-import.ts';
-import { daemonUpdateRoutes } from './daemon-update.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetCatalogSubsystem, fleetCatalogRoutes } from './fleet-catalog.ts';
 import { type FleetCredentialsSubsystem, fleetCredentialRoutes } from './fleet-credentials.ts';
@@ -76,7 +74,6 @@ import { type HarnessLoginSubsystem, harnessLoginRoutes } from './fleet-login.ts
 import { type FleetSetupSubsystem, fleetSetupRoutes } from './fleet-setup.ts';
 import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
-import { harnessUpdateRoutes } from './harness-update.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { inputRequestRoutes, phoneApprovalRoutes } from './input-requests.ts';
 import { type LegacyTaskSubsystem, legacyTaskRoutes } from './legacy-tasks.ts';
@@ -458,9 +455,6 @@ export interface MountedSubsystems {
   /** How this machine's daemon was installed, the latest release, and starting an update. The
    *  subsystem owns its check loop as well as its routes — see `mounts/daemon-update.ts`. */
   readonly daemonUpdate: DaemonUpdateSubsystem;
-  /** How this machine's `claude` and `codex` were installed, whether Ferretry verified their versions, and
-   *  updating them on request. No loop: npm is asked only when somebody reads — see `mounts/harness-update.ts`. */
-  readonly harnessUpdate: HarnessUpdateSubsystem;
   /** One session's working tree, read-only and confined by descriptor: a listing, one file, the change
    *  list and one path's diff. The confinement is the feature — see `src/lib/session/filesystem`. */
   readonly sessionFilesystem: SessionFilesystem;
@@ -775,10 +769,6 @@ export function legacyModule(
               ...speedupRoutes(subsystems.speedups),
               // Fixed literals under `/v1/models`, which no other subsystem uses: none can shadow or be shadowed.
               ...modelRoutes(subsystems.models),
-              // Fixed literals under `/v1/daemon`, which no other subsystem uses: none can shadow or be shadowed.
-              ...daemonUpdateRoutes(subsystems.daemonUpdate),
-              // Fixed literals under `/v1/harnesses`, which no other subsystem uses: none can shadow or be shadowed.
-              ...harnessUpdateRoutes(subsystems.harnessUpdate),
               // The working-tree read registers last among the per-session subsystems: three of its four paths are
               // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
               // its one-segment `fs`, so nothing here can shadow or be shadowed.
