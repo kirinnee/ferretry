@@ -1222,9 +1222,12 @@ consequence:
 addedEntries }] }`, mode `0600`). **The record is written ahead of the document**, in the order backup,
   `pending` entry, document, entry rewritten `converted`, each file replaced atomically and synced, so no
   interruption can leave a converted document the record knows nothing about. **That guarantee belongs to
-  the boot conversion alone**: nothing else moves a legacy key — a conversion that is refused or fails
-  (a backup or journal write error included) leaves the legacy spelling as it was, and recording the
-  settled port then writes the legacy `port` beside it rather than a `bind` entry. The next start settles any
+  the boot conversion alone**: nothing else moves a legacy key — a conversion that is refused, or that
+  fails BEFORE the document is replaced (a backup or journal write error included), leaves the legacy
+  spelling as it was — its `pending` entry is abandoned at the next start — and recording the settled
+  port then writes the legacy `port` beside it rather than a `bind` entry. A failure AFTER the
+  replacement (the final journal write) leaves the converted document with its `pending` entry, which the
+  next start marks `converted`. The next start settles any
   `pending` entry for the file first: the legacy keys gone means the replacement happened (`converted`),
   still there means it did not (`abandoned`); the backup is kept either way, and nothing converts twice.
   **A file named with `--config` is never converted:** it is the operator's own file — it may be a symlink,

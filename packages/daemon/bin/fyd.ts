@@ -14670,7 +14670,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // BEFORE the first read of the document, so everything below — the peek, the address, the notices —
   // reads the converted file. A boot that only answers a question (`--check`, `--print-config`) never gets
   // here and never writes. The conversion refuses whenever the new spelling would read differently, and a
-  // refusal (or a filesystem failure) leaves the legacy keys as they are, which the reader below still honours.
+  // refusal (or a failure before the document is replaced) leaves the legacy keys as they are, which the reader
+  // below still honours; a failure after the replacement (the final journal write) leaves the converted document
+  // with a pending entry that the next boot marks converted.
   await convertLegacyCarrierKeysAtBoot(world);
   const peeked = await world.config.peek();
   const loaded = overriddenBy(

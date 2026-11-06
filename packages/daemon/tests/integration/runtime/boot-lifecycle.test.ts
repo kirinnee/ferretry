@@ -5750,7 +5750,7 @@ describe('daemon boot lifecycle', () => {
     should(said.stated[0]).match(/HTTP 401/u);
     should(said.stated[0]).match(new RegExp(`127\\.0\\.0\\.1:${String(strangerPort)}`, 'u'));
     // It names the edit that fixes it, in the file that holds it.
-    should(said.stated[0]).match(/"port" in .*config\/daemon\.json/u);
+    should(said.stated[0]).match(/"port" on the bind entry in "carriers" .* of .*config\/daemon\.json/u);
   });
 
   it('should fail closed when the address is held by something that never answers', async () => {
@@ -6644,7 +6644,7 @@ describe('daemon boot lifecycle', () => {
       // one holds none, so there is no room the two could meet in either.
       should(notice[1]).match(/bound to 127\.0\.0\.1 and dials no relay/u);
       should(notice[1]).match(/nothing can pair with it either/u);
-      should(notice[2]).match(/^to pair: set "host" in/u);
+      should(notice[2]).match(/^to pair: set "host" to .* on the bind entry in "carriers" of /u);
       should(notice[2]).containEql(join(home, 'config', 'daemon.json'));
       should(notice[2]).containEql(`"${WILDCARD_BIND_HOST}"`);
       should(notice[2]).containEql('"publicUrl"');

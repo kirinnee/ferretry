@@ -215,6 +215,15 @@ describe('what is not converted', () => {
     expect(plan.kind === 'refuse' && plan.reason).toContain('would not read the same');
   });
 
+  it('should refuse a real document the two schemas read differently', () => {
+    // The legacy relay schema strips a trailing slash twice and the carrier schema once, so the rewritten
+    // entry would dial a different URL than the block it replaces.
+    const plan = planCarrierConversion({ relay: { url: 'wss://relay.example/path//' } });
+
+    expect(plan.kind).toBe('refuse');
+    expect(plan.kind === 'refuse' && plan.reason).toContain('would not read the same');
+  });
+
   it('should refuse when only the derived addresses differ', () => {
     const disagreeing = (document: unknown) => {
       const config = parseDaemonConfig(document);

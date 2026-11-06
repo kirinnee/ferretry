@@ -101,8 +101,9 @@ function canonical(value: unknown): string {
  * The rewrite of a RAW document (JSON-parsed, never schema-parsed: key PRESENCE is what says what was
  * written, and a parsed document says `host` whether or not anybody typed it).
  *
- * `read` is the configuration parse the guard compares with; it is a parameter only so the refusal can be
- * exercised, since no real input is known that the two readings disagree on.
+ * `read` is the configuration parse the guard compares with; it is a parameter so the refusal can be
+ * exercised with a forced disagreement. A real input exists too: `{ relay: { url: 'wss://relay.example/path//' } }`,
+ * whose trailing slash the legacy schema strips twice and the carrier schema once, so the guard refuses it.
  */
 export function planCarrierConversion(
   rawDocument: unknown,
