@@ -25,7 +25,14 @@ Never hardcode either name in scripts, Taskfiles, tests, or code. The few static
 must carry them (GoReleaser config, cask, installer, docs) are rewritten by
 `scripts/local/rename.sh --product <name>` / `--bin <name>`.
 
-## Composition root (`packages/cli/bin/<name>.ts`)
+## Composition root (`packages/cli/bin/program.ts`)
+
+The `bin` entry (`bin/<name>.ts`) is a ROUTER: it imports only `src/lib/entry/route.ts` and loads either
+this program or a slice (`bin/reads-group.ts`, `bin/mcp-group.ts`) for the long-lived commands. Shared
+wiring (`createProgram()`, the daemon connection, `wireDaemon()`, `executeSlice()`) is `bin/wiring.ts`.
+A new long-lived command joins a slice by moving its group into a `*-group.ts` that both the program
+and the slice call, listing it in `SLICE_COMMANDS`, and importing only leaf modules (no package
+barrel) — `tests/unit/entry/slices.test.ts` keeps the two in step.
 
 - `createProgram()` — commander skeleton only: name, description, `--version` (from
   package.json, semver-asserted), `--help`. Domain-free.

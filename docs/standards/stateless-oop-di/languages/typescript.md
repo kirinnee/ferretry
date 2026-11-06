@@ -6,7 +6,7 @@ title: Stateless OOP with DI in TypeScript/Bun
 # Stateless OOP with DI in TypeScript/Bun
 
 Ferretry is a Bun workspaces repository. The CLI composition root is
-packages/cli/bin/fy.ts; its pure code belongs under packages/cli/src/lib and its IO adapters
+packages/cli/bin/program.ts; its pure code belongs under packages/cli/src/lib and its IO adapters
 belong under packages/cli/src/adapters. The examples below show the shape future domain code
 should follow without claiming that the sample task command already ships.
 
