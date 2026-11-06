@@ -97,7 +97,7 @@ createRoot(root).render(
           <LiveVoiceSettingsSection />
         </SettingsSection>
         {scene === 'long-voice' || scene === 'older-machine' ? (
-          <div style={{ marginTop: 12 }} className="kt-panel p-panel">
+          <div style={{ marginTop: 12 }} className="kt-panel p-[max(var(--pad-panel),calc(var(--space-unit)*4))]">
             <AutoReadSettings olderMachine={scene === 'older-machine'} startOpen={scene === 'long-voice'} />
           </div>
         ) : null}

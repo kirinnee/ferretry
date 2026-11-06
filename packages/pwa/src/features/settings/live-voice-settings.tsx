@@ -224,7 +224,7 @@ export function LiveVoiceSettingsSection({ store: given }: LiveVoiceSettingsSect
       </Group>
 
       {/* ---- sounds and buzzes ---- */}
-      <Group id="live-sounds" label="Sounds and buzzes">
+      <Group id="live-sounds" label="Sounds and buzzes" spaced>
         <SwitchRow
           label="Sounds"
           checked={settings.earcons}
@@ -266,14 +266,17 @@ export function LiveVoiceSettingsSection({ store: given }: LiveVoiceSettingsSect
 function Group({
   id,
   label,
+  spaced = false,
   children,
 }: {
   readonly id: string;
   readonly label?: string;
+  /** Several switches in one group: the same space between them as between groups, so a helper line is not crowded by the next switch. */
+  readonly spaced?: boolean;
   readonly children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-2" data-live-group={id}>
+    <div className={cn('flex flex-col', spaced ? 'gap-4' : 'gap-2')} data-live-group={id}>
       {label === undefined ? null : (
         <h4 id={`${id}-label`} className="m-0 text-ui font-semibold">
           {label}
@@ -404,7 +407,7 @@ function ReadingSummary({
   ];
   return (
     <div
-      className="flex flex-col gap-3 rounded-control border border-border bg-surface-2 p-3"
+      className="flex flex-col gap-4 rounded-control border border-border bg-surface-2 p-4"
       data-live-reading-summary=""
     >
       <p className="m-0 text-meta text-muted">
@@ -412,9 +415,9 @@ function ReadingSummary({
           ? 'Live reads with the voice, speed and length you chose in Read replies aloud.'
           : 'If you turn reading on, Live will read with the voice, speed and length you chose in Read replies aloud.'}
       </p>
-      <dl className="m-0 flex flex-col gap-1">
+      <dl className="m-0 flex flex-col gap-4">
         {rows.map(([name, value]) => (
-          <div key={name} className="flex flex-wrap gap-x-3">
+          <div key={name} className="flex flex-wrap gap-x-3 gap-y-1">
             <dt className="w-full shrink-0 text-meta text-muted sm:w-36">{name}</dt>
             <dd className="m-0 min-w-0 flex-1 break-words text-ui font-semibold leading-base">{value}</dd>
           </div>

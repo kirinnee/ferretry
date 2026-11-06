@@ -151,6 +151,13 @@ const backLabel = (panel: string | undefined): string | undefined => {
 
 export { DENSITY_OPTIONS } from '../../hooks/use-density.ts';
 
+/**
+ * The two cards that carry Live and Read replies aloud keep their text at least 16 px from the edge (4 space units),
+ * whatever the theme's own panel padding is; every other section keeps `p-panel`.
+ */
+const VOICE_SECTIONS: ReadonlySet<string> = new Set(['live-voice', 'dictation']);
+const ROOMY_PANEL_PADDING = 'p-[max(var(--pad-panel),calc(var(--space-unit)*4))]';
+
 export interface SettingsSectionProps {
   readonly definition: SettingDefinition;
   readonly children: ReactNode;
@@ -180,7 +187,10 @@ export function SettingsSection({ definition, children }: SettingsSectionProps) 
       id={`settings-${definition.id}`}
       data-setting-id={definition.id}
       tabIndex={-1}
-      className="kt-panel p-panel outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className={cn(
+        'kt-panel outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        VOICE_SECTIONS.has(definition.id) ? ROOMY_PANEL_PADDING : 'p-panel',
+      )}
       aria-labelledby={headingId}
     >
       {/* No scope badge here: the section header says "This device" once for every card under it. */}

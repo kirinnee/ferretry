@@ -40,6 +40,24 @@ export function BestVoiceWhere() {
   return <span className="fy-ar-voice-where">Picks a voice that speaks on this device</span>;
 }
 
+/**
+ * The name, then "· language". The dot is glued to the language AND to the name's last word (one no-wrap
+ * piece), so a long name that wraps never leaves a line starting with "·".
+ */
+function VoiceNameAndLang({ voice }: { readonly voice: SpeakerVoice }) {
+  const cut = voice.name.lastIndexOf(' ');
+  const head = cut < 0 ? '' : voice.name.slice(0, cut + 1);
+  const tail = cut < 0 ? voice.name : voice.name.slice(cut + 1);
+  return (
+    <>
+      {head}
+      <span className="whitespace-nowrap">
+        {tail} <span className="font-normal text-muted">· {voice.lang}</span>
+      </span>
+    </>
+  );
+}
+
 export function VoicePicker({ voices, chosen, onChoose, defaultOpen = false }: VoicePickerProps) {
   const [open, setOpen] = useState(defaultOpen);
   const listId = useId();
@@ -90,7 +108,7 @@ export function VoicePicker({ voices, chosen, onChoose, defaultOpen = false }: V
                     title={`${voiceLabel(voice)} — ${voice.lang}`}
                   >
                     <span className="fy-ar-voice-name">
-                      {voice.name} <span className="whitespace-nowrap font-normal text-muted">· {voice.lang}</span>
+                      <VoiceNameAndLang voice={voice} />
                     </span>
                     <VoiceWhere voice={voice} />
                   </VoiceRow>
