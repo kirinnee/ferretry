@@ -25,7 +25,7 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI spli
 | ---------------------------- | ------------------------------------------------------------------------------------------------ |
 | `treefmt`                    | formatting: Biome (TS/JS/JSON/CSS), prettier (Markdown/YAML/HTML), actionlint, nixfmt, shfmt     |
 | `a-biome`                    | Biome lint on TS/JS (Biome formats through `treefmt`, configured in the same `biome.json`)       |
-| `typecheck`                  | `tsc --noEmit` across the workspace                                                              |
+| `typecheck`                  | `tsc --noEmit` across the workspace, one run per machine at a time (see below)                   |
 | `a-deadcode`                 | Knip, repository view (`knip.json`) — includes tests                                             |
 | `a-deadcode-production`      | Knip, production view (`knip.production.json`) — from the bin entry                              |
 | `a-shellcheck`               | shellcheck on every `*.sh` and `scripts/host/ferretry-loopback-firewall`                         |
@@ -60,6 +60,13 @@ therefore catches files that only tests reach, which the repository view conside
 Neither Knip pass can see a module that a barrel re-exports but nobody uses, because loading a file
 counts as using it. `a-composition-reachability` closes that hole — see
 [Contracts](../contracts/README.md#composition-root-reachability).
+
+**One typecheck at a time.** A `tsc` over this workspace peaks at about 4.5 GB (measured 2026-11-06, Linux
+x64), and a machine running many agents commits from many worktrees at once. `typecheck.sh` therefore
+takes a per-user `flock` in `$XDG_RUNTIME_DIR` (else `/tmp/<uid>`) and a second run queues behind the
+first, saying which pid and worktree holds it. It waits at most `TYPECHECK_LOCK_WAIT` seconds (600)
+and then checks anyway, so a stuck neighbour cannot block a commit. CI never takes the lock (`CI` is
+set and each job runs one check), and a machine with no `flock` runs unlocked as before.
 
 `prettier` skips `Changelog.md` and `Changelog.old.md` — semantic-release owns those files and
 reformatting them would churn the release commit.
