@@ -20,6 +20,7 @@ import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../compon
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
 import { PackSessionsProvider } from '../../components/pack-call.tsx';
 import { type QuestionAnswerApi, QuestionForm } from '../../components/question-form.tsx';
+import { QuestionReadingBar } from '../../components/question-reading-bar.tsx';
 import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../components/reference-surface.tsx';
 import {
   isPromptKnownBusy,
@@ -96,18 +97,16 @@ import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspa
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import type { AgendaReplies } from '../../hooks/use-agenda-replies.ts';
 import { type SendAcceptance, useAutoRead } from '../../hooks/use-auto-read.ts';
-import { useLiveQuestionHandoff } from '../../hooks/use-live-question-handoff.ts';
-import type { LivePhase } from '../voice-chat/live-machine.ts';
-import type { LiveReadingSource } from '../voice-chat/live-reader.ts';
 import { useChatCard } from '../../hooks/use-chat-card.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { useStateChatTasks } from '../../hooks/use-chat-tasks-url.ts';
 import { conversationFromTranscript } from '../../hooks/use-dictation.ts';
-import { useSessionReplySource } from '../../hooks/use-session-reply-source.ts';
 import { useProjectCards } from '../../hooks/use-ferret-cards.ts';
 import { useFinePointer } from '../../hooks/use-fine-pointer.ts';
 import { useLiveActivity } from '../../hooks/use-live-counter.ts';
+import { useLiveQuestionHandoff } from '../../hooks/use-live-question-handoff.ts';
 import { useMachineTaskIds } from '../../hooks/use-machine-task-ids.ts';
+import { useSessionReplySource } from '../../hooks/use-session-reply-source.ts';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { useWorkProjectNames } from '../../hooks/use-work-project-names.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
@@ -148,6 +147,8 @@ import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
+import type { LivePhase } from '../voice-chat/live-machine.ts';
+import type { LiveReadingSource } from '../voice-chat/live-reader.ts';
 import { needsInputOf } from '../voice-chat/reply-picker.ts';
 import { workSearchPortFor } from '../work-search.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
@@ -978,7 +979,7 @@ export function SessionChatPage({
   // question is handed to a reader that stays on the page: it speaks the question and its options, with the microphone
   // and the sends already gone, so the question is read and never answerable by voice. Auto-read stays out meanwhile.
   const questionHandoff = useLiveQuestionHandoff(liveReading);
-  const { begin: beginQuestionReading, cancel: cancelQuestionReading } = questionHandoff;
+  const { begin: beginQuestionReading, cancel: cancelQuestionReading, repeat: repeatQuestionReading } = questionHandoff;
   const retireLive = useCallback(
     (phase: LivePhase) => {
       // Only a Live that was waiting on the ferret (or already reading to the person) has a question to say.
@@ -1765,14 +1766,24 @@ export function SessionChatPage({
             />
           )}
           {question !== null && canControl ? (
-            <QuestionForm
-              api={questionApi}
-              daemon={connection}
-              key={`${connection.daemonId}:${session.config.id}:${question.toolUseId}`}
-              onOpenConsole={openConsole}
-              question={question}
-              sessionId={session.config.id}
-            />
+            <>
+              {/* The form replaced Live, so the retained reader brings its own Stop and Repeat (and keys) while it speaks. */}
+              {questionHandoff.reading ? (
+                <QuestionReadingBar
+                  layout={formFactor === 'phone' ? 'phone' : 'desktop'}
+                  onRepeat={repeatQuestionReading}
+                  onStop={cancelQuestionReading}
+                />
+              ) : null}
+              <QuestionForm
+                api={questionApi}
+                daemon={connection}
+                key={`${connection.daemonId}:${session.config.id}:${question.toolUseId}`}
+                onOpenConsole={openConsole}
+                question={question}
+                sessionId={session.config.id}
+              />
+            </>
           ) : awaitingAnswer ? (
             /* Status without a validated payload is damaged or incomplete
            evidence, never an empty question. Keep the recovery action

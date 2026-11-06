@@ -196,3 +196,71 @@ describe('useLiveQuestionHandoff', () => {
     expect(r.synth.spoken).toHaveLength(0);
   });
 });
+
+describe('useLiveQuestionHandoff: a hidden tab and a second reading (fix round 3)', () => {
+  const setVisibility = async (state: 'hidden' | 'visible'): Promise<void> => {
+    await interact(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+  };
+
+  it('hiding the tab during the settle cancels the pending reading; coming back does not re-arm it', async () => {
+    const r = await rig();
+    await interact(() => r.now().begin());
+    expect(r.now().reading).toBe(true);
+    await setVisibility('hidden');
+    expect(r.now().reading).toBe(false);
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+    await setVisibility('visible');
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+    expect(r.now().reading).toBe(false);
+  });
+
+  it('hiding the tab while it speaks stops the voice', async () => {
+    const r = await rig();
+    await interact(() => r.now().begin());
+    await settle();
+    expect(r.controller.getState().status).toBe('reading');
+    await setVisibility('hidden');
+    expect(r.controller.getState().status).toBe('stopped');
+    expect(r.synth.queue).toHaveLength(0);
+    expect(r.now().reading).toBe(false);
+  });
+
+  it('a tab that is hidden and shown with nothing being read changes nothing', async () => {
+    const r = await rig();
+    await setVisibility('hidden');
+    await setVisibility('visible');
+    expect(r.now().reading).toBe(false);
+    expect(r.controller.getState().status).toBe('idle');
+  });
+
+  it('repeat reads the question again from the top, and does so with nothing under way too', async () => {
+    const r = await rig();
+    await interact(() => r.now().begin());
+    await settle();
+    const once = r.synth.spoken.length;
+    await interact(() => r.now().repeat());
+    expect(r.now().reading).toBe(true);
+    await settle();
+    expect(r.synth.spoken.length).toBeGreaterThan(once);
+    expect(r.controller.getState().status).toBe('reading');
+    await interact(() => r.now().cancel());
+    const stopped = r.synth.spoken.length;
+    await interact(() => r.now().repeat());
+    await settle();
+    expect(r.synth.spoken.length).toBeGreaterThan(stopped);
+  });
+
+  it('repeat in a hidden tab says nothing', async () => {
+    const r = await rig();
+    await setVisibility('hidden');
+    await interact(() => r.now().repeat());
+    expect(r.now().reading).toBe(false);
+    await settle();
+    expect(r.synth.spoken).toHaveLength(0);
+  });
+});

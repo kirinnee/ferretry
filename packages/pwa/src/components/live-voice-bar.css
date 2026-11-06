@@ -384,3 +384,44 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* ── A QUESTION BEING READ (components/question-reading-bar.tsx): the retained reader's own controls, shown above the
+   question form because the form replaced the Live bar. Words, then Stop and Repeat: 48 px on a phone, 44 on a computer. ── */
+.fy-live-question {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+}
+.fy-live-question-words {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+.fy-live-question-icon {
+  color: var(--accent);
+  flex: none;
+  margin-top: 2px;
+}
+.fy-live-question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fy-live--question-phone .fy-live-question-actions {
+  display: grid;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
+}
+.fy-live--question-desktop {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+}
+.fy-live--question-desktop .fy-live-btn {
+  min-height: 44px;
+  padding: 0 14px;
+}

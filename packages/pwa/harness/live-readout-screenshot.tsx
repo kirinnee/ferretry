@@ -39,6 +39,7 @@ import { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { LiveVoiceBar } from '../../src/components/live-voice-bar.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
+import { QuestionReadingBar } from '../../src/components/question-reading-bar.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { AutoReadSettings } from '../../src/features/settings/auto-read-settings.tsx';
 import { LiveVoiceSettingsProvider } from '../../src/hooks/use-live-voice-settings.ts';
@@ -117,7 +118,6 @@ const LEVELS = Array.from({ length: 32 }, (_, i) => Math.min(1, 0.12 + 0.85 * Ma
 const VIEWS = {
   reading: liveView(READING, 0),
   'reading-start': liveView(READING, 0),
-  'question-reading': liveView(ASKING, 0),
   'question-prompt': liveView(HELD_ON_QUESTION, 0),
   listen: liveView(LISTEN, 0),
   'another-voice': liveView(TAKEN, 0),
@@ -150,7 +150,9 @@ const bar = view === undefined ? null : (
   />
 );
 const questionApi = { answer: async () => ({}) };
-const prompt = asking && scene !== 'question-reading' ? (
+const prompt = asking ? (
+  <>
+  {scene === 'question-reading' ? <QuestionReadingBar layout={layout} onRepeat={() => undefined} onStop={() => undefined} /> : null}
   <QuestionForm
     api={questionApi}
     daemon={daemon}
@@ -158,6 +160,7 @@ const prompt = asking && scene !== 'question-reading' ? (
     question={{ toolUseId: 'toolu_01', questions: [{ question: 'Push the fix to main?', options: [{ label: 'Push it' }, { label: 'Open a pull request' }, { label: 'Hold' }] }] }}
     sessionId="harness-session"
   />
+  </>
 ) : null;
 
 const root = document.getElementById('root');
@@ -308,14 +311,14 @@ try {
             settingsScene ? 44 : minimum,
           );
           if (small.length > 0) fail(`${label}: buttons under the minimum: ${JSON.stringify(small)}`);
-          if (scene === 'reading') {
+          if (scene === 'reading' || scene === 'question-reading') {
             // The measured heights of every Live control while a reply is read (Hold is a button of its own on a phone).
             const measured = await page.evaluate(() =>
               [...document.querySelectorAll('.fy-live button')].map(
                 button => `${(button.textContent ?? '').trim()}=${Math.round(button.getBoundingClientRect().height)}px`,
               ),
             );
-            if (layout === 'phone' && !measured.some(entry => entry.startsWith('Hold=')))
+            if (scene === 'reading' && layout === 'phone' && !measured.some(entry => entry.startsWith('Hold=')))
               fail(`${label}: no Hold button while a reply is read: ${measured.join(', ')}`);
             process.stdout.write(`📏 ${label} ${scene}: ${measured.join(', ')}\n`);
           }

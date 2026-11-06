@@ -7,7 +7,9 @@
  * It is a READER and nothing else. The microphone and the sends went with the runner, so while this speaks
  * nothing listens and nothing is sent: the question is read to the person and is never answerable by voice. It
  * ends when the speech does (finished, stopped from the row, failed), when the question is gone (answered), and
- * with the page. While it is active the page's own auto-read stays out of the way (`reading`).
+ * with the page, and when the tab is hidden (a reading still waiting out its settle never starts, a speaking one is
+ * stopped, and coming back to the tab never starts it again). While it is active the page's own auto-read stays out
+ * of the way (`reading`).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -26,6 +28,8 @@ export interface LiveQuestionHandoff {
   begin(): void;
   /** End the reading, silently if it has not begun, and stop the voice if it has. */
   cancel(): void;
+  /** Read the question again from the top: ends the reading under way (if any) and begins afresh. */
+  repeat(): void;
 }
 
 export function useLiveQuestionHandoff(source: LiveReadingSource): LiveQuestionHandoff {
@@ -61,6 +65,16 @@ export function useLiveQuestionHandoff(source: LiveReadingSource): LiveQuestionH
     });
   }, []);
 
+  // A hidden tab hears nothing: a reading still waiting out its settle never starts and a speaking one is stopped.
+  // Returning to the tab starts nothing — the question is read once, when it arrived, or when the person asks again.
+  useEffect(
+    () =>
+      documentVisibility(document).watch(visible => {
+        if (!visible) cancel();
+      }),
+    [cancel],
+  );
+
   // The page going away silences the reading (the voice is the page's, and the conversation is left).
   useEffect(
     () => () => {
@@ -71,5 +85,10 @@ export function useLiveQuestionHandoff(source: LiveReadingSource): LiveQuestionH
     [],
   );
 
-  return { reading, begin, cancel };
+  const repeat = useCallback((): void => {
+    cancel();
+    begin();
+  }, [cancel, begin]);
+
+  return { reading, begin, cancel, repeat };
 }
