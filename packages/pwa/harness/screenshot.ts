@@ -60,6 +60,7 @@ import { planSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './ses
 import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runViewportMatrix } from './viewport-matrix.ts';
 import { lapPage, reportWalkTiming, timed, timePage } from './walk-timing.ts';
+import { RESOLVED_AGENDA_DOCUMENT } from './agenda-projection-fixture.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(harnessDir, '..');
@@ -143,6 +144,7 @@ const SEARCH_ONLY = process.argv.includes('--search-only');
 /** A chat that mentions cards: the `&` menu, a new and an old reference, each tapped, and the card beside the chat. */
 const CARD_REFS_ONLY = process.argv.includes('--card-refs-only');
 const AGENDA_ONLY = process.argv.includes('--agenda-only');
+const AGENDA_PROJECTION_ONLY = process.argv.includes('--agenda-projection-only');
 const PROJECTS_ONLY = process.argv.includes('--projects-only');
 /** Settings › Warden's "What Jev may do alone" rows and the Warden page's Recent triggers, nothing else. */
 const WARDEN_ONLY = process.argv.includes('--warden-only');
@@ -203,6 +205,7 @@ const WALKS_SETTINGS = !(
   SEARCH_ONLY ||
   CARD_REFS_ONLY ||
   AGENDA_ONLY ||
+  AGENDA_PROJECTION_ONLY ||
   FILES_ONLY ||
   PROJECTS_ONLY ||
   WARDEN_ONLY ||
@@ -2331,6 +2334,7 @@ const server = Bun.serve({
   port: 0,
   async fetch(request) {
     const path = new URL(request.url).pathname;
+    if (path === '/v1/sessions/fr/agenda/A1') return Response.json(RESOLVED_AGENDA_DOCUMENT);
     if (path === '/')
       return new Response(Bun.file(join(harnessDir, 'index.html')), {
         headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': TRUSTED_TYPES_POLICY },
@@ -2412,6 +2416,46 @@ try {
             const target = join(outDir, `agenda-${viewport.name}.png`);
             await captureElement(page, harness, target);
             process.stdout.write(`📸 agenda ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
+            return;
+          }
+          if (AGENDA_PROJECTION_ONLY) {
+            await page.goto(new URL('?agenda-projection=1', server.url).toString());
+            const harness = page.locator('[data-harness="agenda-projection"]');
+            let reads = 0;
+            page.on('request', request => {
+              if (new URL(request.url()).pathname === '/v1/sessions/fr/agenda/A1') reads++;
+            });
+            const read = page.waitForResponse(
+              response => new URL(response.url()).pathname === '/v1/sessions/fr/agenda/A1',
+            );
+            await harness.locator('[data-open-resolved-fixture]').click();
+            if (!(await read).ok()) fail('resolved agenda document did not load');
+            await harness.locator('[data-agenda-view="A1"]').waitFor({ state: 'visible' });
+            const pane = harness.locator('.fy-item-view__body');
+            // A notification focuses the ask in the real app. The opening evidence instead starts at the very top.
+            await pane.evaluate(element => {
+              element.scrollTop = 0;
+            });
+            await captureElement(page, harness, join(outDir, `agenda-resolved-${SCHEME}-${viewport.name}.png`));
+            const history = harness.locator('[data-agenda-fold="conversation"]');
+            await history.click();
+            await harness.locator('[data-agenda-fold="activity"]').click();
+            await harness.locator('[data-agenda-tab-button="notes"]').click();
+            await harness.locator('[data-agenda-activity]').waitFor({ state: 'visible' });
+            // Fit the expanded proof to its contents: no paragraph is cut underneath a sticky head. The phone width
+            // stays 390px; this is one long exported frame showing the tab, Conversation and revision Activity together.
+            const extra = await pane.evaluate(element => element.scrollHeight - element.clientHeight);
+            await harness.evaluate((element, extra) => {
+              element.style.height = `${element.getBoundingClientRect().height + extra}px`;
+            }, extra);
+            await pane.evaluate(element => {
+              element.scrollTop = 0;
+            });
+            await captureElement(page, harness, join(outDir, `agenda-resolved-history-${SCHEME}-${viewport.name}.png`));
+            if (reads !== 1) fail(`resolved agenda opening made ${reads} full-item reads, expected one`);
+            process.stdout.write(
+              `📸 resolved agenda + Checks, Conversation and Activity ${viewport.name} ${SCHEME}: one full-item HTTP read\n`,
+            );
             return;
           }
           if (WARDEN_ONLY) {

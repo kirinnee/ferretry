@@ -1,4 +1,9 @@
-import type { AgendaActionRequest, AgendaSnapshot, BoardTaskActionRequestInput, TidyPlan } from '@ferretry/protocol';
+import type {
+  AgendaActionRequest,
+  AgendaListSnapshot,
+  BoardTaskActionRequestInput,
+  TidyPlan,
+} from '@ferretry/protocol';
 
 /** The one new daemon call: the plan for the calling session. */
 export interface ITidyPlanGateway {
@@ -13,7 +18,7 @@ export interface ITidyCards {
 
 /** The agenda "done" the ferret could have typed itself; the agenda gateway satisfies this structurally. */
 export interface ITidyAgenda {
-  apply(sessionId: string, request: AgendaActionRequest): Promise<AgendaSnapshot>;
+  apply(sessionId: string, request: AgendaActionRequest): Promise<AgendaListSnapshot>;
 }
 
 /** `ConsoleIo` satisfies this structurally; stdout stays the answer. */

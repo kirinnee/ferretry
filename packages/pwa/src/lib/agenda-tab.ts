@@ -21,7 +21,7 @@ import {
   agendaState,
   hasOpenCardAsk,
   needsYouQueue,
-  type ResolvedAgendaItem,
+  type AgendaListRecord,
   restingQueue,
 } from '@ferretry/protocol';
 import { shortAgo } from './agenda-revisions.ts';
@@ -57,7 +57,7 @@ const STAGE_LABEL: Readonly<Record<AgendaStage, string>> = {
 export interface AgendaTabRow {
   readonly id: AgendaItem['id'];
   readonly filter: AgendaTabFilter;
-  readonly item: AgendaItem | ResolvedAgendaItem;
+  readonly item: AgendaItem | AgendaListRecord;
   /** "Needs you", "Resting · waiting on Johnnie", "Resting · working", "Snoozed until Thu 09:00", "Done". */
   readonly state: string;
   /** A blocker, drawn first in Needs you and marked there. */
@@ -76,7 +76,7 @@ export interface AgendaTabModel {
 
 export interface AgendaTabInput {
   readonly items: readonly AgendaItem[];
-  readonly resolved: readonly ResolvedAgendaItem[];
+  readonly resolved: readonly AgendaListRecord[];
   /** The ferret's spoken name, for "waiting on Johnnie". */
   readonly ferret: string;
   readonly now: number;
@@ -86,7 +86,7 @@ export interface AgendaTabInput {
  * The stage an item had before it closed. The daemon writes `stage: done` on a close and keeps every earlier stage in
  * `stages`, so a closed item names its last stage that was not `done`; one that never named a stage reads from its kind.
  */
-const lastUsefulStage = (item: AgendaItem | ResolvedAgendaItem): AgendaStage => {
+const lastUsefulStage = (item: AgendaItem | AgendaListRecord): AgendaStage => {
   if (item.stage !== undefined && item.stage !== 'done') return item.stage;
   const earlier = [...(item.stages ?? [])].reverse().find(entry => entry.stage !== 'done');
   return earlier?.stage ?? agendaStage({ kind: item.kind, ask: item.ask });
@@ -102,10 +102,10 @@ const sinceWords = (instant: string | undefined, now: number): string | null => 
 
 export const agendaTabModel = ({ items, resolved, ferret, now }: AgendaTabInput): AgendaTabModel => {
   const open = items.filter(item => item.notice !== true);
-  const stageOf = (item: AgendaItem | ResolvedAgendaItem): string => STAGE_LABEL[lastUsefulStage(item)];
+  const stageOf = (item: AgendaItem | AgendaListRecord): string => STAGE_LABEL[lastUsefulStage(item)];
   const row = (
     filter: AgendaTabFilter,
-    item: AgendaItem | ResolvedAgendaItem,
+    item: AgendaItem | AgendaListRecord,
     state: string,
     since: string | undefined,
   ): AgendaTabRow => ({

@@ -17,6 +17,7 @@ import {
   legacyAgendaSnapshot,
   legacyResolvedAgendaItem,
   readsAgendaChannel,
+  readsAgendaHeaders,
 } from '../../src/lib/agenda-legacy.ts';
 
 const AT = '2026-11-03T09:00:00.000Z';
@@ -278,8 +279,20 @@ describe('reading the agenda channel', () => {
     should(readsAgendaChannel(headers('1'))).equal(true);
     should(readsAgendaChannel(headers(' 1 '))).equal(true);
     should(readsAgendaChannel(headers(null))).equal(false);
-    should(readsAgendaChannel(headers('2'))).equal(false);
+    should(readsAgendaChannel(headers('2'))).equal(true);
+    should(readsAgendaChannel(headers(' 2 '))).equal(true);
+    should(readsAgendaChannel(headers('3'))).equal(false);
     should(readsAgendaChannel(headers(''))).equal(false);
+  });
+});
+
+describe('reading resolved agenda headers', () => {
+  it('requires channel 2 explicitly', () => {
+    for (const value of ['2', ' 2 '])
+      should(readsAgendaHeaders(new Headers({ [AGENDA_CHANNEL_HEADER]: value }))).equal(true);
+    for (const value of ['', '1', '3'])
+      should(readsAgendaHeaders(new Headers({ [AGENDA_CHANNEL_HEADER]: value }))).equal(false);
+    should(readsAgendaHeaders(new Headers())).equal(false);
   });
 });
 

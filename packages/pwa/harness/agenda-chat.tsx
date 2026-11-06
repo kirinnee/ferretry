@@ -9,12 +9,12 @@
  * ever moves it, and that a send closes the view — is the layout's doing, not the box's.
  */
 
-import type { AgendaId, AgendaSnapshot } from '@ferretry/protocol';
+import type { AgendaId, AgendaListSnapshot } from '@ferretry/protocol';
 import { type ReactElement, type ReactNode, useMemo, useState } from 'react';
 import { AgendaItemsProvider, AgendaMessageOr, useAgendaChatReply } from '../src/components/agenda-message.tsx';
 import { Markdown } from '../src/components/markdown.tsx';
 import { useAgenda } from '../src/features/agenda/agenda.tsx';
-import { daemonConnection } from '../src/lib/daemon-connection.ts';
+import { type DaemonConnection, daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 
@@ -41,7 +41,8 @@ const CLIENT = {
 const harnessIsDesktop = (): boolean => window.innerWidth >= 1_024;
 
 export interface AgendaChatHarnessProps {
-  readonly board: AgendaSnapshot;
+  readonly board: AgendaListSnapshot;
+  readonly connection?: DaemonConnection;
   readonly now: number;
   readonly ferret?: string;
   readonly agendaMode?: boolean;
@@ -72,14 +73,15 @@ export function AgendaChatHarness({
   target = null,
   entries,
   live,
+  connection = CONNECTION,
 }: AgendaChatHarnessProps): ReactElement {
   const [draft, setDraft] = useState('');
   const [sent, setSent] = useState<readonly string[]>([]);
-  const scope = useMemo(() => daemonSessionScope(CONNECTION, 'fr'), []);
+  const scope = useMemo(() => daemonSessionScope(connection, 'fr'), [connection]);
   const agenda = useAgenda({
     agendaMode,
     client: CLIENT,
-    connection: CONNECTION,
+    connection,
     ferret,
     // A target is a link or a notification tap: it arrives with the page.
     focus: target === null ? null : { target, seq: 1, onEntry: true },

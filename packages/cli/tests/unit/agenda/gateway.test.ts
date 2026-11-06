@@ -12,6 +12,7 @@ import {
 import type { AgendaApiClient } from '../../../src/lib/agenda/ports';
 import { DAEMON_HEALTH_PATH, DaemonFeaturesUnreadable } from '../../../src/lib/daemon/features';
 import { humanItem, SESSION, snapshot } from './fixtures';
+import { projectionRecord } from '../../../../protocol/tests/fixtures/agenda-projection.ts';
 
 interface Call {
   path: string;
@@ -57,7 +58,23 @@ describe('protocol attention gateway', () => {
     await should(gateway.snapshot(MACHINE_AGENDA_ID)).be.rejectedWith(/the machine agenda is the owner's; ask them/u);
     await should(gateway.apply(MACHINE_AGENDA_ID, { action: 'dismiss', id: 'A1' })).be.rejectedWith(/ask them/u);
     await should(gateway.sendReplies(MACHINE_AGENDA_ID)).be.rejectedWith(/ask them/u);
+    await should(gateway.readItem(MACHINE_AGENDA_ID, 'A1')).be.rejectedWith(/ask them/u);
     should(calls).be.empty();
+  });
+
+  it('should read a full resolved document and refuse another item in its place', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const input = projectionRecord();
+    const gateway = new ProtocolAgendaGateway(fakeClient(input, calls));
+    // Act
+    const actual = await gateway.readItem(SESSION, 'A1');
+    // Assert
+    should(actual).deepEqual(input);
+    should(calls[0]?.path).equal(`/v1/sessions/${SESSION}/agenda/A1`);
+    await gateway.readItem(MACHINE_AGENDA_ID, 'A1');
+    should(calls[1]?.path).equal('/v1/machine/agenda/A1');
+    await should(gateway.readItem(SESSION, 'A2')).be.rejectedWith(/another agenda item/u);
   });
   it('should read the board with a plain GET', async () => {
     // Arrange
@@ -69,7 +86,7 @@ describe('protocol attention gateway', () => {
 
     // Assert
     should(calls[0]?.path).equal(`/v1/sessions/${SESSION}/agenda`);
-    should(calls[0]?.init).deepEqual({ headers: { 'x-ferretry-client': 'cli', 'x-fy-agenda-channel': '1' } });
+    should(calls[0]?.init).deepEqual({ headers: { 'x-ferretry-client': 'cli', 'x-fy-agenda-channel': '2' } });
     should(actual.items).have.length(1);
   });
 
@@ -86,7 +103,7 @@ describe('protocol attention gateway', () => {
     should(calls[0]?.init?.headers).deepEqual({
       'content-type': 'application/json',
       'x-ferretry-client': 'cli',
-      'x-fy-agenda-channel': '1',
+      'x-fy-agenda-channel': '2',
     });
     should(JSON.parse(String(calls[0]?.init?.body))).deepEqual({ action: 'dismiss', id: 'A3', note: 'stale' });
   });
@@ -122,7 +139,7 @@ describe('protocol attention gateway attribution', () => {
     // Assert
     const own = {
       'x-ferretry-client': 'cli',
-      'x-fy-agenda-channel': '1',
+      'x-fy-agenda-channel': '2',
       'x-ferretry-session-id': 'mvgt2oz9-04e28935',
     };
     should(calls[0]?.init?.headers).deepEqual(own);
@@ -138,7 +155,7 @@ describe('protocol attention gateway attribution', () => {
     await gateway.snapshot(SESSION);
 
     // Assert
-    should(calls[0]?.init?.headers).deepEqual({ 'x-ferretry-client': 'cli', 'x-fy-agenda-channel': '1' });
+    should(calls[0]?.init?.headers).deepEqual({ 'x-ferretry-client': 'cli', 'x-fy-agenda-channel': '2' });
   });
 });
 

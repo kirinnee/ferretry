@@ -112,7 +112,7 @@ export type LineageTitles = Readonly<Partial<Record<AgendaId, string>>>;
 /** The titles of the agendas an item's lineage names, from the agendas on the board; the ones it does not hold are left out. */
 export const lineageTitles = (
   item: Pick<AgendaItem, 'mergedInto' | 'mergedFrom' | 'splitFrom' | 'splitInto'>,
-  board: readonly AgendaItem[],
+  board: readonly Pick<AgendaItem, 'id' | 'title' | 'subject'>[],
 ): LineageTitles => {
   const named = new Set<AgendaId>([
     ...(item.mergedInto === undefined ? [] : [item.mergedInto]),

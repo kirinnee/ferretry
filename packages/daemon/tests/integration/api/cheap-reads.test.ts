@@ -1,5 +1,14 @@
 import { afterEach, describe, it } from 'bun:test';
-import { type FyEventStreamFrame, FyEventStreamFrameSchema, type SessionView } from '@ferretry/protocol';
+import {
+  AGENDA_CHANNEL_HEADER,
+  AGENDA_CHANNEL_VERSION,
+  AgendaListSnapshotSchema,
+  AgendaReadItemSchema,
+  type FyEventStreamFrame,
+  FyEventStreamFrameSchema,
+  MACHINE_AGENDA_ID,
+  type SessionView,
+} from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import should from 'should';
 import { BunApiServer } from '../../../src/adapters/api/index.ts';
@@ -11,9 +20,18 @@ import {
   NO_GOVERNED_ROUTES_GUARD,
 } from '../../../src/lib/api/index.ts';
 import { fleetEventSocketRoutes, sessionRoutes } from '../../../src/lib/runtime/index.ts';
+import { agendaRoutes } from '../../../src/lib/runtime/mounts/agenda.ts';
+import { agendaMachineRoutes } from '../../../src/lib/runtime/mounts/agenda-machine.ts';
+import { AgendaService } from '../../../src/lib/agenda/index.ts';
 import { type FleetEventSource, FleetEventStreamService } from '../../../src/lib/session/events/index.ts';
 import type { StoredSessionEvent } from '../../../src/lib/session/reads/index.ts';
-import { sessionDirectory, sessionView } from '../../unit/runtime/mounts/support.ts';
+import {
+  agendaService,
+  FakeLedgerRepository,
+  NO_HELD_REPLIES,
+  sessionDirectory,
+  sessionView,
+} from '../../unit/runtime/mounts/support.ts';
 import { bearerSocket } from '../../support/bearer-socket.ts';
 import { waitFor } from '../support/wait-for.ts';
 
@@ -29,6 +47,76 @@ const CREDENTIALS = { admin: 'admin-secret' } as const;
 const AT = '2026-08-01T00:00:00.000Z';
 
 const running: ApiServerHandle[] = [];
+
+describe('agenda projections over the HTTP adapter', () => {
+  it('should send headers in both list spellings and the machine list, and read one full document with the same authority', async () => {
+    // Arrange — the real HTTP server and protocol client, with synthetic agenda documents.
+    const sessions = agendaService();
+    const machine = new AgendaService(
+      new FakeLedgerRepository(),
+      { now: () => AT },
+      { has: async id => id === MACHINE_AGENDA_ID },
+      { raised: async () => {} },
+    );
+    for (const [service, id] of [
+      [sessions, 's1'],
+      [machine, MACHINE_AGENDA_ID],
+    ] as const) {
+      await service.raise(
+        id,
+        {
+          source: 'agent-raised',
+          sourceRef: null,
+          title: 'Fixture release',
+          kind: 'info',
+          subject: 'Read the release result',
+          why: 'The build passed.',
+          howToResolve: 'Read it.',
+          body: 'Fixture detail. '.repeat(500),
+          tabs: [{ id: 'notes', name: 'Notes', body: 'Kept in full.' }],
+        },
+        { kind: 'human' },
+      );
+      await service.resolve(id, 'A1', { kind: 'human' }, 'Checked.');
+    }
+    const routes = [
+      ...agendaRoutes(sessions, { enrolledDevices: async () => 0, agendaDelivered: async () => 0 }, NO_HELD_REPLIES),
+      ...agendaMachineRoutes(machine),
+    ];
+    const handle = await new BunApiServer().listen(
+      {
+        http: new ApiDispatcher(new ApiRouter(routes), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD),
+        sockets: new ApiSocketDispatcher(new ApiRouter([]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD),
+        corsOrigins: [],
+      },
+      BIND,
+    );
+    running.push(handle);
+    const headers = { authorization: `Bearer ${CREDENTIALS.admin}`, [AGENDA_CHANNEL_HEADER]: AGENDA_CHANNEL_VERSION };
+    // Act + Assert
+    for (const path of ['/v1/sessions/s1/agenda', '/v1/sessions/s1/attention', '/v1/machine/agenda']) {
+      const listed = await fetch(new URL(path, handle.url), { headers });
+      should(listed.status).equal(200);
+      const list = AgendaListSnapshotSchema.parse(await listed.json());
+      should(list.resolved[0]).have.property('projection', 'header');
+      should(list.resolved[0]).not.have.property('tabs');
+      if (path.endsWith('/attention')) continue;
+      const read = await fetch(new URL(`${path}/A1`, handle.url), { headers });
+      const item = AgendaReadItemSchema.parse(await read.json());
+      should(item.body).equal('Fixture detail. '.repeat(500).trim());
+      should(item.tabs?.[0]?.body).equal('Kept in full.');
+      should(item.id).equal('A1');
+      should((await fetch(new URL(`${path}/A1`, handle.url))).status).equal(401);
+    }
+    should(
+      (
+        await fetch(new URL('/v1/machine/agenda/A1', handle.url), {
+          headers: { ...headers, 'x-ferretry-session-id': 's1' },
+        })
+      ).status,
+    ).equal(403);
+  });
+});
 
 afterEach(async () => {
   while (running.length > 0) {

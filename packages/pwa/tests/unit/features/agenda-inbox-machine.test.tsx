@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { agendaListSnapshot } from '@ferretry/protocol';
+import { projectionRecord, projectionSnapshot } from '../../../../protocol/tests/fixtures/agenda-projection.ts';
 import { AgendaInboxPage } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import { agendaConversationPath, type InboxCard } from '../../../src/lib/agenda-inbox.ts';
 import { daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
 import { machineSessionView } from '../../../src/lib/machine-agenda.ts';
 import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { chooseFromMenu } from '../../support/inbox-menus.ts';
+import type { InboxResolved } from '../../../src/lib/agenda-inbox.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 const PAIRED = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 't1' });
@@ -52,6 +56,92 @@ const open = async (cards: readonly InboxCard[], initialOpen?: string, paired = 
 };
 
 describe('the Machine group in the Inbox', () => {
+  test('opens a resolved machine deep link in the Inbox when it has no chat to navigate to', async () => {
+    // Arrange
+    const read = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(projectionRecord()));
+    try {
+      const record = must(agendaListSnapshot(projectionSnapshot(0, 1)).resolved[0], 'resolved header');
+      const row: InboxResolved = {
+        key: 'machine:A1',
+        daemonId: PAIRED.daemonId,
+        machineName: 'Studio',
+        view: must(machineView, 'the machine view'),
+        record,
+      };
+      const settled: boolean[] = [];
+      // Act
+      view = await mount(
+        <InboxHarness
+          cards={[]}
+          fake={fakeInbox()}
+          resolved={[row]}
+          render={inbox => (
+            <AgendaInboxPage
+              inbox={{ ...inbox, connectionFor: () => PAIRED }}
+              onNavigate={() => {}}
+              open={{ daemonId: PAIRED.daemonId, sessionId: 'machine-agenda', id: 'A1', settled: true }}
+              onOpenSettled={opened => settled.push(opened)}
+              phone={false}
+              now={NOW}
+            />
+          )}
+        />,
+      );
+      // Assert
+      expect(settled).toEqual([true]);
+      expect(view.container.querySelector('[data-agenda-view="A1"]')).not.toBeNull();
+      expect(read).toHaveBeenCalledTimes(1);
+    } finally {
+      read.mockRestore();
+    }
+  });
+  test('opens a resolved machine header from the list through its one-item read', async () => {
+    // Arrange
+    const read = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(projectionRecord()));
+    try {
+      const record = must(agendaListSnapshot(projectionSnapshot(0, 1)).resolved[0], 'resolved header');
+      const row: InboxResolved = {
+        key: 'machine:A1',
+        daemonId: PAIRED.daemonId,
+        machineName: 'Studio',
+        view: must(machineView, 'the machine view'),
+        record,
+      };
+      view = await mount(
+        <InboxHarness
+          cards={[]}
+          fake={fakeInbox()}
+          resolved={[row]}
+          render={inbox => (
+            <AgendaInboxPage
+              inbox={{ ...inbox, connectionFor: () => PAIRED }}
+              onNavigate={() => {}}
+              phone={false}
+              now={NOW}
+            />
+          )}
+        />,
+      );
+      // Act
+      await chooseFromMenu(view.container, 'filter', 'resolved');
+      await interact(() =>
+        must(view?.container.querySelector<HTMLButtonElement>('.fy-attn-panel__record-link'), 'resolved row').click(),
+      );
+      // Assert
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(String(read.mock.calls[0]?.[0])).toContain('/v1/machine/agenda/A1');
+      expect(view.container.querySelector('[data-agenda-view="A1"]')).not.toBeNull();
+      await interact(() =>
+        must(
+          view?.container.querySelector<HTMLButtonElement>('button[aria-label="Back to the Inbox"]'),
+          'close',
+        ).click(),
+      );
+      expect(view.container.querySelector('[data-agenda-view="A1"]')).toBeNull();
+    } finally {
+      read.mockRestore();
+    }
+  });
   test('is a header that goes nowhere, and its item opens no conversation', async () => {
     const view0 = must(machineView, 'the machine view');
     await open([inboxCard(moved, view0)]);

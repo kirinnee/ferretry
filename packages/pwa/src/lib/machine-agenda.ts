@@ -10,7 +10,7 @@
 
 import {
   type AgendaItem,
-  type AgendaSnapshot,
+  type AgendaListSnapshot,
   MACHINE_AGENDA_ID,
   type SessionAgendaSummary,
   type SessionView,
@@ -43,7 +43,7 @@ const summaryOf = (items: readonly AgendaItem[]): SessionAgendaSummary | undefin
  * The stand-in conversation for a machine's agenda board: only the fields the Inbox reads of a conversation are
  * real. A board with nothing in it (open, parked or resolved) has none — the machine shows no group.
  */
-export const machineSessionView = (snapshot: AgendaSnapshot): SessionView | undefined => {
+export const machineSessionView = (snapshot: AgendaListSnapshot): SessionView | undefined => {
   if (snapshot.items.length === 0 && snapshot.resolved.length === 0) return undefined;
   const summary = summaryOf(snapshot.items);
   return {
@@ -74,7 +74,7 @@ export const withMachineAgendas = <
   },
 >(
   machines: readonly M[],
-  boardFor: (daemonId: DaemonId, sessionId: string) => AgendaSnapshot | undefined,
+  boardFor: (daemonId: DaemonId, sessionId: string) => AgendaListSnapshot | undefined,
 ): readonly M[] =>
   machines.map(machine => {
     const board = boardFor(machine.connection.daemonId, MACHINE_AGENDA_ID);

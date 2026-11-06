@@ -5,8 +5,10 @@ import {
   AgendaActionRequestSchema,
   type AgendaClearAgentsResult,
   AgendaClearAgentsResultSchema,
-  type AgendaSnapshot,
-  AgendaSnapshotSchema,
+  type AgendaListSnapshot,
+  AgendaListSnapshotSchema,
+  type AgendaReadItem,
+  AgendaReadItemSchema,
   isMachineAgendaId,
 } from '@ferretry/protocol';
 import { requestWithRouteFallback } from '../agenda-wire/route-fallback.ts';
@@ -73,7 +75,7 @@ function attributionHeaders(ownSessionId: string | undefined): Record<string, st
  * Speaks the agenda routes (older daemons: the agenda routes) through the protocol client.
  *
  * Requests and responses are both parsed against the protocol schemas. kteam cast the response
- * (`response as AgendaSnapshot`), so a daemon answering with an error envelope produced a crash
+ * (`response as AgendaListSnapshot`), so a daemon answering with an error envelope produced a crash
  * inside rendering rather than a stated failure.
  */
 export class ProtocolAgendaGateway implements IAgendaGateway {
@@ -87,31 +89,42 @@ export class ProtocolAgendaGateway implements IAgendaGateway {
     this.#headers = attributionHeaders(ownSessionId);
   }
 
-  async snapshot(sessionId: string): Promise<AgendaSnapshot> {
+  async snapshot(sessionId: string): Promise<AgendaListSnapshot> {
     this.requireMachineOwner(sessionId);
-    return await requestWithRouteFallback(this.client, boardRoutes(sessionId), AgendaSnapshotSchema, {
+    return await requestWithRouteFallback(this.client, boardRoutes(sessionId), AgendaListSnapshotSchema, {
       headers: this.#headers,
     });
   }
 
-  async apply(sessionId: string, request: AgendaActionRequest): Promise<AgendaSnapshot> {
+  async readItem(sessionId: string, id: string): Promise<AgendaReadItem> {
+    this.requireMachineOwner(sessionId);
+    const item = await this.client.request(
+      `${boardRoutes(sessionId).current}/${encodeURIComponent(id)}`,
+      AgendaReadItemSchema,
+      { headers: this.#headers },
+    );
+    if (item.id !== id) throw new Error('daemon returned another agenda item');
+    return item;
+  }
+
+  async apply(sessionId: string, request: AgendaActionRequest): Promise<AgendaListSnapshot> {
     this.requireMachineOwner(sessionId);
     const body = AgendaActionRequestSchema.parse(request);
     return await requestWithRouteFallback(
       this.client,
       boardRoutes(sessionId),
-      AgendaSnapshotSchema,
+      AgendaListSnapshotSchema,
       jsonPost(body, this.#headers),
     );
   }
 
-  async sendReplies(sessionId: string): Promise<AgendaSnapshot> {
+  async sendReplies(sessionId: string): Promise<AgendaListSnapshot> {
     this.requireMachineOwner(sessionId);
     if (isMachineAgendaId(sessionId)) throw new Error('the machine agenda has no replies; use /v1/machine/agenda');
     return await requestWithRouteFallback(
       this.client,
       { current: agendaRepliesPath(sessionId), legacy: repliesPath(sessionId) },
-      AgendaSnapshotSchema,
+      AgendaListSnapshotSchema,
       jsonPost({}, this.#headers),
     );
   }

@@ -27,7 +27,13 @@
  *   ledger does not hold is said out loud as no longer open.
  */
 
-import type { AgendaId, AgendaItem, AgendaSnapshot, ResolvedAgendaItem } from '@ferretry/protocol';
+import type {
+  AgendaId,
+  AgendaItem,
+  AgendaListRecord,
+  AgendaListSnapshot,
+  ResolvedAgendaItem,
+} from '@ferretry/protocol';
 import { CircleAlert, CircleCheck, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAgendaInbox } from '../../hooks/use-agenda-inbox.ts';
@@ -65,6 +71,7 @@ import { agendaProse } from './agenda-prose.tsx';
 import { AgendaSettled, isResolved } from './agenda-settled.tsx';
 import { AgendaTab } from './agenda-tab.tsx';
 import { useItemLifecycle } from './use-item-lifecycle.ts';
+import { useAgendaItem } from './use-agenda-item.ts';
 
 /** What the chat sends of the agenda client, and nothing else of it. */
 export type AgendaActionClient = Pick<
@@ -87,7 +94,7 @@ export interface AgendaFocus {
 /** Where an id sits on a board: answerable, on the record, absent, or not known until the board is read. */
 type AgendaLocation = 'open' | 'resolved' | 'unknown' | 'pending';
 
-const locateAgenda = (snapshot: AgendaSnapshot | null, id: AgendaId): AgendaLocation => {
+const locateAgenda = (snapshot: AgendaListSnapshot | null, id: AgendaId): AgendaLocation => {
   if (snapshot === null) return 'pending';
   if (snapshot.items.some(item => item.id === id)) return 'open';
   if (snapshot.resolved.some(item => item.id === id)) return 'resolved';
@@ -98,7 +105,7 @@ const locateAgenda = (snapshot: AgendaSnapshot | null, id: AgendaId): AgendaLoca
  * Every id in this session's Agenda LEDGER — open and resolved. This is what proves a `!A3`: an answered
  * item is still on the record, so a reference to it in older chat stays a link instead of decaying into prose.
  */
-export const agendaLedgerIds = (snapshot: AgendaSnapshot | null): readonly AgendaId[] =>
+export const agendaLedgerIds = (snapshot: AgendaListSnapshot | null): readonly AgendaId[] =>
   snapshot === null ? [] : [...snapshot.items.map(item => item.id), ...snapshot.resolved.map(item => item.id)];
 
 /** Ticks or unticks one step of an item on this session's machine, from its full card. */
@@ -123,7 +130,7 @@ const endedWords = (item: ResolvedAgendaItem): string =>
   item.resolutionNote === null || item.resolutionNote.trim() === ''
     ? `${agendaReference(item.id)} is closed.`
     : `${agendaReference(item.id)} is closed. ${item.resolutionNote}`;
-const NO_RECORDS: readonly ResolvedAgendaItem[] = [];
+const NO_RECORDS: readonly AgendaListRecord[] = [];
 const NO_HOLDS: ReadonlySet<AgendaId> = new Set();
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
 const copyWriter = browserClipboardWriter();
@@ -144,7 +151,7 @@ export interface UseAgendaInput {
   readonly projectId?: string;
   /** Absent when this host has no Attention subscription: nothing can be answered from here. */
   readonly client: AgendaActionClient | undefined;
-  readonly snapshot: AgendaSnapshot | null;
+  readonly snapshot: AgendaListSnapshot | null;
   readonly status: AgendaLoadStatus;
   /** The ferret works in agenda mode: only then does the chat draw an agenda. */
   readonly agendaMode: boolean;
@@ -259,12 +266,14 @@ export const useAgenda = ({
   );
 
   // ANY ID THE LEDGER HOLDS: an open item to answer, a parked or notice one outside the pager, a resolved record.
-  const shownItem: AgendaItem | ResolvedAgendaItem | undefined =
+  const selectedItem =
     here.card === null
       ? undefined
       : (byId.get(here.card) ??
         board.find(item => item.id === here.card) ??
         records.find(item => item.id === here.card));
+  const detail = useAgendaItem(connection, scope, selectedItem);
+  const shownItem = detail.item;
   const cardId = shownItem?.id ?? null;
   const closed = shownItem !== undefined && isResolved(shownItem);
   const aboutRef = useRef<readonly AgendaId[]>([]);
@@ -340,7 +349,7 @@ export const useAgenda = ({
   // Whether the item was still open during THIS opening of the view: only then does it close by itself when it ends,
   // never a closed record the owner opened from the history to read, nor one opened again after it ended.
   const seenOpen = useRef<number | null>(null);
-  if (shownItem === undefined || seenOpen.current !== here.opening) seenOpen.current = null;
+  if (selectedItem === undefined || seenOpen.current !== here.opening) seenOpen.current = null;
   if (shownItem !== undefined && !closed) seenOpen.current = here.opening;
   const closeEnded = (id: AgendaId, text: string, tone: 'ok' | 'info'): void => {
     update(current => (current.card === id ? { card: null } : {}));
@@ -378,7 +387,7 @@ export const useAgenda = ({
     if (ended !== undefined) closeEnded(ended.id, endedWords(ended), 'info');
   }, [ended?.id]);
 
-  const openCard = (item: AgendaItem | ResolvedAgendaItem): void => {
+  const openCard = (item: AgendaItem | AgendaListRecord): void => {
     setSentForm(null);
     update(() => ({ card: item.id, drawer: false }));
   };
@@ -555,7 +564,27 @@ export const useAgenda = ({
             act(formItem, action, '');
           });
   const view =
-    cardItem === undefined ? null : (
+    cardItem === undefined ? (
+      selectedItem === undefined ? null : (
+        <div
+          className="fy-item-view"
+          data-agenda-item-reading=""
+          role="dialog"
+          aria-modal="true"
+          aria-label={selectedItem.title ?? selectedItem.subject}
+        >
+          <p role={detail.error === undefined ? 'status' : 'alert'}>{detail.error ?? 'Reading agenda item…'}</p>
+          {detail.error === undefined ? null : (
+            <button type="button" onClick={detail.retry}>
+              Try again
+            </button>
+          )}
+          <button type="button" onClick={() => update(() => ({ card: null }))}>
+            Close
+          </button>
+        </div>
+      )
+    ) : (
       <AgendaDeliveryContext.Provider value={deliveryState}>
         <AgendaItemView
           busy={busyIds.has(cardItem.id)}
@@ -702,7 +731,7 @@ export const useAgenda = ({
     above,
     view,
     scrim,
-    covered: cardItem !== undefined,
+    covered: selectedItem !== undefined,
     close: () => update(() => ({ drawer: false, card: null })),
     hostsLive,
     jumpHost,

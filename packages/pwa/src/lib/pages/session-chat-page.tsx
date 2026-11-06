@@ -1,4 +1,4 @@
-import type { AgendaId, AgendaSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
+import type { AgendaId, AgendaListSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { WorktreeListResponseSchema } from '@ferretry/protocol';
 import { Pause, Play, Search } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -171,7 +171,7 @@ const runtimeModelCatalogs = new DaemonRuntimeModelCatalogStore();
 export interface SessionAgendaModel {
   /** The one canonical client; the page never opens its own transport. */
   readonly client: AgendaActionClient;
-  readonly snapshot: AgendaSnapshot | null;
+  readonly snapshot: AgendaListSnapshot | null;
   readonly status: AgendaLoadStatus;
 }
 

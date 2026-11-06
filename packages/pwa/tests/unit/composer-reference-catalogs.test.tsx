@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { AGENDA_CHANNEL_HEADER } from '@ferretry/protocol';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import type { z } from 'zod';
 import type { AgendaWire } from '../../src/lib/agenda-wire.ts';
@@ -48,13 +49,13 @@ const skillsListing = {
 };
 
 const reader = (
-  answer: (path: string) => unknown | Promise<unknown>,
+  answer: (path: string, init?: RequestInit) => unknown | Promise<unknown>,
   calls: string[] = [],
 ): ComposerReferenceCatalogReader =>
   ({
-    request: async <Value,>(path: string, schema: z.ZodType<Value>): Promise<Value> => {
+    request: async <Value,>(path: string, schema: z.ZodType<Value>, init?: RequestInit): Promise<Value> => {
       calls.push(path);
-      return schema.parse(await answer(path));
+      return schema.parse(await answer(path, init));
     },
   }) as ComposerReferenceCatalogReader;
 
@@ -319,6 +320,71 @@ describe('useComposerReferenceCatalogs', () => {
 });
 
 describe('the composer reference catalogs on the agenda wire', () => {
+  for (const wire of ['attention', 'agenda'] as const) {
+    for (const sharesOwners of [false, true]) {
+      test(`${wire} requests channel 2 and reads resolved headers with shared owners ${sharesOwners}`, async () => {
+        // Arrange — a resolved list record has no document body or ask.
+        const listing = agendaListing();
+        const resolved = {
+          projection: 'header',
+          lifecycle: 'addressed',
+          id: 'A4',
+          title: 'Renderer chosen',
+          kind: 'choice',
+          subject: 'Choose a renderer',
+          why: 'A decision was needed.',
+          sourceRef: null,
+          raisedBy: 'human',
+          raisedByName: null,
+          conversationCount: 2,
+          resolvedAt: listing.updatedAt,
+          resolvedBy: 'human',
+          resolvedBySession: null,
+          resolvedByName: null,
+          resolutionNote: null,
+          disposition: 'done',
+        };
+        const calls: string[] = [];
+        const headers: Headers[] = [];
+        const client = reader((path, init) => {
+          if (path.endsWith('/skills')) return skillsListing;
+          headers.push(new Headers(init?.headers));
+          return { ...listing, resolved: [resolved] };
+        }, calls);
+        const sources: ComposerReferenceCatalogSources | undefined = sharesOwners
+          ? { tasks: cards, skills: skillsListing, waitForTasks: () => undefined, waitForSkills: () => undefined }
+          : undefined;
+        let latest: ReturnType<typeof useComposerReferenceCatalogs> | undefined;
+
+        // Act
+        const view = render(
+          <CatalogProbe
+            client={client}
+            onCatalogs={catalogs => {
+              latest = catalogs;
+            }}
+            sessionId="session-a"
+            sources={sources}
+            wire={wire}
+          />,
+        );
+        await flushCatalogs();
+
+        // Assert — only open items reach the catalog; headers need no one-item read.
+        expect(headers).toHaveLength(1);
+        expect(headers[0]?.get(AGENDA_CHANNEL_HEADER)).toBe('2');
+        expect(calls).toEqual([
+          `/v1/sessions/session-a/${wire}`,
+          ...(sharesOwners ? [] : ['/v1/sessions/session-a/skills']),
+        ]);
+        expect(latest?.attention?.map(item => item.id)).toEqual(['A3']);
+        expect(latest?.failures).toEqual({});
+        expect(output(view)).toBe(sharesOwners ? '1:1:1' : '-:1:1');
+        run(() => view.unmount());
+      });
+    }
+  }
+
   const answer = (path: string) => {
     if (path.endsWith('/skills')) return skillsListing;
     return agendaListing();

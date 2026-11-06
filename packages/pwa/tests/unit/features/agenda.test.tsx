@@ -1,12 +1,15 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import {
   type AgendaId,
   type AgendaItem,
   type AgendaSnapshot,
+  type AgendaListSnapshot,
   DAEMON_FEATURES,
   LANE_PROPOSAL_ANSWERS,
   laneProposalReference,
+  agendaListSnapshot,
 } from '@ferretry/protocol';
+import { projectionSnapshot } from '../../../../protocol/tests/fixtures/agenda-projection.ts';
 import type { ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import {
@@ -28,6 +31,7 @@ import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
 import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { RouterProvider } from '../../../src/lib/router.tsx';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
+import { browserFetch } from '../../../src/lib/runtime-models.ts';
 import type { TranscriptEntry } from '../../../src/lib/session-screens.ts';
 import '../../support/dom.ts';
 import { agendaItem } from '../../support/agenda-inbox.tsx';
@@ -86,7 +90,7 @@ const client = (fail = false): AgendaActionClient => ({
 });
 
 interface HostProps {
-  readonly snapshot: AgendaSnapshot | null;
+  readonly snapshot: AgendaListSnapshot | null;
   readonly agendaMode?: boolean;
   readonly desktop?: boolean;
   readonly afterOpen?: () => void;
@@ -147,15 +151,64 @@ function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...r
 }
 
 const mounted: ReturnType<typeof render>[] = [];
+const itemFetches: { mockRestore(): void }[] = [];
 afterEach(() => {
   for (const view of mounted.splice(0)) run(() => view.unmount());
   calls.length = 0;
   current = undefined;
+  for (const fetcher of itemFetches.splice(0)) fetcher.mockRestore();
   try {
     localStorage.clear();
   } catch {
     // no storage here
   }
+});
+
+describe('opening resolved list headers', () => {
+  test('keeps a failed item read visible and lets the owner retry it', async () => {
+    // Arrange
+    const full = { ...projectionSnapshot(0, 1), sessionId: 'chat' };
+    const read = spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new Error('Offline'))
+      .mockResolvedValue(Response.json(full.resolved[0]));
+    itemFetches.push(read);
+    let view: ReturnType<typeof mount> | undefined;
+    // Act
+    await runAsync(async () => {
+      view = mount({ snapshot: agendaListSnapshot(full), focus: { target: 'A1' as AgendaId, seq: 1 } });
+    });
+    // Assert
+    expect(live().covered).toBe(true);
+    expect(view?.root.findByProps({ role: 'alert' }).children).toEqual(['Offline']);
+    const retry = view?.root.findAllByType('button').find(button => button.children.includes('Try again'));
+    await runAsync(async () => {
+      retry?.props.onClick();
+    });
+    expect(view?.root.findByType(AgendaItemView).props.item.id).toBe('A1');
+  });
+  test('reads exactly one full item before showing its tabs, revisions and stored History', async () => {
+    // Arrange
+    const full = { ...projectionSnapshot(0, 1), sessionId: 'chat' };
+    const listed = agendaListSnapshot(full);
+    const document = full.resolved[0];
+    const read = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(document));
+    itemFetches.push(read);
+    // Act
+    let view: ReturnType<typeof mount> | undefined;
+    await runAsync(async () => {
+      view = mount({ snapshot: listed, focus: { target: 'A1' as AgendaId, seq: 1 } });
+    });
+    // Assert
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(String(read.mock.calls[0]?.[0])).toContain('/v1/sessions/chat/agenda/A1');
+    const opened = view?.root.findByType(AgendaItemView);
+    expect(opened?.props.item).toEqual(document);
+    expect(opened?.props.item.tabs[0].body).toContain('Fixture notes.');
+    expect(opened?.props.history.length).toBeGreaterThan(0);
+    expect(live().covered).toBe(true);
+    run(() => opened?.props.onClose());
+    expect(live().covered).toBe(false);
+  });
 });
 const mount = (props: HostProps) => {
   const hosted = <Host {...props} />;
@@ -375,7 +428,11 @@ describe('the full card', () => {
     });
     const view = mount({
       snapshot: board([stored]),
-      store: { agendaWire: wires, connections: { list: () => [] } } as unknown as AppStore,
+      store: {
+        agendaWire: wires,
+        carrier: { fetch: browserFetch },
+        connections: { list: () => [] },
+      } as unknown as AppStore,
     });
     withDrawer(view);
     open(view, 'A3');

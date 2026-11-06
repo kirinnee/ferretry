@@ -1933,13 +1933,18 @@ item back fresh instead of in its old place.
 An app from before the channel parses a **whole** board with its own schema, so one item it cannot read makes the board
 unreadable. Its limits were smaller (a point-form segment 1,024, the context and every note 2,048, a step 2,000, a body
 8,000), and its revisions and history entries are strict, so an edit of `whereWeAre` or `detail` or a `response` on a
-history entry is a key it refuses. A daemon therefore serves the items in two shapes, chosen by the **request header
-`x-fy-agenda-channel: 1`** (the same version as `agenda.channel.1` on `GET /v1/health`):
+history entry is a key it refuses. A daemon chooses the response shape by the **request header
+`x-fy-agenda-channel`**. Channel 1 corresponds to `agenda.channel.1` on `GET /v1/health`; channel 2 additionally
+accepts resolved headers in list responses:
 
-- **With the header** — the whole shape, exactly as stored. The CLI and current PWA send it on agenda requests,
-  including snapshot reads, actions, Send now and every roll-up page. Older daemons ignore the header (it is already
-  allowed by the daemon's CORS preflight).
-- **Without it** — the **legacy projection** (`legacyAgendaSnapshot`, in `@ferretry/protocol`): the same items, with
+- **Channel 2** — active items in full and resolved headers on session agenda, legacy `/attention` and machine agenda
+  list reads. Opening a resolved item reads its full record through `GET …/agenda/:id`. The current CLI and PWA send
+  `x-fy-agenda-channel: 2` on agenda requests. Actions, Send now, roll-ups and one-item reads retain their full shapes.
+- **Channel 1** — complete active and resolved records, with all channel fields. A cached PWA or CLI that cannot
+  parse headers keeps reading its whole snapshot.
+- Older daemons ignore the header (it is already allowed by CORS); a daemon that only understands channel 1 serves
+  channel 2 readers the legacy full snapshot, which they can still read.
+- **Without it, or with an unknown version** — complete records in the **legacy projection** (`legacyAgendaSnapshot`, in `@ferretry/protocol`): the same items, with
   every widened field cut to the older bound (ending in `…`), the channel-only keys (`resting`, `ownerAnswer`, `stage`,
   `stages`, `whereWeAre`, `detail`), a link's `meaning` (`links[].meaning`, also in a revision's `previous`) and the `response` of a history entry left out, and a revision that only changed a
   field the older app does not know dropped. The ferret's own `tabs` are left out too, a revision that only changed
@@ -1982,6 +1987,25 @@ A daemon that stores the conversation, takes `log`, `merge` and `split`, and kee
 reads every item; the CLI checks the feature first and says the daemon needs an update. The app ships before the daemon:
 an app talking to a daemon without the feature still reconstructs the conversation from session transcripts
 (`item-conversation.ts`) and shows no diff or merge control.
+
+### Lists and complete items
+
+`GET /v1/sessions/:sessionId/agenda`, its legacy `/attention` spelling, and `GET /v1/machine/agenda` return
+`AgendaListSnapshot`: active items (including resting and snoozed ones) in full, and every addressed item as a
+`projection: header` record. A header keeps its id, title, kind, author, resolution time and disposition,
+conversation count, card and reference links, the short reason searched by Find, and the outcome metadata the Resolved rows display. The document's
+tabs, revisions, history, conversation text and full picture travel only on an item read. Stored ledgers and mutation
+responses retain the full `AgendaSnapshot` shape. List readers also accept full records from older daemons.
+
+`GET /v1/sessions/:sessionId/agenda/:id` returns one complete active or addressed item, with the same operator
+minimum and caller policy as the session list. `GET /v1/machine/agenda/:id` does the same for a machine item and is
+owner-only, exactly as its list is. Both are no-store reads; an unknown item is a 404. The existing conversation
+cursor still reads words outside the item's bounded tail.
+
+The PWA reads a resolved item's full document when it opens, before drawing its tabs, conversation and edits.
+The Resolved lists need only header metadata; none of the last ten records needs a full-document exception.
+Machine records open in the Inbox because they have no ferret conversation to navigate to. A failed item read keeps
+a visible retry; it never presents a header as an empty document.
 
 ### Both spellings, one window
 

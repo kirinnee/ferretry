@@ -13,7 +13,13 @@
  * the board is said to be unavailable on its machine — never "Updating", which is only a first read in flight.
  */
 
-import { type AgendaItem, MACHINE_AGENDA_ID, isMachineAgendaId, type SessionView } from '@ferretry/protocol';
+import {
+  type AgendaListRecord,
+  type AgendaItem,
+  MACHINE_AGENDA_ID,
+  isMachineAgendaId,
+  type SessionView,
+} from '@ferretry/protocol';
 import {
   createContext,
   useCallback,
@@ -132,7 +138,7 @@ export interface AgendaInbox {
   /** The items one conversation's board holds (or its roll-up): what a merge can join. */
   readonly boardOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaItem[];
   /** The resolved records one conversation's board holds: where the title of an agenda merged away is read. */
-  readonly recordsOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaItem[];
+  readonly recordsOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaListRecord[];
 }
 
 /** One paired machine to count Attention on: its pairing and the name the reader knows it by. */
@@ -204,7 +210,7 @@ const cardsKey = (cards: readonly InboxCard[]): string =>
   cards.map(card => `${card.key}\u0000${JSON.stringify(card.item)}`).join('\u0001');
 
 const NO_TO_TEST: readonly ToTestCard[] = [];
-const NO_RECORDS: readonly AgendaItem[] = [];
+const NO_RECORDS: readonly AgendaListRecord[] = [];
 
 const toTestKeyOf = (rows: readonly ToTestCard[]): string =>
   rows
@@ -442,7 +448,7 @@ export function useAgendaInboxModel(
     [itemsOf],
   );
   const recordsOf = useCallback(
-    (daemonId: DaemonId, sessionId: string): readonly AgendaItem[] =>
+    (daemonId: DaemonId, sessionId: string): readonly AgendaListRecord[] =>
       boards.snapshots.get(daemonSessionKey({ daemonId, sessionId }))?.resolved ?? NO_RECORDS,
     [boards],
   );

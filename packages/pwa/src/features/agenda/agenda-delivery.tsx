@@ -16,7 +16,7 @@
  * inbox's deck, whose answered cards leave it at once) simply has no "Sending…" to say.
  */
 
-import { type AgendaId, type AgendaItem, type AgendaSnapshot, agendaTitle, hasOwnTitle } from '@ferretry/protocol';
+import { type AgendaId, type AgendaItem, type AgendaListSnapshot, agendaTitle, hasOwnTitle } from '@ferretry/protocol';
 import { LoaderCircle, TriangleAlert } from 'lucide-react';
 import { createContext, useContext } from 'react';
 import { type InboxAction, undeliveredAction } from '../../lib/agenda-answers.ts';
@@ -35,7 +35,7 @@ const NOTHING_SENDING: AgendaDeliveryState = { sending: new Set() };
 export const AgendaDeliveryContext = createContext<AgendaDeliveryState>(NOTHING_SENDING);
 
 /** The ids whose answer is held for the settle window or handed to the ferret and not yet proven. */
-export const deliveringIds = (snapshot: AgendaSnapshot | null): ReadonlySet<AgendaId> =>
+export const deliveringIds = (snapshot: AgendaListSnapshot | null): ReadonlySet<AgendaId> =>
   new Set([...(snapshot?.replies?.pending ?? []), ...(snapshot?.delivery?.sending ?? [])]);
 
 /** The heading a card shows for an item: its own title, or its whole ask for an item from before titles. */

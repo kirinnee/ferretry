@@ -5,7 +5,7 @@
  * same one the Inbox and the chat open; nothing is answered from a row.
  */
 
-import type { AgendaItem, ResolvedAgendaItem } from '@ferretry/protocol';
+import type { AgendaItem, AgendaListRecord } from '@ferretry/protocol';
 import { useState } from 'react';
 import {
   AGENDA_TAB_EMPTY,
@@ -20,7 +20,7 @@ import { agendaAsk } from './agenda-row.tsx';
 export interface AgendaTabProps {
   readonly model: AgendaTabModel;
   /** Open the item's view. */
-  readonly onOpen: (item: AgendaItem | ResolvedAgendaItem) => void;
+  readonly onOpen: (item: AgendaItem | AgendaListRecord) => void;
   /** This ferret is a sub-ferret: its items are raised on its lead's agenda, which is where to look. */
   readonly lead?: { readonly name: string; readonly open: () => void };
   /** The first filter to show; the first with anything in it when absent. */

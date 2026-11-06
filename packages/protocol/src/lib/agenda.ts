@@ -1721,47 +1721,93 @@ export const AgendaDeliverySchema = z.strictObject({
 });
 export type AgendaDelivery = z.infer<typeof AgendaDeliverySchema>;
 
-export const AgendaSnapshotSchema = z
-  .object({
-    v: z.literal(AGENDA_SCHEMA_VERSION),
-    sessionId: z.string().min(1),
-    items: z.array(AgendaItemSchema).max(MAX_AGENDA_PER_SESSION),
-    resolved: z.array(ResolvedAgendaItemSchema).max(MAX_AGENDA_RESOLUTIONS),
-    count: NonNegativeIntegerSchema,
-    parseErrors: NonNegativeIntegerSchema,
-    updatedAt: InstantSchema,
-    /** Writing advice for the item just raised or edited; present only on that response. */
-    warnings: z.array(z.string().trim().min(1).max(MAX_AGENDA_WARNING_LENGTH)).max(MAX_AGENDA_WARNINGS).optional(),
-    /** What the daemon did to the request that the caller should know, not advice on its writing (a card link left off). */
-    notes: z.array(z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH)).max(MAX_AGENDA_WARNINGS).optional(),
-    /**
-     * How many devices this machine has enrolled for push, counted as an item was raised; present only on
-     * the response to that raise. Zero means the owner was told nothing: the ask is on the board, and no
-     * phone or browser will hear of it until one turns notifications on.
-     */
-    enrolled: NonNegativeIntegerSchema.optional(),
-    /** Answers held for this ferret and when they go; absent when nothing is held. */
-    replies: AgendaRepliesSchema.optional(),
-    /** Answers on their way to the ferret and not yet proven to arrive; absent when there are none. */
-    delivery: AgendaDeliverySchema.optional(),
-  })
-  .superRefine((value, context) => {
-    if (value.count !== value.items.length) {
-      context.addIssue({ code: 'custom', message: 'count must equal the number of active items', path: ['count'] });
-    }
-    const activeIds = new Set(value.items.map(item => item.id));
-    if (activeIds.size !== value.items.length) {
-      context.addIssue({ code: 'custom', message: 'active agenda ids must be unique', path: ['items'] });
-    }
-    const resolvedIds = value.resolved.map(item => item.id);
-    if (new Set(resolvedIds).size !== resolvedIds.length) {
-      context.addIssue({ code: 'custom', message: 'resolved agenda ids must be unique', path: ['resolved'] });
-    }
-    if (resolvedIds.some(id => activeIds.has(id))) {
-      context.addIssue({ code: 'custom', message: 'active and resolved agenda ids must be disjoint' });
-    }
-  });
+const AgendaSnapshotObjectSchema = z.object({
+  v: z.literal(AGENDA_SCHEMA_VERSION),
+  sessionId: z.string().min(1),
+  items: z.array(AgendaItemSchema).max(MAX_AGENDA_PER_SESSION),
+  resolved: z.array(ResolvedAgendaItemSchema).max(MAX_AGENDA_RESOLUTIONS),
+  count: NonNegativeIntegerSchema,
+  parseErrors: NonNegativeIntegerSchema,
+  updatedAt: InstantSchema,
+  /** Writing advice for the item just raised or edited; present only on that response. */
+  warnings: z.array(z.string().trim().min(1).max(MAX_AGENDA_WARNING_LENGTH)).max(MAX_AGENDA_WARNINGS).optional(),
+  /** What the daemon did to the request that the caller should know, not advice on its writing (a card link left off). */
+  notes: z.array(z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH)).max(MAX_AGENDA_WARNINGS).optional(),
+  /**
+   * How many devices this machine has enrolled for push, counted as an item was raised; present only on
+   * the response to that raise. Zero means the owner was told nothing: the ask is on the board, and no
+   * phone or browser will hear of it until one turns notifications on.
+   */
+  enrolled: NonNegativeIntegerSchema.optional(),
+  /** Answers held for this ferret and when they go; absent when nothing is held. */
+  replies: AgendaRepliesSchema.optional(),
+  /** Answers on their way to the ferret and not yet proven to arrive; absent when there are none. */
+  delivery: AgendaDeliverySchema.optional(),
+});
+const agendaSnapshotProblems = (
+  value: { count: number; items: readonly { id: string }[]; resolved: readonly { id: string }[] },
+  context: z.RefinementCtx,
+): void => {
+  if (value.count !== value.items.length) {
+    context.addIssue({ code: 'custom', message: 'count must equal the number of active items', path: ['count'] });
+  }
+  const activeIds = new Set(value.items.map(item => item.id));
+  if (activeIds.size !== value.items.length) {
+    context.addIssue({ code: 'custom', message: 'active agenda ids must be unique', path: ['items'] });
+  }
+  const resolvedIds = value.resolved.map(item => item.id);
+  if (new Set(resolvedIds).size !== resolvedIds.length) {
+    context.addIssue({ code: 'custom', message: 'resolved agenda ids must be unique', path: ['resolved'] });
+  }
+  if (resolvedIds.some(id => activeIds.has(id))) {
+    context.addIssue({ code: 'custom', message: 'active and resolved agenda ids must be disjoint' });
+  }
+};
+export const AgendaSnapshotSchema = AgendaSnapshotObjectSchema.superRefine(agendaSnapshotProblems);
 export type AgendaSnapshot = z.infer<typeof AgendaSnapshotSchema>;
+
+/** List-only metadata. The complete document is read through GET …/agenda/:id. */
+const ResolvedAgendaHeaderObjectSchema = z
+  .object({
+    projection: z.literal('header'),
+    lifecycle: z.literal('addressed'),
+    id: AgendaIdSchema,
+    title: AgendaCardShape.title.unwrap(),
+    kind: AgendaKindSchema,
+    subject: AgendaItemBaseShape.subject,
+    /** The Inbox's Find searches this one-line reason as well as the title and subject. */
+    why: AgendaItemBaseShape.why,
+    sourceRef: AgendaItemBaseShape.sourceRef,
+    raisedBy: z.enum(['human', 'agent', 'daemon']),
+    raisedByName: z.string().nullable(),
+    conversationCount: NonNegativeIntegerSchema,
+    task: AgendaItemBaseShape.task,
+    relatedTasks: AgendaItemBaseShape.relatedTasks,
+    links: AgendaBriefShape.links,
+    stage: AgendaItemBaseShape.stage,
+    stages: AgendaItemBaseShape.stages,
+    fields: AgendaBriefShape.fields,
+  })
+  .and(AgendaResolutionSchema);
+
+/** Omitted document fields are unavailable until the one-item read completes. */
+export type ResolvedAgendaHeader = z.infer<typeof ResolvedAgendaHeaderObjectSchema> &
+  Partial<Omit<AgendaItem, 'raisedBy' | 'raisedByName'>>;
+export const ResolvedAgendaHeaderSchema: z.ZodType<ResolvedAgendaHeader> = ResolvedAgendaHeaderObjectSchema;
+export const AgendaListRecordSchema = z.union([ResolvedAgendaHeaderSchema, ResolvedAgendaItemSchema]);
+export type AgendaListRecord = z.infer<typeof AgendaListRecordSchema>;
+export const AgendaListSnapshotSchema = AgendaSnapshotObjectSchema.extend({
+  resolved: z.array(AgendaListRecordSchema).max(MAX_AGENDA_RESOLUTIONS),
+}).superRefine(agendaSnapshotProblems);
+export type AgendaListSnapshot = z.infer<typeof AgendaListSnapshotSchema>;
+export const AgendaReadItemSchema = z.union([
+  ResolvedAgendaItemSchema,
+  z.intersection(AgendaItemSchema, z.object({ resolvedAt: z.never().optional(), projection: z.never().optional() })),
+]);
+export type AgendaReadItem = z.infer<typeof AgendaReadItemSchema>;
+
+export const isAgendaHeader = (item: AgendaItem | AgendaListRecord): item is ResolvedAgendaHeader =>
+  'projection' in item && item.projection === 'header';
 
 const AddAgendaRequestSchema = z.strictObject({
   action: z.literal('add'),

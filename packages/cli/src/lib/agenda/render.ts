@@ -2,7 +2,7 @@ import {
   type AgendaDirection,
   type AgendaId,
   type AgendaItem,
-  type AgendaSnapshot,
+  type AgendaListSnapshot,
   agendaAnswerText,
   agendaCardAnswers,
   agendaInDiscussion,
@@ -13,7 +13,7 @@ import {
   agendaTurn,
   agendaWakeAt,
   hasOwnTitle,
-  type ResolvedAgendaItem,
+  type AgendaListRecord,
   unswipedChoices,
 } from '@ferretry/protocol';
 import { describeAnswer } from './answer.ts';
@@ -70,7 +70,7 @@ function oldestFirst(left: AgendaItem, right: AgendaItem): number {
 }
 
 /** Newest first: a resolution audit is read from the most recent entry back. */
-function newestFirst(left: ResolvedAgendaItem, right: ResolvedAgendaItem): number {
+function newestFirst(left: AgendaListRecord, right: AgendaListRecord): number {
   if (left.resolvedAt !== right.resolvedAt) return left.resolvedAt < right.resolvedAt ? 1 : -1;
   return agendaOrdinal(right.id) - agendaOrdinal(left.id);
 }
@@ -255,14 +255,14 @@ function instructionLines(item: AgendaItem): string[] {
  * kteam returned only this warning and dropped the whole list, so one corrupt record hid every valid
  * item on the board — exactly when a human most needs to see what is waiting.
  */
-function parseErrorWarning(snapshot: AgendaSnapshot): string | undefined {
+function parseErrorWarning(snapshot: AgendaListSnapshot): string | undefined {
   if (snapshot.parseErrors === 0) return undefined;
   const entries = snapshot.parseErrors === 1 ? '1 entry' : `${snapshot.parseErrors} entries`;
   return `Warning: ${entries} on this agenda could not be read; the list below may be incomplete.`;
 }
 
 /** The open agenda as a human reads it. */
-export function renderAgendaList(snapshot: AgendaSnapshot, now?: string): string {
+export function renderAgendaList(snapshot: AgendaListSnapshot, now?: string): string {
   const warning = parseErrorWarning(snapshot);
   const preamble = warning === undefined ? [] : [warning];
   if (snapshot.items.length === 0) return [...preamble, 'Nothing on the agenda.'].join('\n');
@@ -273,12 +273,12 @@ export function renderAgendaList(snapshot: AgendaSnapshot, now?: string): string
 }
 
 /** One item as `agenda show` prints it: the open item's full brief, or the line its resolution left. */
-export function renderAgendaItem(item: AgendaItem | ResolvedAgendaItem, now?: string): string {
+export function renderAgendaItem(item: AgendaItem | AgendaListRecord, now?: string): string {
   return 'resolvedAt' in item ? resolutionLine(item) : itemLines(item, now).join('\n');
 }
 
 /** A ferret closed a question the owner never answered: it was withdrawn, not settled. */
-export function wasWithdrawn(item: ResolvedAgendaItem): boolean {
+export function wasWithdrawn(item: AgendaListRecord): boolean {
   const shape = agendaShape(item);
   return (
     item.disposition === 'done' &&
@@ -289,7 +289,7 @@ export function wasWithdrawn(item: ResolvedAgendaItem): boolean {
   );
 }
 
-function resolutionLine(item: ResolvedAgendaItem): string {
+function resolutionLine(item: AgendaListRecord): string {
   const verb =
     item.disposition === 'dismissed'
       ? 'dismissed'
@@ -309,7 +309,7 @@ function resolutionLine(item: ResolvedAgendaItem): string {
 }
 
 /** The resolution audit, newest first. */
-export function renderAgendaHistory(snapshot: AgendaSnapshot): string {
+export function renderAgendaHistory(snapshot: AgendaListSnapshot): string {
   const warning = parseErrorWarning(snapshot);
   const preamble = warning === undefined ? [] : [warning];
   if (snapshot.resolved.length === 0) return [...preamble, 'No recorded resolutions.'].join('\n');
@@ -321,7 +321,7 @@ export function renderAgendaHistory(snapshot: AgendaSnapshot): string {
 export function renderAgendaMutation(
   verb: string,
   reference: string | undefined,
-  snapshot: AgendaSnapshot,
+  snapshot: AgendaListSnapshot,
   raised?: AgendaId,
 ): string {
   const subject = reference === undefined ? verb : `${verb} ${reference}`;

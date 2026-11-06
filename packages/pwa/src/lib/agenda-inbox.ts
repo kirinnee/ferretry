@@ -20,12 +20,12 @@ import {
   type AgendaId,
   AgendaIdSchema,
   type AgendaItem,
-  type AgendaSnapshot,
+  type AgendaListSnapshot,
   agendaDeepLinkFromFragment,
   agendaTurn,
   isMachineAgendaId,
   LEGACY_ATTENTION_LINK_PARAMETER,
-  type ResolvedAgendaItem,
+  type AgendaListRecord,
   type SessionAgendaSummary,
   type SessionView,
 } from '@ferretry/protocol';
@@ -398,7 +398,7 @@ export interface InboxResolved {
   readonly view: SessionView;
   /** The conversation's owner thread: the ferret a row names. */
   readonly root?: SessionView;
-  readonly record: ResolvedAgendaItem;
+  readonly record: AgendaListRecord;
 }
 
 /**
@@ -407,7 +407,7 @@ export interface InboxResolved {
  */
 export const inboxResolved = (
   sources: readonly AgendaInboxSource[],
-  boardFor: (daemonId: DaemonId, sessionId: string) => AgendaSnapshot | undefined,
+  boardFor: (daemonId: DaemonId, sessionId: string) => AgendaListSnapshot | undefined,
 ): readonly InboxResolved[] => {
   const rows: InboxResolved[] = [];
   for (const source of sources) {

@@ -50,7 +50,8 @@ describe('the mounted daemon surface', () => {
       1 + // bounded full-conversation reads, including historical version threads
       2 + // the work search over cards and agenda items, and the related check before filing (docs/work-search.md)
       1 + // one ferret's tidy plan: its own unwanted cards and work-tracking agenda items (docs/board.md, "Tidy")
-      2 + // the machine agenda: its read and the owner's dismiss, snooze or resolve (docs/agenda.md, "The machine agenda")
+      1 + // one full session agenda item behind a resolved list header
+      3 + // the machine agenda: its list, one full item and the owner's dismiss, snooze or resolve (docs/agenda.md, "The machine agenda")
       1 + // an agenda item the owner opened, so its alerts come down on their other devices (`POST /v1/push/seen`)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
@@ -454,6 +455,7 @@ describe('the mounted daemon surface', () => {
         'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
         'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
         'GET /v1/sessions/:sessionId/agenda',
+        'GET /v1/sessions/:sessionId/agenda/:id',
         'POST /v1/sessions/:sessionId/agenda',
         'GET /v1/sessions/:sessionId/agenda/:id/conversation',
         'GET /v1/sessions/:sessionId/agenda/:id/versions',
@@ -467,6 +469,7 @@ describe('the mounted daemon surface', () => {
         'POST /v1/agenda/clear-agents',
         'GET /v1/agenda/open',
         'GET /v1/machine/agenda',
+        'GET /v1/machine/agenda/:id',
         'POST /v1/machine/agenda',
         'GET /v1/sessions/:sessionId/pins',
         'POST /v1/sessions/:sessionId/pins',
