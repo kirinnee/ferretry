@@ -8,39 +8,21 @@
  */
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  chmod,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  readlink,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import { StoredCredentialClassifier } from '../../src/adapters/credential-classifier.ts';
 import {
   type CredentialCommand,
   type CredentialCommandResult,
   DEFAULT_KEYCHAIN_SERVICE,
   FALLBACK_KEYCHAIN_ACCOUNT,
-  FileCredentialStoreLinks,
-  harnessKeychainAccount,
+  claudeKeychainAccount,
   KEYCHAIN_ITEM_NOT_FOUND,
   PlatformFleetCredentialStore,
   secureStorageKeychainService,
 } from '../../src/adapters/credential-store.ts';
-import {
-  codexCredentialLink,
-  resolveCredentialStore,
-  type StoredCredentialResolution,
-} from '../../src/lib/account/credentials.ts';
+import { resolveCredentialStore, type StoredCredentialResolution } from '../../src/lib/account/credentials.ts';
 import { CredentialSchema } from '../../src/lib/account/schema.ts';
 
 const NOW = 1_800_000_000_000;
@@ -113,6 +95,10 @@ const storeOn = (platform: string, replies: readonly CredentialCommandResult[] =
   };
 };
 
+/** The verdict the store gives for a credential, never the secret. */
+const readStored = async (store: PlatformFleetCredentialStore, resolution: StoredCredentialResolution) =>
+  (await store.inspectStored(resolution)).reading;
+
 /** A resolved store for a credential, rooted in a temporary machine. */
 async function machine() {
   const root = await temporaryDirectory();
@@ -142,10 +128,10 @@ describe('secureStorageKeychainService', () => {
   });
 });
 
-describe('harnessKeychainAccount and the harness alphabet', () => {
+describe('claudeKeychainAccount and the harness alphabet', () => {
   it('should fall back to the harness’s own name for an account Claude would not accept', () => {
-    should(harnessKeychainAccount(['first last'])).equal(FALLBACK_KEYCHAIN_ACCOUNT);
-    should(harnessKeychainAccount(['place.holder_user-1'])).equal('place.holder_user-1');
+    should(claudeKeychainAccount('first last', () => 'unused')).equal(FALLBACK_KEYCHAIN_ACCOUNT);
+    should(claudeKeychainAccount('place.holder_user-1', () => 'unused')).equal('place.holder_user-1');
   });
 });
 
@@ -160,7 +146,7 @@ describe('PlatformFleetCredentialStore.storedMaterial — Claude off macOS', () 
     const { store, command } = storeOn('linux');
 
     // Act
-    const actual = await store.readStored(resolution);
+    const actual = await readStored(store, resolution);
 
     // Assert
     should(actual).deepEqual({ state: 'valid', expiresAt: NOW + HOUR });
@@ -173,7 +159,7 @@ describe('PlatformFleetCredentialStore.storedMaterial — Claude off macOS', () 
     await mkdir(path.join(world.paths.userHome, '.claude'), { recursive: true });
     await writeFile(path.join(world.paths.userHome, '.claude', '.credentials.json'), claudeBlob(NOW - HOUR));
 
-    should(await storeOn('linux').store.readStored(resolution)).deepEqual({
+    should(await readStored(storeOn('linux').store, resolution)).deepEqual({
       state: 'refreshable',
       expiresAt: NOW - HOUR,
     });
@@ -183,7 +169,7 @@ describe('PlatformFleetCredentialStore.storedMaterial — Claude off macOS', () 
     const world = await machine();
     const resolution = world.resolve('claude-slot', { harness: 'claude', store: 'ferretry' });
 
-    should(await storeOn('linux').store.readStored(resolution)).deepEqual({ state: 'missing' });
+    should(await readStored(storeOn('linux').store, resolution)).deepEqual({ state: 'missing' });
   });
 
   it('should refuse a symlinked credential file as unreadable, because a refresh forks it', async () => {
@@ -235,7 +221,7 @@ describe('PlatformFleetCredentialStore.storedMaterial — Claude on macOS', () =
     const { store, command } = storeOn('darwin', [{ code: 0, stdout: `${claudeBlob(NOW + HOUR)}\n` }]);
 
     // Act
-    const actual = await store.readStored(resolution);
+    const actual = await readStored(store, resolution);
 
     // Assert
     should(actual).deepEqual({ state: 'valid', expiresAt: NOW + HOUR });
@@ -257,7 +243,7 @@ describe('PlatformFleetCredentialStore.storedMaterial — Claude on macOS', () =
     const resolution = world.resolve('claude-you', { harness: 'claude', store: 'host' });
     const { store, command } = storeOn('darwin', [{ code: 0, stdout: claudeBlob(NOW + HOUR) }]);
 
-    await store.readStored(resolution);
+    await readStored(store, resolution);
 
     should(command.calls).deepEqual([
       ['security', 'find-generic-password', '-a', 'placeholder-user', '-s', DEFAULT_KEYCHAIN_SERVICE, '-w'],
@@ -280,7 +266,7 @@ describe('PlatformFleetCredentialStore.storedMaterial — Claude on macOS', () =
     });
 
     // Act
-    const actual = await store.readStored(resolution);
+    const actual = await readStored(store, resolution);
 
     // Assert
     should(actual).deepEqual({ state: 'valid', expiresAt: NOW + HOUR });
@@ -298,7 +284,7 @@ describe('PlatformFleetCredentialStore.storedMaterial — Claude on macOS', () =
       keychainAccount: 'placeholder-user',
     });
 
-    should(await store.readStored(resolution)).deepEqual({ state: 'missing' });
+    should(await readStored(store, resolution)).deepEqual({ state: 'missing' });
   });
 
   it('should fall back to the store file only when the item is absent', async () => {
@@ -308,7 +294,8 @@ describe('PlatformFleetCredentialStore.storedMaterial — Claude on macOS', () =
     await mkdir(resolution.storageDirectory, { recursive: true });
     await writeFile(resolution.credentialFile, claudeBlob(NOW + HOUR));
 
-    const actual = await storeOn('darwin', [{ code: KEYCHAIN_ITEM_NOT_FOUND, stdout: '' }]).store.readStored(
+    const actual = await readStored(
+      storeOn('darwin', [{ code: KEYCHAIN_ITEM_NOT_FOUND, stdout: '' }]).store,
       resolution,
     );
 
@@ -340,131 +327,5 @@ describe('PlatformFleetCredentialStore.storedMaterial — Codex', () => {
       outcome: 'found',
       blob: '{"tokens":{"refresh_token":"placeholder"}}',
     });
-  });
-});
-
-describe('StoredCredentialClassifier', () => {
-  it('should classify a credential once, with a digest and never the material', async () => {
-    const world = await machine();
-    const resolution = world.resolve('claude-work', { harness: 'claude', store: 'ferretry' });
-    const subject = new StoredCredentialClassifier({
-      credentials: { storedMaterial: async () => ({ outcome: 'found', blob: claudeBlob(NOW + HOUR) }) },
-      now: () => NOW,
-    });
-
-    const actual = await subject.classify(resolution);
-
-    should(actual).have.properties({ state: 'valid', expiresAt: NOW + HOUR });
-    should(actual.fingerprint).be.a.String();
-    should(JSON.stringify(actual)).not.match(/placeholder/u);
-  });
-
-  it('should give an absent credential no digest', async () => {
-    const world = await machine();
-    const resolution = world.resolve('codex-slot', { harness: 'codex', store: 'ferretry' });
-    const subject = new StoredCredentialClassifier({
-      credentials: { storedMaterial: async () => ({ outcome: 'absent' }) },
-      now: () => NOW,
-    });
-
-    should(await subject.classify(resolution)).deepEqual({ state: 'missing' });
-  });
-});
-
-describe('FileCredentialStoreLinks', () => {
-  const links = new FileCredentialStoreLinks();
-
-  it('should create a ferretry credential directory owner-only, and nothing for host', async () => {
-    // Arrange
-    const world = await machine();
-    const owned = world.resolve('codex-work', { harness: 'codex', store: 'ferretry' });
-    const host = world.resolve('codex-you', { harness: 'codex', store: 'host' });
-
-    // Act
-    await links.prepare(owned);
-    await links.prepare(host);
-
-    // Assert
-    should((await stat(path.join(world.paths.fleetRoot, 'credentials', 'codex-work'))).mode & 0o777).equal(0o700);
-    await should(lstat(world.paths.hostCodexHome)).be.rejected();
-  });
-
-  it("should link a runtime's auth.json to the canonical file by absolute path, then leave it alone", async () => {
-    // Arrange — an empty slot: the canonical file does not exist yet, and the link still goes in.
-    const world = await machine();
-    const resolution = world.resolve('codex-work', { harness: 'codex', store: 'ferretry' });
-    const home = path.join(world.paths.fleetRoot, 'homes', 'r1');
-    await mkdir(home, { recursive: true });
-    const link = codexCredentialLink(home, resolution);
-    if (link === undefined) throw new Error('fixture');
-
-    // Act
-    const first = await links.linkCodex(link);
-    const second = await links.linkCodex(link);
-
-    // Assert — the shape U4's `codex-credential-link.test.ts` measured a refresh keeps.
-    should(first).deepEqual({ ok: true, change: 'linked' });
-    should(second).deepEqual({ ok: true, change: 'unchanged' });
-    should(await readlink(link.path)).equal(path.join(world.paths.fleetRoot, 'credentials', 'codex-work', 'auth.json'));
-  });
-
-  it('should relink a runtime moved to another credential, without touching either credential', async () => {
-    const world = await machine();
-    const home = path.join(world.paths.fleetRoot, 'homes', 'r1');
-    await mkdir(home, { recursive: true });
-    const before = codexCredentialLink(home, world.resolve('a', { harness: 'codex', store: 'ferretry' }));
-    const after = codexCredentialLink(home, world.resolve('b', { harness: 'codex', store: 'ferretry' }));
-    if (before === undefined || after === undefined) throw new Error('fixture');
-    await mkdir(path.dirname(before.target), { recursive: true });
-    await writeFile(before.target, 'placeholder-a');
-    await links.linkCodex(before);
-
-    const actual = await links.linkCodex(after);
-
-    should(actual).deepEqual({ ok: true, change: 'relinked' });
-    should(await readlink(after.path)).equal(after.target);
-    should(await readFile(before.target, 'utf8')).equal('placeholder-a');
-  });
-
-  it('should refuse to replace a regular auth.json, which is a credential of its own', async () => {
-    const world = await machine();
-    const home = path.join(world.paths.fleetRoot, 'homes', 'r1');
-    await mkdir(home, { recursive: true });
-    await writeFile(path.join(home, 'auth.json'), 'placeholder-own');
-    const link = codexCredentialLink(home, world.resolve('a', { harness: 'codex', store: 'ferretry' }));
-    if (link === undefined) throw new Error('fixture');
-
-    const actual = await links.linkCodex(link);
-
-    should(actual).have.property('ok', false);
-    should(await readFile(path.join(home, 'auth.json'), 'utf8')).equal('placeholder-own');
-  });
-
-  it('should keep the old link and leave no temporary behind when a relink cannot be written', async () => {
-    // Arrange — the runtime home holds a link to another credential and has become read-only.
-    const world = await machine();
-    const home = path.join(world.paths.fleetRoot, 'homes', 'r1');
-    await mkdir(home, { recursive: true });
-    await symlink('/nowhere/auth.json', path.join(home, 'auth.json'));
-    const link = codexCredentialLink(home, world.resolve('a', { harness: 'codex', store: 'ferretry' }));
-    if (link === undefined) throw new Error('fixture');
-    await chmod(home, 0o500);
-
-    // Act
-    const outcome = await links.linkCodex(link).catch((error: unknown) => error);
-    await chmod(home, 0o700);
-
-    // Assert
-    should(outcome).be.instanceOf(Error);
-    should(await readlink(path.join(home, 'auth.json'))).equal('/nowhere/auth.json');
-    should(await readdir(home)).deepEqual(['auth.json']);
-  });
-
-  it('should rethrow a lookup failure that is not an absence', async () => {
-    const world = await machine();
-    const file = path.join(world.root, 'plain-file');
-    await writeFile(file, 'x');
-
-    await should(links.linkCodex({ path: path.join(file, 'auth.json'), target: '/t' })).be.rejected();
   });
 });

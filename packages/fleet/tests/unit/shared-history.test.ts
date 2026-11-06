@@ -2,7 +2,6 @@ import { describe, it } from 'bun:test';
 import path from 'node:path';
 import should from 'should';
 import {
-  mergeSharedHistoryJsonl,
   SharedHistoryAccessRefusedError,
   type SharedHistoryFileSystem,
   SharedHistoryMigration,
@@ -318,19 +317,18 @@ describe('shared history policy', () => {
     should(codex).deepEqual(['sessions', 'archived_sessions', 'history.jsonl']);
   });
 
-  it('should merge prompt history by timestamp, order malformed evidence last, and drop blank lines', () => {
+  it('should add prompt history by timestamp, order malformed evidence last, and drop blank lines', () => {
     // Act
-    const actual = mergeSharedHistoryJsonl(
-      '{"display":"three","timestamp":3}\nmalformed\n',
-      '{"display":"one","ts":1}\n{"display":"three","timestamp":3}\n',
-      '{"display":"two","timestamp":2}\n',
+    const actual = sharedHistoryJsonlAdditions(
+      '',
+      '{"display":"three","timestamp":3}\nmalformed\n\n{"display":"one","ts":1}\n{"display":"two","timestamp":2}\n',
     );
 
     // Assert
     should(actual).equal(
       '{"display":"one","ts":1}\n{"display":"two","timestamp":2}\n{"display":"three","timestamp":3}\nmalformed\n',
     );
-    should(mergeSharedHistoryJsonl('', '\n')).equal('');
+    should(sharedHistoryJsonlAdditions('', '\n')).equal('');
   });
 
   it('should keep repeats inside one history but never let a re-merge inflate them', () => {
@@ -339,16 +337,16 @@ describe('shared history policy', () => {
     const once = '{"display":"same","timestamp":1}\n';
 
     // Act
-    const withinOneDocument = mergeSharedHistoryJsonl(twice);
-    const remergedIdentically = mergeSharedHistoryJsonl(twice, twice);
-    const acrossDocuments = mergeSharedHistoryJsonl(once, once);
-    const growingSource = mergeSharedHistoryJsonl(once, twice);
+    const withinOneDocument = sharedHistoryJsonlAdditions('', twice);
+    const remergedIdentically = sharedHistoryJsonlAdditions(twice, twice);
+    const acrossDocuments = sharedHistoryJsonlAdditions(once, once);
+    const growingSource = sharedHistoryJsonlAdditions(once, twice);
 
     // Assert — identity is the exact line, multiplicity is the maximum any one document holds.
     should(withinOneDocument).equal(twice);
-    should(remergedIdentically).equal(twice);
-    should(acrossDocuments).equal(once);
-    should(growingSource).equal(twice);
+    should(remergedIdentically).equal('');
+    should(acrossDocuments).equal('');
+    should(growingSource).equal(once);
   });
 
   it('should reduce a merge to the lines the pool does not already hold', () => {
@@ -366,8 +364,14 @@ describe('shared history policy', () => {
     should(nothingNew).equal('');
     should(intoEmpty).equal('{"display":"first","timestamp":1}\n');
     // Appending exactly this to the pooled document yields the same multiset as the full union.
-    should(mergeSharedHistoryJsonl(pooled, incoming).split('\n').toSorted()).deepEqual(
-      `${pooled}${additions}`.split('\n').toSorted(),
+    should(`${pooled}${additions}`.split('\n').toSorted()).deepEqual(
+      [
+        '',
+        '{"display":"one","timestamp":1}',
+        '{"display":"same","timestamp":9}',
+        '{"display":"same","ts":9}',
+        '{"display":"two","timestamp":2}',
+      ].toSorted(),
     );
   });
 

@@ -41,20 +41,6 @@ import {
 import { FileMutationJournal, isMutationReservedName, STAGE_PREFIX } from './mutation-journal.ts';
 import { fileIdentityOf } from './node-guard-disk.ts';
 
-const CodexSqliteOriginalSchema = z.discriminatedUnion('present', [
-  z.strictObject({ present: z.literal(false) }),
-  z.strictObject({ present: z.literal(true), value: z.string() }),
-]);
-
-const CodexSqliteMarkerSchema = z.strictObject({
-  version: z.literal(1),
-  sqliteHome: z.string().min(1),
-  createdConfig: z.boolean(),
-  original: CodexSqliteOriginalSchema,
-});
-
-type CodexSqliteMarker = z.output<typeof CodexSqliteMarkerSchema>;
-
 const MODE_BITS = 0o7777;
 
 /** A folder an apply makes on the way to a file, as `mkdir` makes one by default (the umask applies). */
@@ -629,7 +615,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   /** A partly observed history request must refuse before any ordinary or history mutation lands. */
   private assertNoSharedHistoryRefusals(previews: FleetApplyPreview['sharedHistory']): void {
     for (const preview of previews) {
-      const refusals = preview.refusals ?? [];
+      const refusals = preview.refusals;
       if (refusals.length === 0) continue;
       throw new Error(
         `refusing to migrate ${preview.kind} history while ${refusals.length} account home(s) cannot be read: ${refusals
@@ -641,22 +627,19 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
   private async assertOperationWritable(operation: FleetWriteOperation): Promise<void> {
     await this.assertWritablePath(operation.path, traversesDestination(operation));
-    if (operation.kind === 'codex-sqlite-ownership') await this.assertWritablePath(operation.markerPath);
   }
 
   /**
-   * A disabled ownership operation is intentionally present in the pure plan: a sidecar from an
-   * earlier enable is the only authority to restore or remove `sqlite_home`. Preview may omit that
-   * operation only after observing that no sidecar exists. Existing evidence is parsed, along with
-   * the config it governs, so damaged state is refused now rather than advertised as a clean plan.
+   * Every operation the plan will perform, after checking each destination is inside a configured fleet
+   * root. A destination represented by a refused account home is kept visible, never inspected: shared-history
+   * preview turns an out-of-root account home into structured, renderable evidence.
    */
   private async previewOperations(
     operations: readonly FleetWriteOperation[],
     sharedHistory: FleetApplyPreview['sharedHistory'],
   ): Promise<readonly FleetWriteOperation[]> {
-    const refusedHomes = sharedHistory.flatMap(preview => (preview.refusals ?? []).map(refusal => refusal.home));
+    const refusedHomes = sharedHistory.flatMap(preview => preview.refusals.map(refusal => refusal.home));
     const previewed: FleetWriteOperation[] = [];
-    const folders = await this.destinationFolders();
     for (const operation of operations) {
       const followsFinalComponent = traversesDestination(operation);
       const pathWritable = await this.isWritablePath(operation.path, followsFinalComponent);
@@ -664,43 +647,6 @@ export class FileFleetProvisioner implements FleetProvisioner {
         throw new Error(`refusing to write outside configured fleet roots: ${operation.path}`);
       }
 
-      if (operation.kind !== 'codex-sqlite-ownership') {
-        previewed.push(operation);
-        continue;
-      }
-
-      const markerWritable = await this.isWritablePath(operation.markerPath);
-      if (!markerWritable && !this.isRepresentedByRefusedHome(operation.markerPath, refusedHomes)) {
-        throw new Error(`refusing to write outside configured fleet roots: ${operation.markerPath}`);
-      }
-
-      // Shared-history preview turns an out-of-root account home into structured, renderable
-      // evidence. Only paths lexically beneath that exact refused home inherit the evidence; keep
-      // their ownership operation visible, but never inspect files outside the declared roots.
-      if (!pathWritable || !markerWritable) {
-        previewed.push(operation);
-        continue;
-      }
-
-      const markerDocument = await this.readRegularText(
-        operation.markerPath,
-        'Codex SQLite ownership sidecar',
-        folders,
-      );
-      const marker =
-        markerDocument === undefined ? undefined : this.parseCodexSqliteMarker(markerDocument, operation.markerPath);
-      if (!operation.enabled && marker === undefined) continue;
-
-      const configDocument = await this.readRegularText(operation.path, 'Codex configuration', folders);
-      const current =
-        configDocument === undefined
-          ? {}
-          : this.parseCodexConfig(
-              configDocument,
-              operation.path,
-              operation.enabled ? 'enabling sharing' : 'disabling sharing',
-            );
-      if (operation.enabled && marker === undefined) this.sqliteHomeState(current, operation.path);
       previewed.push(operation);
     }
     return previewed;
@@ -782,10 +728,6 @@ export class FileFleetProvisioner implements FleetProvisioner {
       // skill item is not one. What was removed is visible where a person decides — the dry run states
       // the directory and the keep set it is bounded to.
       return [];
-    }
-
-    if (operation.kind === 'codex-sqlite-ownership') {
-      return (await this.reconcileCodexSqliteOwnership(operation, journal)) ? [] : undefined;
     }
 
     if (operation.kind === 'settings') {
@@ -889,58 +831,6 @@ export class FileFleetProvisioner implements FleetProvisioner {
     await this.writeFileAtomically(operation.path, operation.content, operation.mode, journal);
   }
 
-  /**
-   * Capture or remove Ferretry's exact `sqlite_home` override. The sidecar is written before the
-   * settings operation which injects the value, so an interrupted enable still has enough evidence
-   * for a later disable. Disable restores only when the current value still equals the one recorded
-   * by our sidecar; a user replacement is left untouched.
-   */
-  private async reconcileCodexSqliteOwnership(
-    operation: Extract<FleetWriteOperation, { readonly kind: 'codex-sqlite-ownership' }>,
-    journal: FileMutationJournal,
-  ): Promise<boolean> {
-    await this.assertWritablePath(operation.markerPath);
-    const markerDocument = await this.readRegularText(
-      operation.markerPath,
-      'Codex SQLite ownership sidecar',
-      journal.folders,
-    );
-    const marker =
-      markerDocument === undefined ? undefined : this.parseCodexSqliteMarker(markerDocument, operation.markerPath);
-
-    if (operation.enabled) {
-      const configDocument = await this.readRegularText(operation.path, 'Codex configuration', journal.folders);
-      const current =
-        configDocument === undefined ? {} : this.parseCodexConfig(configDocument, operation.path, 'enabling sharing');
-      const next: CodexSqliteMarker = {
-        version: 1,
-        sqliteHome: operation.sqliteHome,
-        createdConfig: marker?.createdConfig ?? configDocument === undefined,
-        original: marker?.original ?? this.sqliteHomeState(current, operation.path),
-      };
-      await journal.captureDirectory(path.dirname(operation.markerPath), 0o700);
-      await journal.capture(operation.markerPath);
-      await this.writeFileAtomically(operation.markerPath, `${JSON.stringify(next)}\n`, 0o600, journal, 0o700);
-      return true;
-    }
-
-    if (marker === undefined) return false;
-    const configDocument = await this.readRegularText(operation.path, 'Codex configuration', journal.folders);
-    if (configDocument !== undefined) {
-      const current = { ...this.parseCodexConfig(configDocument, operation.path, 'disabling sharing') };
-      if (current.sqlite_home === marker.sqliteHome) {
-        if (marker.original.present) current.sqlite_home = marker.original.value;
-        else delete current.sqlite_home;
-        await journal.capture(operation.path);
-        if (!(marker.createdConfig && Object.keys(current).length === 0)) {
-          await this.writeFileAtomically(operation.path, serializeSettings(current, 'toml'), 0o600, journal);
-        }
-      }
-    }
-    await journal.capture(operation.markerPath);
-    return true;
-  }
-
   /** The text of the regular file at `target`, read through its checked folder without following a link. */
   private async readRegularText(
     target: string,
@@ -955,36 +845,6 @@ export class FileFleetProvisioner implements FleetProvisioner {
       if (information.kind !== 'file') throw new Error(`${label} must be a regular file: ${target}`);
       return (await readFolderFile(folder, leaf)).toString('utf8');
     });
-  }
-
-  private parseCodexSqliteMarker(document: string, markerPath: string): CodexSqliteMarker {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(document);
-    } catch (error) {
-      throw new Error(`cannot safely reconcile Codex SQLite ownership sidecar ${markerPath}: ${String(error)}`);
-    }
-    const marker = CodexSqliteMarkerSchema.safeParse(parsed);
-    if (!marker.success || !path.isAbsolute(marker.data.sqliteHome)) {
-      throw new Error(`cannot safely reconcile invalid Codex SQLite ownership sidecar: ${markerPath}`);
-    }
-    return marker.data;
-  }
-
-  private parseCodexConfig(document: string, configPath: string, phase: string): SettingsObject {
-    try {
-      return parseSettings(document, 'toml');
-    } catch (error) {
-      throw new Error(`cannot parse Codex configuration while ${phase}: ${configPath}: ${String(error)}`);
-    }
-  }
-
-  private sqliteHomeState(settings: SettingsObject, configPath: string): CodexSqliteMarker['original'] {
-    if (!Object.hasOwn(settings, 'sqlite_home')) return { present: false };
-    if (typeof settings.sqlite_home !== 'string') {
-      throw new Error(`existing sqlite_home must be a string before sharing can change it: ${configPath}`);
-    }
-    return { present: true, value: settings.sqlite_home };
   }
 
   /**
@@ -1198,7 +1058,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
   /**
    * Writes `content` to a new temporary name beside `destination` and publishes it there, all through one checked
-   * handle on the folder (made, each missing folder with `folderMode`, when it is not there). The temporary is
+   * handle on the folder (made, each missing folder with the default folder mode, when it is not there). The temporary is
    * created exclusively and without following a link, and its mode is set through its own descriptor.
    */
   private async writeFileAtomically(
@@ -1206,9 +1066,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
     content: string,
     mode: number,
     journal: FileMutationJournal,
-    folderMode: number = DEFAULT_FOLDER_MODE,
   ): Promise<void> {
-    const folder = await journal.folders.made(path.dirname(destination), folderMode);
+    const folder = await journal.folders.made(path.dirname(destination), DEFAULT_FOLDER_MODE);
     const temporary = `.${path.basename(destination)}.${randomUUID()}.tmp`;
     try {
       const descriptor = await folder.openFile(temporary, 'new', mode);

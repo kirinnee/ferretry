@@ -69,10 +69,6 @@ export const credentialHarnesses = (credential: HalvedCredential): readonly Harn
   return ORDER.filter(harness => halves[harness] !== undefined);
 };
 
-/** Whether a login can drive `harness`. */
-export const credentialServes = (credential: HalvedCredential, harness: HarnessKind): boolean =>
-  credentialHarnesses(credential).includes(harness);
-
 /** What `harness` is given by the login, or `undefined` when the login does not drive it. */
 export const credentialHalf = (credential: HalvedCredential, harness: HarnessKind): CredentialHalf | undefined =>
   credentialHalves(credential)[harness];

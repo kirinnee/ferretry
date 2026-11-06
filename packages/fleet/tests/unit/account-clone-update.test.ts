@@ -1,9 +1,8 @@
 import { describe, it } from 'bun:test';
-import { CLONE_REVIEW_STALE, type FleetCloneBundle, FleetCloneBundleSchema } from '@ferretry/protocol';
+import { type FleetCloneBundle, FleetCloneBundleSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
   analyseCloneUpdate,
-  checkCloneReviewed,
   cloneBaseFor,
   type CloneUpdateInput,
   describeCloneUpdate,
@@ -912,12 +911,12 @@ describe('removed here', () => {
 });
 
 describe('the review the apply names', () => {
-  it('should refuse an apply that names no review or another one, and accept the same one', async () => {
-    const { checkCloneReviewed } = await import('../../src/lib/account/clone-update.ts');
+  it('should name the same review for the same input, and another one for another input', () => {
     const analysis = analyseCloneUpdate(inputOf({ main: 'B' }, { main: 'A' }, { main: 'A' }));
-    should(() => checkCloneReviewed(analysis, undefined)).throw(CloneRefusal);
-    should(() => checkCloneReviewed(analysis, 'other')).throw(CloneRefusal);
-    checkCloneReviewed(analysis, analysis.fingerprint);
+    const again = analyseCloneUpdate(inputOf({ main: 'B' }, { main: 'A' }, { main: 'A' }));
+    const other = analyseCloneUpdate(inputOf({ main: 'C' }, { main: 'A' }, { main: 'A' }));
+    should(again.fingerprint).equal(analysis.fingerprint);
+    should(other.fingerprint).not.equal(analysis.fingerprint);
   });
 });
 
@@ -1498,7 +1497,6 @@ describe('an owner reached through an alias is the same owner (#F544 finding 1, 
       ]),
     );
     should(changed.fingerprint).not.equal(reviewed.fingerprint);
-    should(() => checkCloneReviewed(changed, reviewed.fingerprint)).throw();
   });
 
   it('should keep an alias outside the asset tree out of the ownership', () => {
@@ -2125,11 +2123,10 @@ describe('an environment login a copy adds (#F544 finding 3)', () => {
     ]);
   });
 
-  it('should refuse an apply whose environment login changed after the review', () => {
+  it('should name a different review when the environment login changed after the review', () => {
     const before = analyseCloneUpdate(bareInput(environment('--trace-warnings')));
     const after = analyseCloneUpdate(bareInput(environment('--require /tmp/other-module.cjs')));
     should(after.fingerprint).not.equal(before.fingerprint);
-    should(() => checkCloneReviewed(after, before.fingerprint)).throw(CloneRefusal, { message: CLONE_REVIEW_STALE });
   });
 
   it('should list the login as one the person is asked about too', () => {
@@ -2153,16 +2150,16 @@ describe('an environment login a copy adds (#F544 finding 3)', () => {
 });
 
 describe('the review binds what an apply acts on (#F544 finding 4)', () => {
-  it('should refuse removing a gone item edited here after the review', () => {
+  it('should name a different review when a gone item was edited here after the review', () => {
     const goneTarget = (command: string) =>
       parseAccountModel({ version: 2, components: { mcp: { old: { command, ...FROM, clonedFromKey: KEY_A } } } });
     const before = analyseCloneUpdate(bareInput(sourceBundle(), goneTarget('before-review')));
     const after = analyseCloneUpdate(bareInput(sourceBundle(), goneTarget('edited-here-after-review')));
     should(reviewCloneUpdate(before).items).match([{ ref: 'mcp/old', outcome: 'gone' }]);
-    should(() => checkCloneReviewed(after, before.fingerprint)).throw(CloneRefusal, { message: CLONE_REVIEW_STALE });
+    should(after.fingerprint).not.equal(before.fingerprint);
   });
 
-  it('should refuse taking an item whose folder here moved after the review', () => {
+  it('should name a different review when an item folder here moved after the review', () => {
     const bundle = sourceBundle({
       keys: { 'hooks/a': KEY_A },
       components: { hooks: { a: { harness: 'claude', directory: 'components/hooks/source' } } },
@@ -2176,9 +2173,7 @@ describe('the review binds what an apply acts on (#F544 finding 4)', () => {
       );
     const before = at('components/hooks/old');
     should(reviewCloneUpdate(before).items[0]?.files).match([{ path: 'components/hooks/old/run.sh' }]);
-    should(() => checkCloneReviewed(at('components/hooks/moved'), before.fingerprint)).throw(CloneRefusal, {
-      message: CLONE_REVIEW_STALE,
-    });
+    should(at('components/hooks/moved').fingerprint).not.equal(before.fingerprint);
   });
 
   it('should refuse when a document an item owns here changed, or the record did', () => {

@@ -200,7 +200,7 @@ stdin, and lets the harness write its own credential into its own store. The con
 [docs/design/harness-login.md](docs/design/harness-login.md). **There is one flow PER HARNESS and no shared
 abstraction over them**: Claude prints a URL and reads a pasted code, Codex completes a device grant and has
 no return trip, and a single parameterised flow would have needed both as options — a shape that can express
-a Codex sign-in waiting for a paste. A login is a **declared** per-harness property, and whether one applies
+a Codex sign-in waiting for a paste. Whether a login applies
 to a CREDENTIAL is decided by where it comes from: a token file or an environment variable means
 there is nothing to sign in to, so no control is offered and the surface says where the credential DOES come
 from instead. Every route that acts sits on `fleet.configure` behind the same passkey step-up and

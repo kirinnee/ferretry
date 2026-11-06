@@ -2,14 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   FORBIDDEN,
-  type HeaderLookup,
-  inferenceHttpVerdict,
-  MAX_UTILIZATION_FRACTION,
-  parseQuotaHeaders,
   parseStoredUsageBody,
   percentFromStoredUtilization,
-  percentFromUtilizationFraction,
-  TOO_MANY_REQUESTS,
   UNAUTHORIZED,
   usageEndpointCredentialSignal,
   usageEndpointHttpVerdict,
@@ -18,57 +12,13 @@ import {
   parseCodexUsageBody,
 } from '../../src/lib/quota.ts';
 
-/** A header table, looked up case-insensitively as a real response would be. */
-const headers = (table: Readonly<Record<string, string>>): HeaderLookup => {
-  const lower = new Map(Object.entries(table).map(([name, value]) => [name.toLowerCase(), value]));
-  return name => lower.get(name.toLowerCase()) ?? null;
-};
-
-const RESET_SECONDS = 1_800_003_600;
-const RESET_MS = RESET_SECONDS * 1000;
-
-/**
- * The 100× landmine, guarded from both sides.
- *
- * Both sources call the field `utilization`. The stored-OAuth JSON reports `0..100`; the inference
- * response header reports a fraction of one. These tests deliberately feed each reader the *other's*
- * value, because the whole failure mode is that a wrong reading still looks like a plausible number.
- * If either assertion is ever relaxed, the mix-up becomes reintroducible in silence.
- */
-describe('the two utilization scales', () => {
-  it('should read 0.42 as 42% from a header and as a rounding error from stored usage', () => {
-    // Act — the same number, under each source's rule.
-    const asFraction = percentFromUtilizationFraction('0.42');
-    const asPercent = percentFromStoredUtilization(0.42);
-
-    // Assert — 100× apart, which is exactly why they cannot share a reader.
-    should(asFraction).equal(42);
-    should(asPercent).equal(0.42);
-  });
-
-  it('should read 42 as 42% from stored usage and refuse it outright from a header', () => {
-    // Act
-    const asPercent = percentFromStoredUtilization(42);
-    const asFraction = percentFromUtilizationFraction('42');
-
-    // Assert — a percentage that reached the header reader is refused, not clamped to 100. Clamping
-    // would report a healthy account as exhausted and look like a real reading while doing it.
-    should(asPercent).equal(42);
-    should(asFraction).be.undefined();
-  });
-
-  it('should accept a slightly-over-one utilization, which Anthropic has been observed sending', () => {
-    // Arrange — 1.01 for a genuinely exhausted window is real, so the ceiling must not be exactly 1.
-    should(percentFromUtilizationFraction('1.01')).equal(100);
-    should(MAX_UTILIZATION_FRACTION).be.above(1);
-  });
-
-  it('should refuse a fraction beyond the ceiling rather than clamping it', () => {
-    should(percentFromUtilizationFraction(String(MAX_UTILIZATION_FRACTION + 0.01))).be.undefined();
-  });
-});
-
 describe('percentFromStoredUtilization', () => {
+  it('should read 42 as 42% and 0.42 as less than one percent, never as a fraction', () => {
+    // Assert — the stored usage JSON reports a percentage already, so a small number stays small.
+    should(percentFromStoredUtilization(42)).equal(42);
+    should(percentFromStoredUtilization(0.42)).equal(0.42);
+  });
+
   it('should pass a percentage through, clamped to the public range', () => {
     should(percentFromStoredUtilization(0)).equal(0);
     should(percentFromStoredUtilization(100)).equal(100);
@@ -81,26 +31,6 @@ describe('percentFromStoredUtilization', () => {
     should(percentFromStoredUtilization(undefined)).be.undefined();
     should(percentFromStoredUtilization(null)).be.undefined();
     should(percentFromStoredUtilization(Number.NaN)).be.undefined();
-  });
-});
-
-describe('percentFromUtilizationFraction', () => {
-  it('should accept the fraction as a number as well as a string', () => {
-    should(percentFromUtilizationFraction(0.5)).equal(50);
-    should(percentFromUtilizationFraction('0.5')).equal(50);
-  });
-
-  it('should read a genuine zero as zero, not as absent', () => {
-    should(percentFromUtilizationFraction('0')).equal(0);
-  });
-
-  it('should refuse an empty, blank, unparseable or negative value', () => {
-    should(percentFromUtilizationFraction('')).be.undefined();
-    should(percentFromUtilizationFraction('   ')).be.undefined();
-    should(percentFromUtilizationFraction('not-a-number')).be.undefined();
-    should(percentFromUtilizationFraction('-0.1')).be.undefined();
-    should(percentFromUtilizationFraction(undefined)).be.undefined();
-    should(percentFromUtilizationFraction(Number.POSITIVE_INFINITY)).be.undefined();
   });
 });
 
@@ -156,99 +86,11 @@ describe('parseStoredUsageBody', () => {
   });
 });
 
-describe('parseQuotaHeaders', () => {
-  it('should read both unified windows as fractions and convert them once', () => {
-    // Act
-    const actual = parseQuotaHeaders(
-      headers({
-        'anthropic-ratelimit-unified-5h-utilization': '0.42',
-        'anthropic-ratelimit-unified-5h-reset': String(RESET_SECONDS),
-        'anthropic-ratelimit-unified-5h-status': 'allowed',
-        'anthropic-ratelimit-unified-7d-utilization': '0.11',
-        'anthropic-ratelimit-unified-7d-reset': String(RESET_SECONDS),
-      }),
-    );
-
-    // Assert
-    should(actual.shortWindow).deepEqual({ usedPercent: 42, resetAt: RESET_MS });
-    should(actual.longWindow).deepEqual({ usedPercent: 11, resetAt: RESET_MS });
-    should(actual.hasQuotaSignal).be.true();
-    should(actual.providerAtLimit).be.false();
-  });
-
-  it('should treat an explicit rejection as a signal even with no percentage', () => {
-    // Arrange — the provider saying "rejected" is worth more than a number it did not send.
-    const actual = parseQuotaHeaders(headers({ 'anthropic-ratelimit-unified-5h-status': 'REJECTED' }));
-
-    // Assert
-    should(actual.providerAtLimit).be.true();
-    should(actual.hasQuotaSignal).be.true();
-    should(actual.shortWindow).be.undefined();
-  });
-
-  it('should ignore a status it does not recognise', () => {
-    const actual = parseQuotaHeaders(headers({ 'anthropic-ratelimit-unified-5h-status': 'probably-fine' }));
-    should(actual.providerAtLimit).be.false();
-    should(actual.hasQuotaSignal).be.false();
-  });
-
-  it('should report no signal when a response carries none of the headers', () => {
-    // Arrange — a 200 with no quota headers is a failed reading, not an idle account.
-    const actual = parseQuotaHeaders(headers({}));
-
-    // Assert
-    should(actual.hasQuotaSignal).be.false();
-    should(actual.providerAtLimit).be.false();
-    should(actual.shortWindow).be.undefined();
-    should(actual.longWindow).be.undefined();
-  });
-
-  it('should keep a reset time without a percentage, and still call it no signal', () => {
-    const actual = parseQuotaHeaders(headers({ 'anthropic-ratelimit-unified-7d-reset': String(RESET_SECONDS) }));
-    should(actual.longWindow).deepEqual({ resetAt: RESET_MS });
-    should(actual.hasQuotaSignal).be.false();
-  });
-
-  it('should ignore an unparseable reset value', () => {
-    const actual = parseQuotaHeaders(headers({ 'anthropic-ratelimit-unified-5h-reset': 'soon' }));
-    should(actual.shortWindow).be.undefined();
-  });
-
-  it('should treat a rejection on the long window as at-limit too', () => {
-    const actual = parseQuotaHeaders(headers({ 'anthropic-ratelimit-unified-7d-status': 'rejected' }));
-    should(actual.providerAtLimit).be.true();
-  });
-});
-
-describe('inferenceHttpVerdict', () => {
-  it('should let only 401 condemn the credential', () => {
-    // Assert — a 403 here is an org or spend-policy block on a valid token.
-    should(inferenceHttpVerdict(UNAUTHORIZED)).deepEqual({ authOk: false, unavailable: true });
-    should(inferenceHttpVerdict(FORBIDDEN)).deepEqual({ unavailable: true });
-    should(inferenceHttpVerdict(FORBIDDEN)).not.have.property('authOk');
-  });
-
-  it('should mark a forbidden account unavailable, so routing stops picking it', () => {
-    // Arrange — leaving this unset made such accounts read as "usable, just no usage data".
-    should(inferenceHttpVerdict(FORBIDDEN).unavailable).be.true();
-  });
-
-  it('should treat a rate-limited response as neither dead nor unavailable', () => {
-    // Arrange — a 429 still carries valid quota headers, so it is a successful reading.
-    should(inferenceHttpVerdict(TOO_MANY_REQUESTS)).deepEqual({ authOk: true, unavailable: false });
-  });
-
-  it('should treat a plain success as conclusive and usable', () => {
-    should(inferenceHttpVerdict(200)).deepEqual({ authOk: true, unavailable: false });
-  });
-});
-
 describe('usageEndpointHttpVerdict', () => {
-  it('should not mark an account unavailable for a 403, unlike the inference call', () => {
+  it('should not mark an account unavailable for a 403', () => {
     // Arrange — a 403 here only means the token lacks `user:profile`, which is expected for an
     // inference-scoped token and says nothing about whether the account can serve work.
     should(usageEndpointHttpVerdict(FORBIDDEN)).deepEqual({ unavailable: false });
-    should(inferenceHttpVerdict(FORBIDDEN).unavailable).be.true();
   });
 
   it('should keep a bare control-plane 401 inconclusive for both auth and availability', () => {
@@ -292,7 +134,7 @@ describe('usageEndpointCredentialSignal', () => {
 
   it('should refuse to conclude anything from a rate limit, a server error or another 4xx', () => {
     // Arrange / Act
-    const actual = [TOO_MANY_REQUESTS, 500, 503, 418, 302].map(status => usageEndpointCredentialSignal(status));
+    const actual = [429, 500, 503, 418, 302].map(status => usageEndpointCredentialSignal(status));
 
     // Assert — a rate-limited account is an AUTHENTICATED account, and certainly not one whose login
     // needs replacing. Note `usageEndpointHttpVerdict` reports `authOk: true` for these; health may

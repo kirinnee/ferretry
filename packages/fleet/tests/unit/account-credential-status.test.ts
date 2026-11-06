@@ -13,7 +13,6 @@ import {
   CODEX_LAST_REFRESH_MAX_AGE_MS,
   CREDENTIAL_NEGATIVE_FRESH_MS,
   CREDENTIAL_STATUS_LABELS,
-  CREDENTIAL_STATUS_SHAPES,
   type CodexAuthFacts,
   type CredentialStatusHead,
   type CredentialStatusPorts,
@@ -34,7 +33,6 @@ import {
   needsActiveUsageRead,
   passiveUsageReading,
   readCodexAuthFacts,
-  usagePercentLabel,
 } from '../../src/lib/account/credential-status.ts';
 import type { LocalCredentialReading } from '../../src/lib/health.ts';
 import type { CredentialMaterial } from '../../src/lib/identity.ts';
@@ -97,14 +95,13 @@ const passive = (at: number, used = 42): PassiveUsageRecord => ({
 });
 
 describe('the four words', () => {
-  it('should name exactly the product words and shapes', () => {
+  it('should name exactly the product words', () => {
     should(CREDENTIAL_STATUS_LABELS).deepEqual({
       ready: 'Ready',
       refresh_due: 'Refresh due',
       needs_sign_in: 'Needs sign-in',
       checking: 'Checking',
     });
-    should(Object.keys(CREDENTIAL_STATUS_SHAPES)).deepEqual(['ready', 'refresh_due', 'needs_sign_in', 'checking']);
   });
 });
 
@@ -454,12 +451,6 @@ describe('folding', () => {
 });
 
 describe('usage', () => {
-  it('should never show 0% for a window nobody measured', () => {
-    should(usagePercentLabel({})).equal('unknown');
-    should(usagePercentLabel({ usedPercent: 0 })).equal('0%');
-    should(usagePercentLabel({ usedPercent: 41.6 })).equal('42%');
-  });
-
   it('should choose the newest reading that measured something, else two unknown windows', () => {
     // Arrange
     const older = passiveUsageReading(passive(NOW - 10 * MINUTE, 10));

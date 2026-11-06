@@ -4,7 +4,7 @@
  * them by id.
  *
  * The files are imported as TEXT, so the binary carries them exactly as they are in the repository and
- * a person who wants one as a starting point copies the same text Ferretry reads (`presetFileText`).
+ * a person who wants one as a starting point copies the same text Ferretry reads.
  *
  * Pure.
  */
@@ -108,9 +108,4 @@ export function presetCatalog(
       .toSorted(([left], [right]) => (left < right ? -1 : 1))
       .map(([, preset]) => preset),
   ];
-}
-
-/** The text to start a machine's own copy of a built-in preset from, or `undefined` for an unknown id. */
-export function presetFileText(id: string): string | undefined {
-  return BUILT_IN_PRESET_TEXTS[id];
 }

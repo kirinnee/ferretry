@@ -12,14 +12,12 @@
  * **Attribution is the caller's, never this file's.** The history pool mixes every credential's
  * rollouts (H1), so a reading belongs to a credential only through Ferretry's own session records: the
  * session that launched a conversation names its runtime, and so its credential. This adapter reads
- * the files it is GIVEN and nothing else; {@link listRollouts} and {@link rolloutConversationId} exist
- * so a caller can pick that set. A rollout Ferretry did not launch is simply never handed in.
+ * the files it is GIVEN and nothing else; {@link rolloutConversationId} exists so a caller can pick
+ * that set. A rollout Ferretry did not launch is simply never handed in.
  *
  * Nothing here is credential material, and nothing is written.
  */
-import type { Dirent } from 'node:fs';
-import { open, readdir, readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { open, readFile } from 'node:fs/promises';
 import { parseCodexRateLimits } from '../lib/quota.ts';
 import type { PassiveUsageRecord } from '../lib/usage.ts';
 
@@ -37,41 +35,6 @@ const ROLLOUT_NAME = /^rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 /** The conversation id a rollout's file name carries (`rollout-<time>-<uuid>.jsonl[.zst]`). */
 export function rolloutConversationId(name: string): string | undefined {
   return ROLLOUT_NAME.exec(name)?.[1];
-}
-
-/** How deep {@link listRollouts} walks: `sessions/<yyyy>/<mm>/<dd>/` is three levels. */
-const MAX_DEPTH = 4;
-
-/**
- * Every rollout under one sessions directory, newest first. A directory that is missing or cannot be
- * read contributes nothing: "no rollout" is the honest reading, and usage then reads "unknown".
- */
-export async function listRollouts(directory: string): Promise<readonly RolloutFile[]> {
-  const found: RolloutFile[] = [];
-  const walk = async (current: string, depth: number): Promise<void> => {
-    let entries: Dirent[];
-    try {
-      entries = await readdir(current, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const path = join(current, entry.name);
-      if (entry.isDirectory()) {
-        if (depth < MAX_DEPTH) await walk(path, depth + 1);
-        continue;
-      }
-      const conversationId = rolloutConversationId(entry.name);
-      if (!entry.isFile() || conversationId === undefined) continue;
-      try {
-        found.push({ path, modifiedAt: Math.trunc((await stat(path)).mtimeMs), conversationId });
-      } catch {
-        /* vanished between the listing and the stat */
-      }
-    }
-  };
-  await walk(directory, 0);
-  return found.sort((left, right) => right.modifiedAt - left.modifiedAt || left.path.localeCompare(right.path));
 }
 
 const asRecord = (value: unknown): Readonly<Record<string, unknown>> | undefined =>

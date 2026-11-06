@@ -84,19 +84,6 @@ export type FleetWriteOperation =
       readonly replaceKeys?: readonly string[];
     }
   | {
-      /**
-       * Maintain Ferretry's ownership sidecar for Codex's `sqlite_home` override. The following
-       * `settings` operation writes the actual value when enabled; this operation captures the
-       * original first, or restores it on disable only when the current value is still ours.
-       */
-      readonly kind: 'codex-sqlite-ownership';
-      /** Codex `config.toml`; also the bounded path reported by dry-run. */
-      readonly path: string;
-      readonly markerPath: string;
-      readonly sqliteHome: string;
-      readonly enabled: boolean;
-    }
-  | {
       readonly kind: 'prune';
       /** Directory to sweep. Only its direct children are considered. */
       readonly path: string;

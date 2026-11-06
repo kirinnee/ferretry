@@ -12,7 +12,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type {
-  CredentialCloneOutcome,
   CredentialReading,
   FleetCredentialStore,
   FleetIdentity,
@@ -105,10 +104,6 @@ class ScriptedCredentialStore implements FleetCredentialStore {
     this.reads.push(target.accountId);
     if (this.failure !== undefined) return Promise.reject(this.failure);
     return Promise.resolve(this.passes[this.pass]?.[target.accountId] ?? MISSING);
-  }
-
-  clone(): Promise<CredentialCloneOutcome> {
-    throw new Error('a renewal never clones anything');
   }
 }
 

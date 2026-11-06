@@ -89,16 +89,7 @@ export function operationSummary(operation: FleetWriteOperation): FleetWireOpera
   if (operation.kind === 'prune-directory' && operation.only !== undefined) {
     return { kind: 'retire', path: operation.path, only: [...operation.only], keep: [...operation.keep] };
   }
-  if (operation.kind === 'prune-directory') {
-    return { kind: 'prune-directory', path: operation.path, keep: [...operation.keep] };
-  }
-  return {
-    kind: 'codex-sqlite-ownership',
-    path: operation.path,
-    markerPath: operation.markerPath,
-    sqliteHome: operation.sqliteHome,
-    enabled: operation.enabled,
-  };
+  return { kind: 'prune-directory', path: operation.path, keep: [...operation.keep] };
 }
 
 function manifestSummary(manifest: FleetManifest): FleetManifestSummary {

@@ -39,7 +39,7 @@
  * cost nothing at all: Claude's statusLine (`fy statusline` writes `usage.json`) and the newest Codex
  * rollout `token_count` event. The active free read is used only when no passive reading is younger
  * than the usage pass's interval. A window with no measurement is `usedPercent` absent, which every
- * surface renders as "unknown" — see {@link usagePercentLabel}.
+ * surface renders as "unknown".
  *
  * Pure decisions and one service over ports. No timer lives here: {@link CredentialStatusService.observe}
  * is what the EXISTING usage pass calls, and {@link CredentialStatusService.checkNow} is a person.
@@ -64,7 +64,6 @@ import {
 import {
   type FleetCredentialSignal,
   type FleetUsageProbeResult,
-  type FleetUsageWindow,
   FleetUsageWindowSchema,
   type PassiveUsageRecord,
 } from '../usage.ts';
@@ -83,14 +82,6 @@ export const CREDENTIAL_STATUS_LABELS: Readonly<Record<CredentialStatusWord, str
   refresh_due: 'Refresh due',
   needs_sign_in: 'Needs sign-in',
   checking: 'Checking',
-};
-
-/** The four shapes that go with the words (§4.1 rule 7). */
-export const CREDENTIAL_STATUS_SHAPES: Readonly<Record<CredentialStatusWord, string>> = {
-  ready: '●',
-  refresh_due: '◐',
-  needs_sign_in: '○',
-  checking: '◌',
 };
 
 /**
@@ -567,11 +558,6 @@ export const CredentialUsageSchema = z.strictObject({
   at: epochMilliseconds.optional(),
 });
 export type CredentialUsage = z.infer<typeof CredentialUsageSchema>;
-
-/** A window's percentage as a surface shows it: the number, or "unknown" — never a made-up 0%. */
-export function usagePercentLabel(window: FleetUsageWindow): string {
-  return window.usedPercent === undefined ? 'unknown' : `${Math.round(window.usedPercent)}%`;
-}
 
 const hasSignal = (reading: CredentialUsageReading | undefined): reading is CredentialUsageReading =>
   reading !== undefined && (reading.fiveHour?.usedPercent !== undefined || reading.weekly?.usedPercent !== undefined);

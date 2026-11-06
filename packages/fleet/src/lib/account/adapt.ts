@@ -744,9 +744,3 @@ export function componentPartialSupport(facts: PartialSupportFacts): readonly Pa
 /** A partial-support entry in the product's words (E22): "Partly supported on Codex: …". */
 export const describePartialSupport = (entry: PartialSupport): string =>
   `Partly supported on ${HARNESS_DISPLAY_NAMES[entry.harness]}: ${entry.reason}`;
-
-/** The badge a profile or component carries on `harness` when any of it is partial there (E14). */
-export const partialSupportBadge = (partial: readonly PartialSupport[], harness: HarnessKind): string | undefined =>
-  partial.some(entry => entry.harness === harness)
-    ? `Partly supported on ${HARNESS_DISPLAY_NAMES[harness]}`
-    : undefined;

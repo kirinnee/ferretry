@@ -282,7 +282,7 @@ export const FERRETRY_MCP_ENV_VARS: readonly string[] = [
  * be a static launch argument: it would be on for all of them or none. The daemon writes each switch
  * into a ferret's launch environment as `1` or `0`, and the wrapper composes the ONE
  * `--append-system-prompt` (Claude) or `developer_instructions` (Codex) value at exec time — the
- * owner's own instruction, then {@link AGENT_INSTRUCTION}, then each section that is `1`, in
+ * owner's own instruction, then the {@link ALWAYS_ON_SECTIONS}, then each section that is `1`, in
  * {@link FERRET_SECTIONS} order (`../wrappers.ts`). A restart or resume runs the same wrapper with the
  * same stored environment, so it keeps them — and turns off Claude's system-prompt record, which would
  * otherwise replay the conversation's FIRST launch's sections on every resume.
@@ -520,14 +520,6 @@ export const LEAD_RULES_INSTRUCTION = (fy: string): string => `${NOTIFY_INSTRUCT
 export const AGENT_BASE_INSTRUCTION = (fy: string): string =>
   `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}`;
 
-/**
- * Everything a LEAD agent is told, as ONE appended system prompt section: the tools, the settings rules,
- * the notify rule, then the board rules. A ferret's own sections follow it (`FERRET_SECTIONS`), added by
- * its wrapper.
- */
-export const AGENT_INSTRUCTION = (fy: string): string =>
-  `${AGENT_BASE_INSTRUCTION(fy)}\n\n${LEAD_RULES_INSTRUCTION(fy)}`;
-
 /** One section every agent runtime is told, whatever its switches: its id and its exact text. */
 export interface AlwaysOnSection {
   readonly id: 'tools' | 'settings' | 'notify' | 'board' | 'sub-ferret';
@@ -535,7 +527,7 @@ export interface AlwaysOnSection {
 }
 
 /**
- * The sections of {@link AGENT_INSTRUCTION}, in order. They depend on nothing but the binary's name, so the
+ * The sections every agent runtime is told, in order. They depend on nothing but the binary's name, so the
  * daemon can tell a running ferret what changed in them since its launch (docs/launch-settings.md).
  */
 export const ALWAYS_ON_SECTIONS = (fy: string, subFerret = false): readonly AlwaysOnSection[] => [

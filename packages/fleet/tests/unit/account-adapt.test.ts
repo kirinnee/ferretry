@@ -12,7 +12,6 @@ import {
   concatenateInstructions,
   describePartialSupport,
   isSseUrl,
-  partialSupportBadge,
   SKILLS_STORE_DIRECTORY,
   skillFrontmatterKeys,
   skillSourceReference,
@@ -780,8 +779,6 @@ describe('componentPartialSupport', () => {
     if (!codex.ok || !claude.ok) throw new Error('unexpected');
     codex.resolved.partial.should.deepEqual(partialSupport);
     claude.resolved.partial.should.deepEqual([]);
-    should(partialSupportBadge(codex.resolved.partial, 'codex')).equal('Partly supported on Codex');
-    should(partialSupportBadge(claude.resolved.partial, 'claude')).be.undefined();
   });
 
   it('should declare only keys it can explain', () => {

@@ -1,12 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  type CredentialCloneOutcome,
   type CredentialMaterial,
   type CredentialReading,
-  chooseLoginDriver,
-  classifyClaudeCredential,
-  classifyCodexCredential,
   classifyCredential,
   classifyShape,
   credentialShape,
@@ -142,13 +138,13 @@ const harnessWrittenCredential = (expiresAt: number): string =>
     },
   });
 
-describe('classifyClaudeCredential against the shape the harness writes', () => {
+describe('classifyCredential for claude against the shape the harness writes', () => {
   it('should report a credential minted seconds ago as valid, never as refreshable', () => {
     // Arrange — an access token from an approval that has just completed.
     const expiresAt = NOW + 3_600_000;
 
     // Act
-    const actual = classifyClaudeCredential(found(harnessWrittenCredential(expiresAt)), NOW);
+    const actual = classifyCredential('claude', found(harnessWrittenCredential(expiresAt)), NOW);
 
     // Assert — every extra field the harness carries is ignored rather than confusing the read.
     should(actual).deepEqual({ state: 'valid', expiresAt });
@@ -159,29 +155,29 @@ describe('classifyClaudeCredential against the shape the harness writes', () => 
     const seconds = Math.trunc(NOW / 1000) + 3_600;
 
     // Act — as milliseconds it is thirty years past, so a seconds-storing harness would read dead.
-    const actual = classifyClaudeCredential(found(harnessWrittenCredential(seconds)), NOW);
+    const actual = classifyCredential('claude', found(harnessWrittenCredential(seconds)), NOW);
 
     // Assert — it reads dead, which is exactly why the harness does not store seconds.
     should(actual).deepEqual({ state: 'refreshable', expiresAt: seconds });
-    should(classifyClaudeCredential(found(harnessWrittenCredential(NOW + 3_600_000)), NOW).state).equal('valid');
+    should(classifyCredential('claude', found(harnessWrittenCredential(NOW + 3_600_000)), NOW).state).equal('valid');
   });
 
   it('should report the same shape with a past expiry as refreshable', () => {
     // Assert — the ONLY way a harness-written credential reaches `refreshable`: it really is expired.
-    should(classifyClaudeCredential(found(harnessWrittenCredential(NOW - 1)), NOW)).deepEqual({
+    should(classifyCredential('claude', found(harnessWrittenCredential(NOW - 1)), NOW)).deepEqual({
       state: 'refreshable',
       expiresAt: NOW - 1,
     });
   });
 });
 
-describe('classifyClaudeCredential', () => {
+describe('classifyCredential for claude', () => {
   it('should report a home with no credential as missing, not unreadable', () => {
-    should(classifyClaudeCredential({ outcome: 'absent' }, NOW)).deepEqual({ state: 'missing' });
+    should(classifyCredential('claude', { outcome: 'absent' }, NOW)).deepEqual({ state: 'missing' });
   });
 
   it('should carry a store read failure through as unreadable with its reason', () => {
-    should(classifyClaudeCredential({ outcome: 'unreadable', reason: 'the keychain is locked' }, NOW)).deepEqual({
+    should(classifyCredential('claude', { outcome: 'unreadable', reason: 'the keychain is locked' }, NOW)).deepEqual({
       state: 'unreadable',
       reason: 'the keychain is locked',
     });
@@ -189,7 +185,7 @@ describe('classifyClaudeCredential', () => {
 
   it('should treat bytes that are not readable JSON as unreadable rather than missing', () => {
     // Arrange — a credential written by a newer harness must never be overwritten as if absent.
-    const actual = classifyClaudeCredential(found('not json at all'), NOW);
+    const actual = classifyCredential('claude', found('not json at all'), NOW);
 
     // Assert
     should(actual.state).equal('unreadable');
@@ -197,26 +193,26 @@ describe('classifyClaudeCredential', () => {
   });
 
   it('should treat valid JSON that is not an object as unreadable', () => {
-    should(classifyClaudeCredential(found('[1,2,3]'), NOW).state).equal('unreadable');
-    should(classifyClaudeCredential(found('null'), NOW)).deepEqual({
+    should(classifyCredential('claude', found('[1,2,3]'), NOW).state).equal('unreadable');
+    should(classifyCredential('claude', found('null'), NOW)).deepEqual({
       state: 'unreadable',
       reason: 'the Claude credential is not a JSON object',
     });
   });
 
   it('should report an object with neither token as missing', () => {
-    should(classifyClaudeCredential(found(claudeBlob({})), NOW)).deepEqual({ state: 'missing' });
+    should(classifyCredential('claude', found(claudeBlob({})), NOW)).deepEqual({ state: 'missing' });
   });
 
   it('should report a refresh token with no access token as refreshable', () => {
-    should(classifyClaudeCredential(found(claudeBlob({ refreshToken: 'r' })), NOW)).deepEqual({
+    should(classifyCredential('claude', found(claudeBlob({ refreshToken: 'r' })), NOW)).deepEqual({
       state: 'refreshable',
     });
   });
 
   it('should report an access token whose expiry cannot be read as unreadable, never as usable', () => {
     // Arrange — calling this valid would let a possibly-dead token donate to every sibling.
-    const actual = classifyClaudeCredential(found(claudeBlob({ accessToken: 'a', refreshToken: 'r' })), NOW);
+    const actual = classifyCredential('claude', found(claudeBlob({ accessToken: 'a', refreshToken: 'r' })), NOW);
 
     // Assert
     should(actual).deepEqual({
@@ -226,16 +222,18 @@ describe('classifyClaudeCredential', () => {
   });
 
   it('should ignore an expiry that is not a finite number', () => {
-    should(classifyClaudeCredential(found(claudeBlob({ accessToken: 'a', expiresAt: 'later' })), NOW).state).equal(
+    should(classifyCredential('claude', found(claudeBlob({ accessToken: 'a', expiresAt: 'later' })), NOW).state).equal(
       'unreadable',
     );
   });
 
   it('should report an unexpired access token as valid and keep its expiry', () => {
-    should(classifyClaudeCredential(found(claudeBlob({ accessToken: 'a', expiresAt: NOW + HOUR })), NOW)).deepEqual({
-      state: 'valid',
-      expiresAt: NOW + HOUR,
-    });
+    should(classifyCredential('claude', found(claudeBlob({ accessToken: 'a', expiresAt: NOW + HOUR })), NOW)).deepEqual(
+      {
+        state: 'valid',
+        expiresAt: NOW + HOUR,
+      },
+    );
   });
 
   it('should count a token expiring inside the skew window as already expired', () => {
@@ -243,29 +241,35 @@ describe('classifyClaudeCredential', () => {
     const expiresAt = NOW + 30_000;
 
     // Act
-    const actual = classifyClaudeCredential(found(claudeBlob({ accessToken: 'a', refreshToken: 'r', expiresAt })), NOW);
+    const actual = classifyCredential(
+      'claude',
+      found(claudeBlob({ accessToken: 'a', refreshToken: 'r', expiresAt })),
+      NOW,
+    );
 
     // Assert
     should(actual).deepEqual({ state: 'refreshable', expiresAt });
   });
 
   it('should report an expired token with no way to renew it as missing', () => {
-    should(classifyClaudeCredential(found(claudeBlob({ accessToken: 'a', expiresAt: NOW - HOUR })), NOW)).deepEqual({
-      state: 'missing',
-      expiresAt: NOW - HOUR,
-    });
+    should(classifyCredential('claude', found(claudeBlob({ accessToken: 'a', expiresAt: NOW - HOUR })), NOW)).deepEqual(
+      {
+        state: 'missing',
+        expiresAt: NOW - HOUR,
+      },
+    );
   });
 
   it('should read a flat credential as well as a nested one', () => {
     const flat = JSON.stringify({ accessToken: 'a', expiresAt: NOW + HOUR });
-    should(classifyClaudeCredential(found(flat), NOW).state).equal('valid');
+    should(classifyCredential('claude', found(flat), NOW).state).equal('valid');
   });
 });
 
-describe('classifyCodexCredential', () => {
+describe('classifyCredential for codex', () => {
   it('should report an auth file with no tokens block as missing', () => {
-    should(classifyCodexCredential(found(JSON.stringify({})), NOW)).deepEqual({ state: 'missing' });
-    should(classifyCodexCredential(found(JSON.stringify({ tokens: null })), NOW)).deepEqual({ state: 'missing' });
+    should(classifyCredential('codex', found(JSON.stringify({})), NOW)).deepEqual({ state: 'missing' });
+    should(classifyCredential('codex', found(JSON.stringify({ tokens: null })), NOW)).deepEqual({ state: 'missing' });
   });
 
   it('should take the expiry from the access token JWT', () => {
@@ -275,7 +279,7 @@ describe('classifyCodexCredential', () => {
     );
 
     // Act
-    const actual = classifyCodexCredential(material, NOW);
+    const actual = classifyCredential('codex', material, NOW);
 
     // Assert
     should(actual).deepEqual({ state: 'valid', expiresAt: NOW + HOUR });
@@ -285,11 +289,11 @@ describe('classifyCodexCredential', () => {
     const material = found(
       JSON.stringify({ tokens: { access_token: jwt({ exp: (NOW - HOUR) / 1000 }), refresh_token: 'r' } }),
     );
-    should(classifyCodexCredential(material, NOW).state).equal('refreshable');
+    should(classifyCredential('codex', material, NOW).state).equal('refreshable');
   });
 
   it('should carry an unreadable read through', () => {
-    should(classifyCodexCredential({ outcome: 'unreadable', reason: 'denied' }, NOW).reason).equal('denied');
+    should(classifyCredential('codex', { outcome: 'unreadable', reason: 'denied' }, NOW).reason).equal('denied');
   });
 });
 
@@ -386,51 +390,6 @@ describe('pickDonor', () => {
 
   it('should have no donor when there are no members at all', () => {
     should(pickDonor([])).be.undefined();
-  });
-});
-
-describe('chooseLoginDriver', () => {
-  const autoThenInteractive = [
-    status(member({ accountId: ID_ONE, mode: 'auto' }), { state: 'missing' }),
-    status(member({ accountId: ID_TWO, mode: 'interactive' }), { state: 'missing' }),
-  ];
-
-  it('should launch the named account is own auto lane rather than its interactive sibling', () => {
-    // Act — the whole defect, in one call. The replaced function answered ID_TWO here, so a harness
-    // wrote its credential into ID_TWO is home while somebody waited for ID_ONE to be signed in.
-    should(chooseLoginDriver(autoThenInteractive, ID_ONE)?.accountId).equal(ID_ONE);
-  });
-
-  it('should launch the named account when it is one of several interactive lanes', () => {
-    // Arrange — TWO interactive lanes, and the one named is not the one listed first. An identity
-    // commonly has several: a fleet gives one provider account a lane per model.
-    const members = [
-      status(member({ accountId: ID_ONE, mode: 'interactive' }), { state: 'missing' }),
-      status(member({ accountId: ID_TWO, mode: 'interactive' }), { state: 'missing' }),
-    ];
-
-    // Act / Assert — "find an interactive lane" would answer ID_ONE and sign in the wrong account.
-    should(chooseLoginDriver(members, ID_TWO)?.accountId).equal(ID_TWO);
-  });
-
-  it('should fall back to the interactive lane when the account asked about is not in this identity', () => {
-    // Act / Assert — a manifest can lose a lane between the survey and the launch.
-    should(chooseLoginDriver(autoThenInteractive, ID_THREE)?.accountId).equal(ID_TWO);
-  });
-
-  it('should prefer an interactive lane when nobody was named, because an approval is interactive', () => {
-    // Act / Assert — read from the declared mode, never from a wrapper called `auto-something`.
-    should(chooseLoginDriver(autoThenInteractive)?.accountId).equal(ID_TWO);
-  });
-
-  it('should fall back to the first member when nobody was named and no lane is interactive', () => {
-    const members = [status(member({ accountId: ID_ONE, mode: 'auto' }), { state: 'missing' })];
-    should(chooseLoginDriver(members)?.accountId).equal(ID_ONE);
-  });
-
-  it('should choose nobody when the identity has no available member', () => {
-    should(chooseLoginDriver([])).be.undefined();
-    should(chooseLoginDriver([], ID_ONE)).be.undefined();
   });
 });
 
@@ -540,11 +499,9 @@ describe('decideIdentity', () => {
 /** A store driven entirely from a table, so no test reads or writes a real credential. */
 class FakeCredentialStore implements FleetCredentialStore {
   readonly reads: string[] = [];
-  readonly clones: Array<{ donor: string; target: string; kind: HarnessKind }> = [];
 
   constructor(
     private readonly readings: Readonly<Record<string, CredentialReading>>,
-    private readonly outcomes: Readonly<Record<string, CredentialCloneOutcome>> = {},
     private readonly failures: Readonly<Record<string, string>> = {},
   ) {}
 
@@ -553,13 +510,6 @@ class FakeCredentialStore implements FleetCredentialStore {
     const thrown = this.failures[target.accountId];
     if (thrown !== undefined) return Promise.reject(new Error(thrown));
     return Promise.resolve(this.readings[target.accountId] ?? { state: 'missing' });
-  }
-
-  clone(kind: HarnessKind, donor: FleetIdentityMember, target: FleetIdentityMember): Promise<CredentialCloneOutcome> {
-    this.clones.push({ donor: donor.accountId, target: target.accountId, kind });
-    const thrown = this.failures[`clone:${target.accountId}`];
-    if (thrown !== undefined) return Promise.reject(new Error(thrown));
-    return Promise.resolve(this.outcomes[target.accountId] ?? { ok: true });
   }
 }
 
@@ -613,7 +563,7 @@ describe('FleetIdentityService', () => {
 
   it('should treat a store that throws as a read that failed, not a home with no credential', async () => {
     // Arrange
-    const store = new FakeCredentialStore({}, {}, { [ID_ONE]: 'the keychain timed out' });
+    const store = new FakeCredentialStore({}, { [ID_ONE]: 'the keychain timed out' });
 
     // Act
     const actual = await new FleetIdentityService(store).surveyOne(identity({ members: [member()] }));
@@ -621,66 +571,6 @@ describe('FleetIdentityService', () => {
     // Assert
     should(actual.members[0]?.reading).deepEqual({ state: 'unreadable', reason: 'the keychain timed out' });
     should(actual.verdict.kind).equal('indeterminate');
-  });
-
-  it('should survey every identity it is given', async () => {
-    // Arrange
-    const store = new FakeCredentialStore({});
-    const subject = new FleetIdentityService(store);
-
-    // Act
-    const actual = await subject.survey([identity(), identity({ key: 'codex:kirin', kind: 'codex' })]);
-
-    // Assert
-    should(actual.map(entry => entry.identity.key)).deepEqual(['claude:kirin', 'codex:kirin']);
-  });
-
-  it('should copy the donor onto each target named by the status', async () => {
-    // Arrange
-    const store = new FakeCredentialStore({
-      [ID_ONE]: { state: 'valid', expiresAt: NOW + HOUR },
-      [ID_TWO]: { state: 'missing' },
-    });
-    const subject = new FleetIdentityService(store);
-    const surveyed = await subject.surveyOne(identity({ members: twoMembers }));
-
-    // Act
-    const actual = await subject.sync(surveyed);
-
-    // Assert
-    should(store.clones).deepEqual([{ donor: ID_ONE, target: ID_TWO, kind: 'claude' }]);
-    should(actual).deepEqual([{ accountId: ID_TWO, outcome: { ok: true } }]);
-  });
-
-  it('should write nothing when the verdict is not a sync', async () => {
-    // Arrange — the guard lives here so a caller that forgot to check cannot cause a write.
-    const store = new FakeCredentialStore({ [ID_ONE]: { state: 'missing' } });
-    const subject = new FleetIdentityService(store);
-    const surveyed = await subject.surveyOne(identity({ members: [member()] }));
-
-    // Act
-    const actual = await subject.sync(surveyed);
-
-    // Assert
-    should(surveyed.verdict.kind).equal('login');
-    should(store.clones).deepEqual([]);
-    should(actual).deepEqual([]);
-  });
-
-  it('should report a copy that threw as a failure with its reason', async () => {
-    // Arrange
-    const store = new FakeCredentialStore(
-      { [ID_ONE]: { state: 'valid', expiresAt: NOW + HOUR }, [ID_TWO]: { state: 'missing' } },
-      {},
-      { [`clone:${ID_TWO}`]: 'the target home is read-only' },
-    );
-    const subject = new FleetIdentityService(store);
-
-    // Act
-    const actual = await subject.sync(await subject.surveyOne(identity({ members: twoMembers })));
-
-    // Assert
-    should(actual).deepEqual([{ accountId: ID_TWO, outcome: { ok: false, reason: 'the target home is read-only' } }]);
   });
 });
 

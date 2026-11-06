@@ -53,6 +53,8 @@ const history = (): SharedHistoryPreview => ({
   conflicts: 1,
   links: 2,
   changes: [],
+  emptiedSourceDirectories: [],
+  refusals: [],
 });
 
 describe('operationSummary', () => {
@@ -84,22 +86,6 @@ describe('operationSummary', () => {
     [
       { kind: 'prune-directory', path: '/homes/one/skills', keep: ['review', 'deploy'] },
       { kind: 'prune-directory', path: '/homes/one/skills', keep: ['review', 'deploy'] },
-    ],
-    [
-      {
-        kind: 'codex-sqlite-ownership',
-        path: '/homes/one/config.toml',
-        markerPath: '/homes/one/.marker.json',
-        sqliteHome: '/shared/codex/sqlite',
-        enabled: true,
-      },
-      {
-        kind: 'codex-sqlite-ownership',
-        path: '/homes/one/config.toml',
-        markerPath: '/homes/one/.marker.json',
-        sqliteHome: '/shared/codex/sqlite',
-        enabled: true,
-      },
     ],
   ] as const)('should carry %j across unchanged', (operation, expected) => {
     // Act

@@ -789,12 +789,11 @@ describe('FileFleetProvisioner rollback', () => {
     await assertNoResidue(root);
   });
 
-  it('should undo an enabled Codex ownership sidecar and its settings write in reverse order', async () => {
+  it('should put an operator-written Codex config back when a later operation fails', async () => {
     // Arrange
     const root = await temporaryDirectory();
     const home = path.join(root, 'fleet', 'homes', 'codex-one');
     const configPath = path.join(home, 'config.toml');
-    const markerPath = path.join(home, '.ferretry-sqlite-home.json');
     const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
     const blocker = path.join(root, 'blocker');
     await mkdir(home, { recursive: true });
@@ -804,7 +803,6 @@ describe('FileFleetProvisioner rollback', () => {
       manifest: manifest(),
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
       operations: [
-        { kind: 'codex-sqlite-ownership', path: configPath, markerPath, sqliteHome, enabled: true },
         {
           kind: 'settings',
           path: configPath,
@@ -821,48 +819,9 @@ describe('FileFleetProvisioner rollback', () => {
     // Act
     const actual = await failureOf(subject.apply(plan));
 
-    // Assert — the sidecar this apply created is gone and the operator's value is back.
+    // Assert — the operator's value is back.
     should(actual.kind).equal('rolled-back');
-    should(await Bun.file(markerPath).exists()).be.false();
     should(await readFile(configPath, 'utf8')).equal('sqlite_home = "/somewhere/the/operator/chose"\n');
-    await assertNoResidue(root);
-  });
-
-  it('should undo a disabled Codex ownership reconciliation, sidecar included', async () => {
-    // Arrange
-    const root = await temporaryDirectory();
-    const home = path.join(root, 'fleet', 'homes', 'codex-one');
-    const configPath = path.join(home, 'config.toml');
-    const markerPath = path.join(home, '.ferretry-sqlite-home.json');
-    const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
-    const marker = `${JSON.stringify({
-      version: 1,
-      sqliteHome,
-      createdConfig: false,
-      original: { present: true, value: '/the/original' },
-    })}\n`;
-    const blocker = path.join(root, 'blocker');
-    await mkdir(home, { recursive: true });
-    await writeFile(configPath, `sqlite_home = "${sqliteHome}"\n`);
-    await writeFile(markerPath, marker);
-    await writeFile(blocker, 'blocker\n');
-    const plan: FleetApplyPlan = {
-      manifest: manifest(),
-      manifestPath: path.join(root, 'fleet', 'manifest.json'),
-      operations: [
-        { kind: 'codex-sqlite-ownership', path: configPath, markerPath, sqliteHome, enabled: false },
-        poisonAfter(blocker),
-      ],
-    };
-    const subject = new FileFleetProvisioner([root]);
-
-    // Act
-    const actual = await failureOf(subject.apply(plan));
-
-    // Assert — both the reconciled config and the ownership record are exactly as they were.
-    should(actual.kind).equal('rolled-back');
-    should(await readFile(configPath, 'utf8')).equal(`sqlite_home = "${sqliteHome}"\n`);
-    should(await readFile(markerPath, 'utf8')).equal(marker);
     await assertNoResidue(root);
   });
 

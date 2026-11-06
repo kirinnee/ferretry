@@ -203,8 +203,8 @@ the entire proposal.
 One flow at a time per identity, started and read over HTTP, with the harness doing the exchange:
 
 1. **Start.** The caller names an **account id** (never a command, never a path). The daemon resolves
-   the identity and spawns **that account's own wrapper** — `chooseLoginDriver` returns the named
-   member (`identity.ts`) — with **piped** stdio and the sanitized environment of §1.3, adding
+   the identity and spawns **that account's own wrapper** — the request names the account, so the
+   credential lands where it was asked to land — with **piped** stdio and the sanitized environment of §1.3, adding
    `--device-auth` for Codex.
 
    > **This used to launch the identity's interactive lane instead, and that was the defect.** A
@@ -645,7 +645,7 @@ else's CLI is only true at a version.
   Claude's auto lane and `--dangerously-bypass-approvals-and-sandbox` / `--no-alt-screen` for Codex's), so
   a default fleet is unaffected. What breaks is an operator-declared codex root-only flag — `--full-auto`,
   `--model`, `--sandbox`, `--cd` — or any future release that moves a flag which is tolerated today.
-  **Its reach grew, deliberately.** `chooseLoginDriver` now launches the NAMED account's own wrapper,
+  **Its reach grew, deliberately.** The sign-in now launches the NAMED account's own wrapper,
   so signing an auto lane in reaches the auto lane's flags rather than borrowing an interactive
   sibling's. That is the correct trade: borrowing hid this defect by authenticating a **different
   account** and reporting success, whereas this fails loudly, names the account, and leaves the
@@ -730,7 +730,7 @@ change either of them needed.
 > move. A settings sub-tab is selected by component state and therefore **has no address**, so the
 > readout's "where to go" sentence could not link to it; and the tab grouped by provider login and
 > offered one control per group, which started the sign-in of whichever member was listed first — the
-> exact conflation `chooseLoginDriver` (§ below) exists to end. The page is one row per ACCOUNT, the row's
+> exact conflation the named-account sign-in ends. The page is one row per ACCOUNT, the row's
 > own `accountId` goes to `POST /v1/fleet/login`, and each row carries the stored health verdict and the
 > instant behind it. Everything else in this section still holds: one flow per harness, the credential
 > source deciding whether a sign-in is offered at all, and the shared operator prompt.
@@ -767,9 +767,8 @@ places, each stated so a reader is not left comparing prose to code:
    shared driver. Codex needs a partial stage (two values arrive on two lines) and has no submission at
    all; Claude has a submission and no device code. A single flow would have needed both as options, which
    is a shape that can express a Codex sign-in waiting for a paste.
-2. **A login is DECLARED per harness** — `packages/fleet/src/lib/harness-login.ts`. Both shipped harnesses
-   declare one, and the `false` arm exists so that the day a harness that does not is added, the assumption
-   is a compile error rather than an invisible one.
+2. **Both shipped harnesses log in**, so there is no per-harness declaration of whether one does; a harness
+   that does not would need one added with its first consumer.
 3. **The credential SOURCE decides whether a sign-in applies at all** —
    `packages/fleet/src/lib/credential-source.ts`, derived from the declared configuration and nothing read
    from the host. A credential that arrives from a token file, the environment or the configuration gets no

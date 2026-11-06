@@ -141,11 +141,6 @@ export function modelCatalogFileValue(catalog: ModelCatalog): ModelCatalogFile {
   return file;
 }
 
-/** The text to start a machine's own copy of a built-in catalog from, or `undefined` for an unknown id. */
-export function modelCatalogFileText(id: string): string | undefined {
-  return BUILT_IN_MODEL_CATALOG_TEXTS[id];
-}
-
 /**
  * Which catalog a login reads: a sign-in login its CLI's maker's, an environment login its preset's.
  * `undefined` for an environment login made by hand or from a preset that names none — its runtimes

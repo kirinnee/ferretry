@@ -1,7 +1,6 @@
 import type { StateHomeFence } from '../lib/state-home-fence.ts';
 import {
   copyTreeIntoFolder,
-  copyTreeOutsideStateHomes,
   type FolderDisk,
   type GuardedFolder,
   type GuardDisk,
@@ -158,23 +157,11 @@ export async function readFencedSource(
 }
 
 /**
- * Copies `source` — a file, or a folder and everything in it, every link followed — to the new path `to`,
- * refusing the whole copy when any hop or file is inside the state home. What a refusal leaves at `to` is the
- * caller's to discard (the provisioner stages the copy beside its destination for exactly that).
- */
-export async function copyFencedSource(resolved: ResolvedSourceFence, source: string, to: string): Promise<void> {
-  const copied = await copyTreeOutsideStateHomes(source, to, resolved.homes, resolved.disk, {
-    ...resolved.links,
-    maxFileBytes: MAX_SOURCE_FILE_BYTES,
-    maxTotalBytes: MAX_SOURCE_TOTAL_BYTES,
-    maxFiles: MAX_SOURCE_ENTRIES,
-  });
-  if (!copied.ok) throw new FencedSourceError(source, copied.rule, copied.home);
-}
-
-/**
- * {@link copyFencedSource} into the new entry `leaf` of a checked destination folder, every entry made through it
- * (its descriptor where the platform gives one) rather than through whatever a path names by then.
+ * Copies `source` — a file, or a folder and everything in it, every link followed — into the new entry
+ * `leaf` of a checked destination folder, refusing the whole copy when any hop or file is inside the state
+ * home. Every entry is made through the folder (its descriptor where the platform gives one) rather than
+ * through whatever a path names by then. What a refusal leaves at `leaf` is the caller's to discard (the
+ * provisioner stages the copy beside its destination for exactly that).
  */
 export async function copyFencedSourceInto(
   resolved: ResolvedSourceFence,
