@@ -40,7 +40,6 @@ import {
   grantSubsystem,
   healthSubsystem,
   NO_HELD_REPLIES,
-  nameSubsystem,
   permissionSubsystem,
   recommendSubsystem,
   secretSubsystem,
@@ -716,7 +715,6 @@ export const subsystems = (): MountedSubsystems => ({
     audit: { record: async () => undefined },
     clock: { now: () => 0 },
   }),
-  names: nameSubsystem(),
   recommend: recommendSubsystem(),
   models: {
     view: async () => ({ published: { origin: 'https://ferretry.pages.dev', enabled: false }, catalogs: [] }),

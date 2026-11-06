@@ -36,6 +36,7 @@ import * as learning from './learning/route-contract.ts';
 import * as legacy from './legacy/route-contract.ts';
 import * as mcp from './mcp/route-contract.ts';
 import * as models from './models/route-contract.ts';
+import * as names from './names/route-contract.ts';
 import * as renders from './renders/route-contract.ts';
 import * as sharedDrafts from './shared-drafts/route-contract.ts';
 import * as update from './update/route-contract.ts';
@@ -69,6 +70,7 @@ export const FRAGMENTS: Readonly<Record<string, RouteContractFragment>> = {
   mcp,
   sharedDrafts,
   housekeeping,
+  names,
 };
 
 /** The concatenation of every fragment's `callers`: one line per route, both tables. */

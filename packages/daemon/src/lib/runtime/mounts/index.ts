@@ -74,7 +74,6 @@ import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LegacyTaskSubsystem, legacyTaskRoutes } from './legacy-tasks.ts';
 import { type LocalSkillInstallSubsystem, localSkillInstallRoutes } from './local-skill-installs.ts';
 import type { ModelsSubsystem } from './models.ts';
-import { type NameSubsystem, nameRoutes } from './names.ts';
 import { type PackSubsystem, packRoutes } from './pack.ts';
 import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { type PerformanceSubsystem, performanceRoutes } from './performance.ts';
@@ -397,8 +396,6 @@ export interface MountedSubsystems {
   readonly signInRules: SignInRuleService;
   /** What ferrets suggested the owner make rules for (RAM only): read and dismissed by the owner, never turned into a rule. */
   readonly signInRuleSuggestions: SignInRuleSuggestions;
-  /** Free teammate callsigns, for composing a session title before starting one. */
-  readonly names: NameSubsystem;
   /** The team recommender over the published fleet manifest and the operator's routing catalog. */
   readonly recommend: RecommendSubsystem;
   /** The model catalogs in effect and the published catalog this machine follows (docs/model-catalog.md). The routes come from the
@@ -676,7 +673,6 @@ export function legacyModule(
               // literal `browser`, which distinguishes it from every other `/v1/sessions/:id/...` route above.
               ...browserLoginRoutes(subsystems.browserLogin, subsystems.browser),
               ...browserProxyRoutes(subsystems.browserProxy),
-              ...nameRoutes(subsystems.names),
               ...recommendRoutes(subsystems.recommend),
               // The working-tree read registers last among the per-session subsystems: three of its four paths are
               // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before

@@ -7,6 +7,7 @@ import { builtHousekeeping } from './housekeeping/fixture.ts';
 import { builtInputRequests } from './input-requests/fixture.ts';
 import { builtLearning } from './learning/fixture.ts';
 import { builtMcp } from './mcp/fixture.ts';
+import { builtNames } from './names/fixture.ts';
 import { builtModels } from './models/fixture.ts';
 import { builtRenders } from './renders/fixture.ts';
 import { builtSharedDrafts } from './shared-drafts/fixture.ts';
@@ -48,4 +49,5 @@ const defaultBuiltModules = (): readonly BuiltModule<unknown, object>[] => [
   builtMcp(),
   builtSharedDrafts(),
   builtHousekeeping(),
+  builtNames(),
 ];
