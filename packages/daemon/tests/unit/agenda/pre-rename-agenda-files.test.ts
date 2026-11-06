@@ -24,7 +24,12 @@ describe('refusePreRenameAgendaFiles', () => {
     ]);
     should((error as Error).message).containEql('/s/one/attention.json');
     should((error as Error).message).containEql('(2 in all)');
+    should((error as Error).message).containEql('Back these directories up first');
     should((error as Error).message).containEql('rename attention.json → agenda.json');
+    should((error as Error).message).containEql('only where the new name does not exist yet');
+    should((error as Error).message).containEql('where both names exist, keep both and merge them by hand');
+    should((error as Error).message).containEql('Ferretry 4.116.0 to 4.291.0');
+    should((error as Error).message).not.containEql('Start Ferretry');
   });
 
   it('refuses when the old and the current names are both present', async () => {

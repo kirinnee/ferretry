@@ -1985,8 +1985,11 @@ A ferret's session directory holds the agenda as `agenda.json` and its held answ
 
 Nothing reads the names they had before the rename (`attention.json`, `attention-replies.json`). A home that still holds
 one — in any session directory, indexed or not, or in `machine-agenda` — **refuses to start**, naming the paths: read as
-empty, it would hide the items and the next raise would write a fresh `agenda.json` over them. Start Ferretry 4.291.0
-or older once to move them, or rename the files by hand. `*.migrated` backups are ignored.
+empty, it would hide the items and the next raise would write a fresh `agenda.json` over them. Back the
+directories up first. Then, in each, rename the old names to the new ones only where the new name does not exist yet.
+Where both names exist, keep both and merge them by hand. Ferretry 4.116.0 to 4.291.0 moved these files on start, but
+only for sessions in the index, only on a home's first start after upgrading, and never for the machine agenda.
+`*.migrated` backups are ignored.
 
 - **The ledger says its shape** (`version`, 4 since stored conversations): it is read as 1 when absent and brought to
   4 as it is read ([the channel migration](#the-migration-ledger-version-2) and [the conversation
