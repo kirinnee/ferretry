@@ -107,9 +107,6 @@ import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 import { deviceRotateMessage, verifyDeviceProof } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { z } from 'zod';
-// The hosted app's release key, the one its signed release list is checked with — and so the published
-// model catalog the list vouches for (docs/model-catalog.md). Compiled in as text, from its one file.
-import HOSTED_APP_RELEASE_KEY from '../../pwa/release-signing-key.pub' with { type: 'text' };
 import pkg from '../package.json' with { type: 'json' };
 import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
 import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
@@ -219,7 +216,6 @@ import {
   AgendaLaneAgenda,
   AnalyticsTranscriptSpend,
   AsyncActivityScope,
-  AuthorizedProviderProbe,
   accountName,
   afterAsActivity,
   asActivity,
@@ -263,7 +259,6 @@ import {
   FileLinkKeyVault,
   FileLoginIndexStore,
   FileLoopbackMarkerReader,
-  FileModelCatalogCache,
   FilePasteRuleStore,
   FileProjectCatalog,
   FileRestartQueue,
@@ -277,7 +272,6 @@ import {
   foreignHistoryRoots,
   GitProjectFacts,
   GitRepositoryProbe,
-  HostedModelCatalog,
   HostedRelayDirectory,
   HostedTunnelProvisioner,
   HostedTunnelService,
@@ -931,7 +925,6 @@ import {
   type LivenessSample,
   type LivenessTarget,
   LOOPBACK_FIREWALL_CHECK_MS,
-  LocalModelsService,
   LoginDirectory,
   LoginRecipeService,
   LoginVault,
@@ -964,7 +957,6 @@ import {
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
-  ModelCatalogService,
   type MountedSubsystems,
   mayTrustDirectLoopback,
   mcpCheckBaseEnvironment,
@@ -973,7 +965,6 @@ import {
   migrateAgendaFiles,
   migrateToAgendaHomes,
   migrateToAgendaMode,
-  modelCatalogsView,
   type NameAllocationErrorCode,
   type NameAllocationRequest,
   type NameAllocationResult,
@@ -1015,12 +1006,10 @@ import {
   type ProjectRegistrar,
   ProvedPaneCapture,
   ProviderPresetService,
-  ProviderProbeService,
   ProviderQuotaService,
   PublishedCarrierSet,
   type PublishedCarrierView,
   PublishedFleetInventory,
-  PublishedModelCatalogService,
   PushNewDeviceAlert,
   PushService,
   packageRole,
@@ -1231,7 +1220,6 @@ import {
   shareLinkTarget,
   stampedProjectOf,
   startupEffort,
-  suggestedOllamaModel,
   supersededCarrierKeys,
   TaskPlanAgendaAdapter,
   TaskPlanService,
@@ -1358,6 +1346,7 @@ import { cgroupsModule, createCgroupLaunchLimits } from './modules/cgroups.ts';
 import { fleetLoginModule } from './modules/fleet-login.ts';
 import { inputRequestsModule } from './modules/input-requests.ts';
 import { learningModule } from './modules/learning.ts';
+import { modelsModule } from './modules/models.ts';
 import { rendersModule } from './modules/renders.ts';
 import { type ModuleHandles, seamsOf } from './modules/seams.ts';
 import { updateModule } from './modules/update.ts';
@@ -11268,7 +11257,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           configMutations: daemonConfigMutations,
           // The model catalogs in effect, for their list prices. Read lazily: the catalog service is built
           // below, and nothing prices a session before the subsystems mount.
-          modelCatalogs: async () => await modelCatalogService.catalogs(),
+          modelCatalogs: async () => await models.provides.catalogs.catalogs(),
           transcriptFiles: () => createTranscriptFileResolver(storage),
           transcriptSources,
           clock,
@@ -11587,56 +11576,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const providerPresets = new ProviderPresetService(
         { presets: async () => (await configFiles.inEffect()).evaluation.effective.presets },
         undefined,
-        async () => await modelCatalogService.catalogs(),
+        async () => await models.provides.catalogs.catalogs(),
       );
-      // The model catalog Ferretry publishes with the hosted app (docs/model-catalog.md § Live updates):
-      // a one-file version check, at most every six hours when something reads the catalogs, and the
-      // full catalog only when the version differs — checked against the hosted app's signed release
-      // list with the key compiled into this build. `FY_MODEL_CATALOG=off` follows none; the origin can
-      // be pointed elsewhere with `FY_MODEL_CATALOG_ORIGIN`.
-      const modelCatalogOrigin = process.env.FY_MODEL_CATALOG_ORIGIN?.trim() || HOSTED_APP_ORIGIN;
-      const publishedModelCatalog = new PublishedModelCatalogService({
-        ...(process.env.FY_MODEL_CATALOG === 'off' ? {} : { fetch: new HostedModelCatalog(modelCatalogOrigin) }),
-        cache: new FileModelCatalogCache(stateFiles, join(paths.state, 'model-catalog.json')),
-        publicKeyPem: HOSTED_APP_RELEASE_KEY,
-        nowMs: () => millisecondClock.now(),
-        // A newer catalog moves what every runtime offers now, not at the next change somebody makes —
-        // and the list prices analytics reads.
-        onUpdated: async () => {
-          analytics.provides.ingestion.pricingChanged();
-          await fleetCatalog.republish().catch(() => undefined);
+      // The model catalogs, the models Ollama has installed and a login's Test: inert until a request, read lazily by the
+      // analytics pricing, the learning pricing, the apply, the Pack routing line and the logins, and armed by `start()`.
+      const models = modelsModule.build(
+        {
+          paths,
+          stateFiles,
+          configFiles,
+          presets: providerPresets,
+          authorizer: outboundAuthorizer,
+          stopwatch: speedupStopwatch,
+          clock,
+          millisecondClock,
+          pricingChanged: () => analytics.provides.ingestion.pricingChanged(),
+          republishFleet: () => fleetCatalog.republish(),
         },
-      });
-      // Model catalogs (docs/model-catalog.md): this build's, the published one over them, then this
-      // machine's own config/models/<id>.yaml over both. What every runtime on a login offers and pins.
-      const modelCatalogService = new ModelCatalogService({
-        files: async () => (await configFiles.inEffect()).evaluation.effective.modelCatalogs,
-        published: async () => {
-          publishedModelCatalog.refreshIfDue();
-          return await publishedModelCatalog.catalogs();
-        },
-        presets: async () => await providerPresets.presets(),
-        ollama: () => localModels.snapshot(),
-      });
-      // The models Ollama has installed on this machine (docs/model-catalog.md § Local models): read at
-      // boot and whenever a person opens Settings or a login's setup — never on a timer — through the
-      // same keyless, loopback-only read a login Test makes. A different set moves what runtimes offer.
-      const keylessProbe = new AuthorizedProviderProbe(outboundAuthorizer, new FetchEnhancementTransport());
-      const localModels = new LocalModelsService({
-        probe: keylessProbe,
-        address: process.env.OLLAMA_HOST,
-        enabled: process.env.FY_LOCAL_MODELS !== 'off',
-        suggested: async () => suggestedOllamaModel(await modelCatalogService.catalogs()),
-        now: () => clock.now(),
-        onChanged: async () => {
-          analytics.provides.ingestion.pricingChanged();
-          await fleetCatalog.republish().catch(() => undefined);
-        },
-      });
-      const providerProbe = new ProviderProbeService({
-        probe: keylessProbe,
-        clock: { monotonicMs: () => speedupStopwatch.monotonicMs(), now: () => clock.now() },
-      });
+        seamsOf.models(world),
+        lifecycle,
+      );
       // Provider quotas for environment logins (docs/provider-quotas.md): read through the SAME outbound
       // holder, only when somebody watches, at most once a minute per login, and never inference. The
       // fallback is what this machine's own sessions on the login cost, from the analytics index.
@@ -11685,7 +11644,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               listed => new Set(listed.map(secret => secret.name)),
               () => undefined,
             ),
-          test: async (subject, consent) => await providerProbe.test(subject, consent),
+          test: async (subject, consent) => await models.provides.providerProbe.test(subject, consent),
         },
         providerQuota: quotaReader,
         budget: { view: id => budgets?.view(id) },
@@ -11730,7 +11689,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           pinned: stateHomeKeys(paths),
           publication: fleetPublication,
         }),
-        modelCatalogs: async () => await modelCatalogService.sources(),
+        modelCatalogs: async () => await models.provides.catalogs.sources(),
         publishedManifest: async () => await publishedManifest(),
         lastAutoResume: async () => await autoResumeSummary.read(),
         budgetHolds: () => budgets?.holds() ?? {},
@@ -11916,7 +11875,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             const read = await daemonConfigStore.readPricing();
             return effectiveAnalyticsPricing(
               read.kind === 'unavailable' ? [] : read.configuration.catalog,
-              await modelCatalogService.catalogs(),
+              await models.provides.catalogs.catalogs(),
             );
           },
         },
@@ -12030,7 +11989,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               const read = await daemonConfigStore.readPricing();
               const rates = effectiveAnalyticsPricing(
                 read.kind === 'unavailable' ? [] : read.configuration.catalog,
-                await modelCatalogService.catalogs(),
+                await models.provides.catalogs.catalogs(),
               );
               return usage => {
                 const priced = snapshotAnalyticsUsagePricing(usage, rates);
@@ -12125,12 +12084,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         );
         return async (request: PackProbeRequest, ttlMs: number) => await cache.probe(request, ttlMs);
       })();
-      const packCatalogs = async () =>
-        modelCatalogsView(await modelCatalogService.catalogs(), {
-          origin: modelCatalogOrigin,
-          enabled: publishedModelCatalog.enabled,
-          ...(await publishedModelCatalog.status()),
-        }).catalogs;
+      const packCatalogs = async () => (await models.provides.subsystem.view()).catalogs;
       /**
        * The runtimes, logins, tools and pane limits `fy recommend` judges readiness from — one reader, so the Warden's
        * move (`warden/auto-migrate.ts`) never calls a login ready that a Pack start would refuse.
@@ -12957,16 +12911,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Names-only status over the store's listing, and a Test that spends a key once through the
         // outbound holder above. Jev's Test goes through the same guard the Warden will use.
         // The model catalogs in effect, and the published one this machine follows (docs/model-catalog.md).
-        models: {
-          view: async () =>
-            modelCatalogsView(await modelCatalogService.catalogs(), {
-              origin: modelCatalogOrigin,
-              enabled: publishedModelCatalog.enabled,
-              ...(await publishedModelCatalog.status()),
-            }),
-          refresh: async () => await publishedModelCatalog.refresh(true),
-          refreshLocal: async () => await localModels.refresh(),
-        },
+        models: models.provides.subsystem,
         speedups: new SpeedupsService({
           authorizer: outboundAuthorizer,
           secrets: secrets.directory,
@@ -13591,6 +13536,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           inputRequests,
           agentTools,
           fleetLogin,
+          models,
         },
       };
     },
@@ -14634,7 +14580,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   progress.enter('arming the configuration watcher');
   cleanups.push(await subsystems.configFiles.arm());
   // Which models Ollama has installed, read once now that the fleet can be republished with them.
-  void subsystems.models.refreshLocal().catch(() => undefined);
+  void modules.models.jobs.refreshLocal().catch(() => undefined);
   /**
    * NOT AWAITED. Arming reads the warden's settings through the configuration service's queue, and on a
    * real Mac whose loop was stalling every few seconds that read took longer than seventeen minutes — the

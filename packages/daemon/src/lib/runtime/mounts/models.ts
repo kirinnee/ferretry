@@ -8,6 +8,7 @@ import {
 } from '@ferretry/protocol';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
+import type { ModuleContribution } from '../modules.ts';
 
 /**
  * The model catalogs this machine reads (docs/model-catalog.md): `GET` lists them with where each came
@@ -57,4 +58,15 @@ export function modelRoutes(subsystem: ModelsSubsystem): readonly ApiRoute[] {
       handle: async () => jsonResponse(LocalModelsSchema.parse(await subsystem.refreshLocal())),
     },
   ];
+}
+
+/**
+ * What the models module adds to the daemon: the three catalog routes. They have no audit rule (a refresh is a
+ * read that spends nothing, and the contract fragment says why) and claim no protocol feature.
+ *
+ * Every path is a fixed literal under `/v1/models`, which no other subsystem uses, so no table can shadow or be
+ * shadowed by anything around it.
+ */
+export function modelsContribution(subsystem: ModelsSubsystem): ModuleContribution {
+  return { routes: modelRoutes(subsystem) };
 }
