@@ -107,6 +107,14 @@ export const blockedBy = (card: BoardTask, index: BoardIndex, laneSets: LaneSets
     })
     .map(dependency => dependency.task);
 
+/** How many of a card's live sub-cards are still being built: in a backlog, active or review lane. */
+export const stillBuilding = (card: BoardTask, index: BoardIndex, laneSets: LaneSets): number =>
+  index.children(card.id).filter(child => {
+    if (child.dropped !== null) return false;
+    const category = cardCategory(child, laneSets);
+    return category === 'backlog' || category === 'active' || category === 'review';
+  }).length;
+
 /**
  * The cycle adding `from → to` would close, as the refs in order (`&F1 → &F2 → &F1`), or `null` when the
  * graph stays acyclic. Walks the WHOLE graph from `to`, so a cycle two hops away is found too.

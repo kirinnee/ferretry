@@ -33,7 +33,7 @@ export function ToTestStep({
   const room = useDeckRoom(box, row.key, PAGE_FOOT_PX);
   return (
     <section
-      aria-label={row.stage === 'approve' ? 'Plan to approve' : 'Card to test'}
+      aria-label={row.stage === 'approve' ? 'Plan to approve' : 'Try it'}
       className="fy-inbox-step"
       data-inbox-open-to-test={row.key}
       ref={box}
@@ -45,7 +45,7 @@ export function ToTestStep({
         onClose={onClose}
         onNavigate={onNavigate}
         onSkip={onNext === undefined ? undefined : () => onNext()}
-        pager={{ index, total, noun: 'card', onPrevious, onNext }}
+        pager={{ index, total, noun: 'item', onPrevious, onNext }}
         rows={[row]}
       />
     </section>

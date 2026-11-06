@@ -27,40 +27,41 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 
 ## Hook inventory
 
-| Hook                         | What it enforces                                                                                 |
-| ---------------------------- | ------------------------------------------------------------------------------------------------ |
-| `treefmt`                    | formatting: Biome (TS/JS/JSON/CSS), prettier (Markdown/YAML/HTML), actionlint, nixfmt, shfmt     |
-| `a-biome`                    | Biome lint on TS/JS (Biome formats through `treefmt`, configured in the same `biome.json`)       |
-| `typecheck`                  | `tsc --noEmit` across the workspace, one run per machine at a time (see below)                   |
-| `a-e2e-harness-typecheck`    | `tsc -p tests/e2e/tsconfig.json`: the E2E harness and `scripts/test/**` (see below)              |
-| `a-deadcode`                 | Knip, repository view (`knip.json`) — includes tests                                             |
-| `a-deadcode-production`      | Knip, production view (`knip.production.json`) — from the bin entry                              |
-| `a-shellcheck`               | shellcheck on every `*.sh` and `scripts/host/ferretry-loopback-firewall`                         |
-| `a-enforce-exec`             | tracked shell scripts are executable                                                             |
-| `a-action-pins-trusted`      | trusted GitHub Actions pin a major tag                                                           |
-| `a-action-pins-non-trusted`  | everything else pins a 40-char SHA plus its tag in a comment                                     |
-| `a-cli-contracts`            | the release/architecture invariants in [Contracts](../contracts/README.md)                       |
-| `a-closed-set-agreement`     | registered cross-package closed enumerations have the same members                               |
-| `a-composition-invocation`   | constructed composition-root fields have a caller                                                |
-| `a-composition-reachability` | production modules are used by their package's composition root                                  |
-| `a-conflict-markers`         | marker shapes appear only in declared teaching documents                                         |
-| `a-contract-registry`        | executable, documented and wired contract inventories agree                                      |
-| `a-cors-header-agreement`    | the CORS preflight admits every header the browser code can send                                 |
-| `a-daemon-scope`             | PWA state and requests stay qualified by their owning daemon                                     |
-| `a-fetch-binding`            | the PWA never stores a `fetch` builtin or calls the network past the carrier                     |
-| `a-git-hooks-worktree`       | commit linting works from a linked worktree, concurrently and repeatedly                         |
-| `a-macos-relevance`          | the optional macOS jobs' path lists cover every input; macOS is advisory on PRs, retried on main |
-| `a-no-fy-render-in-docs`     | `fy-render` fence openers appear only in their three teaching files                              |
-| `a-no-legacy-state`          | package code cannot reference predecessor state or identifiers                                   |
-| `a-no-pattern-kill`          | test code never kills processes by pattern (`pkill`, `killall`)                                  |
-| `a-no-sync-io`               | daemon code declares every synchronous file call in `scripts/validate/sync-io-allowlist.txt`     |
-| `a-pages-config`             | the PWA build and the Pages deployment publish the same directory                                |
-| `a-pwa-relevance`            | the PWA browser gate's path list covers every import of its harness; docs-only skips it          |
-| `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree                               |
-| `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt                        |
-| `a-test-tiers`               | tier placement and budgets; complete groups; Quick/Full event, verdict and run-all contracts     |
-| `a-job-ceilings`             | every workflow job states `timeout-minutes`, so a wedged job fails in minutes                    |
-| `a-commit-msg`               | conventional commit subject (`commit-msg` stage)                                                 |
+| Hook                         | What it enforces                                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `treefmt`                    | formatting: Biome (TS/JS/JSON/CSS), prettier (Markdown/YAML/HTML), actionlint, nixfmt, shfmt            |
+| `a-biome`                    | Biome lint on TS/JS (Biome formats through `treefmt`, configured in the same `biome.json`)              |
+| `typecheck`                  | `tsc --noEmit` across the workspace, one run per machine at a time (see below)                          |
+| `a-e2e-harness-typecheck`    | `tsc -p tests/e2e/tsconfig.json`: the E2E harness and `scripts/test/**` (see below)                     |
+| `a-deadcode`                 | Knip, repository view (`knip.json`) — includes tests                                                    |
+| `a-deadcode-production`      | Knip, production view (`knip.production.json`) — from the bin entry                                     |
+| `a-shellcheck`               | shellcheck on every `*.sh` and `scripts/host/ferretry-loopback-firewall`                                |
+| `a-enforce-exec`             | tracked shell scripts are executable                                                                    |
+| `a-action-pins-trusted`      | trusted GitHub Actions pin a major tag                                                                  |
+| `a-action-pins-non-trusted`  | everything else pins a 40-char SHA plus its tag in a comment                                            |
+| `a-cli-contracts`            | the release/architecture invariants in [Contracts](../contracts/README.md)                              |
+| `a-closed-set-agreement`     | registered cross-package closed enumerations have the same members                                      |
+| `a-composition-invocation`   | constructed composition-root fields have a caller                                                       |
+| `a-composition-reachability` | production modules are used by their package's composition root                                         |
+| `a-conflict-markers`         | marker shapes appear only in declared teaching documents                                                |
+| `a-contract-registry`        | executable, documented and wired contract inventories agree                                             |
+| `a-cors-header-agreement`    | the CORS preflight admits every header the browser code can send                                        |
+| `a-daemon-scope`             | PWA state and requests stay qualified by their owning daemon                                            |
+| `a-fetch-binding`            | the PWA never stores a `fetch` builtin or calls the network past the carrier                            |
+| `a-git-hooks-worktree`       | commit linting works from a linked worktree, concurrently and repeatedly                                |
+| `a-macos-relevance`          | the optional macOS jobs' path lists cover every input; macOS is advisory on PRs, retried on main        |
+| `a-no-fy-render-in-docs`     | `fy-render` fence openers appear only in their three teaching files                                     |
+| `a-no-legacy-state`          | package code cannot reference predecessor state or identifiers                                          |
+| `a-no-pattern-kill`          | test code never kills processes by pattern (`pkill`, `killall`)                                         |
+| `a-owner-surface-words`      | no owner-facing string (PWA, daemon, protocol) makes a card the one asking (docs/agenda.md § One model) |
+| `a-no-sync-io`               | daemon code declares every synchronous file call in `scripts/validate/sync-io-allowlist.txt`            |
+| `a-pages-config`             | the PWA build and the Pages deployment publish the same directory                                       |
+| `a-pwa-relevance`            | the PWA browser gate's path list covers every import of its harness; docs-only skips it                 |
+| `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree                                      |
+| `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt                               |
+| `a-test-tiers`               | tier placement and budgets; complete groups; Quick/Full event, verdict and run-all contracts            |
+| `a-job-ceilings`             | every workflow job states `timeout-minutes`, so a wedged job fails in minutes                           |
+| `a-commit-msg`               | conventional commit subject (`commit-msg` stage)                                                        |
 
 The root `typecheck` project does not include `scripts/test/**`, and the E2E harness project does,
 under the same strictness plus `strict`. `task test:e2e` typechecks that project before running any

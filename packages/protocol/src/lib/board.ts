@@ -201,6 +201,13 @@ export type PrState = z.infer<typeof PrStateSchema>;
 export const PrChecksSchema = z.enum(['none', 'pending', 'passing', 'failing']);
 export type PrChecks = z.infer<typeof PrChecksSchema>;
 
+/**
+ * What a PR changed, as the watcher read its files: `docs-tests` when every file is a doc, a design note or a test,
+ * else `code`. Absent on a link nobody has read the files of: an unknown kind is treated as code.
+ */
+export const PrChangeKindSchema = z.enum(['docs-tests', 'code']);
+export type PrChangeKind = z.infer<typeof PrChangeKindSchema>;
+
 const PR_URL = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/([1-9][0-9]*)$/u;
 
 /** The `owner/name` and number a GitHub PR URL names, or `null` when it is not one. */
@@ -230,6 +237,17 @@ export const PrLinkSchema = z
     polledAt: InstantSchema.nullable(),
     /** When the PR was opened on GitHub; absent on a link cached before the watcher read it. */
     createdAt: InstantSchema.nullable().optional(),
+    /** What the PR changed (docs and tests only, or code); absent when its files were not read: an older link. */
+    changes: PrChangeKindSchema.optional(),
+    /**
+     * The commit `changes` was read at: the head while the PR is open, the merge commit once merged. A kind is kept
+     * across polls only for that SAME commit; absent on a link cached before it was kept, whose kind then goes unless a
+     * poll reads the files again.
+     */
+    changesRevision: z
+      .string()
+      .regex(/^[0-9a-f]{40}$/u)
+      .optional(),
   })
   .superRefine((value, context) => {
     const parts = prUrlParts(value.url);

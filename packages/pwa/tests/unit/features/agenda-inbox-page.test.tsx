@@ -787,6 +787,39 @@ describe('AgendaNeedsYou', () => {
     await mounted.unmount();
   });
 
+  it('opens the item in its conversation for a Not good, which needs words this card has no box for (&B165)', async () => {
+    const gate = {
+      cardId: 'F12',
+      laneId: 'released',
+      laneName: 'Released',
+      entry: 4,
+      projectId: 'p1',
+      cardTitle: 'Badge colour',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    };
+    const tried = inboxCard(
+      agendaItem('A6', {
+        kind: 'reply',
+        subject: 'Try it: Badge colour',
+        ask: { kind: 'open-question' },
+        gateAttached: gate,
+        cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
+      } as never),
+    );
+    const fake = fakeInbox();
+    const navigated: string[] = [];
+    const mounted = await mount(needsYou(fake, [tried], navigated));
+    const card = must(mounted.container.querySelector<HTMLElement>('[data-agenda-card="A6"]'), 'the card');
+    await interact(() => must(card.querySelector<HTMLElement>('[data-agenda-option="Not good"]'), 'Not good').click());
+    expect(navigated).toHaveLength(1);
+    expect(navigated[0]).toContain('A6');
+    expect(fake.deferred.hiddenKeys().size).toBe(0);
+    await mounted.unmount();
+  });
+
   it('keeps the answer bar on the card, with no reply box of its own', async () => {
     const long = inboxCard(agendaItem('A5', { subject: 'Point the sync at the new org' }));
     const mounted = await mount(needsYou(fakeInbox(), [long]));

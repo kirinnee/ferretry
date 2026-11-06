@@ -34,6 +34,7 @@ import {
   categoryOf,
   firstLaneOfCategory,
   formatTaskRef,
+  gateOptions,
   isBackwardMove,
   LANE_CATEGORIES,
   type Lane,
@@ -568,6 +569,32 @@ export const closeAsDaemon = (card: BoardTask, reason: string, context: CardCont
         auto: true,
         trigger: closeTrigger(card, reason),
       },
+      { ...rest, actor: { kind: 'daemon' } },
+    ),
+    laneId: target.id,
+  };
+};
+
+/**
+ * THE ONE PLACE THE DAEMON PASSES A GATE (docs/board.md § Cards show progress; their asks ride the agenda). A card at a
+ * TRY-IT lane with nothing to try is moved by the daemon into the board's closed lane, reason beside it, so nobody is
+ * asked to tap Done on it. Only the daemon (the `trigger` standing), only out of a lane whose gate has a reopen option
+ * (a try-it), only into the closed lane. Everything else about a gate stays the owner's: a ferret's move past one is
+ * still refused by `move`, and nothing on the wire reaches this. `null` when the card is not at such a gate, is
+ * dropped, or the board has no closed lane: nothing is written.
+ */
+export const closeNothingToTry = (card: BoardTask, reason: string, context: CardContext): BoardTask | null => {
+  requireStanding('trigger', context.standing, card);
+  if (card.dropped !== null) return null;
+  const from = laneOf(context.laneSet, card.laneId);
+  if (!from.ok || !gateOptions(from.value).some(option => option.outcome.kind === 'reopen-with-agenda')) return null;
+  const target = closedLaneOf(context.laneSet);
+  if (target === undefined || target.id === card.laneId) return null;
+  const { actorVia: _via, ...rest } = context;
+  return {
+    ...withEvent(
+      card,
+      { type: 'moved', from: card.laneId, to: target.id, backward: false, reason, auto: true, trigger: 'signal.done' },
       { ...rest, actor: { kind: 'daemon' } },
     ),
     laneId: target.id,

@@ -10,8 +10,8 @@ agenda passes the three-part test; otherwise it adds to the closest. It never op
 own work: no "please test X", "please verify Y" or "try it after the release". Testing a card goes through the card's own agenda — the board
 runs itself and a card never asks (the owner, 2026-11-04: _"TASK no longer have user interactivity anymore! agenda
 tracks all those and are the one request user to test so it can move it"_): a finished card reaches its Released or
-Ready to try lane, the daemon puts its card ask on the card's agenda, and the owner's **Done** or **Not good** there
-moves the card ([board.md](board.md#cards-show-progress-their-asks-ride-the-agenda)). The ferret's instruction says all of this (`AGENDA_INSTRUCTION`,
+Ready to try lane, the daemon asks on the topic's agenda item, and the owner's **Good** (Done) or typed **Not good** there
+moves the card ([One model](#one-model-the-agenda-asks-the-card-shows)) ([board.md](board.md#cards-show-progress-their-asks-ride-the-agenda)). The ferret's instruction says all of this (`AGENDA_INSTRUCTION`,
 [notifications.md](notifications.md#agenda-mode)).
 
 **A question the owner asks is answered on the agenda too.** The owner reads the agenda, not every reply, so an answer
@@ -25,6 +25,102 @@ resolves only that info item, never the question it was about. A question the ow
 gets one `--kind info` item holding the answer (premise = the question, ask or body = the answer, readable with no chat
 open); a follow-up edits that item rather than adding another. `fy agenda done` on a question the owner has not
 answered asks for `--reason`, and the item reads as **withdrawn**, never as answered.
+
+## One model: the agenda asks, the card shows
+
+**The one rule** (the owner, 2026-11-02 to 2026-11-06: _"TASK no longer have user interactivity anymore! agenda tracks
+all those"_, _"how many times I said cards have no actions"_). Every other section, screen and prompt line follows it:
+
+- **The agenda item is the only place the owner acts.** It has ONE "What I need from you" and ITS OWN answers: one
+  row of buttons, or words typed below, never both said twice.
+- **A card is read-only status.** It is never the one asking. No screen the owner sees heads a box "Card &F12", says
+  "your answer for the card" or "card ask", or draws a second answer row for a card. The card may be named once, as a
+  plain reference line ("For &F12 Badge colour").
+- **Answering an item may move its linked cards.** That is the daemon's bookkeeping, invisible to the owner: the
+  item's Done is what moves a tried card to Closed, its Not good sends it back with the owner's words.
+- **The daemon asks only when there is something to ask** ([Try it only when there is something to try](#try-it-only-when-there-is-something-to-try)),
+  and only on the topic's existing item, never a new item per stage.
+
+**Words the owner sees** (and the only ones):
+
+| Word            | Means                                                                       |
+| --------------- | --------------------------------------------------------------------------- |
+| **agenda item** | one thing the owner decides or does, with its own answers (`!A12`)          |
+| **card**        | one piece of work on the board, and where it stands (`&F12`); it never asks |
+| **ask**         | what an agenda item needs from the owner: its "What I need from you"        |
+| **try-it**      | an ask to try something that shipped, answered Done or Not good             |
+
+"Card ask", "gate" and "lane" are the daemon's words for its bookkeeping (below, and in [board.md](board.md)); they
+never reach an owner-facing string. `scripts/validate/owner-surface-words.sh` fails the build on exactly these shapes
+in a string a screen can show (comments and identifiers are not read): "card ask", "your answer for the card", a
+"Card &F12:" heading, the card narrated as the one acting ("the card goes back", "the card stays"), the board's engine
+words ("is the gate of", "at the gate", "the card's lane", "in the lane"), and narration of a second ask to come ("it is
+asked here"). A new shape is added to its list with a test the day it is seen on a screen.
+
+**Superseded.** From 2026-10-30 to 2026-11-01 the owner asked for Done / Not good buttons on cards ("embed button to
+immediately mark a task as done", the Inbox's cards to test, "stage can have request user options"). The rule of
+2026-11-02 replaces those asks: anything built for them answers on the agenda item, as the item's own ask, or goes.
+
+## Try it only when there is something to try
+
+At a try-it stage (the stage whose answers include **Not good**; the plan stage, "OK to build", is not touched) the
+daemon decides one of three things, in one pure function (`tryItVerdict`, `gate-policy.ts`). It looks in this order:
+
+1. **Wait.** The card is blocked: a dependency is still open, or a ferret blocked it by hand. Nothing is asked, nothing
+   closes, the card stays where it is. An ask that was already live and unanswered when the block arrived is taken
+   back from the item that carried it (the card stays put); when the card is unblocked, the next look at it asks
+   again as usual. The daemon looks
+   at every card at a stage again on each board write and on each Warden sweep (`GateItems.sweep`), so a dependency
+   that ships frees its dependants within one sweep.
+   **An umbrella card waits too**: while any of its live sub-cards is still being built (a backlog, active or review
+   lane), a PR linked to the umbrella itself shipping does not make it ready to try. Nothing is asked and nothing
+   closes; the next look after its sub-cards ship decides again. (The owner's case, 11-06: &C50 "Split fyd.ts" got a
+   try-it when a prerequisite PR linked to it was released.)
+2. **Nothing to try.** Any of these:
+   - the card is **private** (stored `visibility`, else the daemon's default for who asked);
+   - the card is **internal work**: its kind is `chore` (a refactor, a clean-up, a migration — nothing a person sees);
+   - it has **no How to test**, or its How to test **as a whole** is one complete no-testing declaration
+     (`saysNothingToTry`, a closed grammar — never a list of banned verbs). The whole text, trimmed, one sentence with an
+     optional final period, is a **declaration**: "Nothing to try", "Nothing to test", "Nothing for you to try|test",
+     "No user-visible change", "No behaviour|behavior change" (also "No PWA|app|CLI|user-facing … behaviour change"),
+     "Docs only", "Tests only" or "Docs and tests only" — in either spelling and any case. It may carry ONE **reason**
+     from a closed list ("docs only", "tests only", "docs and tests only", "internal refactor", "refactor only", "CI
+     only", "unit suites pass", "no user-visible change"), or a second declaration, joined by ":" ";" "," or " — "
+     ("Nothing to try: docs only.", "No user-visible change; nothing to try."). **Anything else is not a no-test
+     statement and the owner is asked**: any other word after a declaration ("after", "while", "when", "until", "if",
+     "in", "on", "during", "should" …), a second sentence, a list, a numbered or bulleted line, a step. "No PWA change
+     after toggling the setting.", "No change in scrolling after switching tabs." and "Docs only, then check the page"
+     all ask. When in doubt it asks, never closes;
+   - **every merged PR of the card changed only docs, design or tests**, there is at least one, and the kind of each is
+     known. An unknown kind counts as code.
+3. **Ask.** Anything else: exactly what the daemon always did.
+
+**Nothing to try closes the card, with one line and no button.** The daemon moves the card from the try-it stage to
+Closed, reason `Nothing to try: <why>` (for example "its PRs change only docs and tests"), and withdraws any open ask of
+it. If an open agenda item already carries the card, it gets ONE plain line (`&F12: Nothing to try: …`) in its activity;
+its turn, stage and place in Needs you do not change. The line is an ordinary `updated` activity entry whose note is
+exactly `&F12: Nothing to try: <why>` (`nothingToTryLine` in `@ferretry/protocol` reads it), so an app can show its
+words instead of "<ferret> updated it". If none does, no item is raised: the card's history is the record.
+The verdict is judged **again inside the card's own write**, against the card and its dependencies as they are then: steps
+or a block that arrived at the same stage entry since the first look stop the close, and nothing is written.
+**The daemon never raises an agenda item to say "nothing to try".** The exception to "only the owner passes a gate" is
+narrow and named in [board.md](board.md#cards-show-progress-their-asks-ride-the-agenda): the daemon only, only out of a
+try-it stage, only into Closed, only while the card still sits at that stage by that entry. A ferret still cannot pass a
+stage.
+
+**What a PR changed.** The GitHub watcher reads the files of each PR in its one GraphQL query and caches the verdict on
+the PR link (`PrLink.changes`: `docs-tests` or `code`; absent means not read). A PR is `docs-tests` when it has at most
+100 files and every one is a doc or a test: anything under `docs/`, any `*.md` or `*.mdx`, anything under a `tests/`,
+`__tests__/` or `fixtures/` folder or a package's top-level `harness/` (the `harness/` folders under `src/` are shipped code), and any `*.test.*` or `*.spec.*` file (`pr-changes.ts`). More than 100 files
+is `code`. A file list that GitHub cut short or did not give leaves the kind unknown. **A kind is bound to the commit it was read
+at** (`PrLink.changesRevision`: the head commit while the PR is open, the merge commit once merged): a poll that cannot
+read the files keeps the kind only for that same commit, so a docs-only PR that gets code pushed, or is merged, with
+its file list unreadable goes back to unknown and is asked. A merged PR is polled until it is
+released, so its kind is cached before its card reaches the try-it stage; a PR that shipped before the field existed has
+none, and its card is asked.
+
+**The ask goes on the topic's existing item, never a new item per stage.** See [Card asks](#card-asks) ("Which agenda"):
+before the daemon opens an item of its own, it tries the item the card was made from.
 
 ## One channel per topic
 
@@ -196,10 +292,13 @@ each answer does to the card).
   `answer` (`at`, `response`, `note?`, `receipt` — a SHA-256 of everything the answer said —, `askVersion?`). A "Not
   yet" leaves it open with `notYet`. Only the daemon writes one; an add or edit that carries one is refused. Its name is
   its gate's reference, `gate:<card>:<lane>:<entry>`.
-- **Which agenda.** The open agenda that carries the card (it is about the card, or carries one of its asks), else the
-  one that carries its parent card, else ONE new agenda the daemon opens on the card's ferret's home, named after the
-  card, raised on that ferret's behalf (`sourceRef` `card-agenda:<card>`), stage `test` or `plan`. That agenda's own ask
-  is only a reply; the ferret works and closes it as its own.
+- **Which agenda.** In this order: the open agenda that carries the card (it is about the card, or carries one of its
+  asks); the one that carries its parent card; **the card's topic item** — the item the card was made from, which is
+  `task.approval` when the card has one, else the first `!A<n>` its ask's `source` names — when that item is open on one
+  of the card's agenda homes and can carry an ask; and only then ONE new agenda the daemon opens on the card's ferret's
+  home, named after the card, raised on that ferret's behalf (`sourceRef` `card-agenda:<card>`), stage `test` or `plan`.
+  That agenda's own ask is only a reply; the ferret works and closes it as its own. This holds at both stages, OK to build
+  and try-it. Whether a try-it is asked at all is [Try it only when there is something to try](#try-it-only-when-there-is-something-to-try).
 - **It needs you.** A new card ask puts its agenda in Needs you, fresh — even out of a snooze, because it is a blocker
   of its card — and it stays one entry in the unique queue, blockers first. Its stage moves to `test` (its gate can send
   the card back with words) or `plan`. While it is open, its ferret cannot rest the agenda, and nobody but the owner
@@ -212,7 +311,45 @@ each answer does to the card).
   card moves FIRST; a refusal leaves the ask open (`400 invalid`, `403 forbidden`, `409 gate_moved_on`,
   `409 gate_not_moved`). An exact repeat comes back unchanged and moves nothing; the same choice with other words or
   files is refused. **After the answer the agenda RESTS, waiting on its ferret**, which is told; the answer never closes
-  it, and the ferret marks it done once nothing more is expected.
+  it, and the ferret marks it done once nothing more is expected. **Unless the item still asks something of its own**,
+  with no `ownerAnswer`: a choice, yes/no, permission, task or review, or a question it asks in its own words beside
+  its card asks. Then it stays, or goes back to, the owner's turn in Needs you, and only their answer (or reply) to it
+  rests it. **One rule decides "asks something of its own", and the app reads the same one** (`itemAsksOwnQuestion` in
+  `@ferretry/protocol`): the item has questions, form fields or steps, or its ask line (its subject) is neither the
+  daemon's generated card agenda ask nor a line that only repeats one of its card asks. So a ferret's thread whose
+  subject is a question ("Should the badge also change keyboard focus?") stays in Needs you after Good; a thread whose
+  line only repeats the card ask ("Try it: <the card's title or one whole step of its How to test>",
+  `askLineRepeatsCardAsk`) and the daemon-opened card agenda **while its ask is still the one the daemon generated**
+  rest as always.
+  - **"Still the one the daemon generated"** (`isGeneratedCardAgendaAsk`) is read from a stored fact, never from the
+    revisions (they keep only the newest 10, so a ferret's rewrite would age out): every time the daemon raises,
+    restates or carries over a card agenda it records the subject it wrote as `generatedSubject` (daemon-only; an app
+    that predates it drops it). The ask is the daemon's while it is an open question with no questions, fields or
+    steps and its subject still equals `generatedSubject`; once a ferret or the owner rewrites the subject — in any
+    words, "Try it: …" included — it is the item's own question.
+  - **A card agenda from before `generatedSubject`** is read conservatively by its words: its ask is the daemon's only
+    while its subject provably repeats one of the card asks it carries or carried — the lane's own words ("Try it:",
+    "OK to build?") and nothing but the card's title or one step of its How to test. A lane opening alone never hides a
+    question ("Try it: Badge. Should keyboard focus change too?" is the ferret's). One whose daemon-written subject said
+    more (the card's summary) reads as the item's own until the daemon next restates it and records `generatedSubject`.
+  - **A reply in words answers the open question it was given to.** An ordinary reply (or a chat message logged on the
+    item) sets no `ownerAnswer`, so the daemon records `ownAskRepliedTo` (daemon-only): a digest of the item's own
+    ask as it stood — its ask line, questions, fields, steps, ask and ask version. While the ask still digests to it, the
+    question is answered, so a card ask's Good rests the item, whether the reply came while that card ask waited or
+    before it was put. Carrying the item to another agenda (the home migration) carries the digest and the ask version it
+    was taken at with it, so an answered question stays answered there. Once a ferret rewords the question, adds to it or re-asks it, it no longer matches: no earlier
+    reply ever answers a NEW question, which stays in Needs you after the card ask's Good. A choice, yes/no,
+    permission, task or review still takes its own answer.
+  - **The next ask takes over, in the same item.** "Does the item still wait on its own question?" is ONE function both
+    ends read, `awaitsOwnAnswer` (`@ferretry/protocol`; it reads `ownerAnswer` and the `ownAskRepliedTo` digest, `ownAskDigest`,
+    computed the same way on the daemon and in the app). While it holds, the question is the item's one ask and a try-it
+    waits behind it as one "Next" line. The moment it stops holding — a permission the owner already approved, a reply to the
+    question, a choice taken — the card's try-it is the item's ask: Good / Not good are drawn, the old question and its buttons are not,
+    and the item says "Test" in the list and in the open item. So a topic whose feature reaches Released AFTER the owner
+    answered it asks the try-it, not the old question again. **Answering the question never parks an item whose try-it still
+    waits** (a reply, or a tap on its own buttons): the item stays in Needs you with the try-it as its ask, and rests
+    only on the try-it's answer (or when the owner has said Not yet to it). If the try-it goes away first (the card moved
+    on), the item rests on the answer the owner already gave.
 - **Who.** The owner at the machine, or a paired device the `fleet` grant lets use the board (the same grant guards
   Not needed on an agenda with an open card ask). A ferret, its lead and the daemon's other producers are refused.
 - **Leaving.** A card that leaves the gate some other way has its open ask withdrawn quietly. When no open ask
@@ -244,9 +381,13 @@ each answer does to the card).
 - **Not needed.** The owner's Not needed on the card's own agenda (`card-agenda:`, or a converted gate item) means they
   have seen the ask and want it left: it counts as asked. On any other thread that carries the ask it means "drop this
   thread", so the ask is put on the next carrier, or on a new card agenda.
-- **An older app** reads `gateAttached`: the daemon mirrors the FIRST open card ask's gate there on every write, so an
-  app that predates card asks still draws Done / Not good on the agenda, and answers it with `gate: true` and no
-  `cardAsk`. Such an answer is to the ask the mirror shows. The app sends `cardAsk` from this version on, naming the ask it
+- **An older app** reads `gateAttached`: the daemon mirrors there, on every write, the gate of the FIRST card ask in
+  the order they are asked (`askedCardAsks` in `@ferretry/protocol`, the one order the app draws too): every ask still
+  waiting for an answer, as they were put on; then the ones the owner said Not yet to, the one set aside longest ago
+  first. So an app that predates card asks still draws Done / Not good on the agenda, and answers it with `gate: true`
+  and no `cardAsk`. Such an answer is to the ask the mirror shows: a Not yet moves the mirror on to the next ask (which
+  stamps `gateAttachedChangedAt`, below), so a deferred approval never traps an older app, and its next Not yet sets
+  that one aside rather than the first again. The app sends `cardAsk` from this version on, naming the ask it
   drew; one that does not is guarded by the daemon: while an ask on that agenda was answered with the same receipt (the
   choice, words and files) in the last two minutes, a no-`cardAsk` answer is never applied to another ask, whenever
   that ask was put on — it is refused `409 gate_moved_on`. The same goes for any no-`cardAsk` answer in the two minutes
@@ -897,7 +1038,10 @@ A card A5 carries only through its [card ask](#card-asks) can be moved too. A mo
 - **The new item carries them,** answered or not, at stage `test` or `plan` when one still waits on the owner.
 - **A5 keeps the rest.** When A5 asked the owner nothing but the asks that moved, it does not sit in Needs you with
   nothing to answer: a ferret's thread goes back to the turn the first of them woke it out of, and the card's own
-  agenda rests on its ferret.
+  agenda rests on its ferret. "Nothing but" is the one own-question rule above (`itemAsksOwnQuestion` and the reply
+  digest): an item with a question of its own the owner has not answered — one its ferret added or reworded after the ask
+  was attached — stays in Needs you, and so does a thread anybody has written on since the ask (the seal, as for
+  withdrawing an ask).
 - **Refused:** a new item that cannot carry a card's ask. A split off the card's own agenda is the daemon's item, not
   the card's agenda, so moving its card is refused; merge the two instead.
 - **Answering.** The owner answers on the new item as before. An answer that names its ask but reaches A5 is answered
@@ -1027,24 +1171,30 @@ hit on one, open the **Inbox** item, never a `/session/<id>` page.
   - `warden:orphans` — one item naming the cards that have nobody working on them, titled "A card has nobody working on it"
     (or "N cards have nobody working on them"), one plain line per card: "&B1 Fix simcha Loge 502 is waiting in
     Review/CI, but no ferret is assigned, so nothing will happen to it." A card leaves it when someone takes it. The
-    nudge to a live owner ferret is unchanged. It is information, so **Got it** dismisses the whole item, and it
-    carries `cards` (below): each card gets its own **Open**, **Start a ferret** and **Close**, on one line (a phone's width
-    holds the three; a screen reader hears "Open card &B1", "Start a ferret on &B1", "Close card &B1").
+    nudge to a live owner ferret is unchanged. It carries `cards` (below), and an app that draws them answers the notice
+    as **ONE form** ([One model](#one-model-the-agenda-asks-the-card-shows), &B165): each card is only named — its line
+    and an **Open &B1** link — with one pick, **Start a ferret**, **Close it** or **Leave it** (the default), and ONE
+    **Send** under them all does every pick, then answers the notice as **Got it**. There is no per-card button row and
+    no second Got it, and no swipe or key answers Got it past the picks. Without the field (an older app), **Got it**
+    dismisses the whole item as before.
     - **`cards`** is a structured field on an `info` item (1 to 12 rows, each `{ task: { id }, line }`, strict; refused
       on any other kind). The daemon sets it only for a machine that reports `agenda.cards.1`; an older app drops the
       unknown field and reads the same lines from the context instead, so nothing is lost. An app that draws `cards`
       hides the context, because it would say every line twice, and a lone card's line is not repeated under its own title.
-    - **Open** goes to the card. **Close** asks first (with a reason the owner may edit) and then drops the card with
-      the board's own `POST /v1/board/tasks/:taskId` `{action:'drop', reason}`. The button is shown to the person and
-      confirms first; the drop underneath keeps the board's existing rules (`caller: any`, the planner ACL), which are
+    - **Open** goes to the card. **Close it** shows what it does as soon as it is picked — the card leaves the board —
+      with the reason the board records, which the owner may edit, and Send drops the card with the board's own `POST /v1/board/tasks/:taskId` `{action:'drop', reason}`. The pick is the person's and nothing
+      happens before Send; the drop underneath keeps the board's existing rules (`caller: any`, the planner ACL), which are
       unchanged, so a card's owner ferret or an ancestor may still drop it as before. **Start a ferret** is
       `POST /v1/board/tasks/:taskId/start` ([board.md](board.md#start-a-ferret-on-a-card)): it starts a NEW ferret on
-      the card, and is the person's act only (operator minimum, `fleet` use). Each click carries its own action key
+      the card, and is the person's act only (operator minimum, `fleet` use). Each start carries its own action key
       (kept across a retry when no answer came back), so a lost response cannot start a second ferret.
     - **A card a live ferret already holds** is not offered a start: the daemon answers with that ferret
-      (`started: false`); the row swaps **Start a ferret** for **Open its chat**, and its line reads "… — a ferret has
-      picked it up." in place of "no ferret is assigned".
-    - There is no sentence under the notice telling the owner what the buttons do; the buttons say it.
+      (`started: false`); the row offers **Open its ferret’s chat**, and its line reads "… — a ferret has picked it up."
+      in place of "no ferret is assigned".
+    - **A refusal** is said on its card's row in the daemon's words; the notice stays open with the picks as they were,
+      and the next Send only does what has not taken yet. Only when every pick took is the notice answered.
+    - The work is the app's own authorized board calls, exactly as on the board page; the daemon reads no form answer.
+    - There is no sentence under the notice telling the owner what the picks do; the picks say it.
   - `warden:input-stuck` — one item naming every ferret idle with a message of Ferretry's own typed in its box and
     never submitted, after the Warden's Enter did not submit it (the `input_stuck` flag,
     [message-delivery.md](message-delivery.md#b144-a-ferret-idle-behind-its-own-unsent-message)). A ferret leaves it
@@ -1372,7 +1522,7 @@ and a part the item does not carry is not drawn:
 | 2   | Premise and context                 | the two tinted blocks; long is fine                                                                                                                                                                                                                                                                                                                                                           |
 | 3   | Detailed context                    | `detail`, explained from zero — **folded**                                                                                                                                                                                                                                                                                                                                                    |
 | 4   | Terms and references                | ONE table of every term and every link (PR, card, file, page), a term says what it means; a link is named by its target (drawn by the one reference renderer) and means its label, or nothing when it has none — **folded**                                                                                                                                                                   |
-| 5   | What I need from you                | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every card ask with its own buttons** (test steps and Done / Not good, or OK to build); **marked out** (a heavier accent frame and a tint, the heading in the accent) while the item needs the owner                                                                                          |
+| 5   | What I need from you                | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **its first card ask as its own ask** (the steps and ONE answer row; any other named as next); **marked out** (a heavier accent frame and a tint, the heading in the accent) while the item needs the owner                                                                                     |
 | 6   | The live document (tabs)            | **Where we are now** first and open (the answer to the owner's question, decided so far, still open, then `whereWeAre`), **The full picture** (`body`; a review's Reasoning), then the ferret's own tabs — each drawn open and whole, Markdown with fy-render                                                                                                                                 |
 | 7   | Conversation                        | the owner's and the ferret's words about the item, oldest first, each whole: the log, at the bottom — **folded**                                                                                                                                                                                                                                                                              |
 | 8   | Activity                            | the grey lines — each stage entered, each edit with what it changed, where it rests or sleeps now — **folded**                                                                                                                                                                                                                                                                                |
@@ -1441,27 +1591,17 @@ and a part the item does not carry is not drawn:
   (two ticks) until then. A chat reply the daemon stored on the item is stored once the queue accepts it, still
   queued, so its `fromChat` mark is no proof of reading. A stored entry records no delivery, so the item never claims
   more than that.
-- **Card asks live inside the item.** A card ready to test or approve is answered in part 6, with its own buttons,
-  never as an item of its own. Today a card ask arrives as the thread's `gateAttached`; the part is drawn over a
-  list, so a machine that carries several (`cardAsks`, `agenda.card-asks.1`) fills it unchanged. The item's own
-  one-row answer is the sticky dock at the view's foot, in reach however long the item runs — until card asks
-  share the view: then it sits inline right under the item's own ask, headed **Your answer for this item**, and
-  every card ask has its own heading (**Card &F12: your answer for the card**, then a line saying where the card stands), so two button sets are
-  never docked beside each other and never mistaken for one another. A card ask keeps its own buttons whatever the
-  item asks itself: a thread of numbered questions, steps or a form still draws the card's **OK to build** or
-  **Done / Not good** (`attachedGateView` leaves the thread's own answer shape behind), and an item answered in words
-  gets no "Your answer for this item" heading over nothing. A card ask carries the card's **How to test**,
-  read from the board the app already loads (`howToTestFor`), above its Done / Not good.
-- **A reply that already says yes is offered as the card's answer (&B155).** The owner who answers an item holding a
-  card ask in words ("build", "ok to build!") has not pressed the card's button, so the card stays where it is and the
-  ferret may not press it for them. When the owner's words are the LAST thing on the item and plainly approve, the card
-  ask says "You replied “build”. Use it as your answer for the card?" beside its forward button (OK to build, Done),
-  one tap away (`replyApproval`). It is only offered, never applied, and only conservatively: ONE open card ask
-  (counted in `cardAsks`, never the one-ask `gateAttached` mirror, so an item from a daemon that keeps none offers
-  nothing), one forward option, words written AFTER that ask was raised, and a short approval (yes, ok, go ahead,
-  lgtm, ship it…; build words only for OK to build, "works" or "tested" only for Done) or the button's own label. The
-  item's own reference the composer puts in front ("!A304 ok to build!") is set aside, and only that one. Nothing
-  longer is read, and a ferret reply after the words withdraws the offer.
+- **Card asks live inside the item, as its own ask.** A card ready to test or approve is answered in part 6, never
+  as an item of its own and never as a second answer row: [One ask, in the lane's own words](#one-ask-in-the-lanes-own-words)
+  says how each kind draws it. The item's own one-row answer is the sticky dock at the view's foot, in reach however long
+  the item runs; when its card asks are its answer, their buttons are inside "What I need from you" and nothing docks.
+  A card ask's How to test is the daemon's (`howToTest` on the ask), else read from the board the app already loads
+  (`howToTestFor`).
+- **A reply that already says yes is a reply, and nothing is said back (&B155, v4).** The owner who types "build" or "works now"
+  has not pressed the card's button, so the card stays where it is. The ask does NOT draw a line above its button ("You wrote
+  … tap Good"): that was a second prompt beside the one row, which read as a second ask. The words are a reply (see below), the
+  one row's button is the answer, and a typed answer that WAS sent says what it sent ("Sent your words on !A404: “It scanned,…”"),
+  never the label the words rode on.
 - **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
   part 6, "What I need from you", with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item
   the owner opens themselves, or one paged to from the one a push opened, starts at its top.
@@ -1554,6 +1694,97 @@ and the card stays the card:
   every ferret's prompt carries (`AGENDA_SHAPE_LINE`, inside `AGENDA_INSTRUCTION`), the `fy agenda add --help` table
   with an example per kind (`agendaShapeHelp`), the refusals (`AGENDA_SHAPE_ERRORS`, `agendaShapeProblems`) and the
   owner's instruction lines (`AGENDA_SHAPE_LEADS`). Change the wording there, never at a surface.
+
+### One ask, in the lane's own words
+
+**An item that carries a card ask still asks the owner ONE thing, with ONE answer row**
+([One model](#one-model-the-agenda-asks-the-card-shows); the owner, on !A404: _"if it's good, we just select good, if
+not we type what's wrong or what needs changing. to try it, it should write all information needed to try it. if it
+has preview env, we can try it there (even better)! … the agenda MOVES the card and acts as any gates for the card
+movements"_). One pure rule decides it for every kind (`itemAskPlan` in `packages/pwa/src/lib/agenda-item-sections.ts`):
+
+- **Every item draws its first card ask as its own ask**, inside "What I need from you". With several, the first is asked and each other is named,
+  one plain line ("Next: try it, for &F13 Badge shape."), asked once the first is answered: one row, one thing at a time.
+  1. **A heading in the lane's verb**: **Try it**, or **Approve** at a plan. Never "Card &F12", never "your answer for
+     the card".
+  2. **One plain reference line** naming the card once: "For &F12 Badge colour".
+  3. **Everything needed to try it**, written by the daemon from the card for someone who knows nothing of it
+     (`tryItText`, carried as the ask's `howToTest` and restated whenever the card changes): the preview link first —
+     **Try it on the preview** — when the card links one, else "There is no preview for this one. Try it for real: the
+     steps below say where."; then the card's own How to test (where / do / see) as written; then where the work stands
+     (**shipped in Ferretry vX.Y.Z** with the PR and how to update to it — only for a PR of Ferretry's own release repository; another project's is **released in <owner>/<repo> vX.Y.Z** — merged but not released, or the PR still open). A preview is a card
+     link that is a Cloudflare Pages preview (`https://<branch-or-hash>.<project>.pages.dev`, never the production
+     host), recorded with `fy task link <card> --doc <url>`; nothing invents one. **No per-PR preview deploy exists yet**
+     (`pwa-pages.yaml` deploys production from `main` only); once a card links one it is shown first.
+  4. **Its answers.** The item's own ask line stays only when it says something the card ask does not (a ferret's own
+     question); the daemon's "Try it: …" line that only repeats it goes, and "Type your answer below" is never said
+     beside buttons. That is the daemon's own rule (`itemAsksOwnQuestion`, [Card asks](#card-asks)), so a line the app
+     keeps on screen is one the daemon keeps in Needs you after Good. With one card ask, the swipes and arrow keys
+     answer it too.
+- **Good, and the words typed below** — when the item asks nothing of its own (the card's own agenda, or a
+  thread whose ask line only repeats it, with no questions, form fields or buttons of its own, or whose own question was
+  answered) and the host draws the box under the item (the Inbox): the FIRST card ask is the item's one ask — a second
+  card ask behind it is only a plain "Next: try it, for &F13 …" line, so one card or two a try-it reads the same way — and **Good** is one tap (the
+  lane's default "Done" reads Good; a label the lane wrote itself is kept), and what is typed in the box is the other
+  answer: at a try-it the lane's fail, **Not good**, the card going back with the words as the reopen ask (files ride
+  along as for any Not good); at an approval **Not yet**, the card staying while its ferret reads the words (words alone: a Send with files is refused, saying so, and the box keeps the words and the files). Elsewhere
+  (the chat's agenda, which draws no such box) the ask keeps the gate's own buttons, Done and Not good: an ask is never
+  drawn with "type what is wrong" and nowhere to type it.
+- **An item that asks a question of its OWN answers THAT question** (a ferret's question, a choice, a permission, a review: the
+  daemon's `itemAsksOwnQuestion`). Its answers are the one ask — typed words, or its own buttons — and a try-it on the same
+  card is never squeezed in beside them. The card ask is named on one plain line ("Next: try it, for &F12 Badge colour.")
+  and takes the answer row when the question is answered (an item whose question was
+  answered in words rests, and the daemon keeps it in Needs you while a card ask stays open). A **to-do's Done, an info's Got it
+  and a notice** close the item, which the daemon refuses while a card ask is open, so there the card ask goes FIRST and the
+  item's own buttons wait behind it ("First answer the try-it below; the buttons for this come back once it is answered.").
+  Either way: one row at a time, one "What I need from you". Answering the item's own question in words never hides it in the
+  app: while a card ask waits, the daemon keeps the item in Needs you, so the reply overlay (Replied, 30 s) is not applied and the
+  try-it shows at once. Once the question is answered, every part of it (its numbered questions, form fields, wanted answers)
+  is gone from the block, not only the one question line.
+- **A finished item** (resolved or done) is a record: how it ended is said ONCE (the settled line, or the Done chip when the host
+  draws none, and never a stage chip saying Done again), and it has no "What I need from you" box to repeat its headline. The
+  question or ask is also said once while open: the block leads with it, so the head does not repeat it under the title.
+- **A notice answered by a form of its cards** ("3 cards have nobody working on them": a pick per card, one Send) needs the owner:
+  its chip says Needs you, its list row is a tile like any item, its picks are one compact row per card, its Close reason box grows to show the whole text, and its one Send ends the block in
+  normal flow (never over a row). Its open view says the same kind word as its list row (Notification).
+- **Which card ask is first**: the first one still waiting for an answer. One the owner said **Not yet** to waits behind
+  the others (still named, asked again once they are answered; of several, the one set aside longest ago first), so a
+  deferred approval never blocks the next one. The app, the daemon's `gateAttached` mirror and an older app's unnamed
+  answer read this one order (`askedCardAsks`).
+- **The daemon's own ask line is hidden only while it is still the daemon's**: on the agenda the daemon opened for the
+  card, in the lane's words ("Try it: …"), and not rewritten by a ferret since. A question a ferret puts there later is
+  the item's own: it stays on screen, and typed words answer the ferret, never the card.
+- **Nothing else answers beside it**: while a card ask is the answer, the item offers no Done · closes of its own, and an
+  answer that did not land ("Not sent: …") is said beside the card ask, whichever of the item's rows waits.
+- **Every surface answers the same ask**: the item view, the Inbox deck's swipes and arrow keys and the run's key
+  hints read one function (`itemSwipeTargets`), so a swipe and a tap never answer different asks; the compact card (the
+  Sessions page's Needs you, the pinned card) draws the same first card ask with its answers.
+- **An old daemon's Inbox to-test row** (a daemon without `agenda.card-asks.1`, which raises no agenda item for a card
+  to try) is drawn as that item: "What I need from you", "Try it, then tap Done or Not good.", the steps, and its one
+  row. No card heading, no "Close card".
+
+There is no second box, no "Card &F12: your answer for the card" heading and no exception for a ferret's own thread: a
+thread whose own question stands keeps that question as the one ask, and the card ask under it waits, named on one line. `scripts/validate/owner-surface-words.sh` fails the build on the old words, and
+`packages/pwa/tests/unit/features/agenda-one-answer-row.test.tsx` draws every kind with card asks and counts one answer
+row.
+
+**What the Inbox box does with typed words** — exactly one of two things, never a chat message about the item:
+
+- **It answers the ask that was on the item when Send was pressed** (bound by the ask's reference). If that ask was
+  replaced or answered before Send landed, Send fails with a plain line in the box ("That ask has changed. Read the card
+  again, then send.") and answers nothing — never the replacement ask.
+- **It is a direct call**, not a chat send: it bypasses the device send outbox and sends the words exactly as typed — no
+  `!A404` reference prefix, no "See the attached files." stand-in, no location block.
+- **One exception: words that CLEARLY approve a try-it** ("works now", "it works", "good", "lgtm", "tested, ok" — the
+  vocabulary of &B155, read by `typedApproval`). Sent as Not good they would send a finished card back,
+  so they go as an ordinary reply about the item. Nothing is said back above Good (no "You wrote … tap Good"). They never move the card by themselves, **and they never move the item:** the words are logged and the
+  ferret reads them, but the card ask is still open, so the item **stays in Needs you** with its Good (the app does not hide it
+  as replied, and the daemon does not park it — `replyKeepsCardAskOpen`). A reply on an item that asks its own question beside
+  the card ask is that question's answer: while a try-it still waits, the item stays in Needs you and the try-it takes over as its ask. Anything not plainly positive (a "but", a
+  negation, a question, a longer message, or any words at an approval) stays a Not good (or Not yet) with the words.
+
+The wording lives in one place, read by the daemon and the app (`agenda-gate-wording.ts` in `@ferretry/protocol`, from the
+gate's options alone), so a workflow's style is its lane's stage and nothing else.
 
 ### Forms
 
@@ -1733,9 +1964,9 @@ tomorrow / custom); the arrow keys are unchanged. Snooze is offered in the compa
 
 ### Card asks in the Inbox
 
-Today's app draws a card ask from its mirror, `gateAttached`, as the agenda's second answer row (`attachedGateView`):
-the same labels and directions as below, naming the card by its title, tap only, and every answer sent with `gate: true`.
-What follows is how it draws a card at a gate. A **gate item** (read from a daemon older than card asks) is a board card
+A card ask is drawn as the item's own ask, never as a second answer row ([One ask, in the lane's own words](#one-ask-in-the-lanes-own-words));
+an item from a daemon that sends no `cardAsks` reads its mirror, `gateAttached`, the same way, and every answer is sent with `gate: true`
+and the ask it names. What follows is how the Inbox draws a gate item from an older daemon. A **gate item** (read from a daemon older than card asks) is a board card
 waiting on the owner at a gate, raised as an ordinary Inbox item (never for a sub-card: the owner tests its parent, and a sub-card [closes itself](board.md#sub-cards-close-themselves) instead of waiting in a verify lane) (`item.gate`: the card, its lane and what each option does):
 the owner meets one stream, not a question list and a separate to-test list. It is
 the card's ONE head row (the title, ‹ n/N ›, ⋯, ✕ — `CardHead`; its summary, Snooze and Skip behind ⋯) under ONE quiet meta line: **what it is** — the **Test** chip

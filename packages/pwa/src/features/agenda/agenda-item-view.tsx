@@ -41,6 +41,7 @@ import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import { answersWithCardsForm, itemAskPlan, itemCardAsks } from '../../lib/agenda-item-sections.ts';
 import type { LineageTitles } from '../../lib/agenda-merge.ts';
 import { versionCount } from '../../lib/agenda-revisions.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
@@ -99,7 +100,7 @@ export interface AgendaItemViewProps {
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the card, in the answer row's place. */
   readonly planForm?: ReactNode;
-  /** The cards a machine notice is about (`AgendaCardsHost`): each with its own Open, Start and Close. Got it stays the answer. */
+  /** The cards a machine notice is about (`AgendaCardsHost`): ONE form, a pick per card and one Send, which is the answer. */
   readonly cardsForm?: ReactNode;
   /** Names this item's form picks when a composer sends them (the Inbox, the chat); absent, a form is read, not filled in. */
   readonly formKey?: string;
@@ -116,6 +117,11 @@ export interface AgendaItemViewProps {
   readonly howToTestFor?: (cardId: string) => string | null | undefined;
   /** Names the item on this device (its machine, conversation and id), so its folded parts are remembered per item. */
   readonly itemKey?: string;
+  /**
+   * The host draws the box under the item and takes what is typed there as the answer to its one card ask (the Inbox's,
+   * `typedCardAsk`). Only then is that ask Good-only; everywhere else it keeps its own buttons.
+   */
+  readonly typedAnswer?: boolean;
   /** The versions the machine keeps for the item (`useItemLifecycle`): the ⋯ menu's "Changes". Absent: none. */
   readonly versions?: AgendaVersionsView;
   /** "Merge with…" (`useItemLifecycle`), a row of the ⋯ menu. Absent: not offered. */
@@ -190,6 +196,7 @@ export function AgendaItemView({
   startTap,
   howToTestFor,
   itemKey,
+  typedAnswer = false,
   versions,
   merge,
   lineageTitles,
@@ -212,7 +219,12 @@ export function AgendaItemView({
   const showVersion = (version: number): void => setPicked(version >= count ? null : { id: item.id, version });
   useScrollPadding(body, top, dock);
   const quote = useQuoteMenu(root, quoteScope);
-  const map = swipeMap(item);
+  // One card ask that IS the item's ask (a try-it) is answered by the arrows too, like any choice item.
+  const swipes = latest
+    ? itemAskPlan(item, itemCardAsks(item, howToTestFor), { typedHost: typedAnswer }).swipes
+    : undefined;
+  // A notice about cards answers with its one form's Send: no swipe or key says Got it past its picks.
+  const map = answersWithCardsForm(item) ? {} : (swipes ?? swipeMap(item));
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
   const urgent = status !== null && URGENT_TONES.has(status.tone) ? status : null;
@@ -351,7 +363,10 @@ export function AgendaItemView({
           <header className="fy-item-view__head" data-agenda-top="" ref={top}>
             <CardHead
               close={{ label: closeLabel, onClick: onClose }}
-              pager={{ index: position.index, total: position.total, onPrevious, onNext }}
+              // Nothing to step through when this is the only item: no arrows and no "1/1", so the title gets the room.
+              {...(position.total > 1
+                ? { pager: { index: position.index, total: position.total, onPrevious, onNext } }
+                : {})}
               status={
                 urgent === null ? null : (
                   <span className="fy-item-view__status" title={urgent.label}>
@@ -359,7 +374,7 @@ export function AgendaItemView({
                   </span>
                 )
               }
-              title={<MarqueeTitle title={head.title} />}
+              title={<MarqueeTitle title={head.title} wrapped={answersWithCardsForm(item)} />}
               {...(hasMenu
                 ? {
                     menu: (
@@ -389,6 +404,7 @@ export function AgendaItemView({
             onMergeClose={() => setMergeFor(null)}
             history={history}
             {...(itemKey === undefined ? {} : { itemKey })}
+            {...(typedAnswer ? { typedAnswer } : {})}
             {...(versions === undefined ? {} : { versions })}
             {...(merge === undefined ? {} : { merge })}
             {...(lineageTitles === undefined ? {} : { lineageTitles })}

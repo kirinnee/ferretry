@@ -155,7 +155,8 @@ describe('Answer quickly on a wide screen — the run', () => {
     await start(root);
     await press('ArrowRight');
     expect(pending(fake)).toEqual(['Wait']);
-    expect(where(root)).toBe('1/1');
+    // The only card: nothing to step through, so no pager is drawn.
+    expect(where(root)).toBeUndefined();
     await press('ArrowLeft');
     expect(pending(fake)).toEqual(['Wait', 'Ship']);
   });

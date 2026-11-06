@@ -61,9 +61,11 @@ const groupKey = (daemonId: DaemonId, sessionId: string): string => JSON.stringi
 
 /**
  * A plain notification line (Clear, or tap to open its chat). The machine's own notices are never lines: they have no
- * chat, so each is a full row that opens its detail — which ferrets, why, and the command that fixes it.
+ * chat, so each is a full row that opens its detail — which ferrets, why, and the command that fixes it. A notice that
+ * is answered by a form of its cards (`cards`: a pick per card, one Send) is something to DO, so it is a full row too.
  */
-const isNoticeCard = (card: InboxCard): boolean => card.item.notice === true && !isMachineAgendaId(card.view.config.id);
+const isNoticeCard = (card: InboxCard): boolean =>
+  card.item.notice === true && !isMachineAgendaId(card.view.config.id) && (card.item.cards?.length ?? 0) === 0;
 
 /** The card a conversation works on, as it is written: `&F12`. */
 const cardOf = (view: SessionView): string | null =>

@@ -161,8 +161,15 @@
   }
   /* An open Find box needs the whole line: the row folds, and the box takes the second line. */
   .fy-attn-inbox__head:has(.fy-filter-menu__finding),
-  .fy-attn-inbox__head:has(.fy-filter-menu__finding) .fy-attn-inbox__tools {
+  .fy-attn-inbox__head:has(.fy-filter-menu__finding) .fy-attn-inbox__tools,
+  /* A "From Warden" chip on the row: with the machine and Find chips too, nothing fits one phone line, and a chip squeezed
+     to a few pixels shows only a fragment of its icon. The row folds instead, and every chip keeps its own width. */
+  .fy-attn-inbox__head:has(.fy-attn-inbox__chip),
+  .fy-attn-inbox__head:has(.fy-attn-inbox__chip) .fy-attn-inbox__tools {
     flex-wrap: wrap;
+  }
+  .fy-attn-inbox__tools > * {
+    flex-shrink: 0;
   }
   .fy-attn-inbox__find {
     width: auto;
@@ -951,6 +958,14 @@ a.fy-inbox-row:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A receipt that quotes the owner's words wraps to two lines (the rest is "…"), so what was sent can be read. */
+.fy-attn-undo__text--clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .fy-attn-undo__text--wide {
   padding-right: 8px;
   white-space: normal;
@@ -1409,6 +1424,17 @@ a.fy-inbox-row:focus-visible {
   font-weight: var(--weight-strong);
 }
 .fy-totest__project {
+  color: var(--fg);
+}
+/* The row's one ask (&B165): what it needs from you, the steps, then the one answer row below. */
+.fy-totest__need {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+.fy-totest__ask {
+  margin: 0;
   color: var(--fg);
 }
 .fy-totest__how {

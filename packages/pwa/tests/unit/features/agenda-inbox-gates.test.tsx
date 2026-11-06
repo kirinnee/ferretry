@@ -473,13 +473,17 @@ describe('Not good on a card ask drawn on a thread', () => {
     laneName: 'Tested',
     entry: 1,
     projectId: 'p1',
+    cardTitle: 'Badge colour',
     options: [...GATE_OPTIONS.options],
   });
   const thread = (cardId: string): InboxCard =>
     inboxCard(
       agendaItem('T1', {
-        subject: 'Which colour for the badge?',
-        ask: choices('Blue', 'Green'),
+        // What an older daemon raised for a card to try: its ask line is the card's own title, so its card ask is its one
+        // answer row (an item that asks its OWN question answers that, and its card ask waits).
+        subject: 'Try it: Badge colour',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
         gateAttached: askOf(cardId),
       } as Partial<AgendaItem>),
       owner,

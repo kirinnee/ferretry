@@ -1407,8 +1407,9 @@ const AgendaItemBaseShape = {
    */
   gate: AgendaGateSchema.optional(),
   /**
-   * The FIRST OPEN card ask's gate (`cardAsks`), mirrored for an app that predates card asks: it draws Done / Not good
-   * on the agenda and answers them with `gate: true`. Only the daemon sets or clears it, always with `cardAsks`.
+   * The gate of the FIRST card ask in the order they are asked (`cardAsks` read by `askedCardAsks`: an ask the owner
+   * said Not yet to goes behind the ones still waiting), mirrored for an app that predates card asks: it draws Done / Not
+   * good on the agenda and answers them with `gate: true`. Only the daemon sets or clears it, always with `cardAsks`.
    */
   gateAttached: AgendaGateSchema.optional(),
   /**
@@ -1426,6 +1427,22 @@ const AgendaItemBaseShape = {
    * absent on a thread from before it, which a withdrawn ask never moves.
    */
   cardAsksSeal: z.string().max(64).optional(),
+  /**
+   * The subject the daemon last wrote on the card agenda it opened (`card-agenda:<card>`), exactly as written, every
+   * time it raises, restates or carries one: while the subject still equals it, the item's ask is the daemon's own, and
+   * once a ferret or the owner rewrites the subject it is the item's own question (`isGeneratedCardAgendaAsk`). Durable
+   * where the revision tail is not (it keeps only the newest few). Only the daemon writes it; absent on any other item
+   * and on a card agenda from before it, which is read by its words instead.
+   */
+  generatedSubject: singleLine(MAX_AGENDA_SUBJECT_LENGTH).optional(),
+  /**
+   * A digest of the item's OWN ask — its ask line, questions, fields, steps, ask and ask version — as it stood when the
+   * owner last answered the item in words (a reply, or a chat message logged on it): while the ask still digests to
+   * this, the owner has answered it, so a card ask's answer rests the item rather than putting that question back in
+   * front of them. Once a ferret rewrites or re-asks the question it no longer matches, and no earlier reply ever
+   * answers the new one. Only the daemon writes it; absent until the owner first replies.
+   */
+  ownAskRepliedTo: z.string().max(64).optional(),
   /**
    * How a RESTING item rests (`agenda-state.ts`): waiting on its ferret, or the ferret working on it, and the nudge
    * clock. It rides beside the `parked: replied` (or `waitingOn: 'ferret'`) every app reads, which stays the field
@@ -1499,7 +1516,7 @@ export const StoredAgendaItemSchema = z
     }
     const asked = (value.cardAsks ?? []).map(ask => `${ask.gate.cardId}:${ask.gate.laneId}:${String(ask.gate.entry)}`);
     if (new Set(asked).size !== asked.length) {
-      context.addIssue({ code: 'custom', message: 'an agenda carries each card ask once', path: ['cardAsks'] });
+      context.addIssue({ code: 'custom', message: 'an agenda carries each ask about a card once', path: ['cardAsks'] });
     }
     for (const problem of agendaFormProblems(value)) {
       context.addIssue({ code: 'custom', message: problem, path: ['fields'] });
@@ -1603,6 +1620,7 @@ const AGENDA_CONTROL_KEYS: ReadonlySet<string> = new Set([
   'revisions',
   'history',
   'ownerAnswer',
+  'ownAskRepliedTo',
   'undelivered',
   'resting',
   'parked',

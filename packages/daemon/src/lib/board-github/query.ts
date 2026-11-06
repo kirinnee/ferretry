@@ -11,7 +11,7 @@
  */
 import { type PrChecks, prUrlParts } from '@ferretry/protocol';
 import { z } from 'zod';
-import type { PrObservation } from '../board/index.ts';
+import { classifyPrFiles, PR_FILES_READ, type PrObservation } from '../board/index.ts';
 
 /** How many PRs and branches one query asks about; the rest wait for the repository's next poll. */
 export const MAX_PRS_PER_QUERY = 50;
@@ -30,8 +30,9 @@ export interface RepositoryPoll {
 }
 
 const PR_FIELDS =
-  'number url state isDraft createdAt mergedAt mergeCommit { oid } headRefName ' +
-  'commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }';
+  'number url state isDraft createdAt mergedAt mergeCommit { oid } headRefName headRefOid ' +
+  'commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } ' +
+  `files(first: ${PR_FILES_READ}) { totalCount nodes { path } }`;
 
 /** The `gh` arguments of one repository's poll, or `null` for a repository name that is not `owner/name`. */
 export const pollArguments = (poll: RepositoryPoll): readonly string[] | null => {
@@ -107,6 +108,19 @@ const PrNodeSchema = z.object({
   mergedAt: InstantString.nullable(),
   mergeCommit: z.object({ oid: z.string().regex(/^[0-9a-f]{40}$/u) }).nullable(),
   headRefName: z.string(),
+  /** The head commit; one that does not parse leaves the PR's change kind unbound to a commit, never the PR unobserved. */
+  headRefOid: z
+    .string()
+    .regex(/^[0-9a-f]{40}$/u)
+    .nullable()
+    .optional()
+    .catch(undefined),
+  /** The changed files; one that does not parse leaves the PR's change kind unknown, never the PR unobserved. */
+  files: z
+    .object({ totalCount: z.number().int().nonnegative(), nodes: z.array(z.object({ path: z.string() }).nullable()) })
+    .nullable()
+    .optional()
+    .catch(undefined),
   commits: z
     .object({
       nodes: z.array(
@@ -149,6 +163,8 @@ const polledPr = (node: unknown, repo: string): PolledPr | null => {
   if (parts === null || parts.number !== pr.number || parts.repo.toLowerCase() !== repo.toLowerCase()) return null;
   const merged = pr.state === 'MERGED';
   if (merged && (pr.mergedAt === null || pr.mergeCommit === null)) return null;
+  const paths = pr.files?.nodes.flatMap(node => (node === null ? [] : [node.path])) ?? [];
+  const changes = pr.files === null || pr.files === undefined ? undefined : classifyPrFiles(pr.files.totalCount, paths);
   const rollup = pr.commits?.nodes.at(-1)?.commit.statusCheckRollup?.state ?? null;
   return {
     number: pr.number,
@@ -159,6 +175,8 @@ const polledPr = (node: unknown, repo: string): PolledPr | null => {
       draft: pr.isDraft,
       checks: checksOf(rollup),
       createdAt: pr.createdAt ?? null,
+      ...(changes === undefined ? {} : { changes }),
+      ...(pr.headRefOid === null || pr.headRefOid === undefined ? {} : { headSha: pr.headRefOid }),
       mergedAt: merged ? pr.mergedAt : null,
       mergeSha: merged ? (pr.mergeCommit?.oid ?? null) : null,
     },

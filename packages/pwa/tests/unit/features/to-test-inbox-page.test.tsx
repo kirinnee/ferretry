@@ -182,6 +182,21 @@ describe('Inbox — cards waiting for a try', () => {
     expect(rowOf(root, 'F23').querySelector('[data-to-test-how]')).toBeNull();
   });
 
+  // An old daemon (no agenda.card-asks.1) raises no agenda item for a card to try, so this row IS the item (&B165).
+  it('asks as an agenda item would on an old daemon: one What I need from you, one answer row, no card heading', async () => {
+    const { root } = await open();
+    const row = rowOf(root, 'F22');
+    const need = must(row.querySelector<HTMLElement>('[data-to-test-need]'), 'the ask');
+    expect(need.querySelector('h3')?.textContent).toBe('What I need from you');
+    expect(need.querySelector('[data-to-test-ask]')?.textContent).toBe('Try it, then tap Done or Not good.');
+    expect(need.querySelector('[data-to-test-how]')?.textContent).toContain('Open the Board');
+    expect(row.querySelectorAll('.fy-totest__answers')).toHaveLength(1);
+    expect(row.querySelectorAll('[data-to-test-done]')).toHaveLength(1);
+    expect(row.querySelectorAll('[data-to-test-not-good]')).toHaveLength(1);
+    expect(row.textContent).not.toMatch(/card ask|for the card|Card &/iu);
+    expect(row.querySelector('[aria-label="Close card"]')).toBeNull();
+  });
+
   it('counts them with the agenda items in the head count', async () => {
     const { root } = await open();
     expect(root.textContent).toContain('3');

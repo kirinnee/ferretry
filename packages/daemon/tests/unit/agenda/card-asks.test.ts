@@ -25,6 +25,7 @@ const gate = (cardId: string): AgendaGate => ({
   laneName: 'To test',
   entry: 2,
   projectId: 'ferretry',
+  cardTitle: 'Badge',
   options: [
     { id: 'done', label: 'Done', outcome: 'close' },
     { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
@@ -64,7 +65,8 @@ const thread = (extra: Partial<AgendaItem> = {}): AgendaItem =>
     id: 'A1',
     source: 'agent-raised',
     sourceRef: null,
-    subject: 'Can you look at the badge?',
+    // A line that only repeats the card ask (docs/agenda.md § One ask): the card ask is all the thread asks.
+    subject: 'Try it: Badge',
     title: 'Badge',
     why: 'w',
     howToResolve: 'h',
@@ -110,7 +112,7 @@ describe('a withdrawn ask, and the turn it woke the thread out of', () => {
     should(after.parked).be.undefined();
   });
 
-  it('leaves it there too when the owner’s words are the item’s latest answer, or the ferret asked for more info', () => {
+  it('rests it on the owner’s answer that the ask kept in Needs you, and leaves it there when the ferret asked for more info', () => {
     // Arrange
     const { apply } = world();
     const woken = changed(apply(thread({ resting: { sub: 'working', at: at(-30) } }), attach('F3'), 1));
@@ -125,8 +127,10 @@ describe('a withdrawn ask, and the turn it woke the thread out of', () => {
     const afterInfo = changed(apply(asked as unknown as AgendaItem, withdraw('F3'), 5));
 
     // Assert
-    should(agendaState(afterAnswer).state).equal('needs-you');
-    should(afterAnswer.resting).be.undefined();
+    // The answer was kept open only by the waiting ask; with it gone, nothing is left for the owner (and the thread does not
+    // go back to the turn it was woken out of: it is waiting on the ferret that was given the answer).
+    should(agendaState(afterAnswer).state).equal('resting');
+    should(afterAnswer.resting?.sub).equal('waiting-on-ferret');
     should(agendaState(afterInfo).state).equal('needs-you');
     should(afterInfo.resting).be.undefined();
   });
@@ -464,5 +468,60 @@ describe('the mirror an older app draws, and when it changed', () => {
     // Assert
     should(replaced.gateAttachedChangedAt).equal(at(1));
     should(same.gateAttachedChangedAt).equal(at(1));
+  });
+});
+
+describe('one plain line of the daemon’s (a card with nothing to try)', () => {
+  const line = (text: string): CardAskOperation => ({ kind: 'line', line: text });
+
+  it('adds one activity line and changes nothing else: no ask, and the turn and place stay', () => {
+    // Arrange — a ferret's thread, resting on its ferret, and a card agenda on the owner's turn
+    const resting = thread({
+      parked: { reason: 'replied', at: at(-5) },
+      resting: { sub: 'waiting-on-ferret', at: at(-5) },
+    });
+    const { apply } = world();
+
+    for (const item of [resting, thread(), cardAgenda()]) {
+      // Act
+      const next = changed(apply(item, line('&F1: Nothing to try: it is a private card'), 1));
+
+      // Assert
+      should(next.history).eql([{ at: at(1), kind: 'updated', note: '&F1: Nothing to try: it is a private card' }]);
+      should(next.cardAsks).be.undefined();
+      should(next.waitingSince).equal(item.waitingSince);
+      should(next.parked).eql(item.parked);
+      should(next.resting).eql(item.resting);
+      should(agendaState(next).state).equal(agendaState(item).state);
+    }
+  });
+
+  it('writes the same line once, not on every look', () => {
+    // Arrange
+    const { apply } = world();
+    const once = changed(apply(thread(), line('&F1: Nothing to try: it is a private card'), 1));
+
+    // Act
+    const again = apply(once, line('&F1: Nothing to try: it is a private card'), 2);
+    const other = apply(once, line('&F2: Nothing to try: it is a private card'), 2);
+
+    // Assert
+    should(again.kind).equal('unchanged');
+    should(other.kind).equal('changed');
+  });
+
+  it('keeps a thread the daemon left untouched, so a later withdraw still reads it as the daemon’s', () => {
+    // Arrange — an ask is attached (sealed), then the daemon's line is written
+    const { apply } = world();
+    const asked = changed(apply(thread(), attach('F2'), 0));
+    should(asked.cardAsksSeal).be.a.String();
+
+    // Act
+    const noted = changed(apply(asked, line('&F1: Nothing to try: its PRs change only docs and tests'), 1));
+    const withdrawn = changed(apply(noted, withdraw('F2'), 2));
+
+    // Assert — the thread goes back to the turn the ask woke it out of, as it would have without the line
+    should(agendaState(withdrawn).state).equal(agendaState(thread()).state);
+    should(withdrawn.waitingSince).equal(thread().waitingSince);
   });
 });

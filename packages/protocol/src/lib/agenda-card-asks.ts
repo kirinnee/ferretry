@@ -5,8 +5,11 @@
  */
 import type { AgendaCardAsk, AgendaGate, AgendaItem } from './agenda.ts';
 import { gateReference, parseGateFollowupReference } from './agenda-gate.ts';
+import { gateAskLine } from './agenda-gate-wording.ts';
 import type { AgendaStage } from './agenda-state.ts';
 import type { TaskRef } from './board-refs.ts';
+import { canonicalJson } from './canonical-json.ts';
+import { sha256Hex } from './mcp-oauth.ts';
 
 /** The prefix of the `sourceRef` of the agenda the daemon opens for a card: `card-agenda:<card>`. */
 const CARD_AGENDA_REFERENCE_PREFIX = 'card-agenda:';
@@ -20,6 +23,142 @@ export const parseCardAgendaReference = (sourceRef: string | null | undefined): 
   if (typeof sourceRef !== 'string' || !sourceRef.startsWith(CARD_AGENDA_REFERENCE_PREFIX)) return undefined;
   const cardId = sourceRef.slice(CARD_AGENDA_REFERENCE_PREFIX.length);
   return CARD_ID.test(cardId) ? cardId : undefined;
+};
+
+/** A card ask as the "does the item ask its own question" rule reads it: its gate and the How to test it carries. */
+export interface CardAskWords {
+  readonly gate: Pick<AgendaGate, 'options' | 'laneName' | 'cardTitle'>;
+  readonly howToTest?: string | null | undefined;
+}
+
+/** The lane's own opening of a card ask's line (`gateAskLine` with nothing said): "Try it:", "OK to build?". */
+const askLinePrefix = (gate: Pick<AgendaGate, 'options' | 'laneName'>): string => gateAskLine(gate, '').trim();
+
+/**
+ * Whether this is the card agenda the daemon opened with its ask still the one it generated: raised by the daemon under
+ * a `card-agenda:` reference, an open question with no questions, fields or steps, and its subject still exactly the
+ * one the daemon last wrote (`generatedSubject`). A card agenda from before `generatedSubject` is read conservatively by
+ * its words: its subject must only REPEAT one of its card asks (`askLineRepeatsCardAsk`: the lane's words and nothing
+ * but the card's title or one step), never merely open with "Try it:"; anything more is the item's own question, and
+ * the daemon's next restate stamps `generatedSubject` on it. Only then is the item's whole ask its
+ * card asks; once a ferret or the owner rewrites the subject, the item asks the owner something of its own. Never read
+ * from the revision tail, which keeps only the newest few. The ONE test the daemon's state machine and the app share.
+ */
+export const isGeneratedCardAgendaAsk = (
+  item: Pick<
+    AgendaItem,
+    'raisedBy' | 'sourceRef' | 'questions' | 'fields' | 'steps' | 'ask' | 'subject' | 'generatedSubject'
+  > & {
+    readonly cardAsks?: readonly Pick<AgendaCardAsk, 'gate' | 'howToTest'>[] | undefined;
+  },
+): boolean => {
+  if (item.raisedBy !== 'daemon' || parseCardAgendaReference(item.sourceRef) === undefined) return false;
+  if ((item.questions?.length ?? 0) > 0 || (item.fields?.length ?? 0) > 0 || (item.steps?.length ?? 0) > 0) {
+    return false;
+  }
+  if (item.ask?.kind !== 'open-question') return false;
+  if (item.generatedSubject !== undefined) return item.subject === item.generatedSubject;
+  // Before `generatedSubject`: the subject only repeats one of the agenda's card asks (answered ones too: the subject was
+  // written when that ask was put, and an answer does not rewrite it). A lane prefix alone never hides a question.
+  return askLineRepeatsCardAsk(item.subject.trim(), item.cardAsks ?? []);
+};
+
+/** A line as it is compared: no Markdown marks, one space between words, no closing stop, lower case. */
+const collapsed = (text: string): string =>
+  text
+    .replaceAll(/[*_`#>]/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .replace(/[.!]+$/u, '')
+    .toLowerCase();
+
+/** The lines of a How to test, each without its list marker: what a generated "Try it: <first step>" line can be. */
+const stepLines = (text: string): readonly string[] =>
+  text
+    .split('\n')
+    .map(line => collapsed(line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/u, '')))
+    .filter(line => line !== '');
+
+/**
+ * Whether an ask line only REPEATS one of these card asks, so the card ask's own block says it once: the lane's own
+ * words (`gateAskLine`: "Try it: …", "OK to build? …") followed by nothing, the card's title, or one whole step of its
+ * How to test (or that step's first sentence: the daemon clips the line there). Anything else — a ferret's question,
+ * even one quoting a step — says something the card ask does not. Pure and total.
+ */
+export const askLineRepeatsCardAsk = (line: string, asks: readonly CardAskWords[]): boolean =>
+  asks.some(ask => {
+    const prefix = askLinePrefix(ask.gate);
+    if (!line.startsWith(prefix)) return false;
+    const rest = collapsed(line.slice(prefix.length));
+    if (rest === '') return true;
+    const title = ask.gate.cardTitle === undefined ? '' : collapsed(ask.gate.cardTitle);
+    // A step may be cut at its first sentence (the daemon clips the line), never anywhere else.
+    const step = (each: string): boolean => each === rest || each.startsWith(`${rest}. `);
+    return rest === title || (typeof ask.howToTest === 'string' && stepLines(ask.howToTest).some(step));
+  });
+
+/**
+ * Whether the item asks the owner a question of its OWN beside its card asks (docs/agenda.md § One ask): it has
+ * questions, fields or steps, or its ask line (its subject, trimmed) says something — it is neither the daemon's
+ * generated card agenda ask (`isGeneratedCardAgendaAsk`) nor a line that only repeats one of `asks`
+ * (`askLineRepeatsCardAsk`). The app keeps that line on screen and lets typed words answer it, never the card; the
+ * daemon keeps the item in Needs you after the card ask's answer until the owner answers it. The ONE rule both ends read.
+ */
+export const itemAsksOwnQuestion = (
+  item: Parameters<typeof isGeneratedCardAgendaAsk>[0],
+  asks: readonly CardAskWords[],
+): boolean => {
+  if ((item.questions?.length ?? 0) > 0 || (item.fields?.length ?? 0) > 0 || (item.steps?.length ?? 0) > 0) {
+    return true;
+  }
+  // With no questions there is no single question to read: the ask line is the subject.
+  const line = item.subject.trim();
+  return line !== '' && !isGeneratedCardAgendaAsk(item) && !askLineRepeatsCardAsk(line, asks);
+};
+
+/**
+ * The digest of the item's OWN ask as it now stands — its ask line (the subject, trimmed), questions, fields, steps,
+ * ask and ask version — stored by the daemon as `ownAskRepliedTo` when the owner answers the item in words. Anything a
+ * ferret does to the question (rewords it, adds a question or a field, re-asks it under the next version) changes it,
+ * so a reply to an earlier question never answers a later one. `undefined` when it has no canonical spelling. The ONE
+ * spelling both ends read: the daemon writes it and rests the item by it, the app reads it to know the question is answered.
+ */
+export const ownAskDigest = (
+  item: Pick<AgendaItem, 'subject' | 'questions' | 'fields' | 'steps' | 'ask' | 'askVersion'>,
+): string | undefined => {
+  const spelled = canonicalJson({
+    line: item.subject.trim(),
+    ...(item.questions === undefined ? {} : { questions: item.questions }),
+    ...(item.fields === undefined ? {} : { fields: item.fields }),
+    ...(item.steps === undefined ? {} : { steps: item.steps }),
+    ...(item.ask === undefined ? {} : { ask: item.ask }),
+    version: item.askVersion ?? 1,
+  });
+  return spelled.ok ? sha256Hex(spelled.text).slice(0, 32) : undefined;
+};
+
+/** Whether the owner answered the item's own ask, as it now stands, in words (`ownAskRepliedTo`). */
+export const repliedToOwnAsk = (
+  item: Pick<AgendaItem, 'subject' | 'questions' | 'fields' | 'steps' | 'ask' | 'askVersion' | 'ownAskRepliedTo'>,
+): boolean => item.ownAskRepliedTo !== undefined && item.ownAskRepliedTo === ownAskDigest(item);
+
+/**
+ * Whether the item still has an ask of its OWN for the owner, and no answer of theirs on it: a choice, yes/no,
+ * permission, task or review that has no answer yet, or a question the item asks in its own words beside `asks`
+ * (`itemAsksOwnQuestion`) that no reply has answered (`ownAskRepliedTo`, while the question stands unchanged). A notice,
+ * and an item the owner has answered (`ownerAnswer`), ask nothing of their own. The ONE rule the daemon rests an item by
+ * and the app reads to decide whether the item's own question or its card's try-it is the ask now: once this is false the
+ * card ask takes over in the same item. Pure and total.
+ */
+export const awaitsOwnAnswer = (
+  item: Parameters<typeof itemAsksOwnQuestion>[0] &
+    Pick<AgendaItem, 'notice' | 'ownerAnswer' | 'ownAskRepliedTo' | 'askVersion'>,
+  asks: readonly CardAskWords[],
+): boolean => {
+  if (item.notice === true || item.ownerAnswer !== undefined) return false;
+  if (item.ask !== undefined && item.ask.kind !== 'open-question') return true;
+  if (repliedToOwnAsk(item)) return false;
+  return itemAsksOwnQuestion(item, asks);
 };
 
 /** A card ask's stable name: its gate's reference, one per entry of the card into the lane. */
@@ -37,25 +176,45 @@ export const hasOpenCardAsk = (item: { readonly cardAsks?: readonly Pick<AgendaC
   (item.cardAsks ?? []).some(isOpenCardAsk);
 
 /**
- * Whether an agenda asks the owner NOTHING BUT its card asks: its open asks are all there is to answer, so the push they
- * made when they were put is its whole signal and a stop never names it again. The card agenda the daemon opened is
- * that; a ferret's thread is, until its ferret asks it something NEW (its turn with the owner starts after the asks).
+ * The ONE ask of a card's own agenda — the agenda the daemon opened for the card, which asks the owner nothing else —
+ * so its answer is the item's own: Good in one tap, anything else typed. `undefined` for any other item, and for a card
+ * agenda that holds more or fewer than one open ask.
  */
-export const asksOnlyCardAsks = (
-  item: Pick<AgendaItem, 'raisedBy' | 'sourceRef' | 'waitingSince'> & {
-    readonly cardAsks?: readonly Pick<AgendaCardAsk, 'answer' | 'at'>[] | undefined;
-  },
-): boolean => {
-  const open = (item.cardAsks ?? []).filter(isOpenCardAsk);
-  if (open.length === 0) return false;
-  if (item.raisedBy === 'daemon' && parseCardAgendaReference(item.sourceRef) !== undefined) return true;
-  return Date.parse(item.waitingSince) <= Math.max(...open.map(ask => Date.parse(ask.at)));
+export const ownCardAsk = (
+  item: Pick<AgendaItem, 'raisedBy' | 'sourceRef'> & { readonly cardAsks?: readonly AgendaCardAsk[] | undefined },
+): AgendaCardAsk | undefined => {
+  if (item.raisedBy !== 'daemon' || parseCardAgendaReference(item.sourceRef) === undefined) return undefined;
+  const open = openCardAsks(item);
+  return open.length === 1 ? open[0] : undefined;
 };
 
-/** The card ask an app that predates card asks is shown (`gateAttached`): the first open one. */
+/**
+ * An agenda's open card asks IN THE ORDER THEY ARE ASKED (docs/agenda.md § Card asks): every ask still waiting for an
+ * answer first, as they were put on it; then the ones the owner said Not yet to, the one set aside longest ago first,
+ * so the next ask is always reachable and saying Not yet again to the first of them brings the next one forward. Ties
+ * keep the order the asks were put on. The ONE order the app draws, the mirror shows and an unnamed answer reaches.
+ */
+export const askedCardAsks = <Ask extends Pick<AgendaCardAsk, 'answer' | 'notYet'>>(item: {
+  readonly cardAsks?: readonly Ask[] | undefined;
+}): Ask[] => {
+  const open = (item.cardAsks ?? []).filter(isOpenCardAsk);
+  const deferredAt = (ask: Ask): number => {
+    const at = Date.parse(ask.notYet?.at ?? '');
+    return Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY;
+  };
+  return [
+    ...open.filter(ask => ask.notYet === undefined),
+    ...open.filter(ask => ask.notYet !== undefined).sort((left, right) => deferredAt(left) - deferredAt(right)),
+  ];
+};
+
+/**
+ * The card ask an app that predates card asks is shown (`gateAttached`), and the one an answer that names no ask
+ * reaches: the first of {@link askedCardAsks}, so a Not yet moves an old app on to the next ask instead of trapping it.
+ */
 export const mirroredCardAsk = (item: {
   readonly cardAsks?: readonly AgendaCardAsk[] | undefined;
-}): AgendaCardAsk | undefined => openCardAsks(item)[0];
+}): AgendaCardAsk | undefined => askedCardAsks(item)[0];
 
 /** The card ask on this agenda with this reference, open or answered. */
 export const cardAskOf = (

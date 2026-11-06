@@ -35,6 +35,8 @@ describe('pollArguments', () => {
     should(query.match(/p940:/gu)).have.length(1);
     should(query).containEql('b1: pullRequests(headRefName: $b1, first: 5');
     should(query).containEql('releases(first: 50');
+    // The changed files ride the same query: what kind of change each PR was.
+    should(query).containEql('files(first: 100) { totalCount nodes { path } }');
     should(query).containEql(
       'fragment pr on PullRequest { number url state isDraft createdAt mergedAt mergeCommit { oid }',
     );
@@ -85,6 +87,46 @@ describe('checksOf and versionOfTag', () => {
     should(versionOfTag('4.110.0')).be.null();
     should(versionOfTag('v4.110.0-rc.1')).be.null();
     should(versionOfTag('nightly')).be.null();
+  });
+});
+
+const filesOf = (...paths: string[]) => ({ files: { totalCount: paths.length, nodes: paths.map(path => ({ path })) } });
+
+describe('parseRepositoryAnswer reads what a PR changed', () => {
+  const changesOf = (node: unknown) =>
+    parseRepositoryAnswer(answer({ prs: { 1: node } }), poll({ numbers: [1] }))?.prs.get(1)?.observation;
+
+  it('should call a PR of only docs and tests docs-tests, and any other PR code', () => {
+    should(changesOf({ ...prNode(1), ...filesOf('docs/a.md', 'packages/x/tests/a.test.ts') })?.changes).equal(
+      'docs-tests',
+    );
+    should(changesOf({ ...prNode(1), ...filesOf('docs/a.md', 'packages/x/src/a.ts') })?.changes).equal('code');
+  });
+
+  it('should call a PR with more files than were read code', () => {
+    const nodes = Array.from({ length: 100 }, (_, index) => ({ path: `docs/${String(index)}.md` }));
+    should(changesOf({ ...prNode(1), files: { totalCount: 101, nodes } })?.changes).equal('code');
+  });
+
+  it('should leave the kind unknown, and still observe the PR, when the files are missing, empty, short or malformed', () => {
+    for (const files of [
+      undefined,
+      null,
+      { totalCount: 0, nodes: [] },
+      { totalCount: 3, nodes: [{ path: 'docs/a.md' }] },
+      { totalCount: 'many', nodes: 7 },
+      'docs/a.md',
+    ]) {
+      const observed = changesOf({ ...prNode(1), ...(files === undefined ? {} : { files }) });
+      should(observed).be.ok();
+      should(observed).not.have.property('changes');
+      should(observed?.state).equal('open');
+    }
+  });
+
+  it('should skip a file GitHub could not resolve, and call the kind unknown rather than guess', () => {
+    const observed = changesOf({ ...prNode(1), files: { totalCount: 2, nodes: [{ path: 'docs/a.md' }, null] } });
+    should(observed).not.have.property('changes');
   });
 });
 

@@ -45,6 +45,7 @@ import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
 import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
+import { ownQuestionAnswered } from '../../lib/agenda-item-sections.ts';
 import { actionSentence, inboxCardKey, snoozeAction, UNSNOOZE_ACTION } from '../../lib/agenda-inbox.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { sendAgendaAction } from '../../lib/agenda-send.ts';
@@ -551,6 +552,7 @@ export const useAgenda = ({
     !closed &&
     client !== undefined &&
     cardItem.kind === 'form' &&
+    !ownQuestionAnswered(cardItem) &&
     (standing === undefined || questionKept)
       ? cardItem
       : undefined;

@@ -184,6 +184,14 @@
 .fy-item-view__title[data-marquee] {
   cursor: pointer;
 }
+/* A title the owner must read whole before acting (a notice about cards) wraps: never scrolled, never cut mid-glyph. */
+.fy-item-view__title[data-wrapped] {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  align-self: center;
+}
 /* The button a too-long title opens with: it draws nothing of its own, so the heading looks the same with it. */
 .fy-item-view__title-toggle {
   display: block;
@@ -477,6 +485,17 @@
 .fy-card__card-asks .fy-card__gate-lead {
   color: var(--fg);
 }
+.fy-card__ask-head {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--gap-sm);
+}
+.fy-card__ask-head .fy-card__gate-lead {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 
 /* THE FOLDED PARTS (detailed context, activity log): the heading is the button; a chevron turns as it opens. */
 .fy-card__fold {
@@ -700,6 +719,11 @@
 .fy-card__need-lead {
   color: var(--fg);
   font-weight: var(--weight-strong);
+}
+/* The typed answer's one instruction sits quietly under Good, in the body weight: it must not out-shout the button. */
+.fy-card__need-lead[data-agenda-typed-lead] {
+  font-size: 0.9em;
+  font-weight: var(--weight-normal, 400);
 }
 .fy-card__wanted {
   display: flex;
@@ -1597,22 +1621,6 @@
   margin-inline-start: auto;
 }
 
-/* The owner's reply already says yes to the card ask (&B155): offered as its answer, never applied. */
-.fy-card__reply-offer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--gap-sm, 8px);
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  background: var(--accent-soft);
-}
-.fy-card__reply-offer > span {
-  flex: 1 1 14rem;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
 /* THE OPEN ITEM'S ⋯ MENU (`agenda-item-menu.tsx`): a popover under ⋯ on a wide screen, the app's bottom sheet on a
    phone. Its groups are a quiet label over their controls; every control keeps the 44px finger floor on a phone. */
 .fy-item-menu {
@@ -1854,4 +1862,63 @@
 }
 .fy-card__answered-line {
   margin: 0;
+}
+/* A card ask that IS the item's ask (a try-it): drawn bare inside "What I need from you", no frame of its own, so the
+   owner sees one block: the verb, the steps and the buttons. Beside another card ask a rule keeps them apart. */
+.fy-card__card-asks[data-bare] .fy-card__gate-row {
+  padding: 0;
+  border: 0;
+}
+.fy-card__card-asks[data-bare] .fy-card__gate-row + .fy-card__gate-row {
+  padding-top: 10px;
+  border-top: var(--stroke, 1px) solid var(--border);
+}
+/* A card ask waiting behind the item's own answer row (or behind the first card ask): one quiet line, no buttons. */
+.fy-card__card-ask-later {
+  color: var(--muted);
+  font-size: 0.875em;
+}
+.fy-card__card-ask-later p {
+  margin: 0;
+}
+
+/* THE ONE ASK answered Good and the words typed below (the Inbox): how to try it, one tap, then the words line. */
+.fy-card__try-it {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-card__try-taps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+.fy-card__try-taps .fy-qr__chip {
+  flex: 1 1 8rem;
+}
+
+/* A notice's cards form: its one Send ends the block, in normal flow. It reserves its own room, so it never lies over the
+   last card's row (a sticky bar did). */
+.fy-cards-send {
+  padding-block: 4px 0;
+}
+
+/* The steps of a try-it inside "What I need from you": a step is one short instruction, so it reads at the small size and
+   a try-it with its answers fits a phone's screen without scrolling the ask's last line out of sight. */
+.fy-card__card-asks .fy-card__need-part,
+.fy-card__card-asks .fy-card__need-part .md,
+.fy-card__card-asks .fy-card__try-steps,
+.fy-card__card-asks .fy-card__try-steps .md {
+  font-size: var(--text-sm);
+}
+/* The words line and the plain "Next" line are quiet small lines under the one ask, never the size of the ask. */
+.fy-card__card-asks .fy-card__need-lead[data-agenda-typed-lead],
+.fy-card__card-asks .fy-card__card-ask-later,
+.fy-card__card-asks .fy-card__card-ask-later .md {
+  font-size: var(--text-sm);
+}
+.fy-card__card-asks .fy-card__card-ask-later,
+.fy-card__card-asks .fy-card__card-ask-later .md {
+  color: var(--muted);
 }

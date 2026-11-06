@@ -2,10 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import { AgendaSwipeDeck, dragOffset } from '../../../src/features/agenda/agenda-swipe-deck.tsx';
 import { swipeTargets } from '../../../src/lib/agenda-answers.ts';
+import { STALE_ASK_COPY } from '../../../src/lib/agenda-gate-send.ts';
 import type { InboxCard } from '../../../src/lib/agenda-inbox.ts';
 import { daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
+import { openConversation } from '../../support/agenda-folds.ts';
 import {
   agendaItem,
   choices,
@@ -14,7 +16,6 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../support/agenda-inbox.tsx';
-import { openConversation } from '../../support/agenda-folds.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
 
@@ -311,6 +312,230 @@ describe('the open Inbox item', () => {
     expect(fake.deferred.getSnapshot().pending).toHaveLength(1);
     expect(draft).toBe('');
     unregister();
+    await mounted.unmount();
+  });
+
+  it('answers a card’s own agenda with what is typed under it: Not good, with those words', async () => {
+    const gate = {
+      cardId: 'F12',
+      laneId: 'tested',
+      laneName: 'Ready to try',
+      entry: 3,
+      projectId: 'p1',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    } as const;
+    const own = inboxCard(
+      agendaItem('A404', {
+        subject: 'Try it: Badge colour',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        raisedBy: 'daemon',
+        source: 'task',
+        sourceRef: 'card-agenda:F12',
+        // What the daemon records for the subject it wrote (`generatedSubject`).
+        generatedSubject: 'Try it: Badge colour',
+        gateAttached: gate,
+        cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
+      } as never),
+      sessionView('sess-5', { config: { teammate: 'zoe', name: 'Badge' } as never }),
+    );
+    const fake = fakeInbox();
+    let typed: { placeholder: string } | undefined;
+    let send: ((words: { message: string; attachmentIds?: string[] }) => void) | undefined;
+    const mounted = await mount(
+      page(fake, [own], {
+        initialOpen: own.key,
+        renderComposer: (_card, _answerForm, answer) => {
+          typed = answer;
+          send = answer?.send;
+          return <textarea />;
+        },
+      }),
+    );
+    expect(typed?.placeholder).toBe('What is wrong, or what needs changing?');
+    // The answer is bound to this ask by name, and the card draws Good alone (the words go in the box).
+    expect(typed).toMatchObject({ key: 'gate:F12:tested:3' });
+    expect(mounted.container.querySelector('[data-agenda-own-ask="F12"]')).not.toBeNull();
+    expect(mounted.container.querySelector('[data-agenda-card-ask-title]')?.textContent).toBe('Try it');
+    expect(() => send?.({ message: '  ' })).toThrow('Type what you want to say first.');
+    await interact(() => send?.({ message: 'The badge is red', attachmentIds: ['a1'] }));
+    expect(fake.deferred.getSnapshot().pending.map(entry => entry.action)).toEqual([
+      expect.objectContaining({
+        kind: 'respond',
+        label: 'Not good',
+        note: 'The badge is red',
+        gate: true,
+        cardAsk: 'gate:F12:tested:3',
+        attachments: { from: 'sess-5', ids: ['a1'] },
+      }),
+    ]);
+    await mounted.unmount();
+  });
+
+  it('a Send that resumes after Good was tapped answers nothing: Good is never replaced by a late Not good', async () => {
+    const gate = {
+      cardId: 'F12',
+      laneId: 'tested',
+      laneName: 'Ready to try',
+      entry: 3,
+      projectId: 'p1',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    } as const;
+    const own = inboxCard(
+      agendaItem('A404', {
+        subject: 'Try it: Badge colour',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        raisedBy: 'daemon',
+        source: 'task',
+        sourceRef: 'card-agenda:F12',
+        // What the daemon records for the subject it wrote (`generatedSubject`).
+        generatedSubject: 'Try it: Badge colour',
+        gateAttached: gate,
+        cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
+      } as never),
+      sessionView('sess-5', { config: { teammate: 'zoe', name: 'Badge' } as never }),
+    );
+    const fake = fakeInbox();
+    let send: ((words: { message: string }) => void) | undefined;
+    const mounted = await mount(
+      page(fake, [own], {
+        initialOpen: own.key,
+        renderComposer: (_card, _answerForm, answer) => {
+          send = answer?.send;
+          return <textarea />;
+        },
+      }),
+    );
+    // Send was pressed, then the owner tapped Good (or answered on another device) before it finished.
+    const late = send;
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLElement>('[data-agenda-answer-option="Done"]'), 'Good').click(),
+    );
+    expect(pending(fake)).toEqual(['Done']);
+    expect(() => late?.({ message: 'The badge is red' })).toThrow(STALE_ASK_COPY);
+    expect(pending(fake)).toEqual(['Done']);
+    await mounted.unmount();
+  });
+
+  it('reads “works now” typed under a try-it as a reply, offers it back above Good, and never sends it as Not good', async () => {
+    const gate = {
+      cardId: 'F907',
+      laneId: 'released',
+      laneName: 'Released',
+      entry: 2,
+      projectId: 'p1',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    } as const;
+    const own = inboxCard(
+      agendaItem('A404', {
+        subject: 'Try it: Released',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        raisedBy: 'daemon',
+        source: 'task',
+        sourceRef: 'card-agenda:F907',
+        // What the daemon records for the subject it wrote (`generatedSubject`).
+        generatedSubject: 'Try it: Released',
+        gateAttached: gate,
+        cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
+      } as never),
+      sessionView('sess-5', { config: { teammate: 'zoe', name: 'Badge' } as never }),
+    );
+    const fake = fakeInbox();
+    let typed: { approves: (words: string) => boolean } | undefined;
+    const draw = (said: readonly string[]) =>
+      mount(
+        page(fake, [own], {
+          initialOpen: own.key,
+          renderComposer: (_card, _answerForm, answer) => {
+            typed = answer;
+            return <textarea />;
+          },
+          readConversation: async () =>
+            said.map((text, index) => ({ id: `m${String(index)}`, kind: 'user', text, at: NOW - 60_000 + index })),
+        }),
+      );
+    // Without a reply there is no offer.
+    let mounted = await draw([]);
+    await interact(() => Promise.resolve());
+    expect(mounted.container.querySelector('[data-agenda-reply-offer]')).toBeNull();
+    // The composer reads these as approval (a reply), and these as Not good words.
+    for (const yes of ['works now', 'it works now!', 'Good', 'lgtm']) expect(typed?.approves(yes)).toBe(true);
+    for (const no of ['works but the colour is off', "doesn't work now", 'not good', 'is it fixed?', 'x'.repeat(50)]) {
+      expect(typed?.approves(no)).toBe(false);
+    }
+    await mounted.unmount();
+    // After the reply nothing is shown back: the one row's Good is the only place to answer, and it answers the lane's pass.
+    mounted = await draw(['!A404 works now']);
+    await interact(() => Promise.resolve());
+    expect(mounted.container.querySelector('[data-agenda-reply-offer]')).toBeNull();
+    expect(mounted.container.textContent).not.toMatch(/If that is your answer/u);
+    expect(fake.deferred.getSnapshot().pending).toEqual([]);
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-agenda-answer-option="Done"]'), 'Good').click(),
+    );
+    expect(fake.deferred.getSnapshot().pending.map(entry => entry.action)).toEqual([
+      expect.objectContaining({ kind: 'respond', label: 'Done', gate: true, cardAsk: 'gate:F907:released:2' }),
+    ]);
+    await mounted.unmount();
+  });
+
+  it('draws the ask’s own Done and Not good where the Inbox draws no box to type in', async () => {
+    const gate = {
+      cardId: 'F12',
+      laneId: 'tested',
+      laneName: 'Ready to try',
+      entry: 3,
+      projectId: 'p1',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    } as const;
+    const own = inboxCard(
+      agendaItem('A404', {
+        subject: 'Try it: Badge colour',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        raisedBy: 'daemon',
+        source: 'task',
+        sourceRef: 'card-agenda:F12',
+        // What the daemon records for the subject it wrote (`generatedSubject`).
+        generatedSubject: 'Try it: Badge colour',
+        gateAttached: gate,
+        cardAsks: [{ gate, at: '2026-08-01T11:00:00.000Z' }],
+      } as never),
+      sessionView('sess-5', { config: { teammate: 'zoe', name: 'Badge' } as never }),
+    );
+    // No `renderComposer`: nothing to type in, so the card must not say "type what is wrong".
+    const mounted = await mount(page(fakeInbox(), [own], { initialOpen: own.key }));
+    expect(mounted.container.querySelector('[data-agenda-own-ask]')).toBeNull();
+    expect(mounted.container.querySelector('[data-agenda-card-ask-title]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('gives an ordinary item no typed answer: what is typed there is a reply', async () => {
+    let typed: unknown = 'unset';
+    const mounted = await mount(
+      page(fakeInbox(), [shipIt], {
+        initialOpen: shipIt.key,
+        renderComposer: (_card, _answerForm, answer) => {
+          typed = answer;
+          return <textarea />;
+        },
+      }),
+    );
+    expect(typed).toBeUndefined();
     await mounted.unmount();
   });
 

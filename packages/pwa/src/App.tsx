@@ -2345,7 +2345,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
       onNavigate={navigate}
       phone={phone}
       // The open item's ferret's own composer: a reply goes to its chat, about the item.
-      renderComposer={(card, answerForm) => {
+      renderComposer={(card, answerForm, typed) => {
         const target = inbox.connectionFor(card.daemonId);
         if (target === undefined) return null;
         const controls = store.controls.controls(card.daemonId);
@@ -2362,6 +2362,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
             enterKeyPreference={controls.composerEnterKey}
             itemId={card.item.id}
             key={card.key}
+            {...(typed === undefined ? {} : { answerTyped: typed, typedPlaceholder: typed.placeholder })}
             onReplied={sent => inbox.replied.mark(card, sent)}
             onRestored={() => inbox.replied.takeRestore(card.key)}
             restore={inbox.repliedState.restores.find(each => each.key === card.key)?.text}

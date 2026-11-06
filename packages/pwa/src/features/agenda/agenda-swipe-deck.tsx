@@ -3,7 +3,7 @@
  *
  * A swipe is an answer, so it is held to the same rules a button is, and then some:
  *
- * - THE MAPPING IS THE CARD'S OWN ANSWERS (`swipeTargets`), never a second one: left, up and right each
+ * - THE MAPPING IS THE CARD'S OWN ANSWERS (`itemSwipeTargets`: the first card ask's while one is open), never a second one: left, up and right each
  *   give the answer the card put in that direction. A direction with no answer commits nothing. While the
  *   card is dragged it follows the finger; nothing is drawn over it naming the answer (the owner wants no teaching
  *   text on the card) — what letting go would do is kept on the card as `data-swipe-*` attributes. A review's
@@ -40,7 +40,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { type SwipeTarget, type SwipeTargets, swipeTargets } from '../../lib/agenda-answers.ts';
+import type { SwipeTarget, SwipeTargets } from '../../lib/agenda-answers.ts';
+import { itemSwipeTargets } from '../../lib/agenda-item-sections.ts';
 import {
   type InboxAction,
   type InboxCard,
@@ -92,11 +93,38 @@ const visibleBottomOf = (element: HTMLElement): number => {
   return window.visualViewport?.height ?? window.innerHeight;
 };
 
-/** The room a mounted deck has, read off the layout. */
+/** The most of the visible screen the card may take to show its block whole (all of it: the page scrolls to what is under it). */
+const CARD_MOST = 1;
+
+/** A breath under the block the card must show whole. */
+const NEEDS_BREATH_PX = 16;
+
+/**
+ * How tall the open card needs to be to show "What I need from you" whole, without scrolling: the rows around the
+ * scroller plus everything in it down to the end of that block (what the ferret wrote below it may scroll). 0 when the
+ * deck holds no open item view (a plain card).
+ */
+const contentOf = (element: HTMLElement): number => {
+  const open = element.querySelector<HTMLElement>('.fy-attn-deck__top .fy-inbox-open');
+  const body = open?.querySelector<HTMLElement>('[data-agenda-body]');
+  const needs = body?.querySelector<HTMLElement>('[data-agenda-part="needs"]');
+  if (open == null || body == null || needs == null) return 0;
+  const end = needs.getBoundingClientRect().bottom - body.getBoundingClientRect().top + body.scrollTop;
+  return open.offsetHeight - body.clientHeight + end + NEEDS_BREATH_PX;
+};
+
+/**
+ * The room a mounted deck has, read off the layout. A tall composer under the card (a typed answer of several lines)
+ * must not squeeze the card until its block is cut mid-line by the card's own scroll: the card keeps the height its
+ * content needs (up to {@link CARD_MOST} of the visible screen) and the page scrolls to the composer instead.
+ */
 const roomOf = (element: HTMLElement, reserve: number): number => {
   const below = element.nextElementSibling?.getBoundingClientRect().height ?? 0;
   const padding = Number.parseFloat(getComputedStyle(element).paddingBottom) || 0;
-  return deckRoom(element.getBoundingClientRect().top, visibleBottomOf(element), below, padding + reserve);
+  const top = element.getBoundingClientRect().top;
+  const bottom = visibleBottomOf(element);
+  const squeezed = deckRoom(top, bottom, below, padding + reserve);
+  return Math.max(squeezed, Math.min(Math.ceil(contentOf(element)), Math.floor((bottom - top) * CARD_MOST)));
 };
 
 /**
@@ -124,7 +152,12 @@ export const useDeckRoom = (
     const observer =
       below == null || typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure());
     if (observer !== null && below != null) observer.observe(below);
+    // The block the card must show whole can grow after it is drawn (a Close reason box opens in it): measure again.
+    const needs = deck.current?.querySelector('.fy-attn-deck__top [data-agenda-part="needs"]');
+    const growth = needs == null || typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure());
+    if (growth !== null && needs != null) growth.observe(needs);
     return () => {
+      growth?.disconnect();
       window.removeEventListener('resize', measure);
       observer?.disconnect();
     };
@@ -320,6 +353,8 @@ export interface AgendaSwipeDeckProps {
    * card springs back, nothing is sent, and the host asks for what is missing.
    */
   readonly onHold?: (card: InboxCard, action: InboxAction) => boolean;
+  /** Whether a card is drawn with its typed answer (one Good under a try-it): its arrows then say Good, as its button does. */
+  readonly typedHost?: (card: InboxCard) => boolean;
   /** Forces reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
   /**
@@ -340,6 +375,7 @@ export function AgendaSwipeDeck({
   onSnooze,
   canSnooze,
   onHold,
+  typedHost,
   ownGesturesIn,
   reducedMotion,
   runKeys = false,
@@ -354,7 +390,7 @@ export function AgendaSwipeDeck({
   const refocus = useRef(false);
   const swallowClick = useRef(false);
   const top = cards[0];
-  const targets: SwipeTargets = top === undefined ? {} : swipeTargets(top.item);
+  const targets: SwipeTargets = top === undefined ? {} : itemSwipeTargets(top.item, typedHost?.(top) ?? false);
   /** ↓ is Skip, and only where the deck can skip. */
   const canDown = onSkip !== undefined;
   const available: CompassAvailable = {
@@ -406,7 +442,7 @@ export function AgendaSwipeDeck({
       setDrag(null);
       return;
     }
-    const direction = directionOf(swipeTargets(card.item), action);
+    const direction = directionOf(itemSwipeTargets(card.item, typedHost?.(card) ?? false), action);
     refocus.current = deck.current?.contains(document.activeElement) === true;
     gesture.current = null;
     setDrag(null);
