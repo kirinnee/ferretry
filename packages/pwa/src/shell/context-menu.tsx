@@ -301,6 +301,25 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
       : null;
   const positioned = position !== null;
 
+  // WHERE A FIXED BOX REALLY LANDS. `position: fixed` is relative to the viewport only while no ancestor is transformed,
+  // 'will-change: transform', filtered or contained; otherwise that ancestor is the containing block and the same
+  // left/top land offset by its own position. The Inbox's swipe-deck card is one, so the quote menu opened far to the
+  // right of the click or off screen (#B152). So read where the menu actually sits against where it was put, and
+  // shift by the difference: the menu then opens at the viewport point it clamped to, whatever it is inside of.
+  const [frame, setFrame] = useState<ScrollPoint>(NO_SHIFT);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure whenever the placed point changes, and while scroll-follow keeps moving the containing block after the clamp has stopped moving the point
+  useLayoutEffect(() => {
+    const element = menuRef.current;
+    if (!open || !element || position === null) return;
+    const rect = element.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return;
+    const next = {
+      x: Math.round(rect.left - (Number.parseFloat(element.style.left) || 0)),
+      y: Math.round(rect.top - (Number.parseFloat(element.style.top) || 0)),
+    };
+    setFrame(current => (current.x === next.x && current.y === next.y ? current : next));
+  }, [open, position?.left, position?.top, shift.x, shift.y]);
+
   // Move DOM focus to the active item once it is on screen (positioned). Keyed
   // on the boolean rather than on the derived object, which is new every render.
   useEffect(() => {
@@ -383,17 +402,23 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
           event.preventDefault();
           close();
         }}
+        style={
+          frame.x === 0 && frame.y === 0
+            ? undefined
+            : { left: -frame.x, top: -frame.y, right: 'auto', bottom: 'auto', width: '100vw', height: '100vh' }
+        }
         className="fixed inset-0 z-50 cursor-default"
       />
       <div
         ref={menuRef}
         role="menu"
+        data-context-menu=""
         aria-label={ariaLabel}
         aria-orientation="vertical"
         onKeyDown={onKeyDown}
         style={{
-          left: position?.left ?? anchor.x,
-          top: position?.top ?? anchor.y,
+          left: (position?.left ?? anchor.x) - frame.x,
+          top: (position?.top ?? anchor.y) - frame.y,
           visibility: positioned ? 'visible' : 'hidden',
         }}
         className="kt-panel fixed z-50 min-w-[196px] max-w-[min(280px,calc(100vw-16px))] overflow-hidden p-1 font-ui shadow-popover"

@@ -322,6 +322,49 @@ describe('ContextMenu', () => {
       await view.cleanup();
     });
 
+    it('keeps the menu and scrim at the viewport point while a transformed ancestor keeps moving after the clamp (#B152)', async () => {
+      // The containing block travels with the scroll; the menu is already clamped to the top margin, so its placed
+      // point stops changing while the ancestor keeps moving: the measured frame must follow it anyway.
+      let ancestorTop = 0;
+      const original = HTMLElement.prototype.getBoundingClientRect;
+      HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+        const left = Number.parseFloat(this.style.left) || 0;
+        const top = (Number.parseFloat(this.style.top) || 0) + ancestorTop;
+        return {
+          left,
+          top,
+          right: left + 196,
+          bottom: top + 54,
+          width: 196,
+          height: 54,
+          x: left,
+          y: top,
+          toJSON: () => ({}),
+        };
+      };
+      try {
+        const view = await openInScroller();
+        const scrim = document.querySelector<HTMLElement>('button[aria-label="Close menu"]') as HTMLElement;
+        const scrollBy = async (triggerTop: number, parentTop: number) => {
+          view.moveTrigger(triggerTop);
+          ancestorTop = parentTop;
+          await interact(() => view.scroller.dispatchEvent(new Event('scroll')));
+        };
+
+        await scrollBy(-10, -40);
+        await scrollBy(-30, -60);
+
+        expect(view.state.closes).toBe(0);
+        // Clamped to the 8px margin both times, so the placed point did not change on the second move.
+        expect(view.menu.getBoundingClientRect().top).toBe(8);
+        expect(scrim.getBoundingClientRect().top).toBe(0);
+        expect(scrim.style.top).toBe('60px');
+        await view.cleanup();
+      } finally {
+        HTMLElement.prototype.getBoundingClientRect = original;
+      }
+    });
+
     it('closes when its container scrolls just after a wheel from the reader', async () => {
       const view = await openInScroller();
 
@@ -472,5 +515,40 @@ describe('ContextMenu', () => {
     expect(menu.menu.style.left).toBe('20px');
     expect(menu.menu.style.top).toBe('30px');
     await menu.unmount();
+  });
+
+  it('opens at the viewport point even inside a transformed ancestor that offsets fixed boxes (#B152)', async () => {
+    // The Inbox swipe-deck card is `will-change: transform`: a fixed box inside it lands where the CARD is, so the
+    // same left/top draw 378px right and 96px down of the click. Simulate that containing block.
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      const left = (Number.parseFloat(this.style.left) || 0) + 378;
+      const top = (Number.parseFloat(this.style.top) || 0) + 96;
+      return {
+        left,
+        top,
+        right: left + 196,
+        bottom: top + 54,
+        width: 196,
+        height: 54,
+        x: left,
+        y: top,
+        toJSON: () => ({}),
+      };
+    };
+    try {
+      const menu = await openMenu();
+      // It was asked to open at (20, 30): shifted back by the card's offset, it paints there.
+      expect(menu.menu.style.left).toBe('-358px');
+      expect(menu.menu.style.top).toBe('-66px');
+      expect(menu.menu.getBoundingClientRect().left).toBe(20);
+      // The outside-press surface still covers the whole viewport, not just the card.
+      const scrim = menu.container.querySelector<HTMLElement>('button[aria-label="Close menu"]') as HTMLElement;
+      expect(scrim.style.left).toBe('-378px');
+      expect(scrim.style.top).toBe('-96px');
+      await menu.unmount();
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = original;
+    }
   });
 });
