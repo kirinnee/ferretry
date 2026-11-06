@@ -284,9 +284,9 @@ describe('StatePairingRepository device keys', () => {
     })}\n`;
     await files.writeTextAtomic(devicesPath, legacy);
 
-    // Act / Assert — a sentence, not a schema error, and the file is left for the person to move aside.
+    // Act / Assert — a sentence, not a schema error, naming the exact document to replace it with; the file is left as it was.
     await should(new StatePairingRepository(paths, files, undefined, 'fy pair').open('workstation')).be.rejectedWith(
-      `${devicesPath} predates device keys (schemaVersion 1): move it aside and pair every device again with \`fy pair\``,
+      `${devicesPath} predates device keys (schemaVersion 1), so no device in it can sign in any more: replace its contents with ${JSON.stringify({ schemaVersion: 2, daemonId: first.daemonId, devices: [] })} and pair every device again with \`fy pair\``,
     );
     should(await files.readText(devicesPath)).equal(legacy);
   });

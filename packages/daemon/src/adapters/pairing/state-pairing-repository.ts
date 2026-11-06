@@ -118,8 +118,9 @@ export class StatePairingRepository implements PairingDeviceStore {
       daemonId = DaemonIdSchema.parse(this.cryptography.identityFromPrivateKey(identity.privateKeyPem).daemonId);
       const raw = parseDocument(devicesText);
       if (isRecord(raw) && raw.schemaVersion === 1) {
+        const empty = JSON.stringify({ schemaVersion: DEVICE_DOCUMENT_VERSION, daemonId, devices: [] });
         throw new Error(
-          `${this.devicesPath} predates device keys (schemaVersion 1): move it aside and pair every device again${this.pairCommand === undefined ? '' : ` with \`${this.pairCommand}\``}`,
+          `${this.devicesPath} predates device keys (schemaVersion 1), so no device in it can sign in any more: replace its contents with ${empty} and pair every device again${this.pairCommand === undefined ? '' : ` with \`${this.pairCommand}\``}`,
         );
       }
       const document = DeviceDocumentSchema.parse(raw);

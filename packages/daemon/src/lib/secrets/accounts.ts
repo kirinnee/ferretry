@@ -117,7 +117,7 @@ export function randomLoginKey(): string {
   return `L${randomBytes(12).toString('hex').toUpperCase()}`;
 }
 
-/** A fresh sign-in id: 64 random bits. A migrated one is derived instead (the protocol's `migratedSignInId`). */
+/** A fresh sign-in id: 64 random bits. */
 export function randomSignInId(): SignInId {
   return `si_${randomBytes(8).toString('hex')}`;
 }

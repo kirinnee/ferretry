@@ -176,8 +176,7 @@ export class LoginDirectory {
   }
 
   /**
-   * The account's one sign-in (or none) made into what the changed saved login names, exactly as the migration makes
-   * a saved login's places: its website first (the primary, which keeps its id, proposals and auto-apply), then one
+   * The account's one sign-in (or none) made into what the changed saved login names: its website first (the primary, which keeps its id, proposals and auto-apply), then one
    * per terminal key. Facts are kept only at a key of the place they were seen at.
    */
   private reshape(
@@ -350,7 +349,7 @@ export class LoginDirectory {
     return await this.accounts.removeAccount(id);
   }
 
-  /** AT BOOT: the account store's boot step (migrate, then sweep). See {@link AccountDirectory.prepare}. */
+  /** AT BOOT: the account store's boot step (sweep the sealed values no account points at). See {@link AccountDirectory.prepare}. */
   async sweepUnreferenced(): Promise<LoginSweep> {
     return await this.accounts.prepare();
   }

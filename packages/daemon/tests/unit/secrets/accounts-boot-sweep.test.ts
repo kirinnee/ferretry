@@ -154,7 +154,7 @@ describe('damaged is not empty', () => {
     should(Object.keys((await sealed.read())?.entries ?? {})).containEql(SEAL.orphan);
   });
 
-  it('should sweep nothing, and refuse a change, when an account names a sealed value that is gone', async () => {
+  it('should sweep nothing, and report the loss, when an account names a sealed value that is gone', async () => {
     const { index, sealed } = await plant();
     const document = await sealed.read();
     const { [SEAL.githubSeed]: _lost, ...rest } = document?.entries ?? {};

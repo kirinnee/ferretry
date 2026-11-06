@@ -463,8 +463,10 @@ row states what its revoke will do before the press.
   can use it — the browser saved no pairing — and it lapses with idle expiry after 30 days; the
   refusal tells the reader to check the device list and revoke it sooner.
 - **A `devices.json` from before device keys is refused.** A document at `schemaVersion: 1` held only token
-  digests, which no session can prove against, so the daemon does not start on it: the error names the file and
-  says to move it aside and pair every device again.
+  digests, which no session can prove against, so the daemon does not start on it: the error names the file, says no
+  device in it can sign in any more, and gives the one-line document to replace its contents with
+  (`{"schemaVersion":2,"daemonId":"<this daemon's id>","devices":[]}`) before pairing every device again. Moving the
+  file aside instead does not work: an identity with no device file is reported as incomplete.
 - **An unlock bounds who acts, not what the act does.** A governed device inside its unlock may open a
   terminal or apply a fleet change for the rest of the unlock period with no further prompt; minting a code
   still wants a passkey for that one act. The passkey says the person holding the device agreed recently,

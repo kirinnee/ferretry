@@ -1490,7 +1490,7 @@ export type AccountProposeCall = z.infer<typeof AccountProposeCallSchema>;
 
 // ── The saved-login projection: what an older client still reads and writes ──────────────────────
 
-/** A saved login as an older client sees it: the daemon's `LoginRecordSchema` output. */
+/** A saved login as an older client sees it: one account with its sign-ins' places folded into `match`. */
 export interface LoginRecordV1 {
   readonly key: string;
   readonly label: string;

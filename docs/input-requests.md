@@ -1226,10 +1226,10 @@ The index keeps these rules on every read, so a hand-edited file is damaged, nev
 sweep of the sealed document must keep everything it lists. **A sweep that skipped the keys would delete every
 saved seed.**
 
-**A saved login's seed is the account's first key.** `seals.totp` and its parameters are the first key,
-`{ kind: 'totp', label: 'Authenticator app', seal: <the same name>, params, addedBy: 'migration' }`, under the sealed
-name the seed always had. The key is not yet checked. A seed without its parameters, or parameters without a seed,
-is refused as damaged rather than turned into a guessed key.
+**A seed is saved by staging it, never in the body of a login.** A saved-login write that carries a seed is refused
+(`add_2fa_key_needs_passkey`); the seed is staged and saved only after the passkey proof bound to that stage, and then
+becomes a `totp` key, `{ kind: 'totp', label: 'Authenticator app', seal, params, addedBy: 'owner' }` (the label is made
+free if that one is taken). The key is not yet checked.
 
 **What each reader sees:**
 
@@ -1238,8 +1238,8 @@ is refused as damaged rather than turned into a guessed key.
 - **A ferret** (`account_hint`): each key's id, kind and label, **nothing else**. A `totp` key reads the same
   whether Ferretry holds its seed or the owner does, so two accounts that differ only by a seed give
   byte-identical hints. The hint line reads `2FA: 'Okta Verify on Pixel' (push) [tf_…], 'Phone ••42' (sms) [tf_…]`.
-  A ferret can still tell which accounts have a `totp` key, and right after the migration every such key holds a
-  seed. The design allows that (a ferret may know which 2FA kinds an account has); it never learns more.
+  A ferret can still tell which accounts have a `totp` key. The design allows that (a ferret may know which 2FA kinds an
+  account has); it never learns more.
 
 **A code card's title** comes from the keys (`factorAskWords`). The daemon's is agenda text, which every ferret and a
 device without `secrets.use` reads, so it names the place and the keys' kinds alone ("One-time code for github.com, by
