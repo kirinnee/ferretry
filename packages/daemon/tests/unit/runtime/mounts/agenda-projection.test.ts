@@ -15,6 +15,7 @@ import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { type AgendaLedger, AgendaService } from '../../../../src/lib/agenda/index.ts';
 import { agendaRoutes } from '../../../../src/lib/runtime/mounts/agenda.ts';
 import { agendaMachineRoutes } from '../../../../src/lib/runtime/mounts/agenda-machine.ts';
+import { machineAgendaWorld } from '../../../support/machine-agenda-isolation.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, FakeLedgerRepository, human, NO_HELD_REPLIES } from './support.ts';
 
@@ -120,6 +121,28 @@ describe('agenda list and one-item reads', () => {
       expect((await read(`${path}/A2`, {} as typeof headers)).status).toBe(401);
     },
   );
+
+  it('refuses the reserved session item alias before reaching a separate machine port', async () => {
+    const world = await machineAgendaWorld(new FakeLedgerRepository(), new FakeLedgerRepository());
+    const before = await world.machineRepository.read(MACHINE_AGENDA_ID);
+    expect(before?.entries[0]?.item.id).toBe('A1');
+    const response = await world.dispatcher.dispatch(
+      request({
+        path: '/v1/sessions/machine-agenda/agenda/A1',
+        headers: { ...agentIn('s1'), authorization: 'Bearer test-admin' },
+      }),
+    );
+    expect(response.status).toBe(404);
+    expect(jsonBody(response)).toMatchObject({ code: 'not-found' });
+    expect(world.effects).toEqual([]);
+    expect(await world.machineRepository.read(MACHINE_AGENDA_ID)).toEqual(before);
+    expect(await world.sessionRepository.read(MACHINE_AGENDA_ID)).toBeNull();
+    const owner = await world.dispatcher.dispatch(
+      request({ path: '/v1/machine/agenda/A1', headers: { ...human, authorization: 'Bearer test-admin' } }),
+    );
+    expect(owner.status).toBe(200);
+    expect(AgendaReadItemSchema.parse(jsonBody(owner)).id).toBe('A1');
+  });
 
   it('applies the neighbouring route authority to agents, unknown sessions and wardens', async () => {
     // Arrange

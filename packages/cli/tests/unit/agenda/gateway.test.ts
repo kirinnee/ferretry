@@ -58,6 +58,7 @@ describe('protocol attention gateway', () => {
     await should(gateway.snapshot(MACHINE_AGENDA_ID)).be.rejectedWith(/the machine agenda is the owner's; ask them/u);
     await should(gateway.apply(MACHINE_AGENDA_ID, { action: 'dismiss', id: 'A1' })).be.rejectedWith(/ask them/u);
     await should(gateway.sendReplies(MACHINE_AGENDA_ID)).be.rejectedWith(/ask them/u);
+    await should(gateway.readItem(MACHINE_AGENDA_ID, 'A1')).be.rejectedWith(/ask them/u);
     should(calls).be.empty();
   });
 
@@ -71,6 +72,8 @@ describe('protocol attention gateway', () => {
     // Assert
     should(actual).deepEqual(input);
     should(calls[0]?.path).equal(`/v1/sessions/${SESSION}/agenda/A1`);
+    await gateway.readItem(MACHINE_AGENDA_ID, 'A1');
+    should(calls[1]?.path).equal('/v1/machine/agenda/A1');
     await should(gateway.readItem(SESSION, 'A2')).be.rejectedWith(/another agenda item/u);
   });
   it('should read the board with a plain GET', async () => {
