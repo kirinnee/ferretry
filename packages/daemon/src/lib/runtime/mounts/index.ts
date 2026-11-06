@@ -140,7 +140,7 @@ import { tunnelRoutes } from './tunnel.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 import { type WebRtcSignallingSubsystem, webrtcRoutes } from './webrtc.ts';
 import { type WorkSearchSubsystem, workSearchRoutes } from './work-search.ts';
-import { type WorktreeSubsystem, worktreeRoutes } from './worktrees.ts';
+import type { WorktreeSubsystem } from './worktrees.ts';
 
 /**
  * The subsystems the daemon process mounts on top of its base API surface, and the complete route
@@ -635,11 +635,6 @@ export function legacyModule(
               ...(subsystems.sessionArchive === undefined ? [] : sessionArchiveRoutes(subsystems.sessionArchive)),
               ...catalogRoutes(subsystems.catalogs, subsystems.sessions),
               ...boardProjectRoutes(subsystems.boardProjects, subsystems.sessions, subsystems.boardSwitches),
-              // The worktree surface registers beside the catalogs for the reason its subsystem field states.
-              // Every path is under `/v1/worktrees`, which no other subsystem uses, so it can neither shadow
-              // nor be shadowed — and its own two deeper literals are registered before the collection they
-              // sit under, which would otherwise match them first.
-              ...worktreeRoutes(subsystems.worktrees),
               // The write surface registers AFTER the read for the same reason the read comes first: `POST
               // /v1/sessions` is a fixed literal and the stop is a deeper pattern, so neither shadows the
               // other and both sit above every per-session subsystem that follows.

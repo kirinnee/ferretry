@@ -1,6 +1,6 @@
 import type { BuiltModule } from '../../src/lib/runtime/modules.ts';
 import type { DaemonWorld } from '../fyd.ts';
-import type { LearningSubsystem, LimitsService } from '../../src/lib/index.ts';
+import type { LearningSubsystem, LimitsService, ManagedWorktreeService } from '../../src/lib/index.ts';
 import type { AnalyticsJobs, AnalyticsProvides } from './analytics.ts';
 import type { LearningSeams } from './learning.ts';
 import type { UpdateJobs, UpdateProvides } from './update.ts';
@@ -24,6 +24,8 @@ export const seamsOf = {
   learning: (world: DaemonWorld): LearningSeams => ({ userHome: world.userHome }),
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the user home and the harness resolution are needs). */
   update: (_world: DaemonWorld): void => undefined,
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the Git operations arrive in `WorktreeComposition`, a need). */
+  worktrees: (_world: DaemonWorld): void => undefined,
 } as const satisfies SeamReaders;
 
 /**
@@ -36,4 +38,5 @@ export interface ModuleHandles {
   readonly cgroups: BuiltModule<LimitsService>;
   readonly learning: BuiltModule<LearningSubsystem>;
   readonly update: BuiltModule<UpdateProvides, UpdateJobs>;
+  readonly worktrees: BuiltModule<ManagedWorktreeService>;
 }

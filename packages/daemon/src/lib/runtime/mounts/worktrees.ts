@@ -13,7 +13,9 @@ import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, queryValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import type { AuditedRouteRule } from '../../audit/routes.ts';
 import { WorktreeError, type WorktreeErrorCode } from '../../worktrees/index.ts';
+import type { ModuleContribution } from '../modules.ts';
 
 /**
  * The managed-worktree surface: what checkouts this daemon holds, whether one may go, removing one,
@@ -161,4 +163,20 @@ export function worktreeRoutes(worktrees: WorktreeSubsystem): readonly ApiRoute[
       handle: async context => await create(worktrees, context),
     },
   ];
+}
+
+/** The security log's rule for the one destructive route: removing a managed checkout. Creating one is not kept. */
+const WORKTREE_AUDIT_RULES: readonly AuditedRouteRule[] = [
+  { method: 'POST', path: '/v1/worktrees/remove', event: 'worktree.removed' },
+];
+
+/**
+ * What the worktrees module adds to the daemon: the managed-worktree surface and its one audit rule.
+ *
+ * The surface registers beside the catalogs for the reason its subsystem field states. Every path is under
+ * `/v1/worktrees`, which no other subsystem uses, so it can neither shadow nor be shadowed — and its own two
+ * deeper literals are registered before the collection they sit under, which would otherwise match them first.
+ */
+export function worktreesContribution(worktrees: WorktreeSubsystem): ModuleContribution {
+  return { routes: worktreeRoutes(worktrees), audit: { routes: WORKTREE_AUDIT_RULES } };
 }

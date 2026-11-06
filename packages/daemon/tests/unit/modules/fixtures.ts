@@ -3,6 +3,7 @@ import { builtAnalytics } from './analytics/fixture.ts';
 import { builtCgroups } from './cgroups/fixture.ts';
 import { builtLearning } from './learning/fixture.ts';
 import { builtUpdate } from './update/fixture.ts';
+import { builtWorktrees } from './worktrees/fixture.ts';
 
 /**
  * THE EXTRACTED MODULES, AS PRODUCTION BUILDS THEM, ONE FIXTURE FRAGMENT PER MODULE.
@@ -16,4 +17,5 @@ export const builtModules = (): readonly BuiltModule<unknown, object>[] => [
   builtCgroups(),
   builtAnalytics(),
   builtUpdate(),
+  builtWorktrees(),
 ];

@@ -206,8 +206,6 @@ export const callers: readonly string[] = [
   'GET /v1/warden/report authenticated any',
   'GET /v1/warden/status authenticated any',
   'GET /v1/warden/verdicts authenticated any',
-  'GET /v1/worktrees operator any',
-  'GET /v1/worktrees/removal operator any',
   'PATCH /v1/accounts/:id/factors/:factor operator person',
   'PATCH /v1/catalog-installs/project/:installId operator person',
   'PATCH /v1/catalog-installs/runtime/:installId operator person',
@@ -389,8 +387,6 @@ export const callers: readonly string[] = [
   'POST /v1/warden/leave operator person',
   'POST /v1/warden/run operator any',
   'POST /v1/webrtc/offer authenticated any',
-  'POST /v1/worktrees operator any',
-  'POST /v1/worktrees/remove operator any',
   'PUT /v1/accounts/:id operator person',
   'PUT /v1/accounts/defaults operator person',
   'PUT /v1/accounts/sign-ins/:signIn operator person',
@@ -459,8 +455,6 @@ export const notAudited: Readonly<Record<string, string>> = {
     'a read: a POST only because a title and an ask do not fit a URL; it weighs them against the board and changes nothing',
   'POST /v1/tidy/plan':
     'a read: a POST only so a plan is never cached by a proxy; it decides what one ferret could tidy and changes nothing',
-  'POST /v1/worktrees':
-    'creates a worktree inside a registered project; removal is the destructive half and is audited',
   'POST /v1/sessions/:sessionId/stop': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/resume': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/migrate': 'drives an existing session; its journal records it',
