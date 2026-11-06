@@ -36,6 +36,7 @@ import * as legacy from './legacy/route-contract.ts';
 import * as models from './models/route-contract.ts';
 import * as renders from './renders/route-contract.ts';
 import * as update from './update/route-contract.ts';
+import * as usage from './usage/route-contract.ts';
 import * as voice from './voice/route-contract.ts';
 import * as workSearch from './work-search/route-contract.ts';
 import * as worktrees from './worktrees/route-contract.ts';
@@ -61,6 +62,7 @@ export const FRAGMENTS: Readonly<Record<string, RouteContractFragment>> = {
   agentTools,
   fleetLogin,
   models,
+  usage,
 };
 
 /** The concatenation of every fragment's `callers`: one line per route, both tables. */

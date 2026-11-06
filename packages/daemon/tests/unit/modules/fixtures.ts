@@ -8,6 +8,7 @@ import { builtLearning } from './learning/fixture.ts';
 import { builtModels } from './models/fixture.ts';
 import { builtRenders } from './renders/fixture.ts';
 import { builtUpdate } from './update/fixture.ts';
+import { builtUsage } from './usage/fixture.ts';
 import { builtVoice } from './voice/fixture.ts';
 import { builtWorkSearch } from './work-search/fixture.ts';
 import { builtWorktrees } from './worktrees/fixture.ts';
@@ -32,4 +33,5 @@ export const builtModules = (): readonly BuiltModule<unknown, object>[] => [
   builtAgentTools(),
   builtFleetLogin(),
   builtModels(),
+  builtUsage(),
 ];
