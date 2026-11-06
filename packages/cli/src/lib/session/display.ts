@@ -1,10 +1,7 @@
-import {
-  describeCompactAt,
-  displayModel,
-  formatTaskRef,
-  type SessionState,
-  type SessionView,
-} from '@ferretry/protocol';
+import type { SessionState, SessionView } from '@ferretry/protocol';
+import { formatTaskRef } from '@ferretry/protocol/board-refs';
+import { describeCompactAt } from '@ferretry/protocol/compact-at';
+import { displayModel } from '@ferretry/protocol/session-subtree';
 import { harnessReadySeconds } from './harness-startup.ts';
 import type { ICellColour } from './ports.ts';
 

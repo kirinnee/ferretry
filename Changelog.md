@@ -1,3 +1,56 @@
+## [4.289.0](https://github.com/kirinnee/ferretry/compare/v4.288.0...v4.289.0) (2026-11-06)
+
+### Features
+
+* **board:** clashing work waits its turn (&I38) ([#1531](https://github.com/kirinnee/ferretry/issues/1531)) ([fb78a95](https://github.com/kirinnee/ferretry/commit/fb78a959f3537955f790ba068f129419cbe6724a))
+
+## [4.288.0](https://github.com/kirinnee/ferretry/compare/v4.287.1...v4.288.0) (2026-11-06)
+
+### Features
+
+* **daemon:** limit ferrets by default, sized from what the user may spend ([#1517](https://github.com/kirinnee/ferretry/issues/1517)) ([e3b1d94](https://github.com/kirinnee/ferretry/commit/e3b1d941d76b1e281b0e7302d86246cce20f1515))
+
+## [4.287.1](https://github.com/kirinnee/ferretry/compare/v4.287.0...v4.287.1) (2026-11-06)
+
+### Fixes
+
+* **daemon:** serve terminal rename as PATCH, the method the app sends ([#1526](https://github.com/kirinnee/ferretry/issues/1526)) ([8659e25](https://github.com/kirinnee/ferretry/commit/8659e25b75219955344a301def0320bcc4c11621))
+
+## [4.287.0](https://github.com/kirinnee/ferretry/compare/v4.286.0...v4.287.0) (2026-11-06)
+
+### Features
+
+* **pwa:** hide waiting messages from the chat; show send times on the queue page (F955) ([#1493](https://github.com/kirinnee/ferretry/issues/1493)) ([82fb39c](https://github.com/kirinnee/ferretry/commit/82fb39c08fdcf4789673fe02d1b46227bc99088f)), closes [#1496](https://github.com/kirinnee/ferretry/issues/1496)
+
+### Fixes
+
+* **daemon:** keep the event loop off the disk and off whole-fleet renders ([#1516](https://github.com/kirinnee/ferretry/issues/1516)) ([d44379b](https://github.com/kirinnee/ferretry/commit/d44379b2472539a6484d97b2279fb974c5c9af33))
+
+## [4.286.0](https://github.com/kirinnee/ferretry/compare/v4.285.1...v4.286.0) (2026-11-06)
+
+### Features
+
+* **pwa:** auto-read replies aloud when a turn ends (F137 slice 2) ([#1491](https://github.com/kirinnee/ferretry/issues/1491)) ([6884539](https://github.com/kirinnee/ferretry/commit/6884539157768a6050d08eb69804a6d47f22dc43))
+
+## [4.285.1](https://github.com/kirinnee/ferretry/compare/v4.285.0...v4.285.1) (2026-11-06)
+
+### Performance
+
+* **cli:** load only the command group a long-lived fy needs ([#1520](https://github.com/kirinnee/ferretry/issues/1520)) ([fa27b1e](https://github.com/kirinnee/ferretry/commit/fa27b1edd87aee92266e6df978cff04ded259f67))
+
+## [4.285.0](https://github.com/kirinnee/ferretry/compare/v4.284.0...v4.285.0) (2026-11-06)
+
+### Features
+
+* **daemon:** save svg and html pictures as daemon files (render store, F959 slice 2) ([#1485](https://github.com/kirinnee/ferretry/issues/1485)) ([5a6f295](https://github.com/kirinnee/ferretry/commit/5a6f295618cb272dcd2c9c7cb8d1a7337d557ce8))
+
+### Fixes
+
+* **board:** ferret jobs become owner cards; adopt orphaned cards ([#1490](https://github.com/kirinnee/ferretry/issues/1490)) ([36fe336](https://github.com/kirinnee/ferretry/commit/36fe336d6adbdc34ecf53246437da6d8b6d56217))
+* **pwa:** make the Queue page readable ([#1496](https://github.com/kirinnee/ferretry/issues/1496)) ([f144c3f](https://github.com/kirinnee/ferretry/commit/f144c3f35c7e38497f68b96216dda3d7472fa944))
+* **pwa:** open the Inbox quote menu at the selection ([#1468](https://github.com/kirinnee/ferretry/issues/1468)) ([6c83a04](https://github.com/kirinnee/ferretry/commit/6c83a043be72b60a9a07360f8c1f64b9628315ea))
+* **send:** never stall a queue behind a hand-over that gave up before its first key ([#1444](https://github.com/kirinnee/ferretry/issues/1444)) ([b78323f](https://github.com/kirinnee/ferretry/commit/b78323fa3895e1973a2919a47421ca464745af91))
+
 ## [4.284.0](https://github.com/kirinnee/ferretry/compare/v4.283.1...v4.284.0) (2026-11-06)
 
 ### Features

@@ -2299,9 +2299,9 @@ describe('auditedSocketRoutes', () => {
     );
 
     // Act
-    const handler = await (
-      await route?.accept(socketContext({ sessionId: 's', terminalId: 't' }))
-    )?.(new FakeDownstream());
+    const handler = await (await route?.accept(socketContext({ sessionId: 's', terminalId: 't' })))?.(
+      new FakeDownstream(),
+    );
     handler?.fromClient(new Uint8Array([1]));
     await Bun.sleep(0);
 

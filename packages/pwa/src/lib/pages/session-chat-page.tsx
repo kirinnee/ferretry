@@ -150,6 +150,7 @@ import type { DaemonUsageStore } from '../usage-store.ts';
 import { type LiveState, mayHandOffQuestion } from '../voice-chat/live-machine.ts';
 import type { LiveReadingSource } from '../voice-chat/live-reader.ts';
 import { needsInputOf } from '../voice-chat/reply-picker.ts';
+import { hideWaiting } from '../waiting-fold.ts';
 import { workSearchPortFor } from '../work-search.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
@@ -621,6 +622,8 @@ export function SessionChatPage({
   }, []);
   const openAgendaReference = useCallback((id: AgendaId): void => showAgenda(id), [showAgenda]);
   // Dictation clean-up reads the conversation on screen instead of fetching the session's history again.
+  // A message still waiting to go into the ferret is on the Queue page, not in the chat (waiting-fold.ts).
+  const shownEntries = useMemo(() => hideWaiting(entries), [entries]);
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
   const readDictationConversation = useCallback(() => conversationFromTranscript(entriesRef.current), []);
@@ -1477,6 +1480,7 @@ export function SessionChatPage({
       analytics: async () =>
         await fetchSessionAnalytics(connection, scope, `sum ${analyticsIdQuery(scope.sessionId)}`, referenceFetch),
       relaunch: async signal => await readRelaunchSettings(connection, scope, referenceFetch, signal),
+      limits: async () => await (await routedClient(connection)).cgroupConfig(),
       folder: {
         sessionId: scope.sessionId,
         machineName: contextDependencies.machineName,
@@ -1732,7 +1736,7 @@ export function SessionChatPage({
               agentName={agentName}
               busy={busy}
               daemonId={connection.daemonId}
-              entries={entries}
+              entries={shownEntries}
               liveInRow={agenda.hostsLive}
               jumpHost={agenda.jumpHost}
               {...(onRetry === undefined ? {} : { onRetry })}

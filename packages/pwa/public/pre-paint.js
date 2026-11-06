@@ -97,8 +97,8 @@
 
   /* NO MANIFEST SWAP YET. kteam repointed its one `<link id>` manifest here so an
      install prompt fired before React mounted could not expose the wrong
-     colours. Ferretry generates no manifests yet — the worker/manifest/icon
-     slice is not ported (HANDOFF.md §14) — so index.html ships no manifest link
-     and there is nothing to repoint. When that slice lands, mirror
+     colours. app/index.html ships one static manifest (`fy-manifest`,
+     /manifest.webmanifest) but Ferretry generates no themed manifests yet, so
+     there is nothing to repoint. When that generator lands, mirror
      `manifestHrefFor()` here as well as in `useTheme`. */
 })();

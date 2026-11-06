@@ -139,9 +139,7 @@ describe('push routes', () => {
     const subject = new FakePush();
     const unconfirmed = { deviceId: otherDeviceId, appSession: 'app-two' } as const;
 
-    const response = await (
-      await mount(subject)
-    ).dispatch(
+    const response = await (await mount(subject)).dispatch(
       request({ method: 'POST', path: '/v1/push/subscriptions', device: unconfirmed, body: JSON.stringify(body) }),
     );
 
@@ -156,9 +154,9 @@ describe('push routes', () => {
   it('should answer a paired browser with the application-server key, cacheable because it is public', async () => {
     const subject = new FakePush();
 
-    const response = await (
-      await mount(subject)
-    ).dispatch(request({ method: 'GET', path: '/v1/push/vapid', device: browser }));
+    const response = await (await mount(subject)).dispatch(
+      request({ method: 'GET', path: '/v1/push/vapid', device: browser }),
+    );
 
     should(response.status).equal(200);
     // One stable public point per daemon. A browser re-reads it on every enrolment attempt, so a
@@ -170,9 +168,9 @@ describe('push routes', () => {
   it('should list enrolments without ever putting an endpoint on the wire', async () => {
     const subject = new FakePush([view(enrolmentId, 'Pixel 8')]);
 
-    const response = await (
-      await mount(subject)
-    ).dispatch(request({ method: 'GET', path: '/v1/push/subscriptions', device: browser }));
+    const response = await (await mount(subject)).dispatch(
+      request({ method: 'GET', path: '/v1/push/subscriptions', device: browser }),
+    );
 
     should(response.status).equal(200);
     should(response.headers.get('cache-control')).equal('no-store');
@@ -243,9 +241,7 @@ describe('push routes', () => {
   it('should refuse a body the wire does not describe before the subsystem is reached', async () => {
     const subject = new FakePush();
 
-    const response = await (
-      await mount(subject)
-    ).dispatch(
+    const response = await (await mount(subject)).dispatch(
       request({
         method: 'POST',
         path: '/v1/push/subscriptions',
@@ -261,9 +257,9 @@ describe('push routes', () => {
   it('should answer a revocation with the enrolment it ended', async () => {
     const subject = new FakePush();
 
-    const response = await (
-      await mount(subject)
-    ).dispatch(request({ method: 'DELETE', path: `/v1/push/subscriptions/${enrolmentId}`, device: browser }));
+    const response = await (await mount(subject)).dispatch(
+      request({ method: 'DELETE', path: `/v1/push/subscriptions/${enrolmentId}`, device: browser }),
+    );
 
     should(response.status).equal(200);
     should(jsonBody(response)).deepEqual(view(enrolmentId, 'Pixel 8'));
@@ -296,9 +292,7 @@ describe('push routes', () => {
   it('should decode a path segment before matching an enrolment id', async () => {
     const subject = new FakePush();
 
-    const response = await (
-      await mount(subject)
-    ).dispatch(
+    const response = await (await mount(subject)).dispatch(
       request({
         method: 'DELETE',
         path: `/v1/push/subscriptions/${encodeURIComponent(enrolmentId)}`,
@@ -337,9 +331,9 @@ describe('push routes', () => {
       }
     }
 
-    const response = await (
-      await mount(new Broken())
-    ).dispatch(request({ method: 'GET', path: '/v1/push/subscriptions', device: browser }));
+    const response = await (await mount(new Broken())).dispatch(
+      request({ method: 'GET', path: '/v1/push/subscriptions', device: browser }),
+    );
 
     should(response.status).equal(500);
   });

@@ -3,6 +3,7 @@ import should from 'should';
 import {
   BOARD_ACTIVITY_CHOICES,
   buildAssignAction,
+  buildAdoptAction,
   buildClaimAction,
   buildBlockAction,
   buildBoardCreateRequest,
@@ -356,6 +357,8 @@ describe('the action builders', () => {
     should(buildAssignAction('sess-1')).eql({ action: 'assign', assignee: 'sess-1' });
     should(buildAssignAction(null)).eql({ action: 'assign', assignee: null });
     should(buildClaimAction()).eql({ action: 'claim' });
+    should(buildAdoptAction(undefined)).eql({ action: 'adopt' });
+    should(buildAdoptAction('  nobody is left  ')).eql({ action: 'adopt', reason: 'nobody is left' });
   });
 
   it('should join the note words and refuse an empty note', () => {

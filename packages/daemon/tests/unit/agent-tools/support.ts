@@ -134,10 +134,13 @@ type FakePage = BrowserPageSummary & { readonly sessionId: string };
  * service raises. It records every act (by the page that was active when it ran), runs a guard where
  * the real one does, and can be told to fail the next call with any error.
  */
-class FakeBrowserPages implements Pick<
-  BrowserSubsystem,
-  'status' | 'openPage' | 'actOnPage' | 'filesOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
-> {
+class FakeBrowserPages
+  implements
+    Pick<
+      BrowserSubsystem,
+      'status' | 'openPage' | 'actOnPage' | 'filesOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
+    >
+{
   /** Every lifecycle request, exactly as the agent-tools service built it. */
   readonly lifecycles: BrowserPageLifecycleRequest[] = [];
   /** What the next lifecycle requests answer, oldest first; once spent, a plain "done". */

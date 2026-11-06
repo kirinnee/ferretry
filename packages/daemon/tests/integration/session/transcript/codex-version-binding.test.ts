@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TranscriptProvenance } from '@ferretry/protocol';
 import should from 'should';
-import bareStart from '../../../fixtures/transcript/codex-rollouts/codex-0.156.1-bare-start.jsonl' with { type: 'text' };
+import bareStart from '../../../fixtures/transcript/codex-rollouts/codex-0.156.1-bare-start.jsonl' with {
+  type: 'text',
+};
 import codex0145 from '../../../fixtures/transcript/codex-rollouts/codex-0.145.0.jsonl' with { type: 'text' };
 import codex0156 from '../../../fixtures/transcript/codex-rollouts/codex-0.156.1.jsonl' with { type: 'text' };
 import codex0163 from '../../../fixtures/transcript/codex-rollouts/codex-0.163.0.jsonl' with { type: 'text' };

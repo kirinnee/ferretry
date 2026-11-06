@@ -47,7 +47,7 @@ or an upward import from `adapters/`. Pure means pure, mechanically.
 ### Composition-Root Boundary — Guardrails
 
 The composition root is the CLI's **entry and exit boundary**. A command controller is the
-equivalent of an API handler: it is registered through `bin/fy.ts`, protects the domain from
+equivalent of an API handler: it is registered through `bin/program.ts`, protects the domain from
 invalid input, and remains thin.
 
 | Concern              | What it means                           |
@@ -168,7 +168,7 @@ Caller sees stderr + exit status
 ```
 
 Each boundary has its own error shape; mappers translate errors just as they translate data. The
-outermost `execute()` call in `bin/fy.ts` is the last-resort guard: it catches an unhandled error,
+outermost `execute()` call in `bin/program.ts` (and `executeSlice()` in `bin/wiring.ts`) is the last-resort guard: it catches an unhandled error,
 writes it through `ConsoleIo.error`, sets exit code `1`, and attempts each cleanup in its own
 `try`/`catch` so cleanup failure cannot mask the command result. See
 [Functional Practices](../functional-practices/index.md) for the Result-oriented direction.
@@ -194,8 +194,20 @@ swappable. The `arch` contract above enforces the one direction that matters mos
 
 ## Composition Root
 
-All layers are wired at the entry point, `packages/cli/bin/fy.ts` — the only place that knows
-concrete types. Everything else depends on interfaces.
+All layers are wired in the composition root, `packages/cli/bin/program.ts` — the only place that
+knows concrete types. Everything else depends on interfaces.
+
+**The entry is a router, not the root.** `packages/cli/bin/fy.ts` (the `bin` entry) imports nothing but
+the pure rule in `src/lib/entry/route.ts`, then loads either the full program or a **slice**: one command
+group on the same `createProgram()` skeleton and the same daemon wiring (`bin/wiring.ts`). Slices exist
+for the long-lived commands — `fy mcp serve` (`bin/mcp-group.ts`) and the reads, `fy wait` among them
+(`bin/reads-group.ts`) — because everything a module imports is evaluated before a command runs, and a
+process that waits for hours should not hold every command group to do it. A group a slice owns is
+registered by ONE function that the full program calls too, so a slice can only ever cost memory, never
+behave differently; `tests/unit/entry/slices.test.ts` holds both to the same commands and help, and
+any other command routes to the full program. Keep a slice's imports to leaf modules
+(`@ferretry/protocol/<module>`, `@ferretry/fleet/pane-contract`): one VALUE imported through a
+package barrel evaluates the whole barrel (docs/performance.md § A waiting fy is small).
 
 - **`createProgram()`** builds the commander skeleton (name, description, `--version`, `--help`)
   and nothing else. It is domain-free.
@@ -244,8 +256,8 @@ captured IO (`SIT_DRIVER=inprocess`) for the coverage ledger. Every journey asse
 - [ ] Errors are values, not exceptions, and are mapped to an `ICliIo.error` message plus a
       non-zero exit code.
 - [ ] No data layer is modelled until a real persistence adapter exists.
-- [ ] All wiring lives in the composition root (`bin/fy.ts`); executable invocation is guarded by
-      `if (import.meta.main)`.
+- [ ] All wiring lives in the composition root (`bin/program.ts`, with the slices' groups in
+      `bin/*-group.ts`); only the router `bin/fy.ts` runs, guarded by `if (import.meta.main)`.
 - [ ] Dependencies point inward — nothing in `src/lib` imports from `adapters/` or `bin/`.
 
 ---

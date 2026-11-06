@@ -100,7 +100,7 @@ describe('setUpFerretrySkill', () => {
     );
 
     // Assert
-    should(named.length).equal(11);
+    should(named.length).equal(12);
     should(unread).deepEqual([]);
   });
 

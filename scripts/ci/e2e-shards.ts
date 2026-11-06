@@ -212,9 +212,9 @@ function timingsFrom(reports: readonly string[]): void {
   if (reports.length === 0) fail('name at least one JUnit report to read times from');
   const existing = readTimings();
   const measured = new Map<string, number>();
+  // A skipped test reports 0 s: it says nothing about how long the journey takes.
   for (const report of reports)
     for (const journey of readJunit(report))
-      // A skipped test reports 0 s: it says nothing about how long the journey takes.
       if (journey.seconds !== undefined && journey.seconds > 0)
         measured.set(`${journey.file}\u0000${display(journey.path)}`, journey.seconds);
 

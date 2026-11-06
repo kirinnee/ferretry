@@ -82,6 +82,7 @@ export * from './pins/index.ts';
 export * from './ports.ts';
 export * from './provider-probe/index.ts';
 export * from './push/index.ts';
+export * from './renders/index.ts';
 export * from './rebuild.ts';
 export * from './reconciliation.ts';
 export * from './relay/index.ts';

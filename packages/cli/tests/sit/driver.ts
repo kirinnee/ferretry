@@ -1,5 +1,6 @@
 import { CommanderError } from 'commander';
-import { createProgram, registerDomain } from '../../bin/fy';
+import { registerDomain } from '../../bin/program';
+import { createProgram } from '../../bin/wiring';
 import type { ICliIo } from '../../src/adapters/terminal/console-io';
 import type { IPrompt } from '../../src/adapters/terminal/prompt';
 import type { ISpinner } from '../../src/adapters/terminal/spinner';

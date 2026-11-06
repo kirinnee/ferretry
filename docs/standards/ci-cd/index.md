@@ -91,6 +91,7 @@ every second, and the GitHub times from the last runs before Namespace (p50):
 | `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                 | free; the machine-dependent group left for `Realworld`     |
 | `Realworld Tests`                                | Namespace 4x8 | idle budgets, 200 ms stalls  | every event: a quiet dedicated VM is what its budgets need |
 | `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell        | billed a whole minute and a cache attachment on Namespace  |
+| `PWA Relevance`, `E2E Relevance`                 | GitHub        | ~10 s of bash, no nix shell  | a decision, not work: it only decides whether a gate runs  |
 | `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                            | free; macOS and arm64 have no Namespace equivalent here    |
 
 - **One cache volume, tag `ferretry-nix`, requested at 10GB.** `namespacelabs/nscloud-cache-action`
@@ -272,7 +273,8 @@ pushes the tag, the tag fires CD. Nothing else publishes anything. `Realworld` a
 | `unit-ledger`    | `./scripts/ci/coverage-ledger.sh unit --groups <dir>`                            | `needs: test`; the unit tier's 100% ledger                                                                                     |
 | `int`            | `nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"`                     | matrix over `config/test-groups.json`                                                                                          |
 | `int-ledger`     | `./scripts/ci/coverage-ledger.sh int --groups <dir>`                             | `needs: int`; the int tier's 100% ledger                                                                                       |
-| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE"`    | Settings geometry in light; the full gallery in dark, as one leg per viewport                                                  |
+| `pwa-relevance`  | `./scripts/ci/pwa-relevance.sh` (`PWA Relevance`)                                | does this pull request change anything the browser gate reads; GitHub, no nix shell                                            |
+| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE"`    | `needs: pwa-relevance`, skipped when it says no; Settings geometry in light; the full gallery in dark, one leg per viewport    |
 | `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                               | uploads `cli-binaries` from `dist/bin/`                                                                                        |
 | `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                                   | `needs: compile`, downloads the binaries                                                                                       |
 | `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`                          | `needs: compile`, one Linux runner per build target; required                                                                  |
@@ -293,6 +295,23 @@ Notable details:
   `smoke`, the ledger jobs enter no nix shell — the gate is bash, awk, grep and jq — because a nix
   shell would put ~30s back on the critical path the groups took off it. Adding a group means adding
   it to the config and to the matrix.
+- **The int groups are balanced by measured test time.** `Integration Tests (everything-else)` was the
+  last CI job to finish in 103 of 153 successful pull-request runs (Oct 30 – Nov 5, Namespace 2x4, test
+  step p50 / p90: `everything-else` 225 / ~450 s, `daemon` 127 / ~190, `pwa-surfaces` 110 / ~155,
+  `pwa-render` 95 / ~130, `pwa-chat` 63 / ~90, `daemon-runtime` 48 / ~75). It held 40 PWA browser-walk
+  files, ~350 s of per-file test time in one bun process. 17 of them are now dealt out by name prefix in
+  `config/test-groups.json`: `jump-latest-`, `chat-polish` and `chat-rerender` to `pwa-render`, `snooze`, `chat-history`
+  and `agenda-` to `pwa-chat`, `inbox-` to `pwa-surfaces`. The `agenda-` walks first went to `daemon-runtime`, but
+  that group runs the daemon's runtime suites in the same process on a 4 GB 2x4, and with the walks it
+  peaked at 84-91% RAM and was killed (no JUnit report) on two pull requests; `pwa-chat` peaks at ~35%. A first deal-out was measured on its own PR
+  run (`pwa-chat` 237 s, `everything-else` 256 s) and re-cut on the real file times, so each group
+  carries ~130-235 s on the PR run that measured it (`daemon` 234 s, untouched and the slowest;
+  `pwa-surfaces` 212 s). This costs the ledger nothing: the PWA has no `src/adapters`, and the `cli`,
+  `fleet`, `protocol` and `relay` tests that cover those packages' adapters stay in `everything-else`
+  (its `processes: 2` split deals whole packages by file count, so `protocol` moved to the second
+  process with fewer PWA files in the first; the ledger is judged across both, and stayed green). Rebalance by measuring per-file times from the job logs (bun prints
+  each test's duration), not by guessing; a group name is a label for the CI job, not a promise about its
+  contents.
 - **The int tier warms Chrome before its clock starts.** The first Chrome a fresh runner starts is
   slow — on one slow VM longer than the agent browser's 20-second launch budget — so
   `scripts/ci/warm-chrome.sh` starts it once, headless, before the tests. A warm-up, not a gate or a
@@ -326,6 +345,48 @@ Notable details:
   next person who needs its frames — and it owes the same Settings tallies a dark `--settings-only`
   leg would, which is why there is no such leg. The viewports are walked one after the other: walking
   them at once, as three software-rendered Chromes on a 4x8, timed out in 3 of 7 runs under load.
+- **The browser gate runs only when something it reads changed.** The three legs are ~19% of the
+  Namespace bill (measured 2026-10-29 to 11-06: 63k of 339k unit-minutes) and about a quarter of pull
+  requests change nothing they read — a daemon-only, CLI-only or docs-only change. `pwa-relevance`
+  (`PWA Relevance`, `scripts/ci/pwa-relevance.sh`) lists the pull request's files through the API
+  (a rename counts both its old and new path; a pull request of 3000 files or more, which the files API
+  cuts off, always runs) and writes `run=true|false`; `pwa-screenshot` has `needs: pwa-relevance` and
+  `if: ${{ !cancelled() && needs.pwa-relevance.outputs.run != 'false' }}`, so when it is `false` every
+  leg is **skipped, and a skipped check counts as passed** — no stub check, no branch-protection change,
+  and a job and not `paths-ignore` for the reason `E2E Relevance` gives. **Only a `false` skips the
+  gate**: a relevance job that failed, timed out or was skipped leaves the output empty and the gate
+  runs, so the job fails open as well as the script. Another job may `need` `pwa-screenshot` only if its
+  own `if:` starts with `always()` or `!cancelled()` (the `Full CI` verdict; the validator reads the
+  `needs:` as an inline list, a block list or a flow sequence over several lines). The gate's `if:` is a
+  conjunction (no top-level `||`) of `!cancelled()`, the relevance conjunct and nothing else but
+  **event conjuncts**: expressions over `github.event` / `github.event_name` (a label, an action) built
+  from `==`, `!=`, `!`, `&&`, `||`, `contains()` and quoted strings, which is how the `full-ci` label
+  narrows when the whole workflow runs the gate. A literal such as `false`, a `needs`, `steps`, `env`, `vars` or
+  `secrets` expression, or any other function fails the validator. What it cannot judge is whether an
+  event conjunct means what it should: a reviewer owns that. The decision is self-contained: it reads
+  nothing but the pull request's file list, so it holds however and whenever the gate is triggered.
+  - **What selects the gate**: anything under `packages/pwa/`, `packages/protocol/`, `packages/relay/`
+    or `packages/fleet/` (the PWA's workspace closure: it imports all three, and `fleet` and `relay`
+    import `protocol`), the toolchain (`flake.nix`, `flake.lock`, `nix/**`, `bun.lock`, any
+    `package.json`, `bunfig*.toml`, `tsconfig*`), `.github/**`, `scripts/ci/**` and
+    `scripts/local/setup.sh`. The list is generous: a path that is not certainly irrelevant is relevant.
+    `main`, the nightly and `workflow_dispatch` always run it, and any doubt (not a pull request, an
+    unreadable or empty file list) runs it.
+  - **Held to the code, not to memory**: `scripts/validate/pwa-relevance.sh` (`a-pwa-relevance`)
+    traces every import of the harness bundle (`harness/screenshot.ts`, `harness/main.tsx`)
+    transitively, resolves each workspace package it imports through the manifests, and fails unless
+    every file or package outside `packages/pwa/` selects the gate. It also fails if a docs-only or
+    daemon-only change selects it, if a change that mixes docs with one input does not, if `main`,
+    dispatch or any doubt would skip it, or if `ci.yaml` stops gating exactly `pwa-screenshot` on the
+    decision or lets the relevance job grow a nix shell, a Namespace runner or a `needs`. It checks the
+    fail-open `if:` and the allow-list of its other conjuncts, a dependant's `needs:` in all three YAML
+    shapes (each tested against a fixture workflow), a rename moving an input out, a pull request over
+    the files API's cut-off, that no relative import in the traced workspace packages leaves its own
+    package, and that no `@ferretry/*` import in them names a package their `package.json` does not
+    declare (bun hoisting would resolve it, the manifest-following trace would not).
+  - **It adds ~10 s before the gate legs can request runners**: it is `ubuntu-latest` with a sparse
+    checkout of `scripts/ci` and two API calls, and `pwa-screenshot` cannot ask for its Namespace runner
+    until it has queued and run (more when GitHub is busy). The gate waits on it, so keep it bare.
 - **Smoke covers the platforms compile cannot.** `linux-x64-baseline` on `ubuntu-latest`,
   `linux-arm64` on `ubuntu-24.04-arm`; `darwin-arm64` on `macos-15` is the separate `smoke-darwin`
   job, whose runner may not come (see [macOS runner shortage](#macos-runner-shortage)). Smoke is the one job that
@@ -368,8 +429,12 @@ code, run where a failure cannot hold anything up.
   daily run of the contract suite against the newest upstream `claude-code` and `codex` that files its
   own issue on drift.
 - **Concurrency.** Like `CI`, a pull request's runs are grouped by its number and a newer push cancels
-  the older; every other run has a group of its own, so a push to `main` and the nightly never cancel
-  each other.
+  the older, and every push to `main` shares one group with `cancel-in-progress: false` — exactly the
+  shape `ci.yaml` uses: one run running, one waiting, and a newer push replaces the waiting one. A burst
+  of merges therefore runs the tier at most twice instead of once per merge (it ran 557 times in nine
+  days, each on a 4x8), and a run that has started is never cancelled. Nothing is lost: the tier only
+  files issues, and the newer run proves every commit the older one held. The nightly and a manual
+  dispatch keep a group of their own run id, so neither is ever superseded or supersedes a `main` run.
 
 ## Release gating
 
@@ -389,7 +454,7 @@ product, fixed at the root, never retried ([Testing](../testing/index.md#the-fou
 
 `E2E` (`.github/workflows/e2e.yaml`) runs every journey in `tests/e2e/` against the compiled `fy`/`fyd`, the
 real built PWA, the runner's Google Chrome and a local rendezvous ([Testing](../testing/index.md)). Each
-runner runs `nix develop .#ci -c ./scripts/ci/e2e.sh`, which compiles the binaries and hands off to
+runner runs `nix develop .#ci -c ./scripts/ci/e2e.sh`, which compiles this host's binaries and hands off to
 `scripts/test/run-e2e.sh`. That script resolves the real tmux and the compiled CLI, typechecks the
 harness, owns the suite root and cleans it up.
 
@@ -450,8 +515,11 @@ into **`E2E Slow Journeys`**.
   two journeys hung their shards for 600 s and 900 s.
 - **No build-once job, measured.** A shard spends about 40 s before its first journey. Of that, about
   20 s is the Nix shell (substituted from cache.nixos.org, nothing built), about 2 s is `bun install`,
-  about 6 s is compiling every target, and about 3 s is the harness typecheck. A job that compiled
-  once and handed the binaries to the shards would save the 6 s per shard. It would also add a whole
+  about 3 s is the harness typecheck. Compiling is only the host's target: `e2e.sh` sets
+  `COMPILE_TARGETS=linux-x64-baseline` (derived from `uname`, the way `run-e2e.sh` resolves the CLI and
+  the journeys name the daemon), where all nine release binaries took 6–15 s; the release path never sets
+  it and still compiles every target. A job that compiled
+  once and handed the binaries to the shards would save that per shard. It would also add a whole
   job's startup, setup and artifact round trip in front of every shard, which is a net loss of wall
   clock. The PWA bundle cannot be shared either: it is built inside the suite, against the loopback
   relay directory's port, and takes about 5 s.
@@ -495,14 +563,14 @@ Every CI job carries `timeout-minutes`, sized at about two to three times its no
 a wedged job holds its runner for GitHub's six-hour default. On 2026-10-29 the daemon integration group
 hung inside a test and held its runner for two hours, three runs in a row, before anyone cancelled it.
 
-- The integration matrix (`int`) has `timeout-minutes: 20`; its slowest group takes about eight
+- The integration matrix (`int`) has `timeout-minutes: 20`; its slowest group takes about three to four
   minutes.
 - The e2e shards have `timeout-minutes: 20` (`E2E Slow`: 25); see [E2E tier](#e2e-tier).
 - The [realworld workflow](#realworld-workflow) jobs: `realworld` 30, `harness-contract` 30,
   `darwin-confinement` 20, `safari-sandbox-shell` 20, `report` 10, `changes` 5. A machine-dependent test
   that hangs is a red realworld job, never a held runner.
 - Every other job, sized at two to three times its p95 over the week to 2026-10-29: `CI` —
-  `precommit` 10, `build-checks` 20, `pwa-screenshot` 20, `test` (unit) 15, `compile` 15, `sit` 10,
+  `precommit` 10, `build-checks` 20, `pwa-screenshot` 20, `pwa-relevance` 5, `test` (unit) 15, `compile` 15, `sit` 10,
   `smoke` 10, the two ledgers 5; `E2E`/`E2E Slow` relevance and summary 5; `Harness Contract (latest)`
   20 and its report 10; `CD` `compile` 15, `goreleaser` 30 and `sign` 15; the darwin smoke
   (`smoke-darwin.yaml`) attempts 10 each, backoffs 5 and 8, verdict 5; `macOS Advisory` 5; `Deploy PWA to Pages` build 15, sign 10,

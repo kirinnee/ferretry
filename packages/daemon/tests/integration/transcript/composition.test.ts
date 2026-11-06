@@ -32,6 +32,18 @@ describe('daemon transcript composition', () => {
     should(searched.every(match => match.snippet.toLowerCase().includes('synthetic'))).be.true();
   });
 
+  it('should report every service into the one journal it was handed, so one ready step reaches every writer', () => {
+    // Arrange
+    const lines: string[] = [];
+    const journal = { step: (name: string) => lines.push(name), state: (message: string) => lines.push(message) };
+
+    // Act
+    const subject = buildWorld({}, { userHome: ABSENT_USER_HOME, notices: journal });
+
+    // Assert — the world's own notices and the boot preflight's are that journal, not a second writer.
+    should(subject.notices).equal(journal);
+  });
+
   it('should carry the user home it was given, and refuse one that is not absolute', () => {
     // Act
     const subject = buildWorld({}, { userHome: ABSENT_USER_HOME });

@@ -13,6 +13,7 @@ import {
 } from '../../../src/lib/session/send/service.ts';
 import {
   type SendFate,
+  SendNotReady,
   type SendPaneObservation,
   SendPending,
   type SendRecord,
@@ -66,6 +67,7 @@ describe('the attention messenger', () => {
     for (const failure of [
       composerOccupiedRefusal('half a thought'),
       composerUnreadableRefusal(),
+      new SendNotReady('the agent never came to a prompt', 'busy'),
       new SendPending('starting'),
     ])
       await should(messenger(failure).messenger.send(SESSION, 'm', 'id')).be.rejectedWith(AgendaNotTyped);

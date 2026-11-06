@@ -916,3 +916,54 @@ describe('ConfigFilesService serialisation', () => {
     should((await next).evaluation.effective.warden.layers.llm).be.false();
   });
 });
+
+describe('ConfigFilesService.write — limits.yaml with the measured budget', () => {
+  const GIB = 1024 ** 3;
+  const context = { memoryCeilingBytes: 57 * GIB };
+  const NO_CAPS = [
+    'fleet:',
+    '  memoryMax: infinity',
+    '  memoryHigh: infinity',
+    '  swapMax: infinity',
+    'perFerret:',
+    '  memoryMax: infinity',
+    '  memoryHigh: infinity',
+    '',
+  ].join('\n');
+
+  it('should hold an agent write that removes every memory cap when nothing was written before', async () => {
+    // Arrange
+    const { service, directory } = setup({}, {}, context);
+
+    // Act
+    const outcome = await service.write('limits.yaml', NO_CAPS, ABSENT_CONFIG_ETAG, false);
+
+    // Assert
+    should(outcome.outcome).equal('pending');
+    should(outcome.pending?.changes.length).be.aboveOrEqual(5);
+    should(directory.files.get('limits.yaml')).equal(NO_CAPS);
+    should(service.current().evaluation.effective.limits).eql({});
+  });
+
+  it('should hold the same write when the editor has no measured budget at all', async () => {
+    // Arrange
+    const { service } = setup({}, {}, undefined);
+
+    // Act
+    const outcome = await service.write('limits.yaml', NO_CAPS, ABSENT_CONFIG_ETAG, false);
+
+    // Assert
+    should(outcome.outcome).equal('pending');
+  });
+
+  it('should still apply a cap that is provably below the computed default at once', async () => {
+    // Arrange
+    const { service } = setup({}, {}, context);
+
+    // Act
+    const outcome = await service.write('limits.yaml', 'fleet:\n  memoryMax: 30G\n', ABSENT_CONFIG_ETAG, false);
+
+    // Assert
+    should(outcome).eql({ etag: digest('fleet:\n  memoryMax: 30G\n'), outcome: 'applied', loosened: false });
+  });
+});

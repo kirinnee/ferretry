@@ -64,6 +64,35 @@ of memory over the main thread, because each thread carries about 14 MB of engin
 
 Restart the daemon after changing the setting: `fy daemon restart`.
 
+## A waiting fy is small
+
+Every agent pane keeps one `fy mcp serve` running for its whole life, and a lead blocks on `fy wait`
+for each sub-ferret. On a box running thirty-odd ferrets that was about fifty `fy` processes, each holding
+the whole CLI — every command group and every protocol schema, evaluated before it read its arguments.
+
+So the `fy` entry is a router (docs/standards/three-layer-architecture/index.md § Composition Root).
+`fy mcp …` and the reads (`wait`, `stream`, `events`, `logs`, `snapshot`, `attach`) load a **slice**:
+their own command group on the same skeleton and the same daemon connection, and nothing else. Every
+other command loads the full program as before. Idle memory, measured on Linux x64 against a daemon that
+never answers:
+
+| Command          | Before | After  |
+| ---------------- | ------ | ------ |
+| `fy mcp serve`   | 143 MB | 103 MB |
+| `fy wait <id>`   | 144 MB | 113 MB |
+| `fy stream <id>` | 144 MB | 113 MB |
+| `fy status <id>` | 143 MB | 140 MB |
+
+A bare Bun binary is 17 MB. Most of what is left in a slice is the typed daemon client
+(`@ferretry/protocol/client`), which imports the schemas of every route it can call.
+
+**One value through a barrel loads the whole barrel.** The binary is one bundle, and a module reached
+through `@ferretry/protocol` (or `@ferretry/fleet`) evaluates every module that barrel re-exports,
+however little of it the importer uses: one constant cost 85 MB in a probe. Code a slice reaches
+therefore imports values from a leaf subpath — `@ferretry/protocol/<module>`,
+`@ferretry/fleet/pane-contract`, `@ferretry/fleet/user-home` — and keeps `import type` on the barrel,
+which costs nothing at run time.
+
 ## A busy disk
 
 When other programs keep the disk busy, writing a file and waiting for it to reach the disk (`fsync`)

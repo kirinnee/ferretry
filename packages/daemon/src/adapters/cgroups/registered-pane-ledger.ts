@@ -1,7 +1,27 @@
-import { failureText, type CgroupPaneLedger, type LivePanes, type ManagedPane } from '../../lib/cgroups/index.ts';
+import { failureText } from '../../lib/cgroups/index.ts';
 import { hasDurableTerminalEvidence, terminalPaneIdentityMatches } from '../../lib/session/reap.ts';
 import type { RegisteredPaneObserver, TerminalReapSessionDirectory } from '../../lib/session/reap-service.ts';
 import type { TerminalPaneRegistrationScan } from '../session/lifecycle/durable-terminal-pane-reap.ts';
+import type { LivePaneSource } from './pane-session-memory.ts';
+
+/** One live managed pane, from this daemon's own durable registration ledger. */
+export interface ManagedPane {
+  readonly sessionId: string;
+  readonly pid: number;
+}
+
+/** A pane this daemon registered whose live identity could NOT be established. */
+export interface UnprovenPane {
+  readonly sessionId: string;
+  readonly failure: string;
+}
+
+/** What the ledger could and could not establish about this daemon's live panes. */
+export interface LivePanes {
+  readonly panes: readonly ManagedPane[];
+  readonly unproven: readonly UnprovenPane[];
+  readonly incomplete?: string;
+}
 
 /** The tolerant half of the registration ledger — see `DurableTerminalPaneStore.scan`. */
 export interface TerminalPaneRegistrationScanner {
@@ -35,7 +55,7 @@ export interface TerminalPaneRegistrationScanner {
  * hand-edited file can no longer take the whole resource-limit surface down with it, which is what
  * an exception thrown from here used to do.
  */
-export class RegisteredCgroupPaneLedger implements CgroupPaneLedger {
+export class RegisteredCgroupPaneLedger implements LivePaneSource {
   constructor(
     private readonly daemonId: string,
     private readonly registry: TerminalPaneRegistrationScanner,

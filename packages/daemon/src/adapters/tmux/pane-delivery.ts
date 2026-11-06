@@ -90,6 +90,29 @@ export class PaneDeliveryError extends Error {
 }
 
 /**
+ * The pane never came to a prompt, so NOTHING OF THE PAYLOAD WAS TYPED: every way `waitReady` gives up.
+ *
+ * Its own type because a send must tell it from a failure after the keys (&B153). A send whose session record
+ * said idle while its agent was still mid-turn waited here half a minute and threw a plain delivery error; the
+ * send path could not tell "no key went" from "keys went somewhere", so it left the message `typing` behind a
+ * row nothing ever looked at again, and eleven queues stalled for up to six hours. Keys a startup dialog's
+ * known answer needed may have been pressed on the way, but never a character of the payload.
+ */
+export class PaneNotReadyError extends PaneDeliveryError {
+  constructor(
+    message: string,
+    /** What the pane was doing instead: still at work, behind a dialog, or gone. */
+    readonly why: PaneNotReadyCause,
+  ) {
+    super(message);
+    this.name = 'PaneNotReadyError';
+  }
+}
+
+/** Why a pane never came to a prompt. */
+export type PaneNotReadyCause = 'busy' | 'dialog' | 'exited';
+
+/**
  * The pane died while `waitStartupSettled` was watching it. `parked` is whether a frame showed the first turn
  * parked behind the harness's startup before it died: only then is the turn known never to have run.
  */
@@ -150,7 +173,10 @@ export class TmuxPaneDelivery {
       const step = nextReadinessStep(frame, attemptsByKind, options);
       if (step.kind === 'ready') return;
       if (step.kind === 'exited' || step.kind === 'stuck')
-        throw new PaneDeliveryError(`${step.reason}; tmux session ${session}`);
+        throw new PaneNotReadyError(
+          `${step.reason}; tmux session ${session}`,
+          step.kind === 'exited' ? 'exited' : 'dialog',
+        );
       // A composer holding typed input will never become ready by waiting, and the wait is long. Two
       // frames in a row, so a repaint caught halfway through clearing a submit is not mistaken for one.
       // Text parked behind Codex's startup wait is not a draft: Codex accepted it, so just keep waiting.
@@ -171,10 +197,11 @@ export class TmuxPaneDelivery {
       attempt++;
     }
     // Name the dialog when one is why: "not ready" sent the reader to the transcript, which was fine.
-    throw new PaneDeliveryError(
+    throw new PaneNotReadyError(
       blocked === undefined
         ? `tmux session ${session} did not become ready to accept a turn`
         : `tmux session ${session} is blocked by a prompt on screen: "${blocked}" — answer it in the terminal`,
+      blocked === undefined ? 'busy' : 'dialog',
     );
   }
 

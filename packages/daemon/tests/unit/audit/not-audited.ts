@@ -31,7 +31,6 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/unlock/options': 'mints a one-time challenge; the unlock that spends it is audited',
   'POST /v1/secrets/imports':
     'mints a one-time public key for a secret copy; the import that spends it is audited under its id',
-  'PATCH /v1/cgroups/config': 'resource limits on the host’s own sessions; not who may reach the machine',
   'POST /v1/gc': 'scratch cleanup of state the daemon owns; reaches nobody',
   'POST /v1/push/seen':
     'takes an opened agenda item’s alerts down on the owner’s other devices; changes nobody’s access, and the clear is recorded in the notification ledger',
@@ -99,6 +98,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     "the owner dismissing, snoozing or resolving a machine notice; the item's own history records it, and it widens nobody's access",
   'POST /v1/sessions/:sessionId/notify': 'an agent notifying; its payload is labelled with the agent (see L5)',
   'POST /v1/sessions/:sessionId/pins': 'a bookmark in a transcript',
+  'POST /v1/renders':
+    'saves a picture a ferret made into the daemon’s state home, validated and size-capped; it changes nobody’s access, and a ferret or the owner at the machine is the only caller',
   'POST /v1/sessions/:sessionId/pin': "the owner's own sidebar preference; it widens nobody's access",
   'POST /v1/sessions/:sessionId/unpin': "the owner's own sidebar preference; it widens nobody's access",
   'POST /v1/sessions/:sessionId/shared-draft':
@@ -113,7 +114,7 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'PATCH /v1/analytics/pricing': 'the cost table for usage reports; reaches nobody',
   'POST /v1/analytics/pricing/sync/preview': 'a read with a body: previews a price sync',
   'POST /v1/analytics/pricing/sync/apply': 'the cost table for usage reports; reaches nobody',
-  'POST /v1/sessions/:sessionId/terminals/:terminalId': 'renames a terminal; opening and attaching are audited',
+  'PATCH /v1/sessions/:sessionId/terminals/:terminalId': 'renames a terminal; opening and attaching are audited',
   // The agent tools are audited MORE finely than this table can: a route rule may read a path parameter
   // and response names, never the body, and what matters here — which tool, on which named surface,
   // how much was typed — is in the body. `AgentToolService` writes one `agent.tool` record per call and

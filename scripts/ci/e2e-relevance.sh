@@ -26,7 +26,7 @@ decide() {
 [ -z "${PR_NUMBER:-}" ] && decide true "no pull request number"
 
 set +e
-files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"
+files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[] | .filename, (.previous_filename // empty)')"
 listed=$?
 set -e
 [ "${listed}" -ne 0 ] && decide true "the pull request's files could not be listed"

@@ -377,7 +377,7 @@ files-authoritative / index-disposable split gets re-established.
 4. **The PWA** splits per Survey D's directory map, with the **56 single-daemon assumption sites**
    (2 Vite proxy bindings + 54 runtime bindings/stores/caches) collected into one dedicated unit
    that lands _before_ any PWA feature unit.
-5. Each unit's brief carries its exact file list, derived from `daemon-deps.tsv` at authoring
+5. Each unit's brief carries its exact file list, derived from the source import graph at authoring
    time, so ownership stays exclusive across open PRs. The unit must verify that list against the
    source before writing anything.
 6. Tests: the 128 source test files travel with their subject. Pure logic lands in the unit tier,

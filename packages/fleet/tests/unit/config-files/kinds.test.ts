@@ -6,10 +6,12 @@ import {
   type ConfigSchemaId,
   configSchemaModeline,
   DEFAULT_LEARNING_CONFIG,
+  DEFAULT_LIMITS_CONFIG,
   DEFAULT_PACK_CONFIG,
   DEFAULT_VOICE_CONFIG,
   DEFAULT_WARDEN_CONFIG,
   type LearningConfig,
+  type LimitsConfig,
   type PackConfig,
   type PackFile,
   packConfigFromFile,
@@ -20,10 +22,10 @@ import {
 import should from 'should';
 import { checkConfigFile } from '../../../src/lib/config-files/check.ts';
 import {
+  accountDefaultsAdditions,
   CONFIG_FILE_SCHEMAS,
   CONFIG_FILE_STARTERS,
   configFileBody,
-  accountDefaultsAdditions,
   configLoosening,
   configValue,
   type MachineFileValue,
@@ -61,6 +63,7 @@ describe('SINGLETON_DEFAULTS', () => {
     should(SINGLETON_DEFAULTS.warden).equal(DEFAULT_WARDEN_CONFIG);
     should(SINGLETON_DEFAULTS.learning).equal(DEFAULT_LEARNING_CONFIG);
     should(SINGLETON_DEFAULTS.voice).equal(DEFAULT_VOICE_CONFIG);
+    should(SINGLETON_DEFAULTS.limits).equal(DEFAULT_LIMITS_CONFIG);
   });
 
   it('should switch agents off Ferretry settings by default, since that switch is the kill switch', () => {
@@ -187,6 +190,7 @@ describe('configFileBody', () => {
     ['warden', DEFAULT_WARDEN_CONFIG],
     ['learning', DEFAULT_LEARNING_CONFIG],
     ['voice', DEFAULT_VOICE_CONFIG],
+    ['limits', DEFAULT_LIMITS_CONFIG],
   ] as const)('should write a %s value as it is', (schema, value) => {
     // Act + Assert
     should(configFileBody(schema, value)).equal(value);
@@ -758,6 +762,7 @@ const CANONICAL_PATHS: Readonly<Record<ConfigSchemaId, string>> = {
   learning: 'learning.yaml',
   voice: 'voice.yaml',
   pack: 'pack.yaml',
+  limits: 'limits.yaml',
   modelsGuide: 'models-guide.yaml',
   accountDefaults: 'account-defaults.yaml',
   preset: 'presets/my-preset.yaml',
@@ -932,5 +937,56 @@ describe('configLoosening — account-defaults.yaml', () => {
   it('should start from no defaults', () => {
     // Assert
     should(SINGLETON_DEFAULTS.accountDefaults).deepEqual({});
+  });
+});
+
+describe('configLoosening — limits.yaml', () => {
+  const GIB = 1024 ** 3;
+  const limits = (value: unknown): LimitsConfig => CONFIG_FILE_SCHEMAS.limits.parse(value) as LimitsConfig;
+  const context = { memoryCeilingBytes: 48 * GIB };
+
+  it('should hold switching limits off, with a sentence the owner can confirm', () => {
+    // Act
+    const actual = configLoosening('limits', DEFAULT_LIMITS_CONFIG, limits({ enabled: false }), context);
+
+    // Assert
+    should(actual).deepEqual(['ferret limits are switched off, so ferrets may take all of the machine']);
+  });
+
+  it('should hold a cap above the computed default but let a tighter one apply at once', () => {
+    // Act
+    const raised = configLoosening(
+      'limits',
+      DEFAULT_LIMITS_CONFIG,
+      limits({ perFerret: { memoryMax: '40%' } }),
+      context,
+    );
+    const tighter = configLoosening(
+      'limits',
+      DEFAULT_LIMITS_CONFIG,
+      limits({ perFerret: { memoryMax: '20%' } }),
+      context,
+    );
+
+    // Assert
+    should(raised).deepEqual(['the hard memory limit of each ferret was raised']);
+    should(tighter).deepEqual([]);
+  });
+
+  it('should be judged without the budget when the check does not know it', () => {
+    // Act
+    const actual = configLoosening(
+      'limits',
+      limits({ fleet: { memoryHigh: '10G' } }),
+      limits({ fleet: { memoryHigh: '50%' } }),
+    );
+
+    // Assert
+    should(actual).deepEqual(['the soft memory limit for all ferrets together was raised']);
+  });
+
+  it('should read an empty limits.yaml as the defaults', () => {
+    // Act + Assert
+    should(configValue('limits', {})).deepEqual(DEFAULT_LIMITS_CONFIG);
   });
 });

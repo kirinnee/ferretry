@@ -32,6 +32,7 @@
 @import '../components/live-voice-bar.css';
 @import '../components/agenda-message.css';
 @import '../components/read-aloud.css';
+@import '../components/queue-page.css';
 
 /* ============================================================================
    Ferretry UI design system — base elements, shell/layout and component classes.

@@ -1,17 +1,9 @@
 #!/usr/bin/env bun
 import { createHash, randomBytes } from 'node:crypto';
-import {
-  accessSync,
-  chmodSync,
-  existsSync,
-  constants as fsConstants,
-  realpathSync,
-  statSync,
-  writeSync,
-} from 'node:fs';
-import { mkdir, realpath, rm, stat } from 'node:fs/promises';
+import { accessSync, existsSync, constants as fsConstants, realpathSync, statSync, writeSync } from 'node:fs';
+import { access, chmod, mkdir, realpath, rm, stat } from 'node:fs/promises';
 import { homedir, hostname, tmpdir, userInfo } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import {
   AGENDA_ENV,
   ALWAYS_ON_SECTIONS,
@@ -81,6 +73,7 @@ import {
   InputQuarantineEventSchema,
   ioPressureView,
   type LearningConfig,
+  type LimitsConfig,
   localOnlyNotice,
   MACHINE_AGENDA_ID,
   MAX_WORK_RELATED_TEXT_LENGTH,
@@ -98,6 +91,7 @@ import {
   readLoopbackFirewallMarker,
   refusalNotice,
   resolveBrowserPorts,
+  resolveLimits,
   type SessionConfig,
   SessionConfigSchema,
   type SessionHandoff,
@@ -260,6 +254,7 @@ import {
   BunSqliteIndexFactory,
   bundledWorkerUrl,
   CachedUsageFeed,
+  CgroupFleetMemory,
   CliUpdateLauncher,
   CloudflaredLocator,
   ConfigGrantDocument,
@@ -272,6 +267,7 @@ import {
   daemonSecretSourceProgram,
   deliverStopSignal,
   describeWorkerProbes,
+  deviceOfPath,
   ExplicitDaemonConfig,
   FetchEnhancementTransport,
   FileAuditJournal,
@@ -280,10 +276,9 @@ import {
   FileCatalogDocumentStore,
   FileCatalogMembersStore,
   FileCatalogSharesStore,
-  FileCgroupApplyStatusStore,
-  FileCgroupConfigStore,
   FileDaemonConfig,
   FileLaneSetStore,
+  FileLegacyCgroupDocuments,
   FileLegacyWireUseStore,
   FileLinkDocumentStore,
   FileLinkKeyVault,
@@ -342,6 +337,7 @@ import {
   NpmHarnessLatest,
   type OpenedDaemonStorage,
   PaneProcessInventory,
+  PaneSessionMemory,
   PerformanceStopwatch,
   ProcCgroupPlacements,
   ProjectMcpServers,
@@ -367,6 +363,7 @@ import {
   StorageConversationOwners,
   StorageSessionFacts,
   StorageSessionProjectStamp,
+  SysfsDiskScheduler,
   SystemClock,
   SystemFrameClock,
   SystemGrantClock,
@@ -376,6 +373,7 @@ import {
   TmuxPaneSnapshot,
   TranscriptFileExposure,
   TunnelProxyProbe,
+  unmeasuredHostFacts,
   type ViewerSocket,
   WebCryptoPasskeyCrypto,
   WebCryptoRelayIdentityKeys,
@@ -425,6 +423,7 @@ import {
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
+import { FileRenderRepository } from '../src/adapters/renders/index.ts';
 import { releaseAcquired, terminationGate } from '../src/adapters/runtime/termination-gate.ts';
 import {
   AccountAutoResumeAvailability,
@@ -650,6 +649,7 @@ import {
   ReopenDeliveryLadder,
   rungsOf,
   SessionCards,
+  type SessionLivenessGuard,
   type SessionLivenessSource,
   stageGateLanes,
   startOnCard,
@@ -722,6 +722,7 @@ import {
   instrumentChildProcesses,
   ProcessGauges,
 } from '../src/adapters/runtime/performance-instruments.ts';
+import { OrderedLogWriter } from '../src/adapters/runtime/ordered-log-writer.ts';
 import { forgetFerretIdentity } from '../src/adapters/tmux/forget-ferret-identity.ts';
 import { CatalogInstallService } from '../src/lib/catalog-installs/service.ts';
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
@@ -833,8 +834,8 @@ import {
   CatalogLinkService,
   CatalogMemberService,
   type CatalogSubsystem,
+  type CgroupHostFacts,
   CgroupLaunchPlanner,
-  CgroupService,
   ChallengeLedger,
   ClaudeTranscriptParser,
   type ClockPort,
@@ -919,6 +920,7 @@ import {
   dialledRelayUrl,
   directCarrierSocketRoute,
   doneMarkerCertifiesTurn,
+  EnforcementRuntime,
   EphemeralAwareRedactor,
   EphemeralValues,
   EventLoopLagMeter,
@@ -934,6 +936,7 @@ import {
   FleetLaunchEnvironment,
   FleetLaunchRenewal,
   FleetManifestUnreadableError,
+  FleetMemoryWatcher,
   FleetPublication,
   FleetReading,
   FleetRefreshService,
@@ -1006,9 +1009,12 @@ import {
   LaneProposalAcceptance,
   LaneSetService,
   type LearningSubsystem,
+  LegacyLimitsMigration,
   LegacySendReproof,
   LegacyWireUseCounter,
   LessonsService,
+  LIMITS_TICK_MS,
+  LimitsService,
   LiveDeviceConnections,
   LiveMemberSessions,
   type LivenessSample,
@@ -1048,6 +1054,7 @@ import {
   MemberJoinGate,
   MemberJoinProver,
   MemberPasskeyService,
+  MemoryKillExitPort,
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
@@ -1135,6 +1142,7 @@ import {
   planStartupEffort,
   portCandidates,
   previousConversation,
+  probeEnforcement,
   publishableDirectCarrier,
   publisherLabel,
   QUEUE_ANSWER_WAIT_MS,
@@ -1157,6 +1165,7 @@ import {
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   RememberedHandoverReceipts,
+  RenderService,
   RestartBusy,
   RestartService,
   type RestartSubject,
@@ -1574,7 +1583,7 @@ export interface WorktreeComposition {
  * It exists because the two repository gates pull in opposite directions: the architecture gate
  * forbids `src/lib` from importing `src/adapters`, while production dead-code analysis requires
  * every module to be reachable from the package entry. A composition root outside both directories
- * satisfies each — the same reason `packages/cli/bin/fy.ts` is shaped this way.
+ * satisfies each — the same reason `packages/cli/bin/program.ts` is shaped this way.
  */
 export interface DaemonWorld {
   readonly role: typeof packageRole;
@@ -2255,7 +2264,7 @@ function createBoardWorld(
   agendaItems: (sessionId: string) => Promise<readonly AgendaItem[]>,
   bin: string,
   /** Every session's life-signs, with the Warden's liveness ledger laid over them, for "last touched". */
-  sessions: SessionLivenessSource,
+  sessions: SessionLivenessSource & SessionLivenessGuard,
   /** Registers a folder as a project: the catalog `POST /v1/projects` writes through, so both share its dedupe. */
   registrar: ProjectRegistrar,
   /** The folders a ferret's repository is registered from (`projectRoots`), read per adoption. */
@@ -2318,6 +2327,7 @@ function createBoardWorld(
     ),
     attachments,
     done: new DoneDeliveryLadder(new SendReopenMessenger(ownerSends), diagnostics),
+    liveness: sessions,
     activity: new LivenessActivityDeriver({ sessions, clock }),
     // A card's ask goes on its ferret's agenda home: the homes are read too, so a sub-ferret's card finds its agenda.
     agenda: new AgendaCardLinks(
@@ -3089,6 +3099,7 @@ function createSessionControlSubsystem(
             brief: request.prompt,
             parent: request.parent,
             delegation: startDelegation,
+            ...(caller.pack === true ? { viaPack: true as const } : {}),
           });
         await lifecycle.start(
           id,
@@ -6995,7 +7006,9 @@ function createTerminalSubsystem(
       idleTimeoutMs: TERMINAL_IDLE_TIMEOUT_MS,
       isDirectory: async path => {
         try {
-          return statSync(path).isDirectory();
+          // Absolute before it leaves the loop: a relative name on an I/O thread could resolve inside a macOS
+          // descriptor bracket's folder (packages/fleet/src/adapters/descriptor-calls.ts).
+          return (await stat(resolvePath(path))).isDirectory();
         } catch {
           return false;
         }
@@ -7421,26 +7434,42 @@ async function decideAddress(
  * A FAILED WRITE IS SWALLOWED. Losing the log is bad; refusing to boot because the log could not be
  * written is worse, and a daemon that died writing about its own startup would be the least
  * debuggable outcome of all.
+ *
+ * ONCE THE DAEMON SERVES, LINES GO OUT OFF THE LOOP. Everything above is about a boot that wedges; after the
+ * `ready` step the same synchronous write only ever held a serving daemon's loop while the disk was slow
+ * (9.9 s of stalls on 2026-11-05). {@link OrderedLogWriter} keeps the order, and writes what is still queued
+ * synchronously when the process exits.
  */
-function bootJournal(level: LogLevel = 'info'): BootNoticePort {
+/** The boot journal, plus the one thing a stopping daemon asks of it: let what it queued reach the file. */
+interface DaemonJournal extends BootNoticePort {
+  /** Waits, at most `withinMs`, for every line written so far to reach the kernel. */
+  drain(withinMs: number): Promise<void>;
+}
+
+/** How long a stopping daemon waits for its log to reach the file before it exits anyway. */
+const LOG_DRAIN_MS = 2_000;
+
+function bootJournal(level: LogLevel = 'info'): DaemonJournal {
   const startedAtMs = Date.now();
   // Milestones are `info`; the things a human must act on are `warn` and are never filtered out —
   // a log level that could hide the reason a boot refused would recreate the empty-log defect on
   // purpose. `debug` selects the same records as `info` because nothing emits below it yet, which
   // the usage text says rather than implying a level that does something.
   const showSteps = level === 'debug' || level === 'info';
+  const log = new OrderedLogWriter(2);
   const line = (text: string): void => {
-    try {
-      writeSync(2, `${DAEMON_NAME} ${new Date().toISOString()} +${String(Date.now() - startedAtMs)}ms ${text}\n`);
-    } catch {
-      // Intentionally ignored: a stream this daemon cannot write to must not stop it starting.
-    }
+    log.write(`${DAEMON_NAME} ${new Date().toISOString()} +${String(Date.now() - startedAtMs)}ms ${text}\n`);
   };
   return {
     step: (name, detail) => {
       if (showSteps) line(detail === undefined ? name : `${name} — ${detail}`);
+      if (name === 'ready') {
+        process.once('exit', () => log.flushSync());
+        log.goAsync();
+      }
     },
     state: message => line(`! ${message}`),
+    drain: async withinMs => await log.drain(withinMs),
   };
 }
 
@@ -7725,6 +7754,14 @@ function createForkSubsystem(parts: ForkSubsystemParts): SessionForkSubsystem {
 export interface WorldSeams {
   /** This machine's user home, absolute. Both harness home directories are derived from it. */
   readonly userHome: string;
+  /**
+   * The journal every service of this world reports into. `execute` passes the ONE it built before the world,
+   * so the `ready` step that turns its writes asynchronous reaches every writer and their lines share one
+   * order; absent (a test or a probe building a world by itself), the world builds its own.
+   */
+  readonly notices?: BootNoticePort;
+  /** The machine as the limits need it, measured (asynchronously) by `main`; absent in a world nobody measured for. */
+  readonly cgroupHost?: CgroupHostFacts;
 }
 
 /** Builds the production adapter set. Subsystem units extend this as they land. */
@@ -7855,7 +7892,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * `+Nms` baseline, so two lines a person reads in one stream would disagree about when this daemon
    * started. Nothing else about it moved.
    */
-  const bootNotices = bootJournal(overrides.logLevel);
+  const bootNotices = seams.notices ?? bootJournal(overrides.logLevel);
   /**
    * "The configuration moved" (docs/config-files.md "Live changes"): ONE ledger every source of a change
    * announces into — a load that finds a file changed, a route that changes a login or a speed-up, a
@@ -7877,6 +7914,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * and a held loosening are said in this boot's journal, once each, when they are first seen.
    */
   const configDirectory = new FileConfigDirectory(paths.config, stateFiles);
+  // The machine, measured ONCE and asynchronously: how much memory the USER may spend (not how much RAM there is),
+  // which the limits and the loosening check both judge a cap against (docs/ferret-limits.md).
+  const cgroupHost = seams.cgroupHost ?? unmeasuredHostFacts();
   const configFiles = new ConfigFilesService({
     directory: configDirectory,
     accepted: new FileAcceptedConfigStore(join(paths.state, CONFIG_ACCEPTED_FILE), stateFiles),
@@ -7895,6 +7935,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     changes: configChanges,
     // A component source inside this daemon's own files is an error, never in effect (docs/secrets.md).
     checkContext: {
+      memoryCeilingBytes: cgroupHost.memoryCeilingBytes,
       componentSources: {
         fence: componentSourceFence(paths),
         userHome,
@@ -8132,21 +8173,31 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * request would let the effective limit the panel displays differ from the property the next
    * launch writes.
    */
-  const cgroupConfigStore = new FileCgroupConfigStore(stateFiles, paths);
-  const cgroupHost = hostCgroupFacts();
   // Bounded. Both callers hold the session lifecycle's barrier while this runs, so a user manager
   // that accepts a connection and never answers would otherwise stall every session start, stop and
   // resume in the daemon for as long as it stayed silent.
   const cgroupCommands = new SpawnCgroupCommands();
   const sessionSpawnFacts = new FileSessionSpawnFacts(stateFiles, paths);
+  /** What this machine can enforce, asked once at boot (below) and again after a launch that failed. */
+  const limitsEnforcement = new EnforcementRuntime(
+    async () => await probeEnforcement(cgroupHost, cgroupCommands),
+    () => Date.now(),
+  );
+  /** The memory watcher, once it exists (its timer starts with the state home): the exit pass asks it about kills. */
+  const memoryKills: { watcher: FleetMemoryWatcher | undefined } = { watcher: undefined };
+  /** The `limits.yaml` in effect: the last good version, or its defaults. */
+  const limitsInEffect = async (): Promise<LimitsConfig> => (await configFiles.inEffect()).evaluation.effective.limits;
   const cgroupLaunchPlanner = new CgroupLaunchPlanner({
-    store: cgroupConfigStore,
+    limits: limitsInEffect,
     host: cgroupHost,
     commands: cgroupCommands,
     sessions: sessionSpawnFacts,
+    enforcement: limitsEnforcement,
     // A nonce per launch, from the same source as every other unguessable value here, so a relaunch
     // cannot collide with a scope that is still deactivating.
     nonce: () => crypto.randomUUID().slice(0, 8),
+    // A ferret that had to start unconfined says so in the daemon log, not only in the status.
+    warn: message => bootNotices.state(message),
   });
   /**
    * The routing catalog, with its ONE refusal restated in a taxonomy `src/lib` may name.
@@ -9511,19 +9562,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // one of its own launches is replacing it.
           // Wrapped so a settled exit also frees the conversations that session held (account model §9.3).
           exits: recordBootExits(
-            new UnwatchedPaneExits(
-              new LeaseReleasingSessionExits(
-                new TmuxSessionExitObserver(
-                  paths.home,
-                  storage,
-                  new DurableTerminalPaneStore(storage, stateFiles, paths),
-                  launchTmuxCommands,
-                  launchGate,
-                  clock,
+            new MemoryKillExitPort(
+              new UnwatchedPaneExits(
+                new LeaseReleasingSessionExits(
+                  new TmuxSessionExitObserver(
+                    paths.home,
+                    storage,
+                    new DurableTerminalPaneStore(storage, stateFiles, paths),
+                    launchTmuxCommands,
+                    launchGate,
+                    clock,
+                  ),
+                  conversationLeases(storage),
                 ),
-                conversationLeases(storage),
+                watchedPanes,
               ),
-              watchedPanes,
+              { killedRecently: (id, ms) => memoryKills.watcher?.killedRecently(id, ms) },
             ),
           ),
           events: new FileSessionHealthEventSink(stateFiles, join(paths.home, 'health-events.jsonl'), clock),
@@ -9764,6 +9818,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       () => Date.now(),
       // The owner's own shell, resolved once and read from the document at that moment (not captured).
       systemLoginShell(async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.terminals.shell),
+      // A terminal an AGENT opens runs under the same limits as that ferret, through the same planner.
+      cgroupLaunchPlanner,
     ),
     agentBrowserDisplay,
     browserLauncher: new NodeSessionBrowserLauncher(
@@ -9776,6 +9832,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       process.env,
       browserTransport.connectWorker,
       {
+        limits: cgroupLaunchPlanner,
         // Read at every launch, so a switch applies the next time the browser starts. An unreadable
         // configuration launches headless rather than not at all.
         mode: async () => (await declaredAccountModel())?.machine.browserMode ?? 'headless',
@@ -10289,7 +10346,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock,
           scheduler: new TimerSendScheduler(),
           view: async id => await deliveryView.view(id),
-          transport: new SendPathQueueTransport(sends, sendLedger),
+          transport: new SendPathQueueTransport(sends, sendLedger, sendTracker),
           sessions: () => storage.listSessions().map(session => session.id),
           sleep: async milliseconds => await Bun.sleep(milliseconds),
         },
@@ -12718,6 +12775,88 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       setInterval(budgetTick, BUDGET_TICK_MS).unref();
       budgetTick();
       /**
+       * Ferret limits (docs/ferret-limits.md): what the machine can enforce, and a watch on the memory the
+       * fleet is using. The kernel's own counters are read on THIS timer only — never per request — and a
+       * ferret hears about being slowed or killed in its own journal. On macOS there are no counters, so the
+       * same timer sums each ferret's process tree and reports one over its share.
+       */
+      const limitsWatcher = new FleetMemoryWatcher({
+        fleet: new CgroupFleetMemory(cgroupHost),
+        memory: new PaneSessionMemory(
+          new RegisteredCgroupPaneLedger(
+            paths.home,
+            { list: daemonId => cgroupPanes.scan(daemonId) },
+            { list: daemonId => cgroupPanes.sessions(daemonId) },
+            new ExactTmuxPaneReaper(launchTmux),
+          ),
+          processTreeFor(),
+        ),
+        notes: {
+          note: async (sessionId, kind, data) => {
+            await storage.append(parseSessionId(sessionId), `session.${kind}`, data);
+          },
+          callsign: async sessionId =>
+            SessionConfigSchema.safeParse(await storage.readConfig(parseSessionId(sessionId))).data?.teammate,
+        },
+        now: () => Date.now(),
+        iso: milliseconds => new Date(milliseconds).toISOString(),
+      });
+      memoryKills.watcher = limitsWatcher;
+      const limitsTick = asActivity(activities, 'ferret limits', async () => {
+        const resolved = resolveLimits(await limitsInEffect(), { memoryCeilingBytes: cgroupHost.memoryCeilingBytes });
+        if (!resolved.enabled) return;
+        if (cgroupHost.platform === 'darwin') await limitsWatcher.tickWatch(resolved);
+        else if (cgroupHost.platform === 'linux' && cgroupHost.unifiedHierarchy) await limitsWatcher.tickLinux();
+      });
+      setInterval(limitsTick, LIMITS_TICK_MS).unref();
+      limitsTick();
+      // Asked once at boot, so the first status already says why nothing is enforced; never blocks the start.
+      void limitsEnforcement
+        .refresh()
+        .then(state => {
+          if (state.kind === 'direct') bootNotices.state(`ferret limits are not enforced: ${state.reason}`);
+        })
+        .catch(() => undefined);
+      // ONCE: the retired `cgroups/config.json` becomes `limits.yaml`, keeping what the operator chose.
+      const limitsFilePath = configFilePath({ kind: 'limits' });
+      const legacyLimitsDocuments = new FileLegacyCgroupDocuments(stateFiles, paths);
+      void new LegacyLimitsMigration({
+        readOld: async () => await legacyLimitsDocuments.readOld(),
+        retireOld: async () => await legacyLimitsDocuments.retireOld(),
+        readLimits: async () => {
+          const file = await configFiles.file(limitsFilePath);
+          return { exists: file.exists, text: file.exists ? file.text : '', etag: file.etag };
+        },
+        writeLimits: async (text, etag) => {
+          await configFiles.write(limitsFilePath, text, etag, false);
+        },
+      })
+        .run()
+        .then(outcome => {
+          if (outcome.outcome === 'migrated')
+            process.stderr.write(
+              `limits: cgroups/config.json is now ${limitsFilePath}; the old file is kept as config.json.migrated\n`,
+            );
+          else if (outcome.outcome === 'kept') process.stderr.write(`limits: ${outcome.because}\n`);
+        })
+        .catch((error: unknown) => {
+          process.stderr.write(
+            `limits: the cgroups/config.json migration did not run: ${error instanceof Error ? error.message : String(error)}\n`,
+          );
+        });
+      const limitsService = new LimitsService({
+        limits: limitsInEffect,
+        host: cgroupHost,
+        enforcement: limitsEnforcement,
+        disk: new SysfsDiskScheduler(async () => await deviceOfPath(paths.home)),
+        watcher: limitsWatcher,
+        placements: new ProcCgroupPlacements(),
+        daemonPid: process.pid,
+        file: limitsFilePath,
+        uid: process.getuid?.() ?? 0,
+        clock: iso => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+      });
+      /**
        * Pack mode (docs/pack-mode.md): over the same runtimes, logins and catalogs every picker reads, and
        * the same session start every surface uses — so its limits, its callsigns and its launch are the
        * ones a plain start gets. Probes run the runtime's own wrapper with its login's launch environment,
@@ -12804,15 +12943,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // A named folder is judged where it really is: `/tmp` is `/private/tmp` on macOS, and a link into a
         // temporary folder is still one. This machine's own TMPDIR and the runtime's temp folder count too.
         scratch: async cwd => {
-          const real = (path: string): string => {
-            try {
-              return realpathSync(path);
-            } catch {
-              return path;
-            }
+          // Resolved on the I/O threads: a start is a request, and a folder on a slow disk must not hold the loop.
+          // Made absolute first, on the loop: a request may name `.`, and a relative name on an I/O thread could
+          // resolve inside a macOS descriptor bracket's folder (packages/fleet/src/adapters/descriptor-calls.ts).
+          const real = async (path: string): Promise<string> => {
+            const absolute = resolvePath(path);
+            return await realpath(absolute).catch(() => absolute);
           };
           const roots = [...COMMON_SCRATCH_ROOTS, tmpdir(), ...(process.env.TMPDIR ? [process.env.TMPDIR] : [])];
-          return isScratchPath(real(cwd), [...roots, ...roots.map(real)]);
+          return isScratchPath(await real(cwd), [...roots, ...(await Promise.all(roots.map(real)))]);
         },
         probe: packProbe,
         cards: boardWorld.cards,
@@ -13207,46 +13346,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         agentControl,
         fleetSetup,
         /**
-         * How much of this machine the managed fleet may take.
-         *
-         * IT SHARES THE LAUNCH PATH'S COLLABORATORS — the same saved document, the same measured
-         * host, the same command runner — so the effective limits this reports are the ones the
-         * next pane is actually given. A second store here would let the panel display a ceiling no
-         * launch ever writes.
-         *
-         * IT TAKES THE SESSION LIFECYCLE'S OWN EXECUTOR, exclusively. That is the single owner of
-         * mutation ordering in this process, and taking it is what stops a save from landing in the
-         * gap between a start choosing its argv and the pane existing — and what orders two saves
-         * against each other. A private lock here would be a second owner of one question, and the
-         * two would order the same pair of operations differently.
-         *
-         * THE PANE LEDGER IS THIS DAEMON'S OWN REGISTRATIONS, read through the same two ports the
-         * reap sweep uses. A pane this daemon did not register is not one it may reconfigure.
+         * What is in force for the managed fleet and whether it is working: read-only. `limits.yaml` is the
+         * one writer's (the configuration files hold a loosening for the owner), so this has no save.
          */
-        cgroups: new CgroupService({
-          store: cgroupConfigStore,
-          // Beside the saved document, in the same directory: what this host refused to apply
-          // outlives the answer to the save that met the refusal, so a page refresh or a restart
-          // cannot report a session that kept its old cap as a current one.
-          applyStatus: new FileCgroupApplyStatusStore(stateFiles, paths),
-          host: cgroupHost,
-          commands: cgroupCommands,
-          placements: new ProcCgroupPlacements(),
-          panes: new RegisteredCgroupPaneLedger(
-            paths.home,
-            // The TOLERANT read of the same ledger the reap refuses on: a settings surface must not
-            // go dark because one registration was hand-edited, and the same observer the reap uses
-            // re-proves each pane's incarnation before its pid may be addressed.
-            { list: daemonId => cgroupPanes.scan(daemonId) },
-            { list: daemonId => cgroupPanes.sessions(daemonId) },
-            new ExactTmuxPaneReaper(launchTmux),
-          ),
-          sessions: sessionSpawnFacts,
-          serial: sessionMutations,
-          // Measured, not asserted: the surface warns if this very process turns out to be inside
-          // the slice it is capping.
-          daemonPid: process.pid,
-        }),
+        cgroups: limitsService,
         foreignHistory,
         conversationImport,
         // This owns no cache and no provider policy: the daemon usage feed already owns those. One
@@ -13276,6 +13379,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // next process would restart.
           { next: () => crypto.randomUUID() },
         ),
+        // Saved pictures: svg and html a ferret keeps as daemon files (docs/renders.md). Its saves run one at a time
+        // on a queue of their own: the collision check and the quotas read the whole store.
+        renders: new RenderService(new FileRenderRepository(paths, stateFiles), clock, new KeyedSerialExecutor()),
         // The owner's unsent composer, live across their devices. Its own write queue for the same reason
         // pins have one, and its own timer: a draft is written a second after it last changed.
         sharedDrafts: sharedDraftService,
@@ -13363,9 +13469,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             for (const attachmentId of attachmentIds) {
               const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
               const path = join(attachmentOriginals(sessionId), attachmentId, deliveredFilename(attachment.filename));
-              if (!existsSync(path)) {
+              if (
+                !(await access(path).then(
+                  () => true,
+                  () => false,
+                ))
+              ) {
                 await Bun.write(path, bytes);
-                chmodSync(path, 0o600);
+                await chmod(path, 0o600);
               }
               delivered.push({ path, mime: attachment.mime });
             }
@@ -13463,6 +13574,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         board: {
           board: async query => await boardWorld.board.board(query),
           ids: async () => await boardWorld.board.ids(),
+          mergeGate: async pr => await boardWorld.board.mergeGate(pr),
           task: async id => await boardWorld.board.task(id),
           taskByLegacyRef: async legacyRef => await boardWorld.board.taskByLegacyRef(legacyRef),
           create: async (request, caller) => await boardWorld.board.create(request, caller),
@@ -15717,14 +15829,15 @@ async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check
             notices.state('stopping during boot — releasing what this boot acquired so far');
             await releaseAcquired(cleanups);
           },
-          code => process.exit(code),
+          // The log first, boundedly: an exit that cut it off would end the trail at the line before the reason.
+          code => void notices.drain(LOG_DRAIN_MS).finally(() => process.exit(code)),
           process,
           () => cleanups.length > 0,
         )
       : undefined;
   try {
     const world = {
-      ...buildWorld(answer.overrides, { userHome: resolveUserHome() }),
+      ...buildWorld(answer.overrides, { userHome: resolveUserHome(), notices, cgroupHost: await hostCgroupFacts() }),
       notices,
       ...(gate === undefined ? {} : { untilShutdown: () => gate.untilShutdown() }),
     };
@@ -15751,6 +15864,8 @@ async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check
         // Intentionally ignored: cleanup failures must not change the result.
       }
     }
+    // Last: whatever the cleanups said is in the file before `main` exits the process.
+    await notices.drain(LOG_DRAIN_MS);
   }
 }
 

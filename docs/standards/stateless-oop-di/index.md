@@ -187,7 +187,7 @@ configuration and behavior would otherwise be hidden.
 ## Wire at the composition root
 
 The composition root is the one place that constructs adapters and services. For the current CLI,
-that is packages/cli/bin/fy.ts: it builds a CliWorld from terminal and system adapters, then
+that is packages/cli/bin/program.ts: it builds a CliWorld from terminal and system adapters, then
 hands that world to registerDomain.
 
 ```typescript

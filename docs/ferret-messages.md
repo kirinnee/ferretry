@@ -95,6 +95,15 @@ agent, not to the person reading.
 The agent's own read of the turn file (`Read turn-001.md`, or Codex's `cat`) is hidden — it is the
 delivery's plumbing. A read that FAILED stays.
 
+### Messages still waiting
+
+A message that has not gone into the receiver yet — queued on the machine, held to be combined with others
+(`holdUntil`), or saved on the owner's device — is **not in the Chat at all**, whether the owner or a ferret
+sent it: no card, no strip. It shows on that ferret's Queue page ([queue views](message-delivery.md#the-durable-queue-being-built)),
+with "sends by 11:20" per held message and the earliest as the ferret's "next send", and appears in the Chat
+once delivered. A message that failed or could not be confirmed is not waiting and stays in the Chat, where the
+owner can retry it. The sender's own **Sent to** card is unchanged: it lives in the sender's Chat.
+
 ### The sender's Chat
 
 The tool call that ran `fy send` becomes a **Sent to** card: the recipient as a `:name` reference, the

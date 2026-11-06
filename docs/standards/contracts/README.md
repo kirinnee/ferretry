@@ -44,8 +44,10 @@ laundered a defect into something every gate was right to pass.
 | `no-fy-render-in-docs.sh`     | `a-no-fy-render-in-docs`                 | `fy-render` fence openers appear only in their three teaching files                              |
 | `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code names no legacy state, and package source no owner fleet wrapper                    |
 | `no-pattern-kill.sh`          | `a-no-pattern-kill`                      | no test tree kills processes by pattern (`pkill`, `killall`)                                     |
+| `no-sync-io.sh`               | `a-no-sync-io`                           | daemon code holds exactly the synchronous file calls its ledger declares, each with its reason   |
 | `pages-config.sh`             | `a-pages-config`, `task test:gate`       | the PWA build and Pages deployment publish the same directory                                    |
 | `pinned-toolchain.sh`         | `task test:gate`, `build-pwa.sh`         | `node` and `bun` resolve inside `/nix/store`, never to the runner image                          |
+| `pwa-relevance.sh`            | `a-pwa-relevance`                        | the PWA browser gate's path list covers every import of its harness; docs-only skips it          |
 | `relay-config.sh`             | `a-relay-config`, `task test:gate`       | relay code, bindings, discovery and deployment agree                                             |
 | `route-agreement.sh`          | `a-route-agreement`                      | client/daemon paths, verbs and declared method debt agree                                        |
 | `test-tiers.sh`               | `a-test-tiers`, `task test:gate`         | every test lives in a tier, no integration timing or memory bound, test groups match their files |
@@ -269,9 +271,8 @@ board — are unique only WITHIN the daemon that minted them. Two daemons theref
 same browser the same id for different things, so anything the bundle remembers about daemon-owned
 data has to be keyed by `(daemonId, …)`.
 
-That has been carried by hand for the whole migration. Every unit brief repeats it,
-`docs/migration/surveys/pwa-shape.md` lists 56 single-daemon assumptions with `file:line`, and
-surfaces were still being found by eye afterwards. An invariant that depends on every author
+That was carried by hand. Every unit brief repeated it, an audit listed 56 single-daemon
+assumptions with `file:line`, and surfaces were still being found by eye afterwards. An invariant that depends on every author
 remembering it is not an invariant, which is the same reason `name-single-source` and the
 `state-home-*` contracts exist.
 
@@ -325,6 +326,7 @@ policy in [CI/CD](../ci-cd/index.md).
 ./scripts/validate/fetch-binding.sh               # no stored fetch builtin, no direct network call that skips the relay
 ./scripts/validate/no-fy-render-in-docs.sh        # illustrations stay in conversation, out of durable files
 ./scripts/validate/no-pattern-kill.sh             # tests kill by pid or exact socket, never by pattern
+./scripts/validate/no-sync-io.sh                  # every blocking file call in daemon code is declared
 ./scripts/validate/closed-set-agreement.sh        # copied cross-package enumerations still agree
 ./scripts/validate/contract-registry.sh           # every contract is documented and wired
 ./scripts/validate/route-agreement.sh             # paths, verbs and declared method debt agree

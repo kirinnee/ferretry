@@ -17,7 +17,7 @@
 #                  without this pass ever guessing at the expression that made it unreadable. Pay one off
 #                  by making the verb readable at the dial, never by editing the line.
 #
-# 32 LINES AT SEEDING, 22 NOW, after peaking at 52. Every added line exposed an address the old list
+# 32 LINES AT SEEDING, 49 NOW, after peaking at 52. Every added line exposed an address the old list
 # could not hold anybody to; later fixes then paid thirteen exact exemptions back. The peak arithmetic
 # stays here so that temporary growth cannot be quoted as a relaxation:
 #
@@ -45,6 +45,8 @@
 #   -4  The old account routes were deleted (U21) — `GET /v1/fleet/plan`, `GET /v1/fleet/usage`,
 #       `PUT /v1/fleet/environment` and `POST /v1/fleet/apply` with them, the last two of which were
 #       the defect and the dead write this list had been holding open.
+#   -2  Terminal rename is served as PATCH, the method the PWA sends: the `unserved PATCH` and `unreached POST`
+#       pair for it were one defect seen from both ends.
 #
 # The rule is unchanged: a new mismatch fails, a stale line fails, and the list may only shrink.
 #
@@ -54,9 +56,6 @@
 unserved GET /v1/pwa/config # DEFECT: IFyApiClient.pwaConfig() dials a route nothing serves
 unserved PATCH /v1/pwa/config # DEFECT: IFyApiClient.updatePwaConfig() dials a route nothing serves
 unserved DELETE /v1/sessions/* # DEFECT: IFyApiClient.remove() deletes a session; mounts/sessions.ts serves only GET on that path
-
-# Verb disagreements — finding #5's shape, where the path exists and the method does not.
-unserved PATCH /v1/sessions/*/terminals/* # DEFECT: the PWA renames a terminal with PATCH; mounts/terminals.ts serves GET, POST and DELETE
 
 # `FyApiClient.#post` builds `/v1/sessions/${id}/${action}` and nine sites in its own file pass `action`
 # as a string literal. Those nine addresses are now READ, instead of one wildcard that hid them. The
@@ -90,7 +89,6 @@ unreached POST /v1/sessions/:sessionId/attention # CORRECT: the older spelling, 
 # Surfaces with no shipped client yet. Each is a route somebody built and nobody wired.
 unreached GET /v1/sessions/:sessionId/attachments/:attachmentId # no client asks for attachment metadata alone; list and content paths are the shipped surface
 unreached GET /v1/sessions/:sessionId/terminals/:terminalId # the PWA consumes TerminalView rows from the list/create responses; no client asks for detail alone
-unreached POST /v1/sessions/:sessionId/terminals/:terminalId # DEFECT: the daemon serves rename as POST while the only client uses PATCH
 unreached POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock # the PWA has the unlock COPY and no call
 unreached DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock # the PWA has the unlock COPY and no call
 unreached GET /v1/board/tasks # the old-reference lookup (board U16) lands daemon-first; the PWA reference code (board U12) dials it next
@@ -135,3 +133,6 @@ unreached POST /v1/catalog-links/:linkId/copy # CORRECT: daemon-first slice (cat
 unreached DELETE /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalogs 3f-4); the app share sheet dials download links in a later slice
 unreached PUT /v1/catalog-links/:linkId/version # CORRECT: daemon-first slice (catalogs 3f-5); the app share sheet dials download links in a later slice
 unreached PATCH /v1/catalog-links/:linkId # CORRECT: daemon-first slice (catalogs 3f-5); the app share sheet dials download links in a later slice
+unreached POST /v1/renders # CORRECT: daemon-first slice (F959 slice 2); `fy render save` dials it in slice 3
+unreached GET /v1/renders/:id/meta # CORRECT: daemon-first slice (F959 slice 2); the app reference resolver dials it in slice 4
+unreached GET /v1/renders/:id # CORRECT: daemon-first slice (F959 slice 2); the app render embed dials it in slice 4

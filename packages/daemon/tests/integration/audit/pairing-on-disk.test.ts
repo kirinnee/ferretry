@@ -77,7 +77,9 @@ describe('a real pairing, read back off the disk', () => {
     await log.flush(Date.now() + 120_000);
     const written = (
       await Promise.all(
-        (await readdir(paths.state, { recursive: true }))
+        (
+          await readdir(paths.state, { recursive: true })
+        )
           .filter(file => file.startsWith('audit'))
           .map(async file => await readFile(join(paths.state, file), 'utf8')),
       )

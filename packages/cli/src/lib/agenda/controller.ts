@@ -88,8 +88,7 @@ export interface AgendaCommandOptions {
 
 /** Flags that describe a new agenda item, and where its JSON body is read from. */
 export interface AgendaAddOptions
-  extends
-    AgendaCommandOptions,
+  extends AgendaCommandOptions,
     Omit<BriefFlags, 'neededBy' | 'task'>,
     CardFlag,
     Pick<TabFlags, 'whereFile' | 'tabFile'> {

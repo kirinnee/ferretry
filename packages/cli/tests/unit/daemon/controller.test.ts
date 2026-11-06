@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import { type HealthView, TUNNEL_OFF_SENTENCE, type TunnelStatusView } from '@ferretry/protocol';
 import should from 'should';
+import { cgroupConfigView } from '../../../../protocol/tests/fixtures.ts';
 import {
   DaemonController,
   type DaemonControllerDeps,
@@ -2534,6 +2535,51 @@ describe('daemon status — the loopback firewall', () => {
       overrides: { firewall: { read: async () => (reads.push(1), stale) } },
     });
     await stopped.controller.status({ json: true });
+    should(reads).deepEqual([]);
+  });
+});
+
+describe('daemon status — the limits block', () => {
+  const limits = {
+    ...cgroupConfigView,
+    lines: [
+      'ferrets: memory 40.8 GiB soft / 44.4 GiB hard of a 48 GiB user budget',
+      'no ferret is slowed for memory now',
+    ],
+  };
+
+  it('should print the daemon’s sentences under Limits and carry the view into --json', async () => {
+    // Arrange
+    const overrides = { limits: { read: async () => limits } };
+    const human = harness({ probes: [health()], overrides });
+    const json = harness({ probes: [health()], overrides });
+
+    // Act
+    await human.controller.status({});
+    await json.controller.status({ json: true });
+
+    // Assert
+    should(human.out.text).containEql('Limits:');
+    should(human.out.text).containEql('ferrets: memory 40.8 GiB soft / 44.4 GiB hard of a 48 GiB user budget');
+    should(JSON.parse(json.out.lines[0]?.replace(/^\w+: /u, '') ?? '').limits.lines).deepEqual(limits.lines);
+  });
+
+  it('should leave the block out when the daemon gave none, and not ask a daemon that is not serving', async () => {
+    // Arrange
+    const reads: number[] = [];
+    const none = harness({ probes: [health()], overrides: { limits: { read: async () => undefined } } });
+    const stopped = harness({
+      probes: [undefined],
+      serviceFallback: stoppedReport,
+      overrides: { limits: { read: async () => (reads.push(1), limits) } },
+    });
+
+    // Act
+    await none.controller.status({});
+    await stopped.controller.status({ json: true });
+
+    // Assert
+    should(none.out.text).not.containEql('Limits:');
     should(reads).deepEqual([]);
   });
 });

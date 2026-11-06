@@ -1,25 +1,25 @@
+import type {
+  AgentConfigToolCall,
+  AgentConfigToolResult,
+  AgentLessonToolCall,
+  AgentLessonToolResult,
+  AgentToolCall,
+  AgentToolResult,
+  IFyApiClient,
+  SurfaceControlView,
+  SurfaceKind,
+  WorkSearchQueryInput,
+  WorkSearchResponse,
+} from '@ferretry/protocol';
 import {
-  AGENT_LESSONS_PATH,
   AGENT_TOOL_MAX_TOTAL_WAIT_MS,
   AGENT_TOOL_MAX_WAIT_MS,
-  type AgentConfigToolCall,
-  type AgentConfigToolResult,
-  AgentConfigToolResultSchema,
-  type AgentLessonToolCall,
-  type AgentLessonToolResult,
-  AgentLessonToolResultSchema,
-  type AgentToolCall,
-  type AgentToolResult,
   AgentToolResultSchema,
-  type IFyApiClient,
-  type SurfaceControlView,
   SurfaceControlViewSchema,
-  type SurfaceKind,
-  WORK_SEARCH_PATH,
-  type WorkSearchQueryInput,
-  type WorkSearchResponse,
-  WorkSearchResponseSchema,
-} from '@ferretry/protocol';
+} from '@ferretry/protocol/agent-tools';
+import { AGENT_LESSONS_PATH, AgentLessonToolResultSchema } from '@ferretry/protocol/agent-tools-lessons';
+import { AgentConfigToolResultSchema } from '@ferretry/protocol/config-files';
+import { WORK_SEARCH_PATH, WorkSearchResponseSchema } from '@ferretry/protocol/work-search';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME, FY_SESSION_ID_HEADER } from '../session/connection.ts';
 
 /**

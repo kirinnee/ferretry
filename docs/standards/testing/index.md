@@ -583,7 +583,8 @@ The real layout:
 
 ```text
 packages/cli/
-  bin/fy.ts                              # composition root (no tier's ledger)
+  bin/fy.ts                              # entry: routes to a slice or the program
+  bin/program.ts                         # composition root (no tier's ledger)
   src/
     lib/                                 # pure domain      → unit ledger
     adapters/                            # all IO           → integration ledger

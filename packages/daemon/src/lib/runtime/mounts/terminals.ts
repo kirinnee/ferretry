@@ -280,7 +280,7 @@ export function terminalRoutes(subsystem: TerminalSubsystem): readonly ApiRoute[
       handle: async context => await detail(subsystem, context),
     },
     {
-      method: 'POST',
+      method: 'PATCH',
       path: '/v1/sessions/:sessionId/terminals/:terminalId',
       minimum: 'operator',
       caller: 'any',

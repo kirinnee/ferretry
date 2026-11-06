@@ -162,6 +162,13 @@ describe('describeBoardEvent', () => {
     );
   });
 
+  it('should say a card was adopted, from whom, and why', () => {
+    // Act + Assert
+    should(
+      say({ type: 'assigned', from: DENISHA, to: KIRIN, adopted: { from: DENISHA, reason: 'both ferrets ended' } }),
+    ).equal('adopted by kirin from denisha, whose ferrets ended: both ferrets ended');
+  });
+
   it("should say a finished ferret's card went back to its lead", () => {
     // Act + Assert
     should(say({ type: 'assigned', from: DENISHA, to: KIRIN, returnedFrom: DENISHA })).equal(

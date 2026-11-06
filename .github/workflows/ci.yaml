@@ -144,9 +144,41 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && runner.environment == 'self-hosted'
         run: ./scripts/ci/nix-store-hygiene.sh
 
+  # Does this pull request change anything the PWA browser gate reads? One decision for all three legs of
+  # `pwa-screenshot`: when it is `false` they are SKIPPED, which counts as passed, so a daemon-only, CLI-only
+  # or docs-only pull request skips a gate that is ~19% of the Namespace bill. scripts/ci/pwa-relevance.sh has the
+  # list and why it is a job and not `paths-ignore`; scripts/validate/pwa-relevance.sh holds it to the
+  # imports of the harness. `main`, dispatch and any doubt decide `true`.
+  # The job is self-contained: it reads the PR's file list through the API and nothing else, so it stays
+  # valid whenever and however `pwa-screenshot` is triggered.
+  pwa-relevance:
+    timeout-minutes: 5
+    name: PWA Relevance
+    permissions:
+      contents: read
+      pull-requests: read
+    # GitHub, not Namespace: a few seconds of bash with no nix shell (docs/standards/ci-cd, "Runners").
+    # It must stay that cheap: `pwa-screenshot` waits for it, so its seconds are the gate's start delay.
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - id: decide
+        name: Decide whether the PWA browser gate has anything to prove
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ./scripts/ci/pwa-relevance.sh
+
   pwa-screenshot:
     timeout-minutes: 20
     name: PWA ${{ matrix.scope == 'full' && 'Full Gallery' || 'Settings Geometry' }} (${{ matrix.scheme }}${{ matrix.viewport && format(', {0}', matrix.viewport) || '' }})
+    needs: pwa-relevance
+    if: ${{ !cancelled() && needs.pwa-relevance.outputs.run != 'false' }}
     permissions:
       contents: read
     # Linux, deliberately NOT a macOS runner: the image already ships the same Google Chrome the
@@ -307,12 +339,22 @@ jobs:
           if-no-files-found: warn
 
   # The integration tier in parallel shares (config/test-groups.json). Serially it was the CI critical
-  # path at ~4.4 min (~3.8 min of tests); each group is about a minute. The matrix lists every group
+  # path at ~4.4 min (~3.8 min of tests). The matrix lists every group
   # by name, and `int-ledger` refuses to judge unless every group in the config reported.
   # The tier grew back to the critical path: by Oct 28 `everything-else` took ~480s and
-  # `daemon-runtime` ~330s on GitHub. Their slowest files now have groups of their own — the PWA feature
-  # surfaces plus the send handover (~175s of browser walks) — so no group needs much over five
-  # minutes. The real-time budget suites that once had a group are the realworld tier's now
+  # `daemon-runtime` ~330s on GitHub. Their slowest files got groups of their own, and the PWA browser
+  # walks are dealt out by name prefix (config/test-groups.json) so the groups are about as slow as each
+  # other. Measured on Namespace 2x4 over PR runs of Oct 30 – Nov 5, test-step p50: `everything-else`
+  # 225s (p90 ~450s, the last job to finish in 103 of 153 runs) against `daemon` 127, `pwa-surfaces`
+  # 110, `pwa-render` 95, `pwa-chat` 63, `daemon-runtime` 48 — a sum of ~670s that balanced is ~115-150s a
+  # group. `everything-else` held 40 PWA browser-walk files (~350s of per-file test time, all in one
+  # process because the PWA is one package); 17 of them now sit in `pwa-render`, `pwa-chat` (with the `agenda-`
+  # walks: in `daemon-runtime` they pushed a 4 GB 2x4 to 91% RAM and it was killed) and `pwa-surfaces`. A first deal-out left `pwa-chat` at 237s and
+  # `everything-else` at 256s, so the groups were re-cut on the measured file times; each group now has
+  # about 130-235s of test time on the PR run that measured it (`daemon` 234s, untouched and the
+  # slowest; `pwa-surfaces` 212s; p50 of `daemon` is 127s). The PWA
+  # has no `src/adapters`, so no int ledger file depends on where its tests run. The real-time budget
+  # suites that once had a group are the realworld tier's now
   # (realworld.yaml): they asserted the machine, not the code, so they cannot gate a merge. GitHub
   # runs these for free; the cost is two more jobs in its 20-job queue, measured as worth it.
   int:
@@ -328,7 +370,7 @@ jobs:
         && 'ubuntu-latest'
         || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
-    # A CEILING, NOT A RETRY: the slowest group takes ~8 min, so 20 is a wedged run. On 2026-10-29 the
+    # A CEILING, NOT A RETRY: the slowest group takes ~4 min, so 20 is a wedged run. On 2026-10-29 the
     # daemon group hung in a test and held its runner for two hours; without this it holds one for six.
     # `scripts/test/stall-watch.ts` ends a silent run sooner and says why; this catches everything else.
     timeout-minutes: 20

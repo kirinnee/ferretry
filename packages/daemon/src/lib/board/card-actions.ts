@@ -56,11 +56,13 @@ import {
   type BoardStanding,
   type CardAudience,
   claimRefusalMessage,
+  effectiveAssignee,
   mayDo,
   mayPassGate,
   OPERATION_STANDINGS,
   refusalMessage,
 } from './authority.ts';
+import { queueBehindClashes } from './clash-queue.ts';
 import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
@@ -90,6 +92,8 @@ export interface CardContext {
   readonly handsDown?: boolean;
   /** The lead of the caller's own that holds the card, when the caller may CLAIM it (`claimableFrom`). */
   readonly claimedFrom?: string;
+  /** The ended owner ferret a live lead may ADOPT the card from (the service judged the orphan: `BoardService.orphanedOwner`). */
+  readonly adoptedFrom?: string;
   /** The lanes of the card's own board. */
   readonly laneSet: LaneSet;
   readonly index: BoardIndex;
@@ -844,11 +848,13 @@ const file = (
     };
   }
   if (held) throw new BoardError('invalid', `${ref} already claims ${action.path}`);
+  // A claim that clashes with an open card's queues this one behind it (docs/design/clash-queue.md).
   return {
-    task: {
-      ...withEvent(card, { type: 'file-claimed', path: action.path }, context),
-      files: [...card.files, action.path],
-    },
+    task: queueBehindClashes(
+      { ...withEvent(card, { type: 'file-claimed', path: action.path }, context), files: [...card.files, action.path] },
+      [action.path],
+      context,
+    ),
   };
 };
 
@@ -1146,6 +1152,35 @@ export const applyAction = (
             context,
           ),
           assignee: claimer,
+        },
+      };
+    }
+    case 'adopt': {
+      const actor = context.actor;
+      if (context.adoptedFrom === undefined || actor.kind !== 'ferret') {
+        throw new BoardError(
+          'forbidden',
+          `only a live lead may adopt ${ref}, and only when its owner ferret and its assignee have both ended`,
+        );
+      }
+      const adopter = actor.sessionId;
+      return {
+        task: {
+          ...withEvent(
+            card,
+            {
+              type: 'assigned',
+              from: card.assignee,
+              to: adopter,
+              adopted: {
+                from: context.adoptedFrom,
+                reason: action.reason ?? `owner ferret ${card.owner} and assignee ${effectiveAssignee(card)} ended`,
+              },
+            },
+            context,
+          ),
+          owner: adopter,
+          assignee: adopter,
         },
       };
     }

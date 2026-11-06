@@ -7,7 +7,11 @@ import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts'
 import type { ResponseCompressor } from '../../../../src/lib/api/compression.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { type SessionDirectorySubsystem, sessionRoutes } from '../../../../src/lib/runtime/mounts/sessions.ts';
+import {
+  renderSessionList,
+  type SessionDirectorySubsystem,
+  sessionRoutes,
+} from '../../../../src/lib/runtime/mounts/sessions.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, human, sessionDirectory, sessionView } from './support.ts';
 
@@ -325,6 +329,37 @@ describe('the session read mount', () => {
       should(second.headers.get('etag')).not.equal(first.headers.get('etag'));
       should(SessionListSchema.parse(JSON.parse(second.body))[1]?.state.status).equal('stopped');
       should(SessionListSchema.parse(JSON.parse(shorter.body))).have.length(1);
+    });
+
+    it('should render only the views that moved when one element of a long list is new', async () => {
+      // Arrange
+      const unchanged = counted(FIRST);
+      let views: readonly SessionView[] = [unchanged.view, SECOND];
+      const through = dispatcher({ list: async () => views, get: async () => undefined });
+      await through.dispatch(request({ path: '/v1/sessions', headers: human }));
+      const moved = counted(sessionView('s2', { name: 'Mount The Boards' }, { status: 'stopped' }));
+      views = [unchanged.view, moved.view];
+
+      // Act
+      const second = await through.dispatch(request({ path: '/v1/sessions', headers: human }));
+
+      // Assert
+      should(unchanged.renders()).equal(1);
+      should(moved.renders()).equal(1);
+      should(second.body).equal(JSON.stringify([FIRST, moved.view]));
+    });
+
+    it('should spell a list built from cached views exactly as one stringify of the whole list', () => {
+      // Arrange
+      const views = [FIRST, SECOND, sessionView('s3', { name: 'Ünïcode — "quoted"' }, { status: 'stopped' })];
+      renderSessionList(views);
+
+      // Act
+      const rendered = renderSessionList(views);
+
+      // Assert
+      should(rendered).equal(JSON.stringify(views));
+      should(renderSessionList([])).equal('[]');
     });
 
     it('should serve byte-identical bodies and tags whether or not the body was reused', async () => {

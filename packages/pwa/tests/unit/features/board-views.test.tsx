@@ -318,7 +318,7 @@ describe('ArchiveView', () => {
   };
 
   it('lists closed cards and offers no "more" when everything is shown', async () => {
-    view = await mount(<ArchiveView {...await props()} />);
+    view = await mount(<ArchiveView {...(await props())} />);
     expect(ids(view.container)).toEqual(['F1', 'F2']);
     expect(view.container.querySelector('.fy-board-archive__more')).toBeNull();
   });
@@ -336,7 +336,7 @@ describe('ArchiveView', () => {
         shippedIn: { version: '4.110.0', tag: 'v4.110.0', at: '2026-08-01T09:00:00.000Z' },
       }),
     ]);
-    view = await mount(<ArchiveView {...await props({ shown: model.cards, total: 1, env: envOf(model) })} />);
+    view = await mount(<ArchiveView {...(await props({ shown: model.cards, total: 1, env: envOf(model) }))} />);
     const extras = view.container.querySelectorAll('[data-task="F3"] .fy-board-table__extras [data-seg]');
     expect([...extras].map(node => node.getAttribute('data-seg'))).toEqual(['blocked', 'subs', 'shipped']);
   });
@@ -346,14 +346,14 @@ describe('ArchiveView', () => {
     let more = 0;
     view = await mount(
       <ArchiveView
-        {...await props({
+        {...(await props({
           remaining: 40,
           total: 65,
           onQuery: query => void seen.push(query),
           onMore: () => {
             more += 1;
           },
-        })}
+        }))}
       />,
     );
     const search = must(
@@ -370,16 +370,16 @@ describe('ArchiveView', () => {
   });
 
   it('says why it is empty', async () => {
-    view = await mount(<ArchiveView {...await props({ shown: [], total: 0, loading: true })} />);
+    view = await mount(<ArchiveView {...(await props({ shown: [], total: 0, loading: true }))} />);
     expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('Reading the archive…');
-    await view.render(<ArchiveView {...await props({ shown: [], total: 0 })} />);
+    await view.render(<ArchiveView {...(await props({ shown: [], total: 0 }))} />);
     expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('Nothing closed yet.');
-    await view.render(<ArchiveView {...await props({ shown: [], total: 0, query: 'zzz' })} />);
+    await view.render(<ArchiveView {...(await props({ shown: [], total: 0, query: 'zzz' }))} />);
     expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('No archived card matches.');
   });
 
   it('shows the last page’s remainder, not a full page', async () => {
-    view = await mount(<ArchiveView {...await props({ remaining: 3, total: 28 })} />);
+    view = await mount(<ArchiveView {...(await props({ remaining: 3, total: 28 }))} />);
     expect(view.container.querySelector('.fy-board-archive__more')?.textContent).toBe('Show 3 more · 3 left of 28');
   });
 });

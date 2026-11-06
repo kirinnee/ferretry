@@ -52,6 +52,9 @@ this page, which is still how a message reaches the pane.
   being typed, and the stop waits (up to `drainMs`, 15 s) for that hand-over rather than cutting it in half. Both harnesses follow one rule: Claude Code's own queue shows a
   message typed mid-turn, so its hand-over is proven at once; Codex steers it into the running turn and
   shows nothing, so it stays `typing` — holding the next message — until Codex's transcript proves it.
+  A `typing` message whose ledger row is still `accepted` after `recheckMs` (60 s) is put to the send
+  tracker (`QueueTransport.recheck` → `SendTracker.check`), at most once per `recheckMs` per session, so a
+  hand-over nothing else is watching cannot hold the queue ([below](#b153-a-send-that-gave-up-before-its-first-key)).
 - **Switch** — `"delivery": { "queue": false }` in `config/daemon.json` turns it off (on by default; read at
   start). On, `POST /v1/sessions/:sessionId/send` ENQUEUES. The refusals only a person can lift (an open
   structured question, a quarantined harness, an unconfirmed kill) are said first, exactly as the direct
@@ -132,7 +135,16 @@ this page, which is still how a message reaches the pane.
 - **Queue views** — the chat header's ⋯ menu has **Message queue** (that ferret: `/d/<id>/queue/<session>`), and
   **All queues** (`/d/<id>/queue`, also in Find / ⌘K) lists every ferret with something waiting across every
   paired machine, longest-waiting first. Both read `GET …/queue` every five seconds plus the outbox, one row per
-  message with its tick, sender chip (never tag text in a body) and reason, with Edit and Cancel.
+  message with its tick, sender (only when it is not you; never tag text in a body) and reason, with Edit and Cancel. **When it
+  goes** (`rowSend` / `groupNextSend` in `queue-view.ts`): a queued row whose `holdUntil` is still ahead says
+  `sends by 11:20` (the reader's clock), and its ferret's heading shows the earliest as `next send 11:20`; a
+  queued row with no hold left, or none, waiting on a busy ferret says `when its turn ends`; a row waiting for
+  something else (a stopped ferret, an open question) and a row still on this device say only their own reason.
+  A message still **waiting** (saved on this device, or `queued` here, owner's or a ferret's, held or not) is
+  **not drawn in the chat at all** — this page is the only place it shows (`hideWaiting`,
+  `lib/waiting-fold.ts`, applied to the Transcript's rows only) — and it appears in the chat once it is typed
+  or delivered. A message that needs the person (failed, refused, unconfirmed, typed but not sent) is not
+  waiting and stays in the chat.
 
 - **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
 - **Edit or cancel** — only while `queued`: `PATCH /v1/sessions/:sessionId/queue/:messageId` `{ "text" }` and
@@ -586,6 +598,13 @@ send is still withdrawn and answered `409` (`send_refused`: "nothing was typed; 
 moment"), a released held message goes back to held, and a tracker re-attempt of a TYPED send is
 withheld (`unreadable`) and settled `unaccounted` (`pane_unreadable`) — never retyped.
 
+A pane that never comes to a prompt is refused before a key the same way
+([B153](#b153-a-send-that-gave-up-before-its-first-key)): a person's send is kept open and `untyped`, a
+ferret's or the daemon's is withdrawn with `SendNotReady`, a released held message is kept open and
+`untyped` too, and a re-attempt puts its record back and is withheld (`busy`), so the tracker waits. A pane
+that went away during the wait is the exception: nothing is kept for the tracker, the send is withdrawn (a
+released one goes back to held), and the next send revives the session.
+
 A send first reads the composer. If it already holds input, **nothing is typed onto it**. What happens
 next depends on whose text it is.
 
@@ -820,7 +839,7 @@ elta's queue held 28 messages for five hours. `input_stuck` saw none of it. Two 
    types one message at a time, held everything behind it with no wait reason at all. Only a look by the tracker
    freed it — a daemon boot, or a `fy send --wait` from somebody else reading the ledger — and it then landed in
    seconds. Nothing was typed, so `typedNotSent` was never set; and in a declared wait the turn state was `null`,
-   not `your-turn`, so the ferret was not even an `input_stuck` candidate. (The send path's own fix is B153.)
+   not `your-turn`, so the ferret was not even an `input_stuck` candidate. (The send path's own fix is [B153](#b153-a-send-that-gave-up-before-its-first-key).)
 2. **A draft nothing proves ours (elta).** A send settled `unaccounted` (`landing_unconfirmed`) whose text the pane
    drew later, unrecognised: `finishOwnDraft` answered `foreign`, so every later message waited as `draft` with no
    `waitBehind` — for a person who was not there — at a ferret idle at its prompt.
@@ -975,6 +994,60 @@ settled unless the reader opened it. Each has **Dismiss**, remembered per device
 all cancelled** and **Clear stuck messages** do it in bulk. If repair later finds the message in the
 transcript, the same row (`send:<id>`) becomes the ordinary delivered bubble in place.
 
+## B153: a send that gave up before its first key
+
+From 2026-11-02 to 11-04 ryu's queue stopped eleven times, for 38 minutes to 5 h 49 min: one message `typing`,
+its send `accepted` at attempt 1 with nothing typed, and up to twenty messages behind it with no wait reason.
+Each was freed only by a daemon restart, or by an `fy send --wait` from another ferret that made the tracker
+look. Every time ryu's record said `waiting` — a declared wait, set by the agent from inside its turn — while
+the agent was still at work.
+
+What happened, in order: `routeSend` took `waiting` as idle by the status alone, so the send wrote its
+`accepted` row and took the idle path. `waitReady` looked for a prompt for about 27 s, found none, and threw
+a plain `PaneDeliveryError` before any key. Neither the terminal nor the service knew that error meant "no key
+went", so `send()` threw before it told the tracker. The deliverer saw a ledger row and left the message
+`typing`, and its five-second looks only read the fate, which never moved. Four fixes:
+
+1. **A pane that never comes to a prompt is a refusal before typing.** `waitReady` throws
+   `PaneNotReadyError` (`busy` / `dialog` / `exited`) for every way it gives up, and the terminal says it
+   as `SendPaneNotReady`. The send path takes it back the way it takes back an unreadable composer:
+   - a ferret's or the daemon's send is withdrawn and refused with `SendNotReady`, and the queue waits on it
+     as `busy`, `dialog` or `stopped`, so its sender sees why;
+   - a person's send, and a held message released into a live session, is kept open and `untyped` for the
+     tracker (back on hold, the held message would wait for a revive a live session never gets);
+   - a pane that went away is withdrawn instead (a released message goes back to held), so the next send
+     revives the session;
+   - a re-attempt puts its record back and is withheld (`busy`).
+
+   A startup dialog's known answer may have been pressed on the way, but never a character of the message,
+   so nothing is typed again that might have landed.
+
+   **The queue does not hand the message over again until a prompt shows.** Each try holds both the queue
+   lock and the send lock through a readiness wait of about half a minute, and a refusal used to bring the
+   message back on the next `lookMs` look. A pane that showed neither a prompt nor work then looped for as
+   long as it stayed that way. After an `untilPrompt` refusal the deliverer keeps the message waiting on its
+   reason until the pane shows a prompt, the record's readiness flag changes to ready, the pane goes away, or
+   `recheckMs` (60 s) has passed. A record flag that was already true when the pane was refused is the
+   stale reading that was refused, so it ends nothing; it counts only after it has been seen false and
+   turned true again. The last case is a safety net, in case a prompt is drawn but not recognised.
+
+2. **A send that throws with its row open always tells the tracker.** `send()` and `reattempt()` schedule
+   a tracker look whenever they throw and the send's row is still open, or the ledger cannot be read to rule
+   one out. That look follows every existing rule: transcript proof wins, a pane or queue holding the text
+   waits, a turn started since waits, an unreadable pane is unconfirmed, and only a send proven absent is
+   typed again, with the attempt ledgered before any key.
+3. **A declared wait does not overrule a pane at work.** Under `waiting` a pane that visibly shows work routes
+   `busy`, so the message goes into the harness's own queue. A prompt still wins, and a pane that shows
+   neither work nor a prompt still routes idle, because a ghost turn is the worse mistake. Being busy, a
+   `--now` message (an interrupt) now ends that turn with the stop key, as it does for any busy agent. A
+   ferret parked in a blocking `fy wait` call has that call cut short. The other idle
+   statuses (`awaiting_user`, `rate_limited`, `interrupted`) are set at a turn's end and keep their word.
+4. **The deliverer asks the tracker about a hand-over left `accepted`.** See the deliverer above. The ask is
+   not awaited: the tracker's look takes the send lock while the deliverer holds the queue's. A stopping
+   daemon asks nothing, so no look can start typing after the tracker has been disarmed.
+
+The Warden's `inbox_stuck` ([B148](#b148-a-ferret-whose-inbox-is-stuck)) is the detector for whatever still gets past these.
+
 ## Declared gaps
 
 - **A message held in Claude's own queue while the ferret is idle is not pushed.** Claude submits what it
@@ -1001,5 +1074,14 @@ transcript, the same row (`send:<id>`) becomes the ordinary delivered bubble in 
   the send is settled unconfirmed rather than retyped.
 - **A message in Codex's own queue cannot be cancelled there.** Codex offers `alt + ↑` to edit its last
   queued message; driving that is not attempted.
+- **An idle-routed send to a pane that is neither at a prompt nor visibly working waits about 27 s per try.**
+  Under any idle status such a pane routes idle, and the wait for a prompt runs out before it refuses. The
+  queue tries again only once a prompt shows or `recheckMs` has passed. A pane stuck that way therefore
+  costs one readiness wait, with both locks held, about every 90 s. A person's kept send is retried by the
+  tracker every `untypedLookMs` and pays the same wait each time.
+- **A retype withheld before any key is still journalled as a retry.** `control.send_retried` is written
+  before the keys, so a re-attempt that put its record back (a composer it could not read, a pane with no
+  prompt) shows in the journal as an attempt that typed nothing. The ledger is right; readers that count
+  journal retries over-count.
 - **Rows older than the two-hour ceiling are not re-examined.** A row stuck before this fix stays stuck
   until a person cancels it — which is what Cancel and Clear stuck messages are for.

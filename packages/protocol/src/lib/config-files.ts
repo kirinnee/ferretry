@@ -74,6 +74,7 @@ export const CONFIG_FILE_KINDS = [
   'learning',
   'voice',
   'pack',
+  'limits',
   'modelsGuide',
   'accountDefaults',
   'preset',
@@ -84,7 +85,17 @@ export type ConfigFileKind = z.infer<typeof ConfigFileKindSchema>;
 
 /** One file the directory can hold, by what it is rather than where. */
 export type ConfigFileAddress =
-  | { readonly kind: 'machine' | 'warden' | 'learning' | 'voice' | 'pack' | 'modelsGuide' | 'accountDefaults' }
+  | {
+      readonly kind:
+        | 'machine'
+        | 'warden'
+        | 'learning'
+        | 'voice'
+        | 'pack'
+        | 'limits'
+        | 'modelsGuide'
+        | 'accountDefaults';
+    }
   | { readonly kind: 'login' | 'profile' | 'runtime' | 'preset' | 'models'; readonly name: string }
   | { readonly kind: 'component'; readonly componentKind: ConfigComponentKind; readonly name: string };
 
@@ -95,6 +106,7 @@ const SINGLETON_FILES = {
   learning: 'learning.yaml',
   voice: 'voice.yaml',
   pack: 'pack.yaml',
+  limits: 'limits.yaml',
   modelsGuide: 'models-guide.yaml',
   accountDefaults: 'account-defaults.yaml',
 } as const satisfies Record<string, string>;
@@ -159,6 +171,7 @@ export function configFilePath(address: ConfigFileAddress): string {
     case 'learning':
     case 'voice':
     case 'pack':
+    case 'limits':
     case 'modelsGuide':
     case 'accountDefaults':
       return SINGLETON_FILES[address.kind];
@@ -183,6 +196,7 @@ export const CONFIG_SCHEMA_IDS = [
   'learning',
   'voice',
   'pack',
+  'limits',
   'modelsGuide',
   'accountDefaults',
   'preset',

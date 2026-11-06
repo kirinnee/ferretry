@@ -6,7 +6,7 @@ import { DAEMON_FEATURES } from '@ferretry/protocol';
 import { FyApiClient, FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
 import { z } from 'zod';
-import { type DaemonCredentialOptions, daemonConnection } from '../../../bin/fy.ts';
+import { type DaemonCredentialOptions, daemonConnection } from '../../../bin/wiring.ts';
 import { readDaemonToken } from '../../../src/adapters/daemon/api-token.ts';
 import {
   DaemonInstanceCache,

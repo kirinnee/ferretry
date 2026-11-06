@@ -17,6 +17,7 @@
     "@types/node": "^26.1.2",
     "conventional-changelog-conventionalcommits": "^9.3.1",
     "knip": "^6.29.0",
+    "oxc-parser": "0.140.0",
     "semantic-release": "^25.0.8",
     "should": "^13.2.3",
     "typescript": "^7.0.2"

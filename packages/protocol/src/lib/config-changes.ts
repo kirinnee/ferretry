@@ -39,6 +39,8 @@ export const CONFIG_CHANGE_KINDS = [
   'presets',
   /** `pack.yaml` and `models-guide.yaml`: Pack mode's settings and its routing prompt. */
   'pack',
+  /** `limits.yaml`: how much of the machine the ferrets may take. */
+  'limits',
 ] as const;
 export const ConfigChangeKindSchema = z.enum(CONFIG_CHANGE_KINDS);
 export type ConfigChangeKind = z.infer<typeof ConfigChangeKindSchema>;
@@ -60,6 +62,7 @@ const KINDS_BY_FILE: Readonly<Record<ConfigFileAddress['kind'], readonly ConfigC
   learning: ['learning'],
   voice: ['voice'],
   pack: ['pack'],
+  limits: ['limits'],
   modelsGuide: ['pack'],
   accountDefaults: ['credentials'],
   preset: ['presets', 'credentials'],

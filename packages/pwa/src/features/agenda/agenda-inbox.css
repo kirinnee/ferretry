@@ -300,6 +300,15 @@
   transition: none;
   will-change: auto;
 }
+/* B152: the same for the "Quote in composer" menu (and any other context menu) opened inside the top card. Its
+   `position: fixed` box would otherwise be placed against the card and clipped by the Inbox page's own scroller, so the
+   menu could be cut off at the page edge, and its outside-press surface would stop at that edge too. While a menu is
+   open the card drops the transform and will-change (its stacking seal stays), so the menu lives in the viewport; the press that opened it was not a swipe. */
+.fy-attn-deck__top:has([data-context-menu]) {
+  transform: none !important;
+  transition: none;
+  will-change: auto;
+}
 /* A card reads like a chat: its text can be selected, copied and quoted, on a phone by a long press. Only what is
    pressed is not text, so a tap or a swipe never starts a highlight. */
 .fy-attn-deck__top :is(button, summary, [role='button'], [role='menuitem'], [data-agenda-no-swipe]) {

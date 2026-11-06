@@ -2,20 +2,20 @@ import { z } from 'zod';
 import { type AnalyticsResponse, AnalyticsResponseSchema } from '../lib/analytics.ts';
 import { type ProjectList, ProjectListSchema, type SessionSkills, SessionSkillsSchema } from '../lib/catalog.ts';
 import {
+  type CatalogInstalled,
   CatalogInstalledSchema,
+  CatalogInstallIdSchema,
+  type CatalogInstallList,
   CatalogInstallListSchema,
   type CatalogInstallPreview,
+  type CatalogInstallPreviewRequest,
   CatalogInstallPreviewRequestSchema,
   CatalogInstallPreviewSchema,
-  CatalogInstallRemovedSchema,
-  CatalogInstallRequestSchema,
-  type CatalogInstalled,
-  type CatalogInstallList,
-  type CatalogInstallPreviewRequest,
   type CatalogInstallRemoved,
+  CatalogInstallRemovedSchema,
   type CatalogInstallRequest,
+  CatalogInstallRequestSchema,
   type CatalogInstallScope,
-  CatalogInstallIdSchema,
 } from '../lib/catalog-install.ts';
 import {
   FY_REQUEST_ID_HEADER,
@@ -27,21 +27,6 @@ import {
   type IFyHttpTransport,
 } from '../lib/client.ts';
 import { ApiErrorResponseSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '../lib/common.ts';
-import {
-  LocalSkillInstalledSchema,
-  LocalSkillInstallIdSchema,
-  LocalSkillInstallListSchema,
-  type LocalSkillInstalled,
-  type LocalSkillInstallList,
-  type LocalSkillInstallRequest,
-  LocalSkillInstallRequestSchema,
-  type LocalSkillPreview,
-  LocalSkillPreviewRequestSchema,
-  type LocalSkillPreviewRequest,
-  LocalSkillPreviewSchema,
-  type LocalSkillRemoved,
-  LocalSkillRemovedSchema,
-} from '../lib/local-skill-install.ts';
 import { CONFIG_CHANGE_TOPIC, type ConfigChangeFrame, ConfigChangeFrameSchema } from '../lib/config-changes.ts';
 import {
   classifyDaemonUnreachable,
@@ -76,15 +61,27 @@ import {
   type HarnessUpdateView,
   HarnessUpdateViewSchema,
 } from '../lib/harness-update.ts';
+import { type LimitsView, LimitsViewSchema } from '../lib/limits.ts';
+import {
+  type LocalSkillInstalled,
+  LocalSkillInstalledSchema,
+  LocalSkillInstallIdSchema,
+  type LocalSkillInstallList,
+  LocalSkillInstallListSchema,
+  type LocalSkillInstallRequest,
+  LocalSkillInstallRequestSchema,
+  type LocalSkillPreview,
+  type LocalSkillPreviewRequest,
+  LocalSkillPreviewRequestSchema,
+  LocalSkillPreviewSchema,
+  type LocalSkillRemoved,
+  LocalSkillRemovedSchema,
+} from '../lib/local-skill-install.ts';
 import { OpenUrlRequestSchema, type OpenUrlView, OpenUrlViewSchema } from '../lib/open-url.ts';
 import {
   AttachmentUploadRequestSchema,
   type AttachmentView,
   AttachmentViewSchema,
-  type CgroupConfigPatch,
-  CgroupConfigPatchSchema,
-  type CgroupConfigView,
-  CgroupConfigViewSchema,
   EmptyResponseSchema,
   type HealthView,
   HealthViewSchema,
@@ -720,16 +717,8 @@ export class FyApiClient implements IFyApiClient {
     );
   }
 
-  cgroupConfig(): Promise<CgroupConfigView> {
-    return this.request('/v1/cgroups/config', CgroupConfigViewSchema);
-  }
-
-  updateCgroupConfig(patch: CgroupConfigPatch): Promise<CgroupConfigView> {
-    return this.request(
-      '/v1/cgroups/config',
-      CgroupConfigViewSchema,
-      jsonRequest('PATCH', CgroupConfigPatchSchema, patch),
-    );
+  cgroupConfig(): Promise<LimitsView> {
+    return this.request('/v1/cgroups/config', LimitsViewSchema);
   }
 
   // Each scope dials its own literal path: the route-agreement pass can only hold a path it can read.

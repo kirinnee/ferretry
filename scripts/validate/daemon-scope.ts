@@ -7,9 +7,8 @@
  * same id for different things. Anything the browser remembers about daemon-owned data must be
  * keyed by `(daemonId, …)`, or the second daemon reads the first daemon's answer.
  *
- * This has been true for the whole migration and it has been carried by hand: every unit brief
- * repeats "key everything by (daemonId, …)", `docs/migration/surveys/pwa-shape.md` lists 56
- * single-daemon assumptions with file:line, and surfaces were still being found by eye. An
+ * This was carried by hand: every unit brief repeated "key everything by (daemonId, …)", an audit
+ * listed 56 single-daemon assumptions with file:line, and surfaces were still being found by eye. An
  * invariant that depends on every author remembering it is not an invariant. This is the gate that
  * makes it one.
  *

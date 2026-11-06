@@ -4,6 +4,9 @@
  *
  *   bun harness/outbox-screenshot.tsx          # writes harness/out/outbox-*.png
  *
+ * NOTE (F955): the product chat no longer draws a message that is still WAITING (`hideWaiting`); the `chat` view
+ * here draws the rows directly to show the marks. For the chat as shipped see `waiting-hidden-screenshot.tsx`.
+ *
  * Views: `chat` (the four ticks, with a "waiting for connection" pair and the legend), `ferret` (one
  * ferret's queue), `all` (every queue on every machine). It renders the REAL `TranscriptRow`,
  * `QueuePageView` and `MessageMarksLegend`; the outbox rows are ledger rows carrying an `outbox` view,

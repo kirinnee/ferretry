@@ -45,7 +45,6 @@ import type { TranscriptHistoryControl } from './components/transcript-history-r
 import { AgendaInboxComposer } from './features/agenda/agenda-inbox-composer.tsx';
 import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
-import { useCompactAtSessionActions } from './features/session-actions/compact-at-session-actions.tsx';
 import type { ToTestHost } from './features/agenda/to-test-rows.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { BoardOriginProvider, useBoardOrigin } from './features/board/board-origin.tsx';
@@ -101,16 +100,17 @@ import { queueContribution } from './features/queue-view/queue-action.ts';
 import { restartFerrets } from './features/restart-outdated/restart-outdated-api.ts';
 import { RestartOverlayProvider } from './features/restart-outdated/restart-overlay.tsx';
 import { ActionToast } from './features/session-actions/action-toast.tsx';
+import { useCompactAtSessionActions } from './features/session-actions/compact-at-session-actions.tsx';
 import { sessionRowMenuRenderer } from './features/session-actions/row-actions-host.tsx';
 import { switchTapper } from './features/session-info/switch-marks.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { aboutSettingsTab } from './features/settings/about-machine.tsx';
 import { agentClisSettingsTab } from './features/settings/agent-clis.tsx';
-import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
 import { ConnectionPreferenceSettings } from './features/settings/connection-preference-settings.tsx';
 import { daemonDisplayName, distinctDaemonName } from './features/settings/daemon-settings.tsx';
 import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
+import { LimitsSurface } from './features/settings/limits-settings.tsx';
 import { useMachineUpdates } from './features/settings/machine-updates.ts';
 import { NotificationFilterSettingsView } from './features/settings/notification-filter-settings.tsx';
 import { MachineNotificationList, NotificationsOffBanner } from './features/settings/notification-machines.tsx';
@@ -2040,12 +2040,12 @@ function SettingsRoute({ connection }: DaemonPageProps) {
     () => [
       {
         id: 'resource-limits',
-        label: 'Resource limits',
-        description: 'Linux CPU and RAM caps for this daemon’s managed fleet.',
+        label: 'Ferret limits',
+        description: 'How much of this machine the ferrets may take, and whether that is working.',
         // Referenced directly rather than wrapped: this surface takes only `connection`, so a
         // pass-through arrow would add a component factory nothing renders — an uncovered line that
         // exists solely to rename its own argument. Doctor below genuinely needs one; it also passes `read`.
-        Surface: CgroupConfigSurface,
+        Surface: LimitsSurface,
       },
       {
         id: 'doctor',

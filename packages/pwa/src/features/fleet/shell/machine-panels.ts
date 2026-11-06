@@ -73,7 +73,7 @@ export const panelTab = (panel: string): MachineTabId | undefined => PANEL_TABS.
 export const PANEL_NAMES: Readonly<Record<string, string>> = {
   security: 'Passkeys',
   carrier: 'Connection',
-  'resource-limits': 'Resource limits',
+  'resource-limits': 'Ferret limits',
   'agent-clis': 'Agent tools',
   'security-log': 'Security log',
   terminals: 'Terminal slots',

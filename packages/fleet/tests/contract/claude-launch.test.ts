@@ -157,9 +157,10 @@ describe.skipIf(!claudeCredentialPlantable)('claude contract: launching an agent
   });
 
   it('warns before bypassPermissions without the fixed settings (the control)', async () => {
-    const screen = await (
-      await runtime({ onboarded: true, trusted: true })
-    ).screen(['--permission-mode', 'bypassPermissions']);
+    const screen = await (await runtime({ onboarded: true, trusted: true })).screen([
+      '--permission-mode',
+      'bypassPermissions',
+    ]);
     should(screen).match(BYPASS_WARNING);
   });
 

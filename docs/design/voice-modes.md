@@ -282,18 +282,20 @@ voice-worker` with Bun's advanced IPC — not a source path, which a compiled in
 
 ### 2.5 Keeping the agents and the daemon fed (ties to &I36)
 
-The daemon already places agents in cgroups (`packages/daemon/src/lib/cgroups/`, I36): a transient
-systemd **user** scope per agent under `<product>-fleet.slice`, with `CPUQuota` and `MemoryMax`
-computed as shares of the whole host (`limits.ts`), and the daemon itself in `app.slice`, never capped.
+The daemon already places agents in cgroups (`packages/daemon/src/lib/cgroups/`, I36, built in
+`docs/ferret-limits.md`): a transient systemd **user** scope per agent under `<product>_fleet.slice`,
+**on by default**, with `CPUWeight=50` on the slice, memory limits computed from the user's real budget
+(`packages/protocol/src/lib/limits.ts`) and **no CPU quota by default**, and the daemon itself in
+`app.slice`, never capped.
 The voice worker joins that layout as a **sibling** slice, built by the same `scope.ts` / `limits.ts`
 code so there is one owner of the unit format:
 
 ```text
 user@UID.service
 ├── app.slice/…                         the daemon — never capped
-├── <product>-fleet.slice               agents (I36)
+├── <product>_fleet.slice               agents (I36): CPUWeight=50
 │   └── <product>-agent-<id>-<n>.scope
-└── <product>-voice.slice               the speech worker; CPUWeight per D3 (against fleet.slice)
+└── <product>_voice.slice               the speech worker; CPUWeight=200 (D3 (b)) — above the fleet's 50
     └── <product>-voice-<n>.scope       CPUQuota = C × 100 %, MemoryMax = 1.5 GB
 ```
 
@@ -314,10 +316,10 @@ count alone does not bound the process: idle pools may spin. Two things do:
    gets a hard `CPUQuota` of C cores — whatever threads exist, the worker gets at most C cores of CPU
    time — and a `MemoryMax` of 1.5 GB. **Who wins under contention (D3) is a weight on the slice, not the
    scope**: siblings share CPU by their own weights, and the scope is the only child of
-   `<product>-voice.slice`, so a weight on it would decide nothing. D3 (a) sets `<product>-voice.slice`
-   to `CPUWeight=50` against the fleet slice's default 100; (b) sets it to 200. The fleet slice and
-   `app.slice` keep their weights, so the daemon's share is unchanged. B2's contention test runs
-   against these real units. A worker over its memory is killed by the kernel; the daemon sees the exit, says so on the stream, and
+   `<product>_voice.slice`, so a weight on it would decide nothing. The owner chose D3 (b): `<product>_voice.slice`
+   is `CPUWeight=200`, against the fleet slice's **50** (it was 100 before I36 made the fleet's weight explicit)
+   and `app.slice`'s default 100, so **voice sits above the ferrets** and the daemon above them too. B2's contention
+   test runs against these real units. A worker over its memory is killed by the kernel; the daemon sees the exit, says so on the stream, and
    the next stream starts a fresh worker.
 
 **Where cgroups cannot be used** (macOS; Linux without cgroup v2; a user manager that refuses
@@ -675,7 +677,7 @@ voice chat on it; C is the on-device speed opt-in and is independent of B.
 | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **B0** | The endpointer, energy math and Live machine move to `@ferretry/protocol`; no behaviour change.                                                                                                                                                                        | Nothing visible.                                                                                                                                            |
 | **B1** | The `voice` capability (person-only routes, Sharing's predicate pinned, upgrade test), `voice.yaml` engine block, **Install on my machine** (pinned, hashed, resumable), `fy voice status`, `fyd --check` voice line.                                                  | Settings › Voice › On my machine › Install. `fy voice status` says installed, with sizes.                                                                   |
-| **B2** | The worker: `fyd voice-worker`, sherpa from the install dir, C threads, `<product>-voice.slice` (Linux) / best effort elsewhere, idle exit, contention and over-memory tests, Silero trial; `fy voice test <file.wav>`; numbers on Linux x64, arm64 and Apple Silicon. | `fy voice test clip.wav` prints the words and the time. `systemctl --user status <product>-voice.slice` shows the caps while it runs.                       |
+| **B2** | The worker: `fyd voice-worker`, sherpa from the install dir, C threads, `<product>_voice.slice` (Linux) / best effort elsewhere, idle exit, contention and over-memory tests, Silero trial; `fy voice test <file.wav>`; numbers on Linux x64, arm64 and Apple Silicon. | `fy voice test clip.wav` prints the words and the time. `systemctl --user status <product>_voice.slice` shows the caps while it runs.                       |
 | **B3** | `/v1/voice/stream` (fixed-shape units, bounds) and **dictation on my machine, after stop**; relay §10 and the privacy wording updated; forwarded-loopback test.                                                                                                        | On the phone over the relay, pick On my machine, dictate, Stop: the review box shows the words.                                                             |
 | **B4** | **Dictation on my machine, in real time** (chunked Parakeet; streaming Zipformer if installed).                                                                                                                                                                        | In real time with On my machine: words appear as you pause, as fast on the phone as on the desktop.                                                         |
 | **B5** | **Voice chat on the machine**: the panel replaces the composer; the daemon endpoints, counts down and sends (nonce freshness, stable send id); §1.4's states; the on-device take path removed from voice chat; "preview" dropped.                                      | Voice chat: talk, watch the countdown, hear the reply. Airplane mode early in a countdown: nothing is sent, and the words are offered back when you reopen. |

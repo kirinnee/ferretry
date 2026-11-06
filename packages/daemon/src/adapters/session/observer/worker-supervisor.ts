@@ -66,7 +66,15 @@ export interface WorkerSupervisorSettings {
   readonly drainMs: number;
   /** How many workers may be starting at once, so a boot does not start every thread together. */
   readonly startConcurrency: number;
+  /**
+   * How long a thread being ended may take to end its tmux clients before it is terminated anyway. Absent:
+   * {@link DEFAULT_WORKER_STOP_MS}.
+   */
+  readonly stopMs?: number;
 }
+
+/** Long enough for a client to detach and be reaped on a slow host, short enough not to hold a thread for long. */
+export const DEFAULT_WORKER_STOP_MS = 5_000;
 
 export const DEFAULT_WORKER_SUPERVISOR_SETTINGS: Omit<WorkerSupervisorSettings, 'cap'> = {
   requestTimeoutMs: 10_000,
@@ -143,6 +151,12 @@ export class WorkerSupervisor {
   private readonly retryAt = new Map<SessionId, number>();
   private readonly inline = new Set<SessionId>();
   private readonly pending = new Map<number, PendingRequest>();
+  /**
+   * Threads already ended — hosting nothing, answering nothing — that are still ending their tmux clients. Kept
+   * so a stopping daemon waits for them and terminates them like any other thread, instead of exiting while
+   * their clients are still running. `finish` is idempotent: it cancels the wait and terminates.
+   */
+  private readonly retiring = new Map<number, { readonly finish: () => void; readonly finished: Promise<void> }>();
   private nextThread = 1;
   private nextRequest = 1;
   private closed = false;
@@ -289,6 +303,7 @@ export class WorkerSupervisor {
   close(): void {
     this.closed = true;
     for (const thread of [...this.threads.values()]) this.end(thread, new Error('the session workers were closed'));
+    for (const retiring of [...this.retiring.values()]) retiring.finish();
   }
 
   /**
@@ -301,8 +316,20 @@ export class WorkerSupervisor {
   async stop(withinMs = 5_000): Promise<void> {
     this.closed = true;
     const started = [...this.threads.values()].filter(thread => thread.ready && !thread.ended);
-    await Promise.all(
-      started.map(
+    // A thread that was already ending is waited for the same way: its `stop` is already on its way to it.
+    const ending = [...this.retiring.values()].map(
+      async retiring =>
+        await new Promise<void>(resolve => {
+          const cancel = this.ports.schedule(withinMs, resolve);
+          void retiring.finished.then(() => {
+            cancel();
+            resolve();
+          });
+        }),
+    );
+    await Promise.all([
+      ...ending,
+      ...started.map(
         async thread =>
           await new Promise<void>(resolve => {
             const cancel = this.ports.schedule(withinMs, resolve);
@@ -313,7 +340,7 @@ export class WorkerSupervisor {
             this.post(thread.id, { kind: 'stop' });
           }),
       ),
-    );
+    ]);
     this.close();
   }
 
@@ -333,8 +360,9 @@ export class WorkerSupervisor {
     this.threads.set(id, thread);
     worker.unref?.();
     worker.onmessage = event => this.receive(thread, event.data);
-    worker.onerror = event => this.crash(id, `the worker failed: ${event.message}`);
-    worker.addEventListener?.('close', () => this.crash(id, 'the worker exited'));
+    // Both mean the thread itself is gone: there is nobody left to ask to end its clients.
+    worker.onerror = event => this.crash(id, `the worker failed: ${event.message}`, 'gone');
+    worker.addEventListener?.('close', () => this.crash(id, 'the worker exited', 'gone'));
     // Ready once it answers the probe: until then its sessions are observed inline.
     worker.postMessage({ probe: true });
     return thread;
@@ -374,7 +402,11 @@ export class WorkerSupervisor {
   }
 
   private receive(thread: Thread, message: FromSessionWorker): void {
-    if (thread.ended) return;
+    // An ended thread is heard only to say it has stopped: everything else it sends is stale.
+    if (thread.ended) {
+      if ('kind' in message && message.kind === 'stopped') thread.stopped?.();
+      return;
+    }
     if ('probe' in message) {
       thread.ready = true;
       for (const held of thread.held.splice(0)) this.post(thread.id, held);
@@ -419,7 +451,7 @@ export class WorkerSupervisor {
     return placement?.thread === thread.id && placement.generation === generation;
   }
 
-  private crash(threadId: number, reason: string): void {
+  private crash(threadId: number, reason: string, state: 'alive' | 'gone' = 'alive'): void {
     const thread = this.threads.get(threadId);
     if (thread === undefined || thread.ended || this.closed) return;
     const now = this.ports.nowMs();
@@ -439,13 +471,35 @@ export class WorkerSupervisor {
         this.ports.schedule(verdict.afterMs, () => this.ports.changed());
       }
     }
-    this.end(thread, new Error(reason));
+    this.end(thread, new Error(reason), state);
     this.ports.changed();
   }
 
-  private end(thread: Thread, error: Error): void {
+  /**
+   * Ends a thread — and, while the daemon is NOT stopping, lets it end its tmux clients first.
+   *
+   * A CHILD IS REAPED ONLY BY THE THREAD THAT STARTED IT. A worker's `Bun.spawn` children are watched by that
+   * worker's own loop; terminate the thread and a client that exits afterwards is never waited for, and stays a
+   * zombie of the daemon for good. On 2026-11-05 the daemon held 134 `tmux: client <defunct>`, started at boot
+   * and in the stall windows — when a slow disk made a look miss its timeout and the thread was ended as stuck,
+   * and when an emptied thread was drained. So a thread that has started is told to `stop` (end its clients
+   * and answer once they have EXITED, as {@link stop} does for the whole pool) and is terminated on that answer,
+   * or after {@link WorkerSupervisorSettings.stopMs} if it cannot give one: a thread that is truly stuck still
+   * goes. Its sessions and looks are released AT ONCE either way; only the thread's own exit waits.
+   * {@link close} — the daemon stopping — terminates at once, as before: {@link stop} already gave the threads
+   * their chance.
+   */
+  private end(thread: Thread, error: Error, state: 'alive' | 'gone' = 'alive'): void {
     if (thread.ended) return;
     thread.ended = true;
+    // Posted directly, never through `post`: a refused post there is a crash, and this thread is already ending.
+    let graceful = !this.closed && thread.ready && state === 'alive';
+    if (graceful)
+      try {
+        thread.worker.postMessage({ kind: 'stop' } satisfies ToSessionWorker);
+      } catch {
+        graceful = false;
+      }
     thread.drain?.();
     thread.held.splice(0);
     for (const session of thread.sessions) this.placements.delete(session);
@@ -456,11 +510,29 @@ export class WorkerSupervisor {
       pending.cancel();
       pending.reject(error);
     }
-    try {
-      thread.worker.terminate();
-    } catch {
-      // Already gone.
-    }
+    const terminate = (): void => {
+      try {
+        thread.worker.terminate();
+      } catch {
+        // Already gone.
+      }
+    };
+    if (graceful) {
+      let settle: () => void = () => undefined;
+      const finished = new Promise<void>(resolve => {
+        settle = resolve;
+      });
+      let cancel: () => void = () => undefined;
+      const finish = (): void => {
+        if (!this.retiring.delete(thread.id)) return;
+        cancel();
+        terminate();
+        settle();
+      };
+      this.retiring.set(thread.id, { finish, finished });
+      cancel = this.ports.schedule(this.settings.stopMs ?? DEFAULT_WORKER_STOP_MS, finish);
+      thread.stopped = finish;
+    } else terminate();
     this.threads.delete(thread.id);
   }
 

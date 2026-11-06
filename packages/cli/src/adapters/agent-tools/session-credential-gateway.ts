@@ -1,11 +1,6 @@
-import {
-  classifyDaemonUnreachable,
-  type DaemonAttempt,
-  type DaemonRestartPatience,
-  daemonStartingOf,
-  isRepeatableAgentTool,
-  waitOutDaemonRestart,
-} from '@ferretry/protocol';
+import type { DaemonAttempt, DaemonRestartPatience } from '@ferretry/protocol';
+import { isRepeatableAgentTool } from '@ferretry/protocol/agent-tools';
+import { classifyDaemonUnreachable, daemonStartingOf, waitOutDaemonRestart } from '@ferretry/protocol/daemon-restart';
 import type { z } from 'zod';
 import type { IAgentToolsGateway } from '../../lib/agent-tools/client.ts';
 import { isLocalDaemonUrl } from '../../lib/daemon/address.ts';

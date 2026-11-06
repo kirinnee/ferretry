@@ -88,7 +88,6 @@ describe('FyApiClient construction and generic requests', () => {
       'suggestNames',
       'transcriptImage',
       'unpinSession',
-      'updateCgroupConfig',
       'updateDaemonUpdateSettings',
       'updatePwaConfig',
       'updateWardenConfig',

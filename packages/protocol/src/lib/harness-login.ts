@@ -37,7 +37,7 @@
  * harness's own states.
  *
  * Both were established by running the installed CLIs with piped stdio rather than by reading their
- * `--help` — see `docs/migration/surveys/harness-login-flows.md`.
+ * `--help`.
  */
 import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema } from './common.ts';

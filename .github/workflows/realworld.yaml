@@ -71,12 +71,20 @@ on:
       - 'packages/pwa/src/**'
       - 'packages/pwa/tests/fixtures/fy-render-journey.ts'
 
-# A new push to a PR supersedes the run for its old SHA. `main`, the nightly and manual dispatch get a
-# group of their own run id, so a queued run is never cancelled by a newer one.
+# A new push to a PR supersedes the run for its old SHA, so that run is cancelled instead of holding a
+# runner.
+#
+# A push to `main` shares ONE group and never cancels in progress: at most one `main` run runs and one
+# waits, and a newer push replaces the one waiting — the shape ci.yaml gives `main`. Each `main` run used to
+# have a group of its own, so a burst of merges ran the whole tier once per merge (557 runs in nine days,
+# each on a Namespace 4x8). Superseding a waiting run loses nothing: this tier only files issues, and the
+# newer run proves every commit the older one held. A run already in progress is never cancelled.
+# The nightly and manual dispatch keep a group of their own run id, so neither is ever superseded.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{
       github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'main'
       || github.run_id
     }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

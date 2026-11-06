@@ -43,6 +43,7 @@ export class FileSessionSpawnFacts implements SessionSpawnFactsPort {
       ...(typeof value.label === 'string' ? { label: value.label } : {}),
       ...(typeof value.parent === 'string' ? { parent: value.parent } : {}),
       ...(typeof value.wardenLineage === 'boolean' ? { wardenLineage: value.wardenLineage } : {}),
+      ...(value.mode === 'interactive' ? { interactive: true } : {}),
     };
   }
 }

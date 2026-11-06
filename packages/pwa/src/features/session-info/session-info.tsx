@@ -10,6 +10,7 @@ import type {
   AnalyticsResponse,
   BrowserPageSummary,
   BrowserStatus,
+  LimitsView,
   ManagedWorktreeView,
   SessionRelaunchSettings,
   SessionView,
@@ -33,6 +34,7 @@ import { type InfoListRead, InfoRuntime } from './info-runtime.tsx';
 import { InfoSurfaces } from './info-surfaces.tsx';
 import { type InfoAnalyticsRead, InfoUsage } from './info-usage.tsx';
 import { type InfoVerdictsRead, InfoWarden } from './info-warden.tsx';
+import { memoryNote } from './memory-note.ts';
 import type { InfoPlacement } from './use-info-placement.ts';
 
 /** The Context tab's data: the context rail's, minus what Info decides itself. */
@@ -45,6 +47,8 @@ export interface SessionInfoPorts {
   readonly folder: InfoFolderProps;
   /** Whether a Restart would relaunch this ferret on different settings. Absent: no Settings row. */
   readonly relaunch?: ContextLoader<SessionRelaunchSettings>;
+  /** What ferret limits are in force and who is being slowed or stopped for memory. Absent: no Memory row. */
+  readonly limits?: ContextLoader<LimitsView>;
 }
 
 export interface SessionInfoProps {
@@ -97,6 +101,8 @@ const listRead = <T,>(
       : { kind: 'loading' };
 
 /** The loader a host without the read binds, so the hook order never depends on the port. */
+const NO_LIMITS: ContextLoader<LimitsView> = async () => await Promise.reject(new Error('no limits read'));
+
 const NO_RELAUNCH: ContextLoader<SessionRelaunchSettings> = async () => ({ current: true, reasons: [] });
 
 const relaunchRead = (read: ReturnType<typeof useContextRead<SessionRelaunchSettings>>['load']): InfoRelaunchRead =>
@@ -140,6 +146,10 @@ export function SessionInfo({
   const mcp = useContextRead(ports.folder.loadMcp, tab === 'runtime');
   const docs = useContextRead(ports.folder.loadDocs, tab === 'runtime');
   const skills = useContextRead(ports.folder.loadSkills, tab === 'runtime');
+  const limits = useContextRead(ports.limits ?? NO_LIMITS, tab === 'overview' && ports.limits !== undefined);
+  const memory = limits.load.kind === 'ready' ? memoryNote(limits.load.value, view.config.id) : null;
+  const aboutWithMemory =
+    about === undefined && memory === null ? undefined : { ...about, ...(memory === null ? {} : { memory }) };
   const relaunch = useContextRead(ports.relaunch ?? NO_RELAUNCH, tab === 'runtime' && ports.relaunch !== undefined);
 
   const verdictsRead: InfoVerdictsRead =
@@ -189,7 +199,7 @@ export function SessionInfo({
                     ...(card.onOpenBoard === undefined ? {} : { onOpenBoard: card.onOpenBoard }),
                   },
                 })}
-            {...(about === undefined ? {} : { about })}
+            {...(aboutWithMemory === undefined ? {} : { about: aboutWithMemory })}
             warden={<InfoWarden agentName={name} now={now} sessionId={view.config.id} verdicts={verdictsRead} />}
           />
         ),

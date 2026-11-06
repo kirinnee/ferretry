@@ -1,3 +1,63 @@
+## [4.288.0](https://github.com/kirinnee/ferretry/compare/v4.287.1...v4.288.0) (2026-11-06)
+
+### Features
+
+* **daemon:** limit ferrets by default, sized from what the user may spend ([#1517](https://github.com/kirinnee/ferretry/issues/1517)) ([e3b1d94](https://github.com/kirinnee/ferretry/commit/e3b1d941d76b1e281b0e7302d86246cce20f1515))
+
+## [4.287.1](https://github.com/kirinnee/ferretry/compare/v4.287.0...v4.287.1) (2026-11-06)
+
+### Fixes
+
+* **daemon:** serve terminal rename as PATCH, the method the app sends ([#1526](https://github.com/kirinnee/ferretry/issues/1526)) ([8659e25](https://github.com/kirinnee/ferretry/commit/8659e25b75219955344a301def0320bcc4c11621))
+
+## [4.287.0](https://github.com/kirinnee/ferretry/compare/v4.286.0...v4.287.0) (2026-11-06)
+
+### Features
+
+* **pwa:** hide waiting messages from the chat; show send times on the queue page (F955) ([#1493](https://github.com/kirinnee/ferretry/issues/1493)) ([82fb39c](https://github.com/kirinnee/ferretry/commit/82fb39c08fdcf4789673fe02d1b46227bc99088f)), closes [#1496](https://github.com/kirinnee/ferretry/issues/1496)
+
+### Fixes
+
+* **daemon:** keep the event loop off the disk and off whole-fleet renders ([#1516](https://github.com/kirinnee/ferretry/issues/1516)) ([d44379b](https://github.com/kirinnee/ferretry/commit/d44379b2472539a6484d97b2279fb974c5c9af33))
+
+## [4.286.0](https://github.com/kirinnee/ferretry/compare/v4.285.1...v4.286.0) (2026-11-06)
+
+### Features
+
+* **pwa:** auto-read replies aloud when a turn ends (F137 slice 2) ([#1491](https://github.com/kirinnee/ferretry/issues/1491)) ([6884539](https://github.com/kirinnee/ferretry/commit/6884539157768a6050d08eb69804a6d47f22dc43))
+
+## [4.285.1](https://github.com/kirinnee/ferretry/compare/v4.285.0...v4.285.1) (2026-11-06)
+
+### Performance
+
+* **cli:** load only the command group a long-lived fy needs ([#1520](https://github.com/kirinnee/ferretry/issues/1520)) ([fa27b1e](https://github.com/kirinnee/ferretry/commit/fa27b1edd87aee92266e6df978cff04ded259f67))
+
+## [4.285.0](https://github.com/kirinnee/ferretry/compare/v4.284.0...v4.285.0) (2026-11-06)
+
+### Features
+
+* **daemon:** save svg and html pictures as daemon files (render store, F959 slice 2) ([#1485](https://github.com/kirinnee/ferretry/issues/1485)) ([5a6f295](https://github.com/kirinnee/ferretry/commit/5a6f295618cb272dcd2c9c7cb8d1a7337d557ce8))
+
+### Fixes
+
+* **board:** ferret jobs become owner cards; adopt orphaned cards ([#1490](https://github.com/kirinnee/ferretry/issues/1490)) ([36fe336](https://github.com/kirinnee/ferretry/commit/36fe336d6adbdc34ecf53246437da6d8b6d56217))
+* **pwa:** make the Queue page readable ([#1496](https://github.com/kirinnee/ferretry/issues/1496)) ([f144c3f](https://github.com/kirinnee/ferretry/commit/f144c3f35c7e38497f68b96216dda3d7472fa944))
+* **pwa:** open the Inbox quote menu at the selection ([#1468](https://github.com/kirinnee/ferretry/issues/1468)) ([6c83a04](https://github.com/kirinnee/ferretry/commit/6c83a043be72b60a9a07360f8c1f64b9628315ea))
+* **send:** never stall a queue behind a hand-over that gave up before its first key ([#1444](https://github.com/kirinnee/ferretry/issues/1444)) ([b78323f](https://github.com/kirinnee/ferretry/commit/b78323fa3895e1973a2919a47421ca464745af91))
+
+## [4.284.0](https://github.com/kirinnee/ferretry/compare/v4.283.1...v4.284.0) (2026-11-06)
+
+### Features
+
+* **daemon:** show how long a harness took to start ([#1504](https://github.com/kirinnee/ferretry/issues/1504)) ([0f03c35](https://github.com/kirinnee/ferretry/commit/0f03c35efedbf64e461e0f0d87cf72fb9ef0c6c6))
+* **pwa:** read an assistant reply aloud (F137 slice 1) ([#1488](https://github.com/kirinnee/ferretry/issues/1488)) ([5cf56b1](https://github.com/kirinnee/ferretry/commit/5cf56b131950d1c2867da54b28273b3b34a923a9))
+* **pwa:** update review sheet and screenshot harness for re-copy ([#1480](https://github.com/kirinnee/ferretry/issues/1480)) ([173f762](https://github.com/kirinnee/ferretry/commit/173f762d3189937db6c61744762dd62a7da8fd33)), closes [#1482](https://github.com/kirinnee/ferretry/issues/1482)
+
+### Fixes
+
+* **cli:** run the daemon on one GC marker so a worker thread cannot wedge ([#1509](https://github.com/kirinnee/ferretry/issues/1509)) ([f668ab4](https://github.com/kirinnee/ferretry/commit/f668ab4a82577b8f672ef64830d7b3ff97bc9f75))
+* **pwa:** load map tiles in anonymous cors mode ([#1507](https://github.com/kirinnee/ferretry/issues/1507)) ([855d57b](https://github.com/kirinnee/ferretry/commit/855d57bedc2372f3f501a4d6ebc389a65606a0b7))
+
 ## [4.283.1](https://github.com/kirinnee/ferretry/compare/v4.283.0...v4.283.1) (2026-11-05)
 
 ### Fixes

@@ -203,8 +203,8 @@ enter at that boundary and must be validated before they reach the domain:
   constructor ports (a Record/Principal domain would inject `IPostService` here), parses the raw
   argv with a zod schema, calls the domain with typed structures, and sets an exit code. `zod` is a
   real dependency of `packages/cli`; a date library is not.
-- **The composition root wires the command.** `bin/fy.ts` owns `createProgram()` (the commander
-  skeleton), `buildWorld()` (the production adapters), and `registerDomain(program, world)` — the
+- **The composition root wires the command.** `bin/wiring.ts` owns `createProgram()` (the commander
+  skeleton) and `bin/program.ts` owns `buildWorld()` (the production adapters), and `registerDomain(program, world)` — the
   single seam where a controller is constructed with its ports and attached to the program. The
   domain under `src/lib/` never imports from `bin/` or `adapters/`.
 

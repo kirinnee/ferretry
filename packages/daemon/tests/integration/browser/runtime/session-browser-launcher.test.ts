@@ -1294,3 +1294,83 @@ exit 7
     });
   });
 });
+
+describe('shared browser limits at the actual child launch seams', () => {
+  it('should wrap both children without losing their PIDs, lease or DevTools pipe', async () => {
+    const chrome = await fakeChrome();
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-browser-limits-'));
+    roots.push(root);
+    const shim = join(root, 'scope-exec');
+    const pidFile = join(root, 'pids');
+    // A safe stand-in for scope mode's execvpe: no live user manager is touched.
+    await writeFile(shim, `#!/bin/sh\nprintf '%s\\n' "$$" >> '${pidFile}'\nexec "$@"\n`);
+    await chmod(shim, 0o700);
+    const planned: (readonly string[])[] = [];
+    const workers: BrowserWorkerClient[] = [];
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      WORKER_ENTRY,
+      process.execPath,
+      environment(chrome),
+      async options => {
+        const worker = await BrowserWorkerClient.connect(options);
+        workers.push(worker);
+        return worker;
+      },
+      {
+        ...PIPE,
+        ...SHORT_SHUTDOWN,
+        limits: {
+          browserCommand: async command => {
+            planned.push(command);
+            return [shim, ...command];
+          },
+        },
+      },
+    );
+    const browser = await launcher.launch({ width: 800, height: 600 });
+    opened.push(browser);
+    const chromePid = await leasedChromePid(root);
+    const workerPid = (workers[0] as BrowserWorkerClient).pid;
+    should(planned).have.length(2);
+    should(planned[0]?.[0]).equal(chrome);
+    should(planned[1]?.slice(0, 3)).deepEqual([
+      process.execPath,
+      WORKER_ENTRY.kind === 'source' ? WORKER_ENTRY.entry : '',
+      'pipe',
+    ]);
+    const actualPids = (await readFile(pidFile, 'utf8')).trim().split('\n').map(Number);
+    should(actualPids).deepEqual([chromePid, workerPid]);
+    const answer = await browser.navigate('p1', 'cdp-round-trip');
+    should(decodeURIComponent(answer.url)).containEql('"chrome":"FakeChrome/150.0"');
+    await browser.close();
+    should(alive(chromePid)).be.false();
+    should(alive(workerPid)).be.false();
+    const next = await new BrowserProfileStore(root).acquire({ sessionId: 'again' });
+    await next.release();
+  });
+
+  it('should release the profile if the Chrome limit planner refuses before spawn', async () => {
+    const chrome = await fakeChrome();
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-browser-limit-refusal-'));
+    roots.push(root);
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      WORKER_ENTRY,
+      process.execPath,
+      environment(chrome),
+      undefined,
+      {
+        ...PIPE,
+        limits: {
+          browserCommand: async () => {
+            throw new Error('scope refused');
+          },
+        },
+      },
+    );
+    await should(launcher.launch({ width: 800, height: 600 })).be.rejectedWith('scope refused');
+    const next = await new BrowserProfileStore(root).acquire({ sessionId: 'again' });
+    await next.release();
+  });
+});

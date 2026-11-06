@@ -7,20 +7,19 @@ document, not this code, is the thing to implement against.
 
 ## Why this package exists
 
-A daemon behind NAT has no inbound route, so a browser somewhere else cannot reach it. There are two
-carriers and one security model across both:
+A daemon behind NAT has no inbound route, so a browser somewhere else cannot reach it. There are four
+kinds of carrier — direct, WebRTC, a hosted Cloudflare tunnel, and relay — and one security model
+across all of them. This package owns the relay: a Worker + Durable Object forwarding frames it is
+structurally unable to read. Ferretry operates one, with daemon-keyed metering, a runtime kill
+switch, and per-daemon plus account-wide caps.
 
-- **Direct** — the browser dials the daemon. Attempted first, automatically, whenever it works.
-- **Relay** — a Worker + Durable Object forwarding frames it is structurally unable to read. The
-  automatic fallback. Ferretry operates one, with daemon-keyed metering, a runtime kill switch, and
-  per-daemon plus account-wide caps.
-
-**Neither should be a question a user is asked.** The required carrier behaviour is direct first,
-hosted relay when direct does not work, and the live carrier always named on screen so nothing
-degrades silently. The current PWA still carries an interim three-way chooser and self-hosting setup
-route; removing those is an explicit GAP. Running a relay of your own remains supported as an
-**expert opt-in path** with its own runbook —
-[`docs/cloudflare-relay-self-hosting.md`](../../docs/cloudflare-relay-self-hosting.md).
+**The default asks nothing.** A device and machine nobody chose for goes through the relay. A person
+may instead choose, per device and machine, **Auto** (direct, then WebRTC, then a tunnel, then
+relay), or WebRTC, tunnel or relay only. First-run onboarding asks no carrier question, and the
+machine's Connection panel names the live carrier and holds that preference, so nothing degrades
+silently. Running a relay of your own remains supported as an **expert opt-in path** with its own
+runbook — [`docs/cloudflare-relay-self-hosting.md`](../../docs/cloudflare-relay-self-hosting.md). The
+carrier rules are in [docs/relay-protocol.md](../../docs/relay-protocol.md) §1 and §15.
 
 No **carrier** address is compiled into this package. The client build does carry one address — the
 **discovery origin** it reads the advertisement from, because the relay has its own hostname and the
@@ -124,29 +123,15 @@ endpoint instead.
 The protocol, both relay operating modes, the runtime control plane and operator metrics are
 implemented and tested.
 
-**The DAEMON end of the transport is wired; the BROWSER end is not.** That is the honest limit today,
-and it is a different limit from the one this section described before.
+**Both ends of the transport are live.** The daemon dials (`packages/daemon/src/lib/relay` and
+`src/adapters/relay`), the browser opens sessions over whichever carrier wins
+(`packages/pwa/src/lib/relay-session.ts`, `relay-carrier.ts`), and both ends discover the hosted
+default from `HOSTED_RELAY_DIRECTORY_ORIGIN`. Deploying a relay gets you every
+request/response route and the live event, terminal and remote-browser streams. First pairing over
+the hosted rendezvous works even when the daemon's direct address is unreachable; a daemon whose
+only relay is one you run needs a directly reachable first contact.
 
-[PR #202](https://github.com/kirinnee/ferretry/pull/202) supplies discovery — both ends compile
-`HOSTED_RELAY_DIRECTORY_ORIGIN` from this package's one source constant, then read and parse
-`/v1/default-relay` at runtime. The temporary personal `workers.dev` default is shared by forks too;
-the operator can still switch the advertised carrier off without a release.
-
-`packages/daemon` now dials. `src/lib/relay` holds the daemon half of the rendezvous — the claim it
-signs with the key pairing already minted, the per-session handshake, the record layer, the credit
-window, and the tunnel in §14 that carries one request and one answer into the daemon's own route
-table. `src/adapters/relay` is the outbound socket, its redial and its liveness sweep, and
-`DaemonRelayConfigSchema` is where an operator points it at an address. It is proved end to end over a
-real WebSocket against a server that verifies the claim and runs the client half.
-
-What remains is the BROWSER end. `packages/pwa/src/lib/daemon-transport.ts` still builds every request
-from one direct `baseUrl`, and `ConnectionMethod` still has no consumer outside this package, so
-`daemon-connection.ts`, `connections.ts`, `daemon-transport.ts` and `event-transport.ts` still move
-together — followed by active-carrier disclosure for a live session and removal of the interim
-chooser. §13 of the protocol document lists each piece and its state. Until the browser end ships,
-deploying a relay gets you a relay and a daemon sitting in it, not a remote connection.
-
-Two shapes the tunnel does not carry on either end, named in §14 rather than left to be discovered:
-the protocol-switching surfaces (`/v1/events`, terminal streams) and the byte-shaped dictation routes.
-There is also no `fy` verb for the configuration block yet — an operator writes `relay` into
-`<state home>/config/daemon.json` by hand.
+What is still open is listed in [docs/relay-protocol.md §13](../../docs/relay-protocol.md): there is no
+`fy` verb to edit the daemon's `carriers` list (an operator writes it into
+`<state home>/config/daemon.json` by hand), a fresh device can discover only the hosted rendezvous,
+and no surface yet renders the session-ceiling refusal (`4429`).

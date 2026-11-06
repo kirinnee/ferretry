@@ -14,12 +14,15 @@ import type {
   TaskPatchFlags,
 } from '../../lib/board/board-controllers';
 import { laneGuide } from '../../lib/board/lane-guide';
+import type { MergeGateController } from '../../lib/board/merge-gate';
 import { TASK_CREATE_RULE } from '../../lib/board/umbrella';
 import { TASK_TITLE_GUIDANCE } from '../../lib/tasks/task-title';
 
 /** Everything the task command group is wired from; the composition root owns the concrete instances. */
 export interface TaskCommandDependencies {
   readonly board: BoardController;
+  /** `fy task merge-gate`: whether a PR's card is queued behind another (docs/design/clash-queue.md). */
+  readonly mergeGate: MergeGateController;
 }
 
 interface SessionOptions {
@@ -112,7 +115,12 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--assignee <who>', 'the ferret doing it: a callsign or a session id')
     .option('--project <name>', 'the board to create it on; default: the board of the calling session')
     .option('--lane <lane>', "the lane to start in; default: the workflow's first")
-    .option('--file <path>', 'an advisory file claim (repeatable)', collect, [])
+    .option(
+      '--file <path>',
+      "a file or folder the work will touch (repeatable); overlapping an open card's claim queues this card's merge behind it",
+      collect,
+      [],
+    )
     .option('--pr <url>', 'a pull request link (repeatable)', collect, [])
     .option('--branch <branch>', 'the branch it is built on')
     .option('--doc <path>', 'a document link (repeatable)', collect, [])
@@ -275,6 +283,14 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
       await board.claim(id, options);
     });
 
+  acting(group.command('adopt'))
+    .description('take a card whose owner ferret and assignee have both ended (you must be a live lead on its board)')
+    .argument('<id>', ID_HELP)
+    .option('--reason <why>', 'why you take it; kept in its history')
+    .action(async (id: string, options: SessionOptions & { reason?: string }) => {
+      await board.adopt(id, options);
+    });
+
   acting(group.command('note'))
     .description('append a note to the history')
     .argument('<id>', ID_HELP)
@@ -303,13 +319,25 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     });
 
   acting(group.command('file'))
-    .description('claim or release a file; claims are advisory, never a lock')
+    .description(
+      "claim or release a file or folder the work will touch; overlapping an open card's claim queues this card's merge behind it",
+    )
     .argument('<id>', ID_HELP)
-    .argument('<path>', 'the file being claimed')
+    .argument('<path>', 'the file or folder being claimed, relative to the repository')
     .option('--remove', 'release the claim instead of taking it')
     .option('--reason <why>', 'optional context')
     .action(async (id: string, path: string, options: SessionOptions & { remove?: boolean; reason?: string }) => {
       await board.file(id, path, options);
+    });
+
+  group
+    .command('merge-gate')
+    .description(
+      "whether a PR may merge as far as the board's queue goes: exit 0 free, 1 its card waits on another card, 2 cannot tell",
+    )
+    .argument('<pr-url>', 'the pull request, https://github.com/<owner>/<repo>/pull/<n>')
+    .action(async (url: string) => {
+      await dependencies.mergeGate.check(url);
     });
 
   acting(group.command('edit'))

@@ -121,12 +121,13 @@ export class StorageSessionRoster implements SessionLivenessSource, SessionLiven
       subprocessSince: instant(document.subprocessSince),
     };
     const turnState = SessionTurnStateSchema.safeParse(document.turnState);
-    const focus = TaskRefSchema.safeParse(jsonObject(config)?.focusTask);
     const settings = jsonObject(config);
+    const focus = TaskRefSchema.safeParse(settings?.focusTask);
     const lead = typeof settings?.parent === 'string' && settings.parent !== '' ? settings.parent : undefined;
     const fields = {
       id,
       ...(lead === undefined ? {} : { lead }),
+      ...(settings === undefined ? {} : { configRead: true as const }),
       ...(settings?.mode === 'interactive' ? { interactive: true } : {}),
       status: status.data,
       ...(turnState.success ? { turnState: turnState.data } : {}),

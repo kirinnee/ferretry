@@ -23,9 +23,9 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI spli
 
 | Hook                         | What it enforces                                                                                 |
 | ---------------------------- | ------------------------------------------------------------------------------------------------ |
-| `treefmt`                    | formatting: actionlint, nixfmt, prettier, shfmt                                                  |
-| `a-biome`                    | Biome lint on TS/JS (formatting is prettier's job, not Biome's)                                  |
-| `typecheck`                  | `tsc --noEmit` across the workspace                                                              |
+| `treefmt`                    | formatting: Biome (TS/JS/JSON/CSS), prettier (Markdown/YAML/HTML), actionlint, nixfmt, shfmt     |
+| `a-biome`                    | Biome lint on TS/JS (Biome formats through `treefmt`, configured in the same `biome.json`)       |
+| `typecheck`                  | `tsc --noEmit` across the workspace, one run per machine at a time (see below)                   |
 | `a-deadcode`                 | Knip, repository view (`knip.json`) — includes tests                                             |
 | `a-deadcode-production`      | Knip, production view (`knip.production.json`) — from the bin entry                              |
 | `a-shellcheck`               | shellcheck on every `*.sh` and `scripts/host/ferretry-loopback-firewall`                         |
@@ -46,7 +46,9 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI spli
 | `a-no-fy-render-in-docs`     | `fy-render` fence openers appear only in their three teaching files                              |
 | `a-no-legacy-state`          | package code cannot reference predecessor state or identifiers                                   |
 | `a-no-pattern-kill`          | test code never kills processes by pattern (`pkill`, `killall`)                                  |
+| `a-no-sync-io`               | daemon code declares every synchronous file call in `scripts/validate/sync-io-allowlist.txt`     |
 | `a-pages-config`             | the PWA build and the Pages deployment publish the same directory                                |
+| `a-pwa-relevance`            | the PWA browser gate's path list covers every import of its harness; docs-only skips it          |
 | `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree                               |
 | `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt                        |
 | `a-test-tiers`               | every test lives in a tier; integration asserts no wall-clock or memory bound                    |
@@ -60,8 +62,32 @@ Neither Knip pass can see a module that a barrel re-exports but nobody uses, bec
 counts as using it. `a-composition-reachability` closes that hole — see
 [Contracts](../contracts/README.md#composition-root-reachability).
 
+**One typecheck at a time.** A `tsc` over this workspace peaks at about 4.5 GB (measured 2026-11-06, Linux
+x64), and a machine running many agents commits from many worktrees at once. `typecheck.sh` therefore
+takes a per-user `flock` in a directory only the user can write (`$XDG_RUNTIME_DIR`, else
+`${XDG_CACHE_HOME:-$HOME/.cache}/ferretry`, created `0700`, used only if it is a real directory that user owns
+and no one else can write — otherwise the check runs unlocked and says why) and a second run queues behind the
+first. The lock is opened append-only (`exec 9>>"$lock"`), the script writes nothing into the directory, and a
+lock path that is a link or not a regular file is refused. The directory check is best effort: someone who
+owns a parent directory (in practice only root or the user) can swap it after the check. At worst that defeats
+serialization (two checks at once, as before the lock), leaves an empty file created, or puts a FIFO in place so
+the open itself blocks — before the bounded wait below applies, so that commit hangs until interrupted. It can
+never truncate or write to an existing file. A check started from inside a locked one inherits
+descriptor 9; when that descriptor is the same file as the lock it reuses it (`flock -n 9` succeeds at once,
+because the lock belongs to the open file description) instead of waiting on its own ancestor, and a
+descendant that closed descriptor 9 waits like anyone else. The wait on the lock lasts at most `TYPECHECK_LOCK_WAIT` seconds (600)
+and then checks anyway, so a stuck neighbour cannot block a commit. CI never takes the lock (`CI` is
+set and each job runs one check), and a machine with no `flock` runs unlocked as before.
+
 `prettier` skips `Changelog.md` and `Changelog.old.md` — semantic-release owns those files and
 reformatting them would churn the release commit.
+
+**Biome formats code, prettier formats prose.** `nix/fmt.nix` hands TypeScript, JavaScript, JSON(C) and
+CSS to the workspace's own `node_modules/.bin/biome` (the version `a-biome` lints with) and leaves
+Markdown, YAML and HTML to prettier. The formatter options in `biome.json` mirror `.prettierrc` (120
+columns, single quotes, trailing commas, `arrowParens: avoid`); Biome formats the repository in ~2 s
+against prettier's ~40 s on 32 cores. Its few known differences from prettier were applied once, in
+one reformat commit.
 
 ## Configuration rules
 

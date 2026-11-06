@@ -141,6 +141,16 @@ describe('systemd unit rendering', () => {
     should(actual).match(/^KillMode=process$/mu);
   });
 
+  it('should outrank the ferrets for CPU and ask the kernel to protect its memory', () => {
+    // Act
+    const actual = renderSystemdUnit(spec);
+
+    // Assert — the fleet slice is CPUWeight=50 and the voice slice 200 (docs/ferret-limits.md).
+    should(actual).match(/^CPUWeight=200$/mu);
+    should(actual).match(/^MemoryLow=4G$/mu);
+    should(actual).containEql('sudo systemctl set-property user@UID.service MemoryLow=4G');
+  });
+
   it('should declare the install target so `enable` has something to link', () => {
     // Act
     const actual = renderSystemdUnit(spec);

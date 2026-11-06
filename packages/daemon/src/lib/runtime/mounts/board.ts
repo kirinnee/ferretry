@@ -1,6 +1,7 @@
 import {
   type BoardErrorCode,
   type BoardIdsResponse,
+  type BoardMergeGateResponse,
   BoardImportRequestSchema,
   type BoardImportSummary,
   type BoardQuery,
@@ -37,6 +38,8 @@ export interface BoardSubsystem {
   board(query: BoardQuery): Promise<BoardResponse>;
   /** Every card id on this machine, whatever its project or state. */
   ids(): Promise<BoardIdsResponse>;
+  /** Whether a PR may merge as far as the board's queue goes (docs/design/clash-queue.md). */
+  mergeGate(pr: string): Promise<BoardMergeGateResponse>;
   task(id: BoardTaskId): Promise<BoardTaskResponse>;
   /** The card an old task became, by `<session>:<old id>`; `not-found` when none did. */
   taskByLegacyRef(legacyRef: string): Promise<BoardTaskResponse>;
@@ -187,6 +190,19 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
       noStore: true,
       compress: true,
       handle: async () => await answer(async () => await board.ids()),
+    },
+    {
+      method: 'GET',
+      path: '/v1/board/merge-gate',
+      minimum: 'operator',
+      caller: 'any',
+      capability: fleet,
+      noStore: true,
+      handle: async context => {
+        const pr = queryValue(context.request, 'pr');
+        if (pr === undefined) throw new ApiError(400, 'name the pull request: ?pr=<url>', 'invalid');
+        return await answer(async () => await board.mergeGate(pr));
+      },
     },
     {
       method: 'POST',
