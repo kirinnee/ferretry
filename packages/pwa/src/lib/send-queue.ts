@@ -243,6 +243,11 @@ type QueueCancel = (record: { readonly sendId: string }) => Promise<boolean>;
 export interface QueueActions {
   readonly edit: QueueEdit;
   readonly cancel: QueueCancel;
+  /**
+   * Called while a queued message's menu or editor is open, so the chat reads the queue on every poll tick for as long
+   * as it is (a bare tick does not); returns the release. Absent: nothing to tell.
+   */
+  readonly watch?: () => () => void;
 }
 
 const messagePath = (sessionId: string, id: string): string => `${queuePath(sessionId)}/${encodeURIComponent(id)}`;
@@ -277,6 +282,7 @@ export const queueActions = (
   sessionId: string,
   refresh: () => void,
   outbox?: Pick<SendOutbox, 'edit' | 'cancel'>,
+  watch?: () => () => void,
 ): QueueActions => {
   const run = async (id: string, init: RequestInit): Promise<boolean> => {
     if (client === null) return false;
@@ -290,6 +296,7 @@ export const queueActions = (
     return true;
   };
   return {
+    ...(watch === undefined ? {} : { watch }),
     edit: async (record, text) => {
       if ((await outbox?.edit(record.sendId, text)) === 'edited') {
         refresh();

@@ -274,13 +274,20 @@ function LedgerMoreMenu({
   items,
   busy,
   triggerRef,
+  onOpenChange,
 }: {
   readonly items: readonly ContextMenuItem[];
   readonly busy: boolean;
   readonly triggerRef: { current: HTMLButtonElement | null };
+  /** Told whenever the menu opens or closes. */
+  readonly onOpenChange?: (open: boolean) => void;
 }) {
   const modality = useInputModality();
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
+  const isOpen = anchor !== null;
+  useEffect(() => {
+    onOpenChange?.(isOpen);
+  }, [isOpen, onOpenChange]);
   const openMenu = (): void => {
     if (busy) return;
     const rect = triggerRef.current?.getBoundingClientRect();
@@ -328,6 +335,7 @@ function useLedgerActions({
   const body = stripFraming(peerFrom(record.message).body).body;
   const queueApi = useQueueActions();
   const [editing, setEditing] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const actionHeld = useRef(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -357,6 +365,10 @@ function useLedgerActions({
   const queueState = effectiveQueueState(record);
   const queueBacked = queueState === 'queued' || queueState === 'typing' || queueState === 'failed';
   const queueEditable = queueState === 'queued' && record.fate === 'accepted' && queueApi !== null;
+  // While a queued message's menu or editor is open the chat reads the queue on every tick, so what it offers is not stale.
+  const watching = queueBacked && (menuOpen || editing);
+  const watch = queueApi?.watch;
+  useEffect(() => (watching ? watch?.() : undefined), [watching, watch]);
   const typed = record.typedNotSent === true && open;
   const settling = useStillSettling(Date.parse(record.acceptedAt), OPEN_SEND_SETTLE_MS, enabled && open && !typed);
   // Held for a revive is kept deliberately; delivered and cancelled are done. Everything else can be taken back.
@@ -531,7 +543,9 @@ function useLedgerActions({
   }
 
   const trigger =
-    items.length === 0 ? null : <LedgerMoreMenu busy={busy !== null} items={items} triggerRef={triggerRef} />;
+    items.length === 0 ? null : (
+      <LedgerMoreMenu busy={busy !== null} items={items} onOpenChange={setMenuOpen} triggerRef={triggerRef} />
+    );
 
   const panels = !enabled ? null : (
     <>

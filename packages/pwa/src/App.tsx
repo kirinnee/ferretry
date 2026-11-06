@@ -1692,7 +1692,14 @@ function SessionRoute({
   );
   /** Edit and Cancel for a message still in the queue; the bubble reaches them through a context, not props. */
   const queueActionsValue = useMemo(
-    () => queueActions(client, sessionId, refreshSends, store.outbox),
+    () =>
+      queueActions(
+        client,
+        sessionId,
+        refreshSends,
+        store.outbox,
+        () => refreshControl.current?.watchQueue() ?? (() => undefined),
+      ),
     [client, sessionId, refreshSends, store.outbox],
   );
   // "Clear stuck messages" — Actions-menu entry that takes back every message nothing proved arrived.

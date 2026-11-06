@@ -121,10 +121,14 @@ this page, which is still how a message reaches the pane.
   the agent" and a `404` says the queue no longer has it; both refresh the row.
 
 - **The Queue page reaches older messages** — one ferret's Queue page (`/queue/<sessionId>`) shows the window and, when
-  the machine has more, a **Show older messages** button that reads `?before=<cursor>` through the same daemon fetch (so it
+  the machine has more, a **Show older messages** button (between what waits and what finished) that reads `?before=<cursor>` through the same daemon fetch (so it
   rides the relay like every other read) and adds the page to the list; a poll keeps what was added
   (`refreshQueueHistory`). **All queues** lists only what waits, and every waiting message is always in the window, so it
   never asks.
+- **The chat reads the queue on a nudge, not on every tick** — the 3-second working-chat poll still reads the transcript
+  and the send ledger, but reads `GET …/queue` only on the first read, on a feed nudge (a journal event for the session,
+  which a send always is), on any explicit refresh (a send, an edit, the page coming back) and every tick while a
+  queued message's menu or editor is open (`watchQueue`). Ten idle ticks are zero queue reads.
 
 - **The device outbox is tick 1** — a message is written to a durable per-device IndexedDB outbox
   (`ferretry-outbox`, `packages/pwa/src/lib/send-outbox.ts`, keyed by the request id) BEFORE the machine hears of

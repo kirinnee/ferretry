@@ -1581,3 +1581,112 @@ describe('transcriptEntriesFromLog · a search hit on a copy', () => {
     ]);
   });
 });
+
+describe('startSessionWorkspaceRefresh · the durable queue is read on a nudge, not on every tick', () => {
+  const counted = () => {
+    const browser = environment();
+    let queueReads = 0;
+    let logReads = 0;
+    let sendReads = 0;
+    const shown: unknown[] = [];
+    const control = startSessionWorkspaceRefresh({
+      api: {
+        logs: async () => {
+          logReads += 1;
+          return '';
+        },
+        get: async () => sessionView('s-1'),
+        sends: async () => {
+          sendReads += 1;
+          return [];
+        },
+        queue: async () => {
+          queueReads += 1;
+          return [];
+        },
+      },
+      sessionId: 's-1',
+      environment: browser.env,
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onQueue: messages => shown.push(messages),
+      onError: () => undefined,
+    });
+    return { browser, control, shown, reads: () => ({ queue: queueReads, log: logReads, sends: sendReads }) };
+  };
+
+  test('ten bare working-state ticks read the transcript and the ledger each time but never the queue', async () => {
+    const { browser, control, reads } = counted();
+    await control.initial;
+
+    for (let tick = 0; tick < 10; tick += 1) {
+      browser.tick();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    control.stop();
+
+    expect(reads().queue).toBe(1);
+    expect(reads().log).toBe(11);
+    expect(reads().sends).toBe(11);
+  });
+
+  test('a bare tick alone adds no queue read; a nudge adds exactly one', async () => {
+    const { browser, control, reads } = counted();
+    await control.initial;
+    const opened = reads().queue;
+
+    for (let tick = 0; tick < 10; tick += 1) {
+      browser.tick();
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const afterTicks = reads().queue;
+    control.nudge();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    control.stop();
+
+    expect(opened).toBe(1);
+    expect(afterTicks).toBe(1);
+    expect(reads().queue).toBe(2);
+  });
+
+  test('while a queued message’s menu or editor is open every tick reads the queue again, and releasing stops it', async () => {
+    const { browser, control, reads } = counted();
+    await control.initial;
+    const release = control.watchQueue();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const watching = reads().queue;
+
+    browser.tick();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const afterWatchedTick = reads().queue;
+    release();
+    release();
+    browser.tick();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    control.stop();
+
+    expect(watching).toBe(2);
+    expect(afterWatchedTick).toBe(3);
+    expect(reads().queue).toBe(3);
+  });
+
+  test('an api with no queue is never asked, nudged or watched', async () => {
+    const browser = environment();
+    const control = startSessionWorkspaceRefresh({
+      api: { logs: async () => '', get: async () => sessionView('s-1') },
+      sessionId: 's-1',
+      environment: browser.env,
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onError: () => undefined,
+    });
+    await control.initial;
+
+    control.watchQueue()();
+    control.nudge();
+    await control.refresh(true);
+    control.stop();
+  });
+});

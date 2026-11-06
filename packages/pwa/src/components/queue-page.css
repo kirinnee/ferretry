@@ -261,5 +261,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  padding: 12px 0 4px;
+  padding: 14px 0;
+  border-bottom: var(--divider-width, 1px) solid var(--border-soft);
 }

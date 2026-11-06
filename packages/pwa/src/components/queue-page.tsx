@@ -311,6 +311,27 @@ export function QueuePageView({
         ) : null}
         {shown.map(group => {
           const next = nextRowId(group.rows, now);
+          // The older messages belong where they will appear: just above the finished ones, below what still waits.
+          const olderBefore = group.rows.find(row => !isWaitingRow(row))?.id;
+          const older =
+            onLoadOlder !== undefined && olderKeys?.has(group.key) ? (
+              <li className="fy-queue-older" key="older">
+                <button
+                  className="kt-btn kt-btn--sm"
+                  data-queue-older=""
+                  disabled={loadingOlder === group.key}
+                  onClick={() => onLoadOlder(group)}
+                  type="button"
+                >
+                  {loadingOlder === group.key ? 'Reading older messages…' : 'Show older messages'}
+                </button>
+                {olderFailed === group.key ? (
+                  <span className="fy-queue-note" role="status">
+                    Older messages could not be read. Try again.
+                  </span>
+                ) : null}
+              </li>
+            ) : null;
           return (
             <Fragment key={group.key}>
               {wrapGroup(
@@ -328,27 +349,13 @@ export function QueuePageView({
                   </h2>
                   <ul className="fy-queue-list">
                     {group.rows.map(row => (
-                      <QueueRowView handlers={handlers} key={row.id} next={row.id === next} now={now} row={row} />
+                      <Fragment key={row.id}>
+                        {row.id === olderBefore ? older : null}
+                        <QueueRowView handlers={handlers} next={row.id === next} now={now} row={row} />
+                      </Fragment>
                     ))}
+                    {olderBefore === undefined ? older : null}
                   </ul>
-                  {onLoadOlder !== undefined && olderKeys?.has(group.key) ? (
-                    <div className="fy-queue-older">
-                      <button
-                        className="kt-btn kt-btn--sm"
-                        data-queue-older=""
-                        disabled={loadingOlder === group.key}
-                        onClick={() => onLoadOlder(group)}
-                        type="button"
-                      >
-                        {loadingOlder === group.key ? 'Reading older messages…' : 'Show older messages'}
-                      </button>
-                      {olderFailed === group.key ? (
-                        <span className="fy-queue-note" role="status">
-                          Older messages could not be read. Try again.
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
                 </section>,
               )}
             </Fragment>

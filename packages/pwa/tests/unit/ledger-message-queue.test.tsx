@@ -5,7 +5,7 @@ import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { QueueActionsContext } from '../../src/components/queue-actions-context.tsx';
 import { QueueActionError, type QueueActions } from '../../src/lib/send-queue.ts';
 import type { LedgerSendRecord } from '../../src/lib/send-ledger.ts';
-import { actionKeys, chooseAction, closeOpenMenus } from '../support/ledger-menu.ts';
+import { actionKeys, chooseAction, closeOpenMenus, hasActionsButton, openActions } from '../support/ledger-menu.ts';
 import { render, runAsync } from '../support/react.ts';
 
 afterEach(closeOpenMenus);
@@ -121,6 +121,40 @@ describe('what a queued message offers', () => {
   test('a queue state the agent already has offers no edit, even on a stale ledger row', async () => {
     const r = mount(queued('queued', { fate: 'delivered' }), actions(noop, noop));
     expect(await actionKeys(r)).not.toContain('edit');
+  });
+});
+
+describe('keeping the queue read while its actions are open', () => {
+  const watched = (log: string[]): QueueActions => ({
+    ...actions(noop, noop),
+    watch: () => {
+      log.push('watch');
+      return () => log.push('release');
+    },
+  });
+
+  test('asks for the queue to be watched while the menu is open, and lets go when it closes', async () => {
+    const log: string[] = [];
+    const r = mount(queued(), watched(log));
+    expect(log).toEqual([]);
+    await openActions(r);
+    expect(log).toEqual(['watch']);
+    await closeOpenMenus();
+    expect(log).toEqual(['watch', 'release']);
+  });
+
+  test('watches while the editor is open, and not for a message the agent already has', async () => {
+    const log: string[] = [];
+    const r = mount(queued(), watched(log));
+    await chooseAction(r, 'edit');
+    expect(log[0]).toBe('watch');
+    await tap(r.root.find(node => node.type === 'button' && textOfNode(node) === 'Keep as it was'));
+    expect(log.at(-1)).toBe('release');
+
+    const delivered: string[] = [];
+    const done = mount(queued('delivered', { fate: 'delivered' }), watched(delivered));
+    if (hasActionsButton(done)) await openActions(done);
+    expect(delivered).toEqual([]);
   });
 });
 

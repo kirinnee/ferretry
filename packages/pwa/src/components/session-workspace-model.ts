@@ -786,6 +786,12 @@ export interface SessionWorkspaceRefreshControl {
    */
   readonly nudge: () => void;
   /**
+   * The reader has something open that acts on the durable queue (a queued message's menu or editor): while at least one
+   * is, the poll reads the queue on every tick again. Reads one at once. Returns the release; calling it twice is safe.
+   * Without a watcher the queue is read only on a nudge, an explicit refresh or the first read — never on a bare tick.
+   */
+  readonly watchQueue: () => () => void;
+  /**
    * The reader just acted, so something is about to change: the poll is not relaxed for
    * {@link ACTED_WATCH_MS} from now, whatever {@link SessionWorkspaceRefreshInput.relaxed} answers.
    */
@@ -966,9 +972,12 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     }
   };
 
-  const refresh = (afterCurrent = false): Promise<void> => {
+  /** Whether the next read asks the machine for the durable queue; a bare poll tick does not unless someone watches it. */
+  let queueWatchers = 0;
+
+  const read = (afterCurrent: boolean, withQueue: boolean): Promise<void> => {
     if (stopped || !environment.visible()) return Promise.resolve();
-    if (inflight !== null) return afterCurrent ? inflight.then(() => refresh()) : inflight;
+    if (inflight !== null) return afterCurrent ? inflight.then(() => read(false, withQueue)) : inflight;
 
     lastReadAt = environment.now?.() ?? lastReadAt;
     inflight = Promise.allSettled([
@@ -977,7 +986,7 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
       // A daemon that cannot answer the ledger still shows its transcript: the sends are an overlay.
       input.api.sends?.(input.sessionId) ?? Promise.resolve(undefined),
       // Read on the same beat as the ledger; the queue is an overlay too, so its failure never blanks the chat.
-      input.api.queue?.(input.sessionId) ?? Promise.resolve(undefined),
+      withQueue ? (input.api.queue?.(input.sessionId) ?? Promise.resolve(undefined)) : Promise.resolve(undefined),
     ])
       .then(([logs, session, sends, queue]) => {
         if (stopped) return;
@@ -1012,8 +1021,11 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     return inflight;
   };
 
+  /** Every read a caller asks for — a send, a nudge, the page coming back — includes the queue. */
+  const refresh = (afterCurrent = false): Promise<void> => read(afterCurrent, true);
+
   /**
-   * A poll tick, skipped while relaxed and the last read is younger than {@link RELAXED_REFRESH_MS} —
+   * A poll tick), skipped while relaxed and the last read is younger than {@link RELAXED_REFRESH_MS} —
    * unless the reader acted within {@link ACTED_WATCH_MS}.
    */
   const tick = (): void => {
@@ -1025,7 +1037,18 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
       now - lastReadAt < RELAXED_REFRESH_MS
     )
       return;
-    void refresh();
+    void read(false, queueWatchers > 0);
+  };
+
+  const watchQueue = (): (() => void) => {
+    queueWatchers += 1;
+    void read(false, true);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      queueWatchers -= 1;
+    };
   };
 
   const nudge = (): void => {
@@ -1053,6 +1076,7 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     initial,
     refresh,
     nudge,
+    watchQueue,
     acted,
     loadOlder: () => loadOlder(),
     loadUntil,
