@@ -11,6 +11,7 @@ import {
   formatBytes,
   probeEnforcement,
   REPROBE_INTERVAL_MS,
+  type ServiceWeights,
 } from '../../../src/lib/cgroups/index.ts';
 
 const THIS_BOX: CgroupHostFacts = {
@@ -206,6 +207,7 @@ describe('saying it in plain words', () => {
     host: THIS_BOX,
     enforcement: { kind: 'cgroups', ionice: true } as EnforcementState,
     disk: { device: 'nvme0n1', scheduler: 'none' },
+    services: { daemon: 1000, voiceState: 'not-running' as const },
     live,
     file: 'limits.yaml',
     uid: 1000,
@@ -219,10 +221,52 @@ describe('saying it in plain words', () => {
 
     // Assert
     should(view.lines[0]).equal(
-      'ferrets: memory 44 GiB soft / 46 GiB hard of a 48 GiB user budget · CPU weight 50 (daemon 100, voice 200) · disk priority: no effect on this disk (scheduler none)',
+      'ferrets: memory 44 GiB soft / 46 GiB hard of a 48 GiB user budget · CPU weight 50 (daemon 1000, voice not running; gets 200 when it starts) · disk priority: no effect on this disk (scheduler none)',
     );
     should(view.enforcement).equal('cgroups');
     should(view.disk.effect).equal('none');
+    should(() => LimitsViewSchema.parse(view)).not.throw();
+  });
+
+  it('should print the weights the kernel holds, never the numbers the units were written with', () => {
+    // Arrange
+    const line = (services: ServiceWeights) => buildLimitsView({ ...base, services }).lines[0];
+
+    // Act
+    const running = buildLimitsView({ ...base, services: { daemon: 1000, voice: 400, voiceState: 'running' } });
+
+    // Assert
+    should(running.lines[0]).containEql('(daemon 1000, voice 400)');
+    should(running.daemonCpuWeight).equal(1000);
+    should(running.voiceCpuWeight).equal(400);
+    should(running.voiceState).equal('running');
+    should(line({ daemon: 1000, voiceState: 'running' })).containEql('(daemon 1000, voice unknown)');
+    should(line({ voiceState: 'unknown' })).containEql('(daemon unknown, voice unknown)');
+    should(() => LimitsViewSchema.parse(running)).not.throw();
+  });
+
+  it('should leave the voice weight out while the voice worker is not running', () => {
+    // Arrange / Act
+    const view = buildLimitsView(base);
+
+    // Assert
+    should(view.voiceState).equal('not-running');
+    should(view.voiceCpuWeight).be.undefined();
+    should(view.daemonCpuWeight).equal(1000);
+  });
+
+  it('should omit the service weights where the kernel is not asked (macOS)', () => {
+    // Arrange / Act
+    const view = buildLimitsView({
+      ...base,
+      host: { ...THIS_BOX, platform: 'darwin', unifiedHierarchy: false },
+      enforcement: { kind: 'priority', wrapper: 'taskpolicy' } as EnforcementState,
+    });
+
+    // Assert
+    should(view.daemonCpuWeight).be.undefined();
+    should(view.voiceCpuWeight).be.undefined();
+    should(view.voiceState).be.undefined();
     should(() => LimitsViewSchema.parse(view)).not.throw();
   });
 
@@ -369,6 +413,7 @@ describe('saying what is APPLIED, not what is asked for', () => {
       host: THIS_BOX,
       enforcement: { kind: 'cgroups', ionice: true },
       disk: { device: 'nvme0n1', scheduler: 'none' },
+      services: { daemon: 1000, voiceState: 'not-running' as const },
       live: { throttled: [], fleetSlowed: false, killed: [], overBudget: [], ...live },
       file: 'limits.yaml',
       uid: 1000,

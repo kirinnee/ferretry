@@ -292,15 +292,16 @@ export const cgroupConfigView = {
     tasksMax: 4_096,
     cpuPercent: null,
   },
-  daemonCpuWeight: 100,
+  daemonCpuWeight: 1000,
   voiceCpuWeight: 200,
+  voiceState: 'running',
   disk: { ionice: true, scheduler: 'none', effect: 'none' },
   throttled: [],
   killed: [],
   overBudget: [],
   file: 'limits.yaml',
   lines: [
-    'ferrets: memory 44 GiB soft / 46 GiB hard of a 48 GiB user budget · CPU weight 50 (daemon 100, voice 200) · disk priority: no effect on this disk (scheduler none)',
+    'ferrets: memory 44 GiB soft / 46 GiB hard of a 48 GiB user budget · CPU weight 50 (daemon 1000, voice 200) · disk priority: no effect on this disk (scheduler none)',
   ],
   warnings: [],
 } satisfies LimitsView;

@@ -92,6 +92,24 @@ export interface AppliedCaps {
   readonly cpuPercent?: number | null;
 }
 
+/** Whether the voice worker's slice is live, so its weight is one the kernel is applying. */
+export type VoiceState = 'running' | 'not-running' | 'unknown';
+
+/**
+ * The CPU weights the kernel holds for the two services beside the fleet, read back from their cgroups —
+ * not the numbers their units were written with. A weight that could not be read is absent.
+ */
+export interface ServiceWeights {
+  readonly daemon?: number;
+  readonly voice?: number;
+  readonly voiceState: VoiceState;
+}
+
+export interface ServiceWeightsPort {
+  /** Never throws: an unreadable file is an absent weight. */
+  read(): Promise<ServiceWeights>;
+}
+
 /** One per-ferret slice (or a legacy scope) and what the kernel says about its combined memory. */
 export interface ScopeSighting {
   /** The per-ferret slice unit name, or a legacy `<product>-agent-<id>-<nonce>.scope`. */
