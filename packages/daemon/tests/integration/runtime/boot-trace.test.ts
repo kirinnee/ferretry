@@ -97,7 +97,7 @@ async function seedHome(home: string, resurface: boolean): Promise<void> {
   const document = {
     host: '127.0.0.1',
     port: OS_CHOSEN_PORT,
-    ...(resurface ? { attention: { resurfaceAfterMinutes: RESURFACE_AFTER_MINUTES } } : {}),
+    ...(resurface ? { agenda: { resurfaceAfterMinutes: RESURFACE_AFTER_MINUTES } } : {}),
   };
   await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify(document), { mode: 0o600 });
 }
@@ -213,7 +213,7 @@ interface RigOptions {
   readonly duringBoot?: (rig: Rig) => Promise<void>;
   /** Makes the world throw once storage is open. */
   readonly failAfterStorage?: boolean;
-  /** Writes `attention.resurfaceAfterMinutes`, which turns the agenda resurfacer on. */
+  /** Writes `agenda.resurfaceAfterMinutes`, which turns the agenda resurfacer on. */
   readonly resurface?: boolean;
 }
 
@@ -767,7 +767,7 @@ describe('the boot and shutdown trace', () => {
   }, 60_000);
 
   it('should start the agenda resurfacer while the subsystems are built, before the waker and the deadline sweep, when the configuration turns it on', async () => {
-    // Arrange: no case above turns `attention.resurfaceAfterMinutes` on, so none of them would notice the start go.
+    // Arrange: no case above turns `agenda.resurfaceAfterMinutes` on, so none of them would notice the start go.
     const r = await rig({ resurface: true });
 
     // Act

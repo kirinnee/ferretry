@@ -9,7 +9,12 @@
 
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type AcceptedConfigFiles, AcceptedConfigFilesSchema, type ConfigFileText } from '@ferretry/fleet';
+import {
+  type AcceptedConfigFiles,
+  AcceptedConfigFilesSchema,
+  type ConfigFileText,
+  DAEMON_DOCUMENT_FILE,
+} from '@ferretry/fleet';
 import { CONFIG_ACCEPTED_FILE, CONFIG_FILE_MAX_BYTES } from '@ferretry/protocol';
 import type { IConfigFiles } from '../../lib/config/ports.ts';
 
@@ -59,6 +64,24 @@ export class FileConfigFiles implements IConfigFiles {
     };
     await visit('', 1);
     return { files, unreadable };
+  }
+
+  async daemonDocument(): Promise<unknown> {
+    const path = join(this.directory, DAEMON_DOCUMENT_FILE);
+    try {
+      const information = await lstat(path);
+      if (!information.isFile() || information.size > CONFIG_FILE_MAX_BYTES) return undefined;
+      return JSON.parse(await readFile(path, 'utf8'));
+    } catch (error) {
+      if (
+        missing(error) ||
+        (error as NodeJS.ErrnoException | undefined)?.code === 'ENOTDIR' ||
+        error instanceof SyntaxError
+      ) {
+        return undefined;
+      }
+      throw error;
+    }
   }
 
   /** The daemon's record; empty when there is none, or when it does not parse — the stricter reading. */

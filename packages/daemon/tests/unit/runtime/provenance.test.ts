@@ -376,6 +376,5 @@ describe('the agenda reply-window row', () => {
     // Assert
     should(row(rows, 'agenda').origin).equal('config file');
     should(row(rows, 'agenda').value).match(/"deadlineWarnHours":6/u);
-    should(row(rows, 'attention').value).equal(row(rows, 'agenda').value);
   });
 });

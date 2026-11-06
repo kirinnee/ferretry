@@ -150,36 +150,6 @@ export const DaemonWebRtcConfigSchema = z
 export type DaemonWebRtcConfig = z.output<typeof DaemonWebRtcConfigSchema>;
 
 /**
- * What the boot trail says, once, when `config/daemon.json` still carries the retired `accountModel`
- * switch. The key is TOLERATED rather than refused — a document an operator wrote must not stop a boot
- * over a setting that no longer does anything — and dropped from the configuration this daemon reads.
- * It and {@link RETIRED_FLEET_BLOCK_NOTICE} are the two retired keys with that tolerance; any other
- * unknown key is still refused.
- */
-export const RETIRED_ACCOUNT_MODEL_NOTICE =
-  'config/daemon.json still has an accountModel setting; it is no longer read — the account model is always on. Delete the key.';
-
-/**
- * What the boot trail says, once, when `config/daemon.json` still carries the retired `fleet` block
- * (`fleet.prepareDefaults`, which switched the boot-time import on and off).
- *
- * STARTING A DAEMON NEVER IMPORTS ANYTHING NOW: a fresh machine is "not set up" until somebody chooses,
- * in the app or with `fy daemon setup`, so there is nothing left for the key to switch. Earlier boots
- * wrote `{ "prepareDefaults": true }` into every fresh state home themselves, which is why the block is
- * tolerated in ANY shape rather than refused: a document this daemon once wrote must not stop it booting.
- */
-export const RETIRED_FLEET_BLOCK_NOTICE =
-  'config/daemon.json still has a fleet.prepareDefaults setting; it is no longer read — starting the daemon never imports anything, so set this machine up from the app or with `fy daemon setup`. Delete the key.';
-
-/**
- * What the boot trail says, once, when `config/daemon.json` still turns session workers off. Since stage 3d
- * every running session is observed on a worker; the main thread takes a session over only after its
- * worker crashed five times in ten minutes. Tolerated rather than refused, like the two retired keys above.
- */
-export const RETIRED_SESSION_WORKERS_SWITCH_NOTICE =
-  'config/daemon.json still has sessionWorkers.enabled: false; it is no longer read — every running session is observed on a worker thread, and one is observed on the main thread only after its worker crashed five times. Delete the key.';
-
-/**
  * What the operator has agreed the UI may do on this machine, per capability and per axis.
  *
  * EVERY FIELD HAS A DEFAULT, so a document that says nothing is a complete decision rather than an
@@ -226,20 +196,7 @@ const CAPABILITY_GRANT_FIELDS = {
 export const CapabilityGrantsDocumentSchema = z.strictObject(CAPABILITY_GRANT_FIELDS).prefault({});
 
 /**
- * The document an operator owns: exactly the fields `config/daemon.json` holds, and nothing derived.
- *
- * SEPARATE from the parsed configuration below, because the two are written back to disk very
- * differently. A DEFAULT is a value this deployment picked and an operator may edit — writing it out
- * makes it visible and editable, which is the point. A DERIVATION is a value computed from other
- * fields, and persisting one is a defect: once on disk it stops tracking the field it came from, so
- * the operator edits `port`, the derived `publicUrl` keeps the old number, and the daemon appears to
- * ignore the edit entirely. That is exactly what happened — `port` was a field an operator could
- * change with no error, no message and no change in behaviour, which is worse than the collision it
- * was being changed to escape. So: nothing derived is ever written here, and everything derived is
- * recomputed on every read, which makes disagreement between the two unrepresentable.
- */
-/**
- * HOW LONG THE OWNER'S ATTENTION ANSWERS ARE HELD before they reach the ferret (docs/agenda.md § Delivery).
+ * HOW LONG THE OWNER'S AGENDA ANSWERS ARE HELD before they reach the ferret (docs/agenda.md § Delivery).
  * An answer wakes the ferret and every message is re-read on every later turn, so answers are batched:
  * delivered `replySettleSeconds` after the owner's LAST action (each further card action restarts it), and
  * never more than `replyMaxWaitSeconds` after the FIRST. A settle longer than the max wait could never
@@ -255,7 +212,7 @@ export const CapabilityGrantsDocumentSchema = z.strictObject(CAPABILITY_GRANT_FI
  * `resurfaceAfterMinutes` is off unless set: an ask that has sat in discussion that long is surfaced to the
  * owner's queue by the daemon, its history saying the timer did it.
  */
-export const LegacyDaemonAttentionConfigSchema = z
+export const DaemonAgendaConfigSchema = z
   .strictObject({
     replySettleSeconds: z.number().int().min(1).max(3_600).default(10),
     replyMaxWaitSeconds: z.number().int().min(1).max(3_600).default(120),
@@ -267,58 +224,23 @@ export const LegacyDaemonAttentionConfigSchema = z
     deadlineWarnHours: z.number().min(0.25).max(168).default(3),
   })
   .refine(window => window.replySettleSeconds <= window.replyMaxWaitSeconds, {
-    message: 'attention.replySettleSeconds must not exceed attention.replyMaxWaitSeconds',
+    message: 'agenda.replySettleSeconds must not exceed agenda.replyMaxWaitSeconds',
     path: ['replySettleSeconds'],
   });
 
 /**
- * THE SAME BLOCK UNDER ITS NEW NAME (`agenda`, wire `agenda.wire.1`), every key optional.
+ * The document an operator owns: exactly the fields `config/daemon.json` holds, and nothing derived.
  *
- * `attention` is still read until the agenda removal release, so the two spellings are resolved to ONE
- * value, PER KEY, before anything else reads either: a key the `agenda` block sets wins over the same
- * key in `attention`, and a key it leaves out falls through to `attention` and then to the default. The
- * keys carry no defaults here so that "left out" stays distinguishable from "set to the default".
+ * SEPARATE from the parsed configuration below, because the two are written back to disk very
+ * differently. A DEFAULT is a value this deployment picked and an operator may edit — writing it out
+ * makes it visible and editable, which is the point. A DERIVATION is a value computed from other
+ * fields, and persisting one is a defect: once on disk it stops tracking the field it came from, so
+ * the operator edits `port`, the derived `publicUrl` keeps the old number, and the daemon appears to
+ * ignore the edit entirely. That is exactly what happened — `port` was a field an operator could
+ * change with no error, no message and no change in behaviour, which is worse than the collision it
+ * was being changed to escape. So: nothing derived is ever written here, and everything derived is
+ * recomputed on every read, which makes disagreement between the two unrepresentable.
  */
-export const DaemonAgendaConfigSchema = z
-  .strictObject({
-    replySettleSeconds: z.number().int().min(1).max(3_600).optional(),
-    replyMaxWaitSeconds: z.number().int().min(1).max(3_600).optional(),
-    replyComposerWaitSeconds: z.number().int().min(10).max(86_400).optional(),
-    replyReceiptSeconds: z.number().int().min(30).max(86_400).optional(),
-    resurfaceAfterMinutes: z.number().int().min(1).max(10_080).optional(),
-    deadlineWarnHours: z.number().min(0.25).max(168).optional(),
-  })
-  .refine(
-    window =>
-      window.replySettleSeconds === undefined ||
-      window.replyMaxWaitSeconds === undefined ||
-      window.replySettleSeconds <= window.replyMaxWaitSeconds,
-    {
-      message: 'agenda.replySettleSeconds must not exceed agenda.replyMaxWaitSeconds',
-      path: ['replySettleSeconds'],
-    },
-  );
-
-type DaemonAgendaConfig = z.output<typeof LegacyDaemonAttentionConfigSchema>;
-
-/** Which spelling of the reply-window block a document used, so the boot can say so once. */
-export type AgendaBlockSpelling = 'agenda' | 'attention' | 'both' | 'none';
-
-function agendaBlockSpelling(legacyAttention: unknown, agenda: unknown): AgendaBlockSpelling {
-  if (legacyAttention !== undefined && agenda !== undefined) return 'both';
-  if (agenda !== undefined) return 'agenda';
-  return legacyAttention === undefined ? 'none' : 'attention';
-}
-
-/** The sentence a boot says when the older `attention` block is in the document; absent when it is not. */
-export function agendaBlockNotice(spelling: AgendaBlockSpelling): string | undefined {
-  if (spelling === 'attention')
-    return 'daemon config: "attention" is renamed to "agenda"; the old key is still read until the agenda removal release — rename it';
-  if (spelling === 'both')
-    return 'daemon config: both "attention" and "agenda" are set; "agenda" wins key by key and "attention" is only read for the keys it leaves out — delete "attention"';
-  return undefined;
-}
-
 export const DaemonConfigDocumentSchema = z
   .object({
     host: HostSchema.default(LOOPBACK),
@@ -347,12 +269,11 @@ export const DaemonConfigDocumentSchema = z
      * session on its own thread until there are `max`, then shared by the least-loaded one — set `max` at or
      * above the running count for one thread per agent. `fastExit` settles a pane its worker saw die at once
      * instead of at the next 30 s self-check — a visible behaviour change the owner has not chosen yet (§8 Q2),
-     * so it is off. `enabled` is RETIRED (stage 3d): the main thread observes a session only after its worker
-     * crashed five times; see {@link RETIRED_SESSION_WORKERS_SWITCH_NOTICE}.
+     * so it is off. The main thread observes a session only after its worker
+     * crashed five times.
      */
     sessionWorkers: z
       .object({
-        enabled: z.boolean().optional(),
         max: z.number().int().min(1).max(64).default(DEFAULT_SESSION_WORKER_CAP),
         fastExit: z.boolean().default(false),
       })
@@ -417,9 +338,7 @@ export const DaemonConfigDocumentSchema = z
      * before the worker existed.
      */
     housekeeping: z.strictObject({ enabled: z.boolean().default(true) }).prefault({}),
-    /** How long the owner's attention answers are held and batched before they reach the ferret. */
-    attention: LegacyDaemonAttentionConfigSchema.optional(),
-    /** The same block under its new name; wins key by key when both are written. */
+    /** How long the owner's agenda answers are held and batched before they reach the ferret. */
     agenda: DaemonAgendaConfigSchema.optional(),
     /** The rendezvous carrier, if one is written. Absent (with no relay carrier) falls back to the discovery relay carrier. */
     relay: DaemonRelayConfigSchema.optional(),
@@ -471,10 +390,6 @@ export const DaemonConfigDocumentSchema = z
      * end.
      */
     harness: HarnessDiscoveryDocumentSchema,
-    /** RETIRED and ignored: tolerated so an old document still boots. See {@link RETIRED_FLEET_BLOCK_NOTICE}. */
-    fleet: z.unknown().optional(),
-    /** RETIRED and ignored: tolerated so an old document still boots. See {@link RETIRED_ACCOUNT_MODEL_NOTICE}. */
-    accountModel: z.unknown().optional(),
     /**
      * Reusable environment recipes for the use-without-read primitive, holding REFERENCES only.
      *
@@ -597,49 +512,29 @@ function recordedAdvertisement(config: DaemonConfig): { readonly operatorPublicU
  * bind rather than off the document, which is what makes an explicit bind carrier a decision rather
  * than a decoration: the two spellings would otherwise agree everywhere except at the socket.
  */
-export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(
-  ({ accountModel, fleet, agenda, ...value }, ctx) => {
-    const reply: DaemonAgendaConfig = {
-      ...(value.attention ?? LegacyDaemonAttentionConfigSchema.parse({})),
-      ...Object.fromEntries(Object.entries(agenda ?? {}).filter(([, setting]) => setting !== undefined)),
-    };
-    if (reply.replySettleSeconds > reply.replyMaxWaitSeconds) {
-      ctx.addIssue({
-        code: 'custom',
-        message: 'agenda.replySettleSeconds must not exceed agenda.replyMaxWaitSeconds',
-        path: ['agenda', 'replySettleSeconds'],
-      });
-      return z.NEVER;
-    }
-    const declared = resolveDaemonCarriers({
-      host: value.host,
-      port: value.port,
-      relay: value.relay,
-      carriers: value.carriers,
-    });
-    const host = declared.bind.host;
-    const port = declared.bind.port ?? FY_DEFAULT_DAEMON_PORT;
-    return {
-      ...value,
-      /** The ONE reply-window value every consumer reads, whichever spelling set it. */
-      attention: reply,
-      agenda: reply,
-      agendaSpelling: agendaBlockSpelling(value.attention, agenda),
-      host,
-      port,
-      // Read off the resolved bind, not off `value.port`: a `port` key superseded by a portless bind
-      // carrier is not a claim on anything, and treating it as one would refuse a boot over a line the
-      // operator has already migrated away from.
-      portIsRecorded: declared.bind.port !== undefined && declared.bind.port !== OS_CHOSEN_PORT,
-      carrierSet: boundAt(declared, { host, port }),
-      ...derivedAddresses({ host, port, ...operatorPublicUrl(value.publicUrl) }),
-      /** The document still carries the retired `accountModel` key, so the boot says so once. */
-      retiredAccountModel: accountModel !== undefined,
-      /** The document still carries the retired `fleet` block, so the boot says so once. */
-      retiredFleetBlock: fleet !== undefined,
-    };
-  },
-);
+export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(value => {
+  const declared = resolveDaemonCarriers({
+    host: value.host,
+    port: value.port,
+    relay: value.relay,
+    carriers: value.carriers,
+  });
+  const host = declared.bind.host;
+  const port = declared.bind.port ?? FY_DEFAULT_DAEMON_PORT;
+  return {
+    ...value,
+    host,
+    port,
+    // Read off the resolved bind, not off `value.port`: a `port` key superseded by a portless bind
+    // carrier is not a claim on anything, and treating it as one would refuse a boot over a line the
+    // operator has already migrated away from.
+    portIsRecorded: declared.bind.port !== undefined && declared.bind.port !== OS_CHOSEN_PORT,
+    carrierSet: boundAt(declared, { host, port }),
+    ...derivedAddresses({ host, port, ...operatorPublicUrl(value.publicUrl) }),
+    /** The ONE reply-window value every consumer reads; absent from the document means every default. */
+    agenda: value.agenda ?? DaemonAgendaConfigSchema.parse({}),
+  };
+});
 
 export type DaemonConfig = z.output<typeof DaemonConfigSchema>;
 

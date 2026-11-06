@@ -158,6 +158,52 @@ describe('reading the config directory from disk', () => {
   });
 });
 
+describe('reading daemon.json from the config directory', () => {
+  it('should read the document as parsed JSON', async () => {
+    const { directory, files } = await layout();
+    await writeFile(join(directory, 'daemon.json'), JSON.stringify({ attention: {}, port: 7431 }));
+    should(await files.daemonDocument()).deepEqual({ attention: {}, port: 7431 });
+  });
+
+  it('should have nothing to say when the file is absent, is not JSON, or is too large to be configuration', async () => {
+    const { directory, files } = await layout();
+    should(await files.daemonDocument()).be.undefined();
+    await writeFile(join(directory, 'daemon.json'), '{ not json');
+    should(await files.daemonDocument()).be.undefined();
+    await writeFile(join(directory, 'daemon.json'), `{"attention":"${'a'.repeat(CONFIG_FILE_MAX_BYTES)}"}`);
+    should(await files.daemonDocument()).be.undefined();
+  });
+
+  it('should never follow a link to read it', async () => {
+    const { root, directory, files } = await layout();
+    await writeFile(join(root, 'elsewhere.json'), JSON.stringify({ attention: {} }));
+    await symlink(join(root, 'elsewhere.json'), join(directory, 'daemon.json'));
+    should(await files.daemonDocument()).be.undefined();
+  });
+
+  it('should have nothing to say when the config directory is itself a file', async () => {
+    const { root, state } = await layout();
+    await writeFile(join(root, 'not-a-directory'), 'x');
+    const files = new FileConfigFiles(join(root, 'not-a-directory'), state);
+    should(await files.daemonDocument()).be.undefined();
+  });
+
+  it('should let any other filesystem error escape rather than report the document as absent', async () => {
+    // A path component longer than any filesystem allows fails with ENAMETOOLONG, whoever runs the test.
+    const { root, state } = await layout();
+    const files = new FileConfigFiles(join(root, 'x'.repeat(300)), state);
+    await should(files.daemonDocument()).be.rejectedWith({ code: 'ENAMETOOLONG' });
+  });
+
+  it('should hand back JSON that is not an object as it is, for the check to find nothing in', async () => {
+    const { directory, files } = await layout();
+    await writeFile(join(directory, 'daemon.json'), 'null');
+    should(await files.daemonDocument()).be.null();
+    await writeFile(join(directory, 'daemon.json'), '[{"attention":{}}]');
+    should(await files.daemonDocument()).deepEqual([{ attention: {} }]);
+  });
+});
+
 describe('reading the daemon’s accepted record', () => {
   const record = { 'warden.yaml': { etag: 'abc', text: 'enabled: true\n' } };
 

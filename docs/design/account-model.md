@@ -390,7 +390,7 @@ for a skipped one. More runtimes are Settings › Runtimes › Add runtime (§4.
 
 The runtimes this makes are **agent runtimes** (O2). **The daemon never runs this import itself**: an
 earlier build imported at the first boot (`fleet.prepareDefaults`), and that key is now retired —
-tolerated in an old `config/daemon.json` and said once in the boot trail. The same questions are
+an old `config/daemon.json` that still has it is refused, by a sentence naming the key. The same questions are
 `fy daemon setup` in a terminal; `fy daemon import claude|codex` is the no-questions form for scripts.
 
 **Import again** (Settings › Machine › Setup) opens the same full screen on its Claude Code step, and
@@ -1131,9 +1131,8 @@ What happens to a machine whose `config.yaml` is still version 1 (no `version` k
   `store: host`) imports the person's own Claude Code and Codex again. Old homes, credential copies
   and history stay where they were, and nothing reads them.
 
-One tolerance exists. A `config/daemon.json` that still has an `accountModel` key does not stop
-boot: the key is dropped and the boot says once that it is no longer read, because the account model
-is always on. Delete the key.
+No tolerance exists. A `config/daemon.json` that still has an `accountModel` key stops the boot with a
+sentence saying the key is no longer read, because the account model is always on. Delete the key.
 
 ---
 

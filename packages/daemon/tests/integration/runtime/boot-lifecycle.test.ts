@@ -85,8 +85,6 @@ import {
   type ProcessInventoryPort,
   type ProcessObservation,
   parseSessionId,
-  RETIRED_ACCOUNT_MODEL_NOTICE,
-  RETIRED_FLEET_BLOCK_NOTICE,
   type RelayAdvertisement,
   type RelayCarrierSource,
   type ResumeLauncher,
@@ -6800,8 +6798,6 @@ describe('daemon boot lifecycle', () => {
       return { code, answer, said };
     }
 
-    const nothing = async (): Promise<undefined> => undefined;
-
     /** What `GET /v1/fleet/machine` says about the live daemon, so a case can read "not set up". */
     const machineView = async (
       base: string,
@@ -6828,20 +6824,6 @@ describe('daemon boot lifecycle', () => {
       should(answer.status).equal(200);
       should(answer.body.setUp).be.false();
       should(answer.body.runtimeCount).equal(0);
-    });
-
-    it('should boot with the retired fleet.prepareDefaults key, say once that it is no longer read, and import nothing', async () => {
-      // Arrange — the block every earlier boot wrote into a fresh state home, still saying "true".
-      const { home } = await firstRunHome('fyd-retired-prepare-defaults', { fleet: { prepareDefaults: true } });
-      const world = await harnessOnPath(home, ['claude']);
-
-      // Act
-      const { code, said } = await bootOnce(world, home, nothing);
-
-      // Assert — tolerated rather than refused, said exactly once, and obeyed by nobody.
-      should(code).equal(0);
-      should(said.stated.filter(message => message === RETIRED_FLEET_BLOCK_NOTICE)).have.length(1);
-      should(await Bun.file(join(home, 'fleet', 'config.yaml')).exists()).be.false();
     });
 
     /**
@@ -6872,20 +6854,6 @@ describe('daemon boot lifecycle', () => {
       // And nothing was converted, written over or published.
       should(await readFile(configPath, 'utf8')).equal(retired);
       should(await Bun.file(join(home, 'fleet', 'manifest.json')).exists()).be.false();
-    });
-
-    it('should boot with the retired accountModel key and say once that it is no longer read', async () => {
-      // Arrange — the switch the account model used to sit behind, left in an old document.
-      const { home } = await firstRunHome('fyd-retired-switch', { accountModel: { enabled: true } });
-      const world = await harnessOnPath(home, []);
-
-      // Act
-      const { code, said } = await bootOnce(world, home, nothing);
-
-      // Assert — tolerated rather than refused, and said exactly once so the operator can delete it.
-      should(code).equal(0);
-      should(said.stated.filter(message => message === RETIRED_ACCOUNT_MODEL_NOTICE)).have.length(1);
-      should(said.stated.filter(message => message === RETIRED_FLEET_BLOCK_NOTICE)).be.empty();
     });
   });
 

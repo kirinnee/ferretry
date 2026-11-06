@@ -4,6 +4,7 @@ export * from './json-schema.ts';
 export * from './kinds.ts';
 export * from './model.ts';
 export * from './render.ts';
+export * from './retired-daemon-keys.ts';
 export * from './secrets.ts';
 export * from './skill.ts';
 export * from './yaml-text.ts';

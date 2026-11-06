@@ -4,7 +4,6 @@ import should from 'should';
 import { DISCOVERED_RELAY_CARRIER, IMPLIED_TUNNEL_CARRIER, OS_CHOSEN_PORT } from '../../../src/lib/runtime/carriers.ts';
 import {
   advertisesForeignAddress,
-  agendaBlockNotice,
   choosesPortAtBind,
   configuredAt,
   defaultDaemonConfig,
@@ -12,7 +11,6 @@ import {
   mayTrustDirectLoopback,
   overriddenBy,
   parseDaemonConfig,
-  RETIRED_SESSION_WORKERS_SWITCH_NOTICE,
   recordedPortDocument,
   tunnelEntryDocument,
 } from '../../../src/lib/runtime/config.ts';
@@ -700,58 +698,24 @@ describe('the session workers', () => {
       fastExit: true,
     });
   });
-
-  it('should still boot a document that turns the retired switch off, and keep it to say so', () => {
-    // Act
-    const actual = parseDaemonConfig({ sessionWorkers: { enabled: false } }).sessionWorkers;
-
-    // Assert
-    should(actual.enabled).equal(false);
-    should(RETIRED_SESSION_WORKERS_SWITCH_NOTICE).match(/sessionWorkers\.enabled/);
-  });
 });
 
-describe('the retired fleet block', () => {
-  it('should no longer carry a fleet block, because starting a daemon imports nothing', () => {
-    // Assert — there is nothing left to switch, so nothing to default and nothing a first boot writes.
-    should(defaultDaemonConfig()).not.have.property('fleet');
-    should(defaultDaemonConfigDocument()).not.have.property('fleet');
-    should(defaultDaemonConfig().retiredFleetBlock).equal(false);
-  });
-
-  it('should still boot an old document that carries one, in any shape, and remember to say so', () => {
-    // Act — every earlier boot wrote `{ prepareDefaults: true }` itself; a hand-edited one may say anything.
-    const written = parseDaemonConfig({ fleet: { prepareDefaults: true } });
-    const optedOut = parseDaemonConfig({ fleet: { prepareDefaults: false } });
-    const misspelled = parseDaemonConfig({ fleet: { prepareDefault: 'no' } });
-
+describe('the retired daemon.json keys', () => {
+  it('should carry no fleet block or accountModel setting, because starting a daemon imports nothing and the account model is always on', () => {
     // Assert
-    should(written.retiredFleetBlock).equal(true);
-    should(optedOut.retiredFleetBlock).equal(true);
-    should(misspelled.retiredFleetBlock).equal(true);
-    should(written).not.have.property('fleet');
-    should(parseDaemonConfig({}).retiredFleetBlock).equal(false);
-  });
-});
-
-describe('the retired account model setting', () => {
-  it('should no longer carry an accountModel setting', () => {
-    // Assert — the account model is always on, so there is nothing to default.
-    should(defaultDaemonConfig()).not.have.property('accountModel');
-    should(defaultDaemonConfigDocument()).not.have.property('accountModel');
-    should(defaultDaemonConfig().retiredAccountModel).equal(false);
+    for (const key of ['fleet', 'accountModel', 'attention']) {
+      should(defaultDaemonConfig()).not.have.property(key);
+      should(defaultDaemonConfigDocument()).not.have.property(key);
+    }
   });
 
-  it('should still boot an old document that carries one, and remember to say so', () => {
-    // Act — any shape: the key is not read, only noticed.
-    const enabled = parseDaemonConfig({ accountModel: { enabled: true } });
-    const misspelled = parseDaemonConfig({ accountModel: { enable: 'yes' } });
-
+  it.each([
+    ['fleet', { fleet: { prepareDefaults: true } }],
+    ['accountModel', { accountModel: { enabled: true } }],
+    ['attention', { attention: { replySettleSeconds: 30 } }],
+  ])('should not know %s any more, so the strict schema refuses it', (_key, document) => {
     // Assert
-    should(enabled.retiredAccountModel).equal(true);
-    should(misspelled.retiredAccountModel).equal(true);
-    should(enabled).not.have.property('accountModel');
-    should(parseDaemonConfig({}).retiredAccountModel).equal(false);
+    should(() => parseDaemonConfig(document)).throw();
   });
 });
 
@@ -807,32 +771,30 @@ describe('the session-worker pool size', () => {
 
 describe('the agenda resurface timer', () => {
   it('should be off unless configured, and accept a limit of one minute to a week', () => {
-    should(defaultDaemonConfig().attention.resurfaceAfterMinutes).be.undefined();
-    should(parseDaemonConfig({ attention: { resurfaceAfterMinutes: 45 } }).attention.resurfaceAfterMinutes).equal(45);
-    should(parseDaemonConfig({ attention: { resurfaceAfterMinutes: 1 } }).attention.resurfaceAfterMinutes).equal(1);
-    should(parseDaemonConfig({ attention: { resurfaceAfterMinutes: 10_080 } }).attention.resurfaceAfterMinutes).equal(
-      10_080,
-    );
+    should(defaultDaemonConfig().agenda.resurfaceAfterMinutes).be.undefined();
+    should(parseDaemonConfig({ agenda: { resurfaceAfterMinutes: 45 } }).agenda.resurfaceAfterMinutes).equal(45);
+    should(parseDaemonConfig({ agenda: { resurfaceAfterMinutes: 1 } }).agenda.resurfaceAfterMinutes).equal(1);
+    should(parseDaemonConfig({ agenda: { resurfaceAfterMinutes: 10_080 } }).agenda.resurfaceAfterMinutes).equal(10_080);
   });
 
   it('should refuse a limit that is zero, fractional or longer than a week', () => {
-    should(() => parseDaemonConfig({ attention: { resurfaceAfterMinutes: 0 } })).throw();
-    should(() => parseDaemonConfig({ attention: { resurfaceAfterMinutes: 1.5 } })).throw();
-    should(() => parseDaemonConfig({ attention: { resurfaceAfterMinutes: 10_081 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { resurfaceAfterMinutes: 0 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { resurfaceAfterMinutes: 1.5 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { resurfaceAfterMinutes: 10_081 } })).throw();
   });
 });
 
 describe('the agenda reply window', () => {
   it('should hold answers ten seconds after the last, and two minutes after the first, unless told otherwise', () => {
     // Assert
-    should(defaultDaemonConfig().attention).deepEqual({
+    should(defaultDaemonConfig().agenda).deepEqual({
       replySettleSeconds: 10,
       replyMaxWaitSeconds: 120,
       replyComposerWaitSeconds: 600,
       replyReceiptSeconds: 900,
       deadlineWarnHours: 3,
     });
-    should(parseDaemonConfig({ attention: { replySettleSeconds: 30 } }).attention).deepEqual({
+    should(parseDaemonConfig({ agenda: { replySettleSeconds: 30 } }).agenda).deepEqual({
       replySettleSeconds: 30,
       replyMaxWaitSeconds: 120,
       replyComposerWaitSeconds: 600,
@@ -843,31 +805,27 @@ describe('the agenda reply window', () => {
 
   it('should take the composer and receipt waits from config, within their bounds', () => {
     // Act + Assert
-    should(
-      parseDaemonConfig({ attention: { replyComposerWaitSeconds: 60, replyReceiptSeconds: 120 } }).attention,
-    ).deepEqual({
+    should(parseDaemonConfig({ agenda: { replyComposerWaitSeconds: 60, replyReceiptSeconds: 120 } }).agenda).deepEqual({
       replySettleSeconds: 10,
       replyMaxWaitSeconds: 120,
       replyComposerWaitSeconds: 60,
       replyReceiptSeconds: 120,
       deadlineWarnHours: 3,
     });
-    should(() => parseDaemonConfig({ attention: { replyComposerWaitSeconds: 5 } })).throw();
-    should(() => parseDaemonConfig({ attention: { replyReceiptSeconds: 10 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { replyComposerWaitSeconds: 5 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { replyReceiptSeconds: 10 } })).throw();
   });
 
   it('should accept a settle equal to the cap, and the bounds of one second and one hour', () => {
     // Act + Assert
-    should(parseDaemonConfig({ attention: { replySettleSeconds: 1, replyMaxWaitSeconds: 1 } }).attention).deepEqual({
+    should(parseDaemonConfig({ agenda: { replySettleSeconds: 1, replyMaxWaitSeconds: 1 } }).agenda).deepEqual({
       replySettleSeconds: 1,
       replyMaxWaitSeconds: 1,
       replyComposerWaitSeconds: 600,
       replyReceiptSeconds: 900,
       deadlineWarnHours: 3,
     });
-    should(
-      parseDaemonConfig({ attention: { replySettleSeconds: 3600, replyMaxWaitSeconds: 3600 } }).attention,
-    ).deepEqual({
+    should(parseDaemonConfig({ agenda: { replySettleSeconds: 3600, replyMaxWaitSeconds: 3600 } }).agenda).deepEqual({
       replySettleSeconds: 3600,
       replyMaxWaitSeconds: 3600,
       replyComposerWaitSeconds: 600,
@@ -878,33 +836,33 @@ describe('the agenda reply window', () => {
 
   it('should refuse a settle longer than the cap, naming both keys, instead of clamping it', () => {
     // Act + Assert
-    should(() => parseDaemonConfig({ attention: { replySettleSeconds: 200 } })).throw(/replySettleSeconds/);
-    should(() => parseDaemonConfig({ attention: { replySettleSeconds: 30, replyMaxWaitSeconds: 20 } })).throw(
+    should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 200 } })).throw(/replySettleSeconds/);
+    should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 30, replyMaxWaitSeconds: 20 } })).throw(
       /replyMaxWaitSeconds/,
     );
   });
 
   it('should refuse a value out of range, a fraction and a key the block does not define', () => {
     // Act + Assert
-    should(() => parseDaemonConfig({ attention: { replySettleSeconds: 0 } })).throw();
-    should(() => parseDaemonConfig({ attention: { replyMaxWaitSeconds: 3601 } })).throw();
-    should(() => parseDaemonConfig({ attention: { replySettleSeconds: 1.5 } })).throw();
-    should(() => parseDaemonConfig({ attention: { quietSeconds: 5 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 0 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { replyMaxWaitSeconds: 3601 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 1.5 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { quietSeconds: 5 } })).throw();
   });
 });
 
-describe('the attention deadline warning', () => {
+describe('the agenda deadline warning', () => {
   it('should warn three hours ahead unless told otherwise, within its bounds', () => {
     // Act + Assert
-    should(defaultDaemonConfig().attention.deadlineWarnHours).equal(3);
-    should(parseDaemonConfig({ attention: { deadlineWarnHours: 0.25 } }).attention.deadlineWarnHours).equal(0.25);
-    should(parseDaemonConfig({ attention: { deadlineWarnHours: 168 } }).attention.deadlineWarnHours).equal(168);
-    should(() => parseDaemonConfig({ attention: { deadlineWarnHours: 0.1 } })).throw();
-    should(() => parseDaemonConfig({ attention: { deadlineWarnHours: 169 } })).throw();
+    should(defaultDaemonConfig().agenda.deadlineWarnHours).equal(3);
+    should(parseDaemonConfig({ agenda: { deadlineWarnHours: 0.25 } }).agenda.deadlineWarnHours).equal(0.25);
+    should(parseDaemonConfig({ agenda: { deadlineWarnHours: 168 } }).agenda.deadlineWarnHours).equal(168);
+    should(() => parseDaemonConfig({ agenda: { deadlineWarnHours: 0.1 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { deadlineWarnHours: 169 } })).throw();
   });
 });
 
-describe('the agenda block beside the older attention block', () => {
+describe('the agenda block', () => {
   const RESOLVED_DEFAULTS = {
     replySettleSeconds: 10,
     replyMaxWaitSeconds: 120,
@@ -913,74 +871,24 @@ describe('the agenda block beside the older attention block', () => {
     deadlineWarnHours: 3,
   };
 
-  it('should load the older attention block alone exactly as it always did, and say so', () => {
-    // Act
-    const actual = parseDaemonConfig({ attention: { replySettleSeconds: 30, deadlineWarnHours: 6 } });
-
+  it('should resolve to the defaults when it is not written', () => {
     // Assert
-    should(actual.attention).deepEqual({ ...RESOLVED_DEFAULTS, replySettleSeconds: 30, deadlineWarnHours: 6 });
-    should(actual.agendaSpelling).equal('attention');
+    should(defaultDaemonConfig().agenda).deepEqual(RESOLVED_DEFAULTS);
   });
 
-  it('should load the agenda block alone into the value every consumer reads', () => {
+  it('should take what is written and default the rest', () => {
     // Act
     const actual = parseDaemonConfig({ agenda: { replySettleSeconds: 30, resurfaceAfterMinutes: 45 } });
 
     // Assert
-    should(actual.attention).deepEqual({ ...RESOLVED_DEFAULTS, replySettleSeconds: 30, resurfaceAfterMinutes: 45 });
-    should(actual.agenda).equal(actual.attention);
-    should(actual.agendaSpelling).equal('agenda');
+    should(actual.agenda).deepEqual({ ...RESOLVED_DEFAULTS, replySettleSeconds: 30, resurfaceAfterMinutes: 45 });
   });
 
-  it('should resolve to the defaults, and report neither spelling, when neither is written', () => {
-    // Act
-    const actual = defaultDaemonConfig();
-
-    // Assert
-    should(actual.attention).deepEqual(RESOLVED_DEFAULTS);
-    should(actual.agendaSpelling).equal('none');
-  });
-
-  it('should let the agenda block win key by key and read the attention block for the keys it leaves out', () => {
-    // Act
-    const actual = parseDaemonConfig({
-      attention: { replySettleSeconds: 30, replyMaxWaitSeconds: 60, deadlineWarnHours: 6 },
-      agenda: { replySettleSeconds: 20, resurfaceAfterMinutes: 15 },
-    });
-
-    // Assert
-    should(actual.attention).deepEqual({
-      ...RESOLVED_DEFAULTS,
-      replySettleSeconds: 20,
-      replyMaxWaitSeconds: 60,
-      deadlineWarnHours: 6,
-      resurfaceAfterMinutes: 15,
-    });
-    should(actual.agendaSpelling).equal('both');
-  });
-
-  it('should let an agenda key equal to a default still beat a different attention value', () => {
-    // Act
-    const actual = parseDaemonConfig({ attention: { deadlineWarnHours: 6 }, agenda: { deadlineWarnHours: 3 } });
-
-    // Assert
-    should(actual.attention.deadlineWarnHours).equal(3);
-  });
-
-  it('should ignore an agenda key written as undefined, so the attention value stands', () => {
-    // Act
-    const actual = parseDaemonConfig({ attention: { deadlineWarnHours: 6 }, agenda: { deadlineWarnHours: undefined } });
-
-    // Assert
-    should(actual.attention.deadlineWarnHours).equal(6);
-  });
-
-  it('should refuse an unknown agenda key, as the attention block refuses one', () => {
+  it('should refuse an unknown agenda key', () => {
     should(() => parseDaemonConfig({ agenda: { replySettleSecond: 5 } })).throw();
-    should(() => parseDaemonConfig({ attention: { replySettleSecond: 5 } })).throw();
   });
 
-  it('should hold the agenda block to the same bounds', () => {
+  it('should hold the agenda block to its bounds', () => {
     should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 0 } })).throw();
     should(() => parseDaemonConfig({ agenda: { replyComposerWaitSeconds: 5 } })).throw();
     should(() => parseDaemonConfig({ agenda: { replyReceiptSeconds: 10 } })).throw();
@@ -988,31 +896,12 @@ describe('the agenda block beside the older attention block', () => {
     should(() => parseDaemonConfig({ agenda: { deadlineWarnHours: 0.1 } })).throw();
   });
 
-  it('should refuse a settle longer than the max wait inside the agenda block, naming the new key', () => {
+  it('should refuse a settle longer than the max wait, naming the key', () => {
     should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 30, replyMaxWaitSeconds: 20 } })).throw(
       /agenda\.replySettleSeconds must not exceed agenda\.replyMaxWaitSeconds/,
     );
     should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 30 } })).not.throw();
     should(() => parseDaemonConfig({ agenda: { replyMaxWaitSeconds: 5 } })).throw(/replySettleSeconds/);
-  });
-
-  it('should refuse a settle and a max wait that only conflict across the two spellings', () => {
-    should(() =>
-      parseDaemonConfig({ attention: { replyMaxWaitSeconds: 20 }, agenda: { replySettleSeconds: 30 } }),
-    ).throw(/agenda\.replySettleSeconds/);
-  });
-
-  it('should keep the attention refusal naming the attention keys when only that block is written', () => {
-    should(() => parseDaemonConfig({ attention: { replySettleSeconds: 30, replyMaxWaitSeconds: 20 } })).throw(
-      /attention\.replySettleSeconds/,
-    );
-  });
-
-  it('should say nothing for a document that never wrote the older block, and name the new key otherwise', () => {
-    should(agendaBlockNotice('none')).be.undefined();
-    should(agendaBlockNotice('agenda')).be.undefined();
-    should(agendaBlockNotice('attention')).match(/renamed to "agenda".*agenda removal release/);
-    should(agendaBlockNotice('both')).match(/"agenda" wins/);
   });
 });
 

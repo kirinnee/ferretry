@@ -22,6 +22,11 @@ export interface IConfigFiles {
   readonly directory: string;
   /** Every config file, read when it is an ordinary file of a sensible size, otherwise named. */
   list(): Promise<{ readonly files: readonly ConfigFileText[]; readonly unreadable: readonly string[] }>;
+  /**
+   * `daemon.json` from the same directory, parsed, or `undefined` when there is nothing to say about it: no
+   * file, a link, a file too large to be configuration, or text that is not JSON (the daemon reports that).
+   */
+  daemonDocument(): Promise<unknown>;
   /** The daemon's accepted record, read only; empty when there is none yet. */
   accepted(): Promise<AcceptedConfigFiles>;
 }

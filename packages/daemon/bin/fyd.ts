@@ -305,6 +305,7 @@ import {
   PerformanceStopwatch,
   ProjectMcpServers,
   probeBundledWorker,
+  RetiredDaemonKeysError,
   RuntimeEnvironment,
   SocketViewerDownstream,
   SqliteHomeLockFactory,
@@ -728,7 +729,6 @@ import {
   adoptedLaunchArgv,
   adoptedTranscriptProvenance,
   advertisesForeignAddress,
-  agendaBlockNotice,
   agentJobsMessage,
   agentJobsMessageId,
   agentSpokenName,
@@ -1039,9 +1039,6 @@ import {
   QueueRefused,
   RELAY_DIRECTORY_NOT_ASKED,
   RELOAD_THE_APP,
-  RETIRED_ACCOUNT_MODEL_NOTICE,
-  RETIRED_FLEET_BLOCK_NOTICE,
-  RETIRED_SESSION_WORKERS_SWITCH_NOTICE,
   RecipeAgendaAdapter,
   RecommendError,
   type RecommendSubsystem,
@@ -2038,8 +2035,8 @@ export interface DaemonWorld {
      * the document's `sessionWorkers`, read by `start` like every other configured value.
      */
     sessionWorkers: DaemonConfig['sessionWorkers'],
-    /** How long the owner's attention answers are held before they reach the ferret (`attention` block). */
-    agenda: DaemonConfig['attention'],
+    /** How long the owner's agenda answers are held before they reach the ferret (`agenda` block). */
+    agenda: DaemonConfig['agenda'],
     /** Whether a message to a running ferret rides its durable queue (`delivery` block). */
     delivery: DaemonConfig['delivery'],
   ) => Promise<{ readonly mounted: MountedSubsystems; readonly modules: ModuleHandles }>;
@@ -6734,7 +6731,8 @@ function createRecommendSubsystem(
 /**
  * Rewrites a legacy `host`/`port`/`relay` in the configuration document into `carriers` entries, and says so.
  *
- * NOTHING HERE MAY STOP A BOOT. A converted file is announced with where the original was kept; a
+ * NOTHING HERE MAY STOP A BOOT, EXCEPT A DOCUMENT THAT STILL HOLDS A RETIRED KEY (`refuseRetiredKeys`), which is
+ * refused first, before a backup, a journal entry or a document is written. A converted file is announced with where the original was kept; a
  * refused one is announced as left alone and why, and the boot goes on reading the legacy spelling
  * exactly as it always did; a filesystem failure is announced the same way, because a configuration
  * this daemon could still have read is never worth refusing to start over. Whether the document is
@@ -6754,6 +6752,9 @@ async function convertLegacyCarrierKeysAtBoot(world: DaemonWorld): Promise<void>
         `the legacy host/port/relay keys in ${path} were left as they are, because converting them to carriers entries was refused: ${outcome.reason}`,
       );
   } catch (error) {
+    // A document holding a retired key is not a conversion failure: it is refused here, before anything is
+    // written, with the sentence that names the key and the remedy.
+    if (error instanceof RetiredDaemonKeysError) throw error;
     world.notices.state(
       `the legacy host/port/relay keys in ${path} could not be converted to carriers entries (${error instanceof Error ? error.message : String(error)}); check the file and its ${CARRIERS_JOURNAL_NAME} record before the next start`,
     );
@@ -10704,7 +10705,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           if (closed > 0) process.stderr.write(`agenda: closed ${String(closed)} duplicate ask(s)\n`);
         })
         .catch((error: unknown) => boardDiagnostics.warn(`the gate items' boot pass failed: ${String(error)}`));
-      // Off unless `attention.resurfaceAfterMinutes` is set: asks left in discussion that long surface themselves.
+      // Off unless `agenda.resurfaceAfterMinutes` is set: asks left in discussion that long surface themselves.
       if (agendaConfig.resurfaceAfterMinutes !== undefined) {
         new AgendaResurfacer(
           agendaBoards,
@@ -10730,7 +10731,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         await agendaProjection.refresh(sessionId);
         await agendaBuzz.turnChanged(sessionId);
       });
-      // An item whose `neededBy` is within `attention.deadlineWarnHours` is pushed once; the sweep finds the ones
+      // An item whose `neededBy` is within `agenda.deadlineWarnHours` is pushed once; the sweep finds the ones
       // whose time came while nothing else touched their board.
       const sweepDeadlines = asActivity(activities, 'agenda-deadlines', async () => {
         await agendaBuzz.sweep(storage.listSessions().map(session => session.id));
@@ -13863,13 +13864,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // be said or they are left believing the opposite.
   for (const failure of harnessOverrideFailures(harnesses)) world.notices.state(failure);
   if (!harnesses.ready) world.notices.state(harnessAbsentWarning(harnesses, CLIENT_NAME));
-  // The two retired daemon.json keys that are tolerated rather than refused: each said once, every boot
-  // it is still there, so the operator can delete it.
-  if (config.retiredAccountModel) world.notices.state(RETIRED_ACCOUNT_MODEL_NOTICE);
-  if (config.retiredFleetBlock) world.notices.state(RETIRED_FLEET_BLOCK_NOTICE);
-  const agendaNotice = agendaBlockNotice(config.agendaSpelling);
-  if (agendaNotice !== undefined) world.notices.state(agendaNotice);
-  if (config.sessionWorkers.enabled === false) world.notices.state(RETIRED_SESSION_WORKERS_SWITCH_NOTICE);
 
   progress.enter('opening the usage feed');
   const usage = await world.createUsageFeed(config);
@@ -14088,7 +14082,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     harnessDiscovery,
     world.browserLauncher,
     config.sessionWorkers,
-    config.attention,
+    config.agenda,
     config.delivery,
   );
   // The older wire names (`legacy: true` routes) are counted into `<home>/legacy-wire-use.json` and shown on
