@@ -105,7 +105,6 @@ export const callers: readonly string[] = [
   'GET /v1/imports/history/:importId operator any',
   'GET /v1/machine/agenda operator person',
   'GET /v1/machine/agenda/:id operator person',
-  'GET /v1/names operator any',
   'GET /v1/pack operator any',
   'GET /v1/pack/inventory operator any',
   'GET /v1/pack/routing/jobs/:jobId operator any',

@@ -11,6 +11,7 @@ import type { InputRequestsProvides } from './input-requests.ts';
 import type { LearningSeams } from './learning.ts';
 import type { McpProvides } from './mcp.ts';
 import type { ModelsJobs, ModelsProvides } from './models.ts';
+import type { NamesProvides } from './names.ts';
 import type { SharedDraftService } from '../../src/lib/shared-drafts/index.ts';
 import type { UpdateJobs, UpdateProvides } from './update.ts';
 import type { UsageJobs, UsageProvides } from './usage.ts';
@@ -45,6 +46,8 @@ export const seamsOf = {
   mcp: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the outbound holder is a `buildWorld` value, a need). */
   models: (_world: DaemonWorld): void => undefined,
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the claim ledger, the callsign counters and the allocator's randomness are fixed production adapters; the session storage, the state files and the ledger's executor are needs). */
+  names: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the saved-pictures store is a need). */
   renders: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the draft repository, the timer and the generation source are fixed production adapters; the agenda ledgers, the clock and the paired devices are needs). */
@@ -76,6 +79,7 @@ export interface ModuleHandles {
   readonly learning: BuiltModule<LearningSubsystem>;
   readonly mcp: BuiltModule<McpProvides>;
   readonly models: BuiltModule<ModelsProvides, ModelsJobs>;
+  readonly names: BuiltModule<NamesProvides>;
   readonly renders: BuiltModule<RenderService>;
   readonly sharedDrafts: BuiltModule<SharedDraftService>;
   readonly update: BuiltModule<UpdateProvides, UpdateJobs>;
