@@ -312,7 +312,6 @@ describe('FailureLine marks what it quotes', () => {
 describe('AddToCatalogSheet publishing with versions', () => {
   const target = { publish: { catalogId: CATALOG, itemId: ITEM } };
   const ITEM_PATH = `/v1/catalog-items/${ITEM}`;
-  const tools = { changes: true, makeCurrent: true };
   const previewRoute = `POST /v1/catalogs/${CATALOG}/items/preview`;
   const heads = (change: Record<string, unknown> = {}) => ({
     'GET /v1/catalogs': list(ownedCatalog()),
@@ -320,7 +319,7 @@ describe('AddToCatalogSheet publishing with versions', () => {
   });
 
   it('shows what changes from the current version before confirming', async () => {
-    const { view } = await open(heads({ changes: catalogChanges() }), { ...target, versionTools: tools });
+    const { view } = await open(heads({ changes: catalogChanges() }), target);
     await click(q('[data-catalog-preview]'));
     expect(q('[data-changes-view]')?.getAttribute('aria-label')).toBe('What changes from the current version');
     expect(q('[data-change-flag="command"]')).not.toBeNull();
@@ -328,15 +327,11 @@ describe('AddToCatalogSheet publishing with versions', () => {
     await view.unmount();
   });
 
-  it('shows no changes without versions.1, and no changes for a first add', async () => {
-    const plain = await open(heads({ changes: catalogChanges() }), target);
-    await click(q('[data-catalog-preview]'));
-    expect(q('[data-changes-view]')).toBeNull();
-    await plain.view.unmount();
-    const first = await open(
-      { 'GET /v1/catalogs': list(ownedCatalog()), [previewRoute]: () => itemPreview({ changes: catalogChanges() }) },
-      { versionTools: tools },
-    );
+  it('shows no changes for a first add', async () => {
+    const first = await open({
+      'GET /v1/catalogs': list(ownedCatalog()),
+      [previewRoute]: () => itemPreview({ changes: catalogChanges() }),
+    });
     await click(q('[data-catalog-preview]'));
     expect(q('[data-changes-view]')).toBeNull();
     await first.view.unmount();
@@ -355,7 +350,7 @@ describe('AddToCatalogSheet publishing with versions', () => {
           item: sharedItem(),
         }),
       },
-      { ...target, versionTools: tools },
+      target,
     );
     await click(q('[data-catalog-preview]'));
     await settle();
@@ -371,7 +366,7 @@ describe('AddToCatalogSheet publishing with versions', () => {
   it('says it is the same and offers nothing when the same version is already current', async () => {
     const { view } = await open(
       { ...heads({ sameAsVersion: 3 }), [`GET ${ITEM_PATH}`]: () => sharedItem({ current: 3 }) },
-      { ...target, versionTools: tools },
+      target,
     );
     await click(q('[data-catalog-preview]'));
     await settle();
@@ -380,7 +375,7 @@ describe('AddToCatalogSheet publishing with versions', () => {
     await view.unmount();
   });
 
-  it('keeps today’s sentence when the current version cannot be read, or versions.2 is off', async () => {
+  it('keeps today’s sentence when the current version cannot be read', async () => {
     const failing = await open(
       {
         ...heads({ sameAsVersion: 1 }),
@@ -388,20 +383,13 @@ describe('AddToCatalogSheet publishing with versions', () => {
           throw new FyHttpError('x', 500, 'x');
         },
       },
-      { ...target, versionTools: tools },
+      target,
     );
     await click(q('[data-catalog-preview]'));
     await settle();
     expect(q('[data-catalog-add-reason]')?.textContent).toContain('same as version 1');
     expect(q('[data-catalog-make-current]')).toBeNull();
     await failing.view.unmount();
-    const off = await open(heads({ sameAsVersion: 1 }), {
-      ...target,
-      versionTools: { changes: true, makeCurrent: false },
-    });
-    await click(q('[data-catalog-preview]'));
-    expect(q('[data-catalog-make-current]')).toBeNull();
-    await off.view.unmount();
   });
 
   it('shows the refusal when making it current is refused, and can look again', async () => {
@@ -413,7 +401,7 @@ describe('AddToCatalogSheet publishing with versions', () => {
           throw new FyHttpError('moved', 409, 'current_changed');
         },
       },
-      { ...target, versionTools: tools },
+      target,
     );
     await click(q('[data-catalog-preview]'));
     await settle();
@@ -429,7 +417,7 @@ describe('AddToCatalogSheet publishing with versions', () => {
         ...heads({ sameAsRetiredVersion: 2 }),
         [`POST /v1/catalogs/${CATALOG}/items/${ITEM}/versions`]: () => ({ ...published, itemVersion: 4 }),
       },
-      { ...target, versionTools: tools },
+      target,
     );
     await click(q('[data-catalog-preview]'));
     expect(q('[data-catalog-same-as-retired="2"]')?.textContent).toContain('This is the content of retired version 2');
@@ -438,9 +426,5 @@ describe('AddToCatalogSheet publishing with versions', () => {
     expect(fake.calls.at(-1)?.path).toBe(`/v1/catalogs/${CATALOG}/items/${ITEM}/versions`);
     expect(q('[data-catalog-landed]')).not.toBeNull();
     await view.unmount();
-    const quiet = await open(heads({ sameAsRetiredVersion: 2 }), target);
-    await click(q('[data-catalog-preview]'));
-    expect(q('[data-catalog-same-as-retired]')).toBeNull();
-    await quiet.view.unmount();
   });
 });

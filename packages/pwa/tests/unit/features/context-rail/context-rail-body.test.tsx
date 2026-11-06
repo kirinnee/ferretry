@@ -595,12 +595,15 @@ describe('Context › MCP and Skills against a daemon older than the app', () =>
 });
 
 describe('ContextRailBody — catalogs', () => {
+  // A daemon with no default catalog yet: the one tap names the catalog it would make.
+  const PUBLISH_IN_NEW_CATALOG = 'Publish in a new catalog, My skills';
   const fake = () =>
     fakeClient({
       'GET /v1/catalog-installs': () => ({
         installs: [installRecord('skill', 'floop'), installRecord('mcp', 'github')],
       }),
       'GET /v1/catalogs': () => ({ catalogs: [ownedCatalog()] }),
+      'POST /v1/catalog-items/quick-add': () => ({ outcome: 'review', reasons: ['needs-summary'] }),
     });
 
   it('lists the active skills with where each came from, publishes only from the ⋯, and has no Share, Add or link', async () => {
@@ -620,7 +623,7 @@ describe('ContextRailBody — catalogs', () => {
     await click(root, '[data-catalog-item-row="babysit-pr"] [data-row-more]');
     const publish = must(
       [...root.ownerDocument.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-        entry => entry.textContent === 'Publish in a catalog…',
+        entry => entry.textContent === PUBLISH_IN_NEW_CATALOG,
       ),
       'the Publish item',
     );
@@ -649,7 +652,7 @@ describe('ContextRailBody — catalogs', () => {
       await interact(() => item.click());
       await settle();
     };
-    await pick('scratch', 'Show details', ['Show details', 'Publish in a catalog…']);
+    await pick('scratch', 'Show details', ['Show details', PUBLISH_IN_NEW_CATALOG]);
     const details = must(root.querySelector('[data-context-mcp="scratch"] [data-mcp-details]'), 'the details');
     expect(details.textContent).toContain('Runs');
     expect(details.textContent).not.toContain('Declared in');

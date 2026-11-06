@@ -3,7 +3,7 @@ import should from 'should';
 import { z } from 'zod';
 import { addTwoFactorKeySubject } from '../../src/lib/accounts.ts';
 import { AgendaActionRequestSchema } from '../../src/lib/agenda.ts';
-import { AgentToolCallSchema, AgentToolResultSchema, taskPlanCallOf } from '../../src/lib/agent-tools.ts';
+import { AgentToolResultSchema } from '../../src/lib/agent-tools.ts';
 import { sha256Hex } from '../../src/lib/mcp-oauth.ts';
 import { CopyPlanSchema } from '../../src/lib/secure-copy.ts';
 import * as plans from '../../src/lib/task-plan.ts';
@@ -811,33 +811,7 @@ describe('why a line did not apply', () => {
 });
 
 describe('the paste plan it widens (invariant 30)', () => {
-  const preapprove = {
-    tool: 'secure.preapprove',
-    items: [
-      { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'the token' },
-      {
-        from: { kind: 'browser', origin: 'https://github.com' },
-        to: { kind: 'secret', name: 'GH_TOKEN' },
-        why: 'keep it',
-      },
-    ],
-    expiresInSeconds: 900,
-  };
-
-  it('should read secure.preapprove as a task plan of one-use paste lines', () => {
-    const parsed = AgentToolCallSchema.parse(preapprove);
-    if (parsed.tool !== 'secure.preapprove') throw new Error('not a preapprove');
-    const translated = taskPlanCallOf(parsed);
-
-    should(TaskPlanCallSchema.parse(translated)).deepEqual(translated);
-    should(translated).deepEqual({
-      tool: 'task.plan',
-      lines: preapprove.items.map(item => ({ kind: 'paste', ...item, uses: 1 })),
-      expiresInSeconds: 900,
-    });
-  });
-
-  it('should answer secure.preapprove in the old plan shape, paste lines only', () => {
+  it('should answer a task plan in the paste-plan shape, paste lines only', () => {
     const answered = approvedPlan(true, true);
     const pending = copyPlanOf(plan());
 

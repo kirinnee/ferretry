@@ -5,7 +5,6 @@ import {
   type InputRaise,
   type InputRequest,
   type InputTargetFacts,
-  PutLoginEntryRequestSchema,
   padInputValue,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -18,6 +17,7 @@ import { InputRequestService } from '../../../src/lib/input-requests/service.ts'
 import { TypedIdentities } from '../../../src/lib/input-requests/typed-identities.ts';
 import { LoginDirectory, LoginEntryError, LoginVault, totpCode } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments, plantSeed } from '../runtime/mounts/support.ts';
+import { putSavedLogin, savedLogins } from '../secrets/saved-login-fixture.ts';
 
 /**
  * P3, SAVED LOGINS through the REAL input service and the REAL saved-login store (fake cipher, memory files):
@@ -149,7 +149,7 @@ function harness(
       ...sinks,
       JSON.stringify(await service.list(HOST)),
       JSON.stringify(index.document),
-      JSON.stringify(await directory.list()),
+      JSON.stringify(await savedLogins(directory)),
     ].join('\n');
   return {
     service,
@@ -232,7 +232,7 @@ describe('the first time: the owner types the value and saves it', () => {
 
     should(result.saved).deepEqual({ entry: 'SUDO_KIRIN_BOX', ok: true });
     should(h.writes).deepEqual([PASSWORD]);
-    should(await h.directory.list()).match([
+    should(await savedLogins(h.directory)).match([
       { id: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box', match: ['sudo@kirin-box'], fields: { password: true } },
     ]);
     should(h.saves).deepEqual([
@@ -249,12 +249,9 @@ describe('the first time: the owner types the value and saves it', () => {
 
   it('should never write into an existing account without the owner’s Update, nor into one the card does not offer (secrev-1331 M2, L3)', async () => {
     const h = harness();
-    await h.directory.put(
-      'SUDO_LAPTOP',
-      PutLoginEntryRequestSchema.parse({ label: 'my sudo', match: ['sudo@laptop'] }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_LAPTOP', { label: 'my sudo', match: ['sudo@laptop'] });
     const { request } = await raised(h);
-    const before = JSON.stringify(await h.directory.list());
+    const before = JSON.stringify(await savedLogins(h.directory));
 
     const legacy = await refusal(
       h.service.deliver(
@@ -279,19 +276,16 @@ describe('the first time: the owner types the value and saves it', () => {
     should(legacy.message).containEql('Nothing was typed');
     should(elsewhere.message).containEql('not the account this card can update');
     should(h.writes).deepEqual([]);
-    should(JSON.stringify(await h.directory.list())).equal(before);
+    should(JSON.stringify(await savedLogins(h.directory))).equal(before);
   });
 
   it('should replace the password of the account the card offers when the owner chooses Update', async () => {
     const h = harness();
-    await h.directory.put(
-      'SUDO_KIRIN_BOX',
-      PutLoginEntryRequestSchema.parse({
-        label: 'sudo on kirin-box',
-        match: ['sudo@kirin-box'],
-        password: 'old-UNIQUE-pw-0',
-      }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_KIRIN_BOX', {
+      label: 'sudo on kirin-box',
+      match: ['sudo@kirin-box'],
+      password: 'old-UNIQUE-pw-0',
+    });
     const { request } = await raised(h);
     should(request.saved?.update).deepEqual({ id: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' });
 
@@ -305,7 +299,7 @@ describe('the first time: the owner types the value and saves it', () => {
     );
 
     should(result.saved).deepEqual({ entry: 'SUDO_KIRIN_BOX', ok: true });
-    should(await h.directory.list()).match([{ id: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' }]);
+    should(await savedLogins(h.directory)).match([{ id: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' }]);
     const next = await raised(h);
     await h.service.deliver(
       SESSION,
@@ -326,7 +320,7 @@ describe('the first time: the owner types the value and saves it', () => {
       typed(request.observedDigest as string, 'kirinnee', { save: { entry: 'SUDO_KIRIN_BOX', label: 'sudo' } }),
       HOST,
     );
-    should((await h.directory.list())[0]?.username).equal('kirinnee');
+    should((await savedLogins(h.directory))[0]?.username).equal('kirinnee');
   });
 
   it('should refuse, with nothing typed, a save that could never happen: a code, or a password too short to mask', async () => {
@@ -385,10 +379,11 @@ describe('the first time: the owner types the value and saves it', () => {
 
 describe('the next time: the card offers the saved login, and the owner taps Use', () => {
   async function savedOnce(h: Harness): Promise<void> {
-    await h.directory.put(
-      'SUDO_KIRIN_BOX',
-      PutLoginEntryRequestSchema.parse({ label: 'sudo on kirin-box', match: ['sudo@kirin-box'], password: PASSWORD }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_KIRIN_BOX', {
+      label: 'sudo on kirin-box',
+      match: ['sudo@kirin-box'],
+      password: PASSWORD,
+    });
   }
 
   it('should offer the matching login as the one-tap choice, and suggest saving to it', async () => {
@@ -443,10 +438,11 @@ describe('the next time: the card offers the saved login, and the owner taps Use
 
   it('should not offer a login for another target as the one-tap choice, but keep it selectable by hand', async () => {
     const h = harness();
-    await h.directory.put(
-      'SUDO_LAPTOP',
-      PutLoginEntryRequestSchema.parse({ label: 'sudo on laptop', match: ['sudo@laptop'], password: PASSWORD }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_LAPTOP', {
+      label: 'sudo on laptop',
+      match: ['sudo@laptop'],
+      password: PASSWORD,
+    });
     const { request } = await raised(h);
 
     should(request.saved?.offers).deepEqual([
@@ -484,10 +480,7 @@ describe('the next time: the card offers the saved login, and the owner taps Use
 
   it('should mark the ferret’s hint without ever making it the one-tap choice, and tell the ferret nothing either way', async () => {
     const h = harness();
-    await h.directory.put(
-      'SUDO_LAPTOP',
-      PutLoginEntryRequestSchema.parse({ label: 'laptop', match: ['sudo@laptop'], password: PASSWORD }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_LAPTOP', { label: 'laptop', match: ['sudo@laptop'], password: PASSWORD });
     const hinted = await raised(h, { ...RAISE, secretHint: 'SUDO_LAPTOP' });
     const unknown = await raised(h, {
       ...RAISE,
@@ -539,7 +532,7 @@ describe('the next time: the card offers the saved login, and the owner taps Use
 
   it('should refuse an unknown login or one without the field, with nothing typed', async () => {
     const h = harness();
-    await h.directory.put('BARE', PutLoginEntryRequestSchema.parse({ label: 'bare', username: 'kirin' }));
+    await putSavedLogin(h.directory, 'BARE', { label: 'bare', username: 'kirin' });
     const { request } = await raised(h);
     const unknown = await refusal(
       h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'NOPE'), HOST),
@@ -556,10 +549,11 @@ describe('the next time: the card offers the saved login, and the owner taps Use
   it('should refuse a sign-in that is not one of the account it types from, opening and typing nothing (invariant 13)', async () => {
     const h = harness();
     await savedOnce(h);
-    await h.directory.put(
-      'SUDO_LAPTOP',
-      PutLoginEntryRequestSchema.parse({ label: 'laptop', match: ['sudo@laptop'], password: 'laptop-UNIQUE-pw' }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_LAPTOP', {
+      label: 'laptop',
+      match: ['sudo@laptop'],
+      password: 'laptop-UNIQUE-pw',
+    });
     const laptop = await signInOf(h, 'SUDO_LAPTOP');
     const { request } = await raised(h);
     const digest = request.observedDigest as string;
@@ -609,10 +603,11 @@ describe('the next time: the card offers the saved login, and the owner taps Use
   it("should make the ferret's matched choice the primary, and still type nothing until the owner taps (invariant 12)", async () => {
     const h = harness();
     await savedOnce(h);
-    await h.directory.put(
-      'SUDO_ADMIN',
-      PutLoginEntryRequestSchema.parse({ label: 'admin', match: ['sudo@kirin-box'], password: 'admin-UNIQUE-pw' }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_ADMIN', {
+      label: 'admin',
+      match: ['sudo@kirin-box'],
+      password: 'admin-UNIQUE-pw',
+    });
     const { request, view } = await raised(h, { ...RAISE, secretHint: 'SUDO_ADMIN' });
 
     should(request.saved?.offers.map(offer => [offer.id, offer.primary === true, offer.why])).deepEqual([
@@ -635,10 +630,11 @@ describe('the next time: the card offers the saved login, and the owner taps Use
   it('should make the owner’s site default the primary, and say so (R1-5)', async () => {
     const h = harness({ choice: { of: async () => ({ defaults: { sites: { 'sudo@kirin-box': 'SUDO_ADMIN' } } }) } });
     await savedOnce(h);
-    await h.directory.put(
-      'SUDO_ADMIN',
-      PutLoginEntryRequestSchema.parse({ label: 'admin', match: ['sudo@kirin-box'], password: 'admin-UNIQUE-pw' }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_ADMIN', {
+      label: 'admin',
+      match: ['sudo@kirin-box'],
+      password: 'admin-UNIQUE-pw',
+    });
     const { request } = await raised(h);
 
     should(request.saved?.offers.map(offer => [offer.id, offer.primary === true, offer.why])).deepEqual([
@@ -665,10 +661,11 @@ describe('the next time: the card offers the saved login, and the owner taps Use
       },
     });
     await savedOnce(h);
-    await h.directory.put(
-      'SUDO_ADMIN',
-      PutLoginEntryRequestSchema.parse({ label: 'admin', match: ['sudo@kirin-box'], password: 'admin-UNIQUE-pw' }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_ADMIN', {
+      label: 'admin',
+      match: ['sudo@kirin-box'],
+      password: 'admin-UNIQUE-pw',
+    });
     const { request } = await raised(h);
 
     should(request.saved?.offers.find(offer => offer.primary === true)).containEql({
@@ -692,14 +689,16 @@ describe('the next time: the card offers the saved login, and the owner taps Use
       },
     });
     await savedOnce(h);
-    await h.directory.put(
-      'SUDO_ADMIN',
-      PutLoginEntryRequestSchema.parse({ label: 'admin', match: ['sudo@kirin-box'], password: 'admin-UNIQUE-pw' }),
-    );
-    await h.directory.put(
-      'ELSEWHERE',
-      PutLoginEntryRequestSchema.parse({ label: 'elsewhere', match: ['sudo@other-box'], password: 'else-UNIQUE-pw' }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_ADMIN', {
+      label: 'admin',
+      match: ['sudo@kirin-box'],
+      password: 'admin-UNIQUE-pw',
+    });
+    await putSavedLogin(h.directory, 'ELSEWHERE', {
+      label: 'elsewhere',
+      match: ['sudo@other-box'],
+      password: 'else-UNIQUE-pw',
+    });
     const { request } = await raised(h);
 
     should(request.saved?.offers.filter(offer => offer.primary === true || offer.why !== undefined)).deepEqual([]);
@@ -724,10 +723,11 @@ describe('the next time: the card offers the saved login, and the owner taps Use
   it('should offer no primary when two accounts sign in at this terminal and nothing chose one (invariant 11)', async () => {
     const h = harness();
     await savedOnce(h);
-    await h.directory.put(
-      'SUDO_ADMIN',
-      PutLoginEntryRequestSchema.parse({ label: 'admin', match: ['sudo@kirin-box'], password: 'admin-UNIQUE-pw' }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_ADMIN', {
+      label: 'admin',
+      match: ['sudo@kirin-box'],
+      password: 'admin-UNIQUE-pw',
+    });
     const { request } = await raised(h);
 
     should(request.saved?.offers.map(offer => [offer.id, offer.matched, offer.primary === true])).deepEqual([
@@ -739,7 +739,7 @@ describe('the next time: the card offers the saved login, and the owner taps Use
 
   it('should never offer a 2FA code by hand from an account that does not sign in here', async () => {
     const h = harness();
-    await h.directory.put('GITHUB', PutLoginEntryRequestSchema.parse({ label: 'GitHub' }));
+    await putSavedLogin(h.directory, 'GITHUB', { label: 'GitHub' });
     await plantSeed(h.directory.accounts, 'GITHUB', SEED);
     const { request } = await raised(h, { ...RAISE, sensitivity: 'private' });
     should(request.saved?.offers).deepEqual([]);
@@ -747,7 +747,7 @@ describe('the next time: the card offers the saved login, and the owner taps Use
 
   it('should type the username of a saved login into a plain prompt', async () => {
     const h = harness();
-    await h.directory.put('GITHUB', PutLoginEntryRequestSchema.parse({ label: 'GitHub', username: 'kirinnee' }));
+    await putSavedLogin(h.directory, 'GITHUB', { label: 'GitHub', username: 'kirinnee' });
     const { request } = await raised(h, { ...RAISE, sensitivity: 'plain' });
     should(request.saved?.offers.map(offer => offer.fills)).deepEqual(['username']);
     await h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'GITHUB'), HOST);
@@ -756,7 +756,7 @@ describe('the next time: the card offers the saved login, and the owner taps Use
 
   it('should make the 2FA code inside the daemon and type it, with the seed and the code in no other sink', async () => {
     const h = harness();
-    await h.directory.put('GITHUB', PutLoginEntryRequestSchema.parse({ label: 'GitHub', match: ['sudo@kirin-box'] }));
+    await putSavedLogin(h.directory, 'GITHUB', { label: 'GitHub', match: ['sudo@kirin-box'] });
     await plantSeed(h.directory.accounts, 'GITHUB', SEED);
     const { request } = await raised(h, { ...RAISE, sensitivity: 'private' });
     should(request.saved?.offers.map(offer => offer.fills)).deepEqual(['totp']);
@@ -772,7 +772,7 @@ describe('the next time: the card offers the saved login, and the owner taps Use
   it('should never RETURN a code it made for a `code` card: in no result, route or sink, and masked from text reads', async () => {
     // Arrange — the approved pick: a daemon-made TOTP code is typed only into the observed field, never returned.
     const h = harness({ facts: otpFacts() });
-    await h.directory.put('GITHUB', PutLoginEntryRequestSchema.parse({ label: 'GitHub', match: ['ssh@bastion'] }));
+    await putSavedLogin(h.directory, 'GITHUB', { label: 'GitHub', match: ['ssh@bastion'] });
     await plantSeed(h.directory.accounts, 'GITHUB', SEED);
     const { request, view } = await raised(h, { ...RAISE, prompt: 'GitHub wants the 2FA code', sensitivity: 'code' });
     should(request.saved?.offers.map(offer => offer.fills)).deepEqual(['totp']);
@@ -866,10 +866,7 @@ describe('the refusals around saved logins, each with nothing typed', () => {
         },
       }),
     });
-    await h.directory.put(
-      'ANY',
-      PutLoginEntryRequestSchema.parse({ label: 'any', match: ['sudo@kirin-box'], password: PASSWORD }),
-    );
+    await putSavedLogin(h.directory, 'ANY', { label: 'any', match: ['sudo@kirin-box'], password: PASSWORD });
     const { request } = await raised(h);
     const refused = await refusal(
       h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'ANY'), HOST),
@@ -885,10 +882,7 @@ describe('the refusals around saved logins, each with nothing typed', () => {
       [new LoginEntryError('no_such_field', 'ANY keeps no password'), 'bad_request'],
     ] as const) {
       const h = harness({ logins: port => ({ ...port, fill: async () => await Promise.reject(error) }) });
-      await h.directory.put(
-        'ANY',
-        PutLoginEntryRequestSchema.parse({ label: 'any', match: ['sudo@kirin-box'], password: PASSWORD }),
-      );
+      await putSavedLogin(h.directory, 'ANY', { label: 'any', match: ['sudo@kirin-box'], password: PASSWORD });
       const { request } = await raised(h);
       const refused = await refusal(
         h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'ANY'), HOST),
@@ -901,10 +895,7 @@ describe('the refusals around saved logins, each with nothing typed', () => {
 
   it('should refuse a saved value that would press keys, without saying what it was', async () => {
     const h = harness({ logins: port => ({ ...port, fill: async () => 'line-one\nline-two' }) });
-    await h.directory.put(
-      'ANY',
-      PutLoginEntryRequestSchema.parse({ label: 'any', match: ['sudo@kirin-box'], password: PASSWORD }),
-    );
+    await putSavedLogin(h.directory, 'ANY', { label: 'any', match: ['sudo@kirin-box'], password: PASSWORD });
     const { request } = await raised(h);
     const refused = await refusal(
       h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'ANY'), HOST),
@@ -921,10 +912,11 @@ describe('what the daemon saw is kept on the saved login', () => {
     const h = harness({
       observer: () => ({ delivered: async delivery => void told.push(delivery), tainted: () => false }),
     });
-    await h.directory.put(
-      'SUDO_KIRIN_BOX',
-      PutLoginEntryRequestSchema.parse({ label: 'sudo', match: ['sudo@kirin-box'], password: PASSWORD }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_KIRIN_BOX', {
+      label: 'sudo',
+      match: ['sudo@kirin-box'],
+      password: PASSWORD,
+    });
     const { request } = await raised(h);
     await h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'SUDO_KIRIN_BOX'), HOST);
     await Bun.sleep(0);
@@ -948,10 +940,11 @@ describe('what the daemon saw is kept on the saved login', () => {
     const h = harness({
       observer: () => ({ delivered: async delivery => void told.push(delivery), tainted: () => false }),
     });
-    await h.directory.put(
-      'SUDO_KIRIN_BOX',
-      PutLoginEntryRequestSchema.parse({ label: 'sudo', match: ['sudo@kirin-box'], password: PASSWORD }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_KIRIN_BOX', {
+      label: 'sudo',
+      match: ['sudo@kirin-box'],
+      password: PASSWORD,
+    });
     const device: InputCaller = {
       kind: 'owner',
       actor: { kind: 'device', deviceId: `fy_device_id_${'a'.repeat(22)}` },
@@ -1016,10 +1009,7 @@ describe('what the daemon saw is kept on the saved login', () => {
     const h = harness({
       observer: () => ({ delivered: async delivery => void told.push(delivery), tainted: () => false }),
     });
-    await h.directory.put(
-      'SUDO_LAPTOP',
-      PutLoginEntryRequestSchema.parse({ label: 'laptop', match: ['sudo@laptop'], password: PASSWORD }),
-    );
+    await putSavedLogin(h.directory, 'SUDO_LAPTOP', { label: 'laptop', match: ['sudo@laptop'], password: PASSWORD });
     const { request } = await raised(h);
     await h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'SUDO_LAPTOP'), HOST);
     await Bun.sleep(0);
@@ -1041,7 +1031,7 @@ describe('what the daemon saw is kept on the saved login', () => {
       ['SUDO_KIRIN_BOX', 'kirin', PASSWORD],
       ['SUDO_ADMIN', 'admin', 'admin-UNIQUE-pw'],
     ] as const)
-      await h.directory.put(id, PutLoginEntryRequestSchema.parse({ label, match: ['sudo@kirin-box'], password }));
+      await putSavedLogin(h.directory, id, { label, match: ['sudo@kirin-box'], password });
     const factsOf = async (account: string) =>
       (await h.directory.accounts.list()).signIns.find(signIn => signIn.account === account)?.observed;
     // The owner taps the account that sorts LAST ("kirin" after "admin"), naming its sign-in.
@@ -1113,15 +1103,12 @@ describe('a second person on one site', () => {
     const identities = new TypedIdentities(() => NOW);
     identities.typed(SESSION, 'page-gper2', 'accounts.google.com', username);
     const h = harness({ facts: page(), identities });
-    await h.directory.put(
-      'ACCOUNTS_GOOGLE_COM',
-      PutLoginEntryRequestSchema.parse({
-        label: 'accounts.google.com',
-        match: ['accounts.google.com'],
-        ...kept,
-        password: KIRIN_PASSWORD,
-      }),
-    );
+    await putSavedLogin(h.directory, 'ACCOUNTS_GOOGLE_COM', {
+      label: 'accounts.google.com',
+      match: ['accounts.google.com'],
+      ...kept,
+      password: KIRIN_PASSWORD,
+    });
     return h;
   };
   const KIRIN = { username: 'kirinnee97@gmail.com' } as const;
@@ -1202,7 +1189,7 @@ describe('a second person on one site', () => {
       ['ACCOUNTS_GOOGLE_COM', undefined],
       ['GOOGLE_ERNEST', 'ernest@atomi.tech'],
     ]);
-    should(await h.directory.list()).match([
+    should(await savedLogins(h.directory)).match([
       { id: 'ACCOUNTS_GOOGLE_COM', fields: { password: true } },
       { id: 'GOOGLE_ERNEST', match: ['accounts.google.com'], fields: { password: true } },
     ]);
@@ -1327,15 +1314,12 @@ describe('a second person on one site', () => {
 
   it('should refuse an update whose Username box names another person, even when the page said no one', async () => {
     const h = harness({ facts: page() });
-    await h.directory.put(
-      'ACCOUNTS_GOOGLE_COM',
-      PutLoginEntryRequestSchema.parse({
-        label: 'accounts.google.com',
-        match: ['accounts.google.com'],
-        ...KIRIN,
-        password: KIRIN_PASSWORD,
-      }),
-    );
+    await putSavedLogin(h.directory, 'ACCOUNTS_GOOGLE_COM', {
+      label: 'accounts.google.com',
+      match: ['accounts.google.com'],
+      ...KIRIN,
+      password: KIRIN_PASSWORD,
+    });
     const { request } = await raised(h, PAGE_RAISE);
     should(request.saved?.update).match({ id: 'ACCOUNTS_GOOGLE_COM' });
     const before = await shape(h);
@@ -1441,7 +1425,7 @@ describe('a second person on one site', () => {
     await should(
       h.directory.saveFields('GOOGLE_ERNEST', 'second', 'accounts.google.com', { password: ERNEST_PASSWORD }, 'new'),
     ).be.rejectedWith(LoginEntryError);
-    should((await h.directory.list()).find(each => each.id === 'GOOGLE_ERNEST')?.label).equal('first');
+    should((await savedLogins(h.directory)).find(each => each.id === 'GOOGLE_ERNEST')?.label).equal('first');
   });
 });
 
@@ -1503,7 +1487,7 @@ describe('Save as: the refusals and the races around new and update', () => {
     should(refused.code).equal('bad_request');
     should(refused.message).containEql('types the username itself');
     should(h.writes).deepEqual([]);
-    should(await h.directory.list()).deepEqual([]);
+    should(await savedLogins(h.directory)).deepEqual([]);
   });
 
   it('should type nothing when the accounts cannot be read to check a new or update choice', async () => {
@@ -1547,21 +1531,18 @@ describe('Save as: the refusals and the races around new and update', () => {
     should(result.saved?.problem).startWith('The value was typed, but not saved: GOOGLE_ERNEST is already');
     should(result.saved?.problem).containEql('Nothing saved was changed');
     should((result.saved?.problem ?? '').length).be.belowOrEqual(240);
-    should(await h.directory.list()).deepEqual([]);
+    should(await savedLogins(h.directory)).deepEqual([]);
   });
 
   it('should refuse, under the store lock, an update of an account that is not there or is another person, writing nothing', async () => {
     const h = harness();
-    await h.directory.put(
-      'KIRIN',
-      PutLoginEntryRequestSchema.parse({
-        label: 'google',
-        match: ['accounts.google.com'],
-        username: 'kirinnee97@gmail.com',
-        password: 'kirin-UNIQUE-pw-1',
-      }),
-    );
-    const before = JSON.stringify(await h.directory.list());
+    await putSavedLogin(h.directory, 'KIRIN', {
+      label: 'google',
+      match: ['accounts.google.com'],
+      username: 'kirinnee97@gmail.com',
+      password: 'kirin-UNIQUE-pw-1',
+    });
+    const before = JSON.stringify(await savedLogins(h.directory));
 
     const missing = await h.directory.saveFields('NOBODY', 'x', 'accounts.google.com', { password: PW }, 'update').then(
       () => undefined,
@@ -1576,7 +1557,7 @@ describe('Save as: the refusals and the races around new and update', () => {
 
     should(missing).be.instanceOf(LoginEntryError).and.match({ refusal: 'unknown_login' });
     should(other).be.instanceOf(LoginEntryError).and.match({ refusal: 'invalid_change' });
-    should(JSON.stringify(await h.directory.list())).equal(before);
+    should(JSON.stringify(await savedLogins(h.directory))).equal(before);
     // The same person, whatever the case of the name, is an update.
     await h.directory.saveFields(
       'KIRIN',
@@ -1585,7 +1566,7 @@ describe('Save as: the refusals and the races around new and update', () => {
       { username: 'KirinNee97@gmail.com', password: PW },
       'update',
     );
-    should((await h.directory.list()).map(each => each.id)).deepEqual(['KIRIN']);
+    should((await savedLogins(h.directory)).map(each => each.id)).deepEqual(['KIRIN']);
   });
 });
 

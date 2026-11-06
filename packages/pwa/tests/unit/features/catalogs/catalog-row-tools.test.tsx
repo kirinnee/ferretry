@@ -55,15 +55,13 @@ describe('useCatalogRows', () => {
     await view.unmount();
   });
 
-  it('offers no catalog features, and lists nothing, when no client can be made for the machine', async () => {
-    const seen: CatalogRowsRead[] = [];
+  it('lists nothing when no client can be made for the machine', async () => {
     const failing = async () => {
       throw new Error('no route to the machine');
     };
-    const view = await mount(<Probe host={{ connection, createClient: failing }} seen={seen} />);
+    const view = await mount(<Probe host={{ connection, createClient: failing }} seen={[]} />);
     await settle();
     expect(q('[data-reload]')?.textContent).toBe('0 installs, 0 catalogs');
-    expect(seen.at(-1)?.features).toEqual({ items: false, quickAdd: false, versions: false, versions2: false });
     await view.unmount();
   });
 

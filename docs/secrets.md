@@ -62,14 +62,14 @@ A getter added "just for testing" would delete the whole property.
 
 [Accounts](#accounts-and-sign-ins-the-store) (the former saved logins) — the input bridge's password manager — follow the
 same rule over a **separate** sealed document (`login-secrets.json`, under the same key). The route table is
-handed an `AccountDirectory` (and the saved-login `LoginDirectory` built over it), which seals and never opens;
+handed an `AccountDirectory` (and the input bridge's `LoginDirectory` built over it), which seals and never opens;
 only two things hold the `AccountVault` that opens it: the redactor (saved values are masked as
 `[redacted:login:<ID>:password]`) and the input-request service, which types one into the target the owner tapped
 "Use" for and answers only what happened. Two narrow parts of it are handed out, and neither answers a value: the
 directory holds its **seal port** (a merge moves a sealed value to the kept account inside the vault, and asks
 whether two values are the same), and the look-alike route holds its **look-alike answer** (handles only). Both are fresh closures (`narrowAccountVault`), never the vault itself, so nothing that holds one can reach a value. `use`
-cannot spend an account and `${secret:…}` cannot name one. The agent tool `account_hint` (`login_hint` still works) is
-handed the account directory (and `GET /v1/accounts/hint` and `GET /v1/secrets/logins/hint` the same store): it
+cannot spend an account and `${secret:…}` cannot name one. The agent tool `account_hint` is
+handed the account directory (and `GET /v1/accounts/hint` the same store): it
 answers sign-in ids, labels, methods, places and usernames, never a value nor which fields exist.
 
 ## Redaction
@@ -135,8 +135,7 @@ token, by the rule above. Shape is a floor, not a guarantee: the store is the on
 - **An agent writing the store.** Every ferret can reach the host admin token, but the daemon tells a ferret
   (`peer:`, a warden) from the owner's own `fy` and from a paired device, and **refuses a ferret the
   routes that change the store**, before it reads a body: `POST /v1/secrets` (set or replace),
-  `DELETE /v1/secrets/:name`, the saved-login writes (`PUT`, rename, `DELETE` under
-  `/v1/secrets/logins`), opening or filing a copy-in (`POST /v1/secrets/imports[/:importId]`) and
+  `DELETE /v1/secrets/:name`, the account writes (`/v1/accounts*`), opening or filing a copy-in (`POST /v1/secrets/imports[/:importId]`) and
   sealing values out (`POST /v1/secrets/exports/:importId`). So a confused or prompt-injected agent cannot
   swap `GITHUB_TOKEN` for a value it controls, or delete it. It can still list names and **use** a secret
   by name. A ferret gets a value into the store the way it gets any secret from the owner: an input
@@ -425,21 +424,13 @@ takes its password and seeds only when the kept one has none (resealed under the
 vault), and is refused, with nothing changed, when both keep a different password or a different seed (the one not kept would be swept and lost), when both sign in at one place, or
 when a via link would point an account at itself; via links and `[[FROM]]` in recipes follow to the kept account.
 
-**The saved-login routes keep working for one release, as a projection.** `GET /v1/secrets/logins` (and its hint)
-answer one saved login per account: `match` is every place it signs in, `domains` its websites' login domains,
-and method, recipe and auto-apply its primary sign-in's (its website, else its first terminal). A change to the
-account (label, username, password, removing its seed, rename, delete) always works; a seed is saved only with a
-passkey ([2FA keys](#2fa-keys)), so a `totp` seed sent there is `403 add_2fa_key_needs_passkey`. A change to **where or how** it
-signs in (`match`, `domains`, `method`, `recipe`, `autoApplyRecipe`) maps 1:1 onto the account's one sign-in,
-and for an account that signs in at several places it is `409 account_has_sign_ins`: an older app's or CLI's body
-cannot say which sign-in it means, and guessing would be a lossy write. A fact the daemon sees is filed on the
+A fact the daemon sees is filed on the
 sign-in it was typed at (`AccountDirectory.observeSignIn`, the input service's only writer), and only at one of
 that sign-in's own places; anything else is not kept.
 
 **Advertised.** The card is sign-in aware on the daemon's side ([one tap](input-requests.md#the-next-time-one-tap)):
 its offers name the sign-in, and a deliver's `signIn` must be one of the account's. The daemon reports
-`accounts.signins.1` and `accounts.2fa-keys.1` now that the app draws the [Accounts screen](#the-accounts-screen); an
-older daemon, which reports neither, keeps today's saved-logins surface.
+`accounts.signins.1` and `accounts.2fa-keys.1` now that the app draws the [Accounts screen](#the-accounts-screen).
 
 ### 2FA keys
 
@@ -485,8 +476,7 @@ pairing code, widening a device or any other act takes. Both directions are test
   **What is still honest-client:** a ferret that reads the admin token and sends no session at all counts as the
   SAME caller as your own shell's `fy` (`admin-cli`), so it can use up or drop the stages `fy` made — never save a
   seed (that still takes your passkey). A paired device always keeps its own slot, so the app can always stage.
-- **The old seed path is refused in the store itself** (`applySeed`), not only at its route: no caller, now or later,
-  writes a seed except through the passkey-bound save.
+- **Only the passkey-bound save writes a seed**: no route, and no store method but `addSeed`, takes one.
 - **Write-only.** No route, command, log, agenda item or push answers a seed or a code made from it. After the save
   the owner sees "Automatic codes: on".
 - **Removing a key never asks for a passkey**: it only narrows what this machine can do. Its seed is swept with it.
@@ -508,9 +498,7 @@ the app's address is known (`FY_APP_URL`, or the hosted default) it prints the c
 
 The rest of `fy account` is in [input requests](input-requests.md#managing-them): accounts, sign-ins (`site`), recipes,
 defaults, and 2FA keys that hold no value (`factor add --authenticator|--sms|--email|--push|--security-key`). Each write
-is a person route; a ferret's call is refused by the daemon and `fy` reports that rather than retrying. **The old path is closed:**
-`PUT /v1/secrets/logins/:id` with a `totp` seed — today's app form and `fy account edit --totp` — answers
-`403 add_2fa_key_needs_passkey` with where to go instead; `totp: null` (remove the seed) still works there.
+is a person route; a ferret's call is refused by the daemon and `fy` reports that rather than retrying. A seed is saved only through the passkey-bound commit above; no other route takes one.
 
 The card is answered by its Allow (the passkey ceremony, then the commit) or Deny (drop the stage). An agenda answer
 saves nothing, so an app from before these cards shows the daemon's words and cannot save.
@@ -840,9 +828,7 @@ reports `sign-in-rules-terminal.1`. `narrow` and `rm` need no passkey. A paste r
 
 ## The Accounts screen
 
-Settings › Accounts is gated on the daemon's health: a machine that reports `accounts.signins.1` gets the screen below,
-any other (older, silent, or one whose health read failed) keeps the saved-logins surface above, unchanged. It reports
-`accounts.2fa-keys.1` separately: without it the 2FA keys tab is not offered and no seed can be saved from here.
+Settings › Accounts shows the screen below.
 
 - **List** — accounts grouped by the site they sign in at (the first host a place names; `ssh@host` for a terminal),
   each row naming the account, which fields EXIST ("password ✓", never a value) and its 2FA keys. Accounts with no

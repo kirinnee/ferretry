@@ -16,9 +16,6 @@ import {
   type CatalogChanges,
   CatalogChangesSchema,
   CATALOG_ITEMS_PATH,
-  DAEMON_FEATURES,
-  hasFeature,
-  HealthViewSchema,
   CatalogItemPreviewSchema,
   CreateCatalogRequestSchema,
   DeletedCatalogSchema,
@@ -101,56 +98,19 @@ export async function updateCatalog(
   });
 }
 
-/** What this machine says it can do with catalogs. */
-export interface CatalogFeatures {
-  /** The item table, the default catalog and add-existing (`catalogs.items.1`). */
-  readonly items: boolean;
-  /** One-tap Add and its Undo (`catalogs.quick-add.1`). */
-  readonly quickAdd: boolean;
-  /** Versions you can read and compare (`catalogs.versions.1`). */
-  readonly versions: boolean;
-  /** Make a version current, retire and unretire (`catalogs.versions.2`). */
-  readonly versions2: boolean;
-}
-
-export const NO_CATALOG_FEATURES: CatalogFeatures = {
-  items: false,
-  quickAdd: false,
-  versions: false,
-  versions2: false,
-};
-
-/**
- * Reads the machine's advertised features. A machine that cannot be asked offers nothing, so an app that
- * ships before its daemon keeps today's behaviour.
- */
-export async function readCatalogFeatures(client: CatalogClient): Promise<CatalogFeatures> {
-  try {
-    const health = await client.request('/v1/health', HealthViewSchema);
-    return {
-      items: hasFeature(health, DAEMON_FEATURES.catalogItems),
-      quickAdd: hasFeature(health, DAEMON_FEATURES.catalogQuickAdd),
-      versions: hasFeature(health, DAEMON_FEATURES.catalogVersions),
-      versions2: hasFeature(health, DAEMON_FEATURES.catalogVersions2),
-    };
-  } catch {
-    return NO_CATALOG_FEATURES;
-  }
-}
-
-/** Every skill and MCP server this machine shares, once, with the catalogs that list it. Needs `catalogs.items.1`. */
+/** Every skill and MCP server this machine shares, once, with the catalogs that list it. */
 export async function listSharedItems(client: CatalogClient): Promise<OwnedSharedItemList> {
   return await client.request(CATALOG_ITEMS_PATH, OwnedSharedItemListSchema);
 }
 
 const itemPath = (itemId: string): string => `${CATALOG_ITEMS_PATH}/${encodeURIComponent(itemId)}`;
 
-/** One shared item with every version it keeps and the catalogs that list it. Needs `catalogs.items.1`. */
+/** One shared item with every version it keeps and the catalogs that list it. */
 export async function getSharedItem(client: CatalogClient, itemId: string): Promise<OwnedSharedItem> {
   return await client.request(itemPath(itemId), OwnedSharedItemSchema);
 }
 
-/** What a person would read differently in version `to` than in `from`. Needs `catalogs.versions.1`. */
+/** What a person would read differently in version `to` than in `from`. */
 export async function readItemChanges(
   client: CatalogClient,
   itemId: string,
@@ -163,7 +123,7 @@ export async function readItemChanges(
   );
 }
 
-/** Makes a kept version the one every live catalog serves, only if `from` is still current. Needs `catalogs.versions.2`. */
+/** Makes a kept version the one every live catalog serves, only if `from` is still current. */
 export async function makeVersionCurrent(
   client: CatalogClient,
   itemId: string,
@@ -176,7 +136,7 @@ export async function makeVersionCurrent(
   });
 }
 
-/** Retires a version (it stops being offered) or brings it back. Needs `catalogs.versions.2`. */
+/** Retires a version (it stops being offered) or brings it back. */
 export async function setVersionRetired(
   client: CatalogClient,
   itemId: string,
@@ -189,7 +149,7 @@ export async function setVersionRetired(
   });
 }
 
-/** Makes this catalog the default, where one tap adds. Changes no manifest. Needs `catalogs.items.1`. */
+/** Makes this catalog the default, where one tap adds. Changes no manifest. */
 export async function makeDefault(client: CatalogClient, catalogId: string): Promise<OwnedCatalog> {
   return await updateCatalog(client, catalogId, { role: 'default' });
 }
@@ -197,7 +157,6 @@ export async function makeDefault(client: CatalogClient, catalogId: string): Pro
 /**
  * One tap: the daemon reads the source once and either lists it in the default catalog (`added`, with an Undo),
  * finds it there (`already`), or writes nothing and hands back what a person must read (`review`).
- * Needs `catalogs.quick-add.1`.
  */
 export async function quickAdd(client: CatalogClient, request: QuickAddRequest): Promise<QuickAddAnswer> {
   return await client.request(QUICK_ADD_PATH, QuickAddAnswerSchema, {
@@ -230,7 +189,7 @@ export async function previewCatalogItem(
   });
 }
 
-/** An item this machine already shares, put in another catalog at the version that was reviewed. Needs `catalogs.items.1`. */
+/** An item this machine already shares, put in another catalog at the version that was reviewed. */
 export async function addExistingItem(
   client: CatalogClient,
   catalogId: string,

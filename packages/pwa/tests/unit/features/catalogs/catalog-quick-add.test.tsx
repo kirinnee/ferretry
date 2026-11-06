@@ -15,7 +15,6 @@ import {
   TOKEN,
 } from '../../../support/catalog-views.ts';
 import { byText, click, settle } from '../../../support/dom-form.ts';
-import { healthOf } from '../../../support/health.ts';
 import { interact, mount } from '../../../support/dom.ts';
 import { installManualClock, type ManualClock } from '../../../support/manual-clock.ts';
 
@@ -43,7 +42,6 @@ const UNNAMED = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.ex
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
 const QUICK = '/v1/catalog-items/quick-add';
 const UNDO = '/v1/catalog-items/quick-add/undo';
-const BOTH = ['catalogs.items.1', 'catalogs.quick-add.1'];
 
 function Row({
   host,
@@ -70,7 +68,6 @@ function Row({
 interface Setup {
   readonly catalogs?: ReturnType<typeof ownedCatalog>[];
   readonly defaultCatalogId?: string;
-  readonly features?: string[] | null;
   readonly connection?: typeof NAMED;
   readonly more?: Parameters<typeof fakeClient>[0];
 }
@@ -84,10 +81,6 @@ async function show(setup: Setup = {}) {
       ...(setup.defaultCatalogId === undefined ? {} : { defaultCatalogId: setup.defaultCatalogId }),
     }),
     'GET /v1/catalog-members': () => ({ members: [memberView()] }),
-    'GET /v1/health': () => {
-      if (setup.features === null) throw new Error('offline');
-      return healthOf('1.0.0', setup.features ?? BOTH);
-    },
     ...setup.more,
   });
   const host = { connection: setup.connection ?? NAMED, createClient: fake.factory };
@@ -156,17 +149,6 @@ describe('the Publish item says where it goes', () => {
     const { view } = await show({ catalogs: [ownedCatalog()], defaultCatalogId: CATALOG });
     expect(await publishLabel()).toBe('Publish in Team skills');
     await view.unmount();
-  });
-
-  it('opens today’s sheet when the machine has no one-tap Publish, or cannot be asked', async () => {
-    for (const features of [['catalogs.items.1'], [], null]) {
-      const { view } = await show({ features, catalogs: [] });
-      await pickMenu('Publish in a catalog…');
-      expect(q('[data-catalog-sheet="add"]')).not.toBeNull();
-      expect(q('[data-catalog-notice]')).toBeNull();
-      await view.unmount();
-      document.body.replaceChildren();
-    }
   });
 });
 
@@ -543,12 +525,7 @@ describe('Publish in another catalog…', () => {
     await view.unmount();
   });
 
-  it('opens the plain sheet when the machine has no item table, or does not know the item', async () => {
-    const noTable = await show({ features: [] });
-    await pickMenu('Publish in another catalog…');
-    expect(q('[data-catalog-sheet="add"]')?.textContent).toContain('Add to catalog');
-    await noTable.view.unmount();
-    document.body.replaceChildren();
+  it('opens the plain sheet when the machine does not know the item', async () => {
     const unknown = await show({
       more: existingHandlers(sharedItem({ source: { kind: 'skill', path: '/elsewhere/SKILL.md' }, name: 'other' })),
     });

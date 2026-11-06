@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  ADD_TWO_FACTOR_KEY_WHERE,
   AddTwoFactorKeyRequestSchema,
   AgendaItemSchema,
   PASSKEY_CHALLENGE_TTL_SECONDS,
@@ -44,11 +43,6 @@ describe('the 2FA key route shapes', () => {
 
   it('should let a staged seed wait exactly one passkey challenge', () => {
     should(TWO_FACTOR_STAGE_TTL_SECONDS).equal(PASSKEY_CHALLENGE_TTL_SECONDS);
-  });
-
-  it('should say where a seed is saved now', () => {
-    should(ADD_TWO_FACTOR_KEY_WHERE).containEql('fy account factor add');
-    should(ADD_TWO_FACTOR_KEY_WHERE).containEql('Settings › Accounts');
   });
 
   it('should keep a staged seed card on an agenda item, and an older app drop it as a plain card', () => {

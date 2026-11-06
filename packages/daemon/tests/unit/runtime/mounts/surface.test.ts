@@ -108,7 +108,6 @@ describe('the mounted daemon surface', () => {
       3 + // a ferret's processes: the list, one process's output, and Stop
       5 + // the board's projects: the list, one project's lanes, a propose, edit or confirm of them, and its switch read and set
       7 + // the owner's input requests: the two lists, a page request's picture, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
-      6 + // saved logins: the list, the ferret’s hint, put, rename, delete and the owner’s answer to a recipe proposal (docs/input-requests.md#saved-logins)
       13 + // accounts and sign-ins: the list, the hint, look-alike, an account’s put, rename, delete, merge and apart, a sign-in’s add, put, delete and recipe answer, and the owner’s default account for a place (docs/secrets.md)
       9 + // 2FA keys: add, relabel and remove one, and a seed’s stage, read (by account, or by the stage alone), passkey-bound commit, confirm-in-app and drop (docs/secrets.md)
       3 + // approving a sign-in on the phone: the list, one approval, and "Not me" (docs/input-requests.md)
@@ -293,13 +292,7 @@ describe('the mounted daemon surface', () => {
         'POST /v1/secrets/imports',
         'POST /v1/secrets/imports/:importId',
         'POST /v1/secrets/exports/:importId',
-        // Saved logins: names, labels and flags out; values only ever in.
-        'GET /v1/secrets/logins',
-        'GET /v1/secrets/logins/hint',
-        'PUT /v1/secrets/logins/:id',
-        'POST /v1/secrets/logins/:id/recipe/proposals/:proposalId',
-        'POST /v1/secrets/logins/:id/rename',
-        'DELETE /v1/secrets/logins/:id',
+        // Accounts: names, labels and flags out; values only ever in.
         'GET /v1/accounts',
         'GET /v1/accounts/hint',
         'GET /v1/accounts/look-alike',

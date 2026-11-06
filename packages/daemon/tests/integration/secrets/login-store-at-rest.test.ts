@@ -1,7 +1,7 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, describe, it } from 'bun:test';
-import { PutLoginEntryRequestSchema, TotpParametersSchema } from '@ferretry/protocol';
+import { TotpParametersSchema } from '@ferretry/protocol';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import {
@@ -22,6 +22,7 @@ import {
   SecretStoreError,
 } from '../../../src/lib/index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { putSavedLogin } from '../../unit/secrets/saved-login-fixture.ts';
 
 /**
  * Saved logins against a REAL filesystem and REAL WebCrypto: the index holds no value, the sealed document
@@ -63,15 +64,12 @@ afterAll(async () => {
 describe('saved logins at rest', () => {
   it('should keep no value in either file, keep both 0600, and still type the value back', async () => {
     const { paths, directory, vault } = await store('login-at-rest');
-    await directory.put(
-      'GITHUB_KIRINNEE',
-      PutLoginEntryRequestSchema.parse({
-        label: 'GitHub (kirinnee)',
-        match: ['github.com'],
-        username: 'kirinnee',
-        password: PASSWORD,
-      }),
-    );
+    await putSavedLogin(directory, 'GITHUB_KIRINNEE', {
+      label: 'GitHub (kirinnee)',
+      match: ['github.com'],
+      username: 'kirinnee',
+      password: PASSWORD,
+    });
     // A seed is saved only by the passkey-bound commit, which ends in `addSeed`.
     await directory.accounts.addSeed((await directory.accounts.seedTarget('GITHUB_KIRINNEE')).key, SEED, {
       params: TotpParametersSchema.parse({}),

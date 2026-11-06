@@ -192,11 +192,10 @@ import { useToTestCards } from './hooks/use-to-test-cards.ts';
 import { useWardenDaemonScope } from './hooks/use-warden-daemon-scope.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
 import { useWorkProjectNames } from './hooks/use-work-project-names.ts';
-import { agendaClearPort } from './lib/agenda-clear-agents.ts';
 import { captureAgendaDeepLink } from './lib/agenda-deep-link.ts';
 import { agendaConversationPath, agendaTargetFromSearch, inboxTargetFromSearch } from './lib/agenda-inbox.ts';
 import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
-import { AgendaWireProbes, useWorkSearchOffered } from './lib/agenda-wire-react.tsx';
+import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import { transcriptIsCurrent } from './lib/background-fresh.ts';
 import { NO_BOARD_FILTERS } from './lib/board-model.ts';
@@ -290,7 +289,7 @@ import type { SpeechAssets } from './lib/stt/on-device-voices.ts';
 import { createSurfaceEventHub } from './lib/surface-control.ts';
 import type { TranscriptHistoryStatus } from './lib/transcript-history.ts';
 import { tunnelNote } from './lib/tunnel-service.ts';
-import { workSearchPortFor } from './lib/work-search.ts';
+import { createWorkSearchPort } from './lib/work-search.ts';
 import {
   AppBar,
   AppTabBar,
@@ -1214,16 +1213,14 @@ const browserEventStreamEnvironment: SessionEventStreamEnvironment = {
  * through the machine (docs/notifications.md § When an alert is cleared).
  */
 function useAgendaItemOpened() {
-  const store = useAppStore();
   const daemonFetch = useDaemonFetch();
   return useMemo(
     () =>
       agendaItemOpenedHandler({
         registration: machinePushRegistration(navigator as unknown as PushNavigator, window.location.origin),
-        health: async daemon => await (await store.clients.client(daemon)).health(),
         seen: async (daemon, sessionId, agendaId) => await postAgendaItemSeen(daemon, sessionId, agendaId, daemonFetch),
       }),
-    [store.clients, daemonFetch],
+    [daemonFetch],
   );
 }
 
@@ -2281,7 +2278,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   const machineNotifications = usePairedMachineNotifications();
   const daemonFetch = useDaemonFetch();
   const clientFor = useCallback((target: DaemonConnection) => store.clients.client(target), [store.clients]);
-  const clearPort = useMemo(() => agendaClearPort(store.clients, daemonFetch), [store, daemonFetch]);
+  const clearPort = useMemo(() => ({ fetcher: daemonFetch }), [daemonFetch]);
   const itemOpened = useAgendaItemOpened();
   const pairings = useBoardMachines();
   const boardActions = useBoardActions(
@@ -2292,10 +2289,10 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   const toTestHost = useMemo<ToTestHost>(
     () => ({
       actions: boardActions,
-      ports: boardPorts(daemon => store.clients.client(daemon), daemonFetch),
+      ports: boardPorts(daemonFetch),
       connectionOf: id => pairings.find(machine => machine.connection.daemonId === id)?.connection,
     }),
-    [boardActions, store.clients, daemonFetch, pairings],
+    [boardActions, daemonFetch, pairings],
   );
   const fleet = useSyncExternalStore(
     listener => store.fleet.subscribe(listener),
@@ -2863,12 +2860,11 @@ export function AppShell() {
   const fleetSnapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
   const fleet = useSyncExternalStore(subscribeFleet, fleetSnapshot);
   const [palette, setPalette] = useState({ open: false, focusSignal: 0 });
-  // The finder searches card and agenda words only on a machine whose health (already read for the app) says it can.
+  // The finder searches card and agenda words on the connected machine; with no connection it has no search.
   const finderFetch = useDaemonFetch();
-  const finderOffered = useWorkSearchOffered(connection?.daemonId);
   const finderWorkSearch = useMemo(
-    () => (connection === undefined ? undefined : workSearchPortFor(finderOffered, connection, finderFetch)),
-    [finderOffered, connection, finderFetch],
+    () => (connection === undefined ? undefined : createWorkSearchPort(connection, finderFetch)),
+    [connection, finderFetch],
   );
   const finderProjectNames = useWorkProjectNames(connection, palette.open && finderWorkSearch !== undefined);
   const openPalette = useCallback(
@@ -3165,9 +3161,8 @@ export function AppShell() {
                     focusSignal={palette.focusSignal}
                     onClose={closePalette}
                     daemon={connection.daemonId}
-                    {...(finderWorkSearch === undefined
-                      ? {}
-                      : { workSearch: finderWorkSearch, workProjectNames: finderProjectNames })}
+                    workSearch={finderWorkSearch}
+                    workProjectNames={finderProjectNames}
                     sessions={paletteSearch.sessions}
                     sessionsNote={paletteSearch.note}
                     onNavigate={navigate}

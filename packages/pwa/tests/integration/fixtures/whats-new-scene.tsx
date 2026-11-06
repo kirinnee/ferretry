@@ -103,7 +103,13 @@ const MACHINE_VIEW = {
 /** `?about=failed`: the machine's update read errors, so Settings › About draws its failure card. */
 const aboutFails = new URLSearchParams(location.search).get('about') === 'failed';
 
-const daemonFetch = async (): Promise<Response> => Response.json({});
+/** What `GET /v1/search` answers: a well-formed search over an empty index, so the finder settles on nothing found. */
+const EMPTY_SEARCH = { hits: [], total: 0, indexed: { tasks: 0, agenda: 0 } };
+
+const daemonFetch = async (input: string | URL | Request): Promise<Response> => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  return Response.json(new URL(url).pathname === '/v1/search' ? EMPTY_SEARCH : {});
+};
 const network = fetcherDaemons([{ host, identity }], daemonFetch);
 const deviceKeys = new MemoryDeviceKeyStore();
 await deviceKeys.save(identity.daemonId, (await testDevice()).privateKey);

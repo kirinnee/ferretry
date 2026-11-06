@@ -10,7 +10,7 @@
  * so there is no Share and no Add beside the name. The one control is **⋯**, which holds, in order:
  * - **Open** the item's file or detail;
  * - **Publish in ‹default catalog›** (one tap, with Undo) and **Publish in another catalog…**, or
- *   **Publish in a catalog…** when one tap is not offered — only for what this machine could share, never for
+ *   **Publish in a catalog…** while the catalog lists have not answered — only for what this machine could share, never for
  *   what someone else's catalog wrote here;
  * - **Uninstall**, only for what a catalog install wrote. The daemon removes exactly the files that install
  *   recorded and refuses one changed since, so a skill somebody wrote by hand never gets the item at all.
@@ -121,7 +121,7 @@ export function CatalogItemRow({
   const matches = read === undefined ? [] : ownedMatches(read.catalogs, source);
   const chips = rowChips(installs, matches);
   const addable = host !== undefined && canAdd(installs);
-  const oneTap = addable && read?.features.quickAdd === true;
+  const oneTap = addable && read !== undefined;
   const defaultCatalog = read === undefined ? undefined : defaultCatalogOf(read.catalogs, read.defaultCatalogId);
 
   const showToast = useCallback((next: CatalogToast): void => {
@@ -180,7 +180,7 @@ export function CatalogItemRow({
   const addAnother = async (): Promise<void> => {
     if (host === undefined) return;
     setFailure(null);
-    if (read?.features.items !== true) return openSheet({});
+    if (read === undefined) return openSheet({});
     try {
       const list = await listSharedItems(await createClient(host.connection));
       const item = sharedItemFor(list.items, source);

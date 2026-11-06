@@ -5,7 +5,6 @@ import {
   daemonFeatureList,
   type InputRaise,
   type InputTargetFacts,
-  PutLoginEntryRequestSchema,
   type SignInId,
   type SignInRuleDraft,
   type SignInRuleId,
@@ -29,6 +28,7 @@ import { type RuleListing, SignInRuleService } from '../../../src/lib/sign-in-ru
 import type { ApprovedSignInLine } from '../../../src/lib/task-plans/service.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments, plantSeed } from '../runtime/mounts/support.ts';
 import { approved, DEVICE, FakeProofs, MemoryRuleStore, tappedFact, type World } from '../sign-in-rules/support.ts';
+import { putSavedLogin } from '../secrets/saved-login-fixture.ts';
 
 /**
  * R3c-4, STANDING RULE FILLS through the REAL input service, the REAL account store and the REAL rule service (fake
@@ -338,15 +338,12 @@ type Harness = Awaited<ReturnType<typeof harness>>;
 
 /** GitHub · kirinnee, a password sign-in at github.com, with a saved password. */
 async function github(h: Harness, domains: readonly string[] = ['github.com']): Promise<SignInId> {
-  await h.directory.put(
-    'GITHUB',
-    PutLoginEntryRequestSchema.parse({
-      label: 'GitHub',
-      username: USERNAME,
-      password: PASSWORD,
-      match: [...domains],
-    }),
-  );
+  await putSavedLogin(h.directory, 'GITHUB', {
+    label: 'GitHub',
+    username: USERNAME,
+    password: PASSWORD,
+    match: [...domains],
+  });
   const signIn = (await h.directory.accounts.list()).signIns.find(each => each.account === 'GITHUB');
   if (signIn === undefined) throw new Error('no sign-in');
   return signIn.id;
@@ -1005,10 +1002,7 @@ describe('a refusal the ferret can cause shows it nothing a card with no rule wo
 describe('a terminal rule types the password into a proved setuid sudo, and nowhere else (invariant 24)', () => {
   /** Kirin's sudo password on this machine, as a sign-in at `sudo@kirin-box`. */
   async function sudoSignIn(h: Harness): Promise<SignInId> {
-    await h.directory.put(
-      'KIRIN',
-      PutLoginEntryRequestSchema.parse({ label: 'Kirin', password: PASSWORD, match: ['sudo@kirin-box'] }),
-    );
+    await putSavedLogin(h.directory, 'KIRIN', { label: 'Kirin', password: PASSWORD, match: ['sudo@kirin-box'] });
     const signIn = (await h.directory.accounts.list()).signIns.find(each => each.account === 'KIRIN');
     if (signIn === undefined) throw new Error('no sign-in');
     return signIn.id;

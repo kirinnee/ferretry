@@ -203,8 +203,8 @@ profile on`) is listed for every paired device under Settings â€º Secure copy â€
   a device took included, is never dropped to make room. "The machine" is one stager, shared with anything that holds
   its token. A dismissed prompt drops a stage this device made, and leaves a machine's stage waiting (Deny
   drops it). `fy copy rules add` stages at the machine, prints the rows, and waits while you approve it there. The old
-  one-step `POST /v1/copy-rules` makes nothing and answers `409 paste_rule_passkey_needed`; an app or `fy` on a
-  daemon that does not report `copy-rules.passkey.1` keeps the one-step add.
+  one-step `POST /v1/copy-rules` makes nothing and answers `409 paste_rule_passkey_needed`; `fy` still makes the rule in one step on a
+  daemon that does not report `copy-rules.passkey.1`.
 - **Narrowing and removing stay tap-free.** Removing a rule (`DELETE /v1/copy-rules/:ruleId`) and dropping a staged
   one (`DELETE /v1/copy-rules/stages/:stage`) are narrowing routes: they ask the grant and a proven device, never a
   passkey, whatever "ask again for each act" says.
@@ -247,7 +247,7 @@ profile on`) is listed for every paired device under Settings â€º Secure copy â€
   anything, and a rule for one matches whatever arguments the ferret gives it.
 - **The secret store is never written by a rule** unless that rule names the exact secret NAME: `secret:<NAME>`
   has no pattern and no wildcard, so a rule for `VERCEL_TOKEN` never writes `VERCEL_TOKEN_2`.
-- **A plan**: `secure.preapprove` raises ONE card listing the pastes the agent plans, each with its route and
+- **A plan**: `task_plan` raises ONE card listing the pastes the agent plans, each with its route and
   the agent's reason (shown as its words). The owner allows some or all with `fy plan approve <id> 1 3`
   (`fy copy plan approve` is the same command; none declines; it stages and waits for the passkey in the app like any
   plan), or ticks them on the card, a permission card whose own Allow and Decline answer it (the
@@ -267,14 +267,14 @@ profile on`) is listed for every paired device under Settings â€º Secure copy â€
 
 ### Task plans
 
-> **The app draws the plan card, and the daemon reports `task-plan.1`.** The daemon raises, resolves, stages,
+> **The app draws the plan card.** The daemon raises, resolves, stages,
 > approves and revokes plans (`packages/daemon/src/lib/task-plans/`); the app shows the card
 > (`packages/pwa/src/features/secure-copy/task-plan-card.tsx`) and the shared matcher fills under an approved line
 > ([input requests â€º Task plan fills](input-requests.md#task-plan-fills-a-sign-in-the-owner-approved-in-advance)).
 > The agent tool `task_plan` is listed in MCP and the owner answers with `fy plan` (R3a-3) or on the card.
-> `secure.preapprove` still raises paste-only task plans. An app that doesn't know `task-plan.1` draws a plan with
-> paste lines as the old copy-plan card; on a daemon of this build its Allow is refused (`409 needs_passkey`), and its
-> Decline still works.
+> A device refused the plan route (it lacks `secrets.use`) cannot read the plan, so `TaskPlanHost` says so and draws
+> only the paste-plan card for the item's `copyPlan` (`CopyPlanHost`), or nothing when the item has none. That card's
+> Allow is refused (`409 needs_passkey`); its Decline still works.
 
 A task plan widens the paste plan. One card holds up to 10 lines, each with 1â€“5 uses (1 by default), for 2 hours
 by default (5 minutes to 1 day). A line is one of three kinds:
@@ -308,12 +308,11 @@ The rules the contract fixes:
   picked account's name and uses left. It has no `can`, `history`, flags, reasons or code tick. When a plan doesn't
   fill a card, the ferret gets one sentence for every reason. The owner's card gets the reason as a fixed sentence
   (`grantMissLine`).
-- **The old tool keeps working.** `secure.preapprove { items }` reads as a task plan of one-use paste lines
-  (`taskPlanCallOf`). Its answer is projected back to the old plan shape (`copyPlanOf`). An old item number is
-  never a line number: `taskPlanLineOfCopyItem` maps it back, so "approve item 0" can't land on a sign-in line.
-- **The app ships first.** An input card a plan fills carries a `plan` actor and a `preapproval` note, and an
-  older app's strict parse refuses them. So the daemon reports `task-plan.1` only because the app draws the plan
-  card; a machine whose daemon doesn't report it gets today's copy-plan card and no fills.
+- **The paste-plan routes still answer.** A task plan is projected to the paste-plan shape (`copyPlanOf`). A paste-plan
+  item number is never a line number: `taskPlanLineOfCopyItem` maps it back, so "approve item 0" can't land on a sign-in line.
+- **The app draws the card before the daemon fills one.** An input card a plan fills carries a `plan` actor and a
+  `preapproval` note, which the app's strict parse accepts. A device that cannot read the plan route (no
+  `secrets.use`) is shown the paste-plan card instead (see the note above), and no fills come from it.
 
 #### The plan card in the app
 

@@ -844,7 +844,7 @@ describe('TaskPlanService: the paste-plan routes, kept', () => {
     should(w.service.approvedSignIns(SESSION)).eql([]);
   });
 
-  it('should answer secure.preapprove through the same propose, in the old shape', async () => {
+  it('should answer a paste plan through the same propose, in the paste-plan shape', async () => {
     const w = world();
     await w.rules.load();
 

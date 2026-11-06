@@ -662,13 +662,10 @@ export function AddDeviceSurface({
   connection,
   createClient: injectedClient,
   now = Date.now,
-  rulesOffered = false,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: PairingClientFactory;
   readonly now?: PairingClock;
-  /** The machine offers standing sign-in rules, so a device's revoke says how many its passkey approved. */
-  readonly rulesOffered?: boolean;
 }) {
   // The carrier-routed client unless a test or the harness hands one in: a plain-network client
   // reaches no daemon at all, because a paired browser is answered only inside its own session.
@@ -805,11 +802,7 @@ export function AddDeviceSurface({
         busy={busy}
         failure={failure}
         grantFailure={grantFailure}
-        deviceNote={
-          rulesOffered && client !== null
-            ? deviceId => <DeviceRuleNote client={client} deviceId={deviceId} />
-            : undefined
-        }
+        deviceNote={client !== null ? deviceId => <DeviceRuleNote client={client} deviceId={deviceId} /> : undefined}
         onMint={() => void mint()}
         onDiscardInvite={() => setInvite(null)}
         onRevokeCode={() => void revokeCode()}

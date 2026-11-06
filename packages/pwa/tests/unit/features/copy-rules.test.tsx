@@ -212,31 +212,6 @@ const surface = async (
 };
 
 describe('the pre-approval rules surface', () => {
-  it('reads the rules, adds one and reads them again', async () => {
-    const rules: PasteRule[] = [];
-    const { calls, q } = await surface(call => {
-      if (call.method === 'POST') {
-        rules.push(RULE);
-        return RULE;
-      }
-      return { rules };
-    });
-    await click(q('[data-copy-rule-add-open]'));
-    await typeInto(q('[data-copy-rule-from]'), 'gh');
-    await typeInto(q('[data-copy-rule-to]'), 'vercel');
-    await click(q('[data-copy-rule-form] button[type="submit"]'));
-    await settle();
-
-    expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
-      'GET /v1/copy-rules',
-      'GET /v1/copy-rules/settings',
-      'POST /v1/copy-rules',
-      'GET /v1/copy-rules',
-      'GET /v1/copy-rules/settings',
-    ]);
-    expect(q(`[data-copy-rule="${RULE.id}"]`)).not.toBeNull();
-  });
-
   it('removes a rule, and says why when a change fails', async () => {
     let failing = false;
     const { calls, q, text } = await surface(call => {
@@ -253,12 +228,12 @@ describe('the pre-approval rules surface', () => {
     expect(text()).toContain('the daemon is gone');
   });
 
-  it('reads the setting and the badges from their own route, and changes the setting through it', async () => {
-    let allowed = false;
+  it('reads the setting and the badges from their own route, and turns the setting off through it', async () => {
+    let allowed = true;
     const { calls, q } = await surface(call => {
       if (call.method === 'PUT') {
-        allowed = true;
-        return { allowProfileTargets: true };
+        allowed = false;
+        return { allowProfileTargets: false };
       }
       if (call.path === '/v1/copy-rules/settings')
         return { settings: { allowProfileTargets: allowed }, profileRules: [RULE.id] };
@@ -271,11 +246,13 @@ describe('the pre-approval rules surface', () => {
     expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
       'GET /v1/copy-rules',
       'GET /v1/copy-rules/settings',
+      'GET /v1/copy-rules/stages',
       'PUT /v1/copy-rules/settings',
       'GET /v1/copy-rules',
       'GET /v1/copy-rules/settings',
+      'GET /v1/copy-rules/stages',
     ]);
-    expect((q('[data-copy-profile-targets]') as HTMLInputElement | null)?.checked).toBe(true);
+    expect((q('[data-copy-profile-targets]') as HTMLInputElement | null)?.checked).toBe(false);
   });
 
   it('shows no setting and no badge for a daemon too old to have them (a 404), and still lists its rules', async () => {
@@ -379,7 +356,6 @@ describe('making a paste rule with a passkey bound to it (!A244)', () => {
       <CopyRulesSurface
         connection={CONNECTION}
         createClient={async () => fake.client}
-        staging
         {...(given === undefined
           ? {}
           : {
@@ -468,18 +444,6 @@ describe('making a paste rule with a passkey bound to it (!A244)', () => {
     expect(denying.asked).toEqual([]);
     expect(denying.routes()).toContain(`DELETE /v1/copy-rules/stages/${STAGE}`);
     expect(denying.routes()).not.toContain(`POST /v1/copy-rules/stages/${STAGE}/commit`);
-  });
-
-  it('keeps the one-step add on a machine that does not stage paste rules', async () => {
-    const { calls, q } = await surface(call => (call.method === 'POST' ? RULE : { rules: [] }));
-    await click(q('[data-copy-rule-add-open]'));
-    await typeInto(q('[data-copy-rule-from]'), 'gh');
-    await typeInto(q('[data-copy-rule-to]'), 'vercel');
-    await click(q('[data-copy-rule-form] button[type="submit"]'));
-    await settle();
-
-    expect(calls.map(call => `${call.method} ${call.path}`)).toContain('POST /v1/copy-rules');
-    expect(calls.some(call => call.path.startsWith('/v1/copy-rules/stages'))).toBe(false);
   });
 
   it('stages turning on programs in your own profile, asks the passkey for that act with its rows, then commits', async () => {

@@ -6,7 +6,6 @@ import {
   type SignInSummary,
   AgentToolCallSchema,
   type AgentToolCall,
-  CopyPlanSchema,
   TaskPlanAgentViewSchema,
   type TaskPlanCall,
   TASK_PLAN_MAX_PENDING_PER_SESSION,
@@ -34,7 +33,6 @@ const SITE_LINE = {
   uses: 1,
   why: 'check the Actions settings',
 } as const;
-const OLD_ITEMS = [{ from: GH, to: { kind: 'terminal', program: 'vercel' }, why: 'the deploy token' }] as const;
 
 const refused = async (work: Promise<unknown>): Promise<AgentToolError> =>
   (await work.then(
@@ -118,12 +116,6 @@ function planWorld(accounts: { readonly accounts: AccountSummary[]; readonly sig
   return { ...world, cards, proposed };
 }
 
-/** The same wish asked under either name: the new tool, and the old one's body. */
-const BOTH_NAMES: readonly { readonly name: string; readonly call: AgentToolCall }[] = [
-  { name: 'task.plan', call: { tool: 'task.plan', lines: [PASTE_LINE] } },
-  { name: 'secure.preapprove', call: { tool: 'secure.preapprove', items: [...OLD_ITEMS] } },
-];
-
 describe('the task.plan agent tool', () => {
   it('should raise one card for the lines and say what is filled once the owner approves', async () => {
     const world = planWorld();
@@ -139,7 +131,6 @@ describe('the task.plan agent tool', () => {
     should(world.cards[0]?.sessionId).equal('s1');
     const view = TaskPlanAgentViewSchema.parse(answered.taskPlan);
     should(view.lines.map(line => line.state)).eql(['waiting', 'unavailable']);
-    should(answered.plan).be.undefined();
   });
 
   it('should tell the ferret nothing about which secret fields an account holds, with real accounts saved', async () => {
@@ -185,83 +176,38 @@ describe('the task.plan agent tool', () => {
   });
 });
 
-describe('secure.preapprove, kept for an older pane', () => {
-  it('should go through the same propose call as task.plan and answer in the old shape', async () => {
+describe('the task.plan refusals', () => {
+  const call: AgentToolCall = { tool: 'task.plan', lines: [PASTE_LINE] };
+
+  it('should refuse task.plan from a person, and where no plans are wired', async () => {
     const world = planWorld();
 
-    const old = await world.service.call(agent, { tool: 'secure.preapprove', items: [...OLD_ITEMS] });
-    const next = await world.service.call(agent, { tool: 'task.plan', lines: [PASTE_LINE] });
+    const byPerson = await refused(world.service.call(person, call));
+    const unwired = await refused(agentToolWorld().service.call(agent, call));
 
-    should(world.proposed.map(entry => entry.call)).eql([
-      { tool: 'task.plan', lines: [PASTE_LINE] },
-      { tool: 'task.plan', lines: [PASTE_LINE] },
-    ]);
-    const plan = CopyPlanSchema.parse(old.plan);
-    should(plan.items).eql([...OLD_ITEMS]);
-    should(old.taskPlan).be.undefined();
-    should(old.summary).equal(
-      'Asked the owner to approve 1 paste in advance (!A1). Until they answer, each paste asks them.',
-    );
-    should(next.taskPlan?.lines).eql([{ line: 0, state: 'waiting' }]);
+    should([byPerson.code, unwired.code]).eql(['bad_request', 'unavailable']);
+    should(world.proposed).eql([]);
+    should(world.cards).eql([]);
   });
-});
 
-describe('secure.preapprove: a translated call only ever asks for pastes of one use', () => {
-  it('should propose every item as a one-use paste line, whatever the body carried', async () => {
+  it('should refuse a fourth waiting plan and raise no card for it', async () => {
     const world = planWorld();
-    const items = [
-      ...OLD_ITEMS,
-      { from: GH, to: { kind: 'browser', origin: 'https://vercel.com' } as const, why: 'the token field' },
-    ];
+    for (let count = 0; count < TASK_PLAN_MAX_PENDING_PER_SESSION; count += 1) await world.service.call(agent, call);
 
-    await world.service.call(agent, { tool: 'secure.preapprove', items, expiresInSeconds: 3_600 });
+    const fourth = await refused(world.service.call(agent, call));
 
-    const lines = world.proposed.flatMap(entry => entry.call.lines);
-    should(lines.map(line => [line.kind, line.uses])).eql([
-      ['paste', 1],
-      ['paste', 1],
-    ]);
-    should(world.proposed[0]?.call.expiresInSeconds).equal(3_600);
+    should(fourth.code).equal('capacity');
+    should(world.cards).have.length(TASK_PLAN_MAX_PENDING_PER_SESSION);
   });
-});
 
-describe('the same refusals for both names', () => {
-  for (const { name, call } of BOTH_NAMES) {
-    it(`should refuse ${name} from a person, and where no plans are wired`, async () => {
-      const world = planWorld();
-
-      const byPerson = await refused(world.service.call(person, call));
-      const unwired = await refused(agentToolWorld().service.call(agent, call));
-
-      should([byPerson.code, unwired.code]).eql(['bad_request', 'unavailable']);
-      should(world.proposed).eql([]);
-      should(world.cards).eql([]);
-    });
-
-    it(`should refuse a fourth waiting plan from ${name} and raise no card for it`, async () => {
-      const world = planWorld();
-      for (let count = 0; count < TASK_PLAN_MAX_PENDING_PER_SESSION; count += 1) await world.service.call(agent, call);
-
-      const fourth = await refused(world.service.call(agent, call));
-
-      should(fourth.code).equal('capacity');
-      should(world.cards).have.length(TASK_PLAN_MAX_PENDING_PER_SESSION);
-    });
-  }
-
-  it('should read a refused body the same way under both names', () => {
+  it('should read a refused body as no call', () => {
     const tooMany = Array.from({ length: 11 }, () => PASTE_LINE);
 
     const results = [
       AgentToolCallSchema.safeParse({ tool: 'task.plan', lines: tooMany }).success,
-      AgentToolCallSchema.safeParse({
-        tool: 'secure.preapprove',
-        items: tooMany.map(({ from, to, why }) => ({ from, to, why })),
-      }).success,
       AgentToolCallSchema.safeParse({ tool: 'task.plan', lines: [] }).success,
-      AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items: [] }).success,
     ];
 
-    should(results).eql([false, false, false, false]);
+    should(results).eql([false, false]);
   });
 });

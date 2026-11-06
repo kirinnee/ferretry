@@ -265,42 +265,12 @@ describe('Settings › Secure copy', () => {
 });
 
 describe('a ferret’s suggestion', () => {
-  const accounts = {
-    accounts: [
-      {
-        id: 'GITHUB_WORK',
-        label: 'github work',
-        username: 'kirin@atomi.cloud',
-        fields: { username: true, password: true, totp: false },
-      },
-    ],
-    signIns: [],
-  };
-
-  it('draws nothing at all without the machine offering rules', async () => {
-    const mounted = await mount(
-      <SignInRuleSuggestionHost
-        connection={connection}
-        createClient={async () => ({ request: async () => ({ suggestions: [] }) }) as never}
-        item={{ signInRuleSuggestion: { suggestion: suggestion().id } }}
-        offered={false}
-      />,
-    );
-    try {
-      expect(mounted.container.querySelector('[data-rule-suggestion]')).toBeNull();
-      expect(accounts.accounts).toHaveLength(1);
-    } finally {
-      await mounted.unmount();
-    }
-  });
-
   it('draws plain when the item carries no daemon suggestion ref', async () => {
     const mounted = await mount(
       <SignInRuleSuggestionHost
         connection={connection}
         createClient={async () => ({ request: async () => ({ suggestions: [suggestion()] }) }) as never}
         item={{}}
-        offered
       />,
     );
     try {

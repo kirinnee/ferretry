@@ -245,7 +245,7 @@ export const LoginRecipeProposalSchema = z.strictObject({
 });
 export type LoginRecipeProposal = z.infer<typeof LoginRecipeProposalSchema>;
 
-/** What a ferret sends to propose a recipe (`account_propose`, `POST /v1/secrets/logins/:id/recipe/proposals`). */
+/** What a ferret sends to propose a recipe (`account_propose`). */
 export const LoginRecipeProposeRequestSchema = z.strictObject({
   recipe: LoginRecipeSchema,
   why: oneLine(LOGIN_PROPOSAL_WHY_MAX_LENGTH),
@@ -261,7 +261,7 @@ export const LoginRecipeProposedSchema = z.strictObject({
 });
 export type LoginRecipeProposed = z.infer<typeof LoginRecipeProposedSchema>;
 
-/** The owner's answer to a proposal (`POST /v1/secrets/logins/:id/recipe/proposals/:pid`). */
+/** The owner's answer to a proposal (`POST /v1/accounts/sign-ins/:si/recipe/proposals/:pid`). */
 export const LoginRecipeDecisionSchema = z.strictObject({ decision: z.enum(['approve', 'decline']) });
 export type LoginRecipeDecision = z.infer<typeof LoginRecipeDecisionSchema>;
 

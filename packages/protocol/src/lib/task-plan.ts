@@ -419,7 +419,7 @@ export const TaskPlanCallSchema = z
   });
 export type TaskPlanCall = z.infer<typeof TaskPlanCallSchema>;
 
-/** A paste plan's items (`secure.preapprove`) read as task-plan paste lines: one use each, as a paste plan allowed. */
+/** A paste plan's items (the paste-plan routes' input) read as task-plan paste lines: one use each, as a paste plan allowed. */
 export const taskPlanLinesOfCopyItems = (items: readonly CopyPlanItem[]): readonly TaskPlanPasteAsk[] =>
   items.map(item => ({
     kind: 'paste',
@@ -805,7 +805,7 @@ export function taskPlanAgentView(plan: TaskPlan): TaskPlanAgentView {
 }
 
 /**
- * A task plan as a paste plan (`secure.preapprove`'s answer and the paste-plan routes): its paste lines only, numbered
+ * A task plan as a paste plan (what the paste-plan routes answer): its paste lines only, numbered
  * from 0 as items. `undefined` for a plan with no paste line. `approved` lists the items the owner ticked, once answered.
  */
 export function copyPlanOf(plan: TaskPlan): CopyPlan | undefined {

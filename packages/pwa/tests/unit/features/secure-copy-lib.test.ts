@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { PasteRule, PasteRuleStaged } from '@ferretry/protocol';
 import {
-  addRule,
   answerPlan,
   confirmPasteRuleStage,
   fromWords,
@@ -49,20 +48,17 @@ describe('the secure copy client', () => {
     );
 
     expect((await listRules(fake.client)).rules).toHaveLength(1);
-    expect((await addRule(fake.client, { from: RULE.from, to: RULE.to, count: 1 })).id).toBe(RULE.id);
     await removeRule(fake.client, RULE.id);
     expect((await listPlans(fake.client)).plans).toHaveLength(1);
     expect((await answerPlan(fake.client, PLAN, [0])).state).toBe('approved');
 
     expect(fake.calls.map(call => `${call.method} ${call.path}`)).toEqual([
       'GET /v1/copy-rules',
-      'POST /v1/copy-rules',
       `DELETE /v1/copy-rules/${RULE.id}`,
       'GET /v1/copy-plans',
       `POST /v1/sessions/s%201/copy-plans/${PLAN.id}/approve`,
     ]);
-    expect(fake.calls[1]?.body).toEqual({ from: RULE.from, to: RULE.to, count: 1 });
-    expect(fake.calls[4]?.body).toEqual({ items: [0] });
+    expect(fake.calls[3]?.body).toEqual({ items: [0] });
   });
 });
 

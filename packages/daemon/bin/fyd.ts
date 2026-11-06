@@ -7288,7 +7288,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const loginIndex = new FileLoginIndexStore(paths, stateFiles);
   const loginSealed = new FileSecretDocumentStore(paths, stateFiles, LOGIN_SECRETS_DOCUMENT);
   const loginVault = new LoginVault(loginIndex, loginSealed, secretCipher, { hostName: hostname(), clock });
-  // The saved-login projection is built OVER the account directory, so the two share one store lock.
+  // The input bridge's login directory (its "Save as") is built OVER the account directory, so the two share one
+  // store lock.
   // The directory is handed two CLOSURES over the vault, never the vault: nothing it holds can reach `values()` or
   // `fill()`, whatever a later handler casts it to.
   const narrowVault = narrowAccountVault(loginVault);
@@ -7349,7 +7350,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   });
   const secrets: SecretSubsystem = {
     directory: secretDirectory,
-    logins: loginDirectory,
     accounts: accountDirectory,
     // Only the look-alike answer (handles), as a closure: the route table holds nothing that opens a value.
     lookAlike: narrowVault.lookAlike,
@@ -10686,7 +10686,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Login recipes (docs/input-requests.md): every recipe text is checked against every value the daemon masks, and a
       // ferret's proposal waits on a card the owner answers in Settings or with `fy account site recipe`.
       const loginRecipes = new LoginRecipeService({
-        logins: loginDirectory,
         accounts: accountDirectory,
         values: { redact: async text => await secretRedactor.redact(text) },
         agenda: new RecipeAgendaAdapter(agenda),

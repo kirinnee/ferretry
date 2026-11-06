@@ -1611,9 +1611,9 @@ the owner never meant to read. One owner action dismisses every open item on the
 - **CLI:** `fy agenda clear --agents [--yes]` shows the count and asks to confirm unless `--yes`. It is refused
   when `FY_SESSION_ID` is set — a ferret never clears for the owner.
 - **App:** in the Inbox, choose **Agents** in the kind filter (All / Interactive / Agents) and press **Clear all
-  from agent ferrets**. The confirm counts each machine with a dry run, then clears on every machine that offers
-  the feature; a machine without it is listed as "needs an update", and one that did not answer as "could not be
-  reached". The machines are those the Inbox shows rows from.
+  from agent ferrets**. The confirm counts each machine with a dry run, then clears on every machine that answered
+  it; a machine that refused or did not answer is listed as "could not be reached". The machines are those the
+  Inbox shows rows from.
 
 ## In the Inbox
 
@@ -1630,8 +1630,7 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   synced draft of its own, keyed by machine + conversation + **slot** — the slot is `chat` (the chat box, exactly
   today's draft) or the item's id (`A5`). Typing in a card never shows in the ferret's chat, typing in the chat never
   shows in a card, and two cards of one ferret hold two drafts, each in step across the owner's devices (route
-  `…/shared-draft?item=A5`, advertised as the daemon feature `shared-draft.slots.1`; a daemon without it gives the
-  card a local-only draft, never the chat's). Sending from a card empties **that card's** draft only, and the quick
+  `…/shared-draft?item=A5`, advertised as the daemon feature `shared-draft.slots.1`). Sending from a card empties **that card's** draft only, and the quick
   replies take their note from it. When an item closes (any `addressed` change) its draft is deleted; a replied
   (parked) item keeps what is still typed. A conversation holds at most 100 item drafts.
 
@@ -1771,8 +1770,8 @@ them to the card's ferret (its assignee, else its owner ferret) **before the boa
 carried leaves the card where it is and the item open, saying so; it then reopens the card with `{ from: <that ferret>, ids }`,
 and the ferret reads them as it does on the Board. Only a Not good takes files: "Not yet" and the forward option are
 refused with them, and the Inbox draws no "+" on "Not yet". A resolve with files on anything that is not a gate item is
-refused `400 invalid` rather than dropping them. Repeating an answer the owner already gave (a lost response replayed, or the same request twice at once) answers success with the item unchanged and the card moved and the ferret told **once**, but only when the repeat is the SAME answer: the same choice, the same words (spacing aside) and the same files (`from` and ids). The same choice with other words or other files is a stale tab, refused `409 gate_moved_on` ("was already answered, differently: nothing was sent") rather than a success that drops them, and a repeat is still held to a first answer's rules (the owner, the grant, words for a Not good, files from this session). The full answer is kept with the answered item, so an exact repeat succeeds even after a restart. A repeat from anyone else is not a replay. A daemon reports `agenda.gate.attachments.1` on `GET /v1/health` when it
-takes them; the app draws the "+" only there, and an older machine keeps Not good as words alone.
+refused `400 invalid` rather than dropping them. Repeating an answer the owner already gave (a lost response replayed, or the same request twice at once) answers success with the item unchanged and the card moved and the ferret told **once**, but only when the repeat is the SAME answer: the same choice, the same words (spacing aside) and the same files (`from` and ids). The same choice with other words or other files is a stale tab, refused `409 gate_moved_on` ("was already answered, differently: nothing was sent") rather than a success that drops them, and a repeat is still held to a first answer's rules (the owner, the grant, words for a Not good, files from this session). The full answer is kept with the answered item, so an exact repeat succeeds even after a restart. A repeat from anyone else is not a replay. The app draws the "+" whenever it can upload (the page has an upload port and the agenda's own session is known);
+a page with no way to upload draws Not good as words alone.
 
 ### The side panel's Agenda tab
 

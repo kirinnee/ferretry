@@ -16,9 +16,9 @@ import { LoginVault, type TwoFactorSeedStagesDeps, totpCode } from '../../../../
 import { StepUpRegistry } from '../../../../src/lib/step-up/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
-  agentIn,
   CREDENTIALS,
   FakeSecretCipher,
+  agentIn,
   FERRET_ARRIVAL,
   ferretOwn,
   GRANTED,
@@ -561,24 +561,7 @@ describe('a confirm card for the owner at their own shell (C57)', () => {
   });
 });
 
-describe('the old seed path and the other 2FA key routes', () => {
-  it('should refuse a seed on the old saved-login route with where to go, and still remove one there', async () => {
-    // Arrange
-    const r = await rig();
-
-    // Act
-    const refused = await r.call('PUT', '/v1/secrets/logins/GITHUB', { totp: { seed: SEED }, totpAcknowledged: true });
-    await plantSeed(r.subsystem.accounts as NonNullable<SecretSubsystem['accounts']>, 'GITHUB', SEED);
-    const removed = await r.call('PUT', '/v1/secrets/logins/GITHUB', { totp: null });
-
-    // Assert
-    should(refused.status).equal(403);
-    should(refused.body).match({ code: 'add_2fa_key_needs_passkey', error: /fy account factor add/u });
-    should(JSON.stringify(refused.body)).not.containEql(SEED);
-    should(removed.status).equal(200);
-    should(seeds(r)).equal(0);
-  });
-
+describe('the 2FA key routes', () => {
   it('should add, relabel and remove a key with no passkey, sweeping a removed seed and its mask', async () => {
     // Arrange
     const r = await rig();
@@ -665,7 +648,6 @@ describe('the old seed path and the other 2FA key routes', () => {
       (await commit(r, staged)).body,
       (await r.call('GET', '/v1/accounts')).body,
       (await r.call('GET', '/v1/accounts/hint?site=github.com')).body,
-      (await r.call('GET', '/v1/secrets/logins')).body,
       (await r.call('DELETE', `/v1/accounts/GITHUB/factors/seed/${staged.stage}`)).body,
     ];
 
@@ -676,24 +658,6 @@ describe('the old seed path and the other 2FA key routes', () => {
     }
     should((answers[3] as AccountList).accounts.find(account => account.id === 'GITHUB')?.fields.totp).be.true();
     should(JSON.stringify(r.index.document)).not.containEql(SEED);
-  });
-});
-
-describe('the old seed path, below the route', () => {
-  it('should refuse a seed in the store itself, whoever calls it, and change nothing', async () => {
-    // Arrange — the saved-login projection called directly, as a future import or tool would
-    const r = await rig();
-    const before = JSON.stringify(r.index.document);
-
-    // Act
-    const refused = await (r.subsystem.logins as NonNullable<SecretSubsystem['logins']>)
-      .put('GITHUB', { totp: { seed: SEED, parameters: TotpParametersSchema.parse({}) }, totpAcknowledged: true })
-      .catch((error: { refusal?: string }) => error.refusal);
-
-    // Assert
-    should(refused).equal('add_2fa_key_needs_passkey');
-    should(JSON.stringify(r.index.document)).equal(before);
-    should(r.sealed.writes).equal(0);
   });
 });
 

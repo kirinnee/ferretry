@@ -4,7 +4,6 @@ import {
   type InputDeliverBody,
   type InputRaise,
   type InputTargetFacts,
-  PutLoginEntryRequestSchema,
   padInputValue,
   type TwoFactorId,
 } from '@ferretry/protocol';
@@ -24,6 +23,7 @@ import {
   totpCode,
 } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments, plantSeed } from '../runtime/mounts/support.ts';
+import { putSavedLogin } from '../secrets/saved-login-fixture.ts';
 
 /**
  * R2-3, CODE CARDS through the REAL input service and the REAL account store (fake cipher, memory files): a code card
@@ -233,10 +233,7 @@ const settled = async (): Promise<void> => await new Promise(resolve => setTimeo
 
 /** GitHub · kirinnee, signing in at github.com (and the bastion), with the 2FA keys `keys` adds. */
 async function github(h: Harness, match: readonly string[] = ['github.com']): Promise<void> {
-  await h.directory.put(
-    'GITHUB',
-    PutLoginEntryRequestSchema.parse({ label: 'GitHub', username: 'kirinnee', match: [...match] }),
-  );
+  await putSavedLogin(h.directory, 'GITHUB', { label: 'GitHub', username: 'kirinnee', match: [...match] });
 }
 
 const keysOf = async (h: Harness, account = 'GITHUB') =>
@@ -272,7 +269,7 @@ describe('a code card is titled by the owner’s 2FA key, never by the ferret', 
     const h = harness();
     await github(h);
     await h.directory.accounts.addFactor('GITHUB', { kind: 'sms', label: 'Phone', endsWith: '42' });
-    await h.directory.put('GITLAB', PutLoginEntryRequestSchema.parse({ label: 'GitLab', match: ['gitlab.com'] }));
+    await putSavedLogin(h.directory, 'GITLAB', { label: 'GitLab', match: ['gitlab.com'] });
     await h.directory.accounts.addFactor('GITLAB', { kind: 'email', label: 'Work mail', to: 'k@corp.example' });
     const other = await keyId(h, 'Work mail', 'GITLAB');
 
@@ -414,7 +411,7 @@ describe('"Use code from Ferretry": one button per seeded key of the MATCHED acc
     await plantSeed(h.directory.accounts, 'GITHUB', SEED_A, 'Authy');
     await h.directory.accounts.addFactor('GITHUB', { kind: 'sms', label: 'Phone', endsWith: '42' });
     await h.directory.accounts.addFactor('GITHUB', { kind: 'totp', label: 'My phone app' });
-    await h.directory.put('GITLAB', PutLoginEntryRequestSchema.parse({ label: 'GitLab', match: ['gitlab.com'] }));
+    await putSavedLogin(h.directory, 'GITLAB', { label: 'GitLab', match: ['gitlab.com'] });
     await plantSeed(h.directory.accounts, 'GITLAB', SEED_B, 'GitLab app');
     const { request } = await raised(h);
     const digest = request.observedDigest as string;
@@ -438,7 +435,7 @@ describe('"Use code from Ferretry": one button per seeded key of the MATCHED acc
   it('should never hand-pick a code: an account that does not sign in here is not offered, and its tap is refused', async () => {
     const h = harness();
     await github(h);
-    await h.directory.put('GITLAB', PutLoginEntryRequestSchema.parse({ label: 'GitLab', match: ['gitlab.com'] }));
+    await putSavedLogin(h.directory, 'GITLAB', { label: 'GitLab', match: ['gitlab.com'] });
     await plantSeed(h.directory.accounts, 'GITLAB', SEED_B, 'GitLab app');
     const { request } = await raised(h);
     should(request.saved?.offers).deepEqual([]);

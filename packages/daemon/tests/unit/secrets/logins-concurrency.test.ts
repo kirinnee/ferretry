@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type PutLoginEntry, PutLoginEntryRequestSchema, type SecretName } from '@ferretry/protocol';
+import type { SecretName } from '@ferretry/protocol';
 import should from 'should';
 import {
   combinedValues,
@@ -11,6 +11,7 @@ import {
 } from '../../../src/lib/secrets/index.ts';
 import { InputLoginAdapter } from '../../../src/lib/input-requests/login-adapter.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments } from '../runtime/mounts/support.ts';
+import { putSavedLogin, savedLogins } from './saved-login-fixture.ts';
 
 /**
  * F1 of the #1094 security review: every saved login shares two files, and a change reads both, awaits sealing
@@ -57,7 +58,6 @@ function world() {
   return { index, sealed, cipher, directory, vault, masked };
 }
 
-const change = (input: unknown): PutLoginEntry => PutLoginEntryRequestSchema.parse(input);
 const settle = async (): Promise<void> => {
   for (let tick = 0; tick < 20; tick += 1) await Promise.resolve();
 };
@@ -65,9 +65,9 @@ const settle = async (): Promise<void> => {
 describe('saved logins changed at the same time', () => {
   it('should keep BOTH of two overlapping saves to different logins, and keep both masked', async () => {
     const w = world();
-    const first = w.directory.put('FIRST', change({ label: 'first', password: FIRST }));
+    const first = putSavedLogin(w.directory, 'FIRST', { label: 'first', password: FIRST });
     await settle();
-    const second = w.directory.put('SECOND', change({ label: 'second', password: SECOND }));
+    const second = putSavedLogin(w.directory, 'SECOND', { label: 'second', password: SECOND });
     await settle();
 
     // The second has not even begun while the first holds the store: it waits behind it.
@@ -77,7 +77,7 @@ describe('saved logins changed at the same time', () => {
     await w.cipher.open(1);
     await second;
 
-    should((await w.directory.list()).map(entry => entry.id)).deepEqual(['FIRST', 'SECOND']);
+    should((await savedLogins(w.directory)).map(entry => entry.id)).deepEqual(['FIRST', 'SECOND']);
     should(await w.vault.fill('FIRST', 'password', 0)).equal(FIRST);
     should(await w.vault.fill('SECOND', 'password', 0)).equal(SECOND);
     should(await w.masked(FIRST)).be.true();
@@ -86,14 +86,14 @@ describe('saved logins changed at the same time', () => {
 
   it('should keep a card’s save and a Settings edit of the same login, whichever lands second', async () => {
     const w = world();
-    await w.directory.put('SUDO', change({ label: 'sudo', match: ['sudo@laptop'] }));
+    await putSavedLogin(w.directory, 'SUDO', { label: 'sudo', match: ['sudo@laptop'] });
     const saved = w.directory.saveFields('SUDO', 'ignored', 'sudo@kirin-box', { password: FIRST });
     await settle();
-    const edited = w.directory.put('SUDO', change({ label: 'sudo (both machines)', username: 'kirin' }));
+    const edited = putSavedLogin(w.directory, 'SUDO', { label: 'sudo (both machines)', username: 'kirin' });
     await w.cipher.open(0);
     await Promise.all([saved, edited]);
 
-    const [entry] = await w.directory.list();
+    const [entry] = await savedLogins(w.directory);
     should(entry).match({
       id: 'SUDO',
       label: 'sudo (both machines)',
@@ -107,30 +107,30 @@ describe('saved logins changed at the same time', () => {
 
   it('should rename a login that a card is saving into, and keep the saved password under the new name', async () => {
     const w = world();
-    await w.directory.put('SUDO_LAPTOP', change({ label: 'sudo' }));
+    await putSavedLogin(w.directory, 'SUDO_LAPTOP', { label: 'sudo' });
     const saved = w.directory.saveFields('SUDO_LAPTOP', 'sudo', 'sudo@kirin-box', { password: FIRST });
     await settle();
-    const renamed = w.directory.rename('SUDO_LAPTOP', 'SUDO_KIRIN_BOX');
+    const renamed = w.directory.accounts.renameAccount('SUDO_LAPTOP', 'SUDO_KIRIN_BOX');
     await w.cipher.open(0);
     await Promise.all([saved, renamed]);
 
-    should((await w.directory.list()).map(entry => entry.id)).deepEqual(['SUDO_KIRIN_BOX']);
+    should((await savedLogins(w.directory)).map(entry => entry.id)).deepEqual(['SUDO_KIRIN_BOX']);
     should(await w.vault.fill('SUDO_KIRIN_BOX', 'password', 0)).equal(FIRST);
     should(await w.masked(FIRST)).be.true();
   });
 
   it('should keep a save that overlaps removing another login, and leave the removed one gone', async () => {
     const w = world();
-    const pending = w.directory.put('GONE', change({ label: 'gone', password: SECOND }));
+    const pending = putSavedLogin(w.directory, 'GONE', { label: 'gone', password: SECOND });
     await w.cipher.open(0);
     await pending;
-    const saved = w.directory.put('KEPT', change({ label: 'kept', password: FIRST }));
+    const saved = putSavedLogin(w.directory, 'KEPT', { label: 'kept', password: FIRST });
     await settle();
-    const removed = w.directory.remove('GONE');
+    const removed = w.directory.accounts.removeAccount('GONE');
     await w.cipher.open(1);
     await Promise.all([saved, removed]);
 
-    should((await w.directory.list()).map(entry => entry.id)).deepEqual(['KEPT']);
+    should((await savedLogins(w.directory)).map(entry => entry.id)).deepEqual(['KEPT']);
     should(await w.vault.fill('KEPT', 'password', 0)).equal(FIRST);
     should(await w.masked(FIRST)).be.true();
     should([...(await w.vault.values()).values()]).deepEqual([FIRST]);
@@ -145,7 +145,7 @@ describe('saved logins changed at the same time', () => {
     await w.cipher.open(1);
     await Promise.all([one, two]);
 
-    const [entry] = await w.directory.list();
+    const [entry] = await savedLogins(w.directory);
     should(entry?.match).deepEqual(['sudo@a', 'sudo@b']);
     should(await w.vault.fill('SUDO', 'password', 0)).equal(SECOND);
     should(Object.keys((await w.sealed.read())?.entries ?? {})).have.length(1);
@@ -153,10 +153,11 @@ describe('saved logins changed at the same time', () => {
 
   it('should let the next change through after one that failed', async () => {
     const w = world();
-    const refused = w.directory.put('NEW', change({ password: FIRST }));
-    const after = w.directory.put('OK', change({ label: 'ok' }));
+    const refused = putSavedLogin(w.directory, 'NEW', { password: FIRST });
+    const after = putSavedLogin(w.directory, 'OK', { label: 'ok' });
     should(await refused.catch(error => error)).be.instanceOf(LoginEntryError);
-    should((await after).id).equal('OK');
+    await after;
+    should((await savedLogins(w.directory)).map(entry => entry.id)).deepEqual(['OK']);
   });
 
   it('should keep a username and a password from one card together, in one change', async () => {
@@ -166,10 +167,11 @@ describe('saved logins changed at the same time', () => {
       password: FIRST,
     });
     await w.cipher.open(0);
-    const summary = await saving;
+    await saving;
 
+    const [summary] = await savedLogins(w.directory);
     should(summary).match({ label: 'GitHub (kirinnee)', username: 'kirinnee', match: ['github.com'] });
-    should(summary.fields.password).be.true();
+    should(summary?.fields.password).be.true();
     should(await w.vault.fill('GITHUB', 'username', 0)).equal('kirinnee');
     should(await w.vault.fill('GITHUB', 'password', 0)).equal(FIRST);
   });

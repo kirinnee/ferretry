@@ -23,7 +23,6 @@
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
-  ADD_TWO_FACTOR_KEY_WHERE,
   type AccountDefaultsRepoint,
   type AccountId,
   type AccountIndexDocument,
@@ -107,12 +106,8 @@ export type LoginRefusal =
   | 'unknown_sign_in'
   | 'place_taken'
   | 'invalid_change'
-  | 'account_has_sign_ins'
-  | 'account_has_2fa_keys'
-  | 'no_sign_in'
   | 'merge_refused'
-  | 'unknown_2fa_key'
-  | 'add_2fa_key_needs_passkey';
+  | 'unknown_2fa_key';
 
 export class LoginEntryError extends Error {
   constructor(
@@ -360,16 +355,6 @@ export function signInsOf(
   return Object.entries(signIns).filter(([, signIn]) => signIn.account === key);
 }
 
-/** The account's sign-ins with its site ones first: the first is its PRIMARY (what the compat projection reads). */
-export function primaryFirst(
-  own: readonly (readonly [SignInId, SignInRecord])[],
-): readonly (readonly [SignInId, SignInRecord])[] {
-  return [
-    ...own.filter(([, signIn]) => signIn.place.kind === 'site'),
-    ...own.filter(([, signIn]) => signIn.place.kind !== 'site'),
-  ];
-}
-
 /** An account as the owner reads it: which fields exist, its 2FA keys without their seals, its sign-ins. */
 export function accountSummary(
   id: AccountId,
@@ -550,7 +535,8 @@ export class AccountDirectory {
    *    orphan, still masked, swept by the next change or boot.
    * 4. Sealed values nothing points at any more are swept. Best effort: an orphan is still masked.
    *
-   * For the compat projection (`logins.ts`) and this class only: a route is handed the named methods.
+   * For this class and the input bridge's `LoginDirectory.saveFields` (`logins.ts`) only: a route is handed the named
+   * methods.
    */
   async transact<T>(
     work: (draft: AccountDraft) => Promise<T> | T,
@@ -695,31 +681,6 @@ export class AccountDirectory {
     } as AccountRecord;
     draft.accounts[id] = next;
     return next;
-  }
-
-  /**
-   * An older client's `totp` on `PUT /v1/secrets/logins/:id`. Only `null` (remove the seeded keys) does anything: a
-   * SEED is refused here, in the store, whoever calls — a seed is saved only by {@link addSeed}, after the passkey
-   * proof bound to its stage (docs/secrets.md, "2FA keys"). An account with two or more seeded keys is refused too:
-   * which one is meant cannot be read from that body.
-   */
-  async applySeed(
-    draft: AccountDraft,
-    id: AccountId,
-    seed: { readonly seed: string; readonly parameters: TotpParameters } | null,
-  ): Promise<void> {
-    if (seed !== null) throw new LoginEntryError('add_2fa_key_needs_passkey', ADD_TWO_FACTOR_KEY_WHERE);
-    const account = this.accountIn(draft, id);
-    const factors = account.factors ?? [];
-    const seeded = factors.filter(factor => factor.kind === 'totp' && factor.seal !== undefined);
-    if (seeded.length > 1)
-      throw new LoginEntryError(
-        'account_has_2fa_keys',
-        `${account.label} keeps ${String(seeded.length)} 2FA keys Ferretry makes codes for; update the app or use \`fy account\` to change one`,
-      );
-    const next = factors.filter(factor => !seeded.includes(factor));
-    const { factors: _old, ...rest } = account;
-    draft.accounts[id] = { ...rest, ...(next.length === 0 ? {} : { factors: next }), updatedAt: draft.at };
   }
 
   /**

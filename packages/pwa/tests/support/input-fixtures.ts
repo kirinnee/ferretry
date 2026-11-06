@@ -8,12 +8,9 @@ import type {
   InputSaved,
   InputSavedOffer,
   InputSensitivity,
-  LoginEntryList,
-  LoginEntrySummary,
 } from '@ferretry/protocol';
 
 export const NOW = Date.parse('2026-08-05T10:00:00.000Z');
-const AT = '2026-08-01T09:00:00.000Z';
 const DIGEST = 'a'.repeat(64);
 
 const LABEL: Readonly<Record<InputSensitivity, string>> = {
@@ -128,34 +125,6 @@ export const saved = (overrides: Partial<InputSaved> = {}): InputSaved => ({
 export const withSaved = (value: InputSaved, overrides: Partial<InputRequest> = {}): InputRequest =>
   request({ saved: value, ...overrides });
 
-export const login = (overrides: Partial<LoginEntrySummary> = {}): LoginEntrySummary => ({
-  id: 'GITHUB_KIRINNEE',
-  label: 'GitHub (kirinnee)',
-  match: ['github.com'],
-  username: 'kirinnee',
-  fields: { password: true, totp: false },
-  createdAt: AT,
-  updatedAt: AT,
-  ...overrides,
-});
-
-export const logins = (overrides: Partial<LoginEntryList> = {}): LoginEntryList => ({
-  v: 1,
-  health: 'ready',
-  entries: [
-    login(),
-    login({
-      id: 'SUDO_KIRIN_BOX',
-      label: 'sudo on kirin-box',
-      match: ['sudo@kirin-box'],
-      username: undefined,
-      fields: { password: true, totp: true },
-      totp: { algorithm: 'SHA1', digits: 6, period: 30 },
-    }),
-  ],
-  ...overrides,
-});
-
 /** The body a client sent, parsed, with the answer to give; what the card did is read off `calls`. */
 export interface Call {
   readonly path: string;
@@ -178,33 +147,6 @@ export const fakeClient = (answer: (call: Call) => unknown = () => ({})) => {
   };
   return { client: client as never, calls };
 };
-
-/** Fake saved logins that sign in differently: Vercel via Google, the Google login itself, and a GitHub password. */
-export const signInLogins = (): LoginEntryList => ({
-  v: 1,
-  health: 'ready',
-  entries: [
-    login({
-      id: 'VERCEL',
-      label: 'Vercel',
-      match: ['vercel.com'],
-      method: { kind: 'google', via: 'GOOGLE_KIRIN' },
-      domains: ['app.vercel.com'],
-      username: undefined,
-      fields: { password: false, totp: false },
-    }),
-    login({
-      id: 'GOOGLE_KIRIN',
-      label: 'Google (kirin@…)',
-      match: ['google.com'],
-      domains: ['accounts.google.com'],
-      username: 'kirin@example.test',
-      fields: { password: true, totp: true },
-      totp: { algorithm: 'SHA1', digits: 6, period: 30 },
-    }),
-    login(),
-  ],
-});
 
 /** The input card's view of a saved login that signs in through Google. */
 export const savedSignIn = (overrides: Partial<InputSaved> = {}): InputSaved =>

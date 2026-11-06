@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { Browser, BrowserContext, Page } from 'playwright-core';
+import type { Browser, BrowserContext, Locator, Page } from 'playwright-core';
 import { sharedChromium } from '../support/chromium.ts';
 
 const packageRoot = resolve(import.meta.dir, '../../..');
@@ -77,6 +77,65 @@ const sheetState = async (tab: Page) =>
 const closed = async (tab: Page): Promise<boolean> => {
   await tab.waitForSelector('[data-whats-new-body]', { state: 'detached', timeout: 5000 });
   return true;
+};
+
+/**
+ * Types into the finder and waits until it has STOPPED MOVING: the whole text is in the box, the machine's
+ * search for exactly that text has been answered (the filter row stops being busy), and two frames have
+ * painted since. Only then is a row's box a place a finger can aim at, because the filter row appears with
+ * the first letter and the answer lands after the debounce.
+ */
+const typeIntoFinder = async (tab: Page, text: string): Promise<void> => {
+  await tab.keyboard.type(text);
+  await tab.waitForFunction(
+    typed => document.querySelector<HTMLInputElement>('[placeholder^="Search places"]')?.value === typed,
+    text,
+  );
+  await tab.waitForSelector('fieldset[aria-label="Narrow cards and agenda"][aria-busy="false"]');
+  await tab.evaluate(
+    async () => await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+  );
+};
+
+/**
+ * The centre of a row a finger could really land on. The finder's list scrolls inside a panel that is shorter
+ * than the page on a short phone, and `boundingBox()` reports the row's place as if nothing clipped it — so a
+ * row below the fold of that list has a box that lies under the scrim. This scrolls the row into view, lets two
+ * frames paint, and refuses to hand back a point that is off the screen or where something else would take the touch.
+ */
+const reachableCentre = async (tab: Page, row: Locator): Promise<{ readonly x: number; readonly y: number }> => {
+  await row.scrollIntoViewIfNeeded();
+  await tab.evaluate(
+    async () => await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+  );
+  const box = await row.boundingBox();
+  if (box === null) throw new Error('the What’s new row has no box');
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  const viewport = tab.viewportSize();
+  if (viewport === null) throw new Error('the page has no viewport');
+  if (x < 0 || y < 0 || x > viewport.width || y > viewport.height) {
+    throw new Error(
+      `the What’s new row's centre (${x}, ${y}) is outside the ${viewport.width}x${viewport.height} viewport`,
+    );
+  }
+  const hit = await row.evaluate(
+    (element, point) => {
+      const found = document.elementFromPoint(point.x, point.y);
+      return {
+        inside: found !== null && element.contains(found),
+        found:
+          found === null
+            ? 'nothing'
+            : `<${found.tagName.toLowerCase()}> ${(found.getAttribute('aria-label') ?? found.textContent ?? '').slice(0, 40)}`,
+      };
+    },
+    { x, y },
+  );
+  if (!hit.inside) {
+    throw new Error(`a finger at (${x}, ${y}) would land on ${hit.found}, not on the What’s new row`);
+  }
+  return { x, y };
 };
 
 const touchScroll = async (context: BrowserContext, tab: Page, x: number, from: number, to: number): Promise<void> => {
@@ -253,13 +312,13 @@ describe('whats new, on a phone', () => {
           await touch('touchEnd', spec.width / 2, 320);
           await tab.waitForSelector('[placeholder^="Search places"]');
           await tab.tap('[placeholder^="Search places"]');
-          await tab.keyboard.type('what');
+          await typeIntoFinder(tab, 'what');
           await tab.waitForSelector('text=What’s new');
           await shoot(tab, `${spec.name}-6-pull-finder`);
-          const box = await tab.locator('text=What’s new').first().boundingBox();
-          if (box === null) throw new Error('no What’s new row');
-          const x = box.x + box.width / 2;
-          const y = box.y + box.height / 2;
+          const { x, y } = await reachableCentre(
+            tab,
+            tab.locator('[role="option"]', { hasText: 'What’s new' }).first(),
+          );
           await tab.evaluate(() => {
             const w = globalThis as unknown as { __seen: boolean[] };
             w.__seen = [];

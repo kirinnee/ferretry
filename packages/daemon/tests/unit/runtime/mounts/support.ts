@@ -2166,7 +2166,6 @@ export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
   const logins = new LoginDirectory(loginIndex, loginSealed, cipher, clock, { seals: narrow.seals });
   return {
     directory,
-    logins,
     accounts: logins.accounts,
     // The route is mounted; a test that reads or writes the file builds its own over a real config service.
     accountDefaults: new AccountDefaults({
@@ -2176,7 +2175,6 @@ export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
     lookAlike: narrow.lookAlike,
     // Login recipes over the same store; nothing is masked in these fixtures, so no recipe is refused for a value.
     loginRecipes: new LoginRecipeService({
-      logins,
       accounts: logins.accounts,
       values: { redact: async text => text },
       agenda: {

@@ -9,25 +9,17 @@ import {
   AddTwoFactorKeyRequestSchema,
   accountHintsFor,
   ConfirmTwoFactorSeedRequestSchema,
-  type LoginEntryId,
-  LoginEntryIdSchema,
-  type LoginEntryList,
-  type LoginEntrySummary,
-  type LoginHintList,
   LoginRecipeDecisionSchema,
   LoginRecipeProposalIdSchema,
   loginHintSite,
-  loginHintsFor,
   PatchTwoFactorKeyRequestSchema,
   PutAccountDefaultRequestSchema,
   type PutAccountDefaultResult,
   PutAccountRequestSchema,
-  PutLoginEntryRequestSchema,
   PutSecretRequestSchema,
   PutSignInRequestSchema,
   RemovedTwoFactorKeySchema,
   RenameAccountRequestSchema,
-  RenameLoginEntryRequestSchema,
   type SecretCloneRefusal,
   SecretExportRequestSchema,
   SecretExportResponseSchema,
@@ -72,7 +64,6 @@ import {
   type AccountListing,
   type AccountVault,
   DEVICE_OWNER,
-  type LoginDirectory,
   LoginEntryError,
   type LoginRecipeService,
   RecipeValueError,
@@ -128,7 +119,7 @@ export const ACCOUNT_DEFAULT_OWNER_ONLY = `${ownerOnlyWords('chooses the default
  * Every route is `admin`. A warden supervises sessions and has no business enumerating, replacing or
  * spending the operator's credentials, and the route table is where that decision belongs.
  *
- * A FERRET HOLDS THE ADMIN TOKEN BUT MAY NOT WRITE THE STORE: set, replace, delete, saved logins, and
+ * A FERRET HOLDS THE ADMIN TOKEN BUT MAY NOT WRITE THE STORE: set, replace, delete, and
  * filing or sealing a copy are refused to an agent (`ownerOnly`). It lists names and uses a secret by name.
  */
 
@@ -168,12 +159,8 @@ const LOGIN_STATUS: Readonly<Record<LoginEntryError['refusal'], number>> = {
   unknown_sign_in: 404,
   place_taken: 409,
   invalid_change: 409,
-  account_has_sign_ins: 409,
-  account_has_2fa_keys: 409,
-  no_sign_in: 409,
   merge_refused: 409,
   unknown_2fa_key: 404,
-  add_2fa_key_needs_passkey: 403,
 };
 
 /** Re-raises a domain failure as its HTTP answer, and anything else as itself so a genuine bug is
@@ -203,190 +190,6 @@ function ownerOnly(context: RouteContext, act: string): void {
     `a ferret cannot ${act}; the owner does. To get a value into the store, ask the owner with an input request (they see a card and type it), or paste a sealed copy into the store (secure copy). Both show the owner a card.`,
     'forbidden',
   );
-}
-
-/** The saved login's handle in the path. */
-function pathLoginId(context: RouteContext): LoginEntryId {
-  const parsed = LoginEntryIdSchema.safeParse(decodeParameter(context.params.get('id') ?? '') ?? '');
-  if (!parsed.success) throw new ApiError(400, 'the account name in the path is not usable', 'invalid_login_id');
-  return parsed.data;
-}
-
-/**
- * SAVED LOGINS (docs/input-requests.md): labels, matches, usernames and WHICH secret fields exist. Like the
- * secret routes, nothing here answers a value: the directory a route holds seals and never opens. A damaged
- * store is part of the listing, never an empty one.
- */
-/**
- * The entries as a route may answer them: every recipe and proposal masked through the redactor at READ time (a value
- * kept after the text was written shows as a mask), or left out where nothing can mask them.
- */
-async function served(
-  logins: LoginDirectory,
-  recipes: LoginRecipeService | undefined,
-): Promise<readonly LoginEntrySummary[]> {
-  const entries = await logins.list();
-  if (recipes !== undefined) return await recipes.scrubbed(entries);
-  return entries.map(({ recipe: _recipe, recipeBy: _by, proposals: _proposals, ...entry }) => entry);
-}
-
-async function listLogins(logins: LoginDirectory, recipes: LoginRecipeService | undefined): Promise<ApiResponse> {
-  try {
-    return jsonResponse({ v: 1, health: 'ready', entries: await served(logins, recipes) } satisfies LoginEntryList);
-  } catch (error) {
-    if (!(error instanceof SecretStoreError)) throw error;
-    return jsonResponse({
-      v: 1,
-      health: 'damaged',
-      diagnosis: `the accounts cannot be read: ${error.message}`,
-      entries: [],
-    } satisfies LoginEntryList);
-  }
-}
-
-/**
- * WHAT A FERRET MAY KNOW ABOUT SIGNING IN TO A SITE: the entries for it and the providers they go via, by handle,
- * label, method, login domains and the plain username. A narrower view than the listing (no `fields`, no
- * `match`, no times), and never a value. A damaged store is a 500, never an empty hint.
- */
-async function loginHint(
-  logins: LoginDirectory,
-  recipes: LoginRecipeService | undefined,
-  context: RouteContext,
-): Promise<ApiResponse> {
-  const site = loginHintSite(context.request.query.get('site')?.[0] ?? '');
-  if (site === undefined) throw new ApiError(400, 'name a site: a host like github.com, or a URL', 'invalid_site');
-  try {
-    const hints = loginHintsFor(site, await served(logins, recipes));
-    return jsonResponse({ v: 1, site, hints, passkeys: 'off' } satisfies LoginHintList);
-  } catch (error) {
-    return reraise(error);
-  }
-}
-
-async function putLogin(
-  logins: LoginDirectory,
-  recipes: LoginRecipeService | undefined,
-  context: RouteContext,
-): Promise<ApiResponse> {
-  ownerOnly(context, 'change an account');
-  const id = pathLoginId(context);
-  const change = await parseBody(context.request, PutLoginEntryRequestSchema);
-  try {
-    // A recipe never holds a value: without the checker that proves it, a recipe is not taken at all.
-    if (typeof change.recipe === 'string') {
-      if (recipes === undefined) throw new ApiError(503, 'this daemon cannot check recipes for values', 'unavailable');
-      await recipes.assertNoValue(change.recipe);
-    }
-    const changed = await logins.put(id, change);
-    return jsonResponse(recipes === undefined ? changed : ((await recipes.scrubbed([changed]))[0] ?? changed));
-  } catch (error) {
-    return reraise(error);
-  }
-}
-
-/**
- * THE OWNER'S ANSWER TO A FERRET'S RECIPE PROPOSAL. Owner only, like every change to a saved login: an agent
- * answering its own proposal is refused before the body is read.
- */
-async function decideRecipe(recipes: LoginRecipeService, context: RouteContext): Promise<ApiResponse> {
-  ownerOnly(context, 'approve or decline a recipe proposal');
-  const id = pathLoginId(context);
-  const proposal = LoginRecipeProposalIdSchema.safeParse(decodeParameter(context.params.get('proposalId') ?? '') ?? '');
-  if (!proposal.success) throw new ApiError(400, 'the proposal in the path is not usable', 'invalid_proposal');
-  const { decision } = await parseBody(context.request, LoginRecipeDecisionSchema);
-  try {
-    return jsonResponse(await recipes.decide(id, proposal.data, decision));
-  } catch (error) {
-    return reraise(error);
-  }
-}
-
-async function renameLogin(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
-  ownerOnly(context, 'rename an account');
-  const id = pathLoginId(context);
-  const { to } = await parseBody(context.request, RenameLoginEntryRequestSchema);
-  try {
-    return jsonResponse(await logins.rename(id, to));
-  } catch (error) {
-    return reraise(error);
-  }
-}
-
-async function removeLogin(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
-  ownerOnly(context, 'delete an account');
-  const id = pathLoginId(context);
-  try {
-    if (!(await logins.remove(id))) throw new ApiError(404, `there is no account ${id}`, 'unknown_login');
-    return jsonResponse({ id, removed: true });
-  } catch (error) {
-    return reraise(error);
-  }
-}
-
-/** The saved-login routes, when the daemon keeps them. */
-function loginRoutes(logins: LoginDirectory | undefined, recipes: LoginRecipeService | undefined): readonly ApiRoute[] {
-  if (logins === undefined) return [];
-  return [
-    {
-      method: 'GET',
-      path: '/v1/secrets/logins',
-      minimum: 'operator',
-      caller: 'person',
-      capability: SECRETS_USE,
-      noStore: true,
-      handle: async () => await listLogins(logins, recipes),
-    },
-    {
-      method: 'GET',
-      path: '/v1/secrets/logins/hint',
-      minimum: 'operator',
-      caller: 'any',
-      capability: SECRETS_USE,
-      noStore: true,
-      handle: async context => await loginHint(logins, recipes, context),
-    },
-    {
-      method: 'PUT',
-      path: '/v1/secrets/logins/:id',
-      minimum: 'operator',
-      caller: 'person',
-      capability: SECRETS_CONFIGURE,
-      noStore: true,
-      handle: async context => await putLogin(logins, recipes, context),
-    },
-    ...(recipes === undefined
-      ? []
-      : [
-          {
-            method: 'POST',
-            path: '/v1/secrets/logins/:id/recipe/proposals/:proposalId',
-            minimum: 'operator',
-            caller: 'person',
-            capability: SECRETS_CONFIGURE,
-            noStore: true,
-            handle: async (context: RouteContext) => await decideRecipe(recipes, context),
-          } satisfies ApiRoute,
-        ]),
-    {
-      method: 'POST',
-      path: '/v1/secrets/logins/:id/rename',
-      minimum: 'operator',
-      caller: 'person',
-      capability: SECRETS_CONFIGURE,
-      noStore: true,
-      handle: async context => await renameLogin(logins, context),
-    },
-    {
-      method: 'DELETE',
-      path: '/v1/secrets/logins/:id',
-      minimum: 'operator',
-      caller: 'person',
-      capability: SECRETS_CONFIGURE,
-      noStore: true,
-      handle: async context => await removeLogin(logins, context),
-    },
-  ];
 }
 
 // ── Accounts and sign-ins (docs/secrets.md) ──────────────────────────────────────────────────────
@@ -1049,9 +852,7 @@ function widenRefusal(context: RouteContext): ApiResponse | undefined {
 export interface SecretSubsystem {
   /** Management only. It cannot open a secret, which is why a route may hold one. */
   readonly directory: SecretDirectory;
-  /** Saved logins: management only, like `directory`. It seals and never opens. */
-  readonly logins?: LoginDirectory;
-  /** Accounts and sign-ins: management only, like `logins` (which projects them). Seals and never opens. */
+  /** Accounts and sign-ins: management only, like `directory`. Seals and never opens. */
   readonly accounts?: AccountDirectory;
   /** The vault's one look-alike answer (handles only): the only part of it a route holds. */
   readonly lookAlike?: Pick<AccountVault, 'lookAlike'>;
@@ -1157,7 +958,6 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       noStore: true,
       handle: async context => await exportSecrets(subsystem.exports, context),
     },
-    ...loginRoutes(subsystem.logins, subsystem.loginRecipes),
     ...accountRoutes(
       subsystem.accounts,
       subsystem.loginRecipes,

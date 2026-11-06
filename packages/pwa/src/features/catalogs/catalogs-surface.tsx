@@ -24,12 +24,10 @@ import { formatBytes, plural, shortDigest } from './catalog-review-model.ts';
 import { MarkedText } from './catalog-review-view.tsx';
 import {
   type CatalogClientFactory,
-  type CatalogFeatures,
   deleteCatalog,
   exportCatalog,
   listCatalogs,
   makeDefault,
-  readCatalogFeatures,
   updateCatalog,
   withdrawCatalogItem,
 } from './catalogs-api.ts';
@@ -64,7 +62,6 @@ export type Read =
       readonly catalogs: readonly OwnedCatalog[];
       /** The catalog one tap adds to, when the machine has made one. */
       readonly defaultCatalogId?: string;
-      readonly features: CatalogFeatures;
     }
   | { readonly kind: 'failed'; readonly refusal: OwnerRefusal };
 
@@ -84,12 +81,10 @@ export function useCatalogs(
       try {
         const client = await createClient(connection);
         const list = await listCatalogs(client, sourceState ? { sourceState: true } : undefined);
-        const features = await readCatalogFeatures(client);
         if (live)
           setRead({
             kind: 'ready',
             catalogs: list.catalogs,
-            features,
             ...(list.defaultCatalogId === undefined ? {} : { defaultCatalogId: list.defaultCatalogId }),
           });
       } catch (error) {
@@ -140,8 +135,6 @@ export function CatalogsSurface({
           catalog={read.catalogs.find(candidate => candidate.id === openId)}
           catalogs={read.catalogs}
           defaultCatalogId={read.defaultCatalogId}
-          canMakeDefault={read.features.items}
-          features={read.features}
           saveFile={saveFile}
           {...(loadMachineSkills === undefined ? {} : { loadMachineSkills })}
           onBack={() => setOpenId(null)}
@@ -209,8 +202,6 @@ function CatalogDetail({
   catalog,
   catalogs,
   defaultCatalogId,
-  canMakeDefault,
-  features,
   saveFile,
   loadMachineSkills,
   onBack,
@@ -222,8 +213,6 @@ function CatalogDetail({
   readonly catalog: OwnedCatalog | undefined;
   readonly catalogs: readonly OwnedCatalog[];
   readonly defaultCatalogId: string | undefined;
-  readonly canMakeDefault: boolean;
-  readonly features: CatalogFeatures;
   readonly saveFile: SaveText;
   readonly loadMachineSkills?: MachineSkillEntriesLoader;
   readonly onBack: () => void;
@@ -258,23 +247,22 @@ function CatalogDetail({
   };
 
   const isDefault = catalog !== undefined && roleLabel(catalog, defaultCatalogId) !== null;
-  const menu: ContextMenuItem[] =
-    canMakeDefault && !isDefault
-      ? [
-          {
-            key: 'make-default',
-            label: 'Make default',
-            hint: 'One tap on Publish puts a skill here.',
-            icon: <Star size={16} aria-hidden="true" />,
-            onSelect: () =>
-              void act(async id => {
-                await makeDefault(await createClient(connection), id);
-                setNote(`${catalog?.name ?? 'It'} is now the default catalog.`);
-                onChanged();
-              }),
-          },
-        ]
-      : [];
+  const menu: ContextMenuItem[] = !isDefault
+    ? [
+        {
+          key: 'make-default',
+          label: 'Make default',
+          hint: 'One tap on Publish puts a skill here.',
+          icon: <Star size={16} aria-hidden="true" />,
+          onSelect: () =>
+            void act(async id => {
+              await makeDefault(await createClient(connection), id);
+              setNote(`${catalog?.name ?? 'It'} is now the default catalog.`);
+              onChanged();
+            }),
+        },
+      ]
+    : [];
 
   if (catalog === undefined)
     return (
@@ -395,7 +383,7 @@ function CatalogDetail({
             busy={busy}
             confirming={typeof confirm === 'object' && confirm !== null && confirm.withdraw === item.itemId}
             onPublish={() => setPublishing(item)}
-            onVersions={features.versions ? () => setVersionsOf(item) : undefined}
+            onVersions={() => setVersionsOf(item)}
             onAskWithdraw={() => setConfirm({ withdraw: item.itemId })}
             onCancel={() => setConfirm(null)}
             onWithdraw={() =>
@@ -494,7 +482,6 @@ function CatalogDetail({
           }
           label={publishing.name}
           publish={{ catalogId: catalog.id, itemId: publishing.itemId }}
-          versionTools={{ changes: features.versions, makeCurrent: features.versions2 }}
           onClose={() => setPublishing(null)}
           onDone={onChanged}
         />
@@ -505,7 +492,6 @@ function CatalogDetail({
           createClient={createClient}
           itemId={versionsOf.itemId}
           label={versionsOf.name}
-          canWrite={features.versions2}
           onClose={() => setVersionsOf(null)}
           onChanged={onChanged}
         />

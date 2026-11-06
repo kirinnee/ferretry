@@ -3,9 +3,8 @@
  * see it, what changed between neighbours, and the three things an owner does with a version already kept: make it
  * current, retire it, bring it back.
  *
- * It opens only from the owner's own surfaces (a row's ⋯ and Sharing › My catalogs) and only when the machine
- * advertises `catalogs.versions.1`; the buttons that write need `catalogs.versions.2` as well. Every refusal is
- * said in one sentence, and an item that moved on while the sheet was open is read again.
+ * It opens only from the owner's own surfaces (a row's ⋯ and Sharing › My catalogs). Every refusal is said in one
+ * sentence, and an item that moved on while the sheet was open is read again.
  */
 
 import type { CatalogChanges, CatalogMemberView, OwnedCatalog, OwnedSharedItem } from '@ferretry/protocol';
@@ -48,8 +47,6 @@ export interface VersionsSheetProps {
   readonly itemId: string;
   /** The item's name as the row says it. */
   readonly label: string;
-  /** Whether make current, retire and unretire are offered (`catalogs.versions.2`). */
-  readonly canWrite: boolean;
   readonly onClose: () => void;
   /** Called after a write landed, so the list behind the sheet can read again. */
   readonly onChanged?: () => void;
@@ -91,7 +88,6 @@ export function VersionsSheet({
   connection,
   itemId,
   label,
-  canWrite,
   onClose,
   onChanged,
   nowMs,
@@ -211,7 +207,7 @@ export function VersionsSheet({
           ) : null}
           <ul className="m-0 flex list-none flex-col gap-xs p-0" aria-label="Versions" data-versions-list="">
             {versionLines(read.item, now).map(line => {
-              const actions = versionActions(line, canWrite);
+              const actions = versionActions(line);
               const asked = ask?.version === line.version ? ask : null;
               return (
                 <li

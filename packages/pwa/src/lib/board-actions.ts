@@ -79,8 +79,7 @@ type BoardEdit = Omit<Action<'edit'>, 'action'>;
 export interface BoardActions {
   /**
    * Moves a card. A move back needs `reason` (refused here without a round trip when it is missing). An owner's
-   * move back may carry `attachments`, already uploaded to the card's ferret — only to a machine that reports
-   * `board.reopen.attachments.1`, because an older one refuses the field.
+   * move back may carry `attachments`, already uploaded to the card's ferret.
    */
   moveTask(
     target: BoardMoveTarget,

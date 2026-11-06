@@ -1,16 +1,14 @@
 /**
  * Fetches the approve-on-phone card an agenda item points at (`phoneApproval`) from the daemon and keeps it fresh.
- * The card is read by its id from `/v1/phone-approvals`, never from the item's text; a daemon that does not report
- * `input.phone-approval.1`, or no longer lists the approval, draws nothing, and the item is a plain info card.
+ * The card is read by its id from `/v1/phone-approvals`, never from the item's text; a daemon that no longer lists
+ * the approval draws nothing, and the item is a plain info card.
  */
 
-import { DAEMON_FEATURES, type PhoneApproval } from '@ferretry/protocol';
+import type { PhoneApproval } from '@ferretry/protocol';
 import { useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { machineOffers } from '../../lib/daemon-health.ts';
 import { type InputClient, listPhoneApprovals, refusePhoneApproval } from '../../lib/input-api.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
-import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { PhoneApprovalCard } from './phone-approval-card.tsx';
 
 const POLL_MS = 2_000;
@@ -25,13 +23,10 @@ export interface PhoneApprovalHostProps {
 
 export function PhoneApprovalHost({ connection, approvalId, sessionId, onViewPage, onDone }: PhoneApprovalHostProps) {
   const createClient = useDaemonClient();
-  const health = useDaemonHealth(connection);
-  const offered = machineOffers(health, DAEMON_FEATURES.phoneApproval);
   const [found, setFound] = useState<{ readonly client: InputClient; readonly approval: PhoneApproval } | null>(null);
 
   useEffect(() => {
     setFound(null);
-    if (!offered) return undefined;
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const read = async (client: InputClient): Promise<void> => {
@@ -54,9 +49,9 @@ export function PhoneApprovalHost({ connection, approvalId, sessionId, onViewPag
       current = false;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [offered, connection, createClient, approvalId, sessionId]);
+  }, [connection, createClient, approvalId, sessionId]);
 
-  if (!offered || found === null) return null;
+  if (found === null) return null;
   return (
     <PhoneApprovalCard
       approval={found.approval}

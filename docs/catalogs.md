@@ -369,8 +369,7 @@ the current version, is the owner's and answers a ferret 403 `forbidden` (older 
 not something an agent needs). The `changes` and the version reads are the same bytes whoever asks. A version read reads the kept copy, and
 refuses a copy that no longer matches its digest.
 
-The feature flag is `catalogs.versions.1`: a daemon reports it when it answers the item routes above (making a version current and retiring one are `catalogs.versions.2`, see 3d-2 below), so the app
-dials them only where the machine says it can.
+The feature flag is `catalogs.versions.1`: a daemon reports it when it answers the item routes above (making a version current and retiring one are `catalogs.versions.2`, see 3d-2 below).
 
 ### Making a version current, retiring one, and the signed version list (catalogs 3d-2)
 
@@ -452,9 +451,8 @@ written, no revision raised) is not an audit entry. The action comes from the re
 unretire is recorded as an `unretire` that did not succeed, never as a retire; a body that cannot be read is recorded
 as `retirement`.
 
-The feature flag is `catalogs.versions.2`: a daemon reports it when it answers these three routes, so an owner app
-dials the two owner routes only where the machine says it can. A member app has no flag to read and uses the 404 rule
-above.
+The feature flag is `catalogs.versions.2`: a daemon reports it when it answers these three routes. A member app uses
+the 404 rule above.
 
 **For 3d-3 (recorded, not built).** An install chosen from the version list must keep the existing
 `catalog_revision_older` pin: an install chosen from a version list is checked against the manifest the list was
@@ -520,12 +518,10 @@ the daemon decides.
 
 ### The app (catalogs 3c-4)
 
-The skill and MCP rows (`features/catalogs/catalog-item-row.tsx`) use the two routes above. The app ships before the
-daemon, so it asks `GET /v1/health` once per read and uses a route only when the matching flag is there:
-`catalogs.quick-add.1` for one-tap Add, `catalogs.items.1` for the default catalog, **Make default** and **Add to another
-catalog…**. A machine that cannot be asked (the read fails) offers neither, and every row keeps the sheet it had before.
+The skill and MCP rows (`features/catalogs/catalog-item-row.tsx`) use the two routes above: one-tap Add (`catalogs.quick-add.1`) and the default catalog, **Make default** and **Add to
+another catalog…** (`catalogs.items.1`).
 
-- **Publish is one tap** when the machine says it can: the row's ⋯ item says where it goes, "Publish in ‹default
+- **Publish is one tap**: the row's ⋯ item says where it goes, "Publish in ‹default
   catalog›", or "Publish in a new catalog, ‹machine›’s skills" while no default exists yet. The app never claims a
   catalog the machine has not made. The tap sends `{source}` to `quick-add`; picking it again while one is in flight
   is ignored.
@@ -546,22 +542,20 @@ catalog…**. A machine that cannot be asked (the read fails) offers neither, an
 - **A refused tap** (`catalogs_full`, `items_full`, `source_ambiguous`, `source_refused` and the rest) opens the same
   sheet with the refusal in one sentence, so the person can pick a catalog by hand.
 - **Sharing › My catalogs** marks the default catalog with a **default** badge, in the list and on the detail. On the
-  detail of any other catalog, **⋯ › Make default** (`PATCH role: "default"`) makes it the default and says so; it is
-  shown only when the machine has `catalogs.items.1`.
+  detail of any other catalog, **⋯ › Make default** (`PATCH role: "default"`) makes it the default and says so.
 - **Add to another catalog…** (the row's ⋯, for an item already in a catalog) reads `GET /v1/catalog-items`, finds the
   item by source, and opens the sheet in **add-existing** mode: the catalogs that already list the item live are
   left out of the picker; the sheet opens already showing the **frozen current version** (a preview by `{itemId}`, no source read; Preview re-reads it); Add sends
   `{itemId, version}` with the version that was reviewed. If the item moved on (409 `current_changed`, or
   `changed_since_preview`) the sheet reads the frozen version again, shows it, and says so, and the person adds
-  again. Without `catalogs.items.1` the entry opens the ordinary sheet.
+  again.
 
 Versions are in the next section.
 
 ### The owner's versions in the app (catalogs 3d-4)
 
-The owner sees, compares, rolls back and retires versions from the app. It is built only where the machine
-advertises the flag: `catalogs.versions.1` for reading (the sheet, the changes, the changes in Publish update) and
-`catalogs.versions.2` for the three buttons that write. Without them today's screens stay as they were. Everything is
+The owner sees, compares, rolls back and retires versions from the app. Reading is `catalogs.versions.1` (the sheet, the changes, the
+changes in Publish update) and the three buttons that write are `catalogs.versions.2`. Everything is
 the owner's: it appears only on the surfaces that already show owner actions (the row's ⋯ on the skill and MCP rows,
 and Sharing › My catalogs), never to a member.
 
@@ -1406,8 +1400,8 @@ ACTIVE in this session … the add button is too overloaded").
   The ⋯ holds, in order:
   - **Open SKILL.md** or, on an MCP row, **Show details** / **Hide details** (so
     every MCP row has a ⋯);
-  - **Publish in ‹default catalog›**, one tap with Undo, on a machine with `catalogs.quick-add.1` ([The app (catalogs
-    3c-4)](#the-app-catalogs-3c-4)), or **Publish in a catalog…**, which opens the Add to catalog sheet. Once a catalog
+  - **Publish in ‹default catalog›**, one tap with Undo ([The app (catalogs
+    3c-4)](#the-app-catalogs-3c-4)). Once a catalog
     here holds the item, **Publish in another catalog…** too. Only for items this machine could share, never for what
     someone else's catalog installed;
   - **Uninstall**, for catalog installs only, with the same confirm ("Uninstall ‹item› from ‹place›?"). With several

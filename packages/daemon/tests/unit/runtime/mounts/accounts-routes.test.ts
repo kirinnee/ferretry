@@ -4,9 +4,6 @@ import {
   AccountListSchema,
   AccountLookAlikeSchema,
   AccountSummarySchema,
-  LoginEntryListSchema,
-  LoginHintListSchema,
-  PutLoginEntryRequestSchema,
   SignInSummarySchema,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -19,10 +16,9 @@ import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, GRANTED, human, MemoryLoginIndex, plantSeed, secretSubsystem } from './support.ts';
 
 /**
- * `/v1/accounts*` and the saved-login routes over the account store (r1-plan §1.5, §5 invariants 1, 19, 21; lead
- * amendments 3 and 4): no answer carries a password or a seed, every write — and the look-alike read — is the
- * owner's and is refused to a ferret before its body is read, the look-alike answer is handles only and leaves no
- * trace, and an older CLI's body that cannot say which sign-in it means is a 409, never a guess.
+ * `/v1/accounts*` over the account store (r1-plan §1.5, §5 invariants 1, 19, 21; lead amendments 3 and 4): no
+ * answer carries a password or a seed, every write — and the look-alike read — is the owner's and is refused to a
+ * ferret before its body is read, and the look-alike answer is handles only and leaves no trace.
  */
 
 const PASSWORD = 'hunter2-UNIQUE-pw';
@@ -65,7 +61,9 @@ async function world() {
   const answers: unknown[] = [];
   answers.push(await ok('PUT', '/v1/accounts/GITHUB', { label: 'GitHub', username: 'kirin', password: PASSWORD }));
   answers.push(
-    await ok('PUT', '/v1/secrets/logins/GITHUB', PutLoginEntryRequestSchema.parse({ match: ['github.com'] })),
+    await ok('POST', '/v1/accounts/GITHUB/sign-ins', {
+      place: { kind: 'site', domains: ['github.com'], match: ['github.com'] },
+    }),
   );
   // A seed is saved only through the passkey-bound commit now; the fixture plants it the way that commit does.
   await plantSeed(subsystem.accounts as NonNullable<SecretSubsystem['accounts']>, 'GITHUB', SEED);
@@ -105,8 +103,6 @@ describe('no account route answers a value', () => {
       await w.ok('GET', '/v1/accounts/hint?site=github.com'),
       await w.ok('GET', '/v1/accounts/hint?site=site.example'),
       await w.ok('GET', '/v1/accounts/look-alike'),
-      await w.ok('GET', '/v1/secrets/logins'),
-      await w.ok('GET', '/v1/secrets/logins/hint?site=github.com'),
       await w.ok('POST', '/v1/accounts/GOOGLE/rename', { to: 'GOOGLE_KIRIN' }),
       await w.ok('PUT', `/v1/accounts/sign-ins/${w.linked.id}`, { recipe: 'Continue with Google' }),
       await w.ok('POST', '/v1/accounts/GITHUB/apart', { from: 'GOOGLE_KIRIN' }),
@@ -115,9 +111,6 @@ describe('no account route answers a value', () => {
     should(AccountListSchema.safeParse(reads[0]).success).be.true();
     should(AccountHintListSchema.safeParse(reads[1]).success).be.true();
     should(AccountLookAlikeSchema.safeParse(reads[3]).success).be.true();
-    // The projection an older app and CLI parse, strictly.
-    should(LoginEntryListSchema.safeParse(reads[4]).success).be.true();
-    should(LoginHintListSchema.safeParse(reads[5]).success).be.true();
     // The index itself names seals, never values.
     should(leaks(w.index.document)).deepEqual([]);
   });
@@ -152,10 +145,6 @@ describe('every account write is the owner’s', () => {
       ['GET', '/v1/accounts/look-alike'],
       // The owner's listing too: which fields exist, which keys make codes (secrev-r1-2 L1). A ferret reads the hint.
       ['GET', '/v1/accounts'],
-      // The saved-login spellings of the same store.
-      ['PUT', '/v1/secrets/logins/GITHUB'],
-      ['POST', '/v1/secrets/logins/GITHUB/rename'],
-      ['DELETE', '/v1/secrets/logins/GITHUB'],
     ];
     for (const [method, path] of routes) {
       const response = dispatchAs(agentIn('ferret-1'), w.subsystem, method, path, method === 'GET' ? undefined : '{');
@@ -191,44 +180,6 @@ describe('these look like one account', () => {
   });
 });
 
-describe('an older client over the account store', () => {
-  it("should answer 409 account_has_sign_ins to an old CLI's change to where it signs in, and take its account fields", async () => {
-    const w = await world();
-    // `fy secret entry edit GITHUB --match github.com` and `--method github` from an older CLI: these bodies, exactly.
-    for (const body of [{ match: ['github.com'] }, { method: { kind: 'github' } }, { recipe: 'Open github.com' }]) {
-      const refused = await dispatch(
-        w.subsystem,
-        'PUT',
-        '/v1/secrets/logins/GITHUB',
-        PutLoginEntryRequestSchema.parse(body),
-      );
-      should(refused.status).equal(409);
-      const answer = (await jsonBody(refused)) as { code: string; error: string };
-      should(answer.code).equal('account_has_sign_ins');
-      should(answer.error).containEql('2 places');
-    }
-    const relabelled = (await w.ok('PUT', '/v1/secrets/logins/GITHUB', { label: 'GitHub (kirin)' })) as {
-      label: string;
-      match: string[];
-      domains: string[];
-    };
-    should(relabelled.label).equal('GitHub (kirin)');
-    should(relabelled.match).deepEqual(['github.com', 'ssh@build.example.com']);
-    should(relabelled.domains).deepEqual(['github.com']);
-  });
-
-  it('should keep the saved-login hint for an older app, built from the accounts', async () => {
-    const w = await world();
-    const hint = (await w.ok('GET', '/v1/secrets/logins/hint?site=site.example')) as {
-      hints: { id: string; role: string }[];
-    };
-    should(hint.hints.map(each => [each.id, each.role])).deepEqual([
-      ['SITE', 'site'],
-      ['GOOGLE', 'provider'],
-    ]);
-  });
-});
-
 describe('the account routes, the rest of their answers', () => {
   it('should remove a sign-in and an account, and say 404 for one that is gone', async () => {
     const w = await world();
@@ -243,12 +194,7 @@ describe('the account routes, the rest of their answers', () => {
   it('should let the owner answer a proposal on a sign-in, and refuse a proposal id that is not one', async () => {
     const w = await world();
     const recipes = w.subsystem.loginRecipes as NonNullable<SecretSubsystem['loginRecipes']>;
-    await recipes.propose(
-      'ferret-1',
-      { signIn: w.linked.id },
-      'Continue with Google, then pick kirin',
-      'it asks which account',
-    );
+    await recipes.propose('ferret-1', w.linked.id, 'Continue with Google, then pick kirin', 'it asks which account');
     const proposalId = (
       (await w.ok('GET', '/v1/accounts')) as { signIns: { id: string; proposals?: { id: string }[] }[] }
     ).signIns.find(signIn => signIn.id === w.linked.id)?.proposals?.[0]?.id as string;
@@ -297,7 +243,6 @@ describe('the account routes, the rest of their answers', () => {
       removeKey: askedAgain('DELETE', '/v1/accounts/:id/factors/:factor'),
       removeSignIn: askedAgain('DELETE', '/v1/accounts/sign-ins/:signIn'),
       removeAccount: askedAgain('DELETE', '/v1/accounts/:id'),
-      removeLogin: askedAgain('DELETE', '/v1/secrets/logins/:id'),
       changeSignIn: askedAgain('PUT', '/v1/accounts/sign-ins/:signIn'),
       addSignIn: askedAgain('POST', '/v1/accounts/:id/sign-ins'),
     }).eql({
@@ -305,7 +250,6 @@ describe('the account routes, the rest of their answers', () => {
       removeKey: true,
       removeSignIn: true,
       removeAccount: true,
-      removeLogin: true,
       changeSignIn: true,
       addSignIn: true,
     });
@@ -411,9 +355,9 @@ describe('what a ferret may read of the owner’s taps (secrev-1271 L2, secrev-1
       });
     const owner = JSON.stringify(await w.ok('GET', '/v1/accounts'));
 
-    // Act — as a ferret, on both hint routes
+    // Act — as a ferret, on the hint route
     const hints = await Promise.all(
-      ['/v1/accounts/hint?site=github.com', '/v1/secrets/logins/hint?site=github.com'].map(
+      ['/v1/accounts/hint?site=github.com'].map(
         async path => await dispatchAs(agentIn('s1'), w.subsystem, 'GET', path),
       ),
     );
@@ -421,7 +365,7 @@ describe('what a ferret may read of the owner’s taps (secrev-1271 L2, secrev-1
 
     // Assert — the owner sees the count; no ferret answer carries it, though each says what was observed
     should(owner).containEql('"tapped"');
-    should(hints.map(hint => hint.status)).eql([200, 200]);
+    should(hints.map(hint => hint.status)).eql([200]);
     for (const body of bodies) {
       should(body).containEql('"navigatedAway"');
       should(body).not.containEql('tapped');

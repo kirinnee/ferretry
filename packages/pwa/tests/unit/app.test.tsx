@@ -28,7 +28,6 @@ import {
   type AgendaSnapshot,
   CONVERSATION_IMPORT_PATH,
   DAEMON_CAPABILITIES,
-  DAEMON_FEATURES,
   DoctorReportSchema,
   type FyEvent,
   type FyEventStreamIdle,
@@ -85,7 +84,6 @@ import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
-import { healthOf } from '../support/health.ts';
 import { MemoryMemberKeyStore, testSubscription } from '../support/member-keys.ts';
 import { fetcherDaemons, newDaemonIdentity, relayCrypto, testDevice } from '../support/relay.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -284,6 +282,15 @@ const setPath = (path: string): void => window.history.replaceState({}, '', path
 let restoreFetch: (() => void) | undefined;
 const requestedUrls: string[] = [];
 
+/** A conversation's durable rows as the messages routes serve them. */
+const messageRows = (messages: readonly { readonly role: 'user' | 'assistant'; readonly text: string }[]) =>
+  messages.map((message, index) => ({
+    point: { v: 1 as const, byteOffset: index * 100, blockIndex: 0 },
+    role: message.role,
+    text: message.text,
+    selectionBinding: `binding-${index}`,
+  }));
+
 /**
  * The file read every session route's search provider makes, answered in the
  * shape the daemon actually sends.
@@ -441,7 +448,7 @@ interface ShellOptions {
   readonly webrtcRttMs?: (daemonId: DaemonId) => Promise<number | undefined>;
   /** Attention actions a daemon was sent (POSTs to a session's board), as `sessionId:body`. */
   readonly agendaPosts?: string[];
-  /** The hits `GET /v1/search` answers; its health also lists `work.search.1`. Absent: a machine without the search. */
+  /** The hits `GET /v1/search` answers; absent: an empty search. */
   readonly workHits?: readonly WorkHit[];
   /** Each session's conversation as the messages route serves it, in one page; absent: an empty one. */
   readonly messages?: (sessionId: string) => readonly { readonly role: 'user' | 'assistant'; readonly text: string }[];
@@ -670,13 +677,16 @@ const appStore = async (
         messages: async (sessionId: string) => ({
           v: 1 as const,
           sessionId,
-          messages: (options.messages?.(sessionId) ?? []).map((message, index) => ({
-            point: { v: 1 as const, byteOffset: index * 100, blockIndex: 0 },
-            role: message.role,
-            text: message.text,
-            selectionBinding: `binding-${index}`,
-          })),
+          messages: messageRows(options.messages?.(sessionId) ?? []),
           nextCursor: null,
+        }),
+        // The same rows from the tail, which is how an agenda item's History reads them: one page reaches the start.
+        messagesTail: async (sessionId: string) => ({
+          v: 1 as const,
+          sessionId,
+          messages: messageRows(options.messages?.(sessionId) ?? []),
+          nextCursor: null,
+          previousCursor: null,
         }),
         interrupt: async (sessionId: string) => sessionView(sessionId),
         pinSession: async (sessionId: string) => {
@@ -773,8 +783,6 @@ const appStore = async (
           if (path === '/v1/fleet/runtimes' && options.accounts !== undefined)
             return { format: 'version-2', runtimes: options.accounts };
           if (options.fleet?.[path] !== undefined) return options.fleet[path];
-          if (path === '/v1/health' && options.workHits !== undefined)
-            return healthOf('4.130.0', [DAEMON_FEATURES.workSearch]);
           // Settings › Machine › Conversations reads machine.yaml; an empty file is a valid answer.
           if (path.startsWith('/v1/config/file?')) return { text: '', etag: 'fixture' };
           return path === '/v1/doctor' ? doctorReport : {};
@@ -3100,7 +3108,7 @@ const paletteOpen = (container: HTMLElement): boolean =>
   container.querySelector('[role="dialog"], [data-command-palette]') !== null;
 
 describe('the command palette shortcut', () => {
-  it('searches the daemon’s cards and agenda from the finder on a machine whose health offers work.search.1', async () => {
+  it('searches the daemon’s cards and agenda from the finder', async () => {
     const project = '6f1c2f0e-3a4b-4c55-9d1e-0a7b8c9d1e2f';
     const hits: WorkHit[] = [
       {

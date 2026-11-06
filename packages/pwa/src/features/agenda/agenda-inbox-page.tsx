@@ -635,14 +635,7 @@ function GateWhy({
   readonly onCancel: () => void;
 }) {
   // The files ride the answer to the item's own session; the daemon carries them to the card's ferret.
-  const answerPorts = useMemo(
-    () =>
-      ports?.answerFiles === undefined
-        ? undefined
-        : { sendBackFiles: ports.answerFiles, uploadAttachment: ports.uploadAttachment },
-    [ports?.answerFiles, ports?.uploadAttachment],
-  );
-  const files = useSendBackFiles(answerPorts, daemon, card.view.config.id);
+  const files = useSendBackFiles(ports, daemon, card.view.config.id);
   if (daemon === undefined) return null;
   return (
     <div className="fy-inbox-gate-why" data-inbox-gate-why={card.key}>

@@ -243,14 +243,7 @@ const chat = async (
   });
   const view = await mount(
     <StoreProvider store={{ outbox } as unknown as AppStore}>
-      <Composer
-        api={api as never}
-        daemon={daemon}
-        draftStore={drafts}
-        openDraftStream={machine.open}
-        sessionId="s1"
-        sharedUploads={false}
-      />
+      <Composer api={api as never} daemon={daemon} draftStore={drafts} openDraftStream={machine.open} sessionId="s1" />
     </StoreProvider>,
   );
   await settle();

@@ -17,8 +17,6 @@ import { type DaemonHealthRead, machineOffers } from './daemon-health.ts';
  * read decided, and only a read that ANSWERED can change it.
  */
 export class AgendaWireDirectory {
-  /** Whether each read machine answers `GET /v1/search` (`work.search.1`); absent until its health answered. */
-  readonly #workSearch = new Map<DaemonId, boolean>();
   /** Whether each read machine raises gate items for cards waiting on the owner (`board.gate-items.1`); absent until its health answered. */
   readonly #gateItems = new Map<DaemonId, boolean>();
   /** Whether each read machine takes the card ask an answer names (`agenda.card-asks.1`); absent until its health answered. */
@@ -29,15 +27,6 @@ export class AgendaWireDirectory {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   };
-
-  /**
-   * Whether the machine searches cards and agenda items by words (`work.search.1`): `undefined` until its
-   * health answered, which keeps the finder and pickers as they were. Recorded from the health read the app
-   * already holds, so asking costs no request of its own.
-   */
-  workSearchOf(daemonId: DaemonId): boolean | undefined {
-    return this.#workSearch.get(daemonId);
-  }
 
   /**
    * Whether the machine raises a gate item for each card waiting on the owner's try (`board.gate-items.1`): the Inbox
@@ -60,20 +49,16 @@ export class AgendaWireDirectory {
     const cardAsks = machineOffers(read, DAEMON_FEATURES.agendaCardAsks);
     const cardAsksChanged = this.#cardAsks.get(daemonId) !== cardAsks;
     this.#cardAsks.set(daemonId, cardAsks);
-    const searches = machineOffers(read, DAEMON_FEATURES.workSearch);
-    const searchChanged = this.#workSearch.get(daemonId) !== searches;
-    this.#workSearch.set(daemonId, searches);
     const gates = machineOffers(read, DAEMON_FEATURES.boardGateItems);
     const gatesChanged = this.#gateItems.get(daemonId) !== gates;
     this.#gateItems.set(daemonId, gates);
-    if (searchChanged || gatesChanged || cardAsksChanged) this.#notify();
+    if (gatesChanged || cardAsksChanged) this.#notify();
   }
 
   clearDaemon(daemonId: DaemonId): void {
     const hadCardAsks = this.#cardAsks.delete(daemonId);
-    const hadSearch = this.#workSearch.delete(daemonId);
     const hadGates = this.#gateItems.delete(daemonId);
-    if (hadSearch || hadGates || hadCardAsks) this.#notify();
+    if (hadGates || hadCardAsks) this.#notify();
   }
 
   #notify(): void {

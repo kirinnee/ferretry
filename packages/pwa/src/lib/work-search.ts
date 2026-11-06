@@ -2,9 +2,6 @@
  * WORK SEARCH ON THE WIRE, one paired daemon at a time: `GET /v1/search`, parsed with the protocol's own
  * schema (parse, don't validate), plus the small pure rules the finder and the composer pickers share.
  *
- * THE APP SHIPS BEFORE THE DAEMON. A machine that does not list `DAEMON_FEATURES.workSearch` answers `404`,
- * so {@link workSearchPortFor} hands out a port only for a machine known to offer it; every surface keeps its
- * old behaviour exactly when it gets `undefined`.
  */
 
 import { type WorkHit, type WorkKind, type WorkSearchResponse, WorkSearchResponseSchema } from '@ferretry/protocol';
@@ -60,20 +57,9 @@ export const fetchWorkSearch = async (
 };
 
 /** The search port of one daemon, over the carrier its traffic rides (`useDaemonFetch`). */
-const createWorkSearchPort = (daemon: DaemonConnection, fetcher: DaemonFetch): WorkSearchPort => ({
+export const createWorkSearchPort = (daemon: DaemonConnection, fetcher: DaemonFetch): WorkSearchPort => ({
   search: (request, signal) => fetchWorkSearch(daemon, request, fetcher, signal),
 });
-
-/**
- * The port for a machine, or `undefined` unless its health SAID it can search (`offers === true`). A read
- * that has not finished or failed offers nothing: the app cannot tell an old machine from a slow one, so it
- * keeps the older behaviour.
- */
-export const workSearchPortFor = (
-  offers: boolean | undefined,
-  daemon: DaemonConnection,
-  fetcher: DaemonFetch,
-): WorkSearchPort | undefined => (offers === true ? createWorkSearchPort(daemon, fetcher) : undefined);
 
 /** How long a keystroke waits for the next before it asks the daemon. */
 export const WORK_SEARCH_DEBOUNCE_MS = 120;

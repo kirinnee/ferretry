@@ -1,11 +1,11 @@
 /**
- * The live, daemon-bound pre-approval rules (`/v1/copy-rules`). Like the saved logins it owns no module cache: the
+ * The live, daemon-bound pre-approval rules (`/v1/copy-rules`). It owns no module cache: the
  * rules belong to a machine, the loaded list is stamped with the daemon it came from, and a load that failed is a
  * stated refusal rather than "no rules".
  *
- * On a machine that stages paste rules (`copy-rules.passkey.1`, owner decision !A244), making one is staged, approved
- * with a passkey bound to that one rule whose prompt lists the daemon's rows, and only then committed; the rules a
- * machine staged (`fy copy rules add`) wait here for the same passkey. An older machine keeps the one-step add.
+ * Adding a paste rule always stages it (owner decision !A244): it is approved with a passkey bound to that one rule
+ * whose prompt lists the daemon's rows, and only then committed; the rules a machine staged (`fy copy rules add`) wait
+ * here for the same passkey.
  */
 
 import type {
@@ -19,7 +19,6 @@ import type {
 import { useCallback, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
-  addRule,
   changeCopySettings,
   type CopyClient,
   confirmPasteRuleStage,
@@ -63,11 +62,11 @@ const loadedFrom = (
 });
 
 /** Every read, side by side. Waiting stages that cannot be read show none: the add still stages and asks. */
-const readAll = async (client: CopyClient, staging: boolean) =>
+const readAll = async (client: CopyClient) =>
   await Promise.all([
     listRules(client),
     readCopySettings(client),
-    staging ? listPasteRuleStages(client).catch((): readonly PasteRuleStaged[] => []) : [],
+    listPasteRuleStages(client).catch((): readonly PasteRuleStaged[] => []),
   ] as const);
 
 const message = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
@@ -75,13 +74,10 @@ const message = (cause: unknown): string => (cause instanceof Error ? cause.mess
 export function CopyRulesSurface({
   connection,
   createClient,
-  staging = false,
   askPasskey,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient: CopyClientFactory;
-  /** The machine makes a paste rule only with a passkey bound to it (`copy-rules.passkey.1`). */
-  readonly staging?: boolean;
   /** Asks for the `approve-paste-rule` passkey bound to a stage; absent where this device cannot ask. */
   readonly askPasskey?: PasteRuleAsk;
 }) {
@@ -102,7 +98,7 @@ export function CopyRulesSurface({
     setFailure(null);
     void createClient(connection)
       .then(async next => {
-        const [list, settings, waiting] = await readAll(next, staging);
+        const [list, settings, waiting] = await readAll(next);
         if (!current) return;
         setClient(next);
         setLoaded(loadedFrom(connection.daemonId, list, settings, waiting));
@@ -113,7 +109,7 @@ export function CopyRulesSurface({
     return () => {
       current = false;
     };
-  }, [connection, createClient, staging]);
+  }, [connection, createClient]);
 
   /** Runs one change, re-reads so the screen is what the daemon holds, and says whether it took. */
   const write = useCallback(
@@ -123,7 +119,7 @@ export function CopyRulesSurface({
       setError(null);
       try {
         const done = await action(client);
-        setLoaded(loadedFrom(connection.daemonId, ...(await readAll(client, staging))));
+        setLoaded(loadedFrom(connection.daemonId, ...(await readAll(client))));
         return done !== false;
       } catch (cause) {
         setError(message(cause));
@@ -132,7 +128,7 @@ export function CopyRulesSurface({
         setBusy(false);
       }
     },
-    [client, connection.daemonId, staging],
+    [client, connection.daemonId],
   );
 
   /** One staged change through its passkey: made, or nothing approved (a dismissed prompt is not an error). */
@@ -145,11 +141,8 @@ export function CopyRulesSurface({
     [askPasskey],
   );
   const add = useCallback(
-    (rule: PasteRuleCreate) =>
-      write(async next =>
-        staging ? await approve(next, await stagePasteRule(next, rule)) : await addRule(next, rule),
-      ),
-    [write, staging, approve],
+    (rule: PasteRuleCreate) => write(async next => await approve(next, await stagePasteRule(next, rule))),
+    [write, approve],
   );
   const approveWaiting = useCallback(
     (staged: PasteRuleStaged) => write(next => approve(next, staged, true)),
@@ -160,16 +153,16 @@ export function CopyRulesSurface({
     [write],
   );
   const remove = useCallback((id: string) => write(next => removeRule(next, id)), [write]);
-  // Turning profile targets ON widens every terminal rule it could match: staged with its own passkey on a machine that
-  // stages paste changes (secrev-1334 M2). Turning it off is the one-step write.
+  // Turning profile targets ON widens every terminal rule it could match: staged with its own passkey (secrev-1334 M2).
+  // Turning it off is the one-step write.
   const changeSettings = useCallback(
     (settings: PasteRuleSettings) =>
       write(async next =>
-        staging && settings.allowProfileTargets
+        settings.allowProfileTargets
           ? await approve(next, await stageProfileTargets(next))
           : await changeCopySettings(next, settings),
       ),
-    [write, staging, approve],
+    [write, approve],
   );
 
   if (failure !== null && failure.daemonId === connection.daemonId)

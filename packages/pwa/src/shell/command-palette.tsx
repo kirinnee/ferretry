@@ -152,11 +152,10 @@ export interface CommandPaletteProps {
    */
   readonly touchAffected?: boolean;
   /**
-   * The daemon's work search, bound to this daemon. Supplied only for a machine that offers it
-   * (`DAEMON_FEATURES.workSearch`): without it the palette has no Cards or Agenda groups and no filter
-   * chips, exactly as before the search existed.
+   * The daemon's work search, bound to this daemon. Without it (no connection) the palette has no Cards or
+   * Agenda groups and no filter chips.
    */
-  readonly workSearch?: WorkSearchPort;
+  readonly workSearch?: WorkSearchPort | undefined;
   /** Project id to name, so a card hit names its project instead of showing its id. */
   readonly workProjectNames?: ReadonlyMap<string, string>;
 }

@@ -319,9 +319,6 @@ A ferret keeps raising `browser_request_input` / `terminal_request_input` as usu
 sign-in or paste it covers is filled for the ferret, and anything no line covers still asks the owner
 ([secure-copy.md](secure-copy.md), "Task plans").
 
-The old `secure.preapprove { items }` still works for an older pane: it is read as one-use paste lines through the
-same call, and answers the old `plan` shape. It is no longer listed in MCP.
-
 **The owner answers at the machine with `fy plan`** (`fy copy plan` is the same command), or on the plan's card:
 
 | Command                                                                                              | Does                                                        |

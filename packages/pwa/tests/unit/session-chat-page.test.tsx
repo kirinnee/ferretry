@@ -1,11 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import {
-  DAEMON_FEATURES,
-  type HarnessDialog,
-  MCP_OAUTH_PATH,
-  type PermissionRequest,
-  type SessionView,
-} from '@ferretry/protocol';
+import { type HarnessDialog, MCP_OAUTH_PATH, type PermissionRequest, type SessionView } from '@ferretry/protocol';
+import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
 import { type FyApiClient, FyHttpError } from '@ferretry/protocol/client';
 import { Copy } from 'lucide-react';
 import { type ComponentProps, cloneElement, type ReactElement } from 'react';
@@ -45,7 +40,6 @@ import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-cloc
 import type { TranscriptEntry } from '../../src/lib/session-screens.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
-import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
 import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -83,7 +77,6 @@ import { LiveVoiceSettingsStore } from '../../src/lib/voice-chat/live-settings.t
 import { createReadAloud } from '../../src/lib/voice-chat/read-aloud.ts';
 import { createSpeechSynthesisSpeaker } from '../../src/lib/voice-chat/speech-synthesis.ts';
 import { FakeSynth, FakeUtterance } from '../support/fake-speech.ts';
-import { healthOf } from '../support/health.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
 import { settleUntil } from '../support/settle.ts';
@@ -1668,16 +1661,15 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('the composer searches the daemon’s work only on a machine whose health offers it, and names each card’s project', async () => {
+  test('the composer searches the daemon’s work and names each card’s project', async () => {
     const current = sessionView('shared', { config: { projectId: PROJECT } });
-    const wires = new AgendaWireDirectory();
     const board = new DaemonBoardStore(
       fakePort({
         projects: async () => [{ id: PROJECT, name: 'Relay', path: '/work/relay', laneSet: laneSetFor() }],
       }),
       fakeEnvironment(),
     );
-    const store = { agendaWire: wires, board } as unknown as AppStore;
+    const store = { agendaWire: new AgendaWireDirectory(), board } as unknown as AppStore;
     const mountPage = () =>
       renderSessionChatPage(
         <SessionChatPage
@@ -1694,23 +1686,14 @@ describe('SessionChatPage', () => {
         store,
       );
 
-    const without = mountPage();
+    const page = mountPage();
     try {
       await flush();
-      expect(without.root.findByType(Composer).props.autocompleteWorkSearch).toBeUndefined();
-    } finally {
-      run(() => without.unmount());
-    }
-
-    wires.note(alpha.daemonId, { kind: 'read', health: healthOf('4.130.0', [DAEMON_FEATURES.workSearch]) });
-    const offered = mountPage();
-    try {
-      await flush();
-      const props = offered.root.findByType(Composer).props;
+      const props = page.root.findByType(Composer).props;
       expect(props.autocompleteWorkSearch).toBeDefined();
       expect(props.autocompleteProjectNames.get(PROJECT)).toBe('Relay');
     } finally {
-      run(() => offered.unmount());
+      run(() => page.unmount());
     }
   });
 

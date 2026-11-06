@@ -1,6 +1,5 @@
 import { randomBytes } from 'node:crypto';
 import {
-  type AccountId,
   type AuditDetail,
   type Place,
   placeKeys,
@@ -98,10 +97,9 @@ export class SignInRuleSuggestionError extends Error {
   }
 }
 
-/** What a ferret asks: one sign-in (or, in the older spelling, the account whose only sign-in it is) and why. */
+/** What a ferret asks: one sign-in and why. */
 export interface SignInRuleSuggestionAsk {
-  readonly signIn?: SignInId | undefined;
-  readonly login?: AccountId | undefined;
+  readonly signIn: SignInId;
   readonly why: string;
 }
 
@@ -275,7 +273,7 @@ export class SignInRuleSuggestions {
 
   /** The same decision, codes and words as a recipe's (`proposalTarget`): one `account.propose`, one answer. */
   #resolve(listing: RuleListing, ask: SignInRuleSuggestionAsk): SignInSummary {
-    const found = proposalTarget(listing, ask);
+    const found = proposalTarget(listing, ask.signIn);
     if (!found.ok) throw new SignInRuleSuggestionError(found.code, found.words);
     return found.signIn;
   }

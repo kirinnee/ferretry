@@ -262,13 +262,12 @@ describe('opening an item here (the owner opened it in the app)', () => {
   /** The page's clock at the open. */
   const OPENED_AT = 1_000;
 
-  const world = (options: { features?: readonly string[]; seen?: () => Promise<PushSeenResponse> } = {}) => {
+  const world = (options: { seen?: () => Promise<PushSeenResponse> } = {}) => {
     const registration = new FakeRegistration({ [itemTag]: 1, [stopTag]: 1 });
     const told: string[][] = [];
     const opened = agendaItemOpenedHandler({
       registration: async () => registration,
       now: () => OPENED_AT,
-      health: async () => ({ features: options.features ?? ['push.clear.1'] }),
       seen: async (daemon, sessionId, agendaId) => {
         told.push([daemon.daemonId, sessionId, agendaId]);
         return await (options.seen ?? (async () => ({ cleared: true, tags: ['attention-session-1'] })))();
@@ -356,7 +355,6 @@ describe('opening an item here (the owner opened it in the app)', () => {
     registration.stamps[stopTag] = Date.now() + 60_000;
     const opened = agendaItemOpenedHandler({
       registration: async () => registration,
-      health: async () => ({ features: ['push.clear.1'] }),
       seen: async () => ({ cleared: true, tags: ['attention-session-1'] }),
     });
 
@@ -388,19 +386,6 @@ describe('opening an item here (the owner opened it in the app)', () => {
     expect(told).toHaveLength(2);
   });
 
-  it('should close the item’s line but tell nothing to a machine that does not list push.clear.1', async () => {
-    // Arrange
-    const { registration, told, opened } = world({ features: [] });
-
-    // Act
-    const result = await opened(connection, 'session-1', 'A3');
-
-    // Assert
-    expect(result).toEqual({ closed: 1, told: false });
-    expect(told).toEqual([]);
-    expect(registration.closed).toEqual([itemTag]);
-  });
-
   it('should keep what it closed when the machine cannot be told', async () => {
     // Arrange
     const { opened } = world({
@@ -419,7 +404,6 @@ describe('opening an item here (the owner opened it in the app)', () => {
       registration: async () => {
         throw new Error('no service worker container');
       },
-      health: async () => ({ features: ['push.clear.1'] }),
       seen: async () => ({ cleared: true, tags: ['attention-session-1'] }),
     });
     const refusing = agendaItemOpenedHandler({
@@ -428,7 +412,6 @@ describe('opening an item here (the owner opened it in the app)', () => {
           throw new Error('notifications are blocked');
         },
       }),
-      health: async () => ({ features: ['push.clear.1'] }),
       seen: async () => ({ cleared: true, tags: ['attention-session-1'] }),
     });
 
@@ -442,7 +425,6 @@ describe('opening an item here (the owner opened it in the app)', () => {
     const told: string[] = [];
     const opened = agendaItemOpenedHandler({
       registration: async () => null,
-      health: async () => ({ features: ['push.clear.1'] }),
       seen: async (_daemon, _sessionId, agendaId) => {
         told.push(agendaId);
         return { cleared: false, tags: [] };

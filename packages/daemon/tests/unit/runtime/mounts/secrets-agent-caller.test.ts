@@ -6,6 +6,7 @@ import type { RouteContext } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { type SecretSubsystem, secretRoutes } from '../../../../src/lib/runtime/mounts/secrets.ts';
 import { jsonBody, request } from '../../api/support.ts';
+import { putSavedLogin } from '../../secrets/saved-login-fixture.ts';
 import { EchoSecretChildRunner, secretSubsystem } from './support.ts';
 
 /**
@@ -138,21 +139,24 @@ describe('who may write the secret store', () => {
         should(answer.status).equal(403);
       });
 
-      it('should be refused every other way into the store: saved logins, importing a bundle, and sealing values out', async () => {
+      it('should be refused every other way into the store: accounts, importing a bundle, and sealing values out', async () => {
         const subsystem = secretSubsystem();
-        await subsystem.logins?.put('GITHUB', { label: 'GitHub', password: OLD });
+        await putSavedLogin(subsystem.accounts as NonNullable<typeof subsystem.accounts>, 'GITHUB', {
+          label: 'GitHub',
+          password: OLD,
+        });
 
         const answers = [
-          await drive(subsystem, caller, 'PUT', '/v1/secrets/logins/GITHUB', { password: POISON }),
-          await drive(subsystem, caller, 'POST', '/v1/secrets/logins/GITHUB/rename', { to: 'EVIL' }),
-          await drive(subsystem, caller, 'DELETE', '/v1/secrets/logins/GITHUB'),
+          await drive(subsystem, caller, 'PUT', '/v1/accounts/GITHUB', { password: POISON }),
+          await drive(subsystem, caller, 'POST', '/v1/accounts/GITHUB/rename', { to: 'EVIL' }),
+          await drive(subsystem, caller, 'DELETE', '/v1/accounts/GITHUB'),
           await drive(subsystem, caller, 'POST', '/v1/secrets/imports'),
           await drive(subsystem, caller, 'POST', '/v1/secrets/imports/imp_x', { bundle: {} }),
           await drive(subsystem, caller, 'POST', '/v1/secrets/exports/imp_x', { offer: {}, names: ['TOKEN'] }),
         ];
 
         should(answers.map(answer => [answer.status, answer.code])).deepEqual(answers.map(() => [403, 'forbidden']));
-        should((await subsystem.logins?.list())?.map(entry => entry.id)).deepEqual(['GITHUB']);
+        should((await subsystem.accounts?.list())?.accounts.map(entry => entry.id)).deepEqual(['GITHUB']);
       });
 
       it('should still list the names and spend a secret by name', async () => {
@@ -193,15 +197,15 @@ describe('who may write the secret store', () => {
         should(await names(subsystem)).deepEqual([]);
       });
 
-      it('should create, rename and delete a saved login', async () => {
+      it('should create, rename and delete an account', async () => {
         const subsystem = secretSubsystem();
 
-        const put = await drive(subsystem, caller, 'PUT', '/v1/secrets/logins/GITHUB', {
+        const put = await drive(subsystem, caller, 'PUT', '/v1/accounts/GITHUB', {
           label: 'GitHub',
           password: OLD,
         });
-        const renamed = await drive(subsystem, caller, 'POST', '/v1/secrets/logins/GITHUB/rename', { to: 'GH' });
-        const removed = await drive(subsystem, caller, 'DELETE', '/v1/secrets/logins/GH');
+        const renamed = await drive(subsystem, caller, 'POST', '/v1/accounts/GITHUB/rename', { to: 'GH' });
+        const removed = await drive(subsystem, caller, 'DELETE', '/v1/accounts/GH');
 
         should([put.status, renamed.status, removed.status]).deepEqual([200, 200, 200]);
       });

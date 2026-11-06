@@ -80,7 +80,7 @@ describe('the host', () => {
   it('draws nothing for an item with no daemon-set taskPlan ref, and reads no plan for it', async () => {
     const { client, calls } = fakeClient({ 'GET /v1/task-plans': { plans: [mixedPlan()] } });
     const mounted = await mount(
-      <TaskPlanHost connection={connection} createClient={async () => client} item={{}} offered sessionId={SESSION} />,
+      <TaskPlanHost connection={connection} createClient={async () => client} item={{}} sessionId={SESSION} />,
     );
     try {
       expect(mounted.container.querySelector('[data-task-plan]')).toBeNull();
@@ -97,32 +97,11 @@ describe('the host', () => {
         connection={connection}
         createClient={async () => client}
         item={{ taskPlan: { planId: PLAN_ID } }}
-        offered
         sessionId={SESSION}
       />,
     );
     try {
       expect(mounted.container.querySelector(`[data-task-plan="${PLAN_ID}"]`)).not.toBeNull();
-    } finally {
-      await mounted.unmount();
-    }
-  });
-
-  it('keeps the paste-plan card on a machine that does not offer task-plan.1', async () => {
-    const { client, calls } = fakeClient({ 'GET /v1/copy-plans': { plans: [] } });
-    const mounted = await mount(
-      <TaskPlanHost
-        connection={connection}
-        createClient={async () => client}
-        item={{ taskPlan: { planId: PLAN_ID }, copyPlan: { planId: PLAN_ID } }}
-        offered={false}
-        sessionId={SESSION}
-      />,
-    );
-    try {
-      expect(mounted.container.querySelector('[data-task-plan]')).toBeNull();
-      expect(calls.some(call => call.path === '/v1/task-plans')).toBe(false);
-      expect(calls.some(call => call.path === '/v1/copy-plans')).toBe(true);
     } finally {
       await mounted.unmount();
     }
@@ -145,7 +124,6 @@ describe('the host', () => {
         connection={connection}
         createClient={async () => client}
         item={{ taskPlan: { planId: PLAN_ID } }}
-        offered
         sessionId={SESSION}
       />,
     );
@@ -253,7 +231,6 @@ describe('the host, around the card', () => {
         connection={connection}
         createClient={async () => client}
         item={itemRef}
-        offered
         onDone={() => {
           done += 1;
         }}
@@ -281,13 +258,7 @@ describe('the host, around the card', () => {
       [`DELETE ${PLAN_PATH}/approval/${STAGE}`]: { stage: STAGE, dropped: true },
     });
     const mounted = await mount(
-      <TaskPlanHost
-        connection={connection}
-        createClient={async () => client}
-        item={itemRef}
-        offered
-        sessionId={SESSION}
-      />,
+      <TaskPlanHost connection={connection} createClient={async () => client} item={itemRef} sessionId={SESSION} />,
     );
     try {
       await click(mounted.container, '[data-task-plan-machine-deny]');
@@ -305,13 +276,7 @@ describe('the host, around the card', () => {
       [`DELETE ${PLAN_PATH}/approval/${STAGE}`]: new Error('the machine is away'),
     });
     const mounted = await mount(
-      <TaskPlanHost
-        connection={connection}
-        createClient={async () => client}
-        item={itemRef}
-        offered
-        sessionId={SESSION}
-      />,
+      <TaskPlanHost connection={connection} createClient={async () => client} item={itemRef} sessionId={SESSION} />,
     );
     try {
       await click(mounted.container, '[data-task-plan-machine-deny]');
@@ -328,13 +293,7 @@ describe('the host, around the card', () => {
       'GET /v1/task-plans': { plans: [stagedPlan()] },
     });
     const mounted = await mount(
-      <TaskPlanHost
-        connection={connection}
-        createClient={async () => client}
-        item={itemRef}
-        offered
-        sessionId={SESSION}
-      />,
+      <TaskPlanHost connection={connection} createClient={async () => client} item={itemRef} sessionId={SESSION} />,
     );
     try {
       expect(mounted.container.querySelector('[data-task-plan-state="machine-staged"]')).not.toBeNull();
@@ -351,13 +310,7 @@ describe('the host, around the card', () => {
       [`POST ${PLAN_PATH}/revoke`]: revoked,
     });
     const mounted = await mount(
-      <TaskPlanHost
-        connection={connection}
-        createClient={async () => client}
-        item={itemRef}
-        offered
-        sessionId={SESSION}
-      />,
+      <TaskPlanHost connection={connection} createClient={async () => client} item={itemRef} sessionId={SESSION} />,
     );
     try {
       await click(mounted.container, '[data-task-plan-revoke="0"]');
@@ -374,13 +327,7 @@ describe('the host, around the card', () => {
       [`POST ${PLAN_PATH}/revoke`]: new Error('could not reach the machine'),
     });
     const mounted = await mount(
-      <TaskPlanHost
-        connection={connection}
-        createClient={async () => client}
-        item={itemRef}
-        offered
-        sessionId={SESSION}
-      />,
+      <TaskPlanHost connection={connection} createClient={async () => client} item={itemRef} sessionId={SESSION} />,
     );
     try {
       await click(mounted.container, '[data-task-plan-revoke="0"]');
@@ -403,7 +350,6 @@ describe('the host, around the card', () => {
         connection={connection}
         createClient={async () => client}
         item={itemRef}
-        offered
         sessionId={SESSION}
       />,
     );
@@ -421,13 +367,7 @@ describe('the host, around the card', () => {
   it('draws nothing while the plan is not on the machine, and not for another session’s plan', async () => {
     const { client } = fakeClient({ 'GET /v1/task-plans': { plans: [mixedPlan()] } });
     const mounted = await mount(
-      <TaskPlanHost
-        connection={connection}
-        createClient={async () => client}
-        item={itemRef}
-        offered
-        sessionId="other"
-      />,
+      <TaskPlanHost connection={connection} createClient={async () => client} item={itemRef} sessionId="other" />,
     );
     try {
       expect(mounted.container.querySelector('[data-task-plan]')).toBeNull();
@@ -448,7 +388,6 @@ describe('the host, around the card', () => {
         connection={connection}
         createClient={async () => client}
         item={{ taskPlan: { planId: PLAN_ID }, copyPlan: { planId: PLAN_ID } }}
-        offered
         sessionId={SESSION}
       />,
     );
@@ -472,13 +411,7 @@ describe('the host, around the card', () => {
     const forbidden = Object.assign(new Error('forbidden'), { status: 403 });
     const { client } = fakeClient({ 'GET /v1/task-plans': forbidden });
     const mounted = await mount(
-      <TaskPlanHost
-        connection={connection}
-        createClient={async () => client}
-        item={itemRef}
-        offered
-        sessionId={SESSION}
-      />,
+      <TaskPlanHost connection={connection} createClient={async () => client} item={itemRef} sessionId={SESSION} />,
     );
     try {
       expect(must(mounted.container.querySelector('[data-task-plan-forbidden]'), 'note').textContent).toBe(
@@ -493,13 +426,7 @@ describe('the host, around the card', () => {
     holdLongTimers();
     const { client, calls } = fakeClient({ 'GET /v1/task-plans': new Error('offline') });
     const mounted = await mount(
-      <TaskPlanHost
-        connection={connection}
-        createClient={async () => client}
-        item={itemRef}
-        offered
-        sessionId={SESSION}
-      />,
+      <TaskPlanHost connection={connection} createClient={async () => client} item={itemRef} sessionId={SESSION} />,
     );
     try {
       expect(mounted.container.querySelector('[data-task-plan]')).toBeNull();
@@ -520,7 +447,6 @@ describe('the host, around the card', () => {
         connection={connection}
         createClient={async () => Promise.reject(new Error('no client'))}
         item={itemRef}
-        offered
         sessionId={SESSION}
       />,
     );
@@ -539,7 +465,6 @@ describe('the host, around the card', () => {
         connection={connection}
         createClient={async () => client}
         item={itemRef}
-        offered
         sessionId={SESSION}
       />,
     );
@@ -549,13 +474,7 @@ describe('the host, around the card', () => {
       await named.unmount();
     }
     const unnamed = await mount(
-      <TaskPlanHost
-        connection={connection}
-        createClient={async () => client}
-        item={itemRef}
-        offered
-        sessionId={SESSION}
-      />,
+      <TaskPlanHost connection={connection} createClient={async () => client} item={itemRef} sessionId={SESSION} />,
     );
     try {
       expect(unnamed.container.textContent).toContain('The ferret says');

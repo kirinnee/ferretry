@@ -3,7 +3,6 @@ import {
   type AgendaId,
   type InputRaise,
   type InputTargetFacts,
-  PutLoginEntryRequestSchema,
   type SignInId,
   TASK_PLAN_MISS_AGENT_NOTE,
 } from '@ferretry/protocol';
@@ -21,6 +20,7 @@ import { SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
 import { type PlanGrantLines, PlanSignInGrants } from '../../../src/lib/sign-in-grants/plans.ts';
 import type { ApprovedSignInLine } from '../../../src/lib/task-plans/service.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments, plantSeed } from '../runtime/mounts/support.ts';
+import { putSavedLogin } from '../secrets/saved-login-fixture.ts';
 
 /**
  * R3a-4, TASK PLAN FILLS through the REAL input service and the REAL account store (fake cipher, memory files): a card a
@@ -280,10 +280,12 @@ type Harness = ReturnType<typeof harness>;
 
 /** GitHub · kirinnee, a password sign-in at github.com, with a saved password. */
 async function github(h: Harness, label = 'GITHUB', match: readonly string[] = ['github.com']): Promise<SignInId> {
-  await h.directory.put(
-    label,
-    PutLoginEntryRequestSchema.parse({ label: 'GitHub', username: USERNAME, password: PASSWORD, match: [...match] }),
-  );
+  await putSavedLogin(h.directory, label, {
+    label: 'GitHub',
+    username: USERNAME,
+    password: PASSWORD,
+    match: [...match],
+  });
   return await signInOf(h, label);
 }
 
@@ -498,16 +500,13 @@ describe('every check holds or nothing is typed (the owner is asked as usual)', 
     const h = harness({
       facts: loginPage({ origin }, [field('user', { frameOrigin: origin }), field('pass', { frameOrigin: origin })]),
     });
-    await h.directory.put(
-      'GITHUB',
-      PutLoginEntryRequestSchema.parse({
-        label: 'GitHub',
-        username: USERNAME,
-        password: PASSWORD,
-        match: ['github.com', 'gist.github.com'],
-        domains: ['github.com'],
-      }),
-    );
+    await putSavedLogin(h.directory, 'GITHUB', {
+      label: 'GitHub',
+      username: USERNAME,
+      password: PASSWORD,
+      match: ['github.com', 'gist.github.com'],
+      domains: ['github.com'],
+    });
     await approve(h, await signInOf(h, 'GITHUB'));
     should(h.lines[0]?.pins.placeKeys).deepEqual(['github.com']);
     const { view, request } = await raised(h);
@@ -568,10 +567,9 @@ describe('the form and the place are pinned', () => {
     const h = harness();
     const signIn = await github(h);
     await approve(h, signIn);
-    await h.directory.put(
-      'GITHUB',
-      PutLoginEntryRequestSchema.parse({ label: 'GitHub', match: ['github.com', 'gh.example'] }),
-    );
+    await h.directory.accounts.putSignIn(signIn, {
+      place: { kind: 'site', domains: ['github.com', 'gh.example'], match: ['github.com'] },
+    });
     const { request } = await raised(h);
     should(h.writes).deepEqual([]);
     should(request?.preapproval?.reason).equal('place-changed');
@@ -879,10 +877,7 @@ describe('a terminal line is for sudo, su or doas running setuid root', () => {
   };
 
   async function sudoAccount(h: Harness): Promise<SignInId> {
-    await h.directory.put(
-      'KIRIN',
-      PutLoginEntryRequestSchema.parse({ label: 'Kirin', password: PASSWORD, match: ['sudo@kirin-box'] }),
-    );
+    await putSavedLogin(h.directory, 'KIRIN', { label: 'Kirin', password: PASSWORD, match: ['sudo@kirin-box'] });
     return await signInOf(h, 'KIRIN');
   }
 

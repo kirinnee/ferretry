@@ -1,11 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import {
-  type AccountList,
-  AccountListSchema,
-  DAEMON_FEATURES,
-  LOGIN_TOTP_WARNING,
-  type TwoFactorStageId,
-} from '@ferretry/protocol';
+import { type AccountList, AccountListSchema, LOGIN_TOTP_WARNING, type TwoFactorStageId } from '@ferretry/protocol';
 import { AccountsSurface } from '../../../src/features/accounts/accounts-surface.tsx';
 import { DaemonSettingsFrame } from '../../../src/features/settings/daemon-settings-frame.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
@@ -27,8 +21,7 @@ import {
 } from '../../support/accounts-fixtures.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { click, settle, typeInto } from '../../support/dom-form.ts';
-import { healthOf } from '../../support/health.ts';
-import { fakeClient, logins } from '../../support/input-fixtures.ts';
+import { fakeClient } from '../../support/input-fixtures.ts';
 import { ruleClient } from '../../support/sign-in-rule-client.ts';
 
 const CONNECTION = daemonConnection({ daemonId: 'workshop', baseUrl: 'https://workshop.example.test', deviceId: 't1' });
@@ -39,7 +32,7 @@ afterEach(async () => {
 
 const open = async (
   world: World = {},
-  over: { addKey?: (stage: TwoFactorStageId, words: string) => Promise<boolean>; withKeys?: boolean } = {},
+  over: { addKey?: (stage: TwoFactorStageId, words: string) => Promise<boolean> } = {},
 ) => {
   const fake = fakeClient(answer(world));
   const view = await mount(
@@ -47,7 +40,6 @@ const open = async (
       connection={CONNECTION}
       createClient={async () => fake.client}
       {...(over.addKey === undefined ? {} : { addKey: over.addKey })}
-      {...(over.withKeys === undefined ? {} : { withKeys: over.withKeys })}
     />,
   );
   mounted.push(view);
@@ -70,20 +62,16 @@ const choose = async (element: Element | null, value: string): Promise<void> => 
   });
 };
 
-describe('the Accounts screen is drawn only by a daemon that reports it', () => {
-  const frame = async (features: string[] | undefined, health: 'ok' | 'fail' = 'ok') => {
+describe('the Accounts panel of the settings frame', () => {
+  it('should draw the accounts screen, with its 2FA keys tab, without asking the machine what it reports', async () => {
     const paths: string[] = [];
     const client = {
       request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
         paths.push(path);
-        if (path === '/v1/health') {
-          if (health === 'fail') throw new Error('down');
-          return schema.parse(healthOf('9.9.9', features));
-        }
         if (path === '/v1/accounts') return schema.parse(list());
         if (path.startsWith('/v1/config/file')) return schema.parse(fileOf('', false));
         if (path === '/v1/accounts/look-alike') return schema.parse({ v: 1, groups: [] });
-        return schema.parse(logins());
+        throw new Error(`unexpected read ${path}`);
       },
     };
     const view = await mount(
@@ -100,37 +88,13 @@ describe('the Accounts screen is drawn only by a daemon that reports it', () => 
     );
     mounted.push(view);
     for (let tries = 0; tries < 8; tries += 1) await settle();
-    return { view, paths, q: (selector: string) => view.container.querySelector(selector) };
-  };
+    const q = (selector: string) => view.container.querySelector(selector);
 
-  it('should keep today’s saved-logins surface on a daemon that does not report accounts', async () => {
-    const machine = await frame(['messages.tail.1']);
-
-    expect(machine.q('[data-accounts-screen]')).toBeNull();
-    expect(machine.q('[data-login]')).not.toBeNull();
-    expect(machine.paths).not.toContain('/v1/accounts');
-  });
-
-  it('should keep the saved-logins surface when the health read fails, not guess', async () => {
-    const machine = await frame([DAEMON_FEATURES.accountsSignIns], 'fail');
-
-    expect(machine.q('[data-accounts-screen]')).toBeNull();
-    expect(machine.q('[data-login]')).not.toBeNull();
-  });
-
-  it('should draw the accounts screen on a daemon that reports it', async () => {
-    const machine = await frame([DAEMON_FEATURES.accountsSignIns, DAEMON_FEATURES.twoFactorKeys]);
-
-    expect(machine.q('[data-accounts-screen]')).not.toBeNull();
-    expect(machine.q('[data-login]')).toBeNull();
-  });
-
-  it('should offer no 2FA keys tab on a daemon that reports accounts but not 2FA keys', async () => {
-    const machine = await frame([DAEMON_FEATURES.accountsSignIns]);
-
-    await click(machine.q('[data-accounts-row="GITHUB"] button'));
-    expect(machine.q('[data-accounts-tab="details"]')).not.toBeNull();
-    expect(machine.q('[data-accounts-tab="keys"]')).toBeNull();
+    expect(q('[data-accounts-screen]')).not.toBeNull();
+    expect(q('[data-login]')).toBeNull();
+    expect(paths).not.toContain('/v1/health');
+    await click(q('[data-accounts-row="GITHUB"] button'));
+    expect(q('[data-accounts-tab="keys"]')).not.toBeNull();
   });
 });
 
@@ -305,13 +269,6 @@ describe('an account’s 2FA keys', () => {
 
     expect(screen.q('[data-codes-panel]')).toBeNull();
     expect(screen.q('[data-accounts-codes-unavailable]')).not.toBeNull();
-  });
-
-  it('should offer no keys tab when the machine has no 2FA keys', async () => {
-    const screen = await open({}, { withKeys: false });
-    await screen.openAccount('GITHUB');
-
-    expect(screen.q('[data-accounts-tab="keys"]')).toBeNull();
   });
 });
 
@@ -632,13 +589,11 @@ describe('the rest of the write flows', () => {
     expect(screen.text()).toContain('the daemon fell over');
   });
 
-  it('should hand the add-key passkey to the screen when the browser has one and the machine reports keys', async () => {
+  it('should hand the add-key passkey to the screen when the browser has one', async () => {
     const paths: string[] = [];
     const client = {
       request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
         paths.push(path);
-        if (path === '/v1/health')
-          return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.accountsSignIns, DAEMON_FEATURES.twoFactorKeys]));
         if (path === '/v1/accounts') return schema.parse(list());
         if (path.startsWith('/v1/config/file')) return schema.parse(fileOf('', false));
         return schema.parse({ v: 1, groups: [] });
@@ -850,14 +805,12 @@ describe('the last two branches', () => {
   });
 });
 
-describe('a machine that reports standing sign-in rules', () => {
+describe('standing sign-in rules in the settings frame', () => {
   const rulesFrame = async (panel: 'accounts' | 'secure-copy', withStore: boolean) => {
     const rules = ruleClient();
     const client = {
       request: async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) => {
         if (path.startsWith('/v1/sign-in-rules')) return await rules.client.request(path, schema as never, init);
-        if (path === '/v1/health')
-          return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.accountsSignIns, DAEMON_FEATURES.signInRules]));
         if (path === '/v1/accounts') return schema.parse(list());
         if (path.startsWith('/v1/config/file')) return schema.parse(fileOf('', false));
         return schema.parse({ v: 1, groups: [] });

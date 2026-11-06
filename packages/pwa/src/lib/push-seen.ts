@@ -4,15 +4,14 @@
  *
  * This device closes its own lines itself: the daemon's clear skips the device that opened the item, because on an
  * iPhone a clear swaps a line for "Handled on another device", which would be false on the phone in the owner's hand.
- * The item's own tag is closed straight away, even on a daemon too old to clear anything; the tags the daemon's answer
+ * The item's own tag is closed straight away, before the daemon answers; the tags the daemon's answer
  * names (the ferret's stop line once nothing else waits, an approval's own) are closed when it answers — only the lines
  * shown by the moment of the open (`closeShownTags`' `shownBy`), so a slow answer never takes a newer line down.
  *
- * Best effort and total: a browser with no push worker for the machine, a daemon that does not list `push.clear.1`, or
- * a failed call only leaves the lines up, which is how it was before.
+ * Best effort and total: a browser with no push worker for the machine, or a failed call, only leaves the lines up.
  */
 
-import { agendaItemPushTag, DAEMON_FEATURES, hasFeature, type PushSeenResponse } from '@ferretry/protocol';
+import { agendaItemPushTag, type PushSeenResponse } from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type ClearRegistration, closeShownTags } from './push-clear.ts';
 import { pushScopePath } from './push-scope.ts';
@@ -20,8 +19,6 @@ import { pushScopePath } from './push-scope.ts';
 export interface AgendaItemOpenedPorts {
   /** This browser's push registration for one machine, or `null` when it has none. */
   readonly registration: (daemon: DaemonId) => Promise<Pick<ClearRegistration, 'getNotifications'> | null>;
-  /** The machine's health, for whether it lists `push.clear.1`. */
-  readonly health: (daemon: DaemonConnection) => Promise<{ readonly features?: readonly string[] | undefined }>;
   /** Says the item was opened: `postAgendaItemSeen` over the app’s daemon fetch. */
   readonly seen: (daemon: DaemonConnection, sessionId: string, agendaId: string) => Promise<PushSeenResponse>;
   /** The page's clock: the moment of the open, which the daemon's answer may close lines up to. */
@@ -51,7 +48,6 @@ export const agendaItemOpenedHandler = (
       registration === null ? 0 : await closeShownTags(registration, tags, machine, shownBy).catch(() => 0);
     let closed = await close([agendaItemPushTag(sessionId, agendaId)]);
     try {
-      if (!hasFeature(await ports.health(daemon), DAEMON_FEATURES.pushClear)) return { closed, told: false };
       const answer = await ports.seen(daemon, sessionId, agendaId);
       closed += await close(answer.tags, openedAt);
       // The item's OWN lines go however new: any is about the item open in front of the owner, and one of its pushes

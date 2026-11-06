@@ -35,7 +35,6 @@ import {
   AddSignInRequestSchema,
   InputDeliverBodySchema,
   PutAccountRequestSchema,
-  PutLoginEntryRequestSchema,
   PutSignInRequestSchema,
   AccountSummarySchema,
   chosenSignIn,
@@ -870,6 +869,17 @@ describe('what a ferret may learn about signing in (account.hint)', () => {
     expect(accountHintSummary('nothing.example', [])).toContain('No account for nothing.example');
   });
 
+  it("should name a ferret's auto-applied steps as unreviewed, never as the owner's", () => {
+    const list = AccountListSchema.parse({
+      ...LIST,
+      signIns: LIST.signIns.map(signIn =>
+        signIn.id === SI(3) ? { ...signIn, recipe: 'run this', recipeBy: 'ferret' as const } : signIn,
+      ),
+    });
+    const summaryText = accountHintSummary('vercel.com', accountHintsFor('vercel.com', list));
+    expect(summaryText).toContain("a ferret's unreviewed steps, NOT the owner's");
+  });
+
   it('should point to Approve on your phone (push: true) whether or not a sign-in exists or holds a push key', () => {
     expect(accountHintSummary('vercel.com', accountHintsFor('vercel.com', LIST))).toContain(ACCOUNT_HINT_PHONE);
     expect(accountHintSummary('nothing.example', [])).toContain(ACCOUNT_HINT_PHONE);
@@ -1150,27 +1160,22 @@ describe('config/account-defaults.yaml', () => {
 });
 
 describe('account.propose', () => {
-  it('should be keyed by the sign-in, or by the older account handle, never both and never neither', () => {
+  it('should be keyed by the sign-in, never by an account handle and never by nothing', () => {
     const call = { tool: 'account.propose', signIn: SI(1), recipe: 'Open the page.', why: 'the steps were missing' };
     const { signIn: _signIn, ...bare } = call;
     expect(AccountProposeCallSchema.safeParse(call).success).toBe(true);
-    expect(AccountProposeCallSchema.safeParse({ ...bare, login: 'GITHUB' }).success).toBe(true);
+    expect(AccountProposeCallSchema.safeParse({ ...bare, login: 'GITHUB' }).success).toBe(false);
     expect(AccountProposeCallSchema.safeParse({ ...call, signIn: 'GITHUB' }).success).toBe(false);
     expect(AccountProposeCallSchema.safeParse({ ...call, login: 'GITHUB' }).success).toBe(false);
     expect(AccountProposeCallSchema.safeParse(bare).success).toBe(false);
-    expect(AccountProposeCallSchema.safeParse({ ...bare, login: SI(1) }).success).toBe(false);
   });
 
-  it('should be the ONE schema of the live tool: the agent-tool arm is this schema, for both spellings', () => {
+  it('should be the ONE schema of the live tool: the agent-tool arm is this schema', () => {
     const recipe = { recipe: 'Open the page.', why: 'the steps were missing' };
     const viaTool = (call: unknown) => AgentToolCallSchema.safeParse(call);
     expect(viaTool({ tool: 'account.propose', signIn: SI(1), ...recipe }).success).toBe(true);
-    expect(viaTool({ tool: 'account.propose', login: 'GITHUB', ...recipe }).success).toBe(true);
-    expect(viaTool({ tool: 'login.propose', login: 'GITHUB', ...recipe }).data).toEqual({
-      tool: 'account.propose',
-      login: 'GITHUB',
-      ...recipe,
-    });
+    expect(viaTool({ tool: 'account.propose', login: 'GITHUB', ...recipe }).success).toBe(false);
+    expect(viaTool({ tool: 'login.propose', signIn: SI(1), ...recipe }).success).toBe(false);
     expect(viaTool({ tool: 'account.propose', signIn: SI(1), login: 'GITHUB', ...recipe }).success).toBe(false);
     expect(viaTool({ tool: 'account.propose', ...recipe }).success).toBe(false);
   });
@@ -1204,7 +1209,6 @@ describe('facts are written only by the daemon (invariant 14)', () => {
       [PutAccountRequestSchema, { label: 'GitHub' }],
       [AddSignInRequestSchema, { place }],
       [PutSignInRequestSchema, { place }],
-      [PutLoginEntryRequestSchema, { label: 'GitHub', match: ['github.com'] }],
       [
         InputDeliverBodySchema,
         { deliveryId: crypto.randomUUID(), observedDigest: 'a'.repeat(64), entry: 'GITHUB', submit: true },

@@ -50,12 +50,6 @@ describe('the secret routes', () => {
       'POST /v1/secrets/imports',
       'POST /v1/secrets/imports/:importId',
       'POST /v1/secrets/exports/:importId',
-      'GET /v1/secrets/logins',
-      'GET /v1/secrets/logins/hint',
-      'PUT /v1/secrets/logins/:id',
-      'POST /v1/secrets/logins/:id/recipe/proposals/:proposalId',
-      'POST /v1/secrets/logins/:id/rename',
-      'DELETE /v1/secrets/logins/:id',
       // Accounts and sign-ins: the same store, and the same rule. The look-alike answer is handles only.
       'GET /v1/accounts',
       'GET /v1/accounts/hint',

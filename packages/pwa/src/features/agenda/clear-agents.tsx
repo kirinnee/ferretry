@@ -10,7 +10,6 @@
 import { useRef, useState } from 'react';
 import { useDialogFocus } from '../../hooks/use-dialog-focus.ts';
 import {
-  CLEAR_NEEDS_UPDATE,
   type ClearOutcome,
   type ClearPort,
   type ClearPreview,
@@ -42,8 +41,8 @@ function MachineNotes({ names, why }: { readonly names: readonly string[]; reado
   );
 }
 
-function namesOf(preview: ClearPreview, kind: 'needs-update' | 'unreachable'): readonly string[] {
-  return preview.rows.filter(row => row.kind === kind).map(row => row.name);
+function unreachableNames(preview: ClearPreview): readonly string[] {
+  return preview.rows.filter(row => row.kind === 'unreachable').map(row => row.name);
 }
 
 function ConfirmBody({ preview }: { readonly preview: ClearPreview }) {
@@ -54,8 +53,7 @@ function ConfirmBody({ preview }: { readonly preview: ClearPreview }) {
   return (
     <div data-clear-confirm="">
       <p className="mt-1 text-cell text-muted">{lead}</p>
-      <MachineNotes names={namesOf(preview, 'needs-update')} why={CLEAR_NEEDS_UPDATE} />
-      <MachineNotes names={namesOf(preview, 'unreachable')} why="could not be reached" />
+      <MachineNotes names={unreachableNames(preview)} why="could not be reached" />
     </div>
   );
 }
@@ -66,7 +64,6 @@ function ResultBody({ outcome }: { readonly outcome: ClearOutcome }) {
       <p className="mt-1 text-cell text-muted">
         Dismissed {items(outcome.cleared)} from {outcome.sessions} {outcome.sessions === 1 ? 'ferret' : 'ferrets'}.
       </p>
-      <MachineNotes names={outcome.needsUpdate} why={CLEAR_NEEDS_UPDATE} />
       <MachineNotes names={outcome.unreachable} why="could not be reached" />
     </div>
   );

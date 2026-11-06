@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import {
-  DAEMON_FEATURES,
   PHONE_APPROVAL_TITLE,
   PHONE_APPROVAL_WARNING,
   type PhoneApproval,
@@ -12,7 +11,6 @@ import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { DaemonClientProvider } from '../../../src/lib/store.tsx';
 import { type Mounted, mount } from '../../support/dom.ts';
 import { click, settle } from '../../support/dom-form.ts';
-import { healthOf } from '../../support/health.ts';
 
 const CONNECTION = daemonConnection({ daemonId: 'workshop', baseUrl: 'https://workshop.example.test', deviceId: 't1' });
 const mounted: Mounted[] = [];
@@ -206,12 +204,11 @@ describe('the approve-on-phone card', () => {
 });
 
 describe('the approve-on-phone host', () => {
-  const served = (features: string[] | undefined, approvals: PhoneApproval[]) => {
+  const served = (approvals: PhoneApproval[]) => {
     const paths: string[] = [];
     const client = {
       request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
         paths.push(path);
-        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', features));
         return schema.parse({ approvals });
       },
     };
@@ -229,17 +226,8 @@ describe('the approve-on-phone host', () => {
     return view;
   };
 
-  it('draws nothing, and asks for nothing, against a daemon that does not report approve-on-phone', async () => {
-    const machine = served(['messages.tail.1'], [approval()]);
-
-    const view = await host(machine);
-
-    expect(view.container.querySelector('[data-phone-approval]')).toBeNull();
-    expect(machine.paths).not.toContain('/v1/phone-approvals');
-  });
-
-  it('draws the daemon’s approval where the daemon reports the feature', async () => {
-    const machine = served([DAEMON_FEATURES.phoneApproval], [approval()]);
+  it('draws the daemon’s approval', async () => {
+    const machine = served([approval()]);
 
     const view = await host(machine);
 
@@ -249,8 +237,7 @@ describe('the approve-on-phone host', () => {
 
   it('draws no number when reading the approvals fails', async () => {
     const client = {
-      request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
-        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.phoneApproval]));
+      request: async () => {
         throw new Error('unreachable');
       },
     };
@@ -263,8 +250,7 @@ describe('the approve-on-phone host', () => {
   it('drops a number it was showing the moment the next read fails', async () => {
     let reads = 0;
     const client = {
-      request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
-        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.phoneApproval]));
+      request: async (_path: string, schema: { parse: (value: unknown) => unknown }) => {
         reads += 1;
         if (reads > 1) throw new Error('unreachable');
         return schema.parse({ approvals: [approval()] });
@@ -295,12 +281,11 @@ describe('the approve-on-phone host', () => {
   });
 
   it('drops the last approval’s number the moment the approval it shows changes', async () => {
-    const machine = served([DAEMON_FEATURES.phoneApproval], [approval()]);
+    const machine = served([approval()]);
     const view = await host(machine);
     expect(view.container.querySelector('[data-phone-approval-number]')?.textContent).toBe('42');
     const stuck = {
-      request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
-        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.phoneApproval]));
+      request: async () => {
         return await new Promise(() => undefined);
       },
     };
@@ -319,7 +304,6 @@ describe('the approve-on-phone host', () => {
     const sent: string[] = [];
     const client = {
       request: async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) => {
-        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.phoneApproval]));
         if (init?.method === 'POST') {
           sent.push(path);
           return schema.parse({});
@@ -353,7 +337,7 @@ describe('the approve-on-phone host', () => {
   });
 
   it('draws nothing for an approval the daemon does not list for this session', async () => {
-    const machine = served([DAEMON_FEATURES.phoneApproval], [approval({ sessionId: 'someone-else' })]);
+    const machine = served([approval({ sessionId: 'someone-else' })]);
 
     const view = await host(machine);
 

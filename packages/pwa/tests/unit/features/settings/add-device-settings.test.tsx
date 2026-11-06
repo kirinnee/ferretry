@@ -615,42 +615,28 @@ function fakeClient(world: {
         if (world.revokeFailure !== undefined) throw world.revokeFailure;
         return schema.parse({ devices: [], hostLocal: true, mayWiden: MAY_WIDEN });
       }
-      if (path === '/v1/sign-in-rules' && world.rules !== undefined) return schema.parse(world.rules);
+      if (path === '/v1/sign-in-rules') return schema.parse(world.rules ?? ruleList({ rules: [] }));
       throw new Error(`unexpected request ${method} ${path}`);
     },
   });
 }
 
 describe('AddDeviceSurface and standing sign-in rules', () => {
-  const surfaceWith = async (rulesOffered: boolean, calls: string[]) => {
+  const surfaceWith = async (calls: string[]) => {
     let renderer: ReactTestRenderer | undefined;
     const rules = ruleList({ rules: [pageRule({ approvedWith: { deviceId: DEVICE_ID, device: 'Pixel 8' } })] });
     await runAsync(async () => {
-      renderer = render(
-        <AddDeviceSurface
-          connection={connection()}
-          createClient={fakeClient({ calls, rules })}
-          rulesOffered={rulesOffered}
-        />,
-      );
+      renderer = render(<AddDeviceSurface connection={connection()} createClient={fakeClient({ calls, rules })} />);
     });
     return renderer as ReactTestRenderer;
   };
 
-  it('says under a device how many rules its passkey approved when the machine offers rules', async () => {
+  it('says under a device how many rules its passkey approved', async () => {
     const calls: string[] = [];
-    const surface = await surfaceWith(true, calls);
+    const surface = await surfaceWith(calls);
 
     should(calls).containEql('GET /v1/sign-in-rules');
     should(marked(surface, 'data-device-rules', DEVICE_ID)).have.length(1);
-  });
-
-  it('asks nothing about rules, and draws no note, when the machine does not offer them', async () => {
-    const calls: string[] = [];
-    const surface = await surfaceWith(false, calls);
-
-    should(calls).not.containEql('GET /v1/sign-in-rules');
-    should(marked(surface, 'data-device-rules')).have.length(0);
   });
 });
 
@@ -666,7 +652,7 @@ describe('AddDeviceSurface', () => {
     });
 
     // Assert
-    should(calls).deepEqual(['GET /v1/pair/devices']);
+    should(calls).deepEqual(['GET /v1/pair/devices', 'GET /v1/sign-in-rules']);
     should(marked(renderer as ReactTestRenderer, 'data-pair-mint')).have.length(1);
   });
 
@@ -688,7 +674,12 @@ describe('AddDeviceSurface', () => {
 
     // Assert — and the code is gone from the screen once the machine has ended it.
     should(showed).equal(1);
-    should(calls).deepEqual(['GET /v1/pair/devices', 'POST /v1/pair/code', `DELETE /v1/pair/code/${PAIRING_ID}`]);
+    should(calls).deepEqual([
+      'GET /v1/pair/devices',
+      'GET /v1/sign-in-rules',
+      'POST /v1/pair/code',
+      `DELETE /v1/pair/code/${PAIRING_ID}`,
+    ]);
     should(marked(surface, 'data-pair-code')).be.empty();
   });
 
@@ -996,7 +987,11 @@ describe('AddDeviceSurface', () => {
     await runAsync(async () => marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props.onClick());
 
     // Assert
-    should(seen).deepEqual(['GET /v1/pair/devices', `PATCH /v1/pair/devices/${DEVICE_ID}/grants`]);
+    should(seen).deepEqual([
+      'GET /v1/pair/devices',
+      'GET /v1/sign-in-rules',
+      `PATCH /v1/pair/devices/${DEVICE_ID}/grants`,
+    ]);
     should(marked(surface, 'data-device-grant', `${DEVICE_ID}:terminal.use`)[0]?.props['aria-checked']).equal(true);
   });
 

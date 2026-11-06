@@ -1,8 +1,6 @@
 import { beforeAll, describe, it } from 'bun:test';
 import {
-  type LoginEntryId,
   mcpOAuthSecretNames,
-  PutLoginEntryRequestSchema,
   type SealedSecretBundle,
   type SecretExportResponse,
   type SecretImportOffer,
@@ -20,6 +18,7 @@ import { ApiDispatcher, type CapabilityGuard } from '../../../../src/lib/api/ind
 import { SecretVault } from '../../../../src/lib/secrets/index.ts';
 import { type SecretSubsystem, secretRoutes } from '../../../../src/lib/runtime/mounts/secrets.ts';
 import { jsonBody, request } from '../../api/support.ts';
+import { putSavedLogin } from '../../secrets/saved-login-fixture.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments, secretSubsystem } from './support.ts';
 
 /**
@@ -358,15 +357,12 @@ describe('a key this machine already holds, through the import route', () => {
     await source.directory.put('API_KEY', VALUE);
     await target.directory.put('API_KEY', OLD);
     await target.directory.put('OTHER_KEY', OTHER);
-    await target.logins?.put(
-      'GITHUB' as LoginEntryId,
-      PutLoginEntryRequestSchema.parse({
-        label: 'GitHub',
-        match: ['github.com'],
-        username: 'kirinnee',
-        password: PASSWORD,
-      }),
-    );
+    await putSavedLogin(target.accounts as NonNullable<typeof target.accounts>, 'GITHUB', {
+      label: 'GitHub',
+      match: ['github.com'],
+      username: 'kirinnee',
+      password: PASSWORD,
+    });
     const values = async () => [...(await new SecretVault(targetDocuments, new FakeSecretCipher()).values())];
     /** The secret store as the disk holds it, timestamps included. */
     const store = async () => JSON.stringify(await targetDocuments.read());

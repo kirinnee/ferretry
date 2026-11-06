@@ -6,7 +6,6 @@ import {
   type InputTargetFacts,
   type LoginObserved,
   padInputValue,
-  PutLoginEntryRequestSchema,
   type SignInSummary,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -17,6 +16,7 @@ import { LoginDirectory, LoginVault } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments } from '../runtime/mounts/support.ts';
 import type { InputCaller as ServiceCaller } from '../../../src/lib/input-requests/ports.ts';
 import { FACTS, inputRequestService, RAISE, SESSION } from './support.ts';
+import { putSavedLogin } from '../secrets/saved-login-fixture.ts';
 
 /** The adaptive lock (!A149) through the REAL input service: the card says it, and the hold runs it. */
 
@@ -693,14 +693,11 @@ describe('the facts the lock reads: every sign-in matched to the target, togethe
     const sealed = new MemorySecretDocuments();
     const cipher = new FakeSecretCipher();
     const directory = new LoginDirectory(index, sealed, cipher, { now: () => '2026-10-30T09:00:00.000Z' });
-    await directory.put(
-      'EXAMPLE',
-      PutLoginEntryRequestSchema.parse({
-        label: 'Example',
-        password: 'hunter2-UNIQUE-pw',
-        match: ['accounts.example.test', 'ssh@build.example.test'],
-      }),
-    );
+    await putSavedLogin(directory, 'EXAMPLE', {
+      label: 'Example',
+      password: 'hunter2-UNIQUE-pw',
+      match: ['accounts.example.test', 'ssh@build.example.test'],
+    });
     const { signIns } = await directory.accounts.list();
     const site = signIns.find(signIn => signIn.place.kind === 'site')?.id as string;
     const ssh = signIns.find(signIn => signIn.place.kind === 'terminal')?.id as string;

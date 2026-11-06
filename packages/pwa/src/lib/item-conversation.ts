@@ -5,34 +5,22 @@
  * The thread is read from the TAIL: the newest page first, then older ones, until a row older than the item
  * (`since`) is in hand — nobody can name `!A47` before it exists, so nothing further back can belong to it. A
  * recent item costs one page instead of the whole conversation (a long lead session was 12 pages, 9.5 MB).
- * A machine that does not offer backward reads (`DAEMON_FEATURES.messagesTail`) is walked forward from the start
- * as before, up to the route's page ceiling.
  *
  * Kept, as the chat's own `TranscriptEntry`: every user and assistant row that names the item (`!A47`), and the
  * assistant rows that answer a kept user row (up to the next user row) — the ferret seldom repeats the reference
  * in its reply. `itemHistory` then applies the one relevance rule to them, exactly as it does to the live chat.
  */
 
-import {
-  type AgendaItem,
-  DAEMON_FEATURES,
-  hasFeature,
-  type IFyApiClient,
-  type SessionTranscriptMessage,
-} from '@ferretry/protocol';
+import type { AgendaItem, IFyApiClient, SessionTranscriptMessage } from '@ferretry/protocol';
 import type { TranscriptEntry } from './session-screens.ts';
 import { withFreshMessageCursor } from './message-cursor.ts';
 
-export type ItemConversationClient = Pick<IFyApiClient, 'health' | 'messages' | 'messagesTail'>;
+export type ItemConversationClient = Pick<IFyApiClient, 'messagesTail'>;
 
 /** Rows per page when reading from the tail: the route's own default, so a recent item is one small read. */
 const TAIL_PAGE = 200;
-/** Rows per page when walking forward (the route's ceiling). */
-const FORWARD_PAGE = 1_000;
-/** How many pages one forward read walks before it stops. */
-const MAX_FORWARD_PAGES = 40;
-/** How many pages one tail read walks back: the same number of rows the forward walk could reach. */
-const MAX_TAIL_PAGES = (MAX_FORWARD_PAGES * FORWARD_PAGE) / TAIL_PAGE;
+/** How many pages one tail read walks back: 40,000 rows at most. */
+const MAX_TAIL_PAGES = 200;
 /** Slack under the item's earliest known instant: the clock a row was stamped with is not the item's. */
 const FLOOR_SLACK_MS = 60 * 60 * 1_000;
 
@@ -86,14 +74,6 @@ const threadOf = (itemId: string) => {
   };
 };
 
-const offersTail = async (client: ItemConversationClient): Promise<boolean> => {
-  try {
-    return hasFeature(await client.health(), DAEMON_FEATURES.messagesTail);
-  } catch {
-    return false;
-  }
-};
-
 const olderThan = (messages: readonly SessionTranscriptMessage[], since: number): boolean =>
   messages.some(message => message.timestamp !== undefined && Date.parse(message.timestamp) < since);
 
@@ -126,16 +106,6 @@ export const readItemConversation = async (
 ): Promise<readonly TranscriptEntry[]> =>
   withFreshMessageCursor(async () => {
     const thread = threadOf(itemId);
-    if (await offersTail(client)) {
-      thread.feed(await readFromTail(client, sessionId, since));
-      return thread.kept;
-    }
-    let cursor: string | undefined;
-    for (let page = 0; page < MAX_FORWARD_PAGES; page += 1) {
-      const read = await client.messages(sessionId, cursor, FORWARD_PAGE);
-      thread.feed(read.messages);
-      if (read.nextCursor === null) break;
-      cursor = read.nextCursor;
-    }
+    thread.feed(await readFromTail(client, sessionId, since));
     return thread.kept;
   });

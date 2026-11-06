@@ -64,16 +64,13 @@ export function AccountsSurface({
   connection,
   createClient,
   addKey,
-  withKeys = true,
   rules,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient: AccountsClientFactory;
   /** Asks for the passkey bound to a staged seed. Absent when this machine or this browser cannot save a seed. */
   readonly addKey?: (stage: TwoFactorStageId, words: string) => Promise<boolean>;
-  /** Whether this machine has 2FA keys; false hides their tab. */
-  readonly withKeys?: boolean;
-  /** Present only when this machine reports standing sign-in rules: asks the passkey bound to a staged rule. */
+  /** Present when sign-in rules are wired: asks the passkey bound to a staged rule. */
   readonly rules?: { readonly askPasskey: RulesBinding['askPasskey'] };
 }) {
   const [client, setClient] = useState<AccountsClient | null>(null);
@@ -173,7 +170,6 @@ export function AccountsSurface({
   return (
     <AccountsScreen
       addKey={addKey}
-      withKeys={withKeys}
       busy={busy}
       client={client}
       defaults={loaded.defaults}

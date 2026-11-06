@@ -11,35 +11,26 @@
  * The files are the composer's own: each is uploaded the moment it is added, with the same type and size checks,
  * to the card's ferret's session, because that is where the daemon looks for them; the move then names them.
  *
- * THE APP SHIPS BEFORE THE DAEMON. Attach is offered only once the machine has said it takes files with a move
- * back (`board.reopen.attachments.1`). A machine that has not answered yet, or has no way to upload, draws the
- * words alone; one that said no also says an update brings the pictures.
+ * A host with no way to upload draws the words alone.
  */
 
 import { type AttachmentView, MAX_BOARD_REASON_LENGTH, MAX_BOARD_REOPEN_ATTACHMENTS } from '@ferretry/protocol';
-import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, useId, useMemo, useRef } from 'react';
 import { Composer, type ComposerProps } from '../../components/composer.tsx';
 import type { ComposerAttachmentUploader } from '../../components/composer-attachments.ts';
 import { useComposerPreferences } from '../../hooks/use-composer-preferences.ts';
 import { useLayoutMode } from '../../hooks/use-layout-mode.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { DaemonDraftStore } from '../../lib/drafts.ts';
-import { UPDATE_MACHINE_WHERE } from '../../lib/machine-update-words.ts';
 
 /** What the Board needs from a machine to send files with a move back. */
 export interface SendBackPorts {
-  /** Whether the machine takes files with a move back (`board.reopen.attachments.1` on its health). */
-  readonly sendBackFiles?: (daemon: DaemonConnection) => Promise<boolean>;
-  /** Whether the machine takes files with the answer to a gate item (`agenda.gate.attachments.1` on its health). */
-  readonly answerFiles?: (daemon: DaemonConnection) => Promise<boolean>;
   /** Uploads one file to a ferret's session on the machine. */
   readonly uploadAttachment?: (daemon: DaemonConnection, sessionId: string, file: File) => Promise<AttachmentView>;
 }
 
 /** Files on a move back, as the composer sees them for one card. */
 export interface SendBackFiles {
-  /** `true` the machine takes them, `false` it is too old, `null` it has not answered. */
-  readonly offered: boolean | null;
   readonly upload: ComposerAttachmentUploader;
   /** The session they are uploaded to: the card's ferret. */
   readonly sessionId: string;
@@ -51,47 +42,20 @@ export interface SendBack {
   readonly attachmentIds: readonly string[];
 }
 
-/** What the owner reads where the machine is too old to take pictures with a move back. */
-export const SEND_BACK_FILES_NEED_UPDATE = `This machine needs an update to send pictures with it: ${UPDATE_MACHINE_WHERE}.`;
-
 /**
- * Asks the card's machine whether it takes files, and uploads to the card's ferret. `null` when the page has no
- * way to upload at all (no ports), which draws the words alone and says nothing about updates.
+ * The files of one card's move back: uploaded to the card's ferret. `null` when the page has no way to upload at
+ * all (no ports), which draws the words alone.
  */
 export function useSendBackFiles(
   ports: SendBackPorts | undefined,
   daemon: DaemonConnection | undefined,
   sessionId: string | null,
 ): SendBackFiles | null {
-  const asks = ports?.sendBackFiles;
   const upload = ports?.uploadAttachment;
-  const [offered, setOffered] = useState<{ readonly daemonId: string; readonly offered: boolean } | null>(null);
-  const daemonId = daemon?.daemonId;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the machine's id is the re-ask trigger, not its object
-  useEffect(() => {
-    if (asks === undefined || daemon === undefined || daemonId === undefined) return undefined;
-    let live = true;
-    void asks(daemon).then(
-      answer => {
-        if (live) setOffered({ daemonId, offered: answer });
-      },
-      () => {
-        // A machine that cannot be asked is treated like one not yet read: no files, and no update nag.
-        if (live) setOffered(null);
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [asks, daemonId]);
   return useMemo(() => {
-    if (asks === undefined || upload === undefined || daemon === undefined || sessionId === null) return null;
-    return {
-      offered: offered?.daemonId === daemon.daemonId ? offered.offered : null,
-      upload: file => upload(daemon, sessionId, file),
-      sessionId,
-    };
-  }, [asks, upload, daemon, sessionId, offered]);
+    if (upload === undefined || daemon === undefined || sessionId === null) return null;
+    return { upload: file => upload(daemon, sessionId, file), sessionId };
+  }, [upload, daemon, sessionId]);
 }
 
 interface SendBackTarget {
@@ -141,7 +105,7 @@ export function BoardSendBack({
   const headingId = useId();
   const preferences = useComposerPreferences(target.daemon.daemonId);
   const phone = useLayoutMode() === 'drawer';
-  const attachable = files !== null && files.offered === true;
+  const attachable = files !== null;
   const submitNow = useRef(onSubmit);
   submitNow.current = onSubmit;
   // The composer's send is the host's move, not a chat message: nothing reaches a session from here.
@@ -194,11 +158,6 @@ export function BoardSendBack({
           {error}
         </p>
       )}
-      {files !== null && files.offered === false ? (
-        <p className="fy-board-sendback__note" data-send-back-note="update">
-          {SEND_BACK_FILES_NEED_UPDATE}
-        </p>
-      ) : null}
       <Composer
         allowEmptySend={wordsOptional}
         api={api}
