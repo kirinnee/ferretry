@@ -328,9 +328,10 @@ export async function shootPage(
   const bytes =
     options.target === undefined
       ? await page.screenshot({ timeout: BROWSER_ACT_TIMEOUT_MS, type: format, fullPage: options.fullPage === true })
-      : await (
-          await browserElementOf(page, options.target)
-        ).screenshot({ timeout: BROWSER_ACT_TIMEOUT_MS, type: format });
+      : await (await browserElementOf(page, options.target)).screenshot({
+          timeout: BROWSER_ACT_TIMEOUT_MS,
+          type: format,
+        });
   return { base64: Buffer.from(bytes).toString('base64'), format };
 }
 

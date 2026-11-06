@@ -91,7 +91,7 @@ const remount = async (daemon: DaemonConnection | undefined, factory: ReturnType
 
 const readKind = (): string | null | undefined => shown?.container.querySelector('span')?.getAttribute('data-read');
 
-const run = async <T = PackSave,>(save: (pack: MachinePack) => Promise<T>): Promise<T> => {
+const run = async <T = PackSave>(save: (pack: MachinePack) => Promise<T>): Promise<T> => {
   let result: T | null = null;
   await runAsync(async () => {
     result = latest === null ? null : await save(latest);

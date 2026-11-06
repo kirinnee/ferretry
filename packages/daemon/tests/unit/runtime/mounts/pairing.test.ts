@@ -309,9 +309,7 @@ describe('pairing routes', () => {
   });
 
   it('should reject fields on the bodyless mint contract', async () => {
-    const response = await (
-      await mount(new FakePairing())
-    ).dispatch(
+    const response = await (await mount(new FakePairing())).dispatch(
       request({
         method: 'POST',
         path: '/v1/pair/code',
@@ -645,9 +643,9 @@ describe('adding a device always wants a passkey proved for it', () => {
     const subject = new FakePairing();
 
     // Act — the host's admin token, on loopback, with no step-up of any kind.
-    const response = await (
-      await mount(subject)
-    ).dispatch(request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin }));
+    const response = await (await mount(subject)).dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', loopback: true, headers: admin }),
+    );
 
     // Assert
     should(response.status).equal(201);

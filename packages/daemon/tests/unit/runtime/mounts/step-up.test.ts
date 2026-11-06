@@ -781,9 +781,9 @@ describe('step-up routes', () => {
     const dispatcher = await mount({ store: new MemoryStore([elsewhere]) }).surface;
 
     // Act
-    const none = await (
-      await mount().surface
-    ).dispatch(request({ method: 'POST', path: '/v1/step-up/options', body: originBody, ...asDevice }));
+    const none = await (await mount().surface).dispatch(
+      request({ method: 'POST', path: '/v1/step-up/options', body: originBody, ...asDevice }),
+    );
     const otherOrigin = await dispatcher.dispatch(
       request({ method: 'POST', path: '/v1/step-up/options', body: originBody, ...asDevice }),
     );

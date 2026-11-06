@@ -82,7 +82,10 @@ export type PdfWorkerProbe = { readonly ready: true } | { readonly ready: false;
 export async function probePdfDecryptWorker({
   timeoutMs = 20_000,
   spawn = spawnPdfWorker,
-}: { readonly timeoutMs?: number; readonly spawn?: SpawnPdfWorker } = {}): Promise<PdfWorkerProbe> {
+}: {
+  readonly timeoutMs?: number;
+  readonly spawn?: SpawnPdfWorker;
+} = {}): Promise<PdfWorkerProbe> {
   let worker: Worker;
   try {
     worker = spawn();

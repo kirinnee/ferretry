@@ -555,9 +555,7 @@ describe('copyTreeOutsideStateHomes', () => {
     const byLink = await (await tree('/src')).run(disk => disk.link('/src/token', '/fy/api-token'));
     const byFolder = await (await tree('/src')).run(disk => disk.link('/src/state', '/fy/state'));
     const byName = await (await tree('/link-fy/state')).run();
-    const byHop = await (
-      await tree('/src', { hops: 'every' })
-    ).run(disk => {
+    const byHop = await (await tree('/src', { hops: 'every' })).run(disk => {
       disk.dir('/elsewhere');
       disk.link('/fy/out', '/elsewhere');
       disk.link('/src/through', '/fy/out');
@@ -575,9 +573,9 @@ describe('copyTreeOutsideStateHomes', () => {
     const loop = await (await tree('/src')).run(disk => disk.link('/src/sub/again', '/src'));
     const many = await (await tree('/src', { maxFiles: 1 })).run();
     const dangling = await (await tree('/src')).run(disk => disk.link('/src/broken', '/nowhere'));
-    const linked = await (
-      await tree('/src', { hardLinks: 'refuse' })
-    ).run(disk => disk.hardLink('/src/again.md', '/src/a.md'));
+    const linked = await (await tree('/src', { hardLinks: 'refuse' })).run(disk =>
+      disk.hardLink('/src/again.md', '/src/a.md'),
+    );
 
     should([loop, many, dangling, linked].map(rule)).deepEqual(['loop', 'too-many', 'not-found', 'hard-link']);
   });

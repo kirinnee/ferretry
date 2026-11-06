@@ -91,10 +91,9 @@ export function replaceSessionRows(
   mode: IndexWriteMode,
 ): void {
   const stored = database
-    .query<
-      StoredPointer,
-      [string]
-    >('SELECT sequence, time, type, byte_offset, byte_length FROM events WHERE session_id = ?')
+    .query<StoredPointer, [string]>(
+      'SELECT sequence, time, type, byte_offset, byte_length FROM events WHERE session_id = ?',
+    )
     .all(session.id);
   const kept = new Map(stored.map(pointer => [pointer.sequence, pointer]));
   const unchanged = new Set<number>();

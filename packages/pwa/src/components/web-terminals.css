@@ -361,7 +361,7 @@
   text-align: center;
   background:
     radial-gradient(circle at center, color-mix(in srgb, var(--accent) 7%, transparent) 1px, transparent 1px) 0 0 / 18px
-      18px,
+    18px,
     var(--surface);
 }
 

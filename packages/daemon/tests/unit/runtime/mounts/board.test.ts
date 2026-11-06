@@ -102,9 +102,7 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(
+    const response = await (await dispatcher(board)).dispatch(
       request({
         method: 'POST',
         path: '/v1/board/skip',
@@ -112,9 +110,7 @@ describe('the board mount', () => {
         body: JSON.stringify({ reason: 'the owner said not to track this' }),
       }),
     );
-    const named = await (
-      await dispatcher(board)
-    ).dispatch(
+    const named = await (await dispatcher(board)).dispatch(
       request({
         method: 'POST',
         path: '/v1/board/skip',
@@ -134,9 +130,7 @@ describe('the board mount', () => {
 
   it('should refuse a skip from the owner, which has no session of its own to record it on', async () => {
     // Act
-    const response = await (
-      await dispatcher(recording().board)
-    ).dispatch(
+    const response = await (await dispatcher(recording().board)).dispatch(
       request({ method: 'POST', path: '/v1/board/skip', headers: human, body: JSON.stringify({ reason: 'chat' }) }),
     );
 
@@ -150,9 +144,7 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(
+    const response = await (await dispatcher(board)).dispatch(
       request({
         path: '/v1/board',
         headers: human,
@@ -177,9 +169,9 @@ describe('the board mount', () => {
     { name: 'an unknown state', query: [['state', 'archived']] as [string, string][] },
   ])('should refuse $name', async ({ query }) => {
     // Act
-    const response = await (
-      await dispatcher(boardSubsystem())
-    ).dispatch(request({ path: '/v1/board', headers: human, query }));
+    const response = await (await dispatcher(boardSubsystem())).dispatch(
+      request({ path: '/v1/board', headers: human, query }),
+    );
 
     // Assert
     should(response.status).equal(400);
@@ -191,9 +183,9 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(request({ path: '/v1/board/tasks/%26f1', headers: human }));
+    const response = await (await dispatcher(board)).dispatch(
+      request({ path: '/v1/board/tasks/%26f1', headers: human }),
+    );
 
     // Assert
     should(response.status).equal(200);
@@ -206,9 +198,9 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(request({ path: '/v1/board/tasks', headers: human, query: [['legacyRef', 'abc:&f12']] }));
+    const response = await (await dispatcher(board)).dispatch(
+      request({ path: '/v1/board/tasks', headers: human, query: [['legacyRef', 'abc:&f12']] }),
+    );
 
     // Assert
     should(response.status).equal(200);
@@ -218,9 +210,9 @@ describe('the board mount', () => {
 
   it('should answer 404 when no card came from the old task', async () => {
     // Act
-    const response = await (
-      await dispatcher(recording().board)
-    ).dispatch(request({ path: '/v1/board/tasks', headers: human, query: [['legacyRef', 'abc:F99']] }));
+    const response = await (await dispatcher(recording().board)).dispatch(
+      request({ path: '/v1/board/tasks', headers: human, query: [['legacyRef', 'abc:F99']] }),
+    );
 
     // Assert
     should(response.status).equal(404);
@@ -231,9 +223,7 @@ describe('the board mount', () => {
     async value => {
       // Act
       const { calls, board } = recording();
-      const response = await (
-        await dispatcher(board)
-      ).dispatch(
+      const response = await (await dispatcher(board)).dispatch(
         request({
           path: '/v1/board/tasks',
           headers: human,
@@ -257,9 +247,9 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(request({ method: 'POST', path: '/v1/board/import', headers: human, body }));
+    const response = await (await dispatcher(board)).dispatch(
+      request({ method: 'POST', path: '/v1/board/import', headers: human, body }),
+    );
 
     // Assert
     should(response.status).equal(200);
@@ -288,9 +278,9 @@ describe('the board mount', () => {
 
   it.each(['%E0%A4%A', 'F0'])('should refuse the card id %s', async id => {
     // Act
-    const response = await (
-      await dispatcher(boardSubsystem())
-    ).dispatch(request({ path: `/v1/board/tasks/${id}`, headers: human }));
+    const response = await (await dispatcher(boardSubsystem())).dispatch(
+      request({ path: `/v1/board/tasks/${id}`, headers: human }),
+    );
 
     // Assert
     should(response.status).equal(400);
@@ -301,9 +291,7 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(
+    const response = await (await dispatcher(board)).dispatch(
       request({
         method: 'POST',
         path: '/v1/board/tasks',
@@ -455,9 +443,7 @@ describe('the board mount', () => {
 
   it('should answer a report the board has no lane for as invalid', async () => {
     // Act
-    const response = await (
-      await dispatcher(recording().board)
-    ).dispatch(
+    const response = await (await dispatcher(recording().board)).dispatch(
       request({
         method: 'POST',
         path: '/v1/board/tasks/F1',
@@ -476,9 +462,7 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(
+    const response = await (await dispatcher(board)).dispatch(
       request({
         method: 'POST',
         path: '/v1/board/tasks/F1',
@@ -497,9 +481,9 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(request({ method: 'POST', path: '/v1/board/tasks/%26F1/start', headers: human }));
+    const response = await (await dispatcher(board)).dispatch(
+      request({ method: 'POST', path: '/v1/board/tasks/%26F1/start', headers: human }),
+    );
 
     // Assert
     should(response.status).equal(200);
@@ -533,9 +517,9 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(request({ method: 'POST', path: '/v1/board/tasks/F1/start', device: phone }));
+    const response = await (await dispatcher(board)).dispatch(
+      request({ method: 'POST', path: '/v1/board/tasks/F1/start', device: phone }),
+    );
 
     // Assert
     should(response.status).equal(200);
@@ -547,12 +531,12 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const ferret = await (
-      await dispatcher(board)
-    ).dispatch(request({ method: 'POST', path: '/v1/board/tasks/F1/start', headers: agentIn('lead') }));
-    const remote = await (
-      await dispatcher(board, { use: false, configure: false })
-    ).dispatch(request({ method: 'POST', path: '/v1/board/tasks/F1/start', device: phone }));
+    const ferret = await (await dispatcher(board)).dispatch(
+      request({ method: 'POST', path: '/v1/board/tasks/F1/start', headers: agentIn('lead') }),
+    );
+    const remote = await (await dispatcher(board, { use: false, configure: false })).dispatch(
+      request({ method: 'POST', path: '/v1/board/tasks/F1/start', device: phone }),
+    );
 
     // Assert
     should(ferret.status).equal(403);
@@ -581,9 +565,7 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(
+    const response = await (await dispatcher(board)).dispatch(
       request({
         method: 'POST',
         path: '/v1/board/tasks/F1',
@@ -602,9 +584,9 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board, { use: false, configure: false })
-    ).dispatch(request({ path: '/v1/board', device: phone }));
+    const response = await (await dispatcher(board, { use: false, configure: false })).dispatch(
+      request({ path: '/v1/board', device: phone }),
+    );
 
     // Assert
     should(response.status).equal(403);
@@ -630,9 +612,9 @@ describe('the board mount', () => {
     const { calls, board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board, { use: false, configure: false })
-    ).dispatch(request({ path: '/v1/board/ids', device: phone }));
+    const response = await (await dispatcher(board, { use: false, configure: false })).dispatch(
+      request({ path: '/v1/board/ids', device: phone }),
+    );
 
     // Assert
     should(response.status).equal(403);
@@ -739,9 +721,7 @@ describe('public and private cards on the wire', () => {
     const { board } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(
+    const response = await (await dispatcher(board)).dispatch(
       request({ method: 'POST', path: '/v1/board/tasks/F1', headers: agentIn('lead'), body: visibility('private') }),
     );
 
@@ -767,18 +747,18 @@ describe('public and private cards on the wire', () => {
 
   it('should keep a remote device from changing visibility when the fleet grant is off', async () => {
     const { calls, board } = recording();
-    const response = await (
-      await dispatcher(board, { use: false, configure: false })
-    ).dispatch(request({ method: 'POST', path: '/v1/board/tasks/F1', device: phone, body: visibility('private') }));
+    const response = await (await dispatcher(board, { use: false, configure: false })).dispatch(
+      request({ method: 'POST', path: '/v1/board/tasks/F1', device: phone, body: visibility('private') }),
+    );
     should(response.status).equal(403);
     should(calls).eql([]);
   });
 
   it('should refuse a malformed visibility before it reaches the board', async () => {
     const { calls, board } = recording();
-    const response = await (
-      await dispatcher(board)
-    ).dispatch(request({ method: 'POST', path: '/v1/board/tasks/F1', headers: human, body: visibility('hidden') }));
+    const response = await (await dispatcher(board)).dispatch(
+      request({ method: 'POST', path: '/v1/board/tasks/F1', headers: human, body: visibility('hidden') }),
+    );
     should(response.status).equal(400);
     should(calls).eql([]);
   });

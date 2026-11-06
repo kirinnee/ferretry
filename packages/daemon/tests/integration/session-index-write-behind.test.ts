@@ -309,10 +309,9 @@ describe('the index SQL', () => {
     replaceSessionRows(database, session(A, 5), [pointer(1), pointer(2), pointer(3, A, 99), pointer(5)], 'strict');
     const after = database.query<{ changes: number }, []>('SELECT total_changes() AS changes').get()?.changes ?? 0;
     const third = database
-      .query<
-        { byte_length: number },
-        []
-      >("SELECT byte_length FROM events WHERE session_id = 'session-a' AND sequence = 3")
+      .query<{ byte_length: number }, []>(
+        "SELECT byte_length FROM events WHERE session_id = 'session-a' AND sequence = 3",
+      )
       .get()?.byte_length;
 
     // Assert — the session row, two deletions (3 and 4) and two insertions (3 and 5).

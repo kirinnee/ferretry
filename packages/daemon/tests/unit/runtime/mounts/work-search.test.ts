@@ -56,9 +56,7 @@ describe('GET /v1/search', () => {
     const { calls, search } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(search)
-    ).dispatch(
+    const response = await (await dispatcher(search)).dispatch(
       request({
         path: '/v1/search',
         headers: human,
@@ -143,9 +141,9 @@ describe('GET /v1/search', () => {
     const { calls, search } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(search)
-    ).dispatch(request({ path: '/v1/search', device: phone, query: [['q', 'cards']] }));
+    const response = await (await dispatcher(search)).dispatch(
+      request({ path: '/v1/search', device: phone, query: [['q', 'cards']] }),
+    );
 
     // Assert
     should(response.status).equal(200);
@@ -217,9 +215,7 @@ describe('POST /v1/search/related', () => {
     const { calls, search } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(search)
-    ).dispatch(
+    const response = await (await dispatcher(search)).dispatch(
       request({
         method: 'POST',
         path: '/v1/search/related',
@@ -239,9 +235,7 @@ describe('POST /v1/search/related', () => {
     const { calls, search } = recording();
 
     // Act
-    const response = await (
-      await dispatcher(search)
-    ).dispatch(
+    const response = await (await dispatcher(search)).dispatch(
       request({
         method: 'POST',
         path: '/v1/search/related',

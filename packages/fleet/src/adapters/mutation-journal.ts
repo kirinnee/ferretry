@@ -86,7 +86,8 @@ interface JournalEntryBase {
 
 type JournalEntry = JournalEntryBase &
   /** `backup` names the evidence for reports; `backupLeaf` is its name in the entry's own folder. */
-  (| { readonly kind: 'restore'; readonly backup: string; readonly backupLeaf: string }
+  (
+    | { readonly kind: 'restore'; readonly backup: string; readonly backupLeaf: string }
     | { readonly kind: 'remove' }
     /**
      * `mode` is the prior mode to put back; `left` is the mode this apply set. Only the directory's

@@ -220,10 +220,9 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
         db.transaction(() => {
           if (db.query('DELETE FROM mutations WHERE id = ?').run(draft.mutationId ?? '').changes === 0) return;
           const tail = db
-            .query<
-              { version: number; summary: string },
-              []
-            >('SELECT version, summary FROM versions ORDER BY version DESC LIMIT 1')
+            .query<{ version: number; summary: string }, []>(
+              'SELECT version, summary FROM versions ORDER BY version DESC LIMIT 1',
+            )
             .get();
           const summary = tail === null ? undefined : AgendaVersionSummarySchema.parse(JSON.parse(tail.summary));
           if (tail === null || summary?.at !== draft.at || summary.change !== draft.change) return;

@@ -486,10 +486,9 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
     const aliasGroups = analyticsCatalogAliasGroups(catalog);
     const { id } = entry.session;
     const harness = entry.candidate.transcriptHarness;
-    const folded = await (
-      this.parts.folds === undefined
-        ? this.parts.evidence.evidenceFor(id, harness).then(evidence => foldAnalyticsTranscript(evidence, aliasGroups))
-        : this.parts.folds.foldFor(id, harness, aliasGroups)
+    const folded = await (this.parts.folds === undefined
+      ? this.parts.evidence.evidenceFor(id, harness).then(evidence => foldAnalyticsTranscript(evidence, aliasGroups))
+      : this.parts.folds.foldFor(id, harness, aliasGroups)
     ).catch(() => undefined);
     const { usage: fold, activity } = folded ?? foldAnalyticsTranscript({ kind: 'unreadable' }, aliasGroups);
     const derived = deriveAnalyticsSessionRecord(
