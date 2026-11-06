@@ -270,9 +270,8 @@ board — are unique only WITHIN the daemon that minted them. Two daemons theref
 same browser the same id for different things, so anything the bundle remembers about daemon-owned
 data has to be keyed by `(daemonId, …)`.
 
-That has been carried by hand for the whole migration. Every unit brief repeats it,
-`docs/migration/surveys/pwa-shape.md` lists 56 single-daemon assumptions with `file:line`, and
-surfaces were still being found by eye afterwards. An invariant that depends on every author
+That was carried by hand. Every unit brief repeated it, an audit listed 56 single-daemon
+assumptions with `file:line`, and surfaces were still being found by eye afterwards. An invariant that depends on every author
 remembering it is not an invariant, which is the same reason `name-single-source` and the
 `state-home-*` contracts exist.
 

@@ -65,12 +65,11 @@ reconcilable with `use, never read`, and §3 is the shape.
    > `claude-login-panel.tsx` and `codex-login-panel.tsx` replace it, one per harness. What it got right
    > is kept: it cleared the field before the request settled, and it said so to the reader.
 
-2. **The already-surveyed plan contains one recommendation that must be dropped for this flow.**
-   `docs/migration/surveys/harness-login-flows.md:100-101` advises preferring
-   `codex login --with-access-token` (stdin) over flags that take a secret as an argument. That is
-   correct advice for a person at the host and wrong for a UI: a route that accepts an access token
-   to feed those flags makes the daemon a credential conduit and the browser a credential form. Those
-   two flags stay host-and-CLI-only, and §3.3 says so as a rule.
+2. **A route that feeds the CLI's token flags must not exist.** `codex login --with-access-token`
+   reads the token from stdin, which beats a flag that takes a secret as an argument (argv is visible
+   to other processes). That is the right choice for a person at the host and wrong for a UI: a route
+   that accepts an access token to feed those flags makes the daemon a credential conduit and the
+   browser a credential form. Those two flags stay host-and-CLI-only, and §3.3 says so as a rule.
 
 Everything else in this document is cost and sequencing.
 
@@ -224,8 +223,7 @@ One flow at a time per identity, started and read over HTTP, with the harness do
      When the account has device codes turned off, Codex's ordinary browser login takes over, and its
      return trip is the ADDRESS the browser ends on — see §4.2b.
    - **Claude** has no device grant, but its login already degrades to "print a URL, read a pasted
-     code from stdin" — verified by reading the binary, `claude-code` 2.1.220
-     (`docs/migration/surveys/harness-login-flows.md:36-61`). The pasted callback URL is submitted
+     code from stdin" — verified by reading the binary, `claude-code` 2.1.220. The pasted callback URL is submitted
      once and written straight into the child's stdin.
 5. **Then the existing machinery finishes the job.** Re-survey the identity, clone to the siblings,
    report per-account outcomes — `FleetLoginService` does all of this — and then **read the named
@@ -271,8 +269,8 @@ answer must be a citation rather than a reassurance.
 ### 3.3 Five rules the implementation does not get to negotiate
 
 1. **No route accepts a token, and none returns one.** `codex login --with-api-key` and
-   `--with-access-token` are excluded from this flow at every layer (retiring
-   `harness-login-flows.md:100-101` for this path). They remain fine for a person at the host.
+   `--with-access-token` are excluded from this flow at every layer (retiring that
+   advice for this path). They remain fine for a person at the host.
 2. **The child's raw stream is never published, stored or journaled.** Only the two recognised fields
    in §3.1 reach the wire; a line the daemon cannot classify is dropped. Today `fy fleet login`
    inherits stdio and reads nothing (`process-login.ts:89-97`), so this flow makes the daemon a reader
@@ -336,10 +334,10 @@ Two costs come with it, and neither is hypothetical:
 
 **The alternative considered and not taken:** instead of writing the code to stdin, the daemon could
 replay the whole pasted callback URL at the child's own loopback listener — the harness has a
-`callbackPort` setting (`harness-login-flows.md:55`) — so the daemon would never separate the code out
+`callbackPort` setting — so the daemon would never separate the code out
 of the URL at all. That is marginally purer and needs a port the daemon must discover, on a path
 nothing in this repository has read. Recommendation: **stdin**, because the paste prompt was actually
-verified in the binary (`harness-login-flows.md:42-61`) and the port dance was not.
+verified in the binary and the port dance was not.
 
 ### 4.2a Two traps a second implementation had already hit
 
@@ -823,7 +821,7 @@ answer is now.
 | the remedy the daemon composes is a host command                                                                     | `packages/daemon/src/lib/usage/quota.ts:12-17`                                                                                                                                                                       |
 | a terminal cannot be pointed at a command                                                                            | `packages/protocol/src/lib/terminal.ts:96-109`                                                                                                                                                                       |
 | readiness never runs a harness to answer a question                                                                  | `packages/daemon/src/lib/core/harness-readiness.ts:22-24`                                                                                                                                                            |
-| the harness flows were read out of the installed binaries                                                            | `docs/migration/surveys/harness-login-flows.md:10-16`                                                                                                                                                                |
+| the harness flows were read out of the installed binaries                                                            | run the installed CLIs with piped stdio (not `--help`) and read the prompts they print                                                                                                                               |
 
 Use `--fixed-strings` on every one of those greps. `rg -r` is `--replace`, so `rg -rn "pattern" path`
 prints each hit with the pattern rewritten to `n` and reads as "it is not there" — the mistake

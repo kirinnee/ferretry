@@ -25,8 +25,7 @@
  * against and navigates to `/d/:daemon/session/:id` (`daemonSessionPath`), so a
  * reference in one daemon's transcript can never open a same-named session on
  * whichever daemon happens to be in front of the reader. kteam's renderer called
- * `navigate('/session/' + id)` — the single-daemon destination the survey flagged
- * (`pwa-shape.md:115`).
+ * `navigate('/session/' + id)` — the single-daemon destination.
  *
  * EXTERNAL LINKS are `ExternalLink` (`features/browser/external-link.tsx`), the
  * same anchor every other outside link in the app is, so Settings › Appearance ›

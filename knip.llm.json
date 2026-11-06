@@ -20,6 +20,10 @@
     "packages/pwa": {
       "entry": ["src/lib/index.ts", "tests/**/*.test.ts"],
       "project": ["src/**/*.ts", "tests/**/*.ts"]
+    },
+    "packages/relay": {
+      "entry": ["src/lib/index.ts", "src/adapters/index.ts", "tests/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
     }
   },
   "includeEntryExports": true

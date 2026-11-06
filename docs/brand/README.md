@@ -132,10 +132,11 @@ viewer's own theme. The `-at-12x` proofs magnify the real 16 px PNG with `image-
 
 ## What is deliberately not here
 
-- **No favicon, no manifest icon, no app wiring.** `packages/pwa/index.html` still ships without
-  `rel="icon"` or `rel="manifest"`, and this change does not touch it.
-- **No per-daemon branding.** The daemon's runtime monogram/colour overlay (see
-  `docs/migration/surveys/pwa-shape.md`) is a separate, unported capability. These marks are the
+- **No generated themed manifests.** The PWA already wires the icons: `packages/pwa/index.html`
+  and `packages/pwa/app/index.html` link the favicons, and `app/index.html` links the one static
+  `fy-manifest` (`/manifest.webmanifest`). Only per-theme generated manifests remain deferred.
+- **No per-daemon branding.** The daemon's runtime monogram/colour overlay is a
+  separate, unported capability. These marks are the
   product identity underneath it, not a replacement for it.
 - **No icon generation pipeline.** `gen-icons.ts` / `verify-icons.ts` remain unported; whoever
   installs the winning direction owns that.

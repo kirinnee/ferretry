@@ -50,8 +50,7 @@ export type HarnessLoginDeclarations = Readonly<Record<HarnessKind, HarnessLogin
  * The shipped declarations.
  *
  * Both are `true`, and both were established by reading the installed CLIs rather than their `--help`
- * output — see `docs/migration/surveys/harness-login-flows.md`. `claude auth login`'s flag surface
- * alone would have said "not possible".
+ * output. `claude auth login`'s flag surface alone would have said "not possible".
  */
 export const HARNESS_LOGIN_DECLARATIONS: HarnessLoginDeclarations = {
   claude: { login: true },

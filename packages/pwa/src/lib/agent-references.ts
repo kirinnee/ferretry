@@ -20,8 +20,7 @@
  * to keep already-persisted Markdown clickable across its own rename. Ferretry
  * has no such history: a proved reference is encoded by `referenceHref` and
  * navigated with `daemonSessionPath`, which is daemon-aware. Reviving those
- * helpers would reintroduce the single-daemon `/session/:id` destination the
- * survey flagged (`pwa-shape.md:115`).
+ * helpers would reintroduce the single-daemon `/session/:id` destination.
  */
 
 import {
