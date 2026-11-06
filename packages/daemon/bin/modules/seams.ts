@@ -3,6 +3,7 @@ import type { DaemonWorld } from '../fyd.ts';
 import type { LearningSubsystem, LimitsService } from '../../src/lib/index.ts';
 import type { AnalyticsJobs, AnalyticsProvides } from './analytics.ts';
 import type { LearningSeams } from './learning.ts';
+import type { UpdateJobs, UpdateProvides } from './update.ts';
 
 /**
  * The production adapters a test may replace, as each module sees them: one reader per module, over the
@@ -21,6 +22,8 @@ export const seamsOf = {
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the measured host is a `buildWorld` seam, a need). */
   cgroups: (_world: DaemonWorld): void => undefined,
   learning: (world: DaemonWorld): LearningSeams => ({ userHome: world.userHome }),
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the user home and the harness resolution are needs). */
+  update: (_world: DaemonWorld): void => undefined,
 } as const satisfies SeamReaders;
 
 /**
@@ -32,4 +35,5 @@ export interface ModuleHandles {
   readonly analytics: BuiltModule<AnalyticsProvides, AnalyticsJobs>;
   readonly cgroups: BuiltModule<LimitsService>;
   readonly learning: BuiltModule<LearningSubsystem>;
+  readonly update: BuiltModule<UpdateProvides, UpdateJobs>;
 }

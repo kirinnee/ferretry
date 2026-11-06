@@ -6,17 +6,11 @@ import type { AuditRecord } from '@ferretry/protocol';
 import should from 'should';
 import { AUDIT_FILE_MAX_BYTES, auditJournalPaths, FileAuditJournal } from '../../../src/adapters/audit/index.ts';
 import { ApiDispatcher, ApiRouter, type ApiRoute, jsonResponse } from '../../../src/lib/api/index.ts';
-import {
-  AUDIT_FOLD_WINDOW_MS,
-  AUDITED_ROUTES,
-  AUDITED_SOCKET_ROUTES,
-  AuditLog,
-  auditedRoutes,
-  auditedSocketRoutes,
-} from '../../../src/lib/audit/index.ts';
+import { AUDIT_FOLD_WINDOW_MS, AuditLog, auditedRoutes, auditedSocketRoutes } from '../../../src/lib/audit/index.ts';
 import type { SocketDownstream, SocketRoute } from '../../../src/lib/api/socket.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../src/lib/grants/index.ts';
 import { request } from '../../unit/api/support.ts';
+import { composedAuditRules } from '../../unit/runtime/mounts/composed-audit-rules.ts';
 import { grantSubsystem } from '../../unit/runtime/mounts/support.ts';
 
 const AT = '2026-10-13T12:00:00.000Z';
@@ -252,6 +246,8 @@ describe('a flood by a paired device', () => {
   }
 
   async function flooded(maxBytes?: number) {
+    // Every composed module's rules, passed to the decorators explicitly (see `composedAuditRules`).
+    const rules = composedAuditRules();
     const state = await stateDirectory();
     let now = Date.parse(AT);
     const failures: string[] = [];
@@ -265,7 +261,7 @@ describe('a flood by a paired device', () => {
     let fails = false;
     const routes = auditedRoutes(
       subsystem,
-      AUDITED_ROUTES.map(
+      rules.routes.map(
         (rule): ApiRoute => ({
           method: rule.method,
           path: rule.path,
@@ -274,10 +270,11 @@ describe('a flood by a paired device', () => {
           handle: async () => (fails ? { ...jsonResponse({}), status: 403 } : jsonResponse({ used: ['K'], name: 'K' })),
         }),
       ),
+      rules.routes,
     );
     const sockets = auditedSocketRoutes(
       subsystem,
-      AUDITED_SOCKET_ROUTES.map(
+      rules.sockets.map(
         (rule): SocketRoute => ({
           method: 'GET',
           path: rule.path,
@@ -290,6 +287,7 @@ describe('a flood by a paired device', () => {
           }),
         }),
       ),
+      rules.sockets,
     );
     const call = async (index: number): Promise<void> => {
       const subject = `x${String(index)}`;
@@ -462,6 +460,8 @@ describe('a flood by a paired device', () => {
 describe('the security log on disk', () => {
   it('should never contain a code, token, key, proof, secret value or command line', async () => {
     // Arrange
+    // Every composed module's rules, passed to the decorator explicitly (see `composedAuditRules`).
+    const rules = composedAuditRules();
     const state = await stateDirectory();
     const secrets = {
       code: '7F3K-Q2ND',
@@ -484,11 +484,11 @@ describe('the security log on disk', () => {
       // next pull request that audited a route, as "23 records, not 36". A record is ~180 bytes and live
       // plus rotated keep at least 2 × 128 per route, while the ~140 per route actually written still
       // rotates once, so the rotated file is read too.
-      journal: new FileAuditJournal(state, AUDITED_ROUTES.length * 128),
+      journal: new FileAuditJournal(state, rules.routes.length * 128),
       clock: { now: () => AT },
       failures: { auditWriteFailed: () => undefined },
     });
-    const routes: ApiRoute[] = AUDITED_ROUTES.map(rule => ({
+    const routes: ApiRoute[] = rules.routes.map(rule => ({
       method: rule.method,
       path: rule.path,
       minimum: 'operator' as const,
@@ -502,6 +502,7 @@ describe('the security log on disk', () => {
         auditedRoutes(
           { log, failures: { auditWriteFailed: () => undefined }, deviceName: async () => 'Pixel 8' },
           routes,
+          rules.routes,
         ),
       ),
       { admin: 'admin-secret', warden: 'warden-secret' },
@@ -509,7 +510,7 @@ describe('the security log on disk', () => {
     );
 
     // Act
-    for (const rule of AUDITED_ROUTES) {
+    for (const rule of rules.routes) {
       const path = rule.path.replaceAll(/:[A-Za-z]+/gu, `fy_device_id_${'d'.repeat(22)}`);
       await api.dispatch(
         request({
@@ -528,12 +529,12 @@ describe('the security log on disk', () => {
     const reading = { ...read, records: [...read.kept, ...read.records] };
 
     // Assert
-    should(reading.records).have.length(AUDITED_ROUTES.length);
+    should(reading.records).have.length(rules.routes.length);
     should(reading.unreadable).equal(0);
     for (const [kind, value] of Object.entries(secrets))
       should({ kind, leaked: written.includes(value) }).deepEqual({ kind, leaked: false });
     should(written.includes('admin-secret')).be.false();
     const events = reading.records.map((record: AuditRecord) => record.event);
-    should(new Set(events)).deepEqual(new Set(AUDITED_ROUTES.map(rule => rule.event)));
+    should(new Set(events)).deepEqual(new Set(rules.routes.map(rule => rule.event)));
   });
 });

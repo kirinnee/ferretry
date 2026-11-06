@@ -121,18 +121,6 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   // A tunnel changes how other devices reach this machine — a hostname on Cloudflare's edge in front of it
   // — so switching it is kept as a change to the machine's security, beside the settings above.
   { method: 'PUT', path: '/v1/tunnel', event: 'security.changed', fixedSubject: 'tunnel' },
-  // Updating this machine runs new code on it, and turning on automatic updates lets it do so unasked:
-  // both are kept as changes to the machine's security, like its settings.
-  { method: 'POST', path: '/v1/daemon/update', event: 'security.changed', fixedSubject: 'daemon-update' },
-  // Updating an agent CLI puts new code on the machine that every new ferret then runs as.
-  { method: 'POST', path: '/v1/harnesses/update', event: 'security.changed', fixedSubject: 'harness-update' },
-  {
-    method: 'PATCH',
-    path: '/v1/daemon/update/settings',
-    event: 'security.changed',
-    fixedSubject: 'daemon-update-settings',
-    responseSettings: [],
-  },
   // A secure-copy rule lets a ferret paste a value it holds without asking each time (docs/secure-copy.md): adding
   // one (the commit of its staged rule, with a passkey bound to it, owner decision !A244), or approving a ferret's plan
   // of them, loosens what agents may do; removing one narrows it. All are kept.

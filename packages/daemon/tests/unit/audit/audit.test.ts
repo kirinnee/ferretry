@@ -16,7 +16,6 @@ import {
   AUDIT_FOLD_WINDOW_MS,
   AUDIT_INVALID_TEXT,
   AUDIT_KEPT_DAILY_ALLOWANCE,
-  AUDITED_ROUTES,
   AUDITED_SOCKET_ROUTES,
   type AuditEntry,
   AuditedPairingService,
@@ -50,6 +49,7 @@ import {
 import type { PushDispatch } from '../../../src/lib/push/index.ts';
 import { auditRoutes } from '../../../src/lib/runtime/mounts/audit.ts';
 import { jsonBody, request } from '../api/support.ts';
+import { composedAuditRules } from '../runtime/mounts/composed-audit-rules.ts';
 import { grantSubsystem } from '../runtime/mounts/support.ts';
 
 const AT = '2026-10-13T12:00:00.000Z';
@@ -703,9 +703,11 @@ function decorated(handlers: Partial<Record<string, ApiRoute['handle']>>) {
     [DEVICE_ID, 'Pixel 8'],
     [OTHER_DEVICE_ID, 'Old phone'],
   ]);
+  // Every module's rules, not the legacy constant; the decorator gets them explicitly so a moved rule is still recorded.
+  const rules = composedAuditRules();
   const ok: ApiRoute['handle'] = async () => jsonResponse({ ok: true });
   const base: ApiRoute[] = [
-    ...AUDITED_ROUTES.map(rule => ({
+    ...rules.routes.map(rule => ({
       method: rule.method,
       path: rule.path,
       minimum: 'operator' as const,
@@ -717,6 +719,7 @@ function decorated(handlers: Partial<Record<string, ApiRoute['handle']>>) {
   const routes = auditedRoutes(
     { log, deviceName: async id => names.get(id), failures: { auditWriteFailed: message => failures.push(message) } },
     base,
+    rules.routes,
   );
   return { journal, routes, failures };
 }
