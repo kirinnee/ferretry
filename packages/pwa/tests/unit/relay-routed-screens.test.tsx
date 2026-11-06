@@ -4,7 +4,6 @@ import { FileInstanceSurface } from '../../src/components/file-instance-surface.
 import { fsApi, resetFsProbes } from '../../src/components/files-api.ts';
 import { sessionReferenceSurface } from '../../src/components/reference-surface.tsx';
 import { SessionSearchControl, SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
-import { SessionSkillsSurface } from '../../src/features/skills/session-skills-surface.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
@@ -160,19 +159,5 @@ describe('screens read a relay-only daemon through the carrier', () => {
 
     // Act + Assert
     await expect(fsApi.list(daemon, scope, '', undefined, relay.fetch)).rejects.toThrow('cannot read');
-  });
-
-  it('the skills pane reads its catalog through the carrier', async () => {
-    // Arrange
-    const relay = carrier(() => new Response('{"error":"no skills for the test"}', { status: 404 }));
-
-    // Act
-    const view = await mount(routed(relay.fetch, <SessionSkillsSurface connection={daemon} scope={scope} />));
-    await settle();
-
-    // Assert
-    expect(relay.seen.map(row => row.pathname)).toContain('/v1/sessions/session-a/skills');
-    expect(direct).toEqual([]);
-    await view.unmount();
   });
 });

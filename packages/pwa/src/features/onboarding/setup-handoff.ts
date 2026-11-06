@@ -67,7 +67,7 @@ export const SETUP_HANDOFF_KEY = 'fy-setup';
  * once. These links are minutes-old artifacts of a setup in progress, so the cost
  * of refusing one is a tap; the cost of guessing is a journey nobody chose.
  */
-export const SETUP_HANDOFF_VERSION = 'v2';
+const SETUP_HANDOFF_VERSION = 'v2';
 
 /** Where the other device should open, and what it should already have decided. */
 export interface SetupHandoff {

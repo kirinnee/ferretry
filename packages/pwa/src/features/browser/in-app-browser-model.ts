@@ -15,7 +15,7 @@
  */
 
 /** How much of the page a browser destination is trusted with. */
-export type BrowserScope = 'same-origin' | 'cross-origin' | 'device-loopback';
+type BrowserScope = 'same-origin' | 'cross-origin' | 'device-loopback';
 
 export interface BrowserDestination {
   readonly href: string;

@@ -55,7 +55,7 @@
 import type { AgendaId } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 
-export interface AgentReference {
+interface AgentReference {
   readonly kind: 'agent';
   readonly name: string;
 }
@@ -69,16 +69,16 @@ export interface CodeReference {
   readonly endLine?: number;
 }
 
-export interface FileReference extends CodeReference {
+interface FileReference extends CodeReference {
   readonly kind: 'file';
 }
 
-export interface TaskReference {
+interface TaskReference {
   readonly kind: 'task';
   readonly id: string;
 }
 
-export interface AgendaReference {
+interface AgendaReference {
   readonly kind: 'attention';
   readonly id: AgendaId;
 }
@@ -94,7 +94,7 @@ export interface AgendaReference {
  * the kind now is what stops a second surface grammar being invented next to
  * this one.
  */
-export const SURFACE_KINDS = ['terminal', 'browser'] as const;
+const SURFACE_KINDS = ['terminal', 'browser'] as const;
 export type SurfaceKind = (typeof SURFACE_KINDS)[number];
 
 /**
@@ -111,7 +111,7 @@ export interface SurfaceReference {
   readonly key: string;
 }
 
-export interface SkillReference {
+interface SkillReference {
   readonly kind: 'skill';
   /** Canonical lowercase skill name, without either sigil. */
   readonly name: string;
@@ -126,7 +126,7 @@ export type Reference =
   | SkillReference;
 
 /** An agent reference that a live fleet has proved, daemon and session both. */
-export interface ResolvedAgentReference extends AgentReference {
+interface ResolvedAgentReference extends AgentReference {
   readonly daemonId: DaemonId;
   readonly sessionId: string;
 }
@@ -373,7 +373,7 @@ export function findReferences(value: string): ReferenceMatch[] {
   return matches;
 }
 
-export interface AgentReferenceLookup {
+interface AgentReferenceLookup {
   /** Stable identity. Used when re-proving an already-transformed link. */
   readonly sessionId?: string;
   /** Canonical lowercase callsign. Used for authored `:name` tokens. */
@@ -389,14 +389,14 @@ export interface ResolvedAgent {
 
 export type AgentReferenceResolver = (lookup: AgentReferenceLookup) => ResolvedAgent | null | undefined;
 /** Answers a candidate path with its canonical session-relative path, or nothing. */
-export type FileReferenceResolver = (candidatePath: string) => string | null | undefined;
+type FileReferenceResolver = (candidatePath: string) => string | null | undefined;
 export type TaskReferenceResolver = (id: string) => boolean;
 export type AgendaReferenceResolver = (id: AgendaId) => boolean;
 /** Answers whether this session's own skills catalog carries that name. */
 export type SkillReferenceResolver = (name: string) => boolean;
 
 /** What a live surface owner answers with: the daemon AND the session it proved. */
-export interface ResolvedSurface {
+interface ResolvedSurface {
   readonly daemonId: DaemonId;
   readonly sessionId: string;
   readonly surface: SurfaceKind;
@@ -441,7 +441,7 @@ export interface RemarkReferencesOptions {
  * fragment cannot navigate away from a static Cloudflare Pages bundle, and the
  * renderer re-proves the payload before it will act on a click.
  */
-export const REFERENCE_HREF_PREFIX = '#fy-reference?';
+const REFERENCE_HREF_PREFIX = '#fy-reference?';
 
 /** The attribute a transformed link carries, proving the remark plugin made it. */
 export const REFERENCE_ORIGIN_ATTRIBUTE = 'data-fy-reference';

@@ -201,7 +201,7 @@ export function devicesNotSeen(view: PairedDevicesView, seen: ReadonlySet<string
 }
 
 /** How recent a device must be, by the DAEMON's clock, for a first look to announce it anyway. */
-export const NEW_DEVICE_FIRST_LOOK_MS = 24 * 60 * 60_000;
+const NEW_DEVICE_FIRST_LOOK_MS = 24 * 60 * 60_000;
 
 /**
  * What a browser that has never looked counts as already seen.

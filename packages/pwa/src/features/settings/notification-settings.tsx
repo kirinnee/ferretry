@@ -15,7 +15,7 @@ import type { PushDeviceView } from '@ferretry/protocol';
 
 import { cn } from '../../lib/class-names.ts';
 
-export type NotificationPermission = 'unsupported' | 'default' | 'denied' | 'granted';
+type NotificationPermission = 'unsupported' | 'default' | 'denied' | 'granted';
 
 export const NOTIFICATION_UNSUPPORTED_NOTE =
   'This browser does not expose notifications to this app. On iPhone or iPad, install the app first (Share → Add to Home Screen) and open it from the Home Screen.';

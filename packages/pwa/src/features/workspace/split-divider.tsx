@@ -1,8 +1,7 @@
 /**
  * ONE RESIZE SEPARATOR for every workspace boundary: the divider between two
  * panes (a RATIO of the split it sits in) and the edge of a side rail (a width
- * in PIXELS). It generalises the side pane's resize handle
- * (`shell/side-pane-resize-handle.tsx`) to both axes and both units:
+ * in PIXELS). It works in both axes and both units:
  *
  *   - the WAI-ARIA window-splitter pattern — a focusable `role=separator` with
  *     aria-valuenow/min/max, arrow keys (Shift for a larger step), Home / End;
@@ -20,7 +19,7 @@ import {
 
 export const DIVIDER_THROTTLE_MS = 50;
 
-export type SplitDividerAxis = 'row' | 'column';
+type SplitDividerAxis = 'row' | 'column';
 
 export interface SplitDividerProps {
   /** `row`: the panes sit side by side, so the bar is vertical and moves on X. */

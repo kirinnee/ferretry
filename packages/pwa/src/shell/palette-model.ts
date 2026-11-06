@@ -251,7 +251,7 @@ export interface PaletteWorkFilter {
 export const DEFAULT_PALETTE_WORK_FILTER: PaletteWorkFilter = { kind: 'all', open: false };
 
 /** The most rows of each kind while both are listed; one kind alone shows all the daemon returned. */
-export const MAX_WORK_ROWS_PER_KIND = 6;
+const MAX_WORK_ROWS_PER_KIND = 6;
 
 const ownerName = (daemon: DaemonId, sessionId: string, sessions: readonly PaletteSession[]): string => {
   // Session ids collide across machines, and the hit is this machine's.
@@ -264,7 +264,7 @@ const ownerName = (daemon: DaemonId, sessionId: string, sessions: readonly Palet
  * narrows the rows already on screen at once, and the previous answer (kept while the next loads) can
  * never show a kind the reader just turned off.
  */
-export const paletteWorkRows = (
+const paletteWorkRows = (
   hits: readonly WorkHit[],
   filter: PaletteWorkFilter,
   daemon: DaemonId,

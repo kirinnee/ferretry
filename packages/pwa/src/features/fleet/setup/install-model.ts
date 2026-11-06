@@ -24,7 +24,7 @@ export type InstallPhase =
       readonly failures: readonly InstallFailure[];
     };
 
-export interface InstallFailure {
+interface InstallFailure {
   readonly harness: SetupHarness;
   readonly reason: string;
   readonly manualCommand: string;

@@ -40,7 +40,7 @@ export interface MachineData {
   readonly components: FleetComponentCatalog | null;
 }
 
-export type MachineDataState =
+type MachineDataState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly data: MachineData }
   /** The read failed. What was last seen, if anything, stays on screen with the sentence. */

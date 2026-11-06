@@ -64,7 +64,7 @@ export interface NotificationFilterMirrorWriter {
 }
 
 /** What the worker's `push` handler reads. Never throws — see the module doc. */
-export interface NotificationFilterMirrorReader {
+interface NotificationFilterMirrorReader {
   read(): Promise<DeviceNotificationFilterPreferences>;
 }
 

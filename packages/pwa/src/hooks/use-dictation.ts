@@ -169,9 +169,9 @@ const defaultMonotonic = (): number => globalThis.performance.now();
  */
 export const CONTEXT_FETCH_LIMIT = 60;
 /** Context is a nicety and cannot become the slow part of Stop. */
-export const CONTEXT_FETCH_TIMEOUT_MS = 250;
-export const MIN_CONTEXT_MESSAGES = 5;
-export const MAX_CONTEXT_MESSAGES = 10;
+const CONTEXT_FETCH_TIMEOUT_MS = 250;
+const MIN_CONTEXT_MESSAGES = 5;
+const MAX_CONTEXT_MESSAGES = 10;
 
 const CONTEXT_FETCH_TIMED_OUT = Symbol('context-fetch-timed-out');
 
@@ -361,7 +361,7 @@ interface LiveWords {
 const NO_LIVE_WORDS: LiveWords = Object.freeze({ text: '', interim: '', paused: false });
 
 /** Near-live committed + interim words → the preview line and its greyed tail. */
-export const liveWordsFrom = (state: NearLiveState): LiveWords => ({
+const liveWordsFrom = (state: NearLiveState): LiveWords => ({
   text: joinWords(state.committed, state.interim),
   interim: state.interim.trim(),
   paused: state.paused,

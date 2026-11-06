@@ -199,7 +199,7 @@ export const codexPickerFallbackNeeded = (
  * — is the whole wiring, and the two cannot drift. The details sheet supplies
  * only `onClose`, which is why the rest are optional here.
  */
-export interface RuntimeSwitchCallbacks extends Partial<Omit<RuntimeSwitchLifecycle, 'onClose' | 'open'>> {
+interface RuntimeSwitchCallbacks extends Partial<Omit<RuntimeSwitchLifecycle, 'onClose' | 'open'>> {
   readonly onClose: RuntimeSwitchLifecycle['onClose'];
 }
 
@@ -780,7 +780,7 @@ export function RuntimeModelChoices({
  * "Custom id…": for a login whose provider serves ids beyond its catalog (docs/model-catalog.md). The
  * id is checked as one word a CLI takes after `/model` before it is sent; the daemon checks it again.
  */
-export function CustomModelForm({
+function CustomModelForm({
   disabled,
   onSubmit,
   presentation = 'sheet',
@@ -842,7 +842,7 @@ export function CustomModelForm({
 export const effortDisplayName = (effort: string): string =>
   effort === 'xhigh' ? 'Extra high' : effort.charAt(0).toUpperCase() + effort.slice(1);
 
-export interface RuntimeReasoningStepProps {
+interface RuntimeReasoningStepProps {
   readonly model: RuntimeModelChoice;
   readonly currentEffort?: string;
   readonly submittingEffort?: string;
@@ -858,7 +858,7 @@ export interface RuntimeReasoningStepProps {
  * stranded in a sub-step they cannot leave by keyboard; the same move is made
  * here with a ref, which is this repo's idiom and keeps the a11y rule honest.
  */
-export function RuntimeReasoningStep({
+function RuntimeReasoningStep({
   backDisabled,
   currentEffort,
   disabled,

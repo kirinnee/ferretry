@@ -69,7 +69,7 @@ import { DaemonHostChecks, type DaemonReachabilityProbe, daemonDisplayName } fro
 import { type GrantClientFactory, GrantsSurface } from './grants-settings.tsx';
 import { type PasskeyClientFactory, SecuritySurface } from './security-settings.tsx';
 
-export interface DaemonSettingsTabProps {
+interface DaemonSettingsTabProps {
   readonly connection: DaemonConnection;
 }
 

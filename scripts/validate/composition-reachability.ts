@@ -19,8 +19,13 @@
  * So reachability here means: starting at the composition root, some symbol of the module is
  * transitively demanded. Loading a module is not using it.
  *
- * Composition roots are the package's `bin` entries when it has any, otherwise its `exports`
+ * Composition roots are, in order of precedence: the package's own `compositionRoots` list (a
+ * package whose programs are not `bin` entries — the PWA's `src/main.tsx` and its worker programs —
+ * names them there, exact paths, `.ts` or `.tsx`), else its `bin` entries, else its `exports`
  * entries (a library package with no binary has its public surface as its contract).
+ *
+ * A bundler-query import (`./x.ts?worker&url`) is not a module edge: the bundler builds `x.ts` as a
+ * program of its own, so it has to be a composition root itself, and the gate still checks it exists.
  *
  * The parser is lexical, not a regex over raw source: comments and string literals are removed
  * before any statement is matched, so an identifier inside a comment or a string is never mistaken
@@ -288,6 +293,42 @@ function importedNames(clause: string): Set<string> {
   return names;
 }
 
+/** An `export` that declares something on one line; the statement needs nothing after its first line. */
+const DECLARATION_EXPORT =
+  /^export\s+(?:declare\s+|default\s+|async\s+|abstract\s+)*(?:function|class|interface|type|enum|namespace|const|let|var)\b/;
+
+/**
+ * The module-level statements of a `.tsx` file, as TypeScript the lexer can read.
+ *
+ * JSX text holds quotes, apostrophes and slashes that the lexer would take for string and comment
+ * starts ("don't"), swallowing the `export` lines after it. A formatted module states its imports and
+ * exports at column 0 and its lazy `import('...')` calls inside expressions, so those are all that is
+ * read: a column-0 `import`/`export` line up to the `;` that ends it (a declaration export needs only its
+ * first line), plus every `import('...')`. `assertNoMissedEdges` still checks the result against Bun's own
+ * scan of the whole file, so a statement this misses is a hard error, never a silent gap.
+ */
+function moduleStatements(source: string): string {
+  const kept: string[] = [];
+  const lines = source.split('\n');
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (!/^(?:import|export)\b/.test(line)) continue;
+    if (DECLARATION_EXPORT.test(line) || /^import\s*\(/.test(line)) {
+      kept.push(line);
+      continue;
+    }
+    let statement = line;
+    while (!statement.trimEnd().endsWith(';') && index + 1 < lines.length) {
+      index += 1;
+      statement += `\n${lines[index] ?? ''}`;
+    }
+    kept.push(statement);
+  }
+  for (const match of source.matchAll(/\bimport\s*\(\s*(['"])([^'"\n]+)\1/g))
+    kept.push(`import(${match[1]}${match[2]}${match[1]});`);
+  return kept.join('\n');
+}
+
 function parseModule(source: string): ModuleFacts {
   const { text, literals } = clean(source);
   const specifiers = new Set<string>();
@@ -379,12 +420,17 @@ function fail(message: string): never {
 /** Resolve a relative specifier to a repo-relative `.ts` path, or null when it is not our code. */
 function resolveSpecifier(importer: string, specifier: string, root: string): string | null {
   if (!specifier.startsWith('.')) return null;
-  const base = resolve(root, dirname(importer), specifier);
+  const query = specifier.indexOf('?');
+  const base = resolve(root, dirname(importer), query < 0 ? specifier : specifier.slice(0, query));
+  if (query >= 0) {
+    if (!existsSync(base)) return fail(`cannot resolve '${specifier}' imported by ${importer}`);
+    return null;
+  }
   if (base.endsWith('.json')) return null;
-  // A bundled asset (the terminal's font, a provider preset or a prompt imported as text) is a URL or a string the
+  // A bundled asset (the terminal's font, a stylesheet, a provider preset or a prompt imported as text) is a URL or a string the
   // bundler hands back, not a module with exports or a composition root of its own — there is nothing
   // in it to reach. It must still exist. (`.pub` is the hosted app's release key, compiled into the daemon; `scripts/host/*` is the firewall script and unit the CLI prints.)
-  if (/\.(woff2?|png|svg|webp|yaml|txt|pub|service)$/u.test(base) || /(^|\/)scripts\/host\/[^/]+$/u.test(base)) {
+  if (/\.(woff2?|png|svg|webp|css|yaml|txt|pub|service)$/u.test(base) || /(^|\/)scripts\/host\/[^/]+$/u.test(base)) {
     if (!existsSync(base)) return fail(`cannot resolve '${specifier}' imported by ${importer}`);
     return null;
   }
@@ -434,7 +480,7 @@ class ModuleGraph {
     const cached = this.facts.get(file);
     if (cached) return cached;
     const source = readFileSync(resolve(this.root, file), 'utf8');
-    const parsed = parseModule(source);
+    const parsed = parseModule(file.endsWith('.tsx') ? moduleStatements(source) : source);
     assertNoMissedEdges(file, source, parsed);
     this.facts.set(file, parsed);
     return parsed;
@@ -569,17 +615,27 @@ function reachableFrom(graph: ModuleGraph, roots: readonly string[]): ReadonlySe
 interface Manifest {
   readonly bin?: Record<string, string>;
   readonly exports?: Record<string, string>;
+  readonly compositionRoots?: readonly string[];
 }
 
-/** Composition roots for a package: its `bin` entries, or its public `exports` when it has none. */
+/** Composition roots for a package: its `compositionRoots`, else its `bin` entries, else its public `exports`. */
 function compositionRoots(root: string, packageDir: string): string[] {
   const manifestPath = join(packageDir, 'package.json');
   const manifest = JSON.parse(readFileSync(resolve(root, manifestPath), 'utf8')) as Manifest;
+  const named = manifest.compositionRoots;
+  if (named !== undefined && !(Array.isArray(named) && named.length > 0 && named.every(e => /\.tsx?$/.test(e)))) {
+    fail(`${manifestPath} compositionRoots must be a non-empty list of exact .ts/.tsx paths`);
+  }
   const entries = Object.keys(manifest.bin ?? {}).length > 0 ? manifest.bin : manifest.exports;
-  const declared = Object.values(entries ?? {})
-    .filter(entry => typeof entry === 'string' && entry.endsWith('.ts'))
-    .map(entry => join(packageDir, entry));
-  if (declared.length === 0) fail(`${manifestPath} declares no bin or exports entry to use as a composition root`);
+  const declared =
+    named !== undefined
+      ? named.map(entry => join(packageDir, entry))
+      : Object.values(entries ?? {})
+          .filter(entry => typeof entry === 'string' && entry.endsWith('.ts'))
+          .map(entry => join(packageDir, entry));
+  if (declared.length === 0) {
+    fail(`${manifestPath} declares no compositionRoots, bin or exports entry to use as a composition root`);
+  }
   // A worker-thread program beside a bin entry is compiled into the same binary as an entry of its own
   // (`scripts/release/compile-executable.ts` embeds every `bin/*.worker.ts`), so what it imports ships
   // and runs even though no bin entry imports it.

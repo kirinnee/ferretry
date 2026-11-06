@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import type { AgendaSnapshot, PinSnapshot, SessionView } from '@ferretry/protocol';
+import type { AgendaSnapshot, SessionView } from '@ferretry/protocol';
 import { renderToString } from 'react-dom/server';
 import { useAgendaCount, useAgendaSession, useAgendaSnapshot } from '../../src/hooks/use-agenda.ts';
 import { useDensity } from '../../src/hooks/use-density.ts';
 import { useFleetView } from '../../src/hooks/use-fleet-view.ts';
 import { useGroupNeedsYou } from '../../src/hooks/use-group-needs-you.ts';
 import { useMachineOrder } from '../../src/hooks/use-machine-order.ts';
-import { usePinsSession, useSessionPins } from '../../src/hooks/use-pins.ts';
 import { useKnownProjects, useProjectsSlice } from '../../src/hooks/use-projects.ts';
 import {
   useMachinesUsage,
@@ -20,13 +19,12 @@ import { type ControlsStorage, DaemonControlsStore } from '../../src/lib/control
 import { daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { DaemonFleetStore } from '../../src/lib/fleet-store.ts';
-import { DaemonPinClient } from '../../src/lib/pin-client.ts';
 import { DaemonProjectsStore } from '../../src/lib/projects-store.ts';
 import { DaemonUsageStore } from '../../src/lib/usage-store.ts';
 import { sessionView } from '../support/sessions.ts';
 
 // A server render reads every external store through its server snapshot, so each hook must produce
-// the same first paint there as on the client (or, for a pin/attention status, the documented 'idle').
+// the same first paint there as on the client (or, for an attention status, the documented 'idle').
 
 const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const scope = daemonSessionScope(daemon, 'session-a');
@@ -59,8 +57,6 @@ const agendaBoard: AgendaSnapshot = {
   updatedAt: '2026-08-01T00:00:00.000Z',
 };
 
-const pinBoard: PinSnapshot = { v: 1, sessionId: 'session-a', updatedAt: '2026-08-01T00:00:00.000Z', pins: [] };
-
 describe('hooks rendered on the server', () => {
   it('reads the agenda store as idle status, its board and its badge count', () => {
     const client = new DaemonAgendaClient();
@@ -72,17 +68,6 @@ describe('hooks rendered on the server', () => {
       return <output>{`${status}:${board?.count ?? 'none'}:${count}`}</output>;
     };
     expect(renderToString(<Probe />)).toContain('idle:1:1');
-  });
-
-  it('reads the pin store as idle status and its board', () => {
-    const client = new DaemonPinClient();
-    client.store.applySnapshot(scope, pinBoard);
-    const Probe = () => {
-      const status = usePinsSession(client, daemon, scope);
-      const board = useSessionPins(client, scope);
-      return <output>{`${status}:${board?.sessionId ?? 'none'}`}</output>;
-    };
-    expect(renderToString(<Probe />)).toContain('idle:session-a');
   });
 
   it('reads the device controls: density, machine order and the needs-you grouping', () => {

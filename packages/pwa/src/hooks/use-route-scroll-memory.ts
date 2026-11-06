@@ -28,7 +28,7 @@ import { elementAtPath, elementPath, restorableTop, type ScrollMemory } from '..
 export const SCROLL_RESTORE_PATIENCE_MS = 4_000;
 
 /** How long the region must go without a change before a landed offset stops being held. */
-export const SCROLL_RESTORE_QUIET_MS = 500;
+const SCROLL_RESTORE_QUIET_MS = 500;
 
 /** Scrollers this hook leaves alone: the chat's own follow model, and anything that opts out. */
 export const SCROLL_MEMORY_IGNORED = '.fy-transcript, [data-scroll-memory="off"]';

@@ -129,7 +129,7 @@ export function SetupRow({ title, detail, label, status, statusLabel, children, 
   );
 }
 
-export interface SetupChoice<T extends string> {
+interface SetupChoice<T extends string> {
   readonly id: T;
   readonly title: ReactNode;
   readonly detail?: ReactNode;

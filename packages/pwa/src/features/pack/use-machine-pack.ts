@@ -42,17 +42,17 @@ export type PackRead =
   | { readonly kind: 'failed'; readonly message: string };
 
 /** Starting Clean up: a run that began, or why none did. */
-export type CleanUpStart =
+type CleanUpStart =
   | { readonly kind: 'started'; readonly job: PackCleanUpJob }
   | { readonly kind: 'refused'; readonly message: string; readonly details?: string };
 
 /** Reading one clean-up run: its state (and rewrite), or why it could not be read. */
-export type CleanUpJobRead =
+type CleanUpJobRead =
   | { readonly kind: 'read'; readonly result: PackCleanUpJobResult }
   | { readonly kind: 'failed'; readonly message: string };
 
 /** An accept or an undo: what the daemon did, or why it did not. */
-export type RoutingWrite =
+type RoutingWrite =
   | { readonly kind: PackRoutingWriteResult['outcome']; readonly message: string }
   | { readonly kind: 'refused'; readonly message: string };
 

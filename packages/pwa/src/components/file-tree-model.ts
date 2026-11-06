@@ -1,7 +1,7 @@
 import type { FsEntry, FsListing } from './files-api.ts';
 import { entryRefusal, joinRel, normalizeRel, sortFsEntries } from './files-model.ts';
 
-export type TreeDirStatus = 'unloaded' | 'loading' | 'ready' | 'error';
+type TreeDirStatus = 'unloaded' | 'loading' | 'ready' | 'error';
 export interface TreeDirNode {
   status: TreeDirStatus;
   entries: readonly FsEntry[];
@@ -82,7 +82,7 @@ export const pendingTreeDirs = (state: FileTreeState): string[] => {
   walk('');
   return result;
 };
-export interface TreeEntryRow {
+interface TreeEntryRow {
   kind: 'dir' | 'file';
   path: string;
   name: string;
@@ -92,7 +92,7 @@ export interface TreeEntryRow {
   selected: boolean;
   size?: number;
 }
-export interface TreeNoteRow {
+interface TreeNoteRow {
   kind: 'note';
   note: 'loading' | 'error' | 'empty' | 'truncated';
   dir: string;

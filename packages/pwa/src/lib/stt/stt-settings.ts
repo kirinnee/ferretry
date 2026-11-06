@@ -75,7 +75,7 @@ export const DEFAULT_GROQ_ENHANCEMENT_MODEL = 'openai/gpt-oss-120b';
 export const GROQ_FASTER_ENHANCEMENT_MODEL = 'openai/gpt-oss-20b';
 /** The model earlier builds defaulted to; it does not clean up dictation, so a stored copy is replaced. */
 const RETIRED_GROQ_ENHANCEMENT_MODEL = 'llama-3.1-8b-instant';
-export const DEFAULT_CEREBRAS_ENHANCEMENT_MODEL = 'gpt-oss-120b';
+const DEFAULT_CEREBRAS_ENHANCEMENT_MODEL = 'gpt-oss-120b';
 
 /** Each hosted provider's default model — the daemon's own default, restated so the picker can show it. */
 export const DEFAULT_ENHANCEMENT_MODELS: Readonly<Record<RemoteEnhancementProviderId, string>> = {
@@ -92,7 +92,7 @@ export const DEFAULT_ENHANCEMENT_MODELS: Readonly<Record<RemoteEnhancementProvid
  * - `browser` is the browser's or phone's own speech recognition (`browser-recognition.ts`): nothing
  *   to download, but Chrome, Android and Safari send the audio to their vendor's servers.
  */
-export const DICTATION_ENGINES = [...ON_DEVICE_MODEL_IDS, 'browser'] as const;
+const DICTATION_ENGINES = [...ON_DEVICE_MODEL_IDS, 'browser'] as const;
 export type DictationEngineId = (typeof DICTATION_ENGINES)[number];
 
 /** Whether an engine runs a model on this device (so the audio never leaves it). */
@@ -116,7 +116,7 @@ export const AFTER_DICTATION_OPTIONS = [
   },
 ] as const;
 
-export type AfterDictationId = (typeof AFTER_DICTATION_OPTIONS)[number]['id'];
+type AfterDictationId = (typeof AFTER_DICTATION_OPTIONS)[number]['id'];
 
 /**
  * The free-text context cap, re-exported so the settings textarea can carry
@@ -377,22 +377,6 @@ export class SttSettingsStore {
       return false;
     }
   }
-}
-
-/**
- * The voice choices a settings screen reads and writes, as a seam rather than
- * as this store.
- *
- * Voice clean-up is meant to be a MACHINE setting (`voice.yaml` under the
- * daemon's config files). Until that file exists the choice lives here, in the
- * browser's own settings, and the screen depends only on this interface — so
- * moving the backing store to the daemon swaps the implementation, not the
- * screen. `SttSettingsStore` satisfies it.
- */
-export interface VoiceSettingsSource {
-  readonly get: () => SttSettings;
-  update(patch: SttSettingsPatch): SttSettings;
-  readonly subscribe: (listener: () => void) => () => void;
 }
 
 /**

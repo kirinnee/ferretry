@@ -96,7 +96,7 @@ export const SHELL_DESTINATIONS = [
  * Two doors into Sharing that name a tab. They sit right after the Sharing place itself and appear only
  * when the destinations given carry one, so a palette built from a list without Sharing never offers them.
  */
-export const SHARING_TAB_DESTINATIONS = [
+const SHARING_TAB_DESTINATIONS = [
   {
     id: 'sharing-shared',
     label: 'Subscriptions',
@@ -170,7 +170,7 @@ const DESTINATION_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
 export const PAIR_PHONE_SEARCH_TERMS =
   'pair phone device add qr code scan invite mobile tablet browser another connect link';
 
-export const WHATS_NEW_SEARCH_TERMS = 'whats new changelog release notes updates version changes latest';
+const WHATS_NEW_SEARCH_TERMS = 'whats new changelog release notes updates version changes latest';
 
 export const whatsNewPaletteCommand = (Icon: LucideIcon, run: () => void): PaletteCommand => ({
   id: 'whats-new',

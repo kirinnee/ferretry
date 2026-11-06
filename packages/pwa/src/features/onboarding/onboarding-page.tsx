@@ -105,7 +105,7 @@ import { SetupHandoffPanel, type SetupSharePort } from './setup-handoff-panel.ts
 const SHELL =
   'mx-auto flex min-h-full w-full max-w-[560px] flex-col gap-3 py-5 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-8';
 
-export interface OnboardingPairingHost {
+interface OnboardingPairingHost {
   /** The daemon answered and this browser is paired; the journey is finished. */
   readonly onPaired: () => void;
   /**

@@ -37,24 +37,13 @@
 // signature on purpose rather than asserted into a shape we do not control.
 import type { FyEvent, SessionView } from '@ferretry/protocol';
 import { sameAttachmentIds } from '../lib/attachment-ids.ts';
-import type { AttachmentView, StoredTranscriptImage } from '../lib/attachments.ts';
+import type { AttachmentView } from '../lib/attachments.ts';
 import { peerFrom } from '../lib/peer-message.ts';
 import { RECORD_CLOCK_SLACK_MS } from '../lib/send-ledger.ts';
 import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 
 /** How many records one history page asks the daemon for. */
 export const CHAT_PAGE_SIZE = 200;
-
-/**
- * Slack when matching an optimistic send against the real `chat.user` record it
- * became. The record's timestamp comes from the harness's own clock, which can
- * sit slightly behind the browser's.
- *
- * kteam declared this constant twice — once here and once in its send ledger.
- * They are the same fact about the same clock skew, so this reuses the ledger's
- * rather than letting a second copy drift away from it.
- */
-export { RECORD_CLOCK_SLACK_MS } from '../lib/send-ledger.ts';
 
 /** One record in a session's chat history, as both history and live frames carry it. */
 export interface ChatRecord {
@@ -69,31 +58,11 @@ export interface ChatRecord {
 
 export type PendingStatus = 'sending' | 'queued' | 'delivered' | 'error';
 
-export interface PendingSend {
-  readonly key: string;
-  readonly text: string;
-  readonly status: PendingStatus;
-  /**
-   * Idempotency key for the LOGICAL message. Every attempt to deliver it — the
-   * first, a retry after an error, the interrupt-then-send path — carries this
-   * same id, so the daemon applies it exactly once.
-   */
-  readonly requestId: string;
-  /**
-   * When the reader sent it. Used to reap against `chat.user` records that
-   * arrived AFTER this send, never against an identical older message.
-   */
-  readonly at: number;
-  readonly attachmentIds: readonly string[];
-  readonly attachments: readonly StoredTranscriptImage[];
-  readonly localAttachmentIds: readonly string[];
-}
-
 /**
  * `deferred`: the connection is gone, so the file is not uploaded now — it goes to this device's outbox with the
  * message and is uploaded there, before the send, once the machine answers again.
  */
-export type PendingAttachmentStatus = 'uploading' | 'ready' | 'failed' | 'deferred';
+type PendingAttachmentStatus = 'uploading' | 'ready' | 'failed' | 'deferred';
 
 export interface PendingAttachment {
   readonly localId: string;

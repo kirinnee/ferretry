@@ -26,7 +26,7 @@ import { SecretPill } from './secret-pill.tsx';
 import type { LocalModelsControl } from './use-local-models.ts';
 
 /** The facts under a provider's name: scope, quota, docs, when it was checked, and what was not. */
-export function PresetFacts({ preset }: { readonly preset: FleetProviderPresetView }) {
+function PresetFacts({ preset }: { readonly preset: FleetProviderPresetView }) {
   return (
     <div className="flex flex-col gap-1 text-meta leading-base text-muted" data-env-preset-facts={preset.id}>
       <p className="m-0">{preset.summary}</p>

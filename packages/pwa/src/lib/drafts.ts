@@ -8,12 +8,12 @@ export const DRAFTS_KEY = 'fy-drafts-v1';
  * them. Apart from the draft on purpose: the composer overwrites its draft with the shared one at once,
  * and a reload or a session change must not take the only copy of the person's words with it.
  */
-export const DRAFT_RESTORE_KEY = 'fy-draft-restore-v1';
+const DRAFT_RESTORE_KEY = 'fy-draft-restore-v1';
 export const DRAFTS_VERSION = 1;
 export const MAX_DRAFTS = 50;
 export const MAX_DRAFT_LEN = 16_000;
 
-export interface DraftEntry {
+interface DraftEntry {
   readonly text: string;
   readonly at: number;
 }

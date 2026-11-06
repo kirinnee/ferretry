@@ -55,7 +55,7 @@ export interface AddMcpPorts {
 const reference = (inner: string): string => ['$', `{${inner}}`].join('');
 
 /** How long typing must pause before the daemon is asked for a preview. */
-export const PREVIEW_DEBOUNCE_MS = 350;
+const PREVIEW_DEBOUNCE_MS = 350;
 
 type Preview =
   | { readonly kind: 'idle' }

@@ -208,7 +208,6 @@
 # Miner output is saved beside the verified digests and a later mounted run ingests it through
 # `applyMinerOutput`. Proposals remain pending until a human renders a verdict on the review board.
 
-
 # PR #15 — add browser session control: THE HUMAN LOGIN WINDOW IS MOUNTED, nothing to list.
 # The blocker recorded here for three units was accurate and it was a PORT, not a wiring: the host
 # contract `BrowserLoginRuntime` was declared in adapters/browser/control/login-window.ts and nothing
@@ -270,60 +269,7 @@
 # Build-time PostCSS plugin loaded by packages/pwa/vite.config.ts, never by the app bundle: no runtime composition root can import it.
 packages/pwa/src/lib/text-scale-postcss.ts # build tooling for the Text size setting, reached from vite.config.ts only
 
-# The gate's roots skip .tsx entries (packages/pwa exports ./main → src/main.tsx), so a .ts module imported only from the app tree reads as unreached.
-packages/pwa/src/hooks/use-archived-sessions.ts # the sessions bar footer's count and rows of archived finished sessions (docs/session-archive.md), used by ShellSessionsBar in App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/hooks/use-fine-pointer.ts # used by SessionChatPage via App.tsx ← main.tsx; unreached only because the gate ignores .tsx roots
-packages/pwa/src/hooks/use-chat-tasks-url.ts # the Tasks tab expand/agents view kept in the chat address, used by App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/hooks/use-warden-daemon-scope.ts # the Warden page daemon filter choice kept per device, used by WardenRoute in App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/hooks/use-warden-statuses.ts # the combined Warden totals' reads, used by warden-totals-surface.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/hooks/use-work-project-names.ts # the project names a work-search card hit shows, used by App.tsx and SessionChatPage ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/hooks/use-rule-deep-link.ts # sends a #rules/<stage> link to the Secure copy panel, used by App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/features/skills/machine-skills-api.ts # the machine skills read behind My catalogs’ Publish skills picker, used by publish-skills-sheet.tsx ← catalogs-surface.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/board-chat-url.ts # the Tasks tab address grammar (tasks=full, agents=1), used by use-chat-tasks-url.ts ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/chat-search.ts # search within a conversation: used by components/chat-search.tsx ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
-
-packages/pwa/src/hooks/use-agenda-deep-link.ts # resolves a #agenda/<id> link to its machine, used by App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/agenda-deep-link.ts # captures the #agenda/<id> fragment once, used by App.tsx and use-agenda-deep-link.ts ← main.tsx; the gate ignores .tsx roots
-
 # The project board's data layer (board U10) lands before the pages that read it (board U11–U15).
-
-# The lane editor (board U15), imported only from the .tsx app tree that the gate does not root.
-packages/pwa/src/lib/lane-editor-model.ts # the lane editor draft model, used by features/projects/lane-editor.tsx ← App.tsx ← main.tsx
-
-packages/pwa/src/lib/board-summary.ts # the Board table summary (sections and time window), reached from board-table.tsx and board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/board-phone.ts # the phone Board's lane switching and tab badge (U13), reached from board-phone.tsx and App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/board-ports.ts # the Board's send-and-start ports (U12), reached from App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/hooks/use-board-asks.ts # the card detail's ask reader (U12), reached from board-detail.tsx ← board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/item-conversation.ts # the Inbox item's History read, used by App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/push-seen.ts # an Inbox item opened here takes its alerts down (POST /v1/push/seen), used by App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/board-side-view.ts # the in-ferret Tasks tab's Kanban/List choice, reached from chat-tasks.tsx ← session-chat-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/hooks/use-to-test-cards.ts # the Inbox's cards-to-test read, used by App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/features/queue-view/queue-action.ts # the Find/Cmd-K Message queue destination, used by App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/queue-view.ts # the queue page's row and group model, used by queue-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/waiting-fold.ts # which messages are still waiting so the chat folds them out, used by session-chat-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/components/machine-home-model.ts # the machine home's counts, ferret order and health word, used by App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/hooks/use-spend-today.ts # the machine home's spend-today figure, used by App.tsx ← main.tsx; the gate ignores .tsx roots
-
-# The member app (catalogs 2c), imported only from the .tsx app tree that the gate does not root.
-packages/pwa/src/features/shared/use-clock.ts # the join screen's passkey countdown clock, used by join-screen.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-# The owner's sharing screens (catalogs 2c), reached only from the .tsx app tree once the side panel's rows
-# stopped opening the Share sheet (&B131: nothing on an active-skills row publishes).
-packages/pwa/src/features/catalogs/catalog-shares-api.ts # the owner's share and member routes, used by share-sheet.tsx, catalog-members.tsx and versions-sheet.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/features/catalogs/catalog-sharing-model.ts # the share sheet's and People's sentences and rules, used by share-sheet.tsx and catalog-members.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-# My catalogs' Publish skills picker (&B131 A3), reached only from the .tsx app tree.
-packages/pwa/src/features/catalogs/publish-skills-model.ts # which skills the Publish skills picker lists and whether the catalog holds each, used by publish-skills-sheet.tsx ← catalogs-surface.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-
-# The store row's installed version and its acts (&B131 B4), reached only from the .tsx app tree.
-packages/pwa/src/features/shared/store-row-model.ts # the store row status, Update/Move requests and wording, used by store-row-actions.tsx and update-install-sheet.tsx ← shared-with-me.tsx ← sharing-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-
-# What the shared catalog installs mean for a row, reached only from the .tsx app tree.
-packages/pwa/src/features/shared/shared-installs.ts # which skills and MCP servers a publisher's catalogs have installed, used by shared-with-me.tsx ← sharing-page.tsx ← App.tsx ← main.tsx and by add-skills-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/features/catalogs/local-skill-installs-api.ts # the copy-from-this-machine reads and installs, used by add-skills-page.tsx and local-skill-install-sheet.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/features/context-rail/machine-skills-model.ts # the On this machine rows, used by add-skills-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/hooks/use-auto-read.ts # Auto-read replies: reads a finished turn aloud, used by SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/voice-chat/auto-read.ts # the pure turn watcher behind Auto-read replies, used by use-auto-read.ts ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/voice-chat/reply-picker.ts # picks the words of a finished turn to read aloud, used by use-auto-read.ts ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
-
 
 # The speed benchmark's result schema and arithmetic: dev tooling, reached only from the one-click page (packages/pwa/speed-bench/main.ts, runner.ts) and the headless driver (packages/pwa/harness/stt-speed-bench-page.ts), neither of which is the app's composition root. It lives under src/lib so the unit tier's 100% ledger holds it. Delete this line if the app ever imports it.
 packages/pwa/src/lib/stt/speed-bench-report.ts # benchmark result schema, used by speed-bench/ and harness/stt-speed-bench-page.ts only; not part of the shipped app
@@ -331,3 +277,6 @@ packages/pwa/src/lib/stt/speed-bench-report.ts # benchmark result schema, used b
 # The Live voice end-of-turn detector (&F137 slice 3), built and measured before the Live loop hook (slice 4) consumes it.
 packages/pwa/src/lib/voice-chat/turn-endpointer.ts # pure pause detection over level frames, used so far only by its unit tests and harness/turn-endpointer-noise.ts; slice 4's use-live-voice.ts wires it into the composition root and this entry goes then
 packages/pwa/src/lib/voice-chat/turn-endpointer-scoring.ts # the noise harness's pure judging rules, used only by harness/turn-endpointer-noise.ts and its unit tests; goes with the turn-endpointer entry above
+
+# Shared-draft sync, built ahead of its mount. The PWA's roots are the compositionRoots in packages/pwa/package.json (src/main.tsx and the workers); delete this line when a root imports the module.
+packages/pwa/src/lib/shared-draft-client.ts # in-flight shared-draft sync (#1233/#1379), not yet mounted; ignored in knip.production.json too

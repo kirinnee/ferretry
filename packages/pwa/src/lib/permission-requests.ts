@@ -72,7 +72,7 @@ export const answerPermissionRequest = async (
 /* ---------- plain words ---------------------------------------------------- */
 
 /** How long a `what` may be in a notification or a status line before it is shortened. */
-export const PERMISSION_WHAT_SHORT = 48;
+const PERMISSION_WHAT_SHORT = 48;
 
 const isPathAction = (request: PermissionRequest): boolean =>
   request.action === 'read' || request.action === 'edit' || request.action === 'create';

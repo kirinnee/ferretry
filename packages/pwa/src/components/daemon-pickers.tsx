@@ -369,7 +369,7 @@ const IDENTITY_LINE_CLASS = 'mono text-meta text-muted';
  * whose text IS its output is a different thing from where the cursor is. It gets
  * a tick, so scrolling the list never loses track of the answer already given.
  */
-export function AccountPickerRow(option: AccountFieldOption, state: { readonly selected: boolean }): ReactNode {
+function AccountPickerRow(option: AccountFieldOption, state: { readonly selected: boolean }): ReactNode {
   const { account } = option;
   const label = accountLabel(account);
   return (
@@ -405,7 +405,7 @@ export function AccountPickerRow(option: AccountFieldOption, state: { readonly s
 }
 
 /** Provenance is the whole point of a project row: declared, or merely used. */
-export function ProjectPickerRow(option: ProjectFieldOption): ReactNode {
+function ProjectPickerRow(option: ProjectFieldOption): ReactNode {
   const { project } = option;
   const registered = project.kind === 'registered';
   return (
@@ -443,7 +443,7 @@ export function ProjectPickerRow(option: ProjectFieldOption): ReactNode {
 // ---------------------------------------------------------------------------
 
 /** What both fields hand straight to the control. */
-export interface DaemonPickerFieldProps {
+interface DaemonPickerFieldProps {
   /** Used verbatim, so a surface's own `<label htmlFor>` keeps pointing at it. */
   readonly id: string;
   /** The accessible name. Pass the same words as the visible label. */

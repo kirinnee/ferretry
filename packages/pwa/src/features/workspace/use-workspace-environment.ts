@@ -26,10 +26,10 @@ export function useWorkspaceFormFactor(): WorkspaceFormFactor {
 export const SESSION_TERMINALS_POLL_MS = 10_000;
 
 /** The safety-net re-read while the feed is live, for a shell that exited without a journal entry. */
-export const SESSION_TERMINALS_LIVE_POLL_MS = 120_000;
+const SESSION_TERMINALS_LIVE_POLL_MS = 120_000;
 
 /** A feed event that may have changed the session's terminals: a surface or a terminal one. */
-export const movesTerminals = (event: { readonly type: string }): boolean =>
+const movesTerminals = (event: { readonly type: string }): boolean =>
   event.type.startsWith('surface.') || event.type.startsWith('terminal.');
 
 /**

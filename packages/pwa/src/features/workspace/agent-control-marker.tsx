@@ -23,7 +23,7 @@ export interface AgentControlDriver {
 }
 
 /** The agent has handed this surface to the owner. */
-export interface AgentControlAsk {
+interface AgentControlAsk {
   readonly agent: string;
   readonly message?: string;
 }

@@ -137,7 +137,7 @@ export interface UnifiedBrowserSurfaceProps {
  * The host's side of the bar. Every field is optional in spirit: a surface with no host is a plain browser,
  * with the daemon's own Chrome pages in the page menu and no one to take over from.
  */
-export interface BrowserBarHost {
+interface BrowserBarHost {
   /** What the page is called (`app` in `%browser:app`). */
   readonly name: string;
   /** The session's pages, as the host lists them. Absent: the daemon's own Chrome pages are listed here. */

@@ -93,7 +93,7 @@ export const agendaKindMeta = (
   }
 };
 
-export const sourceLabel = (source: AgendaItem['source']): string =>
+const sourceLabel = (source: AgendaItem['source']): string =>
   ({ task: 'Blocked task', question: 'Question', 'agent-raised': 'Agent request' })[source] ?? 'Unknown source';
 
 export const agendaReference = (id: string): string => `!${id}`;

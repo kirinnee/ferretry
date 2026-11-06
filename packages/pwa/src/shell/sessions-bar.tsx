@@ -87,7 +87,7 @@ import { SessionsBarTree } from './sessions-bar-tree.tsx';
  */
 export type SessionsBarPlace = 'sessions' | 'attention' | 'projects' | 'sharing' | 'insights' | 'settings';
 
-export const SESSIONS_BAR_PLACES = [
+const SESSIONS_BAR_PLACES = [
   { id: 'projects', label: 'Projects', path: daemonProjectsPath, Icon: FolderKanban },
   { id: 'sharing', label: 'Sharing', path: daemonSharingPath, Icon: Share2 },
   { id: 'insights', label: 'Insights', path: daemonAnalyticsPath, Icon: ChartNoAxesCombined },
@@ -95,7 +95,7 @@ export const SESSIONS_BAR_PLACES = [
 ] as const;
 
 /** Another paired machine the switcher can take the reader to. */
-export interface SessionsBarMachine {
+interface SessionsBarMachine {
   readonly daemonId: DaemonId;
   readonly name: string;
   /** Its daemon said a newer release exists (`useMachineUpdates`): a dot in the machine menu. */

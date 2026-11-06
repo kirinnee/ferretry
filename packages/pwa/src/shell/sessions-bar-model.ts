@@ -120,7 +120,7 @@ export const rowPreview = (
 };
 
 /** Pulls the pinned sessions out of `rows`, oldest pin first, leaving the rest in their order. */
-export const pullPinned = <T>(
+const pullPinned = <T>(
   rows: readonly T[],
   viewOf: (row: T) => SessionView,
 ): { readonly pinned: readonly T[]; readonly rest: readonly T[] } => ({

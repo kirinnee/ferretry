@@ -418,7 +418,7 @@ const browserTranscriptHold = createTranscriptHoldController(() =>
 );
 
 /** Subscribe without React; kept public for DOM-free controller tests. */
-export const subscribeTranscriptHold = browserTranscriptHold.subscribe;
+const subscribeTranscriptHold = browserTranscriptHold.subscribe;
 
 const transcriptHoldSnapshot = browserTranscriptHold.snapshot;
 

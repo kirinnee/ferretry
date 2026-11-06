@@ -71,7 +71,7 @@ export interface PackWaitOutcome {
 }
 
 /** One model a recommendation lists as usable (or not) here now, in the order the daemon sorted them. */
-export interface PackOption {
+interface PackOption {
   readonly ready: boolean;
   /** Its label ("Claude Opus 5.5"). */
   readonly model: string;

@@ -52,7 +52,7 @@ const STEP_IDS: ReadonlySet<string> = new Set(ONBOARDING_STEPS.map(step => step.
 export const isMachineSetupStepId = (value: string): value is MachineSetupStepId => STEP_IDS.has(value);
 
 /** What the person did with a step. A step they never reached has no state. */
-export type MachineSetupStepState = 'done' | 'skipped';
+type MachineSetupStepState = 'done' | 'skipped';
 
 /** Where the setup starts from: walk through each step, or copy another machine's settings first. */
 export type MachineSetupStart = 'fresh' | 'clone';

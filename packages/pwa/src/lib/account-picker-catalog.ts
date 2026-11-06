@@ -102,8 +102,8 @@ export interface AccountPickerHealthCatalog {
 
 export type PickerCatalogClient = Pick<IFyApiClient, 'request'>;
 
-export const PICKER_RUNTIMES_PATH = '/v1/fleet/runtimes';
-export const PICKER_CREDENTIALS_PATH = '/v1/fleet/credentials';
+const PICKER_RUNTIMES_PATH = '/v1/fleet/runtimes';
+const PICKER_CREDENTIALS_PATH = '/v1/fleet/credentials';
 
 const activityInstant = (view: SessionView): string => view.state.lastActivityAt ?? view.config.updatedAt;
 

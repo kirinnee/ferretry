@@ -53,7 +53,7 @@ import { LoginScopeChip } from './login-scope-chip.tsx';
 import { RemoveLoginDialog } from './remove-login-dialog.tsx';
 import { useLocalModels } from './use-local-models.ts';
 
-export function UsageBars({ credential, now }: { readonly credential: FleetCredentialView; readonly now: number }) {
+function UsageBars({ credential, now }: { readonly credential: FleetCredentialView; readonly now: number }) {
   const bars = usageBars(credential, now);
   if (bars === null)
     return (
@@ -90,7 +90,7 @@ export function UsageBars({ credential, now }: { readonly credential: FleetCrede
  * The badges a login carries: its scope (which CLI it drives), an environment login's preset, its
  * label, a copied slot, and the terminal it shares a login with.
  */
-export function CredentialBadges({ credential }: { readonly credential: FleetCredentialView }) {
+function CredentialBadges({ credential }: { readonly credential: FleetCredentialView }) {
   const terminal = terminalBadge(credential);
   const slot = slotBadge(credential);
   const budget = budgetChip(credential.budget);

@@ -220,7 +220,7 @@ export function ActionSections({
   );
 }
 
-export function MenuRow({
+function MenuRow({
   entry,
   onChoose,
   pending,
@@ -263,7 +263,7 @@ export function MenuRow({
   );
 }
 
-export function ConfirmRow({
+function ConfirmRow({
   entry,
   onConfirm,
   onCancel,
@@ -314,7 +314,7 @@ export function ActionForm({
 }
 
 /** The desktop form frame: hangs under Actions, takes focus, closes on Escape — never on a stray click. */
-export function ActionPopover({
+function ActionPopover({
   title,
   placement,
   onClose,

@@ -5,7 +5,7 @@ import { type CSSProperties, type PointerEvent as ReactPointerEvent, useId, useR
 import { cn } from '../../lib/class-names.ts';
 import { Button, Textarea } from '../../shell/primitives.tsx';
 
-export type AgendaAnswerTone = 'affirmative' | 'negative' | 'neutral';
+type AgendaAnswerTone = 'affirmative' | 'negative' | 'neutral';
 
 export type AgendaAnswerChoice =
   | {

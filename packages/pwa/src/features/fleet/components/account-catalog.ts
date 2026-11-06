@@ -35,7 +35,7 @@ export type AccountCatalogRead =
   | { readonly kind: 'failed'; readonly reason: string };
 
 /** One read of all three; never throws. */
-export async function readAccountCatalog(client: () => Promise<FleetClient>): Promise<AccountCatalogRead> {
+async function readAccountCatalog(client: () => Promise<FleetClient>): Promise<AccountCatalogRead> {
   try {
     const fleet = await client();
     const [components, profiles, runtimes] = await Promise.all([

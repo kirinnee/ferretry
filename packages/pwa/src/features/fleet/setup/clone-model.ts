@@ -35,7 +35,7 @@ import { countWords, SETUP_HARNESSES, type SetupHarness } from './setup-words.ts
 
 export const CLONE_FLOW_KIND = 'clone';
 
-export type CloneMode = 'alongside' | 'replace';
+type CloneMode = 'alongside' | 'replace';
 
 /** What the Existing setup step can pick: an Update of an earlier copy, or one of the two full copies. */
 export type CloneChoiceMode = CloneMode | 'update';
@@ -96,7 +96,7 @@ export const cloneSourceState = (reach: MachineReach | undefined, name: string):
 /** The same pattern the target flags with: a folder under somebody's home on the source. */
 const HOME_PATH = /\/(?:Users|home)\/[^\s"'`,;)}\]]+/u;
 
-export interface ClonePath {
+interface ClonePath {
   /** "Instructions · default". */
   readonly title: string;
   readonly path: string;

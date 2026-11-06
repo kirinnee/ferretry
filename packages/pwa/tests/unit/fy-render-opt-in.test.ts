@@ -52,7 +52,7 @@ describe('fy-render opt-in', () => {
   test('should render an illustration from exactly one component', () => {
     // Act — the component that turns a parsed payload into DOM, and the modules
     // that legitimately name it: the grammar (its type shares the noun), the
-    // renderer that mounts it, and the package barrel.
+    // renderer that mounts it.
     const files = mentioning('FyRenderBlock');
 
     // Assert — a further mounting site is a further thing to threat-model.
@@ -68,7 +68,6 @@ describe('fy-render opt-in', () => {
       'src/components/fy-render-sandbox.tsx',
       'src/components/markdown.tsx',
       'src/lib/fy-render.ts',
-      'src/lib/index.ts',
     ]);
   });
 

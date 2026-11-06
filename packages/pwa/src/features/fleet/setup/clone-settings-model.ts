@@ -45,7 +45,7 @@ import { countWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
 export type CloneItemId = 'fleet' | 'warden' | 'learning' | 'voice' | 'controls';
 
 /** What a Done line is about: an item the person ticked, or the sealed copy of the keys that came with it. */
-export type CloneOutcomeId = CloneItemId | 'keys';
+type CloneOutcomeId = CloneItemId | 'keys';
 
 /** The part of an item an outcome sentence needs. */
 export interface CloneOutcomeItem {

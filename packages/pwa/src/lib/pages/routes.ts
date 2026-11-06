@@ -49,41 +49,41 @@ export interface SharedRoute {
 }
 
 /** The machine home: an overview of what one machine is doing and the few ferrets to open first. */
-export interface DaemonHomeRoute {
+interface DaemonHomeRoute {
   readonly kind: 'home';
   readonly daemonId: DaemonId;
 }
 
-export interface DaemonSessionsRoute {
+interface DaemonSessionsRoute {
   readonly kind: 'sessions';
   readonly daemonId: DaemonId;
 }
 
-export interface DaemonNewSessionRoute {
+interface DaemonNewSessionRoute {
   readonly kind: 'new-session';
   readonly daemonId: DaemonId;
 }
 
-export interface DaemonProjectsRoute {
+interface DaemonProjectsRoute {
   readonly kind: 'projects';
   readonly daemonId: DaemonId;
 }
 
 /** One durable registered Project, addressed by its protocol UUID rather than its path. */
-export interface DaemonProjectDetailRoute {
+interface DaemonProjectDetailRoute {
   readonly kind: 'project-detail';
   readonly daemonId: DaemonId;
   readonly projectId: string;
 }
 
 /** One project's lane editor: the Board's lanes, edited, proposed or picked from a template. */
-export interface DaemonProjectLanesRoute {
+interface DaemonProjectLanesRoute {
   readonly kind: 'project-lanes';
   readonly daemonId: DaemonId;
   readonly projectId: string;
 }
 
-export interface DaemonSessionRoute {
+interface DaemonSessionRoute {
   readonly kind: 'session';
   readonly daemonId: DaemonId;
   readonly sessionId: string;
@@ -93,7 +93,7 @@ export interface DaemonSessionRoute {
  * Add skills: the skills of every catalog this browser subscribes to, to install into one session. A page of its
  * own (`/d/<id>/session/<sid>/skills`), not a sheet over the chat: it has a catalog filter, a Refresh and room.
  */
-export interface DaemonAddSkillsRoute {
+interface DaemonAddSkillsRoute {
   readonly kind: 'add-skills';
   readonly daemonId: DaemonId;
   readonly sessionId: string;
@@ -103,7 +103,7 @@ export interface DaemonAddSkillsRoute {
  * The Inbox: every open item, across every paired machine, newest first. Addressed under the
  * machine on screen only because every page is — the deck itself is not one machine's.
  */
-export interface DaemonAgendaRoute {
+interface DaemonAgendaRoute {
   readonly kind: 'attention';
   readonly daemonId: DaemonId;
 }
@@ -112,7 +112,7 @@ export interface DaemonAgendaRoute {
  * The Board: every card on every paired machine, as lanes. `taskId` is the card the address names; the Board
  * page stays the same page when it changes (the card detail opens over it), so it is not part of the page key.
  */
-export interface DaemonBoardRoute {
+interface DaemonBoardRoute {
   readonly kind: 'board';
   readonly daemonId: DaemonId;
   readonly taskId?: string;
@@ -122,18 +122,18 @@ export interface DaemonBoardRoute {
  * The message queue: every message still waiting, across this machine's ferrets and on this device. `sessionId` narrows
  * it to one ferret; the page stays the same page when it changes, so it is not part of the page key.
  */
-export interface DaemonQueueRoute {
+interface DaemonQueueRoute {
   readonly kind: 'queue';
   readonly daemonId: DaemonId;
   readonly sessionId?: string;
 }
 
-export interface DaemonSettingsRoute {
+interface DaemonSettingsRoute {
   readonly kind: 'settings';
   readonly daemonId: DaemonId;
 }
 
-export interface DaemonWardenRoute {
+interface DaemonWardenRoute {
   readonly kind: 'warden';
   readonly daemonId: DaemonId;
 }
@@ -141,14 +141,14 @@ export interface DaemonWardenRoute {
 /** Analytics' two pages: the Overview of a period, and the Query page. */
 export type AnalyticsView = 'overview' | 'query';
 
-export interface DaemonAnalyticsRoute {
+interface DaemonAnalyticsRoute {
   readonly kind: 'analytics';
   readonly daemonId: DaemonId;
   /** Absent means the Overview, so every older `{ kind: 'analytics' }` still names it. */
   readonly view?: AnalyticsView;
 }
 
-export interface DaemonLearningRoute {
+interface DaemonLearningRoute {
   readonly kind: 'learning';
   readonly daemonId: DaemonId;
 }
@@ -160,16 +160,16 @@ export interface DaemonLearningRoute {
 export const SHARING_TABS = ['shared', 'catalogs', 'people'] as const;
 export type SharingTab = (typeof SHARING_TABS)[number];
 
-export const isSharingTab = (value: string): value is SharingTab => (SHARING_TABS as readonly string[]).includes(value);
+const isSharingTab = (value: string): value is SharingTab => (SHARING_TABS as readonly string[]).includes(value);
 
 /** Sharing: what this browser subscribes to, the catalogs it publishes, and people. Absent `tab` means Subscriptions. */
-export interface DaemonSharingRoute {
+interface DaemonSharingRoute {
   readonly kind: 'sharing';
   readonly daemonId: DaemonId;
   readonly tab?: SharingTab;
 }
 
-export interface DaemonImportedHistoryRoute {
+interface DaemonImportedHistoryRoute {
   readonly kind: 'imported-history';
   readonly daemonId: DaemonId;
 }
@@ -178,12 +178,12 @@ export interface DaemonImportedHistoryRoute {
  * One machine's first run, full screen and outside Settings: what pairing a machine that is not set up
  * yet opens. It is a one-time guided job, so it gets no app chrome — only its own named stepper.
  */
-export interface DaemonMachineSetupRoute {
+interface DaemonMachineSetupRoute {
   readonly kind: 'machine-setup';
   readonly daemonId: DaemonId;
 }
 
-export type DaemonPageRoute =
+type DaemonPageRoute =
   | DaemonHomeRoute
   | DaemonSessionsRoute
   | DaemonNewSessionRoute
@@ -210,13 +210,13 @@ export const isDaemonless = (route: PageRoute): route is ConnectionPickerRoute |
   route.kind === 'connection-picker' || route.kind === 'setup' || route.kind === 'join' || route.kind === 'shared';
 
 /** A compatibility result that callers can replace with its canonical target. */
-export interface LegacyTasksRedirectRoute {
+interface LegacyTasksRedirectRoute {
   readonly kind: 'legacy-tasks-redirect';
   readonly to: DaemonBoardRoute;
 }
 
 /** The Inbox's old `/attention` address, which now redirects to `/inbox` keeping its query. */
-export interface LegacyAttentionRedirectRoute {
+interface LegacyAttentionRedirectRoute {
   readonly kind: 'legacy-attention-redirect';
   readonly to: DaemonAgendaRoute;
 }

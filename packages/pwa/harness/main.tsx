@@ -31,7 +31,6 @@ import type {
   PairingCodeMintResponse,
   PasskeysView,
   PasteRuleList,
-  PinSnapshot,
   ProjectInfo,
   SecretList,
   SecuritySettingsView,
@@ -59,7 +58,6 @@ import {
   AttachmentGalleryProvider,
   TranscriptAttachmentGallery,
 } from '../src/components/attachment-gallery.tsx';
-import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
 import { Composer } from '../src/components/composer.tsx';
 import {
   type AccountUsageRow,
@@ -87,12 +85,7 @@ import { QuestionForm } from '../src/components/question-form.tsx';
 import { RenameSheet } from '../src/components/rename-sheet.tsx';
 import { RuntimeEffortControls, RuntimeModelControls } from '../src/components/runtime-controls.tsx';
 import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/components/session-chat-parts.tsx';
-import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDashboard } from '../src/components/session-dashboard.tsx';
-import { SessionDetails } from '../src/components/session-details.tsx';
-import { SessionHeader } from '../src/components/session-header.tsx';
-import { SessionList } from '../src/components/session-list.tsx';
-import { SessionSurfaceReferences } from '../src/components/session-surface-references.tsx';
 import { SessionTerminalDeck, type TerminalDeckDependencies } from '../src/components/session-terminal-deck.tsx';
 import { transcriptEntriesFromLog } from '../src/components/session-workspace-model.ts';
 import { SessionsPage } from '../src/components/sessions-page.tsx';
@@ -119,7 +112,6 @@ import {
   SessionAnalyticsSurface,
 } from '../src/features/analytics/session-analytics-surface.tsx';
 import { BoardPage } from '../src/features/board/board-page.tsx';
-import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { InAppBrowserSurface } from '../src/features/browser/in-app-browser.tsx';
 import type { BrowserDestination } from '../src/features/browser/in-app-browser-model.ts';
 import { RemoteBrowserPane, type RemoteBrowserPaneProps } from '../src/features/browser/remote-browser-pane.tsx';
@@ -139,7 +131,6 @@ import { MachineSetupScreen } from '../src/features/fleet/setup/setup-screen.tsx
 import type { MachineTabProps, MachineTabSurfaces } from '../src/features/fleet/shell/machines-surface.tsx';
 import { useHypermediaSessionActions } from '../src/features/hypermedia/hypermedia-session-actions.tsx';
 import { LEARNING_SETTINGS_TAB } from '../src/features/learning/learning-settings.tsx';
-import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
 import type { ClipboardWriter } from '../src/features/onboarding/copy-button.tsx';
 import type { DeviceKind } from '../src/features/onboarding/device-kind.ts';
 import type { HostedRelayFallback } from '../src/features/onboarding/hosted-relay.ts';
@@ -153,8 +144,6 @@ import type { SetupSharePort } from '../src/features/onboarding/setup-handoff-pa
 import { PACK_SETTINGS_TAB, PackSettingsSurface } from '../src/features/pack/pack-settings.tsx';
 import { DeviceRefusedNotice } from '../src/features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
-import { PinsBoard } from '../src/features/pins/pins-board.tsx';
-import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import type { ProjectRegistrationStatus } from '../src/features/projects/project-registration-model.ts';
 import { ProjectsHub } from '../src/features/projects/projects-hub.tsx';
 import type { SecretClient } from '../src/features/secrets/secrets-api.ts';
@@ -193,8 +182,6 @@ import { SettingsPage } from '../src/features/settings/settings-page.tsx';
 import { terminalSlotsSettingsTab } from '../src/features/settings/terminal-slots-settings.tsx';
 import { ViewportOverlay, viewportOverlay } from '../src/features/settings/viewport-details.tsx';
 import { VoiceEngineChoice } from '../src/features/settings/voice-engine-choice.tsx';
-import type { SkillsCatalog } from '../src/features/skills/skills-catalog.ts';
-import { SkillsSurface } from '../src/features/skills/skills-surface.tsx';
 import { speedupsSettingsTab } from '../src/features/speedups/speedups-surface.tsx';
 import { StepUpDialog, UNLOCK_COPY } from '../src/features/step-up/step-up-dialog.tsx';
 import { TaskName } from '../src/features/tasks/task-name.tsx';
@@ -210,7 +197,6 @@ import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import type { ConsoleTyper } from '../src/features/workspace/console-surface.tsx';
 import { useAppViewport } from '../src/hooks/use-app-viewport.ts';
-import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
 import { useLayoutMode } from '../src/hooks/use-layout-mode.ts';
 import type { LiveClockOptions } from '../src/hooks/use-live-clock.ts';
 import type { ScopeNavigation } from '../src/hooks/use-project-scope.ts';
@@ -231,7 +217,6 @@ import { DeviceKeyUnsupportedError } from '../src/lib/device-keys.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
 import type { FleetProject, SessionGroup } from '../src/lib/fleet-grouping.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from '../src/lib/fleet-store.ts';
-import { buildLineage } from '../src/lib/lineage.ts';
 import { writeMdComposePref } from '../src/lib/md-compose.ts';
 import { daemonSessionsPath } from '../src/lib/pages/routes.ts';
 import { type SessionChatClient, SessionChatPage } from '../src/lib/pages/session-chat-page.tsx';
@@ -243,7 +228,6 @@ import { AppOutdatedError, DaemonOutdatedError } from '../src/lib/relay-carrier.
 import { type DaemonFetch, DaemonResponseError } from '../src/lib/runtime-models.ts';
 import { unlockStaysSentence } from '../src/lib/security-settings-client.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
-import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import type { StepUpClient } from '../src/lib/step-up-client.ts';
 import { StepUpGate } from '../src/lib/step-up-gate.ts';
 import { DaemonClientProvider } from '../src/lib/store.tsx';
@@ -264,32 +248,24 @@ import { DaemonUsageIndex } from '../src/lib/usage.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../src/lib/usage-store.ts';
 import { activateWorkspaceTab, openWorkspaceTab, workspaceTab } from '../src/lib/workspace-layout.ts';
 import { WorkspaceLayoutStore } from '../src/lib/workspace-layout-store.ts';
-import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
 import { AppBar, AppTabBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { BrandMark } from '../src/shell/brand-mark.tsx';
-import { BulkStopConfirmation } from '../src/shell/bulk-stop-confirmation.tsx';
 import { type ChatWidth, ChatWidthControl } from '../src/shell/chat-width-control.tsx';
 import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from '../src/shell/command-palette.tsx';
 import { ContextMenu } from '../src/shell/context-menu.tsx';
-import { FleetNavigationRail } from '../src/shell/fleet-navigation-rail.tsx';
 import { INSIGHTS_COLUMN_CLASS, InsightsFrame } from '../src/shell/insights-frame.tsx';
-import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
 import { ModeBadge } from '../src/shell/mode-badge.tsx';
 import { paletteSessionEntries } from '../src/shell/palette-model.ts';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
 import { type Quota, QuotaReadout } from '../src/shell/quota-readout.tsx';
 import { RcBadge } from '../src/shell/rc-badge.tsx';
-import { SessionRowMenu } from '../src/shell/session-row-menu.tsx';
 import { SessionsBar } from '../src/shell/sessions-bar.tsx';
 import { SheetTabs } from '../src/shell/sheet-tabs.tsx';
-import { SidePaneWorkspace } from '../src/shell/side-pane.tsx';
-import { SidePaneResizeHandle } from '../src/shell/side-pane-resize-handle.tsx';
 import { SidePaneSearch } from '../src/shell/side-pane-search.tsx';
 import {
   getSidePaneTabDefinitions,
-  openSidePaneBrowserTab,
   openSidePaneFileTab,
   openSidePaneTab,
   readSidePaneTabsState,
@@ -424,32 +400,6 @@ const HARNESS_REFERENCE_PROSE = [
   '```',
 ].join('\n');
 const settingsControls = new DaemonControlsStore();
-
-/**
- * A skills catalog covering both scopes and every origin chip, so the row
- * chrome, the group headings and the badge column can all be compared against
- * the original at both widths.
- */
-const HARNESS_SKILLS: SkillsCatalog = {
-  harness: 'claude',
-  skills: [
-    { name: 'kteam', description: 'Coordinate detached teammates.', scope: 'global', origin: 'claude' },
-    { name: 'summary', description: 'Recap the current work, outcome first.', scope: 'global', origin: 'both' },
-    {
-      name: 'liftoff-ops',
-      description: 'Infrastructure access for Kubernetes, metrics and logs.',
-      scope: 'global',
-      origin: 'codex',
-    },
-    {
-      name: 'cli-authoring',
-      description: 'Doctrine for extending the CLI package.',
-      scope: 'project',
-      origin: 'claude',
-    },
-    { name: 'floop', description: 'Review the diff until every reviewer agrees.', scope: 'project', origin: 'unknown' },
-  ],
-};
 
 /**
  * A carrier a reader would actually want to see rendered: the RELAYED one.
@@ -1711,6 +1661,12 @@ openSidePaneFileTab(scope, 'README.md');
 /** Phone below this width, exactly as the app decides its presentation. */
 const PHONE_MAX = 768;
 
+const HARNESS_PANE_WIDTH = 520;
+
+const HARNESS_SHEET_TABS = ['identity', 'runtime', 'progress', 'budget'] as const;
+
+type HarnessSheetTab = (typeof HARNESS_SHEET_TABS)[number];
+
 /** One session per status class, so all three glyph shapes are on the page. */
 const MARK_SESSIONS: readonly (readonly [string, SessionView])[] = [
   ['running', harnessSession],
@@ -1731,30 +1687,6 @@ const MARK_SESSIONS: readonly (readonly [string, SessionView])[] = [
   ],
   ['completed', { ...harnessSession, state: { ...harnessSession.state, status: 'completed' } } as SessionView],
   ['failed', { ...harnessSession, state: { ...harnessSession.state, status: 'failed' } } as SessionView],
-];
-
-/** A local family keeps the Lineage card readable at both required widths. */
-const LINEAGE_SESSIONS: readonly SessionView[] = [
-  {
-    ...harnessSession,
-    config: { ...harnessSession.config, id: 'lineage-parent', teammate: 'Fable', name: 'Plan the surface port' },
-    state: { ...harnessSession.state, id: 'lineage-parent', status: 'waiting' },
-  } as SessionView,
-  {
-    ...harnessSession,
-    config: { ...harnessSession.config, id: 'harness-session', parent: 'lineage-parent' },
-  } as SessionView,
-  {
-    ...harnessSession,
-    config: {
-      ...harnessSession.config,
-      id: 'lineage-child',
-      teammate: 'Mira',
-      name: 'Render Lineage',
-      parent: 'harness-session',
-    },
-    state: { ...harnessSession.state, id: 'lineage-child', status: 'completed' },
-  } as SessionView,
 ];
 
 const QUOTA_CALM = { fiveHourPercent: 31, weeklyPercent: 58 } as Quota;
@@ -3864,50 +3796,6 @@ const PALETTE_SESSIONS = paletteSessionEntries([
   },
 ] as SessionView[]);
 
-/**
- * A lead with a live child and grandchild — the smallest fleet that shows every
- * bulk-stop warning: an included caller, a current-session ancestor, and
- * descendants that an orphan stop would leave running.
- */
-const stopLead = harnessSession;
-
-const stopChild = {
-  ...harnessSession,
-  config: {
-    ...harnessSession.config,
-    id: 'ms9hi4ts-b22751c4',
-    teammate: 'jessica',
-    name: 'Port the command palette',
-    parent: 'harness-session',
-  },
-} as SessionView;
-
-const stopGrandchild = {
-  ...harnessSession,
-  config: {
-    ...harnessSession.config,
-    id: 'kq21ffds-90ab12cd',
-    teammate: 'ms-98',
-    name: 'Wire the daemon picker',
-    parent: 'ms9hi4ts-b22751c4',
-  },
-} as SessionView;
-
-const STOP_FLEET: SessionView[] = [stopLead, stopChild, stopGrandchild];
-
-/** The same fleet as the sidebar draws it: one folder, lineage-nested. */
-const SIDEBAR_FLEET = {
-  groups: [{ name: 'ferretry', path: '/work/ferretry', rows: STOP_FLEET }],
-  lineage: buildLineage(STOP_FLEET),
-  byId: new Map(STOP_FLEET.map(view => [view.config.id, view])),
-  counts: { all: 3, auto: 2, interactive: 1 },
-  shown: 3,
-  total: 7,
-  scope: '/work/ferretry',
-};
-
-const SIDEBAR_FILTERS = { query: '', mode: 'all', rcOnly: false, includeFinished: false } as const;
-
 const RUNTIME_VIEW = {
   ...harnessSession,
   config: { ...harnessSession.config, harness: 'claude' },
@@ -4100,48 +3988,6 @@ const AGENDA: AgendaSnapshot = {
       disposition: 'dismissed',
     },
   ],
-};
-
-/** Notes and a transcript pin exercise provenance, edit affordances, and the
- * exact-message action without ever connecting the visual harness to a daemon. */
-const PINS: PinSnapshot = {
-  v: 1,
-  sessionId: 'harness-session',
-  updatedAt: '2026-07-31T12:00:00.000Z',
-  pins: [
-    {
-      id: '00000000-0000-4000-8000-000000000021',
-      at: 2,
-      kind: 'note',
-      text: 'Check the snapshot release before asking the lead to merge.',
-      by: 'agent',
-      createdBy: 'harness-agent',
-      createdByName: 'Zoe',
-    },
-    {
-      id: '00000000-0000-4000-8000-000000000022',
-      at: 1,
-      kind: 'message',
-      blockId: 'harness-message',
-      blockKind: 'assistant',
-      preview: 'The visual harness now captures this feature at both breakpoints.',
-      by: 'human',
-      createdBy: null,
-      createdByName: null,
-    },
-  ],
-};
-
-const BROWSER_LOGIN: BrowserLoginView = {
-  state: 'open',
-  profilePrimed: false,
-  expiresAt: '2026-07-31T12:02:00.000Z',
-  connection: {
-    host: '127.0.0.1',
-    port: 5951,
-    password: 'temporary-password',
-    sshTunnel: 'ssh -N -L 5951:127.0.0.1:5951 reader@example.test',
-  },
 };
 
 /** Three real pages, one of them untitled and one last touched by the agent:
@@ -4407,10 +4253,8 @@ const HARNESS_WORKSPACE_BROWSER_DEPENDENCIES: UnifiedBrowserDependencies = {
  */
 const UNIFIED_PREVIEW_SCOPE = daemonSessionScope(daemon, 'harness-unified-preview');
 const UNIFIED_REMOTE_SCOPE = daemonSessionScope(daemon, 'harness-unified-remote');
-const FULL_VIEWPORT_BROWSER_SCOPE = daemonSessionScope(daemon, 'harness-browser-full-viewport');
 /** Seeded, not clicked: the real-engine card renders that engine on first paint. */
 rememberBrowserEngine(UNIFIED_REMOTE_SCOPE, 'remote');
-rememberBrowserEngine(FULL_VIEWPORT_BROWSER_SCOPE, 'remote');
 
 /** Deterministic device controls: never a real device's stored view state. */
 const memoryControlsStorage = (): ControlsStorage => {
@@ -5197,18 +5041,13 @@ function Shell() {
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sttSettings, setSttSettings] = useState<SttSettings>(HARNESS_STT_SETTINGS);
-  const [detailsTab, setDetailsTab] = useState<DetailsTab>('identity');
-  const [paneWidth, setPaneWidth] = useState(SIDE_PANE_DEFAULT_WIDTH);
+  const [detailsTab, setDetailsTab] = useState<HarnessSheetTab>('identity');
   const [paneQuery, setPaneQuery] = useState('');
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
   const state = readSidePaneTabsState(scope);
   const phone = viewport.width <= PHONE_MAX;
   const menuOpen = window.location.hash === '#menu';
   const paletteOpen = window.location.hash === '#palette';
-  const rowMenuOpen = window.location.hash === '#row-menu';
-  const stopOpen = window.location.hash === '#stop';
-  const fleetDrawerOpen = window.location.hash === '#fleet-drawer';
-  const stopResultsOpen = window.location.hash === '#stop-results';
   const migrateOpen = window.location.hash === '#migrate';
   const renameOpen = window.location.hash === '#rename';
   const [chatWidth, setChatWidth] = useState<ChatWidth>('balanced');
@@ -5980,20 +5819,6 @@ function Shell() {
       ),
     },
     {
-      label: 'Session command controls',
-      render: () => (
-        <SessionCommandControls
-          api={{ compact: async () => {} }}
-          canControl
-          daemon={daemon}
-          open
-          promptReady
-          sessionId="harness-session"
-          status="awaiting_user"
-        />
-      ),
-    },
-    {
       label: 'Session screen',
       // `grid-cols-1` below `xl`, NOT the implicit `auto` column. An `auto` track grows to its items'
       // min-content, and a `truncate` label's min-content is its WHOLE text: with the Ubuntu runner's
@@ -6001,26 +5826,8 @@ function Shell() {
       // the full gallery refused the tool-group capture because isolating it changed its width.
       // `minmax(0, 1fr)` lets the truncation do its job, as the real session page's layout does.
       render: () => (
-        <section
-          aria-label="Session screen harness"
-          className="grid grid-cols-1 gap-panel xl:grid-cols-[minmax(17rem,0.8fr)_minmax(0,1.4fr)_minmax(15rem,0.7fr)]"
-          id="harness-session-screen"
-        >
-          <SessionList
-            accounts={HARNESS_SESSION_ACCOUNTS}
-            daemonId={daemon.daemonId}
-            onOpenSession={() => {}}
-            sessions={[harnessSession]}
-          />
+        <section aria-label="Session screen harness" className="grid grid-cols-1 gap-panel" id="harness-session-screen">
           <div className="flex min-h-[320px] flex-col rounded-panel border border-border bg-surface">
-            <SessionHeader
-              accounts={HARNESS_SESSION_ACCOUNTS}
-              daemonId={daemon.daemonId}
-              onBack={() => {}}
-              onOpenDetails={() => {}}
-              onOpenFleet={() => {}}
-              session={harnessSession}
-            />
             <Transcript
               busy
               daemonId={daemon.daemonId}
@@ -6193,7 +6000,6 @@ function Shell() {
               sessionId="harness-session"
             />
           </div>
-          <SessionDetails daemonId={daemon.daemonId} session={harnessSession} />
         </section>
       ),
     },
@@ -6208,16 +6014,6 @@ function Shell() {
             <TaskName name="[Hayden] Port the remaining PWA feature components" />
           </PanelBody>
         </Card>
-      ),
-    },
-    {
-      label: 'Lineage',
-      render: () => (
-        <section aria-label="Lineage preview" className="min-h-[360px]" id="harness-lineage">
-          <Card className="h-full overflow-hidden">
-            <LineageSurfaceContent daemonId={daemon.daemonId} sessionId="harness-session" sessions={LINEAGE_SESSIONS} />
-          </Card>
-        </section>
       ),
     },
     {
@@ -6258,42 +6054,6 @@ function Shell() {
               <WardenStrip status={WARDEN_NOT_REPORTING} now={HARNESS_NOW} />
             </div>
           </PanelBody>
-        </Card>
-      ),
-    },
-    {
-      label: 'Pins trigger',
-      render: () => (
-        <Card aria-label="Pins trigger" className="overflow-visible">
-          <PanelHeader>
-            <Label>Pins</Label>
-          </PanelHeader>
-          <PanelBody>
-            <PinsTrigger id="harness-pins" count={3} expanded={false} onClick={() => {}} />
-          </PanelBody>
-        </Card>
-      ),
-    },
-    {
-      label: 'Skills',
-      render: () => (
-        <Card aria-label="Skills catalog" className="h-[520px] min-w-0 overflow-hidden" id="harness-skills">
-          <SkillsSurface scope={scope} onInsert={() => {}} loadCatalog={async () => HARNESS_SKILLS} />
-        </Card>
-      ),
-    },
-    {
-      label: 'Browser login',
-      render: () => (
-        <Card className="overflow-hidden">
-          <PanelHeader>
-            <Label>Browser login</Label>
-          </PanelHeader>
-          <BrowserLoginBanner
-            status={BROWSER_LOGIN}
-            now={HARNESS_NOW}
-            onClose={async () => ({ state: 'closed', profilePrimed: false })}
-          />
         </Card>
       ),
     },
@@ -6705,21 +6465,6 @@ function Shell() {
       render: () => <AgendaHarness />,
     },
     {
-      label: 'Pins ledger',
-      render: () => (
-        <Card className="min-h-[400px] overflow-hidden">
-          <PinsBoard
-            snapshot={PINS}
-            status="ready"
-            onAddNote={() => {}}
-            onEditNote={() => {}}
-            onRemove={() => {}}
-            onOpenMessage={() => {}}
-          />
-        </Card>
-      ),
-    },
-    {
       label: 'Primitives',
       render: () => (
         <Card>
@@ -6805,8 +6550,6 @@ function Shell() {
               <QuotaReadout quota={QUOTA_TIGHT} now={HARNESS_NOW} />
               <QuotaReadout quota={null} showUnknown now={HARNESS_NOW} />
             </ActionGroup>
-            <MarkerSeparator>Turn 4</MarkerSeparator>
-            <MarkerLine>Ran the unit suite — 4066 passed</MarkerLine>
           </PanelBody>
         </Card>
       ),
@@ -6844,35 +6587,6 @@ function Shell() {
       render: () => (
         <Card aria-label="Learning proposals" className="min-w-0 p-3">
           <LearningHubHarness connection={daemon} sessions={WORKSPACE_FLEET} scanRunning={false} />
-        </Card>
-      ),
-    },
-    {
-      label: 'Fleet sidebar',
-      render: () => (
-        <Card className="min-w-0 overflow-hidden" id="harness-fleet-sidebar">
-          <PanelHeader>
-            <Label>Fleet sidebar</Label>
-          </PanelHeader>
-          <div className="flex h-[420px] min-h-0">
-            <AgentSidebar
-              activeId={SIDEBAR_FLEET.groups[0]?.rows[1]?.config.id}
-              agendaCountFor={id => (id === SIDEBAR_FLEET.groups[0]?.rows[0]?.config.id ? 3 : 0)}
-              canMutate
-              collapsed={false}
-              daemonId={daemon.daemonId}
-              drawerOpen={fleetDrawerOpen}
-              filters={SIDEBAR_FILTERS}
-              fleet={SIDEBAR_FLEET}
-              onCloseDrawer={() => {}}
-              onCollapsedChange={() => {}}
-              onFilterChange={() => {}}
-              onFocusFolder={() => {}}
-            />
-            <div className="min-w-0 flex-1 p-panel text-meta text-muted">
-              The transcript sits here. The column beside it is the sidebar under test.
-            </div>
-          </div>
         </Card>
       ),
     },
@@ -6993,24 +6707,6 @@ function Shell() {
               cwd="/home/harness/workspace/ferretry"
               dependencies={HARNESS_TERMINAL_DECK}
               scope={scope}
-            />
-          </PanelBody>
-        </Card>
-      ),
-    },
-    {
-      label: 'Addressable terminals',
-      render: () => (
-        <Card aria-label="Addressable terminals" className="min-w-0" id="harness-surface-references">
-          <PanelBody className="flex flex-col gap-sm">
-            {/* The listing is the harness's own: this card is about how a
-                reference, its viewer count and its ownership READ, so it must
-                never depend on a daemon being reachable. */}
-            <SessionSurfaceReferences
-              connection={daemon}
-              listTerminals={async () => HARNESS_TERMINAL_LISTING}
-              scope={scope}
-              write={async () => undefined}
             />
           </PanelBody>
         </Card>
@@ -7579,31 +7275,12 @@ function Shell() {
         active="warden"
         themeToggle={<Button size="sm">Theme</Button>}
       />
-      <section aria-label="Fleet navigation rail preview" className="border-b border-border-soft bg-surface">
-        <FleetNavigationRail
-          daemon={daemon.daemonId}
-          sessionCount={7}
-          mode="auto"
-          modeCounts={{ all: 7, auto: 5, interactive: 2 }}
-          rcOnly={false}
-          includeFinished={false}
-          onExpand={() => {}}
-          onSetMode={() => {}}
-          onSetRcOnly={() => {}}
-          onSetIncludeFinished={() => {}}
-        />
-      </section>
 
       <div className="flex min-h-0 flex-col gap-panel p-panel">
-        {/* The desktop workspace: conversation on the left, the pane on the right
-          and the separator between them. The handle measures its own parent and
-          grandparent, so this nesting is the nesting the app uses. On a phone
-          the pane is a full-width surface stacked underneath — no second
-          column, and so no separator to drag. */}
+        {/* The conversation column with a pane beside it; on a phone the pane stacks underneath. */}
         <div className={`relative flex min-h-[160px] gap-2 ${phone ? 'flex-col' : 'flex-row'}`}>
           <Card className="min-w-0 flex-1 p-panel text-ui text-muted">The conversation column.</Card>
-          <div className="relative min-w-0 shrink-0" style={phone ? undefined : { width: `${paneWidth}px` }}>
-            {!phone && <SidePaneResizeHandle width={paneWidth} onPreview={setPaneWidth} onCommit={setPaneWidth} />}
+          <div className="relative min-w-0 shrink-0" style={phone ? undefined : { width: `${HARNESS_PANE_WIDTH}px` }}>
             <Card className="flex h-full flex-col gap-sm p-panel">
               <SidePaneSearch
                 value={paneQuery}
@@ -7613,9 +7290,9 @@ function Shell() {
               />
               <SheetTabs
                 sheetId="harness-sheet-tabs"
-                tabs={DETAILS_TAB_ORDER.map(key => ({ key, label: `${key[0]?.toUpperCase()}${key.slice(1)}` }))}
+                tabs={HARNESS_SHEET_TABS.map(key => ({ key, label: `${key[0]?.toUpperCase()}${key.slice(1)}` }))}
                 current={detailsTab}
-                order={DETAILS_TAB_ORDER}
+                order={HARNESS_SHEET_TABS}
                 onChange={setDetailsTab}
               />
               <div className="text-ui text-muted">The {detailsTab} section renders here.</div>
@@ -7667,53 +7344,6 @@ function Shell() {
           touchAffected={phone}
         />
 
-        {/* Only under `#row-menu`: the REAL sidebar row menu, so the screenshot
-            shows the entries the port actually builds rather than hand-written
-            stand-ins — the four explicit stop scopes and their target counts. */}
-        <SessionRowMenu
-          state={rowMenuOpen ? { view: stopLead, x: phone ? 40 : 420, y: 240 } : null}
-          sessions={STOP_FLEET}
-          canMutate
-          onClose={() => {}}
-          onRun={() => {}}
-          onBulkStop={() => {}}
-          touch={phone}
-        />
-
-        {/* Only under `#stop` / `#stop-results`: another fixed overlay, and the
-            two states are different screens — the confirmation lists what will
-            die, the report lists what did. */}
-        <BulkStopConfirmation
-          request={
-            stopOpen
-              ? {
-                  token: 1,
-                  selectedId: 'harness-session',
-                  scope: 'cascade',
-                  targets: STOP_FLEET,
-                }
-              : stopResultsOpen
-                ? {
-                    token: 2,
-                    selectedId: 'harness-session',
-                    scope: 'cascade',
-                    targets: STOP_FLEET,
-                    outcomes: [
-                      { id: stopLead.config.id, name: 'Fable', ok: true },
-                      { id: stopChild.config.id, name: 'Jessica', ok: true },
-                      { id: stopGrandchild.config.id, name: 'MS-98', ok: false, detail: 'already exited' },
-                    ],
-                    newTargets: [stopGrandchild],
-                  }
-                : null
-          }
-          activeId="ms9hi4ts-b22751c4"
-          sessions={STOP_FLEET}
-          onClose={() => {}}
-          onConfirm={() => {}}
-          onConfirmNew={() => {}}
-        />
-
         <BottomSheet
           id="harness-sheet"
           open={sheetOpen}
@@ -7738,12 +7368,6 @@ function Shell() {
           open={migrateOpen}
           scope={scope}
           view={harnessSession}
-        />
-        <AttachmentUnlockPrompt
-          filename="design-brief.pdf"
-          onCancel={() => {}}
-          onUnlock={async () => {}}
-          open={window.location.search === '?attachment-unlock'}
         />
         <StepUpDialog gate={HARNESS_UNLOCK_GATE} copy={UNLOCK_COPY} machineName={() => 'Studio workstation'} />
       </div>
@@ -8599,48 +8223,6 @@ function NewSessionHarness() {
   );
 }
 
-/**
- * A full route, not a gallery card: the browser must be able to cover the app
- * viewport, so this harness gives the real remote viewer the same standalone
- * screen the production workspace receives. It deliberately opens a browser
- * instance from the side-pane model rather than constructing a second layout.
- */
-function BrowserFullViewportHarness() {
-  useAppViewport();
-  const presentation = useLayoutMode() === 'drawer' ? 'sheet' : 'pane';
-  useEffect(() => {
-    openSidePaneBrowserTab(FULL_VIEWPORT_BROWSER_SCOPE, null, { forceNew: true });
-  }, []);
-  return (
-    <div className="kt-shell flex flex-col overflow-hidden" id="harness-browser-full-viewport-page">
-      <SidePaneWorkspace
-        active
-        presentation={presentation}
-        scope={FULL_VIEWPORT_BROWSER_SCOPE}
-        renderSurface={({ isActive, onClose, presentation: surfacePresentation, tab, titleId }) =>
-          tab.instance?.kind === 'browser' ? (
-            <UnifiedBrowserSurface
-              daemon={daemon}
-              dependencies={HARNESS_UNIFIED_BROWSER_DEPENDENCIES}
-              isActive={isActive}
-              onClose={onClose}
-              presentation={surfacePresentation}
-              scope={FULL_VIEWPORT_BROWSER_SCOPE}
-              titleId={titleId}
-            />
-          ) : (
-            <p className="m-3 text-ui text-muted">This harness opens only the real browser instance.</p>
-          )
-        }
-      >
-        <main className="flex min-h-0 flex-1 items-center justify-center bg-surface-2 p-panel text-ui text-muted">
-          Session conversation remains behind the browser until it expands.
-        </main>
-      </SidePaneWorkspace>
-    </div>
-  );
-}
-
 /** Hash fragments that replace the whole gallery with one setup screen. */
 const ONBOARDING_FRAGMENTS: Readonly<Record<string, HarnessOnboardingScreen>> = {
   '#onboarding-install': 'install',
@@ -8823,8 +8405,6 @@ if (host) {
           <NewSessionHarness />
         ) : window.location.hash === '#session-search' ? (
           <SessionSearchHarness />
-        ) : window.location.hash === '#browser-full-viewport' ? (
-          <BrowserFullViewportHarness />
         ) : pickerFrame !== undefined ? (
           <PickerFrameHarness frame={pickerFrame} />
         ) : projectsFrame !== undefined ? (

@@ -383,7 +383,7 @@ export const SessionCard = memo(function SessionCard({
  * The status as a short coloured word beside the dot, and NOTHING when the agent is simply running
  * (`routineStatus`): no chip box, no capitals, so the exceptions are the only words in the list.
  */
-export function StatusWord({ status }: { readonly status: string }) {
+function StatusWord({ status }: { readonly status: string }) {
   if (routineStatus(status)) return null;
   return (
     <span

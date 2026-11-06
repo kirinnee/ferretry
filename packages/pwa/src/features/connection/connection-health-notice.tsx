@@ -52,7 +52,7 @@ import {
 type Reconnecting = Extract<ConnectionHealthState, { kind: 'reconnecting' }>;
 
 /** One paired machine, its name and its health fact. */
-export interface NoticeMachine {
+interface NoticeMachine {
   readonly daemonId: DaemonId;
   readonly name: string;
   readonly state: ConnectionHealthState;

@@ -28,7 +28,7 @@ export interface NewSessionMachine {
 }
 
 /** The reason an offline machine's row gives. */
-export const unreachableReason = (name: string): string => `${name} isn’t reachable right now`;
+const unreachableReason = (name: string): string => `${name} isn’t reachable right now`;
 
 /**
  * The machines with each one's reach applied: a machine the list reads as offline cannot take a new

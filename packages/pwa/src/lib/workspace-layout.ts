@@ -38,7 +38,7 @@ import {
 // ---- identity ------------------------------------------------------------------
 
 export type WorkspaceTabId = string;
-export type WorkspaceAgentTabKind = 'chat' | 'console' | 'processes';
+type WorkspaceAgentTabKind = 'chat' | 'console' | 'processes';
 export type WorkspaceTabKind = WorkspaceAgentTabKind | SidePaneInstanceKind;
 
 export const WORKSPACE_CHAT_TAB_ID: WorkspaceTabId = 'chat';
@@ -47,11 +47,11 @@ export const WORKSPACE_PROCESSES_TAB_ID: WorkspaceTabId = 'processes';
 export const AGENT_PANE_ID = 'agent';
 /** The id of the split joining the agent pane to the workspace subtree. */
 export const WORKSPACE_ROOT_SPLIT_ID = 'root';
-export const WORKSPACE_DEFAULT_MAX_PANES = 2;
+const WORKSPACE_DEFAULT_MAX_PANES = 2;
 export const WORKSPACE_DEFAULT_RATIO = 0.5;
 /** Neither side of a split may shrink below this share of it. */
 export const WORKSPACE_MIN_RATIO = 0.15;
-export const WORKSPACE_LAYOUT_VERSION = 1;
+const WORKSPACE_LAYOUT_VERSION = 1;
 export const WORKSPACE_ANNOUNCED_LIMIT = 200;
 
 /** One tab's record. `key` is the kind-scoped identity (terminal key, page key,
@@ -88,7 +88,7 @@ export interface WorkspaceSplitNode {
 export type WorkspaceNode = WorkspacePaneNode | WorkspaceSplitNode;
 
 /** The hidden workspace subtree and the root split it was attached by. */
-export interface ParkedWorkspace {
+interface ParkedWorkspace {
   readonly direction: WorkspaceSplitDirection;
   readonly ratio: number;
   readonly node: WorkspaceNode;

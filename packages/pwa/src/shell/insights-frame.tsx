@@ -18,7 +18,7 @@ import { daemonAnalyticsPath, daemonLearningPath, daemonWardenPath } from '../li
 import { UnderlineTabs } from './underline-tabs.tsx';
 import { PageThemeSwitch } from './theme-toggle.tsx';
 
-export type InsightsView = 'analytics' | 'warden' | 'learning';
+type InsightsView = 'analytics' | 'warden' | 'learning';
 
 /** The one Insights column: full width up to 1080px, flush left with the tabs. */
 export const INSIGHTS_COLUMN_CLASS = 'w-full max-w-[1080px]';

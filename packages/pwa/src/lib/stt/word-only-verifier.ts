@@ -75,7 +75,7 @@ export type WordOnlyRejection =
   | 'input-too-large';
 
 /** One accepted whole-word substitution, by word-token index. */
-export interface WordChange {
+interface WordChange {
   /** Index into the word-token sequence (NOT a character offset). */
   readonly index: number;
   readonly from: string;

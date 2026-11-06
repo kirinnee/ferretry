@@ -44,7 +44,7 @@ export type TerminalLinkState =
   | 'refused';
 
 /** WebSocket close codes this client can be given, and what they mean for retry. */
-export const TERMINAL_CLOSE_NORMAL = 1000;
+const TERMINAL_CLOSE_NORMAL = 1000;
 
 /**
  * Whether a closed stream should be reopened.

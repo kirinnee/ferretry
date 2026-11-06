@@ -83,7 +83,7 @@ import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { type DeadlineSchedule, MachineDeadlineError, realSchedule, withDeadline } from './machine-deadline.ts';
 
 /** Whether one daemon's session list has been read, and how that read ended. */
-export type FleetLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
+type FleetLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 /**
  * One paired daemon's fleet, as a screen renders it.
@@ -174,7 +174,7 @@ interface DaemonEntry {
  * abandoned instead: the slice says the machine did not answer, the coalescing slot is released so the
  * next poll asks again, and a late answer is still published if nothing newer has been.
  */
-export const FLEET_LIST_TIMEOUT_MS = 15_000;
+const FLEET_LIST_TIMEOUT_MS = 15_000;
 
 export interface DaemonFleetStoreOptions {
   readonly listTimeoutMs?: number;

@@ -26,7 +26,7 @@ import {
 import { type KeyboardEvent, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 
-export const NOT_HERE = 'not on this machine';
+const NOT_HERE = 'not on this machine';
 const UNKNOWN = 'no catalog lists this model';
 
 const TIER_WORDS: Readonly<Record<PackFleetModel['tier'], string>> = {

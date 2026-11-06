@@ -14,7 +14,7 @@
 import type { SessionStatus, SessionView } from '@ferretry/protocol';
 import { displayCallsign, shortSessionId } from './callsign.ts';
 
-export type SubFerretState = 'starting' | 'working' | 'needs-you' | 'idle' | 'done' | 'failed' | 'stopped';
+type SubFerretState = 'starting' | 'working' | 'needs-you' | 'idle' | 'done' | 'failed' | 'stopped';
 
 export interface SubFerretReading {
   readonly state: SubFerretState;

@@ -133,7 +133,7 @@ const patchSummary = (patch: string): ExtractedTool => ({
 /** The synthetic call the transcript files a run of picture-only rows under: one `Read`, however many pictures. */
 export const IMAGE_READ_TOOL = 'ferretry:image-read';
 
-export const imageReadHeadline = (count: number): string => `${count} image${count === 1 ? '' : 's'}`;
+const imageReadHeadline = (count: number): string => `${count} image${count === 1 ? '' : 's'}`;
 
 export const extractToolSummary = (name: string | undefined, input: unknown): ExtractedTool => {
   const lower = (name ?? '').toLowerCase();
@@ -429,7 +429,7 @@ export interface AskedQuestion {
 const QUESTION_TOOLS = /^(askuserquestion|request_user_input)$/iu;
 
 /** Whether a tool name is the structured question tool of either harness. */
-export const isQuestionTool = (name: string | undefined): boolean => name !== undefined && QUESTION_TOOLS.test(name);
+const isQuestionTool = (name: string | undefined): boolean => name !== undefined && QUESTION_TOOLS.test(name);
 
 const textOf = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() !== '' ? value : undefined;

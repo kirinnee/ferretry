@@ -24,7 +24,7 @@ export interface StepperStep {
 }
 
 /** What the leave confirmation says for this flow (the prototype's `confirmHtml`). */
-export interface StepperLeaveText {
+interface StepperLeaveText {
   /** "Stop adding a runtime?" */
   readonly question: string;
   /** "No runtime is created." */

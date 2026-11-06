@@ -73,13 +73,13 @@ export const NO_SURFACE_DRIVING: SurfaceDriving = Object.freeze({
 });
 
 /** How often the control views are re-read while no live feed is saying what changed. */
-export const SURFACE_CONTROL_POLL_MS = 10_000;
+const SURFACE_CONTROL_POLL_MS = 10_000;
 
 /**
  * The safety-net re-read while the feed is live: every control change is a journaled `surface.*` event,
  * folded in as it arrives, so the read only catches what a missed frame could have left behind.
  */
-export const SURFACE_CONTROL_LIVE_POLL_MS = 120_000;
+const SURFACE_CONTROL_LIVE_POLL_MS = 120_000;
 
 /** A session's live journal, as the page's host already subscribes to it, and whether it is live. */
 export type SurfaceEventFeed = LiveFeedSignal;

@@ -105,7 +105,7 @@ const JEV_ACTS: readonly { readonly id: WardenJevAct; readonly label: string }[]
 const THRESHOLD_STEP = 0.05;
 
 /** What the slider says for a bar: the percent, or “Never” at the top, where Jev never does the act alone. */
-export const jevActBarLabel = (bar: number): string => (bar >= 1 ? 'Never' : `${Math.round(bar * 100)}%`);
+const jevActBarLabel = (bar: number): string => (bar >= 1 ? 'Never' : `${Math.round(bar * 100)}%`);
 
 /** The privacy sentence for the layers that are on: what leaves this machine, and to whom. */
 export const wardenPrivacyNote = (layers: WardenLayers, login: string): string => {
@@ -128,7 +128,7 @@ const KEY_PILL: Readonly<
 };
 
 /** A login in the picker: its name, then the harness and the label the Runtimes tab shows for it. */
-export const loginLabel = (agent: string, runtimes: readonly PickerAccount[]): string => {
+const loginLabel = (agent: string, runtimes: readonly PickerAccount[]): string => {
   const runtime = runtimes.find(candidate => candidate.wrapper === agent);
   if (runtime === undefined) return agent;
   return [agent, runtime.kind, ...(runtime.displayName === agent ? [] : [runtime.displayName])].join(' · ');

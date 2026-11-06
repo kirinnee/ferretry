@@ -25,7 +25,7 @@ export interface HypermediaActionContext {
   readonly canControl: boolean;
 }
 
-export const HYPERMEDIA_ACTION_ID = 'hypermedia';
+const HYPERMEDIA_ACTION_ID = 'hypermedia';
 
 export interface HypermediaSessionActions {
   readonly contributions: readonly SessionActionContribution<HypermediaActionContext>[];

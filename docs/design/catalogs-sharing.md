@@ -102,7 +102,7 @@ shows the machine you are on and follows the app's existing machine selection; i
   - Stop sharing
   - Remove (only for skills installed from someone)
 - **Rows appear in two places:** the context rail (Skills and MCP), and the new **Skills** tab in Sharing. The tab lets
-  you share without opening a session; it mounts the existing `skills-surface.tsx` over the machine's own skills (`GET /v1/skills`).
+  you share without opening a session; it shows the machine's own skills (`GET /v1/skills`). (That tab has since been replaced; see [Catalogs](../catalogs.md).)
 
 ---
 

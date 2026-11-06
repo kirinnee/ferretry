@@ -11,14 +11,13 @@
  * reader's next word went in front of the reference and welded onto it. Only a real engine with real
  * focus and real key input shows that.
  *
- * WHAT IS REAL. The shipped `Composer`, the shipped entry points — the transcript's "Quote in
- * composer" menu, the terminal list's Add to chat and the skills surface's "Use in chat" — inside a reference surface that
+ * WHAT IS REAL. The shipped `Composer`, the shipped entry point — the transcript's "Quote in
+ * composer" menu — inside a reference surface that
  * proves the tokens they add, the app's whole stylesheet, real mouse and keyboard input. Every claim
  * about what is sent is the exact message the agent would receive (`window.__sent`).
  *
  * THE CONTRACT IT HOLDS, per case:
- *   - the delivery APPENDS to the draft (`composeReferenceDraft` / `composeQuotedDraft` /
- *     `appendSkillInvocation`) — the reader's sentence is never split, wherever its caret was;
+ *   - the delivery APPENDS to the draft (`composeReferenceDraft` / `composeQuotedDraft`) — the reader's sentence is never split, wherever its caret was;
  *   - the reference reads as a chip that is a link (the proof gate answered), and as a reference run
  *     inside the live editor; a quote reads as a quote block there;
  *   - focus is in the composer, in INSERT mode when Vim is on, with the caret after what was added,
@@ -93,18 +92,6 @@ const ENTRY_POINTS: readonly EntryPoint[] = [
     expected: draft => (draft === '' ? `> ${QUOTED}\n\n` : `${draft}\n\n> ${QUOTED}\n\n`),
     deliver: quote,
   },
-  {
-    name: "a terminal's Add to chat",
-    token: '%terminal:dev',
-    expected: draft => (draft === '' ? '%terminal:dev ' : `${draft} %terminal:dev `),
-    deliver: page => page.locator('[data-surface-key="dev"]').getByRole('button', { name: 'Add to chat' }).click(),
-  },
-  {
-    name: "a skill's Use in chat",
-    token: '/summary',
-    expected: draft => (draft === '' ? '/summary ' : `${draft} /summary `),
-    deliver: page => page.getByRole('button', { name: 'Use /summary in chat' }).click(),
-  },
 ];
 
 const FIELD = '.fy-composer [data-live-editor], .fy-composer textarea';
@@ -133,9 +120,6 @@ const open = async (editor: string, vim: (typeof VIM)[number], draft: string): P
   const query = new URLSearchParams({ editor, entries: '1', draft, ...(vim === 'off' ? {} : { vim: '1' }) });
   await page.goto(`${server.url}?${query.toString()}`);
   await page.waitForSelector('[data-composer-send]');
-  // Every entry point is ready: the terminal listing and the skills catalog have answered.
-  await page.locator('[data-surface-key="dev"]').waitFor();
-  await page.getByRole('button', { name: 'Use /summary in chat' }).waitFor();
   return page;
 };
 

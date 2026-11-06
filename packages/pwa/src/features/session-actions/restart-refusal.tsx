@@ -36,7 +36,7 @@ const anywayLabel = (held: PausedRestart): string =>
       ? 'Start fresh'
       : 'Restart anyway';
 
-export function RestartRefusalPanel({
+function RestartRefusalPanel({
   refusal,
   busy,
   failure,
@@ -91,7 +91,7 @@ export function RestartRefusalPanel({
 }
 
 /** The same pause, when the reason is a smaller context window rather than something running. */
-export function RestartDowngradePanel({
+function RestartDowngradePanel({
   downgrade,
   busy,
   failure,
@@ -127,7 +127,7 @@ export function RestartDowngradePanel({
 }
 
 /** The same pause, when the conversation cannot be resumed and only a new one could be started. */
-export function RestartUnresumablePanel({
+function RestartUnresumablePanel({
   reason,
   busy,
   failure,

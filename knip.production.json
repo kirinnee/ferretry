@@ -26,11 +26,12 @@
       "project": ["src/**/*.ts"]
     },
     "packages/pwa": {
-      "entry": ["src/main.tsx", "src/lib/index.ts"],
+      "entry": ["src/main.tsx", "src/worker/service-worker.ts"],
       "project": ["src/**/*.{ts,tsx}"],
       "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"],
       "ignore": [
         "src/lib/stt/speed-bench-report.ts",
+        "src/lib/shared-draft-client.ts",
         "src/lib/voice-chat/turn-endpointer.ts",
         "src/lib/voice-chat/turn-endpointer-scoring.ts"
       ]

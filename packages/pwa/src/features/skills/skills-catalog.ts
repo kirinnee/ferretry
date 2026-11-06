@@ -67,7 +67,7 @@ export const filterSkills = (skills: readonly AvailableSkill[], query: string): 
  * a detail line CSS-capitalising the raw wire value — reads identically until a
  * scope arrives whose display name is not its identifier capitalised.
  */
-export const skillScopeLabel = (scope: AvailableSkill['scope']): 'Global' | 'Project' =>
+const skillScopeLabel = (scope: AvailableSkill['scope']): 'Global' | 'Project' =>
   scope === 'global' ? 'Global' : 'Project';
 
 export interface SkillGroup {

@@ -20,7 +20,7 @@ export type DaemonStreamOpener = (daemon: DaemonConnection, request: RelayStream
  * query with `4400` anyway. A paired device has no ticket to buy any more (the daemon refuses to sell
  * one), which is why there is no longer a "direct WebSocket" branch here at all.
  */
-export interface DaemonStreamTarget {
+interface DaemonStreamTarget {
   readonly path: string;
   readonly query: readonly (readonly [string, string])[];
 }

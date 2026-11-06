@@ -84,16 +84,13 @@ export { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS };
  * The grammar core another package must agree on — the type universe, the
  * shared header/alt parsing, the `svg` lexical rules and the `html` checks — is
  * re-exported from `@ferretry/protocol/fy-render`, where the daemon can run the
- * same reader on a save. Every name this module has always exported is still
- * exported from here, so no reader's import changes.
+ * same reader on a save. The names its readers use are re-exported from here.
  */
 export {
   FY_RENDER_IMAGE_MIMES,
   FY_RENDER_MEDIA_TYPES,
-  FY_RENDER_TYPES,
-  fyRenderHtmlRunsScript,
 } from '@ferretry/protocol/fy-render';
-export type { FyRenderImageMime, FyRenderMediaType, FyRenderType } from '@ferretry/protocol/fy-render';
+export type { FyRenderImageMime, FyRenderMediaType } from '@ferretry/protocol/fy-render';
 
 /** The fence info string that opts a block into this grammar, and nothing else. */
 export const FY_RENDER_FENCE_LANGUAGE = 'fy-render';
@@ -156,7 +153,7 @@ export const remarkFyRenderFences = () => markFences;
  * URL, because each of those is either a downgrade, a second inline grammar, or a
  * credential-shaped address.
  */
-export type FyRenderSource =
+type FyRenderSource =
   | { readonly kind: 'workspace'; readonly path: string }
   | { readonly kind: 'media'; readonly path: string }
   | { readonly kind: 'https'; readonly url: string };
@@ -885,8 +882,6 @@ export const FY_RENDER_SANDBOX_LIBRARIES = {
   mermaid: { maxBytes: 6 * 1024 * 1024, url: '/fy-render-mermaid.js' },
 } as const;
 
-export type FyRenderSandboxLibrary = keyof typeof FY_RENDER_SANDBOX_LIBRARIES;
-
 /**
  * Reads a response body to text, refusing at the cap rather than after it.
  *
@@ -1018,7 +1013,7 @@ export type FyRenderSandboxTheme = 'dark' | 'light';
  * their diagram could not be drawn — the same defect class the deadline copy repair
  * removed, on the most operationally likely path.
  */
-export type FyRenderSandboxErrorClass = 'library' | 'render';
+type FyRenderSandboxErrorClass = 'library' | 'render';
 
 const SANDBOX_THEMES: readonly string[] = ['dark', 'light'];
 const SANDBOX_ERROR_CLASSES: readonly string[] = ['library', 'render'];

@@ -1,5 +1,5 @@
 /**
- * &F58: the Resume button on a STOPPED ferret — the real chat header and a sessions-bar row with its menu open.
+ * &F58: the Resume button on a STOPPED ferret — the real chat header and a sessions-bar row with its menu opened by right-click.
  * Phone 390px and desktop 1440px, light and dark.
  *
  *   REVIVE_SHOTS=/tmp/claude-1000/shots/revive-button bun harness/revive-button-screenshot.tsx
@@ -28,7 +28,6 @@ const run = (command: string, args: readonly string[]): void => {
 const BAR_ENTRY = `
 import { createRoot } from 'react-dom/client';
 import { SessionsBar } from '../../../src/shell/sessions-bar.tsx';
-import { SessionRowMenu } from '../../../src/shell/session-row-menu.tsx';
 import { sessionView } from '../../../tests/support/sessions.ts';
 
 const NOW = '2026-10-30T09:00:00.000Z';
@@ -45,7 +44,6 @@ createRoot(root).render(
     <SessionsBar active={null} activeSessionId="running-one" canMutate daemonId={'harness'} machineName="Liftoff EC2"
       machines={[]} onAddMachine={() => {}} onClose={() => {}} onCollapse={() => {}} onNavigate={() => {}}
       onOpenPalette={() => {}} presentation="column" projects={[]} sessions={sessions} />
-    <SessionRowMenu state={{ view: sessions[0], x: compact ? 40 : 60, y: 330 }} sessions={sessions} canMutate onClose={() => {}} onRun={() => {}} onBulkStop={() => {}} touch={compact} />
   </div>,
 );
 `;
@@ -135,6 +133,8 @@ try {
         }
 
         await page.goto(`${server.url}bar?theme=studio-${scheme}`);
+        // The row's own menu opens the way a reader opens it: a right-click on the stopped ferret's row.
+        await page.getByText('Home manager').first().click({ button: 'right' });
         await page.getByRole('menuitem').first().waitFor();
         const menu = await page.getByRole('menuitem').allTextContents();
         process.stdout.write(`${label} row menu (stopped): ${JSON.stringify(menu)}\n`);

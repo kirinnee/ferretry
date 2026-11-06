@@ -72,7 +72,7 @@ import { UnreadBadge } from './unread-badge.tsx';
 export type UpdateReason = 'update' | 'recovery';
 
 /** How this daemon's event stream is doing, in the bar's own vocabulary. */
-export type ConnectionStatus = 'open' | 'connecting' | 'reconnecting';
+type ConnectionStatus = 'open' | 'connecting' | 'reconnecting';
 
 /**
  * The chip's two wordings, as data so they can be asserted directly.
@@ -111,20 +111,20 @@ export const UPDATE_CHIP = {
  * offers no row for them. The row was deleted rather than pointed at a path that no longer
  * resolves; `destinationExists` would have dropped such a row silently, which is a worse way to find out.
  */
-export const SETTINGS_ENTRY = { label: 'Settings', title: 'Open appearance and density settings' } as const;
-export const WARDEN_ENTRY = { label: 'Warden', title: 'Open fleet supervision and verdicts' } as const;
-export const LEARNING_ENTRY = { label: 'Learning', title: 'Open fleet learning proposals' } as const;
-export const ANALYTICS_ENTRY = { label: 'Analytics', title: 'Query all sessions and graph daily usage' } as const;
-export const BOARD_ENTRY = {
+const SETTINGS_ENTRY = { label: 'Settings', title: 'Open appearance and density settings' } as const;
+const WARDEN_ENTRY = { label: 'Warden', title: 'Open fleet supervision and verdicts' } as const;
+const LEARNING_ENTRY = { label: 'Learning', title: 'Open fleet learning proposals' } as const;
+const ANALYTICS_ENTRY = { label: 'Analytics', title: 'Query all sessions and graph daily usage' } as const;
+const BOARD_ENTRY = {
   label: 'Board',
   title: 'Every task on every machine as lanes: what is moving, stuck or waiting on you',
 } as const;
-export const PROJECTS_ENTRY = { label: 'Projects', title: 'Open registered workspaces and folders' } as const;
-export const SHARING_ENTRY = {
+const PROJECTS_ENTRY = { label: 'Projects', title: 'Open registered workspaces and folders' } as const;
+const SHARING_ENTRY = {
   label: 'Sharing',
   title: 'Share skills and MCP servers, see what is shared with you, and who can read your catalogs',
 } as const;
-export const AGENDA_ENTRY = {
+const AGENDA_ENTRY = {
   label: 'Inbox',
   title: 'Everything your ferrets are waiting on you for, across every machine',
 } as const;

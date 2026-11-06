@@ -25,7 +25,7 @@ export interface AgendaActionContext {
   readonly canControl: boolean;
 }
 
-export const AGENDA_ACTION_ID = 'agenda';
+const AGENDA_ACTION_ID = 'agenda';
 
 export interface AgendaSessionActions {
   readonly contributions: readonly SessionActionContribution<AgendaActionContext>[];

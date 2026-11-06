@@ -54,10 +54,10 @@ export interface SystemBlockInfo {
 }
 
 /** What kind of background work Claude Code reported on. */
-export type BackgroundTaskKind = 'command' | 'monitor' | 'agent' | 'task';
+type BackgroundTaskKind = 'command' | 'monitor' | 'agent' | 'task';
 
 /** How it went: `event` is a monitor's line of output, which is neither an end nor a failure. */
-export type BackgroundTaskOutcome = 'finished' | 'failed' | 'stopped' | 'event';
+type BackgroundTaskOutcome = 'finished' | 'failed' | 'stopped' | 'event';
 
 /**
  * ONE `<task-notification>`, read. Claude Code writes one when a `run_in_background` command, a

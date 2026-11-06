@@ -14,7 +14,7 @@ import { DRAWER_MAX, RAIL_MAX } from '../../../hooks/use-layout-mode.ts';
 export type PhoneTabKind = 'chat' | 'console' | 'processes' | 'terminal' | 'browser' | 'file';
 
 /** Who is driving a tab right now. `null` (or absent) means the human is. */
-export interface PhoneTabDriver {
+interface PhoneTabDriver {
   readonly name: string;
 }
 

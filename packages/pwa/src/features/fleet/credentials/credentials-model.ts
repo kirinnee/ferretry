@@ -376,7 +376,7 @@ export const budgetOfDraft = (draft: BudgetDraft): BudgetLimits | undefined => {
 };
 
 /** A budget view as `budgetOfDraft` would write it, so a draft can be compared with what is in effect. */
-export const budgetLimitsOfView = (budget: FleetCredentialBudget | undefined): BudgetLimits | undefined =>
+const budgetLimitsOfView = (budget: FleetCredentialBudget | undefined): BudgetLimits | undefined =>
   budget === undefined ? undefined : budgetOfDraft(budgetDraft(budget));
 
 /** Whether the draft differs from the budget the daemon last reported. */

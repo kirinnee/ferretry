@@ -12,7 +12,7 @@ import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { cancelLearningScan, fetchLearningScan, startLearningScan } from '../../lib/learning-api.ts';
 import type { DaemonFetch } from '../../lib/runtime-models.ts';
 
-export const SCAN_POLL_MS = 2_000;
+const SCAN_POLL_MS = 2_000;
 
 export interface LearningScanControl {
   readonly scan: LearningScanProgress | null;

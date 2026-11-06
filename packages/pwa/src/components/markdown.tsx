@@ -104,10 +104,7 @@ import { MarkdownTable } from './markdown-table.tsx';
  * rather than imported: this component is a renderer, and the filesystem read
  * belongs to the host that already holds the daemon connection and the session cwd.
  */
-export type FilePathResolver = (
-  candidates: readonly string[],
-  signal: AbortSignal,
-) => Promise<ReadonlyMap<string, string>>;
+type FilePathResolver = (candidates: readonly string[], signal: AbortSignal) => Promise<ReadonlyMap<string, string>>;
 
 const EMPTY_RESOLVED_PATHS: ReadonlyMap<string, string> = new Map();
 

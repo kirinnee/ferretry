@@ -16,7 +16,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { panelTab } from '../shell/machine-panels.ts';
 import { MACHINES_SECTION, type MachineTabId, machineHash } from '../shell/machine-route.ts';
 
-export const SETTINGS_FLOWS = ['setup', 'import', 'clone', 'export', 'install-claude', 'install-codex'] as const;
+const SETTINGS_FLOWS = ['setup', 'import', 'clone', 'export', 'install-claude', 'install-codex'] as const;
 
 export type SettingsFlow = (typeof SETTINGS_FLOWS)[number];
 

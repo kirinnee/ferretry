@@ -25,7 +25,7 @@ import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonControlsStore } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonMachineSetupPath, daemonSettingsPath } from '../../lib/pages/routes.ts';
-import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
+import { ChatWidthControl } from '../../shell/chat-width-control.tsx';
 import { Badge, Button } from '../../shell/primitives.tsx';
 import { PageThemeSwitch, ThemeSettings } from '../../shell/theme-toggle.tsx';
 import { useLocalComputer } from '../browser/use-local-computer.ts';
@@ -147,8 +147,6 @@ const backLabel = (panel: string | undefined): string | undefined => {
   const tab = panel === undefined ? undefined : panelTab(panel);
   return MACHINE_TABS.find(candidate => candidate.id === tab)?.label;
 };
-
-export { DENSITY_OPTIONS } from '../../hooks/use-density.ts';
 
 export interface SettingsSectionProps {
   readonly definition: SettingDefinition;
@@ -813,6 +811,3 @@ export function SettingsPage({
     </main>
   );
 }
-
-/** Kept exported for consumers that need the exact conversation-width contract. */
-export { CHAT_WIDTH_OPTIONS };

@@ -71,7 +71,7 @@ export const reasonOf = (cause: unknown): string => {
 };
 
 /** What a confirm says when the edit it named is no longer the one waiting. */
-export const STALE_CONFIRM =
+const STALE_CONFIRM =
   'That edit is no longer the one waiting — the file changed since. Review it again before confirming.';
 
 /**

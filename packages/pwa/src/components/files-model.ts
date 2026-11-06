@@ -1,6 +1,6 @@
 import type { FsEntry } from './files-api.ts';
 
-export type StatusTone = 'ok' | 'warn' | 'err' | 'accent' | 'neutral';
+type StatusTone = 'ok' | 'warn' | 'err' | 'accent' | 'neutral';
 export interface StatusChip {
   code: string;
   label: string;
@@ -151,7 +151,7 @@ export const statusChip = (raw: string | undefined | null): StatusChip => {
 export const changeRowLabel = (path: string, chip: StatusChip, from?: string): string =>
   `${chip.label}${chip.detail ? ` (${chip.detail})` : ''}: ${path}${from ? ` from ${from}` : ''}. Open diff`;
 
-export type DiffLineKind = 'meta' | 'hunk' | 'add' | 'del' | 'ctx' | 'nonl';
+type DiffLineKind = 'meta' | 'hunk' | 'add' | 'del' | 'ctx' | 'nonl';
 export interface DiffLine {
   kind: DiffLineKind;
   text: string;
@@ -166,7 +166,7 @@ export interface ParsedDiff {
   total: number;
   binary: boolean;
 }
-export const MAX_DIFF_LINES = 4000;
+const MAX_DIFF_LINES = 4000;
 const metaPrefixes = [
   'diff --git',
   'diff --no-index',

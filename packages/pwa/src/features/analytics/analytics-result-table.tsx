@@ -67,7 +67,7 @@ interface Column {
   readonly numeric: boolean;
 }
 
-export const ANALYTICS_TABLE_COLUMNS: readonly Column[] = [
+const ANALYTICS_TABLE_COLUMNS: readonly Column[] = [
   { key: 'group', header: 'Group', numeric: false },
   { key: 'sessions', header: 'Sessions', numeric: true },
   { key: 'input', header: 'Input', hint: 'gross input, including cache reads and writes', numeric: true },

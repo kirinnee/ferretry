@@ -10,7 +10,7 @@ import { parseTaskName, taskIsRedundant } from '../shell/task-name.ts';
 import { displayCallsign, shortSessionId } from './callsign.ts';
 
 /** Sidebar indentation stops growing after two 10px steps. */
-export const MAX_INDENT_DEPTH = 2;
+const MAX_INDENT_DEPTH = 2;
 const INDENT_PER_LEVEL = 10;
 
 export const lineageIndent = (depth: number): number => {

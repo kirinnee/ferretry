@@ -108,7 +108,7 @@ export const bulkStopMenuActions = (
 // Bulk stop run identity
 // ---------------------------------------------------------------------------
 
-export interface BulkStopOutcome {
+interface BulkStopOutcome {
   readonly id: string;
   readonly name: string;
   readonly ok: boolean;

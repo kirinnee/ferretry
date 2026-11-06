@@ -92,7 +92,7 @@ export const FIT_MAX_FONT_PX = 12;
 /** Below this a monospace face stops being text; the pane scrolls sideways again rather than shrink further. */
 export const FIT_MIN_FONT_PX = 6.5;
 /** A monospace glyph's advance as a fraction of its size — 0.6em for every face the theme ships, rounded up. */
-export const MONO_ADVANCE_EM = 0.61;
+const MONO_ADVANCE_EM = 0.61;
 
 /** The widest line's length in characters, trailing blanks ignored — the columns the text really uses. */
 export const paneColumns = (text: string): number =>

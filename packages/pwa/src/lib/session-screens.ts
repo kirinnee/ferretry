@@ -151,13 +151,6 @@ export const absoluteTime = (value: string | null | undefined): string => {
   return `${date} ${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
 };
 
-export const sessionNavigation = (daemonId: string, sessionId: string): readonly [string, string] => [
-  daemonId,
-  sessionId,
-];
-
-export const composerUsesEnterToSend = (pointerFine: boolean, canHover: boolean): boolean => pointerFine && canHover;
-
 export const canSubmitComposer = (draft: string, disabled: boolean, sending: boolean): boolean =>
   draft.trim().length > 0 && !disabled && !sending;
 

@@ -41,7 +41,7 @@ export type AnalyticsRequest = (daemon: DaemonConnection, query?: string) => Pro
 export const ANALYTICS_QUERY_DEFAULT = 'sum(cost_usd) by (model) [7d]';
 
 /** The labels offered as one-click grouping chips; a subset of the protocol's, typed so it stays valid. */
-export const ANALYTICS_GROUP_HELPERS: readonly AnalyticsLabel[] = [
+const ANALYTICS_GROUP_HELPERS: readonly AnalyticsLabel[] = [
   'runtime',
   'model',
   'harness',

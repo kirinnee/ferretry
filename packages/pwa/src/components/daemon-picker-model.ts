@@ -262,7 +262,7 @@ interface ProjectPickerOptionBase {
   readonly searchText: string;
 }
 
-export interface RegisteredProjectOption extends ProjectPickerOptionBase {
+interface RegisteredProjectOption extends ProjectPickerOptionBase {
   readonly kind: 'registered';
   /** Present only when the registry itself carried it — never synthesized. */
   readonly id?: string;

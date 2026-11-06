@@ -84,14 +84,14 @@ export const CONNECTION_STATUS_LABEL: Readonly<Record<ConnectionStatusKind, stri
 };
 
 /** Which relay carried it: whose, and the host it lives on — never the daemon fingerprint. */
-export const relayName = (method: Extract<ConnectionMethod, { kind: 'relay' }>): string =>
+const relayName = (method: Extract<ConnectionMethod, { kind: 'relay' }>): string =>
   `${describeConnectionMethod(method).label} · ${new URL(method.relayUrl).host}`;
 
 /**
  * What follows the status word, naming WHICH carrier of its kind: a relay's operator and host, a
  * tunnel's hostname (one random label, never the fingerprint). Direct and WebRTC need nothing more.
  */
-export const carrierDetail = (method: ConnectionMethod): string | undefined => {
+const carrierDetail = (method: ConnectionMethod): string | undefined => {
   if (method.kind === 'relay') return relayName(method);
   if (method.kind === 'tunnel') return new URL(method.tunnelUrl).host;
   return undefined;

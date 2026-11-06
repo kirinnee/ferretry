@@ -1384,7 +1384,7 @@ verifies them again. The offline library is phase 3 and is not built.
 
 ### The skill and MCP rows (catalogs 3b, reworked by &B131 A1)
 
-The context rail's **Skills** list, its **MCP** list and the skills surface draw every item with **one** row
+The context rail's **Skills** list and its **MCP** list draw every item with **one** row
 (`features/catalogs/catalog-item-row.tsx`). Since &B131 the side panel lists **what this session can use** and nothing
 on a row publishes: a list of what an agent has is not a shop (owner, 2026-11-02: "the side panel should show skills
 ACTIVE in this session … the add button is too overloaded").
@@ -1404,7 +1404,7 @@ ACTIVE in this session … the add button is too overloaded").
   `SKILL.md` path (a list that only knows a skill's name matches by name) or the MCP server id. No new route.
 - **Right: only ⋯** (44px). There is no Share and no Add on the row, and the side panel has no "Add from a link…".
   The ⋯ holds, in order:
-  - **Open SKILL.md** (on the skills surface, Show detail) or, on an MCP row, **Show details** / **Hide details** (so
+  - **Open SKILL.md** or, on an MCP row, **Show details** / **Hide details** (so
     every MCP row has a ⋯);
   - **Publish in ‹default catalog›**, one tap with Undo, on a machine with `catalogs.quick-add.1` ([The app (catalogs
     3c-4)](#the-app-catalogs-3c-4)), or **Publish in a catalog…**, which opens the Add to catalog sheet. Once a catalog

@@ -20,7 +20,7 @@
  *   ?runtime=your-turn|working   the model and effort chips, for a session whose last send left
  *                         `promptReady: false` behind (see below)
  *   ?entries=1            every Add to chat / quote entry point beside the composer — the shipped
- *                         transcript, terminal list and skills surface, each delivering
+ *                         transcript, delivering
  *                         through its own production path, inside a reference surface that proves
  *                         the tokens they add (so a chip is a link, as in the app)
  *   ?host=1              a location host is present, so "+" opens the add menu (attach, camera on touch, location)
@@ -52,9 +52,7 @@ import { Composer } from '../../../src/components/composer.tsx';
 import { ComposerRuntime } from '../../../src/components/composer-runtime.tsx';
 import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../../src/components/reference-surface.tsx';
 import { isPromptKnownBusy, RuntimeModelControls } from '../../../src/components/runtime-controls.tsx';
-import { SessionSurfaceReferences } from '../../../src/components/session-surface-references.tsx';
 import { Transcript } from '../../../src/components/transcript.tsx';
-import { SessionSkillsSurface } from '../../../src/features/skills/session-skills-surface.tsx';
 import { useAppViewport } from '../../../src/hooks/use-app-viewport.ts';
 import { LocationShareContext } from '../../../src/hooks/use-location-share.ts';
 import { MarkdownComposerSettings } from '../../../src/features/settings/markdown-composer-settings.tsx';
@@ -153,8 +151,6 @@ function EntryPoints() {
         entries={[{ id: 'turn-1', kind: 'assistant', text: 'The build passed on the second try.' }]}
         sessionId={scope.sessionId}
       />
-      <SessionSurfaceReferences connection={daemon} listTerminals={async () => TERMINALS} scope={scope} />
-      <SessionSkillsSurface connection={daemon} loadCatalog={async () => SKILLS} scope={scope} />
     </section>
   );
 }

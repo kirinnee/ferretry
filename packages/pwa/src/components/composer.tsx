@@ -104,7 +104,7 @@ interface SendFailure {
  * row settles that one, retrying under the original id only what it proves absent.
  */
 /** A message that could wait for the connection only in this tab's memory: not sent, and still in the box. */
-export const UNSTORED_SEND_COPY =
+const UNSTORED_SEND_COPY =
   'Not sent — this device could not keep the message until the connection is back. Your message is still here; send it again once you are connected.';
 
 const sendFailure = (cause: unknown): SendFailure => {
@@ -268,7 +268,7 @@ export interface ComposerProps {
 }
 
 /** What a host says about a detached composer. */
-export interface DetachedComposer {
+interface DetachedComposer {
   /** What the send button says and does: "Send back", where the chat says "Send". */
   readonly sendLabel: string;
   /** Whether files may be added (the plus, a drop, a paste); the host's `uploadAttachment` takes them. */

@@ -44,7 +44,7 @@ export const RECORD_CLOCK_SLACK_MS = 5_000;
  * every other field is dropped when this build does not recognise it, because
  * an unreadable tier must not make an otherwise usable citation unusable.
  */
-export interface LedgerSendEvidence {
+interface LedgerSendEvidence {
   readonly key: string;
   readonly kind?: 'chat.user' | 'queued_command' | 'response_item';
   readonly tier?: 'queue-file-id' | 'turn-instruction' | 'exact-text' | 'merged-text';
@@ -110,7 +110,7 @@ export interface LedgerSendRecord {
 }
 
 /** Since when the ledger could not be read, and why, in the failure's own words. */
-export interface LedgerUnread {
+interface LedgerUnread {
   readonly since: string;
   readonly reason: string;
 }

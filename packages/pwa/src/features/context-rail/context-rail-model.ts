@@ -166,7 +166,7 @@ const DOC_CHIP_LABEL: Readonly<Record<DocChip, string>> = { all: 'All', claude: 
  * (and the uncommitted `CLAUDE.local.md`); Codex and most other agents read `AGENTS.md`; Gemini reads
  * `GEMINI.md`. Order is the order they are listed in.
  */
-export const INSTRUCTION_FILE_NAMES: readonly string[] = [
+const INSTRUCTION_FILE_NAMES: readonly string[] = [
   'CLAUDE.md',
   'CLAUDE.local.md',
   'AGENTS.md',

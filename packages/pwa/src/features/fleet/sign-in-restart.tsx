@@ -14,7 +14,7 @@ import { RotateCcw } from 'lucide-react';
 import { Button } from '../../shell/primitives.tsx';
 
 /** Said when a start picked up a sign-in already running for this login. */
-export const RESUMED_SENTENCE = 'You started this sign-in earlier, so it carries on from where you left it.';
+const RESUMED_SENTENCE = 'You started this sign-in earlier, so it carries on from where you left it.';
 
 export function ResumedNote({ flow }: { readonly flow: HarnessLoginFlow | null }) {
   if (flow?.resumed !== true || flow.state === 'complete' || flow.state === 'failed') return null;

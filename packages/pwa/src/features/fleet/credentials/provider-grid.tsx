@@ -54,7 +54,7 @@ export function ProviderGrid({ presets, onPick, onPaste, local }: ProviderGridPr
             placeholder="Search providers"
             autoComplete="off"
             spellCheck={false}
-            // `!pl-9`: `.kt-input`'s padding shorthand wins over a plain `pl-9` (see skills-surface.tsx).
+            // `!pl-9`: `.kt-input`'s padding shorthand wins over a plain `pl-9`.
             className="kt-input min-h-control w-full !pl-9 !pr-3"
             data-provider-search=""
           />

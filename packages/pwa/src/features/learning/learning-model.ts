@@ -32,7 +32,7 @@ export const SOURCE_FILTERS: readonly { readonly id: SourceFilter; readonly labe
   { id: 'scan', label: 'Scan' },
 ];
 
-export const matchesSource = (proposal: ProposalView, filter: SourceFilter): boolean =>
+const matchesSource = (proposal: ProposalView, filter: SourceFilter): boolean =>
   filter === 'all' || proposal.source === filter;
 
 /** The lessons one tab shows, newest first. */
@@ -205,7 +205,7 @@ export const toggled = (values: readonly string[], value: string): readonly stri
 
 const tokenFormat = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 
-export const formatScanTokens = (tokens: number): string => tokenFormat.format(tokens);
+const formatScanTokens = (tokens: number): string => tokenFormat.format(tokens);
 
 export const formatScanUsd = (usd: number): string => (usd < 0.01 && usd > 0 ? '<$0.01' : `$${usd.toFixed(2)}`);
 

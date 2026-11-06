@@ -65,7 +65,7 @@ export type SidePaneTabPresentation = 'pane' | 'sheet';
  */
 import type { BrowserDestination } from '../features/browser/in-app-browser-model.ts';
 
-export type { BrowserDestination, BrowserScope } from '../features/browser/in-app-browser-model.ts';
+export type { BrowserDestination } from '../features/browser/in-app-browser-model.ts';
 
 // ---- instance identity -------------------------------------------------------
 
@@ -152,7 +152,7 @@ export type SidePaneTabIconName =
  *  deliberately small: built-in surfaces need bespoke delivery props (task,
  *  code-reference, attention and pin requests) that this generic surface must
  *  not grow, so they render through the side pane's own switch instead. */
-export interface SidePaneTabRenderProps {
+interface SidePaneTabRenderProps {
   readonly scope: DaemonSessionScope;
   readonly presentation: SidePaneTabPresentation;
   readonly titleId: string;
@@ -644,22 +644,6 @@ export function deactivateSidePane(scope: DaemonSessionScope): void {
   const current = readSidePaneTabsState(scope);
   if (current.active === null) return;
   write(scope, { ...current, active: null, fullViewport: false });
-}
-
-/**
- * Let the active browser instance take the entire application viewport.
- *
- * This deliberately refuses every other tab kind. A stale callback after a
- * browser tab closed must not turn a files or terminal pane into a layout that
- * has no browser exit chrome. Like all side-pane state, the flag lives under
- * `(daemonId, sessionId)`, never in a process-wide singleton.
- */
-export function setSidePaneFullViewport(scope: DaemonSessionScope, fullViewport: boolean): void {
-  const current = readSidePaneTabsState(scope);
-  const active = current.active === null ? undefined : current.instances[current.active];
-  if (active?.kind !== 'browser') return;
-  if (current.fullViewport === fullViewport) return;
-  write(scope, { ...current, fullViewport });
 }
 
 // Closing an instance tab DISPOSES that instance; whoever owns its live backing

@@ -38,7 +38,7 @@ import { memoryNote } from './memory-note.ts';
 import type { InfoPlacement } from './use-info-placement.ts';
 
 /** The Context tab's data: the context rail's, minus what Info decides itself. */
-export type InfoFolderProps = Omit<ContextRailBodyProps, 'tab' | 'onTabChange' | 'tabs' | 'label'>;
+type InfoFolderProps = Omit<ContextRailBodyProps, 'tab' | 'onTabChange' | 'tabs' | 'label'>;
 
 export interface SessionInfoPorts {
   readonly worktrees: ContextLoader<readonly ManagedWorktreeView[]>;

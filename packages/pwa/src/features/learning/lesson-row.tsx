@@ -33,7 +33,7 @@ import {
 } from './learning-model.ts';
 import { useTouchAffected } from './use-touch-affected.ts';
 
-export interface LessonActions {
+interface LessonActions {
   /** A verdict; resolves once the hub holds the daemon's answer, throws with the daemon's refusal. */
   readonly act: (id: string, action: LearningActionRequest) => Promise<void>;
   readonly preview: (id: string) => Promise<LearningApplyPreview>;
@@ -59,7 +59,7 @@ type ApplyStep =
   | { readonly step: 'writing'; readonly preview: LearningApplyPreview }
   | { readonly step: 'conflict'; readonly path: string };
 
-export function LessonChips({
+function LessonChips({
   proposal,
   sessions,
 }: {

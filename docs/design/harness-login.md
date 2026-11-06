@@ -22,8 +22,7 @@ It answers the owner's request:
 The complaint is correct and the cost is real. An operator who declares six provider accounts must
 today walk to the daemon's host, open a terminal, and run `fy fleet login` — a command that only
 exists locally (§1.3) — and the browser they were using instead shows them the words `quota auth!`
-with no control to resolve it (`packages/pwa/src/shell/quota-readout.tsx:78-86`,
-`packages/pwa/src/components/quota-readout.tsx:32-40`).
+with no control to resolve it (`packages/pwa/src/shell/quota-readout.tsx:78-86`).
 
 ---
 

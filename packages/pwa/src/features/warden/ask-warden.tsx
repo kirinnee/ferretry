@@ -175,7 +175,7 @@ export const askWardenContribution = (ports: AskWardenPorts): SessionActionContr
 });
 
 /** The client calls this needs: the grants view, and the two Warden routes. */
-export type AskWardenClient = Pick<IFyApiClient, 'request' | 'wardenStatus' | 'wardenInvestigate'>;
+type AskWardenClient = Pick<IFyApiClient, 'request' | 'wardenStatus' | 'wardenInvestigate'>;
 export type AskWardenClientFactory = (connection: DaemonConnection) => Promise<AskWardenClient>;
 
 const NONE: readonly SessionActionContribution<CoreActionContext>[] = [];

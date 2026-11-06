@@ -22,7 +22,7 @@ import { daemonRequest } from './daemon-transport.ts';
 import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 /** The query naming an item's own draft; the chat's is the bare route, as it always was. */
-export const sharedDraftItemQuery = (scope: DaemonSessionScope): string =>
+const sharedDraftItemQuery = (scope: DaemonSessionScope): string =>
   scope.item === undefined ? '' : `?item=${encodeURIComponent(scope.item)}`;
 
 export const sharedDraftPath = (scope: DaemonSessionScope): string =>

@@ -5,7 +5,7 @@
  * think", never `sus_thinking`. A raw code on screen is a bug.
  */
 
-import type { WardenActor, WardenAnomalyKind, WardenLayers, WardenOutcome } from '@ferretry/protocol';
+import type { WardenActor, WardenAnomalyKind, WardenLayers } from '@ferretry/protocol';
 
 /** The Badge tones the Warden draws with. No new colours: these are the theme's own. */
 export type WardenChipTone = 'ok' | 'warn' | 'err' | 'pend' | 'accent';
@@ -66,20 +66,3 @@ export const ACTOR_DOT: Readonly<Record<WardenActor, string>> = {
   llm: 'bg-accent',
   owner: 'bg-faint',
 };
-
-/** What became of a flag, as a row chip says it. */
-export const OUTCOME_LABEL: Readonly<Record<WardenOutcome, string>> = {
-  moved: 'Moved',
-  cleared: 'Cleared',
-  stopped: 'Stopped',
-  asked: 'Asked',
-};
-
-const OUTCOME_TONE: Readonly<Record<WardenOutcome, WardenChipTone>> = {
-  moved: 'ok',
-  cleared: 'pend',
-  stopped: 'err',
-  asked: 'warn',
-};
-
-export const outcomeChip = (outcome: WardenOutcome): WardenChip => chip(OUTCOME_LABEL[outcome], OUTCOME_TONE[outcome]);

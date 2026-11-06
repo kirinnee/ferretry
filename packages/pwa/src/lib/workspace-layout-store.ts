@@ -7,7 +7,7 @@
  * minted them, so every entry is keyed through `daemonSessionKey` — two daemons
  * handing out the same session id never share a layout.
  *
- * The contract mirrors `side-pane-preferences.ts`: an explicit payload
+ * The contract: an explicit payload
  * version, a defensive parse (the layout's own parse is in
  * `workspace-layout.ts`), storage denial treated as an ordinary browser
  * condition, and identity-stable snapshots shaped for `useSyncExternalStore`.
@@ -21,7 +21,7 @@ import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { defaultWorkspaceLayout, parseWorkspaceLayout, type WorkspaceLayout } from './workspace-layout.ts';
 
 export const WORKSPACE_LAYOUT_STORE_KEY = 'fy-workspace-layout-v1';
-export const WORKSPACE_LAYOUT_STORE_VERSION = 1;
+const WORKSPACE_LAYOUT_STORE_VERSION = 1;
 export const WORKSPACE_LAYOUT_STORE_LIMIT = 100;
 
 export interface WorkspaceStorage {

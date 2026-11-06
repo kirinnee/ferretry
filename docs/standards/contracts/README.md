@@ -215,7 +215,11 @@ top-level prefix.
 
 `composition-reachability.sh` fails when a production module under `packages/*/src/**` is never
 _used_ by its package's composition root — `packages/cli/bin/fy.ts`, `packages/daemon/bin/fyd.ts`,
-or, for a package with no binary, the entries in its `exports` map.
+or, for a package with no binary, the entries in its `exports` map. A package whose programs are not
+binaries names them itself in a `compositionRoots` list in its `package.json` (exact `.ts`/`.tsx`
+paths, taking precedence): `packages/pwa` lists `src/main.tsx` and its service and speech worker
+programs. A `./x.ts?worker&url` import is not a module edge — the bundler builds `x.ts` as a program of
+its own — so a worker is a root, and the gate only checks that it exists.
 
 It exists because the same defect appeared in three unrelated reviews: a unit builds a subsystem,
 tests it to 100%, and never constructs it in the composition root. The daemon boots without it, so

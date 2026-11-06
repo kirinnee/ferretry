@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import type { BrowserLoginAction, BrowserLoginStatus, IFyHttpTransport } from '@ferretry/protocol';
 import should from 'should';
-import type { BrowserLoginView } from '../../src/features/browser/browser-login-banner.tsx';
 import { daemonApiClient } from '../../src/lib/api-client.ts';
 import {
   BROWSER_LOGIN_CLOSED_POLL_MS,
@@ -519,16 +518,5 @@ describe('DaemonBrowserLoginStore', () => {
     // Clearing a daemon that is already gone is not an error, and a re-paired
     // daemon starts from not-read rather than from its old credential.
     should(store.clearDaemon(daemonA.daemonId)).be.false();
-  });
-
-  it('produces exactly the view the ported banner renders', async () => {
-    const store = new DaemonBrowserLoginStore(only(new FakeLoginPort(() => Promise.resolve(openOn('secret-a')))));
-
-    // A compile-time assertion: the store's snapshot IS the banner's contract,
-    // including the null that makes it render nothing.
-    const unread: BrowserLoginView | null = store.getSnapshot(daemonA.daemonId);
-    should(unread).be.null();
-    const view: BrowserLoginView = await store.refresh(daemonA);
-    should(view.state).equal('open');
   });
 });
