@@ -1,3 +1,28 @@
+## [4.284.0](https://github.com/kirinnee/ferretry/compare/v4.283.1...v4.284.0) (2026-11-06)
+
+### Features
+
+* **daemon:** show how long a harness took to start ([#1504](https://github.com/kirinnee/ferretry/issues/1504)) ([0f03c35](https://github.com/kirinnee/ferretry/commit/0f03c35efedbf64e461e0f0d87cf72fb9ef0c6c6))
+* **pwa:** read an assistant reply aloud (F137 slice 1) ([#1488](https://github.com/kirinnee/ferretry/issues/1488)) ([5cf56b1](https://github.com/kirinnee/ferretry/commit/5cf56b131950d1c2867da54b28273b3b34a923a9))
+* **pwa:** update review sheet and screenshot harness for re-copy ([#1480](https://github.com/kirinnee/ferretry/issues/1480)) ([173f762](https://github.com/kirinnee/ferretry/commit/173f762d3189937db6c61744762dd62a7da8fd33)), closes [#1482](https://github.com/kirinnee/ferretry/issues/1482)
+
+### Fixes
+
+* **cli:** run the daemon on one GC marker so a worker thread cannot wedge ([#1509](https://github.com/kirinnee/ferretry/issues/1509)) ([f668ab4](https://github.com/kirinnee/ferretry/commit/f668ab4a82577b8f672ef64830d7b3ff97bc9f75))
+* **pwa:** load map tiles in anonymous cors mode ([#1507](https://github.com/kirinnee/ferretry/issues/1507)) ([855d57b](https://github.com/kirinnee/ferretry/commit/855d57bedc2372f3f501a4d6ebc389a65606a0b7))
+
+## [4.283.1](https://github.com/kirinnee/ferretry/compare/v4.283.0...v4.283.1) (2026-11-05)
+
+### Fixes
+
+* **daemon:** start Codex at its reasoning level instead of typing /model ([#1498](https://github.com/kirinnee/ferretry/issues/1498)) ([03afd43](https://github.com/kirinnee/ferretry/commit/03afd43e9f98fce933e2430d7f2d41066f8e21dd))
+
+## [4.283.0](https://github.com/kirinnee/ferretry/compare/v4.282.0...v4.283.0) (2026-11-05)
+
+### Features
+
+* **pwa:** pick the fastest safe speech path per device, finish a take early, and measure it (F137 3b) ([#1495](https://github.com/kirinnee/ferretry/issues/1495)) ([444c44e](https://github.com/kirinnee/ferretry/commit/444c44e7d43aadb1662fd6234a7d658a9c8e3ca3))
+
 ## [4.282.0](https://github.com/kirinnee/ferretry/compare/v4.281.0...v4.282.0) (2026-11-05)
 
 ### Features

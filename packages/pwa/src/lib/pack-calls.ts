@@ -288,8 +288,9 @@ const fromOutcome = (outcome: PackNewOutcome): PackStartOutcome => {
   };
 };
 
-/** `  started <runtime> [<model>] [(probe OK 640 ms|probe OK, cached|probe OK)]` */
-const STARTED_TRY = /^ {2}started (\S+)(?: ([^\s(]\S*))?(?: \(probe ([^)]*)\))?$/u;
+/** `  started <runtime> [<model>] [(probe OK 640 ms|probe OK, cached|probe OK)][, harness ready in 1.2 s|, harness not ready after 31.4 s]` */
+const STARTED_TRY =
+  /^ {2}started (\S+)(?: ([^\s(]\S*))?(?: \(probe ([^)]*)\))?(?:, harness (?:ready in|not ready after) \d+(?:\.\d+)? s)?$/u;
 /** `  refused <runtime> [<model>] [(probe failed 3436 ms|probe failed, shared)] — <code>: <message>` */
 const REFUSED_TRY = /^ {2}refused (\S+)(?: ([^\s(]\S*))?(?: \(probe ([^)]*)\))? — ([a-z_]+): ?(.*)$/u;
 /** `Started <teammate> (<id>) on <runtime>, <model> — decided by <you|the routing prompt|jev>.` */

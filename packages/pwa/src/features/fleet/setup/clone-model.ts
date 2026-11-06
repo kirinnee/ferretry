@@ -37,6 +37,9 @@ export const CLONE_FLOW_KIND = 'clone';
 
 export type CloneMode = 'alongside' | 'replace';
 
+/** What the Existing setup step can pick: an Update of an earlier copy, or one of the two full copies. */
+export type CloneChoiceMode = CloneMode | 'update';
+
 /** The steps: Existing setup only when the target has something to keep or replace (E28). */
 export const cloneSteps = (targetHasSetup: boolean): StepperStep[] => [
   { id: 'source', label: 'Source' },
@@ -44,6 +47,24 @@ export const cloneSteps = (targetHasSetup: boolean): StepperStep[] => [
   ...(targetHasSetup ? [{ id: 'existing', label: 'Existing setup' }] : []),
   { id: 'done', label: 'Done', final: true },
 ];
+
+/**
+ * The steps when this machine was copied from the source before (or has probable matches): the Existing
+ * setup choice comes FIRST, because it decides what Changes shows — the review of what differs, or the
+ * full preview of a copy that writes everything (design §6, owner decision §14.2).
+ */
+export const cloneUpdateSteps = (): StepperStep[] => [
+  { id: 'source', label: 'Source' },
+  { id: 'existing', label: 'Existing setup' },
+  { id: 'preview', label: 'Changes' },
+  { id: 'done', label: 'Done', final: true },
+];
+
+/** "studio-mac was copied from work-linux before. Last copied 28 Oct 2026. What should happen this time?" */
+export const updateSentence = (machineName: string, source: string, lastCopied: string | null): string =>
+  lastCopied === null
+    ? `${machineName} already has some of ${source}’s setup. What should happen this time?`
+    : `${machineName} was copied from ${source} before. ${lastCopied} What should happen this time?`;
 
 // ── Source ───────────────────────────────────────────────────────────────────────────────────────
 

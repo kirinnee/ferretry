@@ -1,3 +1,22 @@
+## [4.283.1](https://github.com/kirinnee/ferretry/compare/v4.283.0...v4.283.1) (2026-11-05)
+
+### Fixes
+
+* **daemon:** start Codex at its reasoning level instead of typing /model ([#1498](https://github.com/kirinnee/ferretry/issues/1498)) ([03afd43](https://github.com/kirinnee/ferretry/commit/03afd43e9f98fce933e2430d7f2d41066f8e21dd))
+
+## [4.283.0](https://github.com/kirinnee/ferretry/compare/v4.282.0...v4.283.0) (2026-11-05)
+
+### Features
+
+* **pwa:** pick the fastest safe speech path per device, finish a take early, and measure it (F137 3b) ([#1495](https://github.com/kirinnee/ferretry/issues/1495)) ([444c44e](https://github.com/kirinnee/ferretry/commit/444c44e7d43aadb1662fd6234a7d658a9c8e3ca3))
+
+## [4.282.0](https://github.com/kirinnee/ferretry/compare/v4.281.0...v4.282.0) (2026-11-05)
+
+### Features
+
+* **clone:** merge repeat-copy settings key by key ([#1482](https://github.com/kirinnee/ferretry/issues/1482)) ([9d01d27](https://github.com/kirinnee/ferretry/commit/9d01d27ce296099d79cfecff06e5776b0a6b6ce0))
+* **fleet:** offer a newer API key from the source, replacing only what is named ([#1476](https://github.com/kirinnee/ferretry/issues/1476)) ([7d58a8f](https://github.com/kirinnee/ferretry/commit/7d58a8f461649b9bb775fe2541785c98d7ab027b))
+
 ## [4.281.0](https://github.com/kirinnee/ferretry/compare/v4.280.0...v4.281.0) (2026-11-05)
 
 ### Features

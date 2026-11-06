@@ -226,7 +226,7 @@ export function MachineStepper({
             type="button"
             variant="ghost"
             size="sm"
-            className="kt-btn--flush-start"
+            className="kt-btn--flush-start min-h-[44px]"
             data-stepper-back=""
             onClick={back}
           >
@@ -251,7 +251,7 @@ export function MachineStepper({
             type="button"
             variant="ghost"
             size="sm"
-            className="kt-btn--flush-start"
+            className="kt-btn--flush-start min-h-[44px]"
             data-stepper-back=""
             onClick={back}
           >
@@ -266,6 +266,7 @@ export function MachineStepper({
             type="button"
             variant="ghost"
             size="sm"
+            className="min-h-[44px]"
             data-stepper-cancel=""
             onClick={() => onChange(cancelStepper(state))}
           >

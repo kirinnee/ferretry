@@ -16,6 +16,7 @@
 import { afterAll, describe, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { join, resolve } from 'node:path';
+import { DAEMON_RUNTIME_TUNING } from '@ferretry/protocol/daemon-runtime-tuning';
 import should from 'should';
 import { OWNER_MAC_FLEET, scaledFleet } from '../../integration/support/scaled-fleet.ts';
 import { OS_CHOSEN_PORT } from '../../integration/support/os-port.ts';
@@ -98,6 +99,8 @@ describe('a boot over a fleet the size of the owner’s Mac', () => {
       stderr: 'pipe',
       env: {
         ...process.env,
+        // The options the service definition hands the real daemon, so the stalls are measured on them.
+        ...DAEMON_RUNTIME_TUNING,
         // Housekeeping at once, all of it inside the measured window: the worst case, not the default.
         FYD_BACKGROUND_DELAY_SECONDS: '0',
         FYD_WATCHDOG_SECONDS: '0',

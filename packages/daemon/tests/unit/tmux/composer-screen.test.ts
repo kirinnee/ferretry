@@ -673,3 +673,24 @@ describe('B144: whether the composer holds text that is not the payload, right b
     should(composerHoldsOtherText(...typedAt('[Pasted text #3 +2 lines]'), 'a literal message')).be.true();
   });
 });
+
+describe('a submission Codex 0.166 parked until its startup ends', () => {
+  const held = (state: string, text: string) => {
+    const frame = capture('0.166.0', state);
+    return paneHoldOf(frame.visible, cursorOf(frame), text, false);
+  };
+
+  it('should say the harness holds it (its queue), never that an unsent composer does', () => {
+    // The text is drawn in the composer under `Waiting for startup · esc cancel`: Codex has taken it.
+    should(held('startup-queued-message', 'say hello')).equal('queue');
+    should(held('startup-queued-slash', '/model')).equal('queue');
+  });
+
+  it('should hold the same text in the composer again once the park is cancelled', () => {
+    should(held('startup-queued-cancelled', 'say hello')).equal('composer');
+  });
+
+  it('should say a payload that is not the parked one is absent', () => {
+    should(held('startup-queued-message', 'something else entirely')).equal('absent');
+  });
+});

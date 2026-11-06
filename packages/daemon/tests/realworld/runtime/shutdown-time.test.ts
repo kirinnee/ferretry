@@ -18,6 +18,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { DAEMON_RUNTIME_TUNING } from '@ferretry/protocol/daemon-runtime-tuning';
 import should from 'should';
 import { buildWorld } from '../../../bin/fyd.ts';
 import { OS_CHOSEN_PORT, recordedPort } from '../../integration/support/os-port.ts';
@@ -75,7 +76,8 @@ async function bootServing(): Promise<{
   );
   const child = Bun.spawn({
     cmd: [process.execPath, FYD_ENTRY],
-    env: { ...process.env, FY_HOME: home, HOME: ABSENT_USER_HOME },
+    // `DAEMON_RUNTIME_TUNING`: the options the service definition hands the real daemon.
+    env: { ...process.env, ...DAEMON_RUNTIME_TUNING, FY_HOME: home, HOME: ABSENT_USER_HOME },
     stdin: 'ignore',
     stdout: Bun.file(join(home, 'fyd.out')),
     stderr: Bun.file(join(home, 'fyd.err')),

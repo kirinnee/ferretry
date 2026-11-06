@@ -12,6 +12,7 @@ import {
   composerState,
   composerTransport,
   type DeliveryFrame,
+  draftBlockingReadiness,
   frameCursor,
   harnessExitReason,
   landingDeadlineMs,
@@ -22,9 +23,12 @@ import {
   PASTE_TRANSPORT_CHARS,
   paneResponded,
   paneShowsOpenPicker,
+  paneShowsStartupWait,
+  promptIsReady,
   resumeMenuAction,
   type StartupDialogAction,
   startupDialogAction,
+  startupSettleStep,
 } from '../../../src/lib/index.ts';
 
 const IDLE: DeliveryFrame = { alive: true, dead: false, promptReady: true, visible: '> ' };
@@ -808,5 +812,120 @@ describe('a peer message pasted into a Claude composer', () => {
     const submitted: DeliveryFrame = { ...chip, visible: '❯ \n', cursorX: 2, cursorY: 0 };
 
     should(classifySubmit(submitted, peer, 'placeholder')).deepEqual({ kind: 'delivered', outcome: 'turn-started' });
+  });
+});
+
+describe('a submission Codex 0.166 parks until its startup ends', () => {
+  // Real panes from codex-cli 0.166.0 at 80x24: the composer is drawn before startup ends, and a
+  // payload submitted then stays drawn in it above `Waiting for startup · esc cancel`.
+  const capture = (state: string): DeliveryFrame => {
+    const dir = join(import.meta.dir, '../../fixtures/composer');
+    const [x, y] = readFileSync(join(dir, `codex-0.166.0-${state}.cursor`), 'utf8')
+      .trim()
+      .split('|');
+    const visible = readFileSync(join(dir, `codex-0.166.0-${state}.txt`), 'utf8');
+    const cursorX = Number(x);
+    const cursorY = Number(y);
+    return {
+      alive: true,
+      dead: false,
+      promptReady: promptIsReady(visible, cursorY, cursorX),
+      visible,
+      cursorX,
+      cursorY,
+    };
+  };
+
+  it('should call a parked message delivered, as the turn it becomes, so Enter is never pressed into it again', () => {
+    should(classifySubmit(capture('startup-queued-message'), 'say hello', 'chars')).deepEqual({
+      kind: 'delivered',
+      outcome: 'turn-started',
+    });
+  });
+
+  it('should call a parked slash command delivered as the TUI’s own, so a picker it opens later is not keyed', () => {
+    should(classifySubmit(capture('startup-queued-slash'), '/model', 'chars')).deepEqual({
+      kind: 'delivered',
+      outcome: 'handled-local',
+    });
+  });
+
+  it('should hold a draft whose park was cancelled: the same text, no longer taken', () => {
+    should(classifySubmit(capture('startup-queued-cancelled'), 'say hello', 'chars')).deepEqual({ kind: 'holding' });
+  });
+
+  it('should not count a parked composer as an unsent draft that readiness would wait on forever', () => {
+    // The text is drawn in the composer with the cursor after it, which `occupiedComposer` alone calls a draft.
+    should(occupiedComposer(capture('startup-queued-message'))).equal('say hello');
+    should(draftBlockingReadiness(capture('startup-queued-message'))).be.undefined();
+    should(draftBlockingReadiness(capture('startup-queued-slash'))).be.undefined();
+    // The same text with the park cancelled is an ordinary draft again.
+    should(draftBlockingReadiness(capture('startup-queued-cancelled'))).equal('say hello');
+  });
+
+  it('should never read a parked composer as an idle prompt', () => {
+    should(capture('startup-queued-message').promptReady).be.false();
+    should(capture('startup-queued-slash').promptReady).be.false();
+    // The empty composers on either side of the park are ready, as before.
+    should(capture('startup-composer').promptReady).be.true();
+    should(capture('started-idle').promptReady).be.true();
+  });
+
+  it('should keep waiting while the park line is up, and call the harness settled once it clears', () => {
+    should(startupSettleStep(capture('startup-queued-message'))).deepEqual({ kind: 'wait' });
+    should(startupSettleStep(capture('startup-queued-slash'))).deepEqual({ kind: 'wait' });
+    should(startupSettleStep(capture('started-idle'))).deepEqual({ kind: 'settled' });
+  });
+
+  it('should settle at once for a harness that never draws the park line, and on the same words only in conversation', () => {
+    const claude: DeliveryFrame = { alive: true, dead: false, promptReady: true, visible: '❯ \n  ? for shortcuts' };
+    const quoted: DeliveryFrame = {
+      ...claude,
+      visible: ['• Codex showed:', '  Waiting for startup  · esc cancel', '', '› Ask Codex to do anything', ''].join(
+        '\n',
+      ),
+    };
+
+    should(startupSettleStep(claude)).deepEqual({ kind: 'settled' });
+    should(startupSettleStep(quoted)).deepEqual({ kind: 'settled' });
+  });
+
+  it('should answer a pane that died during startup with the harness’s own last words, before anything else', () => {
+    const died: DeliveryFrame = {
+      alive: true,
+      dead: true,
+      promptReady: false,
+      // Whatever the dead pane's screen says, the park line must not be mistaken for a live wait.
+      visible: 'Pane is dead\nWaiting for startup  · esc cancel',
+      exitCode: 1,
+      history: 'Error: account/read failed during TUI bootstrap: workspace routing discovery timed out\n',
+    };
+    const gone: DeliveryFrame = { alive: false, dead: false, promptReady: false, visible: '' };
+
+    should(startupSettleStep(died)).deepEqual({
+      kind: 'exited',
+      reason:
+        'the interactive harness exited (1): its last output was "Error: account/read failed during TUI bootstrap: workspace routing discovery timed out"',
+    });
+    should(startupSettleStep(gone)).deepEqual({
+      kind: 'exited',
+      reason: 'the interactive harness exited; tmux reported no exit code',
+    });
+  });
+
+  it('should hear the park only from the bottom line, never from the same words in the conversation', () => {
+    // Arrange — a transcript ABOUT this screen, with an idle composer below it.
+    const quoted = [
+      '• Codex showed:',
+      '  Waiting for startup  · esc cancel',
+      '',
+      '› Ask Codex to do anything',
+      '',
+    ].join('\n');
+
+    // Act / Assert
+    should(paneShowsStartupWait(capture('startup-queued-slash').visible)).be.true();
+    should(paneShowsStartupWait(quoted)).be.false();
+    should(promptIsReady(quoted, 3, 2)).be.true();
   });
 });

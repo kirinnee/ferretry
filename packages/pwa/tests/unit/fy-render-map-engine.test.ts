@@ -4,6 +4,9 @@ import '../support/dom.ts';
 
 // Leaflet reads `window` while it loads, so it is imported only once the DOM exists.
 const { mountMap } = await import('../../src/components/fy-render-map-engine.ts');
+// The same rule for the library itself — and the same instance the engine holds, so a test that wraps
+// `L.tileLayer` is heard by the engine too.
+const { default: L } = await import('leaflet');
 
 import { type MapSpec, readMap } from '../../src/lib/fy-render-map.ts';
 import { MAP_TILE_ORIGIN } from '../../src/lib/fy-render-map-tiles.ts';
@@ -102,6 +105,41 @@ describe('fy-render map engine', () => {
       should(tile.getAttribute('referrerpolicy')).equal('strict-origin-when-cross-origin');
     }
     handle.destroy();
+  });
+
+  test('should load the tiles in anonymous CORS mode while the tile host still gets its Referer', () => {
+    // Arrange — capture what the engine asks of the tile layer, the way this file stubs `matchMedia`.
+    // happy-dom cannot help here: its `img.crossOrigin` setter drops `''`, so the attribute never appears
+    // in this DOM (a real browser reflects `crossorigin=""`). The layer's own options are the truth.
+    const realTileLayer = L.tileLayer;
+    const configured: unknown[] = [];
+    let handle: ReturnType<typeof mountMap> | null = null;
+    L.tileLayer = ((url: string, options?: L.TileLayerOptions) => {
+      configured.push(options ?? {});
+      return realTileLayer(url, options);
+    }) as typeof L.tileLayer;
+
+    try {
+      // Act
+      const node = host();
+      handle = mountMap(node, spec('center: [51.5, -0.12]\nzoom: 12'));
+
+      // Assert — `crossOrigin: ''` is anonymous: OSM answers `Access-Control-Allow-Origin: *`, so the
+      // tiles stay allowed on a COEP `require-corp` page (docs/voice.md) where a no-CORS `<img>` would be
+      // blocked. CORS mode does not touch the Referer, so the per-image `referrerPolicy` still carries the
+      // valid Referer OSM's tile policy asks for (docs/fy-render.md).
+      should(configured.length).equal(1);
+      const options = configured[0] as { crossOrigin?: unknown; referrerPolicy?: unknown };
+      should(options.crossOrigin).equal('');
+      should(options.referrerPolicy).equal('strict-origin-when-cross-origin');
+      const tiles = node.querySelectorAll<HTMLImageElement>('img.leaflet-tile');
+      should(tiles.length > 0).be.true();
+      for (const tile of tiles) should(tile.getAttribute('referrerpolicy')).equal('strict-origin-when-cross-origin');
+    } finally {
+      // Restore FIRST — a failed assertion must not leave later tests with a wrapped factory.
+      L.tileLayer = realTileLayer;
+      handle?.destroy();
+    }
   });
 
   test('should keep a payload that looks like markup as text', () => {

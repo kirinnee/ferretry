@@ -5,7 +5,7 @@
  * desktop (1280), light and dark. Review evidence; nothing compares the PNGs, but the script itself fails if a
  * target is too small, the captions box is not whole lines, or a part of a page would be blank.
  *
- *   bun harness/read-aloud-screenshot.tsx             # writes <out>/<light|dark>/<scene>-<phone|desktop>[-partN].png
+ *   bun harness/read-aloud-screenshot.tsx             # writes <out>/<light|dark>/<scene>-<phone|desktop>[-partN].png (remote-voice is never cut)
  *   FY_READ_ALOUD_SHOTS_DIR=/tmp/shots bun harness/read-aloud-screenshot.tsx
  *
  * It renders the REAL `TranscriptRow` (so the real markdown, the real Read aloud control and its captions)
@@ -153,6 +153,8 @@ const server = Bun.serve({
         headers: { 'content-type': 'text/html' },
       });
     }
+    // The CSS names its faces `../assets/fonts/…`; without this route every shot is drawn in the fallback font.
+    if (url.pathname.startsWith('/assets/fonts/')) return new Response(Bun.file(join(packageDir, 'src', url.pathname)));
     return new Response(Bun.file(join(buildDir, url.pathname)));
   },
 });
@@ -175,6 +177,8 @@ const SCENES = [
   'focus-read',
   'focus-stop',
 ] as const;
+/** Scenes shot as one full-height image however tall (the margin below the last row is the page padding). */
+const WHOLE_PAGE = new Set<string>(['remote-voice']);
 /** Scenes where the captions are on screen. */
 const CAPTIONED = new Set<string>(['reading', 'reading-late', 'short', 'remote-voice', 'focus-stop']);
 
@@ -287,7 +291,8 @@ try {
           const total = Math.min(layout.height, Math.ceil(layout.mainBottom));
           const spans: Array<readonly [number, number]> = [];
           let start = 0;
-          while (total - start > viewport.height) {
+          // The warning, the highlighted caption and the time are ONE moment: this scene is never cut into parts.
+          while (!WHOLE_PAGE.has(scene) && total - start > viewport.height) {
             const limit = start + viewport.height;
             const cut = layout.bottoms.filter(y => y > start + viewport.height / 2 && y <= limit - 3).at(-1);
             const end = cut === undefined ? limit : Math.ceil(cut) + 3;

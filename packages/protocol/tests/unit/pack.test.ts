@@ -324,5 +324,6 @@ describe('packConfigFromFile', () => {
     should(pack.DEFAULT_MODELS_GUIDE_FILE).deepEqual({});
     should(pack.PACK_REFUSAL_CODES).containEql('limit_reached');
     should(pack.PACK_REFUSAL_CODES).containEql('scratch_cwd');
+    should(pack.PACK_REFUSAL_CODES).containEql('start_failed');
   });
 });
