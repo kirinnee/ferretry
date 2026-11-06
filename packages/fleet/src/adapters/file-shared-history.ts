@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { closeSync, fstatSync, fsyncSync, readSync, writeSync } from 'node:fs';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { HarnessKind } from '../lib/manifest.ts';
@@ -23,6 +22,7 @@ import {
 } from '../lib/shared-history.ts';
 import { stateHomeFence } from '../lib/state-home-fence.ts';
 import type { FileIdentity, FolderDisk, GuardDisk, GuardedFolder } from '../lib/state-home-guard.ts';
+import { closeDescriptor, fstatOf, readInto, syncDescriptor, writeAllTo } from './descriptor-io.ts';
 import { DestinationFolders, readFolderFile } from './destination-folders.ts';
 import { resolveSourceFence, type SourceFence } from './fenced-source.ts';
 import { type FileLock, processFileLock } from './link-syscall.ts';
@@ -165,12 +165,6 @@ async function syncFolder(folder: GuardedFolder): Promise<void> {
   await folder.sync();
 }
 
-/** Write every byte to a raw descriptor (at its offset, or at its end when opened to append). */
-function writeAll(descriptor: number, bytes: Uint8Array): void {
-  for (let written = 0; written < bytes.byteLength; )
-    written += writeSync(descriptor, bytes, written, bytes.byteLength - written);
-}
-
 /**
  * Real filesystem primitives for the shared-history planner.
  *
@@ -302,9 +296,9 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
       // The empty file is itself the durable fact an ensure-entry action claims, so it is synced like
       // any other write before the caller's cursor is allowed to count it.
       try {
-        fsyncSync(descriptor);
+        await syncDescriptor(descriptor);
       } finally {
-        closeSync(descriptor);
+        await closeDescriptor(descriptor);
       }
       await syncFolder(folder);
     } finally {
@@ -391,10 +385,10 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
       }
       const descriptor = await folder.openFile(temporary, 'new', 0o600);
       try {
-        writeAll(descriptor, new TextEncoder().encode(text));
-        fsyncSync(descriptor);
+        await writeAllTo(descriptor, new TextEncoder().encode(text));
+        await syncDescriptor(descriptor);
       } finally {
-        closeSync(descriptor);
+        await closeDescriptor(descriptor);
       }
       await folder.rename(temporary, leaf);
       await syncFolder(folder);
@@ -421,10 +415,10 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
         throw exclusiveRefusal(error, target);
       });
       try {
-        writeAll(descriptor, new TextEncoder().encode(text));
-        fsyncSync(descriptor);
+        await writeAllTo(descriptor, new TextEncoder().encode(text));
+        await syncDescriptor(descriptor);
       } finally {
-        closeSync(descriptor);
+        await closeDescriptor(descriptor);
       }
       await syncFolder(folder);
     } finally {
@@ -457,18 +451,18 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
       const descriptor = await folder.openFile(leaf, 'append');
       try {
         // A FIFO opens without blocking; anything that is not a regular file is refused here, before a byte moves.
-        if (!fstatSync(descriptor).isFile()) {
+        if (!(await fstatOf(descriptor)).isFile()) {
           throw new Error(`shared-history append expected a file, found something else: ${target}`);
         }
         const prefix = new TextEncoder().encode(expected);
         const seen = new Uint8Array(prefix.byteLength);
-        const read = readSync(descriptor, seen, 0, seen.byteLength, 0);
+        const read = await readInto(descriptor, seen, 0, seen.byteLength, 0);
         if (read !== prefix.byteLength || !prefix.every((byte, index) => byte === seen[index])) return false;
-        writeAll(descriptor, new TextEncoder().encode(addition));
-        fsyncSync(descriptor);
+        await writeAllTo(descriptor, new TextEncoder().encode(addition));
+        await syncDescriptor(descriptor);
         return true;
       } finally {
-        closeSync(descriptor);
+        await closeDescriptor(descriptor);
       }
     });
   }
@@ -732,12 +726,12 @@ async function readLease(
   const bytes = Buffer.alloc(MAX_LEASE_BYTES + 1);
   let length = 0;
   try {
-    if (!fstatSync(descriptor).isFile())
+    if (!(await fstatOf(descriptor)).isFile())
       throw new Error(`${path.join(folder.path, conversation)} is not a regular file`);
     for (let read = -1; read !== 0 && length < bytes.length; length += read)
-      read = readSync(descriptor, bytes, length, bytes.length - length, null);
+      read = await readInto(descriptor, bytes, length, bytes.length - length, null);
   } finally {
-    closeSync(descriptor);
+    await closeDescriptor(descriptor);
   }
   if (length > MAX_LEASE_BYTES) return undefined;
   try {
@@ -757,10 +751,10 @@ async function writeLease(folder: GuardedFolder, conversation: ConversationId, t
   try {
     const descriptor = await folder.openFile(temporary, 'new', 0o600);
     try {
-      writeAll(descriptor, new TextEncoder().encode(text));
-      fsyncSync(descriptor);
+      await writeAllTo(descriptor, new TextEncoder().encode(text));
+      await syncDescriptor(descriptor);
     } finally {
-      closeSync(descriptor);
+      await closeDescriptor(descriptor);
     }
     await folder.rename(temporary, conversation);
     await folder.sync();
@@ -785,8 +779,8 @@ async function openLeaseLock(folder: GuardedFolder): Promise<number> {
       });
     });
     if (descriptor === undefined) continue;
-    if (fstatSync(descriptor).isFile()) return descriptor;
-    closeSync(descriptor);
+    if ((await fstatOf(descriptor)).isFile()) return descriptor;
+    await closeDescriptor(descriptor);
     throw new Error(`refusing the conversation lease lock ${lock}: it is not a regular file`);
   }
   throw new Error(
@@ -961,7 +955,7 @@ export class FileConversationLeaseStore implements ConversationLeaseStore {
       return await work();
     } finally {
       // The only open of the lock is this one, so closing it lets the next claimant in.
-      closeSync(descriptor);
+      await closeDescriptor(descriptor);
     }
   }
 }

@@ -17,6 +17,7 @@ import { INLINE_INDEX_FILES, type IndexFile, type IndexFileFactory } from './ind
 import type { IndexLoad } from './sqlite-index-schema.ts';
 import { applyIndexWrite, SESSION_COLUMNS } from './sqlite-index-statements.ts';
 import { WriteBehindSessionIndex, type WriteBehindSessionIndexOptions } from './write-behind-index.ts';
+import { ListedSessionIndex } from './listed-session-index.ts';
 
 interface SessionRow {
   readonly id: string;
@@ -239,7 +240,9 @@ export class BunSqliteIndexFactory implements SessionIndexFactory {
       for (const path of indexFiles(paths)) {
         if ((await fileSystem.information(path)) !== undefined) await fileSystem.setMode(path, 0o600);
       }
-      return new WriteBehindSessionIndex(new BunSqliteIndex(inMemoryCopy(load.bytes)), file, this.options);
+      return new ListedSessionIndex(
+        new WriteBehindSessionIndex(new BunSqliteIndex(inMemoryCopy(load.bytes)), file, this.options),
+      );
     } catch (error) {
       await file.close();
       throw error;

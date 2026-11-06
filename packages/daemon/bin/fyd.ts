@@ -1,15 +1,7 @@
 #!/usr/bin/env bun
 import { createHash, randomBytes } from 'node:crypto';
-import {
-  accessSync,
-  chmodSync,
-  existsSync,
-  constants as fsConstants,
-  realpathSync,
-  statSync,
-  writeSync,
-} from 'node:fs';
-import { mkdir, realpath, rm, stat } from 'node:fs/promises';
+import { accessSync, existsSync, constants as fsConstants, realpathSync, statSync, writeSync } from 'node:fs';
+import { access, chmod, mkdir, realpath, rm, stat } from 'node:fs/promises';
 import { homedir, hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
@@ -724,6 +716,7 @@ import {
   instrumentChildProcesses,
   ProcessGauges,
 } from '../src/adapters/runtime/performance-instruments.ts';
+import { OrderedLogWriter } from '../src/adapters/runtime/ordered-log-writer.ts';
 import { forgetFerretIdentity } from '../src/adapters/tmux/forget-ferret-identity.ts';
 import { CatalogInstallService } from '../src/lib/catalog-installs/service.ts';
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
@@ -7000,7 +6993,7 @@ function createTerminalSubsystem(
       idleTimeoutMs: TERMINAL_IDLE_TIMEOUT_MS,
       isDirectory: async path => {
         try {
-          return statSync(path).isDirectory();
+          return (await stat(path)).isDirectory();
         } catch {
           return false;
         }
@@ -7426,6 +7419,11 @@ async function decideAddress(
  * A FAILED WRITE IS SWALLOWED. Losing the log is bad; refusing to boot because the log could not be
  * written is worse, and a daemon that died writing about its own startup would be the least
  * debuggable outcome of all.
+ *
+ * ONCE THE DAEMON SERVES, LINES GO OUT OFF THE LOOP. Everything above is about a boot that wedges; after the
+ * `ready` step the same synchronous write only ever held a serving daemon's loop while the disk was slow
+ * (9.9 s of stalls on 2026-11-05). {@link OrderedLogWriter} keeps the order, and writes what is still queued
+ * synchronously when the process exits.
  */
 function bootJournal(level: LogLevel = 'info'): BootNoticePort {
   const startedAtMs = Date.now();
@@ -7434,16 +7432,17 @@ function bootJournal(level: LogLevel = 'info'): BootNoticePort {
   // purpose. `debug` selects the same records as `info` because nothing emits below it yet, which
   // the usage text says rather than implying a level that does something.
   const showSteps = level === 'debug' || level === 'info';
+  const log = new OrderedLogWriter(2);
   const line = (text: string): void => {
-    try {
-      writeSync(2, `${DAEMON_NAME} ${new Date().toISOString()} +${String(Date.now() - startedAtMs)}ms ${text}\n`);
-    } catch {
-      // Intentionally ignored: a stream this daemon cannot write to must not stop it starting.
-    }
+    log.write(`${DAEMON_NAME} ${new Date().toISOString()} +${String(Date.now() - startedAtMs)}ms ${text}\n`);
   };
   return {
     step: (name, detail) => {
       if (showSteps) line(detail === undefined ? name : `${name} — ${detail}`);
+      if (name === 'ready') {
+        process.once('exit', () => log.flushSync());
+        log.goAsync();
+      }
     },
     state: message => line(`! ${message}`),
   };
@@ -12809,15 +12808,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // A named folder is judged where it really is: `/tmp` is `/private/tmp` on macOS, and a link into a
         // temporary folder is still one. This machine's own TMPDIR and the runtime's temp folder count too.
         scratch: async cwd => {
-          const real = (path: string): string => {
-            try {
-              return realpathSync(path);
-            } catch {
-              return path;
-            }
-          };
+          // Resolved on the I/O threads: a start is a request, and a folder on a slow disk must not hold the loop.
+          const real = async (path: string): Promise<string> => await realpath(path).catch(() => path);
           const roots = [...COMMON_SCRATCH_ROOTS, tmpdir(), ...(process.env.TMPDIR ? [process.env.TMPDIR] : [])];
-          return isScratchPath(real(cwd), [...roots, ...roots.map(real)]);
+          return isScratchPath(await real(cwd), [...roots, ...(await Promise.all(roots.map(real)))]);
         },
         probe: packProbe,
         cards: boardWorld.cards,
@@ -13371,9 +13365,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             for (const attachmentId of attachmentIds) {
               const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
               const path = join(attachmentOriginals(sessionId), attachmentId, deliveredFilename(attachment.filename));
-              if (!existsSync(path)) {
+              if (
+                !(await access(path).then(
+                  () => true,
+                  () => false,
+                ))
+              ) {
                 await Bun.write(path, bytes);
-                chmodSync(path, 0o600);
+                await chmod(path, 0o600);
               }
               delivered.push({ path, mime: attachment.mime });
             }
