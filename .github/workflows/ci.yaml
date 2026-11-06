@@ -310,9 +310,16 @@ jobs:
   # path at ~4.4 min (~3.8 min of tests); each group is about a minute. The matrix lists every group
   # by name, and `int-ledger` refuses to judge unless every group in the config reported.
   # The tier grew back to the critical path: by Oct 28 `everything-else` took ~480s and
-  # `daemon-runtime` ~330s on GitHub. Their slowest files now have groups of their own — the PWA feature
-  # surfaces plus the send handover (~175s of browser walks) — so no group needs much over five
-  # minutes. The real-time budget suites that once had a group are the realworld tier's now
+  # `daemon-runtime` ~330s on GitHub. Their slowest files got groups of their own, and the PWA browser
+  # walks are dealt out by name prefix (config/test-groups.json) so the groups are about as slow as each
+  # other. Measured on Namespace 2x4 over PR runs of Oct 30 – Nov 5, test-step p50: `everything-else`
+  # 225s (p90 ~450s, the last job to finish in 103 of 153 runs) against `daemon` 127, `pwa-surfaces`
+  # 110, `pwa-render` 95, `pwa-chat` 63, `daemon-runtime` 48 — a sum of ~670s that balanced is ~115-150s a
+  # group. `everything-else` held 40 PWA browser-walk files (~350s of per-file test time, all in one
+  # process because the PWA is one package); 13 of them now sit in `pwa-render`, `pwa-chat` and
+  # `pwa-surfaces`, which leaves the PWA groups and `everything-else` at ~160s of per-file test time each
+  # and `daemon` the slowest group. The PWA has no `src/adapters`, so no int ledger file depends on
+  # where its tests run. The real-time budget suites that once had a group are the realworld tier's now
   # (realworld.yaml): they asserted the machine, not the code, so they cannot gate a merge. GitHub
   # runs these for free; the cost is two more jobs in its 20-job queue, measured as worth it.
   int:
@@ -328,7 +335,7 @@ jobs:
         && 'ubuntu-latest'
         || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
-    # A CEILING, NOT A RETRY: the slowest group takes ~8 min, so 20 is a wedged run. On 2026-10-29 the
+    # A CEILING, NOT A RETRY: the slowest group takes ~3-4 min, so 20 is a wedged run. On 2026-10-29 the
     # daemon group hung in a test and held its runner for two hours; without this it holds one for six.
     # `scripts/test/stall-watch.ts` ends a silent run sooner and says why; this catches everything else.
     timeout-minutes: 20
