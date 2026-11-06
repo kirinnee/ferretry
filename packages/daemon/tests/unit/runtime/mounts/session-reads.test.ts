@@ -711,6 +711,21 @@ describe('the session addressable-message route', () => {
     should(jsonBody(response)).have.property('code', 'message_cursor_stale');
   });
 
+  it('should answer a page open across the token update with the same recoverable 409', async () => {
+    // Arrange
+    const legacy = (await cursorFor(addressable(20))).replace(/^c2\./u, 'c1.');
+    const dispatch = fixture({ rows: [addressable(10), addressable(20)] });
+    // Act
+    const actual = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [['cursor', legacy]],
+      headers: human,
+    });
+    // Assert
+    should(actual.status).equal(409);
+    should(jsonBody(actual)).have.property('code', 'message_cursor_stale');
+  });
+
   it('should answer a well-formed cursor whose anchor content changed with the same conflict', async () => {
     // Arrange — the point still resolves; only the raw prefix beneath it moved.
     const stale = await cursorFor(addressable(20));

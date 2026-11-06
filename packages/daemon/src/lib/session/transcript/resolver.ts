@@ -14,6 +14,7 @@
  */
 
 import type { TranscriptProvenance } from '@ferretry/protocol';
+import { withoutResolvedTranscriptBaseline } from './baseline.ts';
 import type { CodexRolloutCandidate } from './codex-rollout.ts';
 import { selectCodexRollout } from './codex-rollout.ts';
 import type { CodexDiscoveryPacer } from './discovery-pacing.ts';
@@ -40,7 +41,8 @@ export interface CodexRolloutIndex {
 
 /** Persists a resolution back onto the session's own configuration document. */
 export interface TranscriptProvenanceStore {
-  record(sessionId: string, provenance: TranscriptProvenance): Promise<void>;
+  /** When expected is supplied, replace only that provenance; a concurrent relaunch wins. */
+  record(sessionId: string, provenance: TranscriptProvenance, expected?: TranscriptProvenance): Promise<void>;
 }
 
 /** Rollouts already attributed to other sessions, so no two sessions can claim one file. */
@@ -80,10 +82,15 @@ export class SessionTranscriptResolver {
     startedAt?: () => Promise<string | undefined>,
   ): Promise<string | undefined> {
     if (provenance === undefined) return undefined;
-    if (provenance.file !== undefined) return provenance.file;
+    if (provenance.file !== undefined) {
+      const resolved = withoutResolvedTranscriptBaseline(provenance);
+      // Existing sessions retire their baseline lazily, through the ordinary async config writer.
+      if (resolved !== provenance) await this.store.record(sessionId, resolved, provenance);
+      return provenance.file;
+    }
     const resolve = async (): Promise<TranscriptProvenance | undefined> => {
       const resolved = await this.discover(sessionId, provenance);
-      if (resolved !== undefined) await this.store.record(sessionId, resolved);
+      if (resolved !== undefined) await this.store.record(sessionId, resolved, provenance);
       return resolved;
     };
     // A record with no token is answered without looking, so it is never paced either.
@@ -121,13 +128,13 @@ export class SessionTranscriptResolver {
     if (!candidates.some(candidate => candidate.correlated && !skip.has(candidate.id))) return undefined;
     const chosen = selectCodexRollout(candidates, { baseline, claimed: await this.claims.claimed(sessionId) });
     if (chosen === undefined) return undefined;
-    return {
+    return withoutResolvedTranscriptBaseline({
       ...provenance,
       harnessSessionId: chosen.id,
       identity: 'correlated',
       file: chosen.file,
       resolvedAt: this.clock.now(),
-    };
+    });
   }
 }
 

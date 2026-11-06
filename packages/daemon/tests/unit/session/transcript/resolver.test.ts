@@ -122,7 +122,9 @@ describe('SessionTranscriptResolver', () => {
     should(file).equal('/home/agent/.codex/sessions/new.jsonl');
     should(store.written).eql([
       {
-        ...undiscovered,
+        v: 1,
+        home: undiscovered.home,
+        correlationToken: undiscovered.correlationToken,
         harnessSessionId: 'rollout-new',
         identity: 'correlated',
         file: '/home/agent/.codex/sessions/new.jsonl',
@@ -147,6 +149,40 @@ describe('SessionTranscriptResolver', () => {
     // Assert
     should(file).be.undefined();
     should(store.written).be.empty();
+  });
+
+  it('should retire an existing resolved baseline on the next check, and write nothing on subsequent checks', async () => {
+    // Arrange
+    const store = recorder();
+    const subject = new SessionTranscriptResolver(index([]), noClaims, store, clock);
+    const input: TranscriptProvenance = {
+      ...undiscovered,
+      identity: 'correlated',
+      harnessSessionId: 'mine',
+      file: '/mine.jsonl',
+      resolvedAt: NOW,
+    };
+    // Act
+    const actual = await subject.file('session-1', input);
+    const persisted = store.written[0];
+    await subject.file('session-1', persisted);
+    // Assert
+    should(actual).equal(input.file);
+    should(store.written).have.length(1);
+    should(persisted).not.have.property('baseline');
+    should(input.baseline).eql(['rollout-old']);
+  });
+
+  it('should keep the unresolved exclusion set when discovery finds nothing', async () => {
+    // Arrange
+    const store = recorder();
+    const subject = new SessionTranscriptResolver(index([]), noClaims, store, clock);
+    // Act
+    const actual = await subject.file('session-1', undiscovered);
+    // Assert
+    should(actual).be.undefined();
+    should(store.written).be.empty();
+    should(undiscovered.baseline).eql(['rollout-old']);
   });
 
   it('should answer nothing, and write nothing, while no rollout carries the token', async () => {

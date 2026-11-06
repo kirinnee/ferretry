@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { SessionConfigSchema, SessionListSchema, SessionViewSchema } from '@ferretry/protocol';
 import {
   createSessionDirectory,
   SESSION_LIST_BATCH,
@@ -76,6 +77,54 @@ const directory = (f: Fleet) => {
 const finish = (f: Fleet): number[] => [...f.slices, f.clock - f.sliceStart];
 
 describe('createSessionDirectory', () => {
+  it('should omit 950 rollout ids from list and view while the projector still gets stored discovery evidence', async () => {
+    // Arrange
+    const base = sessionView('baseline-size');
+    const input = {
+      ...base,
+      journalSequence: 7,
+      config: {
+        ...base.config,
+        transcript: {
+          v: 1,
+          home: '/codex',
+          identity: 'undiscovered',
+          baseline: Array.from({ length: 950 }, (_, n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`),
+          correlationToken: '/state/sessions/baseline-size',
+        },
+      },
+    };
+    const id = parseSessionId(input.config.id);
+    const entry = indexed(id, 'running');
+    let projectedBaseline: readonly string[] | undefined;
+    const subject = createSessionDirectory({
+      sessions: () => [entry],
+      find: () => entry,
+      readConfig: async () => input.config,
+      readState: async () => input.state,
+      directory: () => input.directory,
+      project: async (_id, config) => {
+        projectedBaseline = config.transcript?.baseline;
+      },
+      ended: () => false,
+      yieldToLoop: async () => {},
+    });
+    // Act
+    const listed = await subject.list();
+    const viewed = await subject.get(id);
+    const before = Buffer.byteLength(JSON.stringify(input));
+    const after = Buffer.byteLength(JSON.stringify(viewed));
+    // Assert: the fixture saves exactly the baseline key, brackets and 950 UUID strings.
+    should(listed[0]?.config.transcript).not.have.property('baseline');
+    should(viewed?.config.transcript).not.have.property('baseline');
+    should(projectedBaseline).have.length(950);
+    should(SessionConfigSchema.parse(input.config).transcript?.baseline).have.length(950);
+    should(SessionViewSchema.parse(input).config.transcript).not.have.property('baseline');
+    should(SessionListSchema.parse([input])[0]?.config.transcript).not.have.property('baseline');
+    should(before - after).equal(37_063);
+    should(listed[0]).equal(viewed);
+  });
+
   /**
    * The stall budget of the list (the EC2 stalls of 2026-10-30): ~500 sessions, ~30 of them live. Read in one
    * `Promise.all` and projected whole, that pass cost 500 × (two reads + a projection) ≈ 2.5 s of loop on this

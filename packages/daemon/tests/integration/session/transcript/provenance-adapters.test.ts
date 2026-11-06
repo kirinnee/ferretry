@@ -20,7 +20,7 @@ import {
   storedSessionStart,
   storedTranscriptProvenance,
 } from '../../../../src/adapters/index.ts';
-import { parseSessionId, selectCodexRollout } from '../../../../src/lib/index.ts';
+import { parseSessionId, selectCodexRollout, SessionTranscriptResolver } from '../../../../src/lib/index.ts';
 
 const NOW = '2026-08-01T10:00:00.000Z';
 const directories = new Set<string>();
@@ -262,6 +262,73 @@ describe('NodeCodexRolloutIndex walks', () => {
 });
 
 describe('transcript provenance storage', () => {
+  it('should retire a resolved baseline through normal storage once, preserving the rest of the config', async () => {
+    // Arrange
+    const storage = await openTemporaryStorage();
+    const id = parseSessionId('20260801-baseline');
+    const provenance: TranscriptProvenance = {
+      v: 1,
+      home: '/codex',
+      identity: 'correlated',
+      baseline: ['old'],
+      correlationToken: '/session',
+      harnessSessionId: 'mine',
+      file: '/mine.jsonl',
+      resolvedAt: NOW,
+    };
+    await storage.writeConfig(id, { id, agent: 'codex', unrelated: { keep: true }, transcript: provenance });
+    const subject = new SessionTranscriptResolver(
+      {
+        candidates: async () => {
+          throw new Error('resolved sessions never rediscover');
+        },
+      },
+      { claimed: async () => [] },
+      new StorageTranscriptProvenanceStore(storage),
+      { now: () => NOW },
+    );
+    // Act
+    await subject.file(id, storedTranscriptProvenance(await storage.readConfig(id)));
+    const first = await storage.readConfig(id);
+    await subject.file(id, storedTranscriptProvenance(first));
+    const actual = await storage.readConfig(id);
+    // Assert
+    should(storedTranscriptProvenance(actual)).not.have.property('baseline');
+    should(actual).have.property('unrelated', { keep: true });
+    should(actual).eql(first);
+    await storage.close();
+  });
+
+  it('should not let a delayed resolution or cleanup overwrite a relaunched transcript', async () => {
+    // Arrange
+    const storage = await openTemporaryStorage();
+    const id = parseSessionId('20260801-raced');
+    const old: TranscriptProvenance = {
+      v: 1,
+      home: '/codex',
+      identity: 'undiscovered',
+      baseline: ['old'],
+      correlationToken: '/old',
+    };
+    const next = { ...old, correlationToken: '/new' };
+    await storage.writeConfig(id, { id, transcript: next });
+    // Act
+    await new StorageTranscriptProvenanceStore(storage).record(
+      id,
+      {
+        ...old,
+        identity: 'correlated',
+        harnessSessionId: 'mine',
+        file: '/mine',
+        resolvedAt: NOW,
+      },
+      old,
+    );
+    // Assert
+    should(storedTranscriptProvenance(await storage.readConfig(id))).eql(next);
+    await storage.close();
+  });
+
   it('should merge a resolved record into the configuration and read it back', async () => {
     // Arrange
     const storage = await openTemporaryStorage();

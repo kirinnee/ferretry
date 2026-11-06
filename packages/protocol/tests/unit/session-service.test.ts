@@ -33,6 +33,15 @@ const launchInstructions = {
   questions: true,
 };
 
+describe('isPlaceholderSessionName', () => {
+  it('should recognize the placeholder independently of case and surrounding space', () => {
+    // Arrange / Act / Assert
+    should(session.isPlaceholderSessionName('interactive')).be.true();
+    should(session.isPlaceholderSessionName(' Interactive ')).be.true();
+    should(session.isPlaceholderSessionName('Drop Transcript Baseline')).be.false();
+  });
+});
+
 /** A conversion summary with every count present, for the cross-harness preview schemas. */
 const CONVERSION_SUMMARY = {
   converter: 1,
@@ -213,6 +222,7 @@ const sessionCases: SchemaCase[] = [
   // The same document with NO stamp: "nobody has decided" is a different answer from "not a
   // descendant", and both have to parse.
   { name: 'session config', schema: session.SessionConfigSchema, value: sessionView.config },
+  { name: 'session view config', schema: session.SessionViewConfigSchema, value: sessionView.config },
   { name: 'session health', schema: session.SessionHealthSchema, value: 'healthy' },
   { name: 'account availability', schema: session.AccountAvailabilitySchema, value: 'available' },
   { name: 'account reason', schema: session.AccountUnavailableReasonSchema, value: 'cooldown' },

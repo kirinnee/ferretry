@@ -163,7 +163,7 @@ describe('session transcript message tokens', () => {
     const binding = await selection();
 
     // Assert: no payload, no point, no provenance, no raw fingerprint — one opaque tag.
-    should(binding).match(/^s1\.[A-Za-z0-9_-]{43}$/u);
+    should(binding).match(/^s2\.[A-Za-z0-9_-]{43}$/u);
     should(binding).not.containEql(Buffer.from(RAW_PREFIX).toString('base64url'));
     should(binding).not.containEql(Buffer.from(RAW_PREFIX).toString('hex'));
     should(binding).not.containEql('session-1');
@@ -175,7 +175,7 @@ describe('session transcript message tokens', () => {
     const issued = await cursor(point(120, 2));
 
     // Assert
-    should(issued).match(/^c1\.[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$/u);
+    should(issued).match(/^c2\.[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$/u);
     should(readSessionTranscriptMessageCursor(issued)).eql({ v: 1, byteOffset: 120, blockIndex: 2 });
     should(issued).not.containEql(Buffer.from(RAW_PREFIX).toString('base64url'));
     should(issued).not.containEql('/home/agent/.claude');
@@ -213,7 +213,7 @@ describe('session transcript message tokens', () => {
     // Arrange: the domain is inside the tag, so relabelling the envelope cannot move it.
     const binding = await selection();
     const issued = await cursor();
-    const relabelled = `s1.${issued.split('.')[2] ?? ''}`;
+    const relabelled = `s2.${issued.split('.')[2] ?? ''}`;
 
     // Act / Assert
     should(
@@ -267,7 +267,7 @@ describe('session transcript message tokens', () => {
     should(await verify(withProvenance({ file: '/home/agent/.claude/other.jsonl' }), point(40), RAW_PREFIX)).equal(
       'stale',
     );
-    should(await verify(context, point(40), RAW_PREFIX, `s1.${'A'.repeat(43)}`)).equal('stale');
+    should(await verify(context, point(40), RAW_PREFIX, `s2.${'A'.repeat(43)}`)).equal('stale');
     should(await verify(context, point(40), RAW_PREFIX, binding, otherKeyCodec)).equal('stale');
   });
 
@@ -276,13 +276,13 @@ describe('session transcript message tokens', () => {
     const malformed = [
       '',
       'plain-string',
-      's1',
-      's1.',
-      `s2.${'A'.repeat(43)}`,
-      `s1.${'A'.repeat(42)}`,
-      `s1.${'A'.repeat(44)}`,
-      `s1.${'A'.repeat(42)}+`,
-      `s1.${'A'.repeat(43)}.extra`,
+      's2',
+      's2.',
+      `s1.${'A'.repeat(43)}`,
+      `s2.${'A'.repeat(42)}`,
+      `s2.${'A'.repeat(44)}`,
+      `s2.${'A'.repeat(42)}+`,
+      `s2.${'A'.repeat(43)}.extra`,
     ];
 
     // Act / Assert
@@ -315,14 +315,14 @@ describe('session transcript message tokens', () => {
 
     // Act / Assert: syntax, an offset no JavaScript number can hold, and a coordinate version this
     // release does not define are all "not a cursor", never a stale one.
-    should(readSessionTranscriptMessageCursor('c1.short.tag')).be.undefined();
-    should(readSessionTranscriptMessageCursor(`s1.${tag}`)).be.undefined();
-    should(readSessionTranscriptMessageCursor(`c1.${'A'.repeat(32)}`)).be.undefined();
-    should(readSessionTranscriptMessageCursor(`c1.${'*'.repeat(32)}.${tag}`)).be.undefined();
-    should(readSessionTranscriptMessageCursor(`c1.${'A'.repeat(32)}.${'*'.repeat(43)}`)).be.undefined();
-    should(readSessionTranscriptMessageCursor(`c1.${unsafe.toString('base64url')}.${tag}`)).be.undefined();
-    should(readSessionTranscriptMessageCursor(`c1.${unsafeBlock.toString('base64url')}.${tag}`)).be.undefined();
-    should(readSessionTranscriptMessageCursor(`c1.${versionTwo.toString('base64url')}.${tag}`)).be.undefined();
+    should(readSessionTranscriptMessageCursor('c2.short.tag')).be.undefined();
+    should(readSessionTranscriptMessageCursor(`s2.${tag}`)).be.undefined();
+    should(readSessionTranscriptMessageCursor(`c2.${'A'.repeat(32)}`)).be.undefined();
+    should(readSessionTranscriptMessageCursor(`c2.${'*'.repeat(32)}.${tag}`)).be.undefined();
+    should(readSessionTranscriptMessageCursor(`c2.${'A'.repeat(32)}.${'*'.repeat(43)}`)).be.undefined();
+    should(readSessionTranscriptMessageCursor(`c2.${unsafe.toString('base64url')}.${tag}`)).be.undefined();
+    should(readSessionTranscriptMessageCursor(`c2.${unsafeBlock.toString('base64url')}.${tag}`)).be.undefined();
+    should(readSessionTranscriptMessageCursor(`c2.${versionTwo.toString('base64url')}.${tag}`)).be.undefined();
   });
 });
 
@@ -337,10 +337,12 @@ describe('session transcript message tokens', () => {
  * The exhaustive `Record` proves no member is MISSING and says nothing about ORDER; this is the
  * other half.
  *
- * The expected values were produced by an INDEPENDENT reference calculation
+ * The raw-prefix expected values were produced by an INDEPENDENT reference calculation
  * (`vectors/reference-vectors.ts` in the authoring session's coordination directory, preserved with
  * its output) written from the frozen framing specification, importing nothing from this repository
  * and calling nothing from the code under test.
+ * The v2 token vectors were independently recalculated with the v2 envelope and an absent resolved
+ * baseline. The chain vectors are unchanged; v1 token envelopes intentionally require a page refresh.
  *
  * IF ONE OF THESE FAILS, DO NOT UPDATE THE LITERAL. It means the wire format moved, and the change
  * that moved it needs a token version bump rather than a new expectation.
@@ -355,9 +357,9 @@ describe('session transcript token known-answer vectors', () => {
   const VECTOR_CHAIN_A = 'caa3dc0daf59dc3d8b9eefae649fce2cddb7236bf3db0300b1134c20a14845b1';
   const VECTOR_CHAIN_AB = '4387982917e554df5e2d9866069aa6ecee7935b35831166a5957226ff728e25f';
   const VECTOR_CHAIN_JOINED = '7b6e307dbf5922a183e52e5f99c9df1fe9a2197b2fe44c759522dc62113862b8';
-  const VECTOR_SELECTION = 's1.d18fChF2RG_0tPAyo_cKhCA04PWKM32Xkb_AK1XCtUs';
-  const VECTOR_SELECTION_WITHOUT_OPTIONALS = 's1.uRiRlrEGdYTVPrmsc4dI9jPXZ0viFe-bjLyp_yDJc5Q';
-  const VECTOR_CURSOR = 'c1.AAAAAAAAAAEAAAAAAAAQAAAAAAAAAAAD.8nCYphkVRWQaz287czXsn1Z-C8NbEPxuP2gogbr3o7M';
+  const VECTOR_SELECTION = 's2.UNOPLtDwN_sOtqpnjxYipC4oXW-OQO8_SeMd_0ZyHVQ';
+  const VECTOR_SELECTION_WITHOUT_OPTIONALS = 's2.QhRwo9KE8cxQGfJjf31xd5HCpWTaqrpmUuGT7sfArrk';
+  const VECTOR_CURSOR = 'c2.AAAAAAAAAAEAAAAAAAAQAAAAAAAAAAAD.YYZCjD_AY9ylTbo2OHYoZryTU3R1JDOPR4invtxzfvY';
 
   const vectorContext: SessionTranscriptMessageTokenContext = {
     sessionId: 'session-vector',
@@ -452,14 +454,13 @@ describe('session transcript token known-answer vectors', () => {
 });
 
 describe('session transcript token provenance framing', () => {
-  it('should frame every provenance member, so changing any one of them moves the tag', async () => {
+  it('should frame every identity member, so changing any one of them moves the tag', async () => {
     // Arrange
     const baseline = await selection();
     const changed: readonly SessionTranscriptMessageTokenContext[] = [
       withProvenance({ home: '/home/other/.claude' }),
       withProvenance({ harnessSessionId: 'harness-2' }),
       withProvenance({ identity: 'minted' }),
-      withProvenance({ baseline: ['rollout-a', 'rollout-c'] }),
       withProvenance({ correlationToken: 'another-token' }),
       withProvenance({ file: '/home/agent/.claude/projects/-work/other.jsonl' }),
       withProvenance({ resolvedAt: '2025-06-01T00:00:00+00:00' }),
@@ -480,14 +481,31 @@ describe('session transcript token provenance framing', () => {
     for (const where of changed) should(await selection(where)).not.equal(baseline);
   });
 
+  it('should keep selections and cursors valid when a resolved baseline is retired', async () => {
+    // Arrange: tokens can be issued while the old config is still in a reader's hand.
+    const { baseline: _baseline, ...resolved } = provenance;
+    const after = { ...context, provenance: resolved };
+    // Act / Assert
+    for (const domain of [
+      SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+      SESSION_TRANSCRIPT_MESSAGE_TOKEN_CURSOR_DOMAIN,
+    ] as const) {
+      const token = await issueSessionTranscriptMessageToken(codec, domain, context, point(40), RAW_PREFIX);
+      should(await verifySessionTranscriptMessageToken(codec, domain, after, point(40), RAW_PREFIX, token)).equal(
+        'accepted',
+      );
+      should(await issueSessionTranscriptMessageToken(codec, domain, after, point(40), RAW_PREFIX)).equal(token);
+    }
+  });
+
   it('should distinguish an absent optional, an empty array and a differently split array', async () => {
     // Arrange: "no baseline", "an empty baseline" and two spellings of the same characters are three
     // different provenances, and an unframed concatenation would spell two of them identically.
-    const present = await selection(withProvenance({ baseline: ['ab'] }));
+    const present = await selection(withProvenance({ baseline: ['ab'], resolvedAt: undefined }));
 
     // Act
-    const empty = await selection(withProvenance({ baseline: [] }));
-    const split = await selection(withProvenance({ baseline: ['a', 'b'] }));
+    const empty = await selection(withProvenance({ baseline: [], resolvedAt: undefined }));
+    const split = await selection(withProvenance({ baseline: ['a', 'b'], resolvedAt: undefined }));
     const absent = await selection({
       ...context,
       provenance: { v: 1, home: provenance.home, identity: 'undiscovered' },
