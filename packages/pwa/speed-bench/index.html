@@ -45,6 +45,10 @@
         white-space: pre-wrap;
         word-break: break-word;
       }
+      /* Before a run both boxes are empty: show nothing rather than two grey boxes that look broken. */
+      pre:empty {
+        display: none;
+      }
       label {
         display: flex;
         align-items: center;

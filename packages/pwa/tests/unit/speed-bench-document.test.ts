@@ -27,6 +27,12 @@ describe('the /speed-bench/ page the Settings link opens', () => {
     expect(page.indexOf('@media (prefers-color-scheme: dark)')).toBeGreaterThan(page.indexOf('background: #f3f3f3'));
   });
 
+  it('hides the two result boxes until a run fills them, so they never read as broken empty boxes', () => {
+    expect(page).toMatch(/pre:empty\s*\{\s*display:\s*none;/u);
+    expect(page).toMatch(/<pre id="log"[^>]*><\/pre>/u);
+    expect(page).toMatch(/<pre id="result"[^>]*><\/pre>/u);
+  });
+
   it('starts with the download box UNTICKED and names exactly what ticking it does', () => {
     const install = page.match(/<input[^>]*id="install"[^>]*>/u)?.[0] ?? '';
     expect(install).not.toBe('');
