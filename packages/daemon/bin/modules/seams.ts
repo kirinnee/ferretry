@@ -6,6 +6,7 @@ import type { SttEnhancementSubsystem } from '../../src/lib/runtime/mounts/stt.t
 import type { WorkSearchService } from '../../src/lib/work-search/index.ts';
 import type { AnalyticsJobs, AnalyticsProvides } from './analytics.ts';
 import type { AgentToolsProvides } from './agent-tools.ts';
+import type { HousekeepingProvides } from './housekeeping.ts';
 import type { InputRequestsProvides } from './input-requests.ts';
 import type { LearningSeams } from './learning.ts';
 import type { McpProvides } from './mcp.ts';
@@ -37,6 +38,8 @@ export const seamsOf = {
   fleetLogin: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the tmux, the terminals, the agenda and the vault are needs). */
   inputRequests: (_world: DaemonWorld): void => undefined,
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the scratch collector, the speed-up ledger and the Jev guard are fixed production adapters; the session storage, the outbound holder, the secret directory, the clock and the stopwatch are needs). */
+  housekeeping: (_world: DaemonWorld): void => undefined,
   learning: (world: DaemonWorld): LearningSeams => ({ userHome: world.userHome }),
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the OAuth client, the file readers and the MCP probe are fixed production adapters; the session directory, the catalogues and the secret store are needs). */
   mcp: (_world: DaemonWorld): void => undefined,
@@ -68,6 +71,7 @@ export interface ModuleHandles {
   readonly analytics: BuiltModule<AnalyticsProvides, AnalyticsJobs>;
   readonly cgroups: BuiltModule<LimitsService>;
   readonly fleetLogin: BuiltModule<HarnessLoginService>;
+  readonly housekeeping: BuiltModule<HousekeepingProvides>;
   readonly inputRequests: BuiltModule<InputRequestsProvides>;
   readonly learning: BuiltModule<LearningSubsystem>;
   readonly mcp: BuiltModule<McpProvides>;

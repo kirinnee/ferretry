@@ -3,11 +3,7 @@ import { BrowserProxyTester } from '../../../../src/lib/browser/proxy/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
 import { NO_PERFORMANCE_PROBE } from '../../../../src/lib/performance/recorder.ts';
-import {
-  type MountedSubsystems,
-  type PairingSubsystem,
-  type ScratchGcSubsystem,
-} from '../../../../src/lib/runtime/index.ts';
+import type { MountedSubsystems, PairingSubsystem } from '../../../../src/lib/runtime/index.ts';
 import type { CatalogLinkSubsystem } from '../../../../src/lib/runtime/mounts/catalog-links.ts';
 import type { CatalogMemberSubsystem } from '../../../../src/lib/runtime/mounts/catalog-members.ts';
 import type { SharedCatalogSubsystem } from '../../../../src/lib/runtime/mounts/shared-catalogs.ts';
@@ -38,7 +34,6 @@ import {
   FakeSessionResume,
   FakeSessionSend,
   FakeSessionSignal,
-  FakeSpeedups,
   FakeTerminals,
   FakeWarden,
   fleetEventSubsystem,
@@ -105,7 +100,7 @@ const stepUpSubsystem = (): StepUpService =>
     audit: { record: async () => undefined },
   });
 
-export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
+export const subsystems = (): MountedSubsystems => ({
   health: healthSubsystem(),
   performance: {
     profiles: {
@@ -591,12 +586,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
   legacyTasks: { now: () => '2026-07-30T12:00:00.000Z' },
   board: boardSubsystem(),
   boardGitHub: { arm: () => () => undefined },
-  tidy: {
-    plan: async sessionId => ({
-      ok: true,
-      plan: { v: 1, sessionId, subFerret: false, drop: [], close: [], keep: [] },
-    }),
-  },
   // The ingestion loop serves no route, so the surface inventory never calls it. It is present because
   // `MountedSubsystems` is the list of what production constructs, and a loop absent from that list is
   // a store nothing writes to.
@@ -729,7 +718,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
   }),
   names: nameSubsystem(),
   recommend: recommendSubsystem(),
-  speedups: new FakeSpeedups(),
   models: {
     view: async () => ({ published: { origin: 'https://ferretry.pages.dev', enabled: false }, catalogs: [] }),
     refresh: async () => ({ outcome: 'disabled' as const }),
@@ -751,7 +739,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
     activityChanged: () => undefined,
   },
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
-  scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
   systemOpen: { open: async () => ({ opened: true, host: 'example.com' }) },
   secrets: secretSubsystem(),
   sharedCatalogs: { catalogs: {} as SharedCatalogSubsystem['catalogs'] },

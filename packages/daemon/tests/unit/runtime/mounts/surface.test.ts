@@ -5,6 +5,7 @@ import { MemberDispatcher, type SharedRouteDeps } from '../../../../src/lib/cata
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { jsonBody, request } from '../../api/support.ts';
+import { scratchGcRoutes } from '../../../../src/lib/runtime/mounts/scratch-gc.ts';
 import { builtSharedDraftsKnowing } from '../../modules/shared-drafts/fixture.ts';
 import { FRAGMENTS, NOT_AUDITED, OTHER_TABLE_CALLERS, ROUTE_CALLERS } from '../../modules/route-contracts.ts';
 import { agentIn, CREDENTIALS, grantSubsystem, human } from './support.ts';
@@ -854,19 +855,25 @@ describe('the mounted daemon surface', () => {
     // Arrange
     const limits: number[] = [];
     const forces: boolean[] = [];
-    const dispatcher = createMountedDispatcher(
-      base,
-      subsystems({
-        plan: async limit => {
-          limits.push(limit);
-          return [];
-        },
-        sweep: async force => {
-          forces.push(force);
-          return { sessions: 0, bytes: 0, failures: 0 };
-        },
-      }),
-    );
+    // The housekeeping module stands in with the same routes over a collector that records what reaches it.
+    const collector = {
+      id: 'housekeeping',
+      provides: {},
+      jobs: {},
+      contributes: {
+        routes: scratchGcRoutes({
+          plan: async limit => {
+            limits.push(limit);
+            return [];
+          },
+          sweep: async force => {
+            forces.push(force);
+            return { sessions: 0, bytes: 0, failures: 0 };
+          },
+        }),
+      },
+    };
+    const dispatcher = createMountedDispatcher(base, subsystems(), [collector]);
 
     // Act
     const planned = await dispatcher.dispatch(request({ path: '/v1/gc', query: [['limit', '7']], headers: human }));
