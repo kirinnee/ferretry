@@ -267,14 +267,14 @@ profile on`) is listed for every paired device under Settings › Secure copy �
 
 ### Task plans
 
-> **The app draws the plan card, and the daemon reports `task-plan.1`.** The daemon raises, resolves, stages,
+> **The app draws the plan card.** The daemon raises, resolves, stages,
 > approves and revokes plans (`packages/daemon/src/lib/task-plans/`); the app shows the card
 > (`packages/pwa/src/features/secure-copy/task-plan-card.tsx`) and the shared matcher fills under an approved line
 > ([input requests › Task plan fills](input-requests.md#task-plan-fills-a-sign-in-the-owner-approved-in-advance)).
 > The agent tool `task_plan` is listed in MCP and the owner answers with `fy plan` (R3a-3) or on the card.
-> An app that doesn't know `task-plan.1` draws a plan with
-> paste lines as the old copy-plan card; on a daemon of this build its Allow is refused (`409 needs_passkey`), and its
-> Decline still works.
+> A device refused the plan route (it lacks `secrets.use`) cannot read the plan, so `TaskPlanHost` says so and draws
+> only the paste-plan card for the item's `copyPlan` (`CopyPlanHost`), or nothing when the item has none. That card's
+> Allow is refused (`409 needs_passkey`); its Decline still works.
 
 A task plan widens the paste plan. One card holds up to 10 lines, each with 1–5 uses (1 by default), for 2 hours
 by default (5 minutes to 1 day). A line is one of three kinds:
@@ -310,9 +310,9 @@ The rules the contract fixes:
   (`grantMissLine`).
 - **The paste-plan routes still answer.** A task plan is projected to the paste-plan shape (`copyPlanOf`). A paste-plan
   item number is never a line number: `taskPlanLineOfCopyItem` maps it back, so "approve item 0" can't land on a sign-in line.
-- **The app ships first.** An input card a plan fills carries a `plan` actor and a `preapproval` note, and an
-  older app's strict parse refuses them. So the daemon reports `task-plan.1` only because the app draws the plan
-  card; a machine whose daemon doesn't report it gets today's copy-plan card and no fills.
+- **The app draws the card before the daemon fills one.** An input card a plan fills carries a `plan` actor and a
+  `preapproval` note, which the app's strict parse accepts. A device that cannot read the plan route (no
+  `secrets.use`) is shown the paste-plan card instead (see the note above), and no fills come from it.
 
 #### The plan card in the app
 

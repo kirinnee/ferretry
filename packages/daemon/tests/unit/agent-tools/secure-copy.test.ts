@@ -225,7 +225,7 @@ const PASTE: AgentToolCall = {
   prompt: 'the deploy token',
 };
 
-describe('the secure.paste and secure.preapprove agent tools', () => {
+describe('the secure.paste agent tool', () => {
   it("should raise a paste on the agent's own terminal as a secret whose value is the copy", async () => {
     const { input, raised } = recordingInput();
     const world = agentToolWorld({ input });

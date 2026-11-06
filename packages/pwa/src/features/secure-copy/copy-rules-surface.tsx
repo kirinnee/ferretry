@@ -1,11 +1,11 @@
 /**
- * The live, daemon-bound pre-approval rules (`/v1/copy-rules`). Like the saved logins it owns no module cache: the
+ * The live, daemon-bound pre-approval rules (`/v1/copy-rules`). It owns no module cache: the
  * rules belong to a machine, the loaded list is stamped with the daemon it came from, and a load that failed is a
  * stated refusal rather than "no rules".
  *
- * On a machine that stages paste rules (`copy-rules.passkey.1`, owner decision !A244), making one is staged, approved
- * with a passkey bound to that one rule whose prompt lists the daemon's rows, and only then committed; the rules a
- * machine staged (`fy copy rules add`) wait here for the same passkey. An older machine keeps the one-step add.
+ * Adding a paste rule always stages it (owner decision !A244): it is approved with a passkey bound to that one rule
+ * whose prompt lists the daemon's rows, and only then committed; the rules a machine staged (`fy copy rules add`) wait
+ * here for the same passkey.
  */
 
 import type {
