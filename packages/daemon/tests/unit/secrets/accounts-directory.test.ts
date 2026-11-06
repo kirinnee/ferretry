@@ -3,7 +3,7 @@ import { type Place, TotpParametersSchema } from '@ferretry/protocol';
 import should from 'should';
 import { AccountVault, LoginDirectory, narrowAccountVault, totpCode } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, plantSeed } from '../runtime/mounts/support.ts';
-import { CLOCK, CountingSealed, daemonOver, SEED } from './accounts-fixtures.ts';
+import { CLOCK, CountingSealed, daemonOver, plant, SEED } from './accounts-fixtures.ts';
 import { putSavedLogin } from './saved-login-fixture.ts';
 
 /**
@@ -312,5 +312,48 @@ describe('what of the vault is handed out (secrev-r1-2 L2)', () => {
     should(Object.keys(narrow.seals).sort()).deepEqual(['reseal', 'sameValue']);
     should(Object.keys(narrow.lookAlike)).deepEqual(['lookAlike']);
     should(await narrow.lookAlike.lookAlike()).deepEqual([]);
+  });
+});
+
+describe('a sealed document that cannot be read', () => {
+  const unreadable = async (sealed: CountingSealed) =>
+    await sealed.write({ v: 1, cipher: 'ANOTHER-CIPHER', entries: {} });
+  const failure = async (work: Promise<unknown>) =>
+    (await work.catch((error: unknown) => error)) as { failure?: string; message?: string };
+
+  it('should refuse a change that needs it, and write nothing', async () => {
+    const w = world();
+    await w.directory.putAccount('GITHUB', { label: 'GitHub' });
+    await unreadable(w.sealed);
+    const before = JSON.stringify(w.index.document);
+
+    const refused = await failure(w.directory.putAccount('GITLAB', { label: 'GitLab' }));
+
+    should(refused.failure).equal('unreadable');
+    should(refused.message).containEql('ANOTHER-CIPHER');
+    should(JSON.stringify(w.index.document)).equal(before);
+  });
+
+  it('should still let a sign-in and then its account be removed from a version 2 index', async () => {
+    const w = world();
+    await w.directory.putAccount('GITHUB', { label: 'GitHub' });
+    const { id } = await w.directory.addSignIn('GITHUB', { place: site('github.com') });
+    await unreadable(w.sealed);
+
+    should(await w.directory.removeSignIn(id)).be.true();
+    should(await w.directory.removeAccount('GITHUB')).be.true();
+    should(w.index.accounts.accounts).deepEqual({});
+    should(w.index.accounts.signIns).deepEqual({});
+  });
+
+  it('should refuse a removal while the index is still version 1, so a migration never runs over it', async () => {
+    const { index, sealed } = await plant();
+    const { directory } = daemonOver(index, sealed);
+    await unreadable(sealed);
+
+    const refused = await failure(directory.removeAccount('GITHUB'));
+
+    should(refused.failure).equal('unreadable');
+    should(index.document?.v).equal(1);
   });
 });

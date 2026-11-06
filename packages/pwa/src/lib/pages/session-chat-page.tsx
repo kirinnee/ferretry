@@ -1762,9 +1762,8 @@ export function SessionChatPage({
               {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
               {...(composerCatalogs.attention === undefined ? {} : { autocompleteAgenda: composerCatalogs.attention })}
               {...(composerCatalogs.tasks === undefined ? {} : { autocompleteTasks: composerCatalogs.tasks })}
-              {...(workSearch === undefined
-                ? {}
-                : { autocompleteWorkSearch: workSearch, autocompleteProjectNames: workProjectNames })}
+              autocompleteWorkSearch={workSearch}
+              autocompleteProjectNames={workProjectNames}
               {...(composerCatalogs.skills?.skills === undefined
                 ? {}
                 : { autocompleteSkills: composerCatalogs.skills })}

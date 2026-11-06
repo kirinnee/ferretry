@@ -304,6 +304,26 @@ describe('CatalogItemRow without a readable catalog list', () => {
     await view.unmount();
   });
 
+  it('before the lists have answered, offers Publish in a catalog… and opens the add sheet', async () => {
+    const fake = fakeClient(baseHandlers([]));
+    const view = await mount(
+      <CatalogItemRow
+        host={{ connection, createClient: fake.factory }}
+        kind="skill"
+        itemName="pdf-tools"
+        label="/pdf-tools"
+        source={source}
+        scope={scope}
+      />,
+    );
+    await tap('[data-row-more]');
+    expect(menu()).toEqual(['Publish in a catalog…']);
+    await click(byText(document, '[role="menuitem"]', 'Publish in a catalog…'));
+    await settle();
+    expect(q('[data-catalog-sheet="add"]')).not.toBeNull();
+    await view.unmount();
+  });
+
   it('a withdrawn item no longer counts as published', async () => {
     const withdrawn = OwnedCatalogSchema.parse({
       ...ownedCatalog(),

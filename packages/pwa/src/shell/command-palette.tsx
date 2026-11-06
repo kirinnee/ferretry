@@ -155,7 +155,7 @@ export interface CommandPaletteProps {
    * The daemon's work search, bound to this daemon. Without it (no connection) the palette has no Cards or
    * Agenda groups and no filter chips.
    */
-  readonly workSearch?: WorkSearchPort;
+  readonly workSearch?: WorkSearchPort | undefined;
   /** Project id to name, so a card hit names its project instead of showing its id. */
   readonly workProjectNames?: ReadonlyMap<string, string>;
 }

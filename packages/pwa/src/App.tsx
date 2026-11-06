@@ -3161,9 +3161,8 @@ export function AppShell() {
                     focusSignal={palette.focusSignal}
                     onClose={closePalette}
                     daemon={connection.daemonId}
-                    {...(finderWorkSearch === undefined
-                      ? {}
-                      : { workSearch: finderWorkSearch, workProjectNames: finderProjectNames })}
+                    workSearch={finderWorkSearch}
+                    workProjectNames={finderProjectNames}
                     sessions={paletteSearch.sessions}
                     sessionsNote={paletteSearch.note}
                     onNavigate={navigate}
