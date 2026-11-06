@@ -1,3 +1,16 @@
+## [4.285.0](https://github.com/kirinnee/ferretry/compare/v4.284.0...v4.285.0) (2026-11-06)
+
+### Features
+
+* **daemon:** save svg and html pictures as daemon files (render store, F959 slice 2) ([#1485](https://github.com/kirinnee/ferretry/issues/1485)) ([5a6f295](https://github.com/kirinnee/ferretry/commit/5a6f295618cb272dcd2c9c7cb8d1a7337d557ce8))
+
+### Fixes
+
+* **board:** ferret jobs become owner cards; adopt orphaned cards ([#1490](https://github.com/kirinnee/ferretry/issues/1490)) ([36fe336](https://github.com/kirinnee/ferretry/commit/36fe336d6adbdc34ecf53246437da6d8b6d56217))
+* **pwa:** make the Queue page readable ([#1496](https://github.com/kirinnee/ferretry/issues/1496)) ([f144c3f](https://github.com/kirinnee/ferretry/commit/f144c3f35c7e38497f68b96216dda3d7472fa944))
+* **pwa:** open the Inbox quote menu at the selection ([#1468](https://github.com/kirinnee/ferretry/issues/1468)) ([6c83a04](https://github.com/kirinnee/ferretry/commit/6c83a043be72b60a9a07360f8c1f64b9628315ea))
+* **send:** never stall a queue behind a hand-over that gave up before its first key ([#1444](https://github.com/kirinnee/ferretry/issues/1444)) ([b78323f](https://github.com/kirinnee/ferretry/commit/b78323fa3895e1973a2919a47421ca464745af91))
+
 ## [4.284.0](https://github.com/kirinnee/ferretry/compare/v4.283.1...v4.284.0) (2026-11-06)
 
 ### Features
