@@ -70,7 +70,7 @@ describe('the argv a ferret execs on Linux', () => {
 
     // Assert — the slice is configured first, then the scope carries the per-ferret share.
     should(ran).have.length(1);
-    should(ran[0]?.slice(0, 5)).deepEqual(['systemctl', '--user', 'set-property', '--runtime', 'ferretry-fleet.slice']);
+    should(ran[0]?.slice(0, 5)).deepEqual(['systemctl', '--user', 'set-property', '--runtime', 'ferretry_fleet.slice']);
     should(ran[0]).containEql('CPUWeight=50');
     should(actual.slice(0, 8)).deepEqual([
       'systemd-run',
@@ -79,7 +79,7 @@ describe('the argv a ferret execs on Linux', () => {
       '--quiet',
       '--collect',
       '--unit=ferretry-agent-s1-a1b2c3d4.scope',
-      '--slice=ferretry-fleet.slice',
+      '--slice=ferretry_fleet.slice',
       '--property=CPUWeight=100',
     ]);
     should(actual.slice(-8)).deepEqual(['--', 'ionice', '-c2', '-n7', '--', 'claude', '--model', 'x'].slice(-8));

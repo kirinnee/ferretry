@@ -74,7 +74,7 @@ const CpuPercentSchema = z.number().finite().gt(0).max(100);
 
 // ── limits.yaml ──────────────────────────────────────────────────────────────────────────────────
 
-/** The caps on all ferrets taken together (`<product>-fleet.slice`). */
+/** The caps on all ferrets taken together (`<product>_fleet.slice`). */
 export const FleetLimitsFileSchema = z.strictObject({
   /** CPU share against the daemon (100) and voice (200) when the machine is busy. */
   cpuWeight: WeightSchema.optional(),

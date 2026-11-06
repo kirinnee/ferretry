@@ -6,12 +6,20 @@
  *
  * ```text
  * user@UID.service
- * ├── app.slice/…                       this daemon, never capped here
+ * ├── app.slice/…                       this daemon, never capped here (weight 100)
  * ├── …/…-spawn-*.scope                 the multiplexer's own control processes
- * └── <product>-fleet.slice             the aggregate ceiling
+ * └── <product>_fleet.slice             the aggregate ceiling (weight 50)
  *     ├── <product>-agent-<id>-<n>.scope   one agent's ceiling
  *     └── …
  * ```
+ *
+ * THE SLICE NAME HAS NO DASH ON PURPOSE. systemd reads a dash in a slice name as hierarchy
+ * (`systemd.slice(5)`): `foo-bar.slice` lives inside `foo.slice`. A `<product>-fleet.slice` would have sat
+ * under a `<product>.slice` that is itself a sibling of `app.slice`, and as that parent's only busy child it
+ * would have taken the parent's whole weight — the fleet would have competed with the daemon's slice at
+ * parity instead of at half. `<product>_fleet.slice` is a direct child of the user manager's root, so its
+ * `CPUWeight=50` is weighed against `app.slice`'s 100 and the voice slice's 200 as written. Its cgroup path
+ * is still derived through {@link sliceCgroupPath}, which is right for any name.
  *
  * A SCOPE NAME CARRIES A NONCE, so a relaunch cannot collide with a previous transient scope that is
  * still deactivating. `--collect` removes a scope once its agent exits. Nothing ever RECONSTRUCTS a
@@ -29,7 +37,18 @@
 import { productName } from '../version.ts';
 
 /** The aggregate every managed agent shares. */
-export const FLEET_SLICE = `${productName}-fleet.slice`;
+export const FLEET_SLICE = `${productName.replaceAll('-', '_')}_fleet.slice`;
+
+/**
+ * The cgroup directories a slice lives in, outermost first, relative to the user manager: systemd nests
+ * `a-b-c.slice` as `a.slice/a-b.slice/a-b-c.slice`, so reading `<manager>/a-b-c.slice` finds nothing. A name
+ * with no dash (the fleet's) is its own single component.
+ */
+export function sliceCgroupPath(slice: string): readonly string[] {
+  const stem = slice.endsWith('.slice') ? slice.slice(0, -'.slice'.length) : slice;
+  const parts = stem.split('-').filter(part => part !== '');
+  return parts.map((_, index) => `${parts.slice(0, index + 1).join('-')}.slice`);
+}
 
 /** What every managed agent scope is called before its session and nonce. */
 export const AGENT_SCOPE_PREFIX = `${productName}-agent-`;

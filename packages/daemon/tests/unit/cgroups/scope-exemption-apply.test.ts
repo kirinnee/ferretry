@@ -20,6 +20,7 @@ import {
   type SessionSpawnFactsPort,
   safeUnitPart,
   slicePropertyCommand,
+  sliceCgroupPath,
 } from '../../../src/lib/cgroups/index.ts';
 import { WARDEN_LABEL } from '../../../src/lib/warden/index.ts';
 
@@ -36,8 +37,22 @@ const runner = (results: readonly { code: number; stdout?: string; stderr?: stri
 describe('naming and recognising units', () => {
   it('should derive both names from the product scope rather than a literal', () => {
     // Arrange / Act / Assert
-    should(FLEET_SLICE).equal('ferretry-fleet.slice');
+    should(FLEET_SLICE).equal('ferretry_fleet.slice');
     should(AGENT_SCOPE_PREFIX).equal('ferretry-agent-');
+  });
+
+  it('should name the fleet slice as a direct child of the user manager, so its weight is weighed against app.slice', () => {
+    // Arrange / Act / Assert — systemd reads a dash as hierarchy: `ferretry-fleet.slice` would sit inside
+    // `ferretry.slice`, a sibling of app.slice, and take that parent's whole weight as its only busy child
+    should(sliceCgroupPath(FLEET_SLICE)).deepEqual(['ferretry_fleet.slice']);
+    should(FLEET_SLICE).not.containEql('-');
+  });
+
+  it('should derive the nested cgroup path systemd gives a dashed slice name', () => {
+    // Arrange / Act / Assert
+    should(sliceCgroupPath('ferretry-fleet.slice')).deepEqual(['ferretry.slice', 'ferretry-fleet.slice']);
+    should(sliceCgroupPath('a-b-c.slice')).deepEqual(['a.slice', 'a-b.slice', 'a-b-c.slice']);
+    should(sliceCgroupPath('solo.slice')).deepEqual(['solo.slice']);
   });
 
   it('should reduce anything a unit name may not hold to a dash', () => {
@@ -68,7 +83,7 @@ describe('naming and recognising units', () => {
   it('should read the RUNNING scope out of a placement rather than rebuilding the name', () => {
     // Arrange
     const placement =
-      '0::/user.slice/user-1000.slice/user@1000.service/ferretry-fleet.slice/ferretry-agent-s1-9f.scope';
+      '0::/user.slice/user-1000.slice/user@1000.service/ferretry_fleet.slice/ferretry-agent-s1-9f.scope';
 
     // Act / Assert
     should(agentScopeInPlacement(placement)).equal('ferretry-agent-s1-9f.scope');
@@ -99,7 +114,7 @@ describe('naming and recognising units', () => {
 
   it('should prove a pid is under the fleet slice when it is', () => {
     // Arrange / Act / Assert
-    should(placedUnderSlice('0::/user@1000.service/ferretry-fleet.slice/x.scope', FLEET_SLICE)).be.true();
+    should(placedUnderSlice('0::/user@1000.service/ferretry_fleet.slice/x.scope', FLEET_SLICE)).be.true();
   });
 
   it('should prove a pid is outside the fleet slice when it is', () => {
@@ -109,7 +124,7 @@ describe('naming and recognising units', () => {
 
   it('should treat the slice itself as under itself, so a leaf directly inside it still counts', () => {
     // Arrange / Act / Assert
-    should(placedUnderSlice('0::/ferretry-fleet.slice', FLEET_SLICE)).be.true();
+    should(placedUnderSlice('0::/ferretry_fleet.slice', FLEET_SLICE)).be.true();
   });
 
   it('should ignore a line with no path when proving placement', () => {

@@ -28,7 +28,7 @@ of a small budget.
 
 ### Linux (cgroup v2 + the user's systemd manager)
 
-Every new ferret launches as `systemd-run --user --scope` inside `<product>-fleet.slice`, with its harness
+Every new ferret launches as `systemd-run --user --scope` inside `<product>_fleet.slice`, with its harness
 wrapped as `ionice -c2 -n7 -- <cmd>`. Supervision (the Warden and what it started) is never wrapped, and the
 daemon is never launched through the wrapper.
 
@@ -170,6 +170,12 @@ CPU weights compare **siblings**. Under the user's manager the siblings are `app
 fleet slice (50) and the voice slice (200, `docs/design/voice-modes.md` §2.5), so when the machine is busy the
 daemon gets twice a busy fleet's share and voice more than either. The daemon's own unit adds `CPUWeight=200`,
 which only orders it against the other services inside `app.slice`.
+
+The slice names carry **no dash** on purpose: systemd reads a dash in a slice name as hierarchy
+(`systemd.slice(5)`), so `<product>-fleet.slice` would have sat inside a `<product>.slice` — a second root-level
+sibling of `app.slice` at the default weight 100 — and, as its only busy child, taken that whole weight. The fleet
+would then have competed with the daemon at parity instead of at half. `<product>_fleet.slice` is a direct child of
+the user manager, so 50 against 100 against 200 is what is actually weighed.
 
 `fyd.service` is rendered with `CPUWeight=200` and `MemoryLow=4G`. **`MemoryLow` protects the daemon only if
 every ancestor also has a `MemoryLow=`**, and a stock `user@.service` does not.

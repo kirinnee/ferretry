@@ -22,7 +22,7 @@ export const EXIT_ALREADY_RUNNING = 78;
 const EXIT_ADDRESS_CONFLICT = 69;
 
 /**
- * The daemon's CPU weight in its unit: twice systemd's default of 100, against `<product>-fleet.slice` at 50
+ * The daemon's CPU weight in its unit: twice systemd's default of 100, against `<product>_fleet.slice` at 50
  * and the voice slice at 200 (docs/ferret-limits.md).
  */
 const DAEMON_CPU_WEIGHT = 200;

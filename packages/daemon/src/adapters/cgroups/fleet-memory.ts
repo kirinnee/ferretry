@@ -9,6 +9,7 @@ import {
   parseMemoryCap,
   parseMemoryEvents,
   type ScopeSighting,
+  sliceCgroupPath,
   type TreeProcess,
   userManagerPath,
 } from '../../lib/cgroups/index.ts';
@@ -22,7 +23,7 @@ const MAX_PROCESSES = 300;
 /**
  * Reads the fleet slice and each agent scope straight from the cgroup filesystem — plain async file reads,
  * no `systemctl`, no tmux, no root. The slice sits under the daemon's own user manager
- * (`.../user@UID.service/<product>-fleet.slice`), found from the daemon's own cgroup path.
+ * (`.../user@UID.service/<product>_fleet.slice`; a dashed name nests as systemd nests it, see {@link sliceCgroupPath}), found from the daemon's own cgroup path.
  *
  * A slice that does not exist yet (nothing has launched) answers `undefined`, which is not an error.
  */
@@ -36,7 +37,7 @@ export class CgroupFleetMemory implements FleetMemoryPort {
     private readonly procRoot = '/proc',
   ) {
     const manager = host.ownCgroup === undefined ? undefined : userManagerPath(host.ownCgroup);
-    this.directory = manager === undefined ? undefined : join(cgroupRoot, manager, slice);
+    this.directory = manager === undefined ? undefined : join(cgroupRoot, manager, ...sliceCgroupPath(slice));
   }
 
   async read(): Promise<FleetSighting | undefined> {

@@ -156,7 +156,7 @@ describe('reading where a live process sits', () => {
     await mkdir(join(root, '77'), { recursive: true });
     await writeFile(
       join(root, '77', 'cgroup'),
-      '0::/user@1000.service/ferretry-fleet.slice/ferretry-agent-s1-ab.scope\n',
+      '0::/user@1000.service/ferretry_fleet.slice/ferretry-agent-s1-ab.scope\n',
     );
 
     // Act / Assert
@@ -386,7 +386,7 @@ describe('reading the fleet slice', () => {
 
   async function fleet(): Promise<{ readonly memory: CgroupFleetMemory; readonly slice: string }> {
     const root = await mkdtemp(join(tmpdir(), 'ferretry-fleet-'));
-    const slice = join(root, MANAGER, 'ferretry-fleet.slice');
+    const slice = join(root, MANAGER, 'ferretry_fleet.slice');
     const scope = join(slice, `ferretry-agent-${SESSION}-a1b2c3d4.scope`);
     await mkdir(scope, { recursive: true });
     await mkdir(join(root, 'proc', '4242'), { recursive: true });
@@ -429,6 +429,23 @@ describe('reading the fleet slice', () => {
 
     // Assert
     should(actual).deepEqual([{ argv: 'bun test --coverage', rssBytes: 2560 * 4096 }]);
+  });
+
+  it('should read a slice whose name nests the way systemd nests it', async () => {
+    // Arrange — `a-b-c.slice` is `a.slice/a-b.slice/a-b-c.slice`, never `<manager>/a-b-c.slice`
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-nested-'));
+    const nested = join(root, MANAGER, 'ferretry.slice', 'ferretry-fleet.slice');
+    await mkdir(nested, { recursive: true });
+    await writeFile(join(nested, 'memory.events'), 'low 0\nhigh 12\nmax 0\noom 0\noom_kill 0\n');
+    const host = { ...unmeasuredHostFacts(), platform: 'linux', ownCgroup: `${MANAGER}/app.slice/fyd.service` };
+
+    // Act
+    const actual = await new CgroupFleetMemory(host, 'ferretry-fleet.slice', root).read();
+    const flat = await new CgroupFleetMemory(host, 'ferretry_fleet.slice', root).read();
+
+    // Assert
+    should(actual?.events.high).equal(12);
+    should(flat).equal(undefined);
   });
 
   it('should answer nothing, not an error, before any ferret has launched', async () => {
