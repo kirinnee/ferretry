@@ -115,7 +115,7 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'PATCH /v1/analytics/pricing': 'the cost table for usage reports; reaches nobody',
   'POST /v1/analytics/pricing/sync/preview': 'a read with a body: previews a price sync',
   'POST /v1/analytics/pricing/sync/apply': 'the cost table for usage reports; reaches nobody',
-  'POST /v1/sessions/:sessionId/terminals/:terminalId': 'renames a terminal; opening and attaching are audited',
+  'PATCH /v1/sessions/:sessionId/terminals/:terminalId': 'renames a terminal; opening and attaching are audited',
   // The agent tools are audited MORE finely than this table can: a route rule may read a path parameter
   // and response names, never the body, and what matters here — which tool, on which named surface,
   // how much was typed — is in the body. `AgentToolService` writes one `agent.tool` record per call and
