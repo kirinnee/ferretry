@@ -2045,14 +2045,6 @@ export interface DaemonWorld {
      * supplied.
      */
     browserLogin: BrowserLoginLifecycle,
-    /**
-     * Dictation enhancement, passed IN for the same reason as every other host adapter here: one call
-     * spends the operator's provider credential over the network. A test substitutes this and keeps
-     * the route, the credentials and the dispatcher exactly as production builds them. The voice module
-     * reads the same value from the effective world (`seamsOf.voice`), so the factory itself no longer
-     * uses this argument; it goes with the rest of the positional adapters when the tidy-up PR lands.
-     */
-    sttEnhancement: SttEnhancementSubsystem,
     /** Local paths are configuration, so the catalog is constructed against this exact document. */
     catalogs: CatalogSubsystem,
     /** Operator-owned API-equivalent pricing for this daemon's analytics only. */
@@ -9684,7 +9676,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       reviver,
       preflight,
       browserLogin,
-      _sttEnhancement,
       catalogs,
       worktrees,
       analyticsStore,
@@ -14499,7 +14490,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     reviver,
     world.migratePreflight,
     world.browserLogin.window,
-    world.sttEnhancement,
     catalogs,
     {
       operations: world.worktrees,

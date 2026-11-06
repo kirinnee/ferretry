@@ -98,7 +98,11 @@ strip_strings() {
 }
 
 check_root() {
-  local file="$1" interface="$2" package_src="$3"
+  local file="$1" interface="$2"
+  shift 2
+  # Every remaining argument is a directory a read of a field may live in. A composition root that
+  # hands a field to extracted modules reads it there, so the scan covers where the reads really are.
+  local scan_dirs=("$@")
   [ -f "${file}" ] || return 0
 
   local fields
@@ -132,7 +136,7 @@ check_root() {
         elsewhere=1
         break
       fi
-    done <<<"$({ grep -rlE "\b${field}\b" "${package_src}" 2>/dev/null || true; })"
+    done <<<"$({ grep -rlE "\b${field}\b" "${scan_dirs[@]}" 2>/dev/null || true; })"
     if [ "${in_root}" -le 2 ] && [ "${elsewhere}" -eq 0 ]; then
       # A field may be DECLARED blocked — calling it would be wrong or impossible — in
       # invocation-blocked.txt, with the blocker stated. Anything else fails.
@@ -165,7 +169,9 @@ check_root() {
   fi
 }
 
-check_root "${daemon_root}" DaemonWorld packages/daemon/src
+# The daemon root hands world fields to extracted modules under bin/modules, which read them through
+# `seamsOf`; those reads are real calls, so the gate scans them beside src.
+check_root "${daemon_root}" DaemonWorld packages/daemon/src packages/daemon/bin/modules
 check_root "${cli_root}" CliWorld packages/cli/src
 
 if [ "${status}" -ne 0 ]; then
