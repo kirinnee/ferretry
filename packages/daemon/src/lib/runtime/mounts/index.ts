@@ -51,8 +51,6 @@ import type { AgendaGatePort } from './agenda-gates.ts';
 import { agendaMachineRoutes } from './agenda-machine.ts';
 import { agendaOpenRoutes } from './agenda-open.ts';
 import { agentToolRoutes, sessionCredentialDirectory } from './agent-tools.ts';
-import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
-import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
 import { type BoardSubsystem, boardRoutes } from './board.ts';
 import { type BoardProjectsSubsystem, type BoardSwitchSubsystem, boardProjectRoutes } from './board-projects.ts';
@@ -403,10 +401,6 @@ export interface MountedSubsystems {
   /** The board's GitHub watcher (board-design.md §3.1): it serves no route, and it is a mounted subsystem
    *  for the reason `handoverReconcile` is — a loop nothing arms is a watcher that never looks. */
   readonly boardGitHub: { arm(): () => void };
-  /** The fleet-wide analytics read over every finished session the daemon has ingested. */
-  readonly analytics: AnalyticsSubsystem;
-  /** Operator-owned future pricing plus exact-preview synchronization from configured feeds. */
-  readonly analyticsPricing: AnalyticsPricingSubsystem;
   /** The other half of analytics: the pass that PUTS a finished session in the store, folding its
    *  transcript once and pricing it at the rates in force when the row was written. It serves no route
    *  — nobody asks for an ingestion — and it is a mounted subsystem for the reason `monitor` is: a
@@ -746,8 +740,6 @@ export function legacyModule(
               ...workSearchRoutes(subsystems.workSearch),
               // `/v1/tidy/plan` is a fixed literal no other subsystem uses.
               ...tidyRoutes(subsystems.tidy),
-              ...analyticsRoutes(subsystems.analytics),
-              ...analyticsPricingRoutes(subsystems.analyticsPricing),
               // The agent's route is a fixed literal under `/v1/agent`, and a person's are under
               // `/v1/sessions/:sessionId/surfaces`, which no other subsystem uses: none can shadow or be shadowed.
               ...agentToolRoutes(subsystems.agentTools.service, subsystems.agentTools.identities),

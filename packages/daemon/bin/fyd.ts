@@ -19,7 +19,6 @@ import {
   hostCodexHome,
   InMemoryCredentialStatusStore,
   launchInstructions,
-  type ModelCatalog,
   manifestRuntimes,
   PACK_ENV,
   PACK_ROUTING_ENV,
@@ -147,11 +146,8 @@ import { createSessionArchive } from '../src/adapters/session/archive/index.ts';
 import { StorageCredentialedSessions } from '../src/adapters/agent-tools/index.ts';
 import {
   BunSqliteAnalyticsStoreFactory,
-  HttpAnalyticsPricingFeed,
   InlineAnalyticsPersister,
-  readAnalyticsTranscriptEvidence,
   WorkerAnalyticsPersister,
-  WorkerTranscriptFolds,
 } from '../src/adapters/analytics/index.ts';
 import {
   decryptPdfInMemory,
@@ -597,10 +593,6 @@ import {
 } from '../src/adapters/worktrees/index.ts';
 import { type AgendaMutation, closestAgenda, isAgendaSessionId } from '../src/lib/agenda/index.ts';
 import { snapshotAnalyticsUsagePricing } from '../src/lib/analytics/pricing.ts';
-import {
-  type AnalyticsPricingConfigurationPort,
-  AnalyticsPricingService,
-} from '../src/lib/analytics/pricing-service.ts';
 import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts';
 import {
   AgendaCardLinks,
@@ -757,12 +749,7 @@ import {
   ANSWER_MAY_HAVE_LANDED,
   ANSWER_NOT_DELIVERED,
   type AnalyticsIndexStoreFactory,
-  type AnalyticsIngestCandidate,
-  type AnalyticsIngestCandidateSource,
-  AnalyticsIngestionService,
-  type AnalyticsSubsystem,
-  type AnalyticsTranscriptEvidenceSource,
-  type AnalyticsTranscriptFoldSource,
+  type AnalyticsIngestionService,
   AnswerAcknowledged,
   AnswerAlreadyAnswered,
   AnswerReleased,
@@ -1038,7 +1025,6 @@ import {
   migrateAgendaFiles,
   migrateToAgendaHomes,
   migrateToAgendaMode,
-  modelCatalogPricingRates,
   modelCatalogsView,
   type NameAllocationErrorCode,
   type NameAllocationRequest,
@@ -1070,8 +1056,6 @@ import {
   type PairingService,
   type PaneLimit,
   PasskeysChangedSignal,
-  PassTrigger,
-  type PassTriggerTimers,
   PasteRuleService,
   PasteRuleStages,
   PhoneApprovalAgendaAdapter,
@@ -1318,7 +1302,6 @@ import {
   supersededCarrierKeys,
   TaskPlanAgendaAdapter,
   TaskPlanService,
-  TERMINAL_ANALYTICS_STATUSES,
   TEST_MODE_VARIABLE,
   TEST_TIMINGS_VARIABLE,
   TeamAdvisor,
@@ -1439,6 +1422,7 @@ import { PerformanceProfiler, sampleIntervalMs } from '../src/lib/performance/pr
 import { NO_PERFORMANCE_PROBE, PerformanceRecorder } from '../src/lib/performance/recorder.ts';
 import { teeStackSampler } from '../src/lib/performance/sampler-tee.ts';
 import type { BuiltModule, ModuleLifecycle } from '../src/lib/runtime/modules.ts';
+import { analyticsModule } from './modules/analytics.ts';
 import { cgroupsModule, createCgroupLaunchLimits } from './modules/cgroups.ts';
 import { learningModule } from './modules/learning.ts';
 import { type ModuleHandles, seamsOf } from './modules/seams.ts';
@@ -6411,24 +6395,8 @@ export function createSessionHandoverSubsystem(
   );
 }
 
-/**
- * How many finished sessions may have their transcripts folded at once.
- *
- * Small on purpose. Each read is individually bounded, so the risk is never one enormous file — it
- * is a fleet's worth of bounded reads resident at the same instant.
- */
-const ANALYTICS_FOLD_CONCURRENCY = 4;
-
 /** The statuses after which a session's transcript no longer changes and no watcher needs to read it. */
 const ENDED_SESSION_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
-
-/**
- * How many transcripts one ingestion pass may read; the rest wait for the catch-up pass, a minute later.
- *
- * A rebuild used to read every finished transcript in one pass, every boot — on a large Mac fleet,
- * hundreds of megabytes parsed while the daemon was trying to answer its first requests.
- */
-const ANALYTICS_READS_PER_PASS = 8;
 
 /**
  * What a profile cannot attribute to an event: the slow backstops the event-driven housekeeping keeps,
@@ -6446,33 +6414,6 @@ function housekeepingBackstopLimitation(): string {
 }
 
 /**
- * One-shot timers for a {@link PassTrigger}, fired OUTSIDE every activity: the timer is armed by the pass
- * before, and would otherwise count the next pass inside it. Unreferenced, so a pending pass never holds
- * the process open.
- */
-function outsideActivityTimers(activities: ActivityLedger | undefined): PassTriggerTimers {
-  return {
-    setTimeout: (callback, ms) => {
-      const handle = setTimeout(() => (activities === undefined ? callback() : activities.outside(callback)), ms);
-      handle.unref?.();
-      return handle;
-    },
-    clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
-  };
-}
-
-/**
- * Every session the daemon holds durable documents for, as ingestion candidates.
- *
- * IT DOES NOT DECIDE ANYTHING. No gate, no fold, no pricing: it parses the two documents and hands
- * over what they say, including whether they say a session ended. Pre-filtering here would put a
- * second, unstated copy of the terminal-state rule in the composition root, where nothing tests it.
- *
- * Both documents are PARSED, and a session whose pair does not parse is left out entirely rather than
- * contributed with holes: an analytics row assembled from a config the schema rejected is a row whose
- * provenance nobody can state.
- */
-/**
  * A session's moves before this one, oldest first: its `migrations` list, or — on a session that predates it —
  * the single `migration` it carries. Read from the raw config, so a malformed entry is dropped, not thrown.
  */
@@ -6481,124 +6422,6 @@ function priorMigrations(config: Readonly<Record<string, unknown>>): { from: str
   if (!parsed.success) return [];
   if (parsed.data.migrations !== undefined) return [...parsed.data.migrations];
   return parsed.data.migration === undefined ? [] : [parsed.data.migration];
-}
-
-function createAnalyticsCandidateSource(storage: DaemonStorage): AnalyticsIngestCandidateSource {
-  const candidate = async (id: SessionId): Promise<AnalyticsIngestCandidate | undefined> => {
-    const [rawConfig, rawState] = await Promise.all([storage.readConfig(id), storage.readState(id)]);
-    const config = SessionConfigSchema.safeParse(rawConfig);
-    const state = SessionStateSchema.safeParse(rawState);
-    if (!config.success || !state.success) return undefined;
-    return {
-      id,
-      transcriptHarness: config.data.harness === 'codex' ? 'codex' : 'claude',
-      agent: config.data.agent,
-      // The SELECTED model only. `observedModel` is transcript evidence, and the record's own
-      // contract forbids substituting it for what the operator asked for.
-      selectedModel: config.data.model ?? null,
-      contextWindow: state.data.contextWindow ?? null,
-      harness: config.data.harness,
-      mode: config.data.mode,
-      label: config.data.label ?? null,
-      cwd: config.data.cwd,
-      parent: config.data.parent ?? null,
-      createdAt: config.data.createdAt,
-      startedAt: state.data.startedAt ?? null,
-      finishedAt: state.data.finishedAt ?? null,
-      status: state.data.status,
-      // Time-to-first-output is transcript evidence the daemon does not index; a launch instant is
-      // not an output, so reporting one here would mismeasure every session.
-      firstOutputAt: null,
-      turns: state.data.turn,
-      contextEndPercent: state.data.contextPercent ?? null,
-      migrated: config.data.migration !== undefined,
-    };
-  };
-  return {
-    // Finished sessions the archive took out of the list keep the rows ingested when they ended; one never ingested is read on demand.
-    archived: () => storage.listArchivedSessions().map(session => session.id),
-    candidate: async id => await candidate(parseSessionId(id)),
-    listCandidates: async () => {
-      // Read in bounded batches rather than all at once. Each document read is small, but a fleet with
-      // hundreds of sessions would hold every one of them resident under an unbounded `Promise.all`.
-      //
-      // FROM THE INDEX FIRST. Its status is written with every state document, and a session it says is
-      // still running is one the gate refuses anyway — so only an ended session, or one whose status the
-      // index does not know, has its two documents read and parsed.
-      const ids = storage
-        .listSessions()
-        .filter(
-          session =>
-            session.status === undefined || (TERMINAL_ANALYTICS_STATUSES as ReadonlySet<string>).has(session.status),
-        )
-        .map(session => session.id);
-      const candidates: AnalyticsIngestCandidate[] = [];
-      for (let start = 0; start < ids.length; start += ANALYTICS_FOLD_CONCURRENCY) {
-        const batch = await Promise.all(ids.slice(start, start + ANALYTICS_FOLD_CONCURRENCY).map(id => candidate(id)));
-        candidates.push(...batch.filter((entry): entry is AnalyticsIngestCandidate => entry !== undefined));
-      }
-      return candidates;
-    },
-  };
-}
-
-/**
- * Analytics ingestion, over this daemon's own state home.
- *
- * WHY INGESTION EXISTS AT ALL. The read used to derive everything per request — every session's
- * documents parsed and its whole transcript folded, on every question — so the cost of one query grew
- * with the entire history of the fleet, and nothing richer could be built on top of it. A session is
- * now folded and priced ONCE, when it reaches a durable terminal state, and the query reads the result.
- *
- * THE STORE IS THIS DAEMON'S ALONE. It lives under this state home, and the file records the home it
- * was built for; a copied or restored index naming another home is discarded on open rather than
- * served, because one daemon's spend reported as another's is a wrong answer, not a stale one.
- *
- * THE PRICING CATALOG is this daemon's validated operator rates laid over the list prices the model
- * catalogs in effect carry (docs/model-catalog.md § Prices), read per pass, so an operator's edit or a
- * newer published catalog takes effect on the next ingestion — and, because the catalog's fingerprint
- * is part of every row's ingest signature, re-prices the rows it changes. An operator rate wins for its
- * whole model. A model neither prices stays `unpriced` with a reason — the honest answer; a zero would
- * read as free.
- */
-function createAnalyticsIngestion(
-  storage: DaemonStorage,
-  opened: OpenedAnalyticsIndexStore,
-  pricingConfiguration: AnalyticsPricingConfigurationPort,
-  modelCatalogs: () => Promise<Readonly<Record<string, ModelCatalog>>>,
-  evidence: AnalyticsTranscriptEvidenceSource,
-  folds: AnalyticsTranscriptFoldSource,
-  clock: ClockPort,
-  activities: ActivityLedger | undefined,
-): AnalyticsIngestionService {
-  return new AnalyticsIngestionService({
-    candidates: createAnalyticsCandidateSource(storage),
-    evidence,
-    folds,
-    store: opened.store,
-    pricing: async () => {
-      const read = await pricingConfiguration.readPricing();
-      if (read.kind === 'unavailable') throw new Error(`analytics ingestion refused because ${read.message}`);
-      return effectiveAnalyticsPricing(read.configuration.catalog, await modelCatalogs());
-    },
-    clock,
-    concurrency: ANALYTICS_FOLD_CONCURRENCY,
-    readsPerPass: ANALYTICS_READS_PER_PASS,
-    rebuildRequired: opened.rebuildRequired,
-    trigger: new PassTrigger({
-      backstopMs: ANALYTICS_BACKSTOP_MS,
-      timers: outsideActivityTimers(activities),
-      now: () => performance.now(),
-    }),
-  });
-}
-
-/** The analytics read, over the rows ingestion materialised, stamped with this machine's name. */
-function createAnalyticsSubsystem(
-  ingestion: AnalyticsIngestionService,
-  machine: () => string | null,
-): AnalyticsSubsystem {
-  return { index: () => ingestion.read(), machine };
 }
 
 /**
@@ -8963,31 +8786,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       locator,
       new TranscriptImageReader(locator, new NodeTranscriptImageFiles(), pacedTranscriptParsers),
     );
-  };
-  /**
-   * A finished session's whole transcript, read once, for the analytics token total.
-   *
-   * It is a SEPARATE read from `createSessionTranscriptTail` because the two want opposite things:
-   * a tail wants the last few events and does not care what it skipped, while a bill has to account
-   * for every request the session made. This one therefore reports how the read ENDED — the issues
-   * raised and the bytes still pending — so the fold can refuse a total it cannot prove complete
-   * instead of returning a smaller number that looks like a cheaper session.
-   *
-   * The parsed events are NOT retained. The subsystem memoizes the small folded total instead, so a
-   * transcript's bytes live only as long as the fold that consumes them; holding the event list per
-   * session is how a daemon with a busy fleet runs itself out of memory.
-   */
-  const createAnalyticsTranscriptEvidence = (storage: DaemonStorage): AnalyticsTranscriptEvidenceSource => {
-    const resolver = createTranscriptFileResolver(storage);
-    return {
-      evidenceFor: async (sessionId, harness) => {
-        const file = await resolver.file(sessionId).catch(() => undefined);
-        if (file === undefined) return { kind: 'unresolved' };
-        const source = transcriptSources.find(candidate => candidate.harness === harness);
-        if (source === undefined) return { kind: 'unreadable' };
-        return await readAnalyticsTranscriptEvidence(source, file, sessionId, harness);
-      },
-    };
   };
   /** One live writer per harness conversation (account model §9.3), over the shared pool's lease files. */
   const conversationLeases = (storage: DaemonStorage): ConversationLeases =>
@@ -11873,49 +11671,25 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       armAgendaNudge(storage, boardGateCheck, AGENDA_NUDGE_SETTLE_MS, (run, delayMs) => {
         setTimeout(run, delayMs).unref();
       });
-      // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
-      // that reads them. Two would each hold their own account of whether a pass is in flight, and the
-      // read would report `refreshing: false` while the loop was mid-pass.
-      // The model catalogs in effect, for their list prices. Read lazily: the catalog service is built
-      // below, and nothing prices a session before the subsystems mount.
-      const pricedModelCatalogs = async () => await modelCatalogService.catalogs();
-      // Read and folded on a worker thread: the event loop only resolves which file to read. Held here
-      // so a performance profile can sample how many folds the thread holds.
-      const transcriptFolds = new WorkerTranscriptFolds(
-        (
-          resolver => async (sessionId: string) =>
-            await resolver.file(sessionId)
-        )(createTranscriptFileResolver(storage)),
-      );
-      const analyticsIngestion = createAnalyticsIngestion(
-        storage,
-        analyticsStore,
-        daemonConfigStore,
-        pricedModelCatalogs,
-        createAnalyticsTranscriptEvidence(storage),
-        transcriptFolds,
-        clock,
-        activities,
-      );
-      // A session that ends — or a revived one the index still holds — is what moves analytics, and
-      // storage says so as it writes (docs/design/housekeeping-worker.md §4 PR 4). For as long as the
-      // storage is open: closing it drops every listener, this one included.
-      storage.subscribeStates((id, state) => analyticsIngestion.stateWritten(id, state));
-      const analyticsPricing = new AnalyticsPricingService(
-        // The operator's rates: a write through here re-prices what it moved at the next pass.
+      // Analytics (ingestion, the fleet read and the operator's rates): ONE ingestion service for this opened
+      // store, shared by the loop that writes rows and the route that reads them.
+      const analytics = analyticsModule.build(
         {
-          readPricing: async () => await daemonConfigStore.readPricing(),
-          writePricing: async input => {
-            const written = await daemonConfigStore.writePricing(input);
-            analyticsIngestion.pricingChanged();
-            return written;
-          },
+          storage,
+          analyticsStore,
+          config: daemonConfigStore,
+          configMutations: daemonConfigMutations,
+          // The model catalogs in effect, for their list prices. Read lazily: the catalog service is built
+          // below, and nothing prices a session before the subsystems mount.
+          modelCatalogs: async () => await modelCatalogService.catalogs(),
+          transcriptFiles: () => createTranscriptFileResolver(storage),
+          transcriptSources,
+          clock,
+          activities,
+          machineName: () => analyticsMachineName ?? hostname(),
         },
-        new HttpAnalyticsPricingFeed(),
-        daemonConfigMutations,
-        clock,
-        { next: () => crypto.randomUUID() },
-        { modelCatalogRates: async () => modelCatalogPricingRates(await pricedModelCatalogs()) },
+        seamsOf.analytics(world),
+        lifecycle,
       );
       // Hoisted so the handover and restart subsystems below share this exact migrator.
       const sessionMigrate = createSessionMigrateSubsystem({
@@ -12242,7 +12016,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // A newer catalog moves what every runtime offers now, not at the next change somebody makes —
         // and the list prices analytics reads.
         onUpdated: async () => {
-          analyticsIngestion.pricingChanged();
+          analytics.provides.ingestion.pricingChanged();
           await fleetCatalog.republish().catch(() => undefined);
         },
       });
@@ -12268,7 +12042,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         suggested: async () => suggestedOllamaModel(await modelCatalogService.catalogs()),
         now: () => clock.now(),
         onChanged: async () => {
-          analyticsIngestion.pricingChanged();
+          analytics.provides.ingestion.pricingChanged();
           await fleetCatalog.republish().catch(() => undefined);
         },
       });
@@ -12299,7 +12073,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             }));
         },
         authorizer: outboundAuthorizer,
-        spend: new AnalyticsTranscriptSpend(analyticsIngestion),
+        spend: new AnalyticsTranscriptSpend(analytics.provides.ingestion),
         clock: { nowMs: () => millisecondClock.now() },
       });
       providerQuota = quotaReader;
@@ -13134,7 +12908,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             recorder: profilerProbe,
             gauges: new ProcessGauges(),
             workers: [
-              { name: 'analytics-fold', inFlight: () => transcriptFolds.inFlight },
+              { name: 'analytics-fold', inFlight: () => analytics.provides.folds.inFlight },
               { name: 'session-observer', inFlight: () => sessionWorkerSupervisor.inFlight },
               ...(housekeepingJobs instanceof WorkerHousekeepingJobs
                 ? [{ name: HOUSEKEEPING_WORKER, inFlight: () => housekeepingJobs.inFlight }]
@@ -13553,9 +13327,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           subFerrets: boardSubFerrets,
           machineId: () => attachmentDaemonId,
         }),
-        analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
-        analyticsPricing,
-        analyticsIngest: analyticsIngestion,
+        analyticsIngest: analytics.provides.ingestion,
         terminals: terminalSubsystem,
         browserLogin,
         browser: browserHost,
@@ -13604,7 +13376,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // No configuration file is written, and an identical manifest is left alone.
           afterLoad: async () => {
             // A config/models/ file prices models too.
-            analyticsIngestion.pricingChanged();
+            analytics.provides.ingestion.pricingChanged();
             // Credentials the edit added or removed open or close their watches.
             await fleetReading.configLoaded();
             await fleetCatalog.republish().then(
@@ -13876,7 +13648,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             sleep: async milliseconds => await Bun.sleep(milliseconds),
           },
           migrate: sessionMigrate,
-          analytics: analyticsIngestion,
+          analytics: analytics.provides.ingestion,
           events: listener => storage.subscribeEvents(listener),
           livenessSample: async target => await sessionObserver.liveness(target),
           // The pane's tree is read AGAIN here, at the moment of closing, and only the top-level browsers
@@ -14307,7 +14079,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         catalogMembers: { members: catalogMembers },
         catalogLinks: { links: catalogLinks },
       };
-      return { mounted: builtSubsystems, modules: { cgroups, learning } };
+      return { mounted: builtSubsystems, modules: { cgroups, learning, analytics } };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: millisecondClock,
@@ -15289,7 +15061,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     analyticsStore.rebuildRequired ? subsystems.analyticsIngest.rebuild() : subsystems.analyticsIngest.ingest(),
   );
   cleanups.push(
-    subsystems.analyticsIngest.arm(() => {
+    modules.analytics.jobs.arm(() => {
       lane.submit('analytics ingest', () => subsystems.analyticsIngest.ingest());
     }),
   );
