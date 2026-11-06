@@ -1,7 +1,7 @@
 import type { SessionList, SessionView } from '@ferretry/protocol';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
-import { conditionalWithTag, entityTag, jsonResponse } from '../../api/responses.ts';
+import { conditionalWithTag, entityTag, jsonResponse, jsonTextResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
 /**
@@ -104,16 +104,48 @@ function createListRoute(subsystem: SessionDirectorySubsystem) {
    * JSON by construction — its body and tag are reused, and an `If-None-Match` that names the tag is answered
    * without rendering or hashing anything. Any element that is a different object, or a list of another
    * length, is rendered afresh: identity may miss a body that happens to be equal, never serve one that differs.
+   *
+   * AND A NEW LIST RENDERS ONLY ITS NEW VIEWS. With forty sessions running, some view moves on almost every
+   * read, so "the same list" is rare; but of ~2,400 views only the few that moved are new objects. Each
+   * view's JSON is kept beside the view itself ({@link renderSessionList}), so a changed list costs the
+   * stringify of its changed views and one join, not ~6 MB of serialisation: on 2026-11-05 that whole-list
+   * stringify was the hottest frame of the stalls the daemon had while its disk was calm.
    */
   let previous: { readonly sessions: SessionList; readonly response: ApiResponse; readonly etag: string } | undefined;
   return async (context: RouteContext): Promise<ApiResponse> => {
     const sessions: SessionList = [...(await subsystem.list().catch(refuse))];
     if (previous === undefined || !sameSessions(previous.sessions, sessions)) {
-      const response = jsonResponse(sessions);
+      const response = jsonTextResponse(renderSessionList(sessions));
       previous = { sessions, response, etag: entityTag(response.body) };
     }
     return conditionalWithTag(previous.response, previous.etag, context.request.headers.get('if-none-match'));
   };
+}
+
+/**
+ * The JSON of each view the list route has served, held for exactly as long as the view itself lives.
+ *
+ * Keyed by the view OBJECT, never its id: a session that moved is a new view, so its entry is simply never
+ * found again and is collected with the old view. That is the same identity contract the route's whole-list
+ * reuse already rests on — the reader never mutates a view it has handed out.
+ */
+const renderedViews = new WeakMap<SessionView, string>();
+
+/**
+ * The list's JSON, built from each view's own JSON: byte-for-byte what `JSON.stringify(sessions)` spells,
+ * because an array of objects serialises as its elements' serialisations joined by commas in brackets.
+ */
+export function renderSessionList(sessions: SessionList): string {
+  const parts = new Array<string>(sessions.length);
+  for (const [at, view] of sessions.entries()) {
+    let json = renderedViews.get(view);
+    if (json === undefined) {
+      json = JSON.stringify(view);
+      renderedViews.set(view, json);
+    }
+    parts[at] = json;
+  }
+  return `[${parts.join(',')}]`;
 }
 
 /** Whether two lists hold, position for position, the very same view objects. */

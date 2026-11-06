@@ -288,6 +288,19 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # Daemon code holds exactly the synchronous file calls its ledger declares. The daemon's main thread
+    # answers every client, and on 2026-11-05 it stalled up to 61.9 s while swap saturated the disk; a sync
+    # call holds every client for as long as the disk takes. See scripts/validate/no-sync-io.sh and
+    # scripts/validate/sync-io-allowlist.txt.
+    a-no-sync-io = {
+      enable = true;
+      name = "Daemon code declares every synchronous IO call";
+      entry = validator "scripts/validate/no-sync-io.sh";
+      files = "^(packages/(daemon/(src|bin)|fleet/src)/.*\\.ts|scripts/validate/(no-sync-io\\.(sh|ts)|sync-io-allowlist\\.txt))$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-no-fy-render-in-docs = {
       enable = true;
       name = "No fy-render fences in durable files";

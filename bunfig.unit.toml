@@ -28,4 +28,8 @@ coveragePathIgnorePatterns = [
   # (docs/loopback-firewall.md). Bun records a text import as a covered "file", so a tier that loads the
   # bundle would otherwise report `scripts/host/…` and fail on a PATH, not on a test.
   "scripts/host/**",
+  # REPO GATES, which are pre-commit tools and not package code. A unit test that imports one to pin its
+  # parser (`no-sync-io-gate.test.ts` → `scripts/validate/no-sync-io.ts`) would otherwise land it in the
+  # ledger, which admits only `src/lib/`; the gate's own planted-violation tests are what hold it.
+  "scripts/validate/**",
 ]

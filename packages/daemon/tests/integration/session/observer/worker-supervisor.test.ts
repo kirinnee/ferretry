@@ -359,9 +359,12 @@ describe('WorkerSupervisor', () => {
     subject.reconcile([wanted(A, 'fy-a-relaunched')]);
     subject.reconcile([]);
     advance(2_000);
+    const beforeStopped = workers[0]?.terminated;
+    workers[0]?.answer({ kind: 'stopped' });
 
-    // Assert — the thread is drained, then ended.
-    should(workers[0]?.kinds()).deepEqual(['probe', 'attach', 'facts', 'bind', 'detach']);
+    // Assert — the thread is drained, told to end its clients, then ended once they have.
+    should(workers[0]?.kinds()).deepEqual(['probe', 'attach', 'facts', 'bind', 'detach', 'stop']);
+    should(beforeStopped).be.false();
     should(workers[0]?.terminated).be.true();
     should(subject.hosts(A)).be.false();
   });
@@ -380,6 +383,7 @@ describe('WorkerSupervisor', () => {
     // Assert — an emptied thread is never handed new work: it ends after its drain.
     should(workers.length).equal(2);
     workers[1]?.ready();
+    workers[0]?.answer({ kind: 'stopped' });
     should(workers[0]?.terminated).be.true();
     should(subject.hosts(B)).be.true();
   });
@@ -429,12 +433,94 @@ describe('WorkerSupervisor', () => {
     workers[1]?.answer({ kind: 'fault', message: 'not fatal', fatal: false });
     const afterSoftFault = workers[1]?.terminated;
     workers[1]?.answer({ kind: 'fault', message: 'fatal', fatal: true });
+    advance(5_000);
 
     // Assert
     await should(stuck).be.rejectedWith(/no answer within 500 ms/);
     should(workers[0]?.terminated).be.true();
     should(afterSoftFault).be.false();
     should(workers[1]?.terminated).be.true();
+  });
+
+  it('should let a live thread it ends stop its tmux clients first, so none is left unreaped', async () => {
+    // Arrange — a look that misses its timeout ends a thread that is slow, not dead.
+    const { subject, workers, advance } = rig(8, { lookTimeoutMs: 500 });
+    subject.reconcile([wanted(A)]);
+    workers[0]?.ready();
+    const stuck = subject.request(A, { kind: 'pane' });
+
+    // Act
+    advance(500);
+    const askedToStop = workers[0]?.kinds().at(-1);
+    const terminatedAtOnce = workers[0]?.terminated;
+    workers[0]?.answer({ kind: 'stopped' });
+
+    // Assert — its look and session are released at once; only the thread's own exit waits for its clients.
+    await should(stuck).be.rejectedWith(/no answer within 500 ms/);
+    should(subject.hosts(A)).be.false();
+    should(askedToStop).equal('stop');
+    should(terminatedAtOnce).be.false();
+    should(workers[0]?.terminated).be.true();
+  });
+
+  it('should wait for, then terminate, a thread still ending its clients when the daemon stops', async () => {
+    // Arrange — a drained thread was told to stop and has not answered yet.
+    const { subject, workers, advance } = rig();
+    subject.reconcile([wanted(A)]);
+    workers[0]?.ready();
+    subject.reconcile([]);
+    advance(2_000);
+
+    // Act
+    const stopping = subject.stop(1_000);
+    const terminatedBeforeAnswer = workers[0]?.terminated;
+    workers[0]?.answer({ kind: 'stopped' });
+    await stopping;
+
+    // Assert
+    should(terminatedBeforeAnswer).be.false();
+    should(workers[0]?.terminated).be.true();
+  });
+
+  it('should terminate a still-ending thread when the daemon closes, and leave no timer to fire later', () => {
+    // Arrange
+    const { subject, workers, advance } = rig();
+    subject.reconcile([wanted(A)]);
+    workers[0]?.ready();
+    subject.reconcile([]);
+    advance(2_000);
+
+    // Act
+    subject.close();
+    const terminatedAtClose = workers[0]?.terminated;
+    let terminations = 0;
+    const worker = workers[0];
+    if (worker !== undefined)
+      worker.terminate = () => {
+        terminations += 1;
+      };
+    advance(10_000);
+    worker?.answer({ kind: 'stopped' });
+
+    // Assert
+    should(terminatedAtClose).be.true();
+    should(terminations).equal(0);
+  });
+
+  it('should terminate at once a thread that has itself failed or exited: there is nobody to ask', () => {
+    // Arrange
+    const { subject, workers } = rig();
+    subject.reconcile([wanted(A), wanted(B)]);
+    workers[0]?.ready();
+    workers[1]?.ready();
+
+    // Act
+    workers[0]?.fail('segfault');
+    workers[1]?.exit();
+
+    // Assert
+    should(workers.map(worker => worker.terminated)).deepEqual([true, true]);
+    should(workers.map(worker => worker.kinds().includes('stop'))).deepEqual([false, false]);
   });
 
   it('should keep a session inline after five crashes in ten minutes, and say so once', () => {

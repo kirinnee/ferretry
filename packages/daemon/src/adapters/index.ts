@@ -72,6 +72,7 @@ export * from './storage/sqlite-index.ts';
 export * from './storage/state-home-layout.ts';
 export * from './storage/storage-factory.ts';
 export * from './storage/write-behind-index.ts';
+export * from './storage/listed-session-index.ts';
 export * from './stt/index.ts';
 export * from './system/keyed-serial-executor.ts';
 export * from './system/runtime-environment.ts';
