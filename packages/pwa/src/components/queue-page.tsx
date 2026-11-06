@@ -146,20 +146,20 @@ function QueueRowView({
         type="button"
       >
         <StatusLabel status={status} />
-        <span className="fy-queue-sender" data-queue-meta="from">
+        <span className="fy-queue-sender" data-queue-meta="from" title={fromLabel(row)}>
           {fromLabel(row)}
         </span>
-        {next ? (
-          <span className="fy-queue-next-chip" data-queue-chip="next">
-            Next<span className="sr-only"> up</span>
+        <span className="fy-queue-words">
+          {next ? (
+            <span className="fy-queue-next-chip" data-queue-chip="next">
+              Next<span className="sr-only"> up</span>
+            </span>
+          ) : null}
+          <span className="fy-queue-snippet" data-queue-snippet="">
+            {firstLine(row.text)}
           </span>
-        ) : null}
-        <span className="fy-queue-snippet" data-queue-snippet="">
-          {firstLine(row.text)}
         </span>
-        {ago === '' ? (
-          <span />
-        ) : (
+        {ago === '' ? null : (
           <time className="fy-queue-ago" dateTime={row.at} title={absoluteTime(row.at)}>
             {ago}
           </time>

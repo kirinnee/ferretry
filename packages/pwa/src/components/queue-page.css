@@ -206,11 +206,12 @@
 .fy-queue-row:last-child {
   border-bottom: 0;
 }
-/* ONE line. The status column never shrinks (and is wide enough that "Delivered" cannot touch the sender); the sender
-   is only as wide as its name, up to a cap, and ends in an ellipsis past it; the words take everything that is left;
-   nothing wraps, so no line can begin with a stray separator. */
+/* Desktop: ONE line on a grid with fixed tracks — status, sender, words, time — so the words start at the same x on
+   every row. A sender wider than its track ends in an ellipsis (its full name is the title); the words take what is
+   left; nothing wraps. On a narrow window the same cells re-flow into two lines (see the media query below). */
 .fy-queue-line {
-  display: flex;
+  display: grid;
+  grid-template-columns: 6.5rem 9.5rem minmax(0, 1fr) auto;
   align-items: center;
   gap: 0 12px;
   width: 100%;
@@ -220,6 +221,12 @@
   font-size: var(--text-sm, 0.875rem);
   line-height: 1.4;
 }
+.fy-queue-words {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .fy-queue-line:hover {
   background: var(--surface-2, transparent);
 }
@@ -228,8 +235,6 @@
   outline-offset: -2px;
 }
 .fy-queue-status {
-  flex: none;
-  min-width: 6.5rem;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -263,8 +268,6 @@
   white-space: nowrap;
 }
 .fy-queue-sender {
-  flex: 0 1 auto;
-  max-width: min(30%, 14rem);
   color: var(--muted);
 }
 .fy-queue-snippet {
@@ -273,7 +276,6 @@
 /* The message that goes next says so, in a word, right before its words. */
 .fy-queue-next-chip {
   flex: none;
-  margin-inline-end: -4px;
   padding: 0 6px;
   /* Smaller than the words around it: a tag, not a second headline. */
   border-radius: var(--radius-pill);
@@ -285,7 +287,6 @@
   white-space: nowrap;
 }
 .fy-queue-ago {
-  flex: none;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -391,8 +392,8 @@
   margin: 0 0 8px;
   color: var(--muted);
 }
-/* A thumb's 44px, on a touch screen (the global floor) and on any narrow window, mouse or not. The line stays ONE line:
-   the status column narrows, the sender stays as short as its name (30% at most), the words take the rest. */
+/* A thumb's 44px, on a touch screen (the global floor) and on any narrow window, mouse or not. Each row becomes TWO
+   tight lines: status · sender · Next · time (time at the far end), then the words, clamped to two lines. */
 @media (max-width: 640px) {
   .fy-queue-page {
     padding: 0 12px 12px;
@@ -408,16 +409,44 @@
     flex-basis: 100%;
   }
   .fy-queue-line {
-    gap: 0 8px;
+    grid-template-columns: auto minmax(0, auto) auto 1fr;
+    gap: 2px 0;
     min-height: 44px;
-    padding-inline: 4px;
+    padding: 6px 4px;
     font-size: 0.8125rem;
   }
   .fy-queue-status {
-    min-width: 5.1rem;
+    grid-column: 1;
+    grid-row: 1;
   }
   .fy-queue-sender {
-    max-width: 30%;
+    grid-column: 2;
+    grid-row: 1;
+    padding-inline-start: 8px;
+  }
+  .fy-queue-words {
+    display: contents;
+  }
+  .fy-queue-next-chip {
+    grid-column: 3;
+    grid-row: 1;
+    margin-inline-start: 8px;
+  }
+  .fy-queue-ago {
+    grid-column: 4;
+    grid-row: 1;
+    justify-self: end;
+    padding-inline-start: 8px;
+  }
+  .fy-queue-snippet {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
   .fy-queue-detail {
     padding-inline: 4px;

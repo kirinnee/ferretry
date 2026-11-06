@@ -309,13 +309,29 @@ try {
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${view} ${device.name} ${scheme} scrolls sideways by ${overflow}px`);
           if (view === 'waiting' || view === 'sent') {
-            // A compact row is ONE line: no row may be taller than a thumb's worth of text.
+            // A compact row is ONE line on a desktop and TWO on a phone (the words clamp to two): no row may be taller.
+            const limit = device.name === 'phone' ? 84 : 60;
             const tall = await rows.evaluateAll(
-              nodes =>
-                nodes.filter(node => !node.hasAttribute('data-queue-open') && node.getBoundingClientRect().height > 60)
+              (nodes, max) =>
+                nodes.filter(node => !node.hasAttribute('data-queue-open') && node.getBoundingClientRect().height > max)
                   .length,
+              limit,
             );
-            if (tall > 0) fail(`${view} ${device.name} ${scheme}: ${tall} collapsed rows are taller than one line`);
+            if (tall > 0) fail(`${view} ${device.name} ${scheme}: ${tall} collapsed rows are taller than ${limit}px`);
+            // The columns line up: on a desktop the words start at the same x on every row.
+            if (device.name === 'desktop') {
+              const starts = await page.evaluate(() => [
+                ...new Set(
+                  [...document.querySelectorAll('[data-queue-snippet]')].map(node =>
+                    Math.round(node.getBoundingClientRect().left),
+                  ),
+                ),
+              ]);
+              if (starts.length > 2)
+                fail(
+                  `${view} desktop ${scheme}: the words start at ${starts.length} different x positions (${starts})`,
+                );
+            }
           }
           const target = join(outDir, `queue-${view}-${device.name}-${scheme}.png`);
           await page.screenshot({ path: target });

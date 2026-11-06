@@ -184,7 +184,16 @@ describe('QueuePageView', () => {
       groups: [group([queued('q1', 'queued', { text: long, sender: 'agent', by: { kind: 'ferret', name: 'Mira' } })])],
     });
     const parts = (line('q1').children as ReactTestInstance[]).map(child => text(child));
-    expect(parts).toEqual(['Waiting', 'Mira', 'Next up', 'First line of the note', '15m ago']);
+    // Four cells — status, sender, words (the Next chip, then the first line), time — so the grid can fix the first two
+    // columns on a desktop and re-flow all four into two lines on a phone.
+    expect(parts).toEqual(['Waiting', 'Mira', 'Next upFirst line of the note', '15m ago']);
+    const words = line('q1').findByProps({ className: 'fy-queue-words' });
+    expect((words.children as ReactTestInstance[]).map(child => text(child))).toEqual([
+      'Next up',
+      'First line of the note',
+    ]);
+    // The sender cell is a fixed-width column that ellipsizes, so its full name stays reachable.
+    expect(line('q1').findByProps({ 'data-queue-meta': 'from' }).props.title).toBe('Mira');
     expect(line('q1').type).toBe('button');
     expect(line('q1').props['aria-expanded']).toBe(false);
     expect(row('q1').findAllByProps({ 'data-queue-body': '' })).toHaveLength(0);
@@ -202,11 +211,11 @@ describe('QueuePageView', () => {
     expect(row('q1').findAllByProps({ 'data-queue-detail': '' })).toHaveLength(0);
   });
 
-  test('a message whose time cannot be read keeps its empty time cell and claims no age', () => {
+  test('a message whose time cannot be read has no time cell and claims no age', () => {
     mounted = view({ groups: [group([queued('q1', 'queued', { enqueuedAt: 'not a time' })])] });
     expect(row('q1').findAllByType('time')).toHaveLength(0);
     const parts = (line('q1').children as ReactTestInstance[]).map(child => text(child));
-    expect(parts).toEqual(['Waiting', 'You', 'Next up', 'text q1', '']);
+    expect(parts).toEqual(['Waiting', 'You', 'Next uptext q1']);
   });
 
   test('the line shows your own messages as You, the owner of a ferret message by name, and only the first line of a heading', () => {
