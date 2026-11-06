@@ -121,7 +121,7 @@ export function CatalogItemRow({
   const matches = read === undefined ? [] : ownedMatches(read.catalogs, source);
   const chips = rowChips(installs, matches);
   const addable = host !== undefined && canAdd(installs);
-  const oneTap = addable && read?.features.quickAdd === true;
+  const oneTap = addable && read !== undefined;
   const defaultCatalog = read === undefined ? undefined : defaultCatalogOf(read.catalogs, read.defaultCatalogId);
 
   const showToast = useCallback((next: CatalogToast): void => {
@@ -180,7 +180,7 @@ export function CatalogItemRow({
   const addAnother = async (): Promise<void> => {
     if (host === undefined) return;
     setFailure(null);
-    if (read?.features.items !== true) return openSheet({});
+    if (read === undefined) return openSheet({});
     try {
       const list = await listSharedItems(await createClient(host.connection));
       const item = sharedItemFor(list.items, source);

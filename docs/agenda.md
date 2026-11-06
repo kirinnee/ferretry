@@ -1630,8 +1630,7 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   synced draft of its own, keyed by machine + conversation + **slot** — the slot is `chat` (the chat box, exactly
   today's draft) or the item's id (`A5`). Typing in a card never shows in the ferret's chat, typing in the chat never
   shows in a card, and two cards of one ferret hold two drafts, each in step across the owner's devices (route
-  `…/shared-draft?item=A5`, advertised as the daemon feature `shared-draft.slots.1`; a daemon without it gives the
-  card a local-only draft, never the chat's). Sending from a card empties **that card's** draft only, and the quick
+  `…/shared-draft?item=A5`, advertised as the daemon feature `shared-draft.slots.1`). Sending from a card empties **that card's** draft only, and the quick
   replies take their note from it. When an item closes (any `addressed` change) its draft is deleted; a replied
   (parked) item keeps what is still typed. A conversation holds at most 100 item drafts.
 

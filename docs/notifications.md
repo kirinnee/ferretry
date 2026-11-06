@@ -211,7 +211,7 @@ owner's turn, because until then its words are still true.
 **When the owner opens the item.** Opening an item's card anywhere in the app takes its alerts down too: the Inbox
 deck's top card, or the item's card in its conversation (an agenda row, a `!A3` reference, a notification tap, paging
 to it). The app closes that item's lines on the device in the owner's hand at once, and tells the machine
-(`POST /v1/push/seen`, `fleet.use`, only where the machine lists `push.clear.1`). The machine clears every OTHER device
+(`POST /v1/push/seen`, `fleet.use`, `push.clear.1`). The machine clears every OTHER device
 and answers the tags it named, so the app closes those here too, the stop's line included when it was the last item.
 The device the item was opened on is skipped, so it never gets the iPhone note below about its own tap.
 

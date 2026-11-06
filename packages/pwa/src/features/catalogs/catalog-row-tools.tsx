@@ -12,13 +12,7 @@ import { useDaemonClient } from '../../lib/store.tsx';
 import { AddCatalogFromLink } from './add-from-link.tsx';
 import { listCatalogInstalls } from './catalog-installs-api.ts';
 import { CatalogMoreMenu } from './catalog-more-menu.tsx';
-import {
-  type CatalogClientFactory,
-  type CatalogFeatures,
-  listCatalogs,
-  NO_CATALOG_FEATURES,
-  readCatalogFeatures,
-} from './catalogs-api.ts';
+import { type CatalogClientFactory, listCatalogs } from './catalogs-api.ts';
 import { InstallFromFileSheet } from './install-from-file-sheet.tsx';
 
 /** Which machine the rows belong to. `createClient` is a test and harness seam. */
@@ -32,7 +26,6 @@ export interface CatalogRowsRead {
   readonly catalogs: readonly OwnedCatalog[];
   /** The catalog one tap adds to, when the machine has made one. */
   readonly defaultCatalogId?: string;
-  readonly features: CatalogFeatures;
   readonly reload: () => void;
 }
 
@@ -45,7 +38,6 @@ export function useCatalogRows(host: CatalogRowsHost | undefined): CatalogRowsRe
   const [installs, setInstalls] = useState<readonly CatalogInstall[]>(NO_INSTALLS);
   const [catalogs, setCatalogs] = useState<readonly OwnedCatalog[]>(NO_CATALOGS);
   const [defaultCatalogId, setDefaultCatalogId] = useState<string | undefined>(undefined);
-  const [features, setFeatures] = useState<CatalogFeatures>(NO_CATALOG_FEATURES);
   const [tick, setTick] = useState(0);
   const connection = host?.connection;
   const createClient = host?.createClient ?? routed;
@@ -77,21 +69,13 @@ export function useCatalogRows(host: CatalogRowsHost | undefined): CatalogRowsRe
           setDefaultCatalogId(undefined);
         }
       });
-    void client
-      .then(async api => await readCatalogFeatures(api))
-      .then(read => {
-        if (live) setFeatures(read);
-      })
-      .catch(() => {
-        if (live) setFeatures(NO_CATALOG_FEATURES);
-      });
     return () => {
       live = false;
     };
   }, [connection, createClient, tick]);
 
   const reload = useCallback(() => setTick(value => value + 1), []);
-  return { installs, catalogs, features, reload, ...(defaultCatalogId === undefined ? {} : { defaultCatalogId }) };
+  return { installs, catalogs, reload, ...(defaultCatalogId === undefined ? {} : { defaultCatalogId }) };
 }
 
 /**

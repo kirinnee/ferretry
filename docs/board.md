@@ -1124,7 +1124,7 @@ its owner ferret) through the session attachment route, then names them on the m
 ids }`). The daemon refuses files from anyone but the owner, files in any other session, and files on a move
 that sends nothing back. Whichever ferret the reopen reaches gets a copy in its own session; if the copy
 fails, the line still lands with a sentence saying the files did not. A daemon reports
-`board.reopen.attachments.1` on `GET /v1/health` when it takes files; the app offers attaching only there.
+`board.reopen.attachments.1` on `GET /v1/health` when it takes files.
 
 The upload rides the same carrier as every other call to that machine (the router's fetch), because a paired
 device holds no bearer value: the device key that opened the session is the credential, and a request sent over

@@ -6,14 +6,11 @@ import {
   listSharedItems,
   makeDefault,
   makeVersionCurrent,
-  NO_CATALOG_FEATURES,
   quickAdd,
-  readCatalogFeatures,
   readItemChanges,
   setVersionRetired,
   undoQuickAdd,
 } from '../../../../src/features/catalogs/catalogs-api.ts';
-import { healthOf } from '../../../support/health.ts';
 import {
   addedAnswer,
   catalogChanges,
@@ -96,36 +93,6 @@ describe('the owner calls for the item table and one-tap Add', () => {
     await addExistingItem(client, CATALOG, ITEM, 2);
     expect(calls[0]?.path).toBe(`/v1/catalogs/${CATALOG}/items`);
     expect(bodyOf(calls[0])).toEqual({ itemId: ITEM, version: 2 });
-  });
-});
-
-describe('readCatalogFeatures', () => {
-  it('reads both flags from the machine', async () => {
-    const both = recorder(healthOf('1.0.0', ['catalogs.items.1', 'catalogs.quick-add.1']));
-    expect(await readCatalogFeatures(both.client)).toEqual({
-      items: true,
-      quickAdd: true,
-      versions: false,
-      versions2: false,
-    });
-    const versioned = recorder(healthOf('1.0.0', ['catalogs.versions.1', 'catalogs.versions.2']));
-    expect(await readCatalogFeatures(versioned.client)).toEqual({
-      items: false,
-      quickAdd: false,
-      versions: true,
-      versions2: true,
-    });
-    const older = recorder(healthOf('1.0.0'));
-    expect(await readCatalogFeatures(older.client)).toEqual(NO_CATALOG_FEATURES);
-  });
-
-  it('offers nothing when the machine cannot be asked', async () => {
-    const client = {
-      request: async () => {
-        throw new Error('offline');
-      },
-    } as unknown as CatalogClient;
-    expect(await readCatalogFeatures(client)).toEqual(NO_CATALOG_FEATURES);
   });
 });
 

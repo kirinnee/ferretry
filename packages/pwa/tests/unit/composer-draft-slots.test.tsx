@@ -188,7 +188,7 @@ interface Box {
 const box = async (
   machine: Daemon,
   drafts: DaemonDraftStore,
-  options: { readonly slot?: AgendaId; readonly slots?: boolean } = {},
+  options: { readonly slot?: AgendaId } = {},
 ): Promise<Box> => {
   const sent: Box['sent'] = [];
   const api = {
@@ -206,8 +206,6 @@ const box = async (
       {...(options.slot === undefined ? {} : { draftSlot: options.slot })}
       openDraftStream={machine.open}
       sessionId="s1"
-      sharedSlots={options.slots ?? true}
-      sharedUploads={false}
     />,
   );
   await settle();
@@ -332,26 +330,7 @@ describe('a draft slot (B142)', () => {
   });
 });
 
-describe('a machine without draft slots (version skew)', () => {
-  test("a card's draft stays on this device: no stream is opened for it, and the chat's draft is never touched", async () => {
-    const machine = new Daemon();
-    const drafts = store();
-    const chat = await box(machine, drafts);
-    await chat.it.type('chat words');
-    const card = await box(machine, drafts, { slot: A5, slots: false });
-
-    await card.it.type('card words');
-    await saved();
-
-    expect(machine.asked).toEqual([null]);
-    expect(card.it.shown()).toBe('card words');
-    expect(machine.held('chat').text).toBe('chat words');
-    expect(drafts.load(cardScope(A5))).toBe('card words');
-    expect(drafts.load(chatScope)).toBe('chat words');
-    await chat.unmount();
-    await card.unmount();
-  });
-
+describe('a daemon that ignores draft slots, and drafts stored before them', () => {
   test("an older machine that ignores ?item= and answers with the chat's draft never shows it under a card", async () => {
     const machine = new Daemon();
     machine.ignoresItem = true;
@@ -368,8 +347,8 @@ describe('a machine without draft slots (version skew)', () => {
     const drafts = store();
     drafts.save(chatScope, 'kept from before', 1);
     const machine = new Daemon();
-    const chat = await box(machine, drafts, { slots: false });
-    const card = await box(machine, drafts, { slot: A5, slots: false });
+    const chat = await box(machine, drafts);
+    const card = await box(machine, drafts, { slot: A5 });
 
     expect(chat.it.shown()).toBe('kept from before');
     expect(card.it.shown()).toBe('');

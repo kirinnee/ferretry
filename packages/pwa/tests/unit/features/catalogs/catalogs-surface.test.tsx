@@ -14,7 +14,6 @@ import {
 } from '../../../support/catalog-views.ts';
 import { mount } from '../../../support/dom.ts';
 import { click, settle, typeInto } from '../../../support/dom-form.ts';
-import { healthOf } from '../../../support/health.ts';
 
 /** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
 beforeEach(() => {
@@ -96,7 +95,7 @@ describe('CatalogsSurface list', () => {
     const { fake, view } = await open({ 'GET /v1/catalogs': () => ({ catalogs: [rich()] }) });
     expect(q('[data-catalogs-list]')?.textContent).toContain('Team skills');
     expect(q('[data-catalogs-list]')?.textContent).toContain('2 items · revision 4');
-    expect(fake.calls.map(call => call.path)).toEqual(['/v1/catalogs', '/v1/health']);
+    expect(fake.calls.map(call => call.path)).toEqual(['/v1/catalogs']);
     await view.unmount();
   });
 
@@ -373,31 +372,30 @@ describe('CatalogsSurface detail', () => {
 
 describe('CatalogsSurface versions', () => {
   const ITEM_PATH = `/v1/catalog-items/${ITEM}`;
-  const versioned = (features: string[]) => ({
+  const versioned = () => ({
     'GET /v1/catalogs': () => ({ catalogs: [rich()] }),
     [`GET ${DETAIL}`]: () => ({ catalogs: [rich()] }),
-    'GET /v1/health': () => healthOf('1.0.0', features),
     [`GET ${ITEM_PATH}`]: () => sharedItem(),
     'GET /v1/catalog-members': () => ({ members: [] }),
   });
 
   it('opens the versions of a live item, and not of a withdrawn one', async () => {
-    const { view } = await open(versioned(['catalogs.items.1', 'catalogs.versions.1']));
+    const { view } = await open(versioned());
     await tap('[data-catalog-open]');
     expect(q('[data-catalog-versions="old-one"]')).toBeNull();
     await tap('[data-catalog-versions="pdf-tools"]');
     expect(q('[data-catalog-sheet="versions"]')).not.toBeNull();
     expect(q('[data-version="2"]')).not.toBeNull();
-    expect(q('[data-version-retire]')).toBeNull();
+    expect(q('[data-version-retire="1"]')).not.toBeNull();
     await click(q('[aria-label="Close Versions"]'));
     expect(q('[data-catalog-sheet="versions"]')).toBeNull();
     await view.unmount();
   });
 
-  it('offers the writes with versions.2, and reads the list again after one', async () => {
+  it('offers the writes, and reads the list again after one', async () => {
     let reads = 0;
     const { view } = await open({
-      ...versioned(['catalogs.items.1', 'catalogs.versions.1', 'catalogs.versions.2']),
+      ...versioned(),
       [`GET ${DETAIL}`]: () => {
         reads += 1;
         return { catalogs: [rich()] };
@@ -413,16 +411,9 @@ describe('CatalogsSurface versions', () => {
     await view.unmount();
   });
 
-  it('shows no Versions… button without the flag', async () => {
-    const { view } = await open(versioned(['catalogs.items.1']));
-    await tap('[data-catalog-open]');
-    expect(q('[data-catalog-versions]')).toBeNull();
-    await view.unmount();
-  });
-
   it('shows the changes before publishing an update', async () => {
     const { view } = await open({
-      ...versioned(['catalogs.items.1', 'catalogs.versions.1']),
+      ...versioned(),
       [`POST /v1/catalogs/${CATALOG}/items/preview`]: () => itemPreview({ version: 2, changes: catalogChanges() }),
     });
     await tap('[data-catalog-open]');

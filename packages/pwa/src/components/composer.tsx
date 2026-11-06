@@ -1,6 +1,5 @@
 import {
   type AgendaId,
-  DAEMON_FEATURES,
   type IFyApiClient,
   type SessionContext,
   type SessionView,
@@ -34,7 +33,6 @@ import {
 import type { ComposerReferenceTask } from '../lib/composer-reference-catalogs.ts';
 import { initialVimState, normalVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { machineOffers } from '../lib/daemon-health.ts';
 import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { escapeCloses } from '../lib/escape-closes.ts';
@@ -52,7 +50,6 @@ import { useSendOutbox } from '../lib/store.tsx';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import { REINSERT_TRANSCRIPTION_EVENT, reinsertTranscriptionText } from '../lib/stt/reinsert-transcription.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
-import { useDaemonHealth } from '../lib/use-daemon-health.ts';
 import type { WorkSearchPort } from '../lib/work-search.ts';
 import { addMenuActions, ComposerAddMenu } from './composer-add-menu.tsx';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
@@ -149,11 +146,9 @@ export interface ComposerProps {
   /**
    * The agenda item whose own draft this composer holds (an Inbox card). Absent is the session's chat, the
    * draft every composer had before slots: the same words on that session's chat box on every device, never
-   * under a card. A machine that predates slots keeps an item's draft on this device only.
+   * under a card.
    */
   readonly draftSlot?: AgendaId;
-  /** Whether the machine keeps drafts per slot; read from its health when not given (tests give it). */
-  readonly sharedSlots?: boolean;
   /** Told when a send went: what the owner wrote and what the transport made of it (see {@link ComposerSent}). */
   readonly onSent?: (sent: ComposerSent) => void;
   /**
@@ -246,8 +241,6 @@ export interface ComposerProps {
    * store's carrier, which is what the app always uses; a harness or a test hands in its own.
    */
   readonly openDraftStream?: DaemonStreamOpener;
-  /** Says whether the machine takes uploads in presence, without reading its health (the harness and tests). */
-  readonly sharedUploads?: boolean;
   /** The session's runtime chips (model, effort), drawn at the start of the status line. */
   readonly statusSlot?: ReactNode;
   /** How much of the context window the session has used; absent while the window or the size is unknown. */
@@ -452,7 +445,6 @@ export function Composer({
   quota,
   draftStore = documentDraftStore,
   draftSlot,
-  sharedSlots,
   onSent,
   onSending,
   onSendFailed,
@@ -481,7 +473,6 @@ export function Composer({
   vimMode = false,
   uploadAttachment,
   openDraftStream,
-  sharedUploads,
   statusSlot,
   context,
   compacting,
@@ -689,21 +680,14 @@ export function Composer({
    * Another device's edit moves this caret the way the edit moved the text, so typing here is never
    * thrown to the end by somebody typing there.
    */
-  const slotWanted = draftSlot !== undefined && sharedSlots === undefined;
-  const health = useDaemonHealth((sharedUploads === undefined && !isDetached) || slotWanted ? daemon : undefined);
-  // An item's draft needs a machine that keeps one per slot; an older one would answer with the chat's.
-  const slotShared =
-    draftSlot === undefined || (sharedSlots ?? machineOffers(health, DAEMON_FEATURES.sharedDraftSlots));
   const shared = useSharedDraft({
     daemon,
     scope,
-    enabled: slotShared && !isDetached,
+    enabled: !isDetached,
     text: draft,
     setText: setDraft,
     // A detached draft is the host's own: nothing of it may reach the session's draft on any device.
     ...(openDraftStream === undefined ? {} : { open: openDraftStream }),
-    // The app ships before the daemon: an older machine closes the stream on a file still uploading.
-    reportUploads: sharedUploads ?? machineOffers(health, DAEMON_FEATURES.sharedDraftUploading),
     onRemote: (op, next) => {
       const input = inputRef.current;
       if (input === null) return;

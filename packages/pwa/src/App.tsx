@@ -1213,16 +1213,14 @@ const browserEventStreamEnvironment: SessionEventStreamEnvironment = {
  * through the machine (docs/notifications.md § When an alert is cleared).
  */
 function useAgendaItemOpened() {
-  const store = useAppStore();
   const daemonFetch = useDaemonFetch();
   return useMemo(
     () =>
       agendaItemOpenedHandler({
         registration: machinePushRegistration(navigator as unknown as PushNavigator, window.location.origin),
-        health: async daemon => await (await store.clients.client(daemon)).health(),
         seen: async (daemon, sessionId, agendaId) => await postAgendaItemSeen(daemon, sessionId, agendaId, daemonFetch),
       }),
-    [store.clients, daemonFetch],
+    [daemonFetch],
   );
 }
 

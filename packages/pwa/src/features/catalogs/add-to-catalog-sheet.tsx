@@ -83,19 +83,9 @@ export interface AddToCatalogSheetProps {
   readonly asDefault?: boolean;
   /** "Add to another catalog…": add-existing, not a first add from a source. */
   readonly existing?: ExistingItem;
-  /** What this machine can do with versions; without it the sheet is the one it always was. */
-  readonly versionTools?: VersionTools;
   /** Test and harness seam; the app uses the daemon-bound client. */
   readonly createClient?: CatalogClientFactory;
 }
-
-/** `changes`: show what would change before publishing (`catalogs.versions.1`). `makeCurrent`: offer an older version (`catalogs.versions.2`). */
-interface VersionTools {
-  readonly changes: boolean;
-  readonly makeCurrent: boolean;
-}
-
-const NO_VERSION_TOOLS: VersionTools = { changes: false, makeCurrent: false };
 
 const NOT_LISTED: readonly string[] = [];
 
@@ -123,7 +113,6 @@ export function AddToCatalogSheet({
   suggestNewName,
   asDefault = false,
   existing,
-  versionTools = NO_VERSION_TOOLS,
   createClient: injected,
 }: AddToCatalogSheetProps) {
   const routed = useDaemonClient();
@@ -255,7 +244,7 @@ export function AddToCatalogSheet({
 
   const sameAs = preview?.sameAsVersion;
   useEffect(() => {
-    if (!versionTools.makeCurrent || publish === undefined || sameAs === undefined) {
+    if (publish === undefined || sameAs === undefined) {
       setItemCurrent(null);
       return;
     }
@@ -271,7 +260,7 @@ export function AddToCatalogSheet({
     return () => {
       live = false;
     };
-  }, [versionTools.makeCurrent, publish, sameAs, createClient, connection]);
+  }, [publish, sameAs, createClient, connection]);
 
   const makeSameCurrent = async (): Promise<void> => {
     if (publish === undefined || sameAs === undefined || itemCurrent === null) return;
@@ -298,7 +287,6 @@ export function AddToCatalogSheet({
   const readLabel = plan === null ? 'Preview' : previewButtonLabel(plan);
   const previewLabel = preview !== null ? 'Read again' : busy ? 'Reading…' : readLabel;
   const offerCurrent =
-    versionTools.makeCurrent &&
     publish !== undefined &&
     preview?.sameAsVersion !== undefined &&
     itemCurrent !== null &&
@@ -434,9 +422,7 @@ export function AddToCatalogSheet({
               {...(failure.previewAgain ? { again: true, onAgain: () => void runPreview() } : {})}
             />
           )}
-          {preview === null ? null : (
-            <PreviewBlock preview={preview} showChanges={versionTools.changes && publish !== undefined} />
-          )}
+          {preview === null ? null : <PreviewBlock preview={preview} showChanges={publish !== undefined} />}
           {preview === null ? null : (
             <div className="flex min-w-0 flex-col gap-xs">
               <p className="m-0 text-cell text-muted">{FROZEN_COPY_NOTE}</p>
@@ -456,7 +442,7 @@ export function AddToCatalogSheet({
                   {`Make version ${String(sameAs)} current`}
                 </Button>
               ) : null}
-              {versionTools.changes && publish !== undefined && preview.sameAsRetiredVersion !== undefined ? (
+              {publish !== undefined && preview.sameAsRetiredVersion !== undefined ? (
                 <p
                   className="m-0 flex items-start gap-xs break-words text-cell text-warn"
                   role="status"

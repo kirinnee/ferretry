@@ -3108,7 +3108,7 @@ const paletteOpen = (container: HTMLElement): boolean =>
   container.querySelector('[role="dialog"], [data-command-palette]') !== null;
 
 describe('the command palette shortcut', () => {
-  it('searches the daemon’s cards and agenda from the finder on a machine whose health offers work.search.1', async () => {
+  it('searches the daemon’s cards and agenda from the finder', async () => {
     const project = '6f1c2f0e-3a4b-4c55-9d1e-0a7b8c9d1e2f';
     const hits: WorkHit[] = [
       {

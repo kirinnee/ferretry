@@ -97,15 +97,13 @@ describe('who uses and who can see it', () => {
 });
 
 describe('versionActions', () => {
-  const [current, retired, plain] = versionLines(threeVersions(), TWO_DAYS);
+  const [current, retired] = versionLines(threeVersions(), TWO_DAYS);
   const lines = versionLines(sharedItem({ current: 2 }), TWO_DAYS);
-  it('offers only what the daemon would accept, and nothing without versions.2', () => {
-    expect(versionActions(lines[0]!, true)).toEqual({ makeCurrent: false, retire: false, unretire: false });
-    expect(versionActions(lines[1]!, true)).toEqual({ makeCurrent: true, retire: true, unretire: false });
-    expect(versionActions(retired!, true)).toEqual({ makeCurrent: false, retire: false, unretire: true });
-    expect(versionActions(current!, true).makeCurrent).toBe(false);
-    expect(versionActions(plain!, false)).toEqual({ makeCurrent: false, retire: false, unretire: false });
-    expect(versionActions(retired!, false).unretire).toBe(false);
+  it('offers only what the daemon would accept', () => {
+    expect(versionActions(lines[0]!)).toEqual({ makeCurrent: false, retire: false, unretire: false });
+    expect(versionActions(lines[1]!)).toEqual({ makeCurrent: true, retire: true, unretire: false });
+    expect(versionActions(retired!)).toEqual({ makeCurrent: false, retire: false, unretire: true });
+    expect(versionActions(current!).makeCurrent).toBe(false);
   });
 });
 

@@ -98,14 +98,13 @@ export interface VersionActions {
 
 /**
  * Owner acts per line. The current version cannot be retired and is already current, and a retired one cannot be
- * made current until it is back, so each line offers only what the daemon would accept. Without
- * `catalogs.versions.2` it offers nothing: the list is for reading.
+ * made current until it is back, so each line offers only what the daemon would accept.
  */
-export function versionActions(line: VersionLine, versions2: boolean): VersionActions {
+export function versionActions(line: VersionLine): VersionActions {
   return {
-    makeCurrent: versions2 && !line.current && !line.retired,
-    retire: versions2 && !line.current && !line.retired,
-    unretire: versions2 && line.retired,
+    makeCurrent: !line.current && !line.retired,
+    retire: !line.current && !line.retired,
+    unretire: line.retired,
   };
 }
 

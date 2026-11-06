@@ -39,14 +39,13 @@ const base = (item = threeVersions()): Handlers => ({
   'GET /v1/catalog-members': () => ({ members: [memberView()] }),
 });
 
-async function open(handlers: Handlers, canWrite = true, closed: string[] = [], changed: string[] = []) {
+async function open(handlers: Handlers, closed: string[] = [], changed: string[] = []) {
   const fake = fakeClient(handlers);
   const view = await mount(
     <VersionsSheet
       connection={connection}
       itemId={ITEM}
       label="pdf-tools"
-      canWrite={canWrite}
       nowMs={NOW}
       createClient={fake.factory}
       onClose={() => closed.push('closed')}
@@ -86,15 +85,6 @@ describe('VersionsSheet list', () => {
     expect(lineOf(2)?.textContent).toContain('retired');
     expect(q('[data-version-unretire="2"]')).not.toBeNull();
     expect(q('[data-version-make-current="2"]')).toBeNull();
-    await view.unmount();
-  });
-
-  it('is for reading only without versions.2', async () => {
-    const { view } = await open(base(), false);
-    expect(q('[data-version-make-current]')).toBeNull();
-    expect(q('[data-version-retire]')).toBeNull();
-    expect(q('[data-version-unretire]')).toBeNull();
-    expect(q('[data-version-changes="3"]')).not.toBeNull();
     await view.unmount();
   });
 
@@ -219,7 +209,6 @@ describe('make current, retire, bring back', () => {
           return { itemId: ITEM, itemVersion: 2, current: 2, catalogs: [], item };
         },
       },
-      true,
       [],
       changed,
     );

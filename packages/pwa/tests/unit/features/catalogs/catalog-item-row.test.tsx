@@ -7,15 +7,14 @@ import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { fakeClient } from '../../../support/catalog-client.ts';
 import { memberView } from '../../../support/catalog-sharing.ts';
 import {
-  CATALOG,
   DIGEST,
   INSTALL_ID,
   ITEM,
   installRecord,
   itemPreview,
   ownedCatalog,
+  sharedItem,
 } from '../../../support/catalog-views.ts';
-import { healthOf } from '../../../support/health.ts';
 import { byText, click, settle } from '../../../support/dom-form.ts';
 import { mount } from '../../../support/dom.ts';
 
@@ -25,6 +24,7 @@ beforeEach(() => {
 });
 
 const connection = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'token-a' });
+const SECOND = `cat_${'d'.repeat(22)}` as const;
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
 const SKILL = '/home/k/.claude/skills/pdf-tools/SKILL.md';
 const source = { kind: 'skill', skill: SKILL } as const;
@@ -115,7 +115,7 @@ describe('CatalogItemRow rendering', () => {
     await view.unmount();
   });
 
-  it('an own skill in no catalog has no Share or Add on the row, and Publish in a catalog… in the ⋯', async () => {
+  it('an own skill in no catalog has no Share or Add on the row, and one-tap Publish in a new catalog in the ⋯', async () => {
     const { view } = await show(baseHandlers([]));
     expect(q('[data-row-share]')).toBeNull();
     expect(q('[data-row-add]')).toBeNull();
@@ -123,16 +123,16 @@ describe('CatalogItemRow rendering', () => {
     expect(q('[data-row-version]')).toBeNull();
     expect(q('[data-row-from]')).toBeNull();
     await tap('[data-row-more]');
-    expect(menu()).toEqual(['Publish in a catalog…']);
+    expect(menu()).toEqual(['Publish in a new catalog, My skills']);
     await view.unmount();
   });
 
-  it('a skill in a catalog carries its version and Publish in another catalog…', async () => {
+  it('a skill in a catalog carries its version, one-tap Publish and Publish in another catalog…', async () => {
     const { view } = await show(baseHandlers([ownedCatalog()]));
     expect(q('[data-row-version]')?.textContent).toBe('v2');
     await tap('[data-row-more]');
     expect(document.querySelector('[role="menu"]')?.getAttribute('aria-label')).toBe('More for /pdf-tools');
-    expect(menu()).toEqual(['Publish in another catalog…']);
+    expect(menu()).toEqual(['Publish in a new catalog, My skills', 'Publish in another catalog…']);
     await view.unmount();
   });
 
@@ -156,10 +156,7 @@ describe('CatalogItemRow rendering', () => {
   });
 
   it('has no Versions… or Share: they live in Sharing › My catalogs', async () => {
-    const { view } = await show({
-      ...baseHandlers([ownedCatalog()]),
-      'GET /v1/health': () => healthOf('1.0.0', ['catalogs.items.1', 'catalogs.versions.1', 'catalogs.versions.2']),
-    });
+    const { view } = await show(baseHandlers([ownedCatalog()]));
     await tap('[data-row-more]');
     expect(menu().join(' ')).not.toMatch(/Versions|Share/u);
     await view.unmount();
@@ -197,35 +194,31 @@ describe('CatalogItemRow rendering', () => {
 });
 
 describe('CatalogItemRow Publish', () => {
-  it('Publish in a catalog… opens the add sheet, ends with Done, and reads the lists again when it saves', async () => {
-    let catalogs = [] as ReturnType<typeof ownedCatalog>[];
+  it('Publish in another catalog… opens the add sheet, ends with Done, and reads the lists again when it saves', async () => {
+    const second = ownedCatalog({ id: SECOND, name: 'Other', items: [] });
     const { fake, view } = await show({
-      ...baseHandlers([]),
-      'GET /v1/catalogs': () => ({ catalogs }),
-      [`POST /v1/catalogs/${CATALOG}/items/preview`]: () => itemPreview(),
-      [`POST /v1/catalogs/${CATALOG}/items`]: () => {
-        catalogs = [ownedCatalog()];
-        return { itemId: ITEM, kind: 'skill', name: 'pdf-tools', itemVersion: 3, digest: DIGEST };
-      },
+      ...baseHandlers([ownedCatalog({ role: 'default' }), second]),
+      'GET /v1/catalog-items': () => ({ publisher: `fy_daemon_${'q3Xk'.repeat(10)}Xkq`, items: [sharedItem()] }),
+      [`POST /v1/catalogs/${SECOND}/items/preview`]: () => itemPreview({ catalogId: SECOND, version: 2 }),
+      [`POST /v1/catalogs/${SECOND}/items`]: () => ({
+        catalogId: SECOND,
+        itemId: ITEM,
+        itemVersion: 2,
+        digest: DIGEST,
+        revision: 2,
+        item: ownedCatalog().items[0],
+      }),
     });
-    catalogs = [ownedCatalog({ items: [] })];
-    await pickMenu('Publish in a catalog…');
+    await pickMenu('Publish in another catalog…');
     expect(q('[data-catalog-sheet="add"]')).not.toBeNull();
     await tap('[data-catalog-preview]');
     await tap('[data-catalog-add]');
-    expect(q('[data-catalog-landed]')).not.toBeNull();
+    expect(q('[data-catalog-landed]')?.textContent).toContain('Saved to Other');
     expect(q('[data-catalog-done]')?.textContent).toBe('Done');
-    expect(fake.calls.filter(call => call.path === '/v1/catalog-installs').length).toBeGreaterThan(1);
     await tap('[data-catalog-done]');
     expect(q('[data-catalog-sheet="add"]')).toBeNull();
+    expect(fake.calls.filter(call => call.path === '/v1/catalog-installs').length).toBeGreaterThan(1);
     expect(q('[data-row-version]')?.textContent).toBe('v2');
-    await view.unmount();
-  });
-
-  it('Publish in another catalog… from the ⋯ opens the same sheet', async () => {
-    const { view } = await show(baseHandlers([ownedCatalog()]));
-    await pickMenu('Publish in another catalog…');
-    expect(q('[data-catalog-sheet="add"]')).not.toBeNull();
     await view.unmount();
   });
 });
@@ -259,7 +252,7 @@ describe('CatalogItemRow Uninstall', () => {
     expect(q('[data-catalog-remove-confirm]')).toBeNull();
     expect(q('[data-row-from]')).toBeNull();
     await tap('[data-row-more]');
-    expect(menu()).toEqual(['Publish in a catalog…']);
+    expect(menu()).toEqual(['Publish in a new catalog, My skills']);
     await view.unmount();
   });
 
@@ -297,7 +290,7 @@ describe('CatalogItemRow Uninstall', () => {
 });
 
 describe('CatalogItemRow without a readable catalog list', () => {
-  it('still offers Publish in a catalog… when the lists cannot be read', async () => {
+  it('still offers one-tap Publish when the lists cannot be read', async () => {
     const { view } = await show({
       'GET /v1/catalog-installs': () => {
         throw new FyHttpError('boom', 500, 'x');
@@ -307,7 +300,7 @@ describe('CatalogItemRow without a readable catalog list', () => {
       },
     });
     await tap('[data-row-more]');
-    expect(menu()).toEqual(['Publish in a catalog…']);
+    expect(menu()).toEqual(['Publish in a new catalog, My skills']);
     await view.unmount();
   });
 
