@@ -114,7 +114,13 @@ while IFS= read -r project; do
 done < <(find packages -mindepth 2 -maxdepth 2 -name tsconfig.json | sort)
 
 for project in "${projects[@]}"; do
-  "${tsc}" --noEmit -p "${project}"
+  if [[ -n ${FY_TSC_CACHE_DIR:-} ]]; then
+    mkdir -p "${FY_TSC_CACHE_DIR}"
+    cache_name=${project//\//-}
+    "${tsc}" --noEmit --incremental --tsBuildInfoFile "${FY_TSC_CACHE_DIR}/${cache_name}.tsbuildinfo" -p "${project}"
+  else
+    "${tsc}" --noEmit -p "${project}"
+  fi
 done
 
 echo "✅ Typecheck passed: ${projects[*]}"

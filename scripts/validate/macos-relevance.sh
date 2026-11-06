@@ -117,7 +117,7 @@ expect_job 'Harness Contract (macos-15)' 3 "${harness_script}" "${harness_files[
 expect 'false false false' 'documentation only' docs/standards/ci-cd/index.md README.md
 expect 'false false false' 'a PWA feature unrelated to the sandbox shell' packages/pwa/src/features/settings/capability-list.tsx
 expect 'false false false' 'a daemon route unrelated to the file viewer' packages/daemon/src/lib/grants/policy.ts
-expect 'false false false' 'the CI workflow no longer runs these jobs' .github/workflows/ci.yaml .github/workflows/e2e.yaml
+expect 'false false false' 'the CI workflow no longer runs these jobs' .github/workflows/ci.yaml
 for always in flake.lock flake.nix nix/pre-commit.nix .github/workflows/realworld.yaml .github/actions/install-nix/action.yml bun.lock bunfig.realworld.toml; do
   expect 'true true true' "the toolchain, the lockfile or a workflow changed (${always})" "${always}"
 done
@@ -171,9 +171,9 @@ block_has() {
 block_has changes 'scripts/ci/macos-relevance[.]sh' 'must run scripts/ci/macos-relevance.sh'
 block_has changes 'runs-on: ubuntu-latest' 'must run on GitHub, not Namespace'
 block_has darwin-confinement '^    needs: changes$' 'must need changes'
-block_has darwin-confinement "^    if: needs[.]changes[.]outputs[.]containment == 'true'\$" 'must run only when containment is true'
+block_has darwin-confinement "needs[.]changes[.]outputs[.]containment == 'true'" 'must run only when containment is true'
 block_has safari-sandbox-shell '^    needs: changes$' 'must need changes'
-block_has safari-sandbox-shell "^    if: needs[.]changes[.]outputs[.]safari == 'true'\$" 'must run only when safari is true'
+block_has safari-sandbox-shell "needs[.]changes[.]outputs[.]safari == 'true'" 'must run only when safari is true'
 block_has harness-contract '^    needs: changes$' 'must need changes'
 block_has harness-contract 'os: [$][{][{] fromJSON[(]needs[.]changes[.]outputs[.]harness_os[)] [}][}]' 'must take its os matrix from harness_os'
 for moved in changes darwin-confinement safari-sandbox-shell harness-contract; do
@@ -182,9 +182,7 @@ done
 if awk '$0 == "  smoke:" { in_job = 1; next } in_job && /^  [A-Za-z0-9_-]+:$/ { exit } in_job { print }' "${ci_workflow}" | rg -q 'changes'; then
   fail "${ci_workflow}: Smoke darwin-arm64 must run on every pull request, not be gated on \`changes\`"
 fi
-if job_block harness-contract | rg -q '^    if:'; then
-  fail "${workflow}: Harness Contract must not carry a job-level if: — its Linux leg always runs; gate the macos-15 leg through \`harness_os\`"
-fi
+block_has harness-contract "contains[(]github[.]event[.]pull_request[.]labels[.]\*[.]name, 'full-ci'[)]" 'must run its Linux leg on the full set; gate the macos-15 leg through harness_os'
 
 # ─── 5. the workflow triggers on every input ────────────────────────────────────────────────────
 
@@ -227,7 +225,7 @@ for input in docs/x.md packages/pwa/src/x.ts packages/daemon/src/lib/grants/poli
   [ "$(tmux38_of "${input}")" = false ] || fail "a pull request that changes only ${input} must not run the tmux 3.8 leg"
 done
 block_has tmux-38 '^    needs: changes$' 'must need changes'
-block_has tmux-38 "^    if: needs[.]changes[.]outputs[.]tmux38 == 'true'\$" 'must run only when tmux38 is true'
+block_has tmux-38 "needs[.]changes[.]outputs[.]tmux38 == 'true'" 'must run only when tmux38 is true'
 block_has tmux-38 'nix develop [.]#ci-tmux38 ' 'must run in the ci-tmux38 shell'
 
 # ─── 7. macOS is advisory on a pull request and required (and retried) on main and a release tag ────
@@ -298,9 +296,9 @@ fi
 workflow_job_has "${ci_workflow}" smoke-darwin '^    uses: [.]/[.]github/workflows/smoke-darwin[.]yaml$' 'must call smoke-darwin.yaml'
 workflow_job_has "${ci_workflow}" smoke-darwin "^      advisory: [\$][{][{] github[.]event_name == 'pull_request' [}][}]\$" 'must be advisory on a pull request and only there'
 workflow_job_has "${ci_workflow}" smoke-darwin '^    needs: compile$' 'must need compile'
-# The only `if:` it may carry is the owner's switch: unset (or anything but 'skip') runs it on every pull request.
-[ "$(workflow_job_block "${ci_workflow}" smoke-darwin | rg -c '^    if:')" = 1 ] || fail "${ci_workflow}: Smoke darwin-arm64 must carry exactly one if:, the vars.MACOS_SMOKE switch, and not be gated on \`changes\`"
-workflow_job_has "${ci_workflow}" smoke-darwin "^    if: [\$][{][{] vars[.]MACOS_SMOKE != 'skip' [}][}]\$" "must run unless vars.MACOS_SMOKE is 'skip'"
+# Its one condition combines the full-set trigger with the owner's skip switch.
+[ "$(workflow_job_block "${ci_workflow}" smoke-darwin | rg -c '^    if:')" = 1 ] || fail "${ci_workflow}: Smoke darwin-arm64 must carry exactly one if:, the full-set condition and MACOS_SMOKE switch"
+workflow_job_has "${ci_workflow}" smoke-darwin "vars[.]MACOS_SMOKE != 'skip'" "must run in the full set unless vars.MACOS_SMOKE is 'skip'"
 workflow_job_has "${ci_workflow}" compile "if: [\$][{][{] vars[.]MACOS_SMOKE == 'skip' [}][}]" 'must say, in a job that runs, that the smoke was skipped by the switch'
 workflow_job_has "${ci_workflow}" compile 'scripts/ci/macos-smoke-skipped[.]sh' 'must say, in a job that runs, that the smoke was skipped by the switch'
 

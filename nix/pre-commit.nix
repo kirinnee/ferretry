@@ -174,7 +174,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Test tiers";
       entry = validator "scripts/validate/test-tiers.sh";
-      files = "^(packages/[^/]+/tests/.*\\.test\\.tsx?|config/test-groups\\.json|scripts/validate/test-tiers\\.sh)$";
+      files = "^(packages/[^/]+/tests/.*\\.test\\.tsx?|config/test-groups\\.json|scripts/(validate/test-tiers\\.sh|test/ci-sets\\.ts|ci/((quick|quick-part|parallel|integration|full-status|e2e-summary|pre-commit|gate-hook|full-gates)\\.sh|(unit-timings|gate-hooks)\\.ts))|\\.github/workflows/(ci|realworld|e2e-slow)\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };
@@ -199,7 +199,7 @@ pre-commit-lib.run {
       entry = validator "scripts/validate/relay-config.sh";
       # Both ends import the same source default, and the release compiler is deliberately included
       # so a per-build define cannot return while Nix remains direct-only.
-      files = "^(packages/relay/(wrangler\\.(hosted\\.json|jsonc)|src/(adapters/(worker|hosted-control)\\.ts|lib/(hosted-directory-default|index)\\.ts))|packages/protocol/package\\.json|packages/daemon/src/(lib/relay/discovery|adapters/system/runtime-environment)\\.ts|packages/pwa/(src/features/onboarding/hosted-relay|vite\\.config)\\.ts|scripts/(ci/relay-directory-origin|release/compile|validate/relay-config)\\.sh|\\.github/workflows/(relay-hosted|cd|pwa-pages)\\.yaml)$";
+      files = "^(packages/relay/(wrangler\\.(hosted\\.json|jsonc)|src/(adapters/(worker|hosted-control)\\.ts|lib/(hosted-directory-default|index)\\.ts))|packages/protocol/package\\.json|packages/daemon/src/(lib/relay/discovery|adapters/system/runtime-environment)\\.ts|packages/pwa/(src/features/onboarding/hosted-relay|vite\\.config)\\.ts|scripts/(ci/(relay-directory-origin|build-checks|quick|quick-part|setup)|local/setup|release/compile|validate/relay-config)\\.sh|\\.github/workflows/(ci|relay-hosted|cd|pwa-pages)\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };
@@ -391,6 +391,19 @@ pre-commit-lib.run {
       enable = true;
       name = "TypeScript typecheck";
       entry = bun-script "scripts/validate/typecheck.sh";
+      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|\\.(ts|tsx|mts|cts)$)";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    # `task test:e2e` typechecks `tests/e2e` AND `scripts/test/**` before any journey runs, and the root
+    # project above covers neither, so a type error in a script like `ci-sets.ts` stayed green here and
+    # then failed every E2E shard in 20 s (advisory, so the PR still merged green). Same command as
+    # `scripts/test/run-e2e.sh`, so Quick fails first. Read-only.
+    a-e2e-harness-typecheck = {
+      enable = true;
+      name = "E2E harness typecheck";
+      entry = bun-tool "tsc --noEmit --project tests/e2e/tsconfig.json";
       files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|\\.(ts|tsx|mts|cts)$)";
       pass_filenames = false;
       language = "system";

@@ -25,7 +25,16 @@ on:
       - 'packages/cli/package.json'
       - 'packages/daemon/package.json'
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
+    inputs:
+      quick_shape:
+        description: >-
+          Quick Checks machine for this dispatch only: 8x16 (the pull-request shape) or 4x8 (what main's push run
+          uses, so a branch can measure main's shape before merge). Pull requests and main ignore it.
+        type: choice
+        options: ['8x16', '4x8']
+        default: '8x16'
 
 # A new push to a PR supersedes the run for its old SHA, so that run is cancelled instead of holding
 # a runner.
@@ -40,106 +49,69 @@ on:
 concurrency:
   group: >-
     ${{ github.workflow }}-${{
-      github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
+      github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && format('pr-{0}', github.event.pull_request.number)
       || (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'main'
       || github.run_id
     }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
 
 jobs:
-  precommit:
-    timeout-minutes: 10
-    name: Pre-Commit (${{ matrix.part }})
-    permissions:
-      contents: read
-    # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners", says why and what
-    # `vars.CI_RUNNER_POOL` does). The shape is per part, from measured use. `format` is treefmt alone:
-    # 2x4 takes ~55s against ~30s on 4x8, for half the price and still well inside the critical path.
-    # `gates` holds knip, which ran out of memory on the 4GB of a 2x4, so it takes a 4x8: it was 183 s on
-    # GitHub's runner, over the two-minute rule every job holds (docs/standards/ci-cd, "Runners").
-    runs-on: >-
-      ${{
-        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
-        && 'ubuntu-latest'
-        || fromJSON(format('["nscloud-ubuntu-24.04-amd64-{0}-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]', matrix.shape))
-      }}
-    # Two parts on parallel runners: the hooks run one after another, and treefmt alone was ~40s of
-    # their ~105s. Between them the parts run every hook an unsplit run does (scripts/ci/pre-commit.sh).
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { part: format, shape: 2x4 }
-          - { part: gates, shape: 4x8 }
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
-      - uses: ./.github/actions/install-nix
-      - name: Run pre-commit (${{ matrix.part }})
-        env:
-          PART: ${{ matrix.part }}
-        run: ./scripts/ci/in-devshell.sh ./scripts/ci/pre-commit.sh "$PART"
-
-  # Three checks that each finish in under 20 seconds, in ONE job. Namespace bills a job by the minute
-  # with a one-minute floor and holds a runner and a cache attachment for each, so three 15-second jobs
-  # cost three minutes of runner and three cache attachments for 45 seconds of work.
-  build-checks:
+  # Shared setup once, then independent processes with separate logs and coverage directories.
+  quick:
+    name: Quick Checks
+    if: ${{ github.event.action != 'labeled' || github.event.label.name == 'full-ci' }}
     timeout-minutes: 20
-    name: Build Checks
     permissions:
       contents: read
-    # Namespace on EVERY event, `main` included: this is the one Namespace job a `main` run keeps, because
-    # only `main` commits the /nix cache volume and this job builds both closures every other Namespace
-    # job mounts — the `.#ci` dev shell and the install bundle (docs/standards/ci-cd, "Runners").
+    # Main only refreshes the cache and waits for the full release gates; its smaller Quick
+    # machine preserves tsc/Nix cache commits without paying 8 units on every main push.
+    # A dispatch picks its own shape (`quick_shape`), so main's 4x8 can be measured on a branch before merge.
     runs-on: >-
-      ${{
-        vars.CI_RUNNER_POOL == 'github' && 'ubuntu-latest'
-        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
-      }}
+      ${{ fromJSON(format('["nscloud-ubuntu-24.04-amd64-{0}-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]',
+        (github.event_name == 'push' && github.ref == 'refs/heads/main' && '4x8')
+        || (github.event_name == 'workflow_dispatch' && inputs.quick_shape)
+        || '8x16')) }}
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Mount the Nix store cache
+        id: cache
         if: runner.environment == 'self-hosted'
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
+          path: ~/.cache/ferretry-tsc
       - uses: ./.github/actions/install-nix
-      # This is the documented `nix shell github:kirinnee/ferretry` package graph. It used to copy
-      # Bun's workspace links by hand, so fyd gained @ferretry/relay while this build stayed stale;
-      # every other job installed the real workspace and remained green. Build the actual bundle.
-      - name: Build documented Nix install bundle
-        run: nix build .#default --no-link
-      # Compile both deployment shapes with the same flake-locked Wrangler production uses. This
-      # catches schema, migration, binding and module-resolution drift before a deploy sees secrets.
-      - name: Compile relay Workers without publishing
-        run: |
-          ./scripts/ci/in-devshell.sh bash -c '
-            set -euo pipefail
-            cd packages/relay
-            bun install --frozen-lockfile
-            wrangler deploy --dry-run --config wrangler.jsonc
-            wrangler deploy --dry-run --config wrangler.hosted.json
-            wrangler deploy --dry-run --config wrangler.link-store.jsonc
-            wrangler deploy --dry-run --config wrangler.link-store.hosted.json
-          '
-      # The same gate the Pages deploy runs — but that workflow only fires on a push to `main`, so
-      # until now the first thing to notice that the generated `fy-render` sandbox shell and its two
-      # library bundles never reached `dist` was the production deploy. The build asserts all three
-      # are present and non-empty; running it pre-merge makes a lost generation step a red PR instead
-      # of a shipped 404 shell that silently degrades every diagram and animation.
-      - name: Build static PWA bundle
-        run: ./scripts/ci/in-devshell.sh ./scripts/ci/build-pwa.sh
-      # Only `main` commits the cache volume (`nscloud-cache-allow-commit-from-main`), so only `main`
-      # prunes it: everything the dev shell and the install bundle no longer reach, once the store
-      # outgrows its budget. scripts/ci/nix-store-hygiene.sh says why the budget is what it is.
+      - name: Run the quick set
+        env:
+          FY_CI_QUICK_PARALLEL: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.quick_shape == '4x8')) && '3' || '6' }}
+          FY_CI_GATE_PARALLEL: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.quick_shape == '4x8')) && '2' || '4' }}
+          # quick.sh derives FY_TSC_CACHE_DIR from $HOME, the same directory the cache action mounts
+          # above, and on main deletes it first so the cache a pull request reads is a clean proof.
+          FY_CI_MAIN: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '' }}
+          FY_CI_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/quick.sh
+      - name: Upload unit coverage
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit
+          path: coverage/unit/
+          if-no-files-found: warn
+      - name: Upload quick part results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-parts
+          path: |
+            coverage/ci/quick/*.log
+            coverage/ci/quick/*.tsv
+            coverage/ci/quick/hooks/
+            coverage/ci/quick/static/
+          if-no-files-found: warn
       - name: Prune the Nix store cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && runner.environment == 'self-hosted'
         run: ./scripts/ci/nix-store-hygiene.sh
@@ -152,6 +124,7 @@ jobs:
   # The job is self-contained: it reads the PR's file list through the API and nothing else, so it stays
   # valid whenever and however `pwa-screenshot` is triggered.
   pwa-relevance:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
     timeout-minutes: 5
     name: PWA Relevance
     permissions:
@@ -174,11 +147,31 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: ./scripts/ci/pwa-relevance.sh
 
+  # Starts immediately, before Namespace provisioning. A new head has no full proof yet.
+  full-pending:
+    name: Full CI Pending
+    if: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - name: Mark the exact PR head as awaiting full proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: ./scripts/ci/full-status.sh pending
+
   pwa-screenshot:
     timeout-minutes: 20
     name: PWA ${{ matrix.scope == 'full' && 'Full Gallery' || 'Settings Geometry' }} (${{ matrix.scheme }}${{ matrix.viewport && format(', {0}', matrix.viewport) || '' }})
     needs: pwa-relevance
-    if: ${{ !cancelled() && needs.pwa-relevance.outputs.run != 'false' }}
+    if: ${{ !cancelled() && needs.pwa-relevance.outputs.run != 'false' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
     permissions:
       contents: read
     # Linux, deliberately NOT a macOS runner: the image already ships the same Google Chrome the
@@ -249,135 +242,23 @@ jobs:
           path: packages/pwa/.artifacts/pwa-screenshot/
           if-no-files-found: warn
 
-  # The unit tier in parallel shares (config/test-groups.json), exactly like `int` below. Serially it
-  # was ~105s of tests in one process; the slowest group is under a minute.
-  test:
-    timeout-minutes: 15
-    name: Unit Tests (${{ matrix.group }})
-    permissions:
-      contents: read
-    # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners").
-    # `bun test` runs one file at a time: measured at under one busy core of four, so two is plenty.
-    runs-on: >-
-      ${{
-        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
-        && 'ubuntu-latest'
-        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
-      }}
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [pwa-features, pwa, everything-else]
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
-      - uses: ./.github/actions/install-nix
-      - name: Run the ${{ matrix.group }} unit tests
-        env:
-          TEST_GROUP: ${{ matrix.group }}
-        run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh unit "$TEST_GROUP"
-      - name: Upload the ${{ matrix.group }} coverage ledger
-        id: upload_1
-        continue-on-error: true
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-unit-${{ matrix.group }}
-          path: coverage/unit/groups/${{ matrix.group }}/lcov.info
-          if-no-files-found: warn
-      # A later job reads this artifact, so a dropped upload (GitHub's artifact service resets a finalize
-      # now and then) is retried once from the same files; a second failure fails the job as before.
-      - name: Upload the ${{ matrix.group }} coverage ledger (retry)
-        if: ${{ (always()) && steps.upload_1.outcome == 'failure' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-unit-${{ matrix.group }}
-          path: coverage/unit/groups/${{ matrix.group }}/lcov.info
-          overwrite: true
-          if-no-files-found: warn
-
-  # The unit tier's 100% ledger over every group's, as `int-ledger` does for int; no nix shell.
-  unit-ledger:
-    timeout-minutes: 5
-    name: Unit Tests
-    needs: test
-    permissions:
-      contents: read
-    # Namespace 2x4 WITHOUT the cache volume, on every event: ten seconds of bash, awk and jq, but on GitHub
-    # it waited in the 20-job queue and `Release` waits for this gate. Two unit-minutes a run.
-    runs-on: >-
-      ${{
-        vars.CI_RUNNER_POOL == 'github' && 'ubuntu-latest'
-        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4"]')
-      }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - name: Download every group's coverage ledger
-        uses: actions/download-artifact@v4
-        with:
-          pattern: coverage-unit-*
-          path: coverage/unit/groups
-      - name: Hold the unit tier to its 100% ledger
-        run: ./scripts/ci/coverage-ledger.sh unit --groups coverage/unit/groups
-      - name: Upload unit coverage artifact
-        if: always()
-        # Evidence only: a reader's convenience, never the gate. GitHub's artifact service drops a
-        # finalize now and then (ECONNRESET), and that must not turn a proven run red.
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-unit
-          path: coverage/unit/lcov.info
-          if-no-files-found: warn
-
-  # The integration tier in parallel shares (config/test-groups.json). Serially it was the CI critical
-  # path at ~4.4 min (~3.8 min of tests). The matrix lists every group
-  # by name, and `int-ledger` refuses to judge unless every group in the config reported.
-  # The tier grew back to the critical path: by Oct 28 `everything-else` took ~480s and
-  # `daemon-runtime` ~330s on GitHub. Their slowest files got groups of their own, and the PWA browser
-  # walks are dealt out by name prefix (config/test-groups.json) so the groups are about as slow as each
-  # other. Measured on Namespace 2x4 over PR runs of Oct 30 – Nov 5, test-step p50: `everything-else`
-  # 225s (p90 ~450s, the last job to finish in 103 of 153 runs) against `daemon` 127, `pwa-surfaces`
-  # 110, `pwa-render` 95, `pwa-chat` 63, `daemon-runtime` 48 — a sum of ~670s that balanced is ~115-150s a
-  # group. `everything-else` held 40 PWA browser-walk files (~350s of per-file test time, all in one
-  # process because the PWA is one package); 17 of them now sit in `pwa-render`, `pwa-chat` (with the `agenda-`
-  # walks: in `daemon-runtime` they pushed a 4 GB 2x4 to 91% RAM and it was killed) and `pwa-surfaces`. A first deal-out left `pwa-chat` at 237s and
-  # `everything-else` at 256s, so the groups were re-cut on the measured file times; each group now has
-  # about 130-235s of test time on the PR run that measured it (`daemon` 234s, untouched and the
-  # slowest; `pwa-surfaces` 212s; p50 of `daemon` is 127s). The PWA
-  # has no `src/adapters`, so no int ledger file depends on where its tests run. The real-time budget
-  # suites that once had a group are the realworld tier's now
-  # (realworld.yaml): they asserted the machine, not the code, so they cannot gate a merge. GitHub
-  # runs these for free; the cost is two more jobs in its 20-job queue, measured as worth it.
+  # ONE job on one 8x16 runner, not a matrix of 2x4 runners: `integration.sh` runs every group of
+  # config/test-groups.json side by side (six at a time) and then the 100% ledger. The groups are
+  # balanced by measured test time (the PWA browser walks are dealt out by name prefix), so no one
+  # group is the long pole; rebalance from per-file times, not by guessing.
   int:
-    name: Integration Tests (${{ matrix.group }})
+    name: Integration Tests
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    timeout-minutes: 20
     permissions:
       contents: read
-    # Namespace 2x4 on a pull request: six jobs a run were most of what filled GitHub's 20-job cap, and the
-    # warm /nix saves ~20 s of setup. The tests mostly wait on Chrome and daemons, so two cores is the
-    # shape; `main` stays on GitHub (docs/standards/ci-cd, "Runners", per-job table).
-    runs-on: >-
-      ${{
-        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
-        && 'ubuntu-latest'
-        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
-      }}
-    # A CEILING, NOT A RETRY: the slowest group takes ~4 min, so 20 is a wedged run. On 2026-10-29 the
-    # daemon group hung in a test and held its runner for two hours; without this it holds one for six.
-    # `scripts/test/stall-watch.ts` ends a silent run sooner and says why; this catches everything else.
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [daemon-runtime, daemon, pwa-render, pwa-chat, pwa-surfaces, everything-else]
+    runs-on:
+      [
+        nscloud-ubuntu-24.04-amd64-8x16-with-cache,
+        nscloud-cache-tag-ferretry-nix,
+        nscloud-cache-size-10gb,
+        nscloud-cache-allow-commit-from-main,
+      ]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -388,69 +269,59 @@ jobs:
         with:
           cache: nix
       - uses: ./.github/actions/install-nix
-      - name: Run the ${{ matrix.group }} integration tests
-        env:
-          TEST_GROUP: ${{ matrix.group }}
-        run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh int "$TEST_GROUP"
-      - name: Upload the ${{ matrix.group }} coverage ledger
-        id: upload_2
-        continue-on-error: true
+      - name: Run every integration group and its ledger
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/integration.sh
+      - name: Upload integration coverage
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-int-${{ matrix.group }}
-          path: coverage/int/groups/${{ matrix.group }}/lcov.info
-          if-no-files-found: warn
-      # A later job reads this artifact, so a dropped upload (GitHub's artifact service resets a finalize
-      # now and then) is retried once from the same files; a second failure fails the job as before.
-      - name: Upload the ${{ matrix.group }} coverage ledger (retry)
-        if: ${{ (always()) && steps.upload_2.outcome == 'failure' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-int-${{ matrix.group }}
-          path: coverage/int/groups/${{ matrix.group }}/lcov.info
-          overwrite: true
-          if-no-files-found: warn
-
-  # The integration tier's 100% ledger over every group's (scripts/ci/coverage-ledger.sh says why it
-  # merges per file, never per line). Like `smoke`, it enters no nix shell: the gate is bash, awk,
-  # grep and jq, all on the runner image, and a nix shell would add ~30s to the critical path.
-  int-ledger:
-    timeout-minutes: 5
-    name: Integration Tests
-    needs: int
-    permissions:
-      contents: read
-    # Namespace 2x4 WITHOUT the cache volume, on every event: ten seconds of bash, awk and jq, but on GitHub
-    # it waited in the 20-job queue and `Release` waits for this gate. Two unit-minutes a run.
-    runs-on: >-
-      ${{
-        vars.CI_RUNNER_POOL == 'github' && 'ubuntu-latest'
-        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4"]')
-      }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - name: Download every group's coverage ledger
-        uses: actions/download-artifact@v4
-        with:
-          pattern: coverage-int-*
-          path: coverage/int/groups
-      - name: Hold the integration tier to its 100% ledger
-        run: ./scripts/ci/coverage-ledger.sh int --groups coverage/int/groups
-      - name: Upload int coverage artifact
-        if: always()
-        # Evidence only: a reader's convenience, never the gate. GitHub's artifact service drops a
-        # finalize now and then (ECONNRESET), and that must not turn a proven run red.
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: coverage-int
-          path: coverage/int/lcov.info
+          path: coverage/int/
+          if-no-files-found: warn
+      - name: Upload integration part results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-parts
+          path: |
+            coverage/ci/int/*.log
+            coverage/ci/int/*.tsv
           if-no-files-found: warn
 
+  # Knip (twice) and the route agreement: the gates that need more than 4GB, so they are not in Quick's
+  # per-hook buckets and not in compile, whose binaries SIT, the smokes and darwin wait for. A job of
+  # its own, in the verdict's needs, so it overlaps compile instead of lengthening the critical path.
+  full-gates:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    timeout-minutes: 15
+    name: Full Gates
+    permissions:
+      contents: read
+    # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners"). Knip ran out of
+    # memory on a 2x4's 4GB, so this is a 4x8; its two modes and the route check run one after another.
+    runs-on: >-
+      ${{
+        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
+        && 'ubuntu-latest'
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+      }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Mount the Nix store cache
+        if: runner.environment == 'self-hosted'
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
+      - uses: ./.github/actions/install-nix
+      - name: Run the full-only static gates
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/full-gates.sh
+
   compile:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
     timeout-minutes: 15
     name: Compile Binaries
     permissions:
@@ -501,6 +372,7 @@ jobs:
           if-no-files-found: error
 
   sit:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
     timeout-minutes: 10
     name: SIT
     needs: compile
@@ -528,6 +400,7 @@ jobs:
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh sit
 
   smoke:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
     timeout-minutes: 10
     name: Smoke ${{ matrix.target }}
     needs: compile
@@ -579,9 +452,171 @@ jobs:
   smoke-darwin:
     name: Smoke darwin-arm64
     needs: compile
-    if: ${{ vars.MACOS_SMOKE != 'skip' }}
+    if: ${{ vars.MACOS_SMOKE != 'skip' && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
     permissions:
       contents: read
     uses: ./.github/workflows/smoke-darwin.yaml
     with:
       advisory: ${{ github.event_name == 'pull_request' }}
+
+  relevance:
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    timeout-minutes: 5
+    name: E2E Relevance
+    permissions:
+      contents: read
+      pull-requests: read
+    # GitHub, not Namespace: a few seconds of bash with no nix shell. Namespace bills it a whole minute
+    # and attaches the cache volume for nothing, and here it is free.
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - id: decide
+        name: Decide whether the journeys have anything to prove
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ./scripts/ci/e2e-relevance.sh
+
+  # The journeys of the `fast` tier, split by test across the matrix (scripts/ci/e2e-shards.ts, balanced
+  # by tests/e2e/timings.json). Each shard compiles its own binaries: measured, the compile is ~6s of a
+  # shard's ~40s setup, and a build-once job in front would add a whole job's startup to the critical path.
+  journeys:
+    name: E2E Shard (${{ matrix.shard }})
+    needs: relevance
+    if: ${{ ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) && needs.relevance.outputs.run == 'true' }}
+    permissions:
+      contents: read
+    # `ubuntu-latest` ships the Google Chrome the journeys launch and the tmux their agent sessions
+    # live in, exactly as the int tier and the Settings geometry gate already rely on. The timeout stops
+    # a wedged browser from holding the runner for the default six hours.
+    # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners").
+    # A shard drives one journey at a time: measured at about one busy core and under 2GB, so 2x4.
+    runs-on: >-
+      ${{
+        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
+        && 'ubuntu-latest'
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+      }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Mount the Nix store cache
+        if: runner.environment == 'self-hosted'
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
+      - uses: ./.github/actions/install-nix
+      # ADVISORY: `continue-on-error` on this STEP, not the job. On a job it still paints the job's check
+      # red; on the step the job stays green while the step's own result, the job summary line, a warning
+      # annotation and the `E2E Journeys` tally record every failure. Removed when the tier becomes required.
+      - name: Run this shard of the e2e journeys
+        continue-on-error: true
+        env:
+          FY_E2E_TIER: fast
+          FY_E2E_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: nix develop .#ci -c ./scripts/ci/e2e.sh
+      # `always()` because a red run is the run whose evidence matters most: every screen the journeys
+      # reached at phone and desktop width in both colour schemes, the per-step journey log, the relay
+      # ledger, the JUnit report the timings are regenerated from, and the shard's result for the summary.
+      - name: Upload this shard's e2e evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # One artifact per shard and attempt: v4 artifacts are immutable within a run, so a re-run
+          # reusing the name failed its upload after the journeys had passed.
+          name: e2e-evidence-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/e2e-evidence/
+          if-no-files-found: warn
+      # The shard's tally alone, so the summary reads a few bytes instead of every shard's screens.
+      - name: Upload this shard's result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-result-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/e2e-evidence/result.json
+          if-no-files-found: warn
+
+  # THE status: one name for branch protection and merge tooling however many shards there are.
+  summary:
+    timeout-minutes: 5
+    name: E2E Journeys
+    needs: [relevance, journeys]
+    if: ${{ !cancelled() && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    permissions:
+      contents: read
+    # GitHub, not Namespace: a few seconds of bash with no nix shell. Namespace bills it a whole minute
+    # and attaches the cache volume for nothing, and here it is free.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      # Every attempt's: "re-run failed jobs" re-runs only some shards, and the summary keeps each
+      # shard's latest. A shard whose journeys never started left no result; the summary counts it.
+      - name: Download every shard's result
+        if: needs.relevance.outputs.run == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: e2e-result-*
+          path: ${{ runner.temp }}/e2e-shards
+      - name: Add up the shards
+        env:
+          RELEVANCE: ${{ needs.relevance.result }}
+          RUN: ${{ needs.relevance.outputs.run }}
+          SHARDS: ${{ needs.journeys.result }}
+        run: ./scripts/ci/e2e-summary.sh "${{ runner.temp }}/e2e-shards" 3
+
+  full:
+    name: Full CI
+    needs:
+      [
+        quick,
+        full-pending,
+        int,
+        full-gates,
+        compile,
+        sit,
+        smoke,
+        smoke-darwin,
+        pwa-relevance,
+        pwa-screenshot,
+        relevance,
+        journeys,
+        summary,
+      ]
+    if: ${{ always() && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+      issues: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - name: Judge the full set on this exact head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          NEEDS: ${{ toJSON(needs) }}
+          MACOS_SMOKE: ${{ vars.MACOS_SMOKE }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ./scripts/ci/full-status.sh verdict

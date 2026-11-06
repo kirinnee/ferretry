@@ -12,7 +12,9 @@ set -euo pipefail
 # are ADVISORY (docs/standards/ci-cd/index.md, "E2E tier"): a failing journey is tallied, annotated and
 # listed here, and does not turn this red until the tier is made required. A shard job that did not
 # finish — a runner that died, a setup step that failed, a cancelled matrix — is red, as it was before
-# the tier was sharded.
+# the tier was sharded. So is a run where NO shard left a result: every shard job was green but not one
+# journey ran (the harness died before the first, as a typecheck error once did), and "advisory" must
+# not mean "silently never runs". A partial set (some shards without a result) stays a warning.
 
 dir="${1:?usage: e2e-summary.sh <evidence-dir> <expected-shards>}"
 expected="${2:?usage: e2e-summary.sh <evidence-dir> <expected-shards>}"
@@ -41,6 +43,11 @@ mapfile -t results < <(
          END { for (shard in path) print shard "\t" path[shard] }' |
     sort -n | cut -f2
 )
+if [ "${#results[@]}" -eq 0 ]; then
+  echo "### E2E harness produced no results: the journeys did not run" >>"${summary_file}"
+  echo "❌ E2E harness produced no results: the journeys did not run (0 of ${expected} shards left a result)" >&2
+  exit 1
+fi
 totals="$(jq -s '{passed: (map(.passed // 0) | add // 0), failed: (map(.failed // 0) | add // 0),
   slowest: (map(.seconds) | max // 0), failures: (map(.failures[]) | unique)}' "${results[@]}" </dev/null)"
 passed="$(jq -r .passed <<<"${totals}")"
