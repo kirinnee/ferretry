@@ -298,9 +298,10 @@ Notable details:
   step p50 / p90: `everything-else` 225 / ~450 s, `daemon` 127 / ~190, `pwa-surfaces` 110 / ~155,
   `pwa-render` 95 / ~130, `pwa-chat` 63 / ~90, `daemon-runtime` 48 / ~75). It held 40 PWA browser-walk
   files, ~350 s of per-file test time in one bun process. 17 of them are now dealt out by name prefix in
-  `config/test-groups.json`: `agenda-` to `daemon-runtime` (the lightest group, which stopped being
-  runtime-only), `jump-latest-`, `chat-polish` and `chat-rerender` to `pwa-render`, `snooze` and
-  `chat-history` to `pwa-chat`, `inbox-` to `pwa-surfaces`. A first deal-out was measured on its own PR
+  `config/test-groups.json`: `jump-latest-`, `chat-polish` and `chat-rerender` to `pwa-render`, `snooze`, `chat-history`
+  and `agenda-` to `pwa-chat`, `inbox-` to `pwa-surfaces`. The `agenda-` walks first went to `daemon-runtime`, but
+  that group runs the daemon's runtime suites in the same process on a 4 GB 2x4, and with the walks it
+  peaked at 84-91% RAM and was killed (no JUnit report) on two pull requests; `pwa-chat` peaks at ~35%. A first deal-out was measured on its own PR
   run (`pwa-chat` 237 s, `everything-else` 256 s) and re-cut on the real file times, so each group
   carries ~130-235 s on the PR run that measured it (`daemon` 234 s, untouched and the slowest;
   `pwa-surfaces` 212 s). This costs the ledger nothing: the PWA has no `src/adapters`, and the `cli`,
