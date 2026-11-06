@@ -455,13 +455,15 @@ export { AGENDA_ENV };
  * whole on every update with the chat as its log, tabs holding any kind of content, splitting, chat discussion),
  * then the commands that open, answer, rest, log, split and merge one (docs/pack-mode.md records their budget). It
  * teaches no item type: the tabs hold any kind of content (the owner, 2026-11-04: "now agenda doesn't have a "main"
- * type any more"), so the stage chain is the daemon's and `--stage`'s help, not the prompt's.
+ * type any more"), so the stage chain is the daemon's and `--stage`'s help, not the prompt's. Every ask or answer
+ * on a topic STACKS on its one item and every unresolved ask stays floated in "where we are" and "what I need" (the
+ * owner on !A404: "don't let go of unresolved questions"); answered Q&A moves to a `History` tab.
  */
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
     `Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (\`${fy} search\`): none fits→open, else closest. \`split\` misfits, \`merge\` items that share.`,
     `Open: \`${fy} agenda add --title "<topic>" --premise "<now>" --context "<facts>" "<ask>"\`. Title ≤40, ask ≤80. Read cold: no ids/paths/jargon (\`--term X=meaning\`); short points, answer first, no headings. ${AGENDA_SHAPE_LINE} \`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
-    `Needs you buzzes; Resting is quiet. Owner reply/answer rests it; \`answer <id> "…"\` returns it. \`rest <id> --why …\`=working. Every update: \`show <id> --yaml\` whole, rewrite all that's stale (premise, context, ask, options, kind, still-open, each tab), then \`patch <id> --file f\`; chat points there. Tabs hold any kind (to-dos, steps, explainers), one each, serial stays one, kept there. Only you mark it \`done\` when nothing's left. Chat: \`log <id> --reply|--rest\` logs their words verbatim; link it; unsure→closest, say so.`,
+    `Needs you buzzes; Resting is quiet. Owner reply/answer rests it; \`answer <id> "…"\` returns it. \`rest <id> --why …\`=working. Ask/answer stack on the topic's ONE item: \`show <id> --yaml\` whole→\`patch <id> --file f\`; chat points there. Float EVERY open ask in premise (where we are) + ask (what I need); answered Q&A→\`History\`, oldest first, with answer. Tabs by kind, serial stays one; steps/explainers stay. Only you mark it \`done\` when nothing's left. Chat: \`log <id> --reply|--rest\` logs their words verbatim; link it; unsure→closest, say so.`,
     'Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.',
   ].join('\n');
 

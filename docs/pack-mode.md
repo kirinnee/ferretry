@@ -130,6 +130,9 @@ The owner's board-and-agenda teaching (&C48, 2026-11-04) then added five rules a
   updated, else there might be many segments that might be outdated!"_: `fy task show` whole, then edit every stale
   part). Paid for by "(`fy board lanes show`)", which the move's
   help and refusals already print, and by tighter words for the umbrella, related-card and agenda sentences.
+- **Agenda, float open asks** (1,380 → 1,386, cap 1,390; the whole prompt 7,999 of 8,000; the owner on !A404): every ask or answer
+  stacks on the topic's one item, every open ask stays floated in the premise and the ask, answered Q&A goes to a `History` tab, oldest
+  first; the tabs sentence keeps the owner's two tab rules, split by content kind and steps and explainers stay in the tabs ("Tabs by kind, serial stays one; steps/explainers stay."). Paid for by the "rewrite all that's stale (…)" list, the tabs sentence's parenthesis, "then" (→), and "Float EVERY open ask in" for "EVERY open ask stays floated in", `History` for `History` tab and "Ask/answer" for "Asks/answers"; the chat line keeps "link it" and "say so".
 - **Agenda** (1,311 → 1,380, cap 1,320 → 1,390): every update reads the item whole (`show`) and edits every stale part
   — premise, context, the ask, its options and kind (how to reply), still-open and each tab (!A358); the tabs
   hold any kind of content (to-dos, steps, explainers, results) and steps and explainers stay there. Paid for by the

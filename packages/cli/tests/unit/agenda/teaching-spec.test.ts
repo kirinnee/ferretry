@@ -124,7 +124,7 @@ const SPEC_VERBS: ReadonlyArray<{ readonly verb: string; readonly taught: string
   { verb: 'log', taught: 'log <id> --reply|--rest' },
   { verb: 'split', taught: '`split`' },
   { verb: 'merge', taught: '`merge`' },
-  { verb: 'patch', taught: 'then `patch <id> --file f`' },
+  { verb: 'patch', taught: '→`patch <id> --file f`' },
   { verb: 'done', taught: 'mark it `done`' },
 ];
 
@@ -156,7 +156,7 @@ describe('the teaching names every agenda verb the spec lists', () => {
     // Assert
     should(prompt).not.containEql(stages.join('→'));
     should(prompt).not.containEql('`--stage`');
-    should(prompt).containEql('each tab), then `patch');
+    should(prompt).containEql('whole→`patch');
   });
 
   it('should say a resting item is quiet, a Needs-you item buzzes, and rest --why means working', () => {
@@ -186,9 +186,13 @@ describe('the teaching says the tabs are the live document and the chat is its l
     const prompt = said(AGENDA_INSTRUCTION('fy'));
 
     // Assert
-    should(prompt).containEql("every update: `show <id> --yaml` whole, rewrite all that's stale");
-    should(prompt).containEql('each tab), then `patch <id> --file f`');
-    should(prompt).containEql('tabs hold any kind (to-dos, steps, explainers), one each, serial stays one, kept there');
+    should(prompt).containEql(
+      "ask/answer stack on the topic's one item: `show <id> --yaml` whole→`patch <id> --file f`",
+    );
+    // The owner on !A404: every unresolved ask stays floated; answered Q&A moves to a History tab.
+    should(prompt).containEql('float every open ask in premise (where we are) + ask (what i need)');
+    should(prompt).containEql('answered q&a→`history`, oldest first, with answer');
+    should(prompt).containEql('tabs by kind, serial stays one; steps/explainers stay.');
     should(prompt).containEql('chat points there');
     should(prompt).not.containEql('short status');
     should(prompt).not.containEql('one-screen summary');
@@ -215,6 +219,17 @@ describe('the teaching says the tabs are the live document and the chat is its l
       'always keep the item current: before every update read it whole (agenda show <id> --yaml)',
     );
     should(rule).containEql('write it back in one go: agenda patch <id> --file f.yaml');
+    // The owner on !A404: asks and answers stack on one item; an open ask is never dropped; answered Q&A is History.
+    should(rule).containEql(
+      'every ask and answer on a topic stacks on the same item, and an open ask is never dropped',
+    );
+    should(rule).containEql(
+      'every unresolved ask stays floated in "where we are" (premise, context) and in "what i need from you"',
+    );
+    should(rule).containEql(
+      'an answered question moves to a "history" tab, oldest first, each marked answered with its answer',
+    );
+    should(rule).containEql('open a new item only for a clearly separate topic');
     should(rule).containEql(
       'premise, context, the ask (what you need from the owner), its options and how to reply, still-open and each tab',
     );

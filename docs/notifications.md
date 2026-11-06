@@ -416,11 +416,11 @@ thing only the owner can decide or do on the agenda, as its own item (`fy agenda
 [agenda.md](agenda.md)); with it off, it is told only the notify rule above. A new ferret starts with it
 on unless the machine default (below) is turned off.
 
-The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, 1,352 characters, capped at 1,360 by a test; the shipped
+The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, 1,386 characters, capped at 1,390 by a test; the shipped
 prompt as a whole has its own cap, so a new rule here is paid for by tightening words) teaches the model first: what an
 agenda is (one channel of the owner's attention), the three-part test, search-check-open, splitting, then the one
-command that opens one, then the states, the tabs as the live document (read whole, then every stale part edited — premise, context, the ask,
-its options, still-open and each tab — on every update; any kind of content, steps and explainers kept there), chat discussion, and the two standing rules (a bug batch is one
+command that opens one, then the states, the tabs as the live document (read whole on every update; every ask or answer on a topic stacks on its one item, every open ask stays floated in
+the premise and the ask, answered Q&A moves to a History tab, oldest first; one tab per content kind, steps and explainers kept there), chat discussion, and the two standing rules (a bug batch is one
 agenda; an owner’s question is answered on its item)
 ([agenda.md § One channel per topic](agenda.md#one-channel-per-topic)). It names only verbs that exist. Exactly this,
 with the binary's name for `fy`:
@@ -428,7 +428,7 @@ with the binary's name for `fy`:
 ```text
 Agenda mode: one channel of the owner's attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (`fy search`): none fits→open, else closest. `split` misfits, `merge` items that share.
 Open: `fy agenda add --title "<topic>" --premise "<now>" --context "<facts>" "<ask>"`. Title ≤40, ask ≤80. Read cold: no ids/paths/jargon (`--term X=meaning`); short points, answer first, no headings. Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`); todo=`--step`s; info=Got it; permission=Approve/Deny. `--blocking`=stuck, `--will-block`=later, `--by <time>`.
-Needs you buzzes; Resting is quiet. Owner reply/answer rests it; `answer <id> "…"` returns it. `rest <id> --why …`=working. Every update: `show <id> --yaml` whole, rewrite all that's stale (premise, context, ask, options, kind, still-open, each tab), then `patch <id> --file f`; chat points there. Tabs hold any kind (to-dos, steps, explainers), one each, serial stays one, kept there. Only you mark it `done` when nothing's left. Chat: `log <id> --reply|--rest` logs their words verbatim; link it; unsure→closest, say so.
+Needs you buzzes; Resting is quiet. Owner reply/answer rests it; `answer <id> "…"` returns it. `rest <id> --why …`=working. Ask/answer stack on the topic's ONE item: `show <id> --yaml` whole→`patch <id> --file f`; chat points there. Float EVERY open ask in premise (where we are) + ask (what I need); answered Q&A→`History`, oldest first, with answer. Tabs by kind, serial stays one; steps/explainers stay. Only you mark it `done` when nothing's left. Chat: `log <id> --reply|--rest` logs their words verbatim; link it; unsure→closest, say so.
 Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.
 ```
 
