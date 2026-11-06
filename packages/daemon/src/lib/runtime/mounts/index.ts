@@ -80,7 +80,6 @@ import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from 
 import { type PerformanceSubsystem, performanceRoutes } from './performance.ts';
 import { type PushAlertSubsystem, type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
-import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
 import { type CopyListing, type RuleProgramHomes, secureCopyRoutes } from './secure-copy.ts';
 import { securityRoutes } from './security.ts';
@@ -113,12 +112,10 @@ import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catal
 import { sentDraftClearer } from './shared-drafts.ts';
 import { signInRuleRoutes } from './sign-in-rules.ts';
 import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './session-archive.ts';
-import { type SpeedupsSubsystem, speedupRoutes } from './speedups.ts';
 import { stepUpRoutes } from './step-up.ts';
 import { type SystemOpenSubsystem, systemOpenRoutes } from './system-open.ts';
 import { taskPlanRoutes } from './task-plans.ts';
 import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
-import { type TidySubsystem, tidyRoutes } from './tidy.ts';
 import { tunnelRoutes } from './tunnel.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 import { type WebRtcSignallingSubsystem, webrtcRoutes } from './webrtc.ts';
@@ -358,8 +355,6 @@ export interface MountedSubsystems {
   readonly legacyTasks: LegacyTaskSubsystem;
   /** The project boards (v2): every project's cards, one file per card, written under ownership and lineage. */
   readonly board: BoardSubsystem;
-  /** One ferret's clean-up of its own unwanted cards and work-tracking agenda items (docs/board.md, "Tidy"). */
-  readonly tidy: TidySubsystem;
   /** The board's GitHub watcher (board-design.md §3.1): it serves no route, and it is a mounted subsystem
    *  for the reason `handoverReconcile` is — a loop nothing arms is a watcher that never looks. */
   readonly boardGitHub: { arm(): () => void };
@@ -406,9 +401,6 @@ export interface MountedSubsystems {
   readonly names: NameSubsystem;
   /** The team recommender over the published fleet manifest and the operator's routing catalog. */
   readonly recommend: RecommendSubsystem;
-  /** Optional provider keys (Jev, Groq, Cerebras): which are set, and a Test that spends one once through
-   *  the daemon's outbound holder. No key travels on either route — see `mounts/speedups.ts`. */
-  readonly speedups: SpeedupsSubsystem;
   /** The model catalogs in effect and the published catalog this machine follows (docs/model-catalog.md). The routes come from the
    *  models module; this field is read only by the first read of the models Ollama has installed, which `start()` arms. */
   readonly models: ModelsSubsystem;
@@ -425,8 +417,6 @@ export interface MountedSubsystems {
    * agent starts, reaches them. Absent: an agent reads no session file and starts no session with a cwd.
    */
   readonly stateHomes?: StateHomeReach;
-  /** Expired session scratch, planned or reclaimed only after all safety gates pass. */
-  readonly scratchGc: ScratchGcSubsystem;
   /** Hands a web address to this computer's own browser, for a caller on this machine only. */
   readonly systemOpen: SystemOpenSubsystem;
   /** The daemon's secret store, and the use-without-read primitive that is the point of it: an agent
@@ -570,7 +560,6 @@ export function legacyModule(
               // looking like one.
               ...foreignHistoryRoutes(subsystems.foreignHistory),
               ...conversationImportRoutes(subsystems.conversationImport),
-              ...scratchGcRoutes(subsystems.scratchGc),
               ...systemOpenRoutes(subsystems.systemOpen),
               // Every secret path is under `/v1/secrets`, which no other subsystem uses, so this table can
               // neither shadow nor be shadowed by anything around it. It registers with the daemon-wide
@@ -669,8 +658,6 @@ export function legacyModule(
               // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed
               // literals are registered before the patterns beneath them.
               ...boardRoutes(subsystems.board),
-              // `/v1/tidy/plan` is a fixed literal no other subsystem uses.
-              ...tidyRoutes(subsystems.tidy),
               ...secureCopyRoutes(
                 subsystems.secureCopy.copies,
                 subsystems.secureCopy.rules,
@@ -691,8 +678,6 @@ export function legacyModule(
               ...browserProxyRoutes(subsystems.browserProxy),
               ...nameRoutes(subsystems.names),
               ...recommendRoutes(subsystems.recommend),
-              // Fixed literals under `/v1/speedups`, which no other subsystem uses: none can shadow or be shadowed.
-              ...speedupRoutes(subsystems.speedups),
               // The working-tree read registers last among the per-session subsystems: three of its four paths are
               // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
               // its one-segment `fs`, so nothing here can shadow or be shadowed.

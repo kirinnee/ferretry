@@ -3,6 +3,7 @@ import { builtAgentTools } from './agent-tools/fixture.ts';
 import { builtAnalytics } from './analytics/fixture.ts';
 import { builtCgroups } from './cgroups/fixture.ts';
 import { builtFleetLogin } from './fleet-login/fixture.ts';
+import { builtHousekeeping } from './housekeeping/fixture.ts';
 import { builtInputRequests } from './input-requests/fixture.ts';
 import { builtLearning } from './learning/fixture.ts';
 import { builtMcp } from './mcp/fixture.ts';
@@ -46,4 +47,5 @@ const defaultBuiltModules = (): readonly BuiltModule<unknown, object>[] => [
   builtUsage(),
   builtMcp(),
   builtSharedDrafts(),
+  builtHousekeeping(),
 ];

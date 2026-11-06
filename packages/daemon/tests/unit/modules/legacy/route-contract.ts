@@ -96,7 +96,6 @@ export const callers: readonly string[] = [
   'GET /v1/fleet/proposals/:proposalId operator any',
   'GET /v1/fleet/runtimes operator any',
   'GET /v1/fleet/setup/scan operator any',
-  'GET /v1/gc operator any',
   'GET /v1/grants authenticated any',
   'GET /v1/grants/audit operator person',
   'GET /v1/health none any',
@@ -174,7 +173,6 @@ export const callers: readonly string[] = [
   'GET /v1/skill-installs/local operator person',
   'GET /v1/skills operator any',
   'GET /v1/skills/file operator any',
-  'GET /v1/speedups operator any',
   'GET /v1/task-plans operator person',
   'GET /v1/tasks operator any',
   'GET /v1/terminals operator any',
@@ -256,7 +254,6 @@ export const callers: readonly string[] = [
   'POST /v1/fleet/profiles/preview operator any',
   'POST /v1/fleet/proposals operator any',
   'POST /v1/fleet/proposals/:proposalId/apply operator person',
-  'POST /v1/gc operator any',
   'POST /v1/imports/conversations/adopt operator person',
   'POST /v1/machine/agenda operator person',
   'POST /v1/pack/new operator any',
@@ -325,12 +322,10 @@ export const callers: readonly string[] = [
   'POST /v1/skill-installs/local/project/preview operator person',
   'POST /v1/skill-installs/local/runtime operator person',
   'POST /v1/skill-installs/local/runtime/preview operator person',
-  'POST /v1/speedups/:provider/test operator any',
   'POST /v1/step-up operator person',
   'POST /v1/step-up/options operator person',
   'POST /v1/system/open-url operator any',
   'POST /v1/terminals/close-finished operator any',
-  'POST /v1/tidy/plan operator any',
   'POST /v1/unlock operator person',
   'POST /v1/unlock/options operator person',
   'POST /v1/warden/investigate operator person',
@@ -388,7 +383,6 @@ export const notAudited: Readonly<Record<string, string>> = {
   'POST /v1/unlock/options': 'mints a one-time challenge; the unlock that spends it is audited',
   'POST /v1/secrets/imports':
     'mints a one-time public key for a secret copy; the import that spends it is audited under its id',
-  'POST /v1/gc': 'scratch cleanup of state the daemon owns; reaches nobody',
   'POST /v1/push/seen':
     'takes an opened agenda item’s alerts down on the owner’s other devices; changes nobody’s access, and the clear is recorded in the notification ledger',
   'POST /v1/system/open-url':
@@ -400,8 +394,6 @@ export const notAudited: Readonly<Record<string, string>> = {
     'proposes, edits or confirms a project board’s lanes; a board layout changes nobody’s access, and the lane set records who proposed and who confirmed it',
   'PUT /v1/board/projects/:projectId/switch':
     'switches whether a project uses the board; owner-only, it changes nobody’s access, and the switch records that the owner set it and when',
-  'POST /v1/tidy/plan':
-    'a read: a POST only so a plan is never cached by a proxy; it decides what one ferret could tidy and changes nothing',
   'POST /v1/sessions/:sessionId/stop': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/resume': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/migrate': 'drives an existing session; its journal records it',

@@ -253,11 +253,9 @@ import {
   FileProjectCatalog,
   FileRestartQueue,
   FileRoutingCatalog,
-  FileScratchCollector,
   FileSecretDocumentStore,
   FileSecretKey,
   FileSignInRuleStore,
-  FileSpeedupTestLedger,
   FileTunnelHolding,
   foreignHistoryRoots,
   GitProjectFacts,
@@ -607,7 +605,6 @@ import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-con
 import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
 import { isSubFerret, nudgeTarget } from '../src/lib/sub-ferret/index.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
-import { TidyService } from '../src/lib/tidy/index.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
 type AutoResumeRevive = (id: string, message: string | undefined) => Promise<void>;
@@ -1152,7 +1149,6 @@ import {
   type SkillRuntimeHome,
   SkillsInventoryService,
   type SocketRoute,
-  SpeedupsService,
   STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
   type StackSamplerPort,
   StagedApiSurface,
@@ -1300,6 +1296,7 @@ import { agentIdentities, agentToolsModule } from './modules/agent-tools.ts';
 import { analyticsModule } from './modules/analytics.ts';
 import { cgroupsModule, createCgroupLaunchLimits } from './modules/cgroups.ts';
 import { fleetLoginModule } from './modules/fleet-login.ts';
+import { housekeepingModule } from './modules/housekeeping.ts';
 import { inputRequestsModule } from './modules/input-requests.ts';
 import { learningModule } from './modules/learning.ts';
 import { createMcpFoundations, mcpModule } from './modules/mcp.ts';
@@ -9636,29 +9633,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         defaultSessionMonitorSettings,
       );
-      // One collector owns the lifetime counters health reports and the explicit `/v1/gc` surface.
-      // It reads through opened storage and observes through the same revive adapter that would
-      // replace a pane, so a scratch sweep cannot mistake another tmux server for ours.
-      const scratchGc = new FileScratchCollector(
-        {
-          list: () => storage.listSessions(),
-          config: async id => await storage.readConfig(parseSessionId(id)),
-          state: async id => await storage.readState(parseSessionId(id)),
-          directory: id => createSessionPaths(paths, parseSessionId(id)).directory,
-        },
-        { alive: async id => (await reviver.observe(parseSessionId(id))).alive },
-      );
-      const scratch: ScratchReclamation = {
-        get enabled() {
-          return scratchGc.totals().enabled;
-        },
-        get reclaimedSessions() {
-          return scratchGc.totals().reclaimedSessions;
-        },
-        get reclaimedBytes() {
-          return scratchGc.totals().reclaimedBytes;
-        },
-      };
       // The board's projects and their lanes (U3), built before the board that reads them. A proposal is raised
       // on the proposing ferret's agenda, and the owner's Accept confirms it (in the agenda's change fanout).
       // The agenda and the board are read lazily: both are built after this.
@@ -12216,6 +12190,32 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         seamsOf.fleetLogin(world),
         lifecycle,
       );
+      // The scratch collector (its counters are the health report's), one ferret's tidy plan and the speed-ups: every
+      // constructor is pure, so this single build sits where the last input it takes — the agenda's reader — exists.
+      const housekeeping = housekeepingModule.build(
+        {
+          storage,
+          paths,
+          reviver,
+          tidy: {
+            board: boardWorld.board,
+            switches: boardWorld.switches,
+            sessions: boardSessions,
+            agenda,
+            subFerrets: boardSubFerrets,
+            machineId: () => attachmentDaemonId,
+          },
+          speedups: {
+            authorizer: outboundAuthorizer,
+            secrets: secrets.directory,
+            stateFiles,
+            clock,
+            stopwatch: speedupStopwatch,
+          },
+        },
+        seamsOf.housekeeping(world),
+        lifecycle,
+      );
       const mounted: Omit<
         MountedSubsystems,
         'catalogInstalls' | 'localSkillInstalls' | 'sharedCatalogs' | 'catalogMembers' | 'catalogLinks'
@@ -12248,7 +12248,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         health: createHealthSubsystem(
           health,
-          scratch,
+          housekeeping.provides.scratch,
           sessionWorkerPool,
           ioPressure,
           () => duplicateSweep.possible(),
@@ -12606,14 +12606,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
         },
         boardGitHub,
-        tidy: new TidyService({
-          board: boardWorld.board,
-          switches: boardWorld.switches,
-          sessions: boardSessions,
-          agenda,
-          subFerrets: boardSubFerrets,
-          machineId: () => attachmentDaemonId,
-        }),
         analyticsIngest: analytics.provides.ingestion,
         terminals: terminalSubsystem,
         browserLogin,
@@ -12686,13 +12678,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // outbound holder above. Jev's Test goes through the same guard the Warden will use.
         // The model catalogs in effect, and the published one this machine follows (docs/model-catalog.md).
         models: models.provides.subsystem,
-        speedups: new SpeedupsService({
-          authorizer: outboundAuthorizer,
-          secrets: secrets.directory,
-          ledger: new FileSpeedupTestLedger(stateFiles, join(paths.state, 'speedups.json')),
-          clock: { monotonicMs: () => speedupStopwatch.monotonicMs(), now: () => clock.now() },
-          guard: new JevTriageGuard(outboundAuthorizer, speedupStopwatch),
-        }),
         daemonUpdate: update.provides.daemon,
         // Constructed here rather than injected: the pinner opens nothing until a request arrives, and
         // the Git reader is the same hardened runner the worktree gateway already uses. Both are
@@ -12701,7 +12686,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Derived from the session id alone — a caller asks for `scope=media`, never for a directory.
         sessionMediaRoot: id => createSessionPaths(paths, parseSessionId(id)).media,
         stateHomes: stateHomeReach,
-        scratchGc,
         // Constructed here: the service holds only a rate window, and the launcher starts nothing until a
         // loopback caller asks.
         systemOpen: new OpenUrlService({
@@ -13283,6 +13267,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           usage: usageBuilt,
           mcp,
           sharedDrafts,
+          housekeeping,
         },
       };
     },
