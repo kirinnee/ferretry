@@ -61,6 +61,7 @@ import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-
 import { DevicePermissionsSetting } from './device-permissions-settings.tsx';
 import { DictationDebugSettings } from './dictation-debug-settings.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
+import { LiveVoiceSettingsSection } from './live-voice-settings.tsx';
 import type { GrantClientFactory } from './grants-settings.tsx';
 import { KeepChatsFreshSetting } from './keep-chats-fresh.tsx';
 import { useMachineUpdates } from './machine-updates.ts';
@@ -150,6 +151,13 @@ const backLabel = (panel: string | undefined): string | undefined => {
 
 export { DENSITY_OPTIONS } from '../../hooks/use-density.ts';
 
+/**
+ * The two cards that carry Live and Read replies aloud keep their text at least 16 px from the edge (4 space units),
+ * whatever the theme's own panel padding is; every other section keeps `p-panel`.
+ */
+const VOICE_SECTIONS: ReadonlySet<string> = new Set(['live-voice', 'dictation']);
+const ROOMY_PANEL_PADDING = 'p-[max(var(--pad-panel),calc(var(--space-unit)*4))]';
+
 export interface SettingsSectionProps {
   readonly definition: SettingDefinition;
   readonly children: ReactNode;
@@ -179,7 +187,10 @@ export function SettingsSection({ definition, children }: SettingsSectionProps) 
       id={`settings-${definition.id}`}
       data-setting-id={definition.id}
       tabIndex={-1}
-      className="kt-panel p-panel outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className={cn(
+        'kt-panel outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        VOICE_SECTIONS.has(definition.id) ? ROOMY_PANEL_PADDING : 'p-panel',
+      )}
       aria-labelledby={headingId}
     >
       {/* No scope badge here: the section header says "This device" once for every card under it. */}
@@ -506,6 +517,7 @@ export function SettingsPage({
       dictation: (
         <DictationSettings {...dictation} {...(selectedRecord === undefined ? {} : { daemon: selectedRecord })} />
       ),
+      'live-voice': <LiveVoiceSettingsSection />,
       notifications: notifications ?? (
         <p role="status" className="m-0 text-cell leading-base text-muted">
           Notification delivery is unavailable until this page is composed with the paired daemon’s push-subscription

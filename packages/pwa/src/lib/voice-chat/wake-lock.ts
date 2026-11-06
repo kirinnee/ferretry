@@ -81,3 +81,15 @@ export function screenWakeLock(api: WakeLockApiLike | null | undefined, visibili
     },
   };
 }
+
+/**
+ * The person's "Keep screen on" switch in front of a wake lock, asked at each `acquire` (Live asks again after a
+ * hidden tab comes back) so a change applies the next time. Off, `acquire` answers "fine" without asking the
+ * browser — this was a choice, not a refusal, so Live does not warn that the screen may turn off.
+ */
+export function gatedWakeLock(inner: WakeLockPort, keepOn: () => boolean): WakeLockPort {
+  return {
+    acquire: () => (keepOn() ? inner.acquire() : Promise.resolve(true)),
+    release: () => inner.release(),
+  };
+}

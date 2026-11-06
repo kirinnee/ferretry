@@ -281,6 +281,7 @@ describe('SettingsPage sections', () => {
       'composer-enter-key',
       'composer-suggestions',
       'dictation',
+      'live-voice',
       'notifications',
     ]);
     expect(view.container.querySelector('[data-settings-section="appearance"]')).toBeNull();

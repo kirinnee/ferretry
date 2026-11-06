@@ -24,6 +24,8 @@ import {
   liveReduce,
   mayHandOffQuestion,
   micIsOpen,
+  NO_COUNTDOWN_MS,
+  resolveCountdownMs,
   resolveGraceMs,
   SETTLE_MS,
 } from '../../../src/lib/voice-chat/live-machine.ts';
@@ -180,6 +182,41 @@ describe('liveReduce — starting, and refusing to', () => {
     should(run([{ ...START, graceMs: 'soon' } as LiveEvent]).state.graceMs).equal(DEFAULT_GRACE_MS);
     should(resolveGraceMs(1_234.6)).equal(1_235);
     should(resolveGraceMs(Number.NaN)).equal(DEFAULT_GRACE_MS);
+  });
+
+  it('SAFEGUARD: only the exact number 0 is "no countdown"; a bad or tiny length lands in 0.5–5 s and never at 0', () => {
+    should(NO_COUNTDOWN_MS).equal(0);
+    should(GRACE_RANGE_MS).deepEqual({ min: 500, max: 5_000 });
+    should(resolveGraceMs(0)).equal(0);
+    for (const bad of [-40, -0.1, 0.1, 0.49, 1, 499, -1e9]) {
+      should(resolveGraceMs(bad)).equal(GRACE_RANGE_MS.min);
+      should(resolveCountdownMs(bad)).equal(GRACE_RANGE_MS.min);
+    }
+    for (const huge of [5_001, 99_999, 1e12]) should(resolveGraceMs(huge)).equal(GRACE_RANGE_MS.max);
+    for (const junk of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      '0',
+      '-40',
+      '',
+      null,
+      undefined,
+      false,
+      [],
+      {},
+    ]) {
+      should(resolveGraceMs(junk)).equal(DEFAULT_GRACE_MS);
+      should(resolveCountdownMs(junk)).equal(DEFAULT_GRACE_MS);
+    }
+    // The countdown a person can pick is never zero, even when asked for it; the machine keeps 0 only when it is handed 0.
+    should(resolveCountdownMs(0)).equal(GRACE_RANGE_MS.min);
+    // A start event carrying a damaged length gets a real countdown, not an immediate send.
+    for (const bad of [-40, -0.1, 0.1]) {
+      const started = run([{ ...START, graceMs: bad } as LiveEvent]).state;
+      should(started.graceMs).equal(GRACE_RANGE_MS.min);
+    }
+    should(run([{ ...START, graceMs: 0 } as LiveEvent]).state.graceMs).equal(0);
   });
 
   it('starts paused when the page is hidden as the take opens', () => {

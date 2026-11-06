@@ -215,6 +215,12 @@ export interface SessionChatPageProps {
    * the page says "Updating…" over it until it does.
    */
   readonly updating?: boolean;
+  /**
+   * The session state and transcript on screen are the daemon's LIVE answer, not this device's cached copy
+   * (the fleet's seeded view, a transcript drawn before the first live read). Auto-read replies arms nothing
+   * off a cached copy. Default: live.
+   */
+  readonly authoritative?: boolean;
   /** A background read of this chat is still in flight: a tiny dot instead of the "Updating…" pill. */
   readonly catchingUp?: boolean;
   /** Where this session's reading position is kept, so Back and a reload return to it. */
@@ -460,6 +466,7 @@ export function SessionChatPage({
   refreshError = null,
   transcriptUnbound = false,
   updating = false,
+  authoritative = true,
   catchingUp = false,
   readingPosition,
   history,
@@ -1002,6 +1009,7 @@ export function SessionChatPage({
     suspended: liveOn || questionHandoff.reading,
     scope: `${connection.daemonId}/${session.config.id}`,
     entries,
+    authoritative,
     // Only a daemon that dates its turns is watched: with no `turnState` there is no turn to be sure of.
     turn: session.state.turnState === undefined ? null : turn,
     turnStateAt: session.state.turnState === undefined ? undefined : session.state.turnStateAt,

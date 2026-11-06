@@ -385,6 +385,14 @@
   overflow-wrap: anywhere;
 }
 
+/* ── Settings › Live voice: every button, switch and slider is 48 px high on a phone as well as a computer.
+   Written as `:root .fy-live-settings button` because the app's coarse-pointer floor (`:root button { min-height: 44px }`)
+   and `:root input:not([type=checkbox]):not([type=radio])` outrank a lone class, so the class is doubled to keep 48. ── */
+:root .fy-live-settings.fy-live-settings button,
+:root .fy-live-settings.fy-live-settings input[type='range'] {
+  min-height: 48px;
+}
+
 /* ── A QUESTION BEING READ (components/question-reading-bar.tsx): the retained reader's own controls, shown above the
    question form because the form replaced the Live bar. Words, then Stop and Repeat: 48 px on a phone, 44 on a computer. ── */
 .fy-live-question {

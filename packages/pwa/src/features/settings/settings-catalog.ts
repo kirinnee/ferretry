@@ -24,6 +24,7 @@ export type SettingId =
   | 'composer-enter-key'
   | 'composer-suggestions'
   | 'dictation'
+  | 'live-voice'
   | 'notifications'
   | 'install-app'
   | 'device-permissions'
@@ -242,6 +243,52 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
       'words',
       'names',
       'context',
+    ],
+  },
+  {
+    id: 'live-voice',
+    label: 'Live voice',
+    description:
+      'Hands-free voice chat. Live is the one place voice sends: you talk, your words appear in the message box, a countdown runs, and they are sent. Choose the pause that ends your turn, the countdown, reading replies aloud, keeping the screen on, and sounds and buzzes. The mic button still never sends.',
+    keywords: [
+      'live',
+      'voice chat',
+      'hands-free',
+      'hands free',
+      'read aloud',
+      'read replies',
+      'talk',
+      'speak',
+      'listen',
+      'conversation',
+      'microphone',
+      'mic',
+      'pause',
+      'countdown',
+      'send',
+      'auto-send',
+      'auto send',
+      'hold',
+      'quick',
+      'normal',
+      'thinker',
+      'screen reader',
+      'voiceover',
+      'talkback',
+      'keep screen on',
+      'wake lock',
+      'screen on',
+      'sounds',
+      'earcons',
+      'tones',
+      'beep',
+      'haptics',
+      'buzz',
+      'vibrate',
+      'clean-up',
+      'cleanup',
+      'fix',
+      'polish',
     ],
   },
   {
@@ -537,6 +584,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       'composer-enter-key',
       'composer-suggestions',
       'dictation',
+      'live-voice',
       'notifications',
     ],
   },

@@ -75,18 +75,36 @@
 
 import type { LiveBlock, ReadEnd, ReadWhat } from './ports.ts';
 
-/** The countdown between the end of a turn and the send, in ms. 0 sends as soon as the words are shown. */
+/** The countdown between the end of a turn and the send, in ms. The default is 1.5 s. */
 export const DEFAULT_GRACE_MS = 1_500;
-export const GRACE_RANGE_MS = Object.freeze({ min: 0, max: 5_000 });
+/**
+ * The countdown a person can have: 0.5 s to 5 s. NO value below the minimum is a countdown — "no countdown" is a
+ * separate, deliberate choice (`NO_COUNTDOWN_MS`), never something a bad number rounds into.
+ */
+export const GRACE_RANGE_MS = Object.freeze({ min: 500, max: 5_000 });
+/** Sending the moment the words are shown. Only ever the person's own, explicit "Send without a countdown". */
+export const NO_COUNTDOWN_MS = 0;
 /** The words must have been on screen this long before an automatic send (not "Send now"). */
 export const SETTLE_MS = 500;
 /** Ten minutes with no speech ends Live: a phone left on a desk is not a microphone left open. */
 export const IDLE_END_MS = 600_000;
 
-/** A grace length from anything: clamped to the range, rounded, garbage → the default. */
-export function resolveGraceMs(input: unknown): number {
+/**
+ * A countdown length from anything: rounded and clamped into 0.5–5 s, garbage → the default. It can NEVER return
+ * 0: a corrupted, negative, fractional or tiny number must not turn into "send at once".
+ */
+export function resolveCountdownMs(input: unknown): number {
   if (typeof input !== 'number' || !Number.isFinite(input)) return DEFAULT_GRACE_MS;
   return Math.min(GRACE_RANGE_MS.max, Math.max(GRACE_RANGE_MS.min, Math.round(input)));
+}
+
+/**
+ * The length Live starts with. EXACTLY `NO_COUNTDOWN_MS` (the number 0 — what the person's "Send without a
+ * countdown" switch hands over) is kept; every other value goes through `resolveCountdownMs`, so -40, 0.1 and
+ * NaN end up in the safe range and never at 0.
+ */
+export function resolveGraceMs(input: unknown): number {
+  return input === NO_COUNTDOWN_MS ? NO_COUNTDOWN_MS : resolveCountdownMs(input);
 }
 
 export type LivePhase =

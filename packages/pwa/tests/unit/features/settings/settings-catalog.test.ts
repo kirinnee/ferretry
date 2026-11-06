@@ -30,6 +30,7 @@ describe('shared settings catalog', () => {
       'composer-suggestions',
       'theme',
       'dictation',
+      'live-voice',
       'notifications',
       'device-permissions',
       'connection-preference',
@@ -69,6 +70,7 @@ describe('shared settings catalog', () => {
         'composer-enter-key',
         'composer-suggestions',
         'dictation',
+        'live-voice',
         'notifications',
       ],
       [
@@ -159,6 +161,27 @@ describe('shared settings catalog', () => {
     for (const query of ['review first', 'insert straight away', 'preview', 'inject', 'after dictating']) {
       expect(settingsPaletteEntries(alpha, query).map(entry => entry.settingId)).toContain('dictation');
     }
+  });
+
+  test('makes Live voice findable by what a person would type', () => {
+    for (const query of [
+      'live',
+      'voice chat',
+      'read aloud',
+      'hands-free',
+      'countdown',
+      'pause',
+      'screen reader',
+      'keep screen on',
+      'haptics',
+      'buzz',
+      'earcons',
+    ]) {
+      expect(settingsPaletteEntries(alpha, query).map(entry => entry.settingId)).toContain('live-voice');
+    }
+    const entry = settingsPaletteEntries(alpha, 'hands-free').find(item => item.settingId === 'live-voice');
+    expect(entry?.label).toBe('Live voice');
+    expect(settingsSectionForSetting('live-voice')).toBe('behaviour');
   });
 
   test('makes the enhancement feature findable by its own names', () => {
