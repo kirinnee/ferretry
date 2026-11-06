@@ -1935,8 +1935,8 @@ its CORS preflight. The daemon reads it for one thing only, the shape of a **lis
   their full shapes.
 - **Anything else** (no header, channel 1, an unknown version) — complete active and resolved records, exactly as
   stored. A cached PWA or CLI that cannot parse headers keeps reading its whole snapshot.
-- An older daemon ignores the header (it is already allowed by CORS) and serves the full snapshot, which a channel 2
-  reader can still read.
+- Older daemons ignore the header (it is already allowed by CORS); a daemon that only understands channel 1 serves
+  channel 2 readers its legacy projection — the same items with widened fields clipped — which they can still read.
 
 ### Tabs (`agenda.tabs.1`)
 
