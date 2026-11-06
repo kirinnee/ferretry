@@ -340,7 +340,6 @@ export function parseImportRecord(text: string | undefined): ImportRecord | unde
   return {
     version: 1,
     components,
-    ...(typeof raw.profile === 'string' ? { profile: raw.profile } : {}),
     ...(Object.keys(profiles).length === 0 ? {} : { profiles }),
   };
 }

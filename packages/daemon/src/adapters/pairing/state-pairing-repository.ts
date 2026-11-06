@@ -69,28 +69,10 @@ const DeviceDocumentSchema = z.strictObject({
   devices: z.array(DeviceRecordSchema),
 });
 
-/**
- * A document from before device keys: grants that each held the digest of a bearer token.
- *
- * Recognised only so it can be DROPPED in words. Nothing in it can authenticate any more — there is no
- * code path left that compares a token — so carrying the records forward would list devices that can
- * never get in. The owner's decision is that every device pairs again once; this is where that happens.
- */
-const BearerDeviceDocumentSchema = z.object({
-  schemaVersion: z.literal(1),
-  daemonId: DaemonIdSchema,
-  devices: z.array(z.unknown()),
-});
-
 export interface PairingState {
   readonly daemonId: DaemonId;
   readonly daemonName: string;
   readonly devices: readonly PairingDeviceRecord[];
-  /**
-   * How many bearer-token grants a pre-device-key document held and this open dropped. Non-zero exactly
-   * once — the next write replaces the document — so the boot trail can say who has to pair again.
-   */
-  readonly droppedBearerGrants: number;
 }
 
 /** Durable identity and device public keys inside one already-owned state home. */
@@ -105,6 +87,8 @@ export class StatePairingRepository implements PairingDeviceStore {
     paths: FoundationPaths,
     private readonly files: Pick<FileSystemPort, 'readText' | 'writeTextAtomic'>,
     private readonly cryptography = new NodePairingCryptography(),
+    /** The command that pairs a device, named in the refusal of a document from before device keys. */
+    private readonly pairCommand?: string,
   ) {
     this.identityPath = paths.daemonIdentity;
     this.devicesPath = join(paths.state, 'devices.json');
@@ -118,7 +102,6 @@ export class StatePairingRepository implements PairingDeviceStore {
     ]);
     let daemonId: DaemonId;
     let records: readonly PairingDeviceRecord[];
-    let droppedBearerGrants = 0;
     if (identityText === undefined) {
       if (devicesText !== undefined) throw new Error('pairing state is incomplete');
       const identity = this.cryptography.newIdentity();
@@ -134,29 +117,26 @@ export class StatePairingRepository implements PairingDeviceStore {
       const identity = IdentityDocumentSchema.parse(parseDocument(identityText));
       daemonId = DaemonIdSchema.parse(this.cryptography.identityFromPrivateKey(identity.privateKeyPem).daemonId);
       const raw = parseDocument(devicesText);
-      const bearer = BearerDeviceDocumentSchema.safeParse(raw);
-      if (bearer.success) {
-        if (bearer.data.daemonId !== daemonId) throw new Error('device grants belong to a different daemon identity');
-        droppedBearerGrants = bearer.data.devices.length;
-        records = [];
-        await this.files.writeTextAtomic(this.devicesPath, deviceDocument(daemonId, records));
-      } else {
-        const document = DeviceDocumentSchema.parse(raw);
-        if (document.daemonId !== daemonId) throw new Error('device grants belong to a different daemon identity');
-        if (new Set(document.devices.map(device => device.id)).size !== document.devices.length) {
-          throw new Error('device grants contain duplicate identities');
-        }
-        records = document.devices;
-        const stale = (raw as { devices: { grants?: unknown }[] }).devices.some(
-          device => !namesEveryCapability(device.grants),
+      if (isRecord(raw) && raw.schemaVersion === 1) {
+        throw new Error(
+          `${this.devicesPath} predates device keys (schemaVersion 1): move it aside and pair every device again${this.pairCommand === undefined ? '' : ` with \`${this.pairCommand}\``}`,
         );
-        if (stale) await this.files.writeTextAtomic(this.devicesPath, deviceDocument(daemonId, records));
       }
+      const document = DeviceDocumentSchema.parse(raw);
+      if (document.daemonId !== daemonId) throw new Error('device grants belong to a different daemon identity');
+      if (new Set(document.devices.map(device => device.id)).size !== document.devices.length) {
+        throw new Error('device grants contain duplicate identities');
+      }
+      records = document.devices;
+      const stale = (raw as { devices: { grants?: unknown }[] }).devices.some(
+        device => !namesEveryCapability(device.grants),
+      );
+      if (stale) await this.files.writeTextAtomic(this.devicesPath, deviceDocument(daemonId, records));
     }
 
     this.daemonId = daemonId;
     this.records = records;
-    return { daemonId, daemonName: name, devices: records, droppedBearerGrants };
+    return { daemonId, daemonName: name, devices: records };
   }
 
   /**

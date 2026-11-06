@@ -11,9 +11,6 @@
  *   to WHERE or HOW it signs in (match, domains, method, recipe, auto-apply) maps 1:1 onto the account's one sign-in,
  *   and is REFUSED (`409 account_has_sign_ins`) for an account that signs in at several places: that body cannot say
  *   which one it means, and guessing would be a lossy write.
- *
- * The version 1 index schema stays here, frozen: it is what the boot migration reads, and what an older daemon still
- * reads — and fails closed on, since a version 2 index is not one.
  */
 
 import {
@@ -24,18 +21,13 @@ import {
   LOGIN_MATCH_MAX,
   LOGIN_OBSERVED_MAX,
   LOGIN_RECIPE_PROPOSALS_MAX,
-  LoginDomainSchema,
-  LoginObservedSchema,
   type LoginRecipeProposal,
-  LoginRecipeProposalSchema,
-  LoginMethodSchema,
   PASSWORD_METHOD,
   type Place,
   placeHosts,
   placeKeys,
   type PutLoginEntry,
   savedLoginPlaces,
-  SealedNameSchema,
   type SignInId,
   type SignInRecord,
   type SignInSummary,
@@ -43,7 +35,6 @@ import {
   MAX_SIGN_INS_PER_ACCOUNT,
   TotpParametersSchema,
 } from '@ferretry/protocol';
-import { z } from 'zod';
 import type { ClockPort } from '../ports.ts';
 import {
   type AccountDirectoryOptions,
@@ -63,36 +54,6 @@ import {
   withRecipe,
 } from './accounts.ts';
 import type { SecretCipherPort, SecretDocumentStore } from './types.ts';
-
-/** One saved login as a VERSION 1 index keeps it. Frozen: the migration reads it, and nothing writes it any more. */
-export const LoginRecordSchema = z.strictObject({
-  key: z.string().regex(/^L[0-9A-F]{24}$/u),
-  label: z.string().min(1).max(80),
-  match: z.array(z.string().min(1).max(320)).max(16),
-  method: LoginMethodSchema.optional(),
-  domains: z.array(LoginDomainSchema).max(16).optional(),
-  username: z.string().min(1).max(256).optional(),
-  seals: z.strictObject({
-    password: SealedNameSchema.optional(),
-    totp: SealedNameSchema.optional(),
-  }),
-  totp: TotpParametersSchema.optional(),
-  recipe: z.string().min(1).max(4_000).optional(),
-  autoApplyRecipe: z.literal(true).optional(),
-  recipeBy: z.literal('ferret').optional(),
-  observed: z.array(LoginObservedSchema).max(LOGIN_OBSERVED_MAX).optional(),
-  proposals: z.array(LoginRecipeProposalSchema).max(LOGIN_RECIPE_PROPOSALS_MAX).optional(),
-  createdAt: z.string().min(1),
-  updatedAt: z.string().min(1),
-});
-export type LoginRecord = z.infer<typeof LoginRecordSchema>;
-
-/** A version 1 index. `v` is a literal: a version 2 index is not one, so a reader of only this fails closed. */
-export const LoginIndexDocumentSchema = z.strictObject({
-  v: z.literal(1),
-  entries: z.record(z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/u), LoginRecordSchema),
-});
-export type LoginIndexDocument = z.infer<typeof LoginIndexDocumentSchema>;
 
 const unique = <T>(items: readonly T[]): T[] => [...new Set(items)];
 

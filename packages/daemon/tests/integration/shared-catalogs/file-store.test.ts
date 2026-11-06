@@ -1,21 +1,12 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import { FileCatalogBlobStore, FileCatalogDocumentStore } from '../../../src/adapters/shared-catalogs/index.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
-import { type CatalogsDocumentV1, CatalogsDocumentV1Schema } from '../../../src/lib/shared-catalogs/document-v1.ts';
-import {
-  type CatalogsDocument,
-  documentProblem,
-  EMPTY_CATALOGS_DOCUMENT,
-  withCatalog,
-  withNewItem,
-} from '../../../src/lib/shared-catalogs/document.ts';
-import { CatalogsDocumentV2Schema } from '../../../src/lib/shared-catalogs/document.ts';
-import { CatalogRefusal } from '../../../src/lib/shared-catalogs/refusal.ts';
+import { EMPTY_CATALOGS_DOCUMENT, withCatalog } from '../../../src/lib/shared-catalogs/document.ts';
 
 /** The catalogs state under a real state home: its modes, its atomic writes, and a damaged file that is not empty. */
 
@@ -93,34 +84,23 @@ describe('the catalogs document on disk', () => {
     should(failure).have.property('refusal', 'store_damaged');
   });
 
-  it('should hand a version 1 file on with its exact text, and keep the backup beside it, 0600', async () => {
+  it('should refuse a file from before version 3, naming it as damaged and leaving it as it was', async () => {
     const { paths, documents } = await fixture();
-    const text = `${JSON.stringify({ schemaVersion: 1, catalogs: [] }, undefined, 2)}\n`;
-    await documents.writeBackupV1('seed');
-    await writeFile(paths.catalogsDocument, text);
+    for (const schemaVersion of [1, 2]) {
+      const text = `${JSON.stringify({ schemaVersion, catalogs: [] })}\n`;
+      await writeFile(paths.catalogsDocument, text);
 
-    should(await documents.readRaw()).deepEqual({ version: 1, doc: { schemaVersion: 1, catalogs: [] }, text });
+      const failure = await documents.readRaw().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
 
-    await documents.writeBackupV1(text);
-    should(await readFile(paths.catalogsBackupV1, 'utf8')).equal(text);
-    should(await mode(paths.catalogsBackupV1)).equal(0o600);
-    should(await readFile(paths.catalogsDocument, 'utf8')).equal(text);
+      should(failure).have.property('refusal', 'store_damaged');
+      should(await readFile(paths.catalogsDocument, 'utf8')).equal(text);
+    }
   });
 
-  it('should refuse a version 1 file the version 1 schema does not accept', async () => {
-    const { paths, documents } = await fixture();
-    await documents.write(EMPTY_CATALOGS_DOCUMENT);
-    await writeFile(paths.catalogsDocument, JSON.stringify({ schemaVersion: 1, catalogs: [{ id: 'x' }] }));
-
-    const failure = await documents.readRaw().then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-
-    should(failure).have.property('refusal', 'store_damaged');
-  });
-
-  it('should leave a file whose top level is not an object to the version 2 schema, which refuses it', async () => {
+  it('should leave a file whose top level is not an object, which the schema refuses', async () => {
     const { paths, documents } = await fixture();
     await documents.write(EMPTY_CATALOGS_DOCUMENT);
     for (const text of ['[1]', 'null', '7']) {
@@ -133,178 +113,6 @@ describe('the catalogs document on disk', () => {
 
       should(failure).have.property('refusal', 'store_damaged');
     }
-  });
-});
-
-/**
- * The previous daemon's read of `catalogs.json`, as origin/main's `FileCatalogDocumentStore.read` wrote it: the
- * version 1 schema, whose `schemaVersion` is the literal 1, and a refusal that names the file when it does not fit.
- */
-async function previousRead(file: string): Promise<CatalogsDocumentV1> {
-  const raw = await readFile(file, 'utf8');
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(raw);
-  } catch {
-    throw new CatalogRefusal('store_damaged', 'catalogs.json cannot be read: it is not JSON.');
-  }
-  const parsed = CatalogsDocumentV1Schema.safeParse(decoded);
-  if (!parsed.success)
-    throw new CatalogRefusal(
-      'store_damaged',
-      `catalogs.json cannot be read: ${documentProblem(parsed) ?? 'it is malformed'}. Nothing was changed.`,
-    );
-  return parsed.data;
-}
-
-const migrated = (): CatalogsDocument =>
-  withNewItem(
-    withCatalog(EMPTY_CATALOGS_DOCUMENT, {
-      id: CAT,
-      name: 'Team',
-      description: 'for us',
-      publisherName: 'host',
-      now: '2026-01-01T00:00:00.000Z',
-    }),
-    CAT,
-    {
-      itemId: `itm_${'B'.repeat(22)}`,
-      kind: 'mcp',
-      name: 'files',
-      ownSummary: false,
-      createdAt: '2026-01-02T00:00:00.000Z',
-      current: 1,
-      versions: [
-        {
-          version: 1,
-          contentDigest: `sha256:${'a'.repeat(64)}`,
-          size: 340,
-          publishedAt: '2026-01-02T00:00:00.000Z',
-          summary: 'files summary',
-          source: { kind: 'mcp', id: 'id-files', name: 'files' },
-          bindings: { [CAT]: { digest: `sha256:${'b'.repeat(64)}`, size: 341 } },
-        },
-      ],
-    },
-    '2026-01-02T00:00:00.000Z',
-  );
-
-describe('a previous daemon meeting the version 2 file', () => {
-  it('should refuse it, and a read, change and write through its service never writes or puts', async () => {
-    const { paths, documents } = await fixture();
-    const document = migrated();
-    await documents.write(document);
-    // A realistic file: a catalog, a shared item, its version and the binding to the catalog.
-    should(document.items).have.length(1);
-    should(await documents.readRaw()).deepEqual({ version: 3, doc: document });
-    const longAgo = new Date('2020-01-01T00:00:00.000Z');
-    await utimes(paths.catalogsDocument, longAgo, longAgo);
-    const bytes = await readFile(paths.catalogsDocument);
-    const before = await stat(paths.catalogsDocument);
-
-    const failure = await previousRead(paths.catalogsDocument).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-    should(failure).have.property('refusal', 'store_damaged');
-    should(failure)
-      .have.property('message')
-      .match(/catalogs\.json cannot be read/u);
-
-    // The previous service: read the document, change it, put the frozen item, write the document.
-    const writes: unknown[] = [];
-    const puts: unknown[] = [];
-    const previous = {
-      read: () => previousRead(paths.catalogsDocument),
-      write: async (next: unknown) => void writes.push(next),
-      put: async (digest: string, text: string) => void puts.push([digest, text]),
-    };
-    const rename = async () => {
-      const current = await previous.read();
-      const next = { ...current, catalogs: current.catalogs.map(catalog => ({ ...catalog, name: 'Renamed' })) };
-      await previous.put('sha256:x', 'text');
-      await previous.write(next);
-    };
-    const renamed = await rename().then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-
-    should(renamed).have.property('refusal', 'store_damaged');
-    should(writes).have.length(0);
-    should(puts).have.length(0);
-    should(await readFile(paths.catalogsDocument)).deepEqual(bytes);
-    const after = await stat(paths.catalogsDocument);
-    should(after.mtimeMs).equal(before.mtimeMs);
-    should(await readdir(paths.catalogs)).deepEqual(['catalogs.json']);
-  });
-
-  it('should still read a version 1 file, so the refusal above is the version and not the reader', async () => {
-    const { paths, documents } = await fixture();
-    await documents.write(EMPTY_CATALOGS_DOCUMENT);
-    await writeFile(paths.catalogsDocument, JSON.stringify({ schemaVersion: 1, catalogs: [] }));
-
-    should(await previousRead(paths.catalogsDocument)).deepEqual({ schemaVersion: 1, catalogs: [] });
-  });
-});
-
-/**
- * The 3d-1 daemon's read of `catalogs.json`, which knew version 2 and nothing newer: the version 2 schema, whose
- * `schemaVersion` is the literal 2, and a refusal that names the file when it does not fit.
- */
-async function threeDOneRead(file: string): Promise<CatalogsDocument> {
-  const decoded: unknown = JSON.parse(await readFile(file, 'utf8'));
-  const parsed = CatalogsDocumentV2Schema.safeParse(decoded);
-  if (!parsed.success)
-    throw new CatalogRefusal(
-      'store_damaged',
-      `catalogs.json cannot be read: ${documentProblem(parsed) ?? 'it is malformed'}. Nothing was changed.`,
-    );
-  return { ...parsed.data, schemaVersion: 3 };
-}
-
-describe('a 3d-1 daemon meeting the version 3 file', () => {
-  it('should refuse it without writing, and keep what it wrote as catalogs.v2.json for a restore', async () => {
-    const { paths, documents } = await fixture();
-    const v2Text = `${JSON.stringify({ ...migrated(), schemaVersion: 2 }, undefined, 2)}\n`;
-    await mkdir(paths.catalogs, { recursive: true });
-    await writeFile(paths.catalogsDocument, v2Text);
-    const raw = await documents.readRaw();
-    should(raw).have.property('version', 2);
-    should(raw).have.property('text', v2Text);
-    if (raw.version !== 2) throw new Error('expected version 2');
-    await documents.writeBackupV2(raw.text);
-    await documents.write({ ...raw.doc, schemaVersion: 3 });
-    const longAgo = new Date('2020-01-01T00:00:00.000Z');
-    await utimes(paths.catalogsDocument, longAgo, longAgo);
-    const bytes = await readFile(paths.catalogsDocument);
-    const before = await stat(paths.catalogsDocument);
-
-    const writes: unknown[] = [];
-    const rename = async () => {
-      const current = await threeDOneRead(paths.catalogsDocument);
-      writes.push({ ...current, schemaVersion: 2 });
-    };
-    const failure = await rename().then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-
-    should(failure).have.property('refusal', 'store_damaged');
-    should(writes).have.length(0);
-    should(await readFile(paths.catalogsDocument)).deepEqual(bytes);
-    should((await stat(paths.catalogsDocument)).mtimeMs).equal(before.mtimeMs);
-    should(await readFile(paths.catalogsBackupV2, 'utf8')).equal(v2Text);
-    should(await mode(paths.catalogsBackupV2)).equal(0o600);
-    should((await readdir(paths.catalogs)).sort()).deepEqual(['catalogs.json', 'catalogs.v2.json']);
-  });
-
-  it('should still read a version 2 file, so the refusal above is the version and not the reader', async () => {
-    const { paths } = await fixture();
-    await mkdir(paths.catalogs, { recursive: true });
-    await writeFile(paths.catalogsDocument, JSON.stringify({ ...migrated(), schemaVersion: 2 }));
-
-    should((await threeDOneRead(paths.catalogsDocument)).catalogs).have.length(1);
   });
 });
 

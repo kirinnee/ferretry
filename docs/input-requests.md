@@ -1107,7 +1107,7 @@ capability (`use` to list, `configure` to change) and each change a kept `secret
 ### Accounts and sign-ins (data model)
 
 > **The store, the daemon's side of the card and the app's Accounts screen have landed.** The shapes are in
-> `packages/protocol/src/lib/accounts.ts`; the store, the migration at boot and the `/v1/accounts*` routes are in
+> `packages/protocol/src/lib/accounts.ts`; the store, the boot sweep and the `/v1/accounts*` routes are in
 > [secrets](secrets.md#accounts-and-sign-ins-the-store). The card's offers, a deliver's `signIn`, the facts, the
 > lock, `account_hint` and `account_propose` read sign-ins ([one tap](#the-next-time-one-tap)). The app reads
 > `primary`/`why` whenever the daemon sends them (a one-tap is the daemon's `primary` only) and sends a deliver's `signIn` whenever the offer it answers carries one (only a daemon that understands sign-ins sends such an offer, so no feature name gates it); the daemon reports `accounts.signins.1` now that the Accounts screen exists, and that name only chooses between that screen and the older saved-logins one. The project, folder and site defaults are `config/account-defaults.yaml` ([config files](config-files.md#default-accounts)); the daemon feeds them to the card and to `account_hint`, and the card says which one chose ([which account is first](#which-account-is-first-and-why)).
@@ -1130,11 +1130,10 @@ derives today: a page's host against a site's login domains, `program@host` (`ss
 terminal. What a site is _for_ never matches a page. Matching is exact: no look-alike, parent domain, other
 program or other ssh destination.
 
-**The index changes from `v: 1` to `v: 2`; the sealed document does not.** `migrateLoginIndex` is pure and
-deterministic (a migrated sign-in's id is derived from the account key and its place, so a re-run gives the
-same ids):
+**The index is `v: 2`; the sealed document is the one the saved logins always had.** An older client still reads and
+writes a saved login, which maps onto the account model like this:
 
-| Saved login (`v: 1`)                   | Becomes (`v: 2`)                                                                |
+| Saved login (older client)             | Is                                                                              |
 | -------------------------------------- | ------------------------------------------------------------------------------- |
 | handle, key, label, username, password | the account, verbatim                                                           |
 | 2FA seed and its parameters            | the account's first 2FA key, under the same sealed name ([2FA keys](#2fa-keys)) |
@@ -1142,12 +1141,8 @@ same ids):
 | each `tool@host` in `match`            | one **terminal** sign-in (ssh, scp, sftp keep the destination)                  |
 | method, via, recipe                    | every sign-in from that entry (via by the provider's key)                       |
 | auto-apply, proposals                  | the **primary** sign-in only (the site, else the first terminal)                |
-| each observed fact                     | the sign-in at its place; a fact from no place of the entry is dropped, counted |
+| each observed fact                     | the sign-in at its place; a fact from no place of the entry is dropped          |
 | nothing matched                        | an account with no sign-ins                                                     |
-
-Dropping a fact is safe: facts only ever shorten the [lock](#how-long-the-lock-lasts). A via link the new rules
-refuse (gone, itself, a provider with no site, a circle) is dropped and counted rather than written. An older
-daemon reads a `v: 2` index as **damaged**, never as empty.
 
 The index keeps its rules on every read: each sign-in's account exists, one account never has two sign-ins at
 the same place, `via` names another account that signs in on a site and never goes round in a circle.
@@ -1231,12 +1226,10 @@ The index keeps these rules on every read, so a hand-edited file is damaged, nev
 sweep of the sealed document must keep everything it lists. **A sweep that skipped the keys would delete every
 saved seed.**
 
-**The migration moves today's seed; it does not rewrite it.** A saved login's `seals.totp` and its parameters
-become the account's first key, `{ kind: 'totp', label: 'Authenticator app', seal: <the same name>, params,
-addedBy: 'migration' }`. The key is not yet checked. Its id is derived from the account key and the sealed
-name (`migratedTwoFactorId`), so a re-run gives the same id. The sealed document is byte-identical before and
-after. A seed without its parameters, or parameters without a seed, is refused as damaged rather than turned
-into a guessed key. This is folded into the `v: 2` index directly; there is no `v: 3`.
+**A saved login's seed is the account's first key.** `seals.totp` and its parameters are the first key,
+`{ kind: 'totp', label: 'Authenticator app', seal: <the same name>, params, addedBy: 'migration' }`, under the sealed
+name the seed always had. The key is not yet checked. A seed without its parameters, or parameters without a seed,
+is refused as damaged rather than turned into a guessed key.
 
 **What each reader sees:**
 

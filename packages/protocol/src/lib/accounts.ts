@@ -1488,9 +1488,9 @@ export const AccountProposeCallSchema = z
   });
 export type AccountProposeCall = z.infer<typeof AccountProposeCallSchema>;
 
-// ── Migration: a version 1 index (saved logins) → version 2 (accounts and sign-ins) ─────────────────
+// ── The saved-login projection: what an older client still reads and writes ──────────────────────
 
-/** A saved login as a version 1 index keeps it: the daemon's `LoginRecordSchema` output. */
+/** A saved login as an older client sees it: the daemon's `LoginRecordSchema` output. */
 export interface LoginRecordV1 {
   readonly key: string;
   readonly label: string;
@@ -1509,63 +1509,6 @@ export interface LoginRecordV1 {
   readonly updatedAt: string;
 }
 
-/** A version 1 index, as the daemon's `LoginIndexDocumentSchema` parses it. */
-export interface LoginIndexV1 {
-  readonly v: 1;
-  readonly entries: Readonly<Record<string, LoginRecordV1>>;
-}
-
-/** What a migration did, in counts only: the audit record and the report never carry a name or a value. */
-export interface AccountsMigrationReport {
-  readonly entries: number;
-  readonly accounts: number;
-  readonly signIns: number;
-  /** Facts kept at a place that is none of the entry's places (it was hand-picked elsewhere): dropped. */
-  readonly droppedFacts: number;
-  /** Match keys that are not a key a target could have, or past an account's or the store's sign-in limit. */
-  readonly droppedPlaces: number;
-  /** Via links to a login that is gone, is itself, signs in on no site or would go round in a circle. */
-  readonly droppedVia: number;
-  /** Saved 2FA seeds moved into a 2FA key, each under the sealed name it already had. */
-  readonly twoFactorKeys: number;
-}
-
-export type AccountsMigration =
-  | {
-      readonly ok: true;
-      readonly value: { readonly document: AccountIndexDocument; readonly report: AccountsMigrationReport };
-    }
-  | { readonly ok: false; readonly error: string };
-
-/** The domain separator a migrated sign-in's id is derived under. */
-const SIGN_IN_ID_DOMAIN = 'ferretry.signin.v1';
-
-/**
- * A migrated sign-in's id: `si_` and the first 16 hex digits of `sha256("ferretry.signin.v1\0" + key + "\0" + place)`.
- * Derived, not random, so migrating the same index twice (a crash and a reboot, or a read of an index not yet
- * rewritten) gives the same ids.
- */
-export function migratedSignInId(accountKey: string, placeKey: string): SignInId {
-  return `si_${sha256Hex(`${SIGN_IN_ID_DOMAIN}\0${accountKey}\0${placeKey}`).slice(0, 16)}`;
-}
-
-/** The domain separator a migrated 2FA key's id is derived under. */
-const TWO_FACTOR_ID_DOMAIN = 'ferretry.2fa.v1';
-
-/**
- * A migrated 2FA key's id: `tf_` and the first 12 hex digits of `sha256("ferretry.2fa.v1\0" + key + "\0" + seal)`, for
- * the same reason as {@link migratedSignInId}: the same index always migrates to the same ids.
- */
-export function migratedTwoFactorId(accountKey: string, sealName: string): TwoFactorId {
-  return `tf_${sha256Hex(`${TWO_FACTOR_ID_DOMAIN}\0${accountKey}\0${sealName}`).slice(0, 12)}`;
-}
-
-/** What a migrated seed is called until the owner renames it. */
-export const MIGRATED_TOTP_LABEL = 'Authenticator app';
-
-/** The key a place is named by in its migrated id: a site's first host, a terminal's key. One site per entry. */
-const idKeyOf = (place: Place): string => placeHosts(place)[0] ?? '';
-
 /** This machine's short name as a terminal place keeps it (`kirin-box.local` → `kirin-box`); `localhost` if none. */
 function shortHostOf(hostName: string): LoginDomain {
   const host = hostName.trim().toLowerCase().split('.')[0] ?? '';
@@ -1575,18 +1518,14 @@ function shortHostOf(hostName: string): LoginDomain {
 const unique = <T>(items: readonly T[]): readonly T[] => [...new Set(items)];
 
 /** An entry's places, primary first: its one site (if any), then one terminal place per terminal key. */
-function placesOf(
-  record: Pick<LoginRecordV1, 'match' | 'domains'>,
-  host: LoginDomain,
-): { readonly places: readonly Place[]; readonly dropped: number } {
-  const keys = unique(record.match);
-  const valid = keys.filter(key => LoginMatchSchema.safeParse(key).success);
+function placesOf(record: Pick<LoginRecordV1, 'match' | 'domains'>, host: LoginDomain): readonly Place[] {
+  const valid = unique(record.match).filter(key => LoginMatchSchema.safeParse(key).success);
   const match = webHostsOf(valid);
   const domains = unique((record.domains ?? match).filter(domain => LoginDomainSchema.safeParse(domain).success));
   const places: Place[] = [];
   if (domains.length + match.length > 0) places.push({ kind: 'site', domains, match });
   // A valid `tool@host` key is always a valid terminal place (the same character rules, and the key keeps its length);
-  // the whole document is checked once more before the migration answers.
+  // the whole account index is checked when it is written.
   for (const key of valid) {
     const at = key.indexOf('@');
     if (at === -1) continue;
@@ -1596,151 +1535,13 @@ function placesOf(
       isRemoteTool(tool) ? { kind: 'terminal', tool, host, dest: target } : { kind: 'terminal', tool, host: target },
     );
   }
-  return { places, dropped: keys.length - valid.length };
+  return places;
 }
 
 /**
- * The places a saved login's `match` and `domains` make, primary first, exactly as {@link migrateLoginIndex} makes
- * them: what an older client's write to `/v1/secrets/logins/:id` changes an account's one sign-in into.
+ * The places a saved login's `match` and `domains` make, primary first: what an older client's write to
+ * `/v1/secrets/logins/:id` changes an account's one sign-in into.
  */
 export function savedLoginPlaces(login: Pick<LoginRecordV1, 'match' | 'domains'>, hostName: string): readonly Place[] {
-  return placesOf(login, shortHostOf(hostName)).places;
-}
-
-/**
- * MIGRATES A VERSION 1 INDEX, purely: one saved login becomes one account (handle, key, label, username and password
- * seal verbatim; a 2FA seed becomes its first 2FA key, under the sealed name it already had, with its parameters) and
- * one sign-in per place — its site, and each terminal key in `match`. Method, via and recipe go to every sign-in from
- * the entry (today one recipe is shown for every match); auto-apply and proposals go to the PRIMARY only (the site,
- * else the first terminal), so a ferret never gains auto-apply where the owner never saw it. Each observed fact goes
- * to the sign-in whose keys contain its place; one at no place of the entry is dropped and counted, which is safe
- * because facts only ever shorten a lock.
- *
- * Sealed names are untouched (the sealed document is never rewritten). Ids are derived ({@link migratedSignInId},
- * {@link migratedTwoFactorId}), so only `migrated.at` depends on `now`. The result always satisfies
- * {@link AccountIndexDocumentSchema}; an index that cannot become one (two handles sharing a key, a seed without its
- * parameters or parameters without a seed) is refused, and the caller treats the store as damaged.
- */
-export function migrateLoginIndex(
-  v1: LoginIndexV1,
-  options: { readonly hostName: string; readonly now: string },
-): AccountsMigration {
-  const host = shortHostOf(options.hostName);
-  const handles = Object.keys(v1.entries).sort();
-  const accounts: Record<string, AccountRecord> = {};
-  const signIns: Record<string, SignInRecord> = {};
-  const sitesOf = new Set<string>();
-  let droppedFacts = 0;
-  let droppedPlaces = 0;
-  let droppedVia = 0;
-
-  let twoFactorKeys = 0;
-
-  for (const handle of handles) {
-    const record = v1.entries[handle] as LoginRecordV1;
-    const seed = record.seals.totp;
-    // A seed and its parameters go together; one without the other is a hand-edit, and inventing a key (or
-    // parameters) for it would be guessing. The whole index is refused, and the sealed document stays as it is.
-    if ((seed === undefined) !== (record.totp === undefined))
-      return { ok: false, error: `${handle} keeps 2FA parameters exactly when it keeps a 2FA seed` };
-    if (seed !== undefined && record.totp !== undefined) twoFactorKeys += 1;
-    accounts[handle] = {
-      key: record.key,
-      label: record.label,
-      ...(record.username === undefined ? {} : { username: record.username }),
-      seals: record.seals.password === undefined ? {} : { password: record.seals.password },
-      ...(seed === undefined || record.totp === undefined
-        ? {}
-        : {
-            factors: [
-              {
-                id: migratedTwoFactorId(record.key, seed),
-                kind: 'totp' as const,
-                label: MIGRATED_TOTP_LABEL,
-                // The SAME sealed name: the seed is where it was, only the index names it from a new place.
-                seal: seed,
-                params: { ...record.totp },
-                addedAt: record.updatedAt,
-                addedBy: 'migration' as const,
-              },
-            ],
-          }),
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
-    };
-    const found = placesOf(record, host);
-    const room = Math.max(0, Math.min(MAX_SIGN_INS_PER_ACCOUNT, MAX_SIGN_INS - Object.keys(signIns).length));
-    const places = found.places.slice(0, room);
-    droppedPlaces += found.dropped + (found.places.length - places.length);
-    const facts = record.observed ?? [];
-    droppedFacts += facts.filter(fact => !places.some(place => placeKeys(place).includes(fact.at))).length;
-    const method = record.method;
-    places.forEach((place, index) => {
-      const primary = index === 0;
-      const kept = facts.filter(fact => placeKeys(place).includes(fact.at)).map(fact => ({ ...fact }));
-      if (place.kind === 'site') sitesOf.add(record.key);
-      signIns[migratedSignInId(record.key, idKeyOf(place))] = {
-        account: record.key,
-        place,
-        ...(method === undefined
-          ? {}
-          : { method: { kind: method.kind, ...(method.name === undefined ? {} : { name: method.name }) } }),
-        ...(record.recipe === undefined ? {} : { recipe: record.recipe, recipeVersion: 1 }),
-        ...(record.recipe === undefined || record.recipeBy === undefined ? {} : { recipeBy: record.recipeBy }),
-        ...(primary && record.autoApplyRecipe === true ? { autoApplyRecipe: true as const } : {}),
-        ...(kept.length === 0 ? {} : { observed: kept }),
-        ...(primary && record.proposals !== undefined && record.proposals.length > 0
-          ? { proposals: record.proposals.map(proposal => ({ ...proposal })) }
-          : {}),
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt,
-      };
-    });
-  }
-
-  // Via links, by key, once every account and its places are known: kept only where the v2 rules hold.
-  const providers = new Map<string, Set<string>>();
-  for (const handle of handles) {
-    const record = v1.entries[handle] as LoginRecordV1;
-    const via = record.method?.via;
-    const own = Object.values(signIns).filter(signIn => signIn.account === record.key);
-    // An account with no sign-in has no method to keep a link on: nothing is lost.
-    if (via === undefined || own.length === 0) continue;
-    const target = Object.hasOwn(v1.entries, via) ? v1.entries[via] : undefined;
-    const viaKey = target?.key;
-    const tried = new Map(providers);
-    if (viaKey !== undefined) tried.set(record.key, new Set([...(providers.get(record.key) ?? []), viaKey]));
-    const keep = viaKey !== undefined && viaKey !== record.key && sitesOf.has(viaKey) && viaLoop(tried) === undefined;
-    if (!keep) {
-      droppedVia += 1;
-      continue;
-    }
-    providers.set(record.key, new Set([...(providers.get(record.key) ?? []), viaKey]));
-    for (const signIn of own) if (signIn.method !== undefined) signIn.method = { ...signIn.method, viaKey };
-  }
-
-  const document = {
-    v: 2 as const,
-    accounts,
-    signIns,
-    migrated: { from: 1 as const, at: options.now, entries: handles.length },
-  };
-  const checked = AccountIndexDocumentSchema.safeParse(document);
-  if (!checked.success)
-    return { ok: false, error: checked.error.issues[0]?.message ?? 'the saved logins cannot become accounts' };
-  return {
-    ok: true,
-    value: {
-      document: checked.data,
-      report: {
-        entries: handles.length,
-        accounts: Object.keys(accounts).length,
-        signIns: Object.keys(signIns).length,
-        droppedFacts,
-        droppedPlaces,
-        droppedVia,
-        twoFactorKeys,
-      },
-    },
-  };
+  return placesOf(login, shortHostOf(hostName));
 }

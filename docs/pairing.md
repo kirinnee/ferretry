@@ -462,9 +462,9 @@ row states what its revoke will do before the press.
   the daemon may hold a grant for a key the browser has but under a `deviceId` it never learned. Nothing
   can use it — the browser saved no pairing — and it lapses with idle expiry after 30 days; the
   refusal tells the reader to check the device list and revoke it sooner.
-- **Devices paired before device keys were deleted on upgrade.** A `devices.json` from before schema 2
-  held only token digests, which no session can prove against, so the daemon drops those grants at boot
-  and says so once. Each such device must pair again.
+- **A `devices.json` from before device keys is refused.** A document at `schemaVersion: 1` held only token
+  digests, which no session can prove against, so the daemon does not start on it: the error names the file and
+  says to move it aside and pair every device again.
 - **An unlock bounds who acts, not what the act does.** A governed device inside its unlock may open a
   terminal or apply a fleet change for the rest of the unlock period with no further prompt; minting a code
   still wants a passkey for that one act. The passkey says the person holding the device agreed recently,

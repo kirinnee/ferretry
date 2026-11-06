@@ -56,9 +56,6 @@ import { CatalogRefusal } from './refusal.ts';
  */
 export const CATALOGS_SCHEMA_VERSION = 3;
 
-/** The version 3c-1 and 3d-1 wrote: the same shape, read once to be upgraded and never written. */
-export const CATALOGS_SCHEMA_VERSION_V2 = 2;
-
 const BindingSchema = z.strictObject({
   /** The digest the catalog's signed manifest lists: it covers the item's catalog, id and version number. */
   digest: CatalogDigestSchema,
@@ -127,7 +124,7 @@ const StoredCatalogSchema = z.strictObject({
 export type StoredCatalog = z.infer<typeof StoredCatalogSchema>;
 
 /** Why an id may not be used, when it is the placeholder a shared copy is stored under. */
-export function placeholderProblem(kind: 'catalog' | 'item', id: string): string | undefined {
+function placeholderProblem(kind: 'catalog' | 'item', id: string): string | undefined {
   const placeholder = kind === 'catalog' ? NORMALISED_CATALOG_ID : NORMALISED_ITEM_ID;
   return id === placeholder
     ? `${id} is the placeholder id a shared copy is stored under, so it cannot be a ${kind} id`
@@ -216,32 +213,20 @@ function firstProblem(document: {
   return undefined;
 }
 
-const documentSchemaFor = <V extends number>(version: V) =>
-  z
-    .strictObject({
-      schemaVersion: z.literal(version),
-      defaultCatalogId: SharedCatalogIdSchema.optional(),
-      items: z.array(StoredSharedItemSchema),
-      catalogs: z.array(StoredCatalogSchema),
-    })
-    .check(ctx => {
-      const problem = firstProblem(ctx.value);
-      if (problem !== undefined)
-        ctx.issues.push({ code: 'custom', message: problem, input: ctx.value, path: ['catalogs'] });
-    });
+export const CatalogsDocumentSchema = z
+  .strictObject({
+    schemaVersion: z.literal(CATALOGS_SCHEMA_VERSION),
+    defaultCatalogId: SharedCatalogIdSchema.optional(),
+    items: z.array(StoredSharedItemSchema),
+    catalogs: z.array(StoredCatalogSchema),
+  })
+  .check(ctx => {
+    const problem = firstProblem(ctx.value);
+    if (problem !== undefined)
+      ctx.issues.push({ code: 'custom', message: problem, input: ctx.value, path: ['catalogs'] });
+  });
 
-export const CatalogsDocumentSchema = documentSchemaFor(CATALOGS_SCHEMA_VERSION);
 export type CatalogsDocument = z.infer<typeof CatalogsDocumentSchema>;
-
-/** A version 2 file, read only to be upgraded to this one (`upgradeCatalogsV2`). */
-export const CatalogsDocumentV2Schema = documentSchemaFor(CATALOGS_SCHEMA_VERSION_V2);
-export type CatalogsDocumentV2 = z.infer<typeof CatalogsDocumentV2Schema>;
-
-/** Version 2 to 3 changes no data, only the number a build that does not know the new rules cannot read. */
-export const upgradeCatalogsV2 = (document: CatalogsDocumentV2): CatalogsDocument => ({
-  ...document,
-  schemaVersion: CATALOGS_SCHEMA_VERSION,
-});
 
 export const EMPTY_CATALOGS_DOCUMENT: CatalogsDocument = {
   schemaVersion: CATALOGS_SCHEMA_VERSION,
