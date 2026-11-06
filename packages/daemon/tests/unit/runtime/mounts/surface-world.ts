@@ -1,4 +1,4 @@
-import { ANALYTICS_PRICING_RATE_APPLICABILITY, type DaemonId } from '@ferretry/protocol';
+import type { DaemonId } from '@ferretry/protocol';
 import { BrowserProxyTester } from '../../../../src/lib/browser/proxy/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
@@ -32,7 +32,6 @@ import { inputRequestService } from '../../input-requests/support.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
   agendaService,
-  analyticsSubsystem,
   attachSubsystem,
   boardSubsystem,
   CREDENTIALS,
@@ -670,25 +669,6 @@ export const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems =>
       ok: true,
       plan: { v: 1, sessionId, subFerret: false, drop: [], close: [], keep: [] },
     }),
-  },
-  analytics: analyticsSubsystem(),
-  analyticsPricing: {
-    view: async () => ({
-      catalog: [],
-      catalogFingerprint: 'catalog-empty',
-      sources: [],
-      sourcesFingerprint: 'sources-empty',
-      rateApplicability: ANALYTICS_PRICING_RATE_APPLICABILITY,
-    }),
-    patch: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    preview: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
-    apply: async () => {
-      throw new Error('not exercised by the surface inventory');
-    },
   },
   // The ingestion loop serves no route, so the surface inventory never calls it. It is present because
   // `MountedSubsystems` is the list of what production constructs, and a loop absent from that list is

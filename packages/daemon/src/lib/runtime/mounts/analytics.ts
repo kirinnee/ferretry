@@ -7,6 +7,8 @@ import { ApiError } from '../../api/error.ts';
 import type { ApiRequest, ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import type { ModuleContribution } from '../modules.ts';
+import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
 
 /**
  * The analytics read: one bounded PromQL-like query over every finished session the daemon has
@@ -174,4 +176,18 @@ export function analyticsRoutes(subsystem: AnalyticsSubsystem): readonly ApiRout
       handle: context => Promise.resolve(query(subsystem, context)),
     },
   ];
+}
+
+/**
+ * What the analytics module adds to the daemon: the fleet read, then the operator's rate catalog.
+ *
+ * It has no audit rule — the pricing routes' mutations reach nobody, which `notAudited` in the module's route
+ * contract records. Every path is under `/v1/analytics`, which no other subsystem uses, so neither table can
+ * shadow or be shadowed by anything around it.
+ */
+export function analyticsContribution(
+  analytics: AnalyticsSubsystem,
+  pricing: AnalyticsPricingSubsystem,
+): ModuleContribution {
+  return { routes: [...analyticsRoutes(analytics), ...analyticsPricingRoutes(pricing)] };
 }
