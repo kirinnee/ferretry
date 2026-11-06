@@ -52,6 +52,9 @@ const MAX_ASK_LENGTH = MAX_BOARD_BRIEF_LENGTH;
 /** The source an ask carries when the owner said it. */
 const OWNER_ASK_SOURCE = 'owner';
 
+/** The source an ask carries when a `fy new` made the card for a ferret no lead was recorded for: the work of a ferret, never the owner's ask. */
+const PACK_ASK_SOURCE = 'fy new';
+
 /** The source an ask carries when a ferret's brief said it. */
 const sessionAskSource = (sessionId: string): string => `session:${sessionId}`;
 
@@ -155,6 +158,8 @@ export interface StartedSession {
   readonly parent?: string | undefined;
   /** Set for a `fy new`: the card the lead's delegation reserved. */
   readonly delegation?: Delegation | undefined;
+  /** The start came through `fy new`: with no lead recorded, its card is still a ferret's errand, never the owner's ask. */
+  readonly viaPack?: true | undefined;
 }
 
 /** The card a start made, or why it made none. */
@@ -451,7 +456,10 @@ export class SessionCards {
         startRequest({
           title: cardTitle(start.name, brief),
           brief,
-          ask: askOf(brief, from === undefined ? OWNER_ASK_SOURCE : sessionAskSource(from)),
+          ask: askOf(
+            brief,
+            from !== undefined ? sessionAskSource(from) : start.viaPack === true ? PACK_ASK_SOURCE : OWNER_ASK_SOURCE,
+          ),
           parent: delegation?.parent ?? null,
           assignee: delegation === undefined ? null : start.sessionId,
         }),

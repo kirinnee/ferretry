@@ -997,6 +997,17 @@ describe('the action verbs', () => {
     should(sent(gateway)).eql([{ action: 'claim' }]);
   });
 
+  it('should adopt a card, naming no one and carrying the reason', async () => {
+    // Arrange
+    const { controller, gateway } = harness();
+
+    // Act
+    await controller.adopt('F1', { reason: 'both ended' });
+
+    // Assert
+    should(sent(gateway)).eql([{ action: 'adopt', reason: 'both ended' }]);
+  });
+
   it('should refuse an assign that names both a session and --none, or neither, or a stranger', async () => {
     // Arrange
     const { controller, gateway } = harness();

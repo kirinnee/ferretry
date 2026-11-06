@@ -429,7 +429,7 @@ export class PackService {
             name: request.name ?? taskTitleFor(request.task, 'Sub-ferret'),
           },
           delegation,
-          caller,
+          { ...caller, pack: true },
         );
         // A launch that failed still answers with the session that holds the evidence (fyd.ts), and that view
         // is not a ferret that started: say so, with the reason the daemon recorded.

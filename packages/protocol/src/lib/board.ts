@@ -369,6 +369,8 @@ export const BoardTaskEventSchema = z.discriminatedUnion('type', [
     returnedFrom: SessionIdSchema.optional(),
     /** Present when the card's assignee took it from a lead of its own (`fy task claim`): the lead that held it. The actor is the claimer. */
     claimedFrom: SessionIdSchema.optional(),
+    /** Present when a live lead adopted the card because its owner ferret and its assignee had both ended (`fy task adopt`): the owner ferret it took the card from, and why. The actor is the adopter. */
+    adopted: z.strictObject({ from: SessionIdSchema, reason }).optional(),
   }),
   z.object({
     ...EventBase,
@@ -945,6 +947,11 @@ export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('assign'), assignee: SessionIdSchema.nullable() }),
   /** A ferret takes a card its own lead holds: the daemon reads who is asking, so the request names nobody. */
   z.strictObject({ action: z.literal('claim') }),
+  /**
+   * A live lead takes a card whose owner ferret and assignee have BOTH ended: it becomes the card's owner and assignee, and
+   * `reason` is kept in the history. The daemon reads who is asking and judges the orphan; the request names nobody.
+   */
+  z.strictObject({ action: z.literal('adopt'), reason: reason.optional() }),
   z.strictObject({ action: z.literal('note'), text: z.string().trim().min(1).max(MAX_BOARD_NOTE_LENGTH) }),
   z
     .strictObject({

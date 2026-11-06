@@ -321,6 +321,10 @@ export const buildAssignAction = (assignee: string | null): BoardTaskActionReque
 /** `claim` names no one: the daemon takes the caller's own session from its credential. */
 export const buildClaimAction = (): BoardTaskActionRequest => action({ action: 'claim' }, 'cannot claim');
 
+/** `adopt` names no one either: the caller is the adopter, and `reason` (optional) is kept in the card's history. */
+export const buildAdoptAction = (reason: string | undefined): BoardTaskActionRequest =>
+  action({ action: 'adopt', ...(present(reason) === undefined ? {} : { reason: present(reason) }) }, 'cannot adopt');
+
 export function buildReparentAction(
   parent: string | undefined,
   none: boolean | undefined,

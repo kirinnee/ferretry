@@ -650,6 +650,7 @@ import {
   ReopenDeliveryLadder,
   rungsOf,
   SessionCards,
+  type SessionLivenessGuard,
   type SessionLivenessSource,
   stageGateLanes,
   startOnCard,
@@ -2255,7 +2256,7 @@ function createBoardWorld(
   agendaItems: (sessionId: string) => Promise<readonly AgendaItem[]>,
   bin: string,
   /** Every session's life-signs, with the Warden's liveness ledger laid over them, for "last touched". */
-  sessions: SessionLivenessSource,
+  sessions: SessionLivenessSource & SessionLivenessGuard,
   /** Registers a folder as a project: the catalog `POST /v1/projects` writes through, so both share its dedupe. */
   registrar: ProjectRegistrar,
   /** The folders a ferret's repository is registered from (`projectRoots`), read per adoption. */
@@ -2318,6 +2319,7 @@ function createBoardWorld(
     ),
     attachments,
     done: new DoneDeliveryLadder(new SendReopenMessenger(ownerSends), diagnostics),
+    liveness: sessions,
     activity: new LivenessActivityDeriver({ sessions, clock }),
     // A card's ask goes on its ferret's agenda home: the homes are read too, so a sub-ferret's card finds its agenda.
     agenda: new AgendaCardLinks(
@@ -3089,6 +3091,7 @@ function createSessionControlSubsystem(
             brief: request.prompt,
             parent: request.parent,
             delegation: startDelegation,
+            ...(caller.pack === true ? { viaPack: true as const } : {}),
           });
         await lifecycle.start(
           id,

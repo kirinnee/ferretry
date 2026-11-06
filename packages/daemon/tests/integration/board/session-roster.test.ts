@@ -106,6 +106,7 @@ describe('the board session roster', () => {
     should([...roster.held].sort()).eql(['child', 'lead']);
     should(roster.sessions.get('lead')).eql({
       id: 'lead',
+      configRead: true,
       status: 'running',
       turnState: 'working',
       focusTask: { id: 'F12' },
@@ -118,6 +119,7 @@ describe('the board session roster', () => {
     });
     should(roster.sessions.get('child')).eql({
       id: 'child',
+      configRead: true,
       status: 'completed',
       focusTask: null,
       declaredWait: false,

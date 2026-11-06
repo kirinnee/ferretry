@@ -31,6 +31,7 @@ import {
   type BoardLinkOptions,
   type BoardViewOptions,
   buildAssignAction,
+  buildAdoptAction,
   buildClaimAction,
   buildBlockAction,
   buildBoardCreateRequest,
@@ -458,6 +459,10 @@ export class BoardController {
 
   async claim(idText: string, options: BoardCommonOptions) {
     await this.perform('claim', requireCardRef(idText), options, buildClaimAction());
+  }
+
+  async adopt(idText: string, options: BoardCommonOptions & { readonly reason?: string }) {
+    await this.perform('adopt', requireCardRef(idText), options, buildAdoptAction(options.reason));
   }
 
   async note(idText: string, text: readonly string[], options: BoardCommonOptions) {

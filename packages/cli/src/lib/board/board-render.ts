@@ -316,6 +316,7 @@ export type BoardVerb =
   | 'patch'
   | 'assign'
   | 'claim'
+  | 'adopt'
   | 'note'
   | 'order'
   | 'reparent'
@@ -339,6 +340,7 @@ const PAST: Readonly<Record<BoardVerb, string>> = {
   link: 'linked',
   assign: 'assigned',
   claim: 'claimed',
+  adopt: 'adopted',
   note: 'noted',
   order: 'ranked',
   reparent: 're-parented',
