@@ -111,14 +111,10 @@ import type { z } from 'zod';
 // model catalog the list vouches for (docs/model-catalog.md). Compiled in as text, from its one file.
 import HOSTED_APP_RELEASE_KEY from '../../pwa/release-signing-key.pub' with { type: 'text' };
 import pkg from '../package.json' with { type: 'json' };
-import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
-import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
-import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
 import { FileAgendaSeenStore, FileAgendaVersionStore } from '../src/adapters/agenda/file-agenda-versions.ts';
 import { FileMachineMembers } from '../src/adapters/agenda/file-machine-members.ts';
-import { FileMachineMigrationMarker } from '../src/adapters/agenda/file-machine-migration-marker.ts';
 import { KeyedAgendaReplyTimers } from '../src/adapters/agenda/keyed-agenda-reply-timers.ts';
 import {
   LedgerAgendaReceipts,
@@ -154,7 +150,6 @@ import { StoreBoardAttachments } from '../src/adapters/board/board-attachments.t
 import { BoardGateCards } from '../src/adapters/board/board-gate-cards.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
 import { FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
-import { FileGateItemsMigrationMarker } from '../src/adapters/board/file-gate-items-migration-marker.ts';
 import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
 import {
   JournalBoardChanges,
@@ -877,7 +872,6 @@ import {
   firewallRefusal,
   firstWriteReleasedAnswerAgenda,
   fleetManifestRefusal,
-  foldNoticesIntoMachineAgenda,
   foreignAdvertisementNotice,
   HANDOVER_RESCAN_INTERVAL_MS,
   HARNESS_PICKER_COMMAND,
@@ -974,9 +968,6 @@ import {
   mcpCheckBaseEnvironment,
   mcpInventoryFolders,
   messageWithAttachments,
-  migrateAgendaFiles,
-  migrateToAgendaHomes,
-  migrateToAgendaMode,
   modelCatalogsView,
   type NameAllocationErrorCode,
   type NameAllocationRequest,
@@ -4536,9 +4527,7 @@ interface WardenParts {
    */
   readonly attention: AgendaService;
   /**
-   * The machine items the Warden keeps: ferrets it could not move, cards with nobody working on them. `folded` settles when
-   * the boot folding of the old per-ferret notices has finished: the sweep waits for it, so a sweep and the folding
-   * never write the same list at once.
+   * The machine items the Warden keeps: ferrets it could not move, cards with nobody working on them.
    */
   readonly machine: {
     readonly autoMove: AutoMoveFailures;
@@ -4549,7 +4538,6 @@ interface WardenParts {
     readonly stuckInput: StuckInputList;
     /** Every ferret whose messages wait in Ferretry's queue far past due (`warden/inbox-stuck.ts`), as one machine item. */
     readonly stuckInbox: StuckInboxList;
-    readonly folded: Promise<void>;
   };
   readonly usage: UsageFeedPort;
   readonly accounts: AccountInventoryPort & Partial<RuntimeNamesPort>;
@@ -5058,7 +5046,6 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     lastSweepAt: async () => await service.lastSweepAt(),
     intervalMs: async () => await service.intervalMs(),
     arm: async () => {
-      await parts.machine.folded;
       parts.supervision.intervalMs = await service.intervalMs();
       const disarm = await loop.arm();
       // The timer is evidence only after the scheduler accepted it. The instant lets health classify
@@ -9837,7 +9824,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // The owner's shared drafts are built with the rest of the subsystems, further down; an item that closes
       // deletes its draft through this, which reads nothing until requests flow.
       const sharedDraftsHolder: { service?: SharedDraftService } = {};
-      let agendaHomesMigrated: Promise<unknown> = Promise.resolve();
       // One carrier for both halves: a Not good from the Board and one answered on the agenda move files the same way.
       const boardAttachments = new StoreBoardAttachments(attachmentStore);
       const boardWorld = createBoardWorld(
@@ -10226,36 +10212,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // idea of what a session is waiting for.
       // The ledger repository is handed raw ids from the transport, so the id is parsed here rather than
       // asserted: an id the layout would not accept must never become a directory path.
-      // The agenda files move to their agenda names in the background, and the repositories below hold every read
-      // and write until it settles, so no write can land between the migration's read and its copy. Total: it never
-      // rejects, and a failed session keeps its old file (still read) and is tried again next start.
-      const agendaFilesMigrated = migrateAgendaFiles(
-        storage.listSessions().map(session => session.id),
-        {
-          marker: new FileAgendaFilesMigrationMarker(join(paths.home, 'agenda-files-migration.json')),
-          files: new FileAgendaFileStore(id => createSessionPaths(paths, parseSessionId(id)).directory),
-          now: () => new Date(clock.now()).toISOString(),
-          log: line => process.stderr.write(`${line}\n`),
-        },
-      );
       // Every version of an item, and which version each device last opened, beside the board (docs/agenda.md § Versions).
       const agendaSessionDirectory = (id: string): string => createSessionPaths(paths, parseSessionId(id)).directory;
       const agendaVersions = new FileAgendaVersionStore(agendaSessionDirectory);
       const agendaBoards = new FileAgendaLedgerRepository(
         agendaSessionDirectory,
         undefined,
-        agendaFilesMigrated,
         undefined,
         agendaVersions,
         undefined,
         async id => await storage.retainSession(parseSessionId(id)),
       );
       // THE MACHINE AGENDA's ledger: its own directory, apart from every session's, written only by the daemon.
-      const machineBoards = new FileAgendaLedgerRepository(
-        () => join(paths.state, 'machine-agenda'),
-        undefined,
-        agendaFilesMigrated,
-      );
+      const machineBoards = new FileAgendaLedgerRepository(() => join(paths.state, 'machine-agenda'));
       // A handled item's alerts come down on every device (docs/notifications.md § When an alert is cleared): answered,
       // resolved, resting, snoozed or on the ferret's turn, on either board, or opened in the app on another device.
       const alertClearer = new AgendaAlertClearer({
@@ -10270,7 +10239,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       alertClearerBox.clearer = alertClearer;
       // A board that changed while this daemon was down still takes its handled items' alerts down, in the background.
-      void agendaFilesMigrated.then(async () => await alertClearer.sweep()).catch(() => undefined);
+      void alertClearer.sweep().catch(() => undefined);
       // Every session directory that may hold an agenda, whatever the session index still says about it.
       const agendaSessionIds = async (): Promise<readonly string[]> =>
         (await stateFiles.listDirectory(paths.sessions))
@@ -10419,11 +10388,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // must not wait on that. The send ledger keeps one message per batch send id, and is the one witness of
       // whether it arrived; an answer that did not is reopened on the board, built just below (read lazily).
       const agendaReplies = new AgendaReplyBatcher(
-        new FileAgendaOutboxRepository(
-          id => createSessionPaths(paths, parseSessionId(id)).directory,
-          undefined,
-          agendaFilesMigrated,
-        ),
+        new FileAgendaOutboxRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
         new SendAgendaMessenger(answerSends),
         new KeyedAgendaReplyTimers(),
         new KeyedSerialExecutor(),
@@ -10627,61 +10592,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           machineAgenda,
         ),
       };
-      // The old notices are folded in first and quietly; only then does the minute timer or the Warden's sweep touch
-      // the lists, so nothing writes a list while the folding is still reading it.
-      // Folding moves ferrets, so it waits for the sub-ferrets' items to reach their agenda homes: a move mid-fold could not resolve.
-      let homesSettled: () => void = () => undefined;
-      const homesGate = new Promise<void>(settle => {
-        homesSettled = settle;
-      });
-      const machineFolded = homesGate
-        .then(() =>
-          foldNoticesIntoMachineAgenda({
-            agenda,
-            sessions: { all: agendaSessionIds },
-            seed: {
-              autoMoveFailed: async (sessionId, item) => await wardenLists.autoMove.note(sessionId, item.subject, true),
-              orphan: async item => {
-                if (item.task === undefined || item.task === null) return;
-                await wardenLists.orphans.add(
-                  {
-                    sourceRef: item.sourceRef ?? '',
-                    task: item.task,
-                    title: item.title ?? item.subject,
-                    subject: item.subject,
-                    why: item.why,
-                    premise: item.premise ?? '',
-                    context: item.context ?? '',
-                    howToResolve: item.howToResolve,
-                    waitingSince: item.waitingSince,
-                  },
-                  true,
-                );
-              },
-              budget: async (sourceRef, item) => {
-                await machineAgenda.raiseOrUpdate(sourceRef, {
-                  title: item.title ?? item.subject,
-                  subject: item.subject,
-                  why: item.why,
-                  ...(item.premise === undefined ? {} : { premise: item.premise }),
-                  ...(item.context === undefined || item.context === null ? {} : { context: item.context }),
-                  howToResolve: item.howToResolve,
-                  waitingSince: item.waitingSince,
-                  notice: true,
-                  kind: 'info',
-                });
-              },
-            },
-            marker: new FileMachineMigrationMarker(join(paths.home, 'machine-agenda-notices-migration.json')),
-            now: () => clock.now(),
-            diagnostics: boardDiagnostics,
-          }),
-        )
-        .catch((error: unknown) => boardDiagnostics.warn(`the machine agenda's folding failed: ${String(error)}`));
-      const wardenMachine = { ...wardenLists, folded: machineFolded };
-      void machineFolded.then(() => {
-        setInterval(() => void wardenLists.autoMove.reconcile().catch(() => undefined), 60_000).unref();
-      });
+      setInterval(() => void wardenLists.autoMove.reconcile().catch(() => undefined), 60_000).unref();
       // A card that enters a gate lane asks the owner ONE agenda item; answering it moves the card as the owner, and
       // "Not yet" words reach the card's ferret through the reopen ladder. Cards already waiting at a gate when this
       // daemon starts get theirs once, in the background (docs/board.md § Cards show progress).
@@ -10694,7 +10605,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // agenda on this machine, so a gate is asked once whoever has the card.
         sessions: { all: agendaSessionIds },
         homes: agendaHomes,
-        marker: new FileGateItemsMigrationMarker(join(paths.home, 'gate-items-duplicates-migration.json')),
         files: boardAttachments,
         now: () => clock.now(),
         words: {
@@ -10711,29 +10621,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         homes: agendaHomes,
         diagnostics: boardDiagnostics,
       });
-      // Open items already on a sub-ferret's agenda move to its home first, once; the gates then find them there.
-      const homesMigration = migrateToAgendaHomes({
-        agenda,
-        sessions: { all: agendaSessionIds },
-        subFerrets: new StorageSubFerretDirectory(storage),
-        homes: agendaHomes,
-        marker: new FileGateItemsMigrationMarker(join(paths.home, 'agenda-homes-migration.json')),
-        now: () => clock.now(),
-        diagnostics: boardDiagnostics,
-      })
-        .then(outcome => {
-          if (outcome.moved > 0)
-            process.stderr.write(
-              `agenda: moved ${String(outcome.moved)} item(s) from sub-ferrets to their agenda homes\n`,
-            );
-        })
-        .catch(() => undefined);
-      agendaHomesMigrated = homesMigration;
-      void homesMigration.finally(homesSettled);
-      void homesMigration
-        .then(() => gateItems?.backfill())
+      void gateItems
+        .backfill()
         .then(raised => {
-          if ((raised ?? 0) > 0)
+          if (raised > 0)
             process.stderr.write(`board: raised ${String(raised)} gate item(s) for cards already waiting\n`);
         })
         .then(() => duplicateSweep.run())
@@ -11154,18 +11045,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return { view, outcome };
         },
       };
-      void migrateToAgendaMode(
-        storage.listSessions().map(session => session.id),
-        {
-          marker: new FileAgendaMigrationMarker(join(paths.home, 'agenda-mode-migration.json')),
-          boards: agendaBoards,
-          modes: {
-            enabled: async sessionId => await agendaModes.enabled(sessionId),
-            enable: async sessionId => await writeAgendaMode(sessionId, true, new Date(clock.now()).toISOString()),
-          },
-          now: () => clock.now(),
-        },
-      );
       // A harness parked on its own prompt waits on the owner, so it is an item on the board, raised and
       // cleared from the state documents storage writes — and caught up once at start, in the background.
       const harnessPrompts = new HarnessPromptAgenda(
@@ -12667,7 +12546,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         notifications,
         attention: agenda,
         gateItems,
-        agendaHomesMigrated,
         agendaReplies,
         agendaClearer: new AgendaAgentClearer(new StorageAgentSessions(storage), agendaBoards, agenda),
         agendaRollup: new AgendaRollup(agendaBoards, () => storage.listSessions().map(session => session.id)),
@@ -13049,7 +12927,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             await gateItems?.sweep();
             await duplicateSweep.run();
           },
-          machine: wardenMachine,
+          machine: wardenLists,
           usage,
           accounts,
           defaultRuntime: async () => {
@@ -14657,10 +14535,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   cleanups.push(() => {
     releasing = true;
   });
-  // After the boot move of sub-ferret items to their homes: a sweep that ran first would clear or re-raise rows
-  // the move is still carrying.
-  void (subsystems.agendaHomesMigrated ?? Promise.resolve())
-    .then(async () => await subsystems.warden.arm())
+  void subsystems.warden
+    .arm()
     .then(disarm => {
       if (releasing) disarm();
       else cleanups.push(disarm);

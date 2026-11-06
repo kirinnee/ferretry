@@ -96,13 +96,6 @@ interface GateSessions {
   all(): Promise<readonly string[]>;
 }
 
-/** Where the one-time sweep of duplicate gate items records that it ran: once, for this daemon's home. */
-export interface GateItemsMigrationMarker {
-  ran(): Promise<boolean>;
-  /** Records that it ran, and every item it closed (`<session> !A<n>`). */
-  record(at: string, closed: readonly string[]): Promise<void>;
-}
-
 /**
  * Where the daemon asks the owner for a session: its agenda home (docs/agenda.md § Sub-ferret agenda), the owner's own
  * ferret at the root of its lineage — never a sub-ferret.
@@ -120,7 +113,6 @@ export interface GateItemsDependencies {
   readonly files?: GateFiles;
   readonly sessions: GateSessions;
   readonly homes: GateHomes;
-  readonly marker: GateItemsMigrationMarker;
   readonly now: () => string;
   readonly diagnostics: { warn(message: string): void };
 }
@@ -372,14 +364,10 @@ export class GateItems implements CardWriteObserver {
   }
 
   /**
-   * At boot: the old duplicates sweep runs if it never has, and every card's ask is brought in line with its lane —
-   * one at a gate gets its ask, one whose card moved on while the daemon was down loses it. Each card on its own;
+   * At boot: every card's ask is brought in line with its lane — one at a gate gets its ask, one whose card moved on while the daemon was down loses it. Each card on its own;
    * returns how many asks it put on an agenda.
    */
   async backfill(): Promise<number> {
-    await this.sweepDuplicates().catch((error: unknown) =>
-      this.ports.diagnostics.warn(`the sweep of duplicate gate items failed: ${errorText(error)}`),
-    );
     return await this.reconcileAll(card => card);
   }
 
@@ -844,42 +832,6 @@ export class GateItems implements CardWriteObserver {
     const sessions = this.holders.get(cardId) ?? new Set<string>();
     sessions.add(sessionId);
     this.holders.set(cardId, sessions);
-  }
-
-  /**
-   * THE ONE-TIME SWEEP (B138), from before card asks: every gate asked on more than one agenda kept its NEWEST item,
-   * and the others were closed. Agendas are read into card asks now, so a start finds no gate item left to sweep; the
-   * marker still records that it ran.
-   */
-  private async sweepDuplicates(): Promise<void> {
-    if (await this.ports.marker.ran()) return;
-    const byGate = new Map<string, OpenItem[]>();
-    let complete = true;
-    for (const sessionId of await this.ports.sessions.all()) {
-      const listed = await this.ports.agenda.list(sessionId).catch(() => undefined);
-      if (listed === undefined || !listed.ok) {
-        complete = false;
-        continue;
-      }
-      for (const item of listed.value.items) {
-        if (item.gate === undefined || item.sourceRef === null || parseGateReference(item.sourceRef) === undefined)
-          continue;
-        byGate.set(item.sourceRef, [...(byGate.get(item.sourceRef) ?? []), { sessionId, item }]);
-      }
-    }
-    const closed: string[] = [];
-    for (const items of byGate.values()) {
-      const kept = items.reduce(newer);
-      for (const other of items.filter(each => each !== kept)) {
-        const mutation = await this.ports.agenda
-          .resolve(other.sessionId, other.item.id, DAEMON, `closed as a duplicate of !${kept.item.id}`)
-          .catch(() => undefined);
-        if (mutation?.ok === true) closed.push(`${other.sessionId} !${other.item.id}`);
-        else complete = false;
-      }
-    }
-    if (complete) await this.ports.marker.record(this.ports.now(), closed);
-    else this.ports.diagnostics.warn('the sweep of duplicate gate items is unfinished; the next start tries again');
   }
 
   /** Moves the card as the answer says; a refusal when the board would not. */

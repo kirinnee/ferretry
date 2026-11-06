@@ -262,8 +262,6 @@ export interface MountedSubsystems {
   readonly machineAgenda: AgendaService;
   /** A card's gate items (docs/board.md § Cards show progress): the owner's answer to one moves the card first. */
   readonly gateItems?: AgendaGatePort;
-  /** Settles when the boot move of sub-ferret items to their agenda homes is done; the Warden sweep arms after it. */
-  readonly agendaHomesMigrated?: Promise<unknown>;
   /** The owner's unsent composer, shared live between their own devices and never journaled. */
   readonly sharedDrafts: SharedDraftService;
   /** The live stream each open composer holds on its session's shared draft. */

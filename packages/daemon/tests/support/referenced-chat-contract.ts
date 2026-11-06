@@ -21,7 +21,7 @@ export function referencedChatContract() {
     try {
       const directory = () => root;
       const versions = new FileAgendaVersionStore(directory, { spawn: inlineAgendaVersionsWorker });
-      const repository = new FileAgendaLedgerRepository(directory, undefined, undefined, undefined, versions);
+      const repository = new FileAgendaLedgerRepository(directory, undefined, undefined, versions);
       const messages = new Map<string, string>();
       const service = new AgendaService(
         repository,

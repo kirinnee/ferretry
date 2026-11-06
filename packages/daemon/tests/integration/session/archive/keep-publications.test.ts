@@ -141,7 +141,6 @@ test('an agenda publication alone restores membership without a state projection
     undefined,
     undefined,
     undefined,
-    undefined,
     async id => await storage.retainSession(parseSessionId(id)),
   );
   const agenda = new AgendaService(

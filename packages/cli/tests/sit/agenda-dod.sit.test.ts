@@ -143,7 +143,7 @@ function build() {
   const home = mkdtempSync(join(tmpdir(), 'fy-dod-'));
   const sessionDirectory = (sessionId: string) => join(home, 'sessions', sessionId);
   const versions = new FileAgendaVersionStore(sessionDirectory, { spawn: inlineAgendaVersionsWorker });
-  const repository = new FileAgendaLedgerRepository(sessionDirectory, undefined, undefined, undefined, versions);
+  const repository = new FileAgendaLedgerRepository(sessionDirectory, undefined, undefined, versions);
   const seen = new FileAgendaSeenStore(sessionDirectory);
   const clock = { at: minute(0) };
   const asking = new Map<string, { sessionId: string; id: string }>();

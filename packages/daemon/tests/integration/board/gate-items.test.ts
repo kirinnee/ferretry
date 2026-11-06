@@ -85,7 +85,6 @@ const daemonOver = (home: string) => {
     lanes: stageGateLanes,
     homes: { of: async sessionId => sessionId },
     sessions: { all: async () => [...SESSIONS] },
-    marker: { ran: async () => true, record: async () => undefined },
     now: () => NOW,
     words: { told: async () => undefined },
     diagnostics: { warn: () => undefined },

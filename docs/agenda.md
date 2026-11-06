@@ -816,12 +816,7 @@ no archive text; changing versions releases that cached thread. Listing reads on
 the new snapshot and its ordered references in one SQLite transaction, with new words inserted once. Its work depends
 on the current thread, not the number or size of historical versions; unchanged words take no additional text storage.
 This avoids repeated full-archive scans while keeping independently readable complete snapshots and uncapped words.
-
-Earlier draft sidecars (`<id>.jsonl`), both bare snapshots and snapshot/conversation envelopes, import once inside
-the database's initialization transaction. The old file stays untouched. Complete records survive, including a final
-record without a newline; malformed records and torn tails are skipped. The next append numbers from the durable
-imported records, so it cannot join onto a torn tail or swallow the next version. Interrupted database writes roll
-back as a unit; a failed import is retried on the next open. These earlier files were never deployed.
+A store whose `user_version` is not 2 is refused by name and left untouched.
 
 Pruning a closed item cold-archives its complete thread, final snapshot and any carried legacy snapshot before
 removing its `conversations` and `carriedEntries` keys from the hot ledger. Previously orphaned keys follow the same
@@ -830,7 +825,7 @@ in the hot ledger until the entry is actually pruned, even when it has no archiv
 from its latest archive version, and historical version reads remain available. A crash between archive and hot
 commit replays the durable intent without losing words. Merge and split still require open items.
 
-The `agenda-versions` worker owns SQLite opens, initialization, legacy JSONL parsing, reads and commits. The session
+The `agenda-versions` worker owns SQLite opens, initialization, reads and commits. The session
 transaction queue awaits each archive request before committing the ledger; no version writes run behind that queue.
 A busy disk delays that session's next change while other routes and streams keep running. Worker failures reject
 the request without falling back to disk IO on the main thread. The worker closes connections after each operation
@@ -1072,11 +1067,6 @@ hit on one, open the **Inbox** item, never a `/session/<id>` page.
   (the reason names when, if known); one a login can take shows a command that runs, `fy migrate <id> -a <login>`,
   with the login the Warden's own auto-migrate would pick (the most headroom first). The command stays on one line,
   copy button at the right edge. The Why, Context and What-I-need blocks do not repeat the list.
-- **Migration.** On first start after this shipped, the daemon folds the old per-ferret notices (`warden-auto-move`,
-  `warden-orphan:*`, `budget:*`) into their machine item and closes the originals. It writes
-  `machine-agenda-notices-migration.json` only when every agenda was read and every item folded; otherwise it tries
-  again next start. The folding is quiet — it raises without a push, so an old notice does not buzz the phone again —
-  and it closes, without a machine item, a budget notice whose window has already reset.
 
 ## Lane proposals
 
@@ -1242,17 +1232,6 @@ about a ferret whose own board could not be read is neither judged nor cleared.
 `phoneApproval`, `copyPlan`, `taskPlan`, `signInRuleSuggestion`, `signInRuleSuspended` (on an existing item), `twoFactorSeed` or `confirms`, and any raise with
 the cause `harness-prompt`, `input-request`, `phone-approval`, `secure-copy` or `login-recipe`. A password, a code or an
 approval the daemon asks for is the only thing that reaches the owner from a sub-ferret.
-
-**One-time migration.** At boot, once (`agenda-homes-migration.json` in the daemon's home; written only when every
-session was read and every item moved, so an unfinished start tries again), each open item that the **daemon** raised, and that is not hands-on, on a
-session with a parent is raised on its home carrying its waiting time, snooze, conversation and history (`carried`, a
-daemon-only field: an agent can never set it) and resolved where it was with "moved to !A<n> on <home callsign>'s
-agenda". Gate items keep their `gate` and `sourceRef`, so duplicates collapse by the one-item-per-gate rule; other
-items get the sub-ferret's callsign in front of the title, and a Warden notification is renamed to the scoped form
-above. An item a ferret or the owner raised stays where it is (the daemon may not close it, and a copy would be
-the daemon's, which the owner could not discuss); the ferret closes its own with `fy tidy`. A resolve that fails
-after a move is logged with the session and the item and holds the marker back; an item the home refuses for good
-(`forbidden`, `invalid`, `too-long`) is logged, stays, and does not. The boot log says how many moved.
 
 **A lead clears its sub-ferrets' agenda.** The lead (and any ancestor) may `edit`, `surface`, `done` and `dismiss`
 items on the board of a session it started (never an open [card ask](#card-asks)): `fy agenda done !A1 -s <sub-session>`. `AgendaService.apply` proves the
@@ -2002,20 +1981,8 @@ know, and the handover counts are a strict object an older reader refuses an unk
 
 ### On disk
 
-A ferret's session directory holds the agenda as `agenda.json` and its held answers as `agenda-replies.json`; releases
-before the rename called them `attention.json` and `attention-replies.json`. The daemon **reads the new name, else the
-old one, and always writes the new one**, so a daemon upgraded or downgraded in between never loses an item.
+A ferret's session directory holds the agenda as `agenda.json` and its held answers as `agenda-replies.json`.
 
-- **Once, at start**, the daemon moves each session's old file to the new name: it writes the new file whole, reads it
-  back and requires it equal, and only then renames the old file to `*.migrated`. A crash at any step leaves a file the
-  reader still understands; the next start finishes it.
-- **Both files present** (a crash between the two steps, or a downgrade and an upgrade): the newer document stays and the
-  other becomes `*.migrated`. A ledger is newer by its `updatedAt`, then its `nextId`; an outbox has no clock, so it is
-  dated by the latest instant of any answer in it. A tie keeps the new name.
-- **A damaged old file is left exactly where it is** and the session counts as failed: the reader still reads or sets it
-  aside as before, and the next start tries again. The marker `agenda-files-migration.json` in the daemon's home is
-  written only when every session succeeded, and the migration never stops the daemon starting.
-- **`*.migrated` files are kept for one release.** The release after the one that migrated may delete them.
 - **The ledger says its shape** (`version`, 4 since stored conversations): it is read as 1 when absent and brought to
   4 as it is read ([the channel migration](#the-migration-ledger-version-2) and [the conversation
   migration](#the-conversation)).

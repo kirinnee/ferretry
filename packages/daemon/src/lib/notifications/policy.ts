@@ -200,19 +200,8 @@ export interface DeliveredAlert {
   readonly agendaId: string;
   /** A stop's push: about the ferret and every item waiting then, not about its own `agendaId`. */
   readonly stop: boolean;
-  /**
-   * The tag it went out under. Absent on a push recorded before tags were: an approve-on-phone push then went out
-   * under its approval's tag (`approval`), and every other one under the session's — or, when it was high, the item's,
-   * which `uncoveredAlerts` names as a second alert of its own.
-   */
-  readonly tag?: string;
-  /** An approve-on-phone push recorded without a tag: its tag is its approval's, read from the item on the board. */
-  readonly approval?: true;
-  /**
-   * A STOP's push recorded without a tag: a high one went out under the tag of the item it showed — a
-   * one-time code card waiting then, which the ledger did not name — so its clear names those cards' tags too.
-   */
-  readonly legacyStop?: true;
+  /** The tag it went out under, which a clear takes down. */
+  readonly tag: string;
 }
 
 /** What one clear takes down (at most `PUSH_CLEAR_MAX_TAGS` tags), and which pushes it answers for. */
@@ -236,9 +225,7 @@ export const alertStillWanted = (item: AgendaItem): boolean =>
  * - An item's own push comes down once the item no longer waits on the owner — or, with `opened`, once the owner has
  *   opened that item somewhere.
  * - A stop's push ("N need you") comes down only when no item it could count is left on the owner's turn, because
- *   until then its words are still true. So does a push that went out under the same tag (one recorded without one).
- * - An approve-on-phone push recorded without a tag comes down under its approval's tag, read from the item; one whose
- *   item is no longer on the board stays uncovered.
+ *   until then its words are still true. So does a push that went out under the session's tag.
  *
  * Nothing is cleared for an item that never buzzed, which is what keeps a phone that must show something for every
  * push (an iPhone) from collecting a "Handled" line for every item a ferret ever closed.
@@ -260,22 +247,8 @@ export function alertsToClear(
   const waiting = new Set(others.filter(alertStillWanted).map(item => item.id));
   const stopDone = stopLineDone(snapshot, opened);
   const sessionTag = agendaSessionPushTag(sessionId);
-  const approvals = new Map(
-    [...snapshot.items, ...snapshot.resolved].flatMap(item =>
-      item.phoneApproval === undefined ? [] : [[item.id, phoneApprovalTag(item.phoneApproval.id)] as const],
-    ),
-  );
-  // The one-time code cards a legacy high stop may have shown: every one on the board that no longer waits on the
-  // owner (the opened one included). Not narrowed by time — a card can be resolved, or its waiting time moved by a
-  // snooze, after the stop went out — and a card still waiting keeps its line, which is still true.
-  const codeCardTags = [...snapshot.items, ...snapshot.resolved]
-    .filter(item => item.input !== undefined && !waiting.has(item.id))
-    .map(item => agendaItemPushTag(sessionId, item.id));
-  const tagOf = (alert: DeliveredAlert): string | undefined =>
-    alert.tag ?? (alert.approval === true ? approvals.get(alert.agendaId) : sessionTag);
   const handled = uncovered.flatMap(alert => {
-    const tag = tagOf(alert);
-    if (tag === undefined) return [];
+    const { tag } = alert;
     const down =
       alert.stop || tag === sessionTag
         ? stopDone && (alert.stop || !waiting.has(alert.agendaId))
@@ -283,7 +256,7 @@ export function alertsToClear(
           ? !waiting.has(alert.agendaId)
           : alert.agendaId === opened;
     if (!down) return [];
-    return [tag, ...(alert.legacyStop === true ? codeCardTags : [])].map(each => ({ key: alert.key, tag: each }));
+    return [{ key: alert.key, tag }];
   });
   const tags = [...new Set(handled.map(alert => alert.tag))];
   // One clear names at most `PUSH_CLEAR_MAX_TAGS`: a burst that handled more is sent as several. A key is covered by

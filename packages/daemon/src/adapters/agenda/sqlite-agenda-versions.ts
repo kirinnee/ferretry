@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type AgendaConversationEntry,
@@ -12,7 +12,6 @@ import {
   type AgendaVersionSummary,
   AgendaVersionSummarySchema,
 } from '@ferretry/protocol';
-import { z } from 'zod';
 import {
   type AgendaVersionDraft,
   type AgendaVersionStore,
@@ -24,32 +23,14 @@ import { deepFreezeJson, type JsonValue } from '../../lib/json.ts';
 /** The directory beside a session's board that holds one indexed version archive per item. */
 export const AGENDA_VERSIONS_DIRECTORY = 'agenda-versions';
 
-/** Earlier draft sidecars held whole conversations beside (or inside) each snapshot. */
-const StoredVersionSchema = z.strictObject({
-  snapshot: AgendaVersionSchema,
-  conversation: z.array(AgendaConversationEntrySchema).optional(),
-});
-type StoredVersion = z.infer<typeof StoredVersionSchema>;
+/** The `PRAGMA user_version` of a store this daemon reads and writes. */
+const STORE_VERSION = 2;
 
-/** Import every complete legacy record, including a valid final record without a newline; skip torn records. */
-function versionsIn(text: string): StoredVersion[] {
-  const versions: StoredVersion[] = [];
-  for (const line of text.split('\n')) {
-    if (line.trim() === '') continue;
-    try {
-      const value: unknown = JSON.parse(line);
-      const parsed = StoredVersionSchema.safeParse(value);
-      if (parsed.success) versions.push(parsed.data);
-      else {
-        const legacy = AgendaVersionSchema.safeParse(value);
-        if (legacy.success) versions.push({ snapshot: legacy.data });
-      }
-    } catch {
-      // A torn legacy tail does not discard the complete versions before it.
-    }
-  }
-  return versions;
-}
+const userVersion = (db: Database): number =>
+  db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0;
+
+const unsupportedStore = (file: string, found: number): string =>
+  `the agenda version archive ${file} has user_version ${String(found)}; this daemon reads only user_version ${String(STORE_VERSION)}, so it was left untouched`;
 
 const summaryOf = (version: AgendaVersion): AgendaVersionSummary => ({
   version: version.version,
@@ -71,8 +52,7 @@ interface CachedVersion {
  * and per-version ordered word references. Appends inspect only the largest primary key, never historical payloads.
  * SQLite commits a version and all its references together; an interrupted append cannot publish half a version.
  * The caller serializes writes per session. Connections close after each operation; at most one read version is cached.
- * Earlier draft JSONL archives are imported once, atomically, and left untouched. A torn legacy tail is ignored;
- * subsequent numbering follows the complete imported versions. No deployed format needs a rolling dual writer.
+ * A store whose `user_version` is not 2 is refused by name, never upgraded or emptied.
  */
 export class SqliteAgendaVersionStore implements AgendaVersionStore {
   private cached: CachedVersion | undefined;
@@ -91,17 +71,14 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
   /** A read opens only what a record created: an id nothing was recorded for has no store, and asking never makes one. */
   private async openExisting(sessionId: string, id: AgendaId): Promise<Database | undefined> {
     const file = this.file(sessionId, id);
-    for (const candidate of [file, file.replace(/\.sqlite$/u, '.jsonl')]) {
-      const present = await access(candidate).then(
-        () => true,
-        (error: NodeJS.ErrnoException) => {
-          if (error.code !== 'ENOENT') throw error;
-          return false;
-        },
-      );
-      if (present) return await this.open(sessionId, id);
-    }
-    return undefined;
+    const present = await access(file).then(
+      () => true,
+      (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error;
+        return false;
+      },
+    );
+    return present ? await this.open(sessionId, id) : undefined;
   }
 
   private async open(sessionId: string, id: AgendaId): Promise<Database> {
@@ -111,24 +88,13 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
     await writeFile(file, '', { flag: 'a', mode: 0o600 });
     const db = this.connect(file);
     try {
-      const initialized = db.query<{ user_version: number }, []>('PRAGMA user_version').get();
-      if (initialized?.user_version === 2) return db;
-      if (initialized?.user_version === 1) {
-        db.transaction(() => {
-          db.exec('CREATE TABLE IF NOT EXISTS mutations (id TEXT PRIMARY KEY) WITHOUT ROWID');
-          db.exec('PRAGMA user_version = 2');
-        })();
-        return db;
-      }
-      let legacy = '';
-      try {
-        legacy = await readFile(file.replace(/\.sqlite$/u, '.jsonl'), 'utf8');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
+      const stored = userVersion(db);
+      if (stored === STORE_VERSION) return db;
+      // 0 is a file just created above: the only store that is built here rather than found.
+      if (stored !== 0) throw new Error(unsupportedStore(file, stored));
       db.transaction(() => {
-        // Another reader may have finished initialization while this one awaited the legacy file.
-        if (db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version === 2) return;
+        // Another process may have finished initialization since the check above.
+        if (userVersion(db) === STORE_VERSION) return;
         db.exec(`
           CREATE TABLE mutations (id TEXT PRIMARY KEY) WITHOUT ROWID;
           CREATE TABLE versions (version INTEGER PRIMARY KEY, snapshot TEXT NOT NULL, summary TEXT NOT NULL);
@@ -138,8 +104,7 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
             PRIMARY KEY (version, position)
           ) WITHOUT ROWID;
         `);
-        for (const record of versionsIn(legacy)) this.save(db, record.snapshot, record.conversation);
-        db.exec('PRAGMA user_version = 2');
+        db.exec(`PRAGMA user_version = ${STORE_VERSION}`);
       })();
       return db;
     } catch (error) {

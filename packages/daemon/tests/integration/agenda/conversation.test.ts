@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { AgendaItemSchema, ResolvedAgendaItemSchema } from '@ferretry/protocol';
@@ -39,7 +39,7 @@ async function world() {
   homes.push(home);
   const directory = () => home;
   const versions = new FileAgendaVersionStore(directory);
-  const repository = new FileAgendaLedgerRepository(directory, undefined, undefined, undefined, versions);
+  const repository = new FileAgendaLedgerRepository(directory, undefined, undefined, versions);
   const apply = async (command: AgendaCommand) =>
     accepted(await repository.transact(SESSION, current => applyAgendaCommandToSession(current, SESSION, command)));
   return { home, directory, versions, repository, apply };
@@ -134,28 +134,5 @@ describe('Durable agenda conversation', () => {
     ]);
     const second = await new FileAgendaLedgerRepository(directory).read(SESSION);
     should(second?.conversations).deepEqual(reread?.conversations);
-  });
-
-  it('repairs a torn version tail before the next successful append after restart', async () => {
-    const { home, directory, versions, apply } = await world();
-    await apply({ action: 'raise', actor: AGENT, request: request('Which region?'), at: AT });
-    const file = join(home, 'agenda-versions', 'A1.jsonl');
-    const snapshot = await versions.get(SESSION, 'A1', 1);
-    await rm(join(home, 'agenda-versions', 'A1.sqlite'));
-    await writeFile(file, `${JSON.stringify({ snapshot })}\n`);
-    await appendFile(file, '{"version":2,"item":');
-    const restartedVersions = new FileAgendaVersionStore(directory);
-    const repository = new FileAgendaLedgerRepository(directory, undefined, undefined, undefined, restartedVersions);
-    await repository.transact(SESSION, current =>
-      applyAgendaCommandToSession(current, SESSION, {
-        action: 'rest',
-        actor: AGENT,
-        id: 'A1',
-        why: 'Checking regions',
-        at: AT,
-      }),
-    );
-    should((await versions.list(SESSION, 'A1')).map(version => version.version)).deepEqual([1, 2]);
-    should((await readFile(file, 'utf8')).endsWith('{"version":2,"item":')).be.true();
   });
 });

@@ -106,8 +106,6 @@ interface Faults {
   readonly unreadable?: readonly string[];
   /** Resolving an item on these sessions' agendas throws. */
   readonly resolveThrows?: readonly string[];
-  /** The duplicates sweep already ran. */
-  readonly swept?: boolean;
   /** The agenda home of these sessions; every other session is its own. */
   readonly homes?: Readonly<Record<string, string>>;
   /** The instant the gates read as now; the agenda's own clock stays at NOW. */
@@ -120,25 +118,10 @@ interface Faults {
   readonly attachmentStore?: StoreBoardAttachments;
 }
 
-/** The duplicates sweep's marker, in memory. */
-class Marker {
-  readonly records: { readonly at: string; readonly closed: readonly string[] }[] = [];
-  constructor(private readonly already: boolean) {}
-
-  async ran(): Promise<boolean> {
-    return this.already || this.records.length > 0;
-  }
-
-  async record(at: string, closed: readonly string[]): Promise<void> {
-    this.records.push({ at, closed });
-  }
-}
-
 const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
   const ledgers = new Ledgers();
   const warnings: string[] = [];
   const told: { readonly task: string; readonly message: string; readonly key: string }[] = [];
-  const marker = new Marker(faults.swept ?? true);
   let listAllThrows = faults.listAllThrows ?? 0;
   const store = new MemoryBoardStore(cards);
   const reopen = new FakeReopen();
@@ -273,7 +256,6 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
               },
             },
           }),
-      marker,
       now: () => faults.gatesNow ?? NOW,
       words: {
         told: async (task, message, key) => {
@@ -329,7 +311,6 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
     agenda,
     ledgers,
     board,
-    marker,
     get gates(): GateItems {
       return gates as GateItems;
     },
@@ -1472,16 +1453,15 @@ describe('the gate engine, edge by edge', () => {
     should(world.open()).be.empty();
   });
 
-  it('says so, and goes on, when the duplicates sweep or one card fails at boot', async () => {
+  it('says so, and goes on, when one card fails at boot', async () => {
     // Arrange
-    const world = fixture([external({ laneId: 'tested' })], { swept: false, listAllThrows: 1, raiseThrows: true });
+    const world = fixture([external({ laneId: 'tested' })], { raiseThrows: true });
 
     // Act
     const attached = await world.gates.backfill();
 
     // Assert
     should(attached).equal(0);
-    should(world.warnings.some(each => each.startsWith('the sweep of duplicate gate items failed'))).be.true();
     should(world.warnings.some(each => each.startsWith('the ask of &F1 could not be put'))).be.true();
   });
 
@@ -1819,75 +1799,6 @@ describe('a Not good with files', () => {
 
     should(outcome).match({ handled: true, mutation: { ok: true } });
     should(world.warnings.some(each => each.startsWith('could not tell &F1'))).be.true();
-  });
-});
-
-describe('the one-time sweep of duplicate gate items (&B138)', () => {
-  const ASKED: Readonly<Record<string, string>> = {
-    dyani: '2026-10-24T10:00:00.000Z',
-    avary: '2026-10-28T10:00:00.000Z',
-  };
-
-  /** &F291 as an older daemon left it: one gate asked twice, on dyani's and on avary's agenda. */
-  const f291 = async (faults: Faults = {}) => {
-    const task = external({ id: 'F291', laneId: 'tested', owner: 'lead', assignee: 'avary' });
-    const world = fixture([task], { swept: false, ...faults });
-    const gate = gateOf({ task, laneSet: lanes(), audience: 'external', projectName: 'Ferretry' }, stageGateLanes);
-    if (gate === undefined) throw new Error('F291 is at no gate');
-    for (const sessionId of ['dyani', 'avary']) {
-      const raised = await world.agenda.raise(
-        sessionId,
-        {
-          source: 'task',
-          sourceRef: gateReference(gate),
-          title: task.title,
-          kind: 'choice',
-          subject: 'Try it: Open the Inbox',
-          why: '&F291 reached To test, which waits on you.',
-          howToResolve: 'Choose Done or Not good.',
-          ask: { kind: 'multiple-choice', options: gate.options.map(option => ({ label: option.label })) },
-          task: { id: 'F291' },
-          gate,
-          waitingSince: ASKED[sessionId],
-        },
-        DAEMON,
-      );
-      if (!raised.ok) throw new Error(raised.error.message);
-    }
-    // A ferret's own thread is no gate item: the sweep passes it by.
-    const thread = await world.agenda.raise('dyani', threadAbout('F291'), {
-      kind: 'agent',
-      sessionId: 'dyani',
-      name: null,
-    });
-    if (!thread.ok) throw new Error(thread.error.message);
-    return world;
-  };
-
-  it('keeps the newest gate item, closes the other with a note, and records that it ran, once', async () => {
-    const world = await f291();
-
-    await world.gates.backfill();
-    await world.gates.backfill();
-
-    should(world.open('avary').some(item => item.gate !== undefined)).be.true();
-    should(world.open('dyani').some(item => item.gate !== undefined)).be.false();
-    should(world.closed('dyani').at(-1)?.resolutionNote).equal('closed as a duplicate of !A1');
-    should(world.marker.records).eql([{ at: NOW, closed: ['dyani !A1'] }]);
-  });
-
-  it('records nothing while an agenda cannot be read or a duplicate cannot be closed, so the next start tries again', async () => {
-    const unreadable = await f291({ unreadable: ['stranger'] });
-    const unwritable = await f291({ resolveThrows: ['dyani'] });
-
-    await unreadable.gates.backfill();
-    await unwritable.gates.backfill();
-
-    should(unreadable.marker.records).be.empty();
-    should(unwritable.marker.records).be.empty();
-    should(unwritable.warnings).containEql(
-      'the sweep of duplicate gate items is unfinished; the next start tries again',
-    );
   });
 });
 

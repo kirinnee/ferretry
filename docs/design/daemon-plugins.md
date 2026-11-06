@@ -191,8 +191,8 @@ calls):
 cleanups.push(board.jobs.githubWatcher.arm());
 
 // asynchronous, must not block "ready", disarms a late result once shutdown began — fyd.ts:15318-15324 today
-void agenda.provides.homesMigrated
-  .then(async () => await warden.jobs.sweep.arm())
+void warden.jobs.sweep
+  .arm()
   .then(disarm => (releasing ? disarm() : cleanups.push(disarm)))
   .catch(() => undefined);
 ```

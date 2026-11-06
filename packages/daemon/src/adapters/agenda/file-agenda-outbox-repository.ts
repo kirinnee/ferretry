@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
   AGENDA_FILES,
-  readAgendaFile,
   type AgendaOutbox,
   type AgendaOutboxRepository,
   AgendaOutboxSchema,
@@ -10,8 +9,7 @@ import {
 import { FileAgendaFileStore } from './file-agenda-file-store.ts';
 
 /**
- * Each ferret's held answers, as `agenda-replies.json` beside its board (`attention-replies.json` until the
- * migration moves it; it is read when the new name is absent, and every write goes to the new one).
+ * Each ferret's held answers, as `agenda-replies.json` beside its board.
  *
  * Writes replace the file atomically (a temporary file renamed over it). The batcher serializes every
  * read-modify-write per session, so this adapter holds no lock of its own.
@@ -27,30 +25,26 @@ export class FileAgendaOutboxRepository implements AgendaOutboxRepository {
   constructor(
     sessionDirectory: (sessionId: string) => string,
     private readonly uniqueId: () => string = randomUUID,
-    /** Settles when the agenda files migration has finished; no read or write goes to disk before it. */
-    private readonly ready: Promise<unknown> = Promise.resolve(),
   ) {
     this.files = new FileAgendaFileStore(sessionDirectory, uniqueId);
   }
 
   file(sessionId: string): string {
     if (!isAgendaSessionId(sessionId)) throw new Error(`not a valid agenda session id: ${sessionId}`);
-    return this.files.file(sessionId, AGENDA_FILES.outbox.current);
+    return this.files.file(sessionId, AGENDA_FILES.outbox);
   }
 
   async read(sessionId: string): Promise<AgendaOutbox | null> {
-    await this.ready;
-    const found = await readAgendaFile(this.files, sessionId, 'outbox');
-    if (found === undefined) return null;
-    const parsed = AgendaOutboxSchema.safeParse(parseJson(found.text));
+    const text = await this.files.read(sessionId, AGENDA_FILES.outbox);
+    if (text === undefined) return null;
+    const parsed = AgendaOutboxSchema.safeParse(parseJson(text));
     if (parsed.success && parsed.data.sessionId === sessionId) return parsed.data;
-    await this.files.rename(sessionId, found.name, `${AGENDA_FILES.outbox.current}.damaged-${this.uniqueId()}`);
+    await this.files.rename(sessionId, AGENDA_FILES.outbox, `${AGENDA_FILES.outbox}.damaged-${this.uniqueId()}`);
     return null;
   }
 
   async write(outbox: AgendaOutbox): Promise<void> {
-    await this.ready;
-    await this.files.writeAtomic(outbox.sessionId, AGENDA_FILES.outbox.current, `${JSON.stringify(outbox, null, 2)}\n`);
+    await this.files.writeAtomic(outbox.sessionId, AGENDA_FILES.outbox, `${JSON.stringify(outbox, null, 2)}\n`);
   }
 }
 
