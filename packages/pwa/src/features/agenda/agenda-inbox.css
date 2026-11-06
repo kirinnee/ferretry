@@ -958,6 +958,14 @@ a.fy-inbox-row:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A receipt that quotes the owner's words wraps to two lines (the rest is "…"), so what was sent can be read. */
+.fy-attn-undo__text--clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .fy-attn-undo__text--wide {
   padding-right: 8px;
   white-space: normal;

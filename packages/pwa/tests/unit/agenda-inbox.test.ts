@@ -340,10 +340,12 @@ describe('replies', () => {
       response: { kind: 'multiple-choice', choice: 'Not good' },
       note: 'It scanned, but the Mac lists no second device.',
     } as const as InboxAction;
-    expect(actionSentence(typed, 'A404')).toBe('Sent your words on !A404: “It scanned, b…”');
+    expect(actionSentence(typed, 'A404')).toBe(
+      'Sent your words on !A404: “It scanned, but the Mac lists no second device.”',
+    );
     expect(actionSentence(typed, 'A404')).not.toContain('Not good');
     const long = { ...typed, note: `${'word '.repeat(30)}` };
-    expect(actionSentence(long, 'A404').length).toBeLessThan(50);
+    expect(actionSentence(long, 'A404').length).toBeLessThan(110);
     expect(actionSentence(long, 'A404')).toContain('…');
   });
 });

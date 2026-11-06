@@ -30,6 +30,7 @@ import {
   agendaState,
   gateReference,
   AGENDA_KIND_LABELS,
+  gateButtonLabel,
   gateStyle,
   gateTypedLabel,
   awaitsOwnAnswer,
@@ -513,12 +514,17 @@ export const itemSwipeTargets = (item: AgendaItem): SwipeTargets => {
   if (answersWithCardsForm(item)) return {};
   const [first] = itemAskPlan(item, itemCardAsks(item)).asks;
   if (first === undefined) return swipeTargets(item);
+  // Each says what its BUTTON says ("Good", not the lane's "Done"): the arrows and the buttons name one answer once.
+  const wording = (label: string): string => {
+    const option = first.gate.options.find(entry => entry.label === label);
+    return option === undefined ? label : gateButtonLabel(first.gate, option);
+  };
   return Object.fromEntries(
     Object.entries(swipeTargets(first.view)).map(([direction, target]) => [
       direction,
       target === undefined || target.action === null
         ? target
-        : { ...target, action: toGateAction(target.action, first.gate) },
+        : { ...target, label: wording(target.label), action: toGateAction(target.action, first.gate) },
     ]),
   );
 };

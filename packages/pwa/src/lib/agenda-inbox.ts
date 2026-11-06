@@ -590,8 +590,8 @@ export const actionSentence = (action: InboxAction, id: AgendaId, now = Date.now
   return `Answered !${id}: ${action.label}`;
 };
 
-/** The most of a typed answer a receipt repeats: enough to know which one it was. */
-const RECEIPT_WORDS = 14;
+/** The most of a typed answer a receipt repeats (two short lines on a phone): enough to read what was sent. */
+const RECEIPT_WORDS = 72;
 const clipped = (words: string): string => {
   const one = words.replace(/\s+/gu, ' ').trim();
   return one.length <= RECEIPT_WORDS ? one : `${one.slice(0, RECEIPT_WORDS - 1).trimEnd()}…`;

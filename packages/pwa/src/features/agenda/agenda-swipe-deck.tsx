@@ -93,11 +93,38 @@ const visibleBottomOf = (element: HTMLElement): number => {
   return window.visualViewport?.height ?? window.innerHeight;
 };
 
-/** The room a mounted deck has, read off the layout. */
+/** The most of the visible screen the card may take to show its block whole (all of it: the page scrolls to what is under it). */
+const CARD_MOST = 1;
+
+/** A breath under the block the card must show whole. */
+const NEEDS_BREATH_PX = 16;
+
+/**
+ * How tall the open card needs to be to show "What I need from you" whole, without scrolling: the rows around the
+ * scroller plus everything in it down to the end of that block (what the ferret wrote below it may scroll). 0 when the
+ * deck holds no open item view (a plain card).
+ */
+const contentOf = (element: HTMLElement): number => {
+  const open = element.querySelector<HTMLElement>('.fy-attn-deck__top .fy-inbox-open');
+  const body = open?.querySelector<HTMLElement>('[data-agenda-body]');
+  const needs = body?.querySelector<HTMLElement>('[data-agenda-part="needs"]');
+  if (open == null || body == null || needs == null) return 0;
+  const end = needs.getBoundingClientRect().bottom - body.getBoundingClientRect().top + body.scrollTop;
+  return open.offsetHeight - body.clientHeight + end + NEEDS_BREATH_PX;
+};
+
+/**
+ * The room a mounted deck has, read off the layout. A tall composer under the card (a typed answer of several lines)
+ * must not squeeze the card until its block is cut mid-line by the card's own scroll: the card keeps the height its
+ * content needs (up to {@link CARD_MOST} of the visible screen) and the page scrolls to the composer instead.
+ */
 const roomOf = (element: HTMLElement, reserve: number): number => {
   const below = element.nextElementSibling?.getBoundingClientRect().height ?? 0;
   const padding = Number.parseFloat(getComputedStyle(element).paddingBottom) || 0;
-  return deckRoom(element.getBoundingClientRect().top, visibleBottomOf(element), below, padding + reserve);
+  const top = element.getBoundingClientRect().top;
+  const bottom = visibleBottomOf(element);
+  const squeezed = deckRoom(top, bottom, below, padding + reserve);
+  return Math.max(squeezed, Math.min(Math.ceil(contentOf(element)), Math.floor((bottom - top) * CARD_MOST)));
 };
 
 /**
@@ -125,7 +152,12 @@ export const useDeckRoom = (
     const observer =
       below == null || typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure());
     if (observer !== null && below != null) observer.observe(below);
+    // The block the card must show whole can grow after it is drawn (a Close reason box opens in it): measure again.
+    const needs = deck.current?.querySelector('.fy-attn-deck__top [data-agenda-part="needs"]');
+    const growth = needs == null || typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure());
+    if (growth !== null && needs != null) growth.observe(needs);
     return () => {
+      growth?.disconnect();
       window.removeEventListener('resize', measure);
       observer?.disconnect();
     };

@@ -154,6 +154,9 @@ export interface AgendaItemCardProps {
   readonly lineageTitles?: LineageTitles | undefined;
 }
 
+/** The longest title that reads whole in the sticky row (two lines on a phone, one on a desktop): longer, the block keeps the ask. */
+const TITLE_READS_WHOLE = 90;
+
 /** Two lines that say the same thing: the same words once case and spacing are set aside. */
 const sameWords = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 
@@ -483,7 +486,8 @@ export function AgendaItemCard({
   // The head's description: the item's summary under its title, drawn whole (the view's sticky row holds the title).
   // A gate item repeats nothing, and a notice drawn with its cards lists them as rows (its summary is the same lines,
   // for an older app): neither has one.
-  const headDescription = cardsForm === undefined ? agendaCardHead(item).description : null;
+  const cardHead = agendaCardHead(item);
+  const headDescription = cardsForm === undefined ? cardHead.description : null;
   // The segment LEADS WITH THE ASK, whatever the header above it says (a form's is its header's, said once): the lone question, else the item's one-line
   // ask — what is being chosen, approved, done or read. Several questions are their own numbered list instead.
   const askLine = singleAgendaQuestion(item)?.question.trim() || item.subject.trim();
@@ -546,10 +550,12 @@ export function AgendaItemCard({
   // asks nothing, so there is no "What I need from you" box on it.
   // (A notice reads "done" to the protocol while it is still open and answered by its form: that is not finished.)
   const finished = (current as { readonly resolvedAt?: string }).resolvedAt !== undefined;
-  // The item's question is said ONCE: when the "What I need from you" block leads with it, the head does not repeat it.
+  // The item's question is said ONCE: when the "What I need from you" block leads with it, the head does not repeat it,
+  // and when the title above already IS the question (the sticky row, always on screen) the block does not say it again.
   const questionLineShown =
     !finished &&
     askLine !== '' &&
+    !(askLine.length <= TITLE_READS_WHOLE && sameWords(cardHead.title, askLine)) &&
     plan.ownLine &&
     cardsForm === undefined &&
     !(gated && body !== null) &&

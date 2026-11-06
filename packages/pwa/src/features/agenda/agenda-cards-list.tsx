@@ -156,8 +156,13 @@ export function AgendaCardsList({
           const result = results[id];
           const pick = pickOf(id);
           return (
-            <li className="flex min-w-0 flex-col gap-1" data-agenda-card-row={id} key={id}>
-              <div className="flex min-w-0 items-center justify-between gap-x-3" data-agenda-card-links="">
+            <li className="flex min-w-0 flex-col" data-agenda-card-row={id} key={id}>
+              {/* The name line and its picks sit close together (the picks keep their 44px touch height, so the row
+                  above them gives up the space between): one card reads as one block, on a phone and wide alike. */}
+              <div
+                className="flex min-w-0 items-center justify-between gap-x-3 [&_a]:!min-h-0 [&_a]:py-0.5"
+                data-agenda-card-links=""
+              >
                 <div
                   className="min-w-0 break-words text-ui text-fg [&_.md]:inline [&_p]:m-0 [&_p]:inline"
                   data-agenda-card-line=""

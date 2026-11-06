@@ -1507,8 +1507,13 @@ const RUN_MOVES: readonly RunKey[] = [
 export const agendaRunKeys = (card: InboxCard, doneClose = false): readonly RunKey[] => {
   const targets = itemSwipeTargets(card.item);
   const { slots } = answerRowLayout(cardModel(card.item), { requestChanges: true, doneClose });
+  // A try-it answered with the box under it has ONE button, Good: ← would only open a words prompt for the Not good the
+  // box already sends, so the line says no ← (the footer lists what the buttons offer).
+  const typedAsk = typedCardAsk(card.item) !== undefined;
   return [
-    ...(targets.left === undefined ? [] : [{ key: '←', word: agendaAnswerText(targets.left.label, slots) }]),
+    ...(targets.left === undefined || typedAsk
+      ? []
+      : [{ key: '←', word: agendaAnswerText(targets.left.label, slots) }]),
     ...(targets.up === undefined ? [] : [{ key: '↑', word: agendaAnswerText(targets.up.label, slots) }]),
     ...(targets.right === undefined ? [] : [{ key: '→', word: agendaAnswerText(targets.right.label, slots) }]),
     ...RUN_MOVES,

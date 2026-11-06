@@ -207,4 +207,32 @@ describe('a card’s own agenda asks ONE thing, inside “What I need from you�
     expect(part.querySelector('[data-agenda-card-ask-later]')?.textContent).toContain('&F12 Badge colour');
     expect(acted).toEqual([]);
   });
+
+  // &B165 round 3: the question is said once. The sticky title above IS the question when the item has no title of its own.
+  test('does not say the question twice: the title is the question, so the block leaves it out; a long ask stays whole', async () => {
+    await draw(
+      agendaItem('A6', {
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        subject: 'Should a capacity request wait for the owner?',
+        raisedBy: 'agent',
+        cardAsks: [{ gate: tryGate, at: '2026-08-01T11:00:00.000Z', howToTest: STEPS }],
+      } as unknown as Partial<AgendaItem>),
+    );
+    expect(needs().querySelector('[data-agenda-question-line]')).toBeNull();
+    await view?.unmount();
+    view = null;
+    const long =
+      `${'Should a capacity request wait for the owner when the machine is busy with other work? '.repeat(2)}`.trim();
+    await draw(
+      agendaItem('A7', {
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        subject: long,
+        raisedBy: 'agent',
+        cardAsks: [{ gate: tryGate, at: '2026-08-01T11:00:00.000Z', howToTest: STEPS }],
+      } as unknown as Partial<AgendaItem>),
+    );
+    expect(needs().querySelector('[data-agenda-question-line]')?.textContent).toContain('machine is busy');
+  });
 });
