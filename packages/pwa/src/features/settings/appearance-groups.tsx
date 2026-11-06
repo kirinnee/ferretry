@@ -372,7 +372,7 @@ export function AppearanceGroups({
           <SettingRow
             settingId="map-style"
             name="Map style"
-            hint={`Google Maps: ${GOOGLE_MAPS_PRIVACY_NOTE}`}
+            hint={GOOGLE_MAPS_PRIVACY_NOTE}
             explanation={`${described('map-style')} Choosing Google Maps tells Google which places you open (OpenStreetMap's tile server sees the area too, and your IP address, as it always has). Saved on this device only.`}
             wide
             control={() => (

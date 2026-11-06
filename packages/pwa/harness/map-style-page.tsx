@@ -53,11 +53,15 @@ const MANY = block([
   '  - {at: [51.5055, -0.0754], label: Tower Bridge}',
 ]);
 
+// Each scene is cropped to its own box for the screenshot, so give it the inset a message column has;
+// without it a caption's text touches the crop edge.
+const SCENE_INSET = { padding: '0 12px' } as const;
+
 const root = document.getElementById('root');
 if (root !== null) {
   createRoot(root).render(
     <main style={{ display: 'flex', flexDirection: 'column', gap: 24, margin: '0 auto', maxWidth: 760, padding: 16 }}>
-      <div data-scene="settings">
+      <div data-scene="settings" style={SCENE_INSET}>
         <ul className="m-0 list-none p-0">
           <AppearanceGroups
             computerAvailable={false}
@@ -69,17 +73,17 @@ if (root !== null) {
           />
         </ul>
       </div>
-      <div data-scene="osm">
+      <div data-scene="osm" style={SCENE_INSET}>
         <MapStyleProvider embedKey={FAKE_KEY} style="osm">
           <Markdown enableFyRender text={ONE} />
         </MapStyleProvider>
       </div>
-      <div data-scene="google">
+      <div data-scene="google" style={SCENE_INSET}>
         <MapStyleProvider embedKey={FAKE_KEY} style="google">
           <Markdown enableFyRender text={ONE} />
         </MapStyleProvider>
       </div>
-      <div data-scene="fallback">
+      <div data-scene="fallback" style={SCENE_INSET}>
         <MapStyleProvider embedKey={FAKE_KEY} style="google">
           <Markdown enableFyRender text={MANY} />
         </MapStyleProvider>
