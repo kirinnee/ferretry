@@ -9737,8 +9737,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         // A lane change that went live moves the cards of the lanes it removed, as whoever made it live.
         {
-          relocate: async (projectId, moves, by, reason) => {
-            await boardWorld.board.relocate(projectId, moves, reason, by);
+          relocate: async (projectId, moves, by) => {
+            await boardWorld.board.relocate(projectId, moves, by);
           },
         },
         // A lead may replace its own ferret's waiting lane proposal.

@@ -54,17 +54,14 @@ class Agenda implements LaneProposalAgenda {
 
 class Relocator implements CardRelocator {
   readonly moves: Array<readonly [string, Readonly<Record<string, string>>]> = [];
-  readonly reasons: Array<string | undefined> = [];
   readonly authorities: RelocationAuthority[] = [];
   async relocate(
     projectId: BoardProjectId,
     moves: Readonly<Record<string, string>>,
     by: RelocationAuthority,
-    reason?: string,
   ): Promise<void> {
     this.moves.push([projectId, moves]);
     this.authorities.push(by);
-    this.reasons.push(reason);
   }
 }
 

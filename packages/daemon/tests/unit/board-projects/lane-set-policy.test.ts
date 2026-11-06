@@ -360,7 +360,7 @@ describe('decideLaneChange', () => {
   });
 
   it('should refuse to accept a proposal whose live set moved on since', () => {
-    // Arrange: stored as a boot migration that kept it would leave it.
+    // Arrange: a proposal made against version 3 still waits beside a live set that has moved on to version 5.
     const stale = live({
       version: 5,
       pending: {

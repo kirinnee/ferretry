@@ -153,7 +153,7 @@ const waitForOwner = (
 /**
  * The owner's Accept of the waiting proposal: it becomes the live set, confirmed, at its own version, and its
  * relocation is handed back to run as the owner's. A proposal made against a live set that has moved on since
- * (an owner's edit clears it; a boot migration drops it) is a version conflict.
+ * (an owner's edit clears it) is a version conflict.
  */
 export const acceptPendingLaneSet = (
   current: LaneSet,

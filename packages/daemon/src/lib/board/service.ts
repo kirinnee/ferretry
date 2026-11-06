@@ -851,7 +851,7 @@ export class BoardService {
    * Moves the cards of the lanes a lane edit removed to the lanes it named (`moves`: removed → kept),
    * after the edited set is stored (U3's `CardRelocator`). Safe to repeat: a card no longer in a removed
    * lane of this project is left alone. The direction of such a move is not defined — its lane is gone —
-   * so it is recorded as `by`'s move that says why: `reason`, else that the lane was removed. `by` is the
+   * so it is recorded as `by`'s move that says the lane was removed. `by` is the
    * owner for their own edit or their Accept of a proposal; anyone else is the daemon, which never closes a
    * card here: a move into a closed lane is left undone and said in the diagnostics (the lane service already
    * refused any gate it would pass). Returns the cards it moved.
@@ -859,7 +859,6 @@ export class BoardService {
   async relocate(
     projectId: BoardProjectId,
     moves: Readonly<Record<string, string>>,
-    reason?: string,
     by: RelocationAuthority = { kind: 'daemon' },
   ): Promise<readonly BoardTaskId[]> {
     const refused =
@@ -885,7 +884,7 @@ export class BoardService {
             from: current.laneId,
             to,
             backward: false,
-            reason: reason ?? `lane ${current.laneId} was removed from the board`,
+            reason: `lane ${current.laneId} was removed from the board`,
           },
           { now: this.ports.clock.now(), actor: actorOf(callerOf(by)), ...viaOf(callerOf(by)) },
         );
