@@ -14,15 +14,18 @@ import type { LaunchGate } from '../resume/types.ts';
 import {
   assignedTaskDocument,
   createSessionRecord,
+  elapsedMs,
   firstTurnInstruction,
   lifecyclePhase,
   lifecycleSessionId,
   transitionSessionRecord,
+  withHarnessStartup,
   withLaunchInstructions,
 } from './policy.ts';
 import type { SessionLifecycleSettings } from './settings.ts';
 import {
   type CreateSessionLifecycleRequest,
+  diedParked,
   SESSION_BOARD_CAPABILITY_VARIABLE,
   type SessionCredentialIssuer,
   type SessionCredentialRotator,
@@ -98,6 +101,13 @@ export interface SessionLifecyclePorts {
    */
   readonly launches?: Pick<LaunchGate, 'launching' | 'awaitSettled'>;
 }
+
+/**
+ * Appended to a settle failure: delivery was recorded, but the harness died before it ran the first turn. Said as
+ * fact only when the wait saw the turn parked before the pane died; otherwise the turn may have run.
+ */
+const FIRST_TURN_NEVER_RAN = '; its first turn was never run, so start a new session rather than reviving this one';
+const FIRST_TURN_MAYBE_RAN = '; its first turn may not have run, so start a new session rather than reviving this one';
 
 function failureMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -194,6 +204,8 @@ export class SessionLifecycleService {
           : await this.persist(transitionSessionRecord(current, 'starting', this.ports.clock.now()));
       if (firstTurnStanding === 'unsettled' || firstTurnStanding === 'conflict')
         throw await this.recordFailure(starting, this.firstTurnRefusal(parsed, firstTurnStanding));
+      // Set only by a launch THIS call makes: a resumed or idempotent start measured nothing.
+      let launchedAt: string | undefined;
       if (!live) {
         try {
           await this.ports.leases?.claim(parsed, starting.config.command);
@@ -203,6 +215,7 @@ export class SessionLifecycleService {
         }
         // Carried from here on, so the `running` write — or a failure after the pane exists — records
         // what THIS pane was told rather than what the previous one was.
+        launchedAt = this.ports.clock.now();
         starting = withLaunchInstructions(starting, await this.launch(starting));
       }
       if (beforeFirstTurn !== undefined) {
@@ -216,6 +229,9 @@ export class SessionLifecycleService {
         }
       }
       await this.deliverFirstTurn(starting, firstTurn);
+      // A session with no assignment never takes a first turn, so there is nothing to time.
+      if (launchedAt !== undefined && firstTurn !== undefined)
+        starting = await this.settleStartup(starting, launchedAt);
       return await this.persist(transitionSessionRecord(starting, 'running', this.ports.clock.now()));
     });
   }
@@ -365,6 +381,30 @@ export class SessionLifecycleService {
       if (error instanceof FirstTurnSettledReplay && admission === 'settled') return;
       throw await this.recordFailure(record, error);
     }
+  }
+
+  /**
+   * Waits for the harness to finish its own startup, then records how long the launch took.
+   *
+   * Delivery is not startup — Codex parks a first turn until its account check answers — so a pane that
+   * dies in that window fails THIS start with the harness's own reason, rather than reporting a running
+   * session that dies later. A wait that runs out its bound is not a failure, but it is not a startup time
+   * either: it is recorded as the time spent waiting, never as `harnessStartupMs`. A clock reading that is
+   * not an instant records neither.
+   */
+  private async settleStartup(record: SessionLifecycleRecord, launchedAt: string): Promise<SessionLifecycleRecord> {
+    let settlement: 'settled' | 'timed-out' = 'settled';
+    try {
+      settlement = (await this.ports.launcher.settled?.(record)) ?? 'settled';
+    } catch (error) {
+      // The first turn is already recorded delivered. A parked Codex never ran it, and reviving the session
+      // would resume a conversation that was never given its assignment; a pane that died before any park was
+      // seen may have run it, so that is not claimed.
+      const ran = diedParked(error) ? FIRST_TURN_NEVER_RAN : FIRST_TURN_MAYBE_RAN;
+      throw await this.recordFailure(record, new Error(`${failureMessage(error)}${ran}`));
+    }
+    const elapsed = elapsedMs(launchedAt, this.ports.clock.now());
+    return elapsed === undefined ? record : withHarnessStartup(record, settlement, elapsed);
   }
 
   /** The one initial turn this lifecycle may type, keyed beneath the session it acts on. */

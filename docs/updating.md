@@ -112,6 +112,12 @@ Every self-update is the same transaction:
    back, then restart again and confirm the previous version serves.
 7. **Report** the outcome. The new daemon reads the report file and shows it in the app.
 
+The restart in step 4 is made by the `fy` that is running the update — the **previous** release — so
+it writes the service definition with that release's engine options (the `BUN_JSC_*` variables in
+`DAEMON_RUNTIME_TUNING`, which a daemon reads only as it starts). The new release's engine options
+therefore apply from the next restart made by the new `fy`: `fy daemon restart`, `start` or `install`
+once the update has finished.
+
 Homebrew keeps no previous cask version, so a failed Homebrew update cannot be rolled back
 automatically. That is a declared GAP: the outcome says so and names `fy daemon logs`.
 
