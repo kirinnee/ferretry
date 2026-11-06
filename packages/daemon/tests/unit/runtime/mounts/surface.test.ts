@@ -1,19 +1,18 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { ApiResponse } from '../../../../src/lib/api/http.ts';
-import { AUDITED_ROUTES, AUDITED_SOCKET_ROUTES } from '../../../../src/lib/audit/index.ts';
 import { MemberDispatcher, type SharedRouteDeps } from '../../../../src/lib/catalog-members/shared-routes.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import {
   createMountedDispatcher,
   createMountedSocketDispatcher,
+  mountedAuditRules,
   mountedDaemonRoutes,
   mountedSocketRoutes,
 } from '../../../../src/lib/runtime/index.ts';
 import { PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
-import { OTHER_TABLE_CALLERS, ROUTE_CALLERS } from './route-callers.ts';
+import { FRAGMENTS, NOT_AUDITED, OTHER_TABLE_CALLERS, ROUTE_CALLERS } from '../../modules/route-contracts.ts';
 import { agentIn, CREDENTIALS, grantSubsystem, human } from './support.ts';
 
 import { base, subsystems } from './surface-world.ts';
@@ -1123,8 +1122,55 @@ describe('who may call each route', () => {
       routes.map(route => `${route.method} ${route.path} ${route.minimum} ${route.caller}`).sort(),
     );
 
-    // Assert — the table is `route-callers.ts`; a route added, removed or reclassified changes that file.
-    should(declared).deepEqual([...ROUTE_CALLERS]);
+    // Assert — the table is the concatenation of the per-module fragments (`tests/unit/modules/*/route-contract.ts`);
+    // a route added, removed or reclassified changes its module's fragment. Canonical order: each table sorted by
+    // `METHOD path`, sockets after requests, whatever order the fragments list their lines in.
+    const socketKeys = new Set(mountedSocketRoutes(mounted).map(route => `${route.method} ${route.path}`));
+    const isSocket = (line: string): boolean => socketKeys.has(line.split(' ').slice(0, 2).join(' '));
+    should(declared).deepEqual([
+      ...ROUTE_CALLERS.filter(line => !isSocket(line)).sort(),
+      ...ROUTE_CALLERS.filter(isSocket).sort(),
+    ]);
+  });
+
+  it('should put every mounted route in exactly one fragment, and name only mounted routes in a fragment', () => {
+    // Arrange
+    const mounted = subsystems();
+    const keyOf = (line: string): string => line.split(' ').slice(0, 2).join(' ');
+    const mountedKeys = [
+      ...mountedDaemonRoutes(base, mounted).map(route => `${route.method} ${route.path}`),
+      ...mountedSocketRoutes(mounted).map(route => `${route.method} ${route.path}`),
+    ];
+    const fragments = Object.entries(FRAGMENTS);
+
+    // Act
+    const owners = new Map(
+      mountedKeys.map(key => [
+        key,
+        fragments.filter(([, f]) => f.callers.some(line => keyOf(line) === key)).map(([id]) => id),
+      ]),
+    );
+    const unowned = mountedKeys.filter(key => owners.get(key)?.length !== 1);
+    const unmounted = fragments.flatMap(([id, fragment]) =>
+      [...fragment.callers.map(keyOf), ...Object.keys(fragment.notAudited)]
+        .filter(key => !mountedKeys.includes(key))
+        .map(key => `${id}: ${key}`),
+    );
+    // An excuse belongs to the fragment that owns the route it excuses, so a module's lines stay together.
+    const strayExcuses = fragments.flatMap(([id, fragment]) =>
+      Object.keys(fragment.notAudited)
+        .filter(key => !fragment.callers.some(line => keyOf(line) === key))
+        .map(key => `${id}: ${key}`),
+    );
+    const excuseKeys = fragments.flatMap(([, fragment]) => Object.keys(fragment.notAudited));
+
+    // Assert
+    should(unowned).eql([]);
+    should(unmounted).eql([]);
+    should(strayExcuses).eql([]);
+    should(new Set(excuseKeys).size).equal(excuseKeys.length);
+    should(Object.keys(NOT_AUDITED)).have.length(excuseKeys.length);
+    should(ROUTE_CALLERS).have.length(fragments.reduce((sum, [, fragment]) => sum + fragment.callers.length, 0));
   });
 
   it('should leave no route out of the contract, an optional subsystem’s included', async () => {
@@ -1252,20 +1298,25 @@ describe('who may call each route', () => {
 describe('the audited surface', () => {
   const routes = mountedDaemonRoutes(base, subsystems()).map(route => `${route.method} ${route.path}`);
   const sockets = mountedSocketRoutes(subsystems()).map(route => `${route.method} ${route.path}`);
-  const audited = AUDITED_ROUTES.map(rule => `${rule.method} ${rule.path}`);
-  const auditedSockets = AUDITED_SOCKET_ROUTES.map(rule => `GET ${rule.path}`);
+  // The rules are what the composed modules contribute (`contributes.audit`), not a shared constant.
+  const rules = mountedAuditRules(subsystems());
+  const audited = rules.routes.map(rule => `${rule.method} ${rule.path}`);
+  const auditedSockets = rules.sockets.map(rule => `GET ${rule.path}`);
+  // The reviewed excuses are one record for both tables; a key names a socket when only the socket table mounts it.
+  const excusedSockets = Object.fromEntries(
+    Object.entries(NOT_AUDITED).filter(([route]) => sockets.includes(route) && !routes.includes(route)),
+  );
+  const excused = Object.fromEntries(Object.entries(NOT_AUDITED).filter(([route]) => !(route in excusedSockets)));
 
   it('should record or explicitly excuse every route that changes something', () => {
     const unreviewed = routes
       .filter(route => !route.startsWith('GET '))
-      .filter(route => !audited.includes(route) && NOT_AUDITED[route] === undefined);
+      .filter(route => !audited.includes(route) && excused[route] === undefined);
     should(unreviewed).eql([]);
   });
 
   it('should record or explicitly excuse every socket', () => {
-    should(sockets.filter(route => !auditedSockets.includes(route) && NOT_AUDITED_SOCKETS[route] === undefined)).eql(
-      [],
-    );
+    should(sockets.filter(route => !auditedSockets.includes(route) && excusedSockets[route] === undefined)).eql([]);
   });
 
   it('should keep no stale rule and no stale excuse', () => {
@@ -1273,13 +1324,13 @@ describe('the audited surface', () => {
     // is gone, is a review that no longer describes the code.
     should(audited.filter(route => !routes.includes(route))).eql([]);
     should(auditedSockets.filter(route => !sockets.includes(route))).eql([]);
-    should(Object.keys(NOT_AUDITED).filter(route => !routes.includes(route) || audited.includes(route))).eql([]);
-    should(
-      Object.keys(NOT_AUDITED_SOCKETS).filter(route => !sockets.includes(route) || auditedSockets.includes(route)),
-    ).eql([]);
+    should(Object.keys(excused).filter(route => !routes.includes(route) || audited.includes(route))).eql([]);
+    should(Object.keys(excusedSockets).filter(route => !sockets.includes(route) || auditedSockets.includes(route))).eql(
+      [],
+    );
   });
 
   it('should give every excuse a reason', () => {
-    should(Object.values({ ...NOT_AUDITED, ...NOT_AUDITED_SOCKETS }).filter(reason => reason.length < 20)).eql([]);
+    should(Object.values(NOT_AUDITED).filter(reason => reason.length < 20)).eql([]);
   });
 });

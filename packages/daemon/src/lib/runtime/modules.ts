@@ -87,6 +87,11 @@ interface ModuleInventory {
   /** Decorated inventories preserve module and registration order. */
   readonly routes: readonly ApiRoute[];
   readonly sockets: readonly SocketRoute[];
+  /** The union of every module's `contributes.audit`, as the audit layers receive it. */
+  readonly audit: {
+    readonly routes: readonly AuditedRouteRule[];
+    readonly sockets: readonly AuditedSocketRule[];
+  };
 }
 interface ComposedModules extends ModuleInventory {
   readonly dispatcher: ApiDispatcher;
@@ -162,10 +167,12 @@ export function composeModules(
       hasSocketRules ? socketRules : undefined,
     ),
   );
-  if (!('credentials' in base)) return { routes, sockets };
+  const audit = { routes: routeRules, sockets: socketRules };
+  if (!('credentials' in base)) return { routes, sockets, audit };
   return {
     routes,
     sockets,
+    audit,
     dispatcher: new ApiDispatcher(
       new ApiRouter(
         orderRoutesBySpecificity(

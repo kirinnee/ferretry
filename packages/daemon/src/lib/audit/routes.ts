@@ -1280,7 +1280,7 @@ export interface AuditedSocketRule {
 /**
  * The sockets that hand a caller something live. The fleet feed is a read, so it is not here — the
  * contract in `tests/unit/runtime/mounts/surface.test.ts` holds it to the reviewed list in
- * `tests/unit/audit/not-audited.ts`.
+ * `tests/unit/modules/<id>/route-contract.ts` (`notAudited`).
  */
 export const AUDITED_SOCKET_ROUTES: readonly AuditedSocketRule[] = [
   {

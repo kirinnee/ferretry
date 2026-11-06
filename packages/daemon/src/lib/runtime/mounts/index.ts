@@ -10,7 +10,7 @@ import type { ApiRoute } from '../../api/route.ts';
 import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
 import type { ApiSocketDispatcher, SocketRoute } from '../../api/socket.ts';
 import type { StateHomeReach } from '../../api/state-homes.ts';
-import type { AuditedRoutesSubsystem } from '../../audit/index.ts';
+import { AUDITED_ROUTES, AUDITED_SOCKET_ROUTES, type AuditedRoutesSubsystem } from '../../audit/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { ConfigChangeSink } from '../../config-files/index.ts';
 import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
@@ -839,6 +839,7 @@ export function legacyModule(
               // segment less — so the two cannot shadow each other and a POST here is never an upgrade.
             ],
       sockets: legacySockets(subsystems),
+      audit: { routes: AUDITED_ROUTES, sockets: AUDITED_SOCKET_ROUTES },
     },
   };
 }
@@ -861,6 +862,11 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
 
 export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly SocketRoute[] {
   return composeModules(subsystems, [legacyModule(undefined, subsystems)]).sockets;
+}
+
+/** The audit rules the composed modules contribute: what the audit layers receive, for the contract tests. */
+export function mountedAuditRules(subsystems: MountedSubsystems) {
+  return composeModules(subsystems, [legacyModule(undefined, subsystems)]).audit;
 }
 
 /** Credentials use the same session directory for HTTP and socket requests. */

@@ -215,7 +215,7 @@ export interface ScopedRoute extends RoutePattern {
    * Whether a FERRET may make this call, or only a person.
    *
    * REQUIRED, WITH NO DEFAULT, so every route — including every one added later — has had somebody
-   * decide, and the route-caller contract (`tests/unit/runtime/mounts/route-callers.ts`) makes changing
+   * decide, and the route-caller contract (`tests/unit/modules/<id>/route-contract.ts` (`callers`)) makes changing
    * the answer a reviewed diff. See {@link RouteCaller}.
    */
   readonly caller: RouteCaller;

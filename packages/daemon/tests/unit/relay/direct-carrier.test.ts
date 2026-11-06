@@ -46,7 +46,7 @@ import {
 } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
-import { OTHER_TABLE_CALLERS } from '../runtime/mounts/route-callers.ts';
+import { OTHER_TABLE_CALLERS } from '../modules/route-contracts.ts';
 import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
 import type { SocketDownstream, SocketHandler } from '../../../src/lib/api/socket.ts';
 import {
