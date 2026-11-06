@@ -23,7 +23,7 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
 /**
  * Warden supervision: `/v1/warden/status`, `/v1/warden/run`, `/v1/warden/config`, a read of the
- * Warden's own Agenda cards at `/v1/warden/attention`, the owner's own request at `/v1/warden/investigate`, and the owner
+ * Warden's own Agenda cards at `/v1/warden/agenda`, the owner's own request at `/v1/warden/investigate`, and the owner
  * leaving a ferret alone for longer at `/v1/warden/leave`.
  *
  * THIS MOUNT IS WHY SIX MODULES ARE PRODUCTION CODE. `packages/daemon/src/lib/warden/` held the
@@ -205,7 +205,6 @@ async function report(subsystem: WardenSubsystem, context: RouteContext): Promis
  * and the configuration read is what a PATCH must be visible in immediately.
  */
 export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
-  // Shared by `/v1/warden/agenda` and its older `/v1/warden/attention` twin, so the two cannot differ.
   const handleAgenda: ApiRoute['handle'] = async () => jsonResponse(await subsystem.attention().catch(refuse));
   return [
     {
@@ -251,16 +250,6 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
       caller: 'any',
       capability: { capability: 'warden', axis: 'use' },
       noStore: true,
-      handle: handleAgenda,
-    },
-    {
-      method: 'GET',
-      path: '/v1/warden/attention',
-      minimum: 'authenticated',
-      caller: 'any',
-      capability: { capability: 'warden', axis: 'use' },
-      noStore: true,
-      legacy: true,
       handle: handleAgenda,
     },
     // The OWNER's own request: it starts a warden session with no parent, so a ferret (or a warden) asking is

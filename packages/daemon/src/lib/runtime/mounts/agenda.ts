@@ -1,5 +1,4 @@
 import {
-  AGENDA_PUSH_TITLE_LENGTH,
   AgendaConversationPageSchema,
   AgendaConversationQuerySchema,
   type AgendaActionRequest,
@@ -11,16 +10,8 @@ import {
   type AgendaErrorCode,
   type AgendaSnapshot,
   agendaListSnapshot,
-  clipAtWord,
-  type DirectNotificationRequest,
-  DirectNotificationRequestSchema,
-  DirectNotificationResponseSchema,
-  legacyAgendaSnapshot,
   isMachineAgendaId,
-  MAX_AGENDA_SUBJECT_LENGTH,
-  readsAgendaChannel,
   readsAgendaHeaders,
-  restoredLegacyAgendaReply,
 } from '@ferretry/protocol';
 import { type ApiActor, isHumanAdminActor, parseActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
@@ -36,33 +27,22 @@ import {
   type EditAgendaPatch,
   isAgendaSessionId,
   lintAgendaWriting,
-  type RaiseAgendaRequest,
 } from '../../agenda/index.ts';
 import { type AgendaConfigPort, answerConfirmation, raiseRequestOf } from './agenda-confirms.ts';
 import { type AgendaGatePort, answerGate, refuseGateDismissal } from './agenda-gates.ts';
 
 /**
- * The attention board's HTTP surface: what a session is blocked on, and the human's answer to it.
+ * The agenda board's HTTP surface: what a session is blocked on, and the human's answer to it.
  *
- * This is the route table the CLI's `ProtocolAgendaGateway` already speaks — `GET` and `POST` on
- * `/v1/sessions/:sessionId/attention` — so mounting it is what turns the shipped `fy attention`,
- * `fy answer` and `fy resolve` commands from 404s into a working capability.
- *
- * The sibling notify route stays for older CLIs, but ONLY AGENDA ITEMS NOTIFY: it raises an `info`
- * item through the same path as an add, so its push is the item's push and carries the same card. It uses
- * the same server-derived actor and allows an agent only its own session; a human may target any known
- * session. Its delivered count means push endpoints accepted the payload, never that a person observed it.
+ * This is the route table the CLI's `ProtocolAgendaGateway` speaks — `GET` and `POST` on
+ * `/v1/sessions/:sessionId/agenda` — so mounting it is what makes the shipped `fy agenda`,
+ * `fy answer` and `fy resolve` commands work.
  */
 
 export interface DirectNotificationSubsystem {
-  /** How many devices accepted the push the raise of this item made; zero when it pushed to none. */
-  agendaDelivered(sessionId: string, agendaId: string): Promise<number>;
   /** How many devices are enrolled for push on this machine right now. */
   enrolledDevices(): Promise<number>;
 }
-
-const NOTIFY_KIND_REFUSAL =
-  'progress and finishing never notify the owner — raise an item (fy agenda add) only when they must decide or do something';
 
 /**
  * How each domain refusal is reported.
@@ -127,18 +107,9 @@ function pathSessionId(context: RouteContext): string {
 
 type HeldReplies = Pick<AgendaRepliesSubsystem, 'pending' | 'delivery'>;
 
-/**
- * The board in the shape its caller reads: a caller that has not said it reads the channel (`x-fy-agenda-channel`)
- * gets the legacy projection, so an app that shipped before it never meets an item its strict schema refuses.
- */
-export const servedAgendaSnapshot = (context: RouteContext, snapshot: AgendaSnapshot): AgendaSnapshot =>
-  readsAgendaChannel(context.request.headers) ? snapshot : legacyAgendaSnapshot(snapshot);
-
-/** List projection is opt-in; channel 1 and legacy readers still require complete resolved records. */
-export const servedAgendaListSnapshot = (context: RouteContext, snapshot: AgendaSnapshot) => {
-  const served = servedAgendaSnapshot(context, snapshot);
-  return readsAgendaHeaders(context.request.headers) ? agendaListSnapshot(served) : served;
-};
+/** List projection is opt-in: only a reader that names channel 2 gets resolved headers on list reads. */
+export const servedAgendaListSnapshot = (context: RouteContext, snapshot: AgendaSnapshot) =>
+  readsAgendaHeaders(context.request.headers) ? agendaListSnapshot(snapshot) : snapshot;
 
 /**
  * The board with the answers this machine is holding for the ferret (`replies`) and the ones on their way
@@ -179,7 +150,7 @@ async function sendReplies(
   const before = await agenda.list(sessionId);
   if (!before.ok) return refusal(before.error);
   await replies.sendNow(sessionId);
-  return jsonResponse(servedAgendaSnapshot(context, await withReplies(replies, sessionId, before.value)));
+  return jsonResponse(await withReplies(replies, sessionId, before.value));
 }
 
 /** The item id in the path, or a 400: the same grammar the board uses. */
@@ -250,22 +221,8 @@ async function apply(
   context: RouteContext,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
-  let request = await parseBody(context.request, AgendaActionRequestSchema);
+  const request = await parseBody(context.request, AgendaActionRequestSchema);
   const actor = agendaActor(context.actor);
-  // Restore a legacy Retry before gate/config side effects as well as in the atomic ledger transition.
-  if (
-    actor.kind === 'human' &&
-    !readsAgendaChannel(context.request.headers) &&
-    request.action === 'resolve' &&
-    request.response !== undefined &&
-    (gates !== undefined || config !== undefined)
-  ) {
-    const board = await agenda.list(sessionId);
-    if (!board.ok) return refusal(board.error);
-    const id = request.id;
-    const item = board.value.items.find(item => item.id === id);
-    if (item !== undefined) request = restoredLegacyAgendaReply(item, request);
-  }
   // An answer to a card's gate moves the card first; only a move that went through answers the item.
   const gated =
     request.action === 'resolve' && request.response !== undefined && gates !== undefined
@@ -364,7 +321,7 @@ async function apply(
   const notes = mutation.notes ?? [];
   const enrolled = mutation.change === 'created' ? await enrolledDevices(notifications) : undefined;
   return jsonResponse({
-    ...servedAgendaSnapshot(context, await withReplies(replies, sessionId, mutation.snapshot)),
+    ...(await withReplies(replies, sessionId, mutation.snapshot)),
     ...(warnings.length === 0 ? {} : { warnings }),
     ...(notes.length === 0 ? {} : { notes: [...notes] }),
     ...(enrolled === undefined ? {} : { enrolled }),
@@ -389,46 +346,6 @@ function editPatch(request: Extract<AgendaActionRequest, { action: 'edit' }>): E
 }
 
 /**
- * The notice an old notify request becomes: its title is the request's own or the start of the text,
- * its subject the text on one line, and the whole text rides in the context when the ask had to be cut.
- */
-function infoRequest(request: DirectNotificationRequest): RaiseAgendaRequest {
-  const line = request.body.replaceAll(/\s+/gu, ' ').trim();
-  const subject = clipAtWord(line, MAX_AGENDA_SUBJECT_LENGTH);
-  return {
-    source: 'agent-raised',
-    sourceRef: null,
-    kind: 'info',
-    notice: true,
-    title: clipAtWord(request.title ?? line, AGENDA_PUSH_TITLE_LENGTH),
-    subject,
-    why: 'The ferret sent you a message that needs no decision.',
-    ...(subject === line ? {} : { context: request.body.trim() }),
-    howToResolve: 'Nothing to do: it is a notice.',
-  };
-}
-
-async function notify(
-  agenda: AgendaService,
-  notifications: DirectNotificationSubsystem,
-  context: RouteContext,
-): Promise<ApiResponse> {
-  const sessionId = pathSessionId(context);
-  const actor = agendaActor(context.actor);
-  const request = await parseBody(context.request, DirectNotificationRequestSchema);
-  if (request.kind !== undefined) return refusal({ code: 'invalid', message: NOTIFY_KIND_REFUSAL });
-  const sender: AgendaActor = actor.kind === 'human' ? { kind: 'daemon', cause: 'system' } : actor;
-  const mutation = await agenda.raise(sessionId, infoRequest(request), sender);
-  if (!mutation.ok) return refusal(mutation.error);
-  const delivered =
-    mutation.change === 'created' && mutation.item !== undefined
-      ? // The item sits where the mutation landed: a sub-ferret's notice goes to its agenda home.
-        await notifications.agendaDelivered(mutation.snapshot.sessionId, mutation.item.id).catch(() => 0)
-      : 0;
-  return jsonResponse(DirectNotificationResponseSchema.parse({ sessionId, delivered }));
-}
-
-/**
  * `admin` scope on both, which is the conservative reading of a surface a warden can currently only
  * reach through the daemon's own trusted reconciliation. A route that says nothing about scope is
  * admin-only by construction, so widening this later is a deliberate edit rather than an oversight.
@@ -445,8 +362,6 @@ export function agendaRoutes(
   /** The card gates an item may ask about; absent, a gate item is answered like any other choice. */
   gates?: AgendaGatePort,
 ): readonly ApiRoute[] {
-  // One handler per verb, shared by the agenda route and its older `attention` twin, so the two cannot
-  // answer differently or declare different grants (`agenda.wire.1`, docs/agenda.md § Compatibility).
   const handleList: ApiRoute['handle'] = async context => await list(agenda, replies, context);
   const handleApply: ApiRoute['handle'] = async context =>
     await apply(agenda, notifications, replies, config, gates, context);
@@ -461,7 +376,7 @@ export function agendaRoutes(
       handle: async context => {
         const result = await agenda.list(pathSessionId(context));
         if (!result.ok) return refusal(result.error);
-        const snapshot = servedAgendaSnapshot(context, result.value);
+        const snapshot = result.value;
         const id = pathItemId(context);
         const item = snapshot.items.find(item => item.id === id) ?? snapshot.resolved.find(item => item.id === id);
         if (item === undefined) throw new ApiError(404, 'agenda item not found', 'not-found');
@@ -546,43 +461,6 @@ export function agendaRoutes(
       caller: 'person',
       noStore: true,
       handle: handleReplies,
-    },
-    {
-      method: 'GET',
-      path: '/v1/sessions/:sessionId/attention',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      legacy: true,
-      handle: handleList,
-    },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/attention',
-      minimum: 'operator',
-      caller: 'any',
-      consultsGrants: true,
-      noStore: true,
-      legacy: true,
-      handle: handleApply,
-    },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/attention/replies',
-      minimum: 'operator',
-      caller: 'person',
-      noStore: true,
-      legacy: true,
-      handle: handleReplies,
-    },
-    {
-      method: 'POST',
-      path: '/v1/sessions/:sessionId/notify',
-      minimum: 'operator',
-      caller: 'any',
-      noStore: true,
-      legacy: true,
-      handle: async context => await notify(agenda, notifications, context),
     },
   ];
   // Every session agenda route passes here, including future item reads. Refuse the reserved ledger before

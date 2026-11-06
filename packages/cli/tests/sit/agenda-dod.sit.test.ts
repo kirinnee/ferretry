@@ -249,7 +249,7 @@ function serveRoutes(made: World) {
   };
   const routes = agendaRoutes(
     made.service,
-    { enrolledDevices: async () => 1, agendaDelivered: async () => 0 },
+    { enrolledDevices: async () => 1 },
     { pending: async () => undefined, delivery: async () => undefined, sendNow: async () => undefined },
   );
   const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), credentials as never, NO_GOVERNED_ROUTES_GUARD);

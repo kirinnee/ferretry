@@ -280,7 +280,6 @@ describe('BunApiServer', () => {
       NO_GOVERNED_ROUTES_GUARD,
       undefined,
       undefined,
-      undefined,
       new NodeGzip(),
     );
     const sockets = new ApiSocketDispatcher(new ApiRouter([]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);

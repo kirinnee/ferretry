@@ -4,7 +4,7 @@ import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
-import { agendaActor, pathItemId, servedAgendaListSnapshot, servedAgendaSnapshot } from './agenda.ts';
+import { agendaActor, pathItemId, servedAgendaListSnapshot } from './agenda.ts';
 
 const STATUS: Readonly<Record<AgendaErrorCode, number>> = {
   invalid: 400,
@@ -54,7 +54,7 @@ export function agendaMachineRoutes(machine: AgendaService): readonly ApiRoute[]
         if (agendaActor(context.actor).kind !== 'human') throw new ApiError(403, OWNER_ONLY, 'forbidden');
         const listed = await machine.list(MACHINE_AGENDA_ID);
         if (!listed.ok) throw new ApiError(STATUS[listed.error.code], listed.error.message, listed.error.code);
-        const snapshot = servedAgendaSnapshot(context, listed.value);
+        const snapshot = listed.value;
         const id = pathItemId(context);
         const item = snapshot.items.find(item => item.id === id) ?? snapshot.resolved.find(item => item.id === id);
         if (item === undefined) throw new ApiError(404, 'agenda item not found', 'not-found');
@@ -88,7 +88,7 @@ export function agendaMachineRoutes(machine: AgendaService): readonly ApiRoute[]
           );
         }
         if (!mutation.ok) throw new ApiError(STATUS[mutation.error.code], mutation.error.message, mutation.error.code);
-        return jsonResponse(servedAgendaSnapshot(context, mutation.snapshot));
+        return jsonResponse(mutation.snapshot);
       },
     },
   ];

@@ -2,7 +2,6 @@ import type { DaemonFeature } from '@ferretry/protocol';
 import type { CapabilityGuard, StepUpWitness } from '../api/capability.ts';
 import type { ResponseCompressor } from '../api/compression.ts';
 import type { AgentControlPolicy } from '../fleet/agent-control.ts';
-import type { LegacyWireUseRecorder } from '../legacy-wire/ports.ts';
 import type { PerformanceProbe } from '../performance/recorder.ts';
 import type { MillisecondClockPort } from './boot.ts';
 import type { ApiCredentials } from '../api/authentication.ts';
@@ -81,7 +80,6 @@ interface ModuleDependencies extends ModuleRouteDependencies {
   readonly credentials: ApiCredentials;
   readonly grants: CapabilityGuard;
   readonly stepUp: StepUpWitness;
-  readonly legacyWire?: LegacyWireUseRecorder;
   readonly compressor?: ResponseCompressor;
   readonly configChanges: ConfigChangeSink;
   readonly performance: {
@@ -192,7 +190,6 @@ export function composeModules(
       base.grants,
       undefined,
       base.stepUp,
-      base.legacyWire,
       base.compressor,
     ),
     socketDispatcher: (carriers = []) =>

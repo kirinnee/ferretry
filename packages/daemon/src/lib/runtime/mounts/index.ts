@@ -17,7 +17,6 @@ import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { HandoverReconcileLoop } from '../../handover/index.ts';
 import type { InputRequestService } from '../../input-requests/service.ts';
-import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
 import type { PasteRuleStages } from '../../secure-copy/rule-stages.ts';
 import type { PasteRuleService } from '../../secure-copy/rules.ts';
@@ -165,8 +164,6 @@ import type { WorktreeSubsystem } from './worktrees.ts';
 export interface MountedSubsystems {
   /** The daemon's own health, over the self-check that measures it. */
   readonly health: DaemonHealthSubsystem;
-  /** Counts the requests that reach a route kept only for older clients. Absent where nothing counts. */
-  readonly legacyWire?: LegacyWireUseRecorder;
   /** Gzips a large `GET` answer for a caller that accepts it (`lib/api/compression.ts`). Absent where nothing compresses. */
   readonly compressor?: ResponseCompressor;
   /** Host dependencies, diagnosed for this daemon's own machine. */

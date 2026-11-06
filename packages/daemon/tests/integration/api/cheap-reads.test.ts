@@ -80,7 +80,7 @@ describe('agenda projections over the HTTP adapter', () => {
       await service.resolve(id, 'A1', { kind: 'human' }, 'Checked.');
     }
     const routes = [
-      ...agendaRoutes(sessions, { enrolledDevices: async () => 0, agendaDelivered: async () => 0 }, NO_HELD_REPLIES),
+      ...agendaRoutes(sessions, { enrolledDevices: async () => 0 }, NO_HELD_REPLIES),
       ...agendaMachineRoutes(machine),
     ];
     const handle = await new BunApiServer().listen(
@@ -94,13 +94,12 @@ describe('agenda projections over the HTTP adapter', () => {
     running.push(handle);
     const headers = { authorization: `Bearer ${CREDENTIALS.admin}`, [AGENDA_CHANNEL_HEADER]: AGENDA_CHANNEL_VERSION };
     // Act + Assert
-    for (const path of ['/v1/sessions/s1/agenda', '/v1/sessions/s1/attention', '/v1/machine/agenda']) {
+    for (const path of ['/v1/sessions/s1/agenda', '/v1/machine/agenda']) {
       const listed = await fetch(new URL(path, handle.url), { headers });
       should(listed.status).equal(200);
       const list = AgendaListSnapshotSchema.parse(await listed.json());
       should(list.resolved[0]).have.property('projection', 'header');
       should(list.resolved[0]).not.have.property('tabs');
-      if (path.endsWith('/attention')) continue;
       const read = await fetch(new URL(`${path}/A1`, handle.url), { headers });
       const item = AgendaReadItemSchema.parse(await read.json());
       should(item.body).equal('Fixture detail. '.repeat(500).trim());

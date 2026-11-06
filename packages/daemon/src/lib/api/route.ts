@@ -463,12 +463,5 @@ export interface ApiRoute extends ScopedRoute {
    * worth compressing.
    */
   readonly compress?: true;
-  /**
-   * An older spelling of a route, kept for older clients until the agenda removal release
-   * (docs/agenda.md § Compatibility). The dispatcher records every hit on one (the legacy-use counter), so
-   * the release that removes it can wait for a quiet fortnight. It changes nothing about who may reach the
-   * route: the twin declares the same grants.
-   */
-  readonly legacy?: true;
   handle(context: RouteContext): Promise<ApiResponse>;
 }

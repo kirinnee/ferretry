@@ -78,13 +78,9 @@ const post = async (gates: FakeGates, caller: Caller, body: unknown) => {
     credential: caller.credential,
     ...(governance === undefined ? {} : { governance }),
   };
-  const route = agendaRoutes(
-    service,
-    { agendaDelivered: async () => 0, enrolledDevices: async () => 1 },
-    NO_HELD_REPLIES,
-    undefined,
-    gates,
-  ).find(each => each.method === 'POST' && each.path === '/v1/sessions/:sessionId/agenda');
+  const route = agendaRoutes(service, { enrolledDevices: async () => 1 }, NO_HELD_REPLIES, undefined, gates).find(
+    each => each.method === 'POST' && each.path === '/v1/sessions/:sessionId/agenda',
+  );
   try {
     const response = await (route as NonNullable<typeof route>).handle(context);
     return { status: response.status, body: jsonBody(response) as Record<string, unknown> };

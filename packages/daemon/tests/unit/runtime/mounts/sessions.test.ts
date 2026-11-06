@@ -188,7 +188,6 @@ describe('the session read mount', () => {
         NO_GOVERNED_ROUTES_GUARD,
         undefined,
         undefined,
-        undefined,
         compressor,
       );
     const gzip = { ...human, 'accept-encoding': 'gzip' };

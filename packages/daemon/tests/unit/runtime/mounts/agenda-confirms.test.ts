@@ -201,7 +201,7 @@ async function post(
   const context: RouteContext = {
     request: request({
       method: 'POST',
-      path: '/v1/sessions/s1/attention',
+      path: '/v1/sessions/s1/agenda',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }),
@@ -222,10 +222,10 @@ async function post(
   };
   const route = agendaRoutes(
     subject.attention,
-    { agendaDelivered: async () => 0, enrolledDevices: async () => 1 },
+    { enrolledDevices: async () => 1 },
     NO_HELD_REPLIES,
     config ?? undefined,
-  ).find(each => each.method === 'POST' && each.path === '/v1/sessions/:sessionId/attention');
+  ).find(each => each.method === 'POST' && each.path === '/v1/sessions/:sessionId/agenda');
   let response: ApiResponse;
   try {
     response = await (route as NonNullable<typeof route>).handle(context);
@@ -779,7 +779,7 @@ describe('answering a confirmation card through the authorization boundary', () 
     };
     const routes = agendaRoutes(
       subject.attention,
-      { agendaDelivered: async () => 0, enrolledDevices: async () => 1 },
+      { enrolledDevices: async () => 1 },
       NO_HELD_REPLIES,
       configFilesConfirmations(subject.config, audit),
     );
@@ -890,7 +890,7 @@ describe('answering a confirmation card through the authorization boundary', () 
       const { subject, on } = await raisedThrough();
 
       // Act
-      const answer = await send(on, 'paired-phone', choose('Allow'), '/v1/sessions/s1/attention');
+      const answer = await send(on, 'paired-phone', choose('Allow'), '/v1/sessions/s1/agenda');
 
       // Assert
       should(answer.status).equal(403);

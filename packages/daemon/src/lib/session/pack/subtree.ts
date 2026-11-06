@@ -126,7 +126,7 @@ export function oneLine(text: string, max: number = SUBTREE_LAST_LINE_MAX): stri
 export function subtreeStateOf(view: SessionView): SubtreeState {
   const { state } = view;
   if (isEnded(view)) return 'ended';
-  const agenda = state.agenda ?? state.attention;
+  const agenda = state.agenda;
   const onOwner = agenda !== undefined && agenda.open - (agenda.discussing ?? 0) > 0;
   if (
     state.needsHuman !== undefined ||

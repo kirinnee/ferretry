@@ -14,7 +14,6 @@ import {
   type DuplicateAsk,
   type IoPressureView,
   type LearningConfig,
-  type LegacyWireUse,
   PIN_SCHEMA_VERSION,
   type Pin,
   type PinSnapshot,
@@ -1192,8 +1191,6 @@ export interface HealthWorld {
   readonly pid?: number;
   /** The disk pressure the daemon would report, where the host has any. */
   readonly io?: IoPressureView;
-  /** The older wire names clients used, where the daemon counts them. */
-  readonly legacyWire?: readonly LegacyWireUse[];
   /** The possible duplicate asks the last sweep left open, where the daemon runs one. */
   readonly duplicateAsks?: readonly DuplicateAsk[];
   /** How many finished sessions the daemon has archived, where it archives. */
@@ -1278,7 +1275,6 @@ export function healthSubsystem(world: HealthWorld = {}): DaemonHealthSubsystem 
     pid: world.pid ?? 4321,
     scratch: world.scratch ?? { enabled: false, reclaimedSessions: 0, reclaimedBytes: 0 },
     ...(world.io === undefined ? {} : { io: () => world.io }),
-    ...(world.legacyWire === undefined ? {} : { legacyWire: () => world.legacyWire ?? [] }),
     ...(world.duplicateAsks === undefined ? {} : { duplicateAsks: () => world.duplicateAsks ?? [] }),
     ...(world.archivedSessions === undefined ? {} : { archivedSessions: () => world.archivedSessions ?? 0 }),
   };

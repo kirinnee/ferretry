@@ -141,7 +141,7 @@ async function startStubDaemon(): Promise<Stub> {
 
 function route(path: string): unknown {
   if (path === `/v1/sessions/${SESSION}/pins`) return pinBoard;
-  if (path === `/v1/sessions/${SESSION}/attention`) return agendaBoard;
+  if (path === `/v1/sessions/${SESSION}/agenda`) return agendaBoard;
   if (path === `/v1/sessions/${SESSION}/notify`) return { sessionId: SESSION, delivered: 2 };
   if (path === '/v1/analytics') return analyticsFeed;
   return undefined;

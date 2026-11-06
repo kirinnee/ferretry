@@ -121,7 +121,6 @@ function loop(outboxes = new MemoryOutboxes(), sends = new RecordingSends()) {
     new TwiceTold(new AgendaReplyDelivery(batcher, 'fy')),
   );
   const notifications: DirectNotificationSubsystem = {
-    agendaDelivered: async () => 0,
     enrolledDevices: async () => 1,
   };
   const dispatcher = new ApiDispatcher(
@@ -132,7 +131,7 @@ function loop(outboxes = new MemoryOutboxes(), sends = new RecordingSends()) {
   const post = async (
     body: unknown,
     headers: Readonly<Record<string, string>>,
-    path = `/v1/sessions/${SESSION}/attention`,
+    path = `/v1/sessions/${SESSION}/agenda`,
   ): Promise<ApiResponse> =>
     await dispatcher.dispatch(request({ method: 'POST', path, headers, body: JSON.stringify(body) }));
   const raise = async (subject: string, ask: unknown = { kind: 'open-question' }): Promise<string> => {
@@ -172,7 +171,7 @@ describe('the attention loop when a Discuss cannot reach the ferret (the owner�
     // Act — swipe down: Discuss.
     await post({ action: 'discuss', id }, browser);
     await settle();
-    const board = await dispatcher.dispatch(request({ path: `/v1/sessions/${SESSION}/attention`, headers: browser }));
+    const board = await dispatcher.dispatch(request({ path: `/v1/sessions/${SESSION}/agenda`, headers: browser }));
 
     // Assert — nothing typed, nothing recorded as delivered: it is still waiting to go, and the board says why.
     should(sends.attempts).equal(0);
@@ -360,7 +359,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     await post({ action: 'resolve', id }, browser);
 
     // Act
-    const now = await post({}, browser, `/v1/sessions/${SESSION}/attention/replies`);
+    const now = await post({}, browser, `/v1/sessions/${SESSION}/agenda/replies`);
     await Promise.resolve();
 
     // Assert
@@ -377,7 +376,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     const { post } = loop();
 
     // Act
-    const response = await post({}, browser, '/v1/sessions/nobody/attention/replies');
+    const response = await post({}, browser, '/v1/sessions/nobody/agenda/replies');
 
     // Assert
     should(response.status).equal(404);

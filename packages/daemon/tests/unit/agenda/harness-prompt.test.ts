@@ -534,7 +534,7 @@ describe('HarnessPromptAgenda', () => {
     // Act
     await observer(service, { [SESSION]: running({ pendingQuestion: choice }) }).reconcile([SESSION]);
     const kept = await service.list(SESSION);
-    await observer(service, { [SESSION]: running({ status: 'stopped', attention: { open: 1 } }) }).reconcile([SESSION]);
+    await observer(service, { [SESSION]: running({ status: 'stopped', agenda: { open: 1 } }) }).reconcile([SESSION]);
     const cleared = await service.list(SESSION);
 
     // Assert

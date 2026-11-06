@@ -808,12 +808,7 @@ export const SessionStateSchema = z.object({
   nudgedAt: InstantSchema.optional(),
   needsHuman: z.string().optional(),
   needsHumanKind: z.string().optional(),
-  /** The older spelling of `agenda` (same value), read by apps from before `agenda.wire.1`. */
-  attention: SessionAgendaSummarySchema.optional(),
-  /**
-   * The open agenda items waiting on the owner; absent when none is open. The daemon writes it beside the
-   * older `attention` (same value) until the agenda removal release; a client reads `agenda ?? attention`.
-   */
+  /** The open agenda items waiting on the owner; absent when none is open. */
   agenda: SessionAgendaSummarySchema.optional(),
   contextPercent: z.number().finite().min(0).max(100).optional(),
   contextTokens: NonNegativeIntegerSchema.optional(),

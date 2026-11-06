@@ -52,7 +52,6 @@ function dispatcherFor(compressor: ResponseCompressor | undefined, ...routes: re
     NO_GOVERNED_ROUTES_GUARD,
     undefined,
     undefined,
-    undefined,
     compressor,
   );
 }

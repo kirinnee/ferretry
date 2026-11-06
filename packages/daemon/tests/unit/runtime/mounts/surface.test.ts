@@ -44,7 +44,7 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      111 + // the session table and everything that is not the account model (three of them the agenda's versions: the list kept of an item, one version in full, and the device's seen mark; one of them cutting a ferret off: its credential revoked; three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (the ferret limits are read-only now: the PATCH that edited them is gone, `limits.yaml` is the one writer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
+      107 + // the session table and everything that is not the account model (three of them the agenda's versions: the list kept of an item, one version in full, and the device's seen mark; one of them cutting a ferret off: its credential revoked; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (the ferret limits are read-only now: the PATCH that edited them is gone, `limits.yaml` is the one writer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       2 + // the owner's view of who holds the terminal slots, and closing the finished ferrets' terminals (`fy terminal close --all-finished`)
       8 + // the project boards: the board query, its card ids, a PR's merge gate (docs/design/clash-queue.md), one card, a new card, an action on a card (board-design.md §2), a ferret's skip (§3.4), and the owner's start of a new ferret on a card (docs/board.md, "Start a ferret on a card")
       1 + // bounded full-conversation reads, including historical version threads
@@ -128,7 +128,7 @@ describe('the mounted daemon surface', () => {
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
     // It gained the tunnel read too: whether a machine has a tunnel is not a secret (§15).
-    should(minima).deepEqual({ none: 7, authenticated: 11, operator: operatorRoutes, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 7, authenticated: 10, operator: operatorRoutes, 'admin-token': 1 });
     should(
       canonical(routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`)),
     ).deepEqual(
@@ -462,10 +462,6 @@ describe('the mounted daemon surface', () => {
         'GET /v1/sessions/:sessionId/agenda/:id/versions/:version',
         'PUT /v1/sessions/:sessionId/agenda/:id/seen',
         'POST /v1/sessions/:sessionId/agenda/replies',
-        'GET /v1/sessions/:sessionId/attention',
-        'POST /v1/sessions/:sessionId/attention',
-        'POST /v1/sessions/:sessionId/attention/replies',
-        'POST /v1/sessions/:sessionId/notify',
         'POST /v1/agenda/clear-agents',
         'GET /v1/agenda/open',
         'GET /v1/machine/agenda',
@@ -626,7 +622,6 @@ describe('the mounted daemon surface', () => {
         'GET /v1/warden/report',
         'POST /v1/warden/run',
         'GET /v1/warden/agenda',
-        'GET /v1/warden/attention',
         'POST /v1/warden/investigate',
         'POST /v1/warden/leave',
         'GET /v1/warden/config',
@@ -682,11 +677,7 @@ describe('the mounted daemon surface', () => {
 
     // Assert — an answer to a card that confirms a held configuration change (docs/agenda.md), and a paired device
     // bringing back a cut-off ferret (fleet.configure, secrev-1329b M2; a ferret is refused before it is read).
-    should(consulting.toSorted()).eql([
-      'POST /v1/sessions/:sessionId/agenda',
-      'POST /v1/sessions/:sessionId/attention',
-      'POST /v1/sessions/:sessionId/resume',
-    ]);
+    should(consulting.toSorted()).eql(['POST /v1/sessions/:sessionId/agenda', 'POST /v1/sessions/:sessionId/resume']);
     should(routes.filter(route => route.consultsGrants === true && route.capability !== undefined)).eql([]);
   });
 
@@ -754,7 +745,7 @@ describe('the mounted daemon surface', () => {
     const projects = await dispatcher.dispatch(request({ path: '/v1/projects', headers: human }));
     const skills = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/skills', headers: human }));
     const pins = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/pins', headers: human }));
-    const agenda = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attention', headers: human }));
+    const agenda = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/agenda', headers: human }));
     const analytics = await dispatcher.dispatch(request({ path: '/v1/analytics', headers: human }));
     const importedHistory = await dispatcher.dispatch(request({ path: '/v1/imports/history', headers: human }));
     const importedConversation = await dispatcher.dispatch(

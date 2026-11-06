@@ -300,8 +300,8 @@ describe('the "who needs you" feed', () => {
     const subject = dispatcher();
 
     // Act
-    const owner = await subject.dispatch(get('/v1/warden/attention'));
-    const live = await subject.dispatch(get('/v1/warden/attention', warden));
+    const owner = await subject.dispatch(get('/v1/warden/agenda'));
+    const live = await subject.dispatch(get('/v1/warden/agenda', warden));
 
     // Assert
     should(owner.status).equal(200);
@@ -314,7 +314,7 @@ describe('the "who needs you" feed', () => {
     const subject = dispatcher(new FakeWarden(new WardenError('failed', 'the boards could not be read')));
 
     // Act
-    const response = await subject.dispatch(get('/v1/warden/attention'));
+    const response = await subject.dispatch(get('/v1/warden/agenda'));
 
     // Assert
     should(response.status).equal(500);

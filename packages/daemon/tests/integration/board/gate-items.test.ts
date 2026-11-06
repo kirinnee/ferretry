@@ -90,13 +90,9 @@ const daemonOver = (home: string) => {
     words: { told: async () => undefined },
     diagnostics: { warn: () => undefined },
   });
-  const route = agendaRoutes(
-    agenda,
-    { agendaDelivered: async () => 0, enrolledDevices: async () => 1 },
-    NO_HELD_REPLIES,
-    undefined,
-    gates,
-  ).find(each => each.method === 'POST' && each.path === '/v1/sessions/:sessionId/agenda');
+  const route = agendaRoutes(agenda, { enrolledDevices: async () => 1 }, NO_HELD_REPLIES, undefined, gates).find(
+    each => each.method === 'POST' && each.path === '/v1/sessions/:sessionId/agenda',
+  );
   if (route === undefined) throw new Error('no agenda route');
   return { store, agenda, board, gates: gates as GateItems, reopen, done, route };
 };

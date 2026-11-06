@@ -11,9 +11,8 @@ import type { AgendaBoardChange } from '../../../src/lib/agenda/index.ts';
 import type { FrozenJsonValue } from '../../../src/lib/json.ts';
 
 /**
- * The agenda wire's two daemon-side writes on a session's own record: the summary under BOTH names, and the
- * journal events under the new ones. An app from before `agenda.wire.1` reads only `attention`; one after
- * reads `agenda ?? attention`; neither may lose the other's field while the old routes are served.
+ * The daemon-side writes on a session's own record: the open-items summary as `agenda`, and the journal events.
+ * A document written before the rename may still carry the summary as `attention`; a write drops that key.
  */
 
 const SUMMARY = { open: 2, first: 'A1', ask: 'Rebase onto main now?', latestAt: '2026-10-23T10:00:00.000Z' } as const;
@@ -52,7 +51,7 @@ describe('the journal entries a board leaves', () => {
 });
 
 describe('the session summary under both names', () => {
-  it('should write the same summary as `agenda` and `attention` and parse under the protocol', async () => {
+  it('should write the summary as `agenda` and parse under the protocol', async () => {
     // Arrange
     const { storage, state, journal } = storageOver({ ...BASE });
 
@@ -61,15 +60,14 @@ describe('the session summary under both names', () => {
 
     // Assert
     const parsed = SessionStateSchema.parse(state());
-    should(parsed.attention).deepEqual(SUMMARY);
     should(parsed.agenda).deepEqual(SUMMARY);
-    should(state()?.attention).deepEqual(state()?.agenda);
+    should(state()).not.have.property('attention');
     should(journal).deepEqual([{ type: 'agenda.changed', data: { change: 'created', id: 'A2', open: 2 } }]);
   });
 
-  it('should clear both to ABSENT, never null', async () => {
+  it('should clear the summary to ABSENT, never null', async () => {
     // Arrange
-    const { storage, state } = storageOver({ ...BASE, attention: { ...SUMMARY }, agenda: { ...SUMMARY } });
+    const { storage, state } = storageOver({ ...BASE, agenda: { ...SUMMARY } });
 
     // Act
     await new StorageSessionAgendaState(storage).write('session-1', undefined, change('answered', 'A1'));
@@ -89,13 +87,13 @@ describe('the session summary under both names', () => {
 
     // Assert
     should(state()?.agenda).deepEqual(SUMMARY);
-    should(state()?.attention).deepEqual(SUMMARY);
+    should(state()).not.have.property('attention');
     should(journal).deepEqual([{ type: 'agenda.changed', data: { change: 'reconciled', open: 2 } }]);
   });
 
-  it('should leave a document that already holds both untouched and journal only a real change', async () => {
+  it('should leave a document that already holds the summary untouched and journal only a real change', async () => {
     // Arrange
-    const { storage, journal } = storageOver({ ...BASE, attention: { ...SUMMARY }, agenda: { ...SUMMARY } });
+    const { storage, journal } = storageOver({ ...BASE, agenda: { ...SUMMARY } });
     const subject = new StorageSessionAgendaState(storage);
 
     // Act

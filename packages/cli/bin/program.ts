@@ -124,7 +124,7 @@ import { DaemonController } from '../src/lib/daemon/controller';
 import { paneCredentialValue, paneCredentialWarnings } from '../src/lib/daemon/credential';
 import { ProtocolFirewallStatusReader } from '../src/lib/daemon/firewall-status';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
-import { legacyWireReport } from '../src/lib/daemon/legacy-wire';
+import { duplicateAskReport } from '../src/lib/daemon/duplicate-asks';
 import { ProtocolLimitsStatusReader } from '../src/lib/daemon/limits-status';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
 import { registerProfileCommands } from '../src/lib/daemon/profile/commands';
@@ -323,7 +323,7 @@ function registerDoctorCommand(program: Command, world: CliWorld): void {
       const child = Bun.spawn([executable, '--check'], { stdin: 'ignore', stdout: 'inherit', stderr: 'inherit' });
       process.exitCode = await child.exited;
       const stateHome = resolveDaemonStateHome(world.homeDirectory, environment.FY_HOME, PRODUCT_NAME);
-      for (const line of await legacyWireReport(localDaemonHealth(world, stateHome), Date.now())) world.io.report(line);
+      for (const line of await duplicateAskReport(localDaemonHealth(world, stateHome))) world.io.report(line);
     });
 }
 

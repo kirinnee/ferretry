@@ -77,7 +77,6 @@ import {
   parseGateReference,
   type ResolvedAgendaItem,
   ResolvedAgendaItemSchema,
-  restoredLegacyAgendaReply,
   StoredAgendaItemSchema,
   StoredResolvedAgendaItemSchema,
   type TaskRef,
@@ -1282,7 +1281,6 @@ function reopenedReply(closed: ResolvedAgendaItem): AgendaItem | null {
  * held to the schema the reader holds it to, and a change that fails is refused instead of written.
  */
 function applyToLedger(ledger: AgendaLedger, command: AgendaCommand): AgendaMutation {
-  command = restoredRetry(ledger, command);
   // Accepted chat has its own send bound: reply keeps that full source outside the bounded legacy history note.
   if (
     ['answer', 'resolve', 'dismiss', 'needs-info', 'discuss', 'reply'].includes(command.action) &&
@@ -1331,32 +1329,6 @@ function liftedOnRead(channel: AgendaLedger): AgendaLedger {
     'refreshed',
   );
   return mutation.ok ? fitted(channel, mutation).ledger : channel;
-}
-
-/** Old apps post the clipped Retry view. Match it exactly and replay the stored words inside the ledger transition. */
-function restoredRetry(ledger: AgendaLedger, command: AgendaCommand): AgendaCommand {
-  if (command.actor.kind !== 'human' || !('id' in command)) return command;
-  const item = ledger.entries.find(entry => entry.lifecycle === 'active' && entry.item.id === command.id)?.item;
-  const stored = item?.undelivered?.reply;
-  if (item === undefined || stored === undefined) return command;
-  if (command.action === 'answer') {
-    const reply = restoredLegacyAgendaReply(item, {
-      action: 'resolve',
-      response: command.response,
-      note: command.note ?? undefined,
-    });
-    return { ...command, response: reply.response, note: reply.note };
-  }
-  if (
-    command.action === 'resolve' ||
-    command.action === 'dismiss' ||
-    command.action === 'needs-info' ||
-    command.action === 'discuss'
-  ) {
-    const reply = restoredLegacyAgendaReply(item, { action: command.action, note: command.note ?? undefined });
-    return { ...command, note: reply.note };
-  }
-  return command;
 }
 
 /**
