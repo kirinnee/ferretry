@@ -3,6 +3,7 @@ import type { ApiRoute } from '../../../../src/lib/api/route.ts';
 import type { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import type { ApiSocketDispatcher, SocketRoute } from '../../../../src/lib/api/socket.ts';
 import type { MountedSubsystems } from '../../../../src/lib/runtime/index.ts';
+import type { BuiltModule } from '../../../../src/lib/runtime/modules.ts';
 import * as mounted from '../../../../src/lib/runtime/mounts/index.ts';
 import { builtModules } from '../../modules/fixtures.ts';
 
@@ -22,11 +23,15 @@ export const mountedSocketRoutes = (subsystems: MountedSubsystems): readonly Soc
 export const mountedAuditRules = (subsystems: MountedSubsystems) =>
   mounted.mountedAuditRules(subsystems, builtModules());
 
-export const createMountedDispatcher = (base: DaemonApiDependencies, subsystems: MountedSubsystems): ApiDispatcher =>
-  mounted.createMountedDispatcher(base, subsystems, builtModules());
+export const createMountedDispatcher = (
+  base: DaemonApiDependencies,
+  subsystems: MountedSubsystems,
+  replacements: readonly BuiltModule<unknown, object>[] = [],
+): ApiDispatcher => mounted.createMountedDispatcher(base, subsystems, builtModules(replacements));
 
 export const createMountedSocketDispatcher = (
   base: DaemonApiDependencies,
   subsystems: MountedSubsystems,
   carriers: readonly SocketRoute[] = [],
-): ApiSocketDispatcher => mounted.createMountedSocketDispatcher(base, subsystems, carriers, builtModules());
+  replacements: readonly BuiltModule<unknown, object>[] = [],
+): ApiSocketDispatcher => mounted.createMountedSocketDispatcher(base, subsystems, carriers, builtModules(replacements));

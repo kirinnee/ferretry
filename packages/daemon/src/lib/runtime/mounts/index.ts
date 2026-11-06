@@ -110,12 +110,7 @@ import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts'
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
 import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catalogs.ts';
-import {
-  type SharedDraftStreamSubsystem,
-  sentDraftClearer,
-  sharedDraftRoutes,
-  sharedDraftSocketRoutes,
-} from './shared-drafts.ts';
+import { sentDraftClearer } from './shared-drafts.ts';
 import { signInRuleRoutes } from './sign-in-rules.ts';
 import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './session-archive.ts';
 import { type SpeedupsSubsystem, speedupRoutes } from './speedups.ts';
@@ -253,10 +248,10 @@ export interface MountedSubsystems {
   readonly gateItems?: AgendaGatePort;
   /** Settles when the boot move of sub-ferret items to their agenda homes is done; the Warden sweep arms after it. */
   readonly agendaHomesMigrated?: Promise<unknown>;
-  /** The owner's unsent composer, shared live between their own devices and never journaled. */
+  /** The owner's unsent composer, shared live between their own devices and never journaled. The routes come from the
+   *  shared-drafts module; this field is read by a send, which clears the draft it sent, and by the shutdown that
+   *  writes down a draft typed in the last second. */
   readonly sharedDrafts: SharedDraftService;
-  /** The live stream each open composer holds on its session's shared draft. */
-  readonly sharedDraftStream: SharedDraftStreamSubsystem;
   /** The session read: what the fleet holds, and one session in full. */
   readonly sessions: SessionDirectorySubsystem;
   /** The older finished sessions taken out of the live list; absent where this daemon archives none. */
@@ -670,7 +665,6 @@ export function legacyModule(
               ...agendaClearRoutes(subsystems.agendaClearer),
               ...agendaOpenRoutes(subsystems.agendaRollup),
               ...agendaMachineRoutes(subsystems.machineAgenda),
-              ...sharedDraftRoutes(subsystems.sharedDrafts),
               ...legacyTaskRoutes(subsystems.legacyTasks),
               // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed
               // literals are registered before the patterns beneath them.
@@ -745,7 +739,6 @@ function legacySockets(subsystems: MountedSubsystems): readonly SocketRoute[] {
     ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions, subsystems.configChanges),
     ...terminalSocketRoutes(subsystems.terminals, subsystems.inputRequests),
     ...browserSocketRoutes(subsystems.browser),
-    ...sharedDraftSocketRoutes(subsystems.sharedDrafts, subsystems.sharedDraftStream),
   ];
 }
 
