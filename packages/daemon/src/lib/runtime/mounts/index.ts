@@ -7,10 +7,10 @@ import type { CapabilityGuard } from '../../api/capability.ts';
 import type { ResponseCompressor } from '../../api/compression.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
 import type { ApiRoute } from '../../api/route.ts';
-import type { StateHomeReach } from '../../api/state-homes.ts';
 import { ApiRouter } from '../../api/router.ts';
 import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
+import type { StateHomeReach } from '../../api/state-homes.ts';
 import type { AuditedRoutesSubsystem } from '../../audit/index.ts';
 import { auditedRoutes, auditedSocketRoutes } from '../../audit/routes.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
@@ -26,13 +26,9 @@ import { observedRoutes } from '../../performance/observed-routes.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
 import type { PinService } from '../../pins/index.ts';
 import type { RenderService } from '../../renders/index.ts';
-import type { SignInRuleService } from '../../sign-in-rules/service.ts';
-import type { SignInRuleSuggestions } from '../../sign-in-rules/suggestions.ts';
-import type { TaskPlanService } from '../../task-plans/service.ts';
 import type { PasteRuleStages } from '../../secure-copy/rule-stages.ts';
 import type { PasteRuleService } from '../../secure-copy/rules.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
-import type { SharedDraftService } from '../../shared-drafts/index.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
 import type { SessionObserverHost } from '../../session/observer/host.ts';
@@ -42,31 +38,36 @@ import type { SessionRuntimeSubsystem } from '../../session/runtime-control/type
 import type { LegacySendReproof } from '../../session/send/reproof.ts';
 import type { SendTrackingLoop } from '../../session/send/tracker.ts';
 import type { TranscriptImages } from '../../session/transcript/image-reader.ts';
+import type { SharedDraftService } from '../../shared-drafts/index.ts';
+import type { SignInRuleService } from '../../sign-in-rules/service.ts';
+import type { SignInRuleSuggestions } from '../../sign-in-rules/suggestions.ts';
 import type { StepUpService } from '../../step-up/index.ts';
+import type { TaskPlanService } from '../../task-plans/service.ts';
 import type { TunnelSwitchPort } from '../../tunnel/index.ts';
 import type { DaemonUpdateSubsystem } from '../../update/index.ts';
 import type { MillisecondClockPort } from '../boot.ts';
 import type { PublishedCarrierView } from '../published-carriers.ts';
 import { agendaRoutes, type DirectNotificationSubsystem } from './agenda.ts';
 import { agendaClearRoutes } from './agenda-clear.ts';
-import { agendaOpenRoutes } from './agenda-open.ts';
-import { agendaMachineRoutes } from './agenda-machine.ts';
 import { configFilesConfirmations } from './agenda-confirms.ts';
 import type { AgendaGatePort } from './agenda-gates.ts';
+import { agendaMachineRoutes } from './agenda-machine.ts';
+import { agendaOpenRoutes } from './agenda-open.ts';
 import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
 import { agentToolRoutes, sessionCredentialDirectory } from './agent-tools.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
 import { type BoardSubsystem, boardRoutes } from './board.ts';
-import { type TidySubsystem, tidyRoutes } from './tidy.ts';
-import { type WorkSearchSubsystem, workSearchRoutes } from './work-search.ts';
 import { type BoardProjectsSubsystem, type BoardSwitchSubsystem, boardProjectRoutes } from './board-projects.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
 import { type BrowserProxySubsystem, browserProxyRoutes } from './browser-proxy.ts';
 import { carrierRoutes } from './carriers.ts';
+import { type CatalogInstallSubsystem, catalogInstallRoutes } from './catalog-installs.ts';
+import { type CatalogLinkSubsystem, catalogLinkRoutes } from './catalog-links.ts';
+import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
-import { type CgroupSubsystem, cgroupRoutes } from './cgroups.ts';
+import { cgroupRoutes, type LimitsSubsystem } from './cgroups.ts';
 import { type ConfigFilesSubsystem, configFilesRoutes } from './config-files.ts';
 import { type ConversationImportSubsystem, conversationImportRoutes } from './conversation-import.ts';
 import { daemonUpdateRoutes } from './daemon-update.ts';
@@ -87,6 +88,7 @@ import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { inputRequestRoutes, phoneApprovalRoutes } from './input-requests.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type LegacyTaskSubsystem, legacyTaskRoutes } from './legacy-tasks.ts';
+import { type LocalSkillInstallSubsystem, localSkillInstallRoutes } from './local-skill-installs.ts';
 import { type McpInventorySubsystem, mcpInventoryRoutes } from './mcp-inventory.ts';
 import { type McpOAuthSubsystem, mcpOAuthRoutes } from './mcp-oauth.ts';
 import { type ModelsSubsystem, modelRoutes } from './models.ts';
@@ -100,25 +102,14 @@ import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { renderRoutes } from './renders.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
-import {
-  type SharedDraftStreamSubsystem,
-  sentDraftClearer,
-  sharedDraftRoutes,
-  sharedDraftSocketRoutes,
-} from './shared-drafts.ts';
-import { type CatalogLinkSubsystem, catalogLinkRoutes } from './catalog-links.ts';
-import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
-import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catalogs.ts';
 import { type CopyListing, type RuleProgramHomes, secureCopyRoutes } from './secure-copy.ts';
-import { signInRuleRoutes } from './sign-in-rules.ts';
-import { taskPlanRoutes } from './task-plans.ts';
 import { securityRoutes } from './security.ts';
 import { type SessionAddressBook, sessionAddressedRoutes, sessionAddressedSockets } from './session-addressing.ts';
 import { type SessionAgendaModeSubsystem, sessionAgendaModeRoutes } from './session-agenda-mode.ts';
-import { type SessionCompactAtSubsystem, sessionCompactAtRoutes } from './session-compact-at.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answer.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
+import { type SessionCompactAtSubsystem, sessionCompactAtRoutes } from './session-compact-at.ts';
 import { type SessionConsoleSubsystem, sessionConsoleRoutes } from './session-console-input.ts';
 import { knownLaunchRoots, type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { type SessionCredentialSubsystem, sessionCredentialRoutes } from './session-credential.ts';
@@ -127,13 +118,11 @@ import { type SessionMediaRoot, sessionFilesystemRoutes } from './session-filesy
 import { type SessionForkSubsystem, sessionForkRoutes } from './session-fork.ts';
 import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-handover.ts';
 import { type SessionHypermediaSubsystem, sessionHypermediaRoutes } from './session-hypermedia.ts';
-import { type CatalogInstallSubsystem, catalogInstallRoutes } from './catalog-installs.ts';
-import { type LocalSkillInstallSubsystem, localSkillInstallRoutes } from './local-skill-installs.ts';
 import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
 import { type SessionPermissionSubsystem, sessionPermissionRoutes } from './session-permission.ts';
-import { type SessionProcessSubsystem, sessionProcessRoutes } from './session-processes.ts';
 import { type SessionPinSubsystem, sessionPinRoutes } from './session-pin.ts';
+import { type SessionProcessSubsystem, sessionProcessRoutes } from './session-processes.ts';
 import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
 import { type SessionRestartSubsystem, sessionRestartRoutes } from './session-restart.ts';
@@ -142,14 +131,25 @@ import { sessionRuntimeRoutes } from './session-runtime.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
+import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catalogs.ts';
+import {
+  type SharedDraftStreamSubsystem,
+  sentDraftClearer,
+  sharedDraftRoutes,
+  sharedDraftSocketRoutes,
+} from './shared-drafts.ts';
+import { signInRuleRoutes } from './sign-in-rules.ts';
 import { type SpeedupsSubsystem, speedupRoutes } from './speedups.ts';
 import { stepUpRoutes } from './step-up.ts';
 import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
 import { type SystemOpenSubsystem, systemOpenRoutes } from './system-open.ts';
+import { taskPlanRoutes } from './task-plans.ts';
 import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
+import { type TidySubsystem, tidyRoutes } from './tidy.ts';
 import { tunnelRoutes } from './tunnel.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 import { type WebRtcSignallingSubsystem, webrtcRoutes } from './webrtc.ts';
+import { type WorkSearchSubsystem, workSearchRoutes } from './work-search.ts';
 import { type WorktreeSubsystem, worktreeRoutes } from './worktrees.ts';
 
 /**
@@ -261,7 +261,7 @@ export interface MountedSubsystems {
    *  so what the settings panel reports is what the next launch will write. This daemon and the
    *  supervision it runs are outside the capped slice, and the surface PROVES both from placements
    *  rather than repeating the claim. */
-  readonly cgroups: CgroupSubsystem;
+  readonly cgroups: LimitsSubsystem;
   /** The configuration files (docs/config-files.md): what is in effect and what is wrong, an edit, the
    *  owner's confirmation of an edit that loosens, and the agent's `config.*` tools. The subsystem owns
    *  the WATCHER as well as the routes, for the reason the warden owns its sweep. */

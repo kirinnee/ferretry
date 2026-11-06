@@ -124,6 +124,7 @@ import { paneCredentialValue, paneCredentialWarnings } from '../src/lib/daemon/c
 import { ProtocolFirewallStatusReader } from '../src/lib/daemon/firewall-status';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
 import { legacyWireReport } from '../src/lib/daemon/legacy-wire';
+import { ProtocolLimitsStatusReader } from '../src/lib/daemon/limits-status';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
 import { registerProfileCommands } from '../src/lib/daemon/profile/commands';
 import { ProfileController, ProtocolProfileGateway } from '../src/lib/daemon/profile/controller';
@@ -655,6 +656,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     updateStatus: new DaemonUpdateStatusReader(hostInstallFacts(world), new ProtocolDaemonUpdateView(client)),
     tunnel: new ProtocolTunnelStatusReader(client),
     firewall: new ProtocolFirewallStatusReader(client),
+    limits: new ProtocolLimitsStatusReader(client),
     nixShellOffer: buildProfileSwitch(world, processes),
     turns: { midTurn: async () => (await new ProtocolDaemonUpdateView(client).view())?.midTurn ?? 0 },
     restartMarker: new FileDaemonRestartMarker(restartMarkerPath(layout.stateHome)),

@@ -59,7 +59,7 @@ import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geom
 import { planSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runViewportMatrix } from './viewport-matrix.ts';
-import { lapPage, reportWalkTiming, timePage, timed } from './walk-timing.ts';
+import { lapPage, reportWalkTiming, timed, timePage } from './walk-timing.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(harnessDir, '..');
@@ -2962,7 +2962,7 @@ try {
               // Passkeys, daemon-scoped like the panels around it. The fixture answers GET /v1/passkeys with two
               // frozen entries, so the capture shows a real list and the Add control, never a prompt.
               ['Security', 'security', '[data-security-card]', 'machine'],
-              ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]', 'machine'],
+              ['Ferret limits', 'resource-limits', '[data-testid="limits-card"]', 'machine'],
               ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]', 'machine'],
               // The performance report, recorded: the broken budget first, then both reports as text.
               ['Performance', 'performance', '[data-performance]', 'machine'],

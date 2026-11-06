@@ -129,6 +129,11 @@ export interface ConfigCheckContext {
    * names the daemon's state home is an error, so it never comes into effect.
    */
   readonly componentSources?: ComponentSourceRule;
+  /**
+   * The memory the user may spend (`memoryCeilingBytes` in the daemon's limits view). With it, a cap in
+   * `limits.yaml` is judged by the bytes it means; without it only an edit provably not looser passes.
+   */
+  readonly memoryCeilingBytes?: number;
 }
 
 /** The fields of a component that name a document on the disk. */
@@ -171,7 +176,7 @@ export function checkConfigFile(path: string, text: string, context: ConfigCheck
           path,
           severity: 'warning',
           message: 'Ferretry does not read this file',
-          fix: 'name it machine.yaml, warden.yaml, learning.yaml, voice.yaml, pack.yaml, models-guide.yaml, account-defaults.yaml, logins/<id>.yaml, profiles/<name>.yaml, runtimes/<name>.yaml or components/<kind>/<name>.yaml — or move it out of the config directory',
+          fix: 'name it machine.yaml, warden.yaml, learning.yaml, voice.yaml, pack.yaml, limits.yaml, models-guide.yaml, account-defaults.yaml, logins/<id>.yaml, profiles/<name>.yaml, runtimes/<name>.yaml or components/<kind>/<name>.yaml — or move it out of the config directory',
         },
       ],
     };

@@ -1,6 +1,7 @@
 import type {
   DaemonServiceFacts,
   HealthView,
+  LimitsView,
   LivenessView,
   LoopbackFirewallState,
   TunnelStatusView,
@@ -10,6 +11,7 @@ import { passMidTurn } from '../update/mid-turn.ts';
 import { type DaemonUpdateStatus, renderUpdateStatus } from '../update/status.ts';
 import type { InstalledDaemonBinary } from './binary.ts';
 import type { DaemonLayout } from './layout.ts';
+import { renderLimitsStatus } from './limits-status.ts';
 import { nixStorePathOf } from './nix-store.ts';
 import type {
   DaemonLifecycleVerb,
@@ -206,6 +208,11 @@ export interface DaemonControllerDeps {
    * ports are random, from an older daemon, or when the owner's token is not there yet. A warning, never a failure.
    */
   readonly firewall?: { read(): Promise<LoopbackFirewallState | undefined> };
+  /**
+   * The `Limits:` block `status` adds: what ferret limits are in force and whether they work, in the daemon's
+   * own words. `undefined` from an older daemon or without the owner's token, and the block is then left out.
+   */
+  readonly limits?: { read(): Promise<LimitsView | undefined> };
   /** Offers a nix profile install when `install` finds a daemon running from a `nix shell`. */
   readonly nixShellOffer?: INixShellOffer;
   /**
@@ -668,11 +675,13 @@ export class DaemonController {
     const code = statusExitCode(view);
     const tunnel = health === undefined ? undefined : await this.deps.tunnel?.read();
     const firewall = health === undefined ? undefined : await this.deps.firewall?.read();
+    const limits = health === undefined ? undefined : await this.deps.limits?.read();
     const unprotected = firewall !== undefined && firewall.state !== 'applied';
     const human = [
       renderDaemonStatus(view, this.deps.clientName),
       ...(tunnel === undefined ? [] : [tunnel.sentence]),
       ...(firewall === undefined ? [] : [`  Loopback firewall: ${firewall.detail}`]),
+      ...(limits === undefined ? [] : renderLimitsStatus(limits)),
       ...(update === undefined ? [] : renderUpdateStatus(update, this.deps.clientName)),
     ];
     if (options.json === true) {
@@ -680,6 +689,7 @@ export class DaemonController {
         renderDaemonStatusJson(view, {
           ...(tunnel === undefined ? {} : { tunnel }),
           ...(firewall === undefined ? {} : { firewall }),
+          ...(limits === undefined ? {} : { limits }),
           ...(update === undefined ? {} : { install: update.install ?? null, update: update.update ?? null }),
         }),
       );

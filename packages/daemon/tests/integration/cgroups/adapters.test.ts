@@ -2,41 +2,38 @@ import { describe, it } from 'bun:test';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { GIBIBYTE } from '@ferretry/protocol';
 import should from 'should';
 import {
+  activeScheduler,
   CGROUP_COMMAND_TIMEOUT_CODE,
-  cgroupApplyStatusPath,
-  cgroupConfigPath,
+  CgroupFleetMemory,
   DEFAULT_CGROUP_COMMAND_TIMEOUT_MS,
-  FileCgroupApplyStatusStore,
-  FileCgroupConfigStore,
+  deviceOfPath,
+  FileLegacyCgroupDocuments,
   FileSessionSpawnFacts,
   hostCgroupFacts,
+  PaneSessionMemory,
   ProcCgroupPlacements,
   RegisteredCgroupPaneLedger,
   SpawnCgroupCommands,
-  UNIFIED_HIERARCHY_MARKER,
+  SysfsDiskScheduler,
+  unmeasuredHostFacts,
 } from '../../../src/adapters/cgroups/index.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
-import {
-  cleanCgroupApplyStatus,
-  defaultCgroupConfig,
-  parseStoredCgroupApplyStatus,
-  parseStoredCgroupConfig,
-  runCgroupCommand,
-} from '../../../src/lib/cgroups/index.ts';
+import { runCgroupCommand } from '../../../src/lib/cgroups/index.ts';
 import {
   createFoundationPaths,
   createSessionPaths,
-  resolveStateHome,
   type FoundationPaths,
+  resolveStateHome,
 } from '../../../src/lib/index.ts';
 import type { RegisteredTerminalPane } from '../../../src/lib/session/reap.ts';
 import type { RegisteredPaneObserver } from '../../../src/lib/session/reap-service.ts';
 
 /**
- * The five adapters behind the resource-limit surface, against a real throwaway state home, a real
- * `/proc`-shaped tree and real child processes.
+ * The adapters behind ferret limits, against a real throwaway state home, a real `/proc`- and
+ * `/sys`-shaped tree and real child processes.
  *
  * NOTHING HERE TOUCHES A REAL STATE HOME, a real host manager, or the network. The one command
  * runner test spawns `/bin/echo` and `/bin/false`, which are the two outcomes the domain branches
@@ -48,69 +45,6 @@ async function stateHome(label: string): Promise<{ readonly paths: FoundationPat
   const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
   return { paths, files: new StateFileSystem(paths) };
 }
-
-describe('the saved resource-limit document', () => {
-  it('should read an untouched state home as no document at all', async () => {
-    // Arrange
-    const { paths, files } = await stateHome('cgroup-store');
-
-    // Act / Assert
-    should(await new FileCgroupConfigStore(files, paths).read()).be.undefined();
-  });
-
-  it('should round-trip a saved configuration through its own file inside the state home', async () => {
-    // Arrange
-    const { paths, files } = await stateHome('cgroup-store');
-    const subject = new FileCgroupConfigStore(files, paths);
-    const saved = { ...defaultCgroupConfig, enabled: true };
-
-    // Act
-    await subject.write(saved);
-
-    // Assert — its own document, never `config/daemon.json`.
-    should(cgroupConfigPath(paths)).equal(join(paths.home, 'cgroups', 'config.json'));
-    should(await subject.read()).deepEqual(saved);
-    should(await Bun.file(cgroupConfigPath(paths)).text()).endWith('\n');
-  });
-
-  it('should read an empty file as no document rather than as damage', async () => {
-    // Arrange
-    const { paths, files } = await stateHome('cgroup-store');
-    await mkdir(join(paths.home, 'cgroups'), { recursive: true });
-    await writeFile(cgroupConfigPath(paths), '   \n');
-
-    // Act / Assert
-    should(await new FileCgroupConfigStore(files, paths).read()).be.undefined();
-  });
-
-  it('should hand text that is not JSON to the domain, so a mangled document is never silent', async () => {
-    // Arrange
-    const { paths, files } = await stateHome('cgroup-store');
-    await mkdir(join(paths.home, 'cgroups'), { recursive: true });
-    await writeFile(cgroupConfigPath(paths), '{ this is not json');
-
-    // Act
-    const raw = await new FileCgroupConfigStore(files, paths).read();
-
-    // Assert — collapsing it to `undefined` would make a hand-mangled file look like a fresh home.
-    should(raw).equal('{ this is not json');
-    should(parseStoredCgroupConfig(raw).warnings.join(' ')).match(/did not validate/u);
-  });
-
-  it('should preserve a config read refusal as warning evidence rather than absence', async () => {
-    // Arrange — the port throws for a path outside the state home. Calling that "no document"
-    // would silently turn an unreadable enabled config into the disabled defaults.
-    const { files } = await stateHome('cgroup-store');
-    const outside = createFoundationPaths(resolveStateHome({ fyHome: '/nonexistent-home', homeDirectory: '/tmp' }));
-
-    // Act
-    const stored = parseStoredCgroupConfig(await new FileCgroupConfigStore(files, outside).read());
-
-    // Assert
-    should(stored.config.enabled).be.false();
-    should(stored.warnings.join(' ')).match(/could not be read/u);
-  });
-});
 
 describe('one session own spawn record', () => {
   const write = async (paths: FoundationPaths, id: string, document: unknown): Promise<void> => {
@@ -147,6 +81,15 @@ describe('one session own spawn record', () => {
 
     // Act / Assert
     should(await new FileSessionSpawnFacts(files, paths).facts('agent-child')).deepEqual({ parent: 'agent-warden' });
+  });
+
+  it('should know a ferret a person is at, so it gets the heavier CPU weight', async () => {
+    // Arrange
+    const { paths, files } = await stateHome('cgroup-facts');
+    await write(paths, 'agent-mine', { id: 'agent-mine', mode: 'interactive' });
+
+    // Act / Assert
+    should(await new FileSessionSpawnFacts(files, paths).facts('agent-mine')).deepEqual({ interactive: true });
   });
 
   it('should answer with an empty record for an ordinary session that carries neither marker', async () => {
@@ -312,105 +255,285 @@ describe('running one host-manager command', () => {
   });
 });
 
-describe('the record of what a save could not apply', () => {
-  it('should read a state home that has never saved as no record at all', async () => {
+describe('measuring the host', () => {
+  async function tree(
+    files: Readonly<Record<string, string>>,
+  ): Promise<{ cgroupRoot: string; proc: string; systemd: string[] }> {
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-host-'));
+    for (const [path, text] of Object.entries(files)) {
+      await mkdir(join(root, path, '..'), { recursive: true });
+      await writeFile(join(root, path), text);
+    }
+    return { cgroupRoot: join(root, 'sys'), proc: join(root, 'proc'), systemd: [join(root, 'etc')] };
+  }
+
+  const OWN = '/user.slice/user-1000.slice/user@1000.service/app.slice/fyd.service';
+
+  it('should find the user’s memory budget below the machine’s RAM: 48 GiB on a 61 GiB box', async () => {
     // Arrange
-    const { paths, files } = await stateHome('cgroup-status');
-
-    // Act / Assert
-    should(await new FileCgroupApplyStatusStore(files, paths).read()).be.undefined();
-  });
-
-  it('should round-trip a refusal through its own document beside the configuration', async () => {
-    // Arrange
-    const { paths, files } = await stateHome('cgroup-status');
-    const subject = new FileCgroupApplyStatusStore(files, paths);
-    const config = { ...defaultCgroupConfig, enabled: true };
-    const status = {
-      config,
-      fleet: 'Failed to connect to bus',
-      scopes: [{ sessionId: 's1', scope: 'ferretry-agent-s1-ab.scope', failure: 'Unit vanished' }],
-      unproven: [],
-    };
-
-    // Act
-    await subject.write(status);
-
-    // Assert — its own file, so recording a host refusal is never a rewrite of the saved intent.
-    should(cgroupApplyStatusPath(paths)).equal(join(paths.home, 'cgroups', 'apply-status.json'));
-    should(await subject.read()).deepEqual(status);
-    should(parseStoredCgroupApplyStatus(await subject.read(), config).status).deepEqual(status);
-  });
-
-  it('should hand a mangled record to the domain rather than reading it as "nothing failed"', async () => {
-    // Arrange
-    const { paths, files } = await stateHome('cgroup-status');
-    await mkdir(join(paths.home, 'cgroups'), { recursive: true });
-    await writeFile(cgroupApplyStatusPath(paths), '{ hand edited');
-
-    // Act
-    const stored = parseStoredCgroupApplyStatus(await new FileCgroupApplyStatusStore(files, paths).read(), {
-      ...defaultCgroupConfig,
-      enabled: true,
+    const places = await tree({
+      'sys/cgroup.controllers': 'cpu memory pids',
+      'proc/self/cgroup': `0::${OWN}\n`,
+      'proc/meminfo': 'MemTotal: 63963136 kB\nSwapTotal: 33554428 kB\n',
+      'proc/sys/kernel/pid_max': '4194304\n',
+      'sys/user.slice/memory.max': 'max\n',
+      'sys/user.slice/user-1000.slice/memory.high': `${48 * GIBIBYTE}\n`,
+      'sys/user.slice/user-1000.slice/memory.max': 'max\n',
     });
 
-    // Assert
-    should(stored.unreadable).be.true();
-    should(stored.warnings.join(' ')).match(/did not validate/u);
-  });
-
-  it('should write a CLEAN record too, so a later save supersedes an earlier refusal', async () => {
-    // Arrange
-    const { paths, files } = await stateHome('cgroup-status');
-    const subject = new FileCgroupApplyStatusStore(files, paths);
-    const config = { ...defaultCgroupConfig, enabled: true };
-    await subject.write({ config, fleet: 'Failed to connect to bus', scopes: [], unproven: [] });
-
     // Act
-    await subject.write(cleanCgroupApplyStatus(config));
-
-    // Assert — deleting instead would make "applied cleanly" and "never saved" one state.
-    should(parseStoredCgroupApplyStatus(await subject.read(), config).status).deepEqual(cleanCgroupApplyStatus(config));
-  });
-
-  it('should preserve an apply-status read refusal as warning evidence rather than absence', async () => {
-    // Arrange
-    const { files } = await stateHome('cgroup-status');
-    const outside = createFoundationPaths(resolveStateHome({ fyHome: '/nonexistent-home', homeDirectory: '/tmp' }));
-    const config = { ...defaultCgroupConfig, enabled: true };
-
-    // Act
-    const stored = parseStoredCgroupApplyStatus(await new FileCgroupApplyStatusStore(files, outside).read(), config);
+    const facts = await hostCgroupFacts({ platform: 'linux', cpus: 32, physicalBytes: 61 * GIBIBYTE }, places);
 
     // Assert
-    should(stored.unreadable).be.true();
-    should(stored.warnings.join(' ')).match(/could not be read/u);
+    should(facts.unifiedHierarchy).equal(true);
+    should(facts.memoryCeilingBytes).equal(48 * GIBIBYTE);
+    should(facts.ceilingSource).equal('memory.high of user-1000.slice');
+    should(facts.physicalBytes).equal(61 * GIBIBYTE);
+    should(facts.swapBytes).equal(33554428 * 1024);
+    should(facts.pidMax).equal(4_194_304);
+    should(facts.cpus).equal(32);
+    should(facts.ownCgroup).equal(OWN);
+  });
+
+  it('should name the unit that holds the budget down and the drop-in that sets it: the last one wins', async () => {
+    // Arrange
+    const places = await tree({
+      'sys/cgroup.controllers': 'cpu memory',
+      'proc/self/cgroup': `0::${OWN}\n`,
+      'sys/user.slice/user-1000.slice/memory.high': `${48 * GIBIBYTE}\n`,
+      'etc/user-1000.slice.d/50-devbox-memory.conf': '[Slice]\nMemoryHigh=48G\n',
+      'etc/user-1000.slice.d/10-unrelated.conf': '[Slice]\nTasksMax=100\n',
+      'etc/user-1000.slice.d/70-later.conf': '[Slice]\nMemoryHigh=48G\n',
+    });
+
+    // Act
+    const facts = await hostCgroupFacts({ platform: 'linux', cpus: 4, physicalBytes: 61 * GIBIBYTE }, places);
+
+    // Assert
+    should(facts.ceilingCap?.unit).equal('user-1000.slice');
+    should(facts.ceilingCap?.file).equal('memory.high');
+    should(facts.ceilingCap?.dropIn).match(/etc\/user-1000\.slice\.d\/70-later\.conf$/u);
+  });
+
+  it('should use the machine’s RAM when nothing above the daemon is capped', async () => {
+    // Arrange
+    const places = await tree({
+      'sys/cgroup.controllers': 'cpu memory',
+      'proc/self/cgroup': `0::${OWN}\n`,
+      'sys/user.slice/memory.max': 'max\n',
+    });
+
+    // Act
+    const facts = await hostCgroupFacts({ platform: 'linux', cpus: 4, physicalBytes: 16 * GIBIBYTE }, places);
+
+    // Assert
+    should(facts.memoryCeilingBytes).equal(16 * GIBIBYTE);
+    should(facts.swapBytes).equal(0);
+    should(facts.pidMax).equal(undefined);
+  });
+
+  it('should report a host without the unified hierarchy as unsupported and cap nothing', async () => {
+    // Arrange
+    const places = await tree({ 'proc/self/cgroup': '12:memory:/legacy\n' });
+
+    // Act
+    const facts = await hostCgroupFacts({ platform: 'linux', cpus: 4, physicalBytes: 8 * GIBIBYTE }, places);
+
+    // Assert
+    should(facts.unifiedHierarchy).equal(false);
+    should(facts.memoryCeilingBytes).equal(8 * GIBIBYTE);
+    should(facts.ownCgroup).equal(undefined);
+  });
+
+  it('should not read any cgroup file off Linux', async () => {
+    // Arrange / Act
+    const facts = await hostCgroupFacts({ platform: 'darwin', cpus: 8, physicalBytes: 16 * GIBIBYTE });
+
+    // Assert
+    should(facts).deepEqual({
+      platform: 'darwin',
+      cpus: 8,
+      physicalBytes: 16 * GIBIBYTE,
+      unifiedHierarchy: false,
+      memoryCeilingBytes: 16 * GIBIBYTE,
+      ceilingSource: 'the machine’s memory',
+      swapBytes: 0,
+    });
+  });
+
+  it('should floor an unusable reading at one rather than producing a cap nothing can run in', async () => {
+    // Arrange / Act
+    const facts = await hostCgroupFacts({ platform: 'darwin', cpus: 0, physicalBytes: 0.4 });
+
+    // Assert
+    should(facts.cpus).equal(1);
+    should(facts.physicalBytes).equal(1);
+  });
+
+  it('should give an unmeasured world the machine’s own memory and claim no hierarchy', () => {
+    // Arrange / Act
+    const facts = unmeasuredHostFacts();
+
+    // Assert
+    should(facts.unifiedHierarchy).equal(false);
+    should(facts.memoryCeilingBytes).equal(facts.physicalBytes);
   });
 });
 
-describe('measuring the host', () => {
-  it('should read the machine it is actually running on when told nothing', () => {
-    // Arrange / Act
-    const facts = hostCgroupFacts();
+describe('reading the fleet slice', () => {
+  const MANAGER = '/user.slice/user-1000.slice/user@1000.service';
+  const SESSION = 'aaaaaaaa-1111-2222-3333-444444444444';
+
+  async function fleet(): Promise<{ readonly memory: CgroupFleetMemory; readonly slice: string }> {
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-fleet-'));
+    const slice = join(root, MANAGER, 'ferretry-fleet.slice');
+    const scope = join(slice, `ferretry-agent-${SESSION}-a1b2c3d4.scope`);
+    await mkdir(scope, { recursive: true });
+    await mkdir(join(root, 'proc', '4242'), { recursive: true });
+    await writeFile(join(slice, 'memory.events'), 'low 0\nhigh 0\nmax 0\noom 0\noom_kill 1\n');
+    await writeFile(join(scope, 'memory.events'), 'low 0\nhigh 7\nmax 0\noom 0\noom_kill 0\n');
+    await writeFile(join(scope, 'memory.current'), `${5 * GIBIBYTE}\n`);
+    await writeFile(join(scope, 'memory.high'), `${12 * GIBIBYTE}\n`);
+    await writeFile(join(scope, 'cgroup.procs'), '4242\n');
+    await mkdir(join(slice, 'unrelated.scope'), { recursive: true });
+    await writeFile(join(root, 'proc', '4242', 'statm'), '100 2560 1 1 0 1 0\n');
+    await writeFile(join(root, 'proc', '4242', 'cmdline'), 'bun\0test\0--coverage\0');
+    const host = { ...unmeasuredHostFacts(), platform: 'linux', ownCgroup: `${MANAGER}/app.slice/fyd.service` };
+    return { memory: new CgroupFleetMemory(host, undefined, root, join(root, 'proc')), slice };
+  }
+
+  it('should read the slice’s counters and each agent scope, and nothing else under it', async () => {
+    // Arrange
+    const { memory } = await fleet();
+
+    // Act
+    const actual = await memory.read();
 
     // Assert
-    should(facts.platform).equal(process.platform);
-    should(facts.cpus).be.greaterThan(0);
-    should(facts.memoryBytes).be.greaterThan(0);
-    should(UNIFIED_HIERARCHY_MARKER).equal('/sys/fs/cgroup/cgroup.controllers');
+    should(actual?.events.oomKill).equal(1);
+    should(actual?.scopes).have.length(1);
+    should(actual?.scopes[0]).match({
+      scope: `ferretry-agent-${SESSION}-a1b2c3d4.scope`,
+      events: { high: 7, max: 0, oom: 0, oomKill: 0 },
+      currentBytes: 5 * GIBIBYTE,
+      highBytes: 12 * GIBIBYTE,
+    });
   });
 
-  it('should floor an unusable reading at one rather than producing a cap nothing can run in', () => {
-    // Arrange / Act
-    const facts = hostCgroupFacts({ platform: 'linux', cpus: 0, memoryBytes: 0.4 }, true);
+  it('should list a scope’s biggest processes by what they hold, with their command lines', async () => {
+    // Arrange
+    const { memory } = await fleet();
+
+    // Act
+    const actual = await memory.largest(`ferretry-agent-${SESSION}-a1b2c3d4.scope`);
 
     // Assert
-    should(facts).deepEqual({ platform: 'linux', unifiedHierarchy: true, cpus: 1, memoryBytes: 1 });
+    should(actual).deepEqual([{ argv: 'bun test --coverage', rssBytes: 2560 * 4096 }]);
   });
 
-  it('should carry a host without the unified hierarchy through as unsupported', () => {
+  it('should answer nothing, not an error, before any ferret has launched', async () => {
+    // Arrange
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-nofleet-'));
+    const host = { ...unmeasuredHostFacts(), platform: 'linux', ownCgroup: `${MANAGER}/app.slice/fyd.service` };
+
+    // Act
+    const actual = await new CgroupFleetMemory(host, undefined, root).read();
+
+    // Assert
+    should(actual).equal(undefined);
+  });
+
+  it('should answer nothing when the daemon is not under a user manager', async () => {
+    // Arrange
+    const host = { ...unmeasuredHostFacts(), platform: 'linux', ownCgroup: '/system.slice/fyd.service' };
+
+    // Act + Assert
+    should(await new CgroupFleetMemory(host).read()).equal(undefined);
+    should(await new CgroupFleetMemory(host).largest('x.scope')).deepEqual([]);
+  });
+});
+
+describe('reading the disk scheduler', () => {
+  it('should find the active scheduler in the kernel’s bracketed list', () => {
     // Arrange / Act / Assert
-    should(hostCgroupFacts({ platform: 'linux', cpus: 4, memoryBytes: 8 }, false).unifiedHierarchy).be.false();
+    should(activeScheduler('[none] mq-deadline kyber\n')).equal('none');
+    should(activeScheduler('none [bfq] mq-deadline\n')).equal('bfq');
+    should(activeScheduler('')).equal(undefined);
+  });
+
+  it('should resolve a partition to its disk and report that disk’s scheduler', async () => {
+    // Arrange
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-sys-'));
+    const disk = join(root, 'devices', 'nvme0n1');
+    const partition = join(disk, 'nvme0n1p1');
+    await mkdir(join(disk, 'queue'), { recursive: true });
+    await mkdir(partition, { recursive: true });
+    await writeFile(join(disk, 'queue', 'scheduler'), '[none] mq-deadline\n');
+    await mkdir(join(root, 'dev', 'block'), { recursive: true });
+    const { symlink } = await import('node:fs/promises');
+    await symlink(partition, join(root, 'dev', 'block', '259:1'));
+    const reader = new SysfsDiskScheduler(async () => ({ major: 259, minor: 1 }), root);
+
+    // Act
+    const actual = await reader.read();
+
+    // Assert
+    should(actual).deepEqual({ device: 'nvme0n1', scheduler: 'none' });
+  });
+
+  it('should say nothing, not guess, when the device cannot be found', async () => {
+    // Arrange
+    const missing = new SysfsDiskScheduler(
+      async () => ({ major: 1, minor: 1 }),
+      await mkdtemp(join(tmpdir(), 'ferretry-sys-')),
+    );
+    const unknown = new SysfsDiskScheduler(async () => undefined);
+
+    // Act + Assert
+    should(await missing.read()).deepEqual({});
+    should(await unknown.read()).deepEqual({});
+  });
+});
+
+describe('the retired limits document', () => {
+  async function home() {
+    const { paths, files } = await stateHome('cgroup-legacy');
+    return { paths, files, documents: new FileLegacyCgroupDocuments(files, paths) };
+  }
+
+  it('should read none from a state home that never had one', async () => {
+    // Arrange
+    const { documents } = await home();
+
+    // Act + Assert
+    should(await documents.readOld()).equal(undefined);
+  });
+
+  it('should read the old document, and keep a copy beside it when it is put away', async () => {
+    // Arrange
+    const { paths, files, documents } = await home();
+    const path = join(paths.home, 'cgroups', 'config.json');
+    await files.writeTextAtomic(path, '{"enabled":true}\n');
+    await files.writeTextAtomic(join(paths.home, 'cgroups', 'apply-status.json'), '{}\n');
+
+    // Act
+    const read = await documents.readOld();
+    await documents.retireOld();
+
+    // Assert
+    should(read).deepEqual({ enabled: true });
+    should(await files.readText(path)).equal(undefined);
+    should(await files.readText(join(paths.home, 'cgroups', 'config.json.migrated'))).equal('{"enabled":true}\n');
+    should(await files.readText(join(paths.home, 'cgroups', 'apply-status.json'))).equal(undefined);
+  });
+
+  it('should hand back text that is not JSON as the text, so it is reported rather than treated as no document', async () => {
+    // Arrange
+    const { paths, files, documents } = await home();
+    await files.writeTextAtomic(join(paths.home, 'cgroups', 'config.json'), '{ broken');
+
+    // Act + Assert
+    should(await documents.readOld()).equal('{ broken');
   });
 });
 
@@ -615,5 +738,67 @@ describe('the live panes a limit change may reach', () => {
 
     // Act / Assert
     should((await subject.live()).incomplete).match(/EACCES/u);
+  });
+});
+
+describe('measuring this very machine, with no arguments', () => {
+  it('should read this host’s own platform, cores and memory', async () => {
+    // Arrange / Act
+    const facts = await hostCgroupFacts();
+
+    // Assert
+    should(facts.platform).equal(process.platform);
+    should(facts.cpus).be.greaterThan(0);
+    should(facts.physicalBytes).be.greaterThan(0);
+    should(facts.memoryCeilingBytes).be.greaterThan(0);
+    should(facts.memoryCeilingBytes).not.be.greaterThan(facts.physicalBytes);
+  });
+
+  it('should name the device a path lives on, as a major and a minor', async () => {
+    // Arrange / Act
+    const actual = await deviceOfPath(tmpdir());
+
+    // Assert
+    should(actual?.major).be.a.Number();
+    should(actual?.minor).be.a.Number();
+  });
+});
+
+describe('a ferret’s resident memory by its pane’s process tree', () => {
+  const row = (pid: number, rssBytes?: number) => ({
+    pid,
+    ppid: 1,
+    start: 1,
+    startedAtMs: 0,
+    argv: 'bun',
+    state: 'S',
+    ...(rssBytes === undefined ? {} : { rssBytes }),
+  });
+  const memory = (read: 'read' | 'unavailable') =>
+    new PaneSessionMemory(
+      { live: async () => ({ panes: [{ sessionId: 's1', pid: 100 }] }) },
+      {
+        tree: async () =>
+          read === 'read'
+            ? { kind: 'read', rows: [row(101, 2 * GIBIBYTE), row(102), row(103, GIBIBYTE)] }
+            : { kind: 'unavailable', reason: 'no ps' },
+        listening: async () => undefined,
+        startOf: async () => undefined,
+      },
+    );
+
+  it('should list the sessions with a live pane, and add up what their processes hold', async () => {
+    // Arrange / Act
+    const subject = memory('read');
+
+    // Assert
+    should(await subject.sessions()).deepEqual(['s1']);
+    should(await subject.total('s1')).equal(3 * GIBIBYTE);
+  });
+
+  it('should not guess for a session with no pane, or whose tree cannot be read', async () => {
+    // Arrange / Act / Assert
+    should(await memory('read').total('other')).equal(undefined);
+    should(await memory('unavailable').total('s1')).equal(undefined);
   });
 });
