@@ -3,7 +3,7 @@ import { DaemonStorage } from '../../src/adapters/storage/session-storage.ts';
 import { KeyedSerialExecutor } from '../../src/adapters/system/keyed-serial-executor.ts';
 import { createSessionArchive } from '../../src/adapters/session/archive/session-archive.ts';
 import { StorageSessionLifecycleRepository } from '../../src/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
-import { createFoundationPaths } from '../../src/lib/paths.ts';
+import { createFoundationPaths, createSessionPaths } from '../../src/lib/paths.ts';
 import { parseSessionId } from '../../src/lib/session-id.ts';
 
 const NOW = '2026-11-06T12:00:00.000Z';
@@ -98,6 +98,14 @@ export function fixture(
     },
   });
   return { archive, storage, docs, rows, pins, serial };
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 export function sessionArchiveCommitContract(): void {
@@ -323,4 +331,83 @@ export function sessionArchiveCommitContract(): void {
     await queued;
     expect(world.storage.isArchived(parseSessionId('lead-1'))).toBe(false);
   });
+  for (const sweep of ['reconcile', 'rebuildIndex'] as const) {
+    for (const held of [false, true]) {
+      test(`successful retention ${held ? 'inside a board hold' : 'without document lanes'} keeps its row during ${sweep}`, async () => {
+        // Arrange: the double filesystem returns only an archived directory; no real IO occurs.
+        const persisting = deferred();
+        const finish = deferred();
+        let pause = false;
+        const world = fixture({
+          beforePersist: async () => {
+            if (!pause) return;
+            persisting.resolve();
+            await finish.promise;
+          },
+        });
+        const id = parseSessionId('lead-1');
+        await world.archive.subsystem.run?.();
+        const internal = world.storage as unknown as {
+          fileSystem: {
+            listDirectory(path: string): Promise<unknown[]>;
+            readText(path: string): Promise<string | undefined>;
+            information(path: string): Promise<undefined>;
+            readChunks(): AsyncIterable<Uint8Array>;
+          };
+          index: {
+            listSessions(): readonly unknown[];
+            refreshSession(session: Parameters<typeof world.rows.set>[1]): void;
+            countEvents(): number;
+            replaceAll(plan: { sessions: readonly Parameters<typeof world.rows.set>[1][] }): void;
+          };
+          serial: { runExclusive<T>(work: () => Promise<T>): Promise<T> };
+        };
+        internal.fileSystem.listDirectory = async () => [{ name: id, directory: true }];
+        const files = createSessionPaths(paths, id);
+        internal.fileSystem.readText = async path =>
+          path === files.marker
+            ? '1\n'
+            : path === files.config
+              ? JSON.stringify(world.docs.get(id)?.config)
+              : path === files.state
+                ? JSON.stringify(world.docs.get(id)?.state)
+                : undefined;
+        internal.fileSystem.information = async () => undefined;
+        internal.fileSystem.readChunks = async function* () {};
+        // Use the actual index semantics: restored rows are visible immediately, even while archive membership remains.
+        internal.index.listSessions = () => [...world.rows.values()];
+        internal.index.refreshSession = session => {
+          world.rows.set(session.id, session);
+        };
+        internal.index.countEvents = () => 0;
+        internal.index.replaceAll = plan => {
+          world.rows.clear();
+          for (const session of plan.sessions) world.rows.set(session.id, session);
+        };
+        internal.serial.runExclusive = world.serial.runExclusive.bind(world.serial);
+        pause = true;
+        // Act: retention has built the live row and is now persisting removal of archive membership.
+        const retaining = held
+          ? world.storage.holdSessions([id], () => world.storage.retainSession(id))
+          : world.storage.retainSession(id);
+        await persisting.promise;
+        expect(world.rows.has(id)).toBe(true);
+        expect(world.storage.isArchived(id)).toBe(true);
+        try {
+          // Actual collectObservations skips archived dirs; actual reconciliation forgets the apparent stale live row.
+          const reconciling = world.storage[sweep]();
+          await new Promise<void>(resolve => setImmediate(resolve));
+          finish.resolve();
+          const [, reconciled] = await Promise.all([retaining, reconciling]);
+          expect(reconciled.problems).toEqual([]);
+        } finally {
+          finish.resolve();
+          await retaining;
+        }
+        // Assert: a successful keep must leave the session live after both operations settle.
+        expect(world.storage.isArchived(id)).toBe(false);
+        expect(world.rows.has(id)).toBe(true);
+      });
+    }
+  }
 }

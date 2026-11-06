@@ -107,6 +107,8 @@ the pin document or changing its place or time.
   its parent, it releases that gate and then retains the new parent and its ancestors through the ordinary keep path.
   A new parent archived during that window is immediately restored before the config write returns. Two roots are
   never held by a config writer at once, avoiding a lock-order cycle between opposite reparentings.
+  A failed post-write config proof or parent restoration returns an error saying the config is already committed.
+  Retrying the same write repairs any archived session in its parent's lineage, even when the parent is unchanged.
 - A queued config writer or commit rechecks its root after acquiring the gate. If another write moved it, it releases
   the stale gate and queues again. Four unsuccessful acquisitions stop with an explicit retry error; a later archive
   pass can retry, so continual reparenting cannot trap a pass in a retry loop.
@@ -115,6 +117,9 @@ the pin document or changing its place or time.
 - The registry is changed by a **read-modify-write inside its own queue**: the new map is derived from the registry as
   it is when the change's turn comes, then written durably, then published. A revival and an archive pass on different
   sessions therefore never overwrite one another's change.
+  Reconciliation and full index rebuilds use that same lane after taking their document barrier, so neither can
+  erase a live row between restoration and registry removal. Retention takes no document lanes and remains safe
+  when a board publisher already holds them.
 - Archiving **closes the file watches** held on the session's marker, config and state documents and recounts the
   cache and watch bound for the smaller live set. A later read of an archived session may watch again, within the bound.
 

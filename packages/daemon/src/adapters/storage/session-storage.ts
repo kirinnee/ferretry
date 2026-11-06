@@ -725,7 +725,7 @@ export class DaemonStorage {
 
   async rebuildIndex(): Promise<RebuildResult> {
     this.assertOpen();
-    return await this.serial.runExclusive(async () => {
+    return await this.indexSweep(async () => {
       const collected = await this.collectSources();
       const plan = planIndexRebuild(collected.sources);
       this.index.replaceAll(plan);
@@ -878,7 +878,7 @@ export class DaemonStorage {
 
   async reconcile(): Promise<RebuildResult> {
     this.assertOpen();
-    return await this.serial.runExclusive(async () => {
+    return await this.indexSweep(async () => {
       const collected = await this.collectObservations();
       const observationById = new Map(
         collected.observations
@@ -1044,26 +1044,55 @@ export class DaemonStorage {
     const lineage = await this.ancestors(id);
     const root = lineage.at(-1) ?? id;
     let retain: SessionId | undefined;
-    try {
-      const result = await this.lineages.run(root, async (): Promise<{ value: T } | undefined> => {
-        // A writer ahead of us may have reparented this session while we waited. Release the obsolete gate and
-        // queue on the current root before entering the document lane; never nest two lineage gates.
-        if (((await this.ancestors(id)).at(-1) ?? id) !== root) return undefined;
-        const previous = jsonObject(await this.readConfig(id, 'proved').catch(() => undefined))?.parent;
-        try {
-          return { value: await work() };
-        } finally {
-          // Even a failed atomic write can have renamed its document already.
-          const parent = jsonObject(await this.readConfig(id, 'proved').catch(() => undefined))?.parent;
-          if (parent !== previous && typeof parent === 'string') retain = tryParseSessionId(parent);
-        }
-      });
-      if (result !== undefined) return result.value;
+    let committed = false;
+    const result = await this.lineages.run(root, async (): Promise<{ value: T } | { error: unknown } | undefined> => {
+      // A writer ahead of us may have reparented this session while we waited. Release the obsolete gate and
+      // queue on the current root before entering the document lane; never nest two lineage gates.
+      if (((await this.ancestors(id)).at(-1) ?? id) !== root) return undefined;
+      const previous = jsonObject(await this.readConfig(id, 'proved').catch(() => undefined))?.parent;
+      let outcome: { value: T } | { error: unknown };
+      try {
+        const value = await work();
+        committed = true;
+        outcome = { value };
+      } catch (error) {
+        outcome = { error };
+      }
+      // Even a failed atomic write can have renamed its document already.
+      try {
+        const parent = jsonObject(await this.readConfig(id, 'proved'))?.parent;
+        const parentId = typeof parent === 'string' ? tryParseSessionId(parent) : undefined;
+        if (
+          parentId !== undefined &&
+          (parent !== previous || (await this.ancestors(parentId)).some(session => this.archived.has(session)))
+        )
+          retain = parentId;
+      } catch (error) {
+        outcome = {
+          error: new Error(
+            `session ${id} config write ${committed ? 'is already' : 'may already be'} committed; parent proof failed: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error },
+          ),
+        };
+      }
+      return outcome;
+    });
+    if (result === undefined) {
       if (rootMoves >= 3) throw new Error(`session ${id} changed lineage repeatedly; retry the config write`);
       return await this.configWrite(id, work, rootMoves + 1);
-    } finally {
-      if (retain !== undefined) await this.retainSession(retain);
     }
+    if (retain !== undefined) {
+      try {
+        await this.retainSession(retain);
+      } catch (error) {
+        throw new Error(
+          `session ${id} config write ${committed ? 'is already' : 'may already be'} committed; parent retention failed: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      }
+    }
+    if ('error' in result) throw result.error;
+    return result.value;
   }
 
   /**
@@ -1785,7 +1814,7 @@ export class DaemonStorage {
     published?: () => Promise<void> | void,
     valid: () => boolean = () => true,
   ): Promise<void> {
-    const turn = this.registryWrites.then(async () => {
+    await this.registryTurn(async () => {
       if (!valid()) return;
       const next = await change(this.archived);
       if (next === undefined) return;
@@ -1798,8 +1827,22 @@ export class DaemonStorage {
       this.archived = next;
       await published?.();
     });
-    this.registryWrites = turn.catch(() => undefined);
-    await turn;
+  }
+
+  /** Shared publication lane: an index sweep must not erase a row rebuilt before registry removal.
+   * Document barriers are acquired before this lane; retention never takes document lanes here.
+   */
+  private async indexSweep<T>(work: () => Promise<T>): Promise<T> {
+    return await this.serial.runExclusive(() => this.registryTurn(work));
+  }
+
+  private async registryTurn<T>(work: () => Promise<T>): Promise<T> {
+    const turn = this.registryWrites.then(work);
+    this.registryWrites = turn.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await turn;
   }
 
   /**

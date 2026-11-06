@@ -351,4 +351,100 @@ export function sessionArchiveConfigRetentionContract(): void {
     expect(world.storage.isArchived(id)).toBe(false);
     expect(world.rows.has(id)).toBe(true);
   });
+  for (const method of ['writeConfig', 'updateConfig', 'upsertConfig'] as const) {
+    test(`${method}: reports a committed config proof failure and repairs its archived parent on retry`, async () => {
+      // Arrange: the new lead is already archived, the child is live beneath another lead.
+      const world = fixture({
+        docs: new Map([
+          ['lead-1', ended()],
+          ['lead-2', ended()],
+          ['kid-1', { config: { mode: 'auto', parent: 'lead-1' }, state: { status: 'running' } }],
+        ]),
+      });
+      const lead = parseSessionId('lead-2');
+      const kid = parseSessionId('kid-1');
+      await world.storage.archiveSessions([lead], async () => ({}));
+      const internal = writable(world);
+      const writeDocument = internal.writeDocument;
+      let published = false;
+      internal.writeDocument = async (path, text) => {
+        await writeDocument(path, text);
+        published = true;
+      };
+      const read = world.storage.readConfig.bind(world.storage);
+      let failed = false;
+      world.storage.readConfig = async (id, freshness) => {
+        if (id === kid && published && !failed) {
+          failed = true;
+          throw new Error('one-shot EIO proving the already-published config');
+        }
+        return await read(id, freshness);
+      };
+      const next = { mode: 'auto', parent: 'lead-2' };
+      // Publication landed, so a failed proof must reject explicitly and the same write must repair it.
+      const write = () =>
+        method === 'writeConfig' ? world.storage.writeConfig(kid, next) : world.storage[method](kid, () => next);
+      await expect(write()).rejects.toThrow('committed');
+      expect(world.storage.isArchived(lead)).toBe(true);
+      await write();
+      // Assert: published lineage and live membership must agree after it returns.
+      expect(failed).toBe(true);
+      expect(world.docs.get(kid)?.config?.parent).toBe('lead-2');
+      expect(world.storage.isArchived(lead)).toBe(false);
+      expect(world.rows.has(lead)).toBe(true);
+    });
+  }
+
+  test('retrying a config write after a failed parent rebuild actually retries parent retention', async () => {
+    const world = fixture({
+      docs: new Map([
+        ['lead-1', ended()],
+        ['lead-2', ended()],
+        ['kid-1', { config: { mode: 'auto', parent: 'lead-1' }, state: { status: 'running' } }],
+      ]),
+    });
+    const lead = parseSessionId('lead-2');
+    const kid = parseSessionId('kid-1');
+    await world.storage.archiveSessions([lead], async () => ({}));
+    writable(world);
+    const internal = world.storage as unknown as {
+      syncSessionUnlocked(id: string): Promise<void>;
+    };
+    const sync = internal.syncSessionUnlocked.bind(internal);
+    let failed = false;
+    internal.syncSessionUnlocked = async id => {
+      if (id === lead && !failed) {
+        failed = true;
+        throw new Error('transient new-parent journal EIO');
+      }
+      await sync(id);
+    };
+    const next = { mode: 'auto', parent: 'lead-2' };
+    // The write publishes first; retention fails but correctly leaves its archive membership for retry.
+    await expect(world.storage.writeConfig(kid, next)).rejects.toThrow(
+      'config write is already committed; parent retention failed: transient new-parent journal EIO',
+    );
+    expect(world.docs.get(kid)?.config?.parent).toBe('lead-2');
+    expect(world.storage.isArchived(lead)).toBe(true);
+    // The same operation now succeeds: it owes the new parent the restoration the earlier attempt could not do.
+    await world.storage.writeConfig(kid, next);
+    expect(world.storage.isArchived(lead)).toBe(false);
+    expect(world.rows.has(lead)).toBe(true);
+  });
+
+  test('an unchanged live parent still repairs an archived ancestor in its lineage', async () => {
+    const world = fixture({
+      docs: new Map([
+        ['lead-1', ended()],
+        ['parent-1', ended('lead-1')],
+        ['kid-1', { config: { mode: 'auto', parent: 'parent-1' }, state: { status: 'running' } }],
+      ]),
+    });
+    const lead = parseSessionId('lead-1');
+    await world.storage.archiveSessions([lead], async () => ({}));
+    writable(world);
+    await world.storage.writeConfig(parseSessionId('kid-1'), { mode: 'auto', parent: 'parent-1' });
+    expect(world.storage.isArchived(lead)).toBe(false);
+    expect(world.rows.has(lead)).toBe(true);
+  });
 }
