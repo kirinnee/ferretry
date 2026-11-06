@@ -84,13 +84,13 @@ jobs.
 
 ## 2. What the doctrine requires, and how this design meets it
 
-| Doctrine                                                      | Requirement                                                                                                    | How the design meets it                                                                                                                                                                                                             |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Three-Layer](../standards/three-layer-architecture/index.md) | `src/lib` is pure (enforced by `cli-contracts.sh arch` for every package); wiring lives in `bin/`              | Module **types** and the pure composer go in `src/lib/runtime/modules.ts`. Module **wiring** goes in `bin/modules/<id>.ts`, the composition layer, which may import both `lib` and `adapters`. Test-only lists stay under `tests/`. |
-| [Stateless OOP + DI](../standards/stateless-oop-di/index.md)  | Constructor injection; **no service locator**; the graph visible in one place                                  | A module gets its dependencies through a typed `build(needs)` parameter. `fyd.ts` passes them explicitly, so the dependency graph is readable in one file and checked by the compiler. Nothing is looked up by name (§10, D1).      |
-| [Fact Ownership](../standards/fact-ownership/index.md) R1/R2  | A shared fact has one owner in `@ferretry/protocol`; a second list must be proven **complete**, not just sound | `DAEMON_FEATURES` stays in protocol (the PWA reads it too) and is split by area. Module feature claims are a build inventory checked against it in both directions. The health report's own decision is not changed (§4.3).         |
-| [Architecture](../standards/architecture/index.md)            | The app ships before the daemon; features are gated by name                                                    | No change on the wire. `/v1/health › features` is pinned for both a privileged-loopback request and a remote one.                                                                                                                   |
-| [cli-authoring](../../.claude/skills/cli-authoring/SKILL.md)  | One composition root; `if (import.meta.main)` guard; tests import factories                                    | `fyd.ts` stays the one root, and `buildWorld`, `start` and `WorldSeams` keep their names and shapes until the tidy-up PR, so the 16 daemon test files that import `bin/fyd.ts` do not change.                                       |
+| Doctrine                                                      | Requirement                                                                                                    | How the design meets it                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Three-Layer](../standards/three-layer-architecture/index.md) | `src/lib` is pure (enforced by `cli-contracts.sh arch` for every package); wiring lives in `bin/`              | Module **types** and the pure composer go in `src/lib/runtime/modules.ts`. Module **wiring** goes in `bin/modules/<id>.ts`, the composition layer, which may import both `lib` and `adapters`. Test-only lists stay under `tests/`.                                          |
+| [Stateless OOP + DI](../standards/stateless-oop-di/index.md)  | Constructor injection; **no service locator**; the graph visible in one place                                  | A module gets its dependencies through a typed `build(needs)` parameter. `fyd.ts` passes them explicitly, so the dependency graph is readable in one file and checked by the compiler. Nothing is looked up by name (§10, D1).                                               |
+| [Fact Ownership](../standards/fact-ownership/index.md) R1/R2  | A shared fact has one owner in `@ferretry/protocol`; a second list must be proven **complete**, not just sound | `DAEMON_FEATURES` stays in protocol (the PWA reads it too) and is split by area. Module feature claims are a build inventory checked against it in both directions. The health report's own decision is not changed (§4.3).                                                  |
+| [Architecture](../standards/architecture/index.md)            | The app ships before the daemon; features are gated by name                                                    | No change on the wire. `/v1/health › features` is pinned for both a privileged-loopback request and a remote one.                                                                                                                                                            |
+| [cli-authoring](../../.claude/skills/cli-authoring/SKILL.md)  | One composition root; `if (import.meta.main)` guard; tests import factories                                    | `fyd.ts` stays the one root, and `buildWorld`, `start` and `WorldSeams` keep their names and shapes until the tidy-up PR. Of the 16 daemon test files that import `bin/fyd.ts`, only the `createSubsystems` capture in `boot-lifecycle.test.ts` changes, once, in P5 (§3.3). |
 
 ---
 
@@ -105,11 +105,13 @@ import type { SocketRoute } from '../api/socket.ts';
 import type { AuditedRouteRule, AuditedSocketRule } from '../audit/routes.ts';
 
 /**
- * The kernel's existing cleanup list, handed to a module while it builds. A module registers a release
- * at the moment it ACQUIRES the thing, exactly as `start()` does today, so:
+ * The kernel's existing cleanup list, handed to a module while it builds. Every release that is
+ * registered today is registered at the same moment and in the same order, so:
  *  - shutdown still runs the list FORWARD in registration order (`fyd.ts:15755-15760`);
  *  - `first: true` keeps today's prepends (queue delivery, `fyd.ts:15363`);
- *  - a build that throws halfway has already registered what it acquired, so nothing leaks.
+ *  - a build that throws halfway has already registered every release it registers today.
+ * Extraction adds no releases. Where today has none (the agenda deadline timers are only `unref`ed,
+ * and the member sweep's stop callback is dropped), that stays as it is: see §3.4, named exception.
  */
 export interface ModuleLifecycle {
   readonly onRelease: (
