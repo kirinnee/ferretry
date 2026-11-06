@@ -411,7 +411,7 @@ describe('the session send ledger routes', () => {
       should(old.messages).have.length(101);
       should(old.messages[0]?.id).equal('m000');
       should(old.messages.at(-1)?.id).equal('m151');
-      should(page.nextCursor).equal('m052');
+      should(page.nextCursor).endWith('~m052');
       should(answer.body.length).be.below(JSON.stringify({ messages: sessions.queued }).length);
     });
 

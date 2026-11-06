@@ -364,6 +364,50 @@ describe('the queue history a page holds', () => {
     expect(polled.messages.find(each => each.id === 'c')?.state).toBe('read');
   });
 
+  test('holds a message that moved mid-walk once, in its newest state, when an older page repeats it', () => {
+    // The reviewer's timeline: a (old, queued), b and c read; the window is [a, c] with cursor c.
+    const first = startQueueHistory({ messages: [waiting('a', 1), read('c', 3)], nextCursor: 'c' });
+    const cancelledAt = '2026-10-30T11:00:00.000Z';
+
+    // a is cancelled, then the older page [a (cancelled), b] arrives.
+    const extended = extendQueueHistory(first, {
+      messages: [message({ id: 'a', enqueuedAt: at(1), state: 'cancelled', stateAt: cancelledAt }), read('b', 2)],
+      nextCursor: null,
+    });
+
+    expect(ids(extended)).toEqual(['a', 'b', 'c']);
+    expect(extended.messages.find(each => each.id === 'a')?.state).toBe('cancelled');
+  });
+
+  test('never regresses a message to an older state or revision when a stale read repeats it', () => {
+    const edited = message({
+      id: 'a',
+      enqueuedAt: at(1),
+      revision: 2,
+      text: 'edited words',
+      stateAt: '2026-10-30T10:05:00.000Z',
+    });
+    const first = startQueueHistory({ messages: [edited], nextCursor: 'a' });
+
+    const extended = extendQueueHistory(first, {
+      messages: [message({ id: 'a', enqueuedAt: at(1), revision: 1 })],
+      nextCursor: null,
+    });
+    const moved = extendQueueHistory(
+      startQueueHistory({
+        messages: [message({ id: 'z', enqueuedAt: at(9), state: 'read', stateAt: '2026-10-30T10:30:00.000Z' })],
+        nextCursor: 'z',
+      }),
+      {
+        messages: [message({ id: 'z', enqueuedAt: at(9), state: 'queued', stateAt: '2026-10-30T10:00:00.000Z' })],
+        nextCursor: null,
+      },
+    );
+
+    expect(extended.messages[0]).toMatchObject({ revision: 2, text: 'edited words' });
+    expect(moved.messages[0]?.state).toBe('read');
+  });
+
   test('starts over from the window when a message held as waiting is no longer in it', () => {
     const first = startQueueHistory({ messages: [read('d', 4)], nextCursor: 'd' });
     const extended = extendQueueHistory(first, { messages: [waiting('a', 1)], nextCursor: null });

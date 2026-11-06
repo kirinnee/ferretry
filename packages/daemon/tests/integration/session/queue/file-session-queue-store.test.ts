@@ -5,7 +5,13 @@ import { join } from 'node:path';
 import should from 'should';
 import { FileSessionQueueStore } from '../../../../src/adapters/session/queue/index.ts';
 import { KeyedSerialExecutor } from '../../../../src/adapters/index.ts';
-import { foldQueue, type QueueEvent, queuePage, SessionQueueService } from '../../../../src/lib/session/queue/index.ts';
+import {
+  foldQueue,
+  NotifyingSessionQueueStore,
+  type QueueEvent,
+  queuePage,
+  SessionQueueService,
+} from '../../../../src/lib/session/queue/index.ts';
 import { parseSessionId } from '../../../../src/lib/session-id.ts';
 
 /**
@@ -145,5 +151,46 @@ describe('a long-lived session queue read as a window', () => {
     should(new Set(seen.map(message => message.id)).size).equal(2_949);
     should(seen).have.length(2_949);
     should(JSON.stringify({ messages: first?.messages }).length).be.below(JSON.stringify({ messages }).length / 20);
+  });
+});
+
+const EARLY = new Date(Date.UTC(2026, 9, 1, 0, 0, 2)).toISOString();
+
+describe('a queue change on the real log is announced after it is on disk, and a walk survives it', () => {
+  it('should announce the change only once the line is in the file, and meet a message cancelled mid-walk once', async () => {
+    // Arrange — the real file store behind the notifying decorator, the real service on top.
+    const { store: file } = await store();
+    const onDisk: number[] = [];
+    const announced: string[] = [];
+    const notifying = new NotifyingSessionQueueStore(file, {
+      publish: async (_id, _type, data) => {
+        onDisk.push((await file.read(ID)).length);
+        announced.push(`${data.change}:${data.messageId}`);
+      },
+    });
+    let seconds = 0;
+    const service = new SessionQueueService({
+      store: notifying,
+      clock: { now: () => new Date(Date.UTC(2026, 9, 1, 0, 0, seconds++)).toISOString() },
+      serial: new KeyedSerialExecutor(),
+    });
+    for (const id of ['a', 'b', 'c']) await service.enqueue(ID, { id, sender: 'human', text: `words of ${id}` });
+    await file.append(ID, { v: 1, kind: 'moved', at: EARLY, id: 'b', state: 'typing' });
+    await file.append(ID, { v: 1, kind: 'moved', at: EARLY, id: 'b', state: 'delivered' });
+    await file.append(ID, { v: 1, kind: 'moved', at: EARLY, id: 'b', state: 'read' });
+    await file.append(ID, { v: 1, kind: 'moved', at: EARLY, id: 'c', state: 'typing' });
+    await file.append(ID, { v: 1, kind: 'moved', at: EARLY, id: 'c', state: 'delivered' });
+    await file.append(ID, { v: 1, kind: 'moved', at: EARLY, id: 'c', state: 'read' });
+
+    // Act — the first page of one carries a; a is cancelled; the walk goes on.
+    const first = queuePage(await service.list(ID), { limit: 1 });
+    await service.cancel(ID, 'a');
+    const older = queuePage(await service.list(ID), { limit: 5, before: first?.nextCursor ?? '' });
+
+    // Assert
+    should(announced).eql(['enqueued:a', 'enqueued:b', 'enqueued:c', 'moved:a']);
+    should(onDisk).eql([1, 2, 3, 10]);
+    should(first?.messages.map(message => message.id)).eql(['a', 'c']);
+    should(older?.messages.map(message => message.id)).eql(['b']);
   });
 });

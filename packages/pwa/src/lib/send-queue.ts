@@ -437,9 +437,36 @@ const isOpenState = (message: QueuedMessage): boolean =>
   message.state === 'queued' || message.state === 'typing' || message.state === 'unconfirmed';
 
 /**
+ * The fresher of one message as held and as just read, never a regression: a later revision (an edit) wins, then a
+ * later `stateAt` (a move), and on a tie the incoming read — it is the newer look at the same fact. A message
+ * repeated across pages (the window carries every open one, and a walk can meet one that moved mid-walk) is thereby
+ * held once, in the newest state either read saw.
+ */
+const fresherMessage = (held: QueuedMessage, incoming: QueuedMessage): QueuedMessage => {
+  if (incoming.revision !== held.revision) return incoming.revision > held.revision ? incoming : held;
+  return Date.parse(incoming.stateAt) >= Date.parse(held.stateAt) ? incoming : held;
+};
+
+const byAgeThenId = (left: QueuedMessage, right: QueuedMessage): number =>
+  Date.parse(left.enqueuedAt) - Date.parse(right.enqueuedAt) || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+
+/** The messages of two reads as one set by id, the fresher of a repeated id kept, oldest first. */
+const mergeMessages = (
+  held: readonly QueuedMessage[],
+  incoming: readonly QueuedMessage[],
+): readonly QueuedMessage[] => {
+  const merged = new Map(held.map(message => [message.id, message]));
+  for (const message of incoming) {
+    const have = merged.get(message.id);
+    merged.set(message.id, have === undefined ? message : fresherMessage(have, message));
+  }
+  return [...merged.values()].sort(byAgeThenId);
+};
+
+/**
  * A fresh read of the window applied over what is held. Until the person asks for older messages it IS the
  * window. After, every message already shown stays (a new arrival pushes the window's edge up by one, and
- * the message that fell off it is in no older page this person has not already read) and the fresh read wins
+ * the message that fell off it is in no older page this person has not already read) and the fresher read wins
  * for every id it carries. One thing cannot be kept: a message held as still moving that the window no longer
  * carries has finished since, and its new state is unknown — the history starts over from the window rather
  * than draw a stale tick, and "Show older messages" is there again.
@@ -449,22 +476,16 @@ export const refreshQueueHistory = (held: QueueHistory | undefined, fresh: Queue
   const inWindow = new Set(fresh.messages.map(message => message.id));
   const kept = held.messages.filter(message => !inWindow.has(message.id));
   if (kept.some(isOpenState)) return startQueueHistory(fresh);
-  const byAge = [...kept, ...fresh.messages].sort(
-    (left, right) =>
-      Date.parse(left.enqueuedAt) - Date.parse(right.enqueuedAt) ||
-      (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
-  );
-  return { messages: byAge, cursor: held.cursor, older: true };
+  return { messages: mergeMessages(held.messages, fresh.messages), cursor: held.cursor, older: true };
 };
 
-/** An older page read from `held.cursor`, added to what is held; a message is held once, the newer read winning. */
-export const extendQueueHistory = (held: QueueHistory, page: QueuePageRead): QueueHistory => {
-  const have = new Set(held.messages.map(message => message.id));
-  const added = page.messages.filter(message => !have.has(message.id));
-  const byAge = [...added, ...held.messages].sort(
-    (left, right) =>
-      Date.parse(left.enqueuedAt) - Date.parse(right.enqueuedAt) ||
-      (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
-  );
-  return { messages: byAge, cursor: page.nextCursor, older: true };
-};
+/**
+ * An older page read from `held.cursor`, added to what is held; a message is held once, in the fresher state of
+ * the two reads — a message that was open when the first page was cut and closed before this one arrives is the
+ * same bubble in its newest state, never the stale one nor a second one.
+ */
+export const extendQueueHistory = (held: QueueHistory, page: QueuePageRead): QueueHistory => ({
+  messages: mergeMessages(held.messages, page.messages),
+  cursor: page.nextCursor,
+  older: true,
+});

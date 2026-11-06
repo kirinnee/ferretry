@@ -32,6 +32,7 @@ import {
   extendQueueHistory,
   QueueActionError,
   type QueueHistory,
+  type QueuePageRead,
   queueActions,
   readSessionQueuePage,
   refreshQueueHistory,
@@ -281,8 +282,12 @@ export function QueuePageView({
   olderFailed = null,
   onLoadOlder,
 }: QueuePageViewProps) {
-  // A ferret with nothing in its queue has no card: the page says so once, whether it shows one ferret or all.
-  const shown = groups.filter(group => group.rows.length > 0);
+  // A ferret with nothing in its queue has no card: the page says so once, whether it shows one ferret or all. One
+  // whose newest window shows nothing (every message in it cancelled) but whose machine holds older messages keeps its
+  // card, because "Show older messages" lives there and would otherwise be unreachable.
+  const hasOlder = (group: QueueGroup): boolean => onLoadOlder !== undefined && olderKeys?.has(group.key) === true;
+  const shown = groups.filter(group => group.rows.length > 0 || hasOlder(group));
+  const loadOlder = onLoadOlder;
   const waiting = groups.reduce((sum, group) => sum + group.rows.filter(isWaitingRow).length, 0);
   return (
     <main aria-label={title} className="fy-queue-page scroll-thin" data-queue-page="">
@@ -314,13 +319,13 @@ export function QueuePageView({
           // The older messages belong where they will appear: just above the finished ones, below what still waits.
           const olderBefore = group.rows.find(row => !isWaitingRow(row))?.id;
           const older =
-            onLoadOlder !== undefined && olderKeys?.has(group.key) ? (
+            loadOlder !== undefined && hasOlder(group) ? (
               <li className="fy-queue-older" key="older">
                 <button
                   className="kt-btn kt-btn--sm"
                   data-queue-older=""
                   disabled={loadingOlder === group.key}
-                  onClick={() => onLoadOlder(group)}
+                  onClick={() => loadOlder(group)}
                   type="button"
                 >
                   {loadingOlder === group.key ? 'Reading older messages…' : 'Show older messages'}
@@ -378,6 +383,8 @@ export function QueuePage({ daemonId, sessionId }: { readonly daemonId: DaemonId
   const [queues, setQueues] = useState<ReadonlyMap<string, QueueHistory>>(new Map());
   // What each ferret's window held at the last read, so a poll keeps the older messages the person asked for.
   const held = useRef<ReadonlyMap<string, QueueHistory>>(new Map());
+  // The number of the newest window poll started; see `read`.
+  const generation = useRef(0);
   const [loadingOlder, setLoadingOlder] = useState<string | null>(null);
   const [olderFailed, setOlderFailed] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -402,22 +409,34 @@ export function QueuePage({ daemonId, sessionId }: { readonly daemonId: DaemonId
   useEffect(() => {
     let live = true;
     const read = async (): Promise<void> => {
-      const next = new Map<string, QueueHistory>();
+      // Every poll is numbered, and only the newest one still in the air may commit: a slower, older answer that
+      // lands after a newer one has been applied must not put the window back the way it was.
+      generation.current += 1;
+      const mine = generation.current;
+      const answers = new Map<string, QueuePageRead>();
       await Promise.all(
         targets.map(async target => {
           try {
             const client = await store.clients.client(target.connection);
-            const key = `${target.connection.daemonId}/${target.sessionId}`;
-            next.set(
-              key,
-              refreshQueueHistory(held.current.get(key), await readSessionQueuePage(client, target.sessionId)),
+            answers.set(
+              `${target.connection.daemonId}/${target.sessionId}`,
+              await readSessionQueuePage(client, target.sessionId),
             );
           } catch {
             // An unreachable machine shows only what this device still holds for it.
           }
         }),
       );
-      if (!live) return;
+      if (!live || mine !== generation.current) return;
+      // What is held is read NOW, after the answers: an older page the person loaded while this poll was in the air is
+      // in it, and the window answered is applied over it rather than over what was held when the poll began.
+      const next = new Map<string, QueueHistory>();
+      for (const target of targets) {
+        const key = `${target.connection.daemonId}/${target.sessionId}`;
+        const page = answers.get(key);
+        const history = page === undefined ? held.current.get(key) : refreshQueueHistory(held.current.get(key), page);
+        if (history !== undefined) next.set(key, history);
+      }
       held.current = next;
       setQueues(next);
       setLoading(false);

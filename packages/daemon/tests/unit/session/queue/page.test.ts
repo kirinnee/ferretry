@@ -53,7 +53,7 @@ describe('a page of a session queue', () => {
     should(ids(page.messages).slice(0, 3)).eql(['m0003', 'm0040', 'm0041']);
     should(page.messages.at(-1)?.id).equal('m2947');
     should(ids(page.messages)).eql([...ids(page.messages)].sort());
-    should(page.nextCursor).equal('m2848');
+    should(page.nextCursor).endWith('~m2848');
   });
 
   it('should answer a small fraction of the bytes the whole queue weighed', () => {
@@ -110,7 +110,11 @@ describe('a page of a session queue', () => {
     const arrivals = ['n1', 'n2', 'n3'].map((id, n) => message(id, 5_000 + n, 'queued'));
 
     // Act — three arrive, one old waiting message is delivered, then the walk goes on from the same cursor.
-    queue = [...queue, ...arrivals].map(each => (each.id === 'm0003' ? { ...each, state: 'read' as const } : each));
+    queue = [...queue, ...arrivals].map(each =>
+      each.id === 'm0003'
+        ? { ...each, state: 'delivered' as const, stateAt: new Date(Date.UTC(2027, 0, 1)).toISOString() }
+        : each,
+    );
     let page = pageOf(queue, { limit: 500, before: first.nextCursor ?? '' });
     seen.push(...ids(page.messages));
     while (page.nextCursor !== null) {
@@ -118,13 +122,56 @@ describe('a page of a session queue', () => {
       seen.push(...ids(page.messages));
     }
 
-    // Assert — everything that existed when the walk began is met once; m0003 closed in between and is met
-    // in both places, which a reader merging by id folds into one.
-    const began = ids(longQueue());
-    should(began.every(id => seen.includes(id))).be.true();
+    // Assert — everything that existed when the walk began is met EXACTLY once, the one that finished
+    // mid-walk included, and the arrivals (newer than the walk's start) are not part of it.
+    should([...seen].sort()).eql(ids(longQueue()));
     should(seen.filter(id => id.startsWith('n'))).be.empty();
-    const repeats = seen.filter((id, at) => seen.indexOf(id) !== at);
-    should(repeats).eql(['m0003']);
+  });
+
+  it('should meet a message once when it closes mid-walk, and answer its latest state where it was carried', () => {
+    // Arrange — the reviewer's timeline: a is open and old, b and c are read; the first page of 1 carries a.
+    const queue = [message('a', 1, 'queued'), message('b', 2), message('c', 3)];
+    const first = pageOf(queue, { limit: 1 });
+
+    // Act — a is cancelled after the first page, then the walk reads the rest.
+    const cancelledAt = new Date(Date.UTC(2026, 9, 2)).toISOString();
+    const later = queue.map(each =>
+      each.id === 'a' ? { ...each, state: 'cancelled' as const, stateAt: cancelledAt } : each,
+    );
+    const older = pageOf(later, { limit: 5, before: first.nextCursor ?? '' });
+
+    // Assert
+    should(ids(first.messages)).eql(['a', 'c']);
+    should(first.messages[0]?.state).equal('queued');
+    should(ids(older.messages)).eql(['b']);
+    should(older.nextCursor).be.null();
+  });
+
+  it('should not leave out a delivered message that was only read after the walk began', () => {
+    // Arrange — b was delivered (not open) when the first page was cut, and is read afterwards.
+    const queue = [message('a', 1), message('b', 2, 'delivered'), message('c', 3)];
+    const first = pageOf(queue, { limit: 1 });
+
+    // Act
+    const readAt = new Date(Date.UTC(2026, 9, 2)).toISOString();
+    const later = queue.map(each => (each.id === 'b' ? { ...each, state: 'read' as const, stateAt: readAt } : each));
+    const older = pageOf(later, { limit: 5, before: first.nextCursor ?? '' });
+
+    // Assert — b is on the older page, once; nothing was lost.
+    should(ids(older.messages)).eql(['a', 'b']);
+  });
+
+  it('should carry the same snapshot down every older page of a walk', () => {
+    // Arrange
+    const queue = [message('a', 1), message('b', 2), message('c', 3), message('d', 4)];
+
+    // Act
+    const first = pageOf(queue, { limit: 1 });
+    const second = pageOf(queue, { limit: 1, before: first.nextCursor ?? '' });
+
+    // Assert
+    const snapshot = (first.nextCursor ?? '').split('~')[0];
+    should(second.nextCursor).equal(`${snapshot}~c`);
   });
 
   it('should leave the open messages out of an older page, since the first page carried them', () => {
@@ -164,7 +211,7 @@ describe('a page of a session queue', () => {
 
     // Assert
     should([...ids(first.messages), ...ids(rest.messages)].sort()).eql(['a', 'b', 'c']);
-    should(first.nextCursor).equal('b');
+    should(first.nextCursor).endWith('~b');
   });
 });
 

@@ -88,9 +88,14 @@ this page, which is still how a message reaches the pane.
 - **A page, not the log** — `GET …/queue` answers the same WINDOW `GET …/sends` does (`lib/session/queue/page.ts`
   over `windowPage` in `lib/session/send/page.ts`, one owner of the rule): the newest `limit` messages (default
   100, at most 1,000) and EVERY open one however old (`queued`, `typing`, `unconfirmed`), oldest first, with
-  `nextCursor` naming the oldest message of the page proper (`null`: nothing older). `?before=<nextCursor>` answers
-  the next older page, each message once (an older page leaves out the open ones the first page carried); a cursor
-  naming no message is `400 invalid_cursor`. Same minimum and caller as before. Measured on a long-lived lead (2,948
+  `nextCursor` (OPAQUE: hand it back untouched) naming the oldest message of the page proper (`null`: nothing older).
+  `?before=<nextCursor>` answers the next older page, each message once — even one that changes state mid-walk: the
+  cursor is `<instant>~<id>`, the instant being the newest the first page's messages show, and an older page leaves out
+  every message the first page carried, which is the open ones AND any that stands in `delivered`/`cancelled`/`failed`
+  with a `stateAt` after that instant (it was open when the page was cut). The one move that cannot be read that way,
+  `unconfirmed` → `read`, is answered again rather than left out (a rare repeat, never a gap); the app holds a repeated
+  id once, in the fresher revision/`stateAt`. A bare-id cursor (an older daemon's) judges by the state at the time of
+  the read. A cursor naming no message is `400 invalid_cursor`. Same minimum and caller as before. Measured on a long-lived lead (2,948
   messages ever queued, 14 waiting, a 3.5 MB log): the unpaged answer was ~2.2 MB and the app read it 16 times in an
   18-second start-up. A reader written before the window parses the same `messages` array, only shorter, and
   needs no delivered history: a bubble whose queue row is outside the window is drawn from its ledger row. The
@@ -128,7 +133,14 @@ this page, which is still how a message reaches the pane.
 - **The chat reads the queue on a nudge, not on every tick** — the 3-second working-chat poll still reads the transcript
   and the send ledger, but reads `GET …/queue` only on the first read, on a feed nudge (a journal event for the session,
   which a send always is), on any explicit refresh (a send, an edit, the page coming back) and every tick while a
-  queued message's menu or editor is open (`watchQueue`). Ten idle ticks are zero queue reads.
+  queued message's menu or editor is open (`watchQueue`). Ten idle ticks are zero queue reads. **A queue change IS a
+  feed event**: every writer of `channel/queue.jsonl` (the service's enqueue/edit/cancel and the deliverer's moves and
+  waiting reasons) appends through `NotifyingSessionQueueStore` (`lib/session/queue/notifying-store.ts`), which journals
+  `control.queue_changed` (`{ messageId, change }` — never the text) AFTER the event is durable, so an open chat's feed
+  nudges a queue read; the fleet feed leaves the session list alone for it. A failed announcement never fails the
+  change. Under that, the chat keeps a bounded safety net: a queue unread for 30 s (`QUEUE_FALLBACK_MS`) is read on
+  the next poll tick, and a failed queue read is retried with a doubling backoff from 3 s up to 30 s, even on a relaxed
+  page — so a lost event or a failed read can never leave a bubble stale for good.
 
 - **The device outbox is tick 1** — a message is written to a durable per-device IndexedDB outbox
   (`ferretry-outbox`, `packages/pwa/src/lib/send-outbox.ts`, keyed by the request id) BEFORE the machine hears of

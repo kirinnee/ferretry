@@ -731,6 +731,17 @@ export const NUDGE_SETTLE_MS = 150;
  */
 export const ACTED_WATCH_MS = 30_000;
 
+/**
+ * The slowest the durable queue goes unread while the page polls at all. A queue change is announced on the feed
+ * (`control.queue_changed`, journalled after the change is on disk) and read on that nudge, so this beat exists for
+ * the announcement that never arrives — a feed that dropped between the change and its delivery. It is slow on
+ * purpose: one extra read of one bounded window every half minute, not the three-second read it replaced.
+ */
+export const QUEUE_FALLBACK_MS = 30_000;
+
+/** A failed queue read is tried again after this long, doubling each failure up to {@link QUEUE_FALLBACK_MS}. */
+const QUEUE_RETRY_MS = 3_000;
+
 export interface SessionWorkspaceRefreshInput {
   readonly api: SessionWorkspaceReadApi;
   readonly sessionId: string;
@@ -974,6 +985,23 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
 
   /** Whether the next read asks the machine for the durable queue; a bare poll tick does not unless someone watches it. */
   let queueWatchers = 0;
+  /** When the queue was last read well, and how many reads in a row have failed since (and when the next may start). */
+  let queueReadAt: number | undefined;
+  let queueFailures = 0;
+  let queueRetryAt = 0;
+
+  /**
+   * Whether a bare poll tick should read the queue too: someone is acting on it, or its last read failed and the
+   * backoff has run out, or the slow beat ({@link QUEUE_FALLBACK_MS}) says it has gone unread too long. Without a
+   * clock only the first two can be told, so a failed read is retried on every tick and nothing else is.
+   */
+  const queueDue = (): boolean => {
+    if (queueWatchers > 0) return true;
+    const now = environment.now?.();
+    if (now === undefined) return queueFailures > 0;
+    if (queueFailures > 0) return now >= queueRetryAt;
+    return queueReadAt === undefined || now - queueReadAt >= QUEUE_FALLBACK_MS;
+  };
 
   const read = (afterCurrent: boolean, withQueue: boolean): Promise<void> => {
     if (stopped || !environment.visible()) return Promise.resolve();
@@ -990,7 +1018,15 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     ])
       .then(([logs, session, sends, queue]) => {
         if (stopped) return;
-        if (queue.status === 'fulfilled' && queue.value !== undefined) input.onQueue?.(queue.value);
+        if (queue.status === 'fulfilled' && queue.value !== undefined) {
+          input.onQueue?.(queue.value);
+          queueReadAt = environment.now?.() ?? queueReadAt;
+          queueFailures = 0;
+        } else if (queue.status === 'rejected') {
+          queueFailures += 1;
+          queueRetryAt =
+            (environment.now?.() ?? 0) + Math.min(QUEUE_RETRY_MS * 2 ** (queueFailures - 1), QUEUE_FALLBACK_MS);
+        }
         if (sends.status === 'fulfilled' && sends.value !== undefined) input.onSends?.(sends.value);
         if (sends.status === 'rejected') input.onSendsFailed?.(errorMessage(sends.reason));
         const errors: string[] = [];
@@ -1033,11 +1069,12 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     if (
       now !== undefined &&
       input.relaxed?.() === true &&
+      queueFailures === 0 &&
       now - actedAt >= ACTED_WATCH_MS &&
       now - lastReadAt < RELAXED_REFRESH_MS
     )
       return;
-    void read(false, queueWatchers > 0);
+    void read(false, queueDue());
   };
 
   const watchQueue = (): (() => void) => {
@@ -1091,6 +1128,16 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     },
   };
 };
+
+/**
+ * What a queued message's menu or editor calls when it opens, bound to the page's refresh control: the poll reads the
+ * queue on every tick until the returned release is called. The control is read AT THE CALL, because it is replaced
+ * when the session changes; with none (nothing is polling yet) there is nothing to hold and the release does nothing.
+ */
+export const queueWatcher =
+  (control: { readonly current: Pick<SessionWorkspaceRefreshControl, 'watchQueue'> | null | undefined }) =>
+  (): (() => void) =>
+    control.current?.watchQueue() ?? (() => undefined);
 
 /**
  * A ledger row's Retry, bound to one session: re-sends under the send's ORIGINAL id — which the daemon
