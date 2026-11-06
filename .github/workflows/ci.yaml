@@ -178,7 +178,7 @@ jobs:
     timeout-minutes: 20
     name: PWA ${{ matrix.scope == 'full' && 'Full Gallery' || 'Settings Geometry' }} (${{ matrix.scheme }}${{ matrix.viewport && format(', {0}', matrix.viewport) || '' }})
     needs: pwa-relevance
-    if: needs.pwa-relevance.outputs.run == 'true'
+    if: ${{ !cancelled() && needs.pwa-relevance.outputs.run != 'false' }}
     permissions:
       contents: read
     # Linux, deliberately NOT a macOS runner: the image already ships the same Google Chrome the

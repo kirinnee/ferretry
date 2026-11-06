@@ -7,7 +7,7 @@ set -euo pipefail
 # `pwa-screenshot` is three real-Chrome walks of the PWA (Settings geometry on a 2x4, the full gallery
 # once per viewport on two 4x8) and about a fifth of the Namespace bill, yet roughly one pull request in
 # four changes nothing the walk reads: a daemon-only, CLI-only or docs-only change. Those leave the gate
-# out. It is SKIPPED, and a skipped check counts as passed (GitHub, and scripts/safe-merge.sh, both read
+# out. It is SKIPPED, and a skipped check counts as passed (GitHub reads
 # it so), so no stub check and no branch-protection change is needed.
 #
 # WHY A JOB AND NOT `paths-ignore`. The reason scripts/ci/e2e-relevance.sh gives: a workflow that is
@@ -54,10 +54,17 @@ if [ -z "${PWA_RELEVANCE_FILES:-}" ]; then
   [ -z "${PR_NUMBER:-}" ] && decide true "no pull request number"
 
   set +e
-  files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"
+  files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[] | .filename, (.previous_filename // empty)')"
   listed=$?
+  total="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.changed_files')"
+  counted=$?
   set -e
   [ "${listed}" -ne 0 ] && decide true "the pull request's files could not be listed"
+  [ "${counted}" -ne 0 ] && decide true "the pull request's file count could not be read"
+  # The files API ends at 3000 files without saying so: a larger pull request has paths the list never showed.
+  case "${total}" in '' | *[!0-9]*) decide true "the pull request's file count is not a number (${total})" ;; esac
+  [ "${total}" -ge 3000 ] && decide true "the pull request changes ${total} files, more than the files API lists"
+  [ "${total}" -gt "$(wc -l <<<"${files}")" ] && decide true "the pull request changes ${total} files but only $(wc -l <<<"${files}") were listed"
 else
   files="$(cat "${PWA_RELEVANCE_FILES}")"
 fi

@@ -349,10 +349,15 @@ Notable details:
   Namespace bill (measured 2026-10-29 to 11-06: 63k of 339k unit-minutes) and about a quarter of pull
   requests change nothing they read — a daemon-only, CLI-only or docs-only change. `pwa-relevance`
   (`PWA Relevance`, `scripts/ci/pwa-relevance.sh`) lists the pull request's files through the API
-  and writes `run=true|false`; `pwa-screenshot` has `needs: pwa-relevance` and
-  `if: needs.pwa-relevance.outputs.run == 'true'`, so when it is `false` every leg is **skipped, and a
-  skipped check counts as passed** — no stub check, no branch-protection change, and a job and not
-  `paths-ignore` for the reason `E2E Relevance` gives. The decision is self-contained: it reads
+  (a rename counts both its old and new path; a pull request of 3000 files or more, which the files API
+  cuts off, always runs) and writes `run=true|false`; `pwa-screenshot` has `needs: pwa-relevance` and
+  `if: ${{ !cancelled() && needs.pwa-relevance.outputs.run != 'false' }}`, so when it is `false` every
+  leg is **skipped, and a skipped check counts as passed** — no stub check, no branch-protection change,
+  and a job and not `paths-ignore` for the reason `E2E Relevance` gives. **Only a `false` skips the
+  gate**: a relevance job that failed, timed out or was skipped leaves the output empty and the gate
+  runs, so the job fails open as well as the script. Another job may `need` `pwa-screenshot` only if its
+  own `if:` starts with `always()` or `!cancelled()` (the `Full CI` verdict), and the gate's `if:` may
+  carry further conjuncts (the `full-ci` label) so long as nothing but relevance saying `false` can skip it. The decision is self-contained: it reads
   nothing but the pull request's file list, so it holds however and whenever the gate is triggered.
   - **What selects the gate**: anything under `packages/pwa/`, `packages/protocol/`, `packages/relay/`
     or `packages/fleet/` (the PWA's workspace closure: it imports all three, and `fleet` and `relay`
@@ -367,10 +372,12 @@ Notable details:
     every file or package outside `packages/pwa/` selects the gate. It also fails if a docs-only or
     daemon-only change selects it, if a change that mixes docs with one input does not, if `main`,
     dispatch or any doubt would skip it, or if `ci.yaml` stops gating exactly `pwa-screenshot` on the
-    decision or lets the relevance job grow a nix shell, a Namespace runner or a `needs`.
-  - **It adds no wall clock** because it is `ubuntu-latest` with a sparse checkout of `scripts/ci` and
-    one API call (~10 s, while the Namespace jobs are still starting). The gate waits on it, so keep it
-    bare.
+    decision or lets the relevance job grow a nix shell, a Namespace runner or a `needs`. It checks the
+    fail-open `if:`, a rename moving an input out, a pull request over the files API's cut-off, and that
+    no relative import in the traced workspace packages leaves its own package.
+  - **It adds ~10 s before the gate legs can request runners**: it is `ubuntu-latest` with a sparse
+    checkout of `scripts/ci` and two API calls, and `pwa-screenshot` cannot ask for its Namespace runner
+    until it has queued and run (more when GitHub is busy). The gate waits on it, so keep it bare.
 - **Smoke covers the platforms compile cannot.** `linux-x64-baseline` on `ubuntu-latest`,
   `linux-arm64` on `ubuntu-24.04-arm`; `darwin-arm64` on `macos-15` is the separate `smoke-darwin`
   job, whose runner may not come (see [macOS runner shortage](#macos-runner-shortage)). Smoke is the one job that

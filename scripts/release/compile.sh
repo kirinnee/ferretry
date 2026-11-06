@@ -9,7 +9,8 @@ set -euo pipefail
 # `COMPILE_TARGETS` narrows that to the named artifact suffixes (space-separated, e.g. `linux-x64-baseline`)
 # for a caller that runs only some of them: the e2e tier drives the one binary of its own host
 # (scripts/ci/e2e.sh), and compiling the other eight binaries cost ~15s in every shard. UNSET, IT IS EVERY
-# TARGET: the release path (publish.sh, the `compile` job) never sets it, and an unknown name fails
+# TARGET (a whitespace-only value counts as unset): the release path (publish.sh, the `compile` job) never
+# sets it, and an unknown name fails
 # rather than silently compiling less.
 ./scripts/ci/setup.sh
 
@@ -19,7 +20,7 @@ bun-linux-arm64	linux-arm64	linux	arm64
 bun-darwin-arm64	darwin-arm64	darwin	arm64"
 
 targets="${all_targets}"
-if [ -n "${COMPILE_TARGETS:-}" ]; then
+if [ -n "${COMPILE_TARGETS:-}" ] && [ -n "$(tr -d "[:space:]" <<<"${COMPILE_TARGETS}")" ]; then
   targets=""
   for wanted in ${COMPILE_TARGETS}; do
     row="$(awk -F '\t' -v wanted="${wanted}" '$2 == wanted' <<<"${all_targets}")"
