@@ -1357,14 +1357,14 @@ export class DaemonStorage {
         // Checked under the same lineage gate and session lane as archive publication: maintenance
         // never revives a session that left the live set while its caller was reading the transcript.
         if (unlessArchived && this.archived.has(id)) return canonicalJsonValue(current);
+        // The journal contract is settled BEFORE the transform runs and before any byte is written,
+        // so a session that has lost its journal keeps its documents exactly as they were and nothing is
+        // even computed to write. The write paths get the same gate from their own ensureSessionDirectory call.
+        await this.ensureSessionDirectory(id);
         const computed = await compute();
         // CAS losers and already-applied transforms have no publication or index/cache side effects.
         if (current !== undefined && computed === current) return canonicalJsonValue(current);
         await this.reviveIfArchived(id);
-        // The journal contract is settled before publication and before any byte is written,
-        // so a session that has lost its journal keeps its documents exactly as they were. The write
-        // paths get the same gate from their own ensureSessionDirectory call.
-        await this.ensureSessionDirectory(id);
         const next = canonicalJsonValue(computed);
         // The write is inside the try for the same reason as `writeConfig`: a write that threw after its rename
         // has still changed the stored config.
