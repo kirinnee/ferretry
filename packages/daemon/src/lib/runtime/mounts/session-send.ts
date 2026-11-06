@@ -26,6 +26,7 @@ import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { queuePage } from '../../session/queue/page.ts';
 import { DEFAULT_SEND_PAGE, MAX_SEND_PAGE, type SendPageQuery, sendPage } from '../../session/send/page.ts';
 
 /**
@@ -309,27 +310,36 @@ function pathMessageId(context: RouteContext): string {
   return decoded;
 }
 
-/** The page a sends read asks for: `limit` (1 to {@link MAX_SEND_PAGE}) and `before`, the cursor a previous page named. */
-function sendPageQuery(context: RouteContext): SendPageQuery {
+/** The page a sends or queue read asks for: `limit` (1 to {@link MAX_SEND_PAGE}) and `before`, the cursor a previous page named. */
+function pageQuery(context: RouteContext, noun: string): SendPageQuery {
   const { query } = context.request;
   for (const [name] of query) {
     if (name !== 'limit' && name !== 'before')
-      throw new ApiError(400, `unknown sends parameter ${name}`, 'unknown_parameter');
+      throw new ApiError(400, `unknown ${noun} parameter ${name}`, 'unknown_parameter');
   }
   const raw = query.get('limit')?.[0];
   const limit = raw === undefined ? DEFAULT_SEND_PAGE : Number(raw);
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_SEND_PAGE)
-    throw new ApiError(400, `a sends limit must be a whole number from 1 to ${MAX_SEND_PAGE}`, 'invalid_limit');
+    throw new ApiError(400, `a ${noun} limit must be a whole number from 1 to ${MAX_SEND_PAGE}`, 'invalid_limit');
   const before = query.get('before')?.[0];
-  if (before === '') throw new ApiError(400, 'a sends cursor must not be empty', 'invalid_cursor');
+  if (before === '') throw new ApiError(400, `a ${noun} cursor must not be empty`, 'invalid_cursor');
   return before === undefined ? { limit } : { limit, before };
 }
 
 /** One page of a session's sends, or the refusal of a cursor that names none of them. */
 async function sendsPage(subsystem: SessionSendSubsystem, context: RouteContext): Promise<ApiResponse> {
-  const query = sendPageQuery(context);
+  const query = pageQuery(context, 'sends');
   const page = sendPage(await subsystem.sends(pathSessionId(context)).catch(refuse), query);
   if (page === undefined) throw new ApiError(400, `no send ${query.before ?? ''} to page from`, 'invalid_cursor');
+  return jsonResponse(page);
+}
+
+/** One page of a session's durable queue, or the refusal of a cursor that names none of its messages. */
+async function queueMessagesPage(subsystem: SessionSendSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const query = pageQuery(context, 'queue');
+  const page = queuePage(await subsystem.queue(pathSessionId(context)).catch(refuse), query);
+  if (page === undefined)
+    throw new ApiError(400, `no queued message ${query.before ?? ''} to page from`, 'invalid_cursor');
   return jsonResponse(page);
 }
 
@@ -358,7 +368,8 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       minimum: 'operator',
       caller: 'any',
       noStore: true,
-      handle: async context => jsonResponse({ messages: await subsystem.queue(pathSessionId(context)).catch(refuse) }),
+      // A page, not the whole log (`session/queue/page.ts`): the same window the sends above answer.
+      handle: async context => await queueMessagesPage(subsystem, context),
     },
     // Editing or taking back a message only while it waits: the words are the sender's until a key goes
     // to the pane, and the agent's after. Governed as the send itself is.

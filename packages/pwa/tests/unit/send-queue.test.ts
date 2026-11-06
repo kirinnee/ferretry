@@ -8,8 +8,12 @@ import {
   joinOutbox,
   joinQueue,
   QueueActionError,
+  extendQueueHistory,
   queueActions,
   readSessionQueue,
+  readSessionQueuePage,
+  refreshQueueHistory,
+  startQueueHistory,
   withdrawQueued,
   withdrawReplyVia,
 } from '../../src/lib/send-queue.ts';
@@ -263,6 +267,112 @@ describe('readSessionQueue', () => {
     expect(
       readSessionQueue({ request: async () => Promise.reject(new Error('offline')) } as never, 's'),
     ).rejects.toThrow('offline');
+  });
+});
+
+describe('readSessionQueuePage', () => {
+  const recording = (answer: unknown) => {
+    const seen: string[] = [];
+    return { seen, api: { request: async (path: string) => (seen.push(path), answer) } as never };
+  };
+
+  test('asks the window with no parameters, and reads a daemon that names no cursor as having nothing older', async () => {
+    const { api, seen } = recording({ messages: [message()] });
+    expect(await readSessionQueuePage(api, 's')).toEqual({ messages: [message()], nextCursor: null });
+    expect(seen).toEqual(['/v1/sessions/s/queue']);
+  });
+
+  test('asks the next older page by its cursor and limit, encoded', async () => {
+    const { api, seen } = recording({ messages: [], nextCursor: 'm/9' });
+    expect(await readSessionQueuePage(api, 's', { before: 'm 1', limit: 50 })).toEqual({
+      messages: [],
+      nextCursor: 'm/9',
+    });
+    expect(seen).toEqual(['/v1/sessions/s/queue?before=m+1&limit=50']);
+  });
+
+  test('an older daemon with no queue route, or a page this build cannot read, is an empty page', async () => {
+    const empty = { messages: [], nextCursor: null };
+    expect(await readSessionQueuePage(failing(404) as never, 's')).toEqual(empty);
+    expect(await readSessionQueuePage({ request: async () => ({ messages: [{ id: 1 }] }) } as never, 's')).toEqual(
+      empty,
+    );
+  });
+});
+
+describe('a queue window against its ledger', () => {
+  test('a bubble whose queue row fell outside the window is drawn from its ledger row alone', () => {
+    const old = row({ sendId: 'old', message: 'from long ago', fate: 'delivered' });
+    const recent = row({ sendId: 'new', message: 'recent' });
+
+    const joined = joinQueue([old, recent], [message({ id: 'new', state: 'typing' })]);
+
+    expect(joined.find(each => each.sendId === 'old')).toEqual(old);
+    expect(joined.find(each => each.sendId === 'new')?.queue?.state).toBe('typing');
+    expect(joined).toHaveLength(2);
+  });
+
+  test('a window with no queue rows leaves every ledger row as it was', () => {
+    const rows = [row({ sendId: 'a' }), row({ sendId: 'b', fate: 'delivered' })];
+    expect(joinQueue(rows, [])).toBe(rows);
+  });
+});
+
+describe('the queue history a page holds', () => {
+  const at = (minute: number) => new Date(Date.UTC(2026, 9, 30, 10, minute)).toISOString();
+  const read = (id: string, minute: number) => message({ id, enqueuedAt: at(minute), state: 'read' });
+  const waiting = (id: string, minute: number) => message({ id, enqueuedAt: at(minute), state: 'queued' });
+  const ids = (history: { readonly messages: readonly QueuedMessage[] }) => history.messages.map(each => each.id);
+
+  test('is the window until older messages are asked for, and each poll replaces it', () => {
+    const first = startQueueHistory({ messages: [read('b', 2), read('c', 3)], nextCursor: 'b' });
+    const next = refreshQueueHistory(first, { messages: [read('c', 3), read('d', 4)], nextCursor: 'c' });
+
+    expect(ids(next)).toEqual(['c', 'd']);
+    expect(next).toMatchObject({ cursor: 'c', older: false });
+  });
+
+  test('adds an older page once, oldest first, and moves the cursor on', () => {
+    const first = startQueueHistory({ messages: [read('c', 3), read('d', 4)], nextCursor: 'c' });
+
+    const extended = extendQueueHistory(first, {
+      messages: [read('a', 1), read('b', 2), read('c', 3)],
+      nextCursor: null,
+    });
+
+    expect(ids(extended)).toEqual(['a', 'b', 'c', 'd']);
+    expect(extended).toMatchObject({ cursor: null, older: true });
+  });
+
+  test('keeps the older messages shown when a poll pushes the window’s edge up', () => {
+    const first = startQueueHistory({ messages: [read('c', 3), read('d', 4)], nextCursor: 'c' });
+    const extended = extendQueueHistory(first, { messages: [read('a', 1), read('b', 2)], nextCursor: null });
+
+    // A new message arrived: the window now spans d, e and c fell off it.
+    const polled = refreshQueueHistory(extended, { messages: [read('d', 4), read('e', 5)], nextCursor: 'd' });
+
+    expect(ids(polled)).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(polled.cursor).toBeNull();
+  });
+
+  test('lets a fresh read win for a message it carries', () => {
+    const first = startQueueHistory({ messages: [waiting('c', 3)], nextCursor: 'c' });
+    const extended = extendQueueHistory(first, { messages: [read('a', 1)], nextCursor: null });
+
+    const polled = refreshQueueHistory(extended, { messages: [read('c', 3)], nextCursor: 'c' });
+
+    expect(polled.messages.find(each => each.id === 'c')?.state).toBe('read');
+  });
+
+  test('starts over from the window when a message held as waiting is no longer in it', () => {
+    const first = startQueueHistory({ messages: [read('d', 4)], nextCursor: 'd' });
+    const extended = extendQueueHistory(first, { messages: [waiting('a', 1)], nextCursor: null });
+
+    // `a` finished since (cancelled, say), so the window carries it no more and its new state is unknown.
+    const polled = refreshQueueHistory(extended, { messages: [read('d', 4)], nextCursor: 'd' });
+
+    expect(ids(polled)).toEqual(['d']);
+    expect(polled).toMatchObject({ cursor: 'd', older: false });
   });
 });
 

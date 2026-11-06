@@ -85,6 +85,16 @@ this page, which is still how a message reaches the pane.
   owner's agenda answers are no longer batched, held for a working ferret or held for a draft: the queue
   does all three (&C38); their receipt and reopen-as-a-card still come from the agenda outbox. A send
   failure told back to a ferret, and a held message released after a revive, keep the direct path.
+- **A page, not the log** — `GET …/queue` answers the same WINDOW `GET …/sends` does (`lib/session/queue/page.ts`
+  over `windowPage` in `lib/session/send/page.ts`, one owner of the rule): the newest `limit` messages (default
+  100, at most 1,000) and EVERY open one however old (`queued`, `typing`, `unconfirmed`), oldest first, with
+  `nextCursor` naming the oldest message of the page proper (`null`: nothing older). `?before=<nextCursor>` answers
+  the next older page, each message once (an older page leaves out the open ones the first page carried); a cursor
+  naming no message is `400 invalid_cursor`. Same minimum and caller as before. Measured on a long-lived lead (2,948
+  messages ever queued, 14 waiting, a 3.5 MB log): the unpaged answer was ~2.2 MB and the app read it 16 times in an
+  18-second start-up. A reader written before the window parses the same `messages` array, only shorter, and
+  needs no delivered history: a bubble whose queue row is outside the window is drawn from its ledger row. The
+  daemon still folds the whole log to answer — this saves the wire, not the read.
 - **What the app shows** — the app reads `GET …/queue` on the same beat as the send ledger
   (`readSessionQueue`; an older daemon's 404 is "no queue", never an error, and a failed read keeps the last
   queue) and joins the two BY ID (`joinQueue`, `packages/pwa/src/lib/send-queue.ts`). One message is one
@@ -109,6 +119,12 @@ this page, which is still how a message reaches the pane.
   before the proof arrived, so the message may well have landed. While a message is `queued` its bubble menu
   offers **Edit** (an inline editor that PATCHes) and **Cancel** (DELETE). A `409` says "it was just typed into
   the agent" and a `404` says the queue no longer has it; both refresh the row.
+
+- **The Queue page reaches older messages** — one ferret's Queue page (`/queue/<sessionId>`) shows the window and, when
+  the machine has more, a **Show older messages** button that reads `?before=<cursor>` through the same daemon fetch (so it
+  rides the relay like every other read) and adds the page to the list; a poll keeps what was added
+  (`refreshQueueHistory`). **All queues** lists only what waits, and every waiting message is always in the window, so it
+  never asks.
 
 - **The device outbox is tick 1** — a message is written to a durable per-device IndexedDB outbox
   (`ferretry-outbox`, `packages/pwa/src/lib/send-outbox.ts`, keyed by the request id) BEFORE the machine hears of

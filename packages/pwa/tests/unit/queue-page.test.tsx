@@ -319,3 +319,43 @@ describe('QueuePageView send times', () => {
     ).toHaveLength(0);
   });
 });
+
+describe('older messages on the queue page', () => {
+  const older = (props: Partial<Parameters<typeof QueuePageView>[0]> = {}) =>
+    view({
+      groups: [group([queued('q1', 'read')])],
+      olderKeys: new Set(['d1/s1']),
+      onLoadOlder: () => undefined,
+      ...props,
+    });
+
+  test('offers to read older messages only for a ferret the machine has more for, and only when the page can ask', () => {
+    mounted = older();
+    expect(text(mounted.root.findByProps({ 'data-queue-older': '' }))).toBe('Show older messages');
+    mounted.unmount();
+    mounted = older({ olderKeys: new Set() });
+    expect(mounted.root.findAllByProps({ 'data-queue-older': '' })).toHaveLength(0);
+    mounted.unmount();
+    mounted = older({ onLoadOlder: undefined });
+    expect(mounted.root.findAllByProps({ 'data-queue-older': '' })).toHaveLength(0);
+  });
+
+  test('asks for the ferret’s older page when pressed, and says so while reading', () => {
+    const asked: string[] = [];
+    mounted = older({ onLoadOlder: each => asked.push(each.key) });
+    run(() => mounted?.root.findByProps({ 'data-queue-older': '' }).props.onClick());
+    expect(asked).toEqual(['d1/s1']);
+    mounted.unmount();
+
+    mounted = older({ loadingOlder: 'd1/s1' });
+    const button = mounted.root.findByProps({ 'data-queue-older': '' });
+    expect(text(button)).toBe('Reading older messages…');
+    expect(button.props.disabled).toBe(true);
+  });
+
+  test('says a failed read of older messages could not be read, beside the button to try again', () => {
+    mounted = older({ olderFailed: 'd1/s1' });
+    expect(JSON.stringify(mounted.toJSON())).toContain('Older messages could not be read. Try again.');
+    expect(text(mounted.root.findByProps({ 'data-queue-older': '' }))).toBe('Show older messages');
+  });
+});

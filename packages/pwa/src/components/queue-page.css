@@ -251,7 +251,15 @@
     min-height: 44px;
     padding-inline: 4px;
   }
-  .fy-queue-more {
+  .fy-queue-more,
+  .fy-queue-older .kt-btn {
     min-height: 44px;
   }
+}
+.fy-queue-older {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 0 4px;
 }

@@ -87,6 +87,17 @@ export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
 export const QueueEditRequestSchema = z.strictObject({ text: z.string().trim().min(1) });
 export type QueueEditRequest = z.infer<typeof QueueEditRequestSchema>;
 
-/** `GET /v1/sessions/:sessionId/queue`: every message the session's queue holds, oldest first. */
-export const SessionQueueSchema = z.object({ messages: z.array(QueuedMessageSchema) });
+/**
+ * `GET /v1/sessions/:sessionId/queue`: a window onto the session's queue, oldest first. With no parameters it is
+ * the newest page and every message that can still move (`queued`, `typing`, `unconfirmed`), the same window
+ * `GET …/sends` answers; `?before=<nextCursor>` (and `limit`) pages the older history, each message once.
+ *
+ * `nextCursor` is the id of the oldest message of the page proper, or `null` when nothing older is left. It is
+ * absent from an answer of a daemon from before the window, which held the whole queue: absent reads as `null`.
+ * A reader written before the window ignores it and sees the same `messages` array, only shorter.
+ */
+export const SessionQueueSchema = z.object({
+  messages: z.array(QueuedMessageSchema),
+  nextCursor: z.string().min(1).nullable().optional(),
+});
 export type SessionQueue = z.infer<typeof SessionQueueSchema>;

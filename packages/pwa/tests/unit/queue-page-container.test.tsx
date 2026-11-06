@@ -51,7 +51,9 @@ const open = async (
       return {
         request: async (path: string, _schema: unknown, init: RequestInit) => {
           calls.push(`${init.method ?? 'GET'} ${path}`);
-          return queues[path] ?? { messages: [] };
+          const answer = queues[path];
+          if (answer instanceof Error) throw answer;
+          return answer ?? { messages: [] };
         },
       } as unknown as FyApiClient;
     },
@@ -173,6 +175,72 @@ describe('QueuePage', () => {
     await runAsync(async () =>
       mounted?.root.findAll(node => node.type === 'button' && text(node) === 'All queues')[0]?.props.onClick(),
     );
+  });
+
+  test('one ferret’s queue reaches older messages through the cursor when asked, and a poll does not lose them', async () => {
+    const finished = (id: string, text: string, minute: number) => ({
+      ...queued(id, text),
+      state: 'read',
+      enqueuedAt: `2026-10-30T10:0${String(minute)}:00.000Z`,
+    });
+    const { store, calls } = await open({
+      '/v1/sessions/s1/queue': { messages: [finished('q2', 'newer words', 2)], nextCursor: 'q2' },
+      '/v1/sessions/s1/queue?before=q2': { messages: [finished('q1', 'older words', 1)], nextCursor: null },
+    });
+    mounted = render(
+      <RouterProvider>
+        <StoreProvider store={store}>
+          <QueuePage daemonId={alpha.daemonId} sessionId="s1" />
+        </StoreProvider>
+      </RouterProvider>,
+    );
+    await settleUntil(() => JSON.stringify(mounted?.toJSON()).includes('newer words'), 'window shown', runAsync);
+    expect(JSON.stringify(mounted.toJSON())).not.toContain('older words');
+    expect(calls.filter(call => call.includes('before'))).toEqual([]);
+
+    await runAsync(async () => mounted?.root.findByProps({ 'data-queue-older': '' }).props.onClick());
+    await settleUntil(() => JSON.stringify(mounted?.toJSON()).includes('older words'), 'older shown', runAsync);
+
+    expect(calls).toContain('GET /v1/sessions/s1/queue?before=q2');
+    expect(mounted.root.findAllByProps({ 'data-queue-older': '' })).toHaveLength(0);
+    expect(JSON.stringify(mounted.toJSON())).toContain('newer words');
+  });
+
+  test('a failed read of older messages says so, keeps what is shown and lets the person try again', async () => {
+    const finished = { ...queued('q2', 'newer words'), state: 'read' };
+    const { store } = await open({
+      '/v1/sessions/s1/queue': { messages: [finished], nextCursor: 'q2' },
+      '/v1/sessions/s1/queue?before=q2': new Error('offline'),
+    });
+    mounted = render(
+      <RouterProvider>
+        <StoreProvider store={store}>
+          <QueuePage daemonId={alpha.daemonId} sessionId="s1" />
+        </StoreProvider>
+      </RouterProvider>,
+    );
+    await settleUntil(() => JSON.stringify(mounted?.toJSON()).includes('newer words'), 'window shown', runAsync);
+
+    await runAsync(async () => mounted?.root.findByProps({ 'data-queue-older': '' }).props.onClick());
+    await settleUntil(() => JSON.stringify(mounted?.toJSON()).includes('could not be read'), 'failure said', runAsync);
+
+    expect(JSON.stringify(mounted.toJSON())).toContain('newer words');
+    expect(mounted.root.findAllByProps({ 'data-queue-older': '' })).toHaveLength(1);
+  });
+
+  test('All queues never offers older messages: everything waiting is already in the window', async () => {
+    const { store } = await open({
+      '/v1/sessions/s1/queue': { messages: [queued('q1', 'from the machine')], nextCursor: 'q1' },
+    });
+    mounted = render(
+      <RouterProvider>
+        <StoreProvider store={store}>
+          <QueuePage daemonId={alpha.daemonId} />
+        </StoreProvider>
+      </RouterProvider>,
+    );
+    await settleUntil(() => JSON.stringify(mounted?.toJSON()).includes('from the machine'), 'queue shown', runAsync);
+    expect(mounted.root.findAllByProps({ 'data-queue-older': '' })).toHaveLength(0);
   });
 
   test('a machine that cannot be reached shows only what this device holds for it, and a lone machine names no machine', async () => {

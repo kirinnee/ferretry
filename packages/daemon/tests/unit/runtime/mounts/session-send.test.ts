@@ -17,6 +17,7 @@ import {
   unconfirmedSendId,
 } from '@ferretry/protocol';
 import should from 'should';
+import { z } from 'zod';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
@@ -371,6 +372,102 @@ describe('the session send ledger routes', () => {
     should(found.status).equal(200);
     should(SessionQueueSchema.parse(JSON.parse(found.body)).messages).deepEqual([message]);
     should(absent.status).equal(404);
+  });
+
+  describe('the queue read as a window', () => {
+    const queued = (id: string, minute: number, state: QueuedMessage['state'] = 'read'): QueuedMessage => ({
+      v: 1,
+      id,
+      sender: 'human',
+      text: `words of ${id}`,
+      attachmentIds: [],
+      enqueuedAt: new Date(Date.UTC(2026, 7, 1, 0, minute)).toISOString(),
+      state,
+      stateAt: new Date(Date.UTC(2026, 7, 1, 0, minute)).toISOString(),
+      revision: 1,
+    });
+    // 150 finished messages and two that still wait, the oldest of them long ago.
+    const longQueue = (): QueuedMessage[] => [
+      queued('m000', 0, 'queued'),
+      ...Array.from({ length: 150 }, (_, n) => queued(`m${String(n + 1).padStart(3, '0')}`, n + 1)),
+      queued('m151', 151, 'queued'),
+    ];
+    const read = async (sessions: FakeSessionSend, query: Record<string, string> = {}, headers = human) =>
+      await dispatcher(sessions).dispatch(
+        request({ method: 'GET', path: '/v1/sessions/s1/queue', headers, query: Object.entries(query) }),
+      );
+    // What a reader written before the window parses: the same array, nothing else required.
+    const OldQueueSchema = z.object({ messages: z.array(QueuedMessageSchema) });
+
+    it('should answer the newest page and every waiting message when asked nothing, in the old shape', async () => {
+      const sessions = new FakeSessionSend();
+      sessions.queued = longQueue();
+
+      const answer = await read(sessions);
+
+      should(answer.status).equal(200);
+      const old = OldQueueSchema.parse(JSON.parse(answer.body));
+      const page = SessionQueueSchema.parse(JSON.parse(answer.body));
+      should(old.messages).have.length(101);
+      should(old.messages[0]?.id).equal('m000');
+      should(old.messages.at(-1)?.id).equal('m151');
+      should(page.nextCursor).equal('m052');
+      should(answer.body.length).be.below(JSON.stringify({ messages: sessions.queued }).length);
+    });
+
+    it('should walk the older history by cursor, each message once, and say where it ends', async () => {
+      const sessions = new FakeSessionSend();
+      sessions.queued = longQueue();
+      const seen: string[] = [];
+
+      let page = SessionQueueSchema.parse(JSON.parse((await read(sessions, { limit: '40' })).body));
+      seen.push(...page.messages.map(each => each.id));
+      while (page.nextCursor != null) {
+        page = SessionQueueSchema.parse(
+          JSON.parse((await read(sessions, { limit: '40', before: page.nextCursor })).body),
+        );
+        seen.push(...page.messages.map(each => each.id));
+      }
+
+      should(seen).have.length(152);
+      should(new Set(seen).size).equal(152);
+      should(page.nextCursor).be.null();
+    });
+
+    it('should refuse a page it cannot name, and a parameter it does not know', async () => {
+      const sessions = new FakeSessionSend();
+      sessions.queued = longQueue();
+
+      const refused = await Promise.all(
+        (
+          [
+            { limit: '0' },
+            { limit: '1001' },
+            { limit: 'two' },
+            { since: 'x' },
+            { before: 'nope' },
+            { before: '' },
+          ] as Record<string, string>[]
+        ).map(async query => await read(sessions, query)),
+      );
+
+      should(refused.map(each => each.status)).eql([400, 400, 400, 400, 400, 400]);
+    });
+
+    it('should ask the same of the caller as before: an operator, and not a caller with no credential', async () => {
+      const sessions = new FakeSessionSend();
+      sessions.queued = longQueue();
+      const route = sessionSendRoutes(sessions).find(
+        entry => entry.path === '/v1/sessions/:sessionId/queue' && entry.method === 'GET',
+      );
+
+      const anonymous = await read(sessions, {}, {} as never);
+      const warden = await read(sessions, {}, { authorization: `Bearer ${CREDENTIALS.warden}` } as never);
+
+      should(route).match({ minimum: 'operator', caller: 'any', noStore: true });
+      should(anonymous.status).equal(401);
+      should(warden.status).equal(403);
+    });
   });
 
   it('should edit and take back a queued message only while it waits, and refuse the rest', async () => {
