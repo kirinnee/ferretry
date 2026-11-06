@@ -83,7 +83,7 @@ describe('protocol attention gateway', () => {
 
     // Assert
     should(calls[0]?.path).equal(`/v1/sessions/${SESSION}/agenda`);
-    should(calls[0]?.init).deepEqual({ headers: { 'x-ferretry-client': 'cli', 'x-fy-agenda-channel': '1' } });
+    should(calls[0]?.init).deepEqual({ headers: { 'x-ferretry-client': 'cli', 'x-fy-agenda-channel': '2' } });
     should(actual.items).have.length(1);
   });
 
@@ -100,7 +100,7 @@ describe('protocol attention gateway', () => {
     should(calls[0]?.init?.headers).deepEqual({
       'content-type': 'application/json',
       'x-ferretry-client': 'cli',
-      'x-fy-agenda-channel': '1',
+      'x-fy-agenda-channel': '2',
     });
     should(JSON.parse(String(calls[0]?.init?.body))).deepEqual({ action: 'dismiss', id: 'A3', note: 'stale' });
   });
@@ -136,7 +136,7 @@ describe('protocol attention gateway attribution', () => {
     // Assert
     const own = {
       'x-ferretry-client': 'cli',
-      'x-fy-agenda-channel': '1',
+      'x-fy-agenda-channel': '2',
       'x-ferretry-session-id': 'mvgt2oz9-04e28935',
     };
     should(calls[0]?.init?.headers).deepEqual(own);
@@ -152,7 +152,7 @@ describe('protocol attention gateway attribution', () => {
     await gateway.snapshot(SESSION);
 
     // Assert
-    should(calls[0]?.init?.headers).deepEqual({ 'x-ferretry-client': 'cli', 'x-fy-agenda-channel': '1' });
+    should(calls[0]?.init?.headers).deepEqual({ 'x-ferretry-client': 'cli', 'x-fy-agenda-channel': '2' });
   });
 });
 

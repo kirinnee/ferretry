@@ -34,7 +34,7 @@ describe('the one-item agenda client', () => {
     expect(calls[0]?.input).toContain(
       sessionId === MACHINE_AGENDA_ID ? '/v1/machine/agenda/A1' : '/v1/sessions/session/agenda/A1',
     );
-    expect(new Headers(calls[0]?.init?.headers).get('x-fy-agenda-channel')).toBe('1');
+    expect(new Headers(calls[0]?.init?.headers).get('x-fy-agenda-channel')).toBe('2');
   });
 
   it('refuses another daemon scope, another item, a header and a malformed document', async () => {

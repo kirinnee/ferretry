@@ -19,6 +19,7 @@ import {
   isMachineAgendaId,
   MAX_AGENDA_SUBJECT_LENGTH,
   readsAgendaChannel,
+  readsAgendaHeaders,
   restoredLegacyAgendaReply,
 } from '@ferretry/protocol';
 import { type ApiActor, isHumanAdminActor, parseActor } from '../../api/actor.ts';
@@ -133,6 +134,12 @@ type HeldReplies = Pick<AgendaRepliesSubsystem, 'pending' | 'delivery'>;
 export const servedAgendaSnapshot = (context: RouteContext, snapshot: AgendaSnapshot): AgendaSnapshot =>
   readsAgendaChannel(context.request.headers) ? snapshot : legacyAgendaSnapshot(snapshot);
 
+/** List projection is opt-in; channel 1 and legacy readers still require complete resolved records. */
+export const servedAgendaListSnapshot = (context: RouteContext, snapshot: AgendaSnapshot) => {
+  const served = servedAgendaSnapshot(context, snapshot);
+  return readsAgendaHeaders(context.request.headers) ? agendaListSnapshot(served) : served;
+};
+
 /**
  * The board with the answers this machine is holding for the ferret (`replies`) and the ones on their way
  * but not yet proven to arrive (`delivery`), so the owner's screen can say "Sending…". An outbox that
@@ -154,9 +161,7 @@ async function list(agenda: AgendaService, replies: HeldReplies, context: RouteC
   const sessionId = pathSessionId(context);
   const result = await agenda.list(sessionId);
   return result.ok
-    ? jsonResponse(
-        agendaListSnapshot(servedAgendaSnapshot(context, await withReplies(replies, sessionId, result.value))),
-      )
+    ? jsonResponse(servedAgendaListSnapshot(context, await withReplies(replies, sessionId, result.value)))
     : refusal(result.error);
 }
 

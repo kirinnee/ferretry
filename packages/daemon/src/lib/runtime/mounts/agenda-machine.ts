@@ -1,15 +1,10 @@
-import {
-  type AgendaErrorCode,
-  AgendaActionRequestSchema,
-  agendaListSnapshot,
-  MACHINE_AGENDA_ID,
-} from '@ferretry/protocol';
+import { type AgendaErrorCode, AgendaActionRequestSchema, MACHINE_AGENDA_ID } from '@ferretry/protocol';
 import type { AgendaActor, AgendaService } from '../../agenda/index.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
-import { agendaActor, pathItemId, servedAgendaSnapshot } from './agenda.ts';
+import { agendaActor, pathItemId, servedAgendaListSnapshot, servedAgendaSnapshot } from './agenda.ts';
 
 const STATUS: Readonly<Record<AgendaErrorCode, number>> = {
   invalid: 400,
@@ -46,7 +41,7 @@ export function agendaMachineRoutes(machine: AgendaService): readonly ApiRoute[]
         if (agendaActor(context.actor).kind !== 'human') throw new ApiError(403, OWNER_ONLY, 'forbidden');
         const listed = await machine.list(MACHINE_AGENDA_ID);
         if (!listed.ok) throw new ApiError(STATUS[listed.error.code], listed.error.message, listed.error.code);
-        return jsonResponse(agendaListSnapshot(servedAgendaSnapshot(context, listed.value)));
+        return jsonResponse(servedAgendaListSnapshot(context, listed.value));
       },
     },
     {

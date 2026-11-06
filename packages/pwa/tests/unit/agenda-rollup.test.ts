@@ -29,7 +29,7 @@ describe('fetchAgendaRollup', () => {
     const calls: string[] = [];
     const pages = [page(['a', 'b'], 'b'), page(['c'])];
     const boards = await fetchAgendaRollup(daemon, async (input, init) => {
-      expect(new Headers(init?.headers).get('x-fy-agenda-channel')).toBe('1');
+      expect(new Headers(init?.headers).get('x-fy-agenda-channel')).toBe('2');
       calls.push(String(input));
       return reply(pages.shift());
     });

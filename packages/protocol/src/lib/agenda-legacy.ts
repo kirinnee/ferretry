@@ -21,8 +21,8 @@ import type {
 
 /** The request header that says a caller reads the whole channel shape; its value is the channel version. */
 export const AGENDA_CHANNEL_HEADER = 'x-fy-agenda-channel';
-/** The channel version a caller names in `AGENDA_CHANNEL_HEADER`. */
-export const AGENDA_CHANNEL_VERSION = '1';
+/** Current reader version: channel fields plus resolved headers on list reads. Version 1 still reads full records. */
+export const AGENDA_CHANNEL_VERSION = '2';
 
 /** The bounds the app before the channel held, for the fields the channel widened. */
 export const LEGACY_AGENDA_LIMITS = {
@@ -191,6 +191,12 @@ export const legacyAgendaOpenSession = (session: AgendaOpenSession): AgendaOpenS
   items: session.items.map(legacyAgendaItem),
 });
 
-/** Whether a request names the channel it reads (`AGENDA_CHANNEL_HEADER`): only then is it served the whole shape. */
-export const readsAgendaChannel = (headers: { get(name: string): string | null | undefined }): boolean =>
+/** Both supported reader versions understand the full channel fields; absent/unknown versions get legacy fields. */
+export const readsAgendaChannel = (headers: { get(name: string): string | null | undefined }): boolean => {
+  const version = headers.get(AGENDA_CHANNEL_HEADER)?.trim();
+  return version === '1' || version === AGENDA_CHANNEL_VERSION;
+};
+
+/** Only channel 2 readers can parse resolved headers in list responses. */
+export const readsAgendaHeaders = (headers: { get(name: string): string | null | undefined }): boolean =>
   headers.get(AGENDA_CHANNEL_HEADER)?.trim() === AGENDA_CHANNEL_VERSION;
