@@ -27,7 +27,7 @@ export interface NoticeFlags {
 }
 
 /** What a notice's `howToResolve` says: reading it is all it asks. */
-export const CLEARS_WHEN = 'Read it in the Inbox; opening it clears it.';
+const CLEARS_WHEN = 'Read it in the Inbox; opening it clears it.';
 
 /** A trimmed value, or nothing when it was absent or blank. */
 function text(value: string | undefined): string | undefined {

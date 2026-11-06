@@ -256,7 +256,6 @@ describe('the suggested join, applied to the real agenda state machine', () => {
     );
     const command = refused.split('\n').find(line => line.trim().startsWith('fy agenda edit A1'));
     should(command).containEql('--question-answer');
-    should(command).not.containEql('--back');
     await run(['fy', ...shellWords(command ?? '').slice(1)]);
 
     // Assert

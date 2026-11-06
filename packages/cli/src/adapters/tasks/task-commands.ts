@@ -10,7 +10,6 @@ import type {
   TaskCreateFlags,
   TaskEditFlags,
   TaskLinkFlags,
-  TaskListShimFlags,
   TaskPatchFlags,
 } from '../../lib/board/board-controllers';
 import { laneGuide } from '../../lib/board/lane-guide';
@@ -142,16 +141,6 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--yaml', 'print the editable document `task patch` takes back, with its revision')
     .action(async (id: string, options: SessionOptions & { readonly yaml?: boolean }) => {
       await board.show(id, options);
-    });
-
-  acting(group.command('list'))
-    .description('retired: this is `fy board --mine` (`--all` for everybody)')
-    .option('--all', 'read every session on this host')
-    .option('--kind <kind>', `only ${choices(TaskKindSchema.options)}`)
-    .option('--query <text>', 'only tasks whose text contains this')
-    .option('--md', 'render as markdown')
-    .action(async (options: TaskListShimFlags) => {
-      await board.listShim(options);
     });
 
   acting(group.command('move'))
@@ -390,40 +379,6 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--reason <why>', 'why it moves')
     .action(async (id: string, options: SessionOptions & { project?: string; lane?: string; reason?: string }) => {
       await board.refile(id, options);
-    });
-
-  // The v1 spellings. They print what replaced them and exit non-zero, so a script that still calls one fails loudly.
-  group
-    .command('status')
-    .description('retired: use `fy task move`')
-    .argument('<id>', 'the task id')
-    .argument('<status>', 'the old status')
-    .option('--reason <why>', 'why it moved')
-    .option('--note <text>', 'ignored')
-    .option('--session <id>', 'ignored')
-    .option('--json', 'ignored')
-    .action((id: string, status: string, options: { reason?: string }) => {
-      board.retiredStatus(id, status, options.reason);
-    });
-
-  group
-    .command('phase')
-    .description('retired: use `fy task move`')
-    .argument('<id>', 'the task id')
-    .argument('<phase>', 'the old phase')
-    .option('--reason <why>', 'why it moved')
-    .option('--session <id>', 'ignored')
-    .option('--json', 'ignored')
-    .action((id: string, phase: string, options: { reason?: string }) => {
-      board.retiredPhase(id, phase, options.reason);
-    });
-
-  acting(group.command('feedback'))
-    .description('retired: recorded as a note')
-    .argument('<id>', ID_HELP)
-    .argument('<text...>', 'what to record')
-    .action(async (id: string, text: string[], options: SessionOptions) => {
-      await board.feedback(id, text, options);
     });
 
   return group;

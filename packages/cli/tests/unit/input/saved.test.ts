@@ -29,13 +29,13 @@ function rigWith(saved?: InputSaved, result = {}, overrides = {}, prompt = new F
   return rig(overrides, new FakeInputGateway([withSaved(saved)], result), prompt);
 }
 
-describe('fy input answer --secret', () => {
+describe('fy input answer --account', () => {
   it('should send only the entry name: no prompt, no padded value', async () => {
     // Arrange
     const { ports, gateway, prompt, out } = rigWith();
 
     // Act
-    await new InputController(ports).answer('!A7', { ...options, secret: 'SUDO_KIRIN_BOX' });
+    await new InputController(ports).answer('!A7', { ...options, account: 'SUDO_KIRIN_BOX' });
 
     // Assert
     should(prompt.asked).have.length(0);
@@ -49,53 +49,12 @@ describe('fy input answer --secret', () => {
     should(out.messages).deepEqual(['Sent to %terminal:dev and pressed Enter.']);
   });
 
-  it('should take --entry as the same flag, and refuse two different names', async () => {
-    // Arrange
-    const first = rigWith();
-    const second = rigWith();
-
-    // Act
-    await new InputController(first.ports).answer('!A7', { ...options, entry: 'SUDO_KIRIN_BOX' });
-    const failure = await new InputController(second.ports)
-      .answer('!A7', { ...options, secret: 'A_ONE', entry: 'A_TWO' })
-      .catch((error: unknown) => error);
-
-    // Assert
-    should(first.gateway.delivered[0]?.body.entry).equal('SUDO_KIRIN_BOX');
-    should((failure as Error).message).containEql('same flag');
-    should(second.gateway.delivered).have.length(0);
-  });
-
-  it('should take --account as the flag, the same name in an old spelling too, and refuse two different names', async () => {
-    // Arrange
-    const first = rigWith();
-    const second = rigWith();
-    const third = rigWith();
-
-    // Act
-    await new InputController(first.ports).answer('!A7', { ...options, account: 'SUDO_KIRIN_BOX' });
-    await new InputController(second.ports).answer('!A7', {
-      ...options,
-      account: 'SUDO_KIRIN_BOX',
-      secret: 'SUDO_KIRIN_BOX',
-    });
-    const failure = await new InputController(third.ports)
-      .answer('!A7', { ...options, account: 'A_ONE', secret: 'A_TWO' })
-      .catch((error: unknown) => error);
-
-    // Assert
-    should(first.gateway.delivered[0]?.body.entry).equal('SUDO_KIRIN_BOX');
-    should(second.gateway.delivered[0]?.body.entry).equal('SUDO_KIRIN_BOX');
-    should((failure as Error).message).equal('--account, --secret and --entry are the same flag: name one account');
-    should(third.gateway.delivered).have.length(0);
-  });
-
   it('should work without a terminal, because no value is typed', async () => {
     // Arrange
     const { ports, gateway } = rigWith(undefined, {}, { interactive: false });
 
     // Act
-    await new InputController(ports).answer('!A7', { ...options, secret: 'SUDO_KIRIN_BOX' });
+    await new InputController(ports).answer('!A7', { ...options, account: 'SUDO_KIRIN_BOX' });
 
     // Assert
     should(gateway.delivered).have.length(1);
@@ -107,7 +66,7 @@ describe('fy input answer --secret', () => {
 
     // Act
     const failure = await new InputController(ports)
-      .answer('!A7', { ...options, secret: 'not a handle' })
+      .answer('!A7', { ...options, account: 'not a handle' })
       .catch((error: unknown) => error);
 
     // Assert
@@ -121,7 +80,7 @@ describe('fy input answer --secret', () => {
 
     // Act
     const failure = await new InputController(ports)
-      .answer('!A7', { ...options, secret: 'SUDO_KIRIN_BOX' })
+      .answer('!A7', { ...options, account: 'SUDO_KIRIN_BOX' })
       .catch((error: unknown) => error);
 
     // Assert
@@ -137,10 +96,10 @@ describe('fy input answer --secret', () => {
 
     // Act
     const saveAs = await controller
-      .answer('!A7', { ...options, secret: 'SUDO_KIRIN_BOX', saveAs: 'ANOTHER' })
+      .answer('!A7', { ...options, account: 'SUDO_KIRIN_BOX', saveAs: 'ANOTHER' })
       .catch((error: unknown) => error);
     const label = await controller
-      .answer('!A7', { ...options, secret: 'SUDO_KIRIN_BOX', label: 'x' })
+      .answer('!A7', { ...options, account: 'SUDO_KIRIN_BOX', label: 'x' })
       .catch((error: unknown) => error);
 
     // Assert
@@ -154,7 +113,7 @@ describe('fy input answer --secret', () => {
     const { ports, out } = rigWith();
 
     // Act
-    await new InputController(ports).answer('!A7', { ...options, secret: 'SUDO_KIRIN_BOX' });
+    await new InputController(ports).answer('!A7', { ...options, account: 'SUDO_KIRIN_BOX' });
 
     // Assert
     should(out.diagnostics.join('\n')).containEql(
@@ -346,24 +305,20 @@ describe('fy input commands (saved logins)', () => {
     return { ...harness, parsed: program.parseAsync(['node', 'fy', ...argv]) };
   }
 
-  it('should parse --account NAME, its old spellings --secret and --entry, and --save-as NAME --label TEXT', async () => {
+  it('should parse --account NAME, and --save-as NAME --label TEXT', async () => {
     // Arrange
     const account = run(['input', 'answer', '!A7', '-s', SESSION, '--account', 'SUDO_KIRIN_BOX']);
-    const secret = run(['input', 'answer', '!A7', '-s', SESSION, '--secret', 'SUDO_KIRIN_BOX']);
-    const entry = run(['input', 'answer', '!A7', '-s', SESSION, '--entry', 'SUDO_KIRIN_BOX']);
     const save = run(['input', 'answer', '!A7', '-s', SESSION, '--save-as', 'NEW_ONE', '--label', 'My box']);
 
     // Act
-    await Promise.all([account.parsed, secret.parsed, entry.parsed, save.parsed]);
+    await Promise.all([account.parsed, save.parsed]);
 
     // Assert
     should(account.gateway.delivered[0]?.body.entry).equal('SUDO_KIRIN_BOX');
-    should(secret.gateway.delivered[0]?.body.entry).equal('SUDO_KIRIN_BOX');
-    should(entry.gateway.delivered[0]?.body.entry).equal('SUDO_KIRIN_BOX');
     should(save.gateway.delivered[0]?.body.save).deepEqual({ entry: 'NEW_ONE', label: 'My box' });
   });
 
-  it('should show --account in the help and hide its old spellings, which say "account" for the save too', () => {
+  it('should show --account in the help, which says "account" for the save too', () => {
     // Arrange
     const program = new Command().name('fy').exitOverride();
     registerInputCommands(program, new InputController(rig().ports));

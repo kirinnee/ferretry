@@ -1,4 +1,4 @@
-import { type Command, Option } from 'commander';
+import type { Command } from 'commander';
 import type { InputAnswerOptions, InputCommandOptions, InputController } from './controller.ts';
 
 const SESSION_FLAG = '-s, --session <id>';
@@ -54,9 +54,6 @@ export function registerInputCommands(program: Command, controller: InputControl
     .option('--no-enter', 'type it without pressing Enter')
     .option('--enter', 'press Enter after typing (browser fields otherwise stay unsubmitted)')
     .option('--account <name>', 'type this account instead of reading a value (see `fy account ls`)')
-    // The flag's older spellings, from before an account was called one: still read, no longer shown.
-    .addOption(new Option('--secret <name>', 'the same as --account').hideHelp())
-    .addOption(new Option('--entry <name>', 'the same as --account').hideHelp())
     .option('--save-as <name>', 'keep the value you type as this account (a new one, or an existing handle)')
     .option('--label <text>', 'the label a new account gets with --save-as')
     .action(async (reference: string, _options: unknown, command: Command) => {

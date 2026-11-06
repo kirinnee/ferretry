@@ -984,32 +984,18 @@ describe('agenda controller add — related work', () => {
     should(search.relatedCalls).have.length(1);
   });
 
-  it('should still open with a bare --new for one release, warning that the reason is wanted', async () => {
+  it('should refuse a --new with no reason, and open nothing', async () => {
     // Arrange
-    const { controller, gateway, out } = withCheck(strong, own);
+    const { controller, gateway } = withCheck(strong, own);
 
     // Act
-    await controller.add(['choose', 'a', 'relay'], { ...brief, new: true });
+    const failure = await controller
+      .add(['choose', 'a', 'relay'], { ...brief, new: '  ' })
+      .catch((error: unknown) => error);
 
     // Assert
-    should(gateway.applied).have.length(1);
-    should(out.diagnostics.join('\n')).containEql('a bare --new is deprecated');
-    should(out.diagnostics.join('\n')).containEql('--new "<why none fits>"');
-    should(out.diagnostics.join('\n')).containEql('Opening a new agenda anyway: no reason was given.');
-  });
-
-  it('should read the argument a legacy --new swallowed as the ask, warning that --new now takes the reason', async () => {
-    // Arrange — `add --title Deploy --premise x --context y --new "Choose region"` under the old boolean flag.
-    const { controller, gateway, out } = withCheck([], own);
-
-    // Act
-    await controller.add([], { ...BRIEF, title: 'Deploy', new: 'Choose region' });
-
-    // Assert
-    should(gateway.applied).have.length(1);
-    should(gateway.applied[0]?.request).containEql({ action: 'add', subject: 'Choose region' });
-    should(out.diagnostics.join('\n')).containEql('--new now takes the reason');
-    should(out.diagnostics.join('\n')).containEql('was read as your ask');
+    should((failure as Error).message).containEql('--new needs the reason');
+    should(gateway.applied).have.length(0);
   });
 
   it('should keep --new as the reason when the ask was given in words', async () => {

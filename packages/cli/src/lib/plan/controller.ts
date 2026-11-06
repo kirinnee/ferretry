@@ -20,7 +20,7 @@ import {
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { daemonNeedsUpdate, isUnknownRoute } from '../daemon/features.ts';
-import { OWNER_COMMAND_REFUSAL, refuseOwnerCommandInPane } from '../daemon/owner-only.ts';
+import { refuseOwnerCommandInPane } from '../daemon/owner-only.ts';
 import { showUntrusted } from '../input/render.ts';
 import type { CopyPorts } from './ports.ts';
 
@@ -37,9 +37,6 @@ export interface CopyRuleOptions extends CopyCommandOptions {
   readonly count?: string | undefined;
   readonly expires?: string | undefined;
 }
-
-/** Said when a ferret reaches for the owner's command: the one neutral sentence, a read refused as well as a change. */
-export const COPY_FERRET_REFUSAL = OWNER_COMMAND_REFUSAL;
 
 const UNITS: Readonly<Record<string, number>> = { s: 1, m: 60, h: 3_600, d: 86_400 };
 

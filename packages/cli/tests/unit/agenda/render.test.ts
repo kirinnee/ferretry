@@ -55,17 +55,6 @@ describe('attention listing', () => {
     should(row(actual, 5)).equal('      stage: explainer · since 2026-07-31T09:05:00.000Z · raised by agent sol');
   });
 
-  it('should print a legacy default howToResolve as the current agenda default', () => {
-    // Act
-    const actual = renderAgendaList(
-      snapshot([humanItem('A1', 'approve', { howToResolve: 'Answer this item on the agenda board.' })]),
-    );
-
-    // Assert
-    should(actual).containEql('resolve: Answer this item on the agenda (it records who answered).');
-    should(actual).not.containEql('attention board');
-  });
-
   it('should not invent a name for an unnamed agent', () => {
     // Act
     const actual = renderAgendaList(snapshot([agentItem('A2', 'pick a cluster', { raisedByName: null })]));

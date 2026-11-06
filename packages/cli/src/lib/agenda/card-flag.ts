@@ -1,24 +1,22 @@
 import { parseTaskRef, type TaskRef } from '@ferretry/protocol';
 
 /**
- * `fy agenda add --task`, which means two things for one release (board-design.md §2.1, §2.6):
+ * `fy agenda add --task <card>` (board-design.md §2.1, §2.6): `--task F18` (also `&F18`, `#F18`) names the board
+ * CARD the item belongs to; leave `--task` out and the card is the focus card. A to-do is `--todo`, never `--task`.
  *
- * - `--task F18` (also `&F18`, `#F18`) names the board CARD the item belongs to;
- * - a bare `--task` is the older spelling of `--todo`: the owner does something, nothing to choose.
- *
- * The option takes an optional value, so a word after a bare `--task` arrives as its value. A value that is
- * not a card reference is therefore the first word of the ask, put back where it came from, and the flag
- * keeps its to-do meaning — `fy agenda add --task Rotate the key` still raises a to-do.
+ * The option takes a required card reference. Anything else is refused, never read as part of the ask: a
+ * typo'd card must not land the item on the focus card, and `--task Rotate the key` (the retired spelling of a
+ * to-do) must not quietly raise a different kind of item.
  */
 export interface CardFlag {
-  /** `--task <card>` or `--task` (true) as parsed; absent when not given. */
-  readonly task?: boolean | string;
-  /** `--todo`: the to-do spelling that replaces a bare `--task`. */
+  /** `--task <card>` as typed; absent when not given. */
+  readonly task?: string;
+  /** `--todo`: the human does something; nothing to choose. */
   readonly todo?: boolean;
 }
 
 export interface ResolvedCardFlag {
-  /** The ask's words, with a word a bare `--task` swallowed put back first. */
+  /** The ask's words, untouched. */
   readonly words: readonly string[];
   /** Whether the item is a to-do. */
   readonly todo: boolean;
@@ -27,9 +25,11 @@ export interface ResolvedCardFlag {
 }
 
 export function resolveCardFlag(words: readonly string[], flags: CardFlag): ResolvedCardFlag {
-  const task = flags.task;
   const todo = flags.todo === true;
-  if (typeof task !== 'string') return { words, todo: todo || task === true };
-  const card = parseTaskRef(task);
-  return card.ok ? { words, todo, card: card.value } : { words: [task, ...words], todo: true };
+  if (flags.task === undefined) return { words, todo };
+  const card = parseTaskRef(flags.task);
+  if (!card.ok) {
+    throw new Error(`--task needs a card reference (F18 or &F18), not "${flags.task}"; for a to-do use --todo`);
+  }
+  return { words, todo, card: card.value };
 }

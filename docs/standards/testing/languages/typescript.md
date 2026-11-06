@@ -179,7 +179,7 @@ nothing:
 it('should reject non-semver strings', () => {
   // Act + Assert
   for (const value of ['', 'v1.2.3', '1.2', '01.2.3', '1.2.3.4', 'latest']) {
-    should(isSemver(value)).be.false();
+    should(() => assertSemver(value)).throw();
   }
 });
 ```

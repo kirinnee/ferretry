@@ -13,7 +13,7 @@ describe('ask kinds', () => {
 
   it('should map every card kind to the ask it carries', () => {
     // Act + Assert
-    should(parseAsk({ kind: 'task' })).deepEqual({ kind: 'task', ask: { kind: 'task' } });
+    should(parseAsk({ kind: 'todo' })).deepEqual({ kind: 'task', ask: { kind: 'task' } });
     should(parseAsk({ kind: 'permission' })).deepEqual({ kind: 'permission', ask: { kind: 'permission' } });
     should(parseAsk({ kind: 'review' })).deepEqual({ kind: 'review', ask: { kind: 'answer-review' } });
     should(parseAsk({ kind: 'reply' })).deepEqual({ kind: 'reply', ask: { kind: 'open-question' } });
@@ -154,9 +154,8 @@ describe('task asks', () => {
     should(ASK_KIND_NAMES).containEql('todo');
   });
 
-  it('should still read --kind task as the older spelling, but never document it: "task" means a board card', () => {
-    // Act + Assert — the wire value stays `task`, so a released daemon's strict add schema keeps accepting it.
-    should(parseAsk({ kind: 'task' })).deepEqual({ kind: 'task', ask: { kind: 'task' } });
+  it('should not document --kind task: "task" means a board card', () => {
+    // Act + Assert
     should(ASK_KIND_NAMES).not.containEql('task');
   });
 });

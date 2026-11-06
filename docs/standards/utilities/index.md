@@ -21,7 +21,7 @@ Its relevant utility surface is:
 
 - Native JavaScript and TypeScript collection, string, object, and promise APIs.
 - Zod, already installed in packages/cli, for parsing and validating unknown runtime input.
-- packages/cli/src/lib/version.ts, which provides the focused isSemver and assertSemver helpers.
+- packages/cli/src/lib/version.ts, which provides the focused assertSemver helper.
 
 There is no shared Result, Option, collection, or string utility module today. Do not claim one
 exists or introduce a new library merely because another project uses it. When a repeated

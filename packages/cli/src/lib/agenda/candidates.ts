@@ -8,7 +8,6 @@ import {
   type TaskRef,
   type WorkRelatedResponse,
 } from '@ferretry/protocol';
-import { displayHowToResolve } from './how-to-resolve.ts';
 import { agendaReference } from './reference.ts';
 
 /**
@@ -253,10 +252,7 @@ function beyondEdit(candidate: AgendaCandidate, request: AddRequest, card: TaskR
     [filled(request.links), 'links'],
     [filled(request.terms), 'terms'],
     [request.why !== request.subject, 'a reason of its own (--why)'],
-    [
-      displayHowToResolve(request.howToResolve) !== displayHowToResolve(item.howToResolve),
-      'its own way to resolve it (--resolve)',
-    ],
+    [request.howToResolve !== item.howToResolve, 'its own way to resolve it (--resolve)'],
     [tiedElsewhere, card === undefined ? '' : `the card ${refKey(card)}`],
     [request.offerClose === true && item.offerClose !== true, 'the Done button (--offer-close)'],
   ];
@@ -349,7 +345,7 @@ export function renderCandidates(
     readonly binary: string;
     readonly request: AddRequest;
     readonly named?: TaskRef | undefined;
-    /** Set when a new agenda is being opened anyway (`--new`): the reason given, or empty for a bare `--new`. */
+    /** Set when a new agenda is being opened anyway (`--new`): the reason given. */
     readonly opening?: string | undefined;
   },
 ): string {
@@ -389,10 +385,6 @@ export function renderCandidates(
           'Open a new agenda only when none passes the test:',
           `  ${plan.kind === 'edit' ? `${options.binary} agenda add … --new "<why none fits>"` : newWay(options.binary, closest)}`,
         ]
-      : [
-          options.opening === ''
-            ? 'Opening a new agenda anyway: no reason was given.'
-            : `Opening a new agenda anyway: ${options.opening}`,
-        ]),
+      : [`Opening a new agenda anyway: ${options.opening}`]),
   ].join('\n');
 }

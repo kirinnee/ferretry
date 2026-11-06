@@ -16,7 +16,6 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
 import { OWNER_COMMAND_REFUSAL } from '../../../src/lib/daemon/owner-only';
 import {
-  COPY_FERRET_REFUSAL,
   CopyController,
   PROFILE_TARGETS_NEEDS_PASSKEY,
   PROFILE_TARGETS_WARNING,
@@ -209,9 +208,9 @@ describe('fy copy', () => {
       failure(withCredential.controller.list({ session: 's1' })),
     ]);
 
-    should(new Set(refusals)).eql(new Set([COPY_FERRET_REFUSAL]));
-    should(COPY_FERRET_REFUSAL).equal("this is the owner's command; a ferret's pane can't run it");
-    should(COPY_FERRET_REFUSAL).not.containEql('pastes');
+    should(new Set(refusals)).eql(new Set([OWNER_COMMAND_REFUSAL]));
+    should(OWNER_COMMAND_REFUSAL).equal("this is the owner's command; a ferret's pane can't run it");
+    should(OWNER_COMMAND_REFUSAL).not.containEql('pastes');
     should([inPane.gateway.added, withCredential.gateway.removed]).eql([[], []]);
   });
 

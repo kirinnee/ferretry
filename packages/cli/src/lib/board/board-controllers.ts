@@ -128,13 +128,6 @@ export interface TaskPatchFlags extends BoardCommonOptions {
 
 export interface TaskLinkFlags extends BoardLinkOptions, BoardCommonOptions {}
 
-export interface TaskListShimFlags extends BoardCommonOptions {
-  readonly all?: boolean | undefined;
-  readonly kind?: string | undefined;
-  readonly query?: string | undefined;
-  readonly md?: boolean | undefined;
-}
-
 export interface BoardControllerDependencies {
   readonly gateway: IBoardGateway;
   readonly output: IBoardOutput;
@@ -570,57 +563,4 @@ export class BoardController {
       }),
     );
   }
-
-  // ─── the v1 spellings ────────────────────────────────────────────────────────────────────────
-
-  /** `fy task status <id> <status> --reason …` is retired: print the spelling that replaces it and fail. */
-  retiredStatus(idText: string, status: string, reason: string | undefined): never {
-    const id = shownId(idText);
-    return refuse(
-      [
-        `\`${this.deps.binary} task status\` is retired: a task now moves between the lanes of its project's board.`,
-        `use: ${this.deps.binary} task move ${id} <lane> --reason ${quoted(reason ?? `now ${status}`)}`,
-        `see the lanes: ${this.deps.binary} board lanes show`,
-      ].join('\n'),
-    );
-  }
-
-  /** `fy task phase <id> <phase> --reason …` is retired in the same way. */
-  retiredPhase(idText: string, phase: string, reason: string | undefined): never {
-    const id = shownId(idText);
-    return refuse(
-      [
-        `\`${this.deps.binary} task phase\` is retired: audit phases are lanes now.`,
-        `use: ${this.deps.binary} task move ${id} <lane> --reason ${quoted(reason ?? `now ${phase}`)}`,
-        `see the lanes: ${this.deps.binary} board lanes show`,
-      ].join('\n'),
-    );
-  }
-
-  /** Feedback has no lane of its own on the board; it is a note that says so. */
-  async feedback(idText: string, text: readonly string[], options: BoardCommonOptions): Promise<void> {
-    this.deps.output.diagnostic(
-      `\`${this.deps.binary} task feedback\` is retired; recording it as a note: ${this.deps.binary} task note ${shownId(idText)} "feedback: …"`,
-    );
-    await this.note(idText, ['feedback:', ...text], options);
-  }
-
-  /** `fy task list` is `fy board --mine` (`--all` for everybody's), with a one-line notice. */
-  async listShim(options: TaskListShimFlags): Promise<void> {
-    const mine = options.all !== true;
-    this.deps.output.diagnostic(
-      `\`${this.deps.binary} task list\` is now \`${this.deps.binary} board ${mine ? '--mine' : '--project all'}\``,
-    );
-    await this.board({
-      ...options,
-      ...(mine ? { mine: true } : { project: ALL_PROJECTS }),
-    });
-  }
 }
-
-const quoted = (words: string): string => `"${words.replace(/"/gu, '\\"')}"`;
-
-const shownId = (idText: string): string => {
-  const parsed = requireCardRef(idText);
-  return formatTaskRef(parsed);
-};

@@ -102,9 +102,9 @@ export interface AgendaAddOptions
   readonly offerClose?: boolean;
   /**
    * `--new "<why none fits>"`: open a new agenda although open ones were listed as candidates (search, check, then
-   * open). A bare `--new` (true) still works for one release, with a warning that asks for the reason.
+   * open). The reason is required.
    */
-  readonly new?: boolean | string;
+  readonly new?: string;
   /** `--related <id>`: a card to tie the item to, or an agenda item to edit instead of raising a duplicate. */
   readonly related?: string;
 }
@@ -121,8 +121,6 @@ export interface AgendaPatchOptions extends AgendaCommandOptions {
 export interface AgendaEditOptions extends AgendaCommandOptions, Omit<EditFlags, 'neededBy'>, TabFlags {
   /** `--now`: it is urgent — an item the owner snoozed wakes too (at most once an hour). */
   readonly now?: boolean;
-  /** `--back`: RETIRED (`agenda answer` replaced it); refused with the way to say it now. */
-  readonly back?: boolean;
   /** `--by`: when it is needed, as typed (ISO, "in 3h", "17:00"). */
   readonly by?: string;
   /** A Markdown file for the new body; `-` reads standard input. */
@@ -274,7 +272,11 @@ export class AgendaController {
 
   async add(typed: readonly string[], given: AgendaAddOptions): Promise<void> {
     const [file, body] = await this.#inputs(given.jsonFile, given.bodyFile);
-    const [words, options] = this.#legacyNew(typed, given, file);
+    const words = typed;
+    const options = given;
+    if (options.new !== undefined && options.new.trim() === '') {
+      throw new Error('--new needs the reason no open agenda fits: --new "<why none fits>"');
+    }
     const pointer = this.#relatedPointer(options);
     const flag = resolveCardFlag(words, pointer.card === undefined ? options : { ...options, task: pointer.card });
     const tabbed = await tabFieldsOf(options, options.where, path => this.#read(path), stdinCount(options));
@@ -323,25 +325,6 @@ export class AgendaController {
   }
 
   /**
-   * `--new` was a bare flag, so `add --title T --new "Choose region"` raised "Choose region". It now takes the reason, and
-   * Commander hands it the next word. With no other ask given, that word is the ask the old form meant: it is read as
-   * the ask, with a warning, and `--new` stays bare for the one release it is still accepted.
-   */
-  #legacyNew(
-    words: readonly string[],
-    options: AgendaAddOptions,
-    file: BriefFile | undefined,
-  ): [readonly string[], AgendaAddOptions] {
-    const swallowed = typeof options.new === 'string' ? options.new.trim() : '';
-    const named = [options.ask, options.summary, file?.ask, file?.summary].some(line => (line?.trim() ?? '') !== '');
-    if (swallowed === '' || words.some(word => word.trim() !== '') || named) return [words, options];
-    this.out.diagnostic(
-      `--new now takes the reason no open agenda fits, so "${swallowed}" was read as your ask: write the ask as words or --ask, and the reason after --new`,
-    );
-    return [[swallowed], { ...options, new: true }];
-  }
-
-  /**
    * SEARCH, CHECK, THEN OPEN (docs/agenda.md § One channel per topic): whether the add may open a new agenda. The open
    * agendas on the caller's own ledger are the candidates, closest first — one carrying the named card, or a card it
    * depends on or blocks, leads (dependent things share one agenda). With none, the add opens, after the daemon's
@@ -355,15 +338,9 @@ export class AgendaController {
     card: TaskRef | undefined,
     options: AgendaAddOptions,
   ): Promise<boolean> {
-    const why = typeof options.new === 'string' ? options.new.trim() : '';
-    const bare = options.new === true || (typeof options.new === 'string' && why === '');
-    const opening = bare || why !== '';
+    const why = options.new?.trim() ?? '';
+    const opening = why !== '';
     const binary = this.related?.binary ?? 'fy';
-    if (bare) {
-      this.out.diagnostic(
-        `a bare --new is deprecated and stops working in a later release: say why no open agenda fits, --new "<why none fits>"`,
-      );
-    }
     // `--new` skips the refusal, never the discovery: the search runs and the open agendas are listed either way.
     // The daemon's related check is asked once: it ranks the candidates and catches a strong duplicate elsewhere.
     const related = await this.related?.matches(
@@ -446,7 +423,7 @@ export class AgendaController {
   #relatedPointer(options: AgendaAddOptions): { card?: string; item?: AgendaId } {
     const typed = options.related?.trim() ?? '';
     if (typed === '') return {};
-    if (options.new !== undefined && options.new !== false) throw new Error('pass --new or --related <id>, not both');
+    if (options.new !== undefined) throw new Error('pass --new or --related <id>, not both');
     if (parseTaskRef(typed).ok) {
       if (typeof options.task === 'string') throw new Error('pass --task <card> or --related <card>, not both');
       return { card: typed };
@@ -485,11 +462,6 @@ export class AgendaController {
 
   async edit(reference: string, options: AgendaEditOptions): Promise<void> {
     const id = parseAgendaReference(reference);
-    if (options.back === true) {
-      throw new Error(
-        `--back is retired. To answer the owner on ${id}: \`agenda answer ${id} "<text>"\` (it goes back to their list in its old place). To ask them something new: \`agenda edit ${id} --kind <kind> --option …\` replaces the ask, and it asks again, fresh`,
-      );
-    }
     const channel =
       options.stage !== undefined ||
       // `--where` collects, so it is an empty list when not given.

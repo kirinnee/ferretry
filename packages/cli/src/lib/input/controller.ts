@@ -9,7 +9,7 @@ import {
   padInputValue,
 } from '@ferretry/protocol';
 import { parseAgendaReference } from '../agenda/reference.ts';
-import { OWNER_COMMAND_REFUSAL, refuseOwnerCommandInPane } from '../daemon/owner-only.ts';
+import { refuseOwnerCommandInPane } from '../daemon/owner-only.ts';
 import type { InputPorts } from './ports.ts';
 import {
   describeInputReason,
@@ -40,18 +40,11 @@ export interface InputAnswerOptions extends InputCommandOptions {
   readonly enter?: boolean | undefined;
   /** `--account NAME`: type this account's field instead of reading a value. */
   readonly account?: string | undefined;
-  /** `--secret NAME`: the older spelling of `--account`, still read and no longer shown. */
-  readonly secret?: string | undefined;
-  /** `--entry NAME`: the oldest spelling of `--account`, still read and no longer shown. */
-  readonly entry?: string | undefined;
   /** `--save-as NAME`: keep the typed value in this account. */
   readonly saveAs?: string | undefined;
   /** `--label TEXT`: the label a new account gets. */
   readonly label?: string | undefined;
 }
-
-/** Said when a ferret reaches for the owner's command: the one neutral sentence, `input ls` (a read) included. */
-export const FERRET_REFUSAL = OWNER_COMMAND_REFUSAL;
 
 function handle(value: string, flag: string): string {
   const parsed = LoginEntryIdSchema.safeParse(value.trim());
@@ -60,17 +53,9 @@ function handle(value: string, flag: string): string {
   return parsed.data;
 }
 
-/** The account `--account` (or its older spellings `--secret` / `--entry`) names, if any was given. */
+/** The account `--account` names, if any was given. */
 function namedEntry(options: InputAnswerOptions): string | undefined {
-  const named = (
-    [
-      ['--account', options.account],
-      ['--secret', options.secret],
-      ['--entry', options.entry],
-    ] as const
-  ).flatMap(([flag, value]) => (value === undefined ? [] : [handle(value, flag)]));
-  if (new Set(named).size > 1) throw new Error('--account, --secret and --entry are the same flag: name one account');
-  return named[0];
+  return options.account === undefined ? undefined : handle(options.account, '--account');
 }
 
 /** The label a save carries: the owner's own, else the one the card suggests or the entry already has, else the handle. */

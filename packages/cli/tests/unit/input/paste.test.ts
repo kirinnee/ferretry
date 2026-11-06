@@ -28,7 +28,7 @@ describe('fy input answer on a paste', () => {
     const controller = new InputController(ports);
 
     // Act
-    const named = await controller.answer('!A7', { session: SESSION, secret: 'SUDO_BOX' }).then(
+    const named = await controller.answer('!A7', { session: SESSION, account: 'SUDO_BOX' }).then(
       () => undefined,
       (error: Error) => error.message,
     );

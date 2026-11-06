@@ -200,7 +200,7 @@ export function composeAddRequest(
   const steps = stepsFrom(flags.step) ?? stepsFrom(file.steps);
   const fields = fieldsFrom(flags.field, file.fields as readonly FieldInput[] | undefined);
   const named =
-    flags.kind ?? (flags.task === true ? 'task' : (file.kind ?? (fields === undefined ? undefined : 'form')));
+    flags.kind ?? (flags.task === true ? 'todo' : (file.kind ?? (fields === undefined ? undefined : 'form')));
   const confirms = confirmsFrom(flags, file, named, options ?? fileOptions, questions);
   const card = askFor(
     named,
@@ -417,13 +417,13 @@ function askFor(
   if ((lone?.options?.length ?? 0) > MAX_AGENDA_CARD_ANSWERS) throw new Error(TOO_MANY_ANSWERS);
   // Steps and nothing to answer is a to-do: the human does it, then marks it done.
   if (named === undefined && options === undefined && questions === undefined && hasSteps) {
-    return parseAsk({ kind: 'task' });
+    return parseAsk({ kind: 'todo' });
   }
   if (named !== undefined || options !== undefined) {
     // `--kind choice` over a lone question that brought its own options chooses between those.
     const choices = options ?? (named === 'choice' ? lone?.options?.map(each => each.label) : undefined);
     return parseAsk({
-      ...(named === undefined ? {} : { kind: named }),
+      ...(named === undefined || kind === undefined ? {} : { kind }),
       ...(choices === undefined ? {} : { option: choices }),
     });
   }
