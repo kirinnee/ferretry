@@ -1,3 +1,9 @@
+## [4.286.0](https://github.com/kirinnee/ferretry/compare/v4.285.1...v4.286.0) (2026-11-06)
+
+### Features
+
+* **pwa:** auto-read replies aloud when a turn ends (F137 slice 2) ([#1491](https://github.com/kirinnee/ferretry/issues/1491)) ([6884539](https://github.com/kirinnee/ferretry/commit/6884539157768a6050d08eb69804a6d47f22dc43))
+
 ## [4.285.1](https://github.com/kirinnee/ferretry/compare/v4.285.0...v4.285.1) (2026-11-06)
 
 ### Performance
