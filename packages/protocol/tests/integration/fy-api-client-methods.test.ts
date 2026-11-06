@@ -394,6 +394,22 @@ const CASES: readonly MethodCase[] = [
     expected: [sessionView],
   },
   {
+    name: 'archivedSessions with the default limit',
+    invoke: client => client.archivedSessions(),
+    verb: 'GET',
+    path: '/v1/archived-sessions?limit=100',
+    response: () => jsonResponse({ count: 1, sessions: [sessionView] }),
+    expected: { count: 1, sessions: [sessionView] },
+  },
+  {
+    name: 'archivedSessions asked only for its count',
+    invoke: client => client.archivedSessions(0),
+    verb: 'GET',
+    path: '/v1/archived-sessions?limit=0',
+    response: () => jsonResponse({ count: 4, sessions: [] }),
+    expected: { count: 4, sessions: [] },
+  },
+  {
     name: 'suggestNames with the default count',
     invoke: client => client.suggestNames(),
     verb: 'GET',
