@@ -75,6 +75,11 @@ class World {
   ownDraft: () => OwnDraft = () => ({ kind: 'foreign' });
   /** How many times the deliverer asked the send path to finish a draft of ours. */
   clears = 0;
+  /** How many times the deliverer asked the send tracker to look; a test may make the look settle a send. */
+  rechecks = 0;
+  onRecheck: () => void = () => undefined;
+  /** Runs on every ledger read, so a test can act in the middle of a look. */
+  onFate: () => void = () => undefined;
   /** The settings the deliverer reads on every look; a test narrows them with Object.assign. */
   readonly settings: { -readonly [K in keyof QueueDeliverySettings]: QueueDeliverySettings[K] } = {
     ...defaultQueueDeliverySettings,
@@ -105,10 +110,17 @@ class World {
             if (answer instanceof Error) throw answer;
             return answer;
           },
-          fate: async (_id: SessionId, messageId: string) => this.fates.get(messageId),
+          fate: async (_id: SessionId, messageId: string) => {
+            this.onFate();
+            return this.fates.get(messageId);
+          },
           clearOwnDraft: async () => {
             this.clears += 1;
             return this.ownDraft();
+          },
+          recheck: async () => {
+            this.rechecks += 1;
+            this.onRecheck();
           },
         },
         sessions: () => [ID],
@@ -300,6 +312,184 @@ describe('handing over a queue', () => {
     should(world.state('b')?.state).equal('delivered');
   });
 
+  it('should hold the queue with a reason, not behind a typing message, when the pane never came to a prompt (&B153)', async () => {
+    // ryu: the send path gave up waiting for a prompt before any key. It now says so, and the message waits
+    // as `busy` — visible to its sender — instead of sitting `typing` with everything else behind it.
+    const world = new World(message('a', 'human'), message('b', 'human', 1));
+    world.answers.push({ kind: 'refused', reason: 'busy' });
+
+    await world.deliverer.enqueued(ID);
+
+    should(world.handed).eql(['a']);
+    should(world.state('a')).containEql({ state: 'queued', waitReason: 'busy' });
+    should(world.state('b')).containEql({ state: 'queued', waitReason: 'busy' });
+    should(world.scheduled.at(-1)).equal(defaultQueueDeliverySettings.lookMs);
+
+    // The next look finds the prompt: both go, in order, and nothing was typed twice.
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a', 'b']);
+    should(world.queue.map(entry => entry.state)).eql(['delivered', 'delivered']);
+  });
+
+  it('should ask the tracker to look at a hand-over left accepted too long, then move on once it settles (&B153)', async () => {
+    const world = new World(message('a', 'human'), message('b', 'human', 1));
+    world.answers.push(new Error('tmux session fy-ryu did not become ready to accept a turn'));
+    world.fates.set('a', 'accepted');
+
+    await world.deliverer.enqueued(ID);
+    should(world.state('a')?.state).equal('typing');
+
+    // Inside the window the tracker's own look is still due: nothing is asked.
+    world.nowMs += defaultQueueDeliverySettings.recheckMs - 1;
+    await world.deliverer.changed(ID);
+    should(world.rechecks).equal(0);
+
+    // Past it, the tracker is asked once — and not again on every five-second look after.
+    world.nowMs += 1;
+    await world.deliverer.changed(ID);
+    world.nowMs += defaultQueueDeliverySettings.lookMs;
+    await world.deliverer.changed(ID);
+    should(world.rechecks).equal(1);
+    should(world.handed).eql(['a']);
+
+    // Still accepted a window later: asked again. This look proves it absent and retypes it, held in the queue.
+    world.onRecheck = () => void world.fates.set('a', 'queued');
+    world.nowMs += defaultQueueDeliverySettings.recheckMs;
+    await world.deliverer.changed(ID);
+    should(world.rechecks).equal(2);
+    await world.deliverer.changed(ID);
+
+    should(world.state('a')?.state).equal('delivered');
+    should(world.handed).eql(['a', 'b']);
+    should(world.state('b')?.state).equal('delivered');
+  });
+
+  it('should not hand a message over again until the pane shows a prompt, after one never came (&B153)', async () => {
+    // Each hand-over to a pane with no prompt waits out a half-minute readiness window under both locks;
+    // handed over on every five-second look, a pane drawing neither a prompt nor work looped for hours.
+    const world = new World(message('a', 'human'), message('b', 'human', 1));
+    world.target = { ...world.target, status: 'awaiting_user' };
+    world.pane = pane({ activeWork: false });
+    world.answers.push({ kind: 'refused', reason: 'busy', untilPrompt: true });
+
+    await world.deliverer.enqueued(ID);
+    world.nowMs += defaultQueueDeliverySettings.lookMs;
+    await world.deliverer.changed(ID);
+    world.nowMs += defaultQueueDeliverySettings.lookMs;
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a']);
+    should(world.queue.map(entry => entry.waitReason)).eql(['busy', 'busy']);
+
+    // A prompt shows: the queue goes at once, both in order.
+    world.pane = pane({ activeWork: false, promptReady: true });
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a', 'b']);
+    should(world.queue.map(entry => entry.state)).eql(['delivered', 'delivered']);
+  });
+
+  it('should keep waiting when the record still says ready for a pane that showed no prompt (stale flag)', async () => {
+    // The record's readiness flag was already true when the pane was refused for having no prompt: still
+    // true on the next look is the very reading that was refused, so the backoff must hold, not end.
+    const world = new World(message('a', 'human'));
+    world.target = { ...world.target, promptReady: true };
+    world.pane = pane({ activeWork: false });
+    world.answers.push({ kind: 'refused', reason: 'busy', untilPrompt: true });
+
+    await world.deliverer.enqueued(ID);
+    for (let look = 0; look < 3; look += 1) {
+      world.nowMs += defaultQueueDeliverySettings.lookMs;
+      await world.deliverer.changed(ID);
+    }
+
+    should(world.handed).eql(['a']);
+    should(world.state('a')?.waitReason).equal('busy');
+
+    // The flag falling and rising again is a real readiness change after the refusal: the queue goes.
+    world.target = { ...world.target, promptReady: false };
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['a']);
+    world.target = { ...world.target, promptReady: true };
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a']);
+    should(world.state('a')?.state).equal('delivered');
+  });
+
+  it('should go at once when the record turns ready after a refusal made while it was not', async () => {
+    const world = new World(message('a', 'human'));
+    world.pane = pane({ activeWork: false });
+    world.answers.push({ kind: 'refused', reason: 'busy', untilPrompt: true });
+
+    await world.deliverer.enqueued(ID);
+    world.nowMs += defaultQueueDeliverySettings.lookMs;
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['a']);
+
+    world.target = { ...world.target, promptReady: true };
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a']);
+  });
+
+  it('should try a promptless pane again once `recheckMs` has passed, in case its prompt is not recognised', async () => {
+    const world = new World(message('a', 'human'));
+    world.pane = pane({ activeWork: false });
+    world.answers.push({ kind: 'refused', reason: 'dialog', untilPrompt: true });
+
+    await world.deliverer.enqueued(ID);
+    world.nowMs += defaultQueueDeliverySettings.recheckMs - 1;
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['a']);
+    should(world.state('a')?.waitReason).equal('dialog');
+
+    world.nowMs += 1;
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a']);
+    should(world.state('a')?.state).equal('delivered');
+  });
+
+  it('should hand over again at once after a refusal that is not about a missing prompt', async () => {
+    const world = new World(message('a', 'human'));
+    world.answers.push({ kind: 'refused', reason: 'unreadable' });
+
+    await world.deliverer.enqueued(ID);
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a']);
+  });
+
+  it('should start no tracker look once the daemon is stopping', async () => {
+    const world = new World(message('a', 'human'));
+    world.answers.push(new Error('tmux went away'));
+    world.fates.set('a', 'accepted');
+    await world.deliverer.enqueued(ID);
+    world.nowMs += defaultQueueDeliverySettings.recheckMs;
+    // The stop lands mid-look, between reading the ledger and asking the tracker.
+    world.onFate = () => void world.deliverer.stop();
+
+    await world.deliverer.look(ID);
+
+    should(world.rechecks).equal(0);
+  });
+
+  it('should not ask the tracker about a hand-over still being proven, or one the ledger already settled', async () => {
+    const world = new World(message('a', 'human'));
+    world.answers.push({ kind: 'unproven' });
+    world.fates.set('a', 'accepted');
+
+    await world.deliverer.enqueued(ID);
+    world.fates.set('a', 'unaccounted');
+    world.nowMs += defaultQueueDeliverySettings.recheckMs;
+    await world.deliverer.changed(ID);
+
+    should(world.state('a')?.state).equal('unconfirmed');
+    should(world.rechecks).equal(0);
+  });
+
   it('should leave a hand-over that threw to the ledger when the ledger has it, and fail it when it does not', async () => {
     const recorded = new World(message('a', 'human'));
     recorded.answers.push(new Error('tmux went away'));
@@ -451,6 +641,7 @@ describe('handing over a queue', () => {
         handOver: async () => ({ kind: 'landed' }),
         fate: async () => undefined,
         clearOwnDraft: async () => ({ kind: 'foreign' }),
+        recheck: async () => undefined,
       },
       sessions: () => [ID],
       sleep: async () => undefined,

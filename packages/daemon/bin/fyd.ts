@@ -10294,7 +10294,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock,
           scheduler: new TimerSendScheduler(),
           view: async id => await deliveryView.view(id),
-          transport: new SendPathQueueTransport(sends, sendLedger),
+          transport: new SendPathQueueTransport(sends, sendLedger, sendTracker),
           sessions: () => storage.listSessions().map(session => session.id),
           sleep: async milliseconds => await Bun.sleep(milliseconds),
         },

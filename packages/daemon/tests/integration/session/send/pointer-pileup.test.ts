@@ -203,10 +203,11 @@ describe("a send to a Claude ferret whose composer holds a person's question", (
       const answer = await subject.send();
       const record = await subject.deadlines();
 
-      // Idle, the draft refuses the send outright. Busy, the person's send is kept open and untyped
-      // for the tracker, which looked at every deadline and still typed nothing.
-      if (status === 'running') should(record).containEql({ fate: 'accepted', untyped: true });
-      else should(answer).startWith('refused');
+      // Either way the person's send is kept open and untyped for the tracker, which looked at every
+      // deadline and still typed nothing. Busy, the composer could not be read; idle, the pane never came
+      // to a prompt, a refusal before any key too (&B153) — it used to throw untracked.
+      should(record).containEql({ fate: 'accepted', untyped: true });
+      should(answer).not.startWith('refused');
       should(subject.pane.fills()).be.empty();
       should(subject.pane.enters()).equal(0);
       should(subject.pane.composer).equal(DRAFT);

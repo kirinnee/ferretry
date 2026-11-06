@@ -26,6 +26,7 @@ import {
 import { sameSendId } from './send-id.ts';
 import type { SessionSendSettings } from './settings.ts';
 import { sameComposerText, showsOwnText, strandablePointer, strandableText, strandedSend } from './stranded.ts';
+import { isOpenSend } from './tracking.ts';
 import {
   type ComposerDraftAction,
   type ComposerDraftOutcome,
@@ -40,6 +41,9 @@ import {
   SendLandingUnconfirmed,
   type SendLaunchGate,
   type SendLedger,
+  SendNotReady,
+  type SendNotReadyCause,
+  SendPaneNotReady,
   type SendPaneObservation,
   type SendPath,
   SendPending,
@@ -181,6 +185,29 @@ export function composerUnreadableRefusal(): SendScreenUnreadable {
   );
 }
 
+/** What a queue waits on when a pane never came to a prompt. */
+const NOT_READY_REASON: Readonly<Record<SendNotReadyCause, SendNotReady['reason']>> = {
+  busy: 'busy',
+  dialog: 'dialog',
+  exited: 'stopped',
+};
+
+/**
+ * Why nothing was typed when the agent's pane never came to a prompt (&B153). A session record can say
+ * idle while its agent is still mid-turn — a declared wait is set from inside the turn — and the wait for a
+ * prompt then gives up before the first key. Nothing was typed, so the same send may go again.
+ */
+export function paneNotReadyRefusal(error: SendPaneNotReady): SendNotReady {
+  const reason = NOT_READY_REASON[error.why];
+  const remedy =
+    reason === 'dialog'
+      ? 'answer the prompt on its screen'
+      : reason === 'stopped'
+        ? 'it is revived with the message when sent again'
+        : 'send it again once its turn ends';
+  return new SendNotReady(`the agent never came to a prompt (${error.message}); ${remedy}`, reason);
+}
+
 /** What the locked section decided, before anything that must happen outside the lock. */
 type LockedOutcome =
   | { readonly kind: 'revive' }
@@ -311,8 +338,10 @@ export class SessionSendService {
     const sender = await this.sender(request);
     const parties = await this.parties(request);
     const payload = await this.payload(request, sender, parties);
-    const locked = await this.ports.serial.run(request.id, async () => await this.locked(request, payload, sender));
-    const settled = locked.kind === 'revive' ? await this.revive(request, payload, sender) : locked;
+    const settled = await this.watchedOnThrow(request.id, request.sendId, async () => {
+      const locked = await this.ports.serial.run(request.id, async () => await this.locked(request, payload, sender));
+      return locked.kind === 'revive' ? await this.revive(request, payload, sender) : locked;
+    });
     // Only a NEW transport is tracked: a duplicate request found a send already being watched.
     if (settled.applied) this.ports.tracking.track(request.id);
     const target = await this.require(request.id);
@@ -323,6 +352,27 @@ export class SessionSendService {
       } else if (sender !== undefined) await this.attribute(target, sender, request.message, settled);
     }
     return { target, disposition: dispositionOf(settled.path, settled.held), record: settled.record };
+  }
+
+  /**
+   * Runs a send's work and, when it throws with the send's row still open, tells the tracker (&B153).
+   *
+   * A row is written before the first key and a throw does not take it back, so a send that threw is the
+   * one that most needs a look: only the tracker can prove where it went and type it again once it is
+   * proven absent. The look used to be scheduled only by a send that returned, and every queue whose
+   * hand-over threw sat behind an `accepted` row nothing looked at again until the daemon restarted. A
+   * refusal before any key leaves no open row and schedules nothing.
+   */
+  private async watchedOnThrow<T>(id: SessionId, sendId: string, work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (error) {
+      const records = await this.ports.ledger.list(id).catch(() => undefined);
+      const row = records?.find(record => record.sendId === sendId);
+      // A ledger that cannot be read cannot rule an open row out, and an extra look costs one read.
+      if (records === undefined || (row !== undefined && isOpenSend(row))) this.ports.tracking.track(id);
+      throw error;
+    }
   }
 
   /**
@@ -338,7 +388,13 @@ export class SessionSendService {
    * a record saying an attempt was in flight, not silence.
    */
   async reattempt(id: SessionId, sendId: string, options: ReattemptOptions): Promise<SendRecord> {
-    const record = await this.ports.serial.run(id, async () => {
+    const record = await this.watchedOnThrow(id, sendId, async () => await this.reattemptLocked(id, sendId, options));
+    this.ports.tracking.track(id);
+    return record;
+  }
+
+  private async reattemptLocked(id: SessionId, sendId: string, options: ReattemptOptions): Promise<SendRecord> {
+    return await this.ports.serial.run(id, async () => {
       const current = (await this.ports.ledger.list(id)).find(entry => entry.sendId === sendId);
       if (current === undefined) throw new SendRefused(`session ${id} has no send ${sendId}`);
       if (current.fate === 'delivered') throw new SendRefused(`send ${sendId} is already delivered`);
@@ -435,18 +491,27 @@ export class SessionSendService {
         return (await this.queued(id, next, await this.ports.terminal.queue(id, text))) ?? next;
       } catch (error) {
         if (error instanceof SendLandingUnconfirmed) throw await this.unconfirmed(id, next);
-        if (!(error instanceof SendComposerOccupied) && !(error instanceof SendComposerUnreadable)) throw error;
+        if (
+          !(error instanceof SendComposerOccupied) &&
+          !(error instanceof SendComposerUnreadable) &&
+          !(error instanceof SendPaneNotReady)
+        )
+          throw error;
         // Nothing was typed, so the record goes back to exactly what it said before this attempt.
         await this.ports.ledger.settle(id, sendId, restorable(current));
         if (error instanceof SendComposerOccupied) throw composerOccupiedRefusal(error.draft);
+        // A pane that never came to a prompt is waited out, like one mid-turn: the tracker looks again.
+        if (error instanceof SendPaneNotReady)
+          throw new SendRetypeWithheld(
+            `the agent never came to a prompt (${error.message}), so send ${sendId} was not typed again`,
+            'busy',
+          );
         throw new SendRetypeWithheld(
           `the agent's composer could not be read to prove it empty, so send ${sendId} was not typed again`,
           'unreadable',
         );
       }
     });
-    this.ports.tracking.track(id);
-    return record;
   }
 
   /**
@@ -784,7 +849,8 @@ export class SessionSendService {
    *
    * A composer that already held text is refused by the terminal before its first keystroke, so the
    * acceptance is the one thing to take back: a fresh send is withdrawn (its id may honestly start
-   * over) and a released held message goes back to being held.
+   * over) and a released held message goes back to being held. A pane that never came to a prompt is
+   * the same (&B153): the wait for one gives up before the fill, so no key of the message went.
    */
   private async untyped<T>(
     id: SessionId,
@@ -796,18 +862,33 @@ export class SessionSendService {
       return { typed: true, value: await transport() };
     } catch (error) {
       if (error instanceof SendLandingUnconfirmed) throw await this.unconfirmed(id, record);
-      if (!(error instanceof SendComposerOccupied) && !(error instanceof SendComposerUnreadable)) throw error;
+      if (
+        !(error instanceof SendComposerOccupied) &&
+        !(error instanceof SendComposerUnreadable) &&
+        !(error instanceof SendPaneNotReady)
+      )
+        throw error;
       const occupied = error instanceof SendComposerOccupied;
-      if (!occupied && release === undefined && keptForTheTracker(record))
-        return { typed: false, record: await this.keptUntyped(id, record) };
+      const notReady = error instanceof SendPaneNotReady ? error : undefined;
+      const why = notReady === undefined ? undefined : 'the agent never came to a prompt';
+      // Kept open for the tracker: a person's send, and a held message released into a live session that
+      // never came to a prompt — put back on hold, it would wait for a revive a live session never gets. A
+      // pane that went away is a revive's to deliver into, never the tracker's (&B153).
+      const kept =
+        !occupied &&
+        notReady?.why !== 'exited' &&
+        (release === undefined ? keptForTheTracker(record) : notReady !== undefined);
+      if (kept)
+        return { typed: false, record: await this.keptUntyped(id, record, why ?? 'the composer could not be read') };
       if (release !== undefined) await this.ports.ledger.settle(id, record.sendId, { held: true });
       else
         await this.ports.ledger.withdraw(
           id,
           record.sendId,
-          occupied ? 'the composer held unsent text' : 'the composer could not be read',
+          occupied ? 'the composer held unsent text' : (why ?? 'the composer could not be read'),
         );
       if (occupied) throw composerOccupiedRefusal(error.draft);
+      if (error instanceof SendPaneNotReady) throw paneNotReadyRefusal(error);
       throw composerUnreadableRefusal();
     }
   }
@@ -818,14 +899,11 @@ export class SessionSendService {
    * "Send it again in a moment" reached nobody: the owner's message was withdrawn a second after it was
    * accepted, behind a composer the reader could not place, and nothing ever tried it again. The record
    * stays `accepted` and `untyped`, the tracker is told, and it types the send — ahead of any other —
-   * the first time the pane reads clear.
+   * the first time the pane reads clear. A pane that never came to a prompt is kept open the same way.
    */
-  private async keptUntyped(id: SessionId, record: SendRecord): Promise<SendRecord> {
+  private async keptUntyped(id: SessionId, record: SendRecord, reason: string): Promise<SendRecord> {
     const kept = await this.ports.ledger.settle(id, record.sendId, { untyped: true });
-    await this.ports.repository.journal(id, 'control.send_deferred', {
-      sendId: record.sendId,
-      reason: 'the composer could not be read',
-    });
+    await this.ports.repository.journal(id, 'control.send_deferred', { sendId: record.sendId, reason });
     return kept ?? { ...record, untyped: true };
   }
 
