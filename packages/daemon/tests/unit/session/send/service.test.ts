@@ -2586,6 +2586,16 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
       should(built.terminal.calls).not.containEql('submitComposer');
     });
 
+    it('keeps the repair count when the tracker retypes a repaired send, so it never earns a second (review round 5)', async () => {
+      const reopened = delivered({ fate: 'accepted', fateAt: undefined, submitNudges: 1 });
+      const built = taken([pane({ promptReady: true })], new FakeRetraction(true), reopened);
+
+      await built.service.reattempt(ID, 'send-0', { by: 'daemon' });
+
+      should(built.ledger.records.get('send-0')).match({ attempt: 2, submitNudges: 1 });
+      should(built.terminal.typed).have.length(1);
+    });
+
     it('never lets the tracker’s nudge press a delivered send', async () => {
       const built = taken([pane({ draft: POINTER })], new FakeRetraction(true), delivered());
 

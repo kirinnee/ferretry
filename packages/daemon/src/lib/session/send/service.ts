@@ -489,7 +489,9 @@ export class SessionSendService {
         retryable: undefined,
         queuedAt: undefined,
         queueProof: undefined,
-        submitNudges: undefined,
+        // &B153: a repaired retraction (open WITH evidence) keeps its count, so retyping it never earns a second
+        // repair once the harness takes the new copy back too.
+        submitNudges: current.evidence === undefined ? undefined : current.submitNudges,
         untyped: undefined,
         // Marked BEFORE the keys, like the attempt itself: a crash mid-retype must still count it.
         ...(midTurn ? { busyTyped: true } : {}),
