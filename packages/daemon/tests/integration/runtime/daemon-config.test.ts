@@ -110,8 +110,10 @@ describe('FileDaemonConfig', () => {
     should(seeded).not.have.property('publicUrl');
     should(seeded).not.have.property('bindUrl');
     should(seeded).not.have.property('port');
-    // What IS seeded is still a usable document: defaults an operator can see and change.
-    should(seeded).have.property('host', '127.0.0.1');
+    // What IS seeded is still a usable document: defaults an operator can see and change. The listener is
+    // a bind carrier — the one spelling this product writes — and no legacy `host` line exists.
+    should(seeded).not.have.property('host');
+    should(seeded.carriers).deepEqual([{ kind: 'bind', host: '127.0.0.1' }]);
   });
 
   it('should record the address this daemon took and leave every other field alone', async () => {
@@ -126,7 +128,10 @@ describe('FileDaemonConfig', () => {
     const written = JSON.parse(documents.text() ?? '{}') as Record<string, unknown>;
 
     // Assert — recording is what makes choosing safe: the next boot binds exactly this or refuses.
-    should(written).have.property('port', 7_432);
+    // The port lands in a bind carrier carrying the host as typed; no legacy key is written back.
+    should(written.carriers).deepEqual([{ kind: 'bind', host: '127.0.0.1', port: 7_432 }]);
+    should(written).not.have.property('port');
+    should(written).not.have.property('host');
     should(recorded.portIsRecorded).be.true();
     should(recorded.bindUrl).equal('http://127.0.0.1:7432');
     // Exactly one key is written; the operator's own settings survive untouched.
@@ -134,10 +139,10 @@ describe('FileDaemonConfig', () => {
     should(written).have.property('projectRoots', ['~/Code']);
     // And still nothing derived, so a recorded port cannot freeze an advertisement beside it.
     should(written).not.have.property('publicUrl');
-    // EXACTLY ONE KEY, literally: the document that goes back to disk is the one that came off it,
-    // plus `port`. A write that also planted every schema default would put values into a file the
+    // The document that goes back to disk is the one that came off it with the listener spelled as a
+    // bind carrier. A write that also planted every schema default would put values into a file the
     // operator never typed, which is the only evidence anything downstream has of what they chose.
-    should(Object.keys(written)).deepEqual(['host', 'healthIntervalSeconds', 'projectRoots', 'port']);
+    should(Object.keys(written)).deepEqual(['carriers', 'healthIntervalSeconds', 'projectRoots']);
   });
 
   it('should record a settled port into the bind carrier rather than the key it supersedes', async () => {
@@ -533,7 +538,9 @@ describe('FileDaemonConfig', () => {
     await documents.store.record(7_433);
 
     // Assert
-    should(JSON.parse(documents.text() ?? '{}')).have.property('port', 7_433);
+    should(JSON.parse(documents.text() ?? '{}')).have.property('carriers', [
+      { kind: 'bind', host: '127.0.0.1', port: 7_433 },
+    ]);
   });
 });
 

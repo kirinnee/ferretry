@@ -38,9 +38,14 @@
  * `carriers` array baked out to disk with yesterday's port is the same defect as a frozen `publicUrl`
  * — the operator edits one field and the daemon appears to ignore it.
  *
+ * The conversion that moves a document from the old spelling to this one (`carriers-conversion.ts`) obeys
+ * the same rule: it writes only what the operator wrote, in the new spelling, and fills in no default.
+ *
  * ## PRECEDENCE, AND WHY IT IS PRECEDENCE RATHER THAN A REFUSAL
  *
- * `host`, `port` and `relay` remain readable as the LEGACY SPELLING of a one-bind, one-relay list. When
+ * `host`, `port` and `relay` remain readable as the LEGACY SPELLING of a one-bind, one-relay list — a
+ * document an older release wrote is converted to `carriers` at boot, and these keys are read only until
+ * that has happened everywhere. When
  * `carriers` says nothing about a kind, the legacy keys are read as that kind's entry. When `carriers`
  * DOES name a kind, it wins and the legacy spelling of that same kind is superseded — reported, never
  * silent, because a key an operator edited with no effect is the worst outcome this file exists to
@@ -49,7 +54,7 @@
  * refusal built on that difference would refuse boots nobody misconfigured.
  */
 
-import { declaredBind, SocketEndpointSchema } from '@ferretry/protocol';
+import { declaredBind, LOOPBACK, SocketEndpointSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 
 /** A host as an operator writes one: a name or an address, never empty. */
@@ -336,3 +341,81 @@ export function supersededCarrierKeys(input: DaemonCarrierDocumentKeys): readonl
   if (input.carriers.some(carrier => carrier.kind === 'relay') && written('relay')) keys.push('relay');
   return keys;
 }
+
+/** Whether a raw `carriers` element is an object naming this kind — the same test `declaredBind` applies. */
+export function isCarrierOfKind(entry: unknown, kind: DaemonCarrierEntry['kind']): boolean {
+  return typeof entry === 'object' && entry !== null && (entry as { readonly kind?: unknown }).kind === kind;
+}
+
+/**
+ * The bind entry a legacy `host` and `port` spell, written the way the operator typed them.
+ *
+ * `host` is carried over exactly as written, and a missing one is the loopback the schema's default
+ * would have supplied — the only value that reading ever had. `port` is carried over only when one was
+ * written (or is being recorded now): an unwritten port keeps meaning "this boot may choose, once, and
+ * write the answer down", so it is never filled in here.
+ */
+export function legacyBindEntry(
+  rawDocument: Readonly<Record<string, unknown>>,
+  port: unknown = rawDocument.port,
+): Record<string, unknown> {
+  return {
+    kind: 'bind',
+    host: Object.hasOwn(rawDocument, 'host') ? rawDocument.host : LOOPBACK,
+    ...(port === undefined ? {} : { port }),
+  };
+}
+
+/**
+ * The raw document with some keys removed and entries appended to its `carriers` list, and nothing else
+ * changed: every other key and every existing entry keeps its value, and the keys keep their order.
+ *
+ * A `carriers` key that already exists stays where it is; one that does not is created where the first
+ * removed key stood, so a file that began with `host` and `port` begins with `carriers` instead.
+ * The caller guarantees `carriers` is absent or a list — a value that is neither is not something to
+ * append to, and deciding what that means is the caller's refusal to make, not this function's.
+ */
+export function documentWithCarrierEntries(
+  rawDocument: Readonly<Record<string, unknown>>,
+  removedKeys: readonly string[],
+  entries: readonly unknown[],
+): Record<string, unknown> {
+  const existing: readonly unknown[] = Array.isArray(rawDocument.carriers) ? rawDocument.carriers : [];
+  const hasCarriers = Object.hasOwn(rawDocument, 'carriers');
+  // Pairs rather than assignments: `Object.fromEntries` defines own properties, so a hand-written
+  // `"__proto__"` key stays an ordinary key instead of being read as a prototype.
+  const pairs: [string, unknown][] = [];
+  let placed = false;
+  for (const [key, value] of Object.entries(rawDocument)) {
+    if (key === 'carriers') {
+      pairs.push(['carriers', [...existing, ...entries]]);
+      placed = true;
+    } else if (removedKeys.includes(key)) {
+      if (!hasCarriers && !placed) {
+        pairs.push(['carriers', [...entries]]);
+        placed = true;
+      }
+    } else {
+      pairs.push([key, value]);
+    }
+  }
+  if (!placed) pairs.push(['carriers', [...entries]]);
+  return Object.fromEntries(pairs);
+}
+
+/**
+ * What converting a document's legacy carrier keys came to, as the boot reports it.
+ *
+ * `converted` names the keys that went and the entries that came (never the document), and where the
+ * original was kept; `refused` leaves the file exactly as it was and says why in a sentence.
+ */
+export type CarrierConversionOutcome =
+  | { readonly kind: 'unchanged' }
+  | {
+      readonly kind: 'converted';
+      readonly file: string;
+      readonly backup: string;
+      readonly removedKeys: readonly string[];
+      readonly addedEntries: readonly Readonly<Record<string, unknown>>[];
+    }
+  | { readonly kind: 'refused'; readonly reason: string };

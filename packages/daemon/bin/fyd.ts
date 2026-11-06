@@ -270,6 +270,7 @@ import {
   deliverStopSignal,
   describeWorkerProbes,
   deviceOfPath,
+  CARRIERS_JOURNAL_NAME,
   ExplicitDaemonConfig,
   FetchEnhancementTransport,
   FileAuditJournal,
@@ -7395,6 +7396,35 @@ function createRecommendSubsystem(
 }
 
 /**
+ * Rewrites a legacy `host`/`port`/`relay` in the configuration document into `carriers` entries, and says so.
+ *
+ * NOTHING HERE MAY STOP A BOOT. A converted file is announced with where the original was kept; a
+ * refused one is announced as left alone and why, and the boot goes on reading the legacy spelling
+ * exactly as it always did; a filesystem failure is announced the same way, because a configuration
+ * this daemon could still have read is never worth refusing to start over. Whether the document is
+ * readable at all is the next step's question and gets its own, better, sentence.
+ */
+async function convertLegacyCarrierKeysAtBoot(world: DaemonWorld): Promise<void> {
+  const path = world.config.path;
+  try {
+    const outcome = await world.config.convertLegacyCarrierKeys(new Date(world.clock.now()).toISOString());
+    if (outcome.kind === 'converted')
+      world.notices.step(
+        'configuration converted',
+        `${outcome.file}: host/port/relay are now carriers entries (${outcome.removedKeys.join(', ')}); the original is kept at ${outcome.backup}`,
+      );
+    else if (outcome.kind === 'refused')
+      world.notices.state(
+        `the legacy host/port/relay keys in ${path} were left as they are, because converting them to carriers entries was refused: ${outcome.reason}`,
+      );
+  } catch (error) {
+    world.notices.state(
+      `the legacy host/port/relay keys in ${path} could not be converted to carriers entries (${error instanceof Error ? error.message : String(error)}); check the file and its ${CARRIERS_JOURNAL_NAME} record before the next start`,
+    );
+  }
+}
+
+/**
  * Which address this boot will serve, or the refusal that stops it.
  *
  * TWO PATHS, and which one applies is decided by whether the configuration document RECORDS a port.
@@ -8051,7 +8081,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // `secretEnvironment` recipes. Two stores over one file would be two opinions about what the
   // operator wrote — and the one the UI showed would not be the one a spawned child got.
   const daemonConfigStore =
-    overrides.configFile === undefined ? stateHomeDaemonConfigStore : new ExplicitDaemonConfig(overrides.configFile);
+    overrides.configFile === undefined
+      ? stateHomeDaemonConfigStore
+      : new ExplicitDaemonConfig(overrides.configFile, join(paths.home, CARRIERS_JOURNAL_NAME));
   // Read per call, not captured: an operator editing `config/daemon.json` sees the effect on the
   // next use rather than after a restart, and a document that has become unreadable answers no
   // recipes rather than the last good ones — a stale recipe is a reference resolved against a rule
@@ -14637,6 +14669,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   }
 
   progress.enter('loading configuration');
+  // BEFORE the first read of the document, so everything below — the peek, the address, the notices —
+  // reads the converted file. A boot that only answers a question (`--check`, `--print-config`) never gets
+  // here and never writes. The conversion refuses whenever the new spelling would read differently, and a
+  // refusal (or a filesystem failure) leaves the legacy keys as they are, which the reader below still honours.
+  await convertLegacyCarrierKeysAtBoot(world);
   const peeked = await world.config.peek();
   const loaded = overriddenBy(
     peeked.document === undefined ? await world.config.load() : peeked.config,

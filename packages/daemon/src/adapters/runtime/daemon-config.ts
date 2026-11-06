@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { type CapabilityGrants, DAEMON_CAPABILITIES, type DaemonCapability } from '@ferretry/protocol';
 import {
   analyticsPricingFingerprint,
@@ -10,6 +11,7 @@ import type {
   AnalyticsPricingConfigurationWriteResult,
 } from '../../lib/analytics/pricing-service.ts';
 import {
+  type CarrierConversionOutcome,
   type DaemonConfig,
   DaemonConfigDocumentSchema,
   type DaemonTunnelCarrierEntry,
@@ -20,6 +22,7 @@ import {
   recordedPortDocument,
   tunnelEntryDocument,
 } from '../../lib/index.ts';
+import { convertLegacyCarrierKeysIn } from './carrier-conversion.ts';
 
 /**
  * A configuration document this daemon will not act on, named so a person can go and fix it.
@@ -185,6 +188,10 @@ export function prepareAnalyticsPricingWrite(
   }
 }
 
+/** The record of the carrier conversion, one small document in the daemon's home. */
+export const CARRIERS_JOURNAL_NAME = 'carriers-migration.json';
+const PRIVATE_MODE = 0o600;
+
 /** Durable daemon configuration adapter; the state filesystem keeps the document private and atomic. */
 export class FileDaemonConfig {
   constructor(
@@ -265,6 +272,26 @@ export class FileDaemonConfig {
     await this.files.writeTextAtomic(
       this.paths.daemonConfig,
       `${JSON.stringify(recordedPortDocument(raw, port), null, 2)}\n`,
+    );
+  }
+
+  /**
+   * Rewrites a legacy `host`/`port`/`relay` into `carriers` entries, once, at boot — the procedure and its
+   * guard are `convertLegacyCarrierKeysIn` and `planCarrierConversion`, shared with the `--config` adapter.
+   * The one-file record of it is `<home>/carriers-migration.json`.
+   */
+  async convertLegacyCarrierKeys(at: string): Promise<CarrierConversionOutcome> {
+    return await convertLegacyCarrierKeysIn(
+      {
+        readText: async path => await this.files.readText(path),
+        modeOf: async path => (await this.files.information(path))?.mode,
+        writeAtomic: async (path, text, mode) => {
+          await this.files.writeTextAtomic(path, text);
+          if (mode !== PRIVATE_MODE) await this.files.setMode(path, mode);
+        },
+      },
+      { file: this.paths.daemonConfig, journal: join(this.paths.home, CARRIERS_JOURNAL_NAME) },
+      at,
     );
   }
 

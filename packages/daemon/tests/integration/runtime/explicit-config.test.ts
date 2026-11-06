@@ -136,11 +136,14 @@ describe('ExplicitDaemonConfig', () => {
     // Assert
     should(seeded).not.have.property('publicUrl');
     should(seeded).not.have.property('port');
-    should(recorded).have.property('port', 9_200);
+    should(seeded).not.have.property('host');
+    should(seeded.carriers).deepEqual([{ kind: 'bind', host: '127.0.0.1' }]);
+    should(recorded.carriers).deepEqual([{ kind: 'bind', host: '127.0.0.1', port: 9_200 }]);
     should(recorded).not.have.property('publicUrl');
-    // Recording adds the settled port and nothing else — the seeded defaults an operator can see and
-    // edit are theirs from the moment they are written, and a record must not re-author them.
-    should(Object.keys(recorded)).deepEqual([...Object.keys(seeded), 'port']);
+    // Recording adds the settled port to the seeded bind and nothing else — the seeded defaults an
+    // operator can see and edit are theirs from the moment they are written, and a record must not
+    // re-author them.
+    should(Object.keys(recorded)).deepEqual(Object.keys(seeded));
     // A daemon configuration can name a secrets file and the address a machine is administered on.
     should(information.mode & 0o077).equal(0);
   });

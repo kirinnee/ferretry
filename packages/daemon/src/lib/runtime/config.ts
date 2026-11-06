@@ -26,10 +26,13 @@ import { DEFAULT_CAPABILITY_GRANTS } from '../grants/policy.ts';
 import { DEFAULT_SESSION_WORKER_CAP } from '../session/observer/plan.ts';
 import type { RunOverrides } from './arguments.ts';
 import {
+  type CarrierConversionOutcome,
   type DaemonCarrierSet,
   DaemonCarriersDocumentSchema,
   type DaemonTunnelCarrierEntry,
+  documentWithCarrierEntries,
   HostSchema,
+  legacyBindEntry,
   OS_CHOSEN_PORT,
   PortSchema,
   resolveDaemonCarriers,
@@ -683,9 +686,17 @@ export function parseDaemonConfig(value: unknown): DaemonConfig {
  * The DOCUMENT rather than the parsed configuration, so no derived address is ever persisted. A
  * first boot that wrote `publicUrl` out would freeze it at the port it happened to default to, and
  * every later edit of `port` would move the bind while the advertisement stayed behind.
+ *
+ * THE LISTENER IS SPELLED AS A BIND CARRIER, never as the top-level `host`: `carriers` is the one
+ * spelling this product writes. The schema's own `host` default is therefore taken back out of the
+ * result — it is a default, not a line anybody wrote — and no `port` is seeded, so the first boot that
+ * chooses one records it into this entry (`recordedPortDocument`).
  */
-export function defaultDaemonConfigDocument(): DaemonConfigDocument {
-  return DaemonConfigDocumentSchema.parse({});
+export function defaultDaemonConfigDocument(): Omit<DaemonConfigDocument, 'host'> {
+  const { host: _loopbackDefault, ...document } = DaemonConfigDocumentSchema.parse({
+    carriers: [{ kind: 'bind', host: LOOPBACK }],
+  });
+  return document;
 }
 
 export function defaultDaemonConfig(): DaemonConfig {
@@ -714,8 +725,17 @@ export function defaultDaemonConfig(): DaemonConfig {
  * somewhere else, and has nothing to go on. Without a bind carrier the legacy key IS the bind, so it
  * is where the port belongs and it keeps getting written.
  *
- * THE SUPERSEDED KEY IS LEFT EXACTLY AS TYPED, never rewritten and never deleted. It is the
- * operator's line to finish migrating, and `supersededCarrierKeys` is what tells them it is there.
+ * A DOCUMENT WITH NO BIND CARRIER GAINS ONE rather than a top-level `port`: the boot rewrites
+ * a legacy `host`/`port` into `carriers` (`planCarrierConversion`), and this writer must not put the
+ * legacy spelling back. The new entry carries the host as written (loopback when none was) and the settled
+ * port, and the top-level `host`/`port` it replaces are removed — they spelled this same bind, so
+ * leaving them would only be a superseded line. A `carriers` value that is not a list is left as it is
+ * and the legacy key is written as before: there is nothing to append to, and inventing a list over
+ * what somebody typed is not this function's call.
+ *
+ * When a bind carrier IS declared, the legacy keys beside it are superseded and are left exactly as
+ * typed — never rewritten and never deleted — because `supersededCarrierKeys` is what tells the operator
+ * they are there.
  *
  * It is TOTAL over any JSON object, because raw means unvalidated. A `carriers` value that is not a
  * list of entries is a document the configuration parse refuses before a boot could settle anything,
@@ -727,7 +747,10 @@ export function recordedPortDocument(
 ): Record<string, unknown> {
   // The same rule the reader follows, from the one place both ends ask: see `declaredBind`.
   const listener = declaredBind(rawDocument);
-  if (listener === rawDocument) return { ...rawDocument, port };
+  if (listener === rawDocument) {
+    if (Object.hasOwn(rawDocument, 'carriers') && !Array.isArray(rawDocument.carriers)) return { ...rawDocument, port };
+    return documentWithCarrierEntries(rawDocument, ['host', 'port'], [legacyBindEntry(rawDocument, port)]);
+  }
   return {
     ...rawDocument,
     carriers: (rawDocument.carriers as readonly unknown[]).map(entry =>
@@ -838,4 +861,9 @@ export interface DaemonConfigStore {
   load(): Promise<DaemonConfig>;
   /** Writes down the address this daemon took, so it is the same one next time. */
   record(port: number): Promise<void>;
+  /**
+   * Rewrites a legacy `host`/`port`/`relay` into `carriers` entries, once, keeping the original beside it —
+   * see `planCarrierConversion`. `at` is the instant, as an ISO string, that names the backup and the journal entry.
+   */
+  convertLegacyCarrierKeys(at: string): Promise<CarrierConversionOutcome>;
 }
