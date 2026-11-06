@@ -23,12 +23,20 @@ export class SlowCommitDatabase extends Database {
     super(file, { create: true, strict: true });
   }
 
+  /** Every way to run the transaction is slowed, `.deferred`, `.immediate` and `.exclusive` included. */
   override transaction(work: (...args: any[]) => void): any {
     const transaction = super.transaction(work);
-    return (...args: unknown[]) => {
-      const result = transaction(...args);
-      blockThread(this.commitMs);
-      return result;
-    };
+    const slowed =
+      (run: (...args: unknown[]) => unknown) =>
+      (...args: unknown[]) => {
+        const result = run(...args);
+        blockThread(this.commitMs);
+        return result;
+      };
+    return Object.assign(slowed(transaction), {
+      deferred: slowed(transaction.deferred),
+      immediate: slowed(transaction.immediate),
+      exclusive: slowed(transaction.exclusive),
+    });
   }
 }

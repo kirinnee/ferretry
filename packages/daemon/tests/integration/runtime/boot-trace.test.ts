@@ -190,8 +190,7 @@ interface Rig {
   readonly cleanups: Release[];
   /** Ends `untilShutdown`: a stop that lands once the boot is serving. */
   readonly stop: () => void;
-  /** The warden's `arm()` promise, and the `agendaHomesMigrated` promise that releases it. */
-  readonly homesMigrated: ReturnType<typeof deferred<void>>;
+  /** The warden's `arm()` promise. */
   readonly wardenArmed: ReturnType<typeof deferred<() => void>>;
   readonly captured: Captured;
   /** What each late-bound port answered when it was built and its source was not, in construction order. */
@@ -312,7 +311,6 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
       return Reflect.get(target, property, receiver);
     },
   });
-  const homesMigrated = deferred<void>();
   const wardenArmed = deferred<() => void>();
   const stopped = deferred<void>();
   const captured: Captured = { mounted: undefined, modules: undefined };
@@ -408,12 +406,6 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
           return await wardenArmed.promise;
         }) as never,
     );
-    // `start` waits on this before it arms the warden.
-    Object.defineProperty(mounted, 'agendaHomesMigrated', {
-      value: homesMigrated.promise,
-      configurable: true,
-      writable: true,
-    });
   };
 
   const restoreSpies = (): (() => void) => {
@@ -644,7 +636,6 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
     events,
     cleanups: cleanups as unknown as Release[],
     stop: () => stopped.settle(),
-    homesMigrated,
     wardenArmed,
     captured,
     early: async () => await Promise.all(early.answers),
@@ -665,12 +656,6 @@ async function untilReady(r: Rig): Promise<void> {
   await waitFor(() => r.events.includes('step: ready'), 'the boot to say ready');
 }
 
-/** The warden's `arm()` is only called once the agenda's homes are migrated; the case decides when. */
-async function armWarden(r: Rig): Promise<void> {
-  r.homesMigrated.settle();
-  await waitFor(() => r.events.includes('arm warden'), 'the warden to be armed');
-}
-
 describe('the boot and shutdown trace', () => {
   const previousHome = process.env.FY_HOME;
   afterEach(async () => {
@@ -687,7 +672,6 @@ describe('the boot and shutdown trace', () => {
     // Act
     const exit = start(r.world, r.cleanups);
     await untilReady(r);
-    await armWarden(r);
     r.wardenArmed.settle(() => r.events.push('warden disarm'));
     await nextTurn();
     r.events.push('stop requested');
@@ -747,7 +731,6 @@ describe('the boot and shutdown trace', () => {
     const r = await rig();
     const exit = start(r.world, r.cleanups);
     await untilReady(r);
-    await armWarden(r);
 
     // Act: the stop, the whole shutdown, and only then the result of the warden's arm().
     r.events.push('stop requested');

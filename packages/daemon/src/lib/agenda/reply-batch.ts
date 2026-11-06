@@ -134,7 +134,7 @@ export function agendaReplyDueAt(
  * (`[answer to !A3 «ask»] …`), in the order the owner gave them, a blank line apart. One answer reads
  * exactly as it did before batching.
  */
-export function legacyAttentionBatchMessage(pending: readonly PendingReply[]): string {
+export function batchReplyMessage(pending: readonly PendingReply[]): string {
   return agendaBatchMessage(pending.map(each => each.message));
 }
 
@@ -158,7 +158,7 @@ export function beginAgendaBatch(
   const batch = {
     sendId: agendaBatchSendId(outbox.sessionId, ids, begunAt),
     ids,
-    message: legacyAttentionBatchMessage(outbox.pending),
+    message: batchReplyMessage(outbox.pending),
     replies: outbox.pending,
   };
   return {

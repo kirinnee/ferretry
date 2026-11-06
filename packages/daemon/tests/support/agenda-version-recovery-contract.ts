@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { describe, it, spyOn } from 'bun:test';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
@@ -107,7 +106,7 @@ async function world(timeoutMs = 30_000) {
     },
   });
   const repository = (archive: AgendaVersionStore = versions) =>
-    new FileAgendaLedgerRepository(() => root, undefined, undefined, files, archive, {
+    new FileAgendaLedgerRepository(() => root, undefined, files, archive, {
       now: () => now,
       warn: message => {
         warnings.push(message);
@@ -1347,21 +1346,6 @@ export function agendaVersionRecoveryContract() {
         should(await w.files.read(SESSION, `${AGENDA_ARCHIVE_FILE}.pending`)).be.undefined();
         should(await w.files.read(SESSION, AGENDA_VERSION_PENDING)).be.undefined();
         should(JSON.stringify(await w.repo.readArchive(SESSION))).containEql('committed history');
-      } finally {
-        await w.close();
-      }
-    });
-
-    it('upgrades a pre-idempotency SQLite archive without losing its versions', async () => {
-      const w = await world();
-      try {
-        await w.raise();
-        const db = new Database(join(w.root, 'agenda-versions', 'A1.sqlite'));
-        db.exec('DROP TABLE mutations; PRAGMA user_version = 1');
-        db.close();
-        should(await w.backing.list(SESSION, 'A1')).have.length(1);
-        ok(await w.save({ action: 'edit', actor: ACTOR, id: 'A1', patch: { subject: 'Upgraded' } }));
-        should(await w.backing.list(SESSION, 'A1')).have.length(2);
       } finally {
         await w.close();
       }

@@ -60,7 +60,9 @@ function rig(options: { readonly refuse?: boolean; readonly holdBeforeSweep?: bo
         state.held = true;
         order.push('lock acquired');
         return {
-          paths: { home: '/fake/home' },
+          paths: { home: '/fake/home', sessions: '/fake/home/state/sessions', state: '/fake/home/state' },
+          // An empty home: the pre-rename agenda refusal lists it and finds nothing.
+          fileSystem: { listDirectory: async () => [] },
           storage: {
             close: async () => {
               await Promise.resolve();

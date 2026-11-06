@@ -413,7 +413,7 @@ export class HarnessPromptAgenda {
   private readonly seen = new Map<string, string>();
 
   constructor(
-    private readonly legacyAttention: HarnessAgenda,
+    private readonly agenda: HarnessAgenda,
     private readonly serial: Pick<SerialExecutor, 'run'>,
     private readonly states: { read(sessionId: string): Promise<unknown> },
     /** Where a refused question is told: one shaped like a daemon reference raises nothing. */
@@ -455,12 +455,12 @@ export class HarnessPromptAgenda {
 
   private async settle(sessionId: string, wait: HarnessWait | undefined): Promise<void> {
     await this.serial.run(`harness-prompt:${sessionId}`, async () => {
-      const listed = await this.legacyAttention.list(sessionId);
+      const listed = await this.agenda.list(sessionId);
       if (!listed.ok) throw new Error(listed.error.message);
       const ours = listed.value.items.filter(isHarnessPromptItem);
       for (const item of ours) {
         if (item.sourceRef === wait?.sourceRef || item.sourceRef === null) continue;
-        const resolved = await this.legacyAttention.resolveSource(
+        const resolved = await this.agenda.resolveSource(
           sessionId,
           'question',
           item.sourceRef,
@@ -471,7 +471,7 @@ export class HarnessPromptAgenda {
       }
       if (wait === undefined || ours.some(item => item.sourceRef === wait.sourceRef)) return;
       if (listed.value.resolved.some(item => isHarnessPromptItem(item) && item.sourceRef === wait.sourceRef)) return;
-      const raised = await this.legacyAttention.raise(sessionId, wait.request, HARNESS_PROMPT_ACTOR);
+      const raised = await this.agenda.raise(sessionId, wait.request, HARNESS_PROMPT_ACTOR);
       if (!raised.ok) throw new Error(raised.error.message);
     });
   }
@@ -479,8 +479,7 @@ export class HarnessPromptAgenda {
 
 function hasOpenAgenda(state: unknown): boolean {
   if (typeof state !== 'object' || state === null) return false;
-  const { agenda, attention: legacyAttention } = state as { agenda?: unknown; attention?: unknown };
-  return (agenda ?? legacyAttention) !== undefined;
+  return (state as { agenda?: unknown }).agenda !== undefined;
 }
 
 /**

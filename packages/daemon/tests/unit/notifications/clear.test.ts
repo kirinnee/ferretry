@@ -6,7 +6,6 @@ import {
   AgendaItemSchema,
   type AgendaSnapshot,
   PUSH_CLEAR_MAX_TAGS,
-  PUSH_SEEN_MAX_TAGS,
   PushPayloadSchema,
   type PushPayload,
   type ResolvedAgendaItem,
@@ -80,10 +79,6 @@ const GATE = {
   projectId: 'p-1',
   options: [{ id: 'done', label: 'Done', outcome: 'close' as const }],
 };
-
-/** A one-time code card: an input card, whose line a legacy high stop may have shown. */
-const code = (id: string, extra: Partial<AgendaItem> = {}): AgendaItem =>
-  ({ ...item(id, extra), kind: 'input', ask: undefined, input: { requestId: 'a'.repeat(32) } }) as AgendaItem;
 
 const alert = (agendaId: string, extra: Partial<DeliveredAlert> = {}): DeliveredAlert => ({
   key: `agenda:${SESSION}:${agendaId}:ping`,
@@ -204,20 +199,6 @@ describe('which alerts come down (the owner: "if an agenda went to sleep … dis
 
     // Assert
     should(clears).deepEqual([{ tags: ['attention-session-1'], covers: [stop.key] }]);
-  });
-
-  it('should treat a push alert with no tag as shown under the session tag', () => {
-    // Arrange
-    const old = alert('A1', { key: `attention:${SESSION}:A1:ping`, tag: undefined });
-    const { tag: _tag, ...untagged } = old;
-
-    // Act
-    const held = alertsToClear(SESSION, [untagged], snapshotOf([item('A2')]));
-    const cleared = alertsToClear(SESSION, [untagged], snapshotOf([]));
-
-    // Assert
-    should(held).deepEqual([]);
-    should(cleared).deepEqual([{ tags: ['attention-session-1'], covers: [old.key] }]);
   });
 
   it('should clear only the opened item, though it still waits, and the stop when it was the last', () => {
@@ -646,21 +627,13 @@ describe('AgendaAlertClearer.seen (the owner opened the item in the app)', () =>
 });
 
 describe('uncoveredAlerts', () => {
-  it('should read a push recorded before tags were, under the old key spelling, as untagged', () => {
+  it('should offer no push recorded without a tag: it has no tag to take down', () => {
     // Arrange
     const [requested, outcome] = pushed('A1', { ping: true }, { tag: null });
-    const legacy = { ...requested, key: `attention:${SESSION}:A1:ping` } as NotificationRecord;
-    const entries = [{ requested: legacy, outcome }] as NotificationLedgerEntry[];
+    const entries = [{ requested, outcome }] as NotificationLedgerEntry[];
 
-    // Act
-    const alerts = uncoveredAlerts(SESSION, entries);
-
-    // Assert
-    // Every tag it may have gone out under: the session's, and the item's (a high push), each covered on its own.
-    should(alerts).deepEqual([
-      { key: `agenda:${SESSION}:A1:ping`, agendaId: 'A1', stop: false },
-      { key: `agenda:${SESSION}:A1:ping#item`, agendaId: 'A1', stop: false, tag: 'attention-session-1:A1' },
-    ]);
+    // Act / Assert
+    should(uncoveredAlerts(SESSION, entries)).deepEqual([]);
   });
 
   it('should skip a push still in flight and one that errored', () => {
@@ -675,100 +648,6 @@ describe('uncoveredAlerts', () => {
     // Assert
     should(inFlight).deepEqual([]);
     should(failed).deepEqual([]);
-  });
-});
-
-describe('a legacy push (recorded before tags were; review round 1)', () => {
-  it("should clear a high code alert's item tag though another item still waits, and its session tag only later", async () => {
-    // Arrange — a high push went out under the item's tag, but the ledger did not record which.
-    const test = world(pushed('A1', { ping: true }, { tag: null }));
-    test.boards.set(SESSION, ledgerOf(SESSION, [item('A2')], [resolved(item('A1'))]));
-
-    // Act
-    await test.clearer.changed(SESSION, CHANGE);
-    test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(item('A1')), resolved(item('A2'))]));
-    await test.clearer.changed(SESSION, CHANGE);
-    await test.clearer.changed(SESSION, CHANGE);
-
-    // Assert
-    should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
-      ['attention-session-1:A1'],
-      ['attention-session-1'],
-    ]);
-  });
-
-  it("should clear an approve-on-phone push under its approval's tag, read from the item", async () => {
-    // Arrange
-    const [requested, outcome] = pushed('A1', { ping: true }, { tag: null });
-    const approval = NotificationRecordSchema.parse({
-      ...requested,
-      key: `agenda:${SESSION}:A1:phone-approval:0`,
-      ping: undefined,
-      phoneApproval: 0,
-    });
-    const landed = NotificationRecordSchema.parse({ ...outcome, key: approval.key });
-    const card = { ...item('A1'), kind: 'info', phoneApproval: { id: 'pa_0123456789abcdef01234567' } } as AgendaItem;
-    const test = world([approval, landed]);
-    test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(card)]));
-
-    // Act
-    await test.clearer.changed(SESSION, CHANGE);
-
-    // Assert
-    should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
-      ['pa-pa_0123456789abcdef01234567'],
-    ]);
-  });
-
-  it('should clear a legacy stop under every code card that no longer waits, whenever it was handled (review rounds 3–4)', async () => {
-    // Arrange — the ledger names the stop's oldest item, A1, but a high stop showed a code card's tag. A2 was snoozed
-    // and woken since (its waiting time moved past the stop) and A4 was resolved before the stop's record was written.
-    const EARLIER = '2026-11-03T08:00:00.000Z';
-    const gone = { ...resolved(code('A4', { waitingSince: EARLIER })), resolvedAt: EARLIER } as ResolvedAgendaItem;
-    const test = world(pushed('A1', { stoppedAt: AT }, { tag: null }));
-    test.boards.set(
-      SESSION,
-      ledgerOf(
-        SESSION,
-        [{ ...code('A3', { waitingSince: LATER }), gate: GATE } as AgendaItem],
-        [resolved(item('A1')), resolved(code('A2', { waitingSince: LATER })), gone],
-      ),
-    );
-
-    // Act
-    await test.clearer.changed(SESSION, CHANGE);
-
-    // Assert — A3 still waits on the owner, so its line is still true and stays.
-    should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
-      ['attention-session-1', 'attention-session-1:A2', 'attention-session-1:A4'],
-    ]);
-  });
-
-  it('should give every part of a split legacy burst its own key, and count a stop cleared only by its last part', async () => {
-    // Arrange — three untagged stops; nine code cards handled since, each a tag any of them may have shown.
-    const stops = ['08:00', '08:20', '08:40'].map(at => `2026-11-03T${at}:00.000Z`);
-    const cards = Array.from({ length: 9 }, (_, index) => resolved(code(`A${index + 2}`)));
-    const test = world(stops.flatMap(at => pushed('A1', { stoppedAt: at }, { tag: null })));
-    test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(item('A1')), ...cards]));
-
-    // Act
-    await test.clearer.changed(SESSION, CHANGE);
-    await test.clearer.changed(SESSION, CHANGE);
-
-    // Assert
-    const records = test.ledger.records.flatMap(record =>
-      record.phase === 'requested' && record.origin === 'agenda-clear' ? [record] : [],
-    );
-    should(records.map(record => record.tags.length)).deepEqual([PUSH_CLEAR_MAX_TAGS, 10 - PUSH_CLEAR_MAX_TAGS]);
-    should(new Set(records.map(record => record.key)).size).equal(2);
-    should(records.map(record => record.covers.length)).deepEqual([0, 3]);
-  });
-
-  it('should leave an approve-on-phone push uncovered when its item is gone from the board', () => {
-    // Act / Assert
-    should(
-      alertsToClear(SESSION, [{ key: 'k', agendaId: 'A1', stop: false, approval: true }], snapshotOf([])),
-    ).deepEqual([]);
   });
 });
 
@@ -957,66 +836,24 @@ describe('pushes from before an open, and from before this release (review round
     should(test.sent).deepEqual([]);
   });
 
-  it('should send nothing at start for pushes from before tags were, however recent, and clear them on a change (review round 8)', async () => {
-    // Arrange — the first start after upgrade: sixty finished ferrets, each with an untagged push under two days old.
-    const others = Array.from({ length: 60 }, (_, index) => `session-old-${index}`);
+  it('should leave a push recorded without a tag up, however recent, but clear a tagged one of any age', async () => {
+    // Arrange
     const test = world([
-      ...others.flatMap(sessionId => pushed('A1', { ping: true }, { tag: null, sessionId })),
-      ...pushed('A1', { ping: true }, { tag: null }),
-    ]);
-    test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(item('A1'))]));
-
-    // Act
-    await test.clearer.sweep();
-    const atStart = test.sent.length;
-    await test.clearer.changed(SESSION, CHANGE);
-
-    // Assert — its own ferret's next change clears it, under every tag it may have used.
-    should(atStart).equal(0);
-    should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
-      ['attention-session-1', 'attention-session-1:A1'],
-    ]);
-  });
-
-  it('should leave a push from before tags were up once it is two days old, but clear a tagged one of any age', async () => {
-    // Arrange — on the first start after upgrade, the whole history is uncovered.
-    const test = world([
-      ...pushed('A1', { ping: true }, { tag: null, at: DAYS_AGO }),
+      ...pushed('A1', { ping: true }, { tag: null, at: JUST_NOW }),
       ...pushed('A2', { ping: true }, { at: DAYS_AGO }),
-      ...pushed('A3', { ping: true }, { tag: null, at: DAYS_AGO, sessionId: OTHER }),
+      ...pushed('A3', { ping: true }, { tag: null, at: JUST_NOW, sessionId: OTHER }),
     ]);
     test.boards.set(SESSION, ledgerOf(SESSION, [], [resolved(item('A1')), resolved(item('A2'))]));
 
     // Act
     await test.clearer.sweep();
+    await test.clearer.changed(SESSION, CHANGE);
 
-    // Assert — the other ferret had nothing young enough to look at, so its board was never read.
+    // Assert — the untagged push is never cleared, and the other ferret had nothing to look at.
     should(test.sent.map(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual([
       ['attention-session-1:A2'],
     ]);
-    should(uncoveredAlerts(OTHER, await test.ledger.entries())).have.length(2);
-  });
-});
-
-describe('an open that names more tags than one answer carries (review round 5)', () => {
-  it(`should answer at most ${PUSH_SEEN_MAX_TAGS} tags, and send the rest to every device, the opener's too`, async () => {
-    // Arrange — a legacy stop, and more code cards handled since than one answer may name.
-    const cards = Array.from({ length: PUSH_SEEN_MAX_TAGS + 20 }, (_, index) => resolved(code(`A${index + 2}`)));
-    const test = world(pushed('A1', { stoppedAt: AT }, { tag: null }));
-    test.boards.set(SESSION, ledgerOf(SESSION, [item('A1')], cards));
-
-    // Act
-    const outcome = await test.clearer.seen(SESSION, 'A1', 'device-1');
-
-    // Assert
-    const tags = outcome.found ? outcome.tags : [];
-    const skipped = test.sent.filter(dispatch => dispatch.exceptDevice === 'device-1');
-    should(tags.length).be.belowOrEqual(PUSH_SEEN_MAX_TAGS);
-    should(skipped.flatMap(dispatch => (dispatch.payload as { tags: string[] }).tags)).deepEqual(tags);
-    should(test.sent.length).be.above(skipped.length);
-    should(new Set(test.sent.flatMap(dispatch => (dispatch.payload as { tags: string[] }).tags)).size).equal(
-      cards.length + 1,
-    );
+    should(uncoveredAlerts(OTHER, await test.ledger.entries())).deepEqual([]);
   });
 });
 

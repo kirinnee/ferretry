@@ -98,8 +98,8 @@ describe('the agenda file store, read with its identity', () => {
     // Assert
     should(read).eql({ text: '{"a":1}\n', identity });
     should(replaced).not.equal(identity);
-    should(await store.identity('session-1', 'attention.json')).be.undefined();
-    should(await store.readIdentified('session-1', 'attention.json')).be.undefined();
+    should(await store.identity('session-1', 'missing.json')).be.undefined();
+    should(await store.readIdentified('session-1', 'missing.json')).be.undefined();
   });
 
   it('should refuse, not call missing, a file that cannot be read for any other reason', async () => {

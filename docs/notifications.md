@@ -189,9 +189,7 @@ gate, a deadline and a woken item each replace only that item's earlier line. **
 shows two lines**, not one line with "+1 more". A stop's push keeps the ferret's tag, `attention-<session>`
 (`agendaSessionPushTag`), even when it goes out loud for a code card, because it is about the ferret and everything
 waiting then: clearing that one card never takes the stop's line down. The own tag is what lets a handled item's line
-come down on its own (below). A push recorded before tags were went out under the ferret's tag, the item's (a high
-push), its approval's (`pa-<id>`) or — a high stop — a code card's: a clear names each one it may have used, every
-code card that no longer waits included, since the ledger never said which card a high stop showed.
+come down on its own (below).
 
 ## When an alert is cleared
 
@@ -294,11 +292,7 @@ the push it clears is not caught: nothing on the wire tells that push from a new
 `fy doctor`'s push count: one that reached no device (the only one was the device that opened the item) is not a
 failed push. A clear the push service refused leaves that line up.
 
-**Pushes from before this release.** No daemon before this one wrote a clear, so on the first start every push it
-ever made counts as uncovered. The start-up look therefore skips a push recorded before tags were: it is cleared only
-by its own ferret's next board change or open, one ferret at a time as the owner works, and only while it is under
-two days old. A finished ferret's old lines stay up as they did before this release, and an upgrade sends no burst of
-clears. A push this release made has no age bound: its item may be answered days later.
+A push recorded without a tag (one made before tags were) is never cleared: it has no tag to take down.
 
 **GAP: the ledger is never rotated.** The clearer reads the whole `notifications.jsonl` on every board change, every
 landing and each open, and the file only grows (its bounded rotation is a follow-up), so that cost grows with it.
@@ -462,24 +456,7 @@ Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options
 
 ## Migration
 
-Before agenda mode, a ferret's open items WERE its agenda. So once, on the first start of a daemon that
-knows about the mode:
-
-1. every ferret with at least one **open non-notice item** gets agenda mode ON (it records `config.agenda: true`, which sets its launch
-   environment and its summary);
-2. the items are left exactly as they are;
-3. the daemon records that it ran, in `agenda-mode-migration.json` in its home.
-
-It is **idempotent and once**. The marker is written only when every session was handled; a start that
-finds it does nothing, so an owner who later turns a ferret's mode off is never overruled by a restart.
-A start that could not switch some session writes no marker and tries again next time (switching a
-ferret already on is a no-op). It never stops the daemon starting.
-
-A second, separate marker, `agenda-files-migration.json`, records the move of each session's `attention.json` and
-`attention-replies.json` to `agenda.json` and `agenda-replies.json` (one line of counts in the log). It follows the same
-rules: written only when every session succeeded, a failed session keeps its old file and is retried next start, and it
-never stops the daemon starting. [agenda.md § On disk](agenda.md#on-disk) has the rest. Records in
-`notifications.jsonl` are not rewritten: both key spellings (`attention:`, `agenda:`) are read as one, so an item
+Records in `notifications.jsonl` are not rewritten: both key spellings (`attention:`, `agenda:`) are read as one, so an item
 notified before the upgrade is never notified again. A record written before v4.116.0 names its item `attentionId`;
 it is read as `agendaId`. Refusing that spelling silenced every push from v4.116.0, because the ledger then failed
 closed on any line it could not read and the failure was swallowed.

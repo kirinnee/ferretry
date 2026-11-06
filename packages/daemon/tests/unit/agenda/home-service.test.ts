@@ -254,21 +254,6 @@ describe('AgendaService agenda homes', () => {
     });
     should(await failing.service.homeOf('kid')).equal('kid');
   });
-
-  it('never lets an agent carry an item over', async () => {
-    const { ledgers, service } = build();
-    await service.raise('lead', request(), daemon('system'));
-    const carried = ledgers.open('lead')[0];
-
-    const byAgent = await service.raise('lead', request({ source: 'agent-raised', sourceRef: null, carried }), {
-      kind: 'agent',
-      sessionId: 'lead',
-      name: null,
-    });
-
-    should(byAgent).match({ ok: false, error: { code: 'forbidden' } });
-    should(ledgers.open('lead')).have.length(1);
-  });
 });
 
 describe('AgendaService machine fallback', () => {

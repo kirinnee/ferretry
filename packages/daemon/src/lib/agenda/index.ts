@@ -1,5 +1,4 @@
 export * from './agenda-files.ts';
-export * from './agenda-migration.ts';
 export * from './clear-agents.ts';
 export * from './closest.ts';
 export * from './config-confirms.ts';
@@ -7,9 +6,7 @@ export * from './conversation.ts';
 export * from './duplicates.ts';
 export * from './harness-prompt.ts';
 export * from './home.ts';
-export * from './home-migration.ts';
 export * from './machine-agenda.ts';
-export * from './machine-migration.ts';
 export * from './observers.ts';
 export * from './owner-asks.ts';
 export * from './owner-chat.ts';

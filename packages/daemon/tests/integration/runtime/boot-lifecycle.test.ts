@@ -1679,7 +1679,7 @@ describe('daemon boot lifecycle', () => {
     const unusable = await fetch(`${sessions}/wire-bad`, { headers });
     // The same three sessions asked for their attention board. The board's existence proof is the
     // session registry, so each answer is the registry's answer rather than the ledger file's — and
-    // none of these sessions has ever written an `attention.json`, so a ledger-only check would have
+    // none of these sessions has ever written an `agenda.json`, so a ledger-only check would have
     // served all three the same empty board.
     const liveBoard = await fetch(`${sessions}/wire-one/attention`, { headers });
     const absentBoard = await fetch(`${sessions}/wire-ghost/attention`, { headers });
