@@ -133,18 +133,34 @@ this page, which is still how a message reaches the pane.
   words and sent as the `!A3` prefix on every attempt, so a reply that leaves after a reload is still about its
   item, while an edit shows only what was typed.
 - **Queue views** — the chat header's ⋯ menu has **Message queue** (that ferret: `/d/<id>/queue/<session>`), and
-  **All queues** (`/d/<id>/queue`, also in Find / ⌘K) lists every ferret with something waiting across every
-  paired machine, longest-waiting first. Both read `GET …/queue` every five seconds plus the outbox, one row per
-  message with its tick, sender (only when it is not you; never tag text in a body) and reason, with Edit and Cancel. **When it
-  goes** (`rowSend` / `groupNextSend` in `queue-view.ts`): a queued row whose `holdUntil` is still ahead says
-  `sends by 11:20` (the reader's clock), and its ferret's heading shows the earliest as `next send 11:20`; a
-  queued row with no hold left, or none, waiting on a busy ferret says `when its turn ends`; a row waiting for
-  something else (a stopped ferret, an open question) and a row still on this device say only their own reason.
-  A message still **waiting** (saved on this device, or `queued` here, owner's or a ferret's, held or not) is
-  **not drawn in the chat at all** — this page is the only place it shows (`hideWaiting`,
-  `lib/waiting-fold.ts`, applied to the Transcript's rows only) — and it appears in the chat once it is typed
-  or delivered. A message that needs the person (failed, refused, unconfirmed, typed but not sent) is not
-  waiting and stays in the chat.
+  **All queues** (`/d/<id>/queue`, also in Find / ⌘K) covers every ferret across every paired machine. Both read
+  `GET …/queue` every five seconds plus the outbox. **The page is one compact, searchable, scrolling list** (B160):
+  - **Two lists, one toggle.** It opens on **Not sent** — what has not reached the ferret: _Waiting_ (saved here or
+    `queued`), _Sending_ (`typing`, `unconfirmed`) and _Failed_ — in the daemon's delivery order. **Sent** is the
+    history (_Delivered_, _Read_), newest first, a hundred rows at a time behind "Show older messages". Each toggle
+    shows how many rows it holds; an empty Not sent list says "Nothing is waiting" with Sent still one tap away.
+    `listingOf` / `listingGroups` in `queue-view.ts` own the split; cancelled messages are in neither.
+  - **One line per message**: status first (a word _and_ an icon — Waiting, Sending, Delivered, Read, Failed — in
+    distinct theme-token colours, never colour alone), then the sender ("You" for your own), the first line of the
+    words (ellipsized) and how long ago. The line is a button (`aria-expanded`): tap it to open the full words
+    (drawn as the chat draws them), the reason, the kind when it is not an `action`, **Next up**, the send time,
+    and Edit / Cancel. No separator characters are drawn between the parts, so a line can never start with one.
+  - **Search** filters the list on screen by message text _and_ sender, any case (`matchesSearch`); the toggles
+    count what each list holds for the search, "no matches" points at the other list when it has some, and a clear
+    control empties the box. **Next up** is still decided on the ferret's whole queue, not on the matching rows.
+  - **It scrolls.** `.fy-queue-page` takes the pane's height (`height: 100%`) and scrolls inside it — the pane
+    around a page is a plain block, so a flex-basis alone left it as tall as its content, clipped by the shell.
+    The toggle and search stay stuck to the top while the list moves.
+    Rows are one per message with its tick (`data-queue-ticks`), sender (never a tag in a body) and reason, with Edit and Cancel. **When it
+    goes** (`rowSend` / `groupNextSend` in `queue-view.ts`): a queued row whose `holdUntil` is still ahead says
+    `sends by 11:20` (the reader's clock), and its ferret's heading shows the earliest as `next send 11:20` (the row's own copy is in its opened detail); a
+    queued row with no hold left, or none, waiting on a busy ferret says `when its turn ends`; a row waiting for
+    something else (a stopped ferret, an open question) and a row still on this device say only their own reason.
+    A message still **waiting** (saved on this device, or `queued` here, owner's or a ferret's, held or not) is
+    **not drawn in the chat at all** — this page is the only place it shows (`hideWaiting`,
+    `lib/waiting-fold.ts`, applied to the Transcript's rows only) — and it appears in the chat once it is typed
+    or delivered. A message that needs the person (failed, refused, unconfirmed, typed but not sent) is not
+    waiting and stays in the chat.
 
 - **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
 - **Edit or cancel** — only while `queued`: `PATCH /v1/sessions/:sessionId/queue/:messageId` `{ "text" }` and

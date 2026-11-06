@@ -79,51 +79,157 @@ const text = (node: ReactTestInstance): string =>
   node.children.map(child => (typeof child === 'string' ? child : text(child))).join('');
 const buttons = (root: ReactTestInstance, label: string) => root.findAll(n => n.type === 'button' && text(n) === label);
 
+const rowIds = (root: ReactTestInstance) =>
+  root.findAll(n => n.type === 'li' && n.props['data-queue-row'] !== undefined).map(n => n.props['data-queue-row']);
+const row = (id: string) => mounted!.root.findByProps({ 'data-queue-row': id });
+const line = (id: string) => row(id).findByProps({ 'data-queue-line': '' });
+const open = (id: string) => run(() => line(id).props.onClick());
+const toggle = (listing: 'unsent' | 'sent') =>
+  run(() => mounted!.root.findByProps({ 'data-queue-listing': listing }).props.onClick());
+const searchFor = (value: string) =>
+  run(() => mounted!.root.findByProps({ 'data-queue-search': '' }).props.onChange({ target: { value } }));
+const statusOf = (id: string) => text(row(id).findByProps({ 'data-queue-meta': 'status' }));
+
 describe('QueuePageView', () => {
-  test('lists each message with its tick count and reason, and counts what waits', () => {
-    mounted = view();
-    const root = mounted.root;
-    expect(text(root.findByType('h1'))).toBe('All queues');
-    expect(root.findAll(n => n.props['data-queue-row'] !== undefined)).toHaveLength(4);
-    expect(root.findByProps({ 'data-queue-row': 'o1' }).findByProps({ 'data-queue-ticks': 1 })).toBeDefined();
-    expect(root.findByProps({ 'data-queue-row': 'q22' }).findByProps({ 'data-queue-ticks': 4 })).toBeDefined();
-    expect(text(root.findByProps({ 'data-queue-row': 'q333' }).findByProps({ 'data-queue-meta': 'from' }))).toBe(
-      'Mira',
-    );
-    expect(JSON.stringify(mounted.toJSON())).toContain('waiting for connection');
-    expect(JSON.stringify(mounted.toJSON())).toContain('3 messages are waiting');
-  });
-
-  test('a row is one plain line: no chips, no ferret name, no sender for your own, no kind for an action', () => {
-    mounted = view({ now: Date.parse('2026-10-30T10:15:00.000Z') });
-    const row = (id: string) => mounted!.root.findByProps({ 'data-queue-row': id });
-    const parts = (id: string) =>
-      row(id)
-        .findAll(n => n.props['data-queue-meta'] !== undefined)
-        .map(n => n.props['data-queue-meta']);
-    expect(
-      mounted.root.findAll(n => typeof n.props.className === 'string' && n.props.className.includes('kt-badge')),
-    ).toHaveLength(0);
-    expect(parts('o1')).toEqual(['status']);
-    expect(parts('q333')).toEqual(['from', 'status']);
-    expect(text(row('o1'))).not.toContain('Casen');
-    expect(text(row('o1').findByProps({ 'data-queue-meta': 'status' }))).toBe(
-      'On this device · waiting for connection',
-    );
-    expect(text(row('q1').findByProps({ 'data-queue-meta': 'status' }))).toBe('waiting for its turn');
-    const time = row('o1').findByType('time');
-    expect(text(time)).toBe('15m ago');
-    expect(time.props.dateTime).toBe('2026-10-30T10:00:05.000Z');
-  });
-
-  test("a ferret's label shows as the kind, and a blocker marks its row", () => {
+  test('opens on the messages that have not been delivered: waiting, sending and failed; delivered and read are behind Sent', () => {
     mounted = view({
-      groups: [group([queued('q1', 'queued', { label: 'blocker' }), queued('q22', 'queued', { label: 'fyi' })])],
+      groups: [
+        group([
+          saved,
+          queued('q1', 'queued'),
+          queued('q22', 'read'),
+          queued('q333', 'typing'),
+          queued('q4444', 'delivered'),
+          queued('q55555', 'failed'),
+          queued('q666666', 'unconfirmed'),
+        ]),
+      ],
     });
-    const row = (id: string) => mounted!.root.findByProps({ 'data-queue-row': id });
+    expect(text(mounted.root.findByType('h1'))).toBe('All queues');
+    expect(rowIds(mounted.root).sort()).toEqual(['o1', 'q1', 'q333', 'q55555', 'q666666'].sort());
+    expect(mounted.root.findByProps({ 'data-queue-listing': 'unsent' }).props['aria-pressed']).toBe(true);
+    expect(text(mounted.root.findByProps({ 'data-queue-listing-count': 'unsent' }))).toBe('5');
+    expect(text(mounted.root.findByProps({ 'data-queue-listing-count': 'sent' }))).toBe('2');
+    expect(JSON.stringify(mounted.toJSON())).toContain('4 messages are waiting');
+  });
+
+  test('the Sent toggle swaps to delivered and read messages, newest first', () => {
+    mounted = view({
+      groups: [
+        group([
+          queued('q1', 'queued'),
+          queued('old', 'read', { enqueuedAt: '2026-10-01T10:00:00.000Z' }),
+          queued('new', 'delivered', { enqueuedAt: '2026-10-30T10:00:00.000Z' }),
+          queued('mid', 'read', { enqueuedAt: '2026-10-15T10:00:00.000Z' }),
+        ]),
+      ],
+    });
+    toggle('sent');
+    expect(rowIds(mounted.root)).toEqual(['new', 'mid', 'old']);
+    expect(mounted.root.findByProps({ 'data-queue-listing': 'sent' }).props['aria-pressed']).toBe(true);
+    toggle('unsent');
+    expect(rowIds(mounted.root)).toEqual(['q1']);
+  });
+
+  test('a long sent history shows a page of rows and offers Show older', () => {
+    const many = Array.from({ length: 130 }, (_, index) =>
+      queued(`s${String(index).padStart(3, '0')}`, 'read', {
+        enqueuedAt: new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString(),
+      }),
+    );
+    mounted = view({ groups: [group(many)] });
+    toggle('sent');
+    expect(rowIds(mounted.root)).toHaveLength(100);
+    expect(rowIds(mounted.root)[0]).toBe('s129');
+    expect(text(mounted.root.findByProps({ 'data-queue-older': '' }))).toBe('Show older messages (30 more)');
+    run(() => mounted!.root.findByProps({ 'data-queue-older': '' }).props.onClick());
+    expect(rowIds(mounted.root)).toHaveLength(130);
+    expect(mounted.root.findAllByProps({ 'data-queue-older': '' })).toHaveLength(0);
+  });
+
+  test('each row leads with its status word: Waiting, Sending, Delivered, Read, Failed', () => {
+    mounted = view({
+      groups: [
+        group([
+          saved,
+          queued('q1', 'queued'),
+          queued('q22', 'typing'),
+          queued('q333', 'unconfirmed'),
+          queued('q4444', 'failed'),
+          queued('q55555', 'delivered'),
+          queued('q666666', 'read'),
+        ]),
+      ],
+    });
+    expect(['o1', 'q1', 'q22', 'q333', 'q4444'].map(statusOf)).toEqual([
+      'Waiting',
+      'Waiting',
+      'Sending',
+      'Sending',
+      'Failed',
+    ]);
+    toggle('sent');
+    expect(['q55555', 'q666666'].map(statusOf)).toEqual(['Delivered', 'Read']);
+    // The status is the first thing in the line, and it carries an icon (not colour alone).
+    const first = line('q55555').children[0] as ReactTestInstance;
+    const word = first.findByProps({ 'data-queue-status': 'delivered' });
+    expect(word.findAll(n => n.props['aria-hidden'] === 'true').length).toBeGreaterThan(0);
+  });
+
+  test('a row is one line — status, sender, first line of the words, time — and a tap opens the full text', () => {
+    const long = 'First line of the note\n\nSecond paragraph with **the rest** of it';
+    mounted = view({
+      now: Date.parse('2026-10-30T10:15:00.000Z'),
+      groups: [group([queued('q1', 'queued', { text: long, sender: 'agent', by: { kind: 'ferret', name: 'Mira' } })])],
+    });
+    const parts = (line('q1').children as ReactTestInstance[])
+      .filter(child => child.props['data-queue-sr'] === undefined)
+      .map(child => text(child));
+    expect(parts).toEqual(['Waiting', 'Mira', 'First line of the note', '15m ago']);
+    expect(line('q1').type).toBe('button');
+    expect(line('q1').props['aria-expanded']).toBe(false);
+    expect(row('q1').findAllByProps({ 'data-queue-body': '' })).toHaveLength(0);
+    // No separator characters are drawn between the parts of the line (nothing can start a wrapped line with one).
+    expect(text(line('q1'))).not.toContain('·');
+
+    open('q1');
+    expect(line('q1').props['aria-expanded']).toBe(true);
+    expect(line('q1').props['aria-controls']).toBe(row('q1').findByProps({ 'data-queue-detail': '' }).props.id);
+    const body = text(row('q1').findByProps({ 'data-queue-body': '' }));
+    expect(body).toContain('Second paragraph with the rest of it');
+    expect(body).not.toContain('**');
+    open('q1');
+    expect(line('q1').props['aria-expanded']).toBe(false);
+    expect(row('q1').findAllByProps({ 'data-queue-detail': '' })).toHaveLength(0);
+  });
+
+  test('the line shows your own messages as You, the owner of a ferret message by name, and only the first line of a heading', () => {
+    mounted = view({
+      groups: [
+        group([
+          queued('q1', 'queued', { text: '## Review notes\nmore' }),
+          queued('q22', 'queued', { sender: 'agent', by: { kind: 'ferret', name: 'Mira' } }),
+        ]),
+      ],
+    });
+    expect(text(row('q1').findByProps({ 'data-queue-meta': 'from' }))).toBe('You');
+    expect(text(row('q22').findByProps({ 'data-queue-meta': 'from' }))).toBe('Mira');
+    expect(text(row('q1').findByProps({ 'data-queue-snippet': '' }))).toBe('Review notes');
+  });
+
+  test('an opened row says why it waits, its kind when not an action, and a blocker is marked', () => {
+    mounted = view({
+      groups: [group([queued('q1', 'queued', { label: 'blocker' }), queued('q22', 'queued', { label: 'fyi' }), saved])],
+    });
+    open('q1');
+    open('q22');
+    open('o1');
     expect(text(row('q1').findByProps({ 'data-queue-meta': 'kind' }))).toBe('blocker');
     expect(row('q1').props['data-queue-kind']).toBe('blocker');
     expect(text(row('q22').findByProps({ 'data-queue-meta': 'kind' }))).toBe('fyi');
+    expect(text(row('q1').findByProps({ 'data-queue-meta': 'why' }))).toBe('waiting for its turn');
+    expect(text(row('o1').findByProps({ 'data-queue-meta': 'why' }))).toBe('On this device · waiting for connection');
+    expect(row('o1').findAllByProps({ 'data-queue-meta': 'kind' })).toHaveLength(0);
   });
 
   test('marks the one message that is delivered next per ferret, in delivery order, not screen order', () => {
@@ -137,37 +243,85 @@ describe('QueuePageView', () => {
         group([queued('q333', 'read'), queued('q4444', 'queued')], 'd1/s2'),
       ],
     });
-    const rows = mounted.root.findAll(n => n.type === 'li' && n.props['data-queue-row'] !== undefined);
-    expect(rows.map(n => n.props['data-queue-row'])).toEqual(['q1', 'q22', 'q333', 'q4444']);
+    expect(rowIds(mounted.root)).toEqual(['q1', 'q22', 'q4444']);
     expect(mounted.root.findAll(n => n.props['data-queue-next'] === '').map(n => n.props['data-queue-row'])).toEqual([
       'q22',
       'q4444',
     ]);
-    expect(text(mounted.root.findByProps({ 'data-queue-row': 'q22' }).findByProps({ 'data-queue-meta': 'next' }))).toBe(
-      'Next up',
-    );
+    open('q22');
+    expect(text(row('q22').findByProps({ 'data-queue-meta': 'next' }))).toBe('Next up');
   });
 
-  test('draws a message the way the chat does, not as a raw run of text', () => {
-    mounted = view({ groups: [group([queued('q1', 'queued', { text: 'Fixed **it**, see `code`' })])] });
-    const body = text(mounted.root.findByProps({ 'data-queue-body': '' }));
-    expect(body).toContain('Fixed it, see code');
-    expect(body).not.toContain('**');
-    expect(body).not.toContain('`');
+  test("a search narrows the next-up mark to the ferret's whole queue, not to the matching rows", () => {
+    mounted = view({
+      groups: [
+        group([
+          queued('q1', 'queued', { text: 'alpha' }),
+          queued('q22', 'queued', { text: 'beta', enqueuedAt: '2026-10-30T10:30:00.000Z' }),
+        ]),
+      ],
+    });
+    searchFor('beta');
+    expect(rowIds(mounted.root)).toEqual(['q22']);
+    expect(row('q22').props['data-queue-next']).toBeUndefined();
   });
 
-  test('a long message is clamped behind Show more; a short one has no control', () => {
-    const long = 'a long line of words. '.repeat(30);
-    mounted = view({ groups: [group([queued('q1', 'queued', { text: long }), queued('q22', 'queued')])] });
-    const row = (id: string) => mounted!.root.findByProps({ 'data-queue-row': id });
-    expect(row('q1').findByProps({ 'data-queue-body': '' }).props['data-queue-clamped']).toBe('');
-    expect(buttons(row('q1'), 'Show more')).toHaveLength(1);
-    expect(buttons(row('q22'), 'Show more')).toHaveLength(0);
-    run(() => buttons(row('q1'), 'Show more')[0]?.props.onClick());
-    expect(row('q1').findByProps({ 'data-queue-body': '' }).props['data-queue-clamped']).toBeUndefined();
-    expect(buttons(row('q1'), 'Show less')[0]?.props['aria-expanded']).toBe(true);
-    run(() => buttons(row('q1'), 'Show less')[0]?.props.onClick());
-    expect(buttons(row('q1'), 'Show more')).toHaveLength(1);
+  test('search finds messages by their words and by their sender, in any case, in either list', () => {
+    mounted = view({
+      groups: [
+        group([
+          queued('q1', 'queued', { text: 'Please rerun CI' }),
+          queued('q22', 'queued', { text: 'Deploy is blocked', sender: 'agent', by: { kind: 'ferret', name: 'Mira' } }),
+          queued('q333', 'read', { text: 'Old CI note' }),
+          queued('q4444', 'read', { text: 'Shipped', sender: 'agent', by: { kind: 'ferret', name: 'Mira' } }),
+        ]),
+      ],
+    });
+    searchFor('RERUN');
+    expect(rowIds(mounted.root)).toEqual(['q1']);
+    searchFor('mIrA');
+    expect(rowIds(mounted.root)).toEqual(['q22']);
+    // The toggles count what each list holds for this search.
+    expect(text(mounted.root.findByProps({ 'data-queue-listing-count': 'sent' }))).toBe('1');
+    toggle('sent');
+    expect(rowIds(mounted.root)).toEqual(['q4444']);
+    searchFor('ci');
+    expect(rowIds(mounted.root)).toEqual(['q333']);
+    searchFor('you');
+    expect(rowIds(mounted.root)).toEqual(['q333']);
+  });
+
+  test('a search with no match says so, points to the other list, and the clear control brings the rows back', () => {
+    mounted = view({
+      groups: [group([queued('q1', 'queued', { text: 'alpha' }), queued('q22', 'read', { text: 'zebra' })])],
+    });
+    expect(mounted.root.findAllByProps({ 'data-queue-search-clear': '' })).toHaveLength(0);
+    searchFor('zebra');
+    const none = mounted.root.findByProps({ 'data-queue-no-matches': '' });
+    expect(text(none)).toContain('Nothing in Not sent matches “zebra”');
+    expect(text(none)).toContain('1 match in Sent');
+    run(() => mounted!.root.findByProps({ 'data-queue-search-clear': '' }).props.onClick());
+    expect(mounted.root.findAllByProps({ 'data-queue-no-matches': '' })).toHaveLength(0);
+    expect(mounted.root.findByProps({ 'data-queue-search': '' }).props.value).toBe('');
+    expect(rowIds(mounted.root)).toEqual(['q1']);
+    searchFor('nothing like it');
+    run(() => buttons(mounted!.root.findByProps({ 'data-queue-no-matches': '' }), 'Clear search')[0]?.props.onClick());
+    expect(rowIds(mounted.root)).toEqual(['q1']);
+  });
+
+  test('with nothing waiting it says so plainly, and the Sent toggle is still there', () => {
+    mounted = view({ groups: [group([queued('q1', 'read')])] });
+    expect(text(mounted.root.findByProps({ 'data-queue-empty': '' }))).toContain('Nothing is waiting');
+    expect(text(mounted.root.findByProps({ 'data-queue-listing-count': 'sent' }))).toBe('1');
+    toggle('sent');
+    expect(rowIds(mounted.root)).toEqual(['q1']);
+    expect(mounted.root.findAllByProps({ 'data-queue-empty': '' })).toHaveLength(0);
+  });
+
+  test('an empty Sent list says nothing was sent', () => {
+    mounted = view({ groups: [group([queued('q1', 'queued')])] });
+    toggle('sent');
+    expect(text(mounted.root.findByProps({ 'data-queue-empty': '' }))).toContain('Nothing sent yet');
   });
 
   test('a ferret with nothing queued shows the empty card, not an empty heading', () => {
@@ -186,10 +340,7 @@ describe('QueuePageView', () => {
     expect(buttons(mounted.root.findByProps({ 'data-queue-empty': '' }), 'See all queues')).toHaveLength(0);
   });
 
-  test('says when nothing waits, and when it is still reading', () => {
-    mounted = view({ groups: [] });
-    expect(text(mounted.root.findByProps({ 'data-queue-empty': '' }))).toContain('Nothing is waiting');
-    mounted.unmount();
+  test('says when it is still reading', () => {
     mounted = view({ groups: [], loading: true });
     expect(JSON.stringify(mounted.toJSON())).toContain('Reading the queues');
     expect(JSON.stringify(mounted.toJSON())).not.toContain('Nothing is waiting');
@@ -206,46 +357,48 @@ describe('QueuePageView', () => {
     expect(all).toBe(1);
   });
 
-  test('only a message that can still change offers Edit and Cancel', () => {
-    mounted = view();
-    expect(buttons(mounted.root.findByProps({ 'data-queue-row': 'o1' }), 'Edit')).toHaveLength(1);
-    expect(buttons(mounted.root.findByProps({ 'data-queue-row': 'q22' }), 'Edit')).toHaveLength(0);
+  test('only a message that can still change offers Edit and Cancel, once opened', () => {
+    mounted = view({ groups: [group([saved, queued('q1', 'failed')])] });
+    expect(buttons(row('o1'), 'Edit')).toHaveLength(0);
+    open('o1');
+    open('q1');
+    expect(buttons(row('o1'), 'Edit')).toHaveLength(1);
+    expect(buttons(row('q1'), 'Edit')).toHaveLength(0);
   });
 
   test('edit saves the trimmed words, can be dismissed, and cannot save an empty box', async () => {
     const log: string[] = [];
     mounted = view({ handlers: handlers(log) });
-    const row = () => mounted!.root.findByProps({ 'data-queue-row': 'o1' });
-    run(() => buttons(row(), 'Edit')[0]?.props.onClick());
-    const box = () => row().findByType('textarea');
+    open('o1');
+    const box = () => row('o1').findByType('textarea');
+    run(() => buttons(row('o1'), 'Edit')[0]?.props.onClick());
     run(() => box().props.onChange({ target: { value: '  thanks!  ' } }));
-    await runAsync(async () => buttons(row(), 'Save')[0]?.props.onClick());
+    await runAsync(async () => buttons(row('o1'), 'Save')[0]?.props.onClick());
     expect(log).toEqual(['edit o1 thanks!']);
-    expect(row().findAllByType('textarea')).toHaveLength(0);
+    expect(row('o1').findAllByType('textarea')).toHaveLength(0);
 
-    run(() => buttons(row(), 'Edit')[0]?.props.onClick());
+    run(() => buttons(row('o1'), 'Edit')[0]?.props.onClick());
     run(() => box().props.onChange({ target: { value: '   ' } }));
-    expect(buttons(row(), 'Save')[0]?.props.disabled).toBe(true);
-    run(() => buttons(row(), 'Keep as is')[0]?.props.onClick());
-    expect(row().findAllByType('textarea')).toHaveLength(0);
-    expect(text(row().findByProps({ 'data-queue-body': '' }))).toBe('thank you');
+    expect(buttons(row('o1'), 'Save')[0]?.props.disabled).toBe(true);
+    run(() => buttons(row('o1'), 'Keep as is')[0]?.props.onClick());
+    expect(row('o1').findAllByType('textarea')).toHaveLength(0);
+    expect(text(row('o1').findByProps({ 'data-queue-body': '' }))).toBe('thank you');
   });
 
   test('cancel goes through the handler; a refusal is said in plain words and the editor stays open', async () => {
     const log: string[] = [];
     mounted = view({ handlers: handlers(log) });
-    await runAsync(async () =>
-      buttons(mounted!.root.findByProps({ 'data-queue-row': 'o1' }), 'Cancel message')[0]?.props.onClick(),
-    );
+    open('o1');
+    await runAsync(async () => buttons(row('o1'), 'Cancel message')[0]?.props.onClick());
     expect(log).toEqual(['cancel o1']);
 
     mounted.unmount();
     mounted = view({ handlers: handlers([], new QueueActionError('It was already typed.', 'typed')) });
-    const row = () => mounted!.root.findByProps({ 'data-queue-row': 'o1' });
-    run(() => buttons(row(), 'Edit')[0]?.props.onClick());
-    await runAsync(async () => buttons(row(), 'Save')[0]?.props.onClick());
-    expect(text(row().findByProps({ role: 'status' }))).toBe('It was already typed.');
-    expect(row().findAllByType('textarea')).toHaveLength(1);
+    open('o1');
+    run(() => buttons(row('o1'), 'Edit')[0]?.props.onClick());
+    await runAsync(async () => buttons(row('o1'), 'Save')[0]?.props.onClick());
+    expect(text(row('o1').findByProps({ role: 'status' }))).toBe('It was already typed.');
+    expect(row('o1').findAllByType('textarea')).toHaveLength(1);
   });
 
   test('a failure that is not an Error still says something', async () => {
@@ -257,9 +410,8 @@ describe('QueuePageView', () => {
         },
       },
     });
-    await runAsync(async () =>
-      buttons(mounted!.root.findByProps({ 'data-queue-row': 'o1' }), 'Cancel message')[0]?.props.onClick(),
-    );
+    open('o1');
+    await runAsync(async () => buttons(row('o1'), 'Cancel message')[0]?.props.onClick());
     expect(JSON.stringify(mounted.toJSON())).toContain('That did not work.');
   });
 });
@@ -279,6 +431,7 @@ describe('QueuePageView send times', () => {
       ],
     });
     const { root } = mounted;
+    open('q1');
     expect(
       text(root.findByProps({ 'data-queue-row': 'q1' }).findByProps({ 'data-queue-send': '2026-11-04T11:30:00.000Z' })),
     ).toBe(`sends by ${clock('2026-11-04T11:30:00.000Z')}`);
@@ -300,6 +453,7 @@ describe('QueuePageView send times', () => {
     });
     const { root } = mounted;
     for (const id of ['q22', 'q3']) {
+      open(id);
       expect(text(root.findByProps({ 'data-queue-row': id }).findByProps({ 'data-queue-send': 'due' }))).toBe(
         'due now',
       );
@@ -310,6 +464,8 @@ describe('QueuePageView send times', () => {
   test('a row waiting on a busy ferret with no hold says when its turn ends; one on this device says nothing', () => {
     mounted = view({ now: NOW, groups: [group([saved, queued('q1', 'queued', { waitReason: 'busy' })])] });
     const { root } = mounted;
+    open('q1');
+    open('o1');
     expect(text(root.findByProps({ 'data-queue-row': 'q1' }).findByProps({ 'data-queue-send': 'turn' }))).toBe(
       'when its turn ends',
     );

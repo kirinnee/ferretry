@@ -1,31 +1,40 @@
 // THE QUEUE VIEWS: one ferret's queue, and every queue at once.
 //
-// Reads each machine's `GET /v1/sessions/:id/queue` plus this device's outbox, and draws one row per message
-// with the sentence for why it waits. Edit and cancel go through the same `queueActions` the chat bubble uses:
-// the outbox first (local), the daemon's PATCH/DELETE after.
+// Reads each machine's `GET /v1/sessions/:id/queue` plus this device's outbox and draws one compact line per message
+// (status, sender, first line, time; a tap opens the rest). It opens on what has not been delivered; delivered and
+// read messages sit behind the Sent toggle, and a search narrows either list. Edit and cancel go through the same
+// `queueActions` the chat bubble uses: the outbox first (local), the daemon's PATCH/DELETE after.
 
 import type { QueuedMessage } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
+import { AlertTriangle, Check, CheckCheck, Clock, Search, Send, X } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Fragment, useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react';
 import { daemonQueuePath, daemonSessionPath } from '../lib/pages/routes.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import {
+  countRows,
   DUE_NOW_COPY,
   ferretRows,
+  firstLine,
   fromLabel,
   groupNextSend,
   isWaitingRow,
-  needsClamp,
+  limitRows,
+  listingGroups,
   nextRowId,
   queuedAgo,
   type QueueGroup,
+  type QueueListing,
   type QueueRow,
   type RowSend,
+  type RowStatus,
   rowSend,
+  rowStatus,
+  STATUS_LABEL,
   TURN_ENDS_COPY,
   waitingCountLine,
-  waitingGroups,
 } from '../lib/queue-view.ts';
 import { useRouter } from '../lib/router.tsx';
 import { absoluteTime } from '../lib/session-screens.ts';
@@ -33,18 +42,6 @@ import { QueueActionError, queueActions, readSessionQueue } from '../lib/send-qu
 import { useAppStore, useConnectionSnapshot } from '../lib/store.tsx';
 import { ChatProse } from './chat-prose.tsx';
 import { DaemonTaskReferences } from './daemon-task-references.tsx';
-
-/** Where a message is, in words; a queued one is on the machine's queue, which is what this page is. */
-const STATE_LABEL: Readonly<Record<QueueRow['state'], string>> = {
-  saved: 'On this device',
-  queued: '',
-  typing: 'Typing',
-  delivered: 'Typed',
-  read: 'Read',
-  unconfirmed: 'Typed, unconfirmed',
-  cancelled: 'Cancelled',
-  failed: 'Failed',
-};
 
 const STATE_TICKS: Readonly<Record<QueueRow['state'], number>> = {
   saved: 1,
@@ -57,9 +54,18 @@ const STATE_TICKS: Readonly<Record<QueueRow['state'], number>> = {
   failed: 0,
 };
 
+/** The icon beside each status word: a shape of its own, so the state never rests on colour alone. */
+const STATUS_ICON: Readonly<Record<RowStatus, LucideIcon>> = {
+  waiting: Clock,
+  sending: Send,
+  delivered: Check,
+  read: CheckCheck,
+  failed: AlertTriangle,
+  cancelled: X,
+};
+
 /** "On this device · waiting for connection"; a message on the machine's queue says only why it waits. */
-const statusLine = (row: QueueRow): string =>
-  STATE_LABEL[row.state] === '' ? row.why : `${STATE_LABEL[row.state]} · ${row.why}`;
+const whyLine = (row: QueueRow): string => (row.state === 'saved' ? `On this device · ${row.why}` : row.why);
 
 /** "sends by 11:20" / "due now" / "when its turn ends", on the reader's clock. */
 const sendCopy = (send: RowSend, lead: string): string => {
@@ -77,34 +83,14 @@ export interface QueueRowHandlers {
   readonly cancel: (row: QueueRow) => Promise<void>;
 }
 
-/** A message's words, drawn as the chat draws them, folded behind "Show more" when they run long. */
-function QueueBody({ text }: { readonly text: string }) {
-  const [open, setOpen] = useState(false);
-  const bodyId = useId();
-  const clamped = needsClamp(text);
+/** The status word with its icon: the first thing on every row. */
+function StatusLabel({ status }: { readonly status: RowStatus }) {
+  const Icon = STATUS_ICON[status];
   return (
-    <div className="fy-queue-message">
-      <div
-        className="fy-queue-body"
-        data-queue-body=""
-        data-queue-clamped={clamped && !open ? '' : undefined}
-        id={bodyId}
-      >
-        <ChatProse text={text} />
-      </div>
-      {clamped ? (
-        <button
-          aria-controls={bodyId}
-          aria-expanded={open}
-          className="fy-queue-more"
-          data-queue-more=""
-          onClick={() => setOpen(current => !current)}
-          type="button"
-        >
-          {open ? 'Show less' : 'Show more'}
-        </button>
-      ) : null}
-    </div>
+    <span className="fy-queue-status" data-queue-meta="status" data-queue-status={status}>
+      <Icon aria-hidden="true" className="fy-queue-status-icon" size={14} strokeWidth={2.25} />
+      <span>{STATUS_LABEL[status]}</span>
+    </span>
   );
 }
 
@@ -121,9 +107,13 @@ function QueueRowView({
 }) {
   const ago = queuedAgo(row.at, now);
   const send = rowSend(row, now);
+  const status = rowStatus(row);
+  const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(row.text);
   const [note, setNote] = useState<string | null>(null);
+  const detailId = useId();
+  const expanded = open || editing;
   const act = async (run: () => Promise<void>): Promise<boolean> => {
     setNote(null);
     try {
@@ -139,89 +129,122 @@ function QueueRowView({
       className="fy-queue-row"
       data-queue-kind={row.kind}
       data-queue-next={next ? '' : undefined}
+      data-queue-open={expanded ? '' : undefined}
       data-queue-row={row.id}
       data-queue-state={row.state}
+      data-queue-ticks={STATE_TICKS[row.state]}
     >
-      {/* One quiet line, plain words. The ferret is the heading and the owner is the default sender, so
-          neither is repeated; the kind shows only when it is not the ordinary `action`. */}
-      <p className="fy-queue-meta" data-queue-ticks={STATE_TICKS[row.state]}>
+      {/* ONE line: status, sender, the first line of the words, how long ago. Tapping it opens the rest. */}
+      <button
+        aria-controls={expanded ? detailId : undefined}
+        aria-expanded={expanded}
+        className="fy-queue-line"
+        data-queue-line=""
+        disabled={editing}
+        onClick={() => setOpen(current => !current)}
+        type="button"
+      >
         {next ? (
-          <span className="fy-queue-next" data-queue-meta="next">
-            Next up
+          <span className="sr-only" data-queue-sr="">
+            Next up.
           </span>
         ) : null}
-        {row.sender === undefined ? null : <span data-queue-meta="from">{fromLabel(row)}</span>}
-        {row.kind === 'action' ? null : (
-          <span className="fy-queue-kind" data-queue-meta="kind" data-queue-tone={row.kind}>
-            {row.kind}
-          </span>
-        )}
-        <span data-queue-meta="status">{statusLine(row)}</span>
-        {send === undefined ? null : <span data-queue-send={sendKey(send)}>{sendCopy(send, 'sends by')}</span>}
-        {ago === '' ? null : (
-          <time dateTime={row.at} title={absoluteTime(row.at)}>
+        <StatusLabel status={status} />
+        <span className="fy-queue-sender" data-queue-meta="from">
+          {fromLabel(row)}
+        </span>
+        <span className="fy-queue-snippet" data-queue-snippet="">
+          {firstLine(row.text)}
+        </span>
+        {ago === '' ? (
+          <span />
+        ) : (
+          <time className="fy-queue-ago" dateTime={row.at} title={absoluteTime(row.at)}>
             {ago}
           </time>
         )}
-      </p>
-      {editing ? (
-        <div className="fy-queue-edit">
-          <textarea
-            aria-label="Message text"
-            className="fy-queue-textarea"
-            onChange={event => setText(event.target.value)}
-            value={text}
-          />
-          <div className="fy-queue-actions">
-            <button
-              className="kt-btn"
-              data-variant="primary"
-              disabled={text.trim().length === 0}
-              onClick={() => void act(() => handlers.edit(row, text.trim())).then(done => done && setEditing(false))}
-              type="button"
-            >
-              Save
-            </button>
-            <button
-              className="kt-btn"
-              onClick={() => {
-                setText(row.text);
-                setEditing(false);
-              }}
-              type="button"
-            >
-              Keep as is
-            </button>
-          </div>
-        </div>
-      ) : (
-        <QueueBody text={row.text} />
-      )}
-      {note === null ? null : (
-        <p className="fy-queue-note" role="status">
-          {note}
-        </p>
-      )}
-      {row.editable && !editing ? (
-        <div className="fy-queue-actions">
-          <button
-            className="fy-queue-action"
-            onClick={() => {
-              setText(row.text);
-              setEditing(true);
-            }}
-            type="button"
-          >
-            Edit
-          </button>
-          <button
-            className="fy-queue-action"
-            data-tone="danger"
-            onClick={() => void act(() => handlers.cancel(row))}
-            type="button"
-          >
-            Cancel message
-          </button>
+      </button>
+      {expanded ? (
+        <div className="fy-queue-detail" data-queue-detail="" id={detailId}>
+          <p className="fy-queue-facts">
+            {next ? (
+              <span className="fy-queue-next" data-queue-meta="next">
+                Next up
+              </span>
+            ) : null}
+            {row.kind === 'action' ? null : (
+              <span className="fy-queue-kind" data-queue-meta="kind" data-queue-tone={row.kind}>
+                {row.kind}
+              </span>
+            )}
+            <span data-queue-meta="why">{whyLine(row)}</span>
+            {send === undefined ? null : <span data-queue-send={sendKey(send)}>{sendCopy(send, 'sends by')}</span>}
+          </p>
+          {editing ? (
+            <div className="fy-queue-edit">
+              <textarea
+                aria-label="Message text"
+                className="fy-queue-textarea"
+                onChange={event => setText(event.target.value)}
+                value={text}
+              />
+              <div className="fy-queue-actions">
+                <button
+                  className="kt-btn"
+                  data-variant="primary"
+                  disabled={text.trim().length === 0}
+                  onClick={() =>
+                    void act(() => handlers.edit(row, text.trim())).then(done => done && setEditing(false))
+                  }
+                  type="button"
+                >
+                  Save
+                </button>
+                <button
+                  className="kt-btn"
+                  onClick={() => {
+                    setText(row.text);
+                    setEditing(false);
+                  }}
+                  type="button"
+                >
+                  Keep as is
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="fy-queue-body" data-queue-body="">
+              <ChatProse text={row.text} />
+            </div>
+          )}
+          {note === null ? null : (
+            <p className="fy-queue-note" role="status">
+              {note}
+            </p>
+          )}
+          {row.editable && !editing ? (
+            <div className="fy-queue-actions">
+              <button
+                className="fy-queue-action"
+                onClick={() => {
+                  setText(row.text);
+                  setOpen(true);
+                  setEditing(true);
+                }}
+                type="button"
+              >
+                Edit
+              </button>
+              <button
+                className="fy-queue-action"
+                data-tone="danger"
+                onClick={() => void act(() => handlers.cancel(row))}
+                type="button"
+              >
+                Cancel message
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </li>
@@ -254,6 +277,11 @@ export interface QueuePageViewProps {
   readonly now?: number;
 }
 
+/** How many sent messages show before "Show older": the list stays light however long the history is. */
+const SENT_STEP = 100;
+
+const LISTING_LABEL: Readonly<Record<QueueListing, string>> = { unsent: 'Not sent', sent: 'Sent' };
+
 export function QueuePageView({
   title,
   groups,
@@ -265,9 +293,31 @@ export function QueuePageView({
   wrapGroup = (_group, content) => content,
   now = Date.now(),
 }: QueuePageViewProps) {
-  // A ferret with nothing in its queue has no card: the page says so once, whether it shows one ferret or all.
-  const shown = groups.filter(group => group.rows.length > 0);
+  const [listing, setListing] = useState<QueueListing>('unsent');
+  const [query, setQuery] = useState('');
+  const [limit, setLimit] = useState(SENT_STEP);
   const waiting = groups.reduce((sum, group) => sum + group.rows.filter(isWaitingRow).length, 0);
+  // The rows each list would show for this search, so each toggle can say how many it holds.
+  const lists = useMemo(
+    () => ({ unsent: listingGroups(groups, 'unsent', query), sent: listingGroups(groups, 'sent', query) }),
+    [groups, query],
+  );
+  const counts: Readonly<Record<QueueListing, number>> = {
+    unsent: countRows(lists.unsent),
+    sent: countRows(lists.sent),
+  };
+  const searching = query.trim() !== '';
+  const other: QueueListing = listing === 'unsent' ? 'sent' : 'unsent';
+  const total = counts[listing];
+  const shown = listing === 'sent' ? limitRows(lists.sent, limit) : lists.unsent;
+  const choose = (next: QueueListing) => {
+    setListing(next);
+    setLimit(SENT_STEP);
+  };
+  const search = (value: string) => {
+    setQuery(value);
+    setLimit(SENT_STEP);
+  };
   return (
     <main aria-label={title} className="fy-queue-page scroll-thin" data-queue-page="">
       <div className="fy-queue-column">
@@ -280,21 +330,82 @@ export function QueuePageView({
             </button>
           )}
         </header>
-        {shown.length === 0 && !loading ? (
-          <div className="fy-queue-empty kt-panel" data-queue-empty="">
-            <p className="fy-queue-empty-title">Nothing is waiting</p>
-            <p className="fy-queue-empty-hint">
-              Messages for a ferret show up here while they wait for its turn, then leave once it has read them.
-            </p>
-            {onShowAll === undefined ? null : (
-              <button className="kt-btn" onClick={onShowAll} type="button">
-                See all queues
+        <div className="fy-queue-controls">
+          <fieldset aria-label="Which messages" className="fy-queue-toggle">
+            {(['unsent', 'sent'] as const).map(item => (
+              <button
+                aria-pressed={listing === item}
+                className="fy-queue-toggle-button"
+                data-queue-listing={item}
+                key={item}
+                onClick={() => choose(item)}
+                type="button"
+              >
+                <span>{LISTING_LABEL[item]}</span>
+                <span className="fy-queue-toggle-count" data-queue-listing-count={item}>
+                  {counts[item]}
+                </span>
+              </button>
+            ))}
+          </fieldset>
+          <search className="fy-queue-search">
+            <Search aria-hidden="true" className="fy-queue-search-icon" size={16} />
+            <input
+              aria-label="Search messages and senders"
+              autoComplete="off"
+              className="fy-queue-search-input"
+              data-queue-search=""
+              onChange={event => search(event.target.value)}
+              placeholder="Search messages or senders"
+              type="search"
+              value={query}
+            />
+            {query === '' ? null : (
+              <button
+                aria-label="Clear search"
+                className="fy-queue-search-clear"
+                data-queue-search-clear=""
+                onClick={() => search('')}
+                type="button"
+              >
+                <X aria-hidden="true" size={16} />
               </button>
             )}
-          </div>
+          </search>
+        </div>
+        {total === 0 && !loading ? (
+          searching ? (
+            <div className="fy-queue-empty kt-panel" data-queue-no-matches="">
+              <p className="fy-queue-empty-title">{`Nothing in ${LISTING_LABEL[listing]} matches “${query.trim()}”`}</p>
+              {counts[other] > 0 ? (
+                <p className="fy-queue-empty-hint">{`${counts[other]} match in ${LISTING_LABEL[other]}.`}</p>
+              ) : null}
+              <button className="kt-btn" onClick={() => search('')} type="button">
+                Clear search
+              </button>
+            </div>
+          ) : listing === 'sent' ? (
+            <div className="fy-queue-empty kt-panel" data-queue-empty="">
+              <p className="fy-queue-empty-title">Nothing sent yet</p>
+              <p className="fy-queue-empty-hint">Delivered and read messages show up here, newest first.</p>
+            </div>
+          ) : (
+            <div className="fy-queue-empty kt-panel" data-queue-empty="">
+              <p className="fy-queue-empty-title">Nothing is waiting</p>
+              <p className="fy-queue-empty-hint">
+                Messages show up here while they wait for a ferret's turn. Once delivered they move to Sent.
+              </p>
+              {onShowAll === undefined ? null : (
+                <button className="kt-btn" onClick={onShowAll} type="button">
+                  See all queues
+                </button>
+              )}
+            </div>
+          )
         ) : null}
         {shown.map(group => {
-          const next = nextRowId(group.rows, now);
+          // Next up is the ferret's whole queue's next send, found before any search narrowed the rows.
+          const next = nextRowId(groups.find(item => item.key === group.key)?.rows ?? group.rows, now);
           return (
             <Fragment key={group.key}>
               {wrapGroup(
@@ -305,9 +416,9 @@ export function QueuePageView({
                       {group.ferret}
                     </button>
                     {showMachine ? <span className="fy-queue-machine">{group.machine}</span> : null}
-                    <GroupNextSend group={group} now={now} />
+                    {listing === 'unsent' ? <GroupNextSend group={group} now={now} /> : null}
                     {shown.length > 1 ? (
-                      <span className="fy-queue-group-count">{`${group.rows.filter(isWaitingRow).length} waiting`}</span>
+                      <span className="fy-queue-group-count">{`${group.rows.length} ${listing === 'sent' ? 'sent' : 'not sent'}`}</span>
                     ) : null}
                   </h2>
                   <ul className="fy-queue-list">
@@ -320,6 +431,16 @@ export function QueuePageView({
             </Fragment>
           );
         })}
+        {listing === 'sent' && countRows(shown) < total ? (
+          <button
+            className="kt-btn fy-queue-older"
+            data-queue-older=""
+            onClick={() => setLimit(current => current + SENT_STEP)}
+            type="button"
+          >
+            {`Show older messages (${total - countRows(shown)} more)`}
+          </button>
+        ) : null}
       </div>
     </main>
   );
@@ -413,7 +534,7 @@ export function QueuePage({ daemonId, sessionId }: { readonly daemonId: DaemonId
         rows: ferretRows(entry.daemonId, entry.sessionId, entry.sessionId, [], outbox),
       });
     }
-    return sessionId === undefined ? waitingGroups(out) : out;
+    return out;
   }, [connections, outbox, queues, sessionId, targets]);
 
   const handlers = useMemo<QueueRowHandlers>(() => {

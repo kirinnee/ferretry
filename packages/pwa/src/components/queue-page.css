@@ -1,15 +1,16 @@
-/* THE QUEUE PAGE (&B160). A wide, plain list: each ferret is a heading, each queued message a row set off by a
-   hairline — one quiet line of words (who sent it if not you, its kind if not an action, why it waits, how long
-   ago), the message drawn by the chat's renderer (folded behind "Show more" when long) and text buttons. No
-   chips, no boxes inside boxes. Colours, radii and type all come from the theme tokens; nothing names a colour. */
+/* THE QUEUE PAGE (&B160). A compact, searchable, scrollable list. Each ferret is a heading; each message is ONE line —
+   status (word + icon, first), sender, the first line of the words, how long ago — and a tap opens the full text.
+   The page is its own scroll container (it fills the pane and scrolls inside it), with the toggle and search stuck
+   to the top. Colours, radii and type all come from the theme tokens; nothing names a colour. */
 .fy-queue-page {
-  display: flex;
-  flex: 1 1 0;
+  /* The pane around this page is a plain block, not a flex column, so a flex-basis cannot size it: the page takes the
+     pane's height itself and scrolls inside it. (Before, it grew to its content and the shell clipped it.) */
+  box-sizing: border-box;
+  height: 100%;
   min-height: 0;
-  flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: var(--pad-panel, 16px);
+  padding: 0 var(--pad-panel, 16px) var(--pad-panel, 16px);
 }
 .fy-queue-column {
   display: flex;
@@ -25,6 +26,110 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
+  padding-top: var(--pad-panel, 16px);
+}
+/* The toggle and the search stay at the top while the list scrolls under them. */
+.fy-queue-controls {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 0;
+  background: var(--bg, var(--surface));
+  border-bottom: var(--divider-width, 1px) solid var(--border-soft);
+}
+.fy-queue-toggle {
+  display: inline-flex;
+  flex: none;
+  min-width: 0;
+  margin: 0;
+  padding: 2px;
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-2, var(--surface));
+}
+.fy-queue-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: calc(var(--radius-control, 8px) - 2px);
+  color: var(--muted);
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: var(--weight-strong, 600);
+}
+.fy-queue-toggle-button[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 var(--stroke, 1px) var(--border);
+}
+.fy-queue-toggle-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.fy-queue-toggle-count {
+  min-width: 1.4em;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft, var(--surface-2));
+  color: var(--accent);
+  font-size: var(--text-xs, 0.75rem);
+  line-height: 1.5;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.fy-queue-search {
+  position: relative;
+  /* The search element is block-level by default; the box lines up beside the toggle. */
+  display: flex;
+  flex: 1 1 14rem;
+  align-items: center;
+  min-width: 0;
+}
+.fy-queue-search-icon {
+  position: absolute;
+  inset-inline-start: 10px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.fy-queue-search-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 36px;
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: var(--text-sm, 0.875rem);
+}
+.fy-queue-search-input::-webkit-search-cancel-button {
+  display: none;
+}
+.fy-queue-search-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.fy-queue-search-clear {
+  position: absolute;
+  inset-inline-end: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--muted);
+}
+.fy-queue-search-clear:hover,
+.fy-queue-search-clear:focus-visible {
+  color: var(--fg);
+}
+.fy-queue-older {
+  align-self: center;
 }
 .fy-queue-title {
   margin: 0;
@@ -89,37 +194,94 @@
   list-style: none;
 }
 .fy-queue-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
   min-width: 0;
-  padding: 14px 0;
   border-bottom: var(--divider-width, 1px) solid var(--border-soft);
 }
 .fy-queue-row:last-child {
   border-bottom: 0;
 }
-.fy-queue-meta {
+/* The next message to go keeps a quiet accent edge (its words — "Next up" — are in the open row and read aloud). */
+.fy-queue-row[data-queue-next] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+/* ONE line. A fixed status column so the words line up down the page; the snippet takes what is left and ends in
+   an ellipsis; nothing wraps, so no line can begin with a stray separator. */
+.fy-queue-line {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 9rem) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0 12px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 8px;
+  text-align: start;
+  font-size: var(--text-sm, 0.875rem);
+  line-height: 1.4;
+}
+.fy-queue-line:hover {
+  background: var(--surface-2, transparent);
+}
+.fy-queue-line:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.fy-queue-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: var(--weight-strong, 600);
+  white-space: nowrap;
+}
+.fy-queue-status-icon {
+  flex: none;
+}
+.fy-queue-status[data-queue-status='waiting'] {
+  color: var(--warn);
+}
+.fy-queue-status[data-queue-status='sending'] {
+  color: var(--accent);
+}
+.fy-queue-status[data-queue-status='delivered'] {
+  color: var(--muted);
+}
+.fy-queue-status[data-queue-status='read'] {
+  color: var(--ok);
+}
+.fy-queue-status[data-queue-status='failed'] {
+  color: var(--err);
+}
+.fy-queue-sender,
+.fy-queue-snippet {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-queue-sender {
+  color: var(--muted);
+}
+.fy-queue-ago {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fy-queue-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 8px 14px;
+}
+.fy-queue-facts {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  gap: 2px 14px;
   min-width: 0;
   margin: 0;
   color: var(--muted);
   font-size: var(--text-sm, 0.85rem);
-  /* A name with no break opportunity wraps inside the line instead of widening the page. */
   overflow-wrap: anywhere;
-}
-.fy-queue-meta > * + *::before {
-  content: '·';
-  margin-inline: 0.5em;
-}
-.fy-queue-meta time {
-  margin-inline-start: auto;
-  white-space: nowrap;
-}
-.fy-queue-meta time::before {
-  content: none;
 }
 .fy-queue-next {
   color: var(--ok);
@@ -129,18 +291,9 @@
   color: var(--err);
   font-weight: var(--weight-strong, 600);
 }
-.fy-queue-message {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  min-width: 0;
-}
 /* The words wrap at the column — a long URL or path breaks wherever it must instead of widening the page —
    and a code block scrolls inside itself. */
 .fy-queue-body {
-  position: relative;
-  width: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -154,28 +307,6 @@
 .fy-queue-body pre {
   max-width: 100%;
   overflow-x: auto;
-}
-.fy-queue-body[data-queue-clamped] {
-  max-height: 9.5rem;
-  overflow: hidden;
-}
-/* The fold fades into the page, so it reads as "more below" in every theme. */
-.fy-queue-body[data-queue-clamped]::after {
-  content: '';
-  position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  height: 3rem;
-  background: linear-gradient(to bottom, transparent, var(--bg, var(--surface)));
-  pointer-events: none;
-}
-.fy-queue-more {
-  min-width: 0;
-  padding: 2px 0;
-  color: var(--accent);
-  font-size: var(--text-sm, 0.875rem);
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 .fy-queue-actions {
   display: flex;
@@ -236,22 +367,53 @@
   margin: 0 0 8px;
   color: var(--muted);
 }
-/* A thumb's 44px, on a touch screen (the global floor) and on any narrow window, mouse or not. */
+/* A thumb's 44px, on a touch screen (the global floor) and on any narrow window, mouse or not. The line stays ONE line:
+   the status column narrows, the sender shrinks, the words take the rest. */
 @media (max-width: 640px) {
   .fy-queue-page {
-    padding: 12px;
+    padding: 0 12px 12px;
+  }
+  .fy-queue-head {
+    padding-top: 12px;
+  }
+  .fy-queue-title {
+    flex: 1 1 auto;
+  }
+  .fy-queue-count {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .fy-queue-line {
+    grid-template-columns: 5.1rem minmax(0, 3.9rem) minmax(0, 1fr) auto;
+    gap: 0 6px;
+    min-height: 44px;
+    padding-inline: 4px;
+    font-size: 0.8125rem;
+  }
+  .fy-queue-detail {
+    padding-inline: 4px;
+  }
+  .fy-queue-search-input {
+    /* 16px keeps iOS from zooming the page when the box is focused. */
+    font-size: 1rem;
+    min-height: 44px;
+  }
+  .fy-queue-toggle-button {
+    min-height: 40px;
+  }
+  .fy-queue-search-clear {
+    width: 44px;
+    height: 44px;
   }
   .fy-queue-edit .kt-btn,
   .fy-queue-ferret,
   .fy-queue-head .kt-btn,
-  .fy-queue-empty .kt-btn {
+  .fy-queue-empty .kt-btn,
+  .fy-queue-older {
     min-height: 44px;
   }
   .fy-queue-action {
     min-height: 44px;
     padding-inline: 4px;
-  }
-  .fy-queue-more {
-    min-height: 44px;
   }
 }

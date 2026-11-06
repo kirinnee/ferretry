@@ -16,7 +16,14 @@ import {
   queueRowOf,
   rowSend,
   waitingCountLine,
-  waitingGroups,
+  countRows,
+  firstLine,
+  limitRows,
+  listingGroups,
+  listingOf,
+  matchesSearch,
+  rowStatus,
+  STATUS_LABEL,
 } from '../../src/lib/queue-view.ts';
 import type { OutboxEntry } from '../../src/lib/send-outbox.ts';
 
@@ -134,7 +141,11 @@ describe('waiting', () => {
     });
     const early = queueRowOf('d', 's', 'f', message({ enqueuedAt: '2026-10-30T09:00:00.000Z' }));
     const late = queueRowOf('d', 's', 'f', message({ enqueuedAt: '2026-10-30T11:00:00.000Z' }));
-    const groups = waitingGroups([group('b', late), group('empty', row('read')), group('c', early), group('a', early)]);
+    const groups = listingGroups(
+      [group('b', late), group('empty', row('read')), group('c', early), group('a', early)],
+      'unsent',
+      '',
+    );
     expect(groups.map(item => item.key)).toEqual(['a', 'c', 'b']);
   });
 
@@ -277,7 +288,7 @@ describe('needsClamp', () => {
   });
 });
 
-describe('waitingGroups order', () => {
+describe('unsent listing order', () => {
   test('the longest-waiting message decides, even when delivery order lists a newer one first', () => {
     const rowsOf = (sessionId: string, items: Partial<QueuedMessage>[]) =>
       ferretRows(
@@ -305,7 +316,7 @@ describe('waitingGroups order', () => {
     );
     const mid = group('mid', rowsOf('mid', [{ id: 'c', sender: 'human', enqueuedAt: '2026-10-30T10:00:00.000Z' }]));
     expect(old.rows[0]?.id).toBe('b');
-    expect(waitingGroups([mid, old]).map(item => item.key)).toEqual(['old', 'mid']);
+    expect(listingGroups([mid, old], 'unsent', '').map(item => item.key)).toEqual(['old', 'mid']);
   });
 });
 describe('when a queued message goes', () => {
@@ -392,5 +403,89 @@ describe('when a queued message goes', () => {
     expect(groupNextSend(group([later, at('soon', '2026-11-04T11:00:00.001Z')]), NOW)).toEqual({
       at: '2026-11-04T11:00:00.001Z',
     });
+  });
+});
+
+describe('status, listing and search', () => {
+  const row = (state: QueuedMessage['state'], extra: Partial<QueuedMessage> = {}) =>
+    queueRowOf('d', 's', 'f', message({ state, ...extra }));
+  const group = (key: string, ...rows: ReturnType<typeof row>[]) => ({
+    key,
+    daemonId: 'd',
+    machine: 'm',
+    sessionId: key,
+    ferret: key,
+    rows,
+  });
+
+  test('every state has one status word, and the two lists split them', () => {
+    const states = ['queued', 'typing', 'unconfirmed', 'delivered', 'read', 'failed', 'cancelled'] as const;
+    expect(states.map(state => STATUS_LABEL[rowStatus(row(state))])).toEqual([
+      'Waiting',
+      'Sending',
+      'Sending',
+      'Delivered',
+      'Read',
+      'Failed',
+      'Cancelled',
+    ]);
+    expect(STATUS_LABEL[rowStatus(outboxRowOf('f', entry()))]).toBe('Waiting');
+    expect(states.map(state => listingOf(row(state)))).toEqual([
+      'unsent',
+      'unsent',
+      'unsent',
+      'sent',
+      'sent',
+      'unsent',
+      undefined,
+    ]);
+  });
+
+  test('the sent list is newest first, ferrets with the newest message first; the unsent list is not reordered', () => {
+    const at = (day: number) => `2026-10-${String(day).padStart(2, '0')}T10:00:00.000Z`;
+    const a = group('a', row('read', { id: 'a1', enqueuedAt: at(2) }), row('read', { id: 'a2', enqueuedAt: at(9) }));
+    const b = group(
+      'b',
+      row('delivered', { id: 'b1', enqueuedAt: at(20) }),
+      row('queued', { id: 'b2', enqueuedAt: at(1) }),
+    );
+    const sent = listingGroups([a, b], 'sent', '');
+    expect(sent.map(item => [item.key, item.rows.map(r => r.id)])).toEqual([
+      ['b', ['b1']],
+      ['a', ['a2', 'a1']],
+    ]);
+    expect(listingGroups([a, b], 'unsent', '').map(item => item.rows.map(r => r.id))).toEqual([['b2']]);
+  });
+
+  test('search matches the words and the sender, ignoring case and outer spaces', () => {
+    const mira = row('queued', { text: 'Deploy blocked', sender: 'agent', by: { kind: 'ferret', name: 'Mira' } });
+    const mine = row('queued', { text: 'Please rerun CI' });
+    expect(
+      ['', '  ', 'DEPLOY', 'mira', ' rerun ', 'you', 'zzz'].map(q => [matchesSearch(mira, q), matchesSearch(mine, q)]),
+    ).toEqual([
+      [true, true],
+      [true, true],
+      [true, false],
+      [true, false],
+      [false, true],
+      [false, true],
+      [false, false],
+    ]);
+    expect(listingGroups([group('g', mira, mine)], 'unsent', 'mira').flatMap(g => g.rows)).toEqual([mira]);
+  });
+
+  test('limitRows keeps the first rows in the order shown, across ferrets', () => {
+    const g1 = group('a', row('read', { id: '1' }), row('read', { id: '2' }));
+    const g2 = group('b', row('read', { id: '3' }), row('read', { id: '4' }));
+    expect(limitRows([g1, g2], 3).map(g => g.rows.map(r => r.id))).toEqual([['1', '2'], ['3']]);
+    expect(countRows(limitRows([g1, g2], 2))).toBe(2);
+    expect(limitRows([g1, g2], 10)).toEqual([g1, g2]);
+    expect(limitRows([g1], 0)).toEqual([]);
+  });
+
+  test('firstLine is the first non-blank line without its markdown mark', () => {
+    expect(['\n\n  hello \nworld', '## Title\nbody', '> quoted', '- item', '', 'x'.repeat(400)].map(firstLine)).toEqual(
+      ['hello', 'Title', 'quoted', 'item', '', 'x'.repeat(300)],
+    );
   });
 });

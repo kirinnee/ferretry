@@ -1,8 +1,8 @@
 // THE QUEUE VIEWS, AS PURE DECISIONS.
 //
-// One row per message that has not finished its way to the ferret: still on this device (the outbox, tick 1),
-// on the machine's queue, typed and awaiting proof, or read. The views draw these rows; nothing here reads
-// a network or a clock.
+// One row per message on a ferret's queue — not yet delivered (saved on this device, queued, being typed, unconfirmed,
+// failed) or sent (delivered, read). The page shows the two as separate lists, filtered by a search. The views draw
+// these rows; nothing here reads a network or a clock.
 
 import type { QueuedMessage } from '@ferretry/protocol';
 import { relativeTime } from './session-screens.ts';
@@ -196,12 +196,113 @@ export interface QueueGroup {
 const oldestAt = (rows: readonly QueueRow[]): string =>
   rows.reduce((oldest, row) => (oldest === '' || row.at < oldest ? row.at : oldest), '');
 
-/** Only ferrets with something waiting, the longest-waiting first. */
-export const waitingGroups = (groups: readonly QueueGroup[]): readonly QueueGroup[] =>
+/** When the newest message of these rows was queued. */
+const newestAt = (rows: readonly QueueRow[]): string =>
+  rows.reduce((newest, row) => (row.at > newest ? row.at : newest), '');
+
+/** Where a message stands, in the one word the Queue page leads each row with. */
+export type RowStatus = 'waiting' | 'sending' | 'delivered' | 'read' | 'failed' | 'cancelled';
+
+export const rowStatus = (row: QueueRow): RowStatus => {
+  switch (row.state) {
+    case 'saved':
+    case 'queued':
+      return 'waiting';
+    case 'typing':
+    case 'unconfirmed':
+      return 'sending';
+    case 'delivered':
+      return 'delivered';
+    case 'read':
+      return 'read';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'cancelled';
+  }
+};
+
+export const STATUS_LABEL: Readonly<Record<RowStatus, string>> = {
+  waiting: 'Waiting',
+  sending: 'Sending',
+  delivered: 'Delivered',
+  read: 'Read',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
+
+/** The two lists the page offers: what has not reached the ferret (Waiting, Sending, Failed), and what has. */
+export type QueueListing = 'unsent' | 'sent';
+
+export const listingOf = (row: QueueRow): QueueListing | undefined => {
+  switch (rowStatus(row)) {
+    case 'waiting':
+    case 'sending':
+    case 'failed':
+      return 'unsent';
+    case 'delivered':
+    case 'read':
+      return 'sent';
+    case 'cancelled':
+      return undefined;
+  }
+};
+
+/** Whether a message matches what was typed in the search box: its words or its sender, any case. */
+export const matchesSearch = (row: QueueRow, query: string): boolean => {
+  const needle = query.trim().toLowerCase();
+  return needle === '' || row.text.toLowerCase().includes(needle) || fromLabel(row).toLowerCase().includes(needle);
+};
+
+/**
+ * What one listing shows for a search: only its rows (not-yet-delivered ones stay in delivery order, sent ones
+ * newest first), only the ferrets that still have a row. Ferrets with the longest-waiting message come first in
+ * the unsent listing, the one with the newest message first in the sent one.
+ */
+export const listingGroups = (
+  groups: readonly QueueGroup[],
+  listing: QueueListing,
+  query: string,
+): readonly QueueGroup[] =>
   groups
-    .map(group => ({ ...group, rows: group.rows.filter(isWaitingRow) }))
+    .map(group => {
+      const rows = group.rows.filter(row => listingOf(row) === listing && matchesSearch(row, query));
+      return {
+        ...group,
+        rows:
+          listing === 'sent' ? [...rows].sort((a, b) => b.at.localeCompare(a.at) || b.id.localeCompare(a.id)) : rows,
+      };
+    })
     .filter(group => group.rows.length > 0)
-    .sort((a, b) => oldestAt(a.rows).localeCompare(oldestAt(b.rows)) || a.key.localeCompare(b.key));
+    .sort((a, b) =>
+      listing === 'sent'
+        ? newestAt(b.rows).localeCompare(newestAt(a.rows)) || a.key.localeCompare(b.key)
+        : oldestAt(a.rows).localeCompare(oldestAt(b.rows)) || a.key.localeCompare(b.key),
+    );
+
+export const countRows = (groups: readonly QueueGroup[]): number =>
+  groups.reduce((sum, group) => sum + group.rows.length, 0);
+
+/** The first `limit` rows, ferret by ferret in the order shown; the rest wait behind "Show older". */
+export const limitRows = (groups: readonly QueueGroup[], limit: number): readonly QueueGroup[] => {
+  let left = limit;
+  const out: QueueGroup[] = [];
+  for (const group of groups) {
+    if (left <= 0) break;
+    out.push(group.rows.length <= left ? group : { ...group, rows: group.rows.slice(0, left) });
+    left -= group.rows.length;
+  }
+  return out;
+};
+
+/** The first line of a message with its markdown marks off the front: what a one-line row shows of it. */
+export const firstLine = (text: string): string => {
+  const line = text.split('\n').find(item => item.trim() !== '') ?? '';
+  return line
+    .trim()
+    .replace(/^(?:#{1,6}\s+|>\s*|[-*]\s+)/, '')
+    .slice(0, 300);
+};
 
 /** "3 waiting for connection" — the one line a count of saved-on-device messages reads as. */
 export const waitingCountLine = (count: number): string =>

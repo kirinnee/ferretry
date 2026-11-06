@@ -4,13 +4,18 @@
  *
  *   bun harness/queue-page-screenshot.tsx [out-dir]     # default: harness/out/queue-page-*.png
  *
- * Unlike `outbox-screenshot.tsx`, which draws the bare `QueuePageView`, this renders the REAL `QueuePage`
- * container inside the REAL `createAppStore` — its fleet store seeded, its outbox holding a message — because
- * the container is what crashed: it handed the fleet store's methods to React detached from the store. Each
- * capture waits for the page's own `[data-queue-page]`, so a page that fails to mount fails the run.
+ * This renders the REAL `QueuePage` container inside the REAL `createAppStore` — its fleet store seeded, its
+ * outbox holding a message — wrapped in the app's own shell boxes (a fixed `kt-shell` that clips, a flex column,
+ * the pane that is a plain block), because the page sits inside a clipped pane and that is where it once could
+ * not scroll. The shots are therefore VIEWPORT shots: what a person sees, not a stretched full page. Each capture
+ * waits for the page's own `[data-queue-page]`, so a page that fails to mount fails the run.
  *
- * Views: `all` (every queue on two machines), `ferret` (one ferret's queue), `find` (the REAL
- * `CommandPalette` with "Queue" typed).
+ * Fixture (fake data): one ferret with three undelivered messages (Waiting, Sending, Failed) and 56 sent ones
+ * (Delivered and Read, several senders, some long and multi-line, a few days old).
+ *
+ * Views: `waiting` (the default list), `sent` (the Sent list), `scrolled` (Sent, scrolled down — it scrolls),
+ * `search` (a search typed into the Sent list), `expanded` (one row opened), `all` (every queue on two
+ * machines), `empty`, `find` (the REAL `CommandPalette` with "Queue" typed).
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -47,22 +52,52 @@ const message = (id: string, text: string, minute: number, extra: object = {}) =
   v: 1, id, sender: 'human', text, attachmentIds: [], state: 'queued', stateAt: at(minute), revision: 1,
   enqueuedAt: at(minute), ...extra,
 });
+// ago(days, minutes): an instant that long before now.
+const ago = (days: number, minutes: number) => new Date(Date.now() - days * 86400000 - minutes * 60000).toISOString();
+const SENDERS = [
+  { name: 'Mira', id: 'mira' },
+  { name: 'Lead', id: 'lead' },
+  { name: 'Ferretry · Board', id: 'board', daemon: true },
+  { name: 'Tomi', id: 'tomi' },
+  { name: 'you', id: 'human', owner: true },
+];
+const LINES = [
+  'Green and CLEAN, ready for you: #1020 (on your hold), #1015 lanes-follow-facts (merge on green), #1011 B62 scroll (approved).',
+  'Plan: build the daemon half first, then the app half. Both start once S5 lands.',
+  '[board] &F149 done: PR https://github.com/kirinnee/ferretry/pull/1015 — GREEN, MERGEABLE/CLEAN, not merged.',
+  'Please re-run CI once the flaky test is fixed.',
+  'Watching live deliveries for 30 min; I will report anything that sticks or goes twice.',
+  'Merged. Next I open the small follow-up: the empty slot folds when it fits.',
+];
+const HISTORY = Array.from({ length: 56 }, (_, index) => {
+  const who = SENDERS[index % SENDERS.length] as (typeof SENDERS)[number];
+  const base = LINES[index % LINES.length] as string;
+  // Every fifth one is long and multi-line, so an opened row has something to show.
+  const text = index % 5 === 0
+    ? [base, '', 'Details:', '- the first thing, with enough words to wrap on a phone when the row is opened', '- the second thing', '', base.repeat(2)].join('\\n')
+    : base;
+  return message('h' + index, text, 0, {
+    ...(who.owner ? {} : who.daemon
+      ? { sender: 'daemon', by: { kind: 'ferretry', feature: 'Board' } }
+      : { sender: 'agent', from: who.id, fromName: who.name, by: { kind: 'ferret', name: who.name } }),
+    state: index % 3 === 0 ? 'delivered' : 'read',
+    enqueuedAt: ago(Math.floor(index / 9), 70 + index * 7),
+    stateAt: ago(Math.floor(index / 9), 60 + index * 7),
+  });
+});
 const QUEUES: Record<string, object> = {
   '/v1/sessions/s1/queue': {
     messages: [
+      // Not delivered yet: Waiting, Sending, Failed.
       message('q1', 'Please re-run CI once the flaky test is fixed', 40, { waitReason: 'busy' }),
-      message('q2', 'Held to combine with the next update', 41, {
-        sender: 'agent', from: 'lead', fromName: 'Lead', by: { kind: 'ferret', name: 'Lead' },
-        label: 'fyi', holdUntil: at(46),
+      message('q4', 'Typed into the pane, waiting for proof it arrived', 39, { state: 'typing' }),
+      message('q11', 'Roll back the migration if the canary fails', 38, {
+        state: 'failed', failure: 'the ferret\u2019s pane closed before it could be typed',
       }),
-      message('q3', 'Card &F12 moved to Review/CI', 42, {
-        sender: 'daemon', by: { kind: 'ferretry', feature: 'Board' }, waitReason: 'draft', waitBehind: 'earlier',
-      }),
-      message('q4', 'Typed, waiting for proof', 39, { state: 'unconfirmed' }),
-      message('q5', 'Already read', 30, { state: 'read' }),
-      message('q7', 'Blocked: the deploy needs your approval before I can continue with the rollout. See https://github.com/kirinnee/ferretry/actions/runs/123456789012345678901234567890/job/98765432109876543210/attempts/3?pr=1481&check_suite_focus=true and @packages/pwa/src/components/queue-page.tsx:120-140 for the failing step.', 44, {
-        sender: 'agent', from: 'mira', fromName: 'Mira', by: { kind: 'ferret', name: 'Mira' },
-        label: 'blocker', waitReason: 'busy',
+      // Delivered and Read — the history behind the Sent toggle, a few days old, edge cases included.
+      message('q7', 'Blocked: the deploy needs your approval before I can continue with the rollout. See https://github.com/kirinnee/ferretry/actions/runs/123456789012345678901234567890/job/98765432109876543210/attempts/3?pr=1481&check_suite_focus=true and @packages/pwa/src/components/queue-page.tsx:120-140 for the failing step.', 0, {
+        enqueuedAt: ago(1, 50), sender: 'agent', from: 'mira', fromName: 'Mira', by: { kind: 'ferret', name: 'Mira' },
+        label: 'blocker', state: 'read',
       }),
       message('q8', [
         '## Review notes',
@@ -70,30 +105,31 @@ const QUEUES: Record<string, object> = {
         'I went through the diff and found **three** things worth a look:',
         '',
         '1. The retry loop never backs off',
-        '2. \\u0060readSessionQueue\\u0060 swallows the error',
+        '2. \u0060readSessionQueue\u0060 swallows the error',
         '3. Card &F7 is still open',
         '',
-        '\\u0060\\u0060\\u0060ts',
+        '\u0060\u0060\u0060ts',
         'export const backoff = (attempt: number): number => Math.min(30_000, 2 ** attempt * 250);',
         'const veryLongLineThatShouldScrollInsideTheCodeBlockAndNeverPushThePageSideways = await fetchEverything(abc, def, ghi);',
-        '\\u0060\\u0060\\u0060',
+        '\u0060\u0060\u0060',
         '',
-        'Then a long paragraph so the clamp has something to cut: ' + 'the queue holds each message until the ferret is idle and its input box is empty, and only then types it in. '.repeat(6),
+        'Then a long paragraph so the row has something to open: ' + 'the queue holds each message until the ferret is idle and its input box is empty, and only then types it in. '.repeat(4),
         '',
         'Last line after the long paragraph.',
-      ].join('\\n'), 45, {
-        sender: 'agent', from: 'mira', fromName: 'Mira', by: { kind: 'ferret', name: 'Mira' },
-        label: 'action', waitReason: 'busy',
+      ].join('\\n'), 0, {
+        enqueuedAt: ago(1, 55), sender: 'agent', from: 'mira', fromName: 'Mira', by: { kind: 'ferret', name: 'Mira' },
+        label: 'action', state: 'read',
       }),
-      message('q9', '/home/kirin/Workspace/personal/ferretry/packages/pwa/src/components/very/deeply/nested/directory/structure/with/a/really/long/path/name/queue-page-view-component-final-v2.tsx', 46, {
-        sender: 'agent', from: 'lead', fromName: 'Lead', by: { kind: 'ferret', name: 'Lead' },
-        label: 'fyi', holdUntil: at(50),
+      message('q9', '/home/kirin/Workspace/personal/ferretry/packages/pwa/src/components/very/deeply/nested/directory/structure/with/a/really/long/path/name/queue-page-view-component-final-v2.tsx', 0, {
+        enqueuedAt: ago(2, 58), sender: 'agent', from: 'lead', fromName: 'Lead', by: { kind: 'ferret', name: 'Lead' },
+        label: 'fyi', state: 'delivered',
       }),
-      // A callsign with no break opportunity: the meta line must wrap it instead of widening a 390px page.
-      message('q10', 'Sender name has no spaces at all', 47, {
-        sender: 'agent', from: 'wide', fromName: 'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW', by: { kind: 'ferret', name: 'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW' },
-        label: 'fyi', waitReason: 'busy',
+      // A callsign with no break opportunity: it must ellipsize inside its column, never widen a 390px page.
+      message('q10', 'Sender name has no spaces at all', 0, {
+        enqueuedAt: ago(2, 59), sender: 'agent', from: 'wide', fromName: 'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW', by: { kind: 'ferret', name: 'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW' },
+        label: 'fyi', state: 'read',
       }),
+      ...HISTORY,
     ],
   },
   '/v1/sessions/s2/queue': { messages: [] },
@@ -126,27 +162,35 @@ const session = (id: string, name: string, teammate?: string) =>
      state: { id, status: 'running', turn: 1 } }) as never;
 store.fleet.seed(laptop, [session('s1', 'one', 'Casen'), session('s2', 'two', 'Idle')], Date.now());
 store.fleet.seed(workshop, [session('s3', 'three', 'Mira')], Date.now());
-await store.outbox.submit({ daemonId: 'laptop', sessionId: 's1', message: 'thank you — saved while offline' });
+if (view === 'all') await store.outbox.submit({ daemonId: 'laptop', sessionId: 's1', message: 'thank you — saved while offline' });
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
+// The app's own boxes around a page: a fixed shell that clips, a flex column, and the pane — a plain block.
+const Shell = ({ children }: { children: React.ReactNode }) => (
+  <div className="kt-shell flex flex-row overflow-hidden">
+    <div data-shell-main="" className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
+        <div className="contents">{children}</div>
+      </div>
+    </div>
+  </div>
+);
 createRoot(root).render(
-  view === 'empty' ? (
-    <RouterProvider>
-      <StoreProvider store={store}>
-        <div style={{ display: 'flex', minHeight: '100vh' }}>
-          <QueuePage daemonId={laptop.daemonId} sessionId="s2" />
-        </div>
-      </StoreProvider>
-    </RouterProvider>
-  ) : view === 'find' ? (
+  view === 'find' ? (
     <CommandPalette open focusSignal={0} onClose={() => {}} daemon={laptop.daemonId} sessions={[]} onNavigate={() => {}} />
   ) : (
     <RouterProvider>
       <StoreProvider store={store}>
-        <div style={{ display: 'flex', minHeight: '100vh' }}>
-          {view === 'ferret' ? <QueuePage daemonId={laptop.daemonId} sessionId="s1" /> : <QueuePage daemonId={laptop.daemonId} />}
-        </div>
+        <Shell>
+          {view === 'empty' ? (
+            <QueuePage daemonId={laptop.daemonId} sessionId="s2" />
+          ) : view === 'all' ? (
+            <QueuePage daemonId={laptop.daemonId} />
+          ) : (
+            <QueuePage daemonId={laptop.daemonId} sessionId="s1" />
+          )}
+        </Shell>
       </StoreProvider>
     </RouterProvider>
   ),
@@ -159,7 +203,6 @@ const html = (theme: string) => `<!doctype html>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="/app.css" />
-    <style>html, body { height: auto !important; overflow: visible !important; }</style>
   </head>
   <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/queue-page-entry.js"></script></body>
 </html>`;
@@ -218,8 +261,10 @@ try {
         const page = await context.newPage();
         const errors: string[] = [];
         page.on('pageerror', error => errors.push(error.message));
-        for (const view of ['all', 'ferret', 'expanded', 'empty', 'find'] as const) {
-          await page.goto(`${server.url}?theme=studio-${scheme}&view=${view === 'expanded' ? 'ferret' : view}`);
+        const rows = page.locator('[data-queue-row]');
+        for (const view of ['waiting', 'sent', 'scrolled', 'search', 'expanded', 'all', 'empty', 'find'] as const) {
+          const entry = view === 'all' || view === 'empty' || view === 'find' ? view : 'ferret';
+          await page.goto(`${server.url}?theme=studio-${scheme}&view=${entry}`);
           if (view === 'find') {
             await page.getByRole('combobox').first().fill('Queue');
             await page.getByText('All queues').first().waitFor({ state: 'visible' });
@@ -227,15 +272,36 @@ try {
             await page.locator('[data-queue-empty]').waitFor({ state: 'visible' });
           } else {
             await page.locator('[data-queue-page]').waitFor({ state: 'visible' });
-            await page.locator('[data-queue-row]').first().waitFor({ state: 'visible' });
-            if (view === 'expanded') await page.locator('[data-queue-more]').first().click();
+            await rows.first().waitFor({ state: 'visible' });
+          }
+          if (view === 'sent' || view === 'scrolled' || view === 'search' || view === 'expanded')
+            await page.locator('[data-queue-listing="sent"]').click();
+          if (view === 'search') await page.locator('[data-queue-search]').fill('mira');
+          if (view === 'expanded') await page.locator('[data-queue-row="q8"] [data-queue-line]').click();
+          if (view === 'scrolled') {
+            const scrolled = await page.locator('[data-queue-page]').evaluate(node => {
+              const before = node.scrollTop;
+              node.scrollTop = node.scrollHeight / 2;
+              return { before, after: node.scrollTop, room: node.scrollHeight - node.clientHeight };
+            });
+            if (scrolled.room <= 0 || scrolled.after <= scrolled.before)
+              fail(`scrolled ${device.name} ${scheme}: the page did not scroll (${JSON.stringify(scrolled)})`);
           }
           await page.waitForTimeout(250);
           if (errors.length > 0) fail(`${view} ${device.name} ${scheme} threw: ${errors.join(' | ')}`);
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${view} ${device.name} ${scheme} scrolls sideways by ${overflow}px`);
-          const target = join(outDir, `queue-page-${view}-${device.name}-${scheme}.png`);
-          await page.screenshot({ path: target, fullPage: view !== 'find' });
+          if (view === 'waiting' || view === 'sent') {
+            // A compact row is ONE line: no row may be taller than a thumb's worth of text.
+            const tall = await rows.evaluateAll(
+              nodes =>
+                nodes.filter(node => !node.hasAttribute('data-queue-open') && node.getBoundingClientRect().height > 60)
+                  .length,
+            );
+            if (tall > 0) fail(`${view} ${device.name} ${scheme}: ${tall} collapsed rows are taller than one line`);
+          }
+          const target = join(outDir, `queue-${view}-${device.name}-${scheme}.png`);
+          await page.screenshot({ path: target });
           process.stdout.write(`📸 ${target}\n`);
         }
       } finally {
