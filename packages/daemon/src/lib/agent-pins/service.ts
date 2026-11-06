@@ -36,7 +36,10 @@ export class AgentPinService {
     return await this.executor.run(QUEUE, async () => {
       const pins = await this.repository.load();
       const known = pins.find(pin => pin.sessionId === sessionId);
-      if (known !== undefined) return known.pinnedAt;
+      if (known !== undefined) {
+        await this.repository.retain?.(sessionId);
+        return known.pinnedAt;
+      }
       if (pins.length >= MAX_AGENT_PINS)
         throw new AgentPinError('full', `${MAX_AGENT_PINS} ferrets are already pinned; unpin one first`);
       const pinnedAt = this.clock.now();

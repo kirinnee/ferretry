@@ -34,6 +34,10 @@ export class FileAgentPinRepository implements AgentPinRepository {
 
   async save(pins: readonly AgentPin[]): Promise<void> {
     await this.files.writeTextAtomic(agentPinsFile(this.paths), JSON.stringify({ version: 1, pins }));
-    for (const pin of pins) await this.retained?.(pin.sessionId);
+    for (const pin of pins) await this.retain(pin.sessionId);
+  }
+
+  async retain(sessionId: string): Promise<void> {
+    await this.retained?.(sessionId);
   }
 }

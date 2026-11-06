@@ -72,12 +72,16 @@ Three facts were derived from the live list, and would have changed silently whe
 
 A **write** brings an archived session back into the live set: an event appended, its state or config written or
 updated. That covers resume, revive, send and any other path that changes it — they all write through the
-same storage. The registry entry is removed first and the index row is rebuilt by the write that follows.
+same storage. The live index row is rebuilt first, then the registry entry is removed. If rebuilding any session or
+ancestor fails, archive membership stays available for retry. Retention also repairs a missing live row when the
+session has no registry entry, so a retry can recover an incomplete restoration.
 
 **Attaching a pin, a card still in progress, or an agenda item also restores live membership**, including the
 session's ancestors. Each publisher uses the same idempotent storage revival path after its own write. The journal
 index is rebuilt, so the session returns to the default list without another session write. A keep published during
 an archive's verification or registry IO cancels that commit; one published after the commit revives it.
+If pin retention fails after the pin was saved, pinning that same session again retries retention without rewriting
+the pin document or changing its place or time.
 
 ## When it runs
 
@@ -95,9 +99,17 @@ an archive's verification or registry IO cancels that commit; one published afte
   whole current live roster, every configuration read afresh in paced batches) and the keep signals are asked again; a lead
   goes only when every session naming it as lead has gone before it in the same commit. A child that revived, or was
   started, between the decision and the locks keeps its lead live; a pin, card or agenda item that appeared meanwhile
-  keeps its session live. Child creation and the commit share one keyed gate per lineage root: a creation that waits
-  behind the commit restores its lead before publishing its documents. A configuration changing during verification
-  or registry IO cancels the commit, including a write that has not finished publishing yet.
+  keeps its session live. Every config write and the commit share one keyed gate per current lineage root: a writer
+  already publishing finishes before verification; a writer queued behind the commit restores archived membership
+  through the normal write path. Unrelated roots do not wait for each other. Child creation retains its lead and
+  lets the config writer take the gate, so nested config writes never wait on a creation gate they already hold.
+- **Reparenting has one revive-after window.** A config write holds only its current root gate. If publication changes
+  its parent, it releases that gate and then retains the new parent and its ancestors through the ordinary keep path.
+  A new parent archived during that window is immediately restored before the config write returns. Two roots are
+  never held by a config writer at once, avoiding a lock-order cycle between opposite reparentings.
+- A queued config writer or commit rechecks its root after acquiring the gate. If another write moved it, it releases
+  the stale gate and queues again. Four unsuccessful acquisitions stop with an explicit retry error; a later archive
+  pass can retry, so continual reparenting cannot trap a pass in a retry loop.
 - The keep signals are also checked after the commit, with no document lanes held, to reconcile a signal that landed
   during registry IO. Normal signal publishers revive on publication, even when no archive pass is running.
 - The registry is changed by a **read-modify-write inside its own queue**: the new map is derived from the registry as

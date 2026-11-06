@@ -17,6 +17,7 @@ import {
 } from '../../../../src/adapters/index.ts';
 import type { DaemonStorage } from '../../../../src/adapters/storage/session-storage.ts';
 import { AgendaService } from '../../../../src/lib/agenda/service.ts';
+import { AgentPinService } from '../../../../src/lib/agent-pins/service.ts';
 import { createSessionPaths, parseSessionId } from '../../../../src/lib/index.ts';
 import { sessionsOnOpenCards } from '../../../../src/lib/session/archive/open-cards.ts';
 import { card } from '../../../unit/board/support.ts';
@@ -75,6 +76,60 @@ test('a pin publication alone restores an archived session and its ancestors, in
   await pins.save(entry);
   await pins.save(entry);
   expect(await pins.load()).toEqual(entry);
+  await restored(storage);
+});
+
+for (const failAt of [KID, LEAD]) {
+  test(`retention retries a journal read EIO at ${failAt} without forgetting archived membership`, async () => {
+    const { storage, paths } = await world();
+    const files = (storage as unknown as { fileSystem: StateFileSystem }).fileSystem;
+    const information = files.information.bind(files);
+    let failed = false;
+    files.information = async path => {
+      if (path === createSessionPaths(paths, failAt).events && !failed) {
+        failed = true;
+        throw Object.assign(new Error('transient journal read EIO'), { code: 'EIO' });
+      }
+      return await information(path);
+    };
+    await expect(storage.retainSession(KID)).rejects.toThrow('transient journal read EIO');
+    expect(storage.archivedCount()).toBe(2);
+    expect(storage.isArchived(KID)).toBe(true);
+    expect(storage.isArchived(LEAD)).toBe(true);
+    await storage.retainSession(KID);
+    await restored(storage);
+  });
+}
+
+test('re-pinning retries failed archive retention without rewriting the existing pin document', async () => {
+  const { storage, paths, files } = await world();
+  const backend = (storage as unknown as { fileSystem: StateFileSystem }).fileSystem;
+  const information = backend.information.bind(backend);
+  let failed = false;
+  backend.information = async path => {
+    if (path === createSessionPaths(paths, KID).events && !failed) {
+      failed = true;
+      throw Object.assign(new Error('transient journal read EIO'), { code: 'EIO' });
+    }
+    return await information(path);
+  };
+  const write = files.writeTextAtomic.bind(files);
+  let writes = 0;
+  files.writeTextAtomic = async (path, text) => {
+    writes += 1;
+    await write(path, text);
+  };
+  const repository = new FileAgentPinRepository(
+    paths,
+    files,
+    async id => await storage.retainSession(parseSessionId(id)),
+  );
+  const pins = new AgentPinService(repository, { now: () => NOW }, new KeyedSerialExecutor());
+  await expect(pins.pin(KID)).rejects.toThrow('transient journal read EIO');
+  expect(await repository.load()).toEqual([{ sessionId: KID, pinnedAt: NOW }]);
+  expect(storage.archivedCount()).toBe(2);
+  expect(await pins.pin(KID)).toBe(NOW);
+  expect(writes).toBe(1);
   await restored(storage);
 });
 

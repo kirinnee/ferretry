@@ -10,12 +10,12 @@ const NOW = '2026-11-06T12:00:00.000Z';
 const OLD = '2026-11-01T00:00:00.000Z';
 const paths = createFoundationPaths('/tmp/review-only-no-io' as never);
 type Doc = { config?: Record<string, unknown>; state: Record<string, unknown> };
-const ended = (parent?: string): Doc => ({
+export const ended = (parent?: string): Doc => ({
   config: { mode: 'auto', ...(parent ? { parent } : {}) },
   state: { status: 'completed', finishedAt: OLD },
 });
 
-function fixture(
+export function fixture(
   options: {
     docs?: Map<string, Doc>;
     beforeLocks?: (docs: Map<string, Doc>) => void;
@@ -166,7 +166,7 @@ export function sessionArchiveCommitContract(): void {
     expect(world.storage.isArchived(parseSessionId('lead-1'))).toBe(false);
   });
 
-  test('lifecycle child publication during registry IO waits for the root gate and restores its lead before publishing', async () => {
+  test('lifecycle child publication during registry IO retains its lead before publishing', async () => {
     let creation: Promise<void> | undefined;
     let once = false;
     const world = fixture({
@@ -230,7 +230,7 @@ export function sessionArchiveCommitContract(): void {
     expect([...world.rows.keys()].sort()).toEqual(['kid-1', 'lead-1']);
   });
 
-  test('a config writer queued during registry IO cancels the archive and completes after its lanes are released', async () => {
+  test('a config writer queued during registry IO completes and restores membership after the gates are released', async () => {
     let written: Promise<void> | undefined;
     let once = false;
     const world = fixture({
