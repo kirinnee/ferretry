@@ -29,6 +29,7 @@
 import * as agentTools from './agent-tools/route-contract.ts';
 import * as analytics from './analytics/route-contract.ts';
 import * as cgroups from './cgroups/route-contract.ts';
+import * as conversationImport from './conversation-import/route-contract.ts';
 import * as fleetLogin from './fleet-login/route-contract.ts';
 import * as housekeeping from './housekeeping/route-contract.ts';
 import * as inputRequests from './input-requests/route-contract.ts';
@@ -71,6 +72,7 @@ export const FRAGMENTS: Readonly<Record<string, RouteContractFragment>> = {
   sharedDrafts,
   housekeeping,
   names,
+  conversationImport,
 };
 
 /** The concatenation of every fragment's `callers`: one line per route, both tables. */

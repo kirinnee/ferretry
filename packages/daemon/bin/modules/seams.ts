@@ -6,6 +6,7 @@ import type { SttEnhancementSubsystem } from '../../src/lib/runtime/mounts/stt.t
 import type { WorkSearchService } from '../../src/lib/work-search/index.ts';
 import type { AnalyticsJobs, AnalyticsProvides } from './analytics.ts';
 import type { AgentToolsProvides } from './agent-tools.ts';
+import type { ConversationImportProvides } from './conversation-import.ts';
 import type { HousekeepingProvides } from './housekeeping.ts';
 import type { InputRequestsProvides } from './input-requests.ts';
 import type { LearningSeams } from './learning.ts';
@@ -37,6 +38,8 @@ export const seamsOf = {
   cgroups: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the child launcher, the callback delivery, the timer and the port reader are fixed production adapters; the credential catalog, the clock and the environment are needs). */
   fleetLogin: (_world: DaemonWorld): void => undefined,
+  /** No seam: the module replaces no adapter `DaemonWorld` carries (the file readers and the linker are fixed production adapters; the transcript worker, the paced parsers, the storage and the adopter are needs). */
+  conversationImport: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the tmux, the terminals, the agenda and the vault are needs). */
   inputRequests: (_world: DaemonWorld): void => undefined,
   /** No seam: the module replaces no adapter `DaemonWorld` carries (the scratch collector, the speed-up ledger and the Jev guard are fixed production adapters; the session storage, the outbound holder, the secret directory, the clock and the stopwatch are needs). */
@@ -73,6 +76,7 @@ export interface ModuleHandles {
   readonly agentTools: BuiltModule<AgentToolsProvides>;
   readonly analytics: BuiltModule<AnalyticsProvides, AnalyticsJobs>;
   readonly cgroups: BuiltModule<LimitsService>;
+  readonly conversationImport: BuiltModule<ConversationImportProvides>;
   readonly fleetLogin: BuiltModule<HarnessLoginService>;
   readonly housekeeping: BuiltModule<HousekeepingProvides>;
   readonly inputRequests: BuiltModule<InputRequestsProvides>;

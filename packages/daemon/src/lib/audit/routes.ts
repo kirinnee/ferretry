@@ -205,14 +205,6 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     event: 'fleet.configured',
     detail: { action: 'install-tool' },
   },
-  // Keeping existing conversations as ferrets (`mounts/conversation-import.ts`): it creates sessions that can
-  // launch agents, so it is recorded as fleet configuration. The record names no conversation and no folder.
-  {
-    method: 'POST',
-    path: '/v1/imports/conversations/adopt',
-    event: 'fleet.configured',
-    detail: { action: 'adopt-conversations' },
-  },
   // Installing, or removing, an item from a catalog someone else published (`mounts/catalog-installs.ts`): the
   // item's NAME, never a file, command or secret. `code` says why a refusal was one — a signature that did
   // not verify, a publisher that changed, a file edited here — because those mean different things to a reader.
