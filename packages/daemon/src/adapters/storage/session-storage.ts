@@ -36,7 +36,6 @@ import {
   serializeArchiveRegistry,
   serializeJsonDocument,
   sessionJournalRequired,
-  sessionMarkerNeedsUpgrade,
   tryParseSessionId,
   type YieldingSerialExecutor,
 } from '../../lib/index.ts';
@@ -117,9 +116,7 @@ interface ObservationCollection {
 export interface SessionDirectorySurvey {
   readonly id: SessionId;
   /**
-   * True when the journal file is gone from a session that owes one — either because its marker is
-   * the current version, or because an unmigrated legacy session still has an index fingerprint
-   * witnessing the journal it used to have.
+   * True when the journal file is gone from a session that owes one: its marker is the current version.
    */
   readonly journalLost: boolean;
 }
@@ -135,6 +132,11 @@ interface SessionObservation {
   readonly config?: SessionSource['config'];
   readonly state?: SessionSource['state'];
   readonly journal?: JournalObservation;
+}
+
+/** An observation of a session whose marker is supported, so it owes a journal and has one. */
+interface JournaledObservation extends SessionObservation {
+  readonly journal: JournalObservation;
 }
 
 /** The durable layout claim lifecycle creation makes before it publishes any session evidence. */
@@ -356,17 +358,11 @@ export class DaemonStorage {
    *
    * The marker is the authoritative witness: it is on disk, written durably, and unlike the SQLite
    * index it is never dropped and rebuilt — so it still answers after the index has been deleted,
-   * which is the case that used to fabricate an empty session. A version-1 directory predates the
-   * contract, so there the disposable index is the only evidence left.
+   * which is the case that used to fabricate an empty session.
    */
-  private assertExpectedJournal(
-    id: SessionId,
-    marker: string | undefined,
-    indexed: IndexedSession | undefined,
-    present: boolean,
-  ): void {
+  private assertExpectedJournal(id: SessionId, marker: string | undefined, present: boolean): void {
     if (present) return;
-    if (sessionJournalRequired(marker) || (indexed !== undefined && indexed.journal !== null)) {
+    if (sessionJournalRequired(marker)) {
       throw new MissingSessionJournalError(id, createSessionPaths(this.paths, id).events);
     }
   }
@@ -427,7 +423,6 @@ export class DaemonStorage {
     }
     if (decideSessionMarker(marker) === 'refuse') throw new SessionLayoutError(id, marker);
     await this.fileSystem.ensureDirectory(paths.directory, 0o700);
-    if (sessionMarkerNeedsUpgrade(marker)) return await this.completeSessionUpgrade(id, paths);
     const journal = await this.fileSystem.information(paths.events);
     if (journal === undefined) throw new MissingSessionJournalError(id, paths.events);
     await this.fileSystem.setMode(paths.marker, 0o600);
@@ -454,32 +449,6 @@ export class DaemonStorage {
     this.assertOpen();
     await this.serial.run(id, async () => {
       await this.ensureSessionDirectory(id);
-    });
-  }
-
-  /**
-   * Gives every version-1 session directory a journal and the current marker, in place.
-   *
-   * Only version 1 is touched, and only where a journal can be created without destroying evidence.
-   * Nothing here refuses: a session whose journal is already lost must still let the home open, and
-   * quarantining it is the job of rebuild and the health pass, not of boot.
-   */
-  async upgradeLegacySessions(): Promise<readonly SessionId[]> {
-    this.assertOpen();
-    return await this.serial.runExclusive(async () => {
-      const upgraded: SessionId[] = [];
-      for (const entry of await this.fileSystem.listDirectory(this.paths.sessions)) {
-        if (!entry.directory) continue;
-        const id = tryParseSessionId(entry.name);
-        if (id === undefined) continue;
-        if (this.archived.has(id)) continue;
-        const paths = createSessionPaths(this.paths, id);
-        if (!sessionMarkerNeedsUpgrade(await this.fileSystem.readText(paths.marker))) continue;
-        if ((await this.ensureJournalFile(id, paths)) === undefined) continue;
-        await this.writeDocument(paths.marker, `${CURRENT_SESSION_VERSION}\n`);
-        upgraded.push(id);
-      }
-      return upgraded;
     });
   }
 
@@ -632,7 +601,7 @@ export class DaemonStorage {
       this.index.removeSession(id);
       return { eventCount: 0, problems: [] };
     }
-    this.assertExpectedJournal(id, source.marker.text, this.index.findSession(id), source.journal !== undefined);
+    this.assertExpectedJournal(id, source.marker.text, source.journal !== undefined);
     return this.applySource(source);
   }
 
@@ -670,7 +639,7 @@ export class DaemonStorage {
       try {
         const source = await this.readSource(id, true);
         if (source) {
-          this.assertExpectedJournal(id, source.marker.text, this.index.findSession(id), source.journal !== undefined);
+          this.assertExpectedJournal(id, source.marker.text, source.journal !== undefined);
           sources.push(source);
         }
       } catch (error) {
@@ -743,9 +712,8 @@ export class DaemonStorage {
   private async pointerMatches(
     id: SessionId,
     indexed: IndexedSession,
-    source: { readonly journal?: JournalObservation },
+    source: { readonly journal: JournalObservation },
   ): Promise<boolean> {
-    if (source.journal === undefined) return false;
     if (indexed.lastSequence === 0) {
       const after = await this.fileSystem.information(source.journal.file);
       return after !== undefined && sameFingerprint(source.journal.fingerprint, after);
@@ -777,28 +745,37 @@ export class DaemonStorage {
     };
   }
 
-  private metadataSource(observation: SessionObservation, current: IndexedSession): SessionSource {
-    return this.sourceFromObservation(
-      observation,
-      observation.journal === undefined
-        ? undefined
-        : {
-            file: observation.journal.file,
-            fingerprint: observation.journal.fingerprint,
-            scan: {
-              pointers: [],
-              problems: [],
-              scannedTo: observation.journal.fingerprint.size,
-              lastSequence: current.lastSequence,
-              lineAtOffset: current.journalLine,
-            },
-          },
-    );
+  private metadataSource(observation: JournaledObservation, current: IndexedSession): SessionSource {
+    return this.sourceFromObservation(observation, {
+      file: observation.journal.file,
+      fingerprint: observation.journal.fingerprint,
+      scan: {
+        pointers: [],
+        problems: [],
+        scannedTo: observation.journal.fingerprint.size,
+        lastSequence: current.lastSequence,
+        lineAtOffset: current.journalLine,
+      },
+    });
   }
 
-  private async observationJournalIsCurrent(observation: SessionObservation): Promise<boolean> {
+  /**
+   * The observation, now proven to carry its journal.
+   *
+   * Only a supported marker gets here, and the one supported marker is the current version, which owes a
+   * journal: a missing one is lost history, refused as `assertExpectedJournal` refuses it.
+   */
+  private requireJournal(observation: SessionObservation): JournaledObservation {
+    const { journal } = observation;
+    if (journal === undefined) {
+      throw new MissingSessionJournalError(observation.id, createSessionPaths(this.paths, observation.id).events);
+    }
+    return { ...observation, journal };
+  }
+
+  private async observationJournalIsCurrent(observation: JournaledObservation): Promise<boolean> {
     const current = await this.fileSystem.information(createSessionPaths(this.paths, observation.id).events);
-    return sameFingerprint(observation.journal?.fingerprint ?? null, current ?? null);
+    return sameFingerprint(observation.journal.fingerprint, current ?? null);
   }
 
   private async tailStartsAtRecordBoundary(file: string, fromOffset: number): Promise<boolean> {
@@ -818,13 +795,13 @@ export class DaemonStorage {
       this.index.removeSession(id);
       return { problems: [] };
     }
-    this.assertExpectedJournal(id, source.marker.text, this.index.findSession(id), source.journal !== undefined);
+    this.assertExpectedJournal(id, source.marker.text, source.journal !== undefined);
     const result = this.applySource(source);
     return { session: result.session, problems: result.problems };
   }
 
   private async applyMetadataRefresh(
-    observation: SessionObservation,
+    observation: JournaledObservation,
     current: IndexedSession,
   ): Promise<{ readonly session?: IndexedSession; readonly problems: readonly JournalProblem[] }> {
     if (!(await this.observationJournalIsCurrent(observation))) return await this.applyRescan(observation.id);
@@ -837,7 +814,7 @@ export class DaemonStorage {
   }
 
   private async applyTailScan(
-    observation: SessionObservation,
+    observation: JournaledObservation,
     fromOffset: number,
     fromSequence: number,
     fromLine: number,
@@ -846,7 +823,6 @@ export class DaemonStorage {
     if (
       current?.journal === null ||
       current === undefined ||
-      observation.journal === undefined ||
       current.journal.size !== fromOffset ||
       current.lastSequence !== fromSequence ||
       current.journalLine !== fromLine ||
@@ -880,10 +856,8 @@ export class DaemonStorage {
     this.assertOpen();
     return await this.indexSweep(async () => {
       const collected = await this.collectObservations();
-      const observationById = new Map(
-        collected.observations
-          .filter(observation => decideSessionMarker(observation.marker.text) === 'proceed')
-          .map(observation => [observation.id, observation]),
+      const supported = collected.observations.filter(
+        observation => decideSessionMarker(observation.marker.text) === 'proceed',
       );
       const indexed = this.index.listSessions();
       const indexedById = new Map(indexed.map(session => [session.id, session]));
@@ -891,35 +865,30 @@ export class DaemonStorage {
       const lostJournalSessionIds = new Set<string>();
       const problems: JournalProblem[] = [...collected.problems];
       const observations = [];
-      for (const observation of observationById.values()) {
-        const current = indexedById.get(observation.id);
+      const journaledById = new Map<SessionId, JournaledObservation>();
+      for (const supportedObservation of supported) {
+        const current = indexedById.get(supportedObservation.id);
         try {
-          this.assertExpectedJournal(
-            observation.id,
-            observation.marker.text,
-            current,
-            observation.journal !== undefined,
-          );
-          const journal = observation.journal?.fingerprint ?? null;
+          const observation = this.requireJournal(supportedObservation);
+          journaledById.set(observation.id, observation);
+          const journal = observation.journal.fingerprint;
           const lastIndexedEventMatches =
             current === undefined
               ? false
-              : journal === null
-                ? current.journal === null && current.lastSequence === 0
-                : current.journal !== null &&
-                    (sameFingerprint(current.journal, journal) ||
-                      (sameJournalFile(current.journal, journal) && journal.size > current.journal.size))
-                  ? await this.pointerMatches(observation.id, current, observation)
-                  : false;
+              : current.journal !== null &&
+                  (sameFingerprint(current.journal, journal) ||
+                    (sameJournalFile(current.journal, journal) && journal.size > current.journal.size))
+                ? await this.pointerMatches(observation.id, current, observation)
+                : false;
           observations.push({ id: observation.id, journal, lastIndexedEventMatches });
         } catch (error) {
-          failedSessionIds.add(observation.id);
-          if (error instanceof MissingSessionJournalError) lostJournalSessionIds.add(observation.id);
+          failedSessionIds.add(supportedObservation.id);
+          if (error instanceof MissingSessionJournalError) lostJournalSessionIds.add(supportedObservation.id);
           problems.push({
-            file: createSessionPaths(this.paths, observation.id).directory,
+            file: createSessionPaths(this.paths, supportedObservation.id).directory,
             line: 0,
             byteOffset: 0,
-            message: `session ${observation.id} failed to read and was skipped: ${error instanceof Error ? error.message : String(error)}`,
+            message: `session ${supportedObservation.id} failed to read and was skipped: ${error instanceof Error ? error.message : String(error)}`,
           });
         }
       }
@@ -934,7 +903,7 @@ export class DaemonStorage {
           this.index.removeSession(action.id);
           continue;
         }
-        const observation = observationById.get(action.id);
+        const observation = journaledById.get(action.id);
         const current = indexedById.get(action.id);
         if (observation === undefined) continue;
         try {
@@ -983,15 +952,9 @@ export class DaemonStorage {
     }
     if (decideSessionMarker(observation.marker.text) === 'refuse')
       throw new SessionLayoutError(id, observation.marker.text);
-    this.assertExpectedJournal(id, observation.marker.text, current, observation.journal !== undefined);
-    const fingerprint = observation.journal?.fingerprint ?? null;
-    const currentPointerMatches =
-      current === undefined
-        ? false
-        : fingerprint === null
-          ? current.lastSequence === 0 &&
-            (await this.fileSystem.information(createSessionPaths(this.paths, id).events)) === undefined
-          : await this.pointerMatches(id, current, observation);
+    const journaled = this.requireJournal(observation);
+    const fingerprint = journaled.journal.fingerprint;
+    const currentPointerMatches = current === undefined ? false : await this.pointerMatches(id, current, journaled);
     if (current && sameFingerprint(current.journal, fingerprint) && currentPointerMatches) {
       return { kind: 'current', session: current };
     }
@@ -1486,7 +1449,7 @@ export class DaemonStorage {
       const paths = createSessionPaths(this.paths, id);
       const marker = await this.fileSystem.readText(paths.marker);
       const journal = await this.fileSystem.information(paths.events);
-      this.assertExpectedJournal(id, marker, this.index.findSession(id), journal !== undefined);
+      this.assertExpectedJournal(id, marker, journal !== undefined);
       if (!sessionJournalRequired(marker)) throw new MissingSessionJournalError(id, paths.events);
     });
   }
@@ -1723,8 +1686,8 @@ export class DaemonStorage {
    * One marker read and three metadata probes per directory; no document or journal bytes are read
    * and nothing is reconciled, so a health tick can afford this on every pass. A reservation with no
    * config, state, or event is deliberately absent: it is storage for an in-flight create, not a
-   * published session. Loss is otherwise decided exactly as the read paths decide it — current
-   * marker OR a surviving index witness — so an unmigrated legacy session is not silently healthy.
+   * published session. Loss is otherwise decided exactly as the read paths decide it — the current
+   * marker.
    */
   async surveySessionDirectories(): Promise<readonly SessionDirectorySurvey[]> {
     this.assertOpen();
@@ -1757,9 +1720,7 @@ export class DaemonStorage {
         })
       )
         continue;
-      const indexed = this.index.findSession(id);
-      const owesJournal = sessionJournalRequired(marker) || (indexed !== undefined && indexed.journal !== null);
-      const journalLost = owesJournal && journalPresent === undefined;
+      const journalLost = sessionJournalRequired(marker) && journalPresent === undefined;
       survey.push({ id, journalLost });
     }
     return survey.sort((left, right) => left.id.localeCompare(right.id));

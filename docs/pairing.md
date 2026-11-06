@@ -202,8 +202,6 @@ What this deliberately does **not** do:
   setup at all.
 - **It does not govern redemption.** The code is the credential, redeemed inside a sealed session; the
   step-up guards the act of _creating_ a code, and the code's two-minute life bounds the rest.
-- **It does not migrate anything.** A `state/operator-password.json` left by an older build is deleted at
-  boot with one notice line, and nothing is revoked.
 
 ### Who may redeem
 

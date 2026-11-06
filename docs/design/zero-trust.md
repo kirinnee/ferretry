@@ -636,7 +636,7 @@ was kept.
 
 - **Removed:** `state/operator-password.json`, `PUT /v1/grants/password`, `POST /v1/grants/unlock`, the
   `x-ferretry-operator-unlock` header, `fy daemon password`, the unlock dialog, and the password prompt at
-  `fy daemon start`. A stale `state/operator-password.json` is deleted at boot with one notice line.
+  `fy daemon start`.
 - **Pairing:** `POST /v1/pair/code` no longer requires a password. It is governed by `pairing.use`, so a
   governed caller needs a step-up to mint, and a caller on the host mints freely.
 - **The decision:** a caller is governed exactly when its request did not arrive on the host. A governed

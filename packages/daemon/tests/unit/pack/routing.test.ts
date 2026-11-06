@@ -1,12 +1,11 @@
 import { describe, it } from 'bun:test';
-import { MAX_ROUTING_PROMPT_CHARS, ModelsGuideFileSchema, RoutingPromptSchema } from '@ferretry/protocol';
+import { MAX_ROUTING_PROMPT_CHARS, RoutingPromptSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
   cut,
   defaultPrompt,
   effectiveRouting,
   fleetModels,
-  legacyPrompt,
   PROVIDER_PREFERENCE,
   ROUTING_LINE_PREFIX,
   routingLine,
@@ -133,26 +132,6 @@ describe('effectiveRouting', () => {
       source: 'default',
     });
   });
-
-  it('should render an old use-case guide the migration has not reached yet, so nothing it said is lost meanwhile', () => {
-    // Arrange
-    const file = ModelsGuideFileSchema.parse({
-      useCases: [{ id: 'bulk', title: 'Bulk', candidates: [{ provider: 'anthropic', model: 'haiku', why: 'cheap' }] }],
-    });
-
-    // Act
-    const actual = effectiveRouting(file, ALL, []);
-
-    // Assert
-    should(actual.source).equal('file');
-    should(actual.text).containEql('- Bulk: haiku.');
-  });
-
-  it('should fall back to the default for an old file that only described models', () => {
-    should(effectiveRouting({ models: [{ provider: 'zai', model: 'glm', description: 'x' }] }, ALL, []).source).equal(
-      'default',
-    );
-  });
 });
 
 describe('routingLine', () => {
@@ -187,93 +166,5 @@ describe('cut', () => {
     const actual = cut('First sentence here. Second one is long and goes on.', 30);
     should(actual).deepEqual({ text: 'First sentence here.…', cut: true });
     should(cut('x'.repeat(50), 20).text.length).equal(20);
-  });
-});
-
-describe('legacyPrompt', () => {
-  const BASE = 'The default prompt.';
-  const useCases = [
-    {
-      id: 'plan-review',
-      title: 'Hard planning',
-      candidates: [
-        { provider: 'anthropic', model: 'opus', effort: 'max', why: 'x' },
-        { provider: 'openai', model: 'gpt-5', harness: 'codex', effort: 'xhigh', why: 'y' },
-        { provider: 'zai', model: 'glm', why: 'z' },
-        { provider: 'kimi', model: 'k2', why: 'dropped: past three' },
-      ],
-    },
-    { id: 'bulk', title: 'Bulk edits', candidates: [] },
-  ];
-
-  it('should render each use case with its first three candidates, then the routing prompt, then the preferences', () => {
-    // Act
-    const actual = legacyPrompt(
-      { useCases, routing: { prompt: 'Keep Opus for reviews.', short: 'Routing: x.' } },
-      'GLM for bulk work.',
-      BASE,
-    );
-
-    // Assert
-    should(actual).deepEqual({
-      text: [
-        "Pick each sub-task's model by the kind of work, best first:",
-        '- Hard planning: opus at max, then gpt-5 (codex) at xhigh, then glm.',
-        '- Bulk edits: no model named.',
-        'Keep Opus for reviews.',
-        'Preferences: GLM for bulk work.',
-      ].join('\n'),
-      cut: false,
-    });
-  });
-
-  it('should stand the default prompt in for a guide that named no use cases', () => {
-    should(legacyPrompt({ routing: { prompt: 'Opus first.', short: 'x' } }, undefined, BASE)).deepEqual({
-      text: `${BASE}\nOpus first.`,
-      cut: false,
-    });
-    should(legacyPrompt({}, 'Only preferences.', BASE)?.text).equal(`${BASE}\nPreferences: Only preferences.`);
-  });
-
-  it('should be nothing for a file that said nothing a prompt could carry', () => {
-    should(
-      legacyPrompt({ models: [{ provider: 'zai', model: 'glm', description: 'Cheap.' }] }, '  ', BASE),
-    ).be.undefined();
-  });
-
-  it('should keep the use cases whole and cut the prose to fit, saying it was cut', () => {
-    // Act
-    const actual = legacyPrompt(
-      { useCases, routing: { prompt: `${'A long sentence about routing. '.repeat(60)}`, short: 'x' } },
-      undefined,
-      BASE,
-    );
-
-    // Assert
-    should(actual?.cut).be.true();
-    should(actual?.text.length).be.belowOrEqual(MAX_ROUTING_PROMPT_CHARS);
-    should(actual?.text).containEql('- Hard planning: opus at max');
-    should(actual?.text.endsWith('…')).be.true();
-  });
-
-  it('should skip a candidate that names no model, keeping the ones that do', () => {
-    should(
-      legacyPrompt(
-        {
-          useCases: [
-            { id: 'chores', title: 'Chores', candidates: [{ effort: 'low' }, { model: 'haiku', effort: 'low' }] },
-          ],
-        },
-        undefined,
-        BASE,
-      )?.text,
-    ).containEql('- Chores: haiku at low.');
-  });
-
-  it('should read leniently: a use case without a title or candidates that are not objects', () => {
-    should(
-      legacyPrompt({ useCases: [{ id: 'only-id', candidates: ['nope', { model: 'opus' }] }, 'junk'] }, undefined, BASE)
-        ?.text,
-    ).containEql('- only-id: opus.');
   });
 });

@@ -394,7 +394,6 @@ import {
   FileCleanUpRunStore,
   FilePackSpendLedger,
   FileReplacedGuide,
-  FileRoutingMigrationBackup,
   readSessionResult,
 } from '../src/adapters/pack/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
@@ -497,7 +496,6 @@ import {
   FileOutboxTail,
   FileSendChannel,
   FileSendLedger,
-  FileSendReproofMarker,
   FileSendTurnStore,
   ResumeSendReviver,
   StorageSendRepository,
@@ -984,7 +982,6 @@ import {
   KnownAndFerretFolders,
   LaneProposalAcceptance,
   LaneSetService,
-  LegacySendReproof,
   LegacyWireUseCounter,
   LiveDeviceConnections,
   LiveMemberSessions,
@@ -1176,7 +1173,6 @@ import {
   resolveBrowserProxy,
   resolveResumePolicy,
   resolveStateHome,
-  retireOperatorPassword,
   runtimeQuarantineState,
   type ScratchReclamation,
   SESSION_ROSTER_MAX_AGE_MS,
@@ -1431,7 +1427,6 @@ import {
   ProbeCache,
   packInstructed,
   packLaunchDefault,
-  RoutingMigration,
   runningChildCount,
 } from '../src/lib/pack/index.ts';
 import { IDLE_DAEMON_BUDGETS } from '../src/lib/performance/budgets.ts';
@@ -10226,18 +10221,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         defaultSendTrackerSettings,
       );
-      // The old "not delivered" rows, re-proved once against each recipient's transcript (lib/session/send/reproof.ts).
-      const sendReproof = new LegacySendReproof({
-        ledger: sendLedger,
-        evidence: sendEvidence,
-        repository: sendRepository,
-        roster: { sessions: () => storage.listSessions().map(session => session.id) },
-        serial: sendTrackerSerial,
-        clock,
-        marker: new FileSendReproofMarker(join(paths.home, 'send-reproof-migration.json')),
-        pause: async () => await new Promise<void>(resolve => setTimeout(resolve, 0)),
-        log: line => process.stderr.write(`${line}\n`),
-      });
       const sendTurns = new FileSendTurnStore(resumeTurns, id => createSessionPaths(paths, id).directory);
       const sends: SessionSendService = new SessionSendService(
         {
@@ -12927,30 +12910,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         replaced: new FileReplacedGuide(stateFiles, join(paths.state, 'pack-guide-replaced.json')),
         now: () => clock.now(),
       });
-      // ONCE: an old use-case guide (and the old builder preferences) become one routing prompt, the old files
-      // kept in the state home. Every later start finds nothing to do. It never blocks the daemon's start.
-      const packPath = configFilePath({ kind: 'pack' });
-      void new RoutingMigration({
-        readGuide: async () => await configText(guidePath),
-        writeGuide: async (text, etag) => await writeConfigText(guidePath, text, etag),
-        readPack: async () => await configText(packPath),
-        writePack: async (text, etag) => await writeConfigText(packPath, text, etag),
-        defaultPrompt: async () => await packService.defaultPrompt(),
-        backup: async value => await new FileRoutingMigrationBackup(stateFiles, paths.state).write(value),
-        now: () => clock.now(),
-      })
-        .run()
-        .then(outcome => {
-          if (outcome.outcome === 'migrated')
-            process.stderr.write(
-              `pack: the models guide is now one routing prompt${outcome.cut ? ' (cut to fit)' : ''}; the old files are kept at ${outcome.backup}\n`,
-            );
-        })
-        .catch((error: unknown) => {
-          process.stderr.write(
-            `pack: the routing prompt migration did not run: ${error instanceof Error ? error.message : String(error)}\n`,
-          );
-        });
       const sessionResumeSubsystem = createSessionResumeSubsystem(
         storage,
         sessions,
@@ -13351,7 +13310,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionCredential: sessionCredentialRevocation(storage, createSessionLifecycle, launcher),
         sessionResume: sessionResumeSubsystem,
         sendTracking: sendTracker,
-        sendReproof,
         queueDelivery: queueDeliverer,
         sessionSend: createSessionSendSubsystem(
           storage,
@@ -14919,14 +14877,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // Now that the daemon-wide grants are known, and before anything is served (the surface still answers 503).
   const repair = await pairing.repairSharing?.();
   for (const notice of sharingRepairNotices(repair)) world.notices.state(notice);
-  // The operator password is gone; a passkey step-up from the paired device replaced it. A verifier an
-  // older daemon left behind gates nothing now, so it is deleted rather than left looking like a lock —
-  // and said ONCE, so an operator who remembers setting a password learns where it went.
-  if (await retireOperatorPassword(opened.paths.retiredOperatorPassword, opened.fileSystem))
-    world.notices.step(
-      'operator password retired',
-      'deleted state/operator-password.json — a passkey confirmation from the paired device replaced it',
-    );
   progress.enter('first self-check (reconciling the session index)');
   await health.selfCheck().catch(() => undefined);
   // Launches the previous process had in flight died with it. Settled here, before anything serves and
@@ -15405,9 +15355,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * re-types nothing it cannot prove absent — and the disarm cancels the one pending look per session.
    */
   cleanups.push(subsystems.sendTracking.arm());
-  // Re-proves the pre-queue "not delivered" rows once, one session at a time, behind the tracker's lock.
-  void subsystems.sendReproof.run().catch(() => undefined);
-  cleanups.push(() => subsystems.sendReproof.stop());
   // The queue's deliverer looks once at every session for what a restart left open. Its stop is the FIRST
   // thing a shutdown does: a send answers once its message is on disk, so one sent just before a stop is
   // being typed while the daemon goes down, and the tmux client it types through is released below.

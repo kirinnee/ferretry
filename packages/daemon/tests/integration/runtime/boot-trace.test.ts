@@ -364,7 +364,6 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
       ['signInRules', 'flush'],
       ['observer', 'close'],
       ['monitor', 'close'],
-      ['sendReproof', 'stop'],
       ['queueDelivery', 'stop'],
     ] as const)
       named(owner, name, `${owner}.${name}`);
@@ -378,7 +377,6 @@ async function rig(options: RigOptions = {}): Promise<Rig> {
       ['boardGitHub', 'arm'],
       ['daemonUpdate', 'arm'],
       ['sendTracking', 'arm'],
-      ['sendReproof', 'run'],
       ['queueDelivery', 'arm'],
       ['monitor', 'arm'],
     ] as const)

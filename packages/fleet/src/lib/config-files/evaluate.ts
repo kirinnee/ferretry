@@ -99,7 +99,7 @@ export interface EffectiveConfig {
   readonly pack: PackConfig;
   /** How much of the machine the ferrets may take; every absent setting is computed from the machine. */
   readonly limits: LimitsConfig;
-  /** The guide as written; `useCases` absent means the one derived from the catalogs (docs/pack-mode.md). */
+  /** The guide as written; an absent `prompt` means the one derived from the catalogs (docs/pack-mode.md). */
   readonly modelsGuide: ModelsGuideFile;
   /** Which account a sign-in card offers first (`account-defaults.yaml`); the owner's lines only, every change held. */
   readonly accountDefaults: AccountDefaultsFile;

@@ -150,7 +150,7 @@ describe('GuideFileService.accept and undo', () => {
     await subject.service.accept({ prompt: PROMPT, suggested: SUGGESTED });
     should(subject.file()).deepEqual({ prompt: PROMPT, suggested: { ...SUGGESTED, acceptedAt: NOW } });
     should(subject.replaced()).deepEqual({ text: null, savedAt: NOW, source: 'default' });
-    subject.state.text = `${subject.state.text ?? ''}useCases: []\n`;
+    subject.state.text = `${subject.state.text ?? ''}# added after\n`;
 
     // Act
     const undone = await subject.service.undo();
@@ -158,8 +158,9 @@ describe('GuideFileService.accept and undo', () => {
     // Assert
     should(undone.outcome).equal('applied');
     should(subject.replaced()).be.undefined();
-    should(subject.file()).deepEqual({ useCases: [] });
+    should(subject.file()).deepEqual({});
     should(subject.state.text).containEql(GUIDE_MODELINE);
+    should(subject.state.text).containEql('# added after');
     should(subject.state.text).not.containEql('prompt:');
     should(subject.state.text).not.containEql('suggested:');
   });
@@ -177,16 +178,16 @@ describe('GuideFileService.accept and undo', () => {
     should(await subject.service.undoable()).be.undefined();
   });
 
-  it('should write only the keys that change, so another key and its comment survive an accept', async () => {
+  it('should write only the keys that change, so a comment survives an accept', async () => {
     // Arrange
-    const subject = world(`${GUIDE_MODELINE}\n# legacy, migrated elsewhere\nuseCases: []\n`);
+    const subject = world(`${GUIDE_MODELINE}\n# my note\n`);
 
     // Act
     await subject.service.accept({ prompt: PROMPT, suggested: SUGGESTED });
 
     // Assert
-    should(subject.state.text).containEql('# legacy, migrated elsewhere');
-    should(subject.file()).deepEqual({ useCases: [], prompt: PROMPT, suggested: { ...SUGGESTED, acceptedAt: NOW } });
+    should(subject.state.text).containEql('# my note');
+    should(subject.file()).deepEqual({ prompt: PROMPT, suggested: { ...SUGGESTED, acceptedAt: NOW } });
   });
 
   it('should say what an undo would put back from a kept file, without reading the guide', async () => {

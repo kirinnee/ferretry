@@ -363,7 +363,7 @@ describe('foreign state-home refusal', () => {
       name: 'session content',
       seed: async (paths: FoundationPaths) => {
         await mkdir(join(paths.sessions, 'foreign-session'), { recursive: true });
-        await writeFile(join(paths.sessions, 'foreign-session', 'session-version'), '1\n');
+        await writeFile(join(paths.sessions, 'foreign-session', 'session-version'), '2\n');
       },
       survivor: (paths: FoundationPaths) => join(paths.sessions, 'foreign-session', 'session-version'),
     },

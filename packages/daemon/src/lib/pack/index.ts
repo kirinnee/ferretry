@@ -1,7 +1,6 @@
 export * from './admission.ts';
 export * from './cleanup/index.ts';
 export * from './jev.ts';
-export * from './migrate.ts';
 export * from './probe.ts';
 export * from './recommend.ts';
 export * from './routing.ts';

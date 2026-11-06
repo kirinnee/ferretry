@@ -106,7 +106,7 @@ describe('FilePinRepository', () => {
       const absent = await subject.sessions.has('agent-1');
       await subject.repository.mutate('agent-1', current => current);
       const stillAbsent = await subject.sessions.has('agent-1');
-      await writeFile(join(subject.paths.sessions, 'agent-1', 'session-version'), '1');
+      await writeFile(join(subject.paths.sessions, 'agent-1', 'session-version'), '2');
       const present = await subject.sessions.has('agent-1');
 
       // Assert

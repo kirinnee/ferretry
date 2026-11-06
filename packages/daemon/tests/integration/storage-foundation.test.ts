@@ -219,27 +219,22 @@ describe('state-home lifecycle', () => {
     should(second.layout.created).be.false();
   });
 
-  it('should upgrade a version-1 home in place, rewriting only the marker and keeping its sessions', async () => {
-    // Arrange — a home an older release left: a session, and the retired single-file configuration.
+  it('should refuse a version-1 home as an unsupported version and leave its marker alone', async () => {
+    // Arrange — a home an older release left, with a session in it.
     const home = await createTemporaryHome();
     const older = await openStorage(home);
     const id = parseSessionId('kept-session');
     await older.storage.writeConfig(id, { name: 'kept' });
     await closeStorage(older.storage);
     await writeFile(older.paths.layoutVersion, '1\n', { mode: 0o600 });
-    const retired = join(older.paths.fleet, 'config.yaml');
-    await writeFile(retired, 'version: 2\ncredentials: {}\n', { mode: 0o600 });
 
     // Act
-    const upgraded = await openStorage(home);
+    const refusal = await capturedError(async () => await openStorage(home));
 
-    // Assert — not a fresh home; the old configuration is left for its reader to refuse, never converted.
-    should(upgraded.layout.created).be.false();
-    should(await readFile(upgraded.paths.layoutVersion, 'utf8')).equal('2\n');
-    should((await stat(upgraded.paths.layoutVersion)).mode & 0o777).equal(0o600);
-    should(await upgraded.storage.readConfig(id)).match({ name: 'kept' });
-    should(await readFile(retired, 'utf8')).equal('version: 2\ncredentials: {}\n');
-    await closeStorage(upgraded.storage);
+    // Assert
+    should(refusal instanceof StateHomeLayoutError).be.true();
+    should(String(refusal)).containEql('has layout version "1"');
+    should(await readFile(older.paths.layoutVersion, 'utf8')).equal('1\n');
   });
 
   it('should recover an empty bootstrap scaffold after the layout marker write fails', async () => {
@@ -827,70 +822,26 @@ describe('journal storage', () => {
     should(await readFile(foreignPaths.events, 'utf8')).equal('{"foreign":true}\n');
   });
 
-  it('should migrate a legacy session with a journal and one without, then detect a later loss', async () => {
-    // Arrange — hand-built version-1 directories, exactly as an older daemon left them.
+  it('should refuse a version-1 session directory and leave it exactly as it was', async () => {
+    // Arrange — a hand-built version-1 directory: a version this daemon no longer reads.
     const home = await createTemporaryHome();
     const first = await openStorage(home);
-    const withJournal = parseSessionId('legacy-with-journal');
-    const withoutJournal = parseSessionId('legacy-without-journal');
-    const paths = first.paths;
-    await closeStorage(first.storage);
-    const journaled = createSessionPaths(paths, withJournal);
-    const eventless = createSessionPaths(paths, withoutJournal);
-    for (const session of [journaled, eventless]) {
-      await mkdir(session.directory, { recursive: true, mode: 0o700 });
-      await writeFile(session.marker, '1\n', { mode: 0o600 });
-      await writeFile(session.state, '{"status":"running"}\n', { mode: 0o600 });
-    }
-    const legacyEvent = {
-      schemaVersion: 1,
-      sequence: 1,
-      sessionId: withJournal,
-      time: '2026-07-30T10:00:00.000Z',
-      type: 'legacy',
-      data: {},
-    };
-    await writeFile(journaled.events, `${JSON.stringify(legacyEvent)}\n`, { mode: 0o600 });
-
-    // Act
-    const second = await openStorage(home);
-    const rebuild = await second.storage.rebuildIndex();
-    const migrated = await stat(eventless.events);
-    await rm(eventless.events);
-    const lossError = await capturedError(async () => await second.storage.replay(withoutJournal));
-
-    // Assert — both are now version 2, and the one that was legitimately empty has acquired the
-    // ability to tell emptiness from loss.
-    should(await readFile(journaled.marker, 'utf8')).equal('2\n');
-    should(await readFile(eventless.marker, 'utf8')).equal('2\n');
-    should(migrated.size).equal(0);
-    should(rebuild.sessionCount).equal(2);
-    should(second.storage.findSession(withJournal)?.lastSequence).equal(1);
-    should(second.storage.findSession(withoutJournal)?.lastSequence).equal(0);
-    should(lossError instanceof MissingSessionJournalError).be.true();
-  });
-
-  it('should refuse to fabricate a journal for a legacy session the index still witnesses', async () => {
-    // Arrange — a version-1 marker with no journal but a live index fingerprint is lost history,
-    // not emptiness; migrating it would destroy the last evidence of that.
-    const home = await createTemporaryHome();
-    const first = await openStorage(home);
-    const id = parseSessionId('legacy-witnessed');
-    await first.storage.append(id, 'durable', { value: true });
+    const id = parseSessionId('legacy-v1');
     const paths = createSessionPaths(first.paths, id);
     await closeStorage(first.storage);
+    await mkdir(paths.directory, { recursive: true, mode: 0o700 });
     await writeFile(paths.marker, '1\n', { mode: 0o600 });
-    await rm(paths.events);
+    await writeFile(paths.state, '{"status":"running"}\n', { mode: 0o600 });
 
-    // Act — opening the home must still succeed; the refusal belongs to the mutation.
+    // Act — opening the home still succeeds; the refusal belongs to the session.
     const second = await openStorage(home);
     const writeError = await capturedError(async () => await second.storage.writeState(id, { status: 'claimed' }));
 
     // Assert
+    should(writeError instanceof SessionLayoutError).be.true();
+    should(String(writeError)).containEql('unsupported session-version marker "1"');
     should(await readFile(paths.marker, 'utf8')).equal('1\n');
     should(await exists(paths.events)).be.false();
-    should(writeError instanceof MissingSessionJournalError).be.true();
-    should(await exists(paths.state)).be.false();
   });
 
   it.each([

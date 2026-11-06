@@ -448,27 +448,6 @@ describe('storage consistency pass', () => {
     await opened.storage.close();
   });
 
-  it('should report a legacy session whose only witness is the index as unhealable too', async () => {
-    // Arrange — a version-1 directory the boot sweep deliberately refused to migrate, because
-    // fabricating its journal would have destroyed the index fingerprint that proves the loss.
-    const home = await temporaryHome();
-    const opened = await openStorage(home);
-    const id = parseSessionId('legacy-witnessed');
-    await opened.storage.append(id, 'session.started', { durable: true });
-    const session = createSessionPaths(paths(home), id);
-    await writeFile(session.marker, '1\n', { mode: 0o600 });
-    await rm(session.events);
-    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
-
-    // Act
-    const actual = await pass.run(false);
-
-    // Assert
-    should(await opened.storage.surveySessionDirectories()).deepEqual([{ id, journalLost: true }]);
-    should(actual.unhealable).deepEqual([id]);
-    await opened.storage.close();
-  });
-
   it('should ignore a terminal session with no finish stamp rather than call it a zombie', async () => {
     // Arrange
     const home = await temporaryHome();

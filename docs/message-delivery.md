@@ -434,14 +434,6 @@ the paste is re-wrapped. Neither the wrapper's text nor the placeholder's place 
 file placeholders out of the record, and every image-path token out of both, the two must be the same text —
 and the send must have had an image path to lift and the record a placeholder for it.
 
-**The pre-queue "not delivered" rows are re-proved once** (`LegacySendReproof`, marker
-`send-reproof-migration.json` in the daemon's home). After the tracker is armed, every session's typed
-`timed_out` rows — however old — are read against the recipient's transcript with the same incremental
-evidence reader, one session at a time, judging every look: found is `delivered` (journalled as a
-correction), read to the end and not found is `unaccounted` (`landing_unconfirmed`), and a transcript that
-cannot be read to its end is `unaccounted` (`transcript_unreadable`). None stays red: only a send nothing
-was ever typed for keeps "not delivered". A stop mid-pass writes no marker, so the next start finishes it.
-
 **A long transcript is slow, not unreadable.** The tracker reads a session's transcript through a window it
 holds from the oldest send it watches, appending only what is new on each later look, and a look reads at
 most `WINDOW_STEP_LIMIT` batches. A window that stopped at that budget kept its place and has more to read

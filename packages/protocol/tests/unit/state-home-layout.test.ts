@@ -6,7 +6,6 @@ import {
   LAYOUT_VERSION_FILENAME,
   LAYOUT_VERSION_MODE,
   layoutVersionContent,
-  UPGRADABLE_LAYOUT_VERSIONS,
 } from '../../src/lib/state-home-layout.ts';
 
 describe('the layout claim both writers must agree on', () => {
@@ -60,17 +59,15 @@ describe('deciding whether a directory may be used as a state home', () => {
     });
   });
 
-  it('should upgrade a home carrying the previous layout, whatever the marker spacing', () => {
-    // Act + Assert — only the marker changes; the caller that owns the home does the rewrite.
-    const expected = { kind: 'upgrade', from: 1, version: CURRENT_LAYOUT_VERSION };
+  it('should refuse a home carrying the previous layout, whatever the marker spacing', () => {
+    // Act + Assert — only the current layout is served; an older one is refused, never rewritten.
+    const expected = { kind: 'refuse', reason: 'unsupported-version', found: '1', expected: CURRENT_LAYOUT_VERSION };
     should(decideLayout('1\n', ['layout-version', 'fleet'])).deepEqual(expected);
     should(decideLayout('  1  \n', ['layout-version'])).deepEqual(expected);
   });
 
-  it('should upgrade only the versions it names, and never a version it has not met', () => {
+  it('should serve only the current version, and refuse any other', () => {
     // Assert
-    should(UPGRADABLE_LAYOUT_VERSIONS).deepEqual([1]);
-    should(UPGRADABLE_LAYOUT_VERSIONS.includes(CURRENT_LAYOUT_VERSION)).be.false();
     should(CURRENT_LAYOUT_VERSION).equal(2);
     should(decideLayout('0', ['layout-version']).kind).equal('refuse');
   });

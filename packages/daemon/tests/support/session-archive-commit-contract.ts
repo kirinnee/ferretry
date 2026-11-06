@@ -351,12 +351,15 @@ export function sessionArchiveCommitContract(): void {
           fileSystem: {
             listDirectory(path: string): Promise<unknown[]>;
             readText(path: string): Promise<string | undefined>;
-            information(path: string): Promise<undefined>;
+            information(
+              path: string,
+            ): Promise<{ device: string; inode: string; size: number; modifiedAtMs: number; mode: number } | undefined>;
             readChunks(): AsyncIterable<Uint8Array>;
           };
           index: {
             listSessions(): readonly unknown[];
             refreshSession(session: Parameters<typeof world.rows.set>[1]): void;
+            replaceSession(session: Parameters<typeof world.rows.set>[1], events: readonly unknown[]): void;
             countEvents(): number;
             replaceAll(plan: { sessions: readonly Parameters<typeof world.rows.set>[1][] }): void;
           };
@@ -366,17 +369,21 @@ export function sessionArchiveCommitContract(): void {
         const files = createSessionPaths(paths, id);
         internal.fileSystem.readText = async path =>
           path === files.marker
-            ? '1\n'
+            ? '2\n'
             : path === files.config
               ? JSON.stringify(world.docs.get(id)?.config)
               : path === files.state
                 ? JSON.stringify(world.docs.get(id)?.state)
                 : undefined;
-        internal.fileSystem.information = async () => undefined;
+        internal.fileSystem.information = async path =>
+          path === files.events ? { device: '0', inode: '0', size: 0, modifiedAtMs: 0, mode: 0o600 } : undefined;
         internal.fileSystem.readChunks = async function* () {};
         // Use the actual index semantics: restored rows are visible immediately, even while archive membership remains.
         internal.index.listSessions = () => [...world.rows.values()];
         internal.index.refreshSession = session => {
+          world.rows.set(session.id, session);
+        };
+        internal.index.replaceSession = session => {
           world.rows.set(session.id, session);
         };
         internal.index.countEvents = () => 0;

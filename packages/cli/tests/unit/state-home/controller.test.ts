@@ -34,7 +34,7 @@ describe('the adopt verb', () => {
 
   it('should say plainly when a home needs nothing done to it', async () => {
     // Arrange
-    const { controller: adopt, out } = controller([...directories('fleet'), ...files('layout-version')], '1\n');
+    const { controller: adopt, out } = controller([...directories('fleet'), ...files('layout-version')], '2\n');
 
     // Act
     await adopt.adopt({});

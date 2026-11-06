@@ -1573,65 +1573,6 @@ describe('daemon boot lifecycle', () => {
     ).have.length(1);
   });
 
-  it('should delete a stale operator-password verifier at boot and say so once', async () => {
-    // The passkey step-up replaced the operator password with no compatibility path, so a verifier an
-    // older daemon left behind gates nothing. Left in place it would read as a lock to anyone who found
-    // it, so a real boot removes it and tells the operator where the password went.
-    // Arrange — a state home with the retired file in it, and a second boot with none.
-    const home = await tempDirectory('fyd-retired-password');
-    const cleanups: Array<() => void | Promise<void>> = [];
-    let release = (): void => {};
-    const said = recordingNotices();
-    const world = {
-      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
-        await new Promise<void>(resolve => {
-          release = resolve;
-        });
-      })),
-      notices: said.port,
-    };
-    const stale = join(home, 'state', 'operator-password.json');
-    await writeFile(stale, '{"argon2id":"$argon2id$stale"}\n', { mode: 0o600 });
-
-    // Act
-    const exit = start(world, cleanups);
-    const port = await recordedPort(home);
-    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
-    const afterBoot = await readdir(join(home, 'state'));
-    release();
-    const code = await exit;
-    await runCleanups(cleanups);
-
-    const secondHome = await tempDirectory('fyd-no-retired-password');
-    const secondCleanups: Array<() => void | Promise<void>> = [];
-    const secondSaid = recordingNotices();
-    let secondRelease = (): void => {};
-    const secondWorld = {
-      ...(await worldAt(secondHome, OS_CHOSEN_PORT, async () => {
-        await new Promise<void>(resolve => {
-          secondRelease = resolve;
-        });
-      })),
-      notices: secondSaid.port,
-    };
-    const secondExit = start(secondWorld, secondCleanups);
-    const secondPort = await recordedPort(secondHome);
-    await awaitHealthy(`http://127.0.0.1:${secondPort}/healthz`);
-    secondRelease();
-    const secondCode = await secondExit;
-    await runCleanups(secondCleanups);
-
-    // Assert
-    should(code).equal(0);
-    should(afterBoot).not.containEql('operator-password.json');
-    const retired = said.steps.filter(step => step.startsWith('operator password retired'));
-    should(retired).have.length(1);
-    should(retired[0]).match(/deleted state\/operator-password\.json/u);
-    // A machine that never had one is told nothing: the notice is true only when a file was there.
-    should(secondCode).equal(0);
-    should(secondSaid.steps.filter(step => step.startsWith('operator password retired'))).be.empty();
-  });
-
   /**
    * The session read, driven through the production composition root over a real socket.
    *

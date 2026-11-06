@@ -47,12 +47,6 @@ describe('withPackConfig', () => {
     expect(withPackConfig('enabled: maybe\n', { enabled: true })).toBeNull();
     expect(withPackConfig('', { limits: { maxDepth: 99 } })).toBeNull();
   });
-
-  it('leaves an old routingPreferences key alone, still read so the daemon can migrate it', () => {
-    const text = withPackConfig('# mine\nroutingPreferences: Cheap first.\n', { enabled: false }) ?? '';
-    expect(text).toContain('# mine');
-    expect(readPackFile(text)).toEqual({ enabled: false, routingPreferences: 'Cheap first.' });
-  });
 });
 
 describe('withRoutingPrompt', () => {
@@ -87,10 +81,8 @@ describe('withRoutingPrompt', () => {
     expect(withRoutingPrompt(SUGGESTED, null)).not.toContain('prompt:');
   });
 
-  it('never writes the old keys, and leaves ones a file still carries for the migration', () => {
-    const legacy = 'useCases: []\n';
-    const text = withRoutingPrompt(legacy, 'Opus first.');
-    expect(read(text)).toEqual({ useCases: [], prompt: 'Opus first.' });
+  it('never writes the old keys, and refuses a file that still carries one', () => {
+    expect(withRoutingPrompt('useCases: []\n', 'Opus first.')).toBeNull();
     expect(withRoutingPrompt('', 'Opus first.')).not.toMatch(/useCases|routing:|models:/u);
   });
 

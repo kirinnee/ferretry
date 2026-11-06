@@ -532,8 +532,6 @@ reads the grant, so the two cannot drift.
 - **A remote warden is governed and can never step up.** Its credential is not a paired device, so it has
   no passkey to present: `warden.configure` is therefore unreachable to it, while `warden.use` — which needs
   no step-up — is unchanged.
-- **A stale `state/operator-password.json` is deleted at boot**, with one notice line. Nothing reads it any
-  more; leaving it would be a verifier on disk guarding nothing.
 
 ### Where the browser asks for it
 
