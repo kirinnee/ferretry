@@ -248,8 +248,9 @@ export class AgendaService {
     private readonly seen: AgendaSeenStore = NO_AGENDA_SEEN,
   ) {}
 
-  async list(sessionId: string): Promise<AgendaQueryResult<AgendaSnapshot>> {
-    if (sessionId === MACHINE_AGENDA_ID && this.machine !== undefined)
+  async list(sessionId: string, actor?: AgendaActor): Promise<AgendaQueryResult<AgendaSnapshot>> {
+    // The Warden reads a redirected machine home explicitly as the daemon. Session routes never supply this actor.
+    if (sessionId === MACHINE_AGENDA_ID && this.machine !== undefined && actor?.kind === 'daemon')
       return { ok: true, value: await this.machine.list() };
     const unauthorized = await this.authorize(sessionId);
     if (unauthorized !== null) return { ok: false, error: unauthorized };
@@ -287,7 +288,7 @@ export class AgendaService {
             ),
           }
         : titled;
-    if (home === MACHINE_AGENDA_ID && this.machine !== undefined)
+    if (home === MACHINE_AGENDA_ID && this.machine !== undefined && actor.kind === 'daemon')
       return await this.onMachine(async machine => {
         const { source: _source, sourceRef, task: _task, ...rest } = named;
         return await machine.raiseOrUpdate(machineNoticeRef(sessionId, sourceRef, actor), rest, [sessionId]);
@@ -794,7 +795,7 @@ export class AgendaService {
     const here = actor.kind === 'daemon' && (await this.holdsOpenSource(sessionId, source, sourceRef));
     const notice = actor.kind === 'daemon' && actor.cause === 'warden-escalation';
     const home = here ? sessionId : await this.redirected(sessionId, handsOnSource(actor), actor, notice);
-    if (home === MACHINE_AGENDA_ID && this.machine !== undefined)
+    if (home === MACHINE_AGENDA_ID && this.machine !== undefined && actor.kind === 'daemon')
       return await this.onMachine(
         async machine => await machine.resolve(machineNoticeRef(sessionId, sourceRef, actor), note ?? undefined),
       );
@@ -933,6 +934,10 @@ export class AgendaService {
   }
 
   private async authorize(sessionId: string, actor?: AgendaActor): Promise<AgendaFailure | null> {
+    // This instance serves sessions and redirects daemon notices through a separate machine service. Only that
+    // service owns the reserved ledger; a session id (even one accepted by a directory) cannot alias it.
+    if (sessionId === MACHINE_AGENDA_ID && this.machine !== undefined)
+      return { code: 'not-found', message: 'the machine agenda is available only at /v1/machine/agenda' };
     const invalid = invalidSession(sessionId);
     if (invalid !== null) return invalid;
     if (actor !== undefined && !agentConfinedTo(actor, sessionId)) {

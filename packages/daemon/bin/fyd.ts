@@ -4852,7 +4852,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       },
       feed: {
         board: async sessionId => {
-          const listed = await parts.attention.list(sessionId).catch(() => undefined);
+          const listed = await parts.attention.list(sessionId, WARDEN_ESCALATION_ACTOR).catch(() => undefined);
           if (listed?.ok !== true) return undefined;
           return {
             sessionId,
@@ -4934,7 +4934,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       verdicts: { recent: async () => await parts.reportsReader.readVerdicts().catch(() => undefined) },
       attention: {
         board: async sessionId => {
-          const listed = await parts.attention.list(sessionId).catch(() => undefined);
+          const listed = await parts.attention.list(sessionId, WARDEN_ESCALATION_ACTOR).catch(() => undefined);
           return listed?.ok === true
             ? { sessionId, items: listed.value.items, resolved: listed.value.resolved }
             : undefined;

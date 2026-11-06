@@ -7,6 +7,7 @@ import {
   AgendaClearAgentsResultSchema,
   type AgendaSnapshot,
   AgendaSnapshotSchema,
+  isMachineAgendaId,
 } from '@ferretry/protocol';
 import { requestWithRouteFallback } from '../agenda-wire/route-fallback.ts';
 import { readDaemonFeatures } from '../daemon/features.ts';
@@ -15,7 +16,7 @@ import type { AgendaApiClient, IAgendaGateway } from './ports.ts';
 
 /** The daemon route that owns one session's agenda. */
 export function agendaBoardPath(sessionId: string): string {
-  return `/v1/sessions/${encodeURIComponent(sessionId)}/agenda`;
+  return `/v1/sessions/${encodeURIComponent(sessionAgendaId(sessionId))}/agenda`;
 }
 
 /** The daemon route that delivers a ferret's held answers now ("Send now"). */
@@ -25,7 +26,7 @@ export function agendaRepliesPath(sessionId: string): string {
 
 /** The older spelling of the agenda route, which a daemon that predates `agenda.wire.1` still answers. */
 export function legacyAttentionBoardPath(sessionId: string): string {
-  return `/v1/sessions/${encodeURIComponent(sessionId)}/attention`;
+  return `/v1/sessions/${encodeURIComponent(sessionAgendaId(sessionId))}/attention`;
 }
 
 /** The older spelling of the replies route. */
@@ -33,8 +34,15 @@ export function repliesPath(sessionId: string): string {
   return `${legacyAttentionBoardPath(sessionId)}/replies`;
 }
 
+/** The reserved ledger has no session path, including for callers of the path builders above. */
+function sessionAgendaId(sessionId: string): string {
+  if (isMachineAgendaId(sessionId)) throw new Error('use /v1/machine/agenda for the machine agenda');
+  return sessionId;
+}
+
 /** The agenda route and the older one an older daemon answers instead. */
 export function boardRoutes(sessionId: string): { readonly current: string; readonly legacy: string } {
+  if (isMachineAgendaId(sessionId)) return { current: '/v1/machine/agenda', legacy: '/v1/machine/agenda' };
   return { current: agendaBoardPath(sessionId), legacy: legacyAttentionBoardPath(sessionId) };
 }
 
@@ -80,12 +88,14 @@ export class ProtocolAgendaGateway implements IAgendaGateway {
   }
 
   async snapshot(sessionId: string): Promise<AgendaSnapshot> {
+    this.requireMachineOwner(sessionId);
     return await requestWithRouteFallback(this.client, boardRoutes(sessionId), AgendaSnapshotSchema, {
       headers: this.#headers,
     });
   }
 
   async apply(sessionId: string, request: AgendaActionRequest): Promise<AgendaSnapshot> {
+    this.requireMachineOwner(sessionId);
     const body = AgendaActionRequestSchema.parse(request);
     return await requestWithRouteFallback(
       this.client,
@@ -96,6 +106,8 @@ export class ProtocolAgendaGateway implements IAgendaGateway {
   }
 
   async sendReplies(sessionId: string): Promise<AgendaSnapshot> {
+    this.requireMachineOwner(sessionId);
+    if (isMachineAgendaId(sessionId)) throw new Error('the machine agenda has no replies; use /v1/machine/agenda');
     return await requestWithRouteFallback(
       this.client,
       { current: agendaRepliesPath(sessionId), legacy: repliesPath(sessionId) },
@@ -114,5 +126,10 @@ export class ProtocolAgendaGateway implements IAgendaGateway {
 
   async features(): Promise<readonly string[]> {
     return await readDaemonFeatures(this.client);
+  }
+
+  private requireMachineOwner(sessionId: string): void {
+    if (isMachineAgendaId(sessionId) && this.#headers[FY_SESSION_ID_HEADER] !== undefined)
+      throw new Error("the machine agenda is the owner's; ask them");
   }
 }

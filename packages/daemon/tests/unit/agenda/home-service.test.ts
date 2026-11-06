@@ -344,8 +344,9 @@ describe('AgendaService machine fallback', () => {
   it('resolves the machine item when the Warden clears it, and reads the machine board as the home', async () => {
     const { machineLedgers, service } = orphaned();
     await service.raise('kid', request({ sourceRef: 'warden:ask:stuck:kid' }), daemon('warden-escalation'));
-    const listed = await service.list(MACHINE_AGENDA_ID);
-    should(listed).match({ ok: true });
+    // The Warden reads a machine home through its session service with explicit daemon provenance.
+    const listed = await service.list(MACHINE_AGENDA_ID, daemon('warden-escalation'));
+    should(listed).match({ ok: true, value: { sessionId: MACHINE_AGENDA_ID } });
     should(await service.homeOf('kid', true)).equal(MACHINE_AGENDA_ID);
     const cleared = await service.resolveSource(
       'kid',

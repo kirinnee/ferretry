@@ -58,6 +58,10 @@ const fetchAgenda = async (
   fetcher: DaemonFetch,
 ): Promise<unknown> => {
   assertScopeDaemon(daemon, scope);
+  // The machine board has only owner list/actions routes. Versions, conversation, seen and held replies belong
+  // to session boards; never turn an unsupported machine operation into a session request for its reserved id.
+  if (isMachineAgendaId(scope.sessionId) && path !== '/v1/machine/agenda')
+    throw new DaemonResponseError(404, 'this operation is unavailable on /v1/machine/agenda', 'not-found');
   const headers = new Headers(init.headers);
   headers.set(AGENDA_CHANNEL_HEADER, AGENDA_CHANNEL_VERSION);
   const request = daemonRequest(daemon, path, { ...init, headers });
