@@ -143,8 +143,6 @@ export function composeModules(
 ): ModuleInventory | ComposedModules {
   const routeRules = modules.flatMap(module => module.contributes.audit?.routes ?? []);
   const socketRules = modules.flatMap(module => module.contributes.audit?.sockets ?? []);
-  const hasRouteRules = modules.some(module => module.contributes.audit?.routes !== undefined);
-  const hasSocketRules = modules.some(module => module.contributes.audit?.sockets !== undefined);
   const routes = sessionAddressedRoutes(
     base.sessionAddresses,
     auditedRoutes(
@@ -153,7 +151,7 @@ export function composeModules(
         base.agentControl,
         modules.flatMap(module => module.contributes.routes ?? []),
       ),
-      hasRouteRules ? routeRules : undefined,
+      routeRules,
     ),
   );
   const sockets = sessionAddressedSockets(
@@ -164,7 +162,7 @@ export function composeModules(
         base.agentControl,
         modules.flatMap(module => module.contributes.sockets ?? []),
       ),
-      hasSocketRules ? socketRules : undefined,
+      socketRules,
     ),
   );
   const audit = { routes: routeRules, sockets: socketRules };
