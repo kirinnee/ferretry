@@ -3,8 +3,8 @@
  *
  * No test makes a network call and none reads a real credential: the fetch and the credential material
  * are both seams. The point of testing it here rather than in the unit tier is that this is the module
- * that decides *which* endpoint to ask and what an HTTP status means — the parsing itself is covered
- * against both scales in `tests/unit/quota.test.ts`.
+ * that decides *which* endpoint to ask and what an HTTP status means — the percentage-based parsing of
+ * stored usage is covered in `tests/unit/quota.test.ts`.
  */
 import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
