@@ -1,5 +1,6 @@
 import { basename, join } from 'node:path';
 import {
+  type ArchivedSession,
   type ClockPort,
   CURRENT_SESSION_VERSION,
   canonicalJsonValue,
@@ -19,6 +20,7 @@ import {
   type JournalFingerprint,
   type JournalProblem,
   type JsonValue,
+  parseArchiveRegistry,
   parseJsonDocument,
   parseSessionEvent,
   planIndexRebuild,
@@ -31,6 +33,7 @@ import {
   type SessionPaths,
   type SessionSource,
   scanJournalChunk,
+  serializeArchiveRegistry,
   serializeJsonDocument,
   sessionJournalRequired,
   sessionMarkerNeedsUpgrade,
@@ -256,6 +259,13 @@ function assertFleetTailLimit(limit: number): void {
     throw new Error('fleet event limit must be an integer between 1 and 10000');
 }
 
+/** What the archive records of a session it is about to take: the name it answered to and what that name's hold runs from. */
+export interface ArchiveVerdict {
+  readonly name?: string;
+  /** The configuration's `createdAt` and `updatedAt`: what a callsign's hold on its name is measured from. */
+  readonly configTimes?: { readonly createdAt: string; readonly updatedAt: string };
+}
+
 export class DaemonStorage {
   private closed = false;
   /**
@@ -312,6 +322,14 @@ export class DaemonStorage {
   private readonly stateListeners = new Set<(id: SessionId, state: JsonValue) => void>();
   /** How many session configs THIS storage has written: {@link configWrites}. */
   private configChanges = 0;
+  /**
+   * The sessions that have left the live set, by id (docs/session-archive.md). Their directories are untouched, and the
+   * index holds no row for them: every walk of the index, the sessions directory or the survey passes them by, which is
+   * the whole point. A WRITE to one revives it ({@link reviveIfArchived}); a read does not.
+   */
+  private archived: ReadonlyMap<SessionId, ArchivedSession> = new Map();
+  /** Registry writes, one after another: an archive pass and a revive never interleave their documents. */
+  private registryWrites: Promise<void> = Promise.resolve();
 
   constructor(
     readonly paths: FoundationPaths,
@@ -448,6 +466,7 @@ export class DaemonStorage {
         if (!entry.directory) continue;
         const id = tryParseSessionId(entry.name);
         if (id === undefined) continue;
+        if (this.archived.has(id)) continue;
         const paths = createSessionPaths(this.paths, id);
         if (!sessionMarkerNeedsUpgrade(await this.fileSystem.readText(paths.marker))) continue;
         if ((await this.ensureJournalFile(id, paths)) === undefined) continue;
@@ -641,6 +660,7 @@ export class DaemonStorage {
         });
         continue;
       }
+      if (this.archived.has(id)) continue;
       try {
         const source = await this.readSource(id, true);
         if (source) {
@@ -680,6 +700,7 @@ export class DaemonStorage {
         });
         continue;
       }
+      if (this.archived.has(id)) continue;
       try {
         const observation = await this.readObservation(id, true);
         if (observation) observations.push(observation);
@@ -991,6 +1012,7 @@ export class DaemonStorage {
     this.assertOpen();
     const document = serializeJsonDocument(value);
     await this.serial.run(id, async () => {
+      await this.reviveIfArchived(id);
       await this.ensureSessionDirectory(id);
       // The write is inside the try: `writeTextAtomic` renames first and may throw afterwards (the chmod or
       // the directory fsync), so a failed write can still have replaced the stored config.
@@ -1022,6 +1044,7 @@ export class DaemonStorage {
     this.assertOpen();
     const document = serializeJsonDocument(value);
     await this.serial.run(id, async () => {
+      await this.reviveIfArchived(id);
       await this.ensureSessionDirectory(id);
       await this.writeDocument(createSessionPaths(this.paths, id).state, document);
       await this.syncSessionUnlocked(id);
@@ -1240,6 +1263,7 @@ export class DaemonStorage {
   ): Promise<JsonValue> {
     this.assertOpen();
     return await this.serial.run(id, async () => {
+      await this.reviveIfArchived(id);
       const paths = createSessionPaths(this.paths, id);
       const current = await this.readDocument(id, kind);
       const compute = current === undefined ? create : () => transform(current);
@@ -1288,6 +1312,7 @@ export class DaemonStorage {
     this.assertOpen();
     const validated = createSessionEvent(id, 0, this.clock.now(), type, data);
     return await this.serial.run(id, async () => {
+      await this.reviveIfArchived(id);
       const inspection = await this.inspectSession(id);
       const event = createSessionEvent(
         id,
@@ -1430,6 +1455,7 @@ export class DaemonStorage {
       throw new Error('limit must be an integer between 1 and 10000');
     }
     return await this.serial.run(id, async () => {
+      if (this.archived.has(id)) return await this.replayArchived(id, afterSequence, limit);
       await this.synchronizedSession(id);
       let pointers = this.index.eventPointers(id, afterSequence, limit + 1);
       let selected = pointers.slice(0, limit);
@@ -1562,9 +1588,10 @@ export class DaemonStorage {
     });
   }
 
+  /** A live session's index row, or the one an archived session had when it left: both are sessions that exist. */
   findSession(id: SessionId): IndexedSession | undefined {
     this.assertOpen();
-    return this.index.findSession(id);
+    return this.index.findSession(id) ?? this.archived.get(id)?.indexed;
   }
 
   listSessions(): readonly IndexedSession[] {
@@ -1580,6 +1607,7 @@ export class DaemonStorage {
         if (!entry.directory) continue;
         const id = tryParseSessionId(entry.name);
         if (id === undefined) continue;
+        if (this.archived.has(id)) continue;
         const paths = createSessionPaths(this.paths, id);
         await this.fileSystem.setMode(paths.directory, 0o700);
         for (const file of [paths.marker, paths.config, paths.state, paths.events]) {
@@ -1606,6 +1634,7 @@ export class DaemonStorage {
       if (!entry.directory) continue;
       const id = tryParseSessionId(entry.name);
       if (id === undefined) continue;
+      if (this.archived.has(id)) continue;
       const paths = createSessionPaths(this.paths, id);
       // Only PRESENCE is asked of the two documents here, so where the filesystem can answer it with one
       // `stat` it does; every read of their bytes still walks the home. The reaper surveys every session
@@ -1643,6 +1672,128 @@ export class DaemonStorage {
   forgetFromIndex(id: SessionId): void {
     this.assertOpen();
     this.index.removeSession(id);
+  }
+
+  // ---------------------------------------------------------------------------------------------------
+  // The archive (docs/session-archive.md)
+  // ---------------------------------------------------------------------------------------------------
+
+  /**
+   * Reads the archive registry and takes its sessions out of the index. Called once, at open, before anything
+   * walks the sessions directory. A damaged or absent registry is an empty one: every session is live again, which
+   * is the safe direction, and the next archive pass writes a good document.
+   */
+  async loadArchive(): Promise<number> {
+    this.assertOpen();
+    const parsed = parseArchiveRegistry(await this.fileSystem.readText(this.paths.archivedSessions));
+    this.archived = parsed ?? new Map();
+    // An archive that crashed between the registry write and the index removal leaves rows behind.
+    for (const id of this.archived.keys()) if (this.index.findSession(id) !== undefined) this.index.removeSession(id);
+    return this.archived.size;
+  }
+
+  /** How many sessions have left the live set. */
+  archivedCount(): number {
+    return this.archived.size;
+  }
+
+  /** The archived sessions, oldest archived first, as they were indexed when they left. */
+  listArchivedSessions(): readonly (IndexedSession & {
+    readonly archivedAt: string;
+    readonly name?: string;
+    readonly configTimes?: { readonly createdAt: string; readonly updatedAt: string };
+  })[] {
+    return [...this.archived.values()]
+      .map(entry => ({
+        ...entry.indexed,
+        archivedAt: entry.archivedAt,
+        ...(entry.name === undefined ? {} : { name: entry.name }),
+        ...(entry.configTimes === undefined ? {} : { configTimes: entry.configTimes }),
+      }))
+      .sort((left, right) => left.archivedAt.localeCompare(right.archivedAt) || left.id.localeCompare(right.id));
+  }
+
+  isArchived(id: SessionId): boolean {
+    return this.archived.has(id);
+  }
+
+  private async persistRegistry(next: ReadonlyMap<SessionId, ArchivedSession>): Promise<void> {
+    const write = this.registryWrites.then(
+      async () => await this.fileSystem.writeTextAtomic(this.paths.archivedSessions, serializeArchiveRegistry(next)),
+    );
+    this.registryWrites = write.catch(() => undefined);
+    await write;
+  }
+
+  /**
+   * Takes sessions out of the live set, but only those `verify` still vouches for.
+   *
+   * HELD, THEN CHECKED: the sessions' lanes are held, so a revive or a write that was already queued has landed and
+   * none can start until this is done, and `verify` re-reads each session as it is NOW. The registry is written FIRST
+   * and durably; the index rows go after it, so a crash between them leaves rows `loadArchive` removes at the next
+   * open and never a session that is in neither place. Nothing on disk moves.
+   */
+  async archiveSessions(
+    ids: readonly SessionId[],
+    verify: (id: SessionId) => Promise<ArchiveVerdict | undefined>,
+  ): Promise<readonly SessionId[]> {
+    this.assertOpen();
+    return await this.holdSessions(ids, async () => {
+      const staged = new Map(this.archived);
+      const left: SessionId[] = [];
+      const archivedAt = this.clock.now();
+      for (const id of ids) {
+        const indexed = this.index.findSession(id);
+        if (indexed === undefined || staged.has(id)) continue;
+        const verdict = await verify(id);
+        if (verdict === undefined) continue;
+        staged.set(id, {
+          archivedAt,
+          ...(verdict.name === undefined ? {} : { name: verdict.name }),
+          ...(verdict.configTimes === undefined ? {} : { configTimes: verdict.configTimes }),
+          indexed,
+        });
+        left.push(id);
+      }
+      if (left.length === 0) return [];
+      await this.persistRegistry(staged);
+      this.archived = staged;
+      for (const id of left) {
+        this.index.removeSession(id);
+        const paths = createSessionPaths(this.paths, id);
+        for (const file of [paths.marker, paths.config, paths.state]) this.forgetDocument(file);
+      }
+      return left;
+    });
+  }
+
+  /**
+   * Brings an archived session back into the live set. Called with the session's lane held, as the first step of every
+   * write to it; the write that follows indexes it. A read never calls this.
+   */
+  private async reviveIfArchived(id: SessionId): Promise<void> {
+    if (!this.archived.has(id)) return;
+    const next = new Map(this.archived);
+    next.delete(id);
+    await this.persistRegistry(next);
+    this.archived = next;
+  }
+
+  /** An archived session's events, read straight from its journal: its index rows were let go when it left. */
+  private async replayArchived(id: SessionId, afterSequence: number, limit: number): Promise<ReplayPage> {
+    const source = await this.readSource(id);
+    if (source === undefined) throw new Error(`archived session ${id} has no readable journal`);
+    const pointers = planIndexRebuild([source]).events.filter(pointer => pointer.sequence > afterSequence);
+    const selected = pointers.slice(0, limit);
+    const events = await this.resolvePointers(id, selected);
+    if (events === undefined) throw new Error(`journal of archived session ${id} is inconsistent`);
+    return {
+      events,
+      rows: selected.length,
+      afterSequence,
+      nextSequence: selected.at(-1)?.sequence,
+      hasMore: pointers.length > limit,
+    };
   }
 
   async close(): Promise<void> {

@@ -1,0 +1,132 @@
+# Session archive
+
+A daemon keeps every session it ever ran, and nearly all of them are finished. Dozens of jobs walk the whole set on
+every tick — the sweeps, the watchers, the session list the app polls, the board's roster — so the cost of a finished
+session never stopped. **Finished autonomous sessions older than a day leave the live set.** They are archived,
+not deleted.
+
+## What it does
+
+- A session is archived when **all** of these hold:
+  1. It is **autonomous** — `mode: auto`, the same fact the app's Agents filter uses. A session a person drove
+     (`mode: interactive`) is never touched, whatever its age.
+  2. It has **ended** (`completed`, `failed`, `stalled` or `stopped`) and records when (`finishedAt`). An ended
+     session with no end time is kept: its age is not known.
+  3. It ended **at least 24 hours ago**.
+  4. Nothing outside it keeps it (below).
+  5. Every session that names it as `parent` is itself archived or archivable in the same pass. A lead outlives its
+     sub-ferrets in the live set.
+- **When unsure, it keeps the session.** A session whose documents cannot be read, and a keep signal that cannot be
+  read, both keep it.
+
+## What keeps a session live
+
+| Signal                          | Source                                                                      |
+| ------------------------------- | --------------------------------------------------------------------------- |
+| Pinned by the owner             | the agent pins                                                              |
+| Owns or is assigned a live card | the board: not dropped, lane not `closed` or `shipped`; unknown lane = live |
+| An open agenda item             | the session's own agenda board                                              |
+| A live child, in any form       | the rule itself (5 above)                                                   |
+
+A session that is revived, resumed, forked from, or written to for any reason comes back (below), so none of these is
+decided once and for ever.
+
+## Where an archived session is
+
+**Nothing moves.** The session's directory stays under `state/sessions/<id>/` with its documents, journal, agenda,
+channel and media. The only new fact is one document, `state/archived-sessions.json`, written atomically: which ids
+have left, when, the agent name each answered to, and the index row each had. Archiving in place was chosen over moving directories because every
+subsystem that writes into a session directory (the agenda, the channel, the board's stamps) keeps working with no
+second path to teach it, a crash can never strand half a move, and losing the registry only makes every session live
+again at the next boot's reconcile — the safe direction.
+
+An archived session is **out of**: the session index (memory and SQLite), `GET /v1/sessions`, the sessions-directory
+walks (reconcile, rebuild, survey, permission repair, legacy upgrade), the fleet sweeps and the board's roster.
+
+An archived session **still answers**:
+
+- `GET /v1/sessions/:id`, its transcript, journal replay and `fy` history — lazily, from disk. A read does not bring
+  it back.
+- Task-card links and the app's "open session": they name the id, and the id resolves.
+- `findSession`: an archived id is a session that exists, so references to it (a card's owner, an agenda owner) do not
+  go stale.
+- A name: the registry keeps each session's agent name, so `fy history <name>` finds it and `fy send <name>` resumes it,
+  as they did when it was live, with no read of its documents.
+
+## What the archive deliberately still honours
+
+Three facts were derived from the live list, and would have changed silently when a session left it:
+
+- **Callsigns.** A name is held for five days after its session ends. The registry keeps the configuration times that
+  hold is measured from, so an archived session keeps its name for the same five days and `fy send <name>` never meets
+  a second session of that name.
+- **Analytics.** Ingestion forgets a stored row whose session is not in its candidate list. Archived sessions are named to
+  it, so the rows ingested when they ended stay; one that was never ingested (the store was rebuilt) is read on demand.
+- **Session credentials** stop resolving for an archived session. It ended more than a day ago, so nothing can use one
+  legitimately, and a revive launches the session afresh.
+
+## Coming back
+
+A **write** brings an archived session back into the live set: an event appended, its state or config written or
+updated. That covers resume, revive, send and any other path that changes it — they all write through the
+same storage. The registry entry is removed first and the index row is rebuilt by the write that follows.
+
+## When it runs
+
+- **Once at boot**, as a job of the housekeeping lane, so it waits until the daemon is serving and takes its turn
+  behind the other housekeeping.
+- **Hourly after that**, as the same job. The timer is armed after a pass finishes, so a pass can never be overtaken
+  by its own next tick.
+- **Bounded**: at most 200 sessions a pass. A pass that left qualifying sessions behind is followed in a minute, not
+  an hour, so a first run over two thousand sessions finishes in a few passes without holding the event loop.
+- Documents are read paced (25 at a time, the loop handed back between batches) and through the storage's document
+  cache. The registry is written once per pass.
+- Archiving holds the sessions' lanes and re-reads each one as it is **now** before it goes, so a session revived
+  between the decision and the act stays live.
+
+## Seeing it
+
+- `fy daemon status` — `sessions 622 live (31 running, 0 unmonitored), 1796 archived`.
+- `GET /v1/health` — `archivedSessions`.
+- The app's session list ends with "**K older finished sessions archived**" and a way to show them.
+- `GET /v1/archived-sessions?limit=N` — `{ count, sessions }`: how many, and the newest `N` (default 100, at most 500)
+  as ordinary session views. `limit=0` asks only the count. It is a separate route so an archived session can never
+  slip into the hot live list.
+
+## Setting
+
+| Variable                          | Meaning                                                             |
+| --------------------------------- | ------------------------------------------------------------------- |
+| `FYD_SESSION_ARCHIVE_AFTER_HOURS` | Whole hours a finished autonomous session stays live. Default `24`. |
+|                                   | `off` archives nothing more; what is archived stays archived.       |
+
+A daemon is configured by environment here, not by `machine.yaml`: archiving loosens neither spend nor authority, so
+it needs no owner confirmation, and a malformed value stops the daemon at boot naming the variable.
+
+## Declared gaps
+
+- **Forking from an archived session** reads it and writes only the new one, so the source stays archived. It is
+  still readable, which is all a fork needs.
+- **A direct write into an archived session's files** (an agenda reply, a channel append) does not revive it: it
+  changes the files, not the live set. It does no harm — the session stays readable — and a session with an open
+  agenda item is kept in the first place.
+- **Opening an archived session in the app** reads its documents through `GET /v1/sessions/:id`, whose transcript
+  projection may write a document if the transcript moved; that write revives it.
+- **Scratch**: the scratch collector walks the live list, with the same 24-hour age as the archive. A session archived
+  before the collector's sweep reached it keeps its small scratch files (snapshots, turn captures) until a write revives
+  it. They are the bulk of an archived session's directory, so they are the first thing to reclaim if disk matters.
+- **Memory**: the registry holds one small row per archived session in memory. It is a few hundred bytes each, against
+  the full index (event pointers included) that it replaces.
+
+## Where it is in the code
+
+| Part                              | File                                                        |
+| --------------------------------- | ----------------------------------------------------------- |
+| The rule (pure)                   | `packages/daemon/src/lib/session/archive/policy.ts`         |
+| Keep signals                      | `.../archive/keeps.ts`, `.../archive/open-cards.ts`         |
+| The pass                          | `.../archive/service.ts`                                    |
+| The registry document             | `.../archive/registry.ts`                                   |
+| Archive, revive, fallback reads   | `packages/daemon/src/adapters/storage/session-storage.ts`   |
+| The session ports and the factory | `packages/daemon/src/adapters/session/archive/`             |
+| `GET /v1/archived-sessions`       | `packages/daemon/src/lib/runtime/mounts/session-archive.ts` |
+| The timer                         | `packages/daemon/bin/fyd.ts` (beside the housekeeping lane) |

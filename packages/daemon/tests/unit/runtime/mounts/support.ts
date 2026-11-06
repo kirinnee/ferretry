@@ -1198,6 +1198,8 @@ export interface HealthWorld {
   readonly legacyWire?: readonly LegacyWireUse[];
   /** The possible duplicate asks the last sweep left open, where the daemon runs one. */
   readonly duplicateAsks?: readonly DuplicateAsk[];
+  /** How many finished sessions the daemon has archived, where it archives. */
+  readonly archivedSessions?: number;
 }
 
 /**
@@ -1280,6 +1282,7 @@ export function healthSubsystem(world: HealthWorld = {}): DaemonHealthSubsystem 
     ...(world.io === undefined ? {} : { io: () => world.io }),
     ...(world.legacyWire === undefined ? {} : { legacyWire: () => world.legacyWire ?? [] }),
     ...(world.duplicateAsks === undefined ? {} : { duplicateAsks: () => world.duplicateAsks ?? [] }),
+    ...(world.archivedSessions === undefined ? {} : { archivedSessions: () => world.archivedSessions ?? 0 }),
   };
 }
 

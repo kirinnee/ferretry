@@ -262,6 +262,7 @@ const sessionCases: SchemaCase[] = [
     value: { ...sessionView, journalSequence: 2_000 },
   },
   { name: 'session list', schema: session.SessionListSchema, value: [sessionView] },
+  { name: 'archived sessions', schema: session.ArchivedSessionsSchema, value: { count: 3, sessions: [sessionView] } },
   {
     name: 'session config with launch settings',
     schema: session.SessionConfigSchema,

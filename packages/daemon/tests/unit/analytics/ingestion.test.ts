@@ -936,3 +936,86 @@ describe('when an ingestion pass is owed', () => {
     should(ANALYTICS_BACKSTOP_MS).equal(REFUSAL_RETRY_MS);
   });
 });
+
+describe('AnalyticsIngestionService.ingest and the session archive', () => {
+  const finished = async () => readEvidence([usageEvent('claude-opus-5', 1_000, 500)]);
+
+  it('should keep the row of a session that left the list, because it left the list and not the disk', async () => {
+    const live = candidate({ id: 's1' });
+    const test = harness([live], finished);
+    await test.service.ingest();
+    should([...test.store.saved.keys()]).deepEqual(['s1']);
+
+    // The archive takes it out of the live list; it is named as archived.
+    test.setCandidates([]);
+    const archivedHarness = new AnalyticsIngestionService({
+      candidates: { listCandidates: async () => [], archived: () => ['s1'] },
+      evidence: { evidenceFor: finished },
+      store: test.store,
+      pricing: async () => RATES,
+      clock: { now: () => '2026-08-03T00:00:00.000Z' },
+      concurrency: 2,
+      rebuildRequired: false,
+    });
+    await archivedHarness.ingest();
+
+    should([...test.store.saved.keys()]).deepEqual(['s1']);
+    // And a pass is still owed if a write revives it.
+    should(archivedHarness.owes('s1', { status: 'running' })).be.true();
+  });
+
+  it('should still forget a stored row nothing names — not live, not archived', async () => {
+    const test = harness([candidate({ id: 's1' })], finished);
+    await test.service.ingest();
+    test.setCandidates([]);
+
+    await test.service.ingest();
+
+    should([...test.store.saved.keys()]).deepEqual([]);
+  });
+
+  it('should ingest an archived session the store never held, by reading it on demand', async () => {
+    const asked: string[] = [];
+    const store = new MemoryStore();
+    const service = new AnalyticsIngestionService({
+      candidates: {
+        listCandidates: async () => [],
+        archived: () => ['old', 'unreadable'],
+        candidate: async id => {
+          asked.push(id);
+          return id === 'old' ? candidate({ id: 'old' }) : undefined;
+        },
+      },
+      evidence: { evidenceFor: finished },
+      store,
+      pricing: async () => RATES,
+      clock: { now: () => '2026-08-03T00:00:00.000Z' },
+      concurrency: 2,
+      rebuildRequired: false,
+    });
+
+    await service.ingest();
+    await service.ingest();
+
+    should([...store.saved.keys()]).deepEqual(['old']);
+    // The second pass does not read what the store holds again; an unreadable one is asked about each time.
+    should(asked).deepEqual(['old', 'unreadable', 'unreadable']);
+  });
+
+  it('should read no archived session when the source cannot read one on demand', async () => {
+    const store = new MemoryStore();
+    const service = new AnalyticsIngestionService({
+      candidates: { listCandidates: async () => [], archived: () => ['old'] },
+      evidence: { evidenceFor: finished },
+      store,
+      pricing: async () => RATES,
+      clock: { now: () => '2026-08-03T00:00:00.000Z' },
+      concurrency: 2,
+      rebuildRequired: false,
+    });
+
+    await service.ingest();
+
+    should([...store.saved.keys()]).deepEqual([]);
+  });
+});

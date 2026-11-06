@@ -134,6 +134,8 @@ import {
   SendSubmitRequestSchema,
   type SessionAttachTarget,
   SessionAttachTargetSchema,
+  ArchivedSessionsSchema,
+  type ArchivedSessions,
   SessionListSchema,
   type SessionView,
   SessionViewSchema,
@@ -897,6 +899,10 @@ export class FyApiClient implements IFyApiClient {
     const etag = response.headers.get('etag');
     this.#validatedSessions = etag === null ? undefined : { etag, sessions };
     return sessions;
+  }
+
+  archivedSessions(limit = 100): Promise<ArchivedSessions> {
+    return this.request(`/v1/archived-sessions?limit=${NonNegativeIntegerSchema.parse(limit)}`, ArchivedSessionsSchema);
   }
 
   suggestNames(count = 1): Promise<string[]> {

@@ -174,7 +174,7 @@ function healthLines(health: HealthView): string[] {
     : `bootstrap ${health.bootstrapState}`;
   return [
     `  version ${health.version}   pid ${String(health.pid)}   ${bootstrap}`,
-    `  sessions ${String(health.sessions)} (${String(health.running)} running, ${String(health.unmonitoredRunning)} unmonitored)`,
+    sessionsLine(health),
     `  event-loop lag ${health.eventLoopLagMs.toFixed(1)}ms   wedged ${String(health.wedgeCount)}`,
     ...(health.sessionWorkers === undefined
       ? []
@@ -297,4 +297,14 @@ export function megabytes(bytes: number): string {
 export function renderInstalled(daemon: string, definitionPath: string, pid: number | undefined): string {
   const suffix = pid === undefined ? '' : ` (pid ${String(pid)})`;
   return `${daemon} user service installed from ${definitionPath} and started${suffix}`;
+}
+
+/**
+ * The session count. A daemon that archives says so — "3 live (2 running, 0 unmonitored), 40 archived" — because the
+ * live number alone would read as the whole fleet; an older daemon's line is unchanged (docs/session-archive.md).
+ */
+function sessionsLine(health: HealthView): string {
+  const counts = `(${String(health.running)} running, ${String(health.unmonitoredRunning)} unmonitored)`;
+  if (health.archivedSessions === undefined) return `  sessions ${String(health.sessions)} ${counts}`;
+  return `  sessions ${String(health.sessions)} live ${counts}, ${String(health.archivedSessions)} archived`;
 }

@@ -404,6 +404,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     clock: { nowMs: () => 0 },
   },
   sessions: sessionDirectory([sessionView('s1')]),
+  sessionArchive: { count: () => 0, list: async () => [] },
   sessionAddresses: {
     has: id => id === 's1',
     candidates: async () => [{ id: 's1', name: 'aniya', status: 'running' }],
@@ -1042,7 +1043,8 @@ describe('the mounted daemon surface', () => {
       1 + // this daemon's own id for the owner's CLI links (`GET /v1/pair/identity`, person only)
       3 + // the shared draft: the owner's unsent composer, read, edited and streamed live to any of their own devices (&F331)
       3 + // the saved pictures: a ferret's or the owner's save, a picture's meta, and its payload (docs/renders.md)
-      1; // the roll-up of every conversation's open and parked agenda items, paged (`GET /v1/agenda/open`, docs/agenda.md)
+      1 + // the roll-up of every conversation's open and parked agenda items, paged (`GET /v1/agenda/open`, docs/agenda.md)
+      1; // the older finished sessions the archive took out of the live list (`GET /v1/archived-sessions`, docs/session-archive.md)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -1278,6 +1280,7 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/catalog-links/:linkId',
       'GET /v1/sessions',
       'GET /v1/sessions/:sessionId',
+      'GET /v1/archived-sessions',
       'GET /v1/projects',
       'POST /v1/projects',
       'GET /v1/sessions/:sessionId/skills',
