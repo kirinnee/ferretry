@@ -34,20 +34,17 @@ describe('which items merge', () => {
     expect(isPlainThread(item('A1', { phoneApproval: {} as never }))).toBe(false);
   });
 
-  test('is offered only where the machine merges, the host can send it, and the item is open and plain', () => {
+  test('is offered only where the host can send it, and the item is open and plain', () => {
     const open = item('A5');
-    expect(mergeOffered({ machineMerges: true, hostMerges: true, item: open })).toBe(true);
-    expect(mergeOffered({ machineMerges: undefined, hostMerges: true, item: open })).toBe(false);
-    expect(mergeOffered({ machineMerges: false, hostMerges: true, item: open })).toBe(false);
-    expect(mergeOffered({ machineMerges: true, hostMerges: false, item: open })).toBe(false);
+    expect(mergeOffered({ hostMerges: true, item: open })).toBe(true);
+    expect(mergeOffered({ hostMerges: false, item: open })).toBe(false);
     expect(
       mergeOffered({
-        machineMerges: true,
         hostMerges: true,
         item: { ...open, resolvedAt: '2026-11-01T00:00:00.000Z' } as unknown as AgendaItem,
       }),
     ).toBe(false);
-    expect(mergeOffered({ machineMerges: true, hostMerges: true, item: item('A5', { notice: true }) })).toBe(false);
+    expect(mergeOffered({ hostMerges: true, item: item('A5', { notice: true }) })).toBe(false);
   });
 });
 

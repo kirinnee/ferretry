@@ -133,7 +133,6 @@ const store = await createAppStore({
         await never(undefined, signal),
       wardenStatus: async () => await Promise.reject(new Error('no warden in this scene')),
       wardenVerdicts: async () => [],
-      wardenAgenda: async () => await Promise.reject(new Error('no warden in this scene')),
       foreignHistory: async () => ({ conversations: [], skipped: [] }),
       daemonUpdate: aboutFails
         ? async () => await Promise.reject(new Error('this machine did not answer'))

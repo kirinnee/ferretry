@@ -1,5 +1,5 @@
 /**
- * WHAT AN OPEN ITEM KNOWS ABOUT ITS OWN LIFE, read from the machine when it speaks `agenda.conversation.1`: the
+ * WHAT AN OPEN ITEM KNOWS ABOUT ITS OWN LIFE, read from the machine: the
  * versions it was kept as (for the diff), the whole stored conversation (for part 6), and a merge with another agenda.
  * One hook both hosts (the chat and the Inbox) use, so neither learns the routes. Every read is best effort: a machine
  * that does not answer, or answers 404, leaves the item drawn the older way (no diff control, the rebuilt thread).
@@ -31,7 +31,6 @@ import {
   tailIsWhole,
 } from '../../lib/agenda-conversation.ts';
 import { type LineageTitles, lineageTitles, mergeCandidates, mergeOffered } from '../../lib/agenda-merge.ts';
-import { useAgendaConversationOffered } from '../../lib/agenda-wire-react.tsx';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { useDaemonFetch } from '../../lib/store.tsx';
@@ -96,8 +95,7 @@ export const useItemLifecycle = ({
   records = NO_RECORDS,
 }: UseItemLifecycleInput): ItemLifecycle => {
   const fetcher = useDaemonFetch();
-  const machineKeeps = useAgendaConversationOffered(connection?.daemonId) === true;
-  const offered = machineKeeps && connection !== undefined && !isMachineAgendaId(scope.sessionId);
+  const offered = connection !== undefined && !isMachineAgendaId(scope.sessionId);
   const id = item?.id;
   const open = offered && connection !== undefined && id !== undefined;
   const marked = useRef(new Map<string, number>());
@@ -215,12 +213,12 @@ export const useItemLifecycle = ({
     const merger = client?.merge;
     if (item === undefined || client === undefined || merger === undefined || connection === undefined)
       return undefined;
-    if (!mergeOffered({ machineMerges: offered, hostMerges: true, item })) return undefined;
+    if (!mergeOffered({ hostMerges: true, item })) return undefined;
     return {
       candidates: mergeCandidates(item, board),
       merge: (survivor, absorbed) => merger.call(client, connection, scope, survivor, absorbed),
     };
-  }, [item, client, offered, board, connection, scope]);
+  }, [item, client, board, connection, scope]);
 
   const titles = useMemo(
     () => (item === undefined ? NO_TITLES : lineageTitles(item, [...board, ...records])),

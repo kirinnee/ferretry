@@ -9,7 +9,7 @@ import { sessionView } from '../support/sessions.ts';
 const DAEMON = 'alpha' as DaemonId;
 const view = sessionView('s-1', {
   config: { teammate: 'zoe', label: 'Fix the build' },
-  state: { attention: { open: 2, first: 'A1', ask: 'Ship it?', latestAt: '2026-10-16T12:00:00.000Z' } },
+  state: { agenda: { open: 2, first: 'A1', ask: 'Ship it?', latestAt: '2026-10-16T12:00:00.000Z' } },
 });
 
 let mounted: Mounted | null = null;
@@ -54,7 +54,7 @@ describe('the sidebar Needs you rows', () => {
 
   test('count the rows in the heading, and draw nothing when there are none', async () => {
     const other = sessionView('s-2', {
-      state: { attention: { open: 1, first: 'A4', ask: 'Rotate it?', latestAt: '2026-10-16T13:00:00.000Z' } },
+      state: { agenda: { open: 1, first: 'A4', ask: 'Rotate it?', latestAt: '2026-10-16T13:00:00.000Z' } },
     });
     const root = await draw([
       { daemonId: DAEMON, view },

@@ -234,7 +234,7 @@ const openShell = async (path: string, counter: RouteCounter) => {
     traffic += 1;
     const url = new URL(String(input));
     counter.add(routePattern(init?.method ?? 'GET', url.toString()));
-    const agenda = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u)?.[1];
+    const agenda = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/agenda$/u)?.[1];
     if (agenda !== undefined)
       return Response.json({
         v: 1,

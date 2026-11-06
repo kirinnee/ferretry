@@ -39,7 +39,7 @@ const unread = (
 ) =>
   sessionView(id, {
     config: { teammate: id, name: `Task ${id}`, cwd: `/work/${id}`, mode: 'interactive' },
-    state: { lastActivityAt: recent, attention: agenda(open, first, minutesAgo), ...extra },
+    state: { lastActivityAt: recent, agenda: agenda(open, first, minutesAgo), ...extra },
   });
 
 const calm = (id: string) =>
@@ -138,7 +138,7 @@ describe('unread rows in the sessions bar', () => {
     expect(ids(view.container)).toContain('stopped-1');
     await view.unmount();
     view = await mount(
-      bar({ sessions: [{ ...stopped, state: { ...stopped.state, attention: undefined } }, calm('calm-1')] }).element,
+      bar({ sessions: [{ ...stopped, state: { ...stopped.state, agenda: undefined } }, calm('calm-1')] }).element,
     );
     expect(ids(view.container)).not.toContain('stopped-1');
   });
@@ -192,7 +192,7 @@ describe('the pure model', () => {
   });
 
   test('rowPreview prefers the Agenda ask, collapses whitespace and falls back to the parked question', () => {
-    expect(rowPreview(unread('a', 1, 'A1', 1, { attention: { ...agenda(1, 'A1', 1), ask: 'Ship\n  it?' } }))).toEqual({
+    expect(rowPreview(unread('a', 1, 'A1', 1, { agenda: { ...agenda(1, 'A1', 1), ask: 'Ship\n  it?' } }))).toEqual({
       kind: 'attention',
       text: 'Ship it?',
     });
@@ -261,7 +261,7 @@ describe('the collapsed rail', () => {
 
 describe('the Attention entry', () => {
   test('column: a prominent row with the count badge, linking to agendaHref', async () => {
-    const { element, calls } = bar({ agendaHref: '/d/alpha/attention', agendaTotal: 7 });
+    const { element, calls } = bar({ agendaHref: '/d/alpha/inbox', agendaTotal: 7 });
     view = await mount(element);
     const entry = must(view.container.querySelector('a[data-sbar-agenda]'), 'the Attention entry');
     expect(entry.textContent).toContain('Inbox');
@@ -269,15 +269,15 @@ describe('the Attention entry', () => {
     expect(entry.querySelector('.sr-only')?.textContent).toBe('7 open Inbox items');
     expect(entry.hasAttribute('aria-current')).toBe(false);
     await click(entry, 'the entry');
-    expect(calls.at(-1)).toBe('navigate:/d/alpha/attention');
+    expect(calls.at(-1)).toBe('navigate:/d/alpha/inbox');
   });
 
   test('column: a calm zero state that is still a link, with no badge', async () => {
-    view = await mount(bar({ agendaHref: '/d/alpha/attention', agendaTotal: 0 }).element);
+    view = await mount(bar({ agendaHref: '/d/alpha/inbox', agendaTotal: 0 }).element);
     const entry = must(view.container.querySelector('a[data-sbar-agenda]'), 'the Attention entry');
     expect(entry.textContent).toContain('Nothing waiting');
     expect(entry.querySelector('[data-unread-badge]')).toBeNull();
-    expect(entry.getAttribute('href')).toBe('/d/alpha/attention');
+    expect(entry.getAttribute('href')).toBe('/d/alpha/inbox');
   });
 
   test('is drawn only when the host gives it somewhere to go', async () => {
@@ -286,14 +286,13 @@ describe('the Attention entry', () => {
   });
 
   test('marks the inbox page as current', async () => {
-    view = await mount(bar({ agendaHref: '/d/alpha/attention', agendaTotal: 1, active: 'attention' }).element);
+    view = await mount(bar({ agendaHref: '/d/alpha/inbox', agendaTotal: 1, active: 'attention' }).element);
     expect(view.container.querySelector('a[data-sbar-agenda]')?.getAttribute('aria-current')).toBe('page');
   });
 
   test('drawer: the same row as the column', async () => {
     view = await mount(
-      bar({ presentation: 'drawer', onClose: () => undefined, agendaHref: '/d/alpha/attention', agendaTotal: 2 })
-        .element,
+      bar({ presentation: 'drawer', onClose: () => undefined, agendaHref: '/d/alpha/inbox', agendaTotal: 2 }).element,
     );
     const entry = must(view.container.querySelector('a[data-sbar-agenda]'), 'the drawer entry');
     expect(entry.querySelector('[data-unread-badge]')?.textContent).toContain('2');
@@ -303,7 +302,7 @@ describe('the Attention entry', () => {
     const { element, calls } = bar({
       presentation: 'rail',
       onExpand: () => undefined,
-      agendaHref: '/d/alpha/attention',
+      agendaHref: '/d/alpha/inbox',
       agendaTotal: 5,
     });
     view = await mount(element);
@@ -311,7 +310,7 @@ describe('the Attention entry', () => {
     expect(entry.getAttribute('aria-label')).toBe('Inbox — 5 open Inbox items');
     expect(entry.querySelector('[data-unread-badge]')?.textContent).toBe('5');
     await click(entry, 'the rail entry');
-    expect(calls.at(-1)).toBe('navigate:/d/alpha/attention');
+    expect(calls.at(-1)).toBe('navigate:/d/alpha/inbox');
   });
 });
 

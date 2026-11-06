@@ -6,9 +6,8 @@
  * counted-for. `GET /v1/agenda/open` answers every session's items in pages; this reads all the pages of a machine
  * into one map the Inbox lists from.
  *
- * The app ships before the daemon, so a machine is asked only once its health lists `agenda.open.1`
- * ({@link AgendaWireDirectory.openOf}); one that does not keeps the window it always had. A read that fails keeps
- * what the last good read said and says nothing is complete, so the page never claims more than it read.
+ * A read that fails keeps what the last good read said and says nothing is complete, so the page never claims more
+ * than it read.
  */
 
 import {

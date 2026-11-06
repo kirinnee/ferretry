@@ -1,11 +1,11 @@
 /**
  * THE CARDS AN AGENDA ITEM'S "DONE · CLOSES" WOULD CLOSE, read from the board the app already keeps, and the way
- * to close them through the board's own Done. Nothing is offered outside the app store, before the machine's health
- * has listed the feature, for an item that did not ask, or for a card that is already closed or gone.
+ * to close them through the board's own Done. Nothing is offered outside the app store, for an item that did not ask,
+ * or for a card that is already closed or gone.
  */
 
 import type { AgendaItem, TaskRef } from '@ferretry/protocol';
-import { useMemo, useSyncExternalStore } from 'react';
+import { useMemo } from 'react';
 import {
   type CardForClose,
   closeCards,
@@ -23,7 +23,6 @@ import { useBoardActions, useBoardTask } from './use-board.ts';
 
 const NO_MACHINES: readonly DaemonConnection[] = [];
 const NO_AGENDA = { respond: () => Promise.reject(new Error('this host has no agenda')) };
-const NO_OFFER = { subscribe: () => () => undefined } as const;
 
 const forClose = (state: BoardTaskState): CardForClose | undefined =>
   state.status !== 'ready' || state.task === null
@@ -42,13 +41,9 @@ export const useDoneClose = (
   item: AgendaItem | undefined,
 ): DoneCloseSource | undefined => {
   const app = useOptionalAppStore();
-  const directory = app?.agendaWire;
-  const offered = useSyncExternalStore(directory?.subscribe ?? NO_OFFER.subscribe, () =>
-    daemonId === undefined ? undefined : directory?.offerCloseOf(daemonId),
-  );
   const refs = useMemo(
-    () => (daemonId === undefined || item === undefined ? [] : offeredCards(item, offered, daemonId)),
-    [daemonId, item, offered],
+    () => (daemonId === undefined || item === undefined ? [] : offeredCards(item, daemonId)),
+    [daemonId, item],
   );
   const first = refs[0];
   const connection = app?.connections.list().find(record => record.daemonId === daemonId);
@@ -58,7 +53,7 @@ export const useDoneClose = (
   const actions = useBoardActions(board, app?.attention ?? NO_AGENDA, machines);
 
   return useMemo((): DoneCloseSource | undefined => {
-    if (first === undefined || daemonId === undefined || !closable(state)) return undefined;
+    if (first === undefined || daemonId === undefined || connection === undefined || !closable(state)) return undefined;
     const cards: DoneCloseCard[] = [{ ref: first, title: state.task?.title }];
     const closeOne = async (ref: TaskRef): Promise<DoneCloseResult> => {
       const card = forClose(board.taskState(daemonId, ref.id));
@@ -75,5 +70,5 @@ export const useDoneClose = (
     };
     const close = (targets: readonly TaskRef[]) => closeCards(targets, closeOne);
     return { cards, close };
-  }, [first, daemonId, state, board, actions]);
+  }, [first, daemonId, connection, state, board, actions]);
 };

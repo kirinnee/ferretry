@@ -39,6 +39,7 @@ import {
   type SessionView,
   TUNNEL_OFF_SENTENCE,
   type TunnelStatusView,
+  WARDEN_AGENDA_PATH,
   type WardenAgendaView,
   type WardenStatusView,
   type WorkHit,
@@ -546,7 +547,7 @@ const appStore = async (
     // The board a live session reads. A test that wants to watch a refresh
     // land supplies its own answer per read; every other test gets the same
     // empty deck the shell has always been given here.
-    const agendaRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u);
+    const agendaRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/agenda$/u);
     if (agendaRoute?.[1] !== undefined) {
       const sessionId = decodeURIComponent(agendaRoute[1]);
       if (init?.method === 'POST') options.agendaPosts?.push(`${sessionId}:${String(init.body)}`);
@@ -642,7 +643,7 @@ const appStore = async (
             sessionView(id, {
               state: {
                 status: options.sessionStatus?.() ?? 'running',
-                ...(options.listedAgenda === undefined ? {} : { attention: options.listedAgenda }),
+                ...(options.listedAgenda === undefined ? {} : { agenda: options.listedAgenda }),
               },
             }),
           ),
@@ -741,7 +742,6 @@ const appStore = async (
             ? wardenStatus({ fingerprint: 'alpha-fingerprint' })
             : await options.wardenStatus(),
         wardenVerdicts: async () => [],
-        wardenAgenda: async () => (options.wardenAgenda === undefined ? wardenAgenda() : await options.wardenAgenda()),
         wardenRun: async () => ({ sweptAt: '2026-07-31T12:00:00.000Z', anomalies: [] }),
         wardenInvestigate: async ({ sessionId }: { readonly sessionId: string }) => ({
           sessionId,
@@ -768,6 +768,8 @@ const appStore = async (
             if (options.sends === undefined) throw new Error('no send ledger in this fixture');
             return { sends: options.sends };
           }
+          if (path === WARDEN_AGENDA_PATH)
+            return options.wardenAgenda === undefined ? wardenAgenda() : await options.wardenAgenda();
           if (path === '/v1/fleet/runtimes' && options.accounts !== undefined)
             return { format: 'version-2', runtimes: options.accounts };
           if (options.fleet?.[path] !== undefined) return options.fleet[path];
@@ -2448,7 +2450,7 @@ describe('AppShell', () => {
       const { store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
         transcript: 'assistant/message: Review !A3 before continuing.',
         sessionState: {
-          attention: {
+          agenda: {
             open: 1,
             first: 'A3',
             ask: 'permission',
@@ -2502,7 +2504,7 @@ describe('AppShell', () => {
     const { view } = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId], {
       sessions: ['shared'],
       listedAgenda: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' },
-      sessionState: { attention: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' } },
+      sessionState: { agenda: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' } },
       attention: sessionId => agendaSnapshot(sessionId, [todo as typeof externalAgendaItem]),
     });
     try {
@@ -2520,7 +2522,7 @@ describe('AppShell', () => {
     const { view } = await renderShell(`/d/${ALPHA}/inbox?session=shared&agenda=A3`, [alpha.daemonId], {
       sessions: ['shared'],
       listedAgenda: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
-      sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
+      sessionState: { agenda: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
       attention: sessionId => agendaSnapshot(sessionId, [externalAgendaItem]),
     });
     try {
@@ -2567,7 +2569,7 @@ describe('AppShell', () => {
     const { view } = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId], {
       sessions: ['shared'],
       listedAgenda: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
-      sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
+      sessionState: { agenda: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
       attention: sessionId => agendaSnapshot(sessionId, [externalAgendaItem]),
       messages: () => [
         { role: 'assistant', text: 'Bumped the lockfile.' },

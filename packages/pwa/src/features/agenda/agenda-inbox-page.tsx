@@ -207,8 +207,7 @@ const answerCard = (
  * Whether the owner may snooze this card: the machine must take snoozes, and a ferret's rule suggestion never does (the
  * ferret reads its own board, so a snooze would tell it the owner looked: C2).
  */
-const snoozable = (inbox: AgendaInbox, card: InboxCard): boolean =>
-  card.item.signInRuleSuggestion === undefined && (inbox.canSnooze?.(card.daemonId) ?? true);
+const snoozable = (card: InboxCard): boolean => card.item.signInRuleSuggestion === undefined;
 
 /** One compact card (the Sessions page's Needs-you deck), answered with its buttons into the undo window. */
 const renderInboxCard = (
@@ -2053,7 +2052,7 @@ export function AgendaInboxPage({
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open" data-agenda-deck-host="">
             <AgendaSwipeDeck
               cards={deck}
-              canSnooze={card => snoozable(inbox, card)}
+              canSnooze={card => snoozable(card)}
               onAct={(card, action) => answerWithDraft(host, card, action)}
               onDismiss={card => answerCard(host, card, DISMISS_ACTION)}
               onHold={(card, action) => {
@@ -2074,7 +2073,7 @@ export function AgendaInboxPage({
                     act={act}
                     key={card.key}
                     {...(askAt?.key === card.key ? { askTap: askAt.tap } : {})}
-                    canSnooze={snoozable(inbox, card)}
+                    canSnooze={snoozable(card)}
                     card={card}
                     host={host}
                     place={{

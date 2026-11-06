@@ -215,13 +215,7 @@ interface LegacyTasksRedirectRoute {
   readonly to: DaemonBoardRoute;
 }
 
-/** The Inbox's old `/attention` address, which now redirects to `/inbox` keeping its query. */
-interface LegacyAttentionRedirectRoute {
-  readonly kind: 'legacy-attention-redirect';
-  readonly to: DaemonAgendaRoute;
-}
-
-export type Route = PageRoute | LegacyTasksRedirectRoute | LegacyAttentionRedirectRoute;
+export type Route = PageRoute | LegacyTasksRedirectRoute;
 
 const connectionPicker: ConnectionPickerRoute = { kind: 'connection-picker' };
 const setup: SetupRoute = { kind: 'setup' };
@@ -314,7 +308,7 @@ export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
 export const daemonAddSkillsPath = (id: DaemonId, sessionId: string): string =>
   `${daemonSessionPath(id, sessionId)}/skills`;
 
-/** Builds the Inbox pathname, under the machine on screen. `/attention` is the old spelling and redirects here. */
+/** Builds the Inbox pathname, under the machine on screen. */
 export const daemonAgendaPath = (id: DaemonId): string => `${daemonHomePath(id)}/inbox`;
 
 /** Builds the Board pathname, under the machine on screen. */
@@ -381,8 +375,6 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'projects') return { kind: 'projects', daemonId: id };
     if (destination === 'settings') return { kind: 'settings', daemonId: id };
     if (destination === 'inbox') return { kind: 'attention', daemonId: id };
-    if (destination === 'attention')
-      return { kind: 'legacy-attention-redirect', to: { kind: 'attention', daemonId: id } };
     if (destination === 'warden') return { kind: 'warden', daemonId: id };
     if (destination === 'analytics') return { kind: 'analytics', daemonId: id };
     if (destination === 'learning') return { kind: 'learning', daemonId: id };
@@ -501,7 +493,6 @@ export const routePath = (route: Route): string => {
     case 'machine-setup':
       return daemonMachineSetupPath(route.daemonId);
     case 'legacy-tasks-redirect':
-    case 'legacy-attention-redirect':
       return routePath(route.to);
   }
 };
@@ -511,8 +502,7 @@ export const routePath = (route: Route): string => {
  * Session keys deliberately share the daemon-session seam used by caches.
  */
 export const routePageKey = (route: Route): string => {
-  if (route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect')
-    return routePageKey(route.to);
+  if (route.kind === 'legacy-tasks-redirect') return routePageKey(route.to);
   if (route.kind === 'connection-picker' || route.kind === 'setup' || route.kind === 'join' || route.kind === 'shared')
     return route.kind;
   if (route.kind === 'session') return `session:${daemonSessionKey(daemonSessionScope(route, route.sessionId))}`;

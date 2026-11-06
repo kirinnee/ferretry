@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { DAEMON_FEATURES } from '@ferretry/protocol';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import { AgendaSwipeDeck, dragOffset } from '../../../src/features/agenda/agenda-swipe-deck.tsx';
 import { swipeTargets } from '../../../src/lib/agenda-answers.ts';
 import type { InboxCard } from '../../../src/lib/agenda-inbox.ts';
-import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
@@ -433,12 +431,7 @@ describe('the open Inbox item’s History', () => {
     await mounted.unmount();
   });
 
-  it('draws the item’s own stored words when the machine keeps the conversation', async () => {
-    const wires = new AgendaWireDirectory();
-    wires.note(laptop.daemonId, {
-      kind: 'read',
-      health: { features: [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation] },
-    } as never);
+  it('draws the item’s own stored words', async () => {
     const stored = inboxCard(
       agendaItem('A8', {
         subject: 'Stored?',
@@ -451,7 +444,7 @@ describe('the open Inbox item’s History', () => {
       daemonId('laptop'),
     );
     const mounted = await mount(
-      <StoreProvider store={{ agendaWire: wires, connections: { list: () => [] } } as unknown as AppStore}>
+      <StoreProvider store={{ connections: { list: () => [] } } as unknown as AppStore}>
         <InboxHarness
           cards={[stored]}
           fake={fakeInbox()}

@@ -58,7 +58,7 @@ describe('SessionsBarRow outdated glyph', () => {
   test('sits beside the unread badge and beside the machine chip, and is absent on an up-to-date row', async () => {
     const waiting = outdated(
       sessionView('stale-2', {
-        state: { attention: { open: 1, first: 'A1', ask: 'Which web address?', latestAt: '2026-10-16T11:59:00.000Z' } },
+        state: { agenda: { open: 1, first: 'A1', ask: 'Which web address?', latestAt: '2026-10-16T11:59:00.000Z' } },
       }),
     );
     const row = await draw(waiting, 'kirin-box');

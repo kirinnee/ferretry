@@ -17,7 +17,7 @@ const interactive = (id: string, state: Parameters<typeof sessionView>[1] = {}) 
   sessionView(id, { ...state, config: { mode: 'interactive', ...state.config } });
 const asking = (id: string, latestAt: string) =>
   interactive(id, {
-    state: { status: 'awaiting_user', attention: { open: 1, first: 'A1', ask: 'Go?', latestAt } as never },
+    state: { status: 'awaiting_user', agenda: { open: 1, first: 'A1', ask: 'Go?', latestAt } as never },
   });
 
 describe('which ferrets the home is about', () => {

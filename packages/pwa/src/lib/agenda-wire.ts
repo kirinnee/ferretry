@@ -1,83 +1,34 @@
 /**
- * WHICH SPELLING OF THE AGENDA WIRE A MACHINE SPEAKS — decided here and nowhere else.
+ * WHAT THE APP LEARNS ABOUT A MACHINE'S AGENDA FROM ITS HEALTH — decided here and nowhere else.
  *
- * The app deploys from `main` before a machine updates, so it routinely faces a daemon that only
- * answers the older `attention` spellings (`docs/agenda.md` § Compatibility, `docs/standards/
- * architecture/index.md` § "The app ships before the daemon"). A daemon that lists
- * `DAEMON_FEATURES.agendaWire` in its health answers the `agenda` routes; any other, and one whose
- * health has not been read yet, is spoken to the old way — every daemon answers those for the window.
- *
- * The decision is PER DAEMON, because the app talks to several machines at once and they update
- * separately. It is read from the health the app already reads (`daemon-health.ts`); this module
- * only remembers the answer and spells the paths.
+ * The app deploys from `main` before a machine updates (`docs/standards/architecture/index.md` § "The app
+ * ships before the daemon"), so a few agenda features are offered only where a machine's health lists them.
+ * The decision is PER DAEMON, because the app talks to several machines at once and they update separately.
+ * It is read from the health the app already reads (`daemon-health.ts`); this module only remembers the
+ * answers and spells the paths.
  */
 
-import {
-  DAEMON_FEATURES,
-  type SessionAgendaSummary,
-  type SessionState,
-  WARDEN_AGENDA_PATH,
-  LEGACY_WARDEN_ATTENTION_PATH,
-} from '@ferretry/protocol';
+import { DAEMON_FEATURES, type SessionAgendaSummary, type SessionState } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 import { type DaemonHealthRead, machineOffers } from './daemon-health.ts';
 
-export type AgendaWire = 'agenda' | 'attention';
-
-/** The spelling a health read selects; anything but a read that lists the feature keeps the older one. */
-export const agendaWireOf = (read: DaemonHealthRead): AgendaWire =>
-  machineOffers(read, DAEMON_FEATURES.agendaWire) ? 'agenda' : 'attention';
-
 /**
- * Per-machine memory of the spelling. A failed or unfinished read keeps what an earlier read decided:
- * a machine that lists the feature still answers the older routes, so keeping either is safe, and only
- * a read that ANSWERED can change it.
+ * Per-machine memory of what each read machine offers. A failed or unfinished read keeps what an earlier
+ * read decided, and only a read that ANSWERED can change it.
  */
 export class AgendaWireDirectory {
-  readonly #wires = new Map<DaemonId, AgendaWire>();
-  /** Whether each read machine can snooze (`agenda.snooze.1`); absent until its health answered. */
-  readonly #snooze = new Map<DaemonId, boolean>();
-  /** Whether each read machine takes an offer to close a card (`agenda.offer-close.1`); absent until its health answered. */
-  readonly #offerClose = new Map<DaemonId, boolean>();
   /** Whether each read machine answers `GET /v1/search` (`work.search.1`); absent until its health answered. */
   readonly #workSearch = new Map<DaemonId, boolean>();
   /** Whether each read machine raises gate items for cards waiting on the owner (`board.gate-items.1`); absent until its health answered. */
   readonly #gateItems = new Map<DaemonId, boolean>();
-  /** Whether each read machine answers `GET /v1/agenda/open` (`agenda.open.1`); absent until its health answered. */
-  readonly #open = new Map<DaemonId, boolean>();
-  /** Whether each read machine checks an answer's `askVersion` (`agenda.asks.1`); absent until its health answered. */
-  readonly #asks = new Map<DaemonId, boolean>();
   /** Whether each read machine takes the card ask an answer names (`agenda.card-asks.1`); absent until its health answered. */
   readonly #cardAsks = new Map<DaemonId, boolean>();
-  /** Whether each read machine stores the conversation and keeps versions (`agenda.conversation.1`); absent until its health answered. */
-  readonly #conversation = new Map<DaemonId, boolean>();
   readonly #listeners = new Set<() => void>();
 
   subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   };
-
-  /** `'attention'` for a machine nobody has read health for yet. */
-  wireOf(daemonId: DaemonId): AgendaWire {
-    return this.#wires.get(daemonId) ?? 'attention';
-  }
-
-  /**
-   * Whether the machine can snooze and unsnooze (`agenda.snooze.1`): `false` only when its health ANSWERED
-   * without the name — an older daemon refuses the request as an unknown action — and `undefined` until then.
-   */
-  snoozeOf(daemonId: DaemonId): boolean | undefined {
-    return this.#snooze.get(daemonId);
-  }
-
-  /**
-   * Whether the machine takes `offerClose` on an item (`agenda.offer-close.1`): the app offers "Done · closes"
-   * only where it does. `undefined` until its health answered, which offers nothing.
-   */
-  offerCloseOf(daemonId: DaemonId): boolean | undefined {
-    return this.#offerClose.get(daemonId);
-  }
 
   /**
    * Whether the machine searches cards and agenda items by words (`work.search.1`): `undefined` until its
@@ -97,22 +48,6 @@ export class AgendaWireDirectory {
   }
 
   /**
-   * Whether the machine rolls up every conversation's open and parked items (`agenda.open.1`): the Inbox lists parked
-   * items from it only where it does. `undefined` until its health answered, which asks nothing.
-   */
-  openOf(daemonId: DaemonId): boolean | undefined {
-    return this.#open.get(daemonId);
-  }
-
-  /**
-   * Whether the machine checks an answer's `askVersion` (`agenda.asks.1`): `undefined` until its health answered, and
-   * `false` for a machine that would refuse the field as malformed.
-   */
-  asksOf(daemonId: DaemonId): boolean | undefined {
-    return this.#asks.get(daemonId);
-  }
-
-  /**
    * Whether the machine takes the card ask an answer names (`agenda.card-asks.1`): `undefined` until its health
    * answered, and `false` for a machine that would refuse the field as malformed.
    */
@@ -120,75 +55,25 @@ export class AgendaWireDirectory {
     return this.#cardAsks.get(daemonId);
   }
 
-  /**
-   * Whether the machine stores the conversation, keeps every version and takes `merge` (`agenda.conversation.1`): the
-   * item view draws the stored thread, the diff control and the merge button only where it does. `undefined` until its
-   * health answered, which offers none of them.
-   */
-  conversationOf(daemonId: DaemonId): boolean | undefined {
-    return this.#conversation.get(daemonId);
-  }
-
   note(daemonId: DaemonId, read: DaemonHealthRead): void {
     if (read.kind !== 'read') return;
     const cardAsks = machineOffers(read, DAEMON_FEATURES.agendaCardAsks);
     const cardAsksChanged = this.#cardAsks.get(daemonId) !== cardAsks;
     this.#cardAsks.set(daemonId, cardAsks);
-    this.#asks.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaAsks));
-    const snoozes = machineOffers(read, DAEMON_FEATURES.agendaSnooze);
-    const snoozeChanged = this.#snooze.get(daemonId) !== snoozes;
-    this.#snooze.set(daemonId, snoozes);
-    const offers = machineOffers(read, DAEMON_FEATURES.agendaOfferClose);
-    const changed = this.#offerClose.get(daemonId) !== offers;
-    this.#offerClose.set(daemonId, offers);
     const searches = machineOffers(read, DAEMON_FEATURES.workSearch);
     const searchChanged = this.#workSearch.get(daemonId) !== searches;
     this.#workSearch.set(daemonId, searches);
     const gates = machineOffers(read, DAEMON_FEATURES.boardGateItems);
     const gatesChanged = this.#gateItems.get(daemonId) !== gates;
     this.#gateItems.set(daemonId, gates);
-    const opens = machineOffers(read, DAEMON_FEATURES.agendaOpen);
-    const openChanged = this.#open.get(daemonId) !== opens;
-    this.#open.set(daemonId, opens);
-    const stores = machineOffers(read, DAEMON_FEATURES.agendaConversation);
-    const storesChanged = this.#conversation.get(daemonId) !== stores;
-    this.#conversation.set(daemonId, stores);
-    const wire = agendaWireOf(read);
-    const spelled = this.#wires.get(daemonId) !== wire;
-    this.#wires.set(daemonId, wire);
-    if (
-      changed ||
-      spelled ||
-      searchChanged ||
-      gatesChanged ||
-      openChanged ||
-      cardAsksChanged ||
-      snoozeChanged ||
-      storesChanged
-    )
-      this.#notify();
+    if (searchChanged || gatesChanged || cardAsksChanged) this.#notify();
   }
 
   clearDaemon(daemonId: DaemonId): void {
-    const hadSnooze = this.#snooze.delete(daemonId);
     const hadCardAsks = this.#cardAsks.delete(daemonId);
-    this.#asks.delete(daemonId);
-    const had = this.#offerClose.delete(daemonId);
     const hadSearch = this.#workSearch.delete(daemonId);
     const hadGates = this.#gateItems.delete(daemonId);
-    const hadOpen = this.#open.delete(daemonId);
-    const hadStores = this.#conversation.delete(daemonId);
-    if (
-      this.#wires.delete(daemonId) ||
-      had ||
-      hadSearch ||
-      hadGates ||
-      hadOpen ||
-      hadSnooze ||
-      hadCardAsks ||
-      hadStores
-    )
-      this.#notify();
+    if (hadSearch || hadGates || hadCardAsks) this.#notify();
   }
 
   #notify(): void {
@@ -197,30 +82,17 @@ export class AgendaWireDirectory {
 }
 
 /*
- * One literal per spelling, spelled out: `scripts/validate/route-agreement.ts` reads client dials
+ * One literal per route, spelled out: `scripts/validate/route-agreement.ts` reads client dials
  * lexically, and a path assembled from a variable segment is a path nothing checks against the daemon.
  */
 
 /** `GET`/`POST` the session's board. */
-export const sessionAgendaPath = (sessionId: string, wire: AgendaWire): string =>
-  wire === 'agenda'
-    ? `/v1/sessions/${encodeURIComponent(sessionId)}/agenda`
-    : `/v1/sessions/${encodeURIComponent(sessionId)}/attention`;
+export const sessionAgendaPath = (sessionId: string): string => `/v1/sessions/${encodeURIComponent(sessionId)}/agenda`;
 
 /** `POST` "send now" for the answers the daemon is holding. */
-export const sessionAgendaRepliesPath = (sessionId: string, wire: AgendaWire): string =>
-  wire === 'agenda'
-    ? `/v1/sessions/${encodeURIComponent(sessionId)}/agenda/replies`
-    : `/v1/sessions/${encodeURIComponent(sessionId)}/attention/replies`;
+export const sessionAgendaRepliesPath = (sessionId: string): string =>
+  `/v1/sessions/${encodeURIComponent(sessionId)}/agenda/replies`;
 
-/** `GET` the fleet's "who needs you" view. */
-export const wardenAgendaPath = (wire: AgendaWire): string =>
-  wire === 'agenda' ? WARDEN_AGENDA_PATH : LEGACY_WARDEN_ATTENTION_PATH;
-
-/**
- * The session's open-items summary: the daemon writes `agenda` beside `attention`, an older daemon only
- * `attention`. EVERY reader of the summary goes through this, so `agenda` wins when both are there.
- */
-export const sessionAgendaSummary = (
-  state: Pick<SessionState, 'agenda' | 'attention'>,
-): SessionAgendaSummary | undefined => state.agenda ?? state.attention;
+/** The session's open-items summary. EVERY reader of the summary goes through this. */
+export const sessionAgendaSummary = (state: Pick<SessionState, 'agenda'>): SessionAgendaSummary | undefined =>
+  state.agenda;

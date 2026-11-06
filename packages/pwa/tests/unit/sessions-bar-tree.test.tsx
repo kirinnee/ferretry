@@ -18,7 +18,7 @@ const KIDS = [
     config: { ...at('/work/pack'), label: 'Two', parent: 'lead' },
     state: {
       status: 'awaiting_user',
-      attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: '2026-07-31T12:00:00.000Z' },
+      agenda: { open: 1, first: 'A1', ask: 'Ask?', latestAt: '2026-07-31T12:00:00.000Z' },
     },
   }),
   sessionView('kid-3', { config: { ...at('/work/pack'), label: 'Three', parent: 'lead' } }),

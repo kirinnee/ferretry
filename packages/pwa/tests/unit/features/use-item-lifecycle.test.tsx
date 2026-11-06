@@ -1,19 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { type AgendaConversationEntry, type AgendaItem, DAEMON_FEATURES } from '@ferretry/protocol';
+import { type AgendaConversationEntry, type AgendaItem } from '@ferretry/protocol';
 import { useState } from 'react';
 import {
   type ItemLifecycle,
   type UseItemLifecycleInput,
   useItemLifecycle,
 } from '../../../src/features/agenda/use-item-lifecycle.ts';
-import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import { browserFetch } from '../../../src/lib/runtime-models.ts';
 import { agendaItem } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount } from '../../support/dom.ts';
-import { healthOf } from '../../support/health.ts';
 import { settleUntil } from '../../support/settle.ts';
 
 const connection = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
@@ -82,12 +80,6 @@ afterEach(async () => {
   view = null;
 });
 
-const STORES = {
-  kind: 'read',
-  health: healthOf('4.150.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation]),
-} as const;
-const OLD = { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) } as const;
-
 let latest: ItemLifecycle | null = null;
 let update: ((input: UseItemLifecycleInput) => void) | null = null;
 const Probe = ({ initial }: { readonly initial: UseItemLifecycleInput }) => {
@@ -97,14 +89,8 @@ const Probe = ({ initial }: { readonly initial: UseItemLifecycleInput }) => {
   return null;
 };
 
-const draw = async (
-  machine: typeof STORES | typeof OLD,
-  item: AgendaItem | undefined,
-  extra: Partial<UseItemLifecycleInput> = {},
-): Promise<void> => {
-  const wires = new AgendaWireDirectory();
-  wires.note(connection.daemonId, machine);
-  const store = { agendaWire: wires, carrier: { fetch: browserFetch } } as unknown as AppStore;
+const draw = async (item: AgendaItem | undefined, extra: Partial<UseItemLifecycleInput> = {}): Promise<void> => {
+  const store = { carrier: { fetch: browserFetch } } as unknown as AppStore;
   const input: UseItemLifecycleInput = {
     connection,
     scope,
@@ -133,14 +119,8 @@ const base = (overrides: Partial<AgendaItem> = {}): AgendaItem =>
   agendaItem('A5', { revisions: [{}, {}] as never, ...overrides });
 
 describe('what an open item knows about its own life', () => {
-  test('offers nothing on a machine that does not keep versions, and reads nothing from it', async () => {
-    await draw(OLD, base());
-    expect(latest).toEqual({ conversation: null });
-    expect(calls).toEqual([]);
-  });
-
-  test('names the agendas an item was merged into or split from by title, even where no versions are kept', async () => {
-    await draw(OLD, base({ mergedInto: 'A2', splitInto: ['A7', 'A8'] } as never), {
+  test('names the agendas an item was merged into or split from by title', async () => {
+    await draw(base({ mergedInto: 'A2', splitInto: ['A7', 'A8'] } as never), {
       board: [
         agendaItem('A2', { subject: 'Where do snoozed items go?' }),
         agendaItem('A7', { subject: 'Badge count' }),
@@ -148,21 +128,21 @@ describe('what an open item knows about its own life', () => {
     });
     expect(latest?.lineageTitles).toEqual({ A2: 'Where do snoozed items go?', A7: 'Badge count' });
     await view?.unmount();
-    await draw(STORES, base());
+    await draw(base());
     expect(latest?.lineageTitles).toBeUndefined();
   });
 
   test('offers nothing for a machine agenda or with nothing open', async () => {
-    await draw(STORES, base(), { scope: daemonSessionScope(connection, 'machine-agenda') });
+    await draw(base(), { scope: daemonSessionScope(connection, 'machine-agenda') });
     expect(latest).toEqual({ conversation: null });
     await view?.unmount();
-    await draw(STORES, undefined);
+    await draw(undefined);
     expect(latest).toEqual({ conversation: null });
     expect(calls).toEqual([]);
   });
 
   test('keeps the mark from BEFORE this opening as the baseline, then marks the newest version seen', async () => {
-    await draw(STORES, base());
+    await draw(base());
     await settleUntil(() => latest?.versions !== undefined, 'the versions', interact);
     expect(latest?.versions?.list.seen).toBe(1);
     expect(latest?.versions?.list.latest).toBe(3);
@@ -177,13 +157,13 @@ describe('what an open item knows about its own life', () => {
 
   test('offers no diff for an item with one version, but still marks it seen', async () => {
     versions = { latest: 1 };
-    await draw(STORES, agendaItem('A5'));
+    await draw(agendaItem('A5'));
     await settleUntil(() => calls.some(call => call.method === 'PUT'), 'the seen mark', interact);
     expect(latest?.versions).toBeUndefined();
   });
 
   test('reads one version once however often it is asked for', async () => {
-    await draw(STORES, base());
+    await draw(base());
     await settleUntil(() => latest?.versions !== undefined, 'the versions', interact);
     const first = await latest?.versions?.load(2);
     await latest?.versions?.load(2);
@@ -193,19 +173,19 @@ describe('what an open item knows about its own life', () => {
 
   test('keeps drawing the item the older way when the machine does not answer', async () => {
     fail = true;
-    await draw(STORES, base());
+    await draw(base());
     await interact(() => Promise.resolve());
     expect(latest?.versions).toBeUndefined();
     expect(latest?.conversation).toBeNull();
   });
 
   test('uses the item’s own tail when it is the whole thread, and reads the rest when it is not', async () => {
-    await draw(STORES, base({ conversationCount: 1, conversation: [entry('whole')] }));
+    await draw(base({ conversationCount: 1, conversation: [entry('whole')] }));
     expect(latest?.conversation?.map(each => each.text)).toEqual(['whole']);
     expect(calls.some(call => call.path.startsWith('/conversation'))).toBe(false);
     await view?.unmount();
 
-    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await draw(base({ conversationCount: 3, conversation: [entry('three')] }));
     await settleUntil(() => latest?.conversation?.length === 3, 'the whole thread', interact);
     expect(latest?.conversation?.map(each => each.text)).toEqual(['one', 'two', 'three']);
   });
@@ -215,7 +195,7 @@ describe('what an open item knows about its own life', () => {
     hold = new Promise<void>(resolve => {
       release = resolve;
     });
-    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await draw(base({ conversationCount: 3, conversation: [entry('three')] }));
     expect(latest?.conversation?.map(each => each.text)).toEqual(['three']);
     expect(latest?.conversationGap).toEqual({ at: 0, count: 2, state: 'loading' });
     release();
@@ -224,7 +204,7 @@ describe('what an open item knows about its own life', () => {
   });
 
   test('reads only the entries it does not have yet when a reply arrives, and only those the tail lacks', async () => {
-    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await draw(base({ conversationCount: 3, conversation: [entry('three')] }));
     await settleUntil(() => latest?.conversationGap === undefined, 'the earlier entries', interact);
     expect(calls.filter(call => call.path.startsWith('/conversation')).map(call => call.path)).toEqual([
       '/conversation?index=0&offset=0',
@@ -244,7 +224,7 @@ describe('what an open item knows about its own life', () => {
   });
 
   test('reads nothing more when a longer tail already holds what was still missing', async () => {
-    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await draw(base({ conversationCount: 3, conversation: [entry('three')] }));
     await settleUntil(() => latest?.conversationGap === undefined, 'the earlier entries', interact);
 
     calls = [];
@@ -261,7 +241,7 @@ describe('what an open item knows about its own life', () => {
 
   test('says so, and draws only what it has, when a thread is longer than one read takes', async () => {
     endless = true;
-    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await draw(base({ conversationCount: 3, conversation: [entry('three')] }));
     await settleUntil(() => latest?.conversationGap?.state === 'capped', 'the read limit', interact);
     expect(latest?.conversationGap).toEqual({ at: 0, count: 2, state: 'capped' });
     expect(latest?.conversation?.map(each => each.text)).toEqual(['three']);
@@ -269,14 +249,14 @@ describe('what an open item knows about its own life', () => {
 
   test('says the earlier entries could not be read, and keeps the tail, when the machine does not answer', async () => {
     fail = true;
-    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await draw(base({ conversationCount: 3, conversation: [entry('three')] }));
     await settleUntil(() => latest?.conversationGap?.state === 'failed', 'the failure', interact);
     expect(latest?.conversation?.map(each => each.text)).toEqual(['three']);
     expect(latest?.conversationGap).toEqual({ at: 0, count: 2, state: 'failed' });
   });
 
   test('reads the thread again from the start when a merge interleaves another thread into it', async () => {
-    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await draw(base({ conversationCount: 3, conversation: [entry('three')] }));
     await settleUntil(() => latest?.conversationGap === undefined, 'the earlier entries', interact);
     expect(latest?.conversation?.map(each => each.text)).toEqual(['one', 'two', 'three']);
 
@@ -300,7 +280,7 @@ describe('what an open item knows about its own life', () => {
 
   test('tries the earlier entries again when the thread grows after a failed read', async () => {
     fail = true;
-    await draw(STORES, base({ conversationCount: 3, conversation: [entry('three')] }));
+    await draw(base({ conversationCount: 3, conversation: [entry('three')] }));
     await settleUntil(() => latest?.conversationGap?.state === 'failed', 'the failure', interact);
 
     fail = false;
@@ -313,23 +293,14 @@ describe('what an open item knows about its own life', () => {
   });
 
   test('names an agenda merged away by its title, though a closed one is not on the board', async () => {
-    await draw(OLD, base({ mergedFrom: ['A6'] } as never), {
+    await draw(base({ mergedFrom: ['A6'] } as never), {
       records: [agendaItem('A6', { subject: 'Where do ferrets sleep?' })],
     });
     expect(latest?.lineageTitles).toEqual({ A6: 'Where do ferrets sleep?' });
   });
 
-  test('uses words already supplied by a full item read even before health is known, with an honest gap for an incomplete tail', async () => {
-    await draw(OLD, base({ conversationCount: 1, conversation: [entry('Already read.')] }));
-    expect(latest?.conversation?.map(each => each.text)).toEqual(['Already read.']);
-    expect(latest?.conversationGap).toBeUndefined();
-    await draw(OLD, base({ conversationCount: 3, conversation: [entry('Last entry.')] }));
-    expect(latest?.conversation?.map(each => each.text)).toEqual(['Last entry.']);
-    expect(latest?.conversationGap).toEqual({ at: 0, count: 2, state: 'failed' });
-  });
-
   test('draws the rebuilt thread when the item stores no words', async () => {
-    await draw(STORES, base());
+    await draw(base());
     expect(latest?.conversation).toBeNull();
   });
 
@@ -340,7 +311,7 @@ describe('what an open item knows about its own life', () => {
         sent.push(args);
       },
     };
-    await draw(STORES, base(), {
+    await draw(base(), {
       client: client as never,
       board: [agendaItem('A2'), agendaItem('A5'), agendaItem('A9', { notice: true })],
     });
@@ -350,16 +321,13 @@ describe('what an open item knows about its own life', () => {
   });
 
   test('offers no merge without a client that merges, or for an item that cannot merge', async () => {
-    await draw(STORES, base(), { client: undefined });
+    await draw(base(), { client: undefined });
     expect(latest?.merge).toBeUndefined();
     await view?.unmount();
-    await draw(STORES, base(), { client: {} });
+    await draw(base(), { client: {} });
     expect(latest?.merge).toBeUndefined();
     await view?.unmount();
-    await draw(STORES, base({ notice: true }));
-    expect(latest?.merge).toBeUndefined();
-    await view?.unmount();
-    await draw(OLD, base());
+    await draw(base({ notice: true }));
     expect(latest?.merge).toBeUndefined();
   });
 });

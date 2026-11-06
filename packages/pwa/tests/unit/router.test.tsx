@@ -17,7 +17,7 @@ function RouterProbe() {
   const daemonId =
     route.kind === 'connection-picker' || route.kind === 'setup' || route.kind === 'join' || route.kind === 'shared'
       ? 'none'
-      : route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect'
+      : route.kind === 'legacy-tasks-redirect'
         ? route.to.daemonId
         : route.daemonId;
   return (
@@ -99,21 +99,6 @@ describe('RouterProvider', () => {
     expect(window.location.pathname).toBe('/d/daemon-a/board');
     expect(output?.dataset.kind).toBe('board');
     expect(output?.dataset.daemon).toBe('daemon-a');
-    await view.unmount();
-  });
-
-  it('redirects the old /attention address to /inbox, keeping the query', async () => {
-    setPath('/d/daemon-a/attention?from=warden');
-    const view = await mount(
-      <RouterProvider>
-        <RouterProbe />
-      </RouterProvider>,
-    );
-
-    const output = view.container.querySelector('output');
-    expect(window.location.pathname).toBe('/d/daemon-a/inbox');
-    expect(window.location.search).toBe('?from=warden');
-    expect(output?.dataset.kind).toBe('attention');
     await view.unmount();
   });
 

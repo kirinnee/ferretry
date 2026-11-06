@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { type AgendaItem, boardErr, boardOk, DAEMON_FEATURES, type TaskRef } from '@ferretry/protocol';
+import { type AgendaItem, boardErr, boardOk, type TaskRef } from '@ferretry/protocol';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
 import { AgendaQuickReplies } from '../../../src/features/agenda/agenda-quick-replies.tsx';
 import { useDoneCloseFlow } from '../../../src/features/agenda/use-done-close-flow.ts';
@@ -7,12 +7,10 @@ import { useDoneClose } from '../../../src/hooks/use-done-close.ts';
 import { cardModel } from '../../../src/lib/agenda-card-model.ts';
 import type { DoneCloseResult, DoneCloseSource } from '../../../src/lib/agenda-done-close.ts';
 import { type InboxAction, swipeMap } from '../../../src/lib/agenda-inbox.ts';
-import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
-import { healthOf } from '../../support/health.ts';
 import { card, deferred, fakeEnvironment, fakePort, flush, laneSetFor, laptop } from '../board-support.ts';
 
 let view: Mounted | null = null;
@@ -23,7 +21,6 @@ afterEach(async () => {
 
 const lanes = laneSetFor();
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
-const WITH_FEATURE = [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaOfferClose];
 
 const closing = (extra: Partial<AgendaItem> = {}): AgendaItem =>
   agendaItem('A9', { task: { id: 'F1' }, offerClose: true, ...extra } as Partial<AgendaItem>);
@@ -35,10 +32,9 @@ interface World {
   readonly respond: (result: unknown) => void;
 }
 
-/** An app store with the pieces the button reads: the wire directory, the pairing, and a board on a fake port. */
+/** An app store with the pieces the button reads: the pairing, and a board on a fake port. */
 const world = (
   options: {
-    readonly features?: string[];
     readonly task?: () => Promise<{ task: ReturnType<typeof card>; laneSet: typeof lanes } | null>;
     readonly act?: () => ReturnType<DaemonBoardStore['act']>;
   } = {},
@@ -53,10 +49,7 @@ const world = (
     },
   });
   const board = new DaemonBoardStore(port, fakeEnvironment());
-  const wires = new AgendaWireDirectory();
-  wires.note(laptop.daemonId, { kind: 'read', health: healthOf('4.120.0', options.features ?? WITH_FEATURE) });
   const store = {
-    agendaWire: wires,
     connections: { list: () => [laptop] },
     board,
     attention: { respond: async () => undefined },
@@ -110,11 +103,6 @@ describe('Done · closes on an agenda item: when it is offered', () => {
 
   test('draws nothing for an item with no linked card', async () => {
     await drawItem(closing({ task: undefined } as Partial<AgendaItem>), world());
-    expect(chip()).toBeNull();
-  });
-
-  test('draws nothing where the machine does not report agenda.offer-close.1', async () => {
-    await drawItem(closing(), world({ features: [DAEMON_FEATURES.agendaWire] }));
     expect(chip()).toBeNull();
   });
 

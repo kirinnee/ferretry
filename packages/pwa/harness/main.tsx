@@ -190,7 +190,7 @@ import {
   WardenConfigSurface,
 } from '../src/features/warden/warden-config-card.tsx';
 import { WardenOverview } from '../src/features/warden/warden-overview.tsx';
-import { WardenOverviewSurface } from '../src/features/warden/warden-overview-surface.tsx';
+import { type WardenOverviewClient, WardenOverviewSurface } from '../src/features/warden/warden-overview-surface.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import type { ConsoleTyper } from '../src/features/workspace/console-surface.tsx';
@@ -2307,11 +2307,7 @@ const HARNESS_WARDEN_CLIENT: WardenClientFactory = async connection => {
 /** The Warden page's reads, answered from the fixture day; a sweep or investigate request answers in words. */
 const HARNESS_WARDEN_OVERVIEW_CLIENT = async () => ({
   wardenStatus: async () => WARDEN_FIXTURE_STATUS,
-  wardenAgenda: async () => WARDEN_FIXTURE_AGENDA,
-  // The harness has no app store, so no machine reads as speaking the agenda wire.
-  request: async () => {
-    throw new Error('the harness answers the older route only');
-  },
+  request: (async () => WARDEN_FIXTURE_AGENDA) as WardenOverviewClient['request'],
   wardenRun: async () => ({ sweptAt: new Date(WARDEN_FIXTURE_NOW).toISOString(), anomalies: [] }),
   wardenInvestigate: async ({ sessionId }: { readonly sessionId: string }) => ({
     sessionId,
@@ -2882,7 +2878,7 @@ const HARNESS_DAEMON_READS: Readonly<Record<string, unknown>> = {
   // Secure copy: one paste approved in advance, so Settings › Secrets shows the section with a rule in it.
   '/v1/copy-rules': COPY_RULES_READY,
   // The session workspace's "This folder" rail: one open signal and one answered, and its skills.
-  '/v1/sessions/harness-workspace/attention': {
+  '/v1/sessions/harness-workspace/agenda': {
     v: 1,
     sessionId: 'harness-workspace',
     items: [

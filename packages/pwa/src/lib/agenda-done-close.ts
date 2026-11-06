@@ -24,14 +24,13 @@ export interface DoneCloseSource {
   readonly close: (refs: readonly TaskRef[]) => Promise<DoneCloseResult>;
 }
 
-/** The cards an item's tap would close: only where the item asked, the machine takes it, and the card is this machine's. */
+/** The cards an item's tap would close: only where the item asked and the card is this machine's. */
 export const offeredCards = (
   item: Pick<AgendaItem, 'offerClose' | 'task' | 'notice'>,
-  machineOffers: boolean | undefined,
   daemonId: string,
 ): readonly TaskRef[] => {
   const task = item.task;
-  if (machineOffers !== true || item.offerClose !== true || item.notice === true) return [];
+  if (item.offerClose !== true || item.notice === true) return [];
   if (task === undefined || task === null) return [];
   return task.machineId === undefined || task.machineId === daemonId ? [task] : [];
 };

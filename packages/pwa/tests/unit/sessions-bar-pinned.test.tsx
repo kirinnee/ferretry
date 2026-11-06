@@ -23,7 +23,7 @@ const finished = sessionView('done-pin', {
 });
 const waiting = sessionView('waiting', {
   config: { teammate: 'sam', name: 'Needs work', cwd: '/work/wait', mode: 'interactive' },
-  state: { attention: asking as never },
+  state: { agenda: asking as never },
 });
 const plain = sessionView('plain', {
   config: { teammate: 'ava', name: 'Plain work', cwd: '/work/plain', mode: 'interactive' },
@@ -135,7 +135,7 @@ describe('the Pinned group in the sessions bar', () => {
             }),
             sessionView('gamma-ask', {
               config: { teammate: 'gil', name: 'Gamma ask', cwd: '/work/g', mode: 'interactive' },
-              state: { attention: asking as never },
+              state: { agenda: asking as never },
             }),
           ]),
         ],

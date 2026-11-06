@@ -292,9 +292,7 @@ describe('route parsing', () => {
     // Act
     const actual = ['/', '/setup', '/join', '/shared', '/d/daemon-b'].map(path => {
       const route = parseRoute(path);
-      return route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect'
-        ? false
-        : isDaemonless(route);
+      return route.kind === 'legacy-tasks-redirect' ? false : isDaemonless(route);
     });
 
     // Assert
@@ -378,17 +376,9 @@ describe('the Analytics Query address', () => {
 });
 
 describe('the Inbox route', () => {
-  it('makes /inbox canonical and keeps /attention as a redirect to it', () => {
-    const canonical = parseRoute('/d/daemon-b/inbox');
-    const legacy = parseRoute('/d/daemon-b/attention');
-
+  it('makes /inbox the canonical address', () => {
     should(daemonAgendaPath(daemonB)).equal('/d/daemon-b/inbox');
-    should(canonical).deepEqual({ kind: 'attention', daemonId: daemonB });
-    should(legacy).deepEqual({
-      kind: 'legacy-attention-redirect',
-      to: { kind: 'attention', daemonId: daemonB },
-    });
-    should([routePath(legacy), routePageKey(legacy)]).deepEqual(['/d/daemon-b/inbox', routePageKey(canonical)]);
+    should(parseRoute('/d/daemon-b/inbox')).deepEqual({ kind: 'attention', daemonId: daemonB });
   });
 });
 

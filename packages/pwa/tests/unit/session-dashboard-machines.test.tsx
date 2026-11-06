@@ -36,7 +36,7 @@ const SOURCES: readonly MachineSource[] = [
       row('ivo', '/work/ferretry'),
       row('hadi', '/work/ferretry', {
         status: 'awaiting_question',
-        attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: '2026-07-31T12:00:00.000Z' },
+        agenda: { open: 1, first: 'A1', ask: 'Ask?', latestAt: '2026-07-31T12:00:00.000Z' },
       }),
     ],
     'online',
@@ -47,7 +47,7 @@ const SOURCES: readonly MachineSource[] = [
     [
       row('pim', '/work/ferretry', {
         status: 'awaiting_user',
-        attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: '2026-07-31T12:00:00.000Z' },
+        agenda: { open: 1, first: 'A1', ask: 'Ask?', latestAt: '2026-07-31T12:00:00.000Z' },
       }),
     ],
     'offline',
@@ -146,7 +146,7 @@ describe('the Sessions page across every machine', () => {
         [
           row('ora', '/work/ferretry', {
             status: 'awaiting_question',
-            attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: '2026-07-31T12:00:00.000Z' },
+            agenda: { open: 1, first: 'A1', ask: 'Ask?', latestAt: '2026-07-31T12:00:00.000Z' },
           }),
         ],
         'online',

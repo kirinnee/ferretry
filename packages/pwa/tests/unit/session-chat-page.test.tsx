@@ -2021,7 +2021,7 @@ describe('SessionChatPage', () => {
       // The composer bundle owns only Attention here. Tasks and skills come
       // from the workspace owners above, so a fully capable client still does
       // not issue duplicate reads for either family.
-      expect(requested.filter(path => path !== '/v1/sessions/shared/attention')).toEqual([]);
+      expect(requested.filter(path => path !== '/v1/sessions/shared/agenda')).toEqual([]);
       // …and the names it returned are what the transcript proves against, so a
       // `/floop` this pane just inserted is a live reference rather than prose.
       const provider = page.root.findByType(ReferenceSurfaceProvider);
@@ -2776,7 +2776,7 @@ describe('SessionChatPage', () => {
       }) as unknown as SessionAgendaModel;
 
     /** A session whose ferret works in agenda mode: only then does its chat draw an agenda. */
-    const agendaSession = (id = 'shared') => sessionView(id, { state: { attention: { agendaMode: true } as never } });
+    const agendaSession = (id = 'shared') => sessionView(id, { state: { agenda: { agendaMode: true } as never } });
 
     const chatPage = (props: Partial<ComponentProps<typeof SessionChatPage>> = {}) => (
       <SessionChatPage
@@ -2856,11 +2856,11 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('reads agenda mode from the `agenda` summary, which wins over `attention`', () => {
+    test('reads agenda mode from the `agenda` summary', () => {
       const only = sessionView('shared', { state: { agenda: { agendaMode: true } as never } });
       const page = renderSessionChatPage(chatPage({ session: only, attention: agendaModel() }));
       const stale = sessionView('shared', {
-        state: { agenda: { agendaMode: false } as never, attention: { agendaMode: true } as never },
+        state: { agenda: { agendaMode: false } as never },
       });
       const off = renderSessionChatPage(chatPage({ session: stale, attention: agendaModel() }));
       try {
@@ -3107,7 +3107,7 @@ describe('SessionChatPage', () => {
 
     test('draws what is running on the agenda line instead of at the foot of the transcript', () => {
       const working = sessionView('shared', {
-        state: { attention: { agendaMode: true } as never, turnState: 'working' as never },
+        state: { agenda: { agendaMode: true } as never, turnState: 'working' as never },
       });
       const page = renderSessionChatPage(agendaPage({ session: working }));
       try {
@@ -3303,7 +3303,7 @@ describe('SessionChatPage', () => {
           formFactor: 'desktop',
           session: sessionView('shared', {
             config: { focusTask: { id: 'F18' } },
-            state: { attention: { agendaMode: true } as never },
+            state: { agenda: { agendaMode: true } as never },
           }),
           tasksView: { expanded, agents: false, setAgents: () => undefined, setExpanded },
           ...extra,

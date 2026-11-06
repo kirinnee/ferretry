@@ -1,22 +1,15 @@
 import '../support/dom.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
-import {
-  DAEMON_FEATURES,
-  type SessionAgendaSummary,
-  WARDEN_AGENDA_PATH,
-  LEGACY_WARDEN_ATTENTION_PATH,
-} from '@ferretry/protocol';
+import { DAEMON_FEATURES, type SessionAgendaSummary } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import type { z } from 'zod';
 import {
   AgendaWireDirectory,
-  agendaWireOf,
   sessionAgendaPath,
   sessionAgendaRepliesPath,
   sessionAgendaSummary,
-  wardenAgendaPath,
 } from '../../src/lib/agenda-wire.ts';
-import { AgendaWireProbes, useAgendaWire } from '../../src/lib/agenda-wire-react.tsx';
+import { AgendaWireProbes, useWorkSearchOffered } from '../../src/lib/agenda-wire-react.tsx';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import type { DaemonHealthRead } from '../../src/lib/daemon-health.ts';
 import { type AppStore, DaemonClientProvider, StoreProvider } from '../../src/lib/store.tsx';
@@ -26,116 +19,50 @@ import { runAsync } from '../support/react.ts';
 import { settleUntil } from '../support/settle.ts';
 import { alpha } from './features/config-files/config-files-support.ts';
 
-const NEW: DaemonHealthRead = { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) };
-const OLD: DaemonHealthRead = { kind: 'read', health: healthOf('4.84.0') };
+const featured = (...features: string[]): DaemonHealthRead => ({
+  kind: 'read',
+  health: healthOf('4.150.0', features),
+});
+const PLAIN = featured();
 const A = daemonId('a');
 const B = daemonId('b');
 
-describe('which spelling of the agenda wire a machine speaks', () => {
-  it('reads the agenda routes only from a health that lists agenda.wire.1', () => {
-    expect(agendaWireOf(NEW)).toBe('agenda');
-    expect(agendaWireOf(OLD)).toBe('attention');
-    expect(agendaWireOf({ kind: 'read', health: healthOf('4.100.0', ['pack.idea.4000']) })).toBe('attention');
-    expect(agendaWireOf({ kind: 'loading' })).toBe('attention');
-    expect(agendaWireOf({ kind: 'failed' })).toBe('attention');
-  });
-
-  it('spells every path both ways, as the daemon serves them', () => {
-    expect(sessionAgendaPath('s 1', 'agenda')).toBe('/v1/sessions/s%201/agenda');
-    expect(sessionAgendaPath('s 1', 'attention')).toBe('/v1/sessions/s%201/attention');
-    expect(sessionAgendaRepliesPath('s 1', 'agenda')).toBe('/v1/sessions/s%201/agenda/replies');
-    expect(sessionAgendaRepliesPath('s 1', 'attention')).toBe('/v1/sessions/s%201/attention/replies');
-    expect(wardenAgendaPath('agenda')).toBe(WARDEN_AGENDA_PATH);
-    expect(wardenAgendaPath('attention')).toBe(LEGACY_WARDEN_ATTENTION_PATH);
+describe('the agenda paths', () => {
+  it('spells every path as the daemon serves it', () => {
+    expect(sessionAgendaPath('s 1')).toBe('/v1/sessions/s%201/agenda');
+    expect(sessionAgendaRepliesPath('s 1')).toBe('/v1/sessions/s%201/agenda/replies');
   });
 });
 
 describe('AgendaWireDirectory', () => {
-  it('speaks the older way to a machine nobody has read', () => {
-    expect(new AgendaWireDirectory().wireOf(A)).toBe('attention');
-  });
-
-  it('decides per machine: a new and an old daemon at once', () => {
+  it('says nothing about a machine nobody has read', () => {
     const wires = new AgendaWireDirectory();
-    wires.note(A, NEW);
-    wires.note(B, OLD);
-    expect(wires.wireOf(A)).toBe('agenda');
-    expect(wires.wireOf(B)).toBe('attention');
+    expect(wires.workSearchOf(A)).toBeUndefined();
+    expect(wires.gateItemsOf(A)).toBeUndefined();
+    expect(wires.cardAsksOf(A)).toBeUndefined();
   });
 
-  it('keeps an earlier answer through a read that has not answered, and lets an answer change it', () => {
-    const wires = new AgendaWireDirectory();
-    wires.note(A, NEW);
-    wires.note(A, { kind: 'failed' });
-    wires.note(A, { kind: 'loading' });
-    expect(wires.wireOf(A)).toBe('agenda');
-    wires.note(A, OLD);
-    expect(wires.wireOf(A)).toBe('attention');
-  });
-
-  it('tells listeners only when a machine’s spelling really changed, and forgets an unpaired machine', () => {
+  it('tells listeners only when a machine’s answers really changed, and forgets an unpaired machine', () => {
     const wires = new AgendaWireDirectory();
     let heard = 0;
     const stop = wires.subscribe(() => {
       heard += 1;
     });
-    wires.note(A, NEW);
-    wires.note(A, NEW);
+    wires.note(A, PLAIN);
+    wires.note(A, PLAIN);
     expect(heard).toBe(1);
     wires.clearDaemon(B);
     expect(heard).toBe(1);
     wires.clearDaemon(A);
     expect(heard).toBe(2);
-    expect(wires.wireOf(A)).toBe('attention');
     stop();
-    wires.note(A, NEW);
+    wires.note(A, PLAIN);
     expect(heard).toBe(2);
-  });
-});
-
-describe('whether a machine takes offerClose (agenda.offer-close.1)', () => {
-  const OFFERS: DaemonHealthRead = {
-    kind: 'read',
-    health: healthOf('4.120.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaOfferClose]),
-  };
-
-  it('offers nothing until a machine’s health has been read, then follows its feature list', () => {
-    const wires = new AgendaWireDirectory();
-    expect(wires.offerCloseOf(A)).toBeUndefined();
-    wires.note(A, { kind: 'loading' });
-    expect(wires.offerCloseOf(A)).toBeUndefined();
-    wires.note(A, OFFERS);
-    wires.note(B, NEW);
-    expect(wires.offerCloseOf(A)).toBe(true);
-    expect(wires.offerCloseOf(B)).toBe(false);
-  });
-
-  it('tells listeners when only that answer changes, and forgets it with the machine', () => {
-    const wires = new AgendaWireDirectory();
-    let heard = 0;
-    wires.subscribe(() => {
-      heard += 1;
-    });
-    wires.note(A, NEW);
-    expect(heard).toBe(1);
-    wires.note(A, {
-      kind: 'read',
-      health: healthOf('4.120.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaOfferClose]),
-    });
-    expect(heard).toBe(2);
-    wires.note(A, OFFERS);
-    expect(heard).toBe(2);
-    wires.clearDaemon(A);
-    expect(wires.offerCloseOf(A)).toBeUndefined();
-    expect(heard).toBe(3);
   });
 });
 
 describe('whether a machine searches work by words (work.search.1)', () => {
-  const SEARCHES: DaemonHealthRead = {
-    kind: 'read',
-    health: healthOf('4.130.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.workSearch]),
-  };
+  const SEARCHES = featured(DAEMON_FEATURES.workSearch);
 
   it('says nothing until health answered, then follows the feature list, and forgets it with the machine', () => {
     const wires = new AgendaWireDirectory();
@@ -143,7 +70,7 @@ describe('whether a machine searches work by words (work.search.1)', () => {
     wires.note(A, { kind: 'failed' });
     expect(wires.workSearchOf(A)).toBeUndefined();
     wires.note(A, SEARCHES);
-    wires.note(B, NEW);
+    wires.note(B, PLAIN);
     expect(wires.workSearchOf(A)).toBe(true);
     expect(wires.workSearchOf(B)).toBe(false);
     wires.clearDaemon(A);
@@ -156,12 +83,34 @@ describe('whether a machine searches work by words (work.search.1)', () => {
     wires.subscribe(() => {
       heard += 1;
     });
-    wires.note(A, NEW);
+    wires.note(A, PLAIN);
     expect(heard).toBe(1);
     wires.note(A, SEARCHES);
     expect(heard).toBe(2);
     wires.note(A, SEARCHES);
     expect(heard).toBe(2);
+  });
+});
+
+describe('whether a machine takes card asks (agenda.card-asks.1)', () => {
+  it('tells listeners when only the card-asks answer changes after a machine is already read', () => {
+    const wires = new AgendaWireDirectory();
+    let heard = 0;
+    wires.subscribe(() => {
+      heard += 1;
+    });
+    wires.note(A, PLAIN);
+    const before = heard;
+    wires.note(A, PLAIN);
+    expect(heard).toBe(before);
+    wires.note(A, featured(DAEMON_FEATURES.agendaCardAsks));
+    expect(wires.cardAsksOf(A)).toBe(true);
+    expect(heard).toBe(before + 1);
+    wires.note(A, featured(DAEMON_FEATURES.agendaCardAsks));
+    expect(heard).toBe(before + 1);
+    wires.clearDaemon(A);
+    expect(wires.cardAsksOf(A)).toBeUndefined();
+    expect(heard).toBeGreaterThan(before + 1);
   });
 });
 
@@ -173,10 +122,8 @@ describe('the session summary', () => {
     latestAt: '2026-10-23T12:00:00.000Z',
   });
 
-  it('reads whichever name the daemon wrote, and agenda wins when both are there', () => {
-    expect(sessionAgendaSummary({ attention: summary('A1') })?.first).toBe('A1');
+  it('reads the agenda summary the daemon wrote', () => {
     expect(sessionAgendaSummary({ agenda: summary('A2') })?.first).toBe('A2');
-    expect(sessionAgendaSummary({ attention: summary('A1'), agenda: summary('A2') })?.first).toBe('A2');
     expect(sessionAgendaSummary({})).toBeUndefined();
   });
 });
@@ -198,133 +145,35 @@ const healthClient = (read: Record<string, DaemonHealthRead>) =>
     } as unknown as FyApiClient;
   }) as never;
 
-function Wire({ id }: { readonly id: string }) {
-  return <span data-wire={useAgendaWire(daemonId(id))} />;
+function Search({ id }: { readonly id: string }) {
+  return <span data-search={String(useWorkSearchOffered(daemonId(id)))} />;
 }
 
-const wireShown = (): string | null | undefined => shown?.container.querySelector('span')?.getAttribute('data-wire');
+const searchShown = (): string | null | undefined =>
+  shown?.container.querySelector('span')?.getAttribute('data-search');
 
 describe('the agenda wire in React', () => {
-  it('reads the older spelling outside an app store', async () => {
-    shown = await mount(<Wire id="alpha" />);
-    expect(wireShown()).toBe('attention');
+  it('offers nothing outside an app store', async () => {
+    shown = await mount(<Search id="alpha" />);
+    expect(searchShown()).toBe('undefined');
   });
 
-  it('learns each paired machine’s spelling from the health the probes read, and follows a change', async () => {
+  it('learns each paired machine’s features from the health the probes read, and follows a change', async () => {
     const wires = new AgendaWireDirectory();
     const store = { agendaWire: wires } as unknown as AppStore;
     const machines = [alpha, { ...alpha, daemonId: daemonId('beta') }];
     shown = await mount(
       <StoreProvider store={store}>
-        <DaemonClientProvider client={healthClient({ alpha: NEW, beta: OLD })}>
+        <DaemonClientProvider client={healthClient({ alpha: featured(DAEMON_FEATURES.workSearch), beta: PLAIN })}>
           <AgendaWireProbes machines={machines} />
-          <Wire id="alpha" />
+          <Search id="alpha" />
         </DaemonClientProvider>
       </StoreProvider>,
     );
-    await settleUntil(() => wireShown() === 'agenda', 'alpha to read as speaking the agenda wire', runAsync);
-    expect(wires.wireOf(daemonId('alpha'))).toBe('agenda');
-    expect(wires.wireOf(daemonId('beta'))).toBe('attention');
-    await runAsync(async () => wires.note(daemonId('alpha'), OLD));
-    expect(wireShown()).toBe('attention');
-  });
-});
-
-describe('whether a machine rolls up every conversation’s items (agenda.open.1)', () => {
-  const ROLLS: DaemonHealthRead = {
-    kind: 'read',
-    health: healthOf('4.140.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaOpen]),
-  };
-
-  it('says nothing until health answered, then follows the feature list, and forgets it with the machine', () => {
-    const wires = new AgendaWireDirectory();
-    let heard = 0;
-    wires.subscribe(() => {
-      heard += 1;
-    });
-    expect(wires.openOf(A)).toBeUndefined();
-    wires.note(A, ROLLS);
-    wires.note(B, NEW);
-    expect(wires.openOf(A)).toBe(true);
-    expect(wires.openOf(B)).toBe(false);
-    const heardBefore = heard;
-    wires.note(A, ROLLS);
-    expect(heard).toBe(heardBefore);
-    wires.note(A, NEW);
-    expect(wires.openOf(A)).toBe(false);
-    expect(heard).toBe(heardBefore + 1);
-    wires.note(A, ROLLS);
-    wires.clearDaemon(A);
-    expect(wires.openOf(A)).toBeUndefined();
-  });
-});
-
-describe('whether a machine takes card asks or snoozes (agenda.card-asks.1, agenda.snooze.1)', () => {
-  const featured = (...features: string[]): DaemonHealthRead => ({
-    kind: 'read',
-    health: healthOf('4.150.0', [DAEMON_FEATURES.agendaWire, ...features]),
-  });
-
-  it('tells listeners when only the card-asks answer changes after a machine is already read', () => {
-    const wires = new AgendaWireDirectory();
-    let heard = 0;
-    wires.subscribe(() => {
-      heard += 1;
-    });
-    wires.note(A, featured());
-    const before = heard;
-    wires.note(A, featured());
-    expect(heard).toBe(before);
-    wires.note(A, featured(DAEMON_FEATURES.agendaCardAsks));
-    expect(wires.cardAsksOf(A)).toBe(true);
-    expect(heard).toBe(before + 1);
-    wires.note(A, featured(DAEMON_FEATURES.agendaCardAsks));
-    expect(heard).toBe(before + 1);
-    wires.clearDaemon(A);
-    expect(wires.cardAsksOf(A)).toBeUndefined();
-    expect(heard).toBeGreaterThan(before + 1);
-  });
-
-  it('tells listeners when only the snooze answer changes', () => {
-    const wires = new AgendaWireDirectory();
-    let heard = 0;
-    wires.note(A, featured());
-    wires.subscribe(() => {
-      heard += 1;
-    });
-    wires.note(A, featured(DAEMON_FEATURES.agendaSnooze));
-    expect(wires.snoozeOf(A)).toBe(true);
-    expect(heard).toBe(1);
-    wires.note(A, featured(DAEMON_FEATURES.agendaSnooze));
-    expect(heard).toBe(1);
-  });
-});
-
-describe('whether a machine stores the conversation and merges (agenda.conversation.1)', () => {
-  const STORES: DaemonHealthRead = {
-    kind: 'read',
-    health: healthOf('4.150.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaConversation]),
-  };
-
-  it('says nothing until health answered, then follows the feature list, and forgets it with the machine', () => {
-    const wires = new AgendaWireDirectory();
-    let heard = 0;
-    wires.subscribe(() => {
-      heard += 1;
-    });
-    expect(wires.conversationOf(A)).toBeUndefined();
-    wires.note(A, STORES);
-    wires.note(B, NEW);
-    expect(wires.conversationOf(A)).toBe(true);
-    expect(wires.conversationOf(B)).toBe(false);
-    const heardBefore = heard;
-    wires.note(A, STORES);
-    expect(heard).toBe(heardBefore);
-    wires.note(A, NEW);
-    expect(wires.conversationOf(A)).toBe(false);
-    expect(heard).toBe(heardBefore + 1);
-    wires.note(A, STORES);
-    wires.clearDaemon(A);
-    expect(wires.conversationOf(A)).toBeUndefined();
+    await settleUntil(() => searchShown() === 'true', 'alpha to read as searching work', runAsync);
+    expect(wires.workSearchOf(daemonId('alpha'))).toBe(true);
+    expect(wires.workSearchOf(daemonId('beta'))).toBe(false);
+    await runAsync(async () => wires.note(daemonId('alpha'), PLAIN));
+    expect(searchShown()).toBe('false');
   });
 });

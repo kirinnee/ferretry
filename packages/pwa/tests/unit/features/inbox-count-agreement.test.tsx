@@ -37,7 +37,7 @@ const summary = (open: number, latest: number): SessionAgendaSummary => ({
   latestAt: at(latest),
 });
 const waiting = (id: string, name: string, agenda: SessionAgendaSummary): SessionView =>
-  sessionView(id, { config: { teammate: name.toLowerCase(), name }, state: { attention: agenda } });
+  sessionView(id, { config: { teammate: name.toLowerCase(), name }, state: { agenda: agenda } });
 const board = (sessionId: string, items: readonly AgendaItem[]): AgendaSnapshot => ({
   v: 1,
   sessionId,

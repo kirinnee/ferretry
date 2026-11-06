@@ -87,7 +87,7 @@ describe('MachineHome', () => {
     const waiting = interactive('ask', {
       state: {
         status: 'awaiting_user',
-        attention: { open: 2, first: 'A1', ask: 'Go?', latestAt: '2026-10-16T11:59:00.000Z' } as never,
+        agenda: { open: 2, first: 'A1', ask: 'Go?', latestAt: '2026-10-16T11:59:00.000Z' } as never,
       },
     });
     const quiet = await mount(<MachineHome {...props({ sessions: [interactive('a')] })} />);

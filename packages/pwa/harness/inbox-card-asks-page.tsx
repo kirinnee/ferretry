@@ -56,7 +56,7 @@ const BOARD: AgendaSnapshot = {
 };
 const SESSION = sessionView(SESSION_ID, {
   config: { name: 'Release cut', teammate: 'johnnie' } as never,
-  state: { attention: { open: 1, first: 'A12', ask: QUESTION.subject, latestAt: ago(40) } } as never,
+  state: { agenda: { open: 1, first: 'A12', ask: QUESTION.subject, latestAt: ago(40) } } as never,
 });
 
 const store = new DaemonAgendaStore();
