@@ -2626,12 +2626,6 @@ try {
             await captureElement(page, page.locator('[data-density-region="app-bar"]').first(), statusTopBarTarget);
             process.stdout.write(`📸 top bar status ${viewport.name} -> ${statusTopBarTarget}\n`);
 
-            if (viewport.name === 'desktop') {
-              const fleetRailTarget = join(outDir, `fleet-navigation-rail-${viewport.name}.png`);
-              await captureElement(page, page.getByLabel('Fleet navigation rail preview'), fleetRailTarget);
-              process.stdout.write(`📸 fleet navigation rail -> ${fleetRailTarget}\n`);
-            }
-
             // Scoped to its own card: the unified browser surface renders the SAME
             // pane, display and live frame, so a page-wide locator for any of them
             // is ambiguous by design rather than by accident.
