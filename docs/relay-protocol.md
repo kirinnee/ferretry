@@ -1204,8 +1204,8 @@ consequence:
   silently move where the daemon listens; a legacy key that a `carriers` entry supersedes is **named
   at boot** — a key an operator edited with no error, no message and no change in behaviour is the
   defect this whole shape exists to prevent.
-- **The boot conversion.** Before it reads the document, a starting daemon rewrites a document that
-  still has `host`, `port` or `relay` into `carriers` entries, and says so on the boot trail
+- **The boot conversion.** Before it reads the document, a starting daemon rewrites the **state home's**
+  `config/daemon.json` when it still has `host`, `port` or `relay` into `carriers` entries, and says so on the boot trail
   (`configuration converted`). It writes only what the operator wrote, in the new spelling: `host` as
   typed (loopback when absent) and `port` only if one was written — an unwritten port keeps meaning
   "this boot may choose, once, and record" — as one `bind` entry; a `relay` block as one `relay` entry
@@ -1215,9 +1215,17 @@ consequence:
   that. An existing `bind` or `relay` carrier already supersedes its legacy key, which is then only
   deleted, and the tunnel entry and every other key are left alone. The step is **idempotent** (a
   document with none of the three keys is not touched), **keeps the original** next to the document as
-  `daemon.json.pre-carriers.<timestamp>` with its original permissions, and appends a record to
-  `<state home>/carriers-migration.json` (`{ v: 1, conversions: [{ at, file, backup, removedKeys,
-addedEntries }] }`, mode `0600`) in the order backup, document, record. **It refuses rather than
+  `daemon.json.pre-carriers.<timestamp>` with its original permissions, and records the conversion in
+  `<state home>/carriers-migration.json` (`{ v: 1, conversions: [{ status, at, file, backup, removedKeys,
+addedEntries }] }`, mode `0600`). **The record is written ahead of the document**, in the order backup,
+  `pending` entry, document, entry rewritten `converted`, each file replaced atomically and synced, so no
+  interruption can leave a converted document the record knows nothing about. The next start settles any
+  `pending` entry for the file first: the legacy keys gone means the replacement happened (`converted`),
+  still there means it did not (`abandoned`); the backup is kept either way, and nothing converts twice.
+  **A file named with `--config` is never converted:** it is the operator's own file — it may be a symlink,
+  shared, read-only or under version control — so a boot never replaces it. A legacy key in it is reported
+  on the boot trail as left alone (move `host`/`port`/`relay` into its `carriers` list by hand) and is
+  read as the legacy spelling it still is. **It refuses rather than
   guesses:** the rewritten document must parse with the full configuration schema and must read
   identically to the original — listener, port and whether it is recorded, carrier set, bind and public
   addresses — otherwise nothing is written, the legacy keys stay as they are, and the boot trail says

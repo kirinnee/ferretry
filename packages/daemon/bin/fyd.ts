@@ -8081,9 +8081,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // `secretEnvironment` recipes. Two stores over one file would be two opinions about what the
   // operator wrote — and the one the UI showed would not be the one a spawned child got.
   const daemonConfigStore =
-    overrides.configFile === undefined
-      ? stateHomeDaemonConfigStore
-      : new ExplicitDaemonConfig(overrides.configFile, join(paths.home, CARRIERS_JOURNAL_NAME));
+    overrides.configFile === undefined ? stateHomeDaemonConfigStore : new ExplicitDaemonConfig(overrides.configFile);
   // Read per call, not captured: an operator editing `config/daemon.json` sees the effect on the
   // next use rather than after a restart, and a document that has become unreadable answers no
   // recipes rather than the last good ones — a stale recipe is a reference resolved against a rule

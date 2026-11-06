@@ -1,5 +1,4 @@
-import { chmod, readFile, rename, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
 import type {
   AnalyticsPricingConfigurationPort,
   AnalyticsPricingConfigurationRead,
@@ -14,15 +13,11 @@ import {
   type DaemonTunnelCarrierEntry,
   defaultDaemonConfigDocument,
   parseDaemonConfig,
+  planCarrierConversion,
   recordedPortDocument,
   tunnelEntryDocument,
 } from '../../lib/index.ts';
-import { convertLegacyCarrierKeysIn } from './carrier-conversion.ts';
-import {
-  CARRIERS_JOURNAL_NAME,
-  prepareAnalyticsPricingWrite,
-  readAnalyticsPricingConfiguration,
-} from './daemon-config.ts';
+import { prepareAnalyticsPricingWrite, readAnalyticsPricingConfiguration } from './daemon-config.ts';
 
 /**
  * The configuration document an operator named on the command line.
@@ -38,15 +33,7 @@ import {
  * reason the state-home adapter does not: a derived value on disk stops tracking what it came from.
  */
 export class ExplicitDaemonConfig implements DaemonConfigStore, AnalyticsPricingConfigurationPort {
-  /**
-   * `journal` is where a carrier conversion is recorded: the state home's, when the boot has one to name,
-   * and otherwise beside the document, so naming a file outside the home never writes into a directory the
-   * operator did not point at by accident.
-   */
-  constructor(
-    readonly path: string,
-    private readonly journal: string = join(dirname(path), CARRIERS_JOURNAL_NAME),
-  ) {}
+  constructor(readonly path: string) {}
 
   async peek(): Promise<{ readonly document: Record<string, unknown> | undefined; readonly config: DaemonConfig }> {
     const text = await this.read();
@@ -82,29 +69,30 @@ export class ExplicitDaemonConfig implements DaemonConfigStore, AnalyticsPricing
     await this.write(recordedPortDocument(raw, port));
   }
 
-  /** The same conversion as the state-home adapter, applied to the exact file `--config` named. */
-  async convertLegacyCarrierKeys(at: string): Promise<CarrierConversionOutcome> {
-    return await convertLegacyCarrierKeysIn(
-      {
-        readText: async path => await this.readAt(path),
-        modeOf: async path => {
-          try {
-            return (await stat(path)).mode & 0o777;
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-            throw error;
-          }
-        },
-        writeAtomic: async (path, text, mode) => {
-          const temporary = `${path}.${String(process.pid)}.tmp`;
-          await writeFile(temporary, text, { mode });
-          await chmod(temporary, mode);
-          await rename(temporary, path);
-        },
-      },
-      { file: this.path, journal: this.journal },
-      at,
-    );
+  /**
+   * Writes NOTHING: a file an operator named with `--config` is theirs, and a boot never rewrites it.
+   *
+   * The state home's document is converted because the daemon made it and may keep it tidy. This file may be
+   * a symlink, a shared or read-only mode, or kept under version control; replacing it would change what it
+   * is, not only what it says. So a legacy `host`/`port`/`relay` here is reported as refused — the boot
+   * says so — and is read as the legacy spelling it still is.
+   */
+  async convertLegacyCarrierKeys(_at: string): Promise<CarrierConversionOutcome> {
+    const text = await this.read();
+    if (text === undefined) return { kind: 'unchanged' };
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      return { kind: 'unchanged' };
+    }
+    return planCarrierConversion(raw).kind === 'convert'
+      ? {
+          kind: 'refused',
+          reason:
+            'an operator-named --config file is never rewritten at boot; move host/port/relay into its "carriers" list by hand',
+        }
+      : { kind: 'unchanged' };
   }
 
   /** Writes the one tunnel entry into the exact file `--config` named — see `tunnelEntryDocument`. */
@@ -130,12 +118,8 @@ export class ExplicitDaemonConfig implements DaemonConfigStore, AnalyticsPricing
 
   /** A document that is not there is not an error: the operator names where it SHOULD live. */
   private async read(): Promise<string | undefined> {
-    return await this.readAt(this.path);
-  }
-
-  private async readAt(path: string): Promise<string | undefined> {
     try {
-      return await readFile(path, 'utf8');
+      return await readFile(this.path, 'utf8');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
       throw error;

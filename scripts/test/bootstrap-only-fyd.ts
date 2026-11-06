@@ -121,7 +121,11 @@ const configFile = join(process.env.FY_HOME ?? '', 'config', 'daemon.json');
 if ((process.env.FY_HOME ?? '') === '' || !isAbsolute(configFile)) fail('FY_HOME must name the state home');
 if (!existsSync(configFile)) {
   mkdirSync(join(configFile, '..'), { recursive: true });
-  writeFileSync(configFile, `${JSON.stringify({ host: '127.0.0.1', port }, null, 2)}\n`, 'utf8');
+  writeFileSync(
+    configFile,
+    `${JSON.stringify({ carriers: [{ kind: 'bind', host: '127.0.0.1', port }] }, null, 2)}\n`,
+    'utf8',
+  );
 }
 
 const health = {

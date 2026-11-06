@@ -90,10 +90,12 @@ export type UsageFeedConfig = z.output<typeof UsageFeedConfigSchema>;
  * reason a relay makes one reachable at all: the socket is opened from behind the NAT, and the
  * rendezvous only ever answers on a connection the daemon already made.
  *
- * THERE IS NO DEFAULT ADDRESS, and the block itself is optional. An absent block means this daemon
- * has no relay carrier — never "use the one everybody uses". The relay protocol keeps no compiled
- * carrier constant on either end (§1 of `docs/relay-protocol.md`), and inventing one here would put
- * the daemon half of that contract in a release rather than in configuration.
+ * THERE IS NO DEFAULT ADDRESS, and the block itself is optional. An absent block (with no relay carrier
+ * either) is not "no relay": it resolves to the discovery relay carrier, whose address is read at runtime
+ * from the relay directory's advertisement — never a compiled-in "one everybody uses". The relay protocol
+ * keeps no compiled carrier constant on either end (§1 of `docs/relay-protocol.md`), and inventing one
+ * here would put the daemon half of that contract in a release rather than in configuration. A block that
+ * IS written is the legacy spelling of a configured relay carrier.
  *
  * `url` IS PART OF THE SIGNATURE. The claim transcript covers the host the daemon believes it is
  * talking to, so this string has to be the one the rendezvous serves itself as; a daemon refuses to
@@ -722,8 +724,8 @@ export function defaultDaemonConfig(): DaemonConfig {
  * WHERE THE PORT GOES FOLLOWS WHERE IT IS READ FROM. A document with an explicit bind carrier reads
  * its address from that entry, so writing the top-level `port` there would write a key with no effect
  * on where this daemon listens: the operator watches the number change, watches the daemon come up
- * somewhere else, and has nothing to go on. Without a bind carrier the legacy key IS the bind, so it
- * is where the port belongs and it keeps getting written.
+ * somewhere else, and has nothing to go on. Without a bind carrier the legacy keys spell the bind, and
+ * this writer gives that bind a carrier entry instead of writing the port beside them (below).
  *
  * A DOCUMENT WITH NO BIND CARRIER GAINS ONE rather than a top-level `port`: the boot rewrites
  * a legacy `host`/`port` into `carriers` (`planCarrierConversion`), and this writer must not put the

@@ -17,6 +17,7 @@ import {
   type ConversionPreview,
   ConversionPreviewSchema,
   DaemonCarriersViewSchema,
+  declaredBind,
   type FyEventStreamFrame,
   FyEventStreamFrameSchema,
   HealthViewSchema,
@@ -1428,16 +1429,18 @@ describe('daemon boot lifecycle', () => {
       sentence: 'Tunnel: up — https://quiet-otter.tunnels.example',
     });
     // Off: withdrawn from the published set, the listener closed, the tunnel released and forgotten,
-    // and the decision written as one explicit entry beside the legacy keys it does not supersede.
+    // and the decision written as one explicit entry beside the bind carrier the boot made of the seeded
+    // host and port — the document holds no legacy key any more.
     should(offView.state).equal('off');
     should(carriersAfterOff).deepEqual([{ kind: 'direct', url: base }]);
     should(listenerAfterOff).equal('refused');
     should(holdingAfterOff).equal('forgotten');
     should(service.releases.length).equal(1);
     should(documentAfterOff).deepEqual({
-      host: '127.0.0.1',
-      port,
-      carriers: [{ kind: 'tunnel', source: 'discovery', enabled: false }],
+      carriers: [
+        { kind: 'bind', host: '127.0.0.1', port },
+        { kind: 'tunnel', source: 'discovery', enabled: false },
+      ],
     });
     should(service.verdicts).deepEqual([true, true]);
     // Published after direct and before any relay, at the hostname the service provisioned.
@@ -5814,7 +5817,10 @@ describe('daemon boot lifecycle', () => {
     should(health.status).equal(200);
     // RECORDED, so it is the same address next time: a daemon whose address moves on its own is
     // worse than one that fails, and every client that learned where it lived would be wrong.
-    should(recorded).have.property('port', preferredPort + 1);
+    // The port lives in the bind carrier the boot converted the seeded host into, and the document
+    // holds no top-level host, port or relay at all.
+    should((declaredBind(recorded) as { readonly port?: unknown }).port).equal(preferredPort + 1);
+    should(recorded).not.have.properties(['host', 'port', 'relay']);
     // Still nothing derived in the document, so the recorded port cannot freeze an advertisement.
     should(recorded).not.have.property('publicUrl');
     // And it said which address it skipped and why, in the log the operator is already reading.

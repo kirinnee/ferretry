@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -31,7 +31,7 @@ function memory(initial: Record<string, { text: string; mode: number }>) {
 }
 
 describe('converting a document on disk', () => {
-  it("should keep the original, write the new document, then journal it — and convert the owner's file", async () => {
+  it("should keep the original, journal it ahead, write the new document, then settle the entry — and convert the owner's file", async () => {
     const disk = memory({ [FILE]: { text: OWNERS, mode: 0o644 } });
 
     const outcome = await convertLegacyCarrierKeysIn(disk.port, { file: FILE, journal: JOURNAL }, AT);
@@ -44,8 +44,8 @@ describe('converting a document on disk', () => {
       removedKeys: ['host', 'port'],
       addedEntries: [{ kind: 'bind', host: '127.0.0.1', port: 7431 }],
     });
-    // The order is the contract: backup, document, journal.
-    expect(disk.writes).toEqual([backup, FILE, JOURNAL]);
+    // The order is the contract: backup, journal entry ahead, document, entry settled.
+    expect(disk.writes).toEqual([backup, JOURNAL, FILE, JOURNAL]);
     // The original, byte for byte and with the mode it had.
     expect(disk.files.get(backup)).toEqual({ text: OWNERS, mode: 0o644 });
     expect(disk.files.get(FILE)?.mode).toBe(0o600);
@@ -61,6 +61,7 @@ describe('converting a document on disk', () => {
       v: 1,
       conversions: [
         {
+          status: 'converted',
           at: AT,
           file: FILE,
           backup,
@@ -183,6 +184,113 @@ describe('converting a document on disk', () => {
   });
 });
 
+describe('a conversion that is interrupted', () => {
+  const journalOf = (disk: ReturnType<typeof memory>) =>
+    JSON.parse(disk.files.get(JOURNAL)?.text ?? '{}') as { v: number; conversions: Record<string, unknown>[] };
+
+  /** Fails the nth write to `path` (1-based), once, as a disk that filled or a process that died would. */
+  function failing(disk: ReturnType<typeof memory>, path: string, nth: number) {
+    let seen = 0;
+    let armed = true;
+    const inner = disk.port.writeAtomic;
+    disk.port.writeAtomic = async (target, text, mode) => {
+      if (target === path && armed && ++seen === nth) {
+        armed = false;
+        throw new Error('power lost');
+      }
+      await inner(target, text, mode);
+    };
+  }
+
+  it('should have the entry on record when the document write fails, and abandon it next time while converting once', async () => {
+    const disk = memory({ [FILE]: { text: OWNERS, mode: 0o600 } });
+    failing(disk, FILE, 1);
+
+    await expect(convertLegacyCarrierKeysIn(disk.port, { file: FILE, journal: JOURNAL }, AT)).rejects.toThrow(
+      'power lost',
+    );
+
+    const backup = `${FILE}.pre-carriers.2026-11-06T10-20-30-456Z`;
+    expect(disk.files.get(FILE)?.text).toBe(OWNERS);
+    expect(disk.files.get(backup)?.text).toBe(OWNERS);
+    expect(journalOf(disk).conversions.map(entry => [entry.status, entry.backup])).toEqual([['pending', backup]]);
+
+    const later = '2026-11-06T11:00:00.000Z';
+    const outcome = await convertLegacyCarrierKeysIn(disk.port, { file: FILE, journal: JOURNAL }, later);
+
+    const second = `${FILE}.pre-carriers.2026-11-06T11-00-00-000Z`;
+    expect(outcome.kind === 'converted' && outcome.backup).toBe(second);
+    expect(journalOf(disk).conversions.map(entry => [entry.status, entry.backup])).toEqual([
+      ['abandoned', backup],
+      ['converted', second],
+    ]);
+    // Neither backup was touched by the other.
+    expect(disk.files.get(backup)?.text).toBe(OWNERS);
+    expect(disk.files.get(second)?.text).toBe(OWNERS);
+    expect(JSON.parse(disk.files.get(FILE)?.text ?? '')).not.toHaveProperty('port');
+  });
+
+  it('should settle the entry as converted when the last journal write fails, and never convert again', async () => {
+    const disk = memory({ [FILE]: { text: OWNERS, mode: 0o600 } });
+    failing(disk, JOURNAL, 2);
+
+    await expect(convertLegacyCarrierKeysIn(disk.port, { file: FILE, journal: JOURNAL }, AT)).rejects.toThrow(
+      'power lost',
+    );
+
+    const backup = `${FILE}.pre-carriers.2026-11-06T10-20-30-456Z`;
+    // The document was replaced, and the record of it survived as a pending entry.
+    expect(JSON.parse(disk.files.get(FILE)?.text ?? '')).not.toHaveProperty('port');
+    expect(journalOf(disk).conversions.map(entry => [entry.status, entry.backup])).toEqual([['pending', backup]]);
+    const converted = disk.files.get(FILE)?.text;
+    const writtenBefore = disk.writes.length;
+
+    const outcome = await convertLegacyCarrierKeysIn(
+      disk.port,
+      { file: FILE, journal: JOURNAL },
+      '2026-11-06T11:00:00.000Z',
+    );
+
+    expect(outcome).toEqual({ kind: 'unchanged' });
+    expect(journalOf(disk).conversions.map(entry => [entry.status, entry.backup])).toEqual([['converted', backup]]);
+    expect(disk.files.get(FILE)?.text).toBe(converted);
+    // One write — the journal settling — and no second backup.
+    expect(disk.writes.slice(writtenBefore)).toEqual([JOURNAL]);
+    expect(disk.files.get(backup)?.text).toBe(OWNERS);
+  });
+
+  it('should leave the document and the journal alone when the entry cannot be written ahead', async () => {
+    const disk = memory({ [FILE]: { text: OWNERS, mode: 0o600 } });
+    failing(disk, JOURNAL, 1);
+
+    await expect(convertLegacyCarrierKeysIn(disk.port, { file: FILE, journal: JOURNAL }, AT)).rejects.toThrow(
+      'power lost',
+    );
+
+    expect(disk.files.get(FILE)?.text).toBe(OWNERS);
+    expect(disk.files.has(JOURNAL)).toBe(false);
+  });
+
+  it('should abandon a pending entry whose document is gone or unreadable, and leave other files entries pending', async () => {
+    const pending = (file: string, backup: string) => ({ status: 'pending', at: AT, file, backup });
+    const disk = memory({
+      [JOURNAL]: {
+        text: JSON.stringify({
+          v: 1,
+          conversions: [pending(FILE, `${FILE}.bak`), pending('/other/daemon.json', '/other.bak')],
+        }),
+        mode: 0o600,
+      },
+    });
+
+    expect(await convertLegacyCarrierKeysIn(disk.port, { file: FILE, journal: JOURNAL }, AT)).toEqual({
+      kind: 'unchanged',
+    });
+
+    expect(journalOf(disk).conversions.map(entry => entry.status)).toEqual(['abandoned', 'pending']);
+  });
+});
+
 describe('the two configuration stores', () => {
   it('should convert through the state-home filesystem port and keep the journal in the home', async () => {
     const modes = new Map<string, number>([[FILE, 0o640]]);
@@ -208,54 +316,52 @@ describe('the two configuration stores', () => {
     expect(modes.get(backup)).toBe(0o640);
     expect(modes.get(FILE)).toBe(0o600);
     expect(JSON.parse(texts.get(FILE) ?? '')).toEqual({ carriers: [{ kind: 'bind', host: 'box.lan', port: 9100 }] });
-    expect(texts.has(`/home/${CARRIERS_JOURNAL_NAME}`)).toBe(true);
+    expect(JSON.parse(texts.get(`/home/${CARRIERS_JOURNAL_NAME}`) ?? '')).toMatchObject({
+      conversions: [{ status: 'converted', file: FILE, backup }],
+    });
     expect(await store.convertLegacyCarrierKeys(AT)).toEqual({ kind: 'unchanged' });
   });
 
-  it('should convert the exact file --config named, with the same mode on the backup and a private journal', async () => {
+  it('should never write into a file --config named, only say it was left alone', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'fy-carriers-'));
     try {
       const path = join(directory, 'operator.json');
       await writeFile(path, OWNERS, { mode: 0o644 });
       await chmod(path, 0o644);
-      const journal = join(directory, 'journal', 'carriers-migration.json');
-      await mkdir(join(directory, 'journal'));
-      const store = new ExplicitDaemonConfig(path, journal);
+      const link = join(directory, 'linked.json');
+      await symlink(path, link);
 
-      const outcome = await store.convertLegacyCarrierKeys(AT);
+      for (const named of [path, link]) {
+        const outcome = await new ExplicitDaemonConfig(named).convertLegacyCarrierKeys(AT);
 
-      const backup = `${path}.pre-carriers.2026-11-06T10-20-30-456Z`;
-      expect(outcome.kind === 'converted' && outcome.backup).toBe(backup);
-      expect(await readFile(backup, 'utf8')).toBe(OWNERS);
-      expect((await stat(backup)).mode & 0o777).toBe(0o644);
-      expect((await stat(path)).mode & 0o777).toBe(0o600);
-      expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({
-        carriers: [
-          { kind: 'tunnel', source: 'discovery' },
-          { kind: 'bind', host: '127.0.0.1', port: 7431 },
-        ],
-      });
-      expect((await stat(journal)).mode & 0o777).toBe(0o600);
-      expect(await store.convertLegacyCarrierKeys(AT)).toEqual({ kind: 'unchanged' });
-      // A document that is not there is nothing to convert, and creates nothing.
-      expect(await new ExplicitDaemonConfig(join(directory, 'absent.json')).convertLegacyCarrierKeys(AT)).toEqual({
-        kind: 'unchanged',
-      });
-      await expect(stat(join(directory, 'absent.json'))).rejects.toThrow();
+        expect(outcome).toEqual({
+          kind: 'refused',
+          reason:
+            'an operator-named --config file is never rewritten at boot; move host/port/relay into its "carriers" list by hand',
+        });
+      }
+      // Byte for byte, mode and symlink intact, and nothing created beside it.
+      expect(await readFile(path, 'utf8')).toBe(OWNERS);
+      expect((await stat(path)).mode & 0o777).toBe(0o644);
+      expect((await lstat(link)).isSymbolicLink()).toBe(true);
+      expect((await readdir(directory)).sort()).toEqual(['linked.json', 'operator.json']);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });
 
-  it('should keep the journal beside the document when --config names no home', async () => {
+  it('should have nothing to say about a --config file with no legacy key, a broken one, or one that is not there', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'fy-carriers-'));
     try {
-      const path = join(directory, 'operator.json');
-      await writeFile(path, '{"port":9100}');
+      const converted = join(directory, 'converted.json');
+      await writeFile(converted, '{"carriers":[{"kind":"bind","host":"127.0.0.1","port":9100}]}');
+      const broken = join(directory, 'broken.json');
+      await writeFile(broken, '{ "port": ');
 
-      await new ExplicitDaemonConfig(path).convertLegacyCarrierKeys(AT);
+      for (const named of [converted, broken, join(directory, 'absent.json')])
+        expect(await new ExplicitDaemonConfig(named).convertLegacyCarrierKeys(AT)).toEqual({ kind: 'unchanged' });
 
-      expect(JSON.parse(await readFile(join(directory, CARRIERS_JOURNAL_NAME), 'utf8'))).toHaveProperty('v', 1);
+      expect((await readdir(directory)).sort()).toEqual(['broken.json', 'converted.json']);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

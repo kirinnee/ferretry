@@ -42,7 +42,7 @@ import { documentWithCarrierEntries, isCarrierOfKind, legacyBindEntry } from './
 import { type DaemonConfig, parseDaemonConfig } from './config.ts';
 
 /** The three top-level keys that spell, in the legacy way, how this daemon is reached. */
-const LEGACY_CARRIER_KEYS = ['host', 'port', 'relay'] as const;
+export const LEGACY_CARRIER_KEYS = ['host', 'port', 'relay'] as const;
 
 export type CarrierConversion =
   /** Nothing to do: none of the legacy keys is written. */

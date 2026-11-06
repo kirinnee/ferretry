@@ -71,6 +71,52 @@ describe('effective configuration with provenance', () => {
     should(row(rows, 'analyticsPricing')).deepEqual({ value: '(empty)', origin: 'default' });
   });
 
+  it('should read host and port from the bind carrier a conversion wrote, and call the port claimed', () => {
+    // Arrange: the owner's document after the boot conversion — the listener lives in a bind entry and the
+    // top level holds neither key.
+    const document = {
+      carriers: [
+        { kind: 'tunnel', source: 'discovery' },
+        { kind: 'bind', host: '127.0.0.1', port: 7_431 },
+      ],
+    };
+    const config = parseDaemonConfig(document);
+
+    // Act
+    const rows = describeConfiguration({
+      document,
+      config,
+      overrides: {},
+      configFile: CONFIG_FILE,
+      stateHome: STATE_HOME,
+      stateHomeFromEnvironment: false,
+    });
+
+    // Assert — the same answers the legacy spelling of this daemon gives.
+    should(row(rows, 'host')).deepEqual({ value: '127.0.0.1', origin: 'config file' });
+    should(row(rows, 'port')).deepEqual({ value: '7431', origin: 'config file' });
+    should(rows.find(candidate => candidate.name === 'port')?.note).be.undefined();
+    should(config.portIsRecorded).be.true();
+  });
+
+  it('should still call a bind carrier with no port a preference, and report the legacy keys as before', () => {
+    // Arrange
+    const portless = { carriers: [{ kind: 'bind', host: '10.0.0.5' }] };
+    const legacy = { host: '10.0.0.5', port: 9_100 };
+    const base = { overrides: {}, configFile: CONFIG_FILE, stateHome: STATE_HOME, stateHomeFromEnvironment: false };
+
+    // Act
+    const converted = describeConfiguration({ ...base, document: portless, config: parseDaemonConfig(portless) });
+    const unconverted = describeConfiguration({ ...base, document: legacy, config: parseDaemonConfig(legacy) });
+
+    // Assert
+    should(row(converted, 'host')).deepEqual({ value: '10.0.0.5', origin: 'config file' });
+    should(row(converted, 'port').origin).equal('default');
+    should(converted.find(candidate => candidate.name === 'port')?.note).match(/not claimed/u);
+    should(row(unconverted, 'host')).deepEqual({ value: '10.0.0.5', origin: 'config file' });
+    should(row(unconverted, 'port')).deepEqual({ value: '9100', origin: 'config file' });
+  });
+
   it('should say that an OS-chosen port is assigned at bind and then recorded', () => {
     // Arrange
     const document = { host: '127.0.0.1', port: 0 };
@@ -188,6 +234,14 @@ describe('the grant posture a `--check` reports', () => {
     // running the hosted relay that nothing could reach them.
     // Act
     const said = posture({ relay: { url: 'wss://relay.example.com' } });
+
+    // Assert
+    should(said).match(/reachable off this host \(the relay at wss:\/\/relay\.example\.com\)/u);
+  });
+
+  it('should treat a relay carrier as reachable exactly as the legacy relay block it replaced', () => {
+    // Arrange: what the boot conversion turns { relay: { url } } into.
+    const said = posture({ carriers: [{ kind: 'relay', url: 'wss://relay.example.com' }] });
 
     // Assert
     should(said).match(/reachable off this host \(the relay at wss:\/\/relay\.example\.com\)/u);

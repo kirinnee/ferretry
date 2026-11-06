@@ -1,8 +1,8 @@
-import { CAPABILITY_AXES, DAEMON_CAPABILITIES, isLoopbackHost } from '@ferretry/protocol';
+import { CAPABILITY_AXES, DAEMON_CAPABILITIES, declaredBind, isLoopbackHost } from '@ferretry/protocol';
 import { dialledRelayUrl, type RelayCarrierSource } from '../relay/discovery.ts';
 import type { RunOverrides } from './arguments.ts';
 import { foreignAdvertisementNotice } from './boot.ts';
-import { OS_CHOSEN_PORT } from './carriers.ts';
+import { OS_CHOSEN_PORT, relayCarrierIsConfigured } from './carriers.ts';
 import { advertisesForeignAddress, type DaemonConfig } from './config.ts';
 
 /**
@@ -95,18 +95,23 @@ export function describeConfiguration(report: ConfigurationReport): readonly Res
       ...(report.document === undefined ? { note: 'not written yet' } : {}),
     },
   ];
+  // WHERE host AND port ARE WRITTEN DEPENDS ON THE SPELLING: a bind carrier when the document declares one
+  // (what this product writes, and what the boot conversion produces), the top-level keys otherwise.
+  // The protocol owns that rule, so this report cannot read a different line than the daemon does.
+  const bind = declaredBind(document) as Record<string, unknown>;
   for (const key of REPORTED_KEYS) {
+    const written = key === 'host' || key === 'port' ? bind : document;
     const override = OVERRIDDEN_BY[key];
     const overridden = override !== undefined && report.overrides[override] !== undefined;
     // An unrecorded port is the one value whose effective number is not the document's and not a
     // flag's, and saying "default" alone would hide that this boot is free to move off it.
-    const unrecordedPort = key === 'port' && !overridden && document[key] === undefined;
+    const unrecordedPort = key === 'port' && !overridden && written[key] === undefined;
     rows.push({
       name: key,
       value: render(effective[key]),
-      origin: overridden ? 'flag' : document[key] === undefined ? 'default' : 'config file',
+      origin: overridden ? 'flag' : written[key] === undefined ? 'default' : 'config file',
       ...(unrecordedPort ? { note: 'preferred, not claimed — this boot may take the next free address' } : {}),
-      ...(key === 'port' && !overridden && document[key] === OS_CHOSEN_PORT
+      ...(key === 'port' && !overridden && written[key] === OS_CHOSEN_PORT
         ? { note: 'the operating system assigns the port when this daemon binds, and it is then recorded here' }
         : {}),
       ...(key === 'publicUrl' && document[key] === undefined ? { note: 'follows host and port' } : {}),
@@ -186,8 +191,14 @@ export function reachableOffHost(
 ): { readonly reachable: boolean; readonly how: string } {
   const dialled = carrier === undefined ? undefined : dialledRelayUrl(carrier);
   if (dialled !== undefined) return { reachable: true, how: `the relay at ${dialled}` };
-  const relay = carrier === undefined ? config.relay : undefined;
-  if (relay !== undefined && relay.enabled) return { reachable: true, how: `the relay at ${relay.url}` };
+  // The relay the document NAMES, in whichever spelling: a legacy block and a relay carrier both resolve into
+  // the carrier set. An entry that only asks the directory names no address, which is what `carrier` is for.
+  const relay =
+    carrier === undefined
+      ? config.carrierSet.relays.find(entry => relayCarrierIsConfigured(entry) && entry.enabled)
+      : undefined;
+  if (relay !== undefined && relayCarrierIsConfigured(relay))
+    return { reachable: true, how: `the relay at ${relay.url}` };
   if (isLoopbackHost(config.host)) return { reachable: false, how: `host ${config.host}, no relay` };
   return { reachable: true, how: `host ${config.host}` };
 }
