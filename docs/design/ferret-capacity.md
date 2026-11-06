@@ -73,10 +73,11 @@ Three choices. Each has a recommendation; none is decided by this plan.
 - (b) One fixed number of live ferrets. Easy to understand, but blind: 25 ferrets running test suites
   are not 25 ferrets reading code.
 - (c) **Both: the measured signals decide, under a ceiling on live ferrets worked out from the memory
-  budget** (28 on this box, §10), which the owner may lower freely or raise with a confirmation.
+  budget** (on this box today: **36** once I36's 53 GiB fleet slice lands, **34** until then on the
+  57 GiB user slice; §10.2), which the owner may lower freely or raise with a confirmation.
   ← **recommended**: the signals catch heavy work, the ceiling catches the burst the signals have not
-  seen yet. On 2026-11-05 the ceiling would have held the 29th ferret, and the signals would have held
-  more if those 28 got busy.
+  seen yet. Under the 2026-11-05 caps the ceiling was 28 and would have held the 29th ferret; the
+  signals hold back more whenever the admitted ferrets get busy.
 
 ---
 
@@ -232,15 +233,23 @@ remaining rows still decide.
 
 ### 3.2 The memory budget
 
-The budget is the **tightest** of:
+The budget is the first of these that applies:
 
 1. `capacity.yaml` `memory.budget`, when the owner set one;
-2. the I36 fleet slice's cap (`MemoryHigh` when set, else `MemoryMax`), when cgroup enforcement is on;
-3. the person's systemd user slice `MemoryHigh` (48 GiB here), else its `MemoryMax`;
+2. the I36 fleet slice's cap (`MemoryHigh` when set, else `MemoryMax`), when cgroup enforcement is on —
+   I36 sets it to min(RAM, the caps above it) − 4 GiB, which is **53 GiB** on this box today;
+3. the person's systemd user slice `MemoryHigh` (**57 GiB** on this box today), else its `MemoryMax`;
 4. the host's RAM × 0.8 (macOS, or Linux with no cap anywhere).
 
 Its working set is read from the **same** cgroup the budget came from, so the two always describe one
-thing. **Page cache is not counted**: `memory.current` includes reclaimable file cache, which is why
+thing. When the budget is the fleet slice, the daemon, the terminal multiplexer, browser pages and the
+voice worker all live **outside** it, in the 4 GiB I36 leaves; the user slice is then read as a second
+memory row (closes at 90 % of its `MemoryHigh`, reopens at 80 %), so those cannot overflow unseen.
+
+The owner raised this box's caps by hand on 2026-11-06: user slice `MemoryHigh` 57 GiB and `MemoryMax`
+60 GiB (they were 48 and 56 GiB on 2026-11-05), and `user@1000.service` `MemoryLow` 4 GiB.
+
+**Page cache is not counted**: `memory.current` includes reclaimable file cache, which is why
 `memory.current` here read 42 GiB while `free` said 25 GiB used (measured, 2026-11-06). The working set
 subtracts `inactive_file`, as the kubelet does.
 
@@ -271,7 +280,9 @@ ceiling = floor( (85 % × budget − non-ferret working set − voice reservatio
 
 recomputed at boot and every hour, never between two admissions. "Non-ferret working set" is the
 budget cgroup's working set minus the fleet's (daemon, terminal multiplexer, browser pages, the
-person's shell), measured.
+person's shell), measured. "Voice reservation" counts only when the voice worker is inside the budget
+cgroup. When the budget is the I36 fleet slice, both are zero, because they live outside it (§3.2).
+On this box today the ceiling is **36** with I36's fleet slice and **34** before I36 lands (§10.2).
 
 ### 3.4 Why it will not flap
 
@@ -354,12 +365,12 @@ _"waiting for a slot under rhett (15 running)"_, _"waiting for quota: claude-llm
 $ fy daemon status
 …
 Capacity   full — 3 waiting, oldest 6 min
-  memory   41.9 of 48 GiB in use (closes at 43.2, reopens at 38.4)   closed
+  memory   48.3 of 53 GiB in use (closes at 47.7, reopens at 42.4)   closed
   cpu      pressure 55 %, load 1.6 per core                         closed
   disk     pressure 8 %                                             ok
   daemon   no stall in the last 60 s                                ok
-  ferrets  27 live, ceiling 28                                      ok
-  voice    1.5 GiB and 4 cores held for voice (loaded)
+  ferrets  35 live, ceiling 36                                      ok
+  voice    4 cores held for voice (loaded; its memory is outside the fleet slice)
 ```
 
 ---
@@ -377,9 +388,9 @@ lead's own slots or for quota are not counted: they say nothing about the machin
   options:
   1. **Nothing** — the queue is doing its job; dismiss it.
   2. **Fewer at once** — lower `interactiveChildren` or the routing prompt's fan-out.
-  3. **More memory for ferrets** — raise the budget, when the host has room above it (here the user
-     slice's `MemoryHigh` 48 GiB is below its 56 GiB `MemoryMax` and the 61 GiB host). A loosening, so it
-     waits for the owner's confirmation.
+  3. **More memory for ferrets** — raise the budget, when the host has room above it (here little is
+     left: since 2026-11-06 the user slice's `MemoryHigh` is 57 GiB of the 61 GiB host). A loosening,
+     so it waits for the owner's confirmation.
   4. **A bigger machine** — on EC2, the next size up (64 cores / 128 GiB on this family is an estimate).
      Everything Ferretry keeps is under `$FY_HOME` on the instance's disk, so a stop / change type /
      start keeps it; the daemon re-derives the ceiling at boot.
@@ -408,8 +419,9 @@ weighs 200 against the fleet's 100). So:
   (`503 voice_no_memory`); it never waits behind a ferret.
 - **The queue never waits on voice either.** While the worker is loaded, its reservation — its
   `MemoryMax` (the model's peak × 1.25, at least 1.5 GiB) and its C cores (4 here) — is subtracted
-  from the budget and from the usable cores **as a fixed amount**. The gate does not count voice's live
-  usage on top, and never waits for voice's idle exit to free anything.
+  from the usable cores, and from the budget when the budget's cgroup contains the worker (not the I36
+  fleet slice, §3.2), **as a fixed amount**. The gate does not count voice's live usage on top, and
+  never waits for voice's idle exit to free anything.
 - **CPU pressure cannot tell voice apart.** PSI is machine-wide, so while a voice chat is active the
   CPU row uses only load per usable core (cores − C), with voice's C runnable threads taken off the
   load. Otherwise, a voice chat would close the gate by doing exactly what the owner chose it to do.
@@ -445,7 +457,9 @@ weighs 200 against the fleet's 100). So:
 
 ---
 
-## 10. Worked example: 2026-11-05 on this box
+## 10. Worked example on this box
+
+### 10.1 History: 2026-11-05 under the caps of that day
 
 32 cores, 61 GiB RAM, user slice `MemoryHigh` 48 GiB, 41 ferrets started over the day.
 
@@ -464,6 +478,24 @@ weighs 200 against the fleet's 100). So:
 - **Result:** at most 28 live instead of 41; memory stays under 43 GiB instead of swapping; 13 briefs
   wait instead of being refused or overloading the box. If days like this repeat (§7), the agenda tells
   the owner the box is too small, once.
+
+### 10.2 Today: the caps the owner set on 2026-11-06
+
+User slice `MemoryHigh` 57 GiB / `MemoryMax` 60 GiB, `user@1000.service` `MemoryLow` 4 GiB; R still
+1.25 GiB (no measurements yet). These are the numbers D3 is decided on.
+
+| Budget comes from                          | Budget | Closes at | Reopens at | Forecast line | Ceiling                                  |
+| ------------------------------------------ | ------ | --------- | ---------- | ------------- | ---------------------------------------- |
+| **I36's fleet slice** (once I36 PR2 lands) | 53 GiB | 47.7 GiB  | 42.4 GiB   | 45.05 GiB     | floor(45.05 / 1.25) = **36**             |
+| The user slice (until then)                | 57 GiB | 51.3 GiB  | 45.6 GiB   | 48.45 GiB     | floor((48.45 − 4 − 1.5) / 1.25) = **34** |
+
+- **With the fleet slice**, nothing but ferrets is inside the budget: the daemon, tmux, browser pages and
+  the voice worker sit in the 4 GiB I36 leaves outside it, so neither the non-ferret estimate nor voice's
+  1.5 GiB is subtracted. The user slice (57 GiB) is still read as a second memory row (§3.2).
+- **With the user slice**, the same ≈ 4 GiB non-ferret estimate and voice's 1.5 GiB come out first.
+- **Replaying 2026-11-05 today:** ferrets 1–36 start (34 before I36), ferrets 37–41 queue (35–41 before
+  I36). The CPU row is unchanged — load 57 is far past the 42 close line — so on a day as busy as that
+  one the CPU row, not the ceiling, is what would hold starts back.
 
 ---
 
