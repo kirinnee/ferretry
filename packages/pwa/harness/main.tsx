@@ -31,17 +31,23 @@ import type {
   PairingCodeMintResponse,
   PasskeysView,
   PasteRuleList,
+  PasteRuleSettingsView,
+  PasteRuleStageList,
   ProjectInfo,
   SecretList,
   SecuritySettingsView,
   SessionFsFile,
   SessionView,
+  SignInRuleList,
+  SignInRuleSuggestionList,
+  TaskPlanList,
   TerminalListView,
   WardenConfigView,
   WardenStatusView,
 } from '@ferretry/protocol';
 import {
   DAEMON_CAPABILITIES,
+  DEFAULT_PASTE_RULE_SETTINGS,
   HARNESS_UPDATE_CODES,
   SECRET_SCHEMA_VERSION,
   SESSION_FILE_INDEX_VERSION,
@@ -1959,12 +1965,29 @@ const HARNESS_UNLOCK_GATE = new StepUpGate({
 });
 if (window.location.search === '?unlock-prompt') void HARNESS_UNLOCK_GATE.require(daemon);
 
+/**
+ * What the Secure copy panel reads beside the secret list, each in the shape its protocol schema parses: no sign-in
+ * rule or stage, no live task plan, no staged paste rule, and the secure-copy settings at their defaults with no
+ * profile rule. Nothing here is a secret list; a route not named in this table is not answered.
+ */
+const HARNESS_SECURE_COPY_READS: Readonly<Record<string, unknown>> = {
+  '/v1/sign-in-rules': { health: 'ok', rules: [], stages: [] } satisfies SignInRuleList,
+  '/v1/sign-in-rules/suggestions': { suggestions: [] } satisfies SignInRuleSuggestionList,
+  '/v1/task-plans': { plans: [] } satisfies TaskPlanList,
+  '/v1/copy-rules/stages': { stages: [] } satisfies PasteRuleStageList,
+  '/v1/copy-rules/settings': {
+    settings: DEFAULT_PASTE_RULE_SETTINGS,
+    profileRules: [],
+  } satisfies PasteRuleSettingsView,
+};
+
 /** The secret store's client: answers the lists the panels read (secrets, secure-copy rules and accounts), and no write. */
 const HARNESS_SECRET_CLIENT: SecretClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
   return {
-    request: (async (path: string) =>
-      path === '/v1/accounts'
+    request: (async (path: string) => {
+      if (path in HARNESS_SECURE_COPY_READS) return HARNESS_SECURE_COPY_READS[path];
+      return path === '/v1/accounts'
         ? ACCOUNTS_READY
         : path === '/v1/accounts/look-alike'
           ? { v: 1, groups: [] }
@@ -1972,7 +1995,8 @@ const HARNESS_SECRET_CLIENT: SecretClientFactory = async connection => {
             ? accountDefaultsFile
             : path === '/v1/copy-rules'
               ? COPY_RULES_READY
-              : SECRETS_READY) as SecretClient['request'],
+              : SECRETS_READY;
+    }) as SecretClient['request'],
   };
 };
 
