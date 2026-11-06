@@ -2,6 +2,7 @@ import { beforeAll, describe, it } from 'bun:test';
 import type { CatalogInstallTarget, SharedCatalogItem } from '@ferretry/protocol';
 import type { DaemonIdentity } from '@ferretry/relay';
 import should from 'should';
+import { mayHoldSecret } from '../../../src/lib/catalog-installs/conservative-changes.ts';
 import { mcpItem, newIdentity, skillItem } from '../../support/catalog-fixtures.ts';
 import { GOVERNANCE, projectTarget, request, rig, ROOT, runtimeTarget, STEP_UP, type Rig } from './service-support.ts';
 
@@ -183,12 +184,17 @@ describe('see changes never carries text that may be a secret', () => {
   it('should hide PASS, DB_PASS and --pass typed into a server, in the whole answer', async () => {
     const r = rig();
     await install(r, mcpV(1, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { ACME_TOKEN: null });
-    typedInto(r, { PASS: 'abc1', DB_PASS: 'zz9' }, ['--stdio', '--pass', 'hunter2']);
+    // Plain words with dots: none trips mayHoldSecret by its value, so only the NAME (PASS, DB_PASS, --pass) can
+    // hide them; and no hex digest or id elsewhere in the preview can contain a dot.
+    const values = ['plain.word.one', 'plain.word.two', 'plain.word.three'] as const;
+    for (const value of values) should(mayHoldSecret(value)).be.false();
+    typedInto(r, { PASS: values[0], DB_PASS: values[1] }, ['--stdio', '--pass', values[2]]);
     const preview = await r.service.preview(
       'runtime',
       await request(alice, mcpV(2, { ACME_TOKEN: '${secret:ACME_TOKEN}' }), runtimeTarget(), { replaceEdited: true }),
     );
-    should(wire(preview)).not.match(/hunter2|abc1|zz9/u);
+    const json = wire(preview);
+    for (const value of values) should(json.includes(value)).be.false();
   });
 
   it('should hide a server argument whose name has a line break inside it, in the whole answer', async () => {
@@ -245,6 +251,7 @@ describe('see changes never carries text that may be a secret', () => {
     ['a soft hyphen inside a name', `pa${SOFT_HYPHEN}ss: hunter2\n`],
     ['a zero-width space inside a name', `to${ZERO_WIDTH_SPACE}ken=hunter2\n`],
     ['a soft hyphen inside a nameless base64 word', `value: c2VjcmV0cGFz${SOFT_HYPHEN}c3dvcmQxMjM0NTY3OA\n`],
+    // Deliberately all hex: it tests the nameless hex-word heuristic (a digest could hold it only at odds of about 2^-72).
     ['a zero-width space inside a nameless hex word', `0123456789abcdef01${ZERO_WIDTH_SPACE}23456789abcdef0123\n`],
     ['a lone carriage return inside a name', 'pa\rss: hunter2\n'],
     ['a lone carriage return inside a name, then more text', 'x\npa\rss: hunter2\nmore\n'],
