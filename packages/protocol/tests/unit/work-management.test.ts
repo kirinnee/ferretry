@@ -410,6 +410,11 @@ const agendaCases: SchemaCase[] = [
     value: { suggestion: `srg_${'a'.repeat(16)}` },
   },
   {
+    name: 'attention recipe proposal pointer',
+    schema: agenda.AgendaRecipeProposalRefSchema,
+    value: { signIn: `si_${'a'.repeat(16)}`, proposal: `rp_${'b'.repeat(16)}` },
+  },
+  {
     name: 'attention suspended standing rule pointer',
     schema: agenda.AgendaSignInRuleSuspendedRefSchema,
     value: { rule: `sr_${'b'.repeat(24)}` },
@@ -1144,6 +1149,17 @@ describe('attention schemas', () => {
         value: { suggestion: suspended.rule },
       },
       { name: 'empty suggestion pointer', schema: agenda.AgendaSignInRuleSuggestionRefSchema, value: {} },
+      // A recipe proposal pointer names the sign-in and the proposal by id, never an account
+      {
+        name: 'recipe proposal pointer with an account',
+        schema: agenda.AgendaRecipeProposalRefSchema,
+        value: { signIn: `si_${'a'.repeat(16)}`, proposal: `rp_${'b'.repeat(16)}`, account: 'GITHUB' },
+      },
+      {
+        name: 'recipe proposal pointer with no proposal',
+        schema: agenda.AgendaRecipeProposalRefSchema,
+        value: { signIn: `si_${'a'.repeat(16)}` },
+      },
       {
         name: 'suspended with an extra key',
         schema: agenda.AgendaSignInRuleSuspendedRefSchema,

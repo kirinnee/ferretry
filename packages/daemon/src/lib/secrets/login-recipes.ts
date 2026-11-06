@@ -31,8 +31,8 @@ import { proposalTarget } from './proposal-target.ts';
  *   refused, and a redactor that cannot run refuses too (fail closed).
  * - A PROPOSAL IS A FERRET'S WORDS. It comes only from the ferret's own `account_propose` call (never from page text:
  *   the daemon never reads a recipe off a page), is filed on ONE SIGN-IN and waits on the owner, who sees the diff on an
- *   agenda card. The card approves nothing: approving is the owner-only route, so no agenda answer a ferret could steer
- *   changes a recipe. Only an owner who turned auto-apply on for that ONE sign-in lets a proposal apply at once, and
+ *   agenda card. The agenda answer approves nothing: the card's own form (`recipeProposal`) and Settings both answer through
+ *   the owner-only route, so no agenda answer a ferret could steer changes a recipe. Only an owner who turned auto-apply on for that ONE sign-in lets a proposal apply at once, and
  *   that is audited. Every applied change bumps the sign-in's `recipeVersion`.
  */
 
@@ -56,6 +56,8 @@ export interface RecipeAgendaPort {
       readonly subject: string;
       readonly context: string;
       readonly howToResolve: string;
+      /** The sign-in the proposal waits on: the card's form reads it and answers the proposal there. */
+      readonly signIn: SignInId;
     },
   ): Promise<{ ok: true; id: string } | { ok: false; message: string }>;
   close(sessionId: string, id: string, note: string): Promise<void>;
@@ -152,10 +154,11 @@ export class LoginRecipeService {
     // Agenda text is every ferret's to read: the card names the place and the sign-in's id, never the account's label.
     const card = await this.ports.agenda.raise(sessionId, {
       sourceRef: proposal.id,
+      signIn: signIn.id,
       subject: `Recipe change ${placeWords(signIn.place)}`,
       // The card shows the CURRENT recipe too, which may hold a value kept after it was written: masked like any read.
       context: await this.masked(cardContext(signIn.recipe, recipe, why)),
-      howToResolve: `Approve or decline it in Settings › Accounts, on the account's ${placeName(signIn.place)} › Recipe, or at the machine: \`fy account site recipe approve ${signIn.id} ${proposal.id}\`.`,
+      howToResolve: `Approve or decline it on this card, in Settings › Accounts, on the account's ${placeName(signIn.place)} › Recipe, or at the machine: \`fy account site recipe approve ${signIn.id} ${proposal.id}\`.`,
     });
     if (!card.ok) return { ...answer, state: 'pending' };
     await this.ports.accounts.proposalCardSignIn(signIn.id, proposal.id, card.id).catch(() => undefined);
@@ -298,8 +301,9 @@ export function cardContext(base: string | undefined, next: string, why: string)
 const RECIPE_CARD_ACTOR: AgendaActor = { kind: 'daemon', cause: 'login-recipe' };
 
 /**
- * A proposal's card on the owner's agenda: a `task` ("look at this"), whose answers change nothing. The owner
- * approves or declines on the login's Recipe in Settings, or with `fy account site recipe`, and the card closes.
+ * A proposal's card on the owner's agenda: a `task` ("look at this"), whose generic answers change nothing. It points at
+ * the proposal (`recipeProposal`), so the app draws Approve and Decline on the card itself; those, the login's Recipe in
+ * Settings and `fy account site recipe` all answer through the owner-only route, and the card closes.
  */
 export class RecipeAgendaAdapter implements RecipeAgendaPort {
   constructor(private readonly agenda: Pick<AgendaService, 'raise' | 'resolve'>) {}
@@ -311,6 +315,8 @@ export class RecipeAgendaAdapter implements RecipeAgendaPort {
       readonly subject: string;
       readonly context: string;
       readonly howToResolve: string;
+      /** The sign-in the proposal waits on: the card's form reads it and answers the proposal there. */
+      readonly signIn: SignInId;
     },
   ): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
     const outcome = await this.agenda.raise(
@@ -323,6 +329,7 @@ export class RecipeAgendaAdapter implements RecipeAgendaPort {
         why: card.subject,
         context: card.context,
         howToResolve: card.howToResolve,
+        recipeProposal: { signIn: card.signIn, proposal: card.sourceRef },
       },
       RECIPE_CARD_ACTOR,
     );

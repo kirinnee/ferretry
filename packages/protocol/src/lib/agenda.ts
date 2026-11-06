@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   AccountIdSchema,
+  SignInIdSchema,
   SignInRuleIdSchema,
   SignInRuleSuggestionIdSchema,
   TwoFactorStageIdSchema,
@@ -16,6 +17,7 @@ import {
 } from './agenda-state.ts';
 import { BoardReopenAttachmentsSchema, TaskRefSchema } from './board-refs.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
+import { LoginRecipeProposalIdSchema } from './login-recipes.ts';
 
 export const AGENDA_SCHEMA_VERSION = 1 as const;
 
@@ -1156,6 +1158,18 @@ export const AgendaSignInRuleSuggestionRefSchema = z.strictObject({ suggestion: 
 export type AgendaSignInRuleSuggestionRef = z.infer<typeof AgendaSignInRuleSuggestionRefSchema>;
 
 /**
+ * A FERRET'S PROPOSED SIGN-IN RECIPE waiting on the owner (login-recipes.ts, `account.propose`): the card's form reads the
+ * sign-in and the proposal from the owner-only accounts read and answers with the owner-only decide route, the same one
+ * Settings uses. It names the sign-in and the proposal, never an account, and the generic agenda answer approves
+ * nothing. Only the daemon raises one.
+ */
+export const AgendaRecipeProposalRefSchema = z.strictObject({
+  signIn: SignInIdSchema,
+  proposal: LoginRecipeProposalIdSchema,
+});
+export type AgendaRecipeProposalRef = z.infer<typeof AgendaRecipeProposalRefSchema>;
+
+/**
  * A standing sign-in rule a fill in this session SUSPENDED (sign-in-rules.ts): an `info` card that sends the owner to
  * Settings › Secure copy. It names the rule, never an account (the agenda text holds no names), and an agenda answer
  * resumes nothing: only a new passkey does. Only the daemon raises one.
@@ -1398,6 +1412,8 @@ const AgendaItemBaseShape = {
   twoFactorSeed: AgendaTwoFactorSeedRefSchema.optional(),
   /** A ferret's suggested standing rule: its card opens the create sheet with nothing ticked, never the generic answer. */
   signInRuleSuggestion: AgendaSignInRuleSuggestionRefSchema.optional(),
+  /** A ferret's proposed sign-in recipe: its card's own form approves or declines it, never the generic answer. */
+  recipeProposal: AgendaRecipeProposalRefSchema.optional(),
   /** A standing rule a fill suspended; only an `info` item carries one, and no answer resumes it. */
   signInRuleSuspended: AgendaSignInRuleSuspendedRefSchema.optional(),
   /**

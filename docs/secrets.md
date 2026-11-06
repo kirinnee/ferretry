@@ -863,7 +863,8 @@ any other (older, silent, or one whose health read failed) keeps the saved-login
   stage, the two ticks, then the `add-2fa-key` passkey bound to that stage. There is no second path: a seed is never
   sent to `POST …/factors`.
 - **Site (a sign-in)** — _Method_, _Recipe_ (plain text, never Markdown; a ferret's recipe is labelled as unreviewed, and
-  its proposals are shown as a diff to approve or decline), _What Ferretry saw_ (facts, never values) and _Defaults_.
+  its proposals are shown as a diff to approve or decline — the same diff, Approve and Decline the proposal's agenda card
+  draws in chat, through the same owner-only route), _What Ferretry saw_ (facts, never values) and _Defaults_.
 - **Defaults** — a default only decides which account a card lists first; the tap is still the permission. It is
   `config/account-defaults.yaml`, set per host with `PUT /v1/accounts/defaults`. A default may be set on any host the
   sign-in NAMES, a site's `match` hosts included (the daemon checks `placeHosts`, and so does the screen). A file that
