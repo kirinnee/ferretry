@@ -12,6 +12,7 @@ import {
   KeyedSerialExecutor,
   NoMonitorSupervision,
   type PaneDeliveryOptions,
+  type ResumeLaunchSpec,
   RuntimeEnvironment,
   SqliteHomeLockFactory,
   StateFileSystemFactory,
@@ -19,7 +20,6 @@ import {
   StorageResumeRepository,
   SystemClock,
   TmuxPaneDelivery,
-  type ResumeLaunchSpec,
   TmuxResumeLauncher,
 } from '../../../../src/adapters/index.ts';
 import {
