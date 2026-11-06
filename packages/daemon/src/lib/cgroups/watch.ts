@@ -19,6 +19,7 @@
 import type { ResolvedLimits } from '@ferretry/protocol';
 import { eventsGrowth } from './memory-events.ts';
 import type {
+  AppliedCaps,
   FleetMemoryPort,
   MemoryEvents,
   ScopeSighting,
@@ -58,8 +59,18 @@ export interface OverBudgetFerret {
 }
 
 /** What the watcher knows now. */
+/** What the kernel says the fleet slice and each running ferret were actually given. */
+export interface AppliedLimits {
+  readonly fleet?: AppliedCaps;
+  readonly scopes: readonly AppliedCaps[];
+}
+
 export interface MemoryWatchState {
   readonly throttled: readonly SlowedFerret[];
+  /** The ferrets together went past the fleet's soft memory limit and are all being slowed, whoever holds the memory. */
+  readonly fleetSlowed: boolean;
+  /** Read back from the cgroup files on the last look; absent before one (or where there is no slice yet). */
+  readonly applied?: AppliedLimits;
   readonly killed: readonly KilledFerret[];
   readonly overBudget: readonly OverBudgetFerret[];
 }
@@ -91,6 +102,9 @@ export function describeProcess(biggest: TreeProcess): string {
 export class FleetMemoryWatcher {
   private readonly scopes = new Map<string, ScopeMemory>();
   private fleetEvents: MemoryEvents | undefined;
+  private fleetSlowedAt: number | undefined;
+  private fleetNotified = false;
+  private applied: AppliedLimits | undefined;
   private killed: KilledFerret[] = [];
   private overBudget: OverBudgetFerret[] = [];
   private readonly lastKillAt = new Map<string, number>();
@@ -102,8 +116,15 @@ export class FleetMemoryWatcher {
   async tickLinux(): Promise<void> {
     try {
       const sighting = await this.ports.fleet.read();
-      if (sighting === undefined) return;
+      if (sighting === undefined) {
+        this.applied = undefined;
+        return;
+      }
       const now = this.ports.now();
+      this.applied = {
+        ...(sighting.applied === undefined ? {} : { fleet: sighting.applied }),
+        scopes: sighting.scopes.flatMap(scope => (scope.applied === undefined ? [] : [scope.applied])),
+      };
       const seen = new Set<string>();
       let accounted = 0;
       const nowScopes: Array<{ id: string; scope: ScopeSighting }> = [];
@@ -140,6 +161,20 @@ export class FleetMemoryWatcher {
       }
       const vanished = [...this.scopes.entries()].filter(([name]) => !seen.has(name));
       const fleetGrowth = eventsGrowth(this.fleetEvents, sighting.events);
+      if (fleetGrowth.high > 0) {
+        // The fleet's own counter: its children's counters do not receive an ancestor's events, so when the
+        // ferrets TOGETHER cross the soft limit this is the only place the throttling is visible.
+        this.fleetSlowedAt = now;
+        if (!this.fleetNotified) {
+          this.fleetNotified = true;
+          // Only as far as the evidence goes: every ferret running now shares the slowdown, none is singled out.
+          for (const { id, scope } of nowScopes)
+            if (this.scopes.get(scope.scope)?.throttledAt !== now)
+              void this.safeNote(id, 'memory_throttled', { shared: true });
+        }
+      } else if (this.fleetSlowedAt === undefined || now - this.fleetSlowedAt > THROTTLE_MEMORY_MS) {
+        this.fleetNotified = false;
+      }
       const unaccounted = fleetGrowth.oomKill - accounted;
       if (unaccounted > 0) {
         const blamed = vanished
@@ -188,7 +223,14 @@ export class FleetMemoryWatcher {
       if (id === undefined || scope.throttledAt === undefined || now - scope.throttledAt > THROTTLE_MEMORY_MS) continue;
       throttled.push({ sessionId: id, ...(await this.callsignField(id)) });
     }
-    return { throttled, killed: [...this.killed], overBudget: [...this.overBudget] };
+    const fleetSlowed = this.fleetSlowedAt !== undefined && now - this.fleetSlowedAt <= THROTTLE_MEMORY_MS;
+    return {
+      throttled,
+      fleetSlowed,
+      killed: [...this.killed],
+      overBudget: [...this.overBudget],
+      ...(this.applied === undefined ? {} : { applied: this.applied }),
+    };
   }
 
   /** Whether a ferret had a process killed for memory in the last `withinMs`: the end reason asks. */

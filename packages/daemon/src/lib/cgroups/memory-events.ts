@@ -38,3 +38,23 @@ export function eventsGrowth(before: MemoryEvents | undefined, after: MemoryEven
     oomKill: grew(after.oomKill, before.oomKill),
   };
 }
+
+/**
+ * A cap file's value (`memory.high`, `memory.max`, `memory.swap.max`, `pids.max`): a number, `null` for
+ * `max` (no cap), `undefined` for anything that is not either. The kernel prints a page-rounded 2^63-ish
+ * number for "unlimited" on some setups; nothing real is that big, so it reads as no cap.
+ */
+export function parseCapFile(text: string): number | null | undefined {
+  const value = text.trim();
+  if (value === 'max') return null;
+  if (!/^\d+$/u.test(value)) return undefined;
+  const number = Number(value);
+  if (!Number.isSafeInteger(number)) return null;
+  return number >= 2 ** 52 ? null : number;
+}
+
+/** `cpu.weight`: a positive integer, or `undefined`. */
+export function parseWeightFile(text: string): number | undefined {
+  const value = text.trim();
+  return /^\d+$/u.test(value) && Number(value) > 0 ? Number(value) : undefined;
+}

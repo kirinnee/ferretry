@@ -34,6 +34,7 @@ import {
   IONICE_PREFIX,
   MACOS_NICE_PREFIX,
   MACOS_PREFIX,
+  probeScopeName,
   slicePropertyCommand,
 } from './scope.ts';
 
@@ -48,6 +49,14 @@ export interface CgroupLaunchPorts {
   readonly nonce: () => string;
   /** Overridable only so a live verification can exercise the real path against a throwaway unit. */
   readonly slice?: string;
+  /** Said out loud when a ferret had to start unconfined (the daemon log). */
+  readonly warn?: (message: string) => void;
+}
+
+/** What kind of process a launch is, so the scope it gets says so. */
+export interface LaunchKind {
+  /** A shell an agent opened (`terminal_open`), not the harness: its scope is the same share, named apart. */
+  readonly terminal?: boolean;
 }
 
 function priorityPrefix(state: Extract<EnforcementState, { kind: 'priority' }>): readonly string[] {
@@ -59,23 +68,25 @@ function priorityPrefix(state: Extract<EnforcementState, { kind: 'priority' }>):
 export class CgroupLaunchPlanner {
   constructor(private readonly ports: CgroupLaunchPorts) {}
 
-  /** The argv this pane must exec. */
-  async command(sessionId: string, command: readonly string[]): Promise<readonly string[]> {
+  /**
+   * The argv this pane must exec.
+   *
+   * THE WRAPPER IS PROVEN BEFORE IT IS HANDED OUT. A wrapped argv that fails to start would kill the pane
+   * before the harness ran, with nobody to tell: the launch would look like a ferret that died at once and the
+   * status would go on saying limits work. So the exact scope (or the Mac wrapper) is first started around
+   * `true` with the same properties: if the manager went away since boot, or refuses a property, the failure
+   * is HERE, recorded, re-probed, and the ferret starts unconfined with a loud warning — or, if the owner wrote
+   * `enabled: true`, the launch fails. What remains is a manager that dies in the milliseconds between the
+   * proof and the real start; the next launch's proof then says so.
+   */
+  async command(sessionId: string, command: readonly string[], kind: LaunchKind = {}): Promise<readonly string[]> {
     const config = await this.ports.limits();
     const resolved = resolveLimits(config, { memoryCeilingBytes: this.ports.host.memoryCeilingBytes });
     if (!resolved.enabled) return command;
     if (launchIsExempt(await resolveFleetExemption(sessionId, this.ports.sessions))) return command;
     const explicit = config.enabled === true;
     const state = await this.ports.enforcement.current();
-    if (state.kind === 'priority') {
-      const prefix = priorityPrefix(state);
-      if (prefix.length === 0 && explicit)
-        throw new CgroupError(
-          'unsupported',
-          'limits are switched on in limits.yaml but this Mac has neither taskpolicy nor nice',
-        );
-      return [...prefix, ...command];
-    }
+    if (state.kind === 'priority') return await this.onMac(state, command);
     const ionice = resolved.ionice && state.ionice ? IONICE_PREFIX : [];
     if (state.kind === 'direct') {
       if (explicit)
@@ -87,25 +98,60 @@ export class CgroupLaunchPlanner {
     }
     const slice = this.ports.slice ?? FLEET_SLICE;
     const interactive = (await this.ports.sessions.facts(sessionId).catch(() => undefined))?.interactive === true;
+    const nonce = this.ports.nonce();
+    const properties = ferretScopeProperties(resolved.perFerret, this.ports.host, interactive);
     try {
       await runCgroupCommand(
         this.ports.commands,
         slicePropertyCommand(slice, fleetSliceProperties(resolved.fleet, this.ports.host)),
         `could not configure ${slice}`,
       );
+      await runCgroupCommand(
+        this.ports.commands,
+        agentScopeCommand({ scope: probeScopeName(nonce), slice, properties, command: ['true'] }),
+        `could not start a scope in ${slice}`,
+      );
     } catch (error) {
       // The manager may have gone away since boot: ask again (rate limited) so the status says so.
-      this.ports.enforcement.recordLaunchFailure(failureText(error));
+      const reason = failureText(error);
+      this.ports.enforcement.recordLaunchFailure(reason);
       await this.ports.enforcement.afterFailure();
-      if (explicit) throw error instanceof CgroupError ? error : new CgroupError('failed', failureText(error));
+      if (explicit) throw error instanceof CgroupError ? error : new CgroupError('failed', reason);
+      this.ports.warn?.(`starting ${sessionId} without ferret limits: ${reason}`);
       return [...ionice, ...command];
     }
     this.ports.enforcement.recordLaunchSuccess();
     return agentScopeCommand({
-      scope: agentScopeName(sessionId, this.ports.nonce()),
+      // A terminal's nonce starts with `t`: still one session's scope (the name keeps the session id) but never
+      // the same unit as that session's harness.
+      scope: agentScopeName(sessionId, kind.terminal === true ? `t${nonce}` : nonce),
       slice,
-      properties: ferretScopeProperties(resolved.perFerret, this.ports.host, interactive),
+      properties,
       command: [...ionice, ...command],
     });
+  }
+
+  /**
+   * macOS is best effort by design: a Mac that cannot lower priority just runs the ferret as it always did, and
+   * `limits.yaml` cannot demand a guarantee there. The wrapper is proven the same way as a scope.
+   */
+  private async onMac(
+    state: Extract<EnforcementState, { kind: 'priority' }>,
+    command: readonly string[],
+  ): Promise<readonly string[]> {
+    const prefix = priorityPrefix(state);
+    if (prefix.length === 0) return command;
+    const proof = await this.ports.commands.execute([...prefix, 'true']).then(
+      result => (result.code === 0 ? undefined : result.stderr.trim() || `exit ${result.code}`),
+      (error: unknown) => failureText(error),
+    );
+    if (proof === undefined) {
+      this.ports.enforcement.recordLaunchSuccess();
+      return [...prefix, ...command];
+    }
+    this.ports.enforcement.recordLaunchFailure(proof);
+    await this.ports.enforcement.afterFailure();
+    this.ports.warn?.(`starting a ferret without a lower priority: ${proof}`);
+    return command;
   }
 }

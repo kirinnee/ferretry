@@ -28,7 +28,11 @@ export interface SessionPaneRegistrar {
  * A launcher constructed without one launches exactly as it did before this port existed.
  */
 export interface AgentLaunchWrapper {
-  command(sessionId: string, command: readonly string[]): Promise<readonly string[]>;
+  command(
+    sessionId: string,
+    command: readonly string[],
+    kind?: { readonly terminal?: boolean },
+  ): Promise<readonly string[]>;
 }
 
 function message(error: unknown): string {

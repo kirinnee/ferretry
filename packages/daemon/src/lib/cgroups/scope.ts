@@ -157,3 +157,11 @@ export function sessionOfScope(scope: string): string | undefined {
   const match = new RegExp(`^${AGENT_SCOPE_PREFIX}(.+)-[A-Za-z0-9_]+\\.scope$`, 'u').exec(scope);
   return match?.[1];
 }
+
+/**
+ * The throwaway scope a launch is first proven with. Not an agent scope (no {@link AGENT_SCOPE_PREFIX}), so the
+ * watcher and the placement readers never mistake the few milliseconds it lives for a ferret.
+ */
+export function probeScopeName(nonce: string): string {
+  return `${productName}-probe-${safeUnitPart(nonce)}.scope`;
+}

@@ -391,9 +391,17 @@ describe('reading the fleet slice', () => {
     await mkdir(scope, { recursive: true });
     await mkdir(join(root, 'proc', '4242'), { recursive: true });
     await writeFile(join(slice, 'memory.events'), 'low 0\nhigh 0\nmax 0\noom 0\noom_kill 1\n');
+    await writeFile(join(slice, 'memory.high'), `${44 * GIBIBYTE}\n`);
+    await writeFile(join(slice, 'memory.max'), `${46 * GIBIBYTE}\n`);
+    await writeFile(join(slice, 'memory.swap.max'), 'max\n');
+    await writeFile(join(slice, 'pids.max'), '16384\n');
+    await writeFile(join(slice, 'cpu.weight'), '50\n');
     await writeFile(join(scope, 'memory.events'), 'low 0\nhigh 7\nmax 0\noom 0\noom_kill 0\n');
     await writeFile(join(scope, 'memory.current'), `${5 * GIBIBYTE}\n`);
     await writeFile(join(scope, 'memory.high'), `${12 * GIBIBYTE}\n`);
+    await writeFile(join(scope, 'memory.max'), `${14 * GIBIBYTE}\n`);
+    await writeFile(join(scope, 'pids.max'), '4096\n');
+    await writeFile(join(scope, 'cpu.weight'), '100\n');
     await writeFile(join(scope, 'cgroup.procs'), '4242\n');
     await mkdir(join(slice, 'unrelated.scope'), { recursive: true });
     await writeFile(join(root, 'proc', '4242', 'statm'), '100 2560 1 1 0 1 0\n');
@@ -417,6 +425,29 @@ describe('reading the fleet slice', () => {
       events: { high: 7, max: 0, oom: 0, oomKill: 0 },
       currentBytes: 5 * GIBIBYTE,
       highBytes: 12 * GIBIBYTE,
+    });
+  });
+
+  it('should read back what the slice and each scope really hold, not what was asked for', async () => {
+    // Arrange
+    const { memory } = await fleet();
+
+    // Act
+    const actual = await memory.read();
+
+    // Assert — `max` is "no cap", and a swap cap is only read on the slice
+    should(actual?.applied).deepEqual({
+      memoryHigh: 44 * GIBIBYTE,
+      memoryMax: 46 * GIBIBYTE,
+      swapMax: null,
+      tasksMax: 16384,
+      cpuWeight: 50,
+    });
+    should(actual?.scopes[0]?.applied).deepEqual({
+      memoryHigh: 12 * GIBIBYTE,
+      memoryMax: 14 * GIBIBYTE,
+      tasksMax: 4096,
+      cpuWeight: 100,
     });
   });
 

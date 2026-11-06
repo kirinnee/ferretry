@@ -184,7 +184,23 @@ describe('the probe, kept', () => {
 });
 
 describe('saying it in plain words', () => {
-  const live = { throttled: [], killed: [], overBudget: [] };
+  // The kernel already holds the default fleet caps for a 48 GiB budget (what a first launch applies).
+  const live = {
+    throttled: [],
+    fleetSlowed: false,
+    killed: [],
+    overBudget: [],
+    applied: {
+      fleet: {
+        memoryHigh: 44 * GIBIBYTE,
+        memoryMax: 46 * GIBIBYTE,
+        swapMax: Math.floor(4.8 * GIBIBYTE),
+        tasksMax: 16384,
+        cpuWeight: 50,
+      },
+      scopes: [],
+    },
+  };
   const base = {
     config: {},
     host: THIS_BOX,
@@ -213,6 +229,7 @@ describe('saying it in plain words', () => {
   it('should say how many ferrets are slowed and who was killed, and when', () => {
     // Arrange
     const live2 = {
+      ...live,
       throttled: [{ sessionId: 's1', callsign: 'gertrude' }, { sessionId: 's2' }, { sessionId: 's3' }],
       killed: [
         {
@@ -337,5 +354,78 @@ describe('saying it in plain words', () => {
     should(formatBytes(48 * GIBIBYTE)).equal('48 GiB');
     should(formatBytes(Math.floor(40.8 * GIBIBYTE))).equal('40.8 GiB');
     should(formatBytes(512 * 1024 ** 2)).equal('512 MiB');
+  });
+});
+
+describe('saying what is APPLIED, not what is asked for', () => {
+  const caps = (high: number, max: number) => ({ memoryHigh: high * GIBIBYTE, memoryMax: max * GIBIBYTE });
+  const applied = {
+    fleet: { ...caps(44, 46), swapMax: Math.floor(4.8 * GIBIBYTE), tasksMax: 16384, cpuWeight: 50 },
+    scopes: [] as ReturnType<typeof caps>[],
+  };
+  const make = (config: Parameters<typeof buildLimitsView>[0]['config'], live: Record<string, unknown>) =>
+    buildLimitsView({
+      config,
+      host: THIS_BOX,
+      enforcement: { kind: 'cgroups', ionice: true },
+      disk: { device: 'nvme0n1', scheduler: 'none' },
+      live: { throttled: [], fleetSlowed: false, killed: [], overBudget: [], ...live },
+      file: 'limits.yaml',
+      uid: 1000,
+      warnings: [],
+      clock: iso => iso.slice(11, 16),
+    });
+
+  it('should say "configured, not yet applied" when nothing has put the limits in force yet', () => {
+    // Arrange / Act — the manager answers, but no ferret has launched, so no slice exists to read back
+    const view = make({}, {});
+
+    // Assert
+    should(view.lines[0]).startWith('configured, not yet applied');
+    should(view.lines[1]).containEql('none is running under limits yet');
+  });
+
+  it('should keep showing the 55 GiB the kernel holds after the file is tightened to 30, and say so', () => {
+    // Arrange — fleet applied at 55 GiB hard; limits.yaml now asks for 30 GiB
+    const live = {
+      applied: { ...applied, fleet: { ...applied.fleet, memoryHigh: 50 * GIBIBYTE, memoryMax: 55 * GIBIBYTE } },
+    };
+
+    // Act
+    const view = make({ fleet: { memoryHigh: '25G', memoryMax: '30G' } }, live);
+
+    // Assert
+    should(view.lines[0]).containEql('50 GiB soft / 55 GiB hard');
+    should(
+      view.lines.some(
+        line => line.includes('30 GiB hard for all ferrets together') && line.includes('next ferret starts'),
+      ),
+    ).be.true();
+    should(view.fleet.memoryMaxBytes).equal(55 * GIBIBYTE);
+  });
+
+  it('should count running ferrets that still hold earlier limits, and say what a new ferret gets', () => {
+    // Arrange — two scopes started under the old 12/15 GiB caps, one under today's 12/14.4
+    const wanted = { memoryHigh: 12 * GIBIBYTE, memoryMax: Math.floor(14.4 * GIBIBYTE) };
+    const old = { ...caps(10, 20), tasksMax: 4096 };
+    const live = { applied: { ...applied, scopes: [old, old, { ...wanted, tasksMax: 4096 }] } };
+
+    // Act
+    const view = make({ perFerret: { memoryHigh: '12G', memoryMax: '14.4G' } }, live);
+
+    // Assert
+    should(view.lines[1]).containEql('10 GiB soft / 20 GiB hard');
+    should(view.lines.some(line => line.startsWith('2 running ferrets keep the limits they started with'))).be.true();
+  });
+
+  it('should say ferrets are slowed together when only the fleet counter rose', () => {
+    // Arrange / Act
+    const view = make({}, { applied, fleetSlowed: true });
+
+    // Assert
+    should(view.lines).containEql(
+      'all ferrets are slowed for memory now: together they are past the soft limit for all ferrets',
+    );
+    should(view.lines).not.containEql('no ferret is slowed for memory now');
   });
 });

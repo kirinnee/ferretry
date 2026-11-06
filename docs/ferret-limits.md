@@ -62,13 +62,30 @@ that fails re-checks (at most every 30 s). If you wrote `enabled: true` yourself
 
 Only **new** launches get the slice. A running ferret is never moved; relaunch it (Restart) to bring it under.
 
+**A scope is proven before a ferret is put in it.** The launch first starts the exact scope (same slice, same
+properties) around `true`. If the user's manager went away since boot, or refuses a property, the ferret starts
+unconfined with a loud warning in the daemon log, the status says why and the host is probed again (at most every
+30 s) — it never becomes a pane that dies before the harness ran. Only a manager that dies in the milliseconds
+between that proof and the real start can still catch one launch; the next launch's proof then reports it.
+
+**A terminal an agent opens is limited like the ferret that opened it.** `terminal_open` (and the terminal route
+when the ferret is the caller) starts the shell through the same launch path, in its own scope in the same fleet
+slice with the same per-ferret caps. Who opened it is what the daemon derived from the credential and the tool
+route and recorded on the pane — never anything the request or the agent said. A terminal the owner opens from
+the app, or on the host, stays outside: it is the person's shell. The scope of a ferret'"'"'s terminal is its own,
+so a ferret with several terminals can hold up to one allowance for the harness plus one per terminal; the fleet
+slice is the ceiling over all of them. Browser pages an agent opens run in a daemon-started worker that is not in
+the fleet slice yet — a declared gap.
+
 ### macOS (no cgroups)
 
 Ferrets launch as `taskpolicy -c utility nice -n 10 <cmd>`: the QoS is clamped to `utility` (still every core,
 but yielding to your own work) and the BSD priority is lowered. Not `-b`: that throttles far below real time
 (`docs/design/voice-modes.md` §2.5). `-c utility` is documented in `taskpolicy(8)`; a `-d` disk policy is
 **not** used, because the man page documents only `default` and `throttle` as symbolic values. If `taskpolicy`
-refuses the clamp the launch falls back to `nice -n 10` alone, and to nothing if neither runs.
+refuses the clamp the launch falls back to `nice -n 10` alone, and to nothing if neither runs. The wrapper is
+proven around `true` before each launch; one that stops working starts the ferret unwrapped with a warning.
+macOS is best effort: `enabled: true` cannot demand a guarantee a Mac cannot give, so it never fails a launch there.
 
 > **macOS: lower CPU and disk priority only; memory is watched, not capped.**
 
@@ -87,6 +104,16 @@ swap: ferrets may use up to 4.8 GiB of swap
 3 ferrets slowed for memory now: gertrude, …
 killed for memory: gertrude 23:04 (bun test, 9.1 GiB)
 ```
+
+**The numbers are what the kernel holds**, read back from the cgroup files on the same 30 s look — not what
+`limits.yaml` asks for. Before any ferret has launched there is nothing to read, and the status says
+**"configured, not yet applied"**. After you tighten a cap, the slice and each running ferret keep what they
+started with until the next launch (the slice) or their own restart (a ferret): the status keeps showing the held
+numbers and adds one line saying what the file now asks for and how many running ferrets keep earlier limits.
+
+When the ferrets _together_ go past the fleet'"'"'s soft limit while each stays under its own, the kernel counts it
+only on the fleet slice. The status then says **"all ferrets are slowed for memory now"**, and each ferret running
+at that moment gets one journal note marked shared — it is not pinned on one ferret the evidence does not name.
 
 A slowed ferret (`high` rose) and a killed one (`oom_kill` rose) each get a note in their own journal
 (`session.memory_throttled`, `session.memory_killed`). If the **agent itself** was killed that way its end

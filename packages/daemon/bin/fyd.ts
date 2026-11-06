@@ -8196,6 +8196,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     // A nonce per launch, from the same source as every other unguessable value here, so a relaunch
     // cannot collide with a scope that is still deactivating.
     nonce: () => crypto.randomUUID().slice(0, 8),
+    // A ferret that had to start unconfined says so in the daemon log, not only in the status.
+    warn: message => bootNotices.state(message),
   });
   /**
    * The routing catalog, with its ONE refusal restated in a taxonomy `src/lib` may name.
@@ -9816,6 +9818,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       () => Date.now(),
       // The owner's own shell, resolved once and read from the document at that moment (not captured).
       systemLoginShell(async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.terminals.shell),
+      // A terminal an AGENT opens runs under the same limits as that ferret, through the same planner.
+      cgroupLaunchPlanner,
     ),
     agentBrowserDisplay,
     browserLauncher: new NodeSessionBrowserLauncher(

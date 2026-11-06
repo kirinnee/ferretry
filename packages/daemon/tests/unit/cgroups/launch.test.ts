@@ -28,6 +28,8 @@ interface Setup {
   readonly state: EnforcementState;
   readonly sessions?: Readonly<Record<string, SessionSpawnFacts>>;
   readonly systemctl?: { readonly code: number; readonly stderr?: string };
+  /** Overrides the answer to one command by its argv (the scope proof, the Mac wrapper proof). */
+  readonly respond?: (argv: readonly string[]) => { readonly code: number; readonly stderr?: string } | undefined;
 }
 
 function subject(setup: Setup) {
@@ -35,7 +37,7 @@ function subject(setup: Setup) {
   const commands: CgroupCommandPort = {
     execute: async argv => {
       ran.push(argv);
-      const result = setup.systemctl ?? { code: 0 };
+      const result = setup.respond?.(argv) ?? setup.systemctl ?? { code: 0 };
       return { code: result.code, stdout: '', stderr: result.stderr ?? '' };
     },
   };
@@ -47,7 +49,9 @@ function subject(setup: Setup) {
     },
     () => 1_000_000,
   );
+  const warnings: string[] = [];
   const planner = new CgroupLaunchPlanner({
+    warn: message => warnings.push(message),
     limits: async () => setup.config ?? {},
     host: setup.host ?? HOST,
     commands,
@@ -55,7 +59,7 @@ function subject(setup: Setup) {
     enforcement,
     nonce: () => 'a1b2c3d4',
   });
-  return { planner, ran, enforcement, probes: () => probes };
+  return { planner, ran, warnings, enforcement, probes: () => probes };
 }
 
 const CLAUDE = ['claude', '--model', 'x'];
@@ -69,7 +73,7 @@ describe('the argv a ferret execs on Linux', () => {
     const actual = await planner.command('s1', CLAUDE);
 
     // Assert — the slice is configured first, then the scope carries the per-ferret share.
-    should(ran).have.length(1);
+    should(ran).have.length(2);
     should(ran[0]?.slice(0, 5)).deepEqual(['systemctl', '--user', 'set-property', '--runtime', 'ferretry_fleet.slice']);
     should(ran[0]).containEql('CPUWeight=50');
     should(actual.slice(0, 8)).deepEqual([
@@ -248,7 +252,8 @@ describe('the argv a ferret execs on macOS', () => {
     // Assert
     should(actual).deepEqual(['taskpolicy', '-c', 'utility', 'nice', '-n', '10', ...CLAUDE]);
     should(actual).not.containEql('-b');
-    should(ran).deepEqual([]);
+    // The wrapper is proven around `true` before a ferret is wrapped in it.
+    should(ran).deepEqual([['taskpolicy', '-c', 'utility', 'nice', '-n', '10', 'true']]);
   });
 
   it('should fall back to nice alone when taskpolicy is not there, and to nothing when neither is', async () => {
@@ -260,11 +265,92 @@ describe('the argv a ferret execs on macOS', () => {
     // Act
     const a = await nice.planner.command('s1', CLAUDE);
     const b = await none.planner.command('s1', CLAUDE);
-    const c = await strict.planner.command('s1', CLAUDE).catch((error: unknown) => error);
+    const c = await strict.planner.command('s1', CLAUDE);
 
     // Assert
     should(a).deepEqual(['nice', '-n', '10', ...CLAUDE]);
     should(b).deepEqual(CLAUDE);
-    should(c).be.instanceOf(CgroupError);
+    // macOS is best effort: even `enabled: true` cannot demand a guarantee a Mac cannot give.
+    should(c).deepEqual(CLAUDE);
+  });
+
+  it('should start the ferret unwrapped, loudly, when the wrapper stops working after the boot probe', async () => {
+    // Arrange
+    const { planner, enforcement, warnings } = subject({
+      host: MAC,
+      state: { kind: 'priority', wrapper: 'taskpolicy' },
+      respond: argv => (argv.at(-1) === 'true' ? { code: 1, stderr: 'taskpolicy: not permitted' } : undefined),
+    });
+
+    // Act
+    const actual = await planner.command('s1', CLAUDE);
+
+    // Assert
+    should(actual).deepEqual(CLAUDE);
+    should(enforcement.lastLaunchFailure()).match(/not permitted/u);
+    should(warnings[0]).match(/without a lower priority/u);
+  });
+});
+
+describe('a scope that cannot be started after the slice was prepared', () => {
+  const cgroups: EnforcementState = { kind: 'cgroups', ionice: true };
+  const refusesScopes = (argv: readonly string[]) =>
+    argv[0] === 'systemd-run'
+      ? { code: 1, stderr: 'Failed to start transient scope unit: Connection refused' }
+      : undefined;
+
+  it('should prove the exact scope around `true` before wrapping the ferret in it', async () => {
+    // Arrange
+    const { planner, ran } = subject({ state: cgroups });
+
+    // Act
+    const actual = await planner.command('s1', CLAUDE);
+
+    // Assert
+    const proof = ran[1] as readonly string[];
+    should(proof[0]).equal('systemd-run');
+    should(proof.at(-1)).equal('true');
+    should(proof).containEql('--slice=ferretry_fleet.slice');
+    should(proof).containEql('--property=MemoryMax=15461882265');
+    should(proof.some(word => word.startsWith('--unit=ferretry-probe-'))).be.true();
+    should(actual).containEql('--unit=ferretry-agent-s1-a1b2c3d4.scope');
+  });
+
+  it('should start the ferret unconfined, warn out loud and re-probe, instead of a pane that dies at once', async () => {
+    // Arrange
+    const { planner, enforcement, warnings, probes } = subject({ state: cgroups, respond: refusesScopes });
+    await enforcement.current();
+
+    // Act
+    const actual = await planner.command('s1', CLAUDE);
+
+    // Assert — the ferret runs (with the disk priority that still works); it is not wrapped in a scope that fails
+    should(actual).deepEqual(['ionice', '-c2', '-n7', '--', ...CLAUDE]);
+    should(enforcement.lastLaunchFailure()).match(/Connection refused/u);
+    should(warnings[0]).match(/starting s1 without ferret limits: .*Connection refused/u);
+    should(probes()).be.aboveOrEqual(1);
+  });
+
+  it('should still fail the launch for the owner who wrote enabled: true', async () => {
+    // Arrange
+    const { planner } = subject({ config: { enabled: true }, state: cgroups, respond: refusesScopes });
+
+    // Act
+    const failure = await planner.command('s1', CLAUDE).catch((error: unknown) => error);
+
+    // Assert
+    should(failure).be.instanceOf(CgroupError);
+    should((failure as CgroupError).message).match(/Connection refused/u);
+  });
+
+  it('should name a terminal’s scope apart from the harness’s, under the same session', async () => {
+    // Arrange
+    const { planner } = subject({ state: cgroups });
+
+    // Act
+    const actual = await planner.command('s1', ['/bin/zsh', '-l'], { terminal: true });
+
+    // Assert
+    should(actual).containEql('--unit=ferretry-agent-s1-ta1b2c3d4.scope');
   });
 });

@@ -296,3 +296,55 @@ describe('the end reason of a ferret the kernel killed', () => {
     should(exitedByKillSignal(observation({ kind: 'gone' }))).equal(false);
   });
 });
+
+describe('watching the ferrets together being slowed by the fleet’s own soft limit', () => {
+  it('should report the aggregate throttling when only the fleet’s counter rose, and tell each live ferret once', async () => {
+    // Arrange — each ferret stays under its own soft limit, so no child counter moves
+    const { watcher, see, notes, advance } = harness();
+    see({ events: events(0), scopes: [scope(0)] });
+    await watcher.tickLinux();
+
+    // Act
+    advance(30_000);
+    see({ events: events(100), scopes: [scope(0)] });
+    await watcher.tickLinux();
+    advance(30_000);
+    see({ events: events(180), scopes: [scope(0)] });
+    await watcher.tickLinux();
+    const during = await watcher.state();
+    advance(THROTTLE_MEMORY_MS + 1);
+    const after = await watcher.state();
+
+    // Assert
+    should(during.fleetSlowed).be.true();
+    should(during.throttled).deepEqual([]);
+    const told = notes.filter(note => note.kind === 'memory_throttled');
+    should(told).have.length(1);
+    should(told[0]).match({ sessionId: SESSION, data: { shared: true } });
+    should(after.fleetSlowed).be.false();
+  });
+
+  it('should hand the view what the kernel holds for the slice and each scope, and none once the slice is gone', async () => {
+    // Arrange
+    const { watcher, see } = harness();
+    see({
+      events: events(0),
+      applied: { memoryMax: 55 * GIBIBYTE, memoryHigh: null },
+      scopes: [{ ...scope(0), applied: { memoryMax: 14 * GIBIBYTE } }],
+    });
+
+    // Act
+    await watcher.tickLinux();
+    const present = (await watcher.state()).applied;
+    see(undefined);
+    await watcher.tickLinux();
+    const gone = (await watcher.state()).applied;
+
+    // Assert
+    should(present).deepEqual({
+      fleet: { memoryMax: 55 * GIBIBYTE, memoryHigh: null },
+      scopes: [{ memoryMax: 14 * GIBIBYTE }],
+    });
+    should(gone).equal(undefined);
+  });
+});

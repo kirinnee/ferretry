@@ -78,6 +78,18 @@ export interface MemoryEvents {
   readonly oomKill: number;
 }
 
+/**
+ * The limits a cgroup actually holds, read back from its own control files — not what was asked for.
+ * `null` is "no cap" (`max`); a field that could not be read is absent.
+ */
+export interface AppliedCaps {
+  readonly memoryHigh?: number | null;
+  readonly memoryMax?: number | null;
+  readonly swapMax?: number | null;
+  readonly tasksMax?: number | null;
+  readonly cpuWeight?: number;
+}
+
 /** One agent scope found under the fleet slice, and what the kernel says about its memory. */
 export interface ScopeSighting {
   /** The scope unit name (`<product>-agent-<id>-<nonce>.scope`). */
@@ -87,11 +99,15 @@ export interface ScopeSighting {
   readonly currentBytes?: number;
   /** `memory.high`, as a number; absent for `max`. */
   readonly highBytes?: number;
+  /** What this scope was actually given when it started: fixed for its life. */
+  readonly applied?: AppliedCaps;
 }
 
 /** The fleet slice as the kernel reports it. */
 export interface FleetSighting {
   readonly events: MemoryEvents;
+  /** What the fleet slice holds now. */
+  readonly applied?: AppliedCaps;
   readonly scopes: readonly ScopeSighting[];
 }
 

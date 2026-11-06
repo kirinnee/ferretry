@@ -6,8 +6,11 @@ import {
   FLEET_SLICE,
   type FleetMemoryPort,
   type FleetSighting,
+  type AppliedCaps,
+  parseCapFile,
   parseMemoryCap,
   parseMemoryEvents,
+  parseWeightFile,
   type ScopeSighting,
   sliceCgroupPath,
   type TreeProcess,
@@ -52,7 +55,7 @@ export class CgroupFleetMemory implements FleetMemoryPort {
           .map(name => this.scope(name)),
       )
     ).filter((scope): scope is ScopeSighting => scope !== undefined);
-    return { events, scopes };
+    return { events, scopes, applied: await this.caps(this.directory, true) };
   }
 
   async largest(scope: string): Promise<readonly TreeProcess[]> {
@@ -74,6 +77,28 @@ export class CgroupFleetMemory implements FleetMemoryPort {
       .sort((a, b) => b.rssBytes - a.rssBytes);
   }
 
+  /** What the cgroup at `directory` really holds, read from its own files. A slice also has a swap cap. */
+  private async caps(directory: string, swap: boolean): Promise<AppliedCaps> {
+    const [high, max, swapMax, tasks, weight] = await Promise.all([
+      text(join(directory, 'memory.high')),
+      text(join(directory, 'memory.max')),
+      swap ? text(join(directory, 'memory.swap.max')) : Promise.resolve(undefined),
+      text(join(directory, 'pids.max')),
+      text(join(directory, 'cpu.weight')),
+    ]);
+    const field = <K extends string>(key: K, value: number | null | undefined): { [P in K]?: number | null } =>
+      value === undefined ? {} : ({ [key]: value } as { [P in K]?: number | null });
+    return {
+      ...field('memoryHigh', high === undefined ? undefined : parseCapFile(high)),
+      ...field('memoryMax', max === undefined ? undefined : parseCapFile(max)),
+      ...field('swapMax', swapMax === undefined ? undefined : parseCapFile(swapMax)),
+      ...field('tasksMax', tasks === undefined ? undefined : parseCapFile(tasks)),
+      ...(weight === undefined || parseWeightFile(weight) === undefined
+        ? {}
+        : { cpuWeight: parseWeightFile(weight) as number }),
+    };
+  }
+
   private async scope(name: string): Promise<ScopeSighting | undefined> {
     const directory = join(this.directory as string, name);
     const events = parseMemoryEvents((await text(join(directory, 'memory.events'))) ?? '');
@@ -85,6 +110,7 @@ export class CgroupFleetMemory implements FleetMemoryPort {
       events,
       ...(Number.isFinite(current) ? { currentBytes: current } : {}),
       ...(high === undefined ? {} : { highBytes: high }),
+      applied: await this.caps(directory, false),
     };
   }
 }
