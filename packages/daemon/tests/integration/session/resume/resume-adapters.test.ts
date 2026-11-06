@@ -1048,3 +1048,89 @@ describe('the resume launcher and a credential issued per launch', () => {
     should(port.calls.filter(call => call[0] === 'new-session')).have.length(0);
   });
 });
+
+describe('tmux resume launcher › recording the replacement pane’s identity', () => {
+  /** A tmux whose `kill-session` can be made to fail, so a replacement that cannot be named cannot be removed. */
+  class KillableTmux extends RecordingTmuxPort {
+    unkillable = false;
+    override async execute(argv: readonly string[]): Promise<{ stdout: string; stderr: string; code: number }> {
+      // The kill is one command list that releases the control clients first, so it is found by name.
+      if (argv.includes('kill-session')) {
+        this.calls.push(argv);
+        if (this.unkillable) return { stdout: '', stderr: 'no permission', code: 1 };
+        this.alive = false;
+        return { stdout: '', stderr: '', code: 0 };
+      }
+      const result = await super.execute(argv);
+      if (argv[0] === 'new-session') this.alive = true;
+      return result;
+    }
+  }
+
+  function subject(failures: number, unkillable = false) {
+    const port = new KillableTmux();
+    port.alive = false;
+    port.unkillable = unkillable;
+    const controller = new TmuxController(port);
+    const registrations: string[] = [];
+    let remaining = failures;
+    // The SHIPPED retry policy, deliberately not overridden: the bound this daemon actually applies
+    // is part of what these tests are about, and a fake one would prove a policy nothing runs.
+    const launcher = new TmuxResumeLauncher(
+      controller,
+      async () => ({ tmuxSession: 'fy-session-1', mode: 'auto', cwd: '/workspace/project', command: ['/opt/agent'] }),
+      new TmuxPaneDelivery(controller, async () => {}),
+      undefined,
+      undefined,
+      {
+        registerSession: async (_id, tmuxSession) => {
+          if (remaining > 0) {
+            remaining -= 1;
+            throw new Error('tmux has not proved the pane');
+          }
+          registrations.push(tmuxSession);
+        },
+      },
+    );
+    return { port, launcher, registrations };
+  }
+
+  const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+  it('should retry a registration that lost the race with the pane it is about', async () => {
+    // Arrange — both ways this write fails are races with the launch that just happened.
+    const { port, launcher, registrations } = subject(2);
+
+    // Act
+    await launcher.relaunch(ID);
+
+    // Assert — the identity names the replacement, and no pane was thrown away over a race.
+    should(registrations).deepEqual(['fy-session-1']);
+    should(port.calls.some(call => call.includes('kill-session'))).be.false();
+  });
+
+  it('should tear the replacement down and FAIL when its identity cannot be recorded at all', async () => {
+    // Arrange — a live pane nothing can name is worse than no pane.
+    const { port, launcher, registrations } = subject(Number.POSITIVE_INFINITY);
+
+    // Act
+    const failure = await launcher.relaunch(ID).then(() => undefined, message);
+
+    // Assert
+    should(failure).match(/could not be registered \(tmux has not proved the pane\)/u);
+    should(failure).match(/the unregistered replacement pane was killed/u);
+    should(registrations).be.empty();
+    should(port.calls.some(call => call.includes('kill-session'))).be.true();
+  });
+
+  it('should say so when it could not even kill the replacement it cannot name', async () => {
+    // Arrange
+    const { launcher } = subject(Number.POSITIVE_INFINITY, true);
+
+    // Act
+    const failure = await launcher.relaunch(ID).then(() => undefined, message);
+
+    // Assert — the worst state this daemon can be in must not be the quietest one.
+    should(failure).match(/could not be killed either/u);
+  });
+});
