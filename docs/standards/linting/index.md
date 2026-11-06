@@ -63,8 +63,12 @@ counts as using it. `a-composition-reachability` closes that hole — see
 
 **One typecheck at a time.** A `tsc` over this workspace peaks at about 4.5 GB (measured 2026-11-06, Linux
 x64), and a machine running many agents commits from many worktrees at once. `typecheck.sh` therefore
-takes a per-user `flock` in `$XDG_RUNTIME_DIR` (else `/tmp/<uid>`) and a second run queues behind the
-first, saying which pid and worktree holds it. It waits at most `TYPECHECK_LOCK_WAIT` seconds (600)
+takes a per-user `flock` in a directory only the user can write (`$XDG_RUNTIME_DIR`, else
+`${XDG_CACHE_HOME:-$HOME/.cache}/ferretry`, created `0700`, used only if it is a real directory that user owns
+and no one else can write — otherwise the check runs unlocked and says why) and a second run queues behind the
+first, saying which pid and worktree holds it. A check started from inside a locked one sees
+`FY_TYPECHECK_LOCK_HELD` and skips the lock instead of waiting on its own ancestor. It waits at most
+`TYPECHECK_LOCK_WAIT` seconds (600)
 and then checks anyway, so a stuck neighbour cannot block a commit. CI never takes the lock (`CI` is
 set and each job runs one check), and a machine with no `flock` runs unlocked as before.
 
