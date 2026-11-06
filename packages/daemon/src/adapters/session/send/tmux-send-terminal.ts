@@ -47,7 +47,7 @@ import type { TmuxPaneQueue } from '../../tmux/pane-queue.ts';
  * line (the text drawn there is a submission Codex already took; Enter would key it a second time). A paste is its lone placeholder with a count that
  * agrees with the payload (`lonePasteOf`).
  */
-export function holdsExactly(frame: DeliveryFrame, text: string): boolean {
+export function holdsExactly(frame: DeliveryFrame, text: string, strict = false): boolean {
   if (!frame.alive || frame.dead || paneShowsActiveWork(frame.visible) || paneShowsStartupWait(frame.visible))
     return false;
   if (
@@ -59,7 +59,14 @@ export function holdsExactly(frame: DeliveryFrame, text: string): boolean {
   const composer = readComposer(frame.visible, frameCursor(frame));
   if (composer === undefined || composer.placeholder === true) return false;
   const input = composerInput(composer);
+  if (strict) return sameDrawnText(input, text);
   return showsPayload(input, text) || (composerTransport(text) === 'paste' && lonePasteOf(input, text));
+}
+
+/** The whole of `text`, however the TUI wrapped it, and nothing clipped or added (&B153's strict press). */
+function sameDrawnText(shown: string, text: string): boolean {
+  const squeeze = (value: string): string => value.normalize('NFC').replace(/\s+/gu, '');
+  return squeeze(shown) !== '' && squeeze(shown) === squeeze(text);
 }
 
 /** True while what the composer holds is the start of the payload: what erasing from its end leaves. */
@@ -204,9 +211,9 @@ export class TmuxSendTerminal implements SendTerminal {
    * beside our chip, would have their words submitted with it. So the key goes only when the composer is the
    * payload and nothing else, at a pane that is not mid-turn or behind a prompt; otherwise `absent`.
    */
-  async submitComposer(id: SessionId, text: string): Promise<ComposerSubmitOutcome> {
+  async submitComposer(id: SessionId, text: string, strict = false): Promise<ComposerSubmitOutcome> {
     const session = await this.session(id);
-    if (!holdsExactly(await captureFrame(this.tmux, session), text)) return 'absent';
+    if (!holdsExactly(await captureFrame(this.tmux, session), text, strict)) return 'absent';
     await this.tmux.sendKey(session, 'Enter');
     for (let poll = 0; poll < this.keys.submitPolls; poll += 1) {
       await this.sleep(this.keys.pollMs);

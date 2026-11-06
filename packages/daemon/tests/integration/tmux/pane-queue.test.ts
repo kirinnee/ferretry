@@ -1,4 +1,6 @@
 import { describe, it } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import should from 'should';
 import {
   COMPOSER_READS,
@@ -338,5 +340,77 @@ describe('tmux pane queue', () => {
 
     // Assert
     should(pane.queued).be.true();
+  });
+
+  it('should submit the countless chip Claude draws for its own one-line paste, as it lands (&B153)', async () => {
+    const pane = new (class extends BusyPane {
+      override async execute(argv: readonly string[]): Promise<TmuxCommandResult> {
+        if (argv[0] === 'load-buffer') return ok('');
+        if (argv[0] === 'paste-buffer') {
+          this.composer = '[Pasted text #30]';
+          return ok('');
+        }
+        return await super.execute(argv);
+      }
+    })(true);
+    const { subject } = queue(pane);
+
+    await subject.queue(SESSION, `approve — ${'every review thread is answered and CI is green. '.repeat(30)}`);
+
+    should(pane.keysSent()).deepEqual(['Enter']);
+    should(pane.queued).be.true();
+  });
+
+  /** A busy pane whose one-line paste Claude draws as a countless chip, changed on the capture after it landed. */
+  class ChipPane extends BusyPane {
+    prompt: readonly string[] = [];
+    // One frame is two captures (its text and its colours): the landing frame is the first two showing the chip.
+    private capturesShowingChip = 0;
+    constructor(private readonly change: (pane: ChipPane) => void) {
+      super(true);
+    }
+    override async execute(argv: readonly string[]): Promise<TmuxCommandResult> {
+      if (argv[0] === 'load-buffer') return ok('');
+      if (argv[0] === 'paste-buffer') {
+        this.composer = '[Pasted text #30]';
+        return ok('');
+      }
+      if (argv[0] === 'capture-pane' && this.composer === '[Pasted text #30]' && ++this.capturesShowingChip === 3)
+        this.change(this);
+      return await super.execute(argv);
+    }
+    override lines(): readonly string[] {
+      // Claude draws a permission prompt IN PLACE of the composer.
+      const lines = super.lines();
+      return this.prompt.length === 0 ? lines : [...lines.slice(0, -1), ...this.prompt];
+    }
+  }
+  // The bottom of a real Claude 2.1.281 permission prompt (tests/fixtures/permission-prompts/claude-2.1.281-bash.txt).
+  const permissionPrompt = async (): Promise<readonly string[]> =>
+    (await readFile(join(import.meta.dir, '../../fixtures/permission-prompts/claude-2.1.281-bash.txt'), 'utf8'))
+      .trimEnd()
+      .split('\n')
+      .slice(-14);
+  const ONE_LINE = `approve — ${'every review thread is answered and CI is green. '.repeat(30)}`;
+
+  it('should never press for a chip replaced between the landing frame and Enter (&B153 review)', async () => {
+    const pane = new ChipPane(changed => {
+      changed.composer = '[Pasted text #31]';
+    });
+    const { subject } = queue(pane);
+
+    await should(subject.queue(SESSION, ONE_LINE)).be.rejectedWith(ComposerUnconfirmedError);
+    should(pane.keysSent()).be.empty();
+  });
+
+  it('should never press Enter into a permission prompt that came up after the paste landed (&B153 review)', async () => {
+    const prompt = await permissionPrompt();
+    const pane = new ChipPane(changed => {
+      changed.prompt = prompt;
+    });
+    const { subject } = queue(pane);
+
+    await should(subject.queue(SESSION, ONE_LINE)).be.rejectedWith(ComposerUnconfirmedError);
+    should(pane.keysSent()).be.empty();
   });
 });

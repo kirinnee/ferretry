@@ -136,3 +136,26 @@ export function lonePasteOf(composer: string, text: string): boolean {
   const counted = Number(chars[1]);
   return counted === text.length || counted === [...text].length;
 }
+
+/** Claude's chip for a paste with no line break: its counter and nothing else (`[Pasted text #30]`). */
+const COUNTLESS_CLAUDE_PASTE = /^\[Pasted text #(\d+)\]$/iu;
+
+/**
+ * &B153: the counter of Claude's COUNTLESS paste chip, when the composer shows that chip alone and it can be
+ * this payload's paste — a payload that travelled as a paste with no line break, which Claude draws with no
+ * `+N lines`. `undefined` for anything else.
+ *
+ * NOT A CLAIM OF OWNERSHIP. A countless chip says nothing about its text, so {@link lonePasteOf} still never
+ * claims one: a person who cleared our paste and pasted their own line shows one too. Only the live fill may
+ * use this, and only for the chip whose counter it saw right after its own paste landed in a composer it had
+ * proven empty — a replacement paste draws a new counter. On 2026-11-06 refusing it outright left a
+ * 1,550-character one-line owner decision typed and unsent in a lead's box for 40 minutes.
+ *
+ * DECLARED GAP: the landing frame is the first one that shows the chip. A person who cleared our paste and pasted
+ * their own one-line draft BEFORE that frame — within the fill's first look, ~100 ms on a responsive pane — would be
+ * taken for ours. The counted chips this path always pressed have the same window for a paste of the same count.
+ */
+export function countlessPasteOf(composer: string, text: string): string | undefined {
+  if (composerTransport(text) !== 'paste' || text.includes('\n')) return undefined;
+  return COUNTLESS_CLAUDE_PASTE.exec(composer.trim())?.[1];
+}

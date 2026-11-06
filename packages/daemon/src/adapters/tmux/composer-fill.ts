@@ -33,10 +33,12 @@ import {
   type ComposerState,
   composerEvidence,
   composerInk,
+  composerInput,
   composerLanding,
   composerRows,
   composerState,
   composerTransport,
+  countlessPasteOf,
   type DeliveryFrame,
   frameCursor,
   type LandingEvidence,
@@ -45,6 +47,7 @@ import {
   landingEvidence,
   paneHoldOf,
   paneResponded,
+  readComposer,
   type TmuxController,
 } from '../../lib/tmux/index.ts';
 
@@ -189,11 +192,27 @@ async function readComposerState(
 
 /** What watching one fill proved. */
 type LandingWatch =
-  | { readonly kind: 'landed'; readonly evidence: LandingEvidence }
+  | {
+      readonly kind: 'landed';
+      readonly evidence: LandingEvidence;
+      /** &B153: the countless chip a NEW placeholder proved landed, read off that same frame. */
+      readonly chip?: string | undefined;
+    }
   /** The pane drew after the keys and still shows an empty composer holding nothing: they were dropped. */
   | { readonly kind: 'dropped' }
   /** Neither: the pane may not have read the keys yet, or shows something that does not prove them. */
   | { readonly kind: 'unproven'; readonly waitedMs: number; readonly responded: boolean };
+
+/**
+ * &B153: the counter of the countless chip (`[Pasted text #30]`) a one-line paste of ours was drawn as, read off the
+ * frame whose NEW placeholder proved it landed in a composer the fill had proven empty — so it is ours, and a
+ * person's replacement paste afterwards draws a different counter. `undefined` for any other landing.
+ */
+function chipOf(frame: DeliveryFrame, text: string, evidence: LandingEvidence): string | undefined {
+  return evidence === 'placeholder'
+    ? countlessPasteOf(composerInput(readComposer(frame.visible, frameCursor(frame))), text)
+    : undefined;
+}
 
 /**
  * Looks for the payload in fresh frames, backing off, until the pane's own latency says to stop.
@@ -227,12 +246,14 @@ async function watchLanding(
     if (respondedAt === undefined && paneResponded(before, last)) respondedAt = waited;
     deadline = landingDeadlineMs(settings, respondedAt);
     const read = composerLanding(last, text, paste);
-    if (read === 'chars' || read === 'placeholder') return { kind: 'landed', evidence: read };
+    if (read === 'chars' || read === 'placeholder')
+      return { kind: 'landed', evidence: read, chip: chipOf(last, text, read) };
     // A composer the reading cannot place falls back to the payload newly on screen. A composer the
     // cursor PROVES holds other text as well is never "landed": Enter would submit it too.
     if (read !== 'unreadable') continue;
     const proved = landingEvidence(baseline, composerEvidence(last.visible, text));
-    if (proved === 'chars' || (proved === 'placeholder' && paste)) return { kind: 'landed', evidence: proved };
+    if (proved === 'chars' || (proved === 'placeholder' && paste))
+      return { kind: 'landed', evidence: proved, chip: chipOf(last, text, proved) };
   }
   // No NEW evidence, but a placeholder is nonetheless sitting in the composer: a paste of ours is in
   // there (a repaint can hide the counter bump, and re-pasting identical text may not move it). A
@@ -267,6 +288,24 @@ export async function fillComposer(
   session: string,
   text: string,
 ): Promise<LandingEvidence> {
+  return (await fillComposerLanding(tmux, sleep, settings, session, text)).evidence;
+}
+
+/** What a fill proved: how it landed, and &B153's countless chip when that is how it was drawn. */
+export interface ComposerLanding {
+  readonly evidence: LandingEvidence;
+  /** The counter of the countless paste chip the landing frame showed as ours (`countlessPasteOf`). */
+  readonly chip?: string | undefined;
+}
+
+/** {@link fillComposer}, also answering the countless chip its landing frame showed as ours. */
+export async function fillComposerLanding(
+  tmux: TmuxController,
+  sleep: DeliverySleep,
+  settings: ComposerFillSettings,
+  session: string,
+  text: string,
+): Promise<ComposerLanding> {
   const paste = composerTransport(text) === 'paste';
   let typings = 0;
   for (let attempt = 0; attempt < settings.composerAttempts; attempt++) {
@@ -290,7 +329,7 @@ export async function fillComposer(
     else await tmux.sendLiteral(session, text);
     typings += 1;
     const watched = await watchLanding(tmux, sleep, settings, session, text, paste, frame);
-    if (watched.kind === 'landed') return watched.evidence;
+    if (watched.kind === 'landed') return { evidence: watched.evidence, chip: watched.chip };
     if (watched.kind === 'unproven')
       throw new ComposerUnconfirmedError(
         watched.responded

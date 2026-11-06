@@ -444,6 +444,7 @@ import {
   FileSendLedger,
   FileSendReproofMarker,
   FileSendTurnStore,
+  FileTranscriptTail,
   ResumeSendReviver,
   StorageSendRepository,
   TimerSendScheduler,
@@ -1187,6 +1188,7 @@ import {
   TranscriptProvenanceCapture,
   type TranscriptSearchMatch,
   type TranscriptSearchOptions,
+  TranscriptRetractionProof,
   TranscriptSendEvidence,
   type TranscriptSource,
   TranscriptTailCache,
@@ -9380,6 +9382,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         milliseconds => Bun.sleep(milliseconds),
       );
       const sendTranscripts = createTranscriptReader(storage);
+      const sendTranscriptFiles = createTranscriptFileResolver(storage);
       /**
        * Where each send WENT. Built before the send service, which tells it about every transport, and
        * handed the service back through two late-bound ports — a re-attempt and a failure notice are
@@ -9449,6 +9452,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock,
           pause: async ms => await new Promise<void>(resolve => setTimeout(resolve, ms)),
           tracking: sendTracker,
+          // &B153: proof from the transcript that a delivered pointer back in the box was taken back, not recalled.
+          retraction: new TranscriptRetractionProof(
+            new FileTranscriptTail(async id => await sendTranscriptFiles.file(id)),
+          ),
         },
         // The receiving agent is told the CLI a human types, not this daemon — `fyd send` is not a
         // command, exactly as the harness quirk service already reasons about `fyd resume`.
@@ -12678,6 +12685,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           stuckInput: {
             sends: async sessionId => await sendLedger.list(parseSessionId(sessionId)),
             resubmit: async (sessionId, sendId) => await sends.resubmitStuck(parseSessionId(sessionId), sendId),
+            retracted: async sessionId => await sends.retractedDraft(parseSessionId(sessionId)),
             markStalled: async (sessionId, reason) => {
               await sendRepository.transition(parseSessionId(sessionId), {
                 event: 'control.input_stuck',

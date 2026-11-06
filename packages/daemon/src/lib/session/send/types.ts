@@ -407,8 +407,11 @@ export interface SendTerminal {
    * Bounded, and verified by reading the composer after each key.
    */
   clearComposer(id: SessionId, text: string): Promise<ComposerClearOutcome>;
-  /** Presses Enter once, ONLY when the composer holds exactly `text`, and reports where it went. */
-  submitComposer(id: SessionId, text: string): Promise<ComposerSubmitOutcome>;
+  /**
+   * Presses Enter once, ONLY when the composer holds exactly `text`, and reports where it went. `strict` (&B153) also
+   * refuses a clipped drawing of it (`…`): the composer must be the whole text, re-wrapped at most.
+   */
+  submitComposer(id: SessionId, text: string, strict?: boolean): Promise<ComposerSubmitOutcome>;
 }
 
 /** Where a send's fate is decided, told each time a transport finishes so it can look. */

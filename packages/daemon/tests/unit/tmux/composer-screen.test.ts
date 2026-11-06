@@ -5,6 +5,7 @@ import should from 'should';
 import {
   type ComposerCursor,
   composerHoldsOtherText,
+  countlessPasteOf,
   composerInput,
   composerLanding,
   composerRows,
@@ -671,6 +672,18 @@ describe('B144: whether the composer holds text that is not the payload, right b
     should(composerHoldsOtherText(...typedAt('[Pasted text #3 +2 lines]'), PASTE)).be.false();
     should(composerHoldsOtherText(...typedAt('[Pasted text #999 +30 lines]'), PASTE)).be.true();
     should(composerHoldsOtherText(...typedAt('[Pasted text #3 +2 lines]'), 'a literal message')).be.true();
+  });
+
+  it('&B153: should still refuse Claude’s countless chip: only the live fill may pin it by its counter', () => {
+    const oneLine = `approve — ${'every review thread is answered and CI is green. '.repeat(10)}`;
+    should(composerHoldsOtherText(...typedAt('[Pasted text #30]'), oneLine)).be.true();
+    should(countlessPasteOf('[Pasted text #30]', oneLine)).equal('30');
+    should(countlessPasteOf(' [Pasted text #7] ', oneLine)).equal('7');
+    should(countlessPasteOf('[Pasted text #30]', PASTE)).be.undefined();
+    should(countlessPasteOf('[Pasted text #30]', 'a short literal message')).be.undefined();
+    should(countlessPasteOf('[Pasted text #30 +2 lines]', oneLine)).be.undefined();
+    should(countlessPasteOf('[Pasted text #30] and my words', oneLine)).be.undefined();
+    should(countlessPasteOf('[Pasted Content 900 chars]', oneLine)).be.undefined();
   });
 });
 

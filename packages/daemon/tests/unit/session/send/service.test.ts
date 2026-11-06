@@ -32,6 +32,7 @@ import {
   type SendSettlement,
   type SendTarget,
   type SendTerminal,
+  type SendRetractionProof,
   type SendTracking,
   type SendTransition,
   type SendTurnStore,
@@ -224,8 +225,12 @@ class FakeTerminal implements SendTerminal {
     return this.clearOutcome;
   }
 
-  async submitComposer(): Promise<ComposerSubmitOutcome> {
+  /** Whether each Enter asked for the strict whole-text check (&B153). */
+  readonly submitStrict: boolean[] = [];
+
+  async submitComposer(_id?: SessionId, _text?: string, strict = false): Promise<ComposerSubmitOutcome> {
     this.calls.push('submitComposer');
+    this.submitStrict.push(strict);
     return this.submitOutcome;
   }
 
@@ -350,6 +355,7 @@ function parts(
   frames: SendPaneObservation[] = [pane({ promptReady: true })],
   senders: Readonly<Record<string, SendTarget>> = {},
   pause?: (ms: number) => Promise<void>,
+  retraction?: SendRetractionProof,
 ): Parts {
   const repository = new FakeRepository(current ?? undefined, senders);
   const ledger = new FakeLedger();
@@ -363,7 +369,21 @@ function parts(
   const tracked: string[] = [];
   const tracking: SendTracking = { track: id => void tracked.push(id) };
   const service = new SessionSendService(
-    { repository, ledger, terminal, turns, channel, gate, reviver, peerWaits, serial, clock, tracking, pause },
+    {
+      repository,
+      ledger,
+      terminal,
+      turns,
+      channel,
+      gate,
+      reviver,
+      peerWaits,
+      serial,
+      clock,
+      tracking,
+      pause,
+      retraction,
+    },
     defaultSessionSendSettings,
   );
   return { service, repository, ledger, terminal, turns, channel, gate, reviver, peerWaits, serial, tracked };
@@ -2382,6 +2402,216 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
 
       should(again.record.sendId).equal('send-1');
       should(built.terminal.typed).have.length(1);
+    });
+  });
+
+  describe('&B153: a delivered pointer the harness took back', () => {
+    const delivered = (overrides: Partial<SendRecord> = {}): SendRecord =>
+      unconfirmed({
+        fate: 'delivered',
+        unaccountedReason: undefined,
+        fateAt: '2026-08-01T11:59:03.000Z',
+        evidence: {
+          key: 'aeeeefa4-973d-452a-aff6-c7cde97456e8',
+          harness: 'claude',
+          kind: 'chat.user',
+          proof: 'normal-user-record',
+          observedAt: '2026-08-01T11:59:01.000Z',
+          shapeVersion: 1,
+          matchedTurn: 5,
+          tier: 'turn-instruction',
+        },
+        ...overrides,
+      });
+    /** The transcript's answer, recorded: `true` is "its user record was never answered". */
+    class FakeRetraction implements SendRetractionProof {
+      readonly asked: string[] = [];
+      constructor(private readonly unansweredAnswer: boolean | Error) {}
+      async unanswered(_id: SessionId, record: SendRecord): Promise<boolean> {
+        this.asked.push(record.sendId);
+        if (this.unansweredAnswer instanceof Error) throw this.unansweredAnswer;
+        return this.unansweredAnswer;
+      }
+    }
+    function taken(
+      frames: SendPaneObservation[],
+      proof: SendRetractionProof | undefined,
+      ...records: SendRecord[]
+    ): Parts {
+      const built = parts(target({ status: 'running', turn: 5 }), frames, {}, undefined, proof);
+      for (const record of records) built.ledger.records.set(record.sendId, record);
+      return built;
+    }
+
+    it('tells the Warden which delivered pointer an idle box holds once the transcript proves it unanswered', async () => {
+      const proof = new FakeRetraction(true);
+      const built = taken([pane({ draft: POINTER })], proof, delivered());
+
+      should(await built.service.retractedDraft(ID)).equal('send-0');
+      should(proof.asked).eql(['send-0']);
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('never claims a delivered pointer the transcript shows answered: a person recalled it (review blocker)', async () => {
+      for (const proof of [new FakeRetraction(false), new FakeRetraction(new Error('unreadable')), undefined]) {
+        const built = taken([pane({ draft: POINTER })], proof, delivered());
+
+        should(await built.service.retractedDraft(ID)).be.undefined();
+        should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
+        should(await built.service.finishOwnDraft(ID)).eql({ kind: 'foreign' });
+        should(built.terminal.calls).not.containEql('submitComposer');
+      }
+    });
+
+    it('refuses a new send behind a recalled pointer as a person’s draft, pressing nothing', async () => {
+      const built = taken([pane({ draft: POINTER })], new FakeRetraction(false), delivered());
+
+      const refusal = await built.service.send(request()).catch((error: unknown) => error);
+
+      should(refusal).be.instanceof(SendRefused);
+      should(built.terminal.calls).not.containEql('submitComposer');
+      should(built.terminal.typed).be.empty();
+    });
+
+    it('tells the Warden nothing for a busy or dialogued pane, a person’s draft, or a pointer something followed', async () => {
+      const later = unconfirmed({
+        sendId: 'send-1',
+        path: 'direct',
+        acceptedAt: '2026-08-01T12:00:00.000Z',
+        attemptAt: '2026-08-01T12:00:00.000Z',
+        message: 'a later message typed as itself',
+        matchText: 'a later message typed as itself',
+        fate: 'delivered',
+      });
+      const proof = new FakeRetraction(true);
+      const cases = [
+        taken([pane({ draft: POINTER, activeWork: true })], proof, delivered()),
+        taken([pane({ draft: POINTER, blockingPrompt: 'Do you want to proceed?' })], proof, delivered()),
+        taken([pane({ draft: 'my own half-written words' })], proof, delivered()),
+        taken([pane({ draft: POINTER })], proof, delivered(), later),
+        taken([pane({})], proof, delivered()),
+      ];
+
+      for (const built of cases) should(await built.service.retractedDraft(ID)).be.undefined();
+    });
+
+    it('lets the Warden press a proven one once, re-opening it on its old evidence and starting no second turn', async () => {
+      const built = taken([pane({ draft: POINTER })], new FakeRetraction(true), delivered());
+
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('submitted');
+
+      should(built.terminal.calls.filter(call => call === 'submitComposer')).have.length(1);
+      // Open again, so only the user record this Enter writes can settle it; the rewound one stays claimed.
+      should(built.ledger.records.get('send-0')).match({
+        fate: 'accepted',
+        submitNudges: 1,
+        attemptAt: NOW,
+        evidence: { key: 'aeeeefa4-973d-452a-aff6-c7cde97456e8' },
+      });
+      should(built.ledger.records.get('send-0')?.fateAt).be.undefined();
+      should(built.repository.journal_.at(0)).match({
+        event: 'control.send_resubmitted',
+        data: { by: 'warden', reason: 'pointer taken back into the composer by the harness' },
+      });
+      should(built.repository.transitions).be.empty();
+      should(built.tracked).eql([ID]);
+      // Open, it is no longer a delivered pointer: a person's later recall of it cannot qualify on the old record.
+      should(await built.service.retractedDraft(ID)).be.undefined();
+    });
+
+    it('lets the queue finish a proven one rather than wait behind it as a draft', async () => {
+      const built = taken([pane({ draft: POINTER })], new FakeRetraction(true), delivered());
+
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'clear' });
+      should(built.ledger.records.get('send-0')).match({ fate: 'accepted', submitNudges: 1 });
+    });
+
+    it('presses nothing past the limit, so a harness that keeps taking it back is escalated', async () => {
+      const built = taken(
+        [pane({ draft: POINTER })],
+        new FakeRetraction(true),
+        delivered({ submitNudges: STRANDED_ENTER_LIMIT + 1 }),
+      );
+
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('repairs a send ONCE: taken back again, it is flagged and escalated but never pressed (review round 3)', async () => {
+      // Repair 1 re-opened it and the tracker settled it on its NEW user record; that one was taken back too.
+      const again = delivered({
+        submitNudges: 1,
+        evidence: { ...delivered().evidence!, key: 'e7d3ded4-47ac-4b92-ac07-c5ebc422f393' },
+      });
+      const built = taken([pane({ draft: POINTER })], new FakeRetraction(true), again);
+
+      should(await built.service.retractedDraft(ID)).equal('send-0');
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'stuck', sendId: 'send-0', tried: false });
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('reports nothing once a repaired send was answered: a later recall of it is a person’s', async () => {
+      const answered = delivered({ submitNudges: 1 });
+      const built = taken([pane({ draft: POINTER })], new FakeRetraction(false), answered);
+
+      should(await built.service.retractedDraft(ID)).be.undefined();
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'foreign' });
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('presses nothing for a repaired send before the tracker re-binds it, on any path (review round 4)', async () => {
+      const proof = new FakeRetraction(true);
+      const built = taken([pane({ draft: POINTER })], proof, delivered());
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('submitted');
+      should(built.terminal.submitStrict).eql([true]);
+      // Open with its old evidence; the box shows the pointer again — a second rewind, or a person's recall.
+      should(built.ledger.records.get('send-0')).match({ fate: 'accepted', submitNudges: 1 });
+
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'stuck', sendId: 'send-0', tried: false });
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
+      should(await built.service.resubmit(ID, 'send-0')).match({ submitNudges: 1 });
+      const refusal = await built.service.send(request()).catch((error: unknown) => error);
+      should(refusal).be.instanceof(SendRefused);
+      should(built.terminal.calls.filter(call => call === 'submitComposer')).have.length(1);
+    });
+
+    it('claims and presses a taken-back pointer only whole, never a clipped drawing of it (review round 4)', async () => {
+      const clipped = `${POINTER.slice(0, POINTER.indexOf('.md') + 12)}…`;
+      const built = taken([pane({ draft: clipped })], new FakeRetraction(true), delivered());
+
+      should(await built.service.retractedDraft(ID)).be.undefined();
+      should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'foreign' });
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('keeps the repair count when the tracker retypes a repaired send, so it never earns a second (review round 5)', async () => {
+      const reopened = delivered({ fate: 'accepted', fateAt: undefined, submitNudges: 1 });
+      const built = taken([pane({ promptReady: true })], new FakeRetraction(true), reopened);
+
+      await built.service.reattempt(ID, 'send-0', { by: 'daemon' });
+
+      should(built.ledger.records.get('send-0')).match({ attempt: 2, submitNudges: 1 });
+      should(built.terminal.typed).have.length(1);
+    });
+
+    it('never lets the tracker’s nudge press a delivered send', async () => {
+      const built = taken([pane({ draft: POINTER })], new FakeRetraction(true), delivered());
+
+      should(await built.service.resubmit(ID, 'send-0')).match({ fate: 'delivered' });
+      should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('never claims a countless paste chip after the fact: it could be a person’s replacement paste', async () => {
+      const ONE_LINE = `approve — ${'every review thread is answered and CI is green. '.repeat(30)}`;
+      const built = idle(
+        [pane({ draft: '[Pasted text #30]' })],
+        unconfirmed({ path: 'direct', message: ONE_LINE, matchText: ONE_LINE, turn: 5, senderKind: 'human' }),
+      );
+
+      should(await built.service.finishOwnDraft(ID)).eql({ kind: 'foreign' });
+      should(built.terminal.calls).not.containEql('submitComposer');
     });
   });
 });
