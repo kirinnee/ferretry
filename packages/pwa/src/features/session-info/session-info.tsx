@@ -101,9 +101,7 @@ const listRead = <T,>(
       : { kind: 'loading' };
 
 /** The loader a host without the read binds, so the hook order never depends on the port. */
-const NO_LIMITS: ContextLoader<LimitsView> = async () => {
-  throw new Error('this host does not read the limits');
-};
+const NO_LIMITS: ContextLoader<LimitsView> = async () => await Promise.reject(new Error('no limits read'));
 
 const NO_RELAUNCH: ContextLoader<SessionRelaunchSettings> = async () => ({ current: true, reasons: [] });
 
