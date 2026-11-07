@@ -3,7 +3,8 @@ import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import type { Question } from '../../../../contract/index.ts';
 import { pendingQuestionOf, questionAnswerApi } from '../../../../app/questions/question-form.tsx';
 import { QuestionRenderer, questionAskValue } from '../../../../app/questions/question-renderer.tsx';
-import { fakeClient, withClient } from '../../../support/app/client.tsx';
+import { fakeClient } from '../../../support/app/fake-client.ts';
+import { withClient } from '../../../support/app/client.tsx';
 
 const QUESTION: Question = {
   format: 1,
@@ -44,7 +45,7 @@ describe('the ask:question renderer', () => {
   });
 
   test('with its ferret it is the answer form, and Submit posts the answer as the person with its request id', async () => {
-    const client = fakeClient({ 'POST /v1/ferrets/:ferretId/answer': () => ({ ok: true }) });
+    const client = fakeClient({ 'POST /v1/ferrets/:ferretId/answer': () => ({ ok: true }) }, 'd1');
     view = await mount(withClient(client, <QuestionRenderer value={{ ref: QUESTION, ferret: 'f1' }} />));
     const form = must(view.container.querySelector('.fy-question-form'), 'the answer form');
     expect(form.getAttribute('data-daemon-id')).toBe('d1');
@@ -64,7 +65,7 @@ describe('the ask:question renderer', () => {
   });
 
   test('the answer api sends only the fields it was given', async () => {
-    const client = fakeClient({ 'POST /v1/ferrets/:ferretId/answer': () => ({}) });
+    const client = fakeClient({ 'POST /v1/ferrets/:ferretId/answer': () => ({}) }, 'd1');
     await questionAnswerApi(client).answer('f2', 'toolu_2', [], 'my own words');
     expect(client.calls[0]).toMatchObject({
       params: { ferretId: 'f2' },

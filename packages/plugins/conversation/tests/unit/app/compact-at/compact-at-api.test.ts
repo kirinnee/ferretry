@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { DaemonCallError } from '@ferretry/app';
 import { getFerretCompactAt, patchFerretCompactAt } from '../../../../app/compact-at/compact-at-api.ts';
-import { fakeClient, refusal } from '../../../support/app/client.tsx';
+import { fakeClient, refusal } from '../../../support/app/fake-client.ts';
 
 const READ = { own: 250_000, effective: 250_000, window: 1_000_000, restartRequired: true, note: 'At next launch.' };
 const SAVED = { effective: 300_000, restartRequired: false, note: 'Saved.' };

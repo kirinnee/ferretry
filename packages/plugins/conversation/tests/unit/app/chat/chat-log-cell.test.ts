@@ -8,7 +8,8 @@ import { join } from 'node:path';
  * `display: contents` wrapper, so it was auto-placed into a SECOND grid row that took the whole height, and the
  * row the view had named was left empty. Every touch landed on an inert list; ✕ was in a 0px box.
  *
- * The chat log is ONE cell with layers in it. Every layer must name that cell, or it falls into a row of its own.
+ * The chat log is ONE cell with layers in it. Every layer must name that cell, or it falls into a row of its own. The
+ * layers the Agenda draws over it (an open item, the drawer scrim) are checked in the Agenda's own tests.
  * `harness/phone-chat-screenshot.ts` measures the same thing in a browser.
  */
 
@@ -27,12 +28,8 @@ describe('every layer of the chat log shares its one cell', () => {
     expect(log).toContain('grid-template-columns: minmax(0, 1fr);');
   });
 
-  it.each([
-    ['the message list', 'app/src/ui/design-system.css', '.fy-chat-log__messages'],
-    ['an open item', 'plugins/agenda/app/features/agenda/agenda-item-card.css', '.fy-item-view'],
-    ['the drawer scrim', 'plugins/agenda/app/features/agenda/agenda-chat.css', '.fy-chat-log > .fy-agenda-scrim'],
-  ])('%s names the cell', (_name, file, selector) => {
-    expect(rule(read(file), selector)).toContain('grid-area: 1 / 1;');
+  it('puts the message list in the cell', () => {
+    expect(rule(read('app/src/ui/design-system.css'), '.fy-chat-log__messages')).toContain('grid-area: 1 / 1;');
   });
 
   it('lets the message list fill its cell, so the conversation keeps its own scroller', () => {

@@ -1,6 +1,7 @@
 import { splitFerretryNotice } from '../../contract/index.ts';
 import {
   Activity,
+  ArrowRightLeft,
   BookOpen,
   ClipboardList,
   Cog,
@@ -383,6 +384,7 @@ const FEATURE_ICONS: Readonly<Record<string, LucideIcon>> = {
   Agenda: ClipboardList,
   Monitor: Activity,
   Lessons: BookOpen,
+  Move: ArrowRightLeft,
   Restart: RotateCw,
   Delivery: Send,
 };

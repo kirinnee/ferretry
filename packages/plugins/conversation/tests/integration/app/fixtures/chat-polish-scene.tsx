@@ -232,10 +232,7 @@ const FERRETRY_SENDS: readonly (readonly [string, string])[] = [
     'The command you were watching finished with exit code 1.\n\nLast output: 3 tests failed in packages/daemon.',
   ],
   ['Lessons', 'The owner reviewed a lesson you suggested and accepted it.'],
-  [
-    'Migrate',
-    'Ferretry is moving this session to another runtime; stop long-running jobs and say when they are stopped.',
-  ],
+  ['Move', 'Ferretry is moving this session to another runtime; stop long-running jobs and say when they are stopped.'],
   ['Restart', 'Ferretry restarted this session after the daemon updated.\n\nPick up where you left off.'],
   ['Delivery', 'Your message to Torrey did not arrive.\n\nIt was refused: the session had ended.'],
 ];

@@ -21,12 +21,12 @@ import { readLiveDocument } from '@ferretry/app';
 import { type AgendaId, daemonConnection, daemonFerretKey, daemonFerretScope } from '../../../../app/composer/seam.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../../../app/composer/drafts.ts';
 import {
-  fakeClient,
   socketOf,
   type SuiteStreamOpener as DaemonStreamOpener,
   type SuiteStreamSession,
   withClient,
 } from '../../../support/app/composer-host.tsx';
+import { fakeClient } from '../../../support/app/fake-client.ts';
 import { writeMdComposePref } from '@ferretry/app';
 import { ensureDom, interact, mount, must } from '@ferretry/app/testing';
 import { runAsync } from '@ferretry/app/testing';
@@ -214,7 +214,7 @@ const box = async (
         {...(options.slot === undefined ? {} : { draftSlot: options.slot })}
         ferretId="s1"
       />,
-      fakeClient(undefined, socketOf(machine.open)),
+      fakeClient({}, { more: socketOf(machine.open) }),
     ),
   );
   await settle();

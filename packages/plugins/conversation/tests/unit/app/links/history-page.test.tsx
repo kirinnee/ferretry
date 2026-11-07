@@ -8,7 +8,7 @@ import {
   readHistory,
   readHistoryEntry,
 } from '../../../../app/links/history-page.tsx';
-import { fakeClient } from '../../../support/app/client.tsx';
+import { fakeClient } from '../../../support/app/fake-client.ts';
 
 const DAEMON = 'archive-daemon';
 

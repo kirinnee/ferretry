@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { QueuedMessage } from '../../../../contract/index.ts';
 import { DaemonCallError } from '@ferretry/app';
-import { type FakeRoute, fakeClient } from '../../../support/app/fake-client.ts';
+import { type CallHandler, fakeClient } from '../../../support/app/fake-client.ts';
 import type { LedgerSendRecord } from '../../../../app/chat/send-ledger.ts';
 import type { OutboxEntry } from '../../../../app/composer/send-outbox.ts';
 import {
@@ -246,7 +246,7 @@ const DELETE = 'DELETE /v1/ferrets/:ferretId/queue/:messageId';
 
 /** A client every queue route of which refuses with `status`, as the daemon would. */
 const failing = (status: number) => {
-  const refuse: FakeRoute = () => {
+  const refuse: CallHandler = () => {
     throw new DaemonCallError(status, 'refused', 'server words');
   };
   return fakeClient({ [QUEUE]: refuse, [PATCH]: refuse, [DELETE]: refuse });
@@ -256,7 +256,7 @@ describe('readFerretQueue', () => {
   test('reads and parses the messages from the ferret’s queue route', async () => {
     const client = fakeClient({ [QUEUE]: () => ({ messages: [message()] }) });
     expect(await readFerretQueue(client, 'a-b')).toEqual([message()]);
-    expect(client.calls).toEqual([{ route: QUEUE, init: { params: { ferretId: 'a-b' }, query: {} } }]);
+    expect(client.calls).toMatchObject([{ route: QUEUE, params: { ferretId: 'a-b' }, query: {} }]);
   });
 
   test('a failure, or a page this build cannot read, is the caller’s to report', async () => {
@@ -269,7 +269,7 @@ describe('readFerretQueuePage', () => {
   test('asks the window with no parameters, and reads a daemon that names no cursor as having nothing older', async () => {
     const client = fakeClient({ [QUEUE]: () => ({ messages: [message()] }) });
     expect(await readFerretQueuePage(client, 's')).toEqual({ messages: [message()], nextCursor: null });
-    expect(client.calls[0]?.init.query).toEqual({});
+    expect(client.calls[0]?.query).toEqual({});
   });
 
   test('asks the next older page by its cursor and limit', async () => {
@@ -278,7 +278,7 @@ describe('readFerretQueuePage', () => {
       messages: [],
       nextCursor: 'm9',
     });
-    expect(client.calls[0]?.init.query).toEqual({ before: 'm 1', limit: '50' });
+    expect(client.calls[0]?.query).toEqual({ before: 'm 1', limit: '50' });
   });
 });
 
@@ -500,7 +500,7 @@ describe('which look at a message is the later one', () => {
 
 describe('queueActions', () => {
   const recorder = (status?: number) => {
-    const record: FakeRoute = () => {
+    const record: CallHandler = () => {
       if (status !== undefined) throw new DaemonCallError(status, 'refused', 'server words');
       return message();
     };
@@ -516,11 +516,12 @@ describe('queueActions', () => {
     });
     expect(await actions.edit({ sendId: 'm 1' }, '  new words ')).toBe(true);
     expect(await actions.cancel({ sendId: 'm 1' })).toBe(true);
-    expect(calls[0]).toEqual({
+    expect(calls[0]).toMatchObject({
       route: PATCH,
-      init: { params: { ferretId: 's-1', messageId: 'm 1' }, body: { text: 'new words' } },
+      params: { ferretId: 's-1', messageId: 'm 1' },
+      body: { text: 'new words' },
     });
-    expect(calls[1]).toEqual({ route: DELETE, init: { params: { ferretId: 's-1', messageId: 'm 1' } } });
+    expect(calls[1]).toMatchObject({ route: DELETE, params: { ferretId: 's-1', messageId: 'm 1' } });
     expect(refreshes).toBe(2);
   });
 
@@ -633,7 +634,7 @@ describe('queueActions with an outbox', () => {
     const actions = queueActions(client, 's', () => undefined, outbox);
     expect(await actions.edit(record, 'x')).toBe(true);
     expect(await actions.cancel(record)).toBe(true);
-    expect(client.calls.map(call => `${call.route} ${call.init.params?.['messageId']}`)).toEqual([
+    expect(client.calls.map(call => `${call.route} ${call.params?.['messageId']}`)).toEqual([
       `${PATCH} o1`,
       `${DELETE} o1`,
     ]);
@@ -647,7 +648,7 @@ describe('withdrawQueued', () => {
   test('a message still waiting on the machine is taken back through the queue route', async () => {
     const client = fakeClient({ [DELETE]: () => message() });
     expect(await withdrawQueued(client, 's-1', 'm1')).toBe('withdrawn');
-    expect(client.calls).toEqual([{ route: DELETE, init: { params: { ferretId: 's-1', messageId: 'm1' } } }]);
+    expect(client.calls).toMatchObject([{ route: DELETE, params: { ferretId: 's-1', messageId: 'm1' } }]);
   });
 
   test('a message still on this device is cancelled there, without a request', async () => {
@@ -681,7 +682,7 @@ describe('withdrawReplyVia', () => {
     }, outbox as never);
     expect(await take(card, 'm1')).toBe('withdrawn');
     expect(asked).toEqual(['studio']);
-    expect(studio.calls).toEqual([{ route: DELETE, init: { params: { ferretId: 's1', messageId: 'm1' } } }]);
+    expect(studio.calls).toMatchObject([{ route: DELETE, params: { ferretId: 's1', messageId: 'm1' } }]);
   });
 
   test('refuses a machine that is no longer paired, without asking anyone', async () => {

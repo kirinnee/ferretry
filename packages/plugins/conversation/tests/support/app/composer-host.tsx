@@ -6,20 +6,7 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { ReactElement } from 'react';
 import { ConversationClientProvider } from '../../../app/client.ts';
-
-export type FakeCall = (route: string, init?: Parameters<PluginClient['call']>[1]) => Promise<unknown>;
-
-/** A client whose `call` is the suite's, and which refuses everything else. */
-export function fakeClient(call?: FakeCall, more: Partial<PluginClient> = {}): PluginClient {
-  return {
-    call: (async (route: string, init?: Parameters<PluginClient['call']>[1]) => {
-      if (call === undefined) throw new Error(`the suite did not fake ${route}`);
-      return await call(route, init);
-    }) as PluginClient['call'],
-    subscribe: () => () => undefined,
-    ...more,
-  };
-}
+import { fakeClient } from './fake-client.ts';
 
 /** One client for every bare render, so a re-render keeps the same client (and the composer its state). */
 const BARE_CLIENT = fakeClient();

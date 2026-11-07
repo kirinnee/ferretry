@@ -23,9 +23,9 @@ import { fakeClient } from '../../../support/app/fake-client.ts';
 /** A client whose Cancel route runs `cancel` and answers the ledger row it took back. */
 const cancelling = (cancel: (ferretId: string, sendId: string) => Promise<unknown>): Pick<PluginClient, 'call'> =>
   fakeClient({
-    'POST /v1/ferrets/:ferretId/sends/:sendId/cancel': async init => {
-      const ferretId = init.params?.['ferretId'] ?? '';
-      const sendId = init.params?.['sendId'] ?? '';
+    'POST /v1/ferrets/:ferretId/sends/:sendId/cancel': async call => {
+      const ferretId = call.params['ferretId'] ?? '';
+      const sendId = call.params['sendId'] ?? '';
       await cancel(ferretId, sendId);
       return {
         v: 1,

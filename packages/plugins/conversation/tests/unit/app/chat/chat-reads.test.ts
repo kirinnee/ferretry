@@ -32,9 +32,9 @@ const daemon = () => {
   };
   const client = fakeClient(
     {
-      [LOG_PAGE]: init => page(init.params?.['ferretId'] ?? '', `whole:${init.query?.['before'] ?? ''}`),
+      [LOG_PAGE]: call => page(call.params['ferretId'] ?? '', `whole:${call.query['before'] ?? ''}`),
     },
-    conditional,
+    { more: { conditional } },
   );
   return {
     client,
@@ -94,7 +94,7 @@ describe('R265 the transcript validator memory', () => {
   });
 
   test('R265 a 304 to a read that sent no validator is an error, not an empty transcript', async () => {
-    const client = fakeClient({}, async () => ({ status: 304 }));
+    const client = fakeClient({}, { more: { conditional: async () => ({ status: 304 }) } });
     await expect(readLogPage(client, 'a', {}, new ValidatedLogMemory())).rejects.toThrow('sent no validator');
   });
 
@@ -118,13 +118,13 @@ describe('R265 the transcript validator memory', () => {
 
     expect(older.log).toBe('whole:400');
     expect(world.asked).toEqual([]);
-    expect(world.client.calls).toEqual([
-      { route: LOG_PAGE, init: { params: { ferretId: 'a' }, query: { before: '400', file: 'f1' } } },
+    expect(world.client.calls).toMatchObject([
+      { route: LOG_PAGE, params: { ferretId: 'a' }, query: { before: '400', file: 'f1' } },
     ]);
   });
 
   test('R265 a client with no conditional read reads every tail whole', async () => {
-    const client = fakeClient({ [LOG_PAGE]: init => page(init.params?.['ferretId'] ?? '', 'plain') });
+    const client = fakeClient({ [LOG_PAGE]: call => page(call.params['ferretId'] ?? '', 'plain') });
     expect((await readLogPage(client, 'a')).log).toBe('plain');
     expect((await readLogPage(client, 'a')).log).toBe('plain');
     expect(client.calls).toHaveLength(2);

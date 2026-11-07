@@ -10,7 +10,7 @@ import {
   workProjectNames,
   workSearchPort,
 } from '../../../../app/search/work-search.ts';
-import { fakeClient, refusal } from '../../../support/app/client.tsx';
+import { fakeClient, refusal } from '../../../support/app/fake-client.ts';
 
 const RELAY_PROJECT = '6f1c2f0e-3a4b-4c55-9d1e-0a7b8c9d1e2f';
 
