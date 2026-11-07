@@ -1,6 +1,8 @@
 import { defineEvent, definePort } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { type UpdateStatus, UpdateOutcomeSchema, VersionSchema } from './wire.ts';
+import { UpdateOutcomeSchema } from './view.ts';
+import { VersionSchema } from './version.ts';
+import type { UpdateStatus } from './wire.ts';
 
 /** Updates' port (§2.3): whether this daemon is behind. Installing is a route, never a port call. */
 export interface UpdatesApi {
