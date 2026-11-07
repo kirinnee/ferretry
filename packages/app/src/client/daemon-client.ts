@@ -210,11 +210,14 @@ export class DaemonClient {
     if (owner === undefined) throw new TypeError(`${caller} called ${route}, which no compiled manifest declares`);
     await this.#admit(caller, owner);
     const { method, path } = parseRouteKey(route);
+    // Only the allow-listed header crosses (`PluginCallHeaders`: `x-fy-request-id`); any other key a half passes is dropped.
+    const requestId = init.headers?.['x-fy-request-id'];
     const answer = await this.#transport.request({
       method,
       path: fillPath(path, init.params),
       ...(init.query === undefined ? {} : { query: init.query }),
       ...(init.body === undefined ? {} : { body: init.body }),
+      ...(requestId === undefined ? {} : { headers: { 'x-fy-request-id': requestId } }),
     });
     if (answer.status >= 400) throw refusal(answer);
     return answer.body as Answer;
