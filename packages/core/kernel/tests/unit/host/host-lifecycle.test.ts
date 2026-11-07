@@ -390,6 +390,47 @@ describe('live host ownership (§7.1, §9.3)', () => {
     expect((await host.dispatch(request('GET', '/v1/board'))).status).toBe(200);
   });
 
+  test('an admission that says its policy moved re-asks every open stream at once; the subscription ends with the host', async () => {
+    const w = await world();
+    const fx = accessFixture();
+    const listeners = new Set<() => void>();
+    let stillAdmitted = true;
+    const watched = {
+      ...recordingAdmission(),
+      readmit: () => stillAdmitted,
+      watch: (listener: () => void) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const host = await w.boot([
+      implementDaemon(gate, { build: () => ({ provides: { admission: watched } }) }),
+      ...fx.implementations.slice(1),
+    ]);
+    expect(listeners.size).toBe(1);
+    const decision = await host.dispatcher.upgrade(request('GET', '/v1/board/live'));
+    if (decision.outcome !== 'accepted') throw new Error('upgrade');
+    const closes: number[] = [];
+    await decision.attach({
+      send: () => 0,
+      close: code => {
+        closes.push(code);
+      },
+      bufferedBytes: () => 0,
+    });
+    // Nothing moved: the notice alone closes nothing.
+    for (const listener of [...listeners]) listener();
+    expect(closes).toEqual([]);
+    // The policy narrowed: the notice re-asks the open stream now, with no frame and no renewal in between.
+    stillAdmitted = false;
+    for (const listener of [...listeners]) listener();
+    expect(closes).toEqual([4401]);
+    await host.stop();
+    expect(listeners.size).toBe(0);
+  });
+
   test('jobs and onStop resources from a failed build are discarded, including transitive dependents', async () => {
     const w = await world();
     const fx = accessFixture();

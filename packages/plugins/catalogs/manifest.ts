@@ -1,4 +1,4 @@
-import { Credentials, StepUp } from '@ferretry/core-gate/contract';
+import { Credentials } from '@ferretry/core-gate/contract';
 import { defineState, SessionModes } from '@ferretry/kernel/contract';
 import { definePlugin, memberRoute, route, screen, verb } from '@ferretry/kernel/manifest';
 import { AccessPort } from './contract/others.ts';
@@ -542,7 +542,6 @@ export default definePlugin({
   hooks: {
     takes: [
       { hook: Credentials, key: 'member' },
-      { hook: StepUp, key: 'member' },
       { hook: SessionModes, key: 'member' },
     ],
   },

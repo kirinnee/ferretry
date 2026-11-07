@@ -290,11 +290,9 @@ function suggestionRoutes(suggestions: SignInRuleSuggestions): readonly MountedR
 }
 
 /**
- * Gate's kept proof (`holder`) as a rule stores it (`deviceId`): the rule's signed body names the approving device as
- * `approvedBy.deviceId`, so the stored proof keeps today's field and the bytes a rule was approved over never change.
+ * Gate's kept proof as a rule stores it: both name the approving device `deviceId` (today's field), so the rule's
+ * signed body (`approvedBy.deviceId`) and the bytes a rule was approved over never change.
  */
 function storedProofOf(proof: GateStoredProof | undefined): StoredStepUpProof | undefined {
-  if (proof === undefined) return undefined;
-  const { holder, ...assertion } = proof;
-  return { deviceId: holder, ...assertion };
+  return proof === undefined ? undefined : { ...proof };
 }

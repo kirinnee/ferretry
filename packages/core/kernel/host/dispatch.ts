@@ -259,7 +259,7 @@ export class Dispatcher {
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as CallContext;
     let executed = false;
-    const response = await runInCall({ actor: decision.actor }, () =>
+    const response = await runInCall({ actor: decision.actor, standing: decision.standing }, () =>
       run(
         this.bindings,
         found.route,
@@ -381,7 +381,7 @@ export class Dispatcher {
       return { outcome: 'refused', response: refusal ?? skeletonResponse(found.route.owner.title) };
     const call = { request, params: found.params, ...decision.standing } as CallContext;
     try {
-      const attach = await runInCall({ actor: decision.actor }, () => accept(call));
+      const attach = await runInCall({ actor: decision.actor, standing: decision.standing }, () => accept(call));
       this.recorded({ table: 'socket', descriptor: found.route, request, params: found.params, decision, status: 101 });
       return {
         outcome: 'accepted',

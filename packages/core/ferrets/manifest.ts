@@ -170,7 +170,7 @@ export default definePlugin({
       route('POST /v1/ferrets', {
         minimum: 'operator',
         caller: 'any',
-        audit: { skip: 'a start is recorded in the ferret history, as today' },
+        audit: { record: AUDIT_KINDS['session.opened'] },
         guard: { none: 'answers the new ferret id only' },
       }),
       // R-0187: four segments deep with a literal third, so it never matches a ferret id. The payload digest is the proof.
