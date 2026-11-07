@@ -27,24 +27,21 @@ class RefusingAsks extends FakeAsks {
 const ownedByLead: CardView = cardView({ owner: 'lead', assignee: 'worker' }, { activity: 'orphaned' });
 
 /**
- * Board's contract fake, answering the orphaned cards given (one by default) a page at a time, recording every read.
+ * Board's contract fake, answering the orphaned cards given (one by default) in one snapshot, recording every read.
  * Its lane sets are the classic ones, so a lane reads by name.
  */
-function boardWithOrphan(
-  card: CardView | readonly CardView[] = orphaned,
-  pageSize = 500,
-): { readonly board: BoardApi; readonly reads: number[] } {
+function boardWithOrphan(card: CardView | readonly CardView[] = orphaned): {
+  readonly board: BoardApi;
+  readonly reads: number[];
+} {
   const all = Array.isArray(card) ? card : [card as CardView];
   const reads: number[] = [];
   const board: BoardApi = {
     ...fakeBoard(),
-    cardsPage: async query => {
+    orphanedCards: async () => {
       reads.push(reads.length + 1);
-      const start = query.cursor === undefined ? 0 : Number(query.cursor);
-      const end = start + Math.min(query.limit, pageSize);
-      return { cards: all.slice(start, end), nextCursor: end < all.length ? String(end) : null };
+      return { cards: all, laneSets: [lanes(PROJECT)] };
     },
-    laneSets: async () => [lanes(PROJECT)],
   };
   return { board, reads };
 }
@@ -153,8 +150,8 @@ describe('Board, an optional use of the Warden', () => {
     expect(typed[0]).not.toContain('waiting in implement');
   });
 
-  test('more than one page of orphaned cards: every one is flagged, read page by page', async () => {
-    // Arrange: 1,203 cards, three pages of 500 at most
+  test('more than one page of orphaned cards: every one is flagged, once, from one read', async () => {
+    // Arrange: 1,203 cards, more than two pages of 500
     const cards = Array.from({ length: 1203 }, (_, each) =>
       cardView({ id: `F${String(each + 1)}`, owner: 'gone', assignee: 'worker' }, { activity: 'orphaned' }),
     );
@@ -166,7 +163,7 @@ describe('Board, an optional use of the Warden', () => {
 
     // Assert
     expect(ran.status).toBe(200);
-    expect(reads).toHaveLength(3);
+    expect(reads).toHaveLength(1);
     expect(kinds(ran.json()).filter(([kind]) => kind === 'orphaned_card')).toHaveLength(1203);
   });
 

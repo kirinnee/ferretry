@@ -24,6 +24,18 @@ export interface CardPage {
   readonly nextCursor: string | null;
 }
 
+/** Every open orphaned card and the lanes of every board, read from ONE snapshot of the board. */
+export interface OrphanedCards {
+  readonly cards: readonly CardView[];
+  readonly laneSets: readonly LaneSet[];
+}
+
+/** A ferret's focus card with the lanes of its board (`null` when that board has no lane set), as `GET /v1/board/cards/:id` answers. */
+export interface FocusCard {
+  readonly card: CardView;
+  readonly laneSet: LaneSet | null;
+}
+
 /**
  * What the app and other plugins read and write through Board. There is NO `answer` here and no way for a card to ask
  * (#1552): a card is read-only status; the agenda asks, and answering an ask moves its linked cards.
@@ -42,11 +54,18 @@ export interface BoardApi {
    */
   laneSets(): Promise<readonly LaneSet[]>;
   /**
-   * The card a ferret works on (its focus), or `undefined` when it has none, the card is not on this machine, or it
-   * is gone. A daemon-side read of the ferret's own card, answered whatever the card's visibility (as the Warden's
-   * resume brief did); it is no route and no caller reads another person's board through it.
+   * Every open card Board calls orphaned (no ferret on it is alive), in board order, with the lanes of every board:
+   * ONE read of the store and ONE derivation of activity, so a card that is picked up or becomes orphaned while the
+   * caller works cannot make it skip or repeat another (paging with `cardsPage` can). Not limited to a page.
    */
-  focusOf(ferret: FerretId): Promise<CardView | undefined>;
+  orphanedCards(): Promise<OrphanedCards>;
+  /**
+   * The card a ferret works on (its focus) with the lanes of its board, or `undefined` when it has none, the card is
+   * not on this machine, or it is gone. A daemon-side read of the ferret's own card, answered whatever the card's
+   * visibility (as the Warden's resume brief did); it is no route and no caller reads another person's board
+   * through it.
+   */
+  focusOf(ferret: FerretId): Promise<FocusCard | undefined>;
   create(by: FerretId | 'owner', request: CardCreateRequest): Promise<Result<Card, BoardRefusal>>;
   act(by: FerretId | 'owner', id: CardId, request: CardActionRequest): Promise<Result<Card, BoardRefusal>>;
   /** `fy card progress`: replaces the parts named, keeps the rest. */

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import { ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { BoardPort, CardCreateRequestSchema, type CardCreateRequestInput } from '../../../contract/index.ts';
+import { boardConformance } from '../../../contract/testing/index.ts';
 import manifest from '../../../manifest.ts';
 import { boot, TEST_IDENTITY } from '../../integration/daemon/harness.ts';
 
@@ -16,6 +17,9 @@ const create = (input: Partial<CardCreateRequestInput> = {}) =>
 
 const FOCUS = manifest.data.state.find(file => file.name === 'focus');
 const f1 = ferretId('f1') as FerretId;
+
+// The same suite the fake passes, on the real daemon half: the fake and the real board cannot drift apart unseen.
+boardConformance('the real Board daemon half', async () => (await boot()).host.provided(BoardPort));
 
 const world = async () => {
   const { host, ferrets } = await boot();
@@ -98,8 +102,23 @@ describe('BoardApi.focusOf', () => {
     const focus = await board.focusOf(f1);
 
     // Assert
-    expect(focus?.id).toBe(card.id);
-    expect(focus?.title).toBe('Badge colour');
+    expect(focus?.card.id).toBe(card.id);
+    expect(focus?.card.title).toBe('Badge colour');
+  });
+
+  test('comes with the lane set of the card’s board, as the card read does', async () => {
+    // Arrange
+    const { board, made, plantFocus } = await world();
+    const card = await made('owner');
+    plantFocus({ f1: { id: card.id } });
+
+    // Act
+    const focus = await board.focusOf(f1);
+    const sets = await board.laneSets();
+
+    // Assert
+    expect(focus?.laneSet).not.toBeNull();
+    expect(focus?.laneSet).toEqual(sets.find(set => set.projectId === card.projectId));
   });
 
   test('a ferret that wrote to a card is focused on it', async () => {
@@ -113,7 +132,7 @@ describe('BoardApi.focusOf', () => {
     expect(wrote.ok).toBe(true);
 
     // Assert
-    expect((await board.focusOf(f1))?.id).toBe(card.id);
+    expect((await board.focusOf(f1))?.card.id).toBe(card.id);
   });
 
   test('a ferret with no focus gets none', async () => {
@@ -136,8 +155,8 @@ describe('BoardApi.focusOf', () => {
     const focus = await board.focusOf(f1);
 
     // Assert
-    expect(focus?.id).toBe(card.id);
-    expect(focus?.visibility).toBe('private');
+    expect(focus?.card.id).toBe(card.id);
+    expect(focus?.card.visibility).toBe('private');
   });
 
   test('a card of another machine, or one that is gone, is not answered', async () => {
@@ -152,6 +171,35 @@ describe('BoardApi.focusOf', () => {
     expect(await board.focusOf(f1)).toBeUndefined();
     // …and this machine's own id still answers.
     plantFocus({ f1: { id: card.id, machineId: TEST_IDENTITY.daemonId } });
-    expect((await board.focusOf(f1))?.id).toBe(card.id);
+    expect((await board.focusOf(f1))?.card.id).toBe(card.id);
+  });
+});
+
+describe('BoardApi.orphanedCards', () => {
+  test('lists an open card whose ferret has ended, with the lanes that name it, and not a card with a live ferret', async () => {
+    // Arrange: two cards on the implement lane; the ferret of one has stopped
+    const { board, made, ferrets } = await world();
+    ferrets.add({ id: ferretId('f2') as FerretId });
+    const ended = await made('owner', { title: 'Ended', assignee: 'f1', laneId: 'doing' });
+    const live = await made('owner', { title: 'Live', assignee: 'f2', laneId: 'doing' });
+    ferrets.setState(f1, 'stopped');
+
+    // Act
+    const read = await board.orphanedCards();
+
+    // Assert
+    expect(read.cards.map(card => card.id)).toEqual([ended.id]);
+    expect(read.cards.every(card => card.activity === 'orphaned')).toBe(true);
+    expect(read.cards.map(card => card.id)).not.toContain(live.id);
+    expect(read.laneSets.map(set => set.projectId)).toEqual([ended.projectId]);
+  });
+
+  test('is empty when no card is orphaned', async () => {
+    // Arrange
+    const { board, made } = await world();
+    await made('owner');
+
+    // Act / Assert
+    expect((await board.orphanedCards()).cards).toEqual([]);
   });
 });

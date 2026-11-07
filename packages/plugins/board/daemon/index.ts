@@ -102,6 +102,7 @@ export default implementDaemon(manifest, {
         return { cards: page.cards, nextCursor: page.nextCursor };
       },
       laneSets: world.laneSets,
+      orphanedCards: world.orphanedCards,
       focusOf: world.focusCard,
       create: async (by, request) => await settle(async () => (await service.create(request, callerOf(by))).card),
       act: async (by, id, request) => await settle(async () => (await acting.act(id, request, callerOf(by))).card),
