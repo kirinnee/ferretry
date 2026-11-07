@@ -66,6 +66,20 @@ import { createIdentitySigner, signerFor } from './session/signer.ts';
 import { openChildEnvironments, restrictFetch, restrictSpawn, restrictWebSocket } from './permissions.ts';
 import { openHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
+import { PinRegistry } from './pins.ts';
+import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
+import type { ScratchPort } from '../contract/ports.ts';
+
+const NO_PINNER: SessionRootPinner = {
+  pin: async () => {
+    throw unsupportedPlatform(process.platform);
+  },
+};
+const NO_SCRATCH: ScratchPort = {
+  open: async () => {
+    throw new FsError('unsupported', 'this daemon was started with no scratch folders');
+  },
+};
 import { buildSnapshot, type DataPluginManifest } from './snapshot.ts';
 import { type DaemonIdentity, daemonNameFrom, loadIdentity } from './identity.ts';
 import {
@@ -120,6 +134,10 @@ export interface HostAdapters {
   readonly websocket?: WebSocketPort;
   /** The machine's host name, for the daemon name. Absent: `Ferretry daemon`. */
   readonly hostname?: () => string;
+  /** Holds a folder open for `RootHandle.pin`. Absent: every pin is refused (`unsupported`). */
+  readonly pinner?: SessionRootPinner;
+  /** Private scratch folders. Absent: every open is refused. */
+  readonly scratch?: ScratchPort;
 }
 
 export interface Listening {
@@ -365,6 +383,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     return record === undefined || key === undefined ? undefined : { record, key };
   };
 
+  const pins = new PinRegistry(() => adapters.pinner ?? NO_PINNER);
   const portsFor = (manifest: Manifest, lifecycle: PluginLifecycle): KernelPorts => ({
     clock,
     log: scopedLog(adapters.logSink, manifest.id),
@@ -375,6 +394,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       { home, plugin: manifest.id, worktrees: options.worktrees ?? `${home}-worktrees` },
       manifest.permissions?.roots ?? [],
       () => bound.workFolders,
+      pins,
     ),
     events: events.portFor(manifest.id, manifest.data?.publishes ?? []),
     jobs: jobs.portFor(manifest.id),
@@ -384,7 +404,9 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       manifest.permissions?.spawn ?? [],
       openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
       items,
+      pins,
     ),
+    scratch: adapters.scratch ?? NO_SCRATCH,
     fetch: restrictFetch(manifest.id, manifest.permissions?.network ?? [], adapters.fetch, items),
     websocket: restrictWebSocket(manifest.id, manifest.permissions?.network ?? [], websockets, items),
     identity: identityPort,

@@ -38,6 +38,10 @@ import { parse as parseYaml } from 'yaml';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 import { createIdentitySigner, signerFor } from '../host/session/signer.ts';
 import { hostPermitted, type ItemReachOf, NO_ITEMS, spawnPermitted } from '../host/permissions.ts';
+import { scratchPort } from '../host/scratch.ts';
+import { PinRegistry } from '../host/pins.ts';
+import { type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
+import type { ScratchPort } from '../contract/ports.ts';
 import { testIdentity } from './identity.ts';
 import type { IdentitySigner } from '../contract/session.ts';
 import type { CallContext, MemberRouteHandler, RouteDescriptor, RouteHandler } from '../contract/route.ts';
@@ -80,6 +84,10 @@ export interface TestHostOptions {
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
   /** Answers `kernel.websocket.connect` for declared hosts (`ws:`/`wss:`). Without it a dial fails. */
   readonly websocket?: (url: URL) => WebSocketClient;
+  /** Answers `RootHandle.pin` (with the path the test root resolved). Without it a pin is refused. */
+  readonly pinner?: SessionRootPinner;
+  /** `kernel.scratch`. Default: real private temp folders, as the daemon's. */
+  readonly scratch?: ScratchPort;
   /** What the owner's installed items name, for `permissions.spawn`/`network` `{ items }` entries. Default: none. */
   readonly items?: ItemReachOf;
   /** What `kernel.identity` answers. Default: the throwaway identity's id and `test-daemon`. */
@@ -516,6 +524,14 @@ async function start(world: World): Promise<TestHost> {
     };
   };
 
+  const pins = new PinRegistry(
+    () =>
+      options.pinner ?? {
+        pin: async () => {
+          throw unsupportedPlatform('the test host');
+        },
+      },
+  );
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => ({
     root(name) {
       if (!(manifest.permissions?.roots ?? []).includes(name))
@@ -557,6 +573,9 @@ async function start(world: World): Promise<TestHost> {
             : undefined,
         remove: async path => {
           world.roots.delete(path);
+        },
+        pin: async (path, pinOptions) => {
+          return await pins.pin(manifest.id, path, pinOptions);
         },
       };
       return handle;
@@ -633,6 +652,7 @@ async function start(world: World): Promise<TestHost> {
           return options.fetch(parsed, init);
         },
       },
+      scratch: options.scratch ?? scratchPort('fy-test-'),
       websocket: {
         connect(url) {
           const parsed = new URL(String(url));

@@ -1,6 +1,7 @@
-import type { ChildEnvironmentOpener } from '../contract/bound.ts';
+import type { ChildEnvironmentOpener, FencedPath } from '../contract/bound.ts';
 import type { FetchPort, SpawnOptions, SpawnPort, WebSocketPort } from '../contract/ports.ts';
 import type { ItemKind, PermissionEntry } from '../manifest/types.ts';
+import type { PinRegistry } from './pins.ts';
 
 /** What the owner-installed, pinned items of one kind name: their programs and their hosts. */
 export interface ItemReach {
@@ -51,24 +52,23 @@ export function restrictSpawn(
   declared: readonly PermissionEntry[],
   base: SpawnPort,
   items: ItemReachOf = NO_ITEMS,
+  pins?: Pick<PinRegistry, 'lookup'>,
 ): SpawnPort {
-  const check = (program: string): void => {
+  /** Refuses an undeclared program, and a pinned cwd this plugin's roots did not mint; a Linux pin's alias is used. */
+  const check = <O extends SpawnOptions | undefined>(program: string, options: O): O => {
     if (!spawnPermitted(declared, items, program))
       throw new PermissionError(`${plugin} may not run ${programName(program)}: its manifest does not declare it.`);
+    const cwd = options?.cwd;
+    if (cwd === undefined || typeof cwd === 'string') return options;
+    const minted = pins?.lookup(plugin, cwd);
+    if (minted === undefined)
+      throw new PermissionError(`${plugin} may start a child only in a folder one of its own roots holds open.`);
+    return (minted.alias === undefined ? options : { ...options, cwd: minted.alias as FencedPath }) as O;
   };
   return {
-    run: async (program, args, options) => {
-      check(program);
-      return await base.run(program, args, options);
-    },
-    runBytes: async (program, args, options) => {
-      check(program);
-      return await base.runBytes(program, args, options);
-    },
-    start: (program, args, options) => {
-      check(program);
-      return base.start(program, args, options);
-    },
+    run: async (program, args, options) => await base.run(program, args, check(program, options)),
+    runBytes: async (program, args, options) => await base.runBytes(program, args, check(program, options)),
+    start: (program, args, options) => base.start(program, args, check(program, options)),
   };
 }
 

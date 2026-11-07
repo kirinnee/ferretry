@@ -3,7 +3,7 @@ import type { ActRunner, OpaqueId } from './act.ts';
 import type { ChildEnvironment, FencedPath, FolderRefusal, Redaction } from './bound.ts';
 import type { ConfigCollectionDef, ConfigFileDef, EventDef, StateFileDef } from './define.ts';
 import type { FerretId } from './ids.ts';
-import type { PinnedWorkingDirectory } from './pinned.ts';
+import type { HeldRoot, PinnedWorkingDirectory, PinOptions } from './pinned.ts';
 import type { IdentitySigner } from './session.ts';
 import type { PostBuildSnapshot } from './snapshot.ts';
 
@@ -21,6 +21,8 @@ export interface KernelPorts {
   readonly jobs: JobsPort;
   readonly workers: WorkersPort;
   readonly spawn: SpawnPort;
+  /** Fresh private (0700) folders for staging files a child reads (today's diff scratch), removed on close. */
+  readonly scratch: ScratchPort;
   readonly fetch: FetchPort;
   /** WebSocket clients to the hosts the manifest declared in `permissions.network` (`ws:`/`wss:` only). */
   readonly websocket: WebSocketPort;
@@ -302,6 +304,12 @@ export interface RootHandle {
   makeDirectory(path: FencedPath, options?: { readonly mode?: number }): Promise<void>;
   /** The real path of an EXISTING name, links resolved, checked again to be inside the root. */
   realPath(path: FencedPath): Promise<FencedPath>;
+  /**
+   * Holds a folder in this root OPEN and walks beneath it by descriptor (today's session-viewer pinner): the
+   * folder is fenced like every call, and the object actually held is checked again to be inside the root. Its
+   * `policyCwd` is the only cwd `kernel.spawn` accepts as a pin, and only from the plugin whose root minted it.
+   */
+  pin(path: FencedPath, options?: PinOptions): Promise<HeldRoot>;
   remove(path: FencedPath): Promise<void>;
 }
 
@@ -414,6 +422,25 @@ export interface SpawnPort {
   /** The same, keeping stdout as bytes up to a cap and saying whether it was cut. */
   runBytes(program: string, args: readonly string[], options?: SpawnBytesOptions): Promise<SpawnBytesResult>;
   start(program: string, args: readonly string[], options?: SpawnOptions): ChildHandle;
+}
+
+// scratch ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** One private folder; every name is relative to it, and nothing is written through a link it made. */
+export interface ScratchDirectory {
+  /** The folder, for a child's cwd or arguments. Gone after `close`. */
+  readonly path: FencedPath;
+  makeDirectory(rel: string, mode?: number): Promise<void>;
+  /** Create only (refused when anything is at the name), with exactly `mode` (umask does not apply). */
+  writeFile(rel: string, data: string | Uint8Array, mode?: number): Promise<void>;
+  /** A link whose target is text, never followed here. */
+  symlink(rel: string, target: string): Promise<void>;
+  /** Removes the folder and everything in it. */
+  close(): Promise<void>;
+}
+
+export interface ScratchPort {
+  open(): Promise<ScratchDirectory>;
 }
 
 // fetch ────────────────────────────────────────────────────────────────────────────────────────────────────────────

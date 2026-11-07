@@ -4,6 +4,13 @@ import type { FencedPath, FolderRefusal, WorkFolders } from '../contract/bound.t
 import { insideFence } from '../contract/home.ts';
 import type { RootHandle, RootLstat, RootName, RootsPort, RootStat } from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
+import type { PinRegistry } from './pins.ts';
+
+/** Where a root's pins come from: the kernel's registry, and the plugin they are minted for. */
+export interface RootPinning {
+  readonly registry: PinRegistry;
+  readonly plugin: string;
+}
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports']);
@@ -89,6 +96,7 @@ function rootHandle(
   name: RootName,
   base: () => string | undefined,
   check: (path: string) => Result<FencedPath, FolderRefusal> | undefined,
+  pinning?: RootPinning,
 ): RootHandle {
   const ownerRoot = OWNER_ROOTS.has(name);
   const readOnly = READ_ONLY_ROOTS.has(name);
@@ -168,6 +176,23 @@ function rootHandle(
       writable();
       await fs.remove(await real(path));
     },
+    pin: async (path, options) => {
+      if (pinning === undefined) throw new RootError('not_declared');
+      const resolved = await real(path);
+      const pinned = await pinning.registry.pin(pinning.plugin, resolved, options);
+      // The name was checked; now the OBJECT held: what the descriptor resolves to must still be in the root.
+      try {
+        const root = base();
+        if (root === undefined) throw new RootError('outside');
+        const realBase = await fs.realpath(root);
+        if (!inside(realBase, pinned.rootReal)) throw new RootError('link_escape');
+        if (ownerRoot && insideFence(home, pinned.rootReal)) throw new RootError('fenced');
+      } catch (error) {
+        await pinned.close();
+        throw error;
+      }
+      return pinned;
+    },
   };
 }
 
@@ -177,6 +202,7 @@ export function rootsPortFor(
   layout: RootLayout,
   declared: readonly RootName[],
   workFolders: () => WorkFolders | undefined,
+  pins?: PinRegistry,
 ): RootsPort {
   const allowed = new Set(declared);
   return {
@@ -202,7 +228,14 @@ export function rootsPortFor(
         if (name !== 'work' || scope?.ferret === undefined) return undefined;
         return workFolders()?.check(scope.ferret, path) ?? err('unknown_ferret');
       };
-      return rootHandle(fs, layout.home, name, base, check);
+      return rootHandle(
+        fs,
+        layout.home,
+        name,
+        base,
+        check,
+        pins === undefined ? undefined : { registry: pins, plugin: layout.plugin },
+      );
     },
   };
 }
