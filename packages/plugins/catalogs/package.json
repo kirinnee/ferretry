@@ -23,7 +23,8 @@
     "zod": "4.4.3",
     "@ferretry/core-vault": "workspace:*",
     "@ferretry/plugin-access": "workspace:*",
-    "@ferretry/plugin-connections": "workspace:*"
+    "@ferretry/plugin-connections": "workspace:*",
+    "qrcode-generator": "^2.0.4"
   },
   "sideEffects": false
 }
