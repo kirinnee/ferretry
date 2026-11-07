@@ -20,6 +20,7 @@
  * Pure: no IO, no clock, no globals.
  */
 
+import type { LivenessSample as PaneLivenessSample } from '@ferretry/plugin-terminals/contract';
 import { paneShowsActiveWork } from './pane-text.ts';
 import { ledgerAges } from './sus.ts';
 import { isoFromMs } from './time.ts';
@@ -108,20 +109,14 @@ export function textFingerprint(text: string): string {
   return hash.toString(16).padStart(8, '0');
 }
 
-/** One look at a ferret. An `undefined` field could not be read this tick and changes nothing. */
-export interface LivenessSample {
-  /** A digest of the screen as it is now. */
-  readonly paneHash?: string;
-  /** The screen itself, for its work counters. */
-  readonly pane?: string;
+/**
+ * One look at a ferret. An `undefined` field could not be read this tick and changes nothing. The pane's part — screen
+ * digest, masked screen, subprocess, leftover browser — is Terminals' sample (its contract owns that shape); the
+ * transcript digest is taken beside it from Conversation, which owns the transcript.
+ */
+export interface LivenessSample extends PaneLivenessSample {
   /** A digest of the transcript's tail: it changes when the conversation grows. */
   readonly transcriptHash?: string;
-  /** A live tool command under the pane, or a background terminal the harness reports. */
-  readonly subprocessAlive?: boolean;
-  /** Which tool command is running — a different one starts a new episode. */
-  readonly subprocessKey?: string;
-  /** A browser the agent launched is still running under the pane. */
-  readonly leftoverBrowser?: boolean;
 }
 
 /** What the liveness layer remembers of one ferret between ticks. */

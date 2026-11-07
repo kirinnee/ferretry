@@ -12,6 +12,21 @@ export interface BrowserPageRef {
   readonly incognito?: true;
 }
 
+/**
+ * Why a browser under a ferret's pane was left alone, a closed set (never free text, never argv): `not-proved` (the
+ * fresh re-proof said it is not that browser under that pane, threw, or Terminals was off), `gone` (no such process
+ * any more), `tool-running` (a tool command runs under the pane and may be using it), `invalid-pid` (1 or below, or
+ * not a whole number, reported as -1), `signal-refused` (proved, but the SIGTERM did not land).
+ */
+export const LeftAloneWhySchema = z.enum(['not-proved', 'gone', 'tool-running', 'invalid-pid', 'signal-refused']);
+export type LeftAloneWhy = z.infer<typeof LeftAloneWhySchema>;
+
+/** What one close of a ferret's leftover browsers did: how many closed, and each pid it left alone and why. */
+export interface LeftoverBrowsersClosed {
+  readonly closed: number;
+  readonly leftAlone: readonly { readonly pid: number; readonly why: LeftAloneWhy }[];
+}
+
 export interface BrowsersApi {
   state(): Promise<BrowserStateView>;
   /**
@@ -30,6 +45,15 @@ export interface BrowsersApi {
    * (Runtimes keeps it and no contract serves it), so Browsers cannot say, and leaves it absent rather than guess.
    */
   browserPorts?(): Promise<{ readonly shared: boolean }>;
+  /**
+   * Close the browsers a ferret launched that still run under its own pane, read afresh at this moment (today's
+   * `closeLeftoverBrowsers`). ONLY A PID IT CAN PROVE IS SIGNALLED: each is re-proved by Terminals immediately before
+   * its SIGTERM (same pid and start, still a top-level browser in THAT pane's tree, no tool command running) — never
+   * the ferret itself, never a helper's browser, never anything outside its tree. Every other one is left alone and
+   * reported in `leftAlone`, and the rest are still tried. Terminals off: `{ closed: 0, leftAlone: [] }`. Throws only
+   * when the pane's tree could not be read at all.
+   */
+  closeLeftoverBrowsers(ferret: FerretId): Promise<LeftoverBrowsersClosed>;
 }
 
 export const BrowsersPort = definePort<BrowsersApi>('browsers');

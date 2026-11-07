@@ -8,6 +8,7 @@ import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing
 import { fakeKernel } from '../../support/kernel.ts';
 import { waitFor } from '../../support/wait-for.ts';
 import { wardenHost } from './host.ts';
+import { FERRET, livenessHost } from './liveness-host.ts';
 
 const MINUTE = 60_000;
 
@@ -82,5 +83,35 @@ describe('job parity', () => {
     disarm();
 
     expect(early).toBe(boot);
+  });
+
+  test('J-0034 the liveness monitor is armed with the sweep, and from then each 30 s tick looks at a ferret through Terminals', async () => {
+    const host = livenessHost({ sample: () => ({ paneHash: 'same', pane: '❯ ', subprocessAlive: false }) });
+    await new Promise(resolve => setTimeout(resolve, 15));
+    expect(host.looks()).toBe(0);
+
+    const disarm = host.arm();
+    await host.ticks(2);
+    disarm();
+
+    expect(host.looks()).toBe(2);
+  });
+
+  test('J-0035 0 nudges on the 5.0 subsystem; 1 nudge with the setting on, only while the Warden is on and may nudge alone', async () => {
+    const quiet = () => ({ paneHash: 'same', pane: '❯ ', subprocessAlive: false });
+    const sentTo = async (config: unknown, reflexNudges?: boolean): Promise<number> => {
+      const host = livenessHost({ sample: quiet, config, ...(reflexNudges === undefined ? {} : { reflexNudges }) });
+      const disarm = host.arm();
+      await host.ticks(12);
+      disarm();
+      return (await host.conversation.sends(FERRET)).sends.length;
+    };
+
+    // The 5.0 subsystem: the tick looks and detects, and types to nobody (FerretSummary lacks waiting and reflex times).
+    expect(await sentTo(undefined)).toBe(0);
+    // Today's act, with the setting on.
+    expect(await sentTo(undefined, true)).toBe(1);
+    expect(await sentTo({ mayActAlone: { nudge: false } }, true)).toBe(0);
+    expect(await sentTo({ enabled: false }, true)).toBe(0);
   });
 });
