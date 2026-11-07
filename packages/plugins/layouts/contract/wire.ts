@@ -269,6 +269,4 @@ export const LAYOUT_CODES = {
   builtIn: 'layout_built_in',
   exists: 'layout_exists',
   themeUnknown: 'theme_unknown',
-  /** The daemon has no door to write `config/` with, so it can show a layout but not change one. */
-  noConfigDoor: 'layout_config_unavailable',
 } as const;

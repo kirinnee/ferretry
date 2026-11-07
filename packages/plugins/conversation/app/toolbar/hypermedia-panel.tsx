@@ -16,7 +16,7 @@ import { Shapes, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useConversationClient } from '../client.ts';
 import '../compact-at/compact-at.css';
-import { hypermediaOn, patchFerretHypermedia, readFerretHypermedia } from './hypermedia-api.ts';
+import { patchFerretHypermedia, readFerretHypermedia } from './hypermedia-api.ts';
 
 /**
  * The panel for one ferret; nothing without one, and nothing for a connection that cannot control it (today's
@@ -65,7 +65,7 @@ export function HypermediaSwitch({
       setBusy(true);
       try {
         const result = await patchFerretHypermedia(client, ferretId, next);
-        setOn(result.view === undefined ? next : hypermediaOn(result.view.config));
+        setOn(next);
         setNote(result.note);
       } catch (reason) {
         setNote(`Hypermedia could not be switched: ${reason instanceof Error ? reason.message : String(reason)}`);

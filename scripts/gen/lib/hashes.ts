@@ -113,6 +113,18 @@ export async function surfaceOf(_ws: Workspace, subsystem: LoadedSubsystem, toJs
 }
 
 /**
+ * The member surface of one package (§9.6): its member-table routes only, each with the JSON schema of the bodies it
+ * parses and answers. Undefined for a package with no member routes. Sorted by route key, so reordering declarations
+ * is not a change; nothing from the owner routes, the contract's other schemas or any consumed contract enters it.
+ */
+export function memberSurfaceOf(subsystem: LoadedSubsystem, toJsonSchema: ToJsonSchema): Json | undefined {
+  const routes = subsystem.manifest.actions?.memberRoutes ?? [];
+  if (routes.length === 0) return undefined;
+  const sorted = [...routes].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return { id: subsystem.manifest.id, memberRoutes: toStableJson(sorted, toJsonSchema) };
+}
+
+/**
  * Which packages each package consumes (§9.6): providers of its needs and uses, offerers of hooks it takes, the
  * registrar of each ask source it renders, and every contract its own files import.
  */
@@ -122,6 +134,12 @@ export function consumedBy(graph: StartGraph, edges: readonly ImportEdge[]): Rea
   for (const id of graph.ids)
     for (const take of graph.manifests.get(id)?.hooks?.takes ?? [])
       if (take.hook.name === 'ask.sources' && take.key !== undefined) askRegistrar.set(take.key, id);
+  // A reference prefix is registered by the first package (start order) that declares a renderer for it; a package
+  // that renders the same prefix consumes that registrar (§9.6: "a reference prefix it renders").
+  const prefixRegistrar = new Map<string, string>();
+  for (const id of graph.ids)
+    for (const entry of graph.manifests.get(id)?.ui?.renderers ?? [])
+      if (entry.kind === 'reference' && !prefixRegistrar.has(entry.prefix)) prefixRegistrar.set(entry.prefix, id);
   for (const id of graph.ids) {
     const m = graph.manifests.get(id) as Manifest;
     const add = (other: string | undefined): void => {
@@ -131,7 +149,16 @@ export function consumedBy(graph: StartGraph, edges: readonly ImportEdge[]): Rea
       for (const provider of graph.providers.get(token.name) ?? []) add(provider);
     for (const take of m.hooks?.takes ?? [])
       for (const offerer of graph.offerers.get(take.hook.name) ?? []) add(offerer);
-    for (const entry of m.ui?.renderers ?? []) if (entry.kind === 'ask') add(askRegistrar.get(entry.source));
+    for (const entry of m.ui?.renderers ?? []) {
+      if (entry.kind === 'ask') add(askRegistrar.get(entry.source));
+      else add(prefixRegistrar.get(entry.prefix));
+    }
+    // §9.6: "an `input.targets` kind it drives". A package that offers `input.targets` drives every kind a taker
+    // registers under it (a terminal, a page), so a change to a taker's contract changes the offerer's hash.
+    if ((m.hooks?.offers ?? []).some(offer => offer.hook.name === INPUT_TARGETS))
+      for (const other of graph.ids)
+        if ((graph.manifests.get(other)?.hooks?.takes ?? []).some(take => take.hook.name === INPUT_TARGETS))
+          add(other);
   }
   for (const edge of edges) {
     const from = edge.fromPkg.id;
@@ -143,15 +170,21 @@ export function consumedBy(graph: StartGraph, edges: readonly ImportEdge[]): Rea
   return consumed;
 }
 
+/** The Vault hook whose keys are target kinds (`terminal`, `page`, …). */
+const INPUT_TARGETS = 'input.targets';
+
 export interface ContractHashes {
   readonly canonical: string;
   readonly effective: string;
+  /** Over the member-table routes only (§9.6); absent for a package with no member routes. */
+  readonly member?: string;
 }
 
 /** Folds canonical hashes into effective ones over the consumption graph (Tarjan SCCs, deterministic). */
 export function effectiveHashes(
   canonical: ReadonlyMap<string, string>,
   consumed: ReadonlyMap<string, ReadonlySet<string>>,
+  member: ReadonlyMap<string, string> = new Map(),
 ): ReadonlyMap<string, ContractHashes> {
   const ids = [...canonical.keys()].sort();
   let index = 0;
@@ -202,7 +235,12 @@ export function effectiveHashes(
   const result = new Map<string, ContractHashes>();
   for (const id of ids) {
     const own = canonical.get(id) as string;
-    result.set(id, { canonical: own, effective: sha256(`${own}\n${sccHash[sccOf.get(id) as number]}`) });
+    const surface = member.get(id);
+    result.set(id, {
+      canonical: own,
+      effective: sha256(`${own}\n${sccHash[sccOf.get(id) as number]}`),
+      ...(surface === undefined ? {} : { member: surface }),
+    });
   }
   return result;
 }

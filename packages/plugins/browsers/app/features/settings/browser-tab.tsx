@@ -22,11 +22,14 @@ import {
 import { BrowserModeSection, HELD_CHANGE_SENTENCE, type SaveOutcome } from './browser-mode-section.tsx';
 import { BrowserProxySection } from './browser-proxy-section.tsx';
 import { BrowserStateLine } from './browser-state-line.tsx';
-import { SetupNote, SetupSection } from '@ferretry/app/ui';
+import { SetupNote, SetupSection, useChangeAuthority } from '@ferretry/app/ui';
 
 /** Honest about the one thing the browser changes about itself. */
 export const BROWSER_USER_AGENT_WORDS =
   'A headless browser announces itself with “HeadlessChrome” in its user agent. This browser sends the ordinary Chrome user agent instead, without that token. Nothing else about it is changed.';
+
+/** The shell hands a settings tab no machine name yet (GAP(shell) in ports-pending.json), so the sentence says this one. */
+export const BROWSER_MACHINE_NAME = 'This machine';
 
 type Reading =
   | { readonly kind: 'reading' }
@@ -35,6 +38,8 @@ type Reading =
 
 export function BrowserTab({ client }: { readonly client: CallClient }) {
   const [reading, setReading] = useState<Reading>({ kind: 'reading' });
+  // What this browser may change on the machine: read once, over the half's own client, for both forms.
+  const authority = useChangeAuthority(client);
   const load = useCallback((): (() => void) => {
     let current = true;
     readBrowsersConfig(client).then(
@@ -86,6 +91,8 @@ export function BrowserTab({ client }: { readonly client: CallClient }) {
       ) : (
         <>
           <BrowserModeSection
+            machineName={BROWSER_MACHINE_NAME}
+            authority={authority}
             key={reading.document.config.mode}
             mode={reading.document.config.mode}
             save={(mode: BrowserMode) => save({ mode })}
@@ -93,6 +100,8 @@ export function BrowserTab({ client }: { readonly client: CallClient }) {
           <BrowserProxySection
             key={JSON.stringify(reading.document.config.proxy ?? null)}
             client={client}
+            machineName={BROWSER_MACHINE_NAME}
+            authority={authority}
             saved={reading.document.config.proxy ?? null}
             save={(proxy: BrowserProxySetting | null) => save({ proxy })}
           />

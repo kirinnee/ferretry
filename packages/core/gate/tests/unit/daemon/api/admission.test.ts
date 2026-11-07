@@ -542,3 +542,45 @@ describe('audit after the handler', () => {
     ]);
   });
 });
+
+describe('S61 / R-0246 the agent tool door acts only for the ferret its own token names', () => {
+  const tool = descriptor({ minimum: 'authenticated', path: '/v1/tools/terminals/terminal_list', method: 'POST' });
+  const asTool = (options: Parameters<typeof request>[0]) => {
+    const w = world();
+    w.enrol('phone');
+    const decision = w.gate.admit({
+      table: 'tool',
+      descriptor: tool,
+      request: request({ method: 'POST', path: tool.path, ...options }),
+      params: new Map(),
+    });
+    return decision.outcome === 'admitted'
+      ? `admitted as ${String(decision.standing.actor)}`
+      : `${decision.response.status} ${(JSON.parse(String(decision.response.body)) as { code?: string }).code ?? ''}`;
+  };
+  const naming = { [SESSION_ID_HEADER]: FERRET };
+
+  test('R-0246 the admin token naming a ferret in the header is refused on the tool table, and without the header it is the owner', () => {
+    expect(asTool({ bearer: ADMIN, arrival: local(true), headers: naming })).toBe('403 session_header_refused');
+    expect(asTool({ bearer: ADMIN, arrival: local(true) })).toBe('admitted as admin-ui');
+  });
+
+  test('S61 no other non-ferret credential can pick the ferret by header either: warden token and a proved device', () => {
+    expect(asTool({ bearer: WARDEN, arrival: local(false), headers: naming })).toBe('403 session_header_refused');
+    expect(asTool({ device: 'phone', headers: naming })).toBe('403 session_header_refused');
+  });
+
+  test('S61 a ferret token still acts as its own ferret, and the header naming another one is still a session_mismatch', () => {
+    expect(asTool({ bearer: FERRET_TOKEN, arrival: local(true) })).toBe(`admitted as ferret:${FERRET}`);
+    expect(asTool({ bearer: FERRET_TOKEN, arrival: local(true), headers: naming })).toBe(`admitted as ferret:${FERRET}`);
+    expect(asTool({ bearer: FERRET_TOKEN, arrival: local(true), headers: { [SESSION_ID_HEADER]: 'F99' } })).toBe(
+      '401 session_mismatch',
+    );
+  });
+
+  test('S61 the rule is the tool door’s: the same admin call with the header still reaches an ordinary route', () => {
+    const w = world();
+    const { outcome } = admit(w, fleetUse, { bearer: ADMIN, arrival: local(true), headers: naming });
+    expect(outcome).toBe('admitted');
+  });
+});

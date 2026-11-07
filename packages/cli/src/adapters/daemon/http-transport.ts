@@ -33,9 +33,7 @@ const bunSocket: FeedSocketOpener = (url, headers) =>
 /**
  * The daemon's event BUS feed: a socket that sends one `{ name, payload }` JSON frame per event. `/v1/events` is the
  * session journal stream (Ferrets declares it, the kernel serves it) and is not this socket.
- *
- * GAP(kernel): /v1/bus is declared by the kernel - pending. Until it is, a v5 daemon answers it `unclaimed` and the
- * feed ends with "the event feed failed".
+ * The kernel declares and serves it (one frame per event the caller's admission lets it discover).
  */
 const BUS_PATH = '/v1/bus';
 const MAX_EVENT_NAME = 128;
@@ -171,7 +169,6 @@ export class HttpTransport implements DaemonTransport {
             return;
           }
           if (typeof value !== 'object' || value === null) return;
-          // GAP(kernel): /v1/bus is declared by the kernel - pending.
           const { name, payload } = value as { name?: unknown; payload?: unknown };
           if (typeof name === 'string' && name.length <= MAX_EVENT_NAME) listener({ name, payload });
         };

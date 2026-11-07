@@ -1,5 +1,5 @@
 import type { RendererProps } from '@ferretry/kernel/manifest';
-import { z } from 'zod';
+import { AskOnScreenSchema } from '@ferretry/core-asks/contract';
 import { SignInApprovalRefSchema } from '../contract/wire.ts';
 import { AccountsSurface } from './features/accounts/accounts-surface.tsx';
 import { CopyRulesSurface } from './features/secure-copy/copy-rules-surface.tsx';
@@ -35,15 +35,6 @@ export function secureCopyTab(client: AccountsClient) {
   };
 }
 
-/** What the renderer reads off an ask: its ref (the source's own), the ferret it is about, and the daemon's words. */
-const AskOnScreenSchema = z.object({
-  ref: z.unknown(),
-  ferret: z.string().optional(),
-  subject: z.string().optional(),
-  why: z.string().optional(),
-  context: z.string().optional(),
-});
-
 /** Where to answer an ask whose kind has no card of its own. */
 const ANSWER_ELSEWHERE = {
   'rule-suspended': 'Approve it again under Settings › Secure copy › Standing sign-in rules, or answer it with fy.',
@@ -69,21 +60,14 @@ export function signInApprovalRenderer(client: AccountsClient) {
         return (
           <TwoFactorSeedHost client={client} item={{ twoFactorSeed: { stage: card.stage }, subject, why, context }} />
         );
-      if (ferret !== undefined) {
-        if (card.kind === 'task-plan')
-          return <TaskPlanHost client={client} ferret={ferret} planId={card.planId} agentName={ferret} />;
-        if (card.kind === 'rule-suggestion')
-          return (
-            <SignInRuleSuggestionHost
-              client={client}
-              suggestionId={card.suggestion}
-              ferret={ferret}
-              agentName={ferret}
-            />
-          );
-        if (card.kind === 'phone-approval')
-          return <PhoneApprovalHost client={client} approvalId={card.id} ferret={ferret} />;
-      }
+      if (card.kind === 'task-plan')
+        return <TaskPlanHost client={client} ferret={ferret} planId={card.planId} agentName={ferret} />;
+      if (card.kind === 'rule-suggestion')
+        return (
+          <SignInRuleSuggestionHost client={client} suggestionId={card.suggestion} ferret={ferret} agentName={ferret} />
+        );
+      if (card.kind === 'phone-approval')
+        return <PhoneApprovalHost client={client} approvalId={card.id} ferret={ferret} />;
     }
     const where =
       ref.success && (ref.data.kind === 'rule-suspended' || ref.data.kind === 'recipe-proposal')
@@ -91,7 +75,7 @@ export function signInApprovalRenderer(client: AccountsClient) {
         : PLAIN_FALLBACK;
     return (
       <section className="kt-panel p-panel" role="status" aria-label="Sign-in approval">
-        {subject === undefined ? null : <h3 className="m-0 text-row font-semibold text-fg">{subject}</h3>}
+        <h3 className="m-0 text-row font-semibold text-fg">{subject}</h3>
         {why === undefined ? null : <p className="mb-0 mt-1 text-cell leading-base text-muted">{why}</p>}
         <p className="mb-0 mt-1 text-cell leading-base text-faint">{where}</p>
       </section>

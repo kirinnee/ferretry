@@ -41,6 +41,7 @@ import { DISCOVERED_RELAY_CARRIER, type DaemonRelayCarrierEntry } from './lib/ru
 import { decideAdvertisement } from './lib/runtime/advertisement.ts';
 import { browserOrigins, directoryOriginOf } from './lib/runtime/browser-origins.ts';
 import { carrierRoutes } from './lib/runtime/mounts/carriers.ts';
+import { tunnelSessionLog } from './lib/tunnel/session-log.ts';
 import { PublishedCarrierSet } from './lib/runtime/published-carriers.ts';
 import { composeOtherConnections, kernelTunnelHost, type TunnelHostPort } from './compose-b.ts';
 
@@ -121,6 +122,16 @@ export function buildConnections(
     published.tunnel(url);
     ctx.kernel.events.publish(CarriersChanged, { kinds: published.current().map(c => c.kind) });
   };
+  /** Today's `browserOrigins(config)`: what a passkey may name and what a tunnel upgrade's `Origin` may be. */
+  const allowedOrigins = (): readonly string[] =>
+    browserOrigins({
+      corsOrigins: bindings?.corsOrigins ?? [HOSTED_APP_ORIGIN],
+      host: bindings?.host ?? config?.direct?.host ?? '127.0.0.1',
+      ...(bindings?.publicUrl === undefined ? {} : { publicUrl: bindings.publicUrl }),
+      ...((bindings?.port ?? config?.direct?.port) === undefined
+        ? {}
+        : { port: (bindings?.port ?? config?.direct?.port) as number }),
+    });
   const other =
     supplied ??
     (bindings === undefined
@@ -130,6 +141,7 @@ export function buildConnections(
           config,
           ...(bindings.directoryOrigin === undefined ? {} : { directoryOrigin: bindings.directoryOrigin }),
           host: tunnelHost ?? kernelTunnelHost(),
+          origins: allowedOrigins,
           publishTunnel,
         }));
   ctx.kernel.jobs.add({
@@ -147,6 +159,10 @@ export function buildConnections(
       clock: { now: () => ctx.kernel.clock.nowMs() },
       randomBytes: bindings.randomBytes ?? randomSessionBytes,
       openSession: bindings.openSession,
+      // A tunnel session's open and close are one line each in the daemon's journal; names and counts only.
+      sessionLog: tunnelSessionLog({
+        step: (what, detail) => ctx.kernel.log.info(detail === undefined ? what : `${what} — ${detail}`),
+      }),
     });
   const directProvider = direct ?? new UnavailableCarrier('The direct carrier is unavailable.');
   let held: RelayCarrier[] = [];
@@ -255,14 +271,7 @@ export function buildConnections(
             }),
             ...(bindings?.port === undefined ? {} : { port: bindings.port }),
             appOrigin: HOSTED_APP_ORIGIN,
-            allowedOrigins: browserOrigins({
-              corsOrigins: bindings?.corsOrigins ?? [HOSTED_APP_ORIGIN],
-              host: bindings?.host ?? config?.direct?.host ?? '127.0.0.1',
-              ...(bindings?.publicUrl === undefined ? {} : { publicUrl: bindings.publicUrl }),
-              ...((bindings?.port ?? config?.direct?.port) === undefined
-                ? {}
-                : { port: (bindings?.port ?? config?.direct?.port) as number }),
-            }),
+            allowedOrigins: allowedOrigins(),
             ...(() => {
               // The origin the one discovery read asks (`initialise`), so links and passkeys name the same directory.
               const origin = directoryOriginOf(bindings?.directoryOrigin ?? HOSTED_RELAY_DIRECTORY_ORIGIN);

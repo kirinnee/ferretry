@@ -336,6 +336,12 @@ export interface CliContext<M extends Manifest> {
    * (a sign-in recipe, for example, must be 1–4000 characters).
    */
   readText?(path: string): Promise<string>;
+  /**
+   * Whether a path exists, resolved against the CLI working directory (never stdin: `-` is a file named `-`).
+   * As today's `existsSync`: a directory counts, and so does a file that exists but cannot be read. It reads no
+   * content, so a poll (`fy wait --until-marker`) costs one probe, not a whole-file read.
+   */
+  exists?(path: string): Promise<boolean>;
   /** Own declared opaque defs only; private directory operations and stat require named trees. Optional until fy supplies it. */
   readonly ownState?: Pick<
     StatePort,

@@ -55,11 +55,15 @@ export function summaryOf(
   const model = details.options?.model;
   const card = details.options?.card;
   const label = details.options?.label;
+  const nudgeAfterSeconds = details.options?.nudgeAfterSeconds;
+  const killAfterSeconds = details.options?.killAfterSeconds;
   return {
     ...waits,
     ...(model === undefined ? {} : { model }),
     ...(card === undefined ? {} : { card }),
     ...(label === undefined ? {} : { label }),
+    ...(nudgeAfterSeconds === undefined ? {} : { nudgeAfterSeconds }),
+    ...(killAfterSeconds === undefined ? {} : { killAfterSeconds }),
     ...(details.title === undefined ? {} : { title: details.title }),
   };
 }

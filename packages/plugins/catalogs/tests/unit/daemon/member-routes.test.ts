@@ -112,9 +112,11 @@ describe('the member routes answer a refusal with its own code and status', () =
     expect(JSON.stringify(answer.body)).not.toContain('unlock this browser');
   });
 
-  it('G4 should answer a member the contract hash of Catalogs, as the host holds it, and nothing else', async () => {
+  it('G4 should answer a member the MEMBER-SURFACE hash of Catalogs, as the host holds it, and nothing else', async () => {
     // Arrange
-    const fx = await catalogsFixture({ contractHash: id => `effective-of-${id}` });
+    const fx = await catalogsFixture({
+      contractHash: (id, surface) => (surface === 'member' ? `member-of-${id}` : `effective-of-${id}`),
+    });
     const catalog = await makeCatalog(fx, 'Team recipes');
     const who = await browser();
     const joined = await joinWith(fx, who, (await mintShare(fx, { catalogIds: [catalog] })).code);
@@ -124,9 +126,10 @@ describe('the member routes answer a refusal with its own code and status', () =
     // Act
     const answer = await end.ask('GET', '/v1/shared/contract');
 
-    // Assert — one field: Catalogs' hash from `kernel.contract.hash()`, no inventory and no other plugin
+    // Assert — one field: Catalogs' member hash from `kernel.contract.hash('member')` (not the whole effective hash, so an
+    // owner-route change never pauses a member's app), no inventory and no other plugin
     expect(answer.status).toBe(200);
-    expect(answer.body).toEqual({ contract: 'effective-of-catalogs' });
+    expect(answer.body).toEqual({ contract: 'member-of-catalogs' });
     expect(answer.headers['cache-control']).toBe('no-store');
   });
 

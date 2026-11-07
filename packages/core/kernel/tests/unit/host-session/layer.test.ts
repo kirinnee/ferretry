@@ -1047,7 +1047,7 @@ describe('the session layer: the identity signer it offers carriers', () => {
     const nonce = toBase64Url(relayCrypto.randomBytes(32));
     const signed = await fx.layer.signer.sign({ host: 'relay.example.test', nonce });
     expect(signed.daemonId).toBe(fx.daemonId);
-    expect(Object.keys(fx.layer.signer).sort()).toEqual(['sign', 'signCatalog', 'signSecretOffer', 'signTunnel']);
+    expect(Object.keys(fx.layer.signer).sort()).toEqual(['sign', 'signCatalog', 'signLinkStoreRequest', 'signSecretOffer', 'signTunnel']);
   });
 });
 

@@ -21,13 +21,17 @@ afterAll(async () => {
 });
 
 const PLUGINS = { protocol: 1, plugins: [{ id: 'tiny', on: true, contract: 'x' }] };
+/** What the daemon's own host checks say when everything is where it should be (`GET /v1/doctor`). */
+const READY_REPORT = { checks: [], harnesses: [], ready: true, limitation: 'presence on PATH only' };
 const daemon = () =>
   standInDaemon((_request, path) =>
     path === '/v1/health'
       ? Response.json(HEALTH)
       : path === '/v1/plugins'
         ? Response.json(PLUGINS)
-        : Response.json({ error: 'no' }, { status: 404 }),
+        : path === '/v1/doctor'
+          ? Response.json(READY_REPORT)
+          : Response.json({ error: 'no' }, { status: 404 }),
   );
 const env = (extra: Record<string, string> = {}): Record<string, string> => ({
   HOME: home,

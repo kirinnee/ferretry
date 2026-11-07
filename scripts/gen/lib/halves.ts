@@ -94,6 +94,12 @@ export function isSkeleton(impl: AnyImplementation): boolean {
  */
 const MAY_BE_UNIMPLEMENTED: ReadonlySet<string> = new Set(['doctor']);
 
+/**
+ * Members of a daemon half that are a function, not a section of named entries: the host calls `beforeListen` once
+ * per boot (the boot sweep Access runs), so it is neither declared by the manifest nor a section to compare.
+ */
+const HOST_CALLED_MEMBERS: ReadonlySet<string> = new Set(['beforeListen']);
+
 export function halfFindings(
   where: string,
   manifest: Manifest,
@@ -126,6 +132,7 @@ export function halfFindings(
       if (!have.has(name)) findings.push({ check, where, message: `${half} half misses ${section} "${name}"` });
   }
   for (const [section, names] of Object.entries(inspected.sections)) {
+    if (half === 'daemon' && HOST_CALLED_MEMBERS.has(section)) continue;
     const declared = new Set(expected[section] ?? []);
     if (!(section in expected)) {
       findings.push({ check, where, message: `${half} half returns unknown section "${section}"` });

@@ -30,6 +30,19 @@ export const QUESTION_STATE = defineState({
   format: 1,
   schema: QuestionSchema,
 });
+/** The hypermedia switch the owner set for one ferret; none means the mode's default (docs/hypermedia.md). */
+export const HypermediaSwitchSchema = z.strictObject({
+  format: z.literal(1),
+  enabled: z.boolean(),
+  updatedAt: z.string().min(1),
+});
+export const HYPERMEDIA_STATE = defineState({
+  name: 'hypermedia',
+  path: '*/hypermedia.json',
+  store: 'json',
+  format: 1,
+  schema: HypermediaSwitchSchema,
+});
 export const DRAFTS_STATE = defineState({
   name: 'drafts',
   path: '*/drafts',
@@ -113,6 +126,7 @@ export const CONVERSATION_STATE = [
   ANSWERS_STATE,
   TURNS_STATE,
   QUESTION_STATE,
+  HYPERMEDIA_STATE,
   DRAFTS_STATE,
   ATTACHMENT_ORIGINAL_STATE,
   ATTACHMENT_MANIFEST_STATE,
