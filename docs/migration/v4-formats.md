@@ -28,7 +28,9 @@ one-time converter at `migration/v4-to-v5/` and of the runbook [`v4-to-v5-prompt
    keys). Nothing binds the ciphertext to a path, file name, home or daemon id, so `secrets.key` plus the four sealed
    documents that share it (`secrets.json`, `login-secrets.json`, `mcp-oauth-secrets.json`,
    `catalogs/link-keys.json`) open after a byte-for-byte move, **provided the v5 Vault keeps the AAD rule and the
-   `cipher: "AES-256-GCM"` check** (spine D16). Merging them into one document would be a re-seal: not allowed.
+   `cipher: "AES-256-GCM"` check** (spine D16). Merging them into one document would be a re-seal: not allowed. v5 keeps each sealed document by name (M2) and
+   changes only the envelope label (`"v": 1` → `"format": 1`); the converter re-labels it and copies every `iv` and
+   `ciphertext` unchanged, never touching the key (`migration/v4-to-v5/src/rewrap.ts`).
 3. **`push-vapid.json` and `push.json` move together** (every subscription was made against that VAPID key), or
    every phone silently stops getting pushes.
 4. **The harness folders are keyed by runtime, not by ferret.** `fleet/homes/<runtime uuid>/` is a runtime's
