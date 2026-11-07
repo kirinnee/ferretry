@@ -1,7 +1,9 @@
 import { isAbsolute, normalize, parse, relative, sep } from 'node:path';
 import type { DaemonLayout } from './layout.ts';
 import type { ResetTreeMeasure } from './ports.ts';
-import { megabytes } from './render.ts';
+
+/** A size in megabytes to one decimal, in the one unit a person compares two trees in. */
+const megabytes = (bytes: number): string => `${(bytes / 1_000_000).toFixed(1)}MB`;
 
 /**
  * WHAT A RESET IS, AND WHY IT IS A COMMAND RATHER THAN AN INSTRUCTION.
@@ -40,7 +42,7 @@ export function resetRoots(layout: DaemonLayout): readonly [ResetRoot, ResetRoot
   return [
     {
       label: `${layout.daemonName} state home`,
-      holds: 'config, fleet, sessions, secrets, paired devices, logs',
+      holds: 'config, ferrets, secrets, paired devices, logs',
       path: layout.stateHome,
     },
     {
@@ -52,7 +54,7 @@ export function resetRoots(layout: DaemonLayout): readonly [ResetRoot, ResetRoot
 }
 
 /** Raised when a reset will not run, naming the root it refused and why. */
-export class ResetRefusedError extends Error {
+class ResetRefusedError extends Error {
   constructor(reason: string) {
     super(`refusing to reset: ${reason}`);
     this.name = 'ResetRefusedError';
@@ -150,7 +152,7 @@ export interface ResetSurvey {
 interface ResetInventory {
   readonly secrets: number;
   readonly devices: number;
-  readonly sessions: number;
+  readonly ferrets: number;
 }
 
 /** Everything a person is shown before they are asked whether to go ahead. */
@@ -182,7 +184,7 @@ export function resetSurvivors(layout: DaemonLayout): readonly string[] {
     ...(definition === undefined
       ? []
       : [`any user service definition at ${definition} — supervision stays installed, so a start still works`]),
-    'every file outside the two paths above, including every repository and worktree a session was working in',
+    'every file outside the two paths above, including every repository and worktree a ferret was working in',
   ];
 }
 
@@ -214,14 +216,14 @@ function escapeLines(surveys: readonly ResetSurvey[]): readonly string[] {
 function inventoryLines(daemon: string, inventory: ResetInventory | undefined): readonly string[] {
   if (inventory === undefined) {
     return [
-      `  every secret, paired device and session in the paths above — ${daemon} is not running,`,
+      `  every secret, paired device and ferret in the paths above — ${daemon} is not running,`,
       '  so they cannot be counted; the paths and their sizes above are still exact',
     ];
   }
   return [
     `  ${String(inventory.secrets)} secret(s) — the values, not just the names`,
     `  ${String(inventory.devices)} paired device(s), each of which has to be paired again`,
-    `  ${String(inventory.sessions)} session(s), with their transcripts`,
+    `  ${String(inventory.ferrets)} ferret(s), with their transcripts`,
   ];
 }
 
@@ -241,7 +243,7 @@ export function renderResetPlan(plan: ResetPlan): string {
     ...inventoryLines(plan.daemon, plan.inventory),
     // Said because it is the half nobody expects: the agents run under their own terminal server, not
     // under the daemon, so they would otherwise outlive the reset and write into a home that is gone.
-    `  every session's running agent, which is ended rather than left running without a home`,
+    `  every ferret's running agent, which is ended rather than left running without a home`,
     '',
     'It does NOT touch:',
     ...plan.survivors.map(survivor => `  ${survivor}`),
@@ -255,13 +257,7 @@ export function renderResetPlan(plan: ResetPlan): string {
  * The numbers are the REMOVAL's own, not the preflight's. The preflight measured a running daemon that
  * was still writing, so reporting those figures as the outcome would report a count nobody took.
  */
-export function renderResetOutcome(
-  daemon: string,
-  removals: readonly ResetSurvey[],
-  clientName: string,
-  /** The state home claimed again after its removal, when it was. */
-  reclaimed?: string,
-): string {
+export function renderResetOutcome(daemon: string, removals: readonly ResetSurvey[], clientName: string): string {
   const removed = removals.filter(removal => removal.measure.kind !== 'absent');
   const total = (pick: (measure: Extract<ResetTreeMeasure, { kind: 'measured' }>) => number): number =>
     removed.reduce((sum, removal) => sum + (removal.measure.kind === 'absent' ? 0 : pick(removal.measure)), 0);
@@ -272,7 +268,6 @@ export function renderResetOutcome(
       ? `${daemon} had no persistent data on this host; nothing was removed`
       : `${daemon} reset: removed ${String(removed.length)} path(s), ${String(files)} files, ${megabytes(bytes)}`,
     ...removals.map(removal => `  ${removal.measure.kind === 'absent' ? 'absent ' : 'removed'} ${removal.root.path}`),
-    ...(reclaimed === undefined ? [] : [`  claimed ${reclaimed} again, empty, exactly as a fresh install does`]),
     `Run \`${clientName} daemon start\` to bring ${daemon} up on a clean slate, exactly as a fresh install does.`,
   ].join('\n');
 }

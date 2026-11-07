@@ -9,6 +9,7 @@ entry="$(jq -r '.bin | to_entries[0].value' "${CLI_PKG}/package.json")"
 [[ -z ${entry} || ${entry} == "null" ]] && echo "❌ no .bin entry in ${CLI_PKG}/package.json" >&2 && exit 1
 artifact="dist/$(basename "${entry}" .ts).js"
 
+./scripts/local/gen.sh
 echo "🔨 Building CLI bundle..."
 bun build "./${CLI_PKG}/${entry}" --outdir ./dist --target bun
 

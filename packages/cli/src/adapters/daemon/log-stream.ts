@@ -32,7 +32,7 @@ const standardOutput: LogOutputSink = {
  * the last to drain. A reader that goes away (`| head`) ends the relay and the child with it, and that
  * is a normal end, not an error: everything the reader asked for was delivered.
  */
-export function relayingSpawner(sink: LogOutputSink = standardOutput): LogStreamSpawner {
+function relayingSpawner(sink: LogOutputSink = standardOutput): LogStreamSpawner {
   return ([command, ...args]) => {
     const child = Bun.spawn([command, ...args], { stdin: 'inherit', stdout: 'pipe', stderr: 'inherit' });
     const relayed = (async (): Promise<boolean> => {

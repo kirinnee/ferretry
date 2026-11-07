@@ -1,0 +1,181 @@
+{
+  "format": 1,
+  "pending": [
+    "gate",
+    "vault",
+    "ferrets",
+    "connections",
+    "updates",
+    "claude-code",
+    "codex",
+    "logins",
+    "terminals",
+    "browsers",
+    "accounts",
+    "conversation",
+    "agenda",
+    "board",
+    "warden",
+    "usage",
+    "catalogs",
+    "mcp",
+    "skills",
+    "shells",
+    "layouts",
+    "tidy",
+    "runtimes",
+    "onboarding"
+  ],
+  "pendingReasons": {
+    "updates": ["FY_UPDATE_CHECK=off is not honoured: the kernel UpdateHostPort cannot express it (kernel item)"],
+    "runtimes": [
+      "GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) is not ported into Runtimes; Add runtime and a runtime that needs sign-in link to Logins' tab until Logins' app half draws it",
+      "GAP(kernel): Edit as YAML on a profile is not offered, because the kernel's /v1/config/file is not declared yet (renderFileEditor is never supplied)"
+    ],
+    "warden": [
+      "failover and auto-move refuse: needs Ferrets’ additive move(ferret, runtime), today’s migrate (D2 #19)",
+      "auto-revive is wired through FerretsApi.resume but inert: needs a death cause on FerretSummary (D2 #19)",
+      "investigators refuse, so nothing is spent: needs Ferrets’ start taking a work folder and reports read back through summary(ferret) (D2 #19, #15)",
+      "restart is stop then resume with today’s refusals checked first: needs a Ferrets additive automatic resume that replaces a live pane (today’s replaceLiveTerminal)",
+      "nudges must carry actor warden (D2 #19); needs Conversation’s additive warden caller",
+      "the Jev guard answers not_set (NO_VAULT) and nothing leaves the machine: needs the kernel’s secrets.resolve (OwnSecret) (D2 #19)",
+      "input_stuck and inbox_stuck never occur: Conversation’s send-path acts (resubmit, mark stalled, tracker and delivery looks) are not on 5.0",
+      "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
+      "a sub-ferret overdue on a report is flagged but never nudged, nor its parent told: overdue-report nudges need Ferrets’ waiting/done on FerretSummary and its signal route (today skipped a ferret that declared a wait or signalled done)",
+      "the liveness reflex detects but never nudges (frozen, sus_* and dead_monitor still fire): reflex nudges need `FerretSummary` to carry `waiting` and the per-ferret `nudgeAfterSeconds`/`killAfterSeconds` (Ferrets additive)",
+      "an owner's own save is refused while the kernel holds another edit, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write (Gate's judgeConfigWrite judges the whole patched file, so an owner's plain save over a held edit could otherwise put that edit into effect); a broken file or a hand edit the kernel has not reloaded yet is overwritten with the value in effect (every setting is written from the settings in effect plus the owner's patch), never put into effect, but lost (a file with a top-level key the schema does not know is refused instead; the owner repairs it by hand); refusing a write over a file that moved since the kernel's last reload, so such an edit is held instead, waits on the kernel"
+    ],
+    "claude-code": [
+      "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",
+      "GAP(ferrets): the AskUserQuestion hook is installed, but Ferrets does not yet supply FY_QUESTION_FILE or consume and deliver the question",
+      "the ten settings/hooks item verbs return 69 until the item-service route exists",
+      "the permission and dialog answer panels render nothing until Ferrets offers a prompt-state read"
+    ],
+    "codex": [
+      "GAP(kernel): skill launch parts are not materialized into the Codex home: RootHandle.copyTree (with link) exists, but its source must be one of Codex's own roots and no root Codex may declare reaches a skill part's folder (LaunchPart.path); needs a lead decision on that root",
+      "GAP(kernel): the five `fy harness codex settings` verbs refuse with exit 69, because a CLI half has no config/item service route to call yet"
+    ],
+    "logins": [
+      "S176 and S177 (the credential worker guarantees) are skipped as unproved, not ported",
+      "GAP(vault): `fy login add <provider>` does not prompt for, nor store, a provider's secret (store each with the Vault's own verbs and name it as `${secret:NAME}`), and `fy login add --from-env` preset detection is not ported; `fy login budget` is Usage's and `login models list --login` reads Runtimes",
+      "GAP(runtimes): `fy login rm` and the app's Remove cannot refuse a login a runtime still uses, because Logins cannot see runtime usage without a Logins-to-Runtimes edge; Runtimes' own change path must check its runtimes first, then call Logins' reviewed change routes (`POST /v1/logins/changes`, `GET /v1/logins/changes/:changeId`, `POST /v1/logins/changes/:changeId/apply`, kinds `login.*`)",
+      "the app's environment-variable editor (editing a login's `env` after it is made), the provider grid and one-click add, and the budget editor (Usage's) are not ported; the add panel makes a sign-in login or a provider login from a preset"
+    ],
+    "connections": [
+      "GAP(kernel): the tunnel carrier cannot run: the kernel offers no port to bind its own loopback listener (serving only the session route, every arrival remote) and none to find cloudflared (FY_CLOUDFLARED, PATH); the daemon half composes the carrier and says so out loud until a port exists",
+      "GAP(parity): the J-, S- and V-0245 rows still point at tests/unit/parity files that are not written"
+    ],
+    "browsers": [
+      "GAP(kernel): the link opener (POST /v1/system/open-url) is not detached from the daemon, as today's was (detached, unref'd): kernel SpawnOptions has no `detached`, so stopping the daemon's process group can take the opener, and a browser it started directly, down with it; needs the kernel's additive detached spawn",
+      "GAP(kernel): Settings › Browser reads and writes browsers.yaml through the kernel's /v1/config/file, which no manifest declares yet (D2 #3); until it is declared the tab says the settings did not load and still shows the status, the user agent and Test proxy",
+      "GAP(shell): today's link-behaviour facility (open a link in the in-app browser or the real one) is not in @ferretry/app, so the in-app link sheet and workspace host are ported but nothing in the shell mounts them yet",
+      "GAP(app): the human sign-in window (Real window login) is ported as a client and a model; the panel does not offer the button until the shell can open an external window",
+      "GAP(tests): today's visual tests browser-mode.visual, browser-proxy.visual and browser-tab.visual (tests/integration/features), with browser-pane-jumpy.visual and browser-tab-bars.visual, are not moved: plugin app halves have no visual harness yet",
+      "GAP(shell): Settings › Browser has no authority line: today's ChangeApplyPanel (\"{machine} will ask you to confirm with your passkey when you save\", the grant-refused explanation, the disabled Save button) is being ported into @ferretry/app/ui by the Logins fixer (fix/logins-r1, 7d06c97bd3, not pushed yet); the daemon still enforces step-up and a held change says so, so only the up-front sentence and the disabled button are missing. Wire BrowserModeSection and BrowserProxySection to it (useChangeAuthority + ChangeApplyPanel) once it lands; Browsers then declares GET /v1/grants",
+      "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
+    ],
+    "ferrets": [
+      "Fork into a new ferret (the chat's fork action and the new-ferret page's fork seed) is not ported: it needs Conversation's transcript rows to offer it and the new-ferret page to take the seed",
+      "Interrupt is not ported: it is Conversation's turn.interrupt, and Ferrets' Actions menu has no row for it until that route is bound",
+      "Actions rows still to port: add MCP server, compact-at, the context menu, the ferret row-actions and the Warden and learning actions; each needs the plugin that owns it to contribute a row",
+      "Info tabs Agenda, Tasks, Usage, Context, Surfaces and Warden are not ported: they read other plugins' facts (Board, Usage, Conversation, Surfaces, Warden) and wait for those contracts to be bound; only Overview and Runtime are drawn",
+      "Session search inside the files tab is not ported",
+      "The file-instance surface and the image viewer are not ported: the image viewer still lives in Conversation's app and composer, and the files tab opens an image through a plain preview until it is shared",
+      "Continue-conversation (resume a finished ferret's conversation as a new one) and the registered-projects picker on the new-ferret page are not ported",
+      "The files side tab is hidden until Layouts lists it in the ferret.side panel layout",
+      "The 5.0 ferret record carries no turn state, model, effort, limits or context, so the status panel and Info draw only what the record has",
+      "canControl is always true on the Actions panel: the daemon refuses an act this device may not do, but the menu does not yet hide the rows from a viewer who may not",
+      "POST /v1/ferrets requires a folder, so the new-ferret page cannot start a ferret without one",
+      "GAP(kernel): fy wait --until-marker tests \"exists\" by reading the file, because CliContext has no exists(path) probe yet (kernel item, sent to the kernel owner): a marker that is a directory, or a file that exists but cannot be read, never counts as present, and each poll reads the whole file; `-` is refused as a marker meanwhile"
+    ],
+    "conversation": [
+      "conversation app half: C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app) and C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel) have landed; the chat and transcript screen and the queue, compact-at, questions, search and links bodies are still the one-line Pending surface until C3 and C4 land",
+      "GAP(C3): ConversationOutbox is mounted nowhere yet (C3 mounts it around the chat screen), so a message the device kept unsent is not retried until the chat screen draws it; today's boot drain of every machine's saved messages stays a named GAP unless the shell offers a hook for it",
+      "GAP(C3): the Composer takes the ferret's harness as a prop (a Codex ferret's picked skill inserts $name); the chat screen passes it from the Ferrets read",
+      "GAP(app-shell): the carrier outage mark, the Agenda item draft stream, the 'machine recovered' moment and clearing drafts on unpair have no hook in the 5.0 client yet (app/composer/NEEDS-APP-SHELL.txt)",
+      "GAP(board, agenda, skills, terminals, browsers, ferrets): no plugin takes reference.catalog yet, so every composer menu answers provided:false and is empty; the providers declare their own demand (filesystem for @, terminal for %terminal, browser for %browser) and the route asks it before they run",
+      "GAP(app-shell): the fy-render sandbox shell and library bundles are built by packages/app/scripts/build-fy-render-libs.ts and served from the app origin; the browser tests that exercise them need playwright and the Vite harness (tests/integration/app, NEEDS-APP-SHELL.txt)",
+      "GAP(board): a card or board fence draws each card through the Board reference:& renderer; the mini board and the lane view of today are Board views",
+      "GAP(browsers): ExternalLink and useLinkBehaviour keep the default (open in the reader's browser); the \"Open links in\" policy is the Browsers plugin's",
+      "GAP(ferrets): StatusMark reads a structural view; SessionView is not in Ferrets' contract yet (plan Q0, C3 adds it)",
+      "live updates run on the polling fallback until the kernel serves /v1/bus and /v1/events (plan Q12)",
+      "GAP(packs): the conversation.row slot carries no tool calls, so Packs' Pack card (today reads entry.tools/sent) does not draw; adding masked tool calls to ConversationRowEntry is decided with the Packs slot contribution (its own security look)"
+    ],
+    "accounts": [
+      "GAP(access): no passkey ceremony for the app half's widening acts (a paste rule, programs in your own profile ON, a sign-in rule create/resume/renew/widen, task-plan ticks, a machine-staged confirm); each refuses with today's no-passkey words until Access hands over an ask through its contract or the shell offers one (wiring it is one prop per surface)",
+      "GAP(agenda): Agenda does not mount `ask:sign-in-approval` yet; it must pass the ask (ref, ferret, subject, why, context) in `value`",
+      "GAP(board): the sign-in rule suggestion sheet does not offer the project scope, because the app half has no Board read (\"any\" and \"this ferret\" are offered)",
+      "GAP(access): the device-revoke rule-count warning (\"revoking this device suspends N standing sign-in rules\") needs a slot in Access's revoke-device panel",
+      "GAP(shells): the `#rules/<stage>` deep link and the \"Don't ask again\" offer on the input card are not drawn; they are not Accounts' surfaces, and dropping them removes no protection",
+      "67 kept rows owned by the daemon half, the CLI half and half a have no id-named test yet: G90 I130 I136 I137 I139 I141 I142 I143 I144 I146 I148 I149 I150 I156 I157 I158 I160 I161 I162 I163 I164 I166 I167 I168 I169 I170 I171 I172 I174 I175 I177 I178 I186 I195 I200 I201 I205 I207 I208 I212 I214 I216 I225 I226 I227 I228 I229 I230 I244 I34 S100 S109 S114 S135 S136 S137 S138 S139 S140 S68 S73 S76 S86 S91 S93 S97 S98"
+    ]
+  },
+  "pendingHalves": {
+    "agenda": ["app"],
+    "conversation": ["app"],
+    "terminals": ["app"],
+    "warden": ["app"]
+  },
+  "pendingAppPorts": [
+    {
+      "plugin": "conversation",
+      "path": "packages/plugins/conversation/app",
+      "reason": "surfaces, client context, fy-render, the prose kit and the composer (with the attachments and chat-width panels and Conversation Settings) have landed; the chat, transcript, queue, compact-at, questions, search and links bodies are in flight (C3-C4)"
+    },
+    {
+      "plugin": "agenda",
+      "path": "packages/plugins/agenda/app",
+      "reason": "separate app port in flight"
+    },
+    {
+      "plugin": "terminals",
+      "path": "packages/plugins/terminals/app",
+      "reason": "shell daemon-client, grants and browser-link facilities"
+    },
+    {
+      "plugin": "terminals",
+      "path": "packages/plugins/terminals/tests/unit/app",
+      "reason": "shell daemon-client, grants and browser-link facilities"
+    },
+    {
+      "plugin": "terminals",
+      "path": "packages/plugins/terminals/tests/support/app",
+      "reason": "shell daemon-client, grants and browser-link facilities"
+    },
+    {
+      "plugin": "agenda",
+      "path": "packages/plugins/agenda/tests/unit/app",
+      "reason": "app-shell-fill React runtime and app test harness"
+    },
+    {
+      "plugin": "agenda",
+      "path": "packages/plugins/agenda/tests/support/app",
+      "reason": "app-shell-fill React runtime and app test harness"
+    },
+    {
+      "plugin": "warden",
+      "path": "packages/plugins/warden/app",
+      "reason": "@ferretry/app exports none of: the current-daemon hook, the paired-daemon list, ferrets of a daemon, device controls, a plugin client for another paired daemon, Markdown, ModelSelect, AnalyticsMetricChart, the grants/speed-ups/account-picker reads, the config-change effect; app/shell.ts placeholders throw until it does (the warden screen and settings tab, the daemon.status strip and verdicts panels, the ask-warden form)"
+    },
+    {
+      "plugin": "voice",
+      "path": "packages/plugins/voice/app/features/settings/use-machine-voice-cleanup.ts",
+      "reason": "kernel config routes (D2 #3) not declared yet: GET/PUT /v1/config/file, so machine voice.yaml clean-up and the setup Voice default cannot be read or written"
+    },
+    {
+      "plugin": "voice",
+      "path": "packages/plugins/voice/app/features/fleet/setup/voice-default.ts",
+      "reason": "kernel config routes (D2 #3) not declared yet: GET/PUT /v1/config/file, so machine voice.yaml clean-up and the setup Voice default cannot be read or written"
+    },
+    {
+      "plugin": "packs",
+      "path": "packages/plugins/packs/app/components/pack-call.tsx",
+      "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"
+    },
+    {
+      "plugin": "packs",
+      "path": "packages/plugins/packs/tests/unit/app/pack-call.test.tsx",
+      "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"
+    }
+  ]
+}

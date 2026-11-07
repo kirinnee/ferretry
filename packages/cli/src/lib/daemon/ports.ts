@@ -1,6 +1,10 @@
-import type { HealthView, IoPressure, LivenessView } from '@ferretry/protocol';
 import type { DaemonManagerKind } from './layout.ts';
-
+/** What `GET /healthz` says about the serving daemon. `protocol` is any integer: process control never judges it. */
+export interface LocalUpdateHealth {
+  readonly protocol: number;
+  readonly version: string;
+  readonly pid: number;
+}
 /** The result of one external command. */
 export interface CommandOutcome {
   readonly code: number;
@@ -41,18 +45,6 @@ export interface IDaemonProcessPort {
 }
 
 /**
- * Reading the daemon log.
- *
- * kteam read the whole file into memory and wrote it out in one go, which is fine until the log is
- * hundreds of megabytes. Streaming it to the terminal is the adapter's job, so it stays a port.
- */
-export interface IDaemonLogPort {
-  exists(logFile: string): Promise<boolean>;
-  /** Stream the log to this terminal and return the exit code of doing so. */
-  show(logFile: string, follow: boolean): Promise<number>;
-}
-
-/**
  * Claiming the state home before this CLI creates anything inside it.
  *
  * The supervisor holds one because `<state home>/logs` is state INSIDE the daemon's home, and
@@ -61,8 +53,11 @@ export interface IDaemonLogPort {
  */
 export interface IStateHomeClaimPort {
   claim(home: string): Promise<unknown>;
-  /** Whether the home exists and carries the Ferretry marker; reads only, never claims. */
-  inspect(home: string): Promise<'absent' | 'claimed' | 'unclaimed'>;
+  /**
+   * Whether the home exists and carries the Ferretry marker; reads only, never claims. `empty` is a directory with
+   * nothing in it, which the daemon's first start makes into a home.
+   */
+  inspect(home: string): Promise<'absent' | 'empty' | 'claimed' | 'unclaimed'>;
 }
 
 /**
@@ -81,54 +76,18 @@ export interface IServiceFilePort {
 }
 
 /**
- * The daemon's own account of itself, over the protocol client.
+ * Serializing this daemon's mutating lifecycle commands across separate invocations.
  *
- * `undefined` means "did not answer" — the probe never throws, because every caller treats an
- * unreachable daemon as information rather than a failure.
- */
-export interface IDaemonHealthPort {
-  probe(): Promise<HealthView | undefined>;
-  /**
-   * The daemon's liveness answer, read whatever its status code: a booting daemon answers 503 with the
-   * step it is on, and that body is exactly what `status` needs to say "starting" instead of "down".
-   * Optional so a probe that cannot ask still reports what it can.
-   */
-  liveness?(): Promise<LivenessView | undefined>;
-}
-
-/**
- * This host's disk pressure, for a daemon that cannot say how it is doing: a loop stalled on a saturated
- * disk answers nothing, and "wedged" is the wrong word for it. `undefined` where the host reports none
- * (macOS, a kernel without pressure-stall information); the read never throws.
- */
-export interface IIoPressurePort {
-  read(): Promise<IoPressure | undefined>;
-}
-
-/**
- * Pinning a Nix store path so it cannot be garbage-collected.
+ * Two `fy daemon` invocations are unrelated to each other, so an in-object queue orders nothing: one
+ * could write the service definition between another's garbage-collection root update and its own
+ * definition write, leaving a unit that names one executable while the root holds a different one's
+ * closure. The daemon they contend for is identified by a path, so the claim lives at a path too.
  *
- * A daemon installed with `nix shell` has no garbage-collection root of its own: the store path is
- * live only while that shell is open, so a later `nix-collect-garbage` deletes the executable out
- * from under an installed service, which then breaks with no user action. That is why the daemon
- * holds a root of its own: a person's own shell breaking afterwards is an accepted cost, but a
- * user service that cannot launch at the next login is a failure nobody is present to see, and the
- * absolute path a unit file must record is the exact path a collection can delete.
- *
- * Every method reports rather than throws. A daemon that runs but is unpinned is strictly better than
- * a daemon that refuses to start because a pin did not take.
+ * `acquire` throws when the claim cannot be taken; refusing a lifecycle command is safe, whereas
+ * proceeding without exclusion is what produces the mismatch above.
  */
-export interface INixGcRootPort {
-  /** Resolve symbolic links, so a profile or shim path is classified by what it actually points at. */
-  realPath(path: string): Promise<string>;
-  /**
-   * Register an indirect GC root at `rootPath` for `storePath`.
-   *
-   * `undefined` on success; otherwise the reason it could not, for the caller to warn with.
-   */
-  pin(storePath: string, rootPath: string): Promise<string | undefined>;
-  /** Drop a root. An absent root is success — releasing must retire the store path, not fail. */
-  release(rootPath: string): Promise<void>;
+export interface IDaemonLifecycleLockPort {
+  acquire(request: DaemonLifecycleClaimRequest): Promise<IDaemonLifecycleClaim>;
 }
 
 /** The mutating daemon-lifecycle commands, named in a claim so a refusal can say what is running. */
@@ -159,139 +118,6 @@ export interface IDaemonLifecycleClaim {
    * work's own outcome. Anything left behind travels back as the path a person has to look at.
    */
   release(): Promise<string | undefined>;
-}
-
-/**
- * Serializing this daemon's mutating lifecycle commands across separate invocations.
- *
- * Two `fy daemon` invocations are unrelated to each other, so an in-object queue orders nothing: one
- * could write the service definition between another's garbage-collection root update and its own
- * definition write, leaving a unit that names one executable while the root holds a different one's
- * closure. The daemon they contend for is identified by a path, so the claim lives at a path too.
- *
- * `acquire` throws when the claim cannot be taken; refusing a lifecycle command is safe, whereas
- * proceeding without exclusion is what produces the mismatch above.
- */
-export interface IDaemonLifecycleLockPort {
-  acquire(request: DaemonLifecycleClaimRequest): Promise<IDaemonLifecycleClaim>;
-}
-
-/**
- * What one tree holds, measured without removing anything.
- *
- * `escapingLinks` is the evidence for a promise this port makes and a person has no other way to
- * check: a symbolic link inside the tree that points OUT of it is unlinked and never followed, so a
- * link into somebody's real data costs them the link and nothing else. Naming them in the preflight is
- * how that stops being a claim.
- */
-export type ResetTreeMeasure =
-  | { readonly kind: 'absent' }
-  | {
-      readonly kind: 'measured';
-      readonly files: number;
-      readonly bytes: number;
-      /** Rendered `<path inside the tree> -> <where it points>`, relative to the tree it was found in. */
-      readonly escapingLinks: readonly string[];
-    };
-
-/**
- * Measuring and removing the trees a reset destroys.
- *
- * Every failure throws. A reset that cannot remove what it just told somebody it would remove has
- * LIED to them, and half a reset is the state the whole verb exists to stop people reaching by hand —
- * so both methods here throw, and the verb fails with them.
- *
- * `measure` is a separate call rather than a return value of `remove` because the order is the point:
- * a person is shown the sizes and the counts, and only then asked. A measurement that arrived with the
- * removal would arrive too late to abort on.
- */
-export interface IResetTreePort {
-  measure(root: string): Promise<ResetTreeMeasure>;
-  /**
-   * Remove the tree and report what actually went; an absent tree is `absent`, not a failure. Never
-   * follows a symbolic link out of the tree.
-   *
-   * It answers with its OWN measurement rather than nothing, because the preflight's numbers were
-   * taken while the daemon was still running and writing. Reporting those as what was removed would be
-   * a number nobody measured. The removal has to walk the tree anyway to unseal it, so counting on the
-   * way down costs nothing and is the only count that is true.
-   */
-  remove(root: string): Promise<ResetTreeMeasure>;
-}
-
-/**
- * Counting what a reset destroys that nothing brings back, asked of the daemon that still owns it.
- *
- * The daemon is the authority on its own state and the CLI does not read it. `undefined` therefore
- * means "did not answer", which is information rather than a failure: a daemon that is already down
- * cannot be asked, and the preflight says so instead of guessing or counting files behind its back.
- */
-export interface IResetInventoryPort {
-  count(): Promise<{ readonly secrets: number; readonly devices: number } | undefined>;
-}
-
-/** What ending the daemon's private session terminal server did. */
-export type SessionTerminalEnding =
-  /** A server was serving that socket, and it has been told to end every session it holds. */
-  | { readonly kind: 'ended' }
-  /** Nothing was listening there — no session had a running agent to end. */
-  | { readonly kind: 'none' }
-  /** A server may still be running; `reason` is what the terminal multiplexer said. */
-  | { readonly kind: 'failed'; readonly reason: string };
-
-/**
- * Ending every session's running agent, which a reset has to do before it removes their home.
- *
- * The agents run under the daemon's private tmux server, NOT under the daemon, so stopping the daemon
- * leaves them running — by design, because that is how a session survives a restart. A reset that
- * stopped only the daemon therefore deleted the home out from under live agents, and the first thing
- * each of them wrote recreated `<FY_HOME>/fleet/…` with no layout marker: the next `install` met
- * an unclaimed Ferretry directory and refused it. Reported as a value rather than thrown, because a
- * reset that could not end the server is still a reset the owner asked for; the controller says so.
- */
-export interface ISessionTerminalServerPort {
-  end(socket: string): Promise<SessionTerminalEnding>;
-}
-
-/**
- * The typed confirmation a reset asks for, injected so no test blocks on a terminal.
- *
- * The same one-method shape `fy worktree rm` uses, for the same reason: this is the repository's
- * existing pattern for authorizing something irreversible, and a second pattern for one verb would
- * mean two rituals to learn for the same class of act.
- */
-export interface IDaemonPrompt {
-  ask(message: string): Promise<string>;
-}
-
-/** Time, injected so the readiness and shutdown waits are testable without real delay. */
-/**
- * The note that a restart is underway, which every `fy` on this host reads before deciding whether a
- * daemon that refuses its call is worth waiting for (`daemon-restart.ts`). Best effort both ways: a
- * marker that cannot be written costs a person's call its patience, never the restart.
- */
-export interface IDaemonRestartMarkerPort {
-  /** Vouches for a restart until `untilMs` (wall clock). Never throws. */
-  mark(untilMs: number): Promise<void>;
-  /** Withdraws it. Never throws; absent is success. */
-  clear(): Promise<void>;
-}
-
-export interface IClockPort {
-  now(): number;
-  sleep(milliseconds: number): Promise<void>;
-}
-
-/**
- * Presentation port. Deliberately the narrowest slice of the shipped `ConsoleIo` adapter these
- * commands use, so the production adapter satisfies it structurally and no second terminal adapter
- * has to exist.
- */
-export interface IDaemonOutput {
-  success(message: string): void;
-  warn(message: string): void;
-  error(message: string): void;
-  setExitCode(code: number): void;
 }
 
 /** What the service manager believes about the daemon right now. */
@@ -358,4 +184,80 @@ export interface IServiceDefinitionSupervisor extends IDaemonSupervisor {
    * out; its restart stays stop, wait until down, reload.
    */
   readonly restartInPlace?: (executable: string) => Promise<void>;
+}
+export interface INixGcRootPort {
+  /** Resolve symbolic links, so a profile or shim path is classified by what it actually points at. */
+  realPath(path: string): Promise<string>;
+  /**
+   * Register an indirect GC root at `rootPath` for `storePath`.
+   *
+   * `undefined` on success; otherwise the reason it could not, for the caller to warn with.
+   */
+  pin(storePath: string, rootPath: string): Promise<string | undefined>;
+  /** Drop a root. An absent root is success — releasing must retire the store path, not fail. */
+  release(rootPath: string): Promise<void>;
+}
+
+export type { IClockPort } from '../update/machine.ts';
+
+/**
+ * Whether the daemon of this state home is answering, and which process it is.
+ *
+ * The pid is the daemon's own account of itself (`GET /healthz`) at the address its run record names. It is never
+ * trusted alone: every signal sent to it first passes `assertServes`, which proves the pid holds this state home's
+ * lifetime lock. `undefined` is "did not answer", a fact to report and not an error to raise.
+ */
+export interface IDaemonHealthPort {
+  probe(): Promise<LocalUpdateHealth | undefined>;
+}
+
+/** Showing the daemon log: the one-shot read, or following it as it grows. */
+export interface IDaemonLogPort {
+  exists(logFile: string): Promise<boolean>;
+  /** Streams the log to this terminal; the exit code of the reader. */
+  show(logFile: string, follow: boolean): Promise<number>;
+}
+
+/** What one tree holds, measured or removed. */
+export type ResetTreeMeasure =
+  | { readonly kind: 'absent' }
+  | {
+      readonly kind: 'measured';
+      readonly files: number;
+      readonly bytes: number;
+      /** `<path relative to the tree> -> <target>` for every link that points out of the tree. */
+      readonly escapingLinks: readonly string[];
+    };
+
+/** The trees a reset destroys, measured and then removed. Every failure throws. */
+export interface IResetTreePort {
+  measure(root: string): Promise<ResetTreeMeasure>;
+  remove(root: string): Promise<ResetTreeMeasure>;
+}
+
+/** What a reset destroys that nothing brings back, counted from the daemon that still holds it. */
+export interface ResetCounts {
+  readonly secrets: number;
+  readonly devices: number;
+  readonly ferrets: number;
+}
+
+export interface IResetInventoryPort {
+  /** `undefined` when the daemon cannot be asked: a reset must never depend on the thing it recovers from. */
+  count(): Promise<ResetCounts | undefined>;
+}
+
+export type SessionTerminalEnding =
+  | { readonly kind: 'ended' }
+  | { readonly kind: 'none' }
+  | { readonly kind: 'failed'; readonly reason: string };
+
+/** The private terminal server every ferret's agent runs under; it outlives a daemon stop. */
+export interface ISessionTerminalServerPort {
+  end(socket: string): Promise<SessionTerminalEnding>;
+}
+
+/** How many ferrets are mid-turn, for the line a restart says and for `--when-idle`. */
+export interface IDaemonTurnsPort {
+  midTurn(): Promise<number>;
 }

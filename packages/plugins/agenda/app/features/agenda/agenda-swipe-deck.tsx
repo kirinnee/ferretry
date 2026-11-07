@@ -1,0 +1,717 @@
+/**
+ * THE PHONE'S AGENDA DECK: the newest card on top, draggable; the next ones peeking out behind it.
+ *
+ * A swipe is an answer, so it is held to the same rules a button is, and then some:
+ *
+ * - THE MAPPING IS THE CARD'S OWN ANSWERS (`swipeTargets`), never a second one: left, up and right each
+ *   give the answer the card put in that direction. A direction with no answer commits nothing. While the
+ *   card is dragged it follows the finger; nothing is drawn over it naming the answer (the owner wants no teaching
+ *   text on the card) — what letting go would do is kept on the card as `data-swipe-*` attributes. A review's
+ *   "Needs changes" is written in the message box, so it has no swipe: that drag springs back.
+ * - IT COMMITS ONLY PAST THE THRESHOLD (`swipeIntent(...).committed`). Short of it the card springs back
+ *   and nothing is sent; past it the card flies off and the answer is handed to `onAct` — which, in the
+ *   inbox, holds it for the undo window (`DeferredAgendaActions`) rather than posting it.
+ * - DOWN IS SKIP, as on every swipeable card: a drag down past the threshold moves to the next card (`onSkip`) and the card
+ *   follows it down. Nothing is answered, dismissed or sent to `onAct`. "Not needed" is only its own button, and it is
+ *   never a swipe. Where the deck cannot skip (`onSkip` absent) the card does not follow a downward drag and the
+ *   browser keeps it as a scroll.
+ * - THE WHOLE CARD SWIPES, BY TOUCH ONLY. A touch may start anywhere on the card ({@link ./agenda-swipe-gesture.ts}):
+ *   the direction is decided after 10px and kept. Sideways is a swipe (left and right answers). Up or down from the
+ *   body is the reader scrolling and is handed to the browser (`touch-action: pan-y`); only the card's head, which
+ *   does not scroll, keeps the up answer and Skip. A mouse or trackpad drag is the reader selecting text, never a swipe, on any screen size; a
+ *   touch that starts on a link, a button or a field, or inside something that scrolls sideways (a table), is that
+ *   element's, never the deck's.
+ * - A SCROLL IS NEVER A SWIPE. A drag that moved swallows the click it ends in, so a swipe that ends over a button
+ *   does not also press it.
+ * - KEYBOARD AND SCREEN-READER PARITY: the same answers are the card's own buttons, and a focused card
+ *   takes ←, → and ↑ for the mapped answer ({@link AgendaCardFrame}), said in an sr-only hint.
+ * - REDUCED MOTION (the OS preference, or Settings › Appearance › Motion) drops the fly-off and the
+ *   spring: the card is simply gone, or simply back.
+ */
+
+import { agendaTitle } from '../../wire/index.ts';
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
+import { type SwipeTarget, type SwipeTargets, swipeTargets } from '../../lib/agenda-answers.ts';
+import {
+  type InboxAction,
+  type InboxCard,
+  type SwipeDirection,
+  swipeIntent,
+  swipeThreshold,
+} from '../../lib/agenda-inbox.ts';
+import { snoozePicks } from '../../lib/agenda-snooze.ts';
+import { usePrefersReducedMotion, shellClock } from '../../shell.ts';
+import { type CompassAvailable, compassReading } from './agenda-compass.ts';
+import { CustomSnoozeForm } from './agenda-snooze-menu.tsx';
+import {
+  isLongPress,
+  type Lock,
+  lockOf,
+  startsAtScrollTop,
+  startsInHead,
+  startsInSelection,
+  startsInSidewaysScroller,
+  startsOnInteractive,
+  ownsKeys,
+  isTouch,
+} from './agenda-swipe-gesture.ts';
+import { DeckDownContext } from './deck-down-context.ts';
+import { SwipeCompass } from './swipe-reveal.tsx';
+
+/** How long a committed card takes to leave. The answer is handed over at once; this is only the look. */
+const FLY_MS = 220;
+
+/** The least the top card is given, so a short screen still shows its head and its answer bar. */
+const MIN_ROOM_PX = 320;
+/** Breathing room under the card, beyond the peeking cards' own padding. */
+const ROOM_MARGIN_PX = 8;
+
+/**
+ * How tall the top card may be: from the deck's top edge to the bottom of what the reader can see,
+ * less whatever the host draws under the deck (the inbox's hint) and the peeks' padding — never less
+ * than {@link MIN_ROOM_PX}. Pure, so the arithmetic is proved without a layout engine.
+ */
+export const deckRoom = (deckTop: number, visibleBottom: number, below: number, peekPadding: number): number =>
+  Math.max(MIN_ROOM_PX, Math.floor(visibleBottom - deckTop - below - peekPadding - ROOM_MARGIN_PX));
+
+/** The bottom edge of what the reader can see of `element`: its nearest scrolling ancestor, else the window. */
+const visibleBottomOf = (element: HTMLElement): number => {
+  for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
+    const overflow = getComputedStyle(parent).overflowY;
+    if (overflow === 'auto' || overflow === 'scroll') return parent.getBoundingClientRect().bottom;
+  }
+  return window.visualViewport?.height ?? window.innerHeight;
+};
+
+/** The room a mounted deck has, read off the layout. */
+const roomOf = (element: HTMLElement, reserve: number): number => {
+  const below = element.nextElementSibling?.getBoundingClientRect().height ?? 0;
+  const padding = Number.parseFloat(getComputedStyle(element).paddingBottom) || 0;
+  return deckRoom(element.getBoundingClientRect().top, visibleBottomOf(element), below, padding + reserve);
+};
+
+/**
+ * The room the deck has, measured, as the `--deck-room` its top card is capped by — so the card's
+ * detail grows into the screen it has rather than a guess at it. Re-measured when the window resizes,
+ * when a new card comes on top and when what is drawn under the deck changes size.
+ */
+export const useDeckRoom = (
+  deck: { readonly current: HTMLElement | null },
+  topKey: string | undefined,
+  reserve = 0,
+): number | null => {
+  const [room, setRoom] = useState<number | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new card on top is a reason to measure again
+  useEffect(() => {
+    const measure = (): void => {
+      const element = deck.current;
+      if (element !== null) setRoom(roomOf(element, reserve));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    // What the host draws under the deck can grow after it (the Inbox's composer arrives once its client is ready,
+    // and grows as it is typed in): the card gives up that room rather than pushing it off the screen.
+    const below = deck.current?.nextElementSibling;
+    const observer =
+      below == null || typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure());
+    if (observer !== null && below != null) observer.observe(below);
+    return () => {
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
+  }, [topKey]);
+  return room;
+};
+
+/** How many cards peek out behind the top one. */
+const PEEKS = 2;
+
+const KEY_DIRECTION: Readonly<Record<string, SwipeDirection>> = {
+  ArrowRight: 'right',
+  ArrowLeft: 'left',
+  ArrowUp: 'up',
+};
+
+const DIRECTION_WORD: Readonly<Record<SwipeDirection, string>> = {
+  right: 'right',
+  left: 'left',
+  up: 'up',
+};
+
+/** The direction a key points, or `null` for a key that is not one of the three arrows. */
+export const agendaKeyDirection = (key: string): SwipeDirection | null => KEY_DIRECTION[key] ?? null;
+
+/** What the arrows do on this card, in words: the sr-only hint a focused card is described by. */
+export const swipeKeyHint = (targets: SwipeTargets): string =>
+  (['left', 'up', 'right'] as const)
+    .flatMap(direction => {
+      const target = targets[direction];
+      return target === undefined ? [] : [`Arrow ${DIRECTION_WORD[direction]}: ${target.label}.`];
+    })
+    .join(' ');
+
+/** Reduced motion from either source: the OS preference, or the app's own Motion setting. */
+const useReducedMotion = (override?: boolean): boolean => {
+  const prefers = usePrefersReducedMotion();
+  if (override !== undefined) return override;
+  return prefers || (typeof document !== 'undefined' && document.documentElement.dataset.motion === 'reduced');
+};
+
+/** A way a card can leave the deck: one of its answers' directions, or down — Skip. */
+type DeckDirection = SwipeDirection | 'down';
+
+/** What the compass reads as, in the words the card's `data-swipe-answer` keeps. */
+const compassWord = (intent: ReturnType<typeof compassReading>['intent'] | undefined): string => {
+  if (intent === undefined) return 'Skip';
+  if (intent.kind === 'not-needed') return 'Not needed';
+  if (intent.kind === 'snooze')
+    return `Snooze ${snoozePicks(shellClock.nowMs()).find(pick => pick.id === intent.pick)?.label ?? ''}`.trim();
+  if (intent.kind === 'snooze-pick') return 'Snooze';
+  return 'Skip';
+};
+
+/** The direction an action leaves in: the one of `targets` that sends it (matched by meaning), else none. */
+const directionOf = (targets: SwipeTargets, action: InboxAction): SwipeDirection | null => {
+  for (const direction of ['up', 'right', 'left'] as const) {
+    const mapped = targets[direction]?.action;
+    if (mapped != null && mapped.kind === action.kind && mapped.label === action.label) return direction;
+  }
+  return null;
+};
+
+interface AgendaCardFrameProps {
+  readonly card: InboxCard;
+  readonly targets: SwipeTargets;
+  readonly onArrow: (direction: SwipeDirection) => void;
+  /** ↓ on the focused card: Skip. Absent: ↓ is the page's. */
+  readonly onDown?: (() => void) | undefined;
+  readonly children: ReactNode;
+}
+
+/**
+ * A card as something the keyboard can answer: focusable, described by what its arrows do, and taking
+ * ←/→/↑ for the answer in that direction — only when the CARD is focused, never while focus is in a
+ * field or on one of its buttons, where the arrows already mean something.
+ */
+function AgendaCardFrame({ card, targets, onArrow, onDown, children }: AgendaCardFrameProps) {
+  const hintId = useId();
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === 'ArrowDown' && onDown !== undefined) {
+      event.preventDefault();
+      onDown();
+      return;
+    }
+    const direction = agendaKeyDirection(event.key);
+    if (direction === null || targets[direction] === undefined) return;
+    event.preventDefault();
+    onArrow(direction);
+  };
+  return (
+    <section
+      aria-describedby={hintId}
+      aria-label={agendaTitle(card.item)}
+      className="fy-attn-frame"
+      data-agenda-frame={card.item.id}
+      onKeyDown={onKeyDown}
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: the card is focusable so its arrow keys can answer it; the hint says how
+      tabIndex={0}
+    >
+      {children}
+      <span className="sr-only" id={hintId}>
+        {swipeKeyHint(targets)}
+        {onDown === undefined ? '' : ' Arrow down: skip.'}
+      </span>
+    </section>
+  );
+}
+
+interface Drag {
+  readonly dx: number;
+  readonly dy: number;
+}
+
+/** A drag in progress, as the pointer moved it: raw, before {@link dragOffset} draws it. */
+interface RawDrag extends Drag {
+  readonly width: number;
+  /** Whether it began in the card's head: see {@link bodyTargets}. */
+  readonly head: boolean;
+  /** It began in a body already at its top, where a pull down is the compass and not a scroll. */
+  readonly pull: boolean;
+  /** Which way the touch locked: a downward drag that began vertically is the compass's. */
+  readonly lock: Lock;
+}
+
+interface Gesture {
+  readonly pointerId: number;
+  readonly startX: number;
+  readonly startY: number;
+  readonly width: number;
+  readonly head: boolean;
+  readonly pull: boolean;
+  /** It began inside a region that swipes on its own (`ownGesturesIn`): the deck keeps only a pull down from there. */
+  readonly own: boolean;
+  readonly startedAt: number;
+  moved: boolean;
+  lock: Lock;
+  dx: number;
+  dy: number;
+}
+
+interface Leaving {
+  readonly card: InboxCard;
+  readonly direction: DeckDirection;
+  readonly from: Drag;
+}
+
+/** Where a drag of `(dx, dy)` draws the card: it follows sideways, and up or down only when that means something. */
+export const dragOffset = (dx: number, dy: number, targets: SwipeTargets, canDown = false): Drag => ({
+  dx,
+  dy: dy >= 0 ? (canDown ? dy : 0) : targets.up === undefined ? dy * 0.2 : dy,
+});
+
+/**
+ * The swipe targets for a drag that began in the card's body: the sideways answers only. Up and down from there
+ * are the reader scrolling, so a drag that drifts that way after it locked to sideways never answers up.
+ */
+export const bodyTargets = (targets: SwipeTargets, head: boolean): SwipeTargets => {
+  if (head) return targets;
+  const { left, right } = targets;
+  return { ...(left === undefined ? {} : { left }), ...(right === undefined ? {} : { right }) };
+};
+
+export interface AgendaSwipeDeckProps {
+  /** The deck, newest first: the first card is on top. */
+  readonly cards: readonly InboxCard[];
+  /**
+   * Draws one card; `act` is how its own buttons answer it (and fly it off, like a swipe), `skip` how its own
+   * Skip tap moves past it (and flies it down) when the deck can skip.
+   */
+  readonly renderCard: (card: InboxCard, act: (action: InboxAction) => void, skip: () => void) => ReactNode;
+  /** An answer the reader gave, by swipe, arrow key or button (↓ is Skip, never an answer). */
+  readonly onAct: (card: InboxCard, action: InboxAction) => void;
+  /** The reader moved on from the card on top without answering it, by a ↓ swipe, the ↓ key or a tap. Absent: the deck cannot skip. */
+  readonly onSkip?: (card: InboxCard) => void;
+  /**
+   * Regions of the card that answer their own swipes (a touch item view's head and quick-reply row): a drag that
+   * starts there is theirs, never also the deck's, so one swipe can never answer or skip twice.
+   */
+  readonly ownGesturesIn?: string;
+  /**
+   * ↓→ on the compass, and the plain Not needed: the card is dismissed (the host holds it in the undo window). Absent:
+   * the compass has no Not needed.
+   */
+  readonly onDismiss?: (card: InboxCard) => void;
+  /** ↓↓↓ on the compass: snooze the card until this instant. Absent (or `canSnooze` false): the compass has no Snooze. */
+  readonly onSnooze?: (card: InboxCard, until: string) => void;
+  /** Whether the card can be snoozed; the compass draws Snooze only then. Default: it can. */
+  readonly canSnooze?: (card: InboxCard) => boolean;
+  /**
+   * The host takes an answer over before it is sent (a gate's "Not good" waits for its words): return `true` and the
+   * card springs back, nothing is sent, and the host asks for what is missing.
+   */
+  readonly onHold?: (card: InboxCard, action: InboxAction) => boolean;
+  /** Forces reduced motion on or off; the reader's preference otherwise. */
+  readonly reducedMotion?: boolean;
+  /**
+   * The run's keys: ←, ↑ and → answer the card on top and ↓ skips it from anywhere on the page that is not a field,
+   * a menu or a dialog — not only while the card itself is focused.
+   */
+  readonly runKeys?: boolean;
+}
+
+const NO_ACT = (): void => undefined;
+
+export function AgendaSwipeDeck({
+  cards,
+  renderCard,
+  onAct,
+  onSkip,
+  onDismiss,
+  onSnooze,
+  canSnooze,
+  onHold,
+  ownGesturesIn,
+  reducedMotion,
+  runKeys = false,
+}: AgendaSwipeDeckProps) {
+  const reduced = useReducedMotion(reducedMotion);
+  const [drag, setDrag] = useState<RawDrag | null>(null);
+  const [leaving, setLeaving] = useState<Leaving | null>(null);
+  const [custom, setCustom] = useState<InboxCard | null>(null);
+  const gesture = useRef<Gesture | null>(null);
+  const deck = useRef<HTMLDivElement | null>(null);
+  /** Focus was in the deck when a card left: the next card takes it, so the keyboard keeps its place. */
+  const refocus = useRef(false);
+  const swallowClick = useRef(false);
+  const top = cards[0];
+  const targets: SwipeTargets = top === undefined ? {} : swipeTargets(top.item);
+  /** ↓ is Skip, and only where the deck can skip. */
+  const canDown = onSkip !== undefined;
+  const available: CompassAvailable = {
+    notNeeded: onDismiss !== undefined,
+    snooze: onSnooze !== undefined && (top === undefined || canSnooze === undefined || canSnooze(top)),
+  };
+
+  const topKey = top?.key;
+  const room = useDeckRoom(deck, topKey);
+  // A new card on top starts with no drag — the old one's must never carry over — and
+  // takes the focus the card it replaced had.
+  useEffect(() => {
+    gesture.current = null;
+    setDrag(null);
+    if (!refocus.current) return;
+    // The last card leaving forgets the focus too: a card arriving later must not steal it.
+    refocus.current = false;
+    if (topKey === undefined) return;
+    deck.current?.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-frame]')?.focus();
+  }, [topKey]);
+
+  // A pull down from a body at its top is the compass, not a scroll: the browser is told so while the touch is still
+  // cancellable, or it would claim the touch and cancel the pointer. React's own touch handlers are passive.
+  useEffect(() => {
+    const element = deck.current;
+    if (element === null) return;
+    const hold = (event: TouchEvent): void => {
+      const current = gesture.current;
+      const touch = event.touches[0];
+      if (current === null || !current.pull || touch === undefined || !event.cancelable) return;
+      const dx = touch.clientX - current.startX;
+      const dy = touch.clientY - current.startY;
+      if (dy > Math.abs(dx)) event.preventDefault();
+    };
+    element.addEventListener('touchmove', hold, { passive: false });
+    return () => element.removeEventListener('touchmove', hold);
+  }, []);
+
+  useEffect(() => {
+    if (leaving === null) return;
+    return shellClock.after(() => setLeaving(null), FLY_MS);
+  }, [leaving]);
+
+  const answer = (card: InboxCard, action: InboxAction, from: Drag): void => {
+    if (onHold?.(card, action) === true) {
+      gesture.current = null;
+      setDrag(null);
+      return;
+    }
+    const direction = directionOf(swipeTargets(card.item), action);
+    refocus.current = deck.current?.contains(document.activeElement) === true;
+    gesture.current = null;
+    setDrag(null);
+    if (!reduced && direction !== null) setLeaving({ card, direction, from });
+    onAct(card, action);
+  };
+
+  /** Skip, by a ↓ swipe, the ↓ key or a tap: the card goes and the next one comes on top; nothing is answered. */
+  const skip = (card: InboxCard, from: Drag): void => {
+    if (onSkip === undefined) return;
+    refocus.current = deck.current?.contains(document.activeElement) === true;
+    gesture.current = null;
+    setDrag(null);
+    if (!reduced) setLeaving({ card, direction: 'down', from });
+    onSkip(card);
+  };
+
+  /** Not needed, by the compass or its button: the card goes down and the host dismisses it into the undo window. */
+  const dismiss = (card: InboxCard, from: Drag): void => {
+    if (onDismiss === undefined) return;
+    refocus.current = deck.current?.contains(document.activeElement) === true;
+    gesture.current = null;
+    setDrag(null);
+    if (!reduced) setLeaving({ card, direction: 'down', from });
+    onDismiss(card);
+  };
+
+  /** Snooze, by the compass or its buttons: the card goes down and the host snoozes it. */
+  const snooze = (card: InboxCard, until: string, from: Drag): void => {
+    if (onSnooze === undefined) return;
+    refocus.current = deck.current?.contains(document.activeElement) === true;
+    gesture.current = null;
+    setDrag(null);
+    if (!reduced) setLeaving({ card, direction: 'down', from });
+    setCustom(null);
+    onSnooze(card, until);
+  };
+
+  /** A pick of the shared list on the compass: a ready time snoozes; Custom… springs the card back and asks for one. */
+  const snoozeByPick = (card: InboxCard, id: string, from: Drag): void => {
+    const pick = snoozePicks(shellClock.nowMs()).find(candidate => candidate.id === id);
+    if (pick === undefined) return;
+    if (pick.until !== null) {
+      snooze(card, pick.until, from);
+      return;
+    }
+    gesture.current = null;
+    setDrag(null);
+    setCustom(card);
+  };
+
+  /** A swipe or arrow toward `direction`: its answer goes; a "Needs changes" has none, so the card springs back. */
+  const give = (card: InboxCard, direction: SwipeDirection, from: Drag): void => {
+    const target = targets[direction];
+    // Both callers give only a direction the card takes; the guard keeps a future caller from sending
+    // nothing, and a "Needs changes" (written in the message box) has no action to send.
+    if (target === undefined || target.action === null) {
+      setDrag(null);
+      return;
+    }
+    answer(card, target.action, from);
+  };
+
+  // The run's keys read the card on top as of the last render, so one listener serves every card.
+  const keyed = useRef<{ readonly press: (key: string) => void } | null>(null);
+  keyed.current = {
+    press: key => {
+      if (top === undefined) return;
+      if (key === 'ArrowDown') {
+        if (canDown) skip(top, { dx: 0, dy: 0 });
+        return;
+      }
+      const direction = agendaKeyDirection(key);
+      if (direction !== null && targets[direction] !== undefined) give(top, direction, { dx: 0, dy: 0 });
+    },
+  };
+  useEffect(() => {
+    if (!runKeys) return;
+    const onKey = (event: globalThis.KeyboardEvent): void => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key !== 'ArrowDown' && agendaKeyDirection(event.key) === null) return;
+      if (ownsKeys(event.target)) return;
+      event.preventDefault();
+      keyed.current?.press(event.key);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [runKeys]);
+
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
+    swallowClick.current = false;
+    const own =
+      ownGesturesIn !== undefined && event.target instanceof Element && event.target.closest(ownGesturesIn) !== null;
+    // A button in the head or the answer row still lets a pull down start: the row's other swipes are its own.
+    if (
+      top === undefined ||
+      !isTouch(event) ||
+      // React carries a touch on a portal (the item's ⋯ sheet, drawn on `document.body`) up to here though it is not on
+      // the card at all: only a touch on the card's own DOM is the deck's.
+      !(event.target instanceof Node) ||
+      !event.currentTarget.contains(event.target) ||
+      (startsOnInteractive(event.target) && !own) ||
+      startsInSelection(event.target) ||
+      // A hypermedia block opened fullscreen covers the screen: a drag on it is the reader's pan, never a card answer (B164).
+      (event.target instanceof Element && event.target.closest('.fy-render-fullscreen') !== null) ||
+      startsInSidewaysScroller(event.target, event.currentTarget)
+    )
+      return;
+    gesture.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      width: event.currentTarget.getBoundingClientRect().width,
+      head: own || startsInHead(event.target),
+      pull: canDown && !own && !startsInHead(event.target) && startsAtScrollTop(event.target, event.currentTarget),
+      own,
+      startedAt: event.timeStamp,
+      moved: false,
+      lock: 'sideways',
+      dx: 0,
+      dy: 0,
+    };
+  };
+
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>): void => {
+    const current = gesture.current;
+    if (current === null || current.pointerId !== event.pointerId) return;
+    current.dx = event.clientX - current.startX;
+    current.dy = event.clientY - current.startY;
+    if (!current.moved) {
+      const lock = lockOf(current.dx, current.dy);
+      if (lock === null) return;
+      if (isLongPress(event.timeStamp - current.startedAt)) {
+        // Held before it moved: the reader is selecting text, and the browser has this touch.
+        gesture.current = null;
+        return;
+      }
+      if (current.own && (lock === 'sideways' || current.dy < 0)) {
+        // The head's and the row's own swipes: everything but a pull down is theirs, never also the deck's.
+        gesture.current = null;
+        return;
+      }
+      if (lock === 'vertical' && !current.head && !(current.pull && current.dy > 0)) {
+        // The body scrolls: the browser has this touch now, and it is never a swipe.
+        gesture.current = null;
+        return;
+      }
+      current.moved = true;
+      current.lock = lock;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // A pointer the browser already released cannot be captured; the drag still reads.
+      }
+    }
+    setDrag({
+      dx: current.dx,
+      dy: current.dy,
+      width: current.width,
+      head: current.head,
+      pull: current.pull,
+      lock: current.lock,
+    });
+  };
+
+  const onPointerUp = (event: PointerEvent<HTMLDivElement>): void => {
+    const current = gesture.current;
+    if (current === null || current.pointerId !== event.pointerId || top === undefined) return;
+    gesture.current = null;
+    if (!current.moved) return;
+    swallowClick.current = true;
+    const live = bodyTargets(targets, current.head);
+    const downs = canDown && (current.head || current.pull);
+    const from = dragOffset(current.dx, current.dy, live, downs);
+    if (downs && current.lock === 'vertical' && current.dy > 0) {
+      const { intent } = compassReading(current.dx, current.dy, current.width, available);
+      if (intent.kind === 'skip') skip(top, from);
+      else if (intent.kind === 'not-needed') dismiss(top, from);
+      else if (intent.kind === 'snooze') snoozeByPick(top, intent.pick, from);
+      else setDrag(null);
+      return;
+    }
+    const intent = swipeIntent(current.dx, current.dy, current.width, live);
+    const direction = intent.committed ? intent.direction : null;
+    if (direction !== null) give(top, direction, from);
+    else setDrag(null);
+  };
+
+  const onPointerCancel = (event: PointerEvent<HTMLDivElement>): void => {
+    if (gesture.current?.pointerId !== event.pointerId) return;
+    gesture.current = null;
+    setDrag(null);
+  };
+
+  if (top === undefined && leaving === null) return null;
+
+  const live = drag === null ? targets : bodyTargets(targets, drag.head);
+  const downs = canDown && (drag === null || drag.head || drag.pull);
+  const compass =
+    drag !== null && downs && drag.lock === 'vertical' && drag.dy > 0
+      ? compassReading(drag.dx, drag.dy, drag.width, available)
+      : null;
+  const intent =
+    drag === null
+      ? null
+      : compass !== null
+        ? {
+            direction: compass.revealed ? ('down' as const) : null,
+            progress: compass.revealed ? 1 : Math.min(1, drag.dy / swipeThreshold(drag.width)),
+            committed: compass.intent.kind !== 'cancel' && compass.intent.kind !== 'snooze-pick',
+          }
+        : swipeIntent(drag.dx, drag.dy, drag.width, live);
+  const offset = drag === null ? null : dragOffset(drag.dx, drag.dy, live, downs);
+  const aim: SwipeTarget | undefined =
+    intent?.direction == null
+      ? undefined
+      : intent.direction === 'down'
+        ? { label: compassWord(compass?.intent), action: null }
+        : live[intent.direction];
+  const peeks = cards.slice(1, 1 + PEEKS);
+
+  return (
+    <div
+      className="fy-attn-deck"
+      data-agenda-deck=""
+      data-reduced-motion={reduced || undefined}
+      ref={deck}
+      style={room === null ? undefined : ({ '--deck-room': `${room}px` } as CSSProperties)}
+    >
+      {peeks
+        .map((card, index) => (
+          <div aria-hidden="true" className="fy-attn-deck__peek" data-depth={index + 1} inert key={card.key}>
+            {renderCard(card, NO_ACT, NO_ACT)}
+          </div>
+        ))
+        .reverse()}
+      {top === undefined || !compass?.revealed ? null : (
+        <SwipeCompass notNeeded={available.notNeeded} slot={compass.slot} snooze={available.snooze} />
+      )}
+      {top === undefined ? null : (
+        <div
+          className="fy-attn-deck__top"
+          data-dragging={drag === null ? undefined : ''}
+          data-has-up={targets.up === undefined ? undefined : ''}
+          data-swipe-direction={intent?.direction ?? undefined}
+          // What letting go would do — kept on the card for tests and assistive tech. Only ↓ is also drawn, on the ground
+          // the card uncovers ({@link SwipeReveal}); the answers stay unnamed, the card just follows the finger.
+          data-swipe-committed={intent?.committed || undefined}
+          data-swipe-empty={(intent?.direction != null && aim === undefined) || undefined}
+          data-swipe-answer={aim?.label}
+          key={top.key}
+          onClickCapture={event => {
+            if (!swallowClick.current) return;
+            swallowClick.current = false;
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onPointerCancel={onPointerCancel}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          style={{
+            // The body scrolls vertically; the head (`touch-action: none` in the CSS) reads its own up and down.
+            touchAction: 'pan-y',
+            ...(offset === null
+              ? {}
+              : {
+                  transform: `translate3d(${offset.dx}px, ${offset.dy}px, 0) rotate(${(offset.dx / 24).toFixed(2)}deg)`,
+                }),
+          }}
+        >
+          <DeckDownContext.Provider value={canDown}>
+            <AgendaCardFrame
+              card={top}
+              onArrow={direction => give(top, direction, { dx: 0, dy: 0 })}
+              onDown={canDown ? () => skip(top, { dx: 0, dy: 0 }) : undefined}
+              targets={targets}
+            >
+              {renderCard(
+                top,
+                action => answer(top, action, { dx: 0, dy: 0 }),
+                () => skip(top, { dx: 0, dy: 0 }),
+              )}
+            </AgendaCardFrame>
+          </DeckDownContext.Provider>
+        </div>
+      )}
+      {custom === null || top?.key !== custom.key ? null : (
+        <div aria-label="Snooze until" className="fy-attn-deck__custom" data-deck-custom="" role="dialog">
+          <CustomSnoozeForm now={shellClock.nowMs()} onSnooze={until => snooze(custom, until, { dx: 0, dy: 0 })} />
+          <button className="fy-attn-deck__custom-cancel" onClick={() => setCustom(null)} type="button">
+            Cancel
+          </button>
+        </div>
+      )}
+      {leaving === null ? null : (
+        <div
+          aria-hidden="true"
+          className="fy-attn-deck__leaving"
+          data-direction={leaving.direction}
+          inert
+          key={`leaving-${leaving.card.key}`}
+          style={{ '--fly-x': `${leaving.from.dx}px`, '--fly-y': `${leaving.from.dy}px` } as CSSProperties}
+        >
+          {renderCard(leaving.card, NO_ACT, NO_ACT)}
+        </div>
+      )}
+    </div>
+  );
+}

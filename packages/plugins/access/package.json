@@ -1,0 +1,41 @@
+{
+  "name": "@ferretry/plugin-access",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Access (plugins piece of Ferretry 5)",
+  "type": "module",
+  "ferretry": {
+    "id": "access",
+    "manifest": "./manifest.ts"
+  },
+  "exports": {
+    "./contract": "./contract/index.ts",
+    "./contract/testing": "./contract/testing/index.ts",
+    "./manifest": "./manifest.ts",
+    "./daemon": "./daemon/index.ts",
+    "./app": "./app/index.ts",
+    "./cli": "./cli/index.ts"
+  },
+  "dependencies": {
+    "@ferretry/core-gate": "workspace:*",
+    "@ferretry/kernel": "workspace:*",
+    "@ferretry/std": "workspace:*",
+    "zod": "4.4.3",
+    "@ferretry/plugin-connections": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "lucide-react": "^0.468.0",
+    "qrcode-terminal": "0.12.0",
+    "@ferretry/app": "workspace:*"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react-test-renderer": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "@happy-dom/global-registrator": "^20.11.1",
+    "should": "^13.2.3",
+    "@types/qrcode-terminal": "0.12.2"
+  }
+}

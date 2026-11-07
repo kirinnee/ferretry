@@ -81,20 +81,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Workspace and CLI release contracts";
       entry = validator "scripts/validate/cli-contracts.sh all";
-      files = "^(\\.goreleaser\\.yaml|\\.releaserc\\.yaml|Casks/.*|INSTALLATION\\.md|Taskfile\\.yaml|docs/fy-render\\.md|flake\\.nix|go\\.mod|nix/ferretry\\.nix|package\\.json|packages/.*|scripts/release/.*|scripts/validate/cli-contracts\\.sh)$";
-      pass_filenames = false;
-      language = "system";
-    };
-
-    # A closed list copied between independently compiled packages can gain a member on one side
-    # while every typecheck stays green. This is temporary detection: despite §4.6's preferred
-    # no-gate design, the explicit Wave A brief requires it until Wave 2a replaces each registered
-    # duplication with derivation or a compiler-exhaustive key map.
-    a-closed-set-agreement = {
-      enable = true;
-      name = "Cross-package closed-set agreement";
-      entry = validator "scripts/validate/closed-set-agreement.sh";
-      files = "^(packages/[^/]+/src/.*\\.tsx?|scripts/validate/closed-set-agreement\\.(sh|ts))$";
+      files = "^(\\.goreleaser\\.yaml|\\.releaserc\\.yaml|Casks/.*|INSTALLATION\\.md|Taskfile\\.yaml|flake\\.nix|go\\.mod|nix/ferretry\\.nix|package\\.json|packages/.*|scripts/release/.*|scripts/validate/cli-contracts\\.sh)$";
       pass_filenames = false;
       language = "system";
     };
@@ -110,47 +97,13 @@ pre-commit-lib.run {
       language = "system";
     };
 
-    a-composition-reachability = {
+    # The macOS runner policy: the darwin smoke is advisory on a pull request, required and retried on
+    # main and a release tag, and only the free standard macos-15 runner is ever asked for.
+    a-macos-policy = {
       enable = true;
-      name = "Composition-root reachability";
-      entry = validator "scripts/validate/composition-reachability.sh";
-      files = "^(packages/.*\\.tsx?|packages/[^/]+/package\\.json|scripts/validate/composition-reachability\\.(sh|ts)|scripts/validate/reachability-allowlist\\.txt)$";
-      pass_filenames = false;
-      language = "system";
-    };
-
-    a-composition-invocation = {
-      enable = true;
-      name = "Composition-root invocation";
-      entry = validator "scripts/validate/composition-invocation.sh";
-      files = "^(packages/[^/]+/bin/.*\\.ts|packages/[^/]+/src/.*\\.ts|scripts/validate/composition-invocation\\.sh)$";
-      pass_filenames = false;
-      language = "system";
-    };
-
-    # A pull request runs Containment, Sandbox Shell (Safari) and the macos-15 Harness Contract only when
-    # their inputs change. The lists live in scripts/ci/macos-relevance.sh; this holds them to the
-    # scripts and test files those jobs actually run, and realworld.yaml (and ci.yaml) to the decision. It also
-    # pins the macOS runner policy: advisory on a pull request, required and retried on main and a release tag.
-    a-macos-relevance = {
-      enable = true;
-      name = "macOS job relevance";
-      entry = validator "scripts/validate/macos-relevance.sh";
-      files = "^(scripts/(ci/(macos-relevance|macos-smoke-verdict|macos-smoke-skipped|macos-advisory|darwin-confinement|safari-render-proof)|validate/macos-relevance)\\.sh|\\.github/(workflows/(ci|cd|realworld|smoke-darwin|harness-contract-latest)\\.yaml|actions/smoke-darwin/.*)|packages/(daemon/tests/(contract|integration/(session|migrate|file-events|support|process))/.*|fleet/tests/contract/.*|protocol/tests/integration/process-incarnation.*|cli/tests/integration/reads/.*|pwa/harness/fy-render-safari/.*))$";
-      pass_filenames = false;
-      language = "system";
-    };
-
-    # A pull request runs the PWA browser gate (`pwa-screenshot`) only when something it reads changes. The
-    # list lives in scripts/ci/pwa-relevance.sh; this traces the harness bundle's imports and holds the list,
-    # the workflow gate and the fail-open rules to them. It runs when any file it reads can change: the
-    # harness bundle's sources, every file of the workspace packages it traces (section 6 reads their
-    # imports), any package manifest, and any workflow (it looks for jobs that need the gate).
-    a-pwa-relevance = {
-      enable = true;
-      name = "PWA browser gate relevance";
-      entry = validator "scripts/validate/pwa-relevance.sh";
-      files = "^(scripts/(ci/(pwa-relevance|pwa-screenshot-proof)|validate/pwa-relevance)\\.sh|\\.github/workflows/[^/]+\\.ya?ml|packages/(pwa/(src|harness)/.*\\.tsx?|(protocol|relay|fleet)/.*\\.tsx?|[^/]+/package\\.json))$";
+      name = "macOS runner policy";
+      entry = validator "scripts/validate/macos-policy.sh";
+      files = "^(scripts/(ci/(macos-smoke-verdict|macos-smoke-skipped)|validate/macos-policy)\\.sh|\\.github/(workflows/.*\\.ya?ml|actions/smoke-darwin/.*))$";
       pass_filenames = false;
       language = "system";
     };
@@ -174,18 +127,18 @@ pre-commit-lib.run {
       enable = true;
       name = "Test tiers";
       entry = validator "scripts/validate/test-tiers.sh";
-      files = "^(packages/[^/]+/tests/.*\\.test\\.tsx?|config/test-groups\\.json|nix/fmt\\.nix|scripts/(validate/test-tiers\\.sh|test/ci-sets\\.ts|ci/((quick|quick-part|parallel|integration|full-status|e2e-summary|pre-commit|gate-hook|full-gates)\\.sh|(unit-timings|gate-hooks)\\.ts))|\\.github/workflows/(ci|realworld|e2e-slow)\\.yaml)$";
+      files = "^(packages/(.*/)?tests/.*\\.test\\.tsx?|config/test-groups\\.json|nix/fmt\\.nix|scripts/(validate/test-tiers\\.sh|test/ci-sets\\.ts|ci/((quick|quick-part|parallel|integration|full-status|e2e-summary|pre-commit|gate-hook|full-gates)\\.sh|(unit-timings|gate-hooks)\\.ts))|\\.github/workflows/(ci|realworld)\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };
 
-    # The PWA build and the Pages deployment publish the same directory. Cheap and whole-repo, so it
+    # The app build and the Pages deployment publish the same directory. Cheap and whole-repo, so it
     # runs on any change to the files it reads; `Pre-Commit (gates)` runs it on every CI run.
     a-pages-config = {
       enable = true;
       name = "Cloudflare Pages configuration";
       entry = validator "scripts/validate/pages-config.sh";
-      files = "^(wrangler\\.jsonc|packages/protocol/src/lib/stt-cleanup\\.ts|packages/pwa/(vite\\.config\\.ts|package\\.json|public/_(headers|redirects))|scripts/(ci/build-pwa|validate/pages-config)\\.sh|\\.github/workflows/pwa-pages\\.yaml)$";
+      files = "^(wrangler\\.jsonc|packages/app/(vite\\.config\\.ts|package\\.json|public/_(headers|redirects))|scripts/(ci/build-pwa|validate/pages-config)\\.sh|\\.github/workflows/pwa-pages\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };
@@ -199,48 +152,7 @@ pre-commit-lib.run {
       entry = validator "scripts/validate/relay-config.sh";
       # Both ends import the same source default, and the release compiler is deliberately included
       # so a per-build define cannot return while Nix remains direct-only.
-      files = "^(packages/relay/(wrangler\\.(hosted\\.json|jsonc)|src/(adapters/(worker|hosted-control)\\.ts|lib/(hosted-directory-default|index)\\.ts))|packages/protocol/package\\.json|packages/daemon/src/(lib/relay/discovery|adapters/system/runtime-environment)\\.ts|packages/pwa/(src/features/onboarding/hosted-relay|vite\\.config)\\.ts|scripts/(ci/(relay-directory-origin|build-checks|quick|quick-part|setup)|local/setup|release/compile|validate/relay-config)\\.sh|\\.github/workflows/(ci|relay-hosted|cd|pwa-pages)\\.yaml)$";
-      pass_filenames = false;
-      language = "system";
-    };
-
-    # Compare each production client path observation at a served prefix with every daemon route in
-    # both path directions, and declare route-method debt when a dial's verb cannot be read. The exact
-    # main baseline is explicit and stale exemptions fail, so it can shrink but a new disagreement
-    # inside that observation set cannot be absorbed silently.
-    a-route-agreement = {
-      enable = true;
-      name = "Client and daemon route agreement";
-      entry = validator "scripts/validate/route-agreement.sh";
-      files = "^(packages/[^/]+/(package\\.json|(src|bin)/.*\\.tsx?)|scripts/validate/route-agreement\\.(sh|ts)|scripts/validate/route-agreement-allowlist\\.txt)$";
-      pass_filenames = false;
-      language = "system";
-    };
-
-    # A header the browser code can present must be one the daemon's CORS preflight admits, in both
-    # directions. `x-ferretry-operator-unlock` shipped missing from that set, which did not degrade the
-    # request — it made every governed mutation the operator password authorizes unreachable from a
-    # browser, with both halves' tests green. Runs on the client trees and the transport together,
-    # because the finding is a disagreement between them rather than a property of either file.
-    a-cors-header-agreement = {
-      enable = true;
-      name = "Client and transport CORS header agreement";
-      entry = validator "scripts/validate/cors-header-agreement.sh";
-      files = "^(packages/(pwa|protocol)/src/.*\\.tsx?|packages/daemon/src/adapters/api/bun-api-server\\.ts|scripts/validate/cors-header-agreement\\.(sh|ts)|scripts/validate/cors-header-agreement-allowlist\\.txt)$";
-      pass_filenames = false;
-      language = "system";
-    };
-
-    # One browser, several paired daemons: the ids a daemon mints are unique only within it, so
-    # anything the bundle remembers about daemon-owned data has to be keyed by (daemonId, …). Runs
-    # on the whole PWA rather than the touched files because two of its three passes are questions
-    # about the bundle as a whole — which caches the connection registry reaches, and which stores
-    # nothing constructs.
-    a-daemon-scope = {
-      enable = true;
-      name = "PWA daemon scoping";
-      entry = validator "scripts/validate/daemon-scope.sh";
-      files = "^(packages/pwa/src/.*\\.tsx?|scripts/validate/daemon-scope\\.(sh|ts)|scripts/validate/daemon-scope-allowlist\\.txt)$";
+      files = "^(packages/plugins/(connections|catalogs)/worker/.*|scripts/(ci/(relay-directory-origin|relay-bundle-fingerprint|build-checks|quick|quick-part|setup)|local/setup|release/compile|validate/relay-config)\\.sh|\\.github/workflows/(ci|relay-hosted|link-store-hosted|cd|pwa-pages)\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };
@@ -252,9 +164,21 @@ pre-commit-lib.run {
     # than defended against at each call site.
     a-fetch-binding = {
       enable = true;
-      name = "PWA fetch binding";
+      name = "App fetch binding";
       entry = validator "scripts/validate/fetch-binding.sh";
-      files = "^(packages/pwa/src/.*\\.tsx?|scripts/validate/fetch-binding\\.sh)$";
+      files = "^(packages/(app/src|core/[^/]+/app|plugins/[^/]+/app)/.*\\.tsx?|scripts/validate/fetch-binding\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    # The 5.0 checks (redesign §7.9) through their one entry, scripts/gen/check.ts: the import, graph,
+    # manifest, guarantee, host-file and no-compat rules over the whole workspace. Whole-tree, so it runs on
+    # any source, manifest or generator change. See scripts/validate/rebuild-checks.sh.
+    a-rebuild-checks = {
+      enable = true;
+      name = "Ferretry 5.0 checks";
+      entry = bun-script "scripts/validate/rebuild-checks.sh";
+      files = "^(packages/.*|scripts/(gen|validate)/.*|ports-pending\\.json|release\\.json|docs/rebuild/guarantees\\.tsv|package\\.json)$";
       pass_filenames = false;
       language = "system";
     };
@@ -292,7 +216,7 @@ pre-commit-lib.run {
     # Test code never kills by pattern. Suites run from inside live agents' panes, and `pkill -f`
     # matches a regular expression against every command line on the machine — the live tmux server's
     # included. Teardowns kill by pid or by an exact `-S <own temp socket>` argv; see
-    # scripts/validate/no-pattern-kill.sh and packages/daemon/tests/support/ambient-session.ts.
+    # scripts/validate/no-pattern-kill.sh.
     a-no-pattern-kill = {
       enable = true;
       name = "No pattern kills in test code";
@@ -310,7 +234,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Daemon code declares every synchronous IO call";
       entry = validator "scripts/validate/no-sync-io.sh";
-      files = "^(packages/(daemon/(src|bin)|fleet/src)/.*\\.ts|scripts/validate/(no-sync-io\\.(sh|ts)|sync-io-allowlist\\.txt))$";
+      files = "^(packages/(core/kernel/host|core/[^/]+/daemon|plugins/[^/]+/daemon)/.*\\.ts|scripts/validate/(no-sync-io\\.(sh|ts)|sync-io-allowlist\\.txt))$";
       pass_filenames = false;
       language = "system";
     };
@@ -396,17 +320,5 @@ pre-commit-lib.run {
       language = "system";
     };
 
-    # `task test:e2e` typechecks `tests/e2e` AND `scripts/test/**` before any journey runs, and the root
-    # project above covers neither, so a type error in a script like `ci-sets.ts` stayed green here and
-    # then failed every E2E shard in 20 s (advisory, so the PR still merged green). Same command as
-    # `scripts/test/run-e2e.sh`, so Quick fails first. Read-only.
-    a-e2e-harness-typecheck = {
-      enable = true;
-      name = "E2E harness typecheck";
-      entry = bun-tool "tsc --noEmit --project tests/e2e/tsconfig.json";
-      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|\\.(ts|tsx|mts|cts)$)";
-      pass_filenames = false;
-      language = "system";
-    };
   };
 }

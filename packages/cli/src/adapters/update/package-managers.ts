@@ -1,5 +1,5 @@
-import type { CommandOutcome } from '../../lib/daemon/ports.ts';
-import { plainLine } from '../../lib/progress/index.ts';
+import type { CommandOutcome } from '../../lib/update/machine.ts';
+import { plainLine } from '../../lib/update/progress.ts';
 import type { UpdateObserver, UpdatePhase } from '../../lib/update/activity.ts';
 import { NixProgressTracker } from '../../lib/update/nix-progress.ts';
 import type { IPackageManagerPort } from '../../lib/update/ports.ts';

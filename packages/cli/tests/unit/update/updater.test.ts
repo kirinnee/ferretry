@@ -1,13 +1,14 @@
+import { decodeJson } from '../../../../core/kernel/host/state/format.ts';
 import { describe, it } from 'bun:test';
-import { UpdateReportSchema } from '@ferretry/protocol';
+import { UPDATES_REPORT } from '@ferretry/plugin-updates/contract';
 import should from 'should';
-import type { IDaemonPrompt } from '../../../src/lib/daemon/ports';
-import type { IProgress } from '../../../src/lib/progress/index';
-import { PlainProgress } from '../../../src/lib/progress/index';
-import { NixProfileSwitch } from '../../../src/lib/update/profile-switch';
-import { type DaemonUpdateOptions, DaemonUpdater, renderPlan } from '../../../src/lib/update/updater';
-import { CapturedOutput, SteppingClock } from '../daemon/fixtures';
-import { RecordingProgress } from '../progress/fixtures';
+import type { IDaemonPrompt } from '../../../src/lib/update/machine.ts';
+import type { IProgress } from '../../../src/lib/update/progress.ts';
+import { PlainProgress } from '../../../src/lib/update/progress.ts';
+import { NixProfileSwitch } from '../../../src/lib/update/profile-switch.ts';
+import { type DaemonUpdateOptions, DaemonUpdater, renderPlan } from '../../../src/lib/update/updater.ts';
+import { CapturedOutput, SteppingClock } from './support.ts';
+import { RecordingProgress } from './support.ts';
 import {
   FakeFacts,
   FakeHost,
@@ -20,7 +21,7 @@ import {
   PROFILE_DAEMON,
   STORE,
   USER_HOME,
-} from './fixtures';
+} from './fixtures.ts';
 
 /** A terminal that answers each question in turn, then no forever. */
 class ScriptedPrompt implements IDaemonPrompt {
@@ -100,11 +101,38 @@ function harness(
     ...(options.progress === undefined ? {} : { progress: options.progress }),
   });
   const run = (flags: DaemonUpdateOptions = { yes: true, report: '/r.json' }) => updater.update(flags);
-  const report = () => UpdateReportSchema.parse(JSON.parse(reports.written.get('/r.json') ?? 'null'));
+  const report = () => {
+    const decoded = decodeJson(
+      UPDATES_REPORT,
+      'state/updates/update/report.json',
+      reports.written.get('/r.json') ?? 'null',
+    );
+    if (!decoded.ok) throw new Error(decoded.error.sentence);
+    return decoded.value;
+  };
   return { host, packages, standalone, lifecycle, out, prompt, reports, view, clock, latest, run, report };
 }
 
 const BREW_REFRESH = 'brew-refresh:kirinnee/ferretry:https://github.com/kirinnee/ferretry';
+
+it('F-0352 transaction reports round-trip through the real kernel decodeJson for success, refusal and rollback', async () => {
+  const success = harness('standalone');
+  await success.run();
+  const failed = harness('standalone');
+  failed.standalone.refusal = 'no trusted key';
+  await failed.run();
+  const rollback = harness('standalone');
+  rollback.host.restartFailures = 1;
+  await rollback.run();
+  for (const [h, outcome] of [
+    [success, 'succeeded'],
+    [failed, 'failed'],
+    [rollback, 'rolled-back'],
+  ] as const) {
+    should(h.reports.written.get('/r.json')?.startsWith('{\n  "format": 1,')).equal(true);
+    should(h.report().outcome).equal(outcome);
+  }
+});
 const RECOVERY =
   'To recover by hand run: brew update && brew upgrade --cask ferretry && fy daemon restart; if the tap is wedged: brew untap kirinnee/ferretry && brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry && brew reinstall --cask ferretry';
 
@@ -675,7 +703,7 @@ describe('DaemonUpdater — --check', () => {
       [
         'ok: fyd 1.2.3, installed via Homebrew cask ferretry',
         'update available: 1.2.3 → 1.3.0 (https://github.com/kirinnee/ferretry/releases/tag/v1.3.0)',
-        'to update: fy daemon update',
+        'to update: fy update',
       ].join('\n'),
     );
     should(h.host.trail).be.empty();

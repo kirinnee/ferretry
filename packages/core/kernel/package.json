@@ -1,0 +1,30 @@
+{
+  "name": "@ferretry/kernel",
+  "version": "5.0.0",
+  "private": true,
+  "description": "The core host and the plugin SDK: the contract leaf, the manifest SDK, the test host and the daemon host",
+  "type": "module",
+  "bin": {
+    "fyd": "host/fyd.ts"
+  },
+  "ferretry": {
+    "id": "kernel",
+    "manifest": "./plugin.ts"
+  },
+  "exports": {
+    "./contract": "./contract/index.ts",
+    "./manifest": "./manifest/index.ts",
+    "./testing": "./testing/index.ts",
+    "./host": "./host/index.ts",
+    "./plugin": "./plugin.ts",
+    "./wire": "./wire.ts",
+    "./session": "./session.ts",
+    "./worker": "./worker.ts"
+  },
+  "dependencies": {
+    "@ferretry/std": "workspace:*",
+    "yaml": "2.9.0",
+    "zod": "4.4.3"
+  },
+  "sideEffects": false
+}

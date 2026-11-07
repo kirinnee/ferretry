@@ -1,0 +1,27 @@
+{
+  "name": "@ferretry/plugin-skills",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Skills (plugins piece of Ferretry 5)",
+  "type": "module",
+  "ferretry": {
+    "id": "skills",
+    "manifest": "./manifest.ts"
+  },
+  "exports": {
+    "./contract": "./contract/index.ts",
+    "./contract/testing": "./contract/testing/index.ts",
+    "./manifest": "./manifest.ts",
+    "./daemon": "./daemon/index.ts",
+    "./app": "./app/index.ts",
+    "./cli": "./cli/index.ts"
+  },
+  "dependencies": {
+    "@ferretry/kernel": "workspace:*",
+    "@ferretry/std": "workspace:*",
+    "zod": "4.4.3",
+    "@ferretry/core-gate": "workspace:*",
+    "@ferretry/core-ferrets": "workspace:*"
+  },
+  "sideEffects": false
+}

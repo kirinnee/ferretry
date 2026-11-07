@@ -1,54 +1,43 @@
-import { type HealthView, HealthViewSchema, type LivenessView, LivenessViewSchema } from '@ferretry/protocol';
-import type { IDaemonHealthPort } from '../../lib/daemon/ports.ts';
+import { z } from 'zod';
+import type { IDaemonHealthPort, LocalUpdateHealth } from '../../lib/daemon/ports.ts';
+import type { Fetcher } from './http-transport.ts';
 
-/** The one client capability the health probe consumes. */
-export type HealthApiClient = {
-  request<T>(path: string, schema: import('zod').ZodType<T>, init?: RequestInit, timeoutMs?: number): Promise<T>;
-};
-
-/** The daemon's health route. */
-export const HEALTH_PATH = '/v1/health';
-
-/** The daemon's liveness route, served from the moment its address is bound. */
-export const LIVENESS_PATH = '/healthz';
+/** The daemon's liveness route, served from the moment its address is bound (`GET /healthz`). */
+const LIVENESS_PATH = '/healthz';
 
 /**
- * One GET whose body is wanted WHATEVER its status: the protocol client refuses a non-2xx response, and
- * a booting daemon's 503 carries the very facts `status` reports. It rejects only when nothing answered.
+ * What process control reads: which process serves and which build. The protocol is ANY integer here, because a daemon
+ * on another protocol is exactly the one a person must be able to stop, restart and see (`daemon-older`); judging
+ * the protocol is the guard's job, not this read's.
  */
-export type LivenessFetch = (
-  path: string,
-  timeoutMs: number,
-) => Promise<{ readonly status: number; readonly body: unknown }>;
+export const ServingSchema = z
+  .object({ protocol: z.number().int(), version: z.string(), pid: z.number().int().min(2) })
+  .strip();
 
 /**
- * Asks the daemon about itself over the protocol client.
+ * Asks the daemon at `baseUrl()` whether it serves, and which process it is. The address is read again for every
+ * ask, from the run record the daemon writes when it listens, so a daemon that restarted onto another port is found.
  *
- * An unreachable daemon resolves to `undefined` rather than throwing: every caller treats "did not
- * answer" as a fact to report, not an error to propagate. The response is parsed against the protocol
- * schema, so a daemon answering with an error envelope is a miss rather than a plausible-looking
- * object that breaks three frames later.
+ * An unreachable or booting daemon (`503`) resolves to `undefined` rather than throwing: every caller treats "did not
+ * answer" as a fact to report. The pid it gives is a claim over HTTP, so no signal is sent to it before the
+ * supervisor proves that pid holds this state home's lifetime lock (`assertServes`).
  */
-export class ProtocolDaemonHealth implements IDaemonHealthPort {
+export class RunRecordDaemonHealth implements IDaemonHealthPort {
   constructor(
-    private readonly client: HealthApiClient,
+    private readonly baseUrl: () => Promise<string>,
+    private readonly fetcher: Fetcher = (url, init) => fetch(url, init),
     private readonly timeoutMs = 2_000,
-    private readonly raw?: LivenessFetch,
   ) {}
 
-  async liveness(): Promise<LivenessView | undefined> {
-    if (this.raw === undefined) return undefined;
+  async probe(): Promise<LocalUpdateHealth | undefined> {
     try {
-      const parsed = LivenessViewSchema.safeParse((await this.raw(LIVENESS_PATH, this.timeoutMs)).body);
+      const response = await this.fetcher(`${await this.baseUrl()}${LIVENESS_PATH}`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      if (!response.ok) return undefined;
+      const parsed = ServingSchema.safeParse(await response.json().catch(() => undefined));
       return parsed.success ? parsed.data : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  async probe(): Promise<HealthView | undefined> {
-    try {
-      return await this.client.request(HEALTH_PATH, HealthViewSchema, undefined, this.timeoutMs);
     } catch {
       return undefined;
     }

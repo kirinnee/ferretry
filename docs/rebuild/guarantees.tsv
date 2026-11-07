@@ -1,0 +1,1224 @@
+id	status	owner	with	enforcer	doc	test
+G1	kept	gate	-	behaviour as written	grants	G1
+G2	kept	gate	-	behaviour as written	grants	G2
+G3	kept	gate	-	admin token	grants	G3
+G4	kept	gate	-	behaviour as written	grants	G4
+G5	kept	gate	-	behaviour as written	grants	G5
+G6	kept	gate	-	behaviour as written	grants	G6
+G7	kept	gate	-	`FY_SESSION_TOKEN`	grants	G7
+G8	kept	gate	-	behaviour as written	grants	G8
+G9	kept	gate	-	`GrantsView`	grants	G9
+G10	kept	gate	-	`decideCapability`	grants	G10
+G11	kept	gate	-	`caller` declaration	grants	G11
+G12	kept	gate	-	`parent_mismatch`	grants	G12
+G13	kept	gate	-	behaviour as written	grants	G13
+G14	kept	kernel	-	`ApiRequest.loopback`	grants	G14
+G15	kept	kernel	-	`tunnelApiRequest`	grants	G15
+G16	kept	connections	-	tunnel listener	grants	G16
+G17	kept	gate	-	`packages/daemon/tests/unit/grants/policy.test.ts`	grants	G17
+G18	kept	gate	-	`arrivedOnHost` (`packages/daemon/src/lib/api/http.ts`)	grants	G18
+G19	kept	gate	-	`privilegedLoopback`, `mayTrustDirectLoopback`, `arrivedPrivileged`	grants	G19
+G20	kept	catalogs	gate	behaviour as written	grants	G20
+G21	kept	gate	-	behaviour as written	grants	G21
+G22	kept	gate	-	behaviour as written	grants	G22
+G23	kept	gate	-	behaviour as written	grants	G23
+G24	kept	ferrets	vault	behaviour as written	grants	G24
+G25	kept	gate	-	behaviour as written	grants	G25
+G26	kept	gate	-	`privilegedOnly`	grants	G26
+G27	kept	browsers	gate	behaviour as written	grants	G27
+G28	kept	gate	-	behaviour as written	grants	G28
+G29	kept	terminals	-	attach proof	grants	G29
+G30	kept	terminals	gate	behaviour as written	grants	G30
+G31	kept	claude-code	codex,gate	behaviour as written	grants	G31
+G32	kept	claude-code	codex,gate	behaviour as written	grants	G32
+G33	kept	conversation	terminals,gate	behaviour as written	grants	G33
+G34	kept	terminals	gate	behaviour as written	grants	G34
+G35	kept	gate	-	behaviour as written	grants	G35
+G36	kept	gate	-	`tests/unit/runtime/mounts/shared-drafts.test.ts`	grants	G36
+G37	kept	gate	-	`state/agent-pins.json`, `pinnedAt`, `session-pin.test.ts`	grants	G37
+G38	kept	gate	-	behaviour as written	grants	G38
+G39	kept	gate	-	`arrivedOnHost`, `renders.test.ts`	grants	G39
+G40	kept	gate	-	`caller: 'person'`	grants	G40
+G41	kept	conversation	gate	behaviour as written	grants	G41
+G42	kept	gate	-	behaviour as written	grants	G42
+G43	kept	agenda	ferrets	behaviour as written	grants	G43
+G44	kept	gate	-	`consultsGrants`	grants	G44
+G45	kept	gate	-	behaviour as written	grants	G45
+G46	kept	gate	-	behaviour as written	grants	G46
+G47	kept	gate	-	behaviour as written	grants	G47
+G48	kept	gate	-	behaviour as written	grants	G48
+G49	kept	gate	-	behaviour as written	grants	G49
+G50	kept	gate	-	behaviour as written	grants	G50
+G51	kept	access	gate	behaviour as written	grants	G51
+G52	kept	access	gate	behaviour as written	grants	G52
+G53	kept	access	gate	relay-protocol §14	grants	G53
+G54	kept	access	gate	behaviour as written	grants	G54
+G55	kept	gate	-	behaviour as written	grants	G55
+G56	kept	access	gate	`COARSE_SWITCH_ALSO_STOPS` (`packages/pwa/src/lib/grants.ts`)	grants	G56
+G57	kept	kernel	-	behaviour as written	grants	G57
+G58	kept	gate	-	behaviour as written	grants	G58
+G59	kept	access	gate	behaviour as written	grants	G59
+G60	kept	gate	-	behaviour as written	grants	G60
+G61	kept	gate	-	behaviour as written	grants	G61
+G62	kept	gate	-	behaviour as written	grants	G62
+G63	kept	catalogs	gate	behaviour as written	grants	G63
+G64	kept	gate	-	behaviour as written	grants	G64
+G65	kept	gate	-	behaviour as written	grants	G65
+G66	kept	catalogs	gate	behaviour as written	grants	G66
+G67	kept	catalogs	-	behaviour as written	grants	G67
+G68	kept	gate	-	behaviour as written	grants	G68
+G69	removed	access	-	-	grants	-
+G70	removed	access	-	-	grants	-
+G71	removed	access	-	-	grants	-
+G72	removed	access	-	-	grants	-
+G73	kept	repo-tooling	-	`scripts/validate/conflict-markers.sh`	grants	G73
+G74	kept	gate	access	behaviour as written	grants	G74
+G75	kept	gate	access	`unlockValidityHours`	grants	G75
+G76	kept	access	gate	`state/unlocks.json`	grants	G76
+G77	kept	gate	access	behaviour as written	grants	G77
+G78	kept	gate	access	behaviour as written	grants	G78
+G79	kept	gate	access	`stepUpOnActions`	grants	G79
+G80	kept	gate	access	act `catalog-install`	grants	G80
+G81	kept	gate	access	behaviour as written	grants	G81
+G82	kept	gate	access	behaviour as written	grants	G82
+G83	kept	gate	access	`add-2fa-key`, `approve-task-plan`, `approve-sign-in-rule`, `approve-paste-rule`, `allow-profile-targets`	grants	G83
+G84	kept	gate	access	`st_…`, `tps_…`, `srs_…`, `prs_…`	grants	G84
+G85	kept	gate	access	`STEP_UP_ACTS_STORED_PROOF`, `ClaimStoredProof`	grants	G85
+G86	kept	access	gate	behaviour as written	grants	G86
+G87	kept	gate	access	behaviour as written	grants	G87
+G88	kept	gate	access	behaviour as written	grants	G88
+G89	kept	vault	gate	behaviour as written	grants	G89
+G90	kept	accounts	vault,gate	behaviour as written	grants	G90
+G91	kept	gate	access	behaviour as written	grants	G91
+G92	kept	gate	access	behaviour as written	grants	G92
+G93	kept	gate	access	behaviour as written	grants	G93
+G94	kept	gate	access	behaviour as written	grants	G94
+G95	kept	access	gate	behaviour as written	grants	G95
+G96	kept	gate	access	behaviour as written	grants	G96
+G97	kept	gate	access	`stepUpWindowMinutes`	grants	G97
+G98	kept	gate	access	`demandNeedsStepUp`	grants	G98
+G99	kept	gate	access	`demandNeedsStepUp`	grants	G99
+G100	kept	gate	access	`GrantsView.steppedUp`	grants	G100
+G101	kept	gate	access	`STEP_UP_REQUIRED_CODE`	grants	G101
+G102	kept	access	gate	behaviour as written	grants	G102
+G103	kept	gate	access	behaviour as written	grants	G103
+G104	removed	gate	-	-	grants	-
+G105	kept	access	gate	behaviour as written	grants	G105
+G106	kept	access	gate	behaviour as written	grants	G106
+G107	kept	access	gate	behaviour as written	grants	G107
+G108	kept	access	gate	behaviour as written	grants	G108
+G109	kept	gate	-	behaviour as written	grants	G109
+G110	kept	gate	-	behaviour as written	grants	G110
+G111	kept	gate	-	behaviour as written	grants	G111
+G112	kept	gate	-	`arrivedOnHost`	grants	G112
+G113	kept	gate	-	behaviour as written	grants	G113
+G114	kept	gate	-	`STEP_UP_ACTS.loosenSecurity`, `SECURITY_PASSKEY_WIDEN_FIELDS` (`packages/protocol/src/lib/security.ts`)	grants	G114
+G115	kept	gate	-	behaviour as written	grants	G115
+G116	kept	gate	-	behaviour as written	grants	G116
+G117	kept	connections	gate	behaviour as written	grants	G117
+G118	kept	connections	gate	behaviour as written	grants	G118
+G119	kept	connections	gate	behaviour as written	grants	G119
+G120	kept	gate	-	behaviour as written	grants	G120
+G121	kept	gate	-	behaviour as written	grants	G121
+G122	kept	gate	-	`hostLocal`	grants	G122
+G123	kept	gate	-	behaviour as written	grants	G123
+G124	kept	gate	-	`mayGrant`	grants	G124
+G125	kept	gate	-	behaviour as written	grants	G125
+G126	kept	gate	-	behaviour as written	grants	G126
+G127	kept	gate	-	`narrowing: true` (`api/capability.ts`)	grants	G127
+G128a	kept	accounts	gate	behaviour as written	grants	G128a
+G128b	kept	accounts	gate	behaviour as written	grants	G128b
+G128c	kept	accounts	gate	behaviour as written	grants	G128c
+G128d	kept	accounts	gate	behaviour as written	grants	G128d
+G128e	kept	accounts	gate	behaviour as written	grants	G128e
+G128f	kept	accounts	gate	behaviour as written	grants	G128f
+G128g	kept	accounts	gate	behaviour as written	grants	G128g
+G128h	kept	access	gate	behaviour as written	grants	G128h
+G128i	kept	access	gate	behaviour as written	grants	G128i
+G129	kept	gate	-	behaviour as written	grants	G129
+G130	kept	gate	-	behaviour as written	grants	G130
+G131	kept	gate	-	behaviour as written	grants	G131
+G132	kept	gate	-	behaviour as written	grants	G132
+G133	kept	gate	access	`effective(...)`	grants	G133
+G134	split	gate	access	-	grants	G134
+G135	kept	gate	access	`FULL_DEVICE_GRANTS`	grants	G135
+G136	kept	gate	access	`LIMITED_DEVICE_GRANTS`	grants	G136
+G137	kept	access	gate	behaviour as written	grants	G137
+G138	kept	gate	access	behaviour as written	grants	G138
+G139	kept	gate	access	`grant_device_not_granted`	grants	G139
+G140	kept	gate	access	behaviour as written	grants	G140
+G141	split	access	gate	-	grants	G141
+G142	removed	access	-	-	grants	-
+G143	kept	access	gate	`DeviceGrantsPatch`	grants	G143
+G144	kept	access	gate	behaviour as written	grants	G144
+G145	kept	access	gate	behaviour as written	grants	G145
+G146	kept	access	gate	behaviour as written	grants	G146
+G147	kept	access	gate	behaviour as written	grants	G147
+G148	kept	access	gate	behaviour as written	grants	G148
+G149	kept	gate	-	`recheckAll`, `ApiSocketDispatcher.reauthorize`	grants	G149
+G150	kept	access	gate	`state/grant-audit.jsonl`	grants	G150
+G151	kept	access	gate	`PairedDevicesView.mayWiden`, `CapabilityGrantView.deviceGranted`	grants	G151
+G152	kept	gate	-	behaviour as written	grants	G152
+G153	kept	gate	-	behaviour as written	grants	G153
+G154	kept	gate	-	behaviour as written	grants	G154
+G155	kept	gate	-	behaviour as written	grants	G155
+G156	kept	gate	-	behaviour as written	grants	G156
+G157	kept	gate	-	behaviour as written	grants	G157
+G158	kept	connections	-	behaviour as written	grants	G158
+G159	kept	gate	-	behaviour as written	grants	G159
+G160	kept	gate	-	`GET /v1/grants/audit`, `fy daemon config history`	grants	G160
+G161	kept	gate	-	behaviour as written	grants	G161
+G162	kept	conversation	claude-code,codex	behaviour as written	grants	G162
+G163	kept	kernel	vault	behaviour as written	grants	G163
+G164	kept	conversation	kernel,vault	behaviour as written	grants	G164
+G165	kept	access	gate	behaviour as written	grants	G165
+G166	kept	access	-	behaviour as written	grants	G166
+G167	kept	agenda	access,gate	behaviour as written	grants	G167
+G168	removed	access	-	-	grants	-
+G169	kept	gate	-	behaviour as written	grants	G169
+G170	kept	catalogs	gate	`STEP_UP_ACTS.catalogInstall`	grants	G170
+G171	kept	catalogs	gate	behaviour as written	grants	G171
+G172	kept	skills	gate	behaviour as written	grants	G172
+G173	kept	skills	gate	behaviour as written	grants	G173
+G174	kept	skills	gate	behaviour as written	grants	G174
+G175	kept	skills	gate	behaviour as written	grants	G175
+G176	kept	mcp	gate	`session-mcp.ts`	grants	G176
+G177	kept	mcp	gate	behaviour as written	grants	G177
+G178	kept	mcp	gate	`component.put`, `profile.put`	grants	G178
+G179	kept	mcp	gate	behaviour as written	grants	G179
+G180	kept	mcp	gate	behaviour as written	grants	G180
+P1	kept	access	-	behaviour as written	pairing	P1
+P2	kept	access	-	behaviour as written	pairing	P2
+P3	kept	access	-	behaviour as written	pairing	P3
+P4	kept	access	-	behaviour as written	pairing	P4
+P5	kept	access	-	behaviour as written	pairing	P5
+P6	kept	access	kernel,gate	behaviour as written	pairing	P6
+P7	kept	access	-	behaviour as written	pairing	P7
+P8	kept	access	-	behaviour as written	pairing	P8
+P9	kept	access	-	behaviour as written	pairing	P9
+P10	kept	access	-	`state/devices.json`	pairing	P10
+P11	kept	access	-	behaviour as written	pairing	P11
+P12	kept	access	kernel,gate	relay-protocol.md §14	pairing	P12
+P13	kept	access	-	`PairedDeviceSchema`	pairing	P13
+P14	kept	access	-	behaviour as written	pairing	P14
+P15	kept	access	-	behaviour as written	pairing	P15
+P16	kept	access	gate	`POST/GET/DELETE /v1/pair/code[/:pairingId]`, `GET /v1/pair/devices`, `DELETE /v1/pair/devices/:id`, `GET /v1/pair/identity`	pairing	P16
+P17	kept	access	-	`DELETE /v1/pair/code/:pairingId`	pairing	P17
+P18	kept	access	kernel	sealed `pair` record	pairing	P18
+P19	kept	access	gate	`GET /v1/pair/identity`	pairing	P19
+P20	kept	gate	-	behaviour as written	pairing	P20
+P21	kept	access	-	behaviour as written	pairing	P21
+P22	kept	access	kernel	behaviour as written	pairing	P22
+P23	kept	connections	-	`/v1/rendezvous/<daemonId>/client`	pairing	P23
+P24	kept	connections	access,kernel	behaviour as written	pairing	P24
+P25	kept	access	kernel	behaviour as written	pairing	P25
+P26	kept	access	kernel	behaviour as written	pairing	P26
+P27	kept	access	kernel	behaviour as written	pairing	P27
+P28	kept	app-shell	access,kernel	behaviour as written	pairing	P28
+P29	kept	connections	access,kernel	behaviour as written	pairing	P29
+P30	kept	connections	access,kernel	`PairingUnreachableError` in `packages/pwa/src/lib/pairing-unreachable.ts`	pairing	P30
+P31	kept	connections	access,kernel	behaviour as written	pairing	P31
+P32	kept	access	kernel	relay-protocol.md §10, §13	pairing	P32
+P33	kept	access	kernel	behaviour as written	pairing	P33
+P34	kept	access	-	`carriers`	pairing	P34
+P35	kept	connections	-	behaviour as written	pairing	P35
+P36	kept	connections	-	behaviour as written	pairing	P36
+P37	kept	access	-	behaviour as written	pairing	P37
+P38	kept	access	-	behaviour as written	pairing	P38
+P39	kept	access	-	`fy pair --limited`	pairing	P39
+P40	kept	access	-	`fy device grant <device> <capability> --use`; Settings → Devices	pairing	P40
+P41	kept	access	-	`403 grant_forbidden`; `{ "grants": "limited" }`	pairing	P41
+P42	kept	access	-	behaviour as written	pairing	P42
+P43	kept	access	-	behaviour as written	pairing	P43
+P44	kept	access	-	behaviour as written	pairing	P44
+P45	split	access	-	-	pairing	P45
+P46	kept	access	-	behaviour as written	pairing	P46
+P47	kept	connections	-	`GET /v1/carriers`	pairing	P47
+P48	kept	connections	-	behaviour as written	pairing	P48
+P49	kept	connections	-	behaviour as written	pairing	P49
+P50	kept	connections	-	behaviour as written	pairing	P50
+P51	kept	connections	-	behaviour as written	pairing	P51
+P52	kept	connections	-	behaviour as written	pairing	P52
+P53	kept	connections	-	behaviour as written	pairing	P53
+P54	kept	access	-	behaviour as written	pairing	P54
+P55	kept	access	-	`arrivedOnHost`	pairing	P55
+P56	kept	access	-	behaviour as written	pairing	P56
+P57	kept	access	-	behaviour as written	pairing	P57
+P58	kept	access	-	`add-device-settings.tsx`, `pair-phone.tsx`	pairing	P58
+P59	kept	access	-	`POST /v1/pair/code`	pairing	P59
+P60	kept	access	-	`stepUpOnActions`	pairing	P60
+P61	kept	access	-	behaviour as written	pairing	P61
+P62	kept	access	-	behaviour as written	pairing	P62
+P63	kept	access	-	`act: "widen-device"`	pairing	P63
+P64	kept	access	-	behaviour as written	pairing	P64
+P65	kept	access	-	behaviour as written	pairing	P65
+P66	kept	access	-	behaviour as written	pairing	P66
+P67	removed	gate	-	-	pairing	-
+P68	kept	access	-	`reach`	pairing	P68
+P69	kept	access	-	behaviour as written	pairing	P69
+P70	kept	access	-	`discoveredRelayUrl`	pairing	P70
+P71	kept	access	-	`localOnlyNotice`; `invitationRedeemableByAnotherDevice` in `@ferretry/protocol`	pairing	P71
+P72	kept	access	-	`refusal`	pairing	P72
+P73	kept	access	-	behaviour as written	pairing	P73
+P74	kept	access	-	behaviour as written	pairing	P74
+P75	kept	access	-	`formatPairingFragment` / `parsePairingFragment`	pairing	P75
+P76	kept	access	-	behaviour as written	pairing	P76
+P77	kept	connections	-	`HOSTED_RELAY_DIRECTORY_ORIGIN`	pairing	P77
+P78	kept	connections	-	behaviour as written	pairing	P78
+P79	kept	access	-	behaviour as written	pairing	P79
+P80	kept	catalogs	-	`discoverableRelayUrl`; sealed `join` record	pairing	P80
+P81	kept	catalogs	-	behaviour as written	pairing	P81
+P82	kept	connections	-	behaviour as written	pairing	P82
+P83	kept	access	-	behaviour as written	pairing	P83
+P84	kept	access	-	`localOnlyNotice`, `refusalNotice` in `@ferretry/protocol`	pairing	P84
+P85	kept	access	-	behaviour as written	pairing	P85
+P86	kept	access	-	behaviour as written	pairing	P86
+P87	kept	access	-	behaviour as written	pairing	P87
+P88	kept	connections	-	`advertisesForeignAddress`	pairing	P88
+P89	kept	kernel	-	`recordedBindAddress`, `declaredBind`	pairing	P89
+P90	kept	gate	fy-shell	`FY_URL`, `FY_TOKEN`	pairing	P90
+P91	kept	access	-	`ApiRequest.loopback`	pairing	P91
+P92	kept	access	kernel	behaviour as written	pairing	P92
+P93	kept	access	kernel	relay-protocol.md §14	pairing	P93
+P94	kept	access	kernel	behaviour as written	pairing	P94
+P95	kept	access	-	behaviour as written	pairing	P95
+P96	kept	access	kernel	behaviour as written	pairing	P96
+P97	kept	access	-	`PAIRING_MAX_DEVICES`, `PAIRING_GRANTS_PER_HOUR`	pairing	P97
+P98	kept	access	-	behaviour as written	pairing	P98
+P99	kept	access	-	audit.md	pairing	P99
+P100	kept	access	-	`packages/pwa/src/lib/qr-code.ts`	pairing	P100
+P101	kept	access	-	behaviour as written	pairing	P101
+P102	kept	access	-	behaviour as written	pairing	P102
+P103	kept	access	-	`packages/cli/src/lib/pair/redirect-page.ts`; `location.replace(<link>)`	pairing	P103
+P104	kept	access	-	behaviour as written	pairing	P104
+P105	kept	access	-	behaviour as written	pairing	P105
+P106	kept	access	-	`sweepPairingRedirects` in `packages/protocol/src/adapters/pairing-redirect-sweep.ts`; `pairing-redirect.ts`	pairing	P106
+P107	kept	access	-	`HARNESS_INVITE`	pairing	P107
+P108	kept	access	-	behaviour as written	pairing	P108
+P109	kept	access	-	behaviour as written	pairing	P109
+P110	kept	access	-	behaviour as written	pairing	P110
+P111	kept	access	-	`4403`	pairing	P111
+P112	kept	gate	-	dispatcher	pairing	P112
+P113	kept	access	-	behaviour as written	pairing	P113
+P114	kept	access	-	`presence`	pairing	P114
+P115	kept	access	-	`lastSeenAt`, `idleExpiresAt`	pairing	P115
+P116	kept	access	-	`idleExpiryDays`; `fy daemon security set idleExpiryDays <days>`	pairing	P116
+P117	kept	access	-	`fy device revoke <device>`; `DELETE /v1/pair/devices/:deviceId`	pairing	P117
+P118	kept	access	-	behaviour as written	pairing	P118
+P119	kept	access	-	behaviour as written	pairing	P119
+P120	kept	access	-	behaviour as written	pairing	P120
+P121	kept	access	-	behaviour as written	pairing	P121
+P122	kept	access	-	`state/grant-audit.jsonl`	pairing	P122
+P123	kept	access	-	behaviour as written	pairing	P123
+P124	kept	accounts	-	`passkey-removed`	pairing	P124
+P125	split	access	-	-	pairing	P125
+P126	kept	access	-	behaviour as written	pairing	P126
+P127	kept	access	-	behaviour as written	pairing	P127
+P128	kept	access	-	`PairingDeviceNameSchema`	pairing	P128
+P129	removed	access	-	-	pairing	-
+P130	kept	access	-	behaviour as written	pairing	P130
+P131	kept	access	-	`fy passkey window <device>`; `POST /v1/passkeys/registration-window`	pairing	P131
+P132	kept	access	-	behaviour as written	pairing	P132
+P133	kept	access	-	behaviour as written	pairing	P133
+P134	kept	access	-	behaviour as written	pairing	P134
+P135	kept	connections	access,kernel	behaviour as written	pairing	P135
+I1	kept	vault	-	behaviour as written	input-requests	I1
+I2	kept	vault	-	behaviour as written	input-requests	I2
+I3	kept	vault	terminals	quarantine	input-requests	I3
+I4	kept	vault	-	behaviour as written	input-requests	I4
+I5	kept	vault	-	behaviour as written	input-requests	I5
+I6	kept	vault	-	behaviour as written	input-requests	I6
+I7	kept	vault	-	behaviour as written	input-requests	I7
+I8	kept	vault	-	behaviour as written	input-requests	I8
+I9	kept	vault	-	behaviour as written	input-requests	I9
+I10	kept	vault	-	`InputDeliverBodySchema`	input-requests	I10
+I11	kept	vault	asks	behaviour as written	input-requests	I11
+I12	kept	vault	asks	behaviour as written	input-requests	I12
+I13	kept	vault	asks	`INPUT_PROMPT_MARKER`	input-requests	I13
+I14	kept	vault	asks	400 `use_input_form`	input-requests	I14
+I15	kept	vault	-	`InputRaiseSchema`	input-requests	I15
+I16	kept	vault	-	`InputDeliverBodySchema`	input-requests	I16
+I17	kept	vault	-	`InputAgentViewSchema`	input-requests	I17
+I18	kept	vault	-	`InputEventSchema`, `InputAuditDetailSchema`	input-requests	I18
+I19	kept	vault	-	409 `target_changed`	input-requests	I19
+I20	kept	vault	-	`inputValueProblem`	input-requests	I20
+I21	kept	vault	-	behaviour as written	input-requests	I21
+I22	kept	vault	-	behaviour as written	input-requests	I22
+I23	kept	vault	-	behaviour as written	input-requests	I23
+I24	kept	vault	-	behaviour as written	input-requests	I24
+I25	kept	vault	-	behaviour as written	input-requests	I25
+I26	kept	vault	-	`savedRolesOf`	input-requests	I26
+I27	kept	vault	-	behaviour as written	input-requests	I27
+I28	kept	vault	-	`chain`, `request.step`	input-requests	I28
+I29	kept	vault	-	behaviour as written	input-requests	I29
+I30	kept	vault	-	behaviour as written	input-requests	I30
+I31	kept	vault	-	behaviour as written	input-requests	I31
+I32	kept	vault	-	behaviour as written	input-requests	I32
+I33	kept	vault	-	behaviour as written	input-requests	I33
+I34	kept	accounts	-	behaviour as written	input-requests	I34
+I35	kept	vault	-	behaviour as written	input-requests	I35
+I36	kept	vault	-	behaviour as written	input-requests	I36
+I37	kept	vault	-	behaviour as written	input-requests	I37
+I38	kept	vault	-	behaviour as written	input-requests	I38
+I39	kept	vault	-	behaviour as written	input-requests	I39
+I40	kept	vault	-	behaviour as written	input-requests	I40
+I41	split	vault	-	-	input-requests	I41
+I42	kept	vault	-	behaviour as written	input-requests	I42
+I43	kept	vault	-	behaviour as written	input-requests	I43
+I44	kept	vault	-	behaviour as written	input-requests	I44
+I45	kept	vault	-	`deliveryId`, `surface.input_delivering`, 409 `already_delivered`	input-requests	I45
+I46	kept	vault	-	session lock	input-requests	I46
+I47	kept	vault	-	`observedDigest`	input-requests	I47
+I48	kept	terminals	vault	`tmux if-shell -F`	input-requests	I48
+I49	kept	vault	-	behaviour as written	input-requests	I49
+I50	kept	terminals	vault	`send-keys -H`	input-requests	I50
+I51	kept	vault	-	behaviour as written	input-requests	I51
+I52	kept	vault	-	behaviour as written	input-requests	I52
+I53	kept	vault	-	behaviour as written	input-requests	I53
+I54	kept	vault	-	behaviour as written	input-requests	I54
+I55	kept	vault	-	behaviour as written	input-requests	I55
+I56	kept	browsers	vault	`InputTargetPort.refind`	input-requests	I56
+I57	kept	vault	-	`lib/input-requests/rebind.ts`	input-requests	I57
+I58	kept	vault	-	409 `target_rebound`, `input.rebound`	input-requests	I58
+I59	kept	vault	-	behaviour as written	input-requests	I59
+I60	kept	vault	-	behaviour as written	input-requests	I60
+I61	kept	vault	-	behaviour as written	input-requests	I61
+I62	kept	vault	-	`INPUT_MAX_REBINDS`, 410 `target_unsettled`	input-requests	I62
+I63	kept	browsers	vault	`inputType`	input-requests	I63
+I64	kept	vault	-	`request.risk`	input-requests	I64
+I65	kept	vault	-	behaviour as written	input-requests	I65
+I66	kept	vault	-	behaviour as written	input-requests	I66
+I67	kept	vault	-	behaviour as written	input-requests	I67
+I68	kept	terminals	vault	`terminal_request_input`	input-requests	I68
+I69	kept	vault	-	`padInputValue`, `unpadInputValue`	input-requests	I69
+I70	kept	vault	-	behaviour as written	input-requests	I70
+I71	kept	vault	terminals	`INPUT_QUARANTINE_SECONDS`, `INPUT_SHORT_LOCK_SECONDS`	input-requests	I71
+I72	kept	vault	terminals	`conflict` error	input-requests	I72
+I73	kept	vault	terminals	behaviour as written	input-requests	I73
+I74	kept	kernel	vault	`ApiResponse.late`, `finalised`	input-requests	I74
+I75	kept	kernel	connections	per-frame permit	input-requests	I75
+I76	kept	vault	terminals	behaviour as written	input-requests	I76
+I77	kept	vault	terminals	`?reveal=1`, `input.quarantine_revealed`	input-requests	I77
+I78	kept	vault	terminals	`POST .../input-quarantines/:key/end`, `input.quarantine_ended`	input-requests	I78
+I79	kept	vault	terminals	behaviour as written	input-requests	I79
+I80	kept	vault	terminals	behaviour as written	input-requests	I80
+I81	kept	vault	terminals	`unresolved`	input-requests	I81
+I82	kept	vault	terminals	`surface.input_quarantined`, `surface.input_quarantine_ended`	input-requests	I82
+I83	kept	vault	terminals	behaviour as written	input-requests	I83
+I84	kept	vault	terminals	behaviour as written	input-requests	I84
+I85	kept	vault	terminals	behaviour as written	input-requests	I85
+I86	kept	vault	-	`lock.ts`, `InputLockSchema`, `lockSeconds`	input-requests	I86
+I87	kept	vault	-	`hidden-terminal`	input-requests	I87
+I88	kept	vault	-	`proven-field`, `probed-field`	input-requests	I88
+I89	kept	vault	-	`INPUT_LOCK_WORDS`	input-requests	I89
+I90	kept	vault	-	`heldFromView`	input-requests	I90
+I91	kept	vault	-	behaviour as written	input-requests	I91
+I92	kept	vault	-	behaviour as written	input-requests	I92
+I93	kept	vault	-	behaviour as written	input-requests	I93
+I94	kept	vault	-	`until-moved-on`	input-requests	I94
+I95	kept	vault	-	behaviour as written	input-requests	I95
+I96	kept	browsers	vault	dummy probe, `aborted`	input-requests	I96
+I97	kept	browsers	vault	`siteOf`	input-requests	I97
+I98	kept	vault	browsers	`LoginObserver.pageSteer`, `steerOf`	input-requests	I98
+I99	kept	browsers	vault	behaviour as written	input-requests	I99
+I100	kept	browsers	vault	behaviour as written	input-requests	I100
+I101	kept	vault	-	`[redacted:input !A7]`	input-requests	I101
+I102	kept	vault	-	`EphemeralAwareRedactor`, `SecretRedactor`	input-requests	I102
+I103	kept	terminals	vault	behaviour as written	input-requests	I103
+I104	kept	terminals	vault	behaviour as written	input-requests	I104
+I105	kept	terminals	vault	`RedactingTerminalStreamService`	input-requests	I105
+I106	kept	terminals	vault	`capture-pane -N`	input-requests	I106
+I107	kept	vault	-	`observedDigest`	input-requests	I107
+I108	kept	vault	-	behaviour as written	input-requests	I108
+I109	kept	asks	vault	behaviour as written	input-requests	I109
+I110	kept	browsers	vault	`backendNodeId`	input-requests	I110
+I111	kept	browsers	vault	`BrowserSubsystem.inputOnPage`	input-requests	I111
+I112	kept	browsers	vault	`GET .../input-requests/:id/shot`, `request.pictured`	input-requests	I112
+I113	kept	browsers	vault	`DOM.describeNode`	input-requests	I113
+I114	kept	browsers	vault	`covered`	input-requests	I114
+I115	kept	browsers	vault	`inputType`, `Input.insertText`	input-requests	I115
+I116	kept	vault	browsers	`INPUT_QUARANTINE_SECONDS`	input-requests	I116
+I117	kept	vault	browsers	behaviour as written	input-requests	I117
+I118	kept	vault	browsers	behaviour as written	input-requests	I118
+I119	kept	vault	browsers	behaviour as written	input-requests	I119
+I120	kept	vault	browsers	behaviour as written	input-requests	I120
+I121	kept	vault	browsers	behaviour as written	input-requests	I121
+I122	kept	browsers	vault	behaviour as written	input-requests	I122
+I123	kept	browsers	vault	`WebAuthn.addVirtualAuthenticator`, `setResponseOverrideBits({ isBadUP: true })`	input-requests	I123
+I124	kept	browsers	vault	`recogniseBrowserChallenge`, `challenge`	input-requests	I124
+I125	kept	accounts	-	`login-secrets.json`, `login-entries.json`	input-requests	I125
+I126	kept	accounts	-	`[redacted:login:<ID>:password]`	input-requests	I126
+I127	kept	accounts	-	`via`	input-requests	I127
+I128	kept	accounts	-	`namesPasskey`	input-requests	I128
+I129	kept	accounts	-	behaviour as written	input-requests	I129
+I130	kept	accounts	-	`InputSaved.signIn`	input-requests	I130
+I131	split	accounts	vault	-	input-requests	I131
+I132	kept	accounts	-	`hidesCharacters`	input-requests	I132
+I133	kept	accounts	-	`recipe_holds_value`	input-requests	I133
+I134	kept	accounts	-	`recipeBy: ferret`	input-requests	I134
+I135	kept	accounts	-	`LoginFactSink.observeSignIn`	input-requests	I135
+I136	kept	accounts	-	behaviour as written	input-requests	I136
+I137	kept	accounts	-	`observerByOf`	input-requests	I137
+I138	kept	accounts	-	behaviour as written	input-requests	I138
+I139	kept	accounts	-	`actsOn`	input-requests	I139
+I140	kept	accounts	-	`account_propose`, `stale_proposal`, `login-recipe-auto`	input-requests	I140
+I141	kept	accounts	-	`recipeVersion`	input-requests	I141
+I142	kept	accounts	-	behaviour as written	input-requests	I142
+I143	kept	accounts	-	behaviour as written	input-requests	I143
+I144	kept	accounts	-	`InputSaved.update`	input-requests	I144
+I145	kept	accounts	-	behaviour as written	input-requests	I145
+I146	kept	accounts	-	`InputSaved.update`	input-requests	I146
+I147	kept	accounts	-	`LoginDirectory.saveFields`	input-requests	I147
+I148	kept	accounts	-	`LOGIN_PASSWORD_MIN_LENGTH`	input-requests	I148
+I149	kept	accounts	-	`saved: { ok: false }`	input-requests	I149
+I150	kept	accounts	-	`login-save`	input-requests	I150
+I151	kept	accounts	-	`LoginStoreLock`	input-requests	I151
+I152	kept	accounts	-	`LoginDirectory.sweepUnreferenced`	input-requests	I152
+I153	kept	accounts	-	`LoginDirectory.saveFields`	input-requests	I153
+I154	kept	browsers	accounts	`TypedIdentities`, `identifierFieldHost`, `clickedIdentityOf`	input-requests	I154
+I155	kept	browsers	accounts	`BrowserSignInWatch`	input-requests	I155
+I156	kept	accounts	-	`InputSaved.typedUsername`	input-requests	I156
+I157	kept	accounts	-	`differentFrom`	input-requests	I157
+I158	kept	accounts	-	`GET /v1/accounts`	input-requests	I158
+I159	kept	accounts	-	`signInMatches`, `offer.primary`	input-requests	I159
+I160	kept	accounts	-	behaviour as written	input-requests	I160
+I161	kept	accounts	-	`savedForFields`, `bad_request`	input-requests	I161
+I162	kept	accounts	-	behaviour as written	input-requests	I162
+I163	kept	accounts	-	behaviour as written	input-requests	I163
+I164	kept	accounts	-	`elsewhere`	input-requests	I164
+I165	kept	accounts	-	`secretHint`	input-requests	I165
+I166	kept	accounts	-	behaviour as written	input-requests	I166
+I167	kept	accounts	-	`factorAskWords`	input-requests	I167
+I168	kept	accounts	-	`codeTargetProblem`	input-requests	I168
+I169	kept	accounts	-	`bad_request`	input-requests	I169
+I170	kept	accounts	-	`fill(account, 'totp', now, { factor })`, `input.delivered`	input-requests	I170
+I171	kept	accounts	-	`LoginObserver.codeTyped`, `verified`	input-requests	I171
+I172	kept	accounts	-	behaviour as written	input-requests	I172
+I173	kept	accounts	-	`TwoFactorSeedSaved.typed`	input-requests	I173
+I174	kept	accounts	-	`LOGIN_TOTP_WARNING`, `add-2fa-key`	input-requests	I174
+I175	kept	accounts	-	`LOGIN_TOTP_WARNING`, `AUTOMATED_CODE_WARNING`	input-requests	I175
+I176	kept	accounts	-	`403 owner_only`	input-requests	I176
+I177	kept	accounts	-	behaviour as written	input-requests	I177
+I178	kept	accounts	-	behaviour as written	input-requests	I178
+I179	kept	accounts	-	behaviour as written	input-requests	I179
+I180	kept	accounts	-	`placeKeys`	input-requests	I180
+I181	removed	accounts	-	-	input-requests	-
+I182	kept	accounts	-	behaviour as written	input-requests	I182
+I183	kept	accounts	-	`chosenSignIn`	input-requests	I183
+I184	kept	accounts	-	`SessionSignInContext`, `projectOf`, `nameIsUnique`	input-requests	I184
+I185	kept	accounts	-	behaviour as written	input-requests	I185
+I186	kept	accounts	-	`PUT /v1/accounts/defaults`	input-requests	I186
+I187	kept	accounts	-	behaviour as written	input-requests	I187
+I188	kept	accounts	-	`sealedNamesOf`	input-requests	I188
+I189	removed	accounts	-	-	input-requests	-
+I190	kept	accounts	-	behaviour as written	input-requests	I190
+I191	kept	accounts	-	`parseTotpInput`	input-requests	I191
+I192	kept	accounts	-	`factorMismatch`	input-requests	I192
+I193	kept	accounts	-	`add-2fa-key`, `addTwoFactorKeySubject`	input-requests	I193
+I194	removed	accounts	-	-	input-requests	-
+I195	kept	accounts	-	`PhoneApprovalAgentView`	input-requests	I195
+I196	kept	accounts	-	`PhoneApprovalRaise`	input-requests	I196
+I197	kept	accounts	-	`phoneApprovalWords`	input-requests	I197
+I198	kept	accounts	-	behaviour as written	input-requests	I198
+I199	kept	accounts	-	behaviour as written	input-requests	I199
+I200	kept	accounts	-	`push-number.ts`, `numberMissing`	input-requests	I200
+I201	kept	accounts	-	behaviour as written	input-requests	I201
+I202	kept	accounts	-	`numberMissing: 'steered'`	input-requests	I202
+I203	kept	accounts	-	`numberMissing: 'terminal'`	input-requests	I203
+I204	kept	accounts	-	behaviour as written	input-requests	I204
+I205	kept	accounts	-	behaviour as written	input-requests	I205
+I206	kept	accounts	-	`use_input_form`	input-requests	I206
+I207	kept	accounts	-	behaviour as written	input-requests	I207
+I208	kept	accounts	-	behaviour as written	input-requests	I208
+I209	removed	accounts	-	-	input-requests	-
+I210	kept	accounts	-	`packages/daemon/src/lib/sign-in-grants/`	input-requests	I210
+I211	kept	accounts	-	behaviour as written	input-requests	I211
+I212	kept	accounts	-	behaviour as written	input-requests	I212
+I213	kept	accounts	-	`SignInGrantLedger`	input-requests	I213
+I214	kept	accounts	-	behaviour as written	input-requests	I214
+I215	kept	accounts	-	`TASK_PLAN_MISS_AGENT_NOTE`, `grantMissLine`	input-requests	I215
+I216	kept	accounts	-	`grantFilledLineFor`	input-requests	I216
+I217	kept	browsers	vault	`inputArm`	input-requests	I217
+I218	kept	accounts	-	`task-plan-line-stopped`, `task-plan-line-failed`	input-requests	I218
+I219	removed	accounts	-	-	input-requests	-
+I220	kept	accounts	-	`sign-in-grants/rules.ts`, `sources.ts`	input-requests	I220
+I221	kept	accounts	-	behaviour as written	input-requests	I221
+I222	kept	accounts	-	`held()`, `proceed()`, `verified`	input-requests	I222
+I223	kept	accounts	-	behaviour as written	input-requests	I223
+I224	kept	accounts	-	`browser_eval`	input-requests	I224
+I225	kept	accounts	-	`did-not-move-on`	input-requests	I225
+I226	kept	accounts	-	behaviour as written	input-requests	I226
+I227	kept	accounts	-	behaviour as written	input-requests	I227
+I228	kept	accounts	-	`grantMissLineFor`, `grantFilledLineFor`	input-requests	I228
+I229	kept	accounts	-	`sign-in-rules-terminal.1`, `program-changed`, `tool-not-covered`	input-requests	I229
+I230	kept	accounts	-	`preapprove`, `unavailable`	input-requests	I230
+I231	kept	accounts	-	`input.delivered`, `sign-in-rule-suspended`	input-requests	I231
+I232	kept	accounts	-	`code-without-sign-in`	input-requests	I232
+I233	kept	accounts	-	`no-history`	input-requests	I233
+I234	kept	terminals	vault	`TmuxInputTarget`, `KernelProgramProof`	input-requests	I234
+I235	kept	terminals	vault	behaviour as written	input-requests	I235
+I236	kept	terminals	vault	behaviour as written	input-requests	I236
+I237	kept	terminals	vault	`program`, `recognisedConsumer`, `trustedProgram`	input-requests	I237
+I238	kept	terminals	vault	behaviour as written	input-requests	I238
+I239	kept	terminals	vault	behaviour as written	input-requests	I239
+I240	kept	vault	-	behaviour as written	input-requests	I240
+I241	kept	terminals	vault	`tmux-input-guard.test.ts`	input-requests	I241
+I242	kept	vault	-	behaviour as written	input-requests	I242
+I243	kept	terminals	vault	`tmux if-shell -F … send-keys -H`	input-requests	I243
+I244	kept	accounts	-	behaviour as written	input-requests	I244
+I245	split	accounts	vault	-	input-requests	I245
+S1	kept	vault	-	`fy secret set`	secrets	S1
+S2	kept	vault	-	`fy secret ls`	secrets	S2
+S3	kept	vault	-	`fy secret use`	secrets	S3
+S4	kept	vault	-	behaviour as written	secrets	S4
+S5	kept	vault	-	behaviour as written	secrets	S5
+S6	kept	vault	-	enforced by types: route table gets `SecretDirectory`, which has no method that opens ciphertext	secrets	S6
+S7	kept	vault	-	`SecretVault`	secrets	S7
+S8	kept	mcp	-	MCP sign-in service	secrets	S8
+S9	kept	accounts	-	`AccountDirectory`, `LoginDirectory`	secrets	S9
+S10	kept	accounts	-	`AccountVault`	secrets	S10
+S11	kept	accounts	-	`narrowAccountVault`	secrets	S11
+S12	kept	vault	-	behaviour as written	secrets	S12
+S13	kept	accounts	-	`account_hint`, `GET /v1/accounts/hint`, `GET /v1/secrets/logins/hint`	secrets	S13
+S14	kept	vault	-	behaviour as written	secrets	S14
+S15	kept	vault	-	behaviour as written	secrets	S15
+S16	kept	browsers	vault	behaviour as written	secrets	S16
+S17	kept	terminals	vault	behaviour as written	secrets	S17
+S18	kept	vault	-	behaviour as written	secrets	S18
+S19	kept	vault	-	behaviour as written	secrets	S19
+S20	kept	vault	-	`SecretRedactor.batch`	secrets	S20
+S21	kept	vault	-	`redactText`	secrets	S21
+S22	kept	vault	-	`redactText`	secrets	S22
+S23	kept	vault	-	`redactText`	secrets	S23
+S24	kept	vault	-	behaviour as written	secrets	S24
+S25	kept	vault	-	behaviour as written	secrets	S25
+S26	kept	vault	-	`redact-differential.test.ts`	secrets	S26
+S27	kept	vault	-	behaviour as written	secrets	S27
+S28	kept	vault	-	behaviour as written	secrets	S28
+S29	kept	vault	-	behaviour as written	secrets	S29
+S30	kept	gate	-	`caller: 'person'`, `callerIsAgent`	secrets	S30
+S31	kept	vault	-	behaviour as written	secrets	S31
+S32	kept	vault	-	behaviour as written	secrets	S32
+S33	kept	vault	-	behaviour as written	secrets	S33
+S34	kept	vault	-	behaviour as written	secrets	S34
+S35	kept	gate	-	behaviour as written	secrets	S35
+S36	kept	vault	-	`/v1/fleet/proposals/:id/apply`	secrets	S36
+S37	kept	mcp	-	behaviour as written	secrets	S37
+S38	kept	vault	-	`POST /v1/secrets/use`	secrets	S38
+S39	kept	access	-	`fy pair --limited`	secrets	S39
+S40	kept	kernel	-	`StateHomeFence` in `@ferretry/fleet`	secrets	S40
+S41	kept	kernel	-	behaviour as written	secrets	S41
+S42	kept	kernel	-	behaviour as written	secrets	S42
+S43	kept	kernel	-	provisioner; opening `<fleet>/assets`	secrets	S43
+S44	kept	kernel	-	Linux `/proc`, macOS `fchdir`	secrets	S44
+S45	kept	kernel	-	`stateHomeFence`, `fy history claim`	secrets	S45
+S46	kept	kernel	-	`stateHomeFence`	secrets	S46
+S47	kept	ferrets	-	`/v1/sessions/:id/fs/*`, opening `scope=media`	secrets	S47
+S48	kept	kernel	-	`POST /v1/sessions`, `fy new --cwd`	secrets	S48
+S49	kept	kernel	-	behaviour as written	secrets	S49
+S50	kept	kernel	-	behaviour as written	secrets	S50
+S51	kept	browsers	kernel	`browser_upload`	secrets	S51
+S52	kept	gate	fy-shell	`fy mcp serve`, `FY_SESSION_TOKEN`	secrets	S52
+S53	split	gate	fy-shell	-	secrets	S53
+S54	split	gate	fy-shell	-	secrets	S54
+S55	removed	gate	-	-	secrets	-
+S56	removed	gate	-	-	secrets	-
+S57	kept	gate	fy-shell	behaviour as written	secrets	S57
+S58	kept	gate	fy-shell	`x-ferretry-session-id`	secrets	S58
+S59	kept	gate	fy-shell	`FY_SESSION_ID` env check	secrets	S59
+S60	split	gate	fy-shell	-	secrets	S60
+S61	kept	gate	fy-shell	`caller: 'person'`	secrets	S61
+S62	kept	vault	-	behaviour as written	secrets	S62
+S63	kept	vault	-	`secretEnvironment`	secrets	S63
+S64	kept	vault	-	behaviour as written	secrets	S64
+S65	kept	vault	-	behaviour as written	secrets	S65
+S66	kept	vault	-	behaviour as written	secrets	S66
+S67	kept	kernel	vault	`packages/daemon/src/lib/fleet/publication.ts`	secrets	S67
+S68	kept	accounts	-	`packages/daemon/src/lib/secrets/accounts.ts`	secrets	S68
+S69	removed	accounts	-	-	secrets	-
+S70	split	accounts	vault	-	secrets	S70
+S71	removed	accounts	-	-	secrets	-
+S72	removed	accounts	-	-	secrets	-
+S73	split	accounts	vault	-	secrets	S73
+S74	removed	accounts	-	-	secrets	-
+S75	removed	accounts	-	-	secrets	-
+S76	split	accounts	vault	-	secrets	S76
+S77	kept	accounts	-	behaviour as written	secrets	S77
+S78	kept	accounts	-	behaviour as written	secrets	S78
+S79	kept	accounts	-	behaviour as written	secrets	S79
+S80	kept	accounts	-	`PUT /v1/accounts/defaults`	secrets	S80
+S81	kept	accounts	-	`GET /v1/config/status`	secrets	S81
+S82	kept	accounts	-	`GET /v1/accounts/look-alike`	secrets	S82
+S83	kept	accounts	-	behaviour as written	secrets	S83
+S84	split	accounts	vault	-	secrets	S84
+S85	kept	accounts	-	`AccountDirectory.observeSignIn` (sole writer)	secrets	S85
+S86	kept	accounts	-	behaviour as written	secrets	S86
+S87	kept	accounts	-	`two-factor-seeds.ts`	secrets	S87
+S88	kept	accounts	-	behaviour as written	secrets	S88
+S89	kept	accounts	-	`POST /v1/accounts/:id/factors/seed`	secrets	S89
+S90	kept	accounts	-	`sha256("ferretry.add-2fa-key.v1\0"+account key+"\0"+stage)`	secrets	S90
+S91	kept	accounts	-	behaviour as written	secrets	S91
+S92	split	accounts	vault	-	secrets	S92
+S93	kept	accounts	-	behaviour as written	secrets	S93
+S94	kept	accounts	-	behaviour as written	secrets	S94
+S95	kept	accounts	-	behaviour as written	secrets	S95
+S96	kept	accounts	-	`caller: 'person'`	secrets	S96
+S97	kept	accounts	-	`applySeed`	secrets	S97
+S98	kept	accounts	-	behaviour as written	secrets	S98
+S99	kept	accounts	-	behaviour as written	secrets	S99
+S100	split	accounts	vault	-	secrets	S100
+S101	kept	accounts	-	`TwoFactorSeedHost`, `twoFactorSeed`, `useAddKeyStepUp`, `GET /v1/accounts/seed-stages/:stage`	secrets	S101
+S102	kept	accounts	-	behaviour as written	secrets	S102
+S103	kept	accounts	-	behaviour as written	secrets	S103
+S104	kept	accounts	-	`SIGN_IN_RULE_TOTP_WARNING`, `AUTOMATED_CODE_WARNING`, `SIGN_IN_RULE_AUTO_RECIPE_WARNING`, `stillAskedFor('rule')`, `signInRuleWords`	secrets	S104
+S105	kept	accounts	-	behaviour as written	secrets	S105
+S106	kept	accounts	-	`POST /v1/sign-in-rules/stages`	secrets	S106
+S107	kept	accounts	-	`signInRuleChallenge`, `signInRuleSubject`, `…/bind`	secrets	S107
+S108	kept	accounts	-	`claimStoredProof`	secrets	S108
+S109	kept	accounts	-	behaviour as written	secrets	S109
+S110	kept	accounts	-	behaviour as written	secrets	S110
+S111	kept	accounts	-	`tool_not_covered`, `via_provider`, `not_password`, `no_history`, `passkey_required`, `no_code_key`, `terminal_off`	secrets	S111
+S112	kept	accounts	-	`SIGN_IN_RULE_REFUSAL_WORDS`	secrets	S112
+S113	kept	accounts	-	behaviour as written	secrets	S113
+S114	kept	accounts	terminals	`observerByOf`, `rootPromptProved`	secrets	S114
+S115	kept	accounts	-	behaviour as written	secrets	S115
+S116	kept	accounts	-	behaviour as written	secrets	S116
+S117	kept	accounts	-	`AccountDirectory.followRulesWith`	secrets	S117
+S118	kept	accounts	-	behaviour as written	secrets	S118
+S119	kept	accounts	-	behaviour as written	secrets	S119
+S120	kept	accounts	-	behaviour as written	secrets	S120
+S121	kept	accounts	-	behaviour as written	secrets	S121
+S122	kept	accounts	-	`sign-in-rule-suspended`	secrets	S122
+S123	kept	accounts	-	behaviour as written	secrets	S123
+S124	kept	terminals	accounts,vault	`proceed()` (re-check before the guarded tmux write)	secrets	S124
+S125	kept	accounts	-	`SIGN_IN_RULE_ROOT_WARNING`, `SIGN_IN_RULE_TERMINAL_RESIDUAL`, `SIGN_IN_RULE_TERMINAL_HONEST_LIMIT`	secrets	S125
+S126	kept	accounts	-	`sign-in-rules-terminal.1`, `sign-in-rules.1`	secrets	S126
+S127	kept	terminals	accounts,vault	behaviour as written	secrets	S127
+S128	kept	accounts	-	`sign-in-rules-damaged`, `sign-in-rules.json.damaged-<stamp>`	secrets	S128
+S129	kept	accounts	-	behaviour as written	secrets	S129
+S130	kept	accounts	-	behaviour as written	secrets	S130
+S131	kept	accounts	-	`account_propose` with `preapprove`	secrets	S131
+S132	kept	accounts	-	`fy rules`	secrets	S132
+S133	removed	accounts	-	-	secrets	-
+S134	kept	accounts	-	behaviour as written	secrets	S134
+S135	kept	accounts	-	behaviour as written	secrets	S135
+S136	kept	accounts	-	behaviour as written	secrets	S136
+S137	kept	accounts	-	behaviour as written	secrets	S137
+S138	kept	accounts	-	behaviour as written	secrets	S138
+S139	kept	accounts	-	`placeHosts`	secrets	S139
+S140	kept	accounts	-	behaviour as written	secrets	S140
+S141	kept	vault	-	behaviour as written	secrets	S141
+S142	kept	vault	-	behaviour as written	secrets	S142
+S143	kept	vault	-	behaviour as written	secrets	S143
+S144	kept	vault	-	behaviour as written	secrets	S144
+S145	kept	vault	-	`CloneableSecretName` (`packages/protocol/src/lib/secret-clone.ts`)	secrets	S145
+S146	kept	vault	-	`bundle_invalid`	secrets	S146
+S147	kept	vault	-	behaviour as written	secrets	S147
+S148	kept	vault	-	behaviour as written	secrets	S148
+S149	kept	vault	kernel	`POST /v1/fleet/clone/review`, `clone-base.json`	secrets	S149
+S150	kept	vault	-	`SecretDirectory.putMissing`	secrets	S150
+S151	kept	vault	gate	behaviour as written	secrets	S151
+S152	kept	vault	kernel	`POST /v1/fleet/clone/keys`	secrets	S152
+S153	kept	vault	-	`POST /v1/secrets/imports`	secrets	S153
+S154	kept	vault	-	`POST /v1/secrets/exports/:importId`	secrets	S154
+S155	kept	vault	-	`POST /v1/secrets/imports/:importId`	secrets	S155
+S156	kept	vault	-	`secrets.used` (`clone-export`), `secrets.changed` (`clone-import`)	secrets	S156
+S157	kept	vault	-	`SecretImportService`, `SecretExportService` (`packages/daemon/src/lib/secrets/clone.ts`)	secrets	S157
+S158	kept	catalogs	-	`link-keys.json`, `FileSecretKey`	secrets	S158
+S159	kept	vault	gate	`clone-secrets` in `STEP_UP_ACTS`	secrets	S159
+S160	kept	vault	-	behaviour as written	secrets	S160
+S161	kept	vault	-	behaviour as written	secrets	S161
+S162	kept	voice	-	`OutboundProviderAuthorizer.send(secretName, hostAllowlist, request)` (`lib/speedups/authorizer.ts`)	secrets	S162
+S163	kept	voice	-	`lib/speedups/catalog.ts`	secrets	S163
+S164	kept	voice	-	behaviour as written	secrets	S164
+S165	kept	voice	-	behaviour as written	secrets	S165
+S166	kept	voice	-	behaviour as written	secrets	S166
+S167	kept	voice	logins,vault	`POST /v1/stt/enhance`, `POST /v1/speedups/:provider/test`, `POST /v1/fleet/credentials/:id/test`	secrets	S167
+S168	kept	voice	-	`GET /v1/speedups`	secrets	S168
+S169	kept	voice	-	behaviour as written	secrets	S169
+S170	kept	voice	-	`lib/stt/speedup-keys.ts`, `@ferretry/protocol` `stt-cleanup.ts`	secrets	S170
+S171	kept	voice	-	behaviour as written	secrets	S171
+S172	kept	voice	-	`packages/pwa/public/_headers`, `scripts/validate/pages-config.sh`	secrets	S172
+S173	kept	voice	-	`stt-cleanup`	secrets	S173
+S174	kept	mcp	-	`MCP_<NAME>_<HASH>_ACCESS`	secrets	S174
+S175	kept	usage	logins,vault	`GET /api/oauth/usage`, `GET /backend-api/wham/usage`	secrets	S175
+S176	kept	usage	logins,vault	type test	secrets	S176
+S177	kept	usage	logins,vault	diet test	secrets	S177
+S178	kept	usage	logins,vault	`FY_USAGE_PROBE_ORIGIN`	secrets	S178
+R1	kept	kernel	-	behaviour as written	relay-protocol	R1
+R2	kept	kernel	-	behaviour as written	relay-protocol	R2
+R3	kept	kernel	-	`packages/relay` (`src/lib` pure protocol, `src/adapters` Cloudflare)	relay-protocol	R3
+R4	kept	connections	-	behaviour as written	relay-protocol	R4
+R5	kept	connections	-	behaviour as written	relay-protocol	R5
+R6	kept	connections	-	behaviour as written	relay-protocol	R6
+R7	kept	connections	-	behaviour as written	relay-protocol	R7
+R8	kept	connections	-	`chooseConnection` (which-carrier-and-why sentence)	relay-protocol	R8
+R9	kept	connections	-	behaviour as written	relay-protocol	R9
+R10	kept	connections	-	`connectionPreferenceOrder` in `packages/relay/src/lib/connection.ts`	relay-protocol	R10
+R11	kept	connections	-	`{ kind: 'relay', source: 'discovery' }` entry	relay-protocol	R11
+R12	kept	connections	worker:relay	behaviour as written	relay-protocol	R12
+R13	kept	connections	worker:relay	behaviour as written	relay-protocol	R13
+R14	kept	connections	worker:relay	behaviour as written	relay-protocol	R14
+R15	kept	connections	worker:relay	`cloudflare-relay-self-hosting.md`	relay-protocol	R15
+R16	kept	kernel	-	behaviour as written	relay-protocol	R16
+R17	kept	kernel	-	behaviour as written	relay-protocol	R17
+R18	kept	kernel	-	behaviour as written	relay-protocol	R18
+R19	kept	access	kernel	behaviour as written	relay-protocol	R19
+R20	kept	access	kernel	behaviour as written	relay-protocol	R20
+R21	kept	kernel	-	behaviour as written	relay-protocol	R21
+R22	kept	kernel	-	behaviour as written	relay-protocol	R22
+R23	kept	kernel	-	behaviour as written	relay-protocol	R23
+R24	kept	kernel	-	behaviour as written	relay-protocol	R24
+R25	kept	kernel	-	behaviour as written	relay-protocol	R25
+R26	kept	kernel	-	behaviour as written	relay-protocol	R26
+R27	kept	kernel	-	behaviour as written	relay-protocol	R27
+R28	kept	kernel	-	behaviour as written	relay-protocol	R28
+R29	kept	kernel	-	behaviour as written	relay-protocol	R29
+R30	kept	kernel	-	behaviour as written	relay-protocol	R30
+R31	kept	kernel	-	behaviour as written	relay-protocol	R31
+R32	kept	connections	-	behaviour as written	relay-protocol	R32
+R33	kept	connections	kernel	behaviour as written	relay-protocol	R33
+R34	kept	connections	kernel	behaviour as written	relay-protocol	R34
+R35	kept	connections	kernel	behaviour as written	relay-protocol	R35
+R36	kept	kernel	-	behaviour as written	relay-protocol	R36
+R37	kept	kernel	-	behaviour as written	relay-protocol	R37
+R38	kept	kernel	-	behaviour as written	relay-protocol	R38
+R39	kept	kernel	-	behaviour as written	relay-protocol	R39
+R40	kept	kernel	-	behaviour as written	relay-protocol	R40
+R41	kept	kernel	-	behaviour as written	relay-protocol	R41
+R42	kept	connections	worker:relay	behaviour as written	relay-protocol	R42
+R43	kept	connections	worker:relay	behaviour as written	relay-protocol	R43
+R44	kept	connections	worker:relay	`challenge` / `claim` / `claimed`	relay-protocol	R44
+R45	kept	connections	worker:relay	behaviour as written	relay-protocol	R45
+R46	kept	connections	worker:relay	behaviour as written	relay-protocol	R46
+R47	kept	connections	worker:relay	behaviour as written	relay-protocol	R47
+R48	kept	connections	worker:relay	behaviour as written	relay-protocol	R48
+R49	kept	connections	worker:relay	behaviour as written	relay-protocol	R49
+R50	kept	connections	worker:relay	behaviour as written	relay-protocol	R50
+R51	kept	connections	worker:relay	`claim-probe`, `claim-handover`	relay-protocol	R51
+R52	kept	connections	worker:relay	behaviour as written	relay-protocol	R52
+R53	kept	connections	worker:relay	`probe` / `held`	relay-protocol	R53
+R54	kept	connections	worker:relay	behaviour as written	relay-protocol	R54
+R55	kept	connections	worker:relay	behaviour as written	relay-protocol	R55
+R56	kept	connections	worker:relay	`handover`	relay-protocol	R56
+R57	kept	connections	worker:relay	`replaces`	relay-protocol	R57
+R58	kept	connections	worker:relay	behaviour as written	relay-protocol	R58
+R59	kept	connections	worker:relay	behaviour as written	relay-protocol	R59
+R60	kept	connections	worker:relay	behaviour as written	relay-protocol	R60
+R61	kept	connections	worker:relay	`ready` / `open` / `closed` / `error`	relay-protocol	R61
+R62	kept	connections	worker:relay	behaviour as written	relay-protocol	R62
+R63	kept	connections	worker:relay	behaviour as written	relay-protocol	R63
+R64	kept	connections	worker:relay	behaviour as written	relay-protocol	R64
+R65	kept	kernel	-	`hs1` / `hs2`	relay-protocol	R65
+R66	kept	kernel	-	behaviour as written	relay-protocol	R66
+R67	kept	kernel	-	behaviour as written	relay-protocol	R67
+R68	kept	connections	-	`sessionProtocol`	relay-protocol	R68
+R69	kept	kernel	-	behaviour as written	relay-protocol	R69
+R70	kept	kernel	-	behaviour as written	relay-protocol	R70
+R71	kept	kernel	-	behaviour as written	relay-protocol	R71
+R72	kept	kernel	-	behaviour as written	relay-protocol	R72
+R73	kept	kernel	-	behaviour as written	relay-protocol	R73
+R74	kept	kernel	-	behaviour as written	relay-protocol	R74
+R75	kept	access	kernel	behaviour as written	relay-protocol	R75
+R76	kept	kernel	-	behaviour as written	relay-protocol	R76
+R77	kept	access	kernel	behaviour as written	relay-protocol	R77
+R78	kept	access	kernel	behaviour as written	relay-protocol	R78
+R79	kept	kernel	-	behaviour as written	relay-protocol	R79
+R80	kept	kernel	-	behaviour as written	relay-protocol	R80
+R81	kept	kernel	-	behaviour as written	relay-protocol	R81
+R82	kept	kernel	-	behaviour as written	relay-protocol	R82
+R83	kept	kernel	-	behaviour as written	relay-protocol	R83
+R84	kept	kernel	-	behaviour as written	relay-protocol	R84
+R85	kept	kernel	-	behaviour as written	relay-protocol	R85
+R86	kept	kernel	-	behaviour as written	relay-protocol	R86
+R87	kept	connections	worker:relay	Cloudflare WebSocket auto-responder	relay-protocol	R87
+R88	kept	kernel	-	behaviour as written	relay-protocol	R88
+R89	kept	kernel	-	behaviour as written	relay-protocol	R89
+R90	kept	connections	-	behaviour as written	relay-protocol	R90
+R91	kept	connections	-	behaviour as written	relay-protocol	R91
+R92	kept	connections	worker:relay	behaviour as written	relay-protocol	R92
+R93	kept	connections	worker:relay	behaviour as written	relay-protocol	R93
+R94	kept	kernel	-	`credit` frame	relay-protocol	R94
+R95	kept	kernel	-	behaviour as written	relay-protocol	R95
+R96	kept	kernel	-	behaviour as written	relay-protocol	R96
+R97	kept	kernel	-	behaviour as written	relay-protocol	R97
+R98	kept	connections	worker:relay	behaviour as written	relay-protocol	R98
+R99	kept	connections	worker:relay	behaviour as written	relay-protocol	R99
+R100	kept	connections	worker:relay	behaviour as written	relay-protocol	R100
+R101	kept	connections	worker:relay	behaviour as written	relay-protocol	R101
+R102	kept	connections	worker:relay	behaviour as written	relay-protocol	R102
+R103	kept	connections	worker:relay	behaviour as written	relay-protocol	R103
+R104	kept	connections	worker:relay	behaviour as written	relay-protocol	R104
+R105	kept	connections	worker:relay	WebSocket attachment	relay-protocol	R105
+R106	kept	connections	worker:relay	behaviour as written	relay-protocol	R106
+R107	kept	connections	worker:relay	`allowUnconfirmed`	relay-protocol	R107
+R108	kept	connections	worker:relay	behaviour as written	relay-protocol	R108
+R109	kept	connections	worker:relay	behaviour as written	relay-protocol	R109
+R110	kept	connections	worker:relay	behaviour as written	relay-protocol	R110
+R111	kept	connections	worker:relay	behaviour as written	relay-protocol	R111
+R112	kept	kernel	-	send ledger	relay-protocol	R112
+R113	kept	connections	worker:relay	behaviour as written	relay-protocol	R113
+R114	kept	connections	worker:relay	behaviour as written	relay-protocol	R114
+R115	kept	connections	worker:relay	behaviour as written	relay-protocol	R115
+R116	kept	connections	worker:relay	behaviour as written	relay-protocol	R116
+R117	kept	connections	worker:relay	behaviour as written	relay-protocol	R117
+R118	kept	access	kernel	`paired` / `pair-refused`	relay-protocol	R118
+R119	kept	connections	worker:relay	behaviour as written	relay-protocol	R119
+R120	kept	connections	worker:relay	behaviour as written	relay-protocol	R120
+R121	kept	connections	worker:relay	behaviour as written	relay-protocol	R121
+R122	kept	connections	worker:relay	`vars.RELAY_DAEMON_IDS`, `task relay:check`, `task relay:deploy`	relay-protocol	R122
+R123	kept	connections	worker:relay	behaviour as written	relay-protocol	R123
+R124	kept	connections	worker:relay	behaviour as written	relay-protocol	R124
+R125	kept	connections	worker:relay	behaviour as written	relay-protocol	R125
+R126	kept	connections	worker:relay	behaviour as written	relay-protocol	R126
+R127	kept	kernel	-	behaviour as written	relay-protocol	R127
+R128	kept	connections	worker:relay	`acceptWebSocket`, socket attachments, auto-responder	relay-protocol	R128
+R129	kept	connections	worker:relay	`wrangler.hosted.json`, `ferretry-hosted-relay`	relay-protocol	R129
+R130	kept	connections	worker:relay	behaviour as written	relay-protocol	R130
+R131	kept	connections	worker:relay	behaviour as written	relay-protocol	R131
+R132	kept	connections	worker:relay	`PUT /v1/operator/config`, `relay-hosted.yaml` enable/disable	relay-protocol	R132
+R133	kept	connections	worker:relay	behaviour as written	relay-protocol	R133
+R134	kept	connections	worker:relay	behaviour as written	relay-protocol	R134
+R135	kept	connections	worker:relay	behaviour as written	relay-protocol	R135
+R136	kept	connections	worker:relay	`LINK_STORE`, `src/adapters/hosted-link-store-routes.ts`, `env.LINK_STORE.fetch(request)`	relay-protocol	R136
+R137	kept	connections	worker:relay	`scripts/validate/relay-config.sh`, `wrangler.link-store.hosted.json`	relay-protocol	R137
+R138	kept	connections	worker:relay	behaviour as written	relay-protocol	R138
+R139	kept	connections	worker:relay	`RELAY_MODE=hosted`, `wrangler.jsonc`	relay-protocol	R139
+R140	kept	connections	worker:relay	`relayRedialDelayMs`, `reconnectDelayMs`	relay-protocol	R140
+R141	kept	terminals	kernel	`web-terminals.ts`	relay-protocol	R141
+R142	kept	connections	worker:relay	`bun-relay-carrier.ts`, `carrier.ts`	relay-protocol	R142
+R143	kept	connections	worker:relay	behaviour as written	relay-protocol	R143
+R144	kept	connections	worker:relay	behaviour as written	relay-protocol	R144
+R145	kept	connections	worker:relay	behaviour as written	relay-protocol	R145
+R146	kept	connections	worker:relay	behaviour as written	relay-protocol	R146
+R147	kept	connections	worker:relay	behaviour as written	relay-protocol	R147
+R148	kept	connections	worker:relay	`/internal/reconcile`, `confirmedAt`	relay-protocol	R148
+R149	kept	connections	worker:relay	behaviour as written	relay-protocol	R149
+R150	kept	connections	worker:relay	behaviour as written	relay-protocol	R150
+R151	kept	connections	worker:relay	behaviour as written	relay-protocol	R151
+R152	kept	connections	worker:relay	behaviour as written	relay-protocol	R152
+R153	kept	connections	worker:relay	behaviour as written	relay-protocol	R153
+R154	kept	connections	worker:relay	`SUPERSEDED_HOSTED_RELAY_LIMITS`	relay-protocol	R154
+R155	kept	connections	worker:relay	behaviour as written	relay-protocol	R155
+R156	kept	connections	worker:relay	behaviour as written	relay-protocol	R156
+R157	kept	connections	worker:relay	`hostedBandwidthReason`, `parseHostedBandwidthRefusal`	relay-protocol	R157
+R158	kept	connections	worker:relay	behaviour as written	relay-protocol	R158
+R159	kept	connections	worker:relay	behaviour as written	relay-protocol	R159
+R160	kept	connections	worker:relay	behaviour as written	relay-protocol	R160
+R161	kept	connections	worker:relay	behaviour as written	relay-protocol	R161
+R162	kept	connections	worker:relay	`maxTrackedDaemons`	relay-protocol	R162
+R163	kept	connections	worker:relay	behaviour as written	relay-protocol	R163
+R164	kept	connections	worker:relay	behaviour as written	relay-protocol	R164
+R165	kept	connections	worker:relay	behaviour as written	relay-protocol	R165
+R166	kept	connections	worker:relay	behaviour as written	relay-protocol	R166
+R167	kept	connections	worker:relay	behaviour as written	relay-protocol	R167
+R168	kept	connections	worker:relay	behaviour as written	relay-protocol	R168
+R169	kept	connections	worker:relay	behaviour as written	relay-protocol	R169
+R170	kept	connections	-	behaviour as written	relay-protocol	R170
+R171	kept	connections	-	behaviour as written	relay-protocol	R171
+R172	kept	connections	-	behaviour as written	relay-protocol	R172
+R173	kept	connections	-	behaviour as written	relay-protocol	R173
+R174	split	connections	-	-	relay-protocol	R174
+R175	removed	connections	-	-	relay-protocol	-
+R176	removed	connections	-	-	relay-protocol	-
+R177	removed	connections	-	-	relay-protocol	-
+R178	removed	connections	-	-	relay-protocol	-
+R179	removed	connections	-	-	relay-protocol	-
+R180	removed	connections	-	-	relay-protocol	-
+R181	removed	connections	-	-	relay-protocol	-
+R182	kept	connections	-	`bindUrl`, `publicUrl`	relay-protocol	R182
+R183	kept	connections	-	behaviour as written	relay-protocol	R183
+R184	kept	connections	-	behaviour as written	relay-protocol	R184
+R185	kept	connections	gate	behaviour as written	relay-protocol	R185
+R186	kept	connections	-	behaviour as written	relay-protocol	R186
+R187	kept	connections	-	behaviour as written	relay-protocol	R187
+R188	kept	connections	-	behaviour as written	relay-protocol	R188
+R189	kept	connections	gate	`grants.md`	relay-protocol	R189
+R190	kept	connections	-	`packages/protocol/src/lib/version-skew.ts`	relay-protocol	R190
+R191	removed	connections	-	-	relay-protocol	-
+R192	kept	connections	-	`packages/protocol/src/lib/carriers.ts`, `packages/daemon/src/lib/runtime/carriers.ts`, `packages/pwa/src/lib/connections.ts`, `relay-carrier.ts`	relay-protocol	R192
+R193	kept	connections	-	behaviour as written	relay-protocol	R193
+R194	kept	connections	-	behaviour as written	relay-protocol	R194
+R195	kept	connections	-	behaviour as written	relay-protocol	R195
+R196	kept	connections	-	behaviour as written	relay-protocol	R196
+R197	kept	connections	-	behaviour as written	relay-protocol	R197
+R198	kept	connections	-	behaviour as written	relay-protocol	R198
+R199	kept	connections	-	behaviour as written	relay-protocol	R199
+R200	kept	connections	-	behaviour as written	relay-protocol	R200
+R201	kept	connections	worker:relay	`tests/e2e/relay-browser-pairing.e2e.test.ts`	relay-protocol	R201
+R202	kept	connections	worker:relay	`HOSTED_RELAY_DIRECTORY_ORIGIN`	relay-protocol	R202
+R203	kept	connections	worker:relay	`packages/daemon/src/lib/relay/discovery.ts`, `FY_RELAY_DIRECTORY_ORIGIN`, `vite.config.ts`	relay-protocol	R203
+R204	kept	connections	worker:relay	behaviour as written	relay-protocol	R204
+R205	kept	connections	worker:relay	behaviour as written	relay-protocol	R205
+R206	kept	connections	worker:relay	`fyd --check`	relay-protocol	R206
+R207	kept	connections	worker:relay	`packages/daemon/src/lib/relay`, `packages/daemon/src/adapters/relay`	relay-protocol	R207
+R208	kept	connections	worker:relay	`relay-session.ts`, `relay-carrier.ts`, `DaemonConnection`, `connections.ts`	relay-protocol	R208
+R209	kept	connections	worker:relay	`relay-carrier-end-to-end.test.ts`, `RendezvousDurableObject`, `RelayLink`	relay-protocol	R209
+R210	kept	connections	worker:relay	behaviour as written	relay-protocol	R210
+R211	kept	connections	-	`refusalUpgrade`	relay-protocol	R211
+R212	kept	connections	-	behaviour as written	relay-protocol	R212
+R213	kept	connections	worker:relay	`src/adapters/relay/hosted-relay-directory.ts`	relay-protocol	R213
+R214	kept	connections	worker:relay	behaviour as written	relay-protocol	R214
+R215	kept	connections	worker:relay	behaviour as written	relay-protocol	R215
+R216	kept	connections	worker:relay	behaviour as written	relay-protocol	R216
+R217	kept	kernel	gate	behaviour as written	relay-protocol	R217
+R218	kept	connections	worker:relay	`PAIRING_REACH_NOTICE`, `discoverableRelayUrl`, `localOnlyNotice`	relay-protocol	R218
+R219	kept	connections	worker:relay	`DaemonCarrierRouter.openStream`	relay-protocol	R219
+R220	kept	access	connections	`scripts/validate/cli-contracts.sh`	relay-protocol	R220
+R221	kept	connections	worker:relay	`discoveredRelayUrl`	relay-protocol	R221
+R222	kept	connections	worker:relay	behaviour as written	relay-protocol	R222
+R223	kept	connections	worker:relay	`useDaemonFetch()`	relay-protocol	R223
+R224	kept	connections	worker:relay	`ActiveCarrierCard`, `chooseConnection().reason`, `describeConnectionMethod`, `DaemonCarrierRouter.choice`, `connection-health.ts`	relay-protocol	R224
+R225	split	connections	worker:relay	-	relay-protocol	R225
+R226	kept	connections	worker:relay	behaviour as written	relay-protocol	R226
+R227	kept	connections	worker:relay	behaviour as written	relay-protocol	R227
+R228	kept	kernel	-	behaviour as written	relay-protocol	R228
+R229	kept	kernel	-	behaviour as written	relay-protocol	R229
+R230	kept	kernel	-	behaviour as written	relay-protocol	R230
+R231	kept	kernel	-	behaviour as written	relay-protocol	R231
+R232	kept	kernel	-	behaviour as written	relay-protocol	R232
+R233	kept	kernel	-	behaviour as written	relay-protocol	R233
+R234	kept	kernel	-	behaviour as written	relay-protocol	R234
+R235	kept	kernel	-	behaviour as written	relay-protocol	R235
+R236	kept	access	kernel	behaviour as written	relay-protocol	R236
+R237	kept	access	gate	behaviour as written	relay-protocol	R237
+R238	kept	kernel	access	behaviour as written	relay-protocol	R238
+R239	kept	access	gate	behaviour as written	relay-protocol	R239
+R240	kept	access	gate	behaviour as written	relay-protocol	R240
+R241	kept	kernel	access,gate	`renew` / `renewed`	relay-protocol	R241
+R242	kept	access	gate	behaviour as written	relay-protocol	R242
+R243	kept	access	gate	behaviour as written	relay-protocol	R243
+R244	kept	kernel	access,gate	behaviour as written	relay-protocol	R244
+R245	kept	kernel	access,gate	behaviour as written	relay-protocol	R245
+R246	kept	access	gate	behaviour as written	relay-protocol	R246
+R247	kept	kernel	access,gate	`FYD_TEST_TIMINGS` (`leaseSeconds`, `renewLeadSeconds`, `maxSessionSeconds`, `idleDaySeconds`)	relay-protocol	R247
+R248	kept	access	gate	`deviceKeyRotationDays`, `POST /v1/unlock`, `POST /v1/step-up`	relay-protocol	R248
+R249	kept	access	gate	behaviour as written	relay-protocol	R249
+R250	kept	access	gate	behaviour as written	relay-protocol	R250
+R251	kept	access	gate	`device.key-rotated`	relay-protocol	R251
+R252	kept	access	gate	behaviour as written	relay-protocol	R252
+R253	kept	access	gate	`unlockOnOpen`, `POST /v1/unlock/options`	relay-protocol	R253
+R254	kept	access	gate	`unlockValidityHours`	relay-protocol	R254
+R255	kept	access	gate	behaviour as written	relay-protocol	R255
+R256	kept	kernel	-	behaviour as written	relay-protocol	R256
+R257	kept	access	kernel	behaviour as written	relay-protocol	R257
+R258	kept	kernel	-	behaviour as written	relay-protocol	R258
+R259	kept	kernel	-	behaviour as written	relay-protocol	R259
+R260	kept	kernel	-	behaviour as written	relay-protocol	R260
+R261	kept	kernel	-	behaviour as written	relay-protocol	R261
+R262	kept	gate	kernel	`privilegedOnly`	relay-protocol	R262
+R263	kept	kernel	-	behaviour as written	relay-protocol	R263
+R264	kept	kernel	-	behaviour as written	relay-protocol	R264
+R265	kept	conversation	kernel	behaviour as written	relay-protocol	R265
+R266	split	conversation	kernel	-	relay-protocol	R266
+R267	kept	conversation	kernel	`GET /v1/sessions/:id/transcript-images/:handle`	relay-protocol	R267
+R501	kept	ferrets	kernel	`etag`, `journalSequence`	relay-protocol	R501
+R502	split	ferrets	kernel	-	relay-protocol	R502
+R503	kept	ferrets	kernel	behaviour as written	relay-protocol	R503
+R504	kept	kernel	-	`accept-encoding: gzip`	relay-protocol	R504
+R505	kept	kernel	-	`TUNNEL_*` in `@ferretry/protocol`	relay-protocol	R505
+R506	kept	kernel	-	`RelayClientSession.request`, `DecompressionStream`	relay-protocol	R506
+R507	kept	kernel	-	`RelayClientSession.request`	relay-protocol	R507
+R508	kept	kernel	-	dispatcher	relay-protocol	R508
+R509	kept	kernel	-	behaviour as written	relay-protocol	R509
+R510	kept	kernel	-	behaviour as written	relay-protocol	R510
+R511	kept	kernel	-	behaviour as written	relay-protocol	R511
+R512	kept	kernel	-	behaviour as written	relay-protocol	R512
+R513	kept	kernel	-	`compress: true`; `tests/unit/runtime/mounts/surface.test.ts` pins the set	relay-protocol	R513
+R514	kept	kernel	-	behaviour as written	relay-protocol	R514
+R515	kept	kernel	-	`publishResponse`	relay-protocol	R515
+R516	kept	kernel	-	tunnel permits	relay-protocol	R516
+R517	kept	kernel	-	behaviour as written	relay-protocol	R517
+R518	split	kernel	-	-	relay-protocol	R518
+R519	kept	kernel	-	`shared-reads.ts`	relay-protocol	R519
+R520	kept	kernel	-	`idle` frame	relay-protocol	R520
+R521	kept	kernel	-	behaviour as written	relay-protocol	R521
+R522	kept	kernel	-	file-event hub	relay-protocol	R522
+R523	split	kernel	-	-	relay-protocol	R523
+R524	kept	kernel	-	behaviour as written	relay-protocol	R524
+R525	kept	kernel	-	`x-fy-version`	relay-protocol	R525
+R526	kept	kernel	-	`partitionTunnelBody` in `@ferretry/protocol`	relay-protocol	R526
+R527	kept	kernel	-	`req-more`, `res-more`	relay-protocol	R527
+R528	kept	kernel	-	behaviour as written	relay-protocol	R528
+R529	kept	kernel	-	behaviour as written	relay-protocol	R529
+R530	kept	kernel	-	`MAX_QUEUED_REQUESTS` in `packages/pwa/src/lib/relay-session.ts`	relay-protocol	R530
+R531	kept	kernel	-	behaviour as written	relay-protocol	R531
+R532	kept	kernel	-	behaviour as written	relay-protocol	R532
+R533	kept	kernel	-	behaviour as written	relay-protocol	R533
+R534	kept	kernel	-	behaviour as written	relay-protocol	R534
+R535	kept	kernel	-	`MAX_CONCURRENT_REQUESTS` in `packages/daemon/src/lib/relay/link.ts`	relay-protocol	R535
+R536	kept	kernel	-	behaviour as written	relay-protocol	R536
+R537	kept	kernel	-	behaviour as written	relay-protocol	R537
+R538	kept	kernel	-	behaviour as written	relay-protocol	R538
+R539	kept	kernel	-	socket route table	relay-protocol	R539
+R540	kept	kernel	access,gate	behaviour as written	relay-protocol	R540
+R541	kept	kernel	-	behaviour as written	relay-protocol	R541
+R542	kept	kernel	-	behaviour as written	relay-protocol	R542
+R543	kept	kernel	-	behaviour as written	relay-protocol	R543
+R544	kept	kernel	-	behaviour as written	relay-protocol	R544
+R545	kept	kernel	-	`relayDataByteBudget`	relay-protocol	R545
+R546	kept	terminals	kernel	behaviour as written	relay-protocol	R546
+R547	kept	terminals	-	behaviour as written	relay-protocol	R547
+R548	kept	browsers	kernel	`browser-stream.ts` in `@ferretry/protocol`	relay-protocol	R548
+R549	kept	browsers	kernel	`insertText`	relay-protocol	R549
+R550	kept	kernel	-	behaviour as written	relay-protocol	R550
+R551	kept	kernel	-	behaviour as written	relay-protocol	R551
+R552	kept	terminals	kernel	behaviour as written	relay-protocol	R552
+R553	kept	browsers	kernel	behaviour as written	relay-protocol	R553
+R554	kept	kernel	-	behaviour as written	relay-protocol	R554
+R555	kept	kernel	-	behaviour as written	relay-protocol	R555
+R556	kept	kernel	-	behaviour as written	relay-protocol	R556
+R557	kept	kernel	-	behaviour as written	relay-protocol	R557
+R558	kept	kernel	-	behaviour as written	relay-protocol	R558
+R559	kept	kernel	-	behaviour as written	relay-protocol	R559
+R560	kept	terminals	-	`capture-pane`, `display-message`	relay-protocol	R560
+R561	kept	terminals	-	behaviour as written	relay-protocol	R561
+R562	kept	terminals	-	behaviour as written	relay-protocol	R562
+R563	kept	terminals	-	`stream-close`	relay-protocol	R563
+R564	kept	connections	worker:relay	(§9 ref)	relay-protocol	R564
+R565	kept	kernel	-	behaviour as written	relay-protocol	R565
+R566	kept	terminals	-	`adapters/tmux/control-tmux-process.ts`	relay-protocol	R566
+R567	kept	kernel	-	`openStream`	relay-protocol	R567
+R568	kept	kernel	-	behaviour as written	relay-protocol	R568
+R569	split	access	kernel	-	relay-protocol	R569
+R570	kept	connections	access,kernel	behaviour as written	relay-protocol	R570
+R571	kept	access	kernel	behaviour as written	relay-protocol	R571
+R572	kept	kernel	access	behaviour as written	relay-protocol	R572
+R573	kept	access	kernel	behaviour as written	relay-protocol	R573
+R574	kept	access	kernel	`PairingResponseSchema`	relay-protocol	R574
+R575	kept	app-shell	access,kernel	behaviour as written	relay-protocol	R575
+R576	kept	access	kernel	behaviour as written	relay-protocol	R576
+R577	kept	access	kernel	`ApiRequest`	relay-protocol	R577
+R578	kept	access	kernel	behaviour as written	relay-protocol	R578
+R579	kept	access	kernel	behaviour as written	relay-protocol	R579
+R580	kept	access	kernel	`HOSTED_RELAY_DIRECTORY_ORIGIN`	relay-protocol	R580
+R581	kept	connections	-	behaviour as written	relay-protocol	R581
+R582	kept	connections	access,kernel	behaviour as written	relay-protocol	R582
+R583	kept	access	kernel	behaviour as written	relay-protocol	R583
+R584	kept	access	kernel	`paired.response.carriers`	relay-protocol	R584
+R585	kept	access	kernel	`PAIRING_FRAGMENT_PATTERN`	relay-protocol	R585
+R586	kept	access	kernel	`version-skew.ts`, `PairingCodeMintResponse`	relay-protocol	R586
+R587	kept	access	kernel	fixed-window limiter	relay-protocol	R587
+R588	kept	access	kernel	behaviour as written	relay-protocol	R588
+R589	kept	access	kernel	behaviour as written	relay-protocol	R589
+R590	kept	access	kernel	behaviour as written	relay-protocol	R590
+R591	kept	catalogs	kernel	`catalog-members/join.ts`, `shared-routes.ts`, `MemberDispatcher`, `passkeys.ts`	relay-protocol	R591
+R592	kept	catalogs	kernel	behaviour as written	relay-protocol	R592
+R593	kept	connections	catalogs	`discoverableRelayUrl`	relay-protocol	R593
+R594	kept	catalogs	kernel	`member-session.ts`; labels `ferretry-member-*-v1`, `ferretry-catalog-*-v1`, `ferretry-link-*-v1`	relay-protocol	R594
+R595	kept	catalogs	kernel	behaviour as written	relay-protocol	R595
+R596	kept	catalogs	kernel	`MEMBER_JOIN_OUTCOME_BYTES`, `padJoinOutcome`	relay-protocol	R596
+R597	kept	catalogs	kernel	behaviour as written	relay-protocol	R597
+R598	kept	catalogs	kernel	behaviour as written	relay-protocol	R598
+R599	kept	catalogs	kernel	behaviour as written	relay-protocol	R599
+R600	kept	catalogs	kernel	behaviour as written	relay-protocol	R600
+R601	kept	catalogs	kernel	behaviour as written	relay-protocol	R601
+R602	kept	catalogs	kernel	`MemberJoinedResponseSchema`	relay-protocol	R602
+R603	kept	catalogs	kernel	behaviour as written	relay-protocol	R603
+R604	kept	catalogs	kernel	behaviour as written	relay-protocol	R604
+R605	kept	catalogs	kernel	behaviour as written	relay-protocol	R605
+R606	kept	catalogs	kernel	behaviour as written	relay-protocol	R606
+R607	kept	catalogs	kernel	behaviour as written	relay-protocol	R607
+R608	kept	catalogs	kernel	behaviour as written	relay-protocol	R608
+R609	kept	catalogs	kernel	behaviour as written	relay-protocol	R609
+R610	kept	catalogs	kernel	behaviour as written	relay-protocol	R610
+R611	removed	catalogs	-	-	relay-protocol	-
+R612	kept	catalogs	kernel	behaviour as written	relay-protocol	R612
+R613	kept	catalogs	kernel	behaviour as written	relay-protocol	R613
+R614	kept	catalogs	kernel	behaviour as written	relay-protocol	R614
+R615	kept	catalogs	kernel	`surface.test.ts` sweep	relay-protocol	R615
+R616	kept	catalogs	kernel	behaviour as written	relay-protocol	R616
+R617	kept	catalogs	kernel	behaviour as written	relay-protocol	R617
+R618	kept	catalogs	kernel	behaviour as written	relay-protocol	R618
+R619	kept	catalogs	kernel	behaviour as written	relay-protocol	R619
+R620	kept	catalogs	kernel	behaviour as written	relay-protocol	R620
+R621	kept	catalogs	kernel	`POST /v1/shared/redeem`	relay-protocol	R621
+R622	kept	catalogs	kernel	behaviour as written	relay-protocol	R622
+R623	kept	catalogs	kernel	behaviour as written	relay-protocol	R623
+R624	kept	kernel	-	behaviour as written	relay-protocol	R624
+R625	kept	kernel	-	behaviour as written	relay-protocol	R625
+R626	kept	voice	kernel	behaviour as written	relay-protocol	R626
+R627	kept	kernel	-	`RELAY_SESSION_CONCLUDED_CLOSE_CODE`	relay-protocol	R627
+R628	kept	kernel	-	`relayDataByteBudget`	relay-protocol	R628
+R629	kept	kernel	-	behaviour as written	relay-protocol	R629
+R630	kept	connections	-	behaviour as written	relay-protocol	R630
+R631	split	connections	-	-	relay-protocol	R631
+R632	kept	connections	-	behaviour as written	relay-protocol	R632
+R633	kept	connections	access	behaviour as written	relay-protocol	R633
+R634	split	connections	-	-	relay-protocol	R634
+R635	kept	connections	-	behaviour as written	relay-protocol	R635
+R636	kept	connections	-	behaviour as written	relay-protocol	R636
+R637	kept	connections	-	`TUNNEL_CONTROL`, `packages/relay/src/lib/tunnel.ts`	relay-protocol	R637
+R638	kept	connections	-	behaviour as written	relay-protocol	R638
+R639	kept	connections	-	label `ferretry-tunnel-provision-v1`	relay-protocol	R639
+R640	kept	connections	-	`ferretry-tunnel-release-v1`	relay-protocol	R640
+R641	kept	connections	-	behaviour as written	relay-protocol	R641
+R642	kept	connections	-	behaviour as written	relay-protocol	R642
+R643	kept	connections	-	behaviour as written	relay-protocol	R643
+R644	kept	connections	-	behaviour as written	relay-protocol	R644
+R645	kept	connections	-	behaviour as written	relay-protocol	R645
+R646	kept	connections	-	`tunnelIngress`	relay-protocol	R646
+R647	kept	connections	-	behaviour as written	relay-protocol	R647
+R648	kept	connections	-	behaviour as written	relay-protocol	R648
+R649	kept	connections	-	behaviour as written	relay-protocol	R649
+R650	kept	connections	-	behaviour as written	relay-protocol	R650
+R651	kept	connections	-	`PUT /v1/operator/tunnels`	relay-protocol	R651
+R652	kept	connections	-	behaviour as written	relay-protocol	R652
+R653	kept	connections	-	`GET /v1/operator/tunnels`	relay-protocol	R653
+R654	kept	connections	-	`TUNNEL_ACCOUNTS`, `TunnelAccountSchema`, `HOSTED_TUNNEL_ACCOUNTS`, `scripts/validate/relay-config.sh`	relay-protocol	R654
+R655	kept	connections	-	`.github/workflows/relay-hosted.yaml`	relay-protocol	R655
+R656	split	connections	-	-	relay-protocol	R656
+R657	kept	connections	gate	`TunnelStatusView`, `packages/protocol/src/lib/tunnel.ts`	relay-protocol	R657
+R658	kept	connections	-	`FY_CLOUDFLARED`	relay-protocol	R658
+R659	kept	connections	-	`TUNNEL_TOKEN`	relay-protocol	R659
+R660	kept	connections	-	behaviour as written	relay-protocol	R660
+R661	kept	connections	-	behaviour as written	relay-protocol	R661
+R662	kept	kernel	connections	behaviour as written	relay-protocol	R662
+R663	kept	connections	-	`redirect: 'error'`	relay-protocol	R663
+R664	kept	connections	-	`state/tunnel.json`	relay-protocol	R664
+R665	kept	connections	-	`packages/daemon/src/lib/tunnel/session-log.ts`	relay-protocol	R665
+R666	kept	connections	-	behaviour as written	relay-protocol	R666
+R667	kept	connections	-	`KNOWN_CARRIER_KINDS`, `packages/daemon/src/lib/runtime/published-carriers.ts`	relay-protocol	R667
+R668	kept	connections	-	behaviour as written	relay-protocol	R668
+R669	kept	connections	-	behaviour as written	relay-protocol	R669
+R670	kept	connections	-	behaviour as written	relay-protocol	R670
+R671	kept	connections	-	`packages/protocol/src/lib/webrtc.ts`	relay-protocol	R671
+R672	kept	connections	-	behaviour as written	relay-protocol	R672
+R673	kept	connections	-	behaviour as written	relay-protocol	R673
+R674	kept	connections	-	behaviour as written	relay-protocol	R674
+R675	kept	kernel	connections	behaviour as written	relay-protocol	R675
+R676	kept	connections	-	behaviour as written	relay-protocol	R676
+R677	kept	connections	-	behaviour as written	relay-protocol	R677
+R678	kept	connections	-	behaviour as written	relay-protocol	R678
+R679	kept	connections	-	behaviour as written	relay-protocol	R679
+R680	kept	connections	-	`fy-ping`/`fy-pong`	relay-protocol	R680
+R681	kept	connections	-	behaviour as written	relay-protocol	R681
+R682	kept	connections	-	behaviour as written	relay-protocol	R682
+R683	kept	connections	-	behaviour as written	relay-protocol	R683
+R684	kept	connections	-	behaviour as written	relay-protocol	R684
+R685	kept	connections	-	behaviour as written	relay-protocol	R685
+R686	kept	connections	-	`currentRoundTripTime`	relay-protocol	R686
+R687	kept	connections	-	behaviour as written	relay-protocol	R687
+R688	kept	connections	-	`scripts/release/compile-executable.ts`, `compile.sh`	relay-protocol	R688
+R689	kept	connections	-	`scripts/release/smoke.sh`	relay-protocol	R689
+R690	kept	connections	-	`WEBRTC_ENGINE_LINGER_MS`, `cleanup`	relay-protocol	R690
+R691	kept	connections	-	`packages/daemon/tests/realworld/runtime/shutdown-time.test.ts`	relay-protocol	R691
+R692	kept	connections	-	`WebRtcCarrier`, `webrtc-carrier.test.ts`, `WebRtcDialer`, `CarrierDialers.webrtc`, `useCarrierRtt`	relay-protocol	R692
+R693	kept	catalogs	worker:catalogs-link-store	`ferretry-link-envelope-v1`, `src/lib/link-bundle.ts`, `link-store.ts`, `link-store-reducer.ts`, `link-store-worker.ts`	relay-protocol	R693
+R694	kept	catalogs	worker:catalogs-link-store	`LINK_STORE`, `workers_dev: false`	relay-protocol	R694
+R695	kept	catalogs	worker:catalogs-link-store	`LINK_STORE_DEPLOY_UNATTENDED=1`	relay-protocol	R695
+R696	kept	catalogs	worker:catalogs-link-store	`LINK_ENVELOPE_MAX_BYTES`	relay-protocol	R696
+R697	kept	catalogs	worker:catalogs-link-store	`link_bad_request`	relay-protocol	R697
+R698	kept	catalogs	worker:catalogs-link-store	behaviour as written	relay-protocol	R698
+R699	kept	catalogs	worker:catalogs-link-store	behaviour as written	relay-protocol	R699
+R700	kept	catalogs	worker:catalogs-link-store	behaviour as written	relay-protocol	R700
+R701	kept	catalogs	worker:catalogs-link-store	behaviour as written	relay-protocol	R701
+R702	kept	catalogs	worker:catalogs-link-store	behaviour as written	relay-protocol	R702
+R703	kept	catalogs	worker:catalogs-link-store	`LINK_STORE_DAEMON_IDS`	relay-protocol	R703
+R704	kept	catalogs	worker:catalogs-link-store	`DEFAULT_LINK_STORE_LIMITS`, `LINK_WINDOW_MAX_KEYS`	relay-protocol	R704
+R705	kept	catalogs	worker:catalogs-link-store	behaviour as written	relay-protocol	R705
+R706	kept	catalogs	worker:catalogs-link-store	`LINK_STORE_OPERATOR_TOKEN`	relay-protocol	R706
+R707	kept	catalogs	worker:catalogs-link-store	behaviour as written	relay-protocol	R707
+R708	kept	catalogs	worker:catalogs-link-store	behaviour as written	relay-protocol	R708
+R709	kept	catalogs	worker:catalogs-link-store	behaviour as written	relay-protocol	R709
+R710	kept	catalogs	worker:catalogs-link-store	behaviour as written	relay-protocol	R710

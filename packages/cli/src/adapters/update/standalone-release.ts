@@ -1,7 +1,7 @@
 import { chmod, mkdtemp, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { releaseDownloadBase } from '@ferretry/protocol';
-import type { CommandOutcome } from '../../lib/daemon/ports.ts';
+import { releaseDownloadBase } from '@ferretry/plugin-updates/contract';
+import type { CommandOutcome } from '../../lib/update/machine.ts';
 import type { UpdateObserver } from '../../lib/update/activity.ts';
 import type { IStandaloneReleasePort, StagedRelease, StandaloneRefusal } from '../../lib/update/ports.ts';
 import {

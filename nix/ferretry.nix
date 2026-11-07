@@ -10,8 +10,55 @@ let
   # check, so derivation metadata can follow the same release source instead of going stale silently.
   releaseVersion = lib.removeSuffix "\n" (builtins.readFile "${src}/VERSION");
 
-  # The only files `bun install` reads: the lockfile and the workspace manifests. The dependency
-  # derivation is built from exactly these, so nothing outside them can move its output unseen.
+  # The workspace package directories, from the root manifest's own `workspaces` globs (`packages/*`,
+  # `packages/core/*`, `packages/plugins/*`), so a new package is in the install the moment it is a workspace.
+  workspaceGlobs = (lib.importJSON "${src}/package.json").workspaces;
+  globDirs =
+    glob:
+    let
+      parent = lib.removeSuffix "/*" glob;
+    in
+    if lib.hasSuffix "/*" glob then
+      map (name: "${parent}/${name}") (
+        builtins.attrNames (
+          lib.filterAttrs (
+            name: type: type == "directory" && builtins.pathExists "${src}/${parent}/${name}/package.json"
+          ) (builtins.readDir "${src}/${parent}")
+        )
+      )
+    else
+      [ glob ];
+  workspaceDirs = lib.concatMap globDirs workspaceGlobs;
+  # Every directory on the way to a workspace package, which the filter below must keep to reach it.
+  ancestorsOf =
+    dir:
+    let
+      parts = lib.splitString "/" dir;
+    in
+    map (n: lib.concatStringsSep "/" (lib.take n parts)) (lib.range 1 (builtins.length parts));
+  # Every directory a `file:` entry of the root manifest's `overrides` names (the vendored `sharp` and
+  # `onnxruntime-node` stand-ins): `bun install` links those packages from the source tree, so they are
+  # install inputs too, derived from the manifest rather than listed by hand.
+  overrideDirs = map (lib.removePrefix "file:./") (
+    lib.filter (lib.hasPrefix "file:./") (
+      lib.attrValues ((lib.importJSON "${src}/package.json").overrides or { })
+    )
+  );
+  # Every file under those directories, as a source-relative path (a store path would move the digest
+  # with the commit), for the digest below.
+  overrideFiles = lib.concatMap (
+    dir:
+    map (file: lib.removePrefix "${toString src}/" (toString file)) (
+      lib.filesystem.listFilesRecursive (src + "/${dir}")
+    )
+  ) overrideDirs;
+  installDirs = lib.unique (lib.concatMap ancestorsOf (workspaceDirs ++ overrideDirs));
+  isUnderOverride =
+    relative: lib.any (dir: relative == dir || lib.hasPrefix "${dir}/" relative) overrideDirs;
+
+  # The only files `bun install` reads: the lockfile, the workspace manifests and the packages the
+  # root `overrides` vendor by `file:` path. The dependency derivation is built from exactly these, so
+  # nothing outside them can move its output unseen.
   isInstallInput =
     path: type:
     let
@@ -20,17 +67,19 @@ let
     builtins.elem relative [
       "bun.lock"
       "package.json"
-      "packages"
     ]
-    || (type == "directory" && builtins.match "packages/[^/]+" relative != null)
-    || builtins.match "packages/[^/]+/package.json" relative != null;
+    || (type == "directory" && builtins.elem relative installDirs)
+    || builtins.elem relative (map (dir: "${dir}/package.json") workspaceDirs)
+    || isUnderOverride relative;
   installInputs = builtins.path {
     name = "ferretry-bun-install-inputs";
     path = src;
     filter = isInstallInput;
   };
 
-  bunInstall = "bun install --frozen-lockfile --production --ignore-scripts --os=linux --os=darwin --cpu=x64 --cpu=arm64 --filter=fy --filter=@ferretry/daemon";
+  # Every workspace package is installed (`--filter='*'`, production dependencies only): the registry generator loads each
+  # package's manifest at build time, and a manifest resolves `@ferretry/kernel` through its own package-scoped links.
+  bunInstall = "bun install --frozen-lockfile --production --ignore-scripts --os=linux --os=darwin --cpu=x64 --cpu=arm64 --filter='*'";
 
   # A fixed-output derivation's store path is its name and its outputHash, nothing else, so a store
   # that already holds that path never re-runs `bun install` — not when the lockfile moves, not when
@@ -45,15 +94,13 @@ let
       command = bunInstall;
       lockfile = builtins.readFile "${src}/bun.lock";
       manifests = map (manifest: removeAttrs (lib.importJSON "${src}/${manifest}") [ "version" ]) (
-        [ "package.json" ]
-        ++ map (package: "packages/${package}/package.json") (
-          builtins.filter (package: builtins.pathExists "${src}/packages/${package}/package.json") (
-            builtins.attrNames (
-              lib.filterAttrs (_: type: type == "directory") (builtins.readDir "${src}/packages")
-            )
-          )
-        )
+        [ "package.json" ] ++ map (dir: "${dir}/package.json") workspaceDirs
       );
+      # The vendored packages' bytes are install inputs, so editing one is a cache miss like any other.
+      vendored = map (file: {
+        inherit file;
+        content = builtins.readFile "${src}/${file}";
+      }) overrideFiles;
     }
   );
 
@@ -68,7 +115,7 @@ let
     outputHashAlgo = "sha256";
     # When a build reports a hash mismatch here, the install inputs changed what it installs: take the
     # `got:` hash. It is the same on every builder, so a mismatch is never fixed by rerunning.
-    outputHash = "sha256-GvQgm4lUEtutiWjYKWvBJjYtVR7wprQ436BOUsOv9Gw=";
+    outputHash = "sha256-vXk82QZ+lf/379Ktx8zpQiAZe04cvCg83ftmQuEI9pE=";
     dontFixup = true;
 
     buildPhase = ''
@@ -88,7 +135,7 @@ let
       # Bun records the filtered workspace graph under each package. Preserve those relative links
       # alongside its content-addressed store; mkBinary relocates them back into the source tree.
       foundWorkspaceModules=
-      for packageModules in packages/*/node_modules; do
+      for packageModules in ${lib.concatMapStringsSep " " (dir: "${dir}/node_modules") workspaceDirs}; do
         [ -d "$packageModules" ] || continue
         packageDir="$(dirname "$packageModules")"
         mkdir -p "$out/$packageDir"
@@ -102,9 +149,8 @@ let
     '';
   };
 
-  # One derivation per shipped package, compiling EVERY executable it ships into the same bin/: the
-  # daemon runs its browser worker from beside its own resolved path, so a worker in a different
-  # store path would be invisible to it. Every executable goes through the release compile script so
+  # One derivation per shipped package, compiling EVERY executable it ships into the same bin/: a helper
+  # a package runs from beside its own resolved path would be invisible to it in a different store path. Every executable goes through the release compile script so
   # the flake and the archives apply the same build-time fixes.
   mkBinary =
     {
@@ -123,19 +169,21 @@ let
       buildPhase = ''
         # Restore Bun's own filtered install tree instead of flattening package dependencies into a
         # hand-maintained root list. Its relative workspace links preserve declared boundaries and
-        # already include transitive edges such as daemon -> relay -> protocol.
+        # already include transitive edges such as fy -> kernel -> std.
         cp -R ${bunDeps}/node_modules node_modules
         foundWorkspaceModules=
-        for packageModules in ${bunDeps}/packages/*/node_modules; do
-          [ -d "$packageModules" ] || continue
-          packageName="$(basename "$(dirname "$packageModules")")"
-          cp -R "$packageModules" "packages/$packageName/node_modules"
+        for packageDir in ${lib.concatStringsSep " " workspaceDirs}; do
+          [ -d "${bunDeps}/$packageDir/node_modules" ] || continue
+          cp -R "${bunDeps}/$packageDir/node_modules" "$packageDir/node_modules"
           foundWorkspaceModules=1
         done
         [ -n "$foundWorkspaceModules" ] || {
           echo "cached Bun dependencies contain no package-scoped node_modules trees" >&2
           exit 1
         }
+        # The hosts import the git-ignored generated registries; the source tree has none, so generate them
+        # (scripts/local/gen.sh).
+        bash scripts/local/gen.sh
         ${lib.concatMapStringsSep "\n" (
           executable:
           "bun scripts/release/compile-executable.ts --entry ${executable.entry} --outfile ${executable.name}"
@@ -157,7 +205,7 @@ let
     executables = [
       {
         name = "fy";
-        entry = "packages/cli/bin/fy.ts";
+        entry = "packages/cli/${(lib.importJSON "${src}/packages/cli/package.json").bin.fy}";
       }
     ];
   };
@@ -170,16 +218,19 @@ let
     postInstall = ''
       wrapProgram "$out/bin/fyd" --set-default FY_CLOUDFLARED ${lib.getExe pkgs.cloudflared}
     '';
+    # The daemon host is the kernel package's (docs/rebuild/spine.md D1): its first `bin` entry. Every
+    # `bin` entry of the Browsers package ships beside it: the browser worker the daemon runs from its
+    # own directory (the kernel never points into a plugin, so the worker's bin is the plugin's).
     executables = [
       {
         name = "fyd";
-        entry = "packages/daemon/bin/fyd.ts";
+        entry = "packages/core/kernel/${(lib.importJSON "${src}/packages/core/kernel/package.json").bin.fyd}";
       }
-      {
-        name = "fyd-browser-worker";
-        entry = "packages/daemon/bin/browser-worker.ts";
-      }
-    ];
+    ]
+    ++ lib.mapAttrsToList (name: entry: {
+      inherit name;
+      entry = "packages/plugins/browsers/${entry}";
+    }) (lib.importJSON "${src}/packages/plugins/browsers/package.json").bin;
   };
 in
 {

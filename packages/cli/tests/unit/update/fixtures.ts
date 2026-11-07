@@ -1,7 +1,8 @@
-import type { DaemonUpdateView, HealthView, InstallFacts } from '@ferretry/protocol';
-import type { InstalledDaemonBinary } from '../../../src/lib/daemon/binary';
-import type { CommandOutcome } from '../../../src/lib/daemon/ports';
-import type { UpdateActivity, UpdateObserver } from '../../../src/lib/update/activity';
+import type { Health } from '@ferretry/kernel/contract';
+import { type DaemonUpdateView, DaemonUpdateViewSchema, type InstallFacts } from '@ferretry/plugin-updates/contract';
+import type { InstalledDaemonBinary } from '../../../src/lib/update/machine.ts';
+import type { CommandOutcome } from '../../../src/lib/update/machine.ts';
+import type { UpdateActivity, UpdateObserver } from '../../../src/lib/update/activity.ts';
 import type {
   IDaemonUpdateViewPort,
   IInstallFactsPort,
@@ -12,8 +13,8 @@ import type {
   LatestReleaseAnswer,
   StagedRelease,
   StandaloneRefusal,
-} from '../../../src/lib/update/ports';
-import { health } from '../daemon/fixtures';
+} from '../../../src/lib/update/ports.ts';
+import { health } from './support.ts';
 
 export const STORE = '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-ferretry-1.2.3';
 export const USER_HOME = '/tmp/fy-home';
@@ -248,7 +249,7 @@ export class FakeLifecycle implements IUpdateLifecyclePort {
     return Promise.resolve(this.stale);
   }
 
-  probe(): Promise<HealthView | undefined> {
+  probe(): Promise<Health | undefined> {
     return Promise.resolve(this.host.running === undefined ? undefined : health({ version: this.host.running }));
   }
 }
@@ -263,24 +264,26 @@ export class FakeUpdateView implements IDaemonUpdateViewPort {
     const midTurn = this.midTurn[Math.min(this.looks, this.midTurn.length - 1)];
     this.looks += 1;
     if (midTurn === undefined) return Promise.resolve(undefined);
-    return Promise.resolve({
-      current: '1.2.3',
-      method: { kind: 'homebrew', cask: 'ferretry' },
-      plan: {
-        kind: 'self',
-        steps: [{ command: 'brew upgrade --cask ferretry' }, { command: 'fy daemon restart' }],
-        rollback: 'none',
-      },
-      check: {
-        state: 'ok',
-        checkedAt: '2026-10-18T09:00:00.000Z',
-        latest: { version: '1.3.0', url: 'https://github.com/kirinnee/ferretry/releases/tag/v1.3.0' },
-      },
-      available: true,
-      midTurn,
-      autoInstall: false,
-      job: null,
-    });
+    return Promise.resolve(
+      DaemonUpdateViewSchema.parse({
+        current: '1.2.3',
+        method: { kind: 'homebrew', cask: 'ferretry' },
+        plan: {
+          kind: 'self',
+          steps: [{ command: 'brew upgrade --cask ferretry' }, { command: 'fy daemon restart' }],
+          rollback: 'none',
+        },
+        check: {
+          state: 'ok',
+          checkedAt: '2026-10-18T09:00:00.000Z',
+          latest: { version: '1.3.0', url: 'https://github.com/kirinnee/ferretry/releases/tag/v1.3.0' },
+        },
+        available: true,
+        midTurn,
+        autoInstall: false,
+        job: null,
+      }),
+    );
   }
 }
 

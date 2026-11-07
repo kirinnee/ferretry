@@ -1,10 +1,12 @@
+import { instantFromEpochMs } from '@ferretry/std';
 import {
+  serializeUpdateReport,
   classifyInstallMethod,
-  compareProtocolVersions,
+  compareVersions,
   describeInstallMethod,
   type InstallMethod,
   type LatestRelease,
-  ProtocolVersionSchema,
+  VersionSchema,
   planUpdate,
   RELEASE_OWNER,
   releaseTapName,
@@ -13,10 +15,10 @@ import {
   type UpdateOutcome,
   type UpdatePlan,
   type UpdateReport,
-} from '@ferretry/protocol';
-import type { InstalledDaemonBinary } from '../daemon/binary.ts';
-import type { IClockPort, IDaemonOutput, IDaemonPrompt, IServiceFilePort } from '../daemon/ports.ts';
-import { formatElapsed, type IProgress, NO_PROGRESS } from '../progress/index.ts';
+} from '@ferretry/plugin-updates/contract';
+import type { InstalledDaemonBinary } from './machine.ts';
+import type { IClockPort, IDaemonOutput, IDaemonPrompt, IServiceFilePort } from './machine.ts';
+import { formatElapsed, type IProgress, NO_PROGRESS } from './progress.ts';
 import { passMidTurn } from './mid-turn.ts';
 import type {
   IDaemonUpdateViewPort,
@@ -29,7 +31,7 @@ import type {
 import { isYes, lastLine, lastLines, type NixProfileSwitch } from './profile-switch.ts';
 import { stepObserver } from './step-observer.ts';
 
-/** Flags `fy daemon update` accepts. */
+/** Flags `fy update` accepts. */
 export interface DaemonUpdateOptions {
   /** Report only: what is installed, what is latest, and what updating would take. */
   readonly check?: boolean;
@@ -99,7 +101,7 @@ type Applied =
   | { readonly kind: 'failed'; readonly message: string };
 
 /**
- * `fy daemon update`: one transaction per install method — check, wait for idle, upgrade with the
+ * `fy update`: one transaction per install method — check, wait for idle, upgrade with the
  * method's own tool, restart, prove the new version serves, and roll back when it does not.
  *
  * The contract and its reasons are `docs/updating.md`. Two rules shape every branch here:
@@ -127,7 +129,7 @@ export class DaemonUpdater {
   async update(options: DaemonUpdateOptions): Promise<void> {
     const startedAt = this.deps.clock.now();
     let from = '0.0.0';
-    let target = options.to !== undefined && ProtocolVersionSchema.safeParse(options.to).success ? options.to : '0.0.0';
+    let target = options.to !== undefined && VersionSchema.safeParse(options.to).success ? options.to : '0.0.0';
     try {
       const daemon = this.deps.lifecycle.installed();
       this.progress.start('Checking for an update');
@@ -161,7 +163,7 @@ export class DaemonUpdater {
     method: InstallMethod,
   ): Promise<{ readonly release: LatestRelease } | { readonly failure: string }> {
     if (to !== undefined) {
-      if (!ProtocolVersionSchema.safeParse(to).success) return { failure: `${to} is not a version` };
+      if (!VersionSchema.safeParse(to).success) return { failure: `${to} is not a version` };
       return {
         release: { version: to, url: `https://github.com/${RELEASE_OWNER}/${this.deps.product}/releases/tag/v${to}` },
       };
@@ -172,7 +174,7 @@ export class DaemonUpdater {
       method.kind === 'nix-profile' || method.kind === 'nix-shell' ? await this.deps.latest.newestTag() : undefined;
     if (
       tag?.kind === 'found' &&
-      (answer.kind === 'failed' || compareProtocolVersions(tag.release.version, answer.release.version) === 1)
+      (answer.kind === 'failed' || compareVersions(tag.release.version, answer.release.version) === 1)
     ) {
       return { release: tag.release };
     }
@@ -189,7 +191,7 @@ export class DaemonUpdater {
     json: boolean,
   ): void {
     const release = 'release' in latest ? latest.release : undefined;
-    const available = release !== undefined && compareProtocolVersions(release.version, current) === 1;
+    const available = release !== undefined && compareVersions(release.version, current) === 1;
     if (json) {
       this.deps.out.success(
         JSON.stringify(
@@ -220,8 +222,7 @@ export class DaemonUpdater {
     intent: UpdateIntent,
     options: DaemonUpdateOptions,
   ): Promise<Omit<UpdateReport, 'from' | 'target' | 'finishedAt'>> {
-    if (compareProtocolVersions(intent.target, intent.current) !== 1)
-      return await this.#refreshDefinition(intent, options);
+    if (compareVersions(intent.target, intent.current) !== 1) return await this.#refreshDefinition(intent, options);
     if (intent.plan.kind === 'manual') {
       throw new DaemonUpdateRefusedError(
         [`${intent.plan.explanation}`, ...renderPlan(intent.plan, this.deps.clientName)].join('\n'),
@@ -232,7 +233,7 @@ export class DaemonUpdater {
         [
           intent.plan.explanation,
           ...renderPlan(intent.plan, this.deps.clientName),
-          `or run ${this.deps.clientName} daemon update --switch-to-profile`,
+          `or run ${this.deps.clientName} update --switch-to-profile`,
         ].join('\n'),
       );
     }
@@ -416,7 +417,7 @@ export class DaemonUpdater {
     const name = this.deps.daemonName;
     const installed = this.deps.lifecycle.versionOf(applied.daemonPath);
     // The package manager may build something newer than the release that was offered; that is still an update.
-    const order = installed === undefined ? undefined : compareProtocolVersions(installed, intent.target);
+    const order = installed === undefined ? undefined : compareVersions(installed, intent.target);
     if (installed === undefined || order === undefined || order < 0) {
       return await this.#rollBack(
         intent,
@@ -509,10 +510,10 @@ export class DaemonUpdater {
       readonly message: string;
     },
   ): Promise<void> {
-    const report: UpdateReport = { ...result, finishedAt: new Date(this.deps.clock.now()).toISOString() };
+    const report: UpdateReport = { ...result, finishedAt: instantFromEpochMs(this.deps.clock.now()) };
     if (options.report !== undefined) {
       try {
-        await this.deps.reports.writePrivate(options.report, `${JSON.stringify(report, null, 2)}\n`);
+        await this.deps.reports.writePrivate(options.report, serializeUpdateReport(report));
       } catch (error: unknown) {
         this.deps.out.warn(`could not write the update report to ${options.report}: ${errorText(error)}`);
       }
@@ -528,7 +529,7 @@ export class DaemonUpdater {
 
 /** A plan's steps, one line each, for a terminal. */
 export function renderPlan(plan: UpdatePlan, clientName: string): string[] {
-  if (plan.kind === 'self') return [`to update: ${clientName} daemon update`];
+  if (plan.kind === 'self') return [`to update: ${clientName} update`];
   if (plan.steps.length === 0) return [];
   return [
     'steps:',

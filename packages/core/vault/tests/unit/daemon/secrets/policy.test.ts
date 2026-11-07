@@ -1,0 +1,267 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import {
+  configuredReferences,
+  coverageOf,
+  mergeRanges,
+  secretCoverage,
+  earnedRecipes,
+  expandSecretReferences,
+  launchEnvironment,
+  recipeOrigin,
+  redactJsonValue,
+  redactSecretValues,
+  resolveChildEnvironment,
+  UnknownSecretError,
+} from '../../../../daemon/lib/secrets/index.ts';
+
+const TOKEN = 'sk-live-0123456789';
+const OTHER = 'pw-abcdefghij';
+
+function values(entries: Record<string, string> = { TOKEN }): ReadonlyMap<string, string> {
+  return new Map(Object.entries(entries));
+}
+
+describe('expanding a reference', () => {
+  it('S62 substitute the value a reference names', () => {
+    // Arrange / Act
+    const expanded = expandSecretReferences('Bearer ${secret:TOKEN}', values());
+
+    // Assert
+    should(expanded).equal(`Bearer ${TOKEN}`);
+  });
+
+  it('should leave text with no reference untouched', () => {
+    should(expandSecretReferences('plain text', values())).equal('plain text');
+  });
+
+  it('S64 refuse rather than substitute an empty string', () => {
+    // Arrange / Act / Assert — the whole point: an empty substitution is a 401 twenty minutes later
+    // with nothing to point at.
+    should(() => expandSecretReferences('Bearer ${secret:MISSING}', values())).throw(/MISSING/u);
+  });
+
+  it('should name EVERY missing secret, once each', () => {
+    // Arrange
+    let raised: UnknownSecretError | undefined;
+
+    // Act
+    try {
+      expandSecretReferences('${secret:A} ${secret:B} ${secret:A}', values());
+    } catch (error) {
+      raised = error as UnknownSecretError;
+    }
+
+    // Assert
+    should(raised).be.instanceof(UnknownSecretError);
+    should(raised?.names).deepEqual(['A', 'B']);
+  });
+});
+
+describe('the child environment', () => {
+  it('should export each named secret under its own name', () => {
+    should(resolveChildEnvironment(['TOKEN'], {}, values())).deepEqual({ TOKEN });
+  });
+
+  it('should let a configured entry compose the plain export', () => {
+    // Arrange / Act
+    const environment = resolveChildEnvironment(['TOKEN'], { AUTH: 'Bearer ${secret:TOKEN}' }, values());
+
+    // Assert
+    should(environment).deepEqual({ TOKEN, AUTH: `Bearer ${TOKEN}` });
+  });
+
+  it('should let a configured entry override the plain export', () => {
+    should(resolveChildEnvironment(['TOKEN'], { TOKEN: 'literal-override' }, values())).deepEqual({
+      TOKEN: 'literal-override',
+    });
+  });
+
+  it('should refuse a named secret this daemon does not hold, before anything is spawned', () => {
+    should(() => resolveChildEnvironment(['ABSENT'], {}, values())).throw(/ABSENT/u);
+  });
+
+  it('should refuse a configured entry naming a secret it does not hold', () => {
+    should(() => resolveChildEnvironment([], { AUTH: '${secret:ABSENT}' }, values())).throw(/ABSENT/u);
+  });
+});
+
+describe('earning a recipe', () => {
+  const RECIPES = {
+    STAGING_AUTH: 'Bearer ${secret:STAGING_KEY}',
+    PRODUCTION_AUTH: 'Bearer ${secret:PRODUCTION_KEY}',
+    PLAIN: 'no reference here',
+  };
+
+  it('S63 give a caller only the recipes whose secrets it asked for', () => {
+    should(earnedRecipes(RECIPES, ['STAGING_KEY'])).deepEqual({
+      STAGING_AUTH: 'Bearer ${secret:STAGING_KEY}',
+      PLAIN: 'no reference here',
+    });
+  });
+
+  it('should withhold a recipe naming a secret the caller did not ask for', () => {
+    // Assert — an operator's convenience must never widen a caller's request into a leak.
+    should(Object.keys(earnedRecipes(RECIPES, []))).deepEqual(['PLAIN']);
+  });
+
+  it('should give both when both are asked for', () => {
+    should(Object.keys(earnedRecipes(RECIPES, ['STAGING_KEY', 'PRODUCTION_KEY'])).sort()).deepEqual([
+      'PLAIN',
+      'PRODUCTION_AUTH',
+      'STAGING_AUTH',
+    ]);
+  });
+});
+
+describe('configured references', () => {
+  it('S65 name each reference with the entry it came from', () => {
+    should(configuredReferences({ AUTH: 'Bearer ${secret:TOKEN}' })).deepEqual([
+      { name: 'TOKEN', origin: 'config/daemon.json → secretEnvironment.AUTH' },
+    ]);
+  });
+
+  it('should report nothing for an entry with no reference', () => {
+    should(configuredReferences({ PLAIN: 'literal' })).deepEqual([]);
+  });
+
+  it('should spell an origin an operator can go and find', () => {
+    should(recipeOrigin('AUTH')).equal('config/daemon.json → secretEnvironment.AUTH');
+  });
+});
+
+describe('redaction', () => {
+  it('S18 mask a value wherever it appears', () => {
+    should(redactSecretValues(`before ${TOKEN} after ${TOKEN}`, values())).equal(
+      'before [redacted:TOKEN] after [redacted:TOKEN]',
+    );
+  });
+
+  it('should leave text holding no value untouched', () => {
+    should(redactSecretValues('nothing to see', values())).equal('nothing to see');
+  });
+
+  it('should mask the LONGER value first when one contains the other', () => {
+    // Arrange — the short value is a prefix of the long one. Masking short-first would leave the
+    // remaining characters of the long secret in plain view.
+    const nested = values({ SHORT: 'abcdefgh', LONG: 'abcdefgh-tail' });
+
+    // Act
+    const redacted = redactSecretValues('here is abcdefgh-tail', nested);
+
+    // Assert
+    should(redacted).equal('here is [redacted:LONG]');
+  });
+
+  it('should mask every string inside JSON without changing its shape', () => {
+    // Arrange
+    const data = { header: `Bearer ${TOKEN}`, list: [OTHER, 7, null, true], nested: { deep: TOKEN } };
+
+    // Act
+    const redacted = redactJsonValue(data, values({ TOKEN, OTHER }));
+
+    // Assert
+    should(redacted).deepEqual({
+      header: 'Bearer [redacted:TOKEN]',
+      list: ['[redacted:OTHER]', 7, null, true],
+      nested: { deep: '[redacted:TOKEN]' },
+    });
+  });
+
+  it('should pass a non-string scalar through unchanged', () => {
+    should(redactJsonValue(42, values())).equal(42);
+    should(redactJsonValue(null, values())).equal(null);
+  });
+
+  it('should NOT recognise a transformed value — the residual hole, asserted so it is not a surprise', () => {
+    // Arrange — this is the documented limit of literal scrubbing, and a test that pretends
+    // otherwise would be worse than no test.
+    const encoded = Buffer.from(TOKEN).toString('base64');
+
+    // Act
+    const redacted = redactSecretValues(encoded, values());
+
+    // Assert
+    should(redacted).equal(encoded);
+  });
+});
+
+describe('redaction refuses to destroy the text it is protecting', () => {
+  it('should skip an empty value rather than mask between every character', () => {
+    // Arrange — `''` is a separator that splits a string into characters. One empty entry would
+    // return the whole text with a mask between every letter: unreadable, and hiding nothing.
+    const withEmpty = values({ REAL: TOKEN, BROKEN: '' });
+
+    // Act
+    const redacted = redactSecretValues(`prefix ${TOKEN} suffix`, withEmpty);
+
+    // Assert
+    should(redacted).equal('prefix [redacted:REAL] suffix');
+  });
+
+  it('should skip an empty value in JSON too', () => {
+    should(redactJsonValue({ note: 'plain text' }, values({ BROKEN: '' }))).deepEqual({ note: 'plain text' });
+  });
+});
+
+describe('where known secrets sit in a text', () => {
+  it('should answer the positions of every occurrence, overlapping ones merged, and never a value', () => {
+    should(coverageOf('aXbXb', ['X'])).deepEqual([
+      { start: 1, end: 2 },
+      { start: 3, end: 4 },
+    ]);
+    should(coverageOf('abcdef', ['abc', 'cde'])).deepEqual([{ start: 0, end: 5 }]);
+    should(coverageOf('abc', [''])).deepEqual([]);
+    should(coverageOf('abc', ['zz'])).deepEqual([]);
+  });
+
+  it('should merge touching and nested ranges', () => {
+    should(
+      mergeRanges([
+        { start: 4, end: 6 },
+        { start: 0, end: 4 },
+        { start: 1, end: 2 },
+      ]),
+    ).deepEqual([{ start: 0, end: 6 }]);
+  });
+
+  it('should cover the values of a secret map', () => {
+    should(secretCoverage(`x ${TOKEN} y`, values({ TOKEN }))).deepEqual([{ start: 2, end: 2 + TOKEN.length }]);
+  });
+});
+
+describe('a ferret child’s environment', () => {
+  it('S62 S64 expand a plain reference, and refuse naming every plain reference that is missing', () => {
+    // Act
+    const resolved = launchEnvironment({ AUTH: 'Bearer ${secret:TOKEN}', PLAIN: 'x' }, values());
+    const refused = launchEnvironment(
+      { A: '${secret:MISSING}', B: '${secret:ALSO_MISSING} ${secret:TOKEN}' },
+      values(),
+    );
+
+    // Assert
+    should(resolved).deepEqual({ ok: true, value: { AUTH: `Bearer ${TOKEN}`, PLAIN: 'x' } });
+    should(refused).deepEqual({ ok: false, unknown: ['MISSING', 'ALSO_MISSING'] });
+  });
+
+  it('should set a whole-value optional reference when held and leave the variable out when not, never empty', () => {
+    // Arrange — a sign-out landed between MCP naming SIGNED_OUT and the launch opening it.
+    const env = { HELD: '${secret?:TOKEN}', GONE: '${secret?:SIGNED_OUT}' };
+
+    // Act
+    const resolved = launchEnvironment(env, values());
+
+    // Assert
+    should(resolved).deepEqual({ ok: true, value: { HELD: TOKEN } });
+  });
+
+  it('should keep refusing a plain reference beside an optional one, and read an optional one inside text as text', () => {
+    // Act
+    const refused = launchEnvironment({ GONE: '${secret?:SIGNED_OUT}', X: '${secret:MISSING}' }, values());
+    const inText = launchEnvironment({ AUTH: 'Bearer ${secret?:TOKEN}' }, values());
+
+    // Assert — only the plain one is named; an optional reference is one only as a whole value.
+    should(refused).deepEqual({ ok: false, unknown: ['MISSING'] });
+    should(inText).deepEqual({ ok: true, value: { AUTH: 'Bearer ${secret?:TOKEN}' } });
+  });
+});

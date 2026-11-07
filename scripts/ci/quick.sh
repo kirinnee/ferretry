@@ -42,5 +42,12 @@ limit=${FY_CI_QUICK_PARALLEL:-2}
 bun scripts/ci/unit-timings.ts || status=1
 # Judge even a red run: a missing group or uncovered source is reported alongside test failures.
 ./scripts/ci/coverage-ledger.sh unit --groups coverage/unit/groups || status=1
-./scripts/ci/parallel.sh coverage/ci/quick/static "${limit}" ./scripts/ci/quick.sh --part -- format gates build || status=1
+./scripts/ci/parallel.sh coverage/ci/quick/static "${limit}" ./scripts/ci/quick.sh --part -- format gates build scripts || status=1
+# THE GUARANTEE PROOF (redesign §10.5): every kept Appendix D row has a test named with its id AND that test passed in the
+# unit tier's JUnit reports (the unit groups, and the repository tooling's own `scripts` part). Judged after every part, so a
+# red run still reports it, and ANY default-mode finding fails the job. `--tier unit` leaves the rows tested only in the
+# integration tier to the integration job (scripts/ci/integration.sh), which judges them from its own report.
+# STRICT MODE becomes required once `ports-pending.json` is empty: add `--strict` here and in integration.sh. It also checks the rows of
+# the packages still pending, which are skipped by design until then.
+bun scripts/gen/check.ts guarantees --tier unit --results coverage/unit --results coverage/scripts || status=1
 exit "${status}"

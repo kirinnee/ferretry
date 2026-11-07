@@ -1,0 +1,50 @@
+{
+  "name": "@ferretry/plugin-voice",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Voice (plugins piece of Ferretry 5)",
+  "type": "module",
+  "ferretry": {
+    "id": "voice",
+    "manifest": "./manifest.ts"
+  },
+  "exports": {
+    "./contract": "./contract/index.ts",
+    "./contract/testing": "./contract/testing/index.ts",
+    "./manifest": "./manifest.ts",
+    "./daemon": "./daemon/index.ts",
+    "./app": "./app/index.ts",
+    "./cli": "./cli/index.ts"
+  },
+  "dependencies": {
+    "@ferretry/app": "workspace:*",
+    "@ferretry/core-gate": "workspace:*",
+    "@ferretry/core-vault": "workspace:*",
+    "@ferretry/kernel": "workspace:*",
+    "@ferretry/plugin-logins": "workspace:*",
+    "@ferretry/std": "workspace:*",
+    "@huggingface/transformers": "4.3.1",
+    "@lichess-org/vosk-browser": "0.0.3",
+    "@sherpaw/asr": "0.3.0",
+    "lucide-react": "^0.468.0",
+    "onnxruntime-web": "1.24.1",
+    "parakeet.js": "1.4.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.0",
+    "yaml": "2.9.0",
+    "zod": "4.4.3"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "playwright-core": "^1.55.0",
+    "react-test-renderer": "^19.0.0",
+    "should": "^13.2.3"
+  }
+}

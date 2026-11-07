@@ -1,100 +1,63 @@
-import type { DaemonAttempt, DaemonRestartPatience } from '@ferretry/protocol';
-import { isRepeatableAgentTool } from '@ferretry/protocol/agent-tools';
-import { classifyDaemonUnreachable, daemonStartingOf, waitOutDaemonRestart } from '@ferretry/protocol/daemon-restart';
-import type { z } from 'zod';
-import type { IAgentToolsGateway } from '../../lib/agent-tools/client.ts';
-import { isLocalDaemonUrl } from '../../lib/daemon/address.ts';
-import { assertOwnLoopbackListener, type LoopbackListenerGuardPorts } from '../daemon/loopback-listener-guard.ts';
+import type { DaemonReply, DaemonTransport, SendOptions } from '../../lib/client.ts';
+import { isLocalDaemonUrl } from '../../lib/address.ts';
+import { SESSION_BEARER_PREFIX } from '../../lib/credential.ts';
+import type { DaemonRequest } from '../../lib/request.ts';
+import { assertOwnLoopbackListener, type ListenerGuardPorts } from '../daemon/listener-guard.ts';
+import { type Fetcher, HttpTransport, type RestartWaiting } from '../daemon/http-transport.ts';
 
-/** How long one agent tool request may take: a page load (45 s in the worker) or a held-open wait. */
-const DEFAULT_TIMEOUT_MS = 60_000;
-
-/** Waiting for a restarting daemon: the patience, and the clock it is measured on. */
-export interface SessionGatewayRestart {
-  readonly patience: DaemonRestartPatience;
-  readonly nowMs: () => number;
-  readonly sleep: (milliseconds: number) => Promise<void>;
+export interface SessionGatewayOptions {
+  readonly baseUrl: () => Promise<string>;
+  /** The ferret's own `fys_` credential. */
+  readonly bearer: string;
+  /** `FY_SESSION_ID`: the pane this process runs in, sent so a person-only route can refuse a ferret that names itself. */
+  readonly ferretId?: string;
+  readonly fetcher?: Fetcher;
+  /** A ferret always waits out a restart: it only exists because a daemon ran it. */
+  readonly restart?: RestartWaiting;
+  readonly listeners?: ListenerGuardPorts;
+  readonly timeoutMs?: number;
 }
 
 /**
- * Whether a request the daemon dropped may be sent again: a read, or a tool that changes nothing.
- * These requests carry no request id the daemon could apply once, so a `terminal.send` that was
- * dropped after it typed must not type again.
+ * The daemon, as a FERRET reaches it: `Authorization: Bearer fys_…` and nothing else (S52, S53).
+ *
+ * It never reads the host's admin token and drops any other `authorization` a caller passes, because a tools server
+ * that held host authority would be an agent holding it. A refusal is final (S54): there is no second credential to
+ * fall back to. It talks only to a daemon on this machine, whose port this user owns (S57): a session credential sent
+ * anywhere else would be a credential leaving the machine. A restart is waited out.
  */
-function repeatable(init: RequestInit): boolean {
-  const method = (init.method ?? 'GET').toUpperCase();
-  if (method === 'GET' || method === 'HEAD') return true;
-  if (typeof init.body !== 'string') return false;
-  try {
-    const call: unknown = JSON.parse(init.body);
-    return typeof call === 'object' && call !== null && isRepeatableAgentTool((call as { tool?: unknown }).tool);
-  } catch {
-    return false;
+export class SessionCredentialGateway implements DaemonTransport {
+  readonly #inner: HttpTransport;
+
+  constructor(options: SessionGatewayOptions) {
+    if (!options.bearer.startsWith(SESSION_BEARER_PREFIX))
+      throw new Error(`a ferret credential starts with ${SESSION_BEARER_PREFIX}`);
+    this.#inner = new HttpTransport({
+      baseUrl: options.baseUrl,
+      authorization: async () => `Bearer ${options.bearer}`,
+      beforeSend: async base => {
+        if (!isLocalDaemonUrl(base))
+          throw new Error(`a ferret’s fy talks only to the daemon on this machine, and ${base} is not on it`);
+        await assertOwnLoopbackListener(base, 'the session credential', options.listeners);
+      },
+      headers: {
+        'x-ferretry-client': 'cli',
+        ...(options.ferretId === undefined ? {} : { 'x-ferretry-session-id': options.ferretId }),
+      },
+      ...(options.fetcher === undefined ? {} : { fetcher: options.fetcher }),
+      ...(options.restart === undefined ? {} : { restart: options.restart }),
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    });
   }
-}
 
-/**
- * The daemon, as an AGENT reaches it: with its session credential and nothing else.
- *
- * It sends no bearer token at all — it never reads the host's admin token, and drops an
- * `authorization` header if a caller passed one — because the agent route authenticates the session
- * credential alone, and a tools server that held host authority would be an agent holding it too. It
- * talks only to a daemon on this machine: the agent route is served over loopback only, and a session
- * credential sent anywhere else would be a credential leaving the machine.
- *
- * A RESTART IS WAITED OUT. The MCP tools an agent calls mid-turn are exactly the calls a daemon
- * restart would otherwise fail, so with `restart` given a call the daemon refused is sent again until
- * it is back (`daemon-restart.ts`), and one it dropped mid-request is sent again only when it reads. A
- * daemon that answers it is still STARTING is not back yet: that answer is waited out like a refusal,
- * so a call made across a restart lands once the new daemon serves rather than failing a boot step early.
- */
-export class SessionCredentialGateway implements IAgentToolsGateway {
-  constructor(
-    private readonly baseUrl: () => Promise<string>,
-    private readonly fetcher: (url: string, init: RequestInit) => Promise<Response> = fetch,
-    private readonly restart?: SessionGatewayRestart,
-    private readonly listeners?: LoopbackListenerGuardPorts,
-  ) {}
+  send(request: DaemonRequest, options: SendOptions): Promise<DaemonReply> {
+    return this.#inner.send(request, options);
+  }
 
-  async request<T>(
-    path: string,
-    schema: z.ZodType<T>,
-    init: RequestInit = {},
-    timeoutMs = DEFAULT_TIMEOUT_MS,
-  ): Promise<T> {
-    const base = await this.baseUrl();
-    if (!isLocalDaemonUrl(base))
-      throw new Error(`the agent tools talk only to the daemon on this machine, and ${base} is not on it`);
-    // Asked on every request: this gateway lives as long as the agent's tools server, across daemon restarts
-    // that leave the port free for another user's program to take.
-    await assertOwnLoopbackListener(base, 'the session credential', this.listeners);
-    const headers = new Headers(init.headers);
-    headers.delete('authorization');
-    const attempt = async (): Promise<DaemonAttempt<Response>> => {
-      try {
-        const signal = AbortSignal.timeout(timeoutMs);
-        const response = await this.fetcher(`${base}${path}`, { ...init, headers, signal });
-        // A daemon that has bound its address but not mounted its routes ran nothing: still away.
-        const starting = await daemonStartingOf(response);
-        if (starting !== undefined) throw starting;
-        return { kind: 'answered', value: response };
-      } catch (error) {
-        const how = classifyDaemonUnreachable(error);
-        return how === undefined ? { kind: 'failed', error } : { kind: 'unreachable', how, error };
-      }
-    };
-    const first = await attempt();
-    const outcome =
-      this.restart === undefined
-        ? first
-        : await waitOutDaemonRestart({ ...this.restart, attempt, first, repeatable: repeatable(init) });
-    if (outcome.kind !== 'answered') throw outcome.error;
-    const response = outcome.value;
-    const body: unknown = await response.json().catch(() => undefined);
-    if (!response.ok) {
-      const said = typeof body === 'object' && body !== null && 'error' in body ? body.error : undefined;
-      throw new Error(typeof said === 'string' ? said : `fyd answered HTTP ${String(response.status)}`);
-    }
-    return schema.parse(body);
+  events(
+    listener: Parameters<HttpTransport['events']>[0],
+    onClose: Parameters<HttpTransport['events']>[1],
+  ): () => void {
+    return this.#inner.events(listener, onClose);
   }
 }

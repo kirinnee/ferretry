@@ -1,0 +1,370 @@
+import {
+  type DiffSide,
+  EMPTY_TREE_OID,
+  type GitLineStats,
+  type HeadBlob,
+  type HeadEntry,
+  hasDiffableChange,
+  parseBatchCheck,
+  parseCheckIgnore,
+  parseCheckIgnoreRule,
+  parseFileList,
+  parseHeadTreeEntry,
+  parseNumstat,
+  parsePorcelainStatus,
+  parseRevParse,
+  type RenderedDiff,
+  relabelDiffHeaders,
+  type SessionChangesView,
+  type SessionFileList,
+  type SessionGit,
+  type SessionRepoInfo,
+  type SpawnBudget,
+  withLineStats,
+} from '../../../lib/session/filesystem/index.ts';
+import type { GitExecution, GitRunner, GitWorkingDirectory } from '../../../lib/worktrees/ports.ts';
+import { decodeGitOutput, GitCommandError, requireGitExit } from '../../git/index.ts';
+
+/**
+ * The Git reads the session working-tree viewer needs, over the hardened runner.
+ *
+ * EVERY method takes a PINNED working directory and passes it straight through as the child's cwd. That is
+ * the contract this adapter depends on and cannot itself enforce: Git only speaks pathnames, so if a caller
+ * hands it a configured cwd instead of a descriptor alias, a rename plus a symlink between validation and
+ * spawn makes Git answer for a different tree than the one whose paths passed the gates. The domain
+ * compensates for the pathname weakness by re-walking and comparing component identities afterwards.
+ *
+ * `diffSnapshots` is the one method with no cwd at all, and that is the point of it — see its own comment.
+ */
+
+/** A `git diff` for this viewer never resolves the working tree by name, and never detects a rename. */
+const DIFF_SAFETY: readonly string[] = [
+  '-c',
+  // Load-bearing security, not cosmetics. On a path inside the session cwd, rename detection prints the
+  // out-of-cwd SOURCE path in the diff header and its full content in the body; an in-cwd destination must
+  // render as a plain add instead. The `-c` is there so a repo-local `diff.renames=true` cannot re-enable
+  // it. Deliberately NOT applied to every command: `status` derives its own rename detection from
+  // `diff.renames`, and a Changes list needs renames.
+  'diff.renames=false',
+  'diff',
+  '--no-ext-diff',
+  '--no-textconv',
+  '--no-color',
+  '--no-renames',
+];
+
+const NUL = String.fromCharCode(0);
+export const SYMLINK_MODE = 0o120000;
+
+/**
+ * The private scratch directory `diffSnapshots` stages both sides in (today: `mkdtemp` under the temp dir, removed
+ * after). It is host IO, so it is the kernel's capability (asked for with the session root pinner); tests provide
+ * today's (`tests/support/daemon/session-filesystem/`).
+ */
+export interface DiffScratch {
+  /**
+   * Makes a fresh private directory, runs `use` with its path and a stager, and removes the directory afterwards
+   * whatever `use` did. `stage(relative, side)` writes one side at `relative` inside it: a symlink when the side's
+   * mode is {@link SYMLINK_MODE} (its bytes are the target, never followed), else a file with exactly the side's
+   * permission bits (not subject to umask).
+   */
+  withScratch<T>(
+    use: (directory: string, stage: (relative: string, side: DiffSide) => Promise<void>) => Promise<T>,
+  ): Promise<T>;
+}
+
+interface TextExecution {
+  readonly execution: GitExecution;
+  readonly stdout: string;
+}
+
+/**
+ * What is left of a budget, as the runner's own timeout — and nothing at all without one.
+ *
+ * Rounded UP so a fraction of a millisecond is still a millisecond: rounding down would hand the runner
+ * a zero, which it reads as "kill this immediately" rather than as "there is no time left", and the two
+ * are different instructions to give a child that has not started yet.
+ */
+function spawnBound(budget: SpawnBudget | undefined): { timeoutMs?: number } {
+  return budget === undefined ? {} : { timeoutMs: Math.ceil(budget.remainingMs()) };
+}
+
+export class RunnerSessionGit implements SessionGit {
+  constructor(
+    private readonly runner: GitRunner,
+    private readonly scratch: DiffScratch,
+  ) {}
+
+  /**
+   * Two commands under ONE budget, which is why the budget rather than a timeout comes in.
+   *
+   * A timeout alone would let a caller who allowed ten seconds wait twenty, and — worse — a cancellation
+   * that arrived while the first command was running would be invisible here and the second would start
+   * anyway. So the budget is asked again in between: an expired one returns what the FIRST command
+   * already established and spawns nothing, and the port says a caller who supplied a budget must re-ask
+   * it before trusting `hasHead`.
+   */
+  async repoInfo(cwd: GitWorkingDirectory, budget?: SpawnBudget): Promise<SessionRepoInfo> {
+    // The index checks before calling, and the adapter repeats the check because this port is public:
+    // an already-spent budget is not a licence to spawn a child with a zero-millisecond timeout.
+    if (budget?.expired() === true) return { repo: false, prefix: '', hasHead: false };
+    // Never throws for "not a repo": that is a valid state the viewer reports so a client hides its diff
+    // affordances.
+    const inside = await this.text(
+      'git rev-parse',
+      ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--show-prefix'],
+      cwd,
+      [0, 128],
+      budget,
+    );
+    const facts = parseRevParse(inside.stdout);
+    if (!facts.insideWorkTree) return { repo: false, prefix: '', hasHead: false };
+    const shape = { repo: true as const, ...(facts.root ? { root: facts.root } : {}), prefix: facts.prefix };
+    // The placeholder the port documents: `hasHead` was never asked, and saying so would cost the spawn
+    // this branch exists to avoid.
+    if (budget?.expired() === true) return { ...shape, hasHead: false };
+
+    const head = await this.text(
+      'git rev-parse HEAD',
+      ['rev-parse', '--verify', '--quiet', 'HEAD'],
+      cwd,
+      [0, 1, 128],
+      budget,
+    );
+    return { ...shape, hasHead: head.execution.exitCode === 0 };
+  }
+
+  /**
+   * Every path under this working directory Git does not exclude, in one command.
+   *
+   * `--cached` plus `--others --exclude-standard` is tracked content plus untracked content minus
+   * everything the ignore rules cover — and `--exclude-standard` is the ONLY spelling of that rule this
+   * daemon should ever hold, because it is Git's own. Reimplementing `.gitignore` matching to build a
+   * search index is how a build directory full of credentials ends up in one.
+   *
+   * Paths come back relative to THIS directory and bounded to it, which is what keeps a session started
+   * in a repository subdirectory from indexing its siblings — the same containment `--relative` gives
+   * the changes list, obtained here by Git's own default rather than by a flag.
+   */
+  async listFiles(cwd: GitWorkingDirectory, maxBytes: number, budget?: SpawnBudget): Promise<SessionFileList> {
+    // No command was asked, so the empty list is explicitly incomplete rather than confidently empty.
+    if (budget?.expired() === true) return { paths: [], truncated: true };
+    const execution = await this.runner.run({
+      args: ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+      cwd,
+      maxStdoutBytes: maxBytes,
+      // The caller's remaining budget when it has one, so this child cannot outlive the answer it is
+      // part of. Without one the runner applies its own default — the arguments are a fixed list either
+      // way, and no caller input is ever spelled into a command line.
+      ...spawnBound(budget),
+    });
+    requireGitExit('git ls-files', execution);
+    return {
+      paths: parseFileList(decodeGitOutput(execution), execution.stdoutTruncated),
+      truncated: execution.stdoutTruncated,
+    };
+  }
+
+  /**
+   * Which of these cwd-relative paths does gitignore cover?
+   *
+   * Paths go in `./`-prefixed for two reasons: it defuses pathspec magic in the one command that cannot
+   * accept literal pathspecs, and it keeps a real file named `:(top)x` from aborting the whole batch. Exit
+   * 1 means "none of them"; anything other than 0 or 1 means we could not tell, and THROWS — a viewer that
+   * cannot prove a file is unignored must not claim it is safe to serve.
+   */
+  async ignoredPaths(cwd: GitWorkingDirectory, rels: readonly string[]): Promise<ReadonlySet<string>> {
+    const candidates = [...new Set(rels.filter(rel => rel.length > 0))];
+    if (candidates.length === 0) return new Set();
+    // The gate is vacuous outside a Git tree, and `check-ignore` would exit 128 there.
+    if (!(await this.repoInfo(cwd)).repo) return new Set();
+
+    const stdin = new TextEncoder().encode(`${candidates.map(rel => `./${rel}`).join(NUL)}${NUL}`);
+    const execution = await this.runner.run({
+      args: ['check-ignore', '-z', '--stdin'],
+      cwd,
+      stdin,
+      literalPathspecs: false,
+    });
+    if (execution.exitCode === 1 && !execution.timedOut) return new Set();
+    requireGitExit('git check-ignore', execution);
+    return parseCheckIgnore(decodeGitOutput(execution));
+  }
+
+  /** See the port: the source, line and pattern Git matched, for a refusal that has to name its rule. */
+  async ignoreRule(cwd: GitWorkingDirectory, rels: readonly string[]): Promise<string | undefined> {
+    const candidates = [...new Set(rels.filter(rel => rel.length > 0))];
+    if (candidates.length === 0 || !(await this.repoInfo(cwd)).repo) return undefined;
+    const stdin = new TextEncoder().encode(`${candidates.map(rel => `./${rel}`).join(NUL)}${NUL}`);
+    const execution = await this.runner.run({
+      args: ['check-ignore', '-v', '-z', '--stdin'],
+      cwd,
+      stdin,
+      literalPathspecs: false,
+    });
+    if (execution.exitCode === 1 && !execution.timedOut) return undefined;
+    requireGitExit('git check-ignore -v', execution);
+    return parseCheckIgnoreRule(decodeGitOutput(execution));
+  }
+
+  /**
+   * Is this cwd-relative path itself a tracked FILE, including a staged addition?
+   *
+   * The exit code alone is not the answer. A pathspec naming a directory matches every record beneath it,
+   * so a DELETED directory `sub/` exits 0 — and a caller would then admit `sub` as if it were one deleted
+   * file and diff everything under it. So compare the records: exactly one, equal to the requested path.
+   */
+  async isTracked(cwd: GitWorkingDirectory, rel: string): Promise<boolean> {
+    const listed = await this.text('git ls-files', ['ls-files', '--error-unmatch', '-z', '--', rel], cwd, [0, 1, 128]);
+    if (listed.execution.exitCode !== 0) return false;
+    const records = listed.stdout.split(NUL).filter(record => record.length > 0);
+    return records.length === 1 && records[0] === rel;
+  }
+
+  async changes(cwd: GitWorkingDirectory): Promise<SessionChangesView> {
+    const info = await this.repoInfo(cwd);
+    if (!info.repo) return { repo: false, changes: [] };
+
+    const status = await this.text('git status', ['status', '--porcelain=v1', '-z', '-b', '-uall'], cwd, [0]);
+    const parsed = parsePorcelainStatus(status.stdout, status.execution.stdoutTruncated, info.prefix);
+    const changes = hasDiffableChange(parsed.changes)
+      ? withLineStats(parsed.changes, await this.lineStats(cwd, info))
+      : parsed.changes;
+
+    return {
+      repo: true,
+      ...(parsed.branch ? { branch: parsed.branch } : {}),
+      changes,
+      ...(status.execution.stdoutTruncated ? { truncated: true } : {}),
+    };
+  }
+
+  /**
+   * The HEAD entry for one path: its recorded mode plus its bytes.
+   *
+   * The mode is what a diff formatter needs so a mode change, or a symlink-to-file type change, still
+   * renders.
+   */
+  async headEntry(cwd: GitWorkingDirectory, rel: string, maxBytes: number): Promise<HeadEntry | undefined> {
+    const info = await this.repoInfo(cwd);
+    if (!info.repo || !info.hasHead) return undefined;
+
+    const listed = await this.text('git ls-tree', ['ls-tree', '-z', 'HEAD', '--', rel], cwd, [0, 128]);
+    if (listed.execution.exitCode !== 0) return undefined;
+    const entry = parseHeadTreeEntry(listed.stdout, rel);
+    if (!entry) return undefined;
+
+    const blob = await this.runner.run({ args: ['cat-file', 'blob', entry.oid], cwd, maxStdoutBytes: maxBytes });
+    if (blob.timedOut) throw new GitCommandError('git cat-file', blob);
+    if (blob.exitCode !== 0) return undefined;
+    return { mode: entry.mode, bytes: blob.stdout, truncated: blob.stdoutTruncated };
+  }
+
+  /**
+   * Read `HEAD:<rel>` for a "rendered before" view.
+   *
+   * `rel` is validated by the caller to contain no `..`, and that matters here more than anywhere: a tree
+   * read never touches the working copy, so the syntactic gate is the ONLY containment this has, and
+   * `HEAD:./../x` really does resolve outside a subdirectory cwd.
+   */
+  async readHeadBlob(cwd: GitWorkingDirectory, rel: string, maxBytes: number): Promise<HeadBlob | undefined> {
+    const info = await this.repoInfo(cwd);
+    if (!info.repo || !info.hasHead) return undefined;
+
+    const stdin = new TextEncoder().encode(`HEAD:./${rel}${NUL}`);
+    const check = await this.runner.run({ args: ['cat-file', '--batch-check', '-z'], cwd, stdin });
+    if (check.timedOut) throw new GitCommandError('git cat-file', check);
+    if (check.exitCode !== 0) return undefined;
+    const reply = parseBatchCheck(decodeGitOutput(check));
+    if (!reply) return undefined;
+    if (reply.size > maxBytes) return { size: reply.size };
+
+    const blob = await this.runner.run({ args: ['cat-file', 'blob', reply.oid], cwd, maxStdoutBytes: maxBytes });
+    if (blob.timedOut) throw new GitCommandError('git cat-file', blob);
+    if (blob.exitCode !== 0) return undefined;
+    return { size: reply.size, bytes: blob.stdout };
+  }
+
+  /**
+   * Render a unified diff between two byte snapshots the CALLER obtained, using Git purely as a formatter.
+   *
+   * This exists for containment, not convenience. `git diff HEAD -- <rel>` reads the worktree side by NAME
+   * from the repository top level, so it re-resolves every component at spawn time: with a parent renamed
+   * away and replaced by a symlink mid-request, Git pairs the pinned repo's index entry with bytes from the
+   * other tree and emits a diff that MIXES both. Passing a pinned parent as cwd does not help, because Git
+   * converts the pathspec to a top-level-relative path first. Neither side here is a name Git resolves:
+   * both are bytes already read through the pinned descriptor chain and staged into a private scratch
+   * directory, and `--no-index` then diffs those two files and nothing else.
+   */
+  async diffSnapshots(
+    rel: string,
+    oldSide: DiffSide | undefined,
+    newSide: DiffSide | undefined,
+  ): Promise<RenderedDiff> {
+    if (!oldSide && !newSide) return { diff: '', truncated: false };
+
+    return await this.scratch.withScratch(async (scratch, stage) => {
+      const left = oldSide ? await stageSide(stage, rel, 'a', oldSide) : '/dev/null';
+      const right = newSide ? await stageSide(stage, rel, 'b', newSide) : '/dev/null';
+      const args = [...DIFF_SAFETY, '--no-index', '--src-prefix=', '--dst-prefix=', '--', left, right];
+      // `--no-index` exits 1 for "they differ", which is the normal case here.
+      const rendered = await this.text('git diff', args, scratch, [0, 1]);
+      return { diff: relabelDiffHeaders(rendered.stdout, rel), truncated: rendered.execution.stdoutTruncated };
+    });
+  }
+
+  /**
+   * One fixed-cost stats pass for every changed row, never one spawn per file.
+   *
+   * `--relative=<session prefix>` both filters siblings out at Git and rewrites the returned paths into the
+   * same cwd-relative namespace as status. This is optional enrichment: a status list is still useful
+   * without counts, so a failure here degrades to no counts rather than taking the whole browser down.
+   */
+  private async lineStats(cwd: GitWorkingDirectory, info: SessionRepoInfo): Promise<ReadonlyMap<string, GitLineStats>> {
+    try {
+      const revision = info.hasHead ? 'HEAD' : EMPTY_TREE_OID;
+      const args = [...DIFF_SAFETY, '--numstat', '-z', `--relative=${info.prefix}`, revision, '--'];
+      const rendered = await this.text('git diff --numstat', args, cwd, [0, 1, 128]);
+      if (rendered.execution.exitCode !== 0) return new Map();
+      return parseNumstat(rendered.stdout, rendered.execution.stdoutTruncated);
+    } catch {
+      return new Map();
+    }
+  }
+
+  /** Run one command, refuse a timeout or an unexpected exit, and decode stdout as text. */
+  private async text(
+    action: string,
+    args: readonly string[],
+    cwd: GitWorkingDirectory,
+    acceptedExitCodes: readonly number[],
+    budget?: SpawnBudget,
+  ): Promise<TextExecution> {
+    const execution = requireGitExit(
+      action,
+      await this.runner.run({ args, cwd, ...spawnBound(budget) }),
+      acceptedExitCodes,
+    );
+    return { execution, stdout: decodeGitOutput(execution) };
+  }
+}
+
+/**
+ * Stage one side of the diff inside the scratch directory and return the path Git should be given,
+ * relative to that directory.
+ *
+ * The `a/` and `b/` prefixes are not cosmetic: paired with `--src-prefix=` and `--dst-prefix=` they make Git
+ * print `--- a/<rel>` and `+++ b/<rel>` ITSELF. That is what lets this avoid rewriting those lines
+ * afterwards — and rewriting them would be a real hazard, because a body line `-- a/x` renders as `--- a/x`,
+ * indistinguishable from a header by prefix alone.
+ */
+async function stageSide(
+  stage: (relative: string, side: DiffSide) => Promise<void>,
+  rel: string,
+  prefix: 'a' | 'b',
+  side: DiffSide,
+): Promise<string> {
+  const relative = `${prefix}/${rel}`;
+  await stage(relative, side);
+  return relative;
+}
