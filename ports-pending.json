@@ -70,11 +70,15 @@
     "connections": [
       "GAP(kernel): the tunnel carrier cannot run: the kernel offers no port to bind its own loopback listener (serving only the session route, every arrival remote) and none to find cloudflared (FY_CLOUDFLARED, PATH); the daemon half composes the carrier and says so out loud until a port exists",
       "GAP(parity): the J-, S- and V-0245 rows still point at tests/unit/parity files that are not written"
+    ],
+    "browsers": [
+      "GAP(kernel): Settings › Browser reads and writes browsers.yaml through the kernel's /v1/config/file, which no manifest declares yet (D2 #3); until it is declared the tab says the settings did not load and still shows the status, the user agent and Test proxy",
+      "GAP(shell): today's link-behaviour facility (open a link in the in-app browser or the real one) is not in @ferretry/app, so the in-app link sheet and workspace host are ported but nothing in the shell mounts them yet",
+      "GAP(app): the human sign-in window (Real window login) is ported as a client and a model; the panel does not offer the button until the shell can open an external window"
     ]
   },
   "pendingHalves": {
     "agenda": ["app"],
-    "browsers": ["app"],
     "conversation": ["app"],
     "terminals": ["app"],
     "warden": ["app"]
@@ -88,11 +92,6 @@
     {
       "plugin": "agenda",
       "path": "packages/plugins/agenda/app",
-      "reason": "separate app port in flight"
-    },
-    {
-      "plugin": "browsers",
-      "path": "packages/plugins/browsers/app",
       "reason": "separate app port in flight"
     },
     {
