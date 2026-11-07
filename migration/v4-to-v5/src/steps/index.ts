@@ -15,8 +15,11 @@ import { boardStep } from './board.ts';
 import { conversationStep } from './conversation.ts';
 import { ferretsStep } from './ferrets.ts';
 import { harnessHomesStep } from './harness-homes.ts';
+import { loginsStep } from './logins.ts';
+import { projectsStep } from './projects.ts';
 import { terminalsStep } from './terminals.ts';
 import { identityStep, vaultStep } from './secrets.ts';
+import { wardenStep } from './warden.ts';
 
 export interface StepContext {
   readonly v4: V4Paths;
@@ -64,17 +67,7 @@ export const STEPS: readonly Step[] = [
   harnessHomesStep,
   boardStep,
   agendaStep,
-  pending(
-    {
-      id: 'projects',
-      title: 'Projects',
-      owner: ['plugin-projects'],
-      reads: ['state/projects.json'],
-      sealed: [],
-      notCarried: [],
-    },
-    'the Projects state schema',
-  ),
+  projectsStep,
   pending(
     {
       id: 'lessons',
@@ -102,17 +95,7 @@ export const STEPS: readonly Step[] = [
     },
     'the Usage state schema',
   ),
-  pending(
-    {
-      id: 'warden',
-      title: 'Warden history and settings',
-      owner: ['plugin-warden'],
-      reads: ['state/warden/**', 'config/warden.yaml'],
-      sealed: [],
-      notCarried: [],
-    },
-    'the Warden state and config schemas',
-  ),
+  wardenStep,
   pending(
     {
       id: 'catalogs',
@@ -131,7 +114,7 @@ export const STEPS: readonly Step[] = [
       id: 'layouts',
       title: 'Layouts and settings',
       owner: ['plugin-layouts', 'kernel'],
-      reads: ['config/*.yaml'],
+      reads: ['config/*.yaml', 'config/logins/*.yaml (each login file; its sign-in folder is the Logins step)'],
       sealed: [],
       notCarried: [],
     },
@@ -153,17 +136,7 @@ export const STEPS: readonly Step[] = [
     },
     'the Runtimes config schemas',
   ),
-  pending(
-    {
-      id: 'logins',
-      title: 'Logins (harness sign-ins linked, never read)',
-      owner: ['plugin-logins'],
-      reads: ['config/logins/**', 'fleet/credentials/** (moved whole, never opened)'],
-      sealed: [],
-      notCarried: [],
-    },
-    'the Logins config schema and credentials location',
-  ),
+  loginsStep,
   vaultStep,
   identityStep,
   pending(
