@@ -36,7 +36,33 @@
     },
     "packages/plugins/agenda": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"],
+      "ignore": [
+        "app/components/agenda-message.tsx",
+        "app/hooks/use-agenda-deep-link.ts",
+        "app/hooks/use-agenda-replies.ts",
+        "app/hooks/use-agenda.ts",
+        "app/hooks/use-answered-suggestion-sweep.ts",
+        "app/hooks/use-notification-open.ts",
+        "app/hooks/use-notifications.ts",
+        "app/lib/agenda-chat.ts",
+        "app/lib/agenda-deep-link.ts",
+        "app/lib/answer-chip.ts",
+        "app/lib/item-conversation.ts",
+        "app/lib/notification-ledger.ts",
+        "app/lib/notification-open.ts",
+        "app/lib/notification-preferences.ts",
+        "app/lib/notification-tap.ts",
+        "app/lib/notify.ts",
+        "app/lib/permission-request.ts",
+        "app/lib/push-delivery.ts",
+        "app/features/permission-request/approval-card.tsx",
+        "app/features/agenda/agenda-inbox-composer.tsx",
+        "app/features/agenda/agenda-line.tsx",
+        "app/features/agenda/agenda-nav.tsx",
+        "app/features/agenda/agenda-replies-notice.tsx",
+        "app/features/agenda/agenda.tsx"
+      ]
     },
     "packages/plugins/board": {
       "entry": ["app/views/*.tsx"],

@@ -30,7 +30,11 @@ const IDLE_BOARD: AgendaCardsBoard = {
 
 const AgendaCardsBoardContext = createContext<AgendaCardsBoard>(IDLE_BOARD);
 
-/** Hands the notices below it the board their Start and Close write through. */
+/**
+ * Hands the notices below it the board their Start and Close write through.
+ *
+ * @pending agenda: GAP(cards-board) — no host mounts it until Board contributes the board (or Agenda is given a need)
+ */
 export function AgendaCardsBoardProvider({
   board,
   children,
