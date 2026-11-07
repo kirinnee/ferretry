@@ -131,6 +131,15 @@ describe('the assigned warden prompt', () => {
     should(actual).match(expected);
   });
 
+  it('should name a long data conversion, not a "move", as a legitimate long tool command', () => {
+    // Arrange / Act
+    const actual = buildAssignedWardenPrompt(anomaly({ kind: 'sus_subprocess' }), session(), REPORT, ACTING);
+
+    // Assert
+    should(actual).containEql('(build, test suite, long data conversion…)');
+    should(actual).not.containEql('long move');
+  });
+
   it('should tell an authorized warden to answer only an unambiguous question', () => {
     // Arrange / Act
     const actual = buildAssignedWardenPrompt(anomaly({ kind: 'unattended_question' }), session(), REPORT, ACTING);

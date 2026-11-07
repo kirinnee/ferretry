@@ -140,7 +140,7 @@ function kindGuidance(
       'long time with NOTHING moving: no transcript growth, no token advance, no screen change beyond the spinner and',
       'the status line. The harness’s own helpers (`fy mcp serve`, MCP and language servers), a server listening on a',
       'port and a browser were already ruled out — do not blame one of them, nor a process outside this pane.',
-      'Judge whether that is expected for the task (build, test suite, long move…) and whether the process is',
+      'Judge whether that is expected for the task (build, test suite, long data conversion…) and whether the process is',
       'actually PROGRESSING: is its output growing (turn logs, files in the cwd), is it consuming CPU, are artifacts',
       'appearing? A legitimate long task should show movement between two looks a minute apart. A loop whose exit',
       'condition can never be met is stuck however busy it looks.',
