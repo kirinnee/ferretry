@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { ManagedWorktreeView, WorktreeRemovalRequest } from '../../../../daemon/lib/protocol/worktrees.ts';
+import type { ManagedWorktreeView, WorktreeRemovalRequest } from '../../../../contract/index.ts';
 import should from 'should';
 import {
   type CheckManagedWorktreeRemovalInput,

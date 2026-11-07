@@ -1,12 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { type FerretSummary, FerretSummarySchema, SubtreeViewSchema, type SubtreeView } from '../../contract/index.ts';
-import type {
-  RestartCancelResult,
-  RestartRequest,
-  RestartResult,
-  RestartStatus,
-} from '../../daemon/lib/protocol/session-restart.ts';
+import {
+  type FerretSummary,
+  FerretSummarySchema,
+  SubtreeViewSchema,
+  type SubtreeView,
+  type RestartCancelResult,
+  type RestartRequest,
+  type RestartResult,
+  type RestartStatus,
+} from '../../contract/index.ts';
 import type { IRestartGateway } from './restart/ports.ts';
 import type { ListedFerret } from './session/display.ts';
 import type { PinnedView, ISessionPinGateway } from './session/pin-agent.ts';

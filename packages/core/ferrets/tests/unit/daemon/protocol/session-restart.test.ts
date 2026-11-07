@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as restart from '../../../../daemon/lib/protocol/session-restart.ts';
+import * as restart from '../../../../contract/session-restart.ts';
 import { SessionOutdatedSchema } from '../../../../daemon/lib/protocol/session.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 

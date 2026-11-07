@@ -8,7 +8,7 @@ import type {
   WorktreeRemovalBlocker,
   WorktreeRemovalDecision,
   WorktreeRemovalRequest,
-} from '../../../../daemon/lib/protocol/worktrees.ts';
+} from '../../../../contract/index.ts';
 import type { IWorktreePrompt } from '../../../../cli/lib/worktrees/controller.ts';
 import type { IWorktreeGateway, IWorktreeOutput } from '../../../../cli/lib/worktrees/ports.ts';
 
