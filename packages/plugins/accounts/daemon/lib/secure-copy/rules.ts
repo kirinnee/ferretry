@@ -1,18 +1,9 @@
-import {
-  COPY_MAX_RULES,
-  type CopyOrigin,
-  DEFAULT_PASTE_RULE_SETTINGS,
-  type CopyRouteFrom,
-  type CopyRouteTo,
-  type InputActor,
-  type InputTargetFacts,
-  type PasteRule,
-  type PasteRuleCreate,
-  type PasteRuleSettings,
-} from '../../../wire/index.ts';
-import { CODE_PROGRAMS, GETPASS_PROGRAMS } from '../input-requests/lock.ts';
-import type { InputPasteRules } from '../input-requests/ports.ts';
+import { COPY_MAX_RULES, type CopyOrigin, DEFAULT_PASTE_RULE_SETTINGS, type CopyRouteFrom, type CopyRouteTo, type PasteRule, type PasteRuleCreate, type PasteRuleSettings } from '../../../wire/index.ts';
+import { CODE_PROGRAMS, GETPASS_PROGRAMS } from '../vault-inputs.ts';
+import type { InputPasteRules } from '../vault-inputs.ts';
 import { SecureCopyError } from './errors.ts';
+import { type InputActor } from '../vault-inputs.ts';
+import { type InputTargetFacts } from '@ferretry/core-vault/contract';
 
 /**
  * THE OWNER'S PRE-APPROVAL RULES (docs/secure-copy.md): pastes allowed in advance, from a source to a destination.
@@ -387,7 +378,7 @@ function toMatches(rule: PasteRule, facts: InputTargetFacts, settings: PasteRule
           (facts.program === undefined && profile === rule.to.program && profileMayStandFor(settings, profile)))
       );
     case 'browser':
-      return facts.kind === 'browser' && facts.origin === rule.to.origin;
+      return facts.kind === 'page' && facts.origin === rule.to.origin;
     case 'secret':
       // Only the EXACT name the owner approved: a rule can never write a secret it does not name.
       return facts.kind === 'secret' && facts.name === rule.to.name;

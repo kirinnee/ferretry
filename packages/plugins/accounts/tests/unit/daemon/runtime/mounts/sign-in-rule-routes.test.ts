@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SIGN_IN_RULE_REFUSAL_WORDS, STEP_UP_REQUIRED_CODE, type SignInRuleStageId } from '../../../../../wire/index.ts';
+import { SIGN_IN_RULE_REFUSAL_WORDS, type SignInRuleStageId } from '../../../../../wire/index.ts';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
@@ -23,6 +23,7 @@ import {
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
 import { MemoryRuleStore, listing, signIn, tappedFact } from '../../sign-in-rules/support.ts';
 import { agentIn, CREDENTIALS, fromFerret, GRANTED, human, withoutGrant } from './support.ts';
+import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 
 /**
  * THE STANDING-RULE ROUTES through the real router, boundary, step-up service and registry (r3c-plan §5, invariants 1,

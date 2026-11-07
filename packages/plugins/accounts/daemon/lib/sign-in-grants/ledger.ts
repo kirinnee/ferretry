@@ -1,5 +1,5 @@
 import type { GrantMissReason, LoginFieldRole, SignInId } from '../../../wire/index.ts';
-import { SECOND_FACTOR_WINDOW_MS } from '../input-requests/login-observer.ts';
+import { SECOND_FACTOR_WINDOW_MS } from '../vault-inputs.ts';
 
 /**
  * USES, ATTEMPTS AND THE RATE LIMIT of grant fills (docs/input-requests.md, "Task plan fills", "Standing rule fills").

@@ -1,4 +1,4 @@
-import type { PasskeysChangedListener } from '../step-up/passkeys-changed.ts';
+import type { PasskeysChangedListener } from '../local-ports.ts';
 import type { RuleListing } from './drift.ts';
 import type { SignInRuleService } from './service.ts';
 

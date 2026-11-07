@@ -1,31 +1,4 @@
-import {
-  type AccountId,
-  AccountIdSchema,
-  SIGN_IN_RULE_ERROR_CODES,
-  SIGN_IN_RULE_REFUSAL_WORDS,
-  type SignInId,
-  SignInIdSchema,
-  SignInRuleAccountRevokedSchema,
-  SignInRuleDraftSchema,
-  SignInRuleEligibilitySchema,
-  type SignInRuleId,
-  SignInRuleIdSchema,
-  SignInRuleListSchema,
-  SignInRuleNarrowSchema,
-  SignInRuleRevokedSchema,
-  SignInRuleStageDroppedSchema,
-  SignInRuleStagedSchema,
-  type SignInRuleStageId,
-  SignInRuleStageIdSchema,
-  SignInRuleStageViewSchema,
-  SignInRuleSuggestionDismissedSchema,
-  SignInRuleSuggestionIdSchema,
-  SignInRuleSuggestionListSchema,
-  SignInRuleViewSchema,
-  STEP_UP_ACTS,
-  STEP_UP_REQUIRED_CODE,
-  type StepUpRequiredBody,
-} from '../../../../wire/index.ts';
+import { type AccountId, AccountIdSchema, SIGN_IN_RULE_ERROR_CODES, SIGN_IN_RULE_REFUSAL_WORDS, type SignInId, SignInIdSchema, SignInRuleAccountRevokedSchema, SignInRuleDraftSchema, SignInRuleEligibilitySchema, type SignInRuleId, SignInRuleIdSchema, SignInRuleListSchema, SignInRuleNarrowSchema, SignInRuleRevokedSchema, SignInRuleStageDroppedSchema, SignInRuleStagedSchema, type SignInRuleStageId, SignInRuleStageIdSchema, SignInRuleStageViewSchema, SignInRuleSuggestionDismissedSchema, SignInRuleSuggestionIdSchema, SignInRuleSuggestionListSchema, SignInRuleViewSchema } from '../../../../wire/index.ts';
 import { parseBody } from '../../api/body.ts';
 import type { CapabilityDemand } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
@@ -37,6 +10,7 @@ import { SignInRuleError, SignInRuleProofMissing, type SignInRuleService } from 
 import { SignInRuleSuggestionError, type SignInRuleSuggestions } from '../../sign-in-rules/suggestions.ts';
 import { ownerActorOf } from './input-requests.ts';
 import { refusedAccountNames, refusedPageInput } from './secret-write-grant.ts';
+import { STEP_UP_ACTS, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from '@ferretry/core-gate/contract';
 
 /**
  * THE OWNER'S STANDING SIGN-IN RULE ROUTES (docs/secrets.md, "Standing sign-in rules"): read the rules, stage one,

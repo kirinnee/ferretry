@@ -1,54 +1,14 @@
 import { randomBytes } from 'node:crypto';
-import {
-  type AccountId,
-  type AccountRef,
-  type AuditActor,
-  type AuditDetail,
-  type Place,
-  SIGN_IN_RULE_ERROR_CODES,
-  SIGN_IN_RULE_REFUSAL_WORDS,
-  SIGN_IN_RULE_INELIGIBLE_CODES,
-  SIGN_IN_RULE_INELIGIBLE_WORDS,
-  SIGN_IN_RULE_MAX,
-  SIGN_IN_RULE_STAGE_TTL_SECONDS,
-  type SignInField,
-  type SignInId,
-  type SignInRuleBody,
-  type SignInRuleDraft,
-  SignInRuleDraftSchema,
-  type SignInRuleEligibility,
-  type SignInRuleFlag,
-  type SignInRuleId,
-  type SignInRuleList,
-  type SignInRuleNarrow,
-  SignInRuleNarrowSchema,
-  type SignInRuleRecord,
-  SignInRuleRecordSchema,
-  type SignInRuleStaged,
-  type SignInRuleStageId,
-  type SignInRuleStageState,
-  type SignInRuleStageView,
-  type SignInRuleSuspension,
-  type SignInRulesDocument,
-  type SignInRuleView,
-  type StoredStepUpProof,
-  signInRuleBodyProblems,
-  signInRuleClockProblems,
-  signInRuleEffective,
-  signInRuleFieldWords,
-  signInRuleLifetime,
-  signInRuleNarrowed,
-  signInRuleSuspensionWords,
-  signInRuleWords,
-} from '../../../wire/index.ts';
-import { OWNER_ONLY_CODE, ownerOnlyWords } from '../api/agent-caller.ts';
-import type { AuditSink } from '../audit/types.ts';
+import { type AccountId, type AccountRef, type Place, SIGN_IN_RULE_ERROR_CODES, SIGN_IN_RULE_REFUSAL_WORDS, SIGN_IN_RULE_INELIGIBLE_CODES, SIGN_IN_RULE_INELIGIBLE_WORDS, SIGN_IN_RULE_MAX, SIGN_IN_RULE_STAGE_TTL_SECONDS, type SignInField, type SignInId, type SignInRuleBody, type SignInRuleDraft, SignInRuleDraftSchema, type SignInRuleEligibility, type SignInRuleFlag, type SignInRuleId, type SignInRuleList, type SignInRuleNarrow, SignInRuleNarrowSchema, type SignInRuleRecord, SignInRuleRecordSchema, type SignInRuleStaged, type SignInRuleStageId, type SignInRuleStageState, type SignInRuleStageView, type SignInRuleSuspension, type SignInRulesDocument, type SignInRuleView, type StoredStepUpProof, signInRuleBodyProblems, signInRuleClockProblems, signInRuleEffective, signInRuleFieldWords, signInRuleLifetime, signInRuleNarrowed, signInRuleSuspensionWords, signInRuleWords } from '../../../wire/index.ts';
+import { OWNER_ONLY_CODE, ownerOnlyWords } from '@ferretry/core-gate/contract';
+import type { AuditSink } from '../local-ports.ts';
 import type { PasteRuleCaller } from '../secure-copy/rules.ts';
-import type { PasskeysChange } from '../step-up/passkeys-changed.ts';
+import type { PasskeysChange } from '../local-ports.ts';
 import { type RuleListing, ruleDrift, samePins, snapshotPins } from './drift.ts';
 import { ineligibleBecause, ruleSurfaceOf, tappedCount } from './eligibility.ts';
 import { checkRuleProof, ruleChallenge, type SignInRuleProofPort } from './proof.ts';
 import { auditText } from './words.ts';
+import { type AuditActor, type AuditDetail } from '@ferretry/core-gate/contract';
 
 /**
  * STANDING SIGN-IN RULES (docs/secrets.md, "Standing sign-in rules"): one owner-signed permission for Ferretry to fill

@@ -1,27 +1,14 @@
 import { randomBytes } from 'node:crypto';
-import {
-  type AccountId,
-  type AuditDetail,
-  type Place,
-  placeKeys,
-  SIGN_IN_RULE_SUGGESTION_TTL_SECONDS,
-  SIGN_IN_RULE_SUGGESTION_WHY_MAX_CHARS,
-  SIGN_IN_RULE_SUGGESTIONS_PER_HOUR,
-  signInRuleKeysFit,
-  type SignInId,
-  type SignInRuleSuggestionId,
-  type SignInRuleSuggestionList,
-  type SignInRuleSuggestionView,
-  type SignInSummary,
-} from '../../../wire/index.ts';
-import { OWNER_ONLY_CODE, ownerOnlyWords } from '../api/agent-caller.ts';
-import type { AuditSink } from '../audit/types.ts';
+import { type AccountId, type Place, placeKeys, SIGN_IN_RULE_SUGGESTION_TTL_SECONDS, SIGN_IN_RULE_SUGGESTION_WHY_MAX_CHARS, SIGN_IN_RULE_SUGGESTIONS_PER_HOUR, signInRuleKeysFit, type SignInId, type SignInRuleSuggestionId, type SignInRuleSuggestionList, type SignInRuleSuggestionView, type SignInSummary } from '../../../wire/index.ts';
+import { OWNER_ONLY_CODE, ownerOnlyWords } from '@ferretry/core-gate/contract';
+import type { AuditSink } from '../local-ports.ts';
 import { proposalTarget } from '../secrets/proposal-target.ts';
 import type { PasteRuleCaller } from '../secure-copy/rules.ts';
 import type { RuleListing } from './drift.ts';
 import { ruleSurfaceOf } from './eligibility.ts';
 import { SignInRuleError } from './service.ts';
 import { auditText } from './words.ts';
+import { type AuditDetail } from '@ferretry/core-gate/contract';
 
 /**
  * A FERRET'S SUGGESTION OF A STANDING RULE (docs/secrets.md, "Standing sign-in rules"; plan §10). A ferret may ASK the

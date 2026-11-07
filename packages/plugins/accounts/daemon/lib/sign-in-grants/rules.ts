@@ -1,19 +1,9 @@
-import {
-  type AccountId,
-  type AccountKey,
-  type GrantMissReason,
-  type SignInField,
-  type SignInRuleId,
-  type SignInRuleRecord,
-  type SignInRuleSuspension,
-  signInRuleEffective,
-  signInRuleSuspensionOf,
-  UNFILED_PROJECT_ID,
-} from '../../../wire/index.ts';
-import type { SessionProjectFactSource } from '../board-projects/session-projects.ts';
+import { type AccountId, type AccountKey, type GrantMissReason, type SignInField, type SignInRuleId, type SignInRuleRecord, type SignInRuleSuspension, signInRuleEffective, signInRuleSuspensionOf } from '../../../wire/index.ts';
+import type { SessionProjectFactSource } from '../local-ports.ts';
 import type { SignInGrantLedger } from './ledger.ts';
 import { type ScriptedOriginsView, type SignInGrant, scopeCovers, scriptedSince } from './matcher.ts';
 import type { GrantFillAt, GrantVerdict, SignInGrantSource } from './plans.ts';
+import { UNFILED_PROJECT_ID } from '../local-ports.ts';
 
 /**
  * STANDING SIGN-IN RULES AS GRANTS (docs/input-requests.md, "Standing rule fills"): each rule the owner approved with a

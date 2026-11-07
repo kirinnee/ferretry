@@ -1,45 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import {
-  type AccountId,
-  type AccountKey,
-  type AuditActor,
-  type AuditDetail,
-  type CopyPlan,
-  type CopyPlanItem,
-  copyPlanOf,
-  type GrantMissReason,
-  type SignInChoiceContext,
-  type SignInId,
-  TASK_PLAN_DEFAULT_LIFETIME_SECONDS,
-  TASK_PLAN_ERROR_CODES,
-  TASK_PLAN_MAX_LIVE_PER_SESSION,
-  TASK_PLAN_MAX_PENDING_PER_SESSION,
-  TASK_PLAN_MAX_PROPOSALS_PER_HOUR,
-  TASK_PLAN_STAGE_TTL_SECONDS,
-  TASK_PLAN_WHY_MAX_CHARS,
-  type TaskPlan,
-  type TaskPlanApproval,
-  type TaskPlanApprovalAnswer,
-  TaskPlanApprovalSchema,
-  TaskPlanCallSchema,
-  type TaskPlanConfirming,
-  type TaskPlanLine,
-  type TaskPlanLineAsk,
-  type TaskPlanLinePins,
-  TaskPlanSchema,
-  type TaskPlanSelectedLine,
-  type TaskPlanStaged,
-  type TaskPlanStageId,
-  type TaskPlanStageState,
-  type TaskPlanStageView,
-  type TaskPlanState,
-  taskPlanApprovalSubject,
-  taskPlanLineOfCopyItem,
-  taskPlanLinesOfCopyItems,
-  taskPlanSelection,
-  taskPlanSelectionNeedsPasskey,
-} from '../../../wire/index.ts';
-import type { AuditSink } from '../audit/types.ts';
+import { type AccountId, type AccountKey, type CopyPlan, type CopyPlanItem, copyPlanOf, type GrantMissReason, type SignInChoiceContext, type SignInId, TASK_PLAN_DEFAULT_LIFETIME_SECONDS, TASK_PLAN_ERROR_CODES, TASK_PLAN_MAX_LIVE_PER_SESSION, TASK_PLAN_MAX_PENDING_PER_SESSION, TASK_PLAN_MAX_PROPOSALS_PER_HOUR, TASK_PLAN_STAGE_TTL_SECONDS, TASK_PLAN_WHY_MAX_CHARS, type TaskPlan, type TaskPlanApproval, type TaskPlanApprovalAnswer, TaskPlanApprovalSchema, TaskPlanCallSchema, type TaskPlanConfirming, type TaskPlanLine, type TaskPlanLineAsk, type TaskPlanLinePins, TaskPlanSchema, type TaskPlanSelectedLine, type TaskPlanStaged, type TaskPlanStageId, type TaskPlanStageState, type TaskPlanStageView, type TaskPlanState, taskPlanApprovalSubject, taskPlanLineOfCopyItem, taskPlanLinesOfCopyItems, taskPlanSelection, taskPlanSelectionNeedsPasskey } from '../../../wire/index.ts';
+import type { AuditSink } from '../local-ports.ts';
 import { SecureCopyError } from '../secure-copy/errors.ts';
 import type { PasteRuleCaller, PasteRuleService } from '../secure-copy/rules.ts';
 import { boundSelection, PlanAskMismatch, type PlanListing, pinsOf, repeatedSignIn, resolveLine } from './resolve.ts';
@@ -53,6 +14,7 @@ import {
   routeOf,
   selectedWords,
 } from './words.ts';
+import { type AuditActor, type AuditDetail } from '@ferretry/core-gate/contract';
 
 /**
  * A FERRET'S TASK PLAN (docs/secure-copy.md, "Task plans"): one card, raised before a task, on which the owner

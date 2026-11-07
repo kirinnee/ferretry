@@ -1,28 +1,4 @@
-import {
-  type CopyMeta,
-  CopyPlanApproveSchema,
-  type CopyPlanList,
-  PASTE_RULE_ERROR_CODES,
-  PASTE_RULE_REFUSAL_WORDS,
-  type PasteRule,
-  type PasteRuleCreate,
-  PasteRuleCreateSchema,
-  type PasteRuleList,
-  PasteRuleSchema,
-  type PasteRuleStageDropped,
-  type PasteRuleStageId,
-  PasteRuleStageIdSchema,
-  type PasteRuleStageList,
-  PasteRuleStageListSchema,
-  PasteRuleStagedSchema,
-  PasteRuleStageViewSchema,
-  PasteRuleSettingsSchema,
-  type PasteRuleSettingsView,
-  taskPlanLineOfCopyItem,
-  STEP_UP_ACTS,
-  STEP_UP_REQUIRED_CODE,
-  type StepUpRequiredBody,
-} from '../../../../wire/index.ts';
+import { type CopyMeta, CopyPlanApproveSchema, type CopyPlanList, PASTE_RULE_ERROR_CODES, PASTE_RULE_REFUSAL_WORDS, type PasteRule, type PasteRuleCreate, PasteRuleCreateSchema, type PasteRuleList, PasteRuleSchema, type PasteRuleStageDropped, type PasteRuleStageId, PasteRuleStageIdSchema, type PasteRuleStageList, PasteRuleStageListSchema, PasteRuleStagedSchema, PasteRuleStageViewSchema, PasteRuleSettingsSchema, type PasteRuleSettingsView, taskPlanLineOfCopyItem } from '../../../../wire/index.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -39,6 +15,7 @@ import type { TaskPlanService } from '../../task-plans/service.ts';
 import { ownerActorOf } from './input-requests.ts';
 import { refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
 import { taskPlanAnswered } from './task-plans.ts';
+import { STEP_UP_ACTS, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from '@ferretry/core-gate/contract';
 
 /**
  * THE OWNER'S ROUTES FOR SECURE COPY (docs/secure-copy.md): the copies a session holds (descriptions only), the

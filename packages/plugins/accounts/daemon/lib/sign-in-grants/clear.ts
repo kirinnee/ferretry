@@ -1,4 +1,5 @@
-import type { InputTargetFacts } from '../../../wire/index.ts';
+
+import { type InputTargetFacts } from '@ferretry/core-vault/contract';
 
 /**
  * EMPTYING A PASSWORD LEFT IN A FIELD (docs/input-requests.md, "Task plan fills"). A grant fill that typed a password
@@ -30,7 +31,7 @@ export interface ClearJob {
 
 /** The clear job for the password fields of a page write: each typed `secret` field's node. `undefined` when there is none. */
 export function clearJobOf(facts: InputTargetFacts, secretFields: readonly string[]): ClearJob | undefined {
-  if (facts.kind !== 'browser') return undefined;
+  if (facts.kind !== 'page') return undefined;
   const fields = facts.fields
     .filter(field => secretFields.includes(field.fieldId))
     .map(field => ({ frameId: field.frameId, backendNodeId: field.backendNodeId }));

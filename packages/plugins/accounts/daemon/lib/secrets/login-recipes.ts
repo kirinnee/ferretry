@@ -1,26 +1,44 @@
 import { randomBytes } from 'node:crypto';
+import { MAX_ASK_DETAIL_LENGTH as MAX_AGENDA_DETAIL_LENGTH } from '@ferretry/core-asks/contract';
 import {
+  type AccountId,
   type AccountSummary,
-  type LoginEntryId,
-  type LoginEntrySummary,
   type LoginRecipeProposal,
   type LoginRecipeProposed,
-  type SignInId,
-  type SignInSummary,
-  AgendaIdSchema,
-  MAX_AGENDA_DETAIL_LENGTH,
   type Place,
   placeKeys,
   placeWords,
   recipeDiff,
+  type SignInId,
+  type SignInSummary,
 } from '../../../wire/index.ts';
-import type { AgendaService } from '../agenda/service.ts';
-import type { AgendaActor } from '../agenda/state-machine.ts';
-import type { AuditSink } from '../audit/types.ts';
-import type { ClockPort } from '../ports.ts';
-import { type AccountDirectory, type AccountListing, LoginEntryError } from './accounts.ts';
-import type { LoginDirectory } from './logins.ts';
+import type { AuditSink, ClockPort } from '../local-ports.ts';
 import { proposalTarget } from './proposal-target.ts';
+
+/** The accounts and sign-ins, never a value (today's `AccountListing`, `lib/secrets/accounts.ts`). */
+export interface AccountListing {
+  readonly accounts: readonly AccountSummary[];
+  readonly signIns: readonly SignInSummary[];
+}
+
+/**
+ * THE ACCOUNT STORE, as the recipe policy needs it: where a proposal is filed (on one sign-in) and where the owner
+ * answers one. accounts-a's `AccountDirectory` (today's `lib/secrets/accounts.ts`) is this, method for method.
+ */
+export interface RecipeAccounts {
+  list(): Promise<AccountListing>;
+  proposeSignIn(
+    id: SignInId,
+    proposal: LoginRecipeProposal,
+  ): Promise<{ readonly applied: boolean; readonly dropped: readonly LoginRecipeProposal[] }>;
+  /** Remembers the ask a proposal was raised on, so settling it closes that ask. */
+  proposalCardSignIn(id: SignInId, proposalId: string, agendaItemId: string): Promise<void>;
+  decideSignIn(
+    id: SignInId,
+    proposalId: string,
+    decision: 'approve' | 'decline',
+  ): Promise<{ readonly signIn: SignInSummary; readonly proposal: LoginRecipeProposal }>;
+}
 
 /**
  * LOGIN RECIPES, as policy (docs/input-requests.md, "Login recipes"). The directory stores a recipe and its
@@ -40,19 +58,21 @@ import { proposalTarget } from './proposal-target.ts';
  * Which sign-in a proposal is for: named (`{ signIn }`), or an account's ONLY sign-in (the older `{ login }`, from
  * `login.propose` and `account.propose { login }`). Both go through {@link LoginRecipeService.propose}, ONE path.
  */
-export type RecipeProposalTarget = { readonly signIn: SignInId } | { readonly login: LoginEntryId };
+export type RecipeProposalTarget = { readonly signIn: SignInId } | { readonly login: AccountId };
 
 /** Whether a text holds any value the daemon masks: the redactor would change it. Rejects when it cannot tell. */
 export interface RecipeValueCheck {
   redact(text: string): Promise<string>;
 }
 
-/** The agenda, as a proposal needs it: raise its card, close it once the owner answered. */
+/** The asks, as a proposal needs them: raise its ask, close it once the owner answered (`sign-in-approval/asks.ts`). */
 export interface RecipeAgendaPort {
   raise(
     sessionId: string,
     card: {
       readonly sourceRef: string;
+      /** The sign-in the proposal is filed on: the ask names it and the proposal, never the account. */
+      readonly signIn: SignInId;
       readonly subject: string;
       readonly context: string;
       readonly howToResolve: string;
@@ -62,10 +82,13 @@ export interface RecipeAgendaPort {
 }
 
 export interface LoginRecipePorts {
-  /** The saved-login projection, for an older client's answer to a proposal by account (`/v1/secrets/logins/…`). */
-  readonly logins: Pick<LoginDirectory, 'list' | 'decide'>;
   /** The account store: where a proposal is filed (on one sign-in) and where the owner answers one. */
-  readonly accounts: Pick<AccountDirectory, 'list' | 'proposeSignIn' | 'proposalCardSignIn' | 'decideSignIn'>;
+  readonly accounts: RecipeAccounts;
+  /**
+   * The refusal a target that is not one sign-in is thrown as: accounts-a passes `(refusal, words) => new
+   * LoginEntryError(refusal, words)` so the account routes answer it as today.
+   */
+  readonly refuse: (refusal: string, words: string) => Error;
   readonly values: RecipeValueCheck;
   readonly agenda: RecipeAgendaPort;
   readonly audit: Pick<AuditSink, 'record'>;
@@ -115,7 +138,7 @@ export class LoginRecipeService {
       await this.ports.accounts.list(),
       'signIn' in target ? { signIn: target.signIn } : { login: target.login },
     );
-    if (!found.ok) throw new LoginEntryError(found.refusal, found.words);
+    if (!found.ok) throw this.ports.refuse(found.refusal, found.words);
     return { signIn: found.signIn, account: found.account };
   }
 
@@ -152,6 +175,7 @@ export class LoginRecipeService {
     // Agenda text is every ferret's to read: the card names the place and the sign-in's id, never the account's label.
     const card = await this.ports.agenda.raise(sessionId, {
       sourceRef: proposal.id,
+      signIn: signIn.id,
       subject: `Recipe change ${placeWords(signIn.place)}`,
       // The card shows the CURRENT recipe too, which may hold a value kept after it was written: masked like any read.
       context: await this.masked(cardContext(signIn.recipe, recipe, why)),
@@ -163,14 +187,9 @@ export class LoginRecipeService {
   }
 
   /**
-   * The entries as they may be SERVED: every recipe, proposal and reason masked through the redactor NOW, so a value
+   * An account listing as it may be SERVED: every recipe, proposal and reason masked through the redactor NOW, so a value
    * kept after the text was written is a mask, never the value. A redactor that fails drops the texts (fail closed).
    */
-  async scrubbed(entries: readonly LoginEntrySummary[]): Promise<readonly LoginEntrySummary[]> {
-    return await Promise.all(entries.map(async entry => await this.scrubbedEntry(entry)));
-  }
-
-  /** An account listing as it may be SERVED: every sign-in's recipe and proposals masked, as {@link scrubbed}. */
   async scrubbedAccounts(listing: AccountListing): Promise<AccountListing> {
     return {
       accounts: listing.accounts,
@@ -213,25 +232,8 @@ export class LoginRecipeService {
   }
 
   /**
-   * The OWNER answers a proposal; its card closes either way. An approval is checked for values again: one the owner
-   * kept after the proposal was made must not become the recipe.
-   */
-  async decide(id: LoginEntryId, proposalId: string, decision: 'approve' | 'decline'): Promise<LoginEntrySummary> {
-    if (decision === 'approve') {
-      const waiting = (await this.ports.logins.list())
-        .find(each => each.id === id)
-        ?.proposals?.find(proposal => proposal.id === proposalId);
-      if (waiting !== undefined) await this.assertNoValue(waiting.recipe);
-    }
-    const { entry, proposal } = await this.ports.logins.decide(id, proposalId, decision);
-    await this.closeCard(proposal, decision === 'approve' ? 'Approved: the recipe was updated.' : 'Declined.');
-    const [served] = await this.scrubbed([entry]);
-    return served ?? entry;
-  }
-
-  /**
-   * The OWNER answers a proposal on one sign-in; its card closes either way. An approval is checked for values again,
-   * as {@link decide} does.
+   * The OWNER answers a proposal on one sign-in; its ask closes either way. An approval is checked for values again:
+   * one the owner kept after the proposal was made must not become the recipe.
    */
   async decideSignIn(id: SignInId, proposalId: string, decision: 'approve' | 'decline'): Promise<SignInSummary> {
     const accounts = this.ports.accounts;
@@ -252,7 +254,7 @@ export class LoginRecipeService {
   }
 
   private async record(
-    id: LoginEntryId,
+    id: AccountId,
     action: string,
     proposal: string,
     session: string,
@@ -293,48 +295,4 @@ export function cardContext(base: string | undefined, next: string, why: string)
     used += line.length + 1;
   }
   return `${kept.length === 0 ? 'No line changes.' : kept.join('\n')}\n\n${reason}`;
-}
-
-const RECIPE_CARD_ACTOR: AgendaActor = { kind: 'daemon', cause: 'login-recipe' };
-
-/**
- * A proposal's card on the owner's agenda: a `task` ("look at this"), whose answers change nothing. The owner
- * approves or declines on the login's Recipe in Settings, or with `fy account site recipe`, and the card closes.
- */
-export class RecipeAgendaAdapter implements RecipeAgendaPort {
-  constructor(private readonly agenda: Pick<AgendaService, 'raise' | 'resolve'>) {}
-
-  async raise(
-    sessionId: string,
-    card: {
-      readonly sourceRef: string;
-      readonly subject: string;
-      readonly context: string;
-      readonly howToResolve: string;
-    },
-  ): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
-    const outcome = await this.agenda.raise(
-      sessionId,
-      {
-        source: 'question',
-        sourceRef: card.sourceRef,
-        kind: 'task',
-        subject: card.subject,
-        why: card.subject,
-        context: card.context,
-        howToResolve: card.howToResolve,
-      },
-      RECIPE_CARD_ACTOR,
-    );
-    if (!outcome.ok) return { ok: false, message: outcome.error.message };
-    return outcome.item === undefined
-      ? { ok: false, message: 'the agenda kept no card for this proposal' }
-      : { ok: true, id: outcome.item.id };
-  }
-
-  async close(sessionId: string, id: string, note: string): Promise<void> {
-    const parsed = AgendaIdSchema.safeParse(id);
-    if (!parsed.success) return;
-    await this.agenda.resolve(sessionId, parsed.data, RECIPE_CARD_ACTOR, note).catch(() => undefined);
-  }
 }

@@ -1,14 +1,9 @@
 import { describe, it } from 'bun:test';
-import {
-  COPY_MAX_RULES,
-  type InputTargetFacts,
-  type PasteRule,
-  PasteRuleListSchema,
-  type PasteRuleSettings,
-} from '../../../../wire/index.ts';
+import { COPY_MAX_RULES, type PasteRule, PasteRuleListSchema, type PasteRuleSettings } from '../../../../wire/index.ts';
 import should from 'should';
 import { type PasteRuleCaller, PasteRuleService, routeOf, SecureCopyError } from '../../../src/lib/index.ts';
 import { FACTS } from '../input-requests/support.ts';
+import { type InputTargetFacts } from '@ferretry/core-vault/contract';
 
 const OWNER: PasteRuleCaller = { kind: 'owner', actor: { kind: 'host' } };
 const PHONE: PasteRuleCaller = { kind: 'owner', actor: { kind: 'device', deviceId: 'phone-1' } };

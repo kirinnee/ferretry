@@ -1,25 +1,9 @@
-import {
-  type AccountId,
-  type AccountKey,
-  automaticKeysInOfferOrder,
-  factorFingerprint,
-  fillRoleFor,
-  type GrantMissReason,
-  type InputRequestField,
-  type InputTargetFacts,
-  type LoginFieldRole,
-  type PlaceKey,
-  placeKeys,
-  type SignInField,
-  type SignInId,
-  type SignInRuleId,
-  type SignInRuleScope,
-  TASK_PLAN_TERMINAL_TOOLS,
-  type TwoFactorId,
-} from '../../../wire/index.ts';
-import { terminalHides } from '../input-requests/lock.ts';
-import { identityOf } from '../input-requests/login-observer.ts';
-import { codeTargetProblem, type SavedListing } from '../input-requests/saved-logins.ts';
+import { type AccountId, type AccountKey, automaticKeysInOfferOrder, factorFingerprint, fillRoleFor, type GrantMissReason, type LoginFieldRole, type PlaceKey, placeKeys, type SignInField, type SignInId, type SignInRuleId, type SignInRuleScope, TASK_PLAN_TERMINAL_TOOLS, type TwoFactorId } from '../../../wire/index.ts';
+import { terminalHides } from '../vault-inputs.ts';
+import { identityOf } from '../vault-inputs.ts';
+import { codeTargetProblem, type SavedListing } from '../vault-inputs.ts';
+import { type InputRequestField } from '../vault-inputs.ts';
+import { type InputTargetFacts } from '@ferretry/core-vault/contract';
 
 /**
  * THE SHARED MATCHER (docs/input-requests.md, "Task plan fills"): whether ONE permission to fill a sign-in without a tap
@@ -198,7 +182,7 @@ function rolesUnder(
 
 /** A page's checks (10–16): https, one origin, real password boxes, everything visible, no human check, no script. */
 function pageProblem(
-  facts: Extract<InputTargetFacts, { readonly kind: 'browser' }>,
+  facts: Extract<InputTargetFacts, { readonly kind: 'page' }>,
   fields: readonly InputRequestField[],
   roles: readonly LoginFieldRole[],
   scripted: boolean,
@@ -305,7 +289,7 @@ export function matchSignInGrant(
   const { facts } = seen;
   if (
     facts.kind === 'secret' ||
-    (facts.kind === 'browser' ? 'page' : 'terminal') !== grant.surface ||
+    (facts.kind === 'page' ? 'page' : 'terminal') !== grant.surface ||
     seen.matchKey === undefined ||
     !grant.pins.placeKeys.includes(seen.matchKey)
   )
@@ -337,10 +321,10 @@ export function matchSignInGrant(
     return miss('account-lacks-field');
   // 10–16 / 10t–12t. The surface's own checks.
   const problem =
-    facts.kind === 'browser' ? pageProblem(facts, seen.fields, roles, seen.scripted) : terminalProblem(facts, roles);
+    facts.kind === 'page' ? pageProblem(facts, seen.fields, roles, seen.scripted) : terminalProblem(facts, roles);
   if (problem !== undefined) return miss(problem);
   // 15b. A rule on a page: no page script ran on its login domains since it was approved, in ANY session.
-  if (rule && facts.kind === 'browser' && scriptedSince(seen.scriptedOrigins, grant.pins.placeKeys, grant.approvedAt))
+  if (rule && facts.kind === 'page' && scriptedSince(seen.scriptedOrigins, grant.pins.placeKeys, grant.approvedAt))
     return miss('scripted-origin');
   // 17 / 13t. The form is one the sign-in has history with, and the one first filled for this field set. A plan line
   //    with no history pins the first password form it fills; a rule NEVER pins a new form: every field set it fills

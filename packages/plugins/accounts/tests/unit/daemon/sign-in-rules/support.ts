@@ -1,20 +1,8 @@
-import type {
-  AccountId,
-  AccountSummary,
-  AuditActor,
-  AuditDetail,
-  LoginObserved,
-  SignInId,
-  SignInRuleDraft,
-  SignInRuleStageId,
-  SignInRulesDocument,
-  SignInSummary,
-  StoredStepUpProof,
-  TwoFactorKeySummary,
-} from '../../../../wire/index.ts';
+import type { AccountId, AccountSummary, LoginObserved, SignInId, SignInRuleDraft, SignInRuleStageId, SignInRulesDocument, SignInSummary, StoredStepUpProof, TwoFactorKeySummary } from '../../../../wire/index.ts';
 import type { PasteRuleCaller } from '../../../src/lib/secure-copy/rules.ts';
 import type { RuleListing, SignInRuleProofPort, SignInRuleStore } from '../../../src/lib/sign-in-rules/index.ts';
 import { SignInRuleService } from '../../../src/lib/sign-in-rules/index.ts';
+import { type AuditActor, type AuditDetail } from '@ferretry/core-gate/contract';
 
 /** A standing-rule world over fakes: the store, the listing, the registry and the clock are the test's. */
 

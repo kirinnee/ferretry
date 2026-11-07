@@ -1,12 +1,5 @@
 import { describe, it } from 'bun:test';
-import {
-  type AccountId,
-  type AccountKey,
-  type AccountSummary,
-  type SignInSummary,
-  STEP_UP_REQUIRED_CODE,
-  type TaskPlanStageId,
-} from '../../../../../wire/index.ts';
+import { type AccountId, type AccountKey, type AccountSummary, type SignInSummary, type TaskPlanStageId } from '../../../../../wire/index.ts';
 import should from 'should';
 import type { AuthenticatedCredential } from '../../../../src/lib/api/authentication.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -19,6 +12,7 @@ import { secureCopyRoutes } from '../../../../src/lib/runtime/mounts/secure-copy
 import { taskPlanRoutes } from '../../../../src/lib/runtime/mounts/task-plans.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, fromFerret, GRANTED, human, withoutGrant } from './support.ts';
+import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 
 /** The owner's task-plan routes through the real router and boundary, over the real plan and rule services. */
 

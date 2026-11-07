@@ -1,20 +1,4 @@
-import {
-  STEP_UP_ACTS,
-  STEP_UP_REQUIRED_CODE,
-  type StepUpRequiredBody,
-  TASK_PLAN_ERROR_CODES,
-  type TaskPlan,
-  TaskPlanApprovalAnswerSchema,
-  TaskPlanApprovalSchema,
-  TaskPlanConfirmingSchema,
-  type TaskPlanList,
-  TaskPlanRevokeSchema,
-  TaskPlanSchema,
-  TaskPlanStageDroppedSchema,
-  type TaskPlanStageId,
-  TaskPlanStageIdSchema,
-  TaskPlanStageViewSchema,
-} from '../../../../wire/index.ts';
+import { TASK_PLAN_ERROR_CODES, type TaskPlan, TaskPlanApprovalAnswerSchema, TaskPlanApprovalSchema, TaskPlanConfirmingSchema, type TaskPlanList, TaskPlanRevokeSchema, TaskPlanSchema, TaskPlanStageDroppedSchema, type TaskPlanStageId, TaskPlanStageIdSchema, TaskPlanStageViewSchema } from '../../../../wire/index.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';
@@ -25,6 +9,7 @@ import type { PasteRuleCaller } from '../../secure-copy/rules.ts';
 import { TaskPlanError, TaskPlanProofMissing, type TaskPlanService } from '../../task-plans/service.ts';
 import { ownerActorOf } from './input-requests.ts';
 import { refusedAccountNames, refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
+import { STEP_UP_ACTS, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from '@ferretry/core-gate/contract';
 
 /**
  * THE OWNER'S TASK-PLAN ROUTES (docs/secure-copy.md, "Task plans"): read the plans, answer one, and revoke.

@@ -1,11 +1,5 @@
 import { describe, it } from 'bun:test';
-import {
-  type AccountKey,
-  DAEMON_FEATURES,
-  daemonFeatureList,
-  type SignInRuleId,
-  UNFILED_PROJECT_ID,
-} from '../../../../wire/index.ts';
+import { type AccountKey, DAEMON_FEATURES, daemonFeatureList, type SignInRuleId } from '../../../../wire/index.ts';
 import should from 'should';
 import { SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
 import { RuleSignInGrants, stampedProjectOf } from '../../../src/lib/sign-in-grants/rules.ts';
@@ -21,6 +15,7 @@ import {
   type World,
   world,
 } from '../sign-in-rules/support.ts';
+import { UNFILED_PROJECT_ID } from '../../../../daemon/lib/local-ports.ts';
 
 /**
  * STANDING RULES AS GRANTS (R3c-4) over the REAL rule service (fake registry and store): what a fill reads of a rule,

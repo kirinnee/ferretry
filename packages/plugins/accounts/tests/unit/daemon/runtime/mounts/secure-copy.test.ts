@@ -1,13 +1,5 @@
 import { describe, it } from 'bun:test';
-import {
-  type PasteRule,
-  type PasteRuleCreate,
-  type PasteRuleSettings,
-  type PasteRuleStageId,
-  RUNS_WHAT_IT_READS_WARNING,
-  STEP_UP_ACTS,
-  STEP_UP_REQUIRED_CODE,
-} from '../../../../../wire/index.ts';
+import { type PasteRule, type PasteRuleCreate, type PasteRuleSettings, type PasteRuleStageId, RUNS_WHAT_IT_READS_WARNING } from '../../../../../wire/index.ts';
 import should from 'should';
 import type { CallerGovernance, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -27,6 +19,7 @@ import type { ApiRequest } from '../../../../src/lib/api/http.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
 import { handleDirectly } from './second-line.ts';
 import { agentIn, CREDENTIALS, fromFerret, GRANTED, human, withoutGrant, withoutSecretsConfigure } from './support.ts';
+import { STEP_UP_ACTS, STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 
 /** The owner's secure-copy routes through the real router and authorization boundary, with the real services. */
 

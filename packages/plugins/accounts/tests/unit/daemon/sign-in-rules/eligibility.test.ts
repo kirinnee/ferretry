@@ -1,15 +1,10 @@
 import { describe, it } from 'bun:test';
-import {
-  foldObservation,
-  type InputTargetFacts,
-  type LoginObserved,
-  type LoginObserverBy,
-  type SignInSummary,
-} from '../../../../wire/index.ts';
+import { foldObservation, type LoginObserved, type LoginObserverBy, type SignInSummary } from '../../../../wire/index.ts';
 import should from 'should';
 import { type LoginDelivery, LoginObserver } from '../../../src/lib/input-requests/login-observer.ts';
 import { ineligibleBecause, tappedCount, tappedIdentities } from '../../../src/lib/sign-in-rules/index.ts';
 import { signIn, tappedFact } from './support.ts';
+import { type InputTargetFacts } from '@ferretry/core-vault/contract';
 
 /**
  * ONLY THE OWNER'S OWN DEVICE TAPS QUALIFY A SIGN-IN (r3c-plan §6, invariant 13): the observer writes `tapped` for a

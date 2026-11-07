@@ -1,4 +1,3 @@
-export * from './agenda-adapter.ts';
 export * from './drift.ts';
 export * from './eligibility.ts';
 export * from './proof.ts';
