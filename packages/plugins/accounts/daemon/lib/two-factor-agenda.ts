@@ -10,7 +10,7 @@ export const SIGN_IN_APPROVAL_SOURCE = 'sign-in-approval' as SourceKey;
  * ceremony bound to the stage and then the commit, and an agenda answer is refused (S101).
  *
  * The ref names the stage alone: the account's handle is often its label and username, and every ferret reads the
- * agenda. (Its `two-factor-seed` arm is pending in the contract's `SignInApprovalRefSchema`; lead asked 2026-11-07.)
+ * agenda (`SignInApprovalRefSchema`'s `two-factor-seed` arm).
  */
 export class TwoFactorSeedAgendaAdapter implements TwoFactorSeedAgendaPort {
   constructor(private readonly asks: Pick<AsksApi, 'raise' | 'close'>) {}
