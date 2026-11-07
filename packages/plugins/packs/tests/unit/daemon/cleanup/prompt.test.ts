@@ -10,7 +10,7 @@ describe('cleanUpBrief', () => {
   it('should carry the rough prompt then the inventory as data blocks, show the shape and end with how to hand it back', () => {
     // Act
     const lines = cleanUpBrief(INPUTS, 'fy').split('\n');
-    const at = (text: string): number => lines.findIndex(line => line === text);
+    const at = (text: string): number => lines.indexOf(text);
 
     // Assert
     should(lines[0]).equal("You clean up the routing prompt for Ferretry's Pack mode. You do one job, then stop.");
@@ -73,7 +73,7 @@ describe('generateBrief', () => {
   it('should carry idea, current prompt and inventory in order, show the shape and end with how to hand it back', () => {
     // Act
     const lines = generateBrief(GENERATE_INPUTS, 'fy').split('\n');
-    const at = (text: string): number => lines.findIndex(line => line === text);
+    const at = (text: string): number => lines.indexOf(text);
 
     // Assert
     should(lines[0]).equal(

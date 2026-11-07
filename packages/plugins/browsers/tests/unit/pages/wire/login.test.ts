@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as browser from '../../../../daemon/pages/wire/browser.ts';
+import * as browser from '../../../../contract/wire/browser.ts';
 import * as browserLogin from '../../../../contract/index.ts';
 import type { BrowserLoginAction, BrowserLoginStatus } from '../../../../contract/index.ts';
 import type { BrowserLoginConnection } from '../../../../daemon/worker/control/login.ts';

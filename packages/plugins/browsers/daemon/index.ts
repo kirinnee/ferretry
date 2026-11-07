@@ -20,6 +20,9 @@ import { pageToolHost } from './tools/page-host.ts';
 import { BrowserTools } from './tools/service.ts';
 import type { RecordedSurfaceEvent } from './tools/types.ts';
 import { processHost } from './adapters/host.ts';
+import { KernelDetachedLauncher } from './open-url/launcher.ts';
+import { systemOpenRoutes } from './open-url/routes.ts';
+import { type DetachedLauncherPort, OpenUrlService } from './open-url/service.ts';
 import { closeLeftoverBrowsers, spawnTerminate } from './leftovers.ts';
 import { BrowserLoginWindowService } from './worker/control/adapters/login-window.ts';
 import { NodeBrowserLoginRuntime, XvfbDisplay } from './worker/control/adapters/login-runtime.ts';
@@ -32,12 +35,15 @@ import { workerCommand } from './worker/program.ts';
 const BROWSER_IDLE_TIMEOUT_MS = 15 * 60_000;
 
 /** `surface.*` event types mapped onto the published `PageChanged` change (a wake-up; the port is the truth). */
-const PAGE_CHANGES: Readonly<Record<string, 'opened' | 'taken-over' | 'handed-back' | 'handed-over' | 'asked'>> = {
+const PAGE_CHANGES: Readonly<
+  Record<string, 'opened' | 'taken-over' | 'handed-back' | 'handed-over' | 'asked' | 'driving'>
+> = {
   'surface.opened': 'opened',
   'surface.takeover': 'taken-over',
   'surface.handback': 'handed-back',
   'surface.handed': 'handed-over',
   'surface.asked': 'asked',
+  'surface.driving': 'driving',
 };
 
 /**
@@ -54,6 +60,8 @@ export interface BrowsersSeams {
   readonly launcher?: BrowserSessionLauncher;
   /** Who each page signs in; by default a fresh ledger on the kernel clock. */
   readonly identities?: TypedIdentities;
+  /** Hands one address to the operating system's opener; by default `open`, `xdg-open` or `rundll32` through `kernel.spawn`. */
+  readonly opener?: DetachedLauncherPort;
 }
 
 /** The daemon half, composed once: every piece below is built here and nowhere else. */
@@ -225,6 +233,14 @@ export function buildBrowsers(
     acts: { acted: (ferret, script) => vault.pageActed?.(ferret, script) },
   });
 
+  // ── handing a link to this computer's own browser (G27) ──────────────────────────────────────────────────────
+  const openUrl = new OpenUrlService({
+    launcher: seams.opener ?? new KernelDetachedLauncher(kernel.spawn, host.environment),
+    audit: { record: async draft => await ctx.needs.gate.audit(draft) },
+    nowMs: () => kernel.clock.nowMs(),
+    platform: host.platform,
+  });
+
   kernel.lifecycle.onStop(async () => {
     await pages.closeAll().catch(() => undefined);
     await loginRuntime.close().catch(() => undefined);
@@ -235,6 +251,7 @@ export function buildBrowsers(
       ...pageRoutes(kernel, login, pages),
       ...proxyRoutes({ tester, state: () => pages.overview() }),
       ...controlRoutes(tools),
+      ...systemOpenRoutes(openUrl),
     },
     sockets: { 'GET /v1/sessions/:sessionId/browser/stream': streamSocket(pages, stream) },
     tools: { ...toolHandlers(tools), ...target.tools },

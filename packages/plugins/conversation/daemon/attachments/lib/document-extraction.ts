@@ -3,6 +3,7 @@ export const DEFAULT_MAX_EXTRACTED_CHARACTERS = 250_000;
 const MAX_DOCX_CONTENT_TYPES_BYTES = 1024 * 1024;
 const MAX_DOCX_DOCUMENT_XML_BYTES = 8 * 1024 * 1024;
 const DOCX_MAIN_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml';
+// biome-ignore lint/complexity/useRegexLiterals: a regex literal of control characters trips noControlCharactersInRegex, which this strips on purpose
 const CONTROL_CHARACTERS = new RegExp('[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]', 'g');
 
 export type TextExtractionMethod = 'docx-xml';

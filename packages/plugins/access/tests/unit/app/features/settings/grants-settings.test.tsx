@@ -160,7 +160,7 @@ describe('GrantsCard', () => {
     expect(text(renderer)).not.toContain('revoke that device FIRST');
   });
 
-  it('tells a remote caller that switching pairing off also disables their own revoke', () => {
+  it('G56 tells a remote caller that switching pairing off also disables their own revoke: revoke that device FIRST', () => {
     const renderer = render(
       <GrantsCard
         connection={connection()}
@@ -169,6 +169,19 @@ describe('GrantsCard', () => {
       />,
     );
     expect(text(renderer)).toContain('revoke that device FIRST');
+  });
+
+  it('G59 names the host command that turns secrets back on, `fy daemon config set secrets --use`, on the turn-off control', () => {
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({ capabilities: [entry({ capability: 'secrets' })] })}
+        onChange={() => {}}
+      />,
+    );
+    expect(marked(renderer, 'data-grant-one-way')[0]?.props['data-grant-one-way']).toBe('secrets');
+    expect(text(renderer)).toContain('fy daemon config set secrets --use');
+    expect(text(renderer)).not.toContain('revoke that device FIRST');
   });
 
   it('keeps a browser on the machine behind the same one-way door: no switch on, only the command to run', () => {

@@ -97,6 +97,7 @@ describe('the guard', () => {
       .call('GET /v1/agenda')
       .catch(e => e)) as DaemonCallError;
     expect([failure.status, failure.code, failure.message]).toEqual([404, 'not_found', 'No such thing.']);
+    expect(failure.body).toEqual({ error: 'No such thing.', code: 'not_found' });
   });
 
   test('a socket of a blocked package is refused, and an open one closes when it becomes blocked', async () => {
@@ -116,6 +117,24 @@ describe('the guard', () => {
     expect(() =>
       client.forPackage('board').socket('GET /v1/board/stream', {}, { onFrame: () => {}, onClose: () => {} }),
     ).toThrow('paused');
+  });
+
+  test('a socket hears when the daemon accepts the stream, and the close code the stream ended with', async () => {
+    const { transport, client } = daemon(inventoryOf(compiled));
+    await client.start();
+    const heard: string[] = [];
+    client.forPackage('board').socket(
+      'GET /v1/board/stream',
+      {},
+      {
+        onOpen: () => heard.push('open'),
+        onFrame: () => {},
+        onClose: (reason, code) => heard.push(`close ${reason} ${String(code)}`),
+      },
+    );
+    transport.sockets[0]?.listeners.onOpen?.();
+    transport.sockets[0]?.listeners.onClose('invalid input', 1008);
+    expect(heard).toEqual(['open', 'close invalid input 1008']);
   });
 });
 

@@ -14,7 +14,7 @@ import {
   BrowserLoadStateSchema,
   BrowserRequestIdSchema,
   BrowserResourceTypeSchema,
-} from '../pages/wire/page-lifecycle.ts';
+} from '../../contract/wire/page-lifecycle.ts';
 import {
   BROWSER_MAX_SCROLL_TEXT_CHARS,
   BrowserMouseActionSchema,
@@ -28,7 +28,7 @@ import {
   refineBrowserHighlight,
   refineBrowserMouse,
   refineBrowserScroll,
-} from '../pages/wire/pointer.ts';
+} from '../../contract/wire/pointer.ts';
 import {
   BROWSER_MAX_FIND_CHARS,
   BROWSER_MAX_SNAPSHOT_DEPTH,
@@ -41,17 +41,16 @@ import {
   refineBrowserRead,
   refineBrowserScreenshot,
   refineBrowserTarget,
-} from '../pages/wire/target.ts';
+} from '../../contract/wire/target.ts';
 import {
-  AGENT_TOOL_MAX_ASK_CHARS,
   AGENT_TOOL_MAX_PATH_CHARS,
   AGENT_TOOL_MAX_SCRIPT_CHARS,
   AGENT_TOOL_MAX_SCRIPT_MS,
   AGENT_TOOL_MAX_SELECTOR_CHARS,
   AGENT_TOOL_MAX_TEXT_CHARS,
   AGENT_TOOL_MAX_UPLOAD_FILES,
-  AGENT_TOOL_MAX_URL_CHARS,
 } from './limits.ts';
+import { AGENT_TOOL_MAX_URL_CHARS, AskOwnerMessageSchema } from '../../contract/wire/limits.ts';
 
 /**
  * The browser tools' calls (§3.3 `tool(... input)`), copied field for field from today's `AgentToolCallSchema`
@@ -67,9 +66,6 @@ export const AgentUrlSchema = z
     value => URL.canParse(value) && ['http:', 'https:'].includes(new URL(value).protocol),
     'only http and https URLs can be opened',
   );
-
-/** What the owner is asked to do when a surface is handed to them: a short plain sentence, never a secret. */
-export const AskOwnerMessageSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_ASK_CHARS);
 
 /** `true` asks the owner to take the surface over; a string says exactly what to do there. */
 const AskOwnerSchema = z.union([z.literal(true), AskOwnerMessageSchema]);

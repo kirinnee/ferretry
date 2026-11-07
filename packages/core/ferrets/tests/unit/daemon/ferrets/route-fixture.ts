@@ -7,7 +7,7 @@ import { definePlugin } from '@ferretry/kernel/manifest';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { FerretFiles, type FerretId, type FerretRecord, Harnesses, Runners } from '../../../../contract/index.ts';
-import { FakeHarness, FakeRunner, ferretId, T0 } from '../../../../contract/testing/index.ts';
+import { type FakeHarness, type FakeRunner, ferretId, T0 } from '../../../../contract/testing/index.ts';
 import ferrets from '../../../../daemon/index.ts';
 
 /** Who calls: the `x-test-caller` header names a ferret (`ferret:<id>`), else the owner at the machine. */

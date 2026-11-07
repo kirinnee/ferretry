@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import { reviveRuling } from '../../../../../daemon/lib/protocol/session-revive.ts';
-import { type SessionView } from '../../../../../daemon/lib/protocol/session.ts';
+import type { SessionView } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { withRevive } from '../../../../../daemon/lib/session/resume/revive-view.ts';
 import { sessionView } from '../../../../support/daemon/session-view.ts';

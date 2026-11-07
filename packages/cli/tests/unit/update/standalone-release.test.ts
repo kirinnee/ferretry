@@ -87,5 +87,5 @@ test('no trusted signing keys refuses before downloading or changing the install
     refused: expect.stringContaining('no release-signing key'),
   });
   expect(f.ran).toEqual([]);
-  expect(await readdir(f.dir)).toEqual(['fy', 'fyd']);
+  expect((await readdir(f.dir)).sort()).toEqual(['fy', 'fyd']);
 });

@@ -1,5 +1,5 @@
-import { type BrowserInputEvent, type BrowserScreencastFrame } from '../pages/wire/browser.ts';
-import { encodeBrowserStreamChunks, nextBrowserStreamSerial } from './wire.ts';
+import { type BrowserInputEvent, type BrowserScreencastFrame } from '../../contract/wire/browser.ts';
+import { encodeBrowserStreamChunks, nextBrowserStreamSerial } from '../../contract/wire/stream.ts';
 import type { FrameClock, FrameTimer } from './contracts.ts';
 import { MAX_FRAME_BYTES, encodeFrameEnvelope } from './envelope.ts';
 import { type BrowserKeyInput, keyIdentity, keyReleaseSequence, normalizeBrowserInput } from './input.ts';

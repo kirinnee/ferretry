@@ -1,4 +1,5 @@
 import { ApiError, jsonResponse, type PlainApiResponse } from '@ferretry/kernel/contract';
+import { markProofClaimed } from './claimed-standings.ts';
 import { STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from './policy.ts';
 import {
   type ApiActor,
@@ -62,5 +63,10 @@ const stepUpDemand = (act: string): PlainApiResponse =>
 export function claimOwnerOnly(call: OwnerOnlyCall, act: string): PlainApiResponse | undefined {
   const refused = ownerOnly(call, act);
   if (refused !== undefined || call.governance?.governed !== true) return refused;
-  return call.claimFreshStepUp?.() === true ? undefined : stepUpDemand(act);
+  const claim = call.claimFreshStepUp;
+  if (claim?.() !== true) return stepUpDemand(act);
+  // Gate's config judge accepts this standing without taking a second proof (the act's own loosening write rides on
+  // THIS claim): one proof, one act. The mark is Gate-private (`claimed-standings.ts`).
+  markProofClaimed(claim);
+  return undefined;
 }

@@ -161,13 +161,24 @@ export function implementDaemon<const M extends Manifest>(
 /** One open socket route, from the plugin's side (the app shell's `TransportSocket`). */
 export interface PluginSocket {
   send(frame: string | Uint8Array): void;
-  close(): void;
+  /** Leave on purpose; the code and reason travel to the daemon. */
+  close(code?: number, reason?: string): void;
+}
+
+/** The event feed's liveness, from the plugin's side (the app shell's `DaemonClient.feed`). */
+export interface PluginFeed {
+  isLive(): boolean;
+  /** Told whenever the feed goes live or drops. Returns a cancel. */
+  subscribeLive(listener: (live: boolean) => void): Cancel;
 }
 
 /** What a plugin hears on a socket route (the app shell's `SocketListeners`). */
 export interface PluginSocketListeners {
+  /** The daemon accepted the stream: from here a frame sent reaches it (a frame sent before is dropped). */
+  readonly onOpen?: () => void;
   readonly onFrame: (frame: string | Uint8Array) => void;
-  readonly onClose: (reason: string) => void;
+  /** The stream ended; `code` is the close code it ended with (`1008` is a refusal, not a drop), absent if it never opened. */
+  readonly onClose: (reason: string, code?: number) => void;
 }
 
 /**
@@ -207,6 +218,12 @@ export interface PluginClient {
    * through the same contract-hash guard as `call`. Optional until the app shell and the CLI fill it in.
    */
   socket?(key: string, params: Readonly<Record<string, string>>, listeners: PluginSocketListeners): PluginSocket;
+  /**
+   * Whether the daemon's event feed (what `subscribe` hears) is live, and when that changes. A screen that polls
+   * beside the feed polls slowly while it is live and at its own pace when it is not. Optional until the app shell
+   * fills it in.
+   */
+  feed?: PluginFeed;
   /**
    * A conditional GET (today's per-connection etag/304 list read, the held fleet list R502): sends `If-None-Match`
    * and answers `304` without a body when it still matches. Optional until the app shell and the CLI fill it in.

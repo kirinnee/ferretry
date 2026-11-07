@@ -13,8 +13,22 @@ const CREDENTIAL: Record<CallerKind, AuthenticatedCredential> = {
 const ACTOR: Record<CallerKind, string> = { host: 'admin-cli', device: 'device:d1', agent: 'ferret:s1' };
 
 /**
+ * One passkey proof as Access holds it: fresh until a claim takes it, and the claim is atomic (of two claims exactly
+ * one is answered `true`). Share one across several `callOf` calls to stand for requests admitted on the SAME proof.
+ */
+export interface OneProof {
+  fresh: boolean;
+  /** How many claims took the proof (never more than one per proof). */
+  claimed: number;
+}
+
+export const oneProof = (fresh = true): OneProof => ({ fresh, claimed: 0 });
+
+/**
  * A handler's `CallContext` as Gate stamps it (today's `RouteContext` the route tests built): the request, the raw
- * params, and the standing. `spent` counts fresh step-ups the handler spent.
+ * params, and the standing. `spent` counts the fresh proofs the handler took. `presentation.freshStepUp` is the
+ * admission SNAPSHOT (`fresh`, or the shared `proof` as it stood when the call was built), so two calls built before
+ * either runs both say fresh, as two requests racing on one proof would.
  */
 export function callOf(options: {
   readonly method: 'GET' | 'POST';
@@ -22,10 +36,13 @@ export function callOf(options: {
   readonly body?: unknown;
   readonly kind?: CallerKind;
   readonly fresh?: boolean;
+  /** The proof this call's claim takes; defaults to a private one that is fresh when `fresh` is. */
+  readonly proof?: OneProof;
   readonly params?: Readonly<Record<string, string>>;
 }): { readonly call: CallContext; readonly spent: () => number } {
   const kind = options.kind ?? 'host';
-  let spent = 0;
+  const proof = options.proof ?? oneProof(options.fresh === true);
+  const snapshot = proof.fresh;
   const text = options.body === undefined ? '' : JSON.stringify(options.body);
   const governance: CallerGovernance = {
     governed: kind === 'device',
@@ -35,8 +52,8 @@ export function callOf(options: {
     local: kind !== 'device',
     adminToken: kind === 'host',
     actor: ACTOR[kind],
-    stepUp: options.fresh === true,
-    freshStepUp: options.fresh === true,
+    stepUp: snapshot,
+    freshStepUp: snapshot,
   };
   const call = {
     request: {
@@ -54,9 +71,12 @@ export function callOf(options: {
     credential: CREDENTIAL[kind],
     governance,
     presentation,
-    spendFreshStepUp: () => {
-      spent += 1;
+    claimFreshStepUp: () => {
+      if (!proof.fresh) return false;
+      proof.fresh = false;
+      proof.claimed += 1;
+      return true;
     },
   } as unknown as CallContext;
-  return { call, spent: () => spent };
+  return { call, spent: () => proof.claimed };
 }

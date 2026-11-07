@@ -17,7 +17,7 @@ import {
 import { browserProxyStatus, proxyEndpoint, type ResolvedBrowserProxy } from '../proxy/index.ts';
 import type { BrowserSessionLauncher } from '../pages/service.ts';
 import type { ChildHandle, Clock, FetchPort, SpawnPort } from '@ferretry/kernel/contract';
-import { type BrowserAutomation } from '../pages/automation.ts';
+import type { BrowserAutomation } from '../pages/automation.ts';
 import type { BrowserHost } from '../adapters/host.ts';
 import { type ListenerProverPort, ProcListenerProver } from './control/adapters/listener-prover.ts';
 import type { BrowserDisplayPort } from './control/adapters/login-runtime.ts';

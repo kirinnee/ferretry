@@ -12,7 +12,7 @@
  *   immutable once written, and a wrong release would never be corrected; an absent one only waits.
  */
 import { compareVersions } from '../board/versions.ts';
-import { type ReleasedIn } from '../../../contract/index.ts';
+import type { ReleasedIn } from '../../../contract/index.ts';
 import { z } from 'zod';
 import { type PolledRelease, RELEASES_PER_QUERY } from './query.ts';
 

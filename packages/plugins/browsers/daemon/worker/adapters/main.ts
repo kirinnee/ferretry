@@ -33,9 +33,9 @@ import {
   type BrowserModifier,
   type BrowserMouseButton,
   type BrowserTarget,
-} from '../../pages/wire/target.ts';
-import { type BrowserInputEvent } from '../../pages/wire/browser.ts';
-import { BrowserPageLifecycleRequestSchema } from '../../pages/wire/page-lifecycle.ts';
+} from '../../../contract/wire/target.ts';
+import { type BrowserInputEvent } from '../../../contract/wire/browser.ts';
+import { BrowserPageLifecycleRequestSchema } from '../../../contract/wire/page-lifecycle.ts';
 import {
   type Browser,
   type BrowserContext,
