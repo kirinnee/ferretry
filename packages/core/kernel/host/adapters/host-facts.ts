@@ -5,9 +5,34 @@
 import { readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { availableParallelism, totalmem } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import type { HostFactsPort } from '../../contract/ports.ts';
+import type { CgroupFile, HostFactsPort, ProcPidFile, ProcSystemFile } from '../../contract/ports.ts';
 
 const SEGMENT = /^[A-Za-z0-9_.@:+-]+$/u;
+const PROC_PID_FILES: ReadonlySet<ProcPidFile> = new Set(['stat', 'status', 'comm', 'cmdline', 'cgroup', 'statm']);
+const PROC_SYSTEM_FILES: ReadonlySet<ProcSystemFile> = new Set([
+  'stat',
+  'meminfo',
+  'sys/kernel/pid_max',
+  'net/tcp',
+  'net/tcp6',
+]);
+const CGROUP_FILES: ReadonlySet<CgroupFile> = new Set([
+  'cgroup.controllers',
+  'cgroup.procs',
+  'memory.events',
+  'memory.events.local',
+  'memory.high',
+  'memory.max',
+  'memory.swap.max',
+  'pids.max',
+  'cpu.weight',
+  'cpu.max',
+]);
+
+function allowedFile<T extends string>(file: T, allowed: ReadonlySet<T>): T {
+  if (!allowed.has(file)) throw new RangeError('not a declared host facts file');
+  return file;
+}
 
 function pidOf(pid: number | 'self'): string {
   if (pid === 'self') return 'self';
@@ -16,11 +41,12 @@ function pidOf(pid: number | 'self'): string {
 }
 
 function fdOf(fd: string): string {
-  if (!/^[0-9]{1,9}$/u.test(fd)) throw new RangeError(`${fd} is not a descriptor number`);
+  if (typeof fd !== 'string' || !/^[0-9]{1,9}$/u.test(fd)) throw new RangeError('not a descriptor number');
   return fd;
 }
 
 function cgroupPathOf(path: string): string[] {
+  if (typeof path !== 'string') throw new RangeError('not a cgroup path');
   const segments = path.split('/').filter(segment => segment !== '');
   for (const segment of segments)
     if (!SEGMENT.test(segment) || segment === '.' || segment === '..')
@@ -43,8 +69,8 @@ export function nodeHostFacts(roots: { readonly proc?: string; readonly sys?: st
     cpus: availableParallelism(),
     totalMemoryBytes: totalmem(),
     pids: async () => (await readdir(proc)).filter(name => /^[1-9][0-9]*$/u.test(name)).map(name => Number(name)),
-    procFile: async (pid, file) => await readFile(join(proc, pidOf(pid), file), 'utf8'),
-    procSystemFile: async file => await readFile(join(proc, file), 'utf8'),
+    procFile: async (pid, file) => await readFile(join(proc, pidOf(pid), allowedFile(file, PROC_PID_FILES)), 'utf8'),
+    procSystemFile: async file => await readFile(join(proc, allowedFile(file, PROC_SYSTEM_FILES)), 'utf8'),
     procTasks: async pid => await readdir(join(proc, pidOf(pid), 'task')),
     procTaskChildren: async (pid, task) =>
       await readFile(join(proc, pidOf(pid), 'task', pidOf(task), 'children'), 'utf8'),
@@ -55,7 +81,8 @@ export function nodeHostFacts(roots: { readonly proc?: string; readonly sys?: st
       return { character: found.isCharacterDevice(), device: found.rdev };
     },
     procExecutable: async pid => await readlink(join(proc, pidOf(pid), 'exe')),
-    cgroupFile: async (path, file) => await readFile(join(cgroupRoot, ...cgroupPathOf(path), file), 'utf8'),
+    cgroupFile: async (path, file) =>
+      await readFile(join(cgroupRoot, ...cgroupPathOf(path), allowedFile(file, CGROUP_FILES)), 'utf8'),
     cgroupChildren: async path => await readdir(join(cgroupRoot, ...cgroupPathOf(path))),
     blockScheduler: async (major, minor) => {
       let node = await realpath(

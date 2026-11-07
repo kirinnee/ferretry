@@ -3,6 +3,7 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { nodeHostFacts } from '../../../host/adapters/host-facts.ts';
+import type { CgroupFile, ProcPidFile, ProcSystemFile } from '../../../contract/ports.ts';
 
 const roots: string[] = [];
 afterAll(async () => {
@@ -36,6 +37,37 @@ async function tree() {
 }
 
 describe('TT nodeHostFacts on a fixture tree', () => {
+  test('TT runtime file allowlists refuse traversal and undeclared interface files', async () => {
+    const facts = await tree();
+    for (const file of ['../net/tcp', 'fd/0', 'exe', '/stat', '', 'stat\0', 1, null])
+      await expect(facts.procFile(42, file as ProcPidFile)).rejects.toBeInstanceOf(RangeError);
+    for (const file of ['42/stat', '../proc/42/stat', 'sys/kernel/hostname', '', {}, null])
+      await expect(facts.procSystemFile(file as ProcSystemFile)).rejects.toBeInstanceOf(RangeError);
+    for (const file of ['../user.slice/cpu.weight', 'cgroup.subtree_control', '', {}, null])
+      await expect(facts.cgroupFile('user.slice', file as CgroupFile)).rejects.toBeInstanceOf(RangeError);
+  });
+
+  test('TT runtime pid and cgroup path validation rejects non-numbers and unsafe segments', async () => {
+    const facts = await tree();
+    for (const pid of [0, -1, 1.5, NaN, Infinity, '42', '../42', null, {}, Number.MAX_SAFE_INTEGER + 1]) {
+      const value = pid as number;
+      for (const read of [
+        () => facts.procFile(value, 'stat'),
+        () => facts.procTasks(value),
+        () => facts.procTaskChildren(42, value),
+        () => facts.procFds(value),
+        () => facts.procFdLink(value, '0'),
+        () => facts.procFdReach(value, '0'),
+        () => facts.procExecutable(value),
+      ])
+        await expect(read()).rejects.toBeInstanceOf(RangeError);
+    }
+    for (const path of ['..', 'user.slice/../user.slice', '.', 'x\0y', {}, null]) {
+      await expect(facts.cgroupFile(path as string, 'cpu.weight')).rejects.toBeInstanceOf(RangeError);
+      await expect(facts.cgroupChildren(path as string)).rejects.toBeInstanceOf(RangeError);
+    }
+  });
+
   test('process reads', async () => {
     const facts = await tree();
     expect(await facts.pids()).toEqual([42]);
