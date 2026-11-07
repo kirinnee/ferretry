@@ -1,7 +1,7 @@
 /**
  * A stand-in for the slot the move page offers (`ferrets.move-account`): one button per scripted account, each
  * proposing its wrapper through the callbacks the contract declares, exactly as Runtimes' panel does. The host element
- * carries `data-slot`, which is how the page tells a slot with a panel from one without.
+ * carries `data-slot` and each panel `fy-panel`, which is how the page tells a slot with a panel from one without.
  */
 import type { ReactNode } from 'react';
 import type { ChosenFerretAccount, HarnessKey } from '../../../../contract/index.ts';
@@ -31,7 +31,7 @@ export const fakeSlot =
     return (
       <div className="fy-slot" data-slot="ferrets.move-account">
         {/* biome-ignore lint/a11y/useSemanticElements: a stand-in for the contributed picker */}
-        <div role="group" aria-labelledby={field.labelId}>
+        <div className="fy-panel" role="group" aria-labelledby={field.labelId}>
           {accounts.map(account => (
             <button
               aria-pressed={field.value === account.wrapper}

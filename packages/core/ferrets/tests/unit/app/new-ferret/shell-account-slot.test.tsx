@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { holdsPicker } from '../../../../app/features/new-ferret/shell-account-slot.tsx';
+import { holdsPicker } from '../../../../app/lib/slot-picker.ts';
 import { initialAgentOf } from '../../../../app/views/new-ferret.tsx';
 import { mount, must } from '../support/dom.ts';
 
@@ -11,7 +11,7 @@ const slotMarkup = (panels: string): string => `<div class="fy-slot" data-slot="
 const holds = async (html: string): Promise<boolean> => {
   // biome-ignore lint/security/noDangerouslySetInnerHtml: a fixed test fixture of the shell slot's markup, never daemon data
   const screen = await mount(<div dangerouslySetInnerHTML={{ __html: html }} />);
-  const answer = holdsPicker(must(screen.container.firstElementChild as HTMLElement, 'the root'));
+  const answer = holdsPicker(must(screen.container.firstElementChild as HTMLElement, 'the root'), SLOT);
   await screen.unmount();
   return answer;
 };

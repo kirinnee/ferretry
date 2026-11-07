@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { AccountSlot } from '../../../../app/features/move/account-slot.tsx';
+import { AccountSlot, type RenderAccountSlot } from '../../../../app/features/move/account-slot.tsx';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { chosenAccount, emptySlot, fakeSlot } from './slot.tsx';
 
@@ -47,5 +47,20 @@ describe('AccountSlot', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
     expect(typed).toEqual(['codex-z']);
+  });
+
+  it('falls back to a typed wrapper when the slot only holds the shell line saying its plugin cannot draw', async () => {
+    const blocked: RenderAccountSlot = () => (
+      <div className="fy-slot" data-slot="ferrets.move-account">
+        <div className="fy-panel" data-panel="runtimes.move-account">
+          <p className="fy-shell-line fy-shell-line--muted" role="status">
+            Runtimes is paused on this daemon.
+          </p>
+        </div>
+      </div>
+    );
+    live = await mount(<AccountSlot fallbackLabel="Wrapper" field={field()} render={blocked} />);
+    expect(live.container.querySelector('.fy-shell-line')).not.toBeNull();
+    expect(live.container.querySelector('input#wrapper')).not.toBeNull();
   });
 });

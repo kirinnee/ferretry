@@ -3,13 +3,15 @@
  * contributes to it (Runtimes offers its runtime picker, with each login's health and quota). The page owns the typed
  * wrapper and the model box; a panel only proposes through the callbacks Ferrets' contract declares.
  *
- * A daemon without Runtimes contributes no panel, and the slot then draws nothing. The page must still be usable, so
- * when the slot's host holds no panel the wrapper is a plain text box, submitted exactly as typed: the daemon is the
- * thing that accepts or refuses a wrapper.
+ * A daemon without Runtimes contributes no panel, and Runtimes paused, still loading or failed on a daemon leaves the
+ * shell's one-line "cannot draw this" in the slot instead. The page must still be usable in both, so when the slot
+ * holds no working picker (the same rule as the new-ferret page) the wrapper is a plain text box, submitted exactly as
+ * typed: the daemon is the thing that accepts or refuses a wrapper.
  */
 
 import { type ReactNode, useId, useLayoutEffect, useRef, useState } from 'react';
-import type { ChosenFerretAccount, HarnessKey } from '../../../contract/index.ts';
+import { type ChosenFerretAccount, type HarnessKey, MOVE_ACCOUNT_SLOT } from '../../../contract/index.ts';
+import { holdsPicker } from '../../lib/slot-picker.ts';
 
 export interface AccountSlotField {
   readonly harness: HarnessKey;
@@ -40,7 +42,7 @@ export function AccountSlot({
   const [bare, setBare] = useState<boolean | null>(null);
   useLayoutEffect(() => {
     const node = host.current;
-    setBare(node !== null && node.querySelector('[data-slot]') === null);
+    setBare(node !== null && !holdsPicker(node, MOVE_ACCOUNT_SLOT));
   });
   const fallbackId = useId().replace(/:/gu, '');
   return (

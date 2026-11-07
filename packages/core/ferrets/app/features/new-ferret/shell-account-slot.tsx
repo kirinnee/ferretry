@@ -10,6 +10,7 @@
 import { PanelSlot } from '@ferretry/app';
 import { NEW_FERRET_ACCOUNT_SLOT, type NewFerretAccountSlotProps } from '@ferretry/core-ferrets/contract';
 import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
+import { holdsPicker } from '../../lib/slot-picker.ts';
 
 export interface AccountSlotProps {
   readonly daemon: string;
@@ -18,20 +19,12 @@ export interface AccountSlotProps {
   readonly fallback: ReactNode;
 }
 
-/** Whether a slot element holds at least one panel and none of them is the shell's one-line "cannot draw this". */
-export const holdsPicker = (root: HTMLElement | null): boolean => {
-  const slot = root?.querySelector(`[data-slot="${NEW_FERRET_ACCOUNT_SLOT}"]`) ?? null;
-  if (slot === null) return false;
-  const panels = slot.querySelectorAll('.fy-panel');
-  return panels.length > 0 && slot.querySelector('.fy-shell-line') === null;
-};
-
 export function ShellAccountSlot({ daemon, slot, fallback }: AccountSlotProps): ReactNode {
   const root = useRef<HTMLDivElement>(null);
   // Assume a picker until the committed tree says otherwise, so a contributed picker never flashes a second box.
   const [picker, setPicker] = useState(true);
   useLayoutEffect(() => {
-    const next = holdsPicker(root.current);
+    const next = holdsPicker(root.current, NEW_FERRET_ACCOUNT_SLOT);
     if (next !== picker) setPicker(next);
   });
   return (
