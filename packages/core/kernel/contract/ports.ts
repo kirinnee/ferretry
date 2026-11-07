@@ -284,7 +284,23 @@ export interface ConfigFilesWriter {
 // roots ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The declared roots (§7.7). */
-export type RootName = 'agent-homes' | 'harness-history' | 'worktrees' | 'work' | 'imports' | 'downloads';
+export type RootName =
+  | 'agent-homes'
+  | 'harness-history'
+  | 'worktrees'
+  | 'work'
+  | 'imports'
+  | 'downloads'
+  /** Logins' own sign-in material (`state/logins/credentials`): Logins alone, even if another plugin declares it. */
+  | 'credentials';
+
+/** `RootHandle.copyTree`: what to bring, and how. */
+export interface TreeCopyOptions {
+  /** Link the destination name to the source folder (today's skill link into a runtime home) instead of copying. */
+  readonly link?: boolean;
+  /** The most entries a copy walks (folders count); past it the copy stops and throws. Default 10 000. */
+  readonly maxEntries?: number;
+}
 
 export interface RootStat {
   readonly kind: 'file' | 'directory';
@@ -317,6 +333,16 @@ export interface RootHandle {
   readBytes(path: FencedPath, limitBytes?: number): Promise<Uint8Array>;
   /** Atomic replace by default; `exclusive` creates only (today's worktree registry write, `wx`). */
   writeText(path: FencedPath, text: string, options?: RootWriteOptions): Promise<void>;
+  /** The same, for bytes. */
+  writeBytes(path: FencedPath, bytes: Uint8Array, options?: RootWriteOptions): Promise<void>;
+  /**
+   * Brings a folder from one of THIS plugin's root handles (`source`, maybe this one) to `to` in this root: a copy
+   * (each file read off the disk, never through a link: a link inside is skipped, a file with a second hard link is
+   * skipped, modes kept) or, with `link`, one link at `to` to the source folder's real path. Both ends are fenced.
+   */
+  copyTree(source: RootHandle, from: FencedPath, to: FencedPath, options?: TreeCopyOptions): Promise<void>;
+  /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */
+  ensurePrivateDirectory(path: FencedPath): Promise<void>;
   list(path: FencedPath): Promise<readonly string[]>;
   stat(path: FencedPath): Promise<RootStat | undefined>;
   /** The leaf's own kind (a link is `symlink`); its parents are resolved and fenced as for every call. */

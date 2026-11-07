@@ -2,7 +2,7 @@ import type { Result } from '@ferretry/std';
 import { err, instantFromEpochMs, ok } from '@ferretry/std';
 import type { FencedPath, FolderRefusal, WorkFolders } from '../contract/bound.ts';
 import { insideFence } from '../contract/home.ts';
-import type { RootHandle, RootLstat, RootName, RootsPort, RootStat } from '../contract/ports.ts';
+import type { RootHandle, RootLstat, RootName, RootsPort, RootStat, RootWriteOptions } from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import type { PinRegistry } from './pins.ts';
 
@@ -15,6 +15,15 @@ export interface RootPinning {
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports']);
 const READ_ONLY_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'imports']);
+/** Internal roots only one plugin may have, whatever another manifest declares. */
+const ROOT_OWNERS: Partial<Record<RootName, string>> = { credentials: 'logins' };
+const DEFAULT_COPY_ENTRIES = 10_000;
+
+/** Every handle the kernel made, with the plugin it was made for and its fenced resolver (for `copyTree`). */
+const HANDLES = new WeakMap<
+  object,
+  { readonly plugin: string; readonly real: (path: FencedPath) => Promise<FencedPath> }
+>();
 
 export interface RootLayout {
   readonly home: string;
@@ -97,6 +106,7 @@ function rootHandle(
   base: () => string | undefined,
   check: (path: string) => Result<FencedPath, FolderRefusal> | undefined,
   pinning?: RootPinning,
+  plugin = pinning?.plugin ?? '',
 ): RootHandle {
   const ownerRoot = OWNER_ROOTS.has(name);
   const readOnly = READ_ONLY_ROOTS.has(name);
@@ -125,7 +135,27 @@ function rootHandle(
   const writable = (): void => {
     if (readOnly) throw new RootError('read_only');
   };
-  return {
+  const write = async (path: FencedPath, data: string | Uint8Array, options?: RootWriteOptions): Promise<void> => {
+    writable();
+    const mode = options?.mode ?? 0o600;
+    if (options?.exclusive === true) await fs.writeExclusive(await realParent(path), data, mode);
+    else await fs.writeAtomic(await real(path), data, mode);
+  };
+  /** Copies `from` (a real, fenced source folder) into `to`: off the disk, never through a link or a hard link. */
+  const copyInto = async (from: string, to: string, budget: { left: number }): Promise<void> => {
+    await fs.mkdirp(to, 0o700);
+    for (const name of await fs.list(from)) {
+      budget.left -= 1;
+      if (budget.left < 0) throw new RootError('outside');
+      const info = await fs.lstat(`${from}/${name}`);
+      if (info === undefined) continue;
+      if (info.kind === 'directory') await copyInto(`${from}/${name}`, `${to}/${name}`, budget);
+      else if (info.kind === 'file' && (info.links ?? 1) <= 1)
+        await fs.writeAtomic(`${to}/${name}`, await fs.readBytes(`${from}/${name}`), (info.mode ?? 0o600) & 0o777);
+      // a link is left alone (never entered), a device or a hard-linked file is never read
+    }
+  };
+  const handle: RootHandle = {
     name,
     resolve: relative => {
       const root = base();
@@ -142,11 +172,31 @@ function rootHandle(
       const bytes = await fs.readBytes(await real(path));
       return limit === undefined ? bytes : bytes.slice(0, limit);
     },
-    writeText: async (path, text, options) => {
+    writeText: async (path, text, options) => await write(path, text, options),
+    writeBytes: async (path, bytes, options) => await write(path, bytes, options),
+    copyTree: async (source, from, to, options) => {
       writable();
-      const mode = options?.mode ?? 0o600;
-      if (options?.exclusive === true) await fs.writeExclusive(await realParent(path), text, mode);
-      else await fs.writeAtomic(await real(path), text, mode);
+      const known = HANDLES.get(source);
+      if (known === undefined || known.plugin !== plugin) throw new RootError('not_declared');
+      const sourceReal = await known.real(from);
+      const info = await fs.lstat(sourceReal);
+      if (info?.kind !== 'directory') throw new RootError('outside');
+      if (options?.link === true) {
+        await fs.symlink(sourceReal, await realParent(to));
+        return;
+      }
+      // A copy lands in a NEW folder: nothing already there (a planted link) can redirect what it writes.
+      const destination = await realParent(to);
+      if ((await fs.lstat(destination)) !== undefined) throw new RootError('outside');
+      await copyInto(sourceReal, destination, { left: options?.maxEntries ?? DEFAULT_COPY_ENTRIES });
+    },
+    ensurePrivateDirectory: async path => {
+      writable();
+      const at = await realParent(path);
+      const info = await fs.lstat(at);
+      if (info !== undefined && info.kind !== 'directory') throw new RootError('outside');
+      if (info === undefined) await fs.mkdirp(at, 0o700);
+      await fs.chmod(at, 0o700);
     },
     lstat: async (path): Promise<RootLstat | undefined> => {
       const info = await fs.lstat(await realParent(path));
@@ -194,6 +244,8 @@ function rootHandle(
       return pinned;
     },
   };
+  HANDLES.set(handle, { plugin, real });
+  return handle;
 }
 
 /** The roots port for one plugin: only roots its manifest declared (§3.7); anything else throws. */
@@ -208,12 +260,16 @@ export function rootsPortFor(
   return {
     root: (name, scope) => {
       if (!allowed.has(name)) throw new RootError('not_declared');
+      const owner = ROOT_OWNERS[name];
+      if (owner !== undefined && owner !== layout.plugin) throw new RootError('not_declared');
       const base = (): string | undefined => {
         switch (name) {
           case 'agent-homes':
             return join(`${layout.home}/state/${layout.plugin}/agent-homes`, scope?.subfolder ?? '');
           case 'downloads':
             return `${layout.home}/state/${layout.plugin}/downloads`;
+          case 'credentials':
+            return `${layout.home}/state/${layout.plugin}/credentials`;
           case 'worktrees':
             return layout.worktrees;
           case 'work':
@@ -235,6 +291,7 @@ export function rootsPortFor(
         base,
         check,
         pins === undefined ? undefined : { registry: pins, plugin: layout.plugin },
+        layout.plugin,
       );
     },
   };
