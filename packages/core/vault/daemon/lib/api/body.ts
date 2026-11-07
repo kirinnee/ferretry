@@ -8,13 +8,27 @@ import type { z } from 'zod';
  * values, so a rejected credential never comes back out in an error message.
  */
 
-/** The body bound the secret routes read under: their largest body is one value of at most 16 KiB, plus a bundle. */
-export const SECRET_BODY_BYTES = 512 * 1024;
+/** Decoded bytes in the largest single payload any API request legitimately carries — one attachment (today's value). */
+const LARGEST_PAYLOAD_BYTES = 32 * 1024 * 1024;
+
+/** What base64 costs: four characters per three bytes, rounded up to the padded quantum. */
+const ENCODED_PAYLOAD_BYTES = Math.ceil(LARGEST_PAYLOAD_BYTES / 3) * 4;
+
+/** Room around the payload for the JSON envelope. */
+const ENVELOPE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The bound the secret routes read under — today's `MAX_REQUEST_BODY_BYTES`, copied unchanged.
+ *
+ * Today every secret route (the import bundle above all) parsed under this default, and a valid bundle of many
+ * secrets runs well past half a mebibyte, so a tighter bound here would refuse imports today accepts.
+ */
+export const MAX_REQUEST_BODY_BYTES = ENCODED_PAYLOAD_BYTES + ENVELOPE_BYTES;
 
 export async function parseBody<Schema extends z.ZodType>(
   request: ApiRequest,
   schema: Schema,
-  maxBytes: number = SECRET_BODY_BYTES,
+  maxBytes: number = MAX_REQUEST_BODY_BYTES,
 ): Promise<z.output<Schema>> {
   let text: string;
   try {
