@@ -1,5 +1,5 @@
 import { posix } from 'node:path';
-import { CAPABILITIES, grantRefusalCode } from '@ferretry/core-gate/contract';
+import { CAPABILITIES, grantRefusalCode, STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 import { ApiError, type CallContext, type CapabilityDemand } from '@ferretry/kernel/contract';
 
 const TERMINAL_USE: CapabilityDemand = { capability: CAPABILITIES.terminal, axis: 'use' };
@@ -26,7 +26,8 @@ export async function terminalLaunchRefusal(
       'known project roots are not bound, so this daemon cannot classify the launch',
       'launch_roots_unavailable',
     );
-  const outside = !flagged && !(await knownRoots!()).some(root => within(request.folder, root));
+  const outside =
+    !flagged && knownRoots !== undefined && !(await knownRoots()).some(root => within(request.folder, root));
   if (!flagged && !outside) return;
   if (call.governance === undefined)
     throw new ApiError(503, 'this daemon cannot decide terminal.use for the launch', 'launch_gate_unavailable');
@@ -38,7 +39,7 @@ export async function terminalLaunchRefusal(
   throw new ApiError(
     403,
     'starting an agent with its own flags, or outside every project, is terminal access',
-    decision.refusal === 'step-up-required' ? 'step_up_required' : grantRefusalCode(decision.refusal),
+    decision.refusal === 'step-up-required' ? STEP_UP_REQUIRED_CODE : grantRefusalCode(decision.refusal),
     undefined,
     decision.refusal === 'step-up-required' ? { demand: TERMINAL_USE } : undefined,
   );
