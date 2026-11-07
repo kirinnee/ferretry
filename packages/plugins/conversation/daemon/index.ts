@@ -111,6 +111,12 @@ export default implementDaemon(manifest, {
           release: ferret => b.release(ferret),
           look: (ferret, phase) => a.turns.look(ferret, phase),
           forget: ferret => a.turns.forget(ferret),
+          withdrawQuestion: ferret =>
+            void a
+              .withdrawQuestion(ferret)
+              .catch((error: unknown) =>
+                ctx.kernel.log.warn(`conversation could not withdraw the question of ${ferret}: ${String(error)}`),
+              ),
           warn: message => ctx.kernel.log.warn(message),
         }),
       },

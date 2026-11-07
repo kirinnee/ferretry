@@ -20,16 +20,18 @@ import { sendRecordFor, sendRecordView } from './delivery/lib/index.ts';
 import { sentDraftClearer, sharedDraftRoutes, sharedDraftSocketRoutes } from './drafts/lib/mounts/shared-drafts.ts';
 import { SessionSendError, sessionSendRoutes } from './delivery/lib/mounts/session-send.ts';
 import { StateDraftRepository } from './drafts/adapters/index.ts';
+import { clearAskedQuestion } from './questions/adapters/index.ts';
 import { TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
 import { StateQueueStore } from './queue/adapters/index.ts';
 import { NotifyingSessionQueueStore, QueueRefused, SessionQueueService } from './queue/lib/index.ts';
-import { sessionAnswerRoutes } from './questions/lib/mounts/session-answer.ts';
+import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './questions/lib/mounts/session-answer.ts';
 import { sessionCompactAtRoutes } from './turns/lib/mounts/session-compact-at.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
 import { parseSessionId, type SessionId } from './seams/ferret-id.ts';
 import type { ClockPort } from './seams/ports.ts';
+import type { SessionView } from './seams/protocol.ts';
 
 /** Said by every route that needs to type into, or read the screen of, a ferret's terminal. */
 export const TERMINAL_PENDING =
@@ -42,6 +44,9 @@ const pendingRefusal = (): ConversationRefusal => ({
   code: 'conversation_terminal_unavailable',
   message: TERMINAL_PENDING,
 });
+
+/** One answer as the terminal seam takes it: the route's request, or the port's with a minted request id. */
+type AnswerToTerminal = Parameters<SessionAnswerSubsystem['answer']>[1];
 
 /** What part a builds: its routes, its sockets, the half of the port it owns and its sitrep lines. */
 export interface ConversationAHalf {
@@ -69,6 +74,8 @@ export interface ConversationAHalf {
     | 'editDraft'
   >;
   readonly sitrep: SitrepLineSource;
+  /** The ferret stopped or went away: the question it was asking is withdrawn, so `question.json` goes. */
+  withdrawQuestion(ferret: string): Promise<void>;
   /** An ask was answered: the draft of its item goes with it. */
   onAskAnswered(answered: { readonly ferret: string; readonly askId: AskId }): Promise<void>;
   /** What Ferrets says of a ferret's phase, for `turn.ended`. */
@@ -141,6 +148,7 @@ export function buildConversationA(deps: {
   const terminal = {
     deliver: async (_ferret: string, _message: string): Promise<never> => pending(),
     interrupt: async (_ferret: string): Promise<never> => pending(),
+    answer: async (_ferret: string, _request: AnswerToTerminal): Promise<SessionView> => pending(),
   };
   const interruptFerret = async (ferret: string): Promise<void> => {
     await terminal.interrupt(ferret);
@@ -163,6 +171,16 @@ export function buildConversationA(deps: {
     // The transcript it was proved against stays in the file: the route and the port answer the question only.
     const { transcript: _proof, ...question } = read.value;
     return question;
+  };
+  /**
+   * Answers through the terminal seam. An answer that landed ends the question, so `question.json` goes with it (the
+   * route's subsystem "returns only after … state cleared its exact bound tool id"): the route, the port and the sitrep
+   * then say none instead of the question already answered.
+   */
+  const answerQuestion = async (ferret: string, request: AnswerToTerminal): Promise<SessionView> => {
+    const view = await terminal.answer(ferret, request);
+    await clearAskedQuestion(kernel.state, ferret, request.toolUseId);
+    return view;
   };
 
   const mounts: MountRoute[] = [
@@ -190,7 +208,7 @@ export function buildConversationA(deps: {
       },
       sentDraftClearer(drafts),
     ),
-    ...sessionAnswerRoutes({ question: askedQuestion, answer: async () => pending() }),
+    ...sessionAnswerRoutes({ question: askedQuestion, answer: answerQuestion }),
     ...sessionCompactAtRoutes({ get: async () => pending(), set: async () => pending() }),
     ...sharedDraftRoutes(drafts),
   ];
@@ -246,7 +264,17 @@ export function buildConversationA(deps: {
     enterSend: async () => err(pendingRefusal()),
     composer: async () => err(pendingRefusal()),
     question: async ferret => await askedQuestion(ferret),
-    answer: async () => err(pendingRefusal()),
+    answer: async (ferret, request) => {
+      try {
+        await answerQuestion(ferret, { ...request, requestId: String(kernel.ids.mint('answer')) });
+      } catch (error) {
+        return err({
+          code: (error instanceof ApiError ? error.code : undefined) ?? 'answer_refused',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return ok(undefined);
+    },
     compactAt: async () => undefined,
     setCompactAt: async () => err(pendingRefusal()),
     draft: async (ferret, slot) => await drafts.read(ferret, slot === 'chat' ? undefined : slot),
@@ -288,6 +316,7 @@ export function buildConversationA(deps: {
     sockets: socketTable(sockets),
     api,
     sitrep,
+    withdrawQuestion: async ferret => await clearAskedQuestion(kernel.state, ferret),
     onAskAnswered: async ({ ferret, askId }) => {
       await drafts.discard(ferret, askId).catch(() => undefined);
     },

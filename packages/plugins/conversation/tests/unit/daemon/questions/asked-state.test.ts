@@ -2,11 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import { fixedClock, testHost } from '@ferretry/kernel/testing';
+import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { CONVERSATION_STATE, ConversationPort, QUESTION_STATE } from '../../../../contract/index.ts';
 import daemon from '../../../../daemon/index.ts';
-import { readAskedQuestion, writeAskedQuestion } from '../../../../daemon/questions/adapters/state-asked-question.ts';
+import {
+  clearAskedQuestion,
+  readAskedQuestion,
+  writeAskedQuestion,
+} from '../../../../daemon/questions/adapters/state-asked-question.ts';
 import { parseAskedQuestion } from '../../../../daemon/questions/lib/asked.ts';
 import { fixtureTexts } from '../../../support/fixtures.ts';
 import { memoryStatePort } from '../../../support/state.ts';
@@ -23,12 +27,14 @@ async function conversation() {
   const state = memoryStatePort(CONVERSATION_STATE);
   const ferrets = new FakeFerrets();
   ferrets.add({ id: F1, state: 'working' });
+  const built: { half?: ReturnType<NonNullable<typeof daemon.build>> } = {};
   const implementation = {
     ...daemon,
     build: (ctx: Parameters<NonNullable<typeof daemon.build>>[0]) => {
       const build = daemon.build;
       if (build === undefined) throw new Error('the conversation daemon half has no build');
-      return build({ ...ctx, kernel: { ...ctx.kernel, state } });
+      built.half = build({ ...ctx, kernel: { ...ctx.kernel, state } });
+      return built.half;
     },
   } as typeof daemon;
   const host = await testHost({
@@ -36,8 +42,21 @@ async function conversation() {
     fakes: { ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-10-30T04:40:00Z'),
   });
-  return { host, state };
+  const changed = (payload: Parameters<NonNullable<typeof built.half>['hooks']['ferret.changed']>[0]) =>
+    built.half?.hooks['ferret.changed'](payload);
+  return { host, state, changed };
 }
+
+/** The live payload asking another question, under another tool use. */
+const LATER = (() => {
+  const envelope = JSON.parse(PAYLOAD) as { tool_use_id: string; tool_input: { questions: { question: string }[] } };
+  const [first] = envelope.tool_input.questions;
+  return JSON.stringify({
+    ...envelope,
+    tool_use_id: 'toolu_later',
+    tool_input: { questions: [{ ...first, question: 'Choice 2 of 5 — which colour?' }] },
+  });
+})();
 
 describe('question.json holds the parsed question, never the raw hook payload', () => {
   test('F-0331 the hook payload is parsed when written, and both readers read it back', async () => {
@@ -89,6 +108,7 @@ describe('question.json holds the parsed question, never the raw hook payload', 
 
   test('what cannot be stored whole is not written: another transcript, another tool, several questions at once', async () => {
     const { host, state } = await conversation();
+    // Each payload replaces the file whole: an earlier question stored first is cleared by every one of them.
     const envelope = JSON.parse(PAYLOAD) as { tool_input: { questions: unknown[] } };
     const twice = JSON.stringify({
       ...envelope,
@@ -100,11 +120,78 @@ describe('question.json holds the parsed question, never the raw hook payload', 
       [JSON.stringify({ ...envelope, tool_name: 'Bash' }), TRANSCRIPT],
       [twice, TRANSCRIPT],
       ['not json', TRANSCRIPT],
-    ] as const)
+    ] as const) {
+      expect(await writeAskedQuestion(state, F1, PAYLOAD, ASKED_AT, TRANSCRIPT)).toBeDefined();
       expect(await writeAskedQuestion(state, F1, payload, ASKED_AT, transcript)).toBeUndefined();
+      const left = await state.read(QUESTION_STATE, F1);
+      expect(left.ok && left.value).toBeUndefined();
+    }
     const stored = await state.read(QUESTION_STATE, F1);
     expect(stored.ok && stored.value).toBeUndefined();
     expect(await host.provided(ConversationPort).question(F1)).toBeUndefined();
+    await host.stop();
+  });
+});
+
+describe('question.json is cleared when the question is answered or withdrawn', () => {
+  test('an answered question goes: the route and the port then say none', async () => {
+    const { host, state } = await conversation();
+    const asked = await writeAskedQuestion(state, F1, PAYLOAD, ASKED_AT, TRANSCRIPT);
+    expect((await host.request('GET', '/v1/ferrets/f1/question', { as: owner() })).json()).toMatchObject({
+      question: { toolUseId: asked?.toolUseId },
+    });
+    // The answer step's clear (the terminal seam answers, then this runs for the exact tool use it answered).
+    await clearAskedQuestion(state, F1, asked?.toolUseId);
+    expect((await host.request('GET', '/v1/ferrets/f1/question', { as: owner() })).json()).toEqual({ question: null });
+    expect(await host.provided(ConversationPort).question(F1)).toBeUndefined();
+    await host.stop();
+  });
+
+  test('answering an earlier question leaves a later one alone', async () => {
+    const { host, state } = await conversation();
+    const first = await writeAskedQuestion(state, F1, PAYLOAD, ASKED_AT, TRANSCRIPT);
+    const later = await writeAskedQuestion(state, F1, LATER, ASKED_AT, TRANSCRIPT);
+    await clearAskedQuestion(state, F1, first?.toolUseId);
+    expect((await host.provided(ConversationPort).question(F1))?.toolUseId).toBe(later?.toolUseId as string);
+    await host.stop();
+  });
+
+  test('an answer the terminal could not deliver keeps the question pending', async () => {
+    const { host, state } = await conversation();
+    const asked = await writeAskedQuestion(state, F1, PAYLOAD, ASKED_AT, TRANSCRIPT);
+    const answer = await host.provided(ConversationPort).answer(F1, {
+      toolUseId: asked?.toolUseId ?? '',
+      labels: ['tests.example.dev'],
+    });
+    expect(answer.ok).toBe(false);
+    expect((await host.provided(ConversationPort).question(F1))?.toolUseId).toBe(asked?.toolUseId as string);
+    await host.stop();
+  });
+
+  test('a ferret that stopped or went away withdraws its question', async () => {
+    for (const [phase, change] of [
+      ['stopped', 'stopped'],
+      ['stopped', 'removed'],
+      ['stopped', 'state'],
+    ] as const) {
+      const { host, state, changed } = await conversation();
+      await writeAskedQuestion(state, F1, PAYLOAD, ASKED_AT, TRANSCRIPT);
+      changed({ ferret: F1, state: phase, change });
+      await Bun.sleep(0);
+      expect(await host.provided(ConversationPort).question(F1)).toBeUndefined();
+      expect((await host.request('GET', '/v1/ferrets/f1/question', { as: owner() })).json()).toEqual({
+        question: null,
+      });
+      await host.stop();
+    }
+  });
+
+  test('a ferret still working keeps the question it is asking', async () => {
+    const { host, state, changed } = await conversation();
+    const asked = await writeAskedQuestion(state, F1, PAYLOAD, ASKED_AT, TRANSCRIPT);
+    changed({ ferret: F1, state: 'idle', change: 'state' });
+    await Bun.sleep(0);
+    expect((await host.provided(ConversationPort).question(F1))?.toolUseId).toBe(asked?.toolUseId as string);
     await host.stop();
   });
 });

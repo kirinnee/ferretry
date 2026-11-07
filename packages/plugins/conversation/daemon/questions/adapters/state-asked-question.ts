@@ -5,10 +5,13 @@ import { type AskedQuestion, parseAskedQuestion } from '../lib/asked.ts';
 
 /**
  * THE ONE WRITER of `question.json`: the hook's `PreToolUse` payload, read by {@link parseAskedQuestion}'s rules — a
- * whole `AskUserQuestion` call, naming `transcript` — and stored as a {@link Question}, never raw. What cannot be
- * stored whole is not stored: a payload that does not parse, names another transcript, or asks several questions at
- * once (a `Question` holds one) leaves the file as it was, and the ferret's question is then what its transcript
- * says (today's fallback when the hook's evidence is refused). Answers the question written, or `undefined`.
+ * whole `AskUserQuestion` call, naming `transcript` — and stored as a {@link Question}, never raw.
+ *
+ * EVERY PAYLOAD REPLACES THE FILE WHOLE, as today's hook file was "replaced whole by every question": what cannot be
+ * stored whole — a payload that does not parse, names another transcript, or asks several questions at once (a
+ * `Question` holds one) — clears it, so an earlier question is never shown while a different form is open, and the
+ * ferret's question is then what its transcript says (today's fallback when the hook's evidence is refused). Answers
+ * the question written, or `undefined`.
  */
 export async function writeAskedQuestion(
   state: StatePort,
@@ -19,7 +22,10 @@ export async function writeAskedQuestion(
 ): Promise<Question | undefined> {
   const asked = parseAskedQuestion(payload, Date.parse(askedAt), transcript);
   const [first, ...more] = asked?.questions ?? [];
-  if (asked === undefined || first === undefined || more.length > 0 || transcript === undefined) return undefined;
+  if (asked === undefined || first === undefined || more.length > 0 || transcript === undefined) {
+    await state.remove(QUESTION_STATE, ferret);
+    return undefined;
+  }
   const question: Question = {
     format: 1,
     toolUseId: asked.toolUseId,
@@ -34,6 +40,20 @@ export async function writeAskedQuestion(
   };
   await state.write(QUESTION_STATE, question, ferret);
   return question;
+}
+
+/**
+ * The question is no longer the one the ferret is waiting on: it was answered, or withdrawn (the ferret stopped or went
+ * away), so `question.json` goes and the question route, the port and the sitrep say none (`contract/port.ts`: "none
+ * when it asks nothing"). With `toolUseId`, only that question is cleared: a file that already holds a LATER question
+ * is left as it is.
+ */
+export async function clearAskedQuestion(state: StatePort, ferret: string, toolUseId?: string): Promise<void> {
+  if (toolUseId !== undefined) {
+    const read = await state.read(QUESTION_STATE, ferret);
+    if (read.ok && read.value !== undefined && read.value.toolUseId !== toolUseId) return;
+  }
+  await state.remove(QUESTION_STATE, ferret);
 }
 
 /**
