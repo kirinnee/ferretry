@@ -9,12 +9,16 @@
  * document that is there and cannot be read — refused by the root, not a regular file, too large, not JSON — answers
  * `unreadable`, and MCP then binds no project server. A document that is not there was read: it disables nothing.
  * No answer quotes a document: a `.claude.json` holds far more than approvals.
+ *
+ * A ferret's FIRST launch asks before its home is made (the harness makes it in `prepareHome`, after Ferrets has
+ * gathered the launch parts). Its own name is looked up through the plain `agent-homes` root, never followed: only
+ * when NOTHING is at that name (no folder, no file, no link) is the answer `read` with no documents — every server
+ * `pending`, as today's read of a home with no `.claude.json`. Anything else that is not a folder, and every
+ * failure to look, answers `unreadable`.
  */
 import type { FerretId, FencedPath, RootHandle } from '@ferretry/kernel/contract';
 import type { ProjectServerApproval, ProjectServerApprovals, ProjectServerQuery } from '../../contract/index.ts';
-
-/** Larger than any real one: a busy `.claude.json` runs to a few hundred kilobytes. */
-const MAX_DOCUMENT_BYTES = 16 * 1024 * 1024;
+import { MAX_HOME_DOCUMENT_BYTES as MAX_DOCUMENT_BYTES } from './harness/claude-json.ts';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -99,21 +103,52 @@ async function readHomeDocument(home: RootHandle, name: string): Promise<HomeDoc
   }
 }
 
-/** `home(ferret)`: this plugin's own `agent-homes` root for that ferret's home. */
+type HomeFolder = { readonly made: boolean } | { readonly made: undefined; readonly reason: string };
+
+/**
+ * What is at the ferret home's own name, looked up (never followed) through the plain `agent-homes` root: a folder,
+ * nothing at all (a first launch), or a reason it cannot be read.
+ */
+async function homeFolder(homes: RootHandle, ferret: FerretId): Promise<HomeFolder> {
+  try {
+    const path = homes.resolve(ferret);
+    if (!path.ok) return { made: undefined, reason: "The ferret's home is outside what Ferretry may read." };
+    const info = await homes.lstat(path.value);
+    if (info === undefined) return { made: false };
+    if (info.kind !== 'directory') return { made: undefined, reason: "The ferret's home is not a folder." };
+    return { made: true };
+  } catch (error) {
+    const code = codeOf(error);
+    return { made: undefined, reason: `The ferret's home could not be read${code === undefined ? '' : ` (${code})`}.` };
+  }
+}
+
+/**
+ * `home(ferret)`: this plugin's own `agent-homes` root for that ferret's home, which throws for an id that is not one
+ * plain name; `homes()`: the plain `agent-homes` root the homes are made in.
+ */
 export class ClaudeProjectApprovals {
-  constructor(private readonly home: (ferret: FerretId) => RootHandle) {}
+  constructor(
+    private readonly home: (ferret: FerretId) => RootHandle,
+    private readonly homes: () => RootHandle,
+  ) {}
 
   async approvedProjectServers(query: ProjectServerQuery): Promise<ProjectServerApprovals> {
     let home: RootHandle;
+    let homes: RootHandle;
     try {
+      // `home` first: it refuses an id that is not one plain name before the name is looked up anywhere.
       home = this.home(query.ferret);
+      homes = this.homes();
     } catch {
       return { state: 'unreadable', reason: "The ferret's home is outside what Ferretry may read." };
     }
-    const [claudeJson, settings] = await Promise.all([
-      readHomeDocument(home, '.claude.json'),
-      readHomeDocument(home, 'settings.json'),
-    ]);
+    const folder = await homeFolder(homes, query.ferret);
+    if (folder.made === undefined) return { state: 'unreadable', reason: folder.reason };
+    const nothing: HomeDocument = { read: true, value: null };
+    const [claudeJson, settings] = folder.made
+      ? await Promise.all([readHomeDocument(home, '.claude.json'), readHomeDocument(home, 'settings.json')])
+      : [nothing, nothing];
     if (!claudeJson.read) return { state: 'unreadable', reason: claudeJson.reason };
     if (!settings.read) return { state: 'unreadable', reason: settings.reason };
     const root = query.root.replace(/(?<=.)\/+$/u, '');

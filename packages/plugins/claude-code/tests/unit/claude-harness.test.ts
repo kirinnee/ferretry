@@ -280,7 +280,10 @@ describe('ClaudeHarness', () => {
     const document = async () => JSON.parse(await readFile(claudeJson(), 'utf8')) as Document;
     const project = (doc: Document, root: string): Record<string, unknown> => doc.projects[root] ?? {};
     const approvals = (roots: ReturnType<typeof build>['roots']) =>
-      new ClaudeProjectApprovals(ferret => roots.root('agent-homes', { ferret, subfolder: ferret }));
+      new ClaudeProjectApprovals(
+        ferret => roots.root('agent-homes', { ferret, subfolder: ferret }),
+        () => roots.root('agent-homes'),
+      );
 
     test('a project server disabled in Claude stays disabled across three launches', async () => {
       const { harness, roots } = build();

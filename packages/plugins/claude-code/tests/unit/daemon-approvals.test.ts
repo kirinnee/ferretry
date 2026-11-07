@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Harness, LaunchSpec } from '@ferretry/core-ferrets/contract';
@@ -86,6 +86,11 @@ const spec = (): LaunchSpec =>
 const ask = async (claudeCode: ClaudeCodeApi, ferret: FerretId = FERRET) =>
   await claudeCode.approvedProjectServers?.({ ferret, root: ROOT, servers: ['docs', 'tracker', 'fresh'] });
 
+/** A `.claude.json` that approves every server of the project: what a read must never hand over by mistake. */
+const APPROVE_ALL = JSON.stringify({
+  projects: { [ROOT]: { hasTrustDialogAccepted: true, enableAllProjectMcpServers: true } },
+});
+
 describe('the Claude Code daemon half serves approvedProjectServers', () => {
   test('an approved server answers approved, a disabled one disabled, an unanswered one pending', async () => {
     const { claudeCode } = half();
@@ -133,5 +138,52 @@ describe('the Claude Code daemon half serves approvedProjectServers', () => {
     await writeFile(join(HOME, '.claude.json'), '{"projects": ');
     expect((await ask(claudeCode))?.state).toBe('unreadable');
     expect((await ask(claudeCode, '../f2' as FerretId))?.state).toBe('unreadable');
+  });
+
+  test("a multi-part ferret id (f2/x) is refused before it reaches a folder inside another ferret's home", async () => {
+    const { claudeCode } = half();
+    const inside = join(fixture, 'fy-home/state/claude-code/agent-homes/f2/x');
+    await mkdir(inside, { recursive: true });
+    await writeFile(join(inside, '.claude.json'), APPROVE_ALL);
+
+    expect((await ask(claudeCode, 'f2/x' as FerretId))?.state).toBe('unreadable');
+    expect((await ask(claudeCode, '../f2' as FerretId))?.state).toBe('unreadable');
+  });
+
+  test("a ferret's first launch, before its home exists, answers pending for every server, and its launch still makes the home", async () => {
+    const { claudeCode, harness } = half();
+    await rm(HOME, { recursive: true });
+
+    expect(await ask(claudeCode)).toEqual({
+      state: 'read',
+      servers: { docs: 'pending', tracker: 'pending', fresh: 'pending' },
+    });
+    await harness.prepareHome(spec());
+    expect(await ask(claudeCode)).toEqual({
+      state: 'read',
+      servers: { docs: 'pending', tracker: 'pending', fresh: 'pending' },
+    });
+  });
+
+  test('a LINK at the home name answers unreadable, even to a folder that approves everything', async () => {
+    const { claudeCode } = half();
+    await rm(HOME, { recursive: true });
+    const elsewhere = join(fixture, 'fy-home/state/claude-code/agent-homes/f9');
+    await mkdir(elsewhere, { recursive: true });
+    await writeFile(join(elsewhere, '.claude.json'), APPROVE_ALL);
+    await symlink(elsewhere, HOME);
+
+    const answer = await ask(claudeCode);
+
+    expect(answer?.state).toBe('unreadable');
+    expect(JSON.stringify(answer)).not.toContain('approved');
+  });
+
+  test('a FILE at the home name answers unreadable', async () => {
+    const { claudeCode } = half();
+    await rm(HOME, { recursive: true });
+    await writeFile(HOME, APPROVE_ALL);
+
+    expect((await ask(claudeCode))?.state).toBe('unreadable');
   });
 });

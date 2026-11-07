@@ -15,6 +15,7 @@ import { PaneDirectory, TmuxPane } from './adapters/tmux-pane.ts';
 import { factsSource, hostFacts, locationSource, npmLatest, probe, spawnRun } from './adapters/update-ports.ts';
 import { DialogAnswerService } from './lib/dialog/service.ts';
 import { PermissionAnswerService } from './lib/permission/service.ts';
+import { isConversationId } from './lib/harness/claude-path.ts';
 import { ClaudeProjectApprovals } from './lib/project-approvals.ts';
 import { dialogRoute, permissionRoute, updateStartRoute, updateViewRoute } from './lib/routes.ts';
 import { HarnessUpdateService } from './lib/update/service.ts';
@@ -77,8 +78,13 @@ export default implementDaemon(manifest, {
     const panes = new PaneDirectory();
     const pane = new TmuxPane(kernel.spawn, panes);
     const sleep = async (ms: number): Promise<void> => await kernel.clock.sleep(milliseconds(ms));
-    const approvals = new ClaudeProjectApprovals(ferret =>
-      kernel.roots.root('agent-homes', { ferret, subfolder: ferret }),
+    // The harness's own plain-name guard (`ClaudeHarness.home`): a multi-part id would name a folder inside another home.
+    const approvals = new ClaudeProjectApprovals(
+      ferret => {
+        if (!isConversationId(ferret)) throw new Error('the ferret id must be one plain name');
+        return kernel.roots.root('agent-homes', { ferret, subfolder: ferret });
+      },
+      () => kernel.roots.root('agent-homes'),
     );
     const permission = new PermissionAnswerService(pane, sleep);
     const dialog = new DialogAnswerService(pane, sleep);

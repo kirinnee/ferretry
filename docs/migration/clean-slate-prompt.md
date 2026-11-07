@@ -132,7 +132,8 @@ noted in step 2; `NEW` is `~/.ferretry`, the home the daemon just made (it has `
      launch still starts. A sign-out during a launch never stops it.
    - A Codex launch renews no project server's sign-in and is handed none, as today.
    - A project server's token is handed to a Claude Code ferret unless Claude disabled that server in the ferret's
-     home, and that decision lasts across launches.
+     home, and that decision lasts across launches. A home that exists but cannot be read hands nothing; a first
+     launch, before the home is made, is handed the servers.
 4. After the main step 4 (Settings) adds the servers, `fy mcp ls` shows each one's sign-in state.
 
 ## 3. Clear each browser, then pair it (owner's hands)

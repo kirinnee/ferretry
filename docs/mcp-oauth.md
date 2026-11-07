@@ -16,7 +16,8 @@ read: register its real path. A Codex ferret is handed no project server and ren
 Whether the runtime declined the server is the harness's own answer, read from its own home; Ferretry's MCP
 code never reads that home. Claude Code answers it from the ferret's home, where a server the person disabled
 stays disabled across launches; a ferret is handed a project server's token only when Claude approved the
-server or has not answered for it yet, never when it disabled it.
+server or has not answered for it yet, never when it disabled it. A home that exists but cannot be read hands
+nothing; a home not made yet (a ferret's first launch) has answered nothing, so its servers are handed over.
 
 **Declared gap:** "only `.mcp.json`, at a known project root" is enforced by Ferretry's MCP code, not by the
 daemon's file access layer, which would let that code read any folder outside Ferretry's own home. Closing it

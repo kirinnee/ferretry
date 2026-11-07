@@ -35,7 +35,7 @@ function home(files: Readonly<Record<string, Entry>>, refused: readonly string[]
     },
     readText: async path => {
       const entry = at(path);
-      if (entry === BROKEN) throw Object.assign(new Error('EACCES: the disk said no'), { code: 'EACCES' });
+      if (entry === BROKEN) throw EACCES();
       return typeof entry === 'string' ? entry : '';
     },
     readBytes: async () => new Uint8Array(),
@@ -58,6 +58,25 @@ function home(files: Readonly<Record<string, Entry>>, refused: readonly string[]
   };
 }
 
+const EACCES = () => Object.assign(new Error('EACCES: the disk said no'), { code: 'EACCES' });
+
+/** The plain `agent-homes` root: what is at the ferret home's own name (a folder unless a test says otherwise). */
+function homes(at: 'directory' | 'file' | 'symlink' | 'nothing' | typeof BROKEN = 'directory'): RootHandle {
+  return {
+    ...home({}),
+    resolve: relative => ok(`/homes/${relative}` as FencedPath),
+    stat: () => Promise.reject(new Error('the home name is looked up, never followed')),
+    lstat: async () => {
+      if (at === BROKEN) throw EACCES();
+      if (at === 'nothing') return undefined;
+      return { kind: at, size: 1, modified: '2026-11-07T09:00:00.000Z' as Instant, mode: 0o700, links: 1 };
+    },
+  };
+}
+
+const approvalsOver = (homeOf: (ferret: FerretId) => RootHandle, plain: () => RootHandle = () => homes()) =>
+  new ClaudeProjectApprovals(homeOf, plain);
+
 const claudeJson = (project: Record<string, unknown>): string =>
   JSON.stringify({ oauthAccount: { emailAddress: 'someone@example.invalid' }, projects: { [ROOT]: project } });
 
@@ -67,7 +86,7 @@ const ask = (approvals: ClaudeProjectApprovals, servers: readonly string[] = ['d
 describe('Claude Code project server approvals', () => {
   test('approves a trusted, enabled server, keeps an unasked one pending and reports a disabled one', async () => {
     // Arrange
-    const approvals = new ClaudeProjectApprovals(() =>
+    const approvals = approvalsOver(() =>
       home({
         '.claude.json': claudeJson({
           hasTrustDialogAccepted: true,
@@ -89,9 +108,10 @@ describe('Claude Code project server approvals', () => {
     async name => {
       // Arrange — one home per answer; the name is listed exactly as the others are.
       const answer = async (project: Record<string, unknown>) => {
-        const result = await ask(new ClaudeProjectApprovals(() => home({ '.claude.json': claudeJson(project) })), [
-          name,
-        ]);
+        const result = await ask(
+          approvalsOver(() => home({ '.claude.json': claudeJson(project) })),
+          [name],
+        );
         if (result.state !== 'read') throw new Error('the home was readable');
         return result.servers;
       };
@@ -116,7 +136,7 @@ describe('Claude Code project server approvals', () => {
 
   test('a deny in settings.json wins over an allow in the project, and enableAll approves the rest', async () => {
     // Arrange
-    const approvals = new ClaudeProjectApprovals(() =>
+    const approvals = approvalsOver(() =>
       home({
         '.claude.json': claudeJson({ hasTrustDialogAccepted: true, enabledMcpjsonServers: ['docs'] }),
         'settings.json': JSON.stringify({ enableAllProjectMcpServers: true, disabledMcpjsonServers: ['docs'] }),
@@ -132,10 +152,14 @@ describe('Claude Code project server approvals', () => {
 
   test('a fresh home (no documents, or empty ones) disables nothing: every server is pending', async () => {
     // Act
-    const fresh = await ask(new ClaudeProjectApprovals(() => home({})), ['docs']);
-    const empty = await ask(new ClaudeProjectApprovals(() => home({ '.claude.json': '  ', 'settings.json': '' })), [
-      'docs',
-    ]);
+    const fresh = await ask(
+      approvalsOver(() => home({})),
+      ['docs'],
+    );
+    const empty = await ask(
+      approvalsOver(() => home({ '.claude.json': '  ', 'settings.json': '' })),
+      ['docs'],
+    );
 
     // Assert
     expect(fresh).toEqual({ state: 'read', servers: { docs: 'pending' } });
@@ -149,7 +173,7 @@ describe('Claude Code project server approvals', () => {
     ['refused by the root (a link out of the home)', { '.claude.json': '{}' }, ['settings.json']],
   ] as const)('fails closed when a home document is %s: unreadable, quoting nothing', async (_why, files, refused) => {
     // Arrange
-    const approvals = new ClaudeProjectApprovals(() => home(files, refused));
+    const approvals = approvalsOver(() => home(files, refused));
 
     // Act
     const answer = await ask(approvals);
@@ -160,9 +184,45 @@ describe('Claude Code project server approvals', () => {
     expect(JSON.stringify(answer)).not.toContain('someone@example.invalid');
   });
 
+  test("a ferret's first launch, before its home is made, answers pending without reading the home", async () => {
+    // Arrange — nothing at the home's name; the home root itself would fail any read (the folder is not there).
+    const missing = (): RootHandle => ({
+      ...home({}),
+      stat: () => Promise.reject(Object.assign(new Error('ENOENT: no such folder'), { code: 'ENOENT' })),
+    });
+    const approvals = approvalsOver(missing, () => homes('nothing'));
+
+    // Act / Assert
+    expect(await ask(approvals)).toEqual({
+      state: 'read',
+      servers: { docs: 'pending', linear: 'pending', tracker: 'pending' },
+    });
+  });
+
+  test.each([
+    ['a link', 'symlink', "The ferret's home is not a folder."],
+    ['a file', 'file', "The ferret's home is not a folder."],
+    ['refused by the disk', BROKEN, "The ferret's home could not be read (EACCES)."],
+  ] as const)('a home name that is %s answers unreadable, and the home is not read', async (_what, at, reason) => {
+    // Arrange — the documents would approve everything if they were read.
+    const approving = home({
+      '.claude.json': claudeJson({ hasTrustDialogAccepted: true, enableAllProjectMcpServers: true }),
+    });
+    const approvals = approvalsOver(
+      () => approving,
+      () => homes(at),
+    );
+
+    // Act
+    const answer = await ask(approvals);
+
+    // Assert
+    expect(answer).toEqual({ state: 'unreadable', reason });
+  });
+
   test('a ferret whose home cannot be opened answers unreadable', async () => {
     // Arrange
-    const approvals = new ClaudeProjectApprovals(() => {
+    const approvals = approvalsOver(() => {
       throw new Error('not declared');
     });
 

@@ -12,10 +12,33 @@ const merged = (existing: unknown): unknown => {
 };
 
 describe('mergeClaudeJson', () => {
-  test('a home with no document (or an empty one) gets the fixed layer whole', () => {
-    expect(mergeClaudeJson(undefined, FRESH)).toBe(FRESH);
-    expect(mergeClaudeJson('  \n', FRESH)).toBe(FRESH);
-    expect(JSON.parse(mergeClaudeJson('null', FRESH) ?? '')).toEqual(JSON.parse(FRESH));
+  test('a home with no document (or an empty one) gets the fixed layer whole, with the Chrome keys of the seed', () => {
+    const whole = { ...(JSON.parse(FRESH) as object), claudeInChromeDefaultEnabled: false };
+    expect(JSON.parse(mergeClaudeJson(undefined, FRESH) ?? '')).toEqual(whole);
+    expect(JSON.parse(mergeClaudeJson('  \n', FRESH) ?? '')).toEqual(whole);
+    expect(JSON.parse(mergeClaudeJson('null', FRESH) ?? '')).toEqual(whole);
+    expect(whole).toMatchObject({ hasCompletedClaudeInChromeOnboarding: true, claudeInChromeDefaultEnabled: false });
+    expect((mergeClaudeJson(undefined, FRESH) ?? '').endsWith('}\n')).toBe(true);
+  });
+
+  test('claudeInChromeDefaultEnabled is set to false only when absent or null; a true the person chose stays', () => {
+    const chrome = (existing: unknown) => (merged(existing) as Record<string, unknown>).claudeInChromeDefaultEnabled;
+    expect(chrome({})).toBe(false);
+    expect(chrome({ claudeInChromeDefaultEnabled: null })).toBe(false);
+    expect(chrome({ claudeInChromeDefaultEnabled: true })).toBe(true);
+    expect(chrome({ claudeInChromeDefaultEnabled: false })).toBe(false);
+    // The onboarding key is a fixed one: always set, like hasCompletedOnboarding.
+    expect(
+      (merged({ hasCompletedClaudeInChromeOnboarding: false }) as Record<string, unknown>)
+        .hasCompletedClaudeInChromeOnboarding,
+    ).toBe(true);
+  });
+
+  test('a document that holds a null Chrome default is not "already seeded": it is written', () => {
+    const seeded = JSON.parse(mergeClaudeJson(undefined, FRESH) ?? '{}') as Record<string, unknown>;
+    expect(mergeClaudeJson(JSON.stringify({ ...seeded, claudeInChromeDefaultEnabled: true }), FRESH)).toBeUndefined();
+    const written = mergeClaudeJson(JSON.stringify({ ...seeded, claudeInChromeDefaultEnabled: null }), FRESH);
+    expect((JSON.parse(written ?? '{}') as Record<string, unknown>).claudeInChromeDefaultEnabled).toBe(false);
   });
 
   test('sets the trust key and the fixed keys, and keeps every other key, the project decisions included', () => {
@@ -35,6 +58,8 @@ describe('mergeClaudeJson', () => {
     expect(merged(existing)).toEqual({
       userID: 'fake-user',
       hasCompletedOnboarding: true,
+      hasCompletedClaudeInChromeOnboarding: true,
+      claudeInChromeDefaultEnabled: false,
       projects: {
         [CWD]: {
           hasTrustDialogAccepted: true,

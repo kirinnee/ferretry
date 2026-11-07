@@ -40,8 +40,8 @@ import {
   type HarnessConfig,
 } from '../../contract/index.ts';
 import type { DialogAnswerService } from '../lib/dialog/service.ts';
+import { MAX_HOME_DOCUMENT_BYTES as MAX_CLAUDE_JSON_BYTES, mergeClaudeJson } from '../lib/harness/claude-json.ts';
 import { claudeTranscriptPath, isConversationId } from '../lib/harness/claude-path.ts';
-import { mergeClaudeJson } from '../lib/harness/claude-json.ts';
 import { HOME_FILES, homeText, launchCommand } from '../lib/harness/launch.ts';
 import { parseEntries, parseUsage } from '../lib/harness/transcript.ts';
 import { parseHarnessDialog } from '../lib/pane/harness-dialog.ts';
@@ -72,8 +72,6 @@ export interface ClaudeHarnessDeps {
 const TMUX_TIMEOUT_MS = 5_000;
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
 const FIRST_RECORDS_BYTES = 16 * 1024;
-/** Larger than any real one: a busy `.claude.json` runs to a few hundred kilobytes (the approvals read's limit). */
-const MAX_CLAUDE_JSON_BYTES = 16 * 1024 * 1024;
 
 const configFile = CLAUDE_CODE_CONFIG as unknown as ConfigFileDef<HarnessConfig>;
 const settingsCollection = CLAUDE_CODE_SETTINGS as never;
