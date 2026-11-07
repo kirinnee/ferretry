@@ -982,6 +982,19 @@ describe('when the page changes under the card (#B100)', () => {
     });
   }
 
+  it('I60 should count several look-alikes as failed checks and never choose one', async () => {
+    const { service, request, writes, setFacts, setRefound } = await raisedLogin();
+    setFacts(undefined);
+    // The page adapter reports an ambiguous refind as target_gone; it has selected no field.
+    setRefound({ ok: false, reason: 'target_gone' });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const error = await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
+      should(error.reason).equal('target_changed');
+      should(await service.requestState(request.id)).equal(attempt < 2 ? 'pending' : 'refused');
+      should(writes).eql([]);
+    }
+  });
+
   it('should look again on a navigation to another origin and end the card after three, never typing', async () => {
     const { service, request, writes, setFacts, closed } = await raisedLogin();
     setFacts({ ...RERENDERED, origin: 'https://evil.example', navigationId: 'loader-9' });
