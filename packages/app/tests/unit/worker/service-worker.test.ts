@@ -167,20 +167,22 @@ test('the release worker guard refuses a transitive non-worker import even witho
     await mkdir(join(directory, 'src/worker'), { recursive: true });
     await mkdir(join(directory, 'src/layout'), { recursive: true });
     await writeFile(join(directory, 'src/worker/probe.ts'), "import './helper.ts';");
-    await writeFile(join(directory, 'src/worker/helper.ts'), "import '../layout/probe.ts';");
     await writeFile(join(directory, 'src/layout/probe.ts'), 'globalThis.Response = undefined;');
-    const failure = await Bun.build({
-      entrypoints: [join(directory, 'src/worker/probe.ts')],
-      target: 'browser',
-      plugins: [workerInputGuard(directory)],
-    }).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
-    expect(failure).toBeInstanceOf(AggregateError);
-    expect((failure as AggregateError).errors.map(String).join('\n')).toContain(
-      'no plugin code may run in the signed service worker',
-    );
+    for (const specifier of ['../layout/probe.ts', 'node:events', 'path', 'bun:jsc']) {
+      await writeFile(join(directory, 'src/worker/helper.ts'), `import '${specifier}';`);
+      const failure = await Bun.build({
+        entrypoints: [join(directory, 'src/worker/probe.ts')],
+        target: 'browser',
+        plugins: [workerInputGuard(directory)],
+      }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect((failure as AggregateError).errors.map(String).join('\n')).toContain(
+        'no plugin code may run in the signed service worker',
+      );
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -26,6 +26,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
+import { isBuiltin } from 'node:module';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import {
@@ -105,6 +106,12 @@ export function workerInputGuard(root = packageRoot, inputs?: Set<string>): BunP
   return {
     name: 'shell-worker-inputs',
     setup(build) {
+      build.onResolve({ filter: /.*/u }, args => {
+        if (isBuiltin(args.path) || args.path.startsWith('bun:')) {
+          throw new Error(`no plugin code may run in the signed service worker: refused input ${args.path}`);
+        }
+        return undefined;
+      });
       build.onLoad({ filter: /.*/u }, args => {
         const path = realpathSync(args.path);
         if (!allowed.some(directory => path.startsWith(directory)) && !path.startsWith(zod + sep)) {

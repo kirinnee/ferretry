@@ -1252,7 +1252,10 @@ export class RelayClientSession {
         return;
       case 'closed':
         // R575: a forwarded close owes the same sealed outcome as a carrier close.
-        if (message.code === RELAY_SESSION_CONCLUDED_CLOSE_CODE) {
+        if (
+          message.code === RELAY_SESSION_CONCLUDED_CLOSE_CODE &&
+          (this.#phase === 'awaiting-credential' || this.#phase === 'streaming')
+        ) {
           this.#quietly(message.code, this.#closedWithoutOutcome(message.code, message.reason));
           return;
         }
