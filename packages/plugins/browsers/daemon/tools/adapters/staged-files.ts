@@ -49,26 +49,31 @@ export function nodeStagedFiles(uploadDirectory: string, clock: Pick<Clock, 'now
         constants.O_NOFOLLOW |
         (options.overwrite ? constants.O_TRUNC : constants.O_EXCL);
       const target = await open(to, flags, SAVED_FILE_MODE);
-      const source = await open(from, constants.O_RDONLY | constants.O_NOFOLLOW);
       let size = 0;
       try {
-        const chunk = new Uint8Array(64 * 1024);
-        for (;;) {
-          const { bytesRead } = await source.read(chunk, 0, chunk.byteLength, null);
-          if (bytesRead === 0) break;
-          size += bytesRead;
-          if (size > options.maxBytes) throw new Error('over the save size limit');
-          await target.write(chunk, 0, bytesRead);
+        // The source is opened INSIDE the guarded block: a staged file that is gone must close the target (a handle
+        // left to the garbage collector is an error in Bun) and take the half-made file with it.
+        const source = await open(from, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try {
+          const chunk = new Uint8Array(64 * 1024);
+          for (;;) {
+            const { bytesRead } = await source.read(chunk, 0, chunk.byteLength, null);
+            if (bytesRead === 0) break;
+            size += bytesRead;
+            if (size > options.maxBytes) throw new Error('over the save size limit');
+            await target.write(chunk, 0, bytesRead);
+          }
+        } finally {
+          await source.close();
         }
       } catch (error) {
-        await target.close();
+        await target.close().catch(() => undefined);
         await rm(to, { force: true });
         throw error;
-      } finally {
-        await source.close();
       }
       await target.close();
-      await rm(from, { force: true });
+      // The staged file stays: the browser keeps a download for its keep time so it can be saved again (with
+      // `overwrite`, or elsewhere), and its own stage removes it when that time is up.
       return size;
     },
   };
