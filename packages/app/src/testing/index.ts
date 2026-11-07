@@ -13,5 +13,7 @@ export {
 export { ensureDom, interact, type Mounted, mount, must, pressKey } from './dom.ts';
 export { render, run, runAsync, runUntil } from './react.ts';
 export { settleUntil } from './settle.ts';
+/** A fake client a suite hands a half, recorded against a daemon as the shell records the real ones. */
+export { noteClientDaemon } from '../connect/daemon-of.ts';
 export { RouterProvider } from './router.tsx';
 export { manualScheduler } from './live-scheduler.ts';

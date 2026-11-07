@@ -1,3 +1,7 @@
+import type { PluginClient } from '@ferretry/kernel/manifest';
+import type { ShellAppImplementation } from '../connect/provides.ts';
+import type { ScreenHrefOf } from '../router/screen-href.ts';
+import type { SurfaceEntry } from '../surfaces/registry.ts';
 import { daemonTitle, type PairedDaemon } from '../daemons/daemon-list.ts';
 import type { ScreenRef } from '../layout/engine.ts';
 import type { DeviceLayoutStore } from '../layout/device-layout.ts';
@@ -83,4 +87,69 @@ export function deviceLayoutSource(base: Layout, layouts: DeviceLayoutStore): Co
     });
     return entries;
   };
+}
+
+// ─── plugins' entries ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** What the shell hands a plugin's command bar source for the daemon the reader is on. */
+export interface PluginCommandContext {
+  /** That plugin's guarded client for this daemon. */
+  readonly client: PluginClient;
+  readonly daemon: string;
+  readonly navigate: (href: string) => void;
+  /** Where another plugin's screen lives (`useScreenHref`'s answer), so no plugin hard-codes a URL. */
+  readonly screenHref: ScreenHrefOf;
+  /** Asks the bar to list again: an answer the source was waiting for has arrived. */
+  readonly changed: () => void;
+}
+
+/**
+ * A plugin's contribution to the command bar (its app half's `shell.commands`, see `provideToShell`). It is built once
+ * per daemon the bar opens on and asked for its entries on every keystroke, like the shell's own sources; a source
+ * that reads its daemon answers what it already holds and calls `changed` when more arrives.
+ */
+export type PluginCommandSource = (context: PluginCommandContext) => CommandBarSource;
+
+/** The halves in the registry that contribute command bar entries, with their plugin id. */
+export function pluginCommandSources(
+  surfaces: readonly SurfaceEntry[],
+): readonly { readonly plugin: string; readonly source: PluginCommandSource }[] {
+  return surfaces.flatMap(entry => {
+    const half = entry.app as Partial<ShellAppImplementation> | undefined;
+    if (half === undefined || half.skeleton === true) return [];
+    const source = half.shell?.commands;
+    return typeof source === 'function' ? [{ plugin: entry.id, source }] : [];
+  });
+}
+
+/**
+ * Builds the plugins' sources for one daemon, each over that plugin's own guarded client. A plugin with no client
+ * there (paused, blocked, not reached) lists nothing, and one whose source throws while building costs only its own
+ * entries.
+ */
+export function buildPluginCommandSources(input: {
+  readonly surfaces: readonly SurfaceEntry[];
+  readonly daemon: string;
+  readonly clientOf: (plugin: string) => PluginClient | undefined;
+  readonly navigate: (href: string) => void;
+  readonly screenHref: ScreenHrefOf;
+  readonly changed: () => void;
+}): readonly CommandBarSource[] {
+  return pluginCommandSources(input.surfaces).flatMap(({ plugin, source }) => {
+    const client = input.clientOf(plugin);
+    if (client === undefined) return [];
+    try {
+      return [
+        source({
+          client,
+          daemon: input.daemon,
+          navigate: input.navigate,
+          screenHref: input.screenHref,
+          changed: input.changed,
+        }),
+      ];
+    } catch {
+      return [];
+    }
+  });
 }
