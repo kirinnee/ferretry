@@ -8,6 +8,7 @@ import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { RouteHandler, ScopedRoute } from '../contract/route.ts';
 import type { Manifest } from '../manifest/types.ts';
 import type kernelManifest from '../plugin.ts';
+import { type ConfigRouteSources, configRoutes } from './config/routes.ts';
 
 type KernelRouteKey = NonNullable<(typeof kernelManifest)['actions']>['routes'][number]['key'];
 
@@ -34,11 +35,14 @@ export interface KernelHalfSources {
   project(request: ApiRequest, entries: readonly InventoryEntry[]): readonly InventoryEntry[] | undefined;
   snapshot(): PostBuildSnapshot;
   liveness(): { readonly status: 'starting' | 'ok'; readonly uptimeSeconds: number; readonly pid: number };
+  /** What the configuration-file routes act through (`./config/routes.ts`). */
+  readonly config: ConfigRouteSources;
 }
 
 /** The kernel's own routes (§9.6, §1.3). Their descriptors are in `plugin.ts`. */
 export function kernelRoutes(sources: KernelHalfSources): Readonly<Record<KernelRouteKey, RouteHandler>> {
   return {
+    ...configRoutes(sources.config),
     'GET /v1/health': async () => jsonResponse({ protocol: PROTOCOL, version: sources.version } satisfies Health),
     'GET /healthz': async () => {
       const live = sources.liveness();

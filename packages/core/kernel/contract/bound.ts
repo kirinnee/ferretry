@@ -73,6 +73,14 @@ export interface Admission<Standing extends object = CallStanding, Member extend
    */
   judgeConfigWrite?(input: ConfigWriteJudgement): 'apply' | 'hold';
   /**
+   * The Gate axis of the KERNEL's own config routes (`GET/PUT /v1/config/file`, `POST /v1/config/confirm`), asked
+   * once per file the call touches, before it does: the file's capability on the axis the act needs (`read` is
+   * `use`; `write` and `confirm` are `configure`), a person only for the acts that change, and — to
+   * put a held edit into effect — the passkey proved for that act. An absent judge, or one that throws, refuses the
+   * call (nobody can say who may change what).
+   */
+  judgeConfigAccess?(input: ConfigAccessJudgement): ConfigAccessVerdict;
+  /**
    * Told after every handler of a descriptor that has `audit: { record }`, once per call, with the final status —
    * the handler's own refusals (an `ApiError`) and failures included, as today's audited-route decorator recorded
    * every outcome of the handler. A call admission refused, or a plugin not serving, never reached a handler and is
@@ -81,6 +89,31 @@ export interface Admission<Standing extends object = CallStanding, Member extend
    */
   recorded?(call: RecordedCall): void;
 }
+
+/** What the caller does to one config file (`Admission.judgeConfigAccess`). */
+export type ConfigAct = 'read' | 'write' | 'confirm';
+
+/** What Gate is asked before the kernel's config routes touch one file. */
+export interface ConfigAccessJudgement {
+  readonly plugin: string;
+  /** The file, relative to `config/`. */
+  readonly path: string;
+  readonly act: ConfigAct;
+  /** Who the call in progress runs as. */
+  readonly actor: Actor;
+  /** The standing admission put on the call in progress; absent when none is (a job) and on a member call. */
+  readonly standing?: CallStanding;
+}
+
+/**
+ * Gate's answer: the call may go on, or it is refused with Gate's own answer (a grant refusal, a step-up demand, an
+ * owner-only refusal). On a write, `mayLoosen` says this call may put a loosening into effect in this same act
+ * (somebody at this machine), and `claimLoosening` is how a call that holds a passkey proof earns that: asked ONLY when
+ * the text really loosens, it takes the one proof atomically (`true`: put it into effect). One proof, one loosening.
+ */
+export type ConfigAccessVerdict =
+  | { readonly allowed: true; readonly mayLoosen?: boolean; readonly claimLoosening?: () => boolean }
+  | { readonly allowed: false; readonly response: ApiResponse };
 
 /** What Gate's judge is asked about one loosening config edit. */
 export interface ConfigWriteJudgement {

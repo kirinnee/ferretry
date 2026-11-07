@@ -62,6 +62,9 @@ export function configTree(initial: Record<string, Record<string, unknown>> = {}
       documents.set(where, next);
       return { kind: 'written', etag: `etag-${calls.length}`, loosened: [] };
     },
+    async writeAsOwner(def, name, edit, options): Promise<ConfigWriteOutcome> {
+      return await this.write(def, name, edit, options);
+    },
     async remove(def, name): Promise<ConfigWriteOutcome> {
       calls.push({ op: 'remove', where: keyOf(def, name) });
       if (forced !== undefined) return forced;
