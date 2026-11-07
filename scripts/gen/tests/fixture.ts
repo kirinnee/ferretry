@@ -27,6 +27,8 @@ export interface FixturePackage {
   readonly app?: string;
   readonly cli?: string;
   readonly kinds?: readonly string[];
+  /** False for a package with no daemon/app/cli half (the Kernel's own shape): no half is exported or written. */
+  readonly halves?: boolean;
   /** More files, path → source, relative to the package. */
   readonly files?: Readonly<Record<string, string>>;
 }
@@ -72,6 +74,7 @@ export function fixture(
   );
   for (const pkg of packages) {
     const dir = pkg.core === true ? `packages/core/${pkg.id}` : `packages/plugins/${pkg.id}`;
+    const halves = pkg.halves !== false;
     write(
       `${dir}/package.json`,
       JSON.stringify({
@@ -82,9 +85,7 @@ export function fixture(
           './contract': './contract/index.ts',
           './contract/testing': './contract/testing/index.ts',
           './manifest': './manifest.ts',
-          './daemon': './daemon/index.ts',
-          './app': './app/index.ts',
-          './cli': './cli/index.ts',
+          ...(halves ? { './daemon': './daemon/index.ts', './app': './app/index.ts', './cli': './cli/index.ts' } : {}),
         },
       }),
     );
@@ -95,9 +96,11 @@ export function fixture(
     );
     write(`${dir}/contract/index.ts`, pkg.contract ?? 'export {};\n');
     write(`${dir}/contract/testing/index.ts`, pkg.testing ?? 'export {};\n');
-    write(`${dir}/daemon/index.ts`, pkg.daemon ?? skeletonHalf('Daemon'));
-    write(`${dir}/app/index.ts`, pkg.app ?? skeletonHalf('App'));
-    write(`${dir}/cli/index.ts`, pkg.cli ?? skeletonHalf('Cli'));
+    if (halves) {
+      write(`${dir}/daemon/index.ts`, pkg.daemon ?? skeletonHalf('Daemon'));
+      write(`${dir}/app/index.ts`, pkg.app ?? skeletonHalf('App'));
+      write(`${dir}/cli/index.ts`, pkg.cli ?? skeletonHalf('Cli'));
+    }
     for (const [rel, text] of Object.entries(pkg.files ?? {})) write(`${dir}/${rel}`, text);
   }
   return { root, write, dispose: () => rmSync(root, { recursive: true, force: true }) };
