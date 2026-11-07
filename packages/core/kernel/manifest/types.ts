@@ -189,11 +189,19 @@ export interface OnboardingDecl {
   readonly order: number;
 }
 
+/**
+ * One `permissions.spawn` / `permissions.network` entry: a program (its name, or the basename of an absolute path) or
+ * a host (`*.example.com` for subdomains), or `{ items: kind }` — the programs or hosts NAMED BY the owner-installed,
+ * pinned items of that kind (an MCP server's `command` / `url`), resolved by the kernel when the call is made from
+ * the installed items it holds; refused when no installed item names it.
+ */
+export type PermissionEntry = string | { readonly items: ItemKind };
+
 /** What it may touch outside its own folder (§3.7). Anything undeclared is refused by the kernel ports. */
 export interface Permissions {
   readonly roots?: readonly RootName[];
-  readonly network?: readonly string[];
-  readonly spawn?: readonly string[];
+  readonly network?: readonly PermissionEntry[];
+  readonly spawn?: readonly PermissionEntry[];
   /** Vault secret names it may use by name (never read). */
   readonly secrets?: readonly string[];
 }

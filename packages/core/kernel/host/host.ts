@@ -42,6 +42,7 @@ import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { currentActor, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
+import { type InstalledItems, installedItemReach } from './items.ts';
 import {
   admitCall,
   Dispatcher,
@@ -306,6 +307,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const { engine: hooks } = HookEngine.plan(order, log, deadline);
 
   const data = await loadDataPlugins(adapters.fs, home, new Set(manifests.map(manifest => manifest.id)));
+  const items = await installedItemReach(adapters.fs, home, data.accepted as readonly InstalledItems[]);
 
   const records = new Map<string, PluginRecord>();
   for (const manifest of manifests) {
@@ -376,9 +378,10 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       manifest.id,
       manifest.permissions?.spawn ?? [],
       openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
+      items,
     ),
-    fetch: restrictFetch(manifest.id, manifest.permissions?.network ?? [], adapters.fetch),
-    websocket: restrictWebSocket(manifest.id, manifest.permissions?.network ?? [], websockets),
+    fetch: restrictFetch(manifest.id, manifest.permissions?.network ?? [], adapters.fetch, items),
+    websocket: restrictWebSocket(manifest.id, manifest.permissions?.network ?? [], websockets, items),
     identity: identityPort,
     signer: signerFor(manifest.id, sessionSigner),
     ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
