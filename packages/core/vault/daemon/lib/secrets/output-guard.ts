@@ -44,7 +44,11 @@ export class HoldRegistry implements OutputGuard {
     try {
       // Unscoped: the body could show any target, so any hold change since the stamp withholds it.
       if (stamp.targets.length === 0) return this.#generation === stamp.generation;
-      return stamp.targets.every(target => (this.#movedAt.get(keyOf(target)) ?? 0) <= stamp.generation);
+      return stamp.targets.every(
+        target =>
+          (this.#movedAt.get(keyOf(target)) ?? 0) <= stamp.generation &&
+          (this.#movedAt.get(keyOf({ kind: target.kind, key: '*' })) ?? 0) <= stamp.generation,
+      );
     } catch {
       // A throw is read as false: withheld, never shown on a doubt.
       return false;
