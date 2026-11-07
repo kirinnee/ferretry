@@ -494,6 +494,7 @@
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-logins": "workspace:*",
         "@ferretry/std": "workspace:*",
         "@huggingface/transformers": "4.3.1",
         "@lichess-org/vosk-browser": "0.0.3",

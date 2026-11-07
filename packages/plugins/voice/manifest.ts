@@ -9,7 +9,7 @@ import {
   VOICE_READ_MODELS,
   VoicePort,
 } from './contract/index.ts';
-import { LoginsPort as LoginsStandIn } from './contract/others.ts';
+import { LoginsPort } from '@ferretry/plugin-logins/contract';
 
 /**
  * Voice (§2.3): talk instead of type. Recognition runs in the browser; the daemon's part is the one JSON exchange a
@@ -30,7 +30,7 @@ export default definePlugin({
   words: [{ word: 'dictate', means: 'speak a message', insteadOf: ['STT'] }],
 
   needs: { vault: VaultPort },
-  uses: { logins: LoginsStandIn },
+  uses: { logins: LoginsPort },
   provides: { voice: VoicePort },
 
   actions: {
