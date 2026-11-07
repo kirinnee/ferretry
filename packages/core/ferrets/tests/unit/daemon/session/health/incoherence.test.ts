@@ -1,11 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  defaultSessionHealthSettings,
-  emptyIncoherenceLedger,
-  recordIncoherencePass,
-  type IncoherencePass,
-} from '../../../../../daemon/lib/session/health/index.ts';
+import { defaultSessionHealthSettings } from '../../../../../daemon/lib/session/health/settings.ts';
+import { emptyIncoherenceLedger, recordIncoherencePass } from '../../../../../daemon/lib/session/health/incoherence.ts';
+import { type IncoherencePass } from '../../../../../daemon/lib/session/health/types.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
 

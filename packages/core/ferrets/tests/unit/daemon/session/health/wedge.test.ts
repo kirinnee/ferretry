@@ -2,15 +2,17 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   classifySelfCheckTick,
-  defaultSessionHealthSettings,
   emptySelfCheckLedger,
-  parseSessionHealthSettings,
   recordSelfCheckTick,
   recordSkippedTick,
-  type SelfCheckLedger,
-  sessionHealthSettingsAt,
   wedgeEvent,
-} from '../../../../../daemon/lib/session/health/index.ts';
+} from '../../../../../daemon/lib/session/health/wedge.ts';
+import {
+  defaultSessionHealthSettings,
+  parseSessionHealthSettings,
+  sessionHealthSettingsAt,
+} from '../../../../../daemon/lib/session/health/settings.ts';
+import { type SelfCheckLedger } from '../../../../../daemon/lib/session/health/types.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
 const AT = '2026-07-31T10:00:00.000Z';
