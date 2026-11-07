@@ -36,5 +36,11 @@ export {
   type FerretView,
   FerretViewSchema,
 } from './view/ferret-view.ts';
-export { type FerretLiveActivity, FerretLiveActivitySchema } from './view/session-live.ts';
+export {
+  compactionFreed,
+  type FerretCompactionDone,
+  type FerretCompactionRunning,
+  type FerretLiveActivity,
+  FerretLiveActivitySchema,
+} from './view/session-live.ts';
 export { type FerretSearchQuery, FerretSearchQuerySchema } from './view/session-search.ts';

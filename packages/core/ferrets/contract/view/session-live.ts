@@ -40,7 +40,7 @@ export type SessionLiveTokensSource = z.infer<typeof SessionLiveTokensSourceSche
 export const SessionCompactionBasisSchema = z.enum(['history', 'typical']);
 export type SessionCompactionBasis = z.infer<typeof SessionCompactionBasisSchema>;
 
-export const SessionCompactionRunningSchema = z.strictObject({
+export const FerretCompactionRunningSchema = z.strictObject({
   phase: z.literal('running'),
   /** When the daemon first saw the harness compacting. */
   startedAt: InstantSchema,
@@ -55,9 +55,9 @@ export const SessionCompactionRunningSchema = z.strictObject({
   /** `history`: this daemon's own past compactions. `typical`: no history yet; a fixed prior. */
   basis: SessionCompactionBasisSchema,
 });
-export type SessionCompactionRunning = z.infer<typeof SessionCompactionRunningSchema>;
+export type FerretCompactionRunning = z.infer<typeof FerretCompactionRunningSchema>;
 
-export const SessionCompactionDoneSchema = z.strictObject({
+export const FerretCompactionDoneSchema = z.strictObject({
   phase: z.literal('done'),
   /** Who asked: the harness's own record says; absent when it did not. */
   trigger: z.enum(['manual', 'auto']).optional(),
@@ -67,16 +67,16 @@ export const SessionCompactionDoneSchema = z.strictObject({
   tokensBefore: NonNegativeIntegerSchema.optional(),
   tokensAfter: NonNegativeIntegerSchema.optional(),
 });
-export type SessionCompactionDone = z.infer<typeof SessionCompactionDoneSchema>;
+export type FerretCompactionDone = z.infer<typeof FerretCompactionDoneSchema>;
 
 export const SessionCompactionSchema = z.discriminatedUnion('phase', [
-  SessionCompactionRunningSchema,
-  SessionCompactionDoneSchema,
+  FerretCompactionRunningSchema,
+  FerretCompactionDoneSchema,
 ]);
 export type SessionCompactionState = z.infer<typeof SessionCompactionSchema>;
 
 /** Tokens a finished compaction freed, when both ends are known and the context did shrink. */
-export const compactionFreed = (done: SessionCompactionDone): number | undefined =>
+export const compactionFreed = (done: FerretCompactionDone): number | undefined =>
   done.tokensBefore === undefined || done.tokensAfter === undefined || done.tokensAfter > done.tokensBefore
     ? undefined
     : done.tokensBefore - done.tokensAfter;
