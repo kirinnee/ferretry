@@ -10,7 +10,6 @@ import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 // ─── tidy plan (`POST /v1/tidy/plan`) ─────────────────────────────────────────────────────────────────────────────
 
-export const TIDY_PLAN_PATH = '/v1/tidy/plan' as const;
 
 /** A card's id as Board mints it (`B12`, `F412`, `I3`, `C9`); Tidy reads it, never makes one. */
 export const TidyCardIdSchema = z.string().regex(/^[BFIC][1-9][0-9]{0,8}$/u);

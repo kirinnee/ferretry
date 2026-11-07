@@ -147,3 +147,20 @@ describe('render', () => {
     expect(renderScratchSweep({ ferrets: 0, bytes: 0, failures: 0 })).toBe('reclaimed 0 kB from 0 ferret(s)');
   });
 });
+
+describe('parity: V-0271 fy gc, V-0494 fy tidy', () => {
+  test('both verbs are declared by the manifest and answered by the half', () => {
+    const t = run({});
+    expect(manifest.actions.cli.map(verb => verb.verb)).toEqual(['gc', 'tidy']);
+    expect(
+      Object.keys(
+        cli.build?.({
+          manifest,
+          client: { call: async () => ({}) as never, subscribe: () => () => {} },
+          io: { out() {}, err() {}, isTty: false },
+        })?.verbs ?? {},
+      ).sort(),
+    ).toEqual(['gc', 'tidy']);
+    expect(t.calls).toEqual([]);
+  });
+});
