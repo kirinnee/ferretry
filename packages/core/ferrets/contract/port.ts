@@ -54,6 +54,11 @@ export interface FerretsApi {
   resume(ferret: FerretId): Promise<Result<FerretId, StartFailure>>;
   /** Adopts a live process by its runner handle without restarting it (spine D15). */
   attach(ferret: FerretId, handle: RunnerHandle): Promise<Result<FerretId, StartFailure>>;
+  /**
+   * The runner handle of a running ferret (Terminals: its tmux pane id), as `ferret.json` keeps it, so a harness finds
+   * the ferret's pane after a daemon restart. `undefined` for a stopped or unknown ferret. Not a secret.
+   */
+  handle(ferret: FerretId): Promise<RunnerHandle | undefined>;
   sitrep(ferret: FerretId): Promise<Sitrep | undefined>;
 }
 

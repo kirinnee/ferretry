@@ -250,5 +250,22 @@ describe('starting, tokens and attach', () => {
     const gone = await h.provided(FerretsPort).attach(ferretId('lead'), '%99' as never);
     expect(gone.ok).toBe(false);
   });
+
+  test('the port names a running ferret’s handle from ferret.json, after a restart too, and none once stopped', async () => {
+    const runner = new FakeRunner();
+    const h = await host([], { harness: new FakeHarness(), runner });
+    const id = (await h.request('POST', '/v1/ferrets', { body: { folder: '/work/a' } })).json<{ id: FerretId }>().id;
+    const handle = await h.provided(FerretsPort).handle(id);
+    expect(handle).toBeDefined();
+    // A fresh daemon reads only what ferret.json kept.
+    const restarted = await host([{ ...record(id), handle: handle as string, state: 'working' }], {
+      harness: new FakeHarness(),
+      runner,
+    });
+    expect(await restarted.provided(FerretsPort).handle(id)).toBe(handle);
+    await restarted.request('POST', `/v1/ferrets/${id}/stop`);
+    expect(await restarted.provided(FerretsPort).handle(id)).toBeUndefined();
+    expect(await restarted.provided(FerretsPort).handle(ferretId('nobody'))).toBeUndefined();
+  });
 });
 

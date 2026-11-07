@@ -84,6 +84,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 
   const service = new FerretsService(registry, tokens, {
+    ready,
     now: () => kernel.clock.now(),
     newId: () => mintId(kernel.clock.nowMs()),
     newName: taken =>

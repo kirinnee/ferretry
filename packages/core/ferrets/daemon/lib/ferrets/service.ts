@@ -45,6 +45,8 @@ export const FERRET_ID_VARIABLE = 'FY_SESSION_ID';
 
 /** Everything the service reaches outside its own memory. The daemon half binds these to kernel ports. */
 export interface FerretsPorts {
+  /** Resolves once the held ferret records are loaded (a read before then would see no ferret). */
+  ready?(): Promise<void>;
   now(): Instant;
   /** A fresh, server-minted ferret id; a request never names one (today's `TimeSessionIdFactory`). */
   newId(): FerretId;
@@ -96,6 +98,12 @@ export class FerretsService implements FerretsApi {
 
   harnesses(): readonly HarnessKey[] {
     return this.ports.harnessKeys();
+  }
+
+  /** The handle `ferret.json` keeps while the ferret runs; a stop clears it. */
+  async handle(ferret: FerretId): Promise<RunnerHandle | undefined> {
+    await this.ports.ready?.();
+    return this.registry.get(ferret)?.handle as RunnerHandle | undefined;
   }
 
   async start(request: StartRequest): Promise<Result<FerretId, StartFailure>> {

@@ -320,10 +320,15 @@ export class FakeFerrets implements FerretsApi {
     this.setState(ferret, 'starting');
     return ok(ferret);
   }
-  async attach(ferret: FerretId, _handle: RunnerHandle): Promise<Result<FerretId, StartFailure>> {
+  readonly #handles = new Map<FerretId, RunnerHandle>();
+  async attach(ferret: FerretId, handle: RunnerHandle): Promise<Result<FerretId, StartFailure>> {
     if (!this.#ferrets.has(ferret)) return err({ code: 'failed', reason: 'no such ferret' });
     this.setState(ferret, 'working');
+    this.#handles.set(ferret, handle);
     return ok(ferret);
+  }
+  async handle(ferret: FerretId): Promise<RunnerHandle | undefined> {
+    return this.#ferrets.get(ferret)?.state === 'stopped' ? undefined : this.#handles.get(ferret);
   }
   async sitrep(ferret: FerretId): Promise<Sitrep | undefined> {
     const summary = this.#ferrets.get(ferret);
