@@ -546,6 +546,7 @@ async function build(): Promise<void> {
         '--workflow',
         'quick',
         '--public',
+        '--new',
         '--assignee',
         target,
         '--project',
@@ -599,7 +600,7 @@ async function build(): Promise<void> {
     };
     const answered = await add('yesno', 'Fixture answered ask', 'Fixture: ship it?');
     const open = await add('yesno', 'Fixture open ask', 'Fixture: still open?');
-    await fyOk(['agenda', 'done', `!${answered}`, '--yes', '--note', 'fixture answer']);
+    await fyOk(['agenda', 'done', `!${answered}`, '--yes', '--note', 'fixture answer', '--session', target]);
     made.agenda = [
       { id: answered, kind: 'yesno', state: 'answered', answer: 'yes' },
       { id: open, kind: 'yesno', state: 'open' },
@@ -613,7 +614,8 @@ async function build(): Promise<void> {
     // never reads it. So the (fake) ferret runs the command itself: its stand-in harness executes a line that starts
     // with FIXTURE-RUN, in the environment the daemon gave its pane.
     const result = join(out, 'lesson-result.txt');
-    const command = `${join(v4Dir, 'fy')} lesson suggest 'Fixture rule: say what you did.' --scope global --json`;
+    // FY_URL is only an address; the credential stays in the pane's own environment.
+    const command = `env FY_URL=${baseUrl} ${join(v4Dir, 'fy')} lesson suggest 'Fixture rule: say what you did.' --scope global --json`;
     await fyOk(['send', target, '--kind', 'blocker', `FIXTURE-RUN ${result} ${command}`]);
     const deadline = Date.now() + 90_000;
     let code = '';
