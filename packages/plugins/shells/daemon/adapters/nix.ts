@@ -1,16 +1,9 @@
 /** `nix`, reached only through the kernel's spawn port (`permissions.spawn: ['nix']`). Every call turns on the two
  * experimental features itself, so no user configuration is needed. */
-import { err, minutes, type Result, seconds } from '@ferretry/std';
+import { err, minutes, seconds } from '@ferretry/std';
 import type { SpawnPort } from '@ferretry/kernel/contract';
-import type { NixFacts } from '../../contract/index.ts';
-import { type FlakeFacts, parseDevEnv, parseFlakeMetadata } from '../lib/source.ts';
-
-export interface NixTool {
-  facts(): Promise<NixFacts>;
-  flakeMetadata(reference: string): Promise<Result<FlakeFacts, string>>;
-  /** Builds the shell and answers its environment. `args` are the arguments after `nix`. */
-  devEnv(args: readonly string[]): Promise<Result<Readonly<Record<string, string>>, string>>;
-}
+import type { NixTool } from '../lib/nix-tool.ts';
+import { parseDevEnv, parseFlakeMetadata } from '../lib/source.ts';
 
 const FEATURES = ['--extra-experimental-features', 'nix-command flakes'] as const;
 

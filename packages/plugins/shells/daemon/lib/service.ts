@@ -7,7 +7,7 @@
 import type { Clock, ConfigCollectionDef, ConfigPort, EventsPort, Log, StatePort } from '@ferretry/kernel/contract';
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import type { Instant, Result } from '@ferretry/std';
-import type { NixTool } from '../adapters/nix.ts';
+import type { NixTool } from './nix-tool.ts';
 import {
   type NarHash,
   type NixFacts,

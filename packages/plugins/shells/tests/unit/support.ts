@@ -8,7 +8,7 @@ import type {
   StatePort,
 } from '@ferretry/kernel/contract';
 import { err, ok, type Instant, type Result } from '@ferretry/std';
-import type { NixTool } from '../../daemon/adapters/nix.ts';
+import type { NixTool } from '../../daemon/lib/nix-tool.ts';
 import type { ConfigDoor, DoorResult } from '../../daemon/lib/config-door.ts';
 import type { FlakeFacts } from '../../daemon/lib/source.ts';
 import { createShellsService, type ShellsService } from '../../daemon/lib/service.ts';
