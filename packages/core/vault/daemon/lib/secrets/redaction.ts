@@ -20,9 +20,7 @@
  */
 
 import { secretMask, type SecretName } from '../../../contract/index.ts';
-import { redactJsonValue, redactSecretValues, secretCoverage, type TextRange } from './policy.ts';
-
-export type { TextRange };
+import { mergeRanges, type TextRange } from './policy.ts';
 
 /**
  * Where the values to mask come from: the vault, the saved logins, or both. Each opens on every call, and a
@@ -55,11 +53,22 @@ export function combinedValues(...sources: readonly RedactionValueSource[]): Red
  * synchronous by design — an `await` inside it would end the batch before the scrubbing after it.
  */
 export interface Scrub {
-  text(text: string, cut?: boolean): string;
-  data(value: unknown): unknown;
+  text(text: string, cut?: boolean, additional?: readonly MaskValue[]): string;
+  data(value: unknown, additional?: readonly MaskValue[]): unknown;
   /** WHERE `text` holds a known value: merged ranges of UTF-16 offsets, never the value. For masking by position. */
-  cover(text: string): readonly TextRange[];
+  cover(text: string, additional?: readonly MaskValue[]): readonly TextRange[];
 }
+
+/** Daemon-only entries for one masking pass; duplicate names preserve both sides of a rotation. */
+export interface MaskValue {
+  readonly name: string;
+  readonly value: string;
+  readonly input?: true;
+  readonly marker?: string;
+}
+
+export const namedMasks = (values: ReadonlyMap<string, string>): readonly MaskValue[] =>
+  [...values].map(([name, value]) => ({ name, value }));
 
 /**
  * What the operator read surface asks of redaction, expressed where that surface can depend on it
@@ -73,11 +82,7 @@ export interface TextRedactor {
 }
 
 /** The scrub of a daemon with nothing to hide. */
-const IDENTITY_SCRUB: Scrub = {
-  text: text => text,
-  data: value => value,
-  cover: () => [],
-};
+const IDENTITY_SCRUB = scrubValues(() => new Map());
 
 /** A redactor for a daemon with no secret store wired: it has nothing to scrub and says so by
  *  returning its input. It exists so the read surface has one shape to depend on. */
@@ -107,11 +112,7 @@ export class SecretRedactor implements TextRedactor {
       return opened;
     };
     try {
-      return work({
-        text: (text, cut = false) => redactOutput(text, values(), cut),
-        data: value => redactJsonValue(value, values()),
-        cover: text => secretCoverage(text, values()),
-      });
+      return work(scrubValues(values));
     } finally {
       // Revoked, so a scrub that escaped its work holds nothing.
       opened = undefined;
@@ -119,10 +120,64 @@ export class SecretRedactor implements TextRedactor {
   }
 }
 
-/** A child's output with every known value masked, including one the output limit cut in half. */
-export function redactOutput(text: string, values: ReadonlyMap<SecretName, string>, cut: boolean): string {
-  const redacted = redactSecretValues(text, values);
-  return cut ? maskCutValue(redacted, values) : redacted;
+/** One value set and one pass over ORIGINAL bytes, for vault, contributed, injected and typed values. */
+export function scrubValues(values: () => ReadonlyMap<string, string>): Scrub {
+  const all = (additional: readonly MaskValue[] = []): readonly MaskValue[] => [...namedMasks(values()), ...additional];
+  const data = (value: unknown, entries: readonly MaskValue[]): unknown => {
+    if (typeof value === 'string') return redactOutput(value, entries, false);
+    if (Array.isArray(value)) return value.map(item => data(item, entries));
+    if (value !== null && typeof value === 'object')
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [redactOutput(key, entries, false), data(item, entries)]),
+      );
+    return value;
+  };
+  return {
+    text: (text, cut = false, additional) => redactOutput(text, all(additional), cut),
+    data: (value, additional) => data(value, all(additional)),
+    cover: (text, additional) =>
+      mergeRanges(matches(text, all(additional), false).map(({ start, end }) => ({ start, end }))),
+  };
+}
+
+interface Match extends TextRange {
+  readonly entry: MaskValue;
+}
+
+function matches(text: string, values: readonly MaskValue[], cut: boolean): Match[] {
+  const found: Match[] = [];
+  const ordered = [...values].filter(entry => entry.value !== '').sort((a, b) => b.value.length - a.value.length);
+  for (const entry of ordered)
+    for (let at = text.indexOf(entry.value); at !== -1; at = text.indexOf(entry.value, at + 1))
+      found.push({ start: at, end: at + entry.value.length, entry });
+  const prefix = cut ? cutValue(text, ordered) : undefined;
+  if (prefix !== undefined) found.push(prefix);
+  return found.sort((a, b) => a.start - b.start || b.end - a.end);
+}
+
+/** Today's whole-value and cut-prefix rules, with their ranges collected before replacing any bytes. */
+function redactOutput(text: string, values: readonly MaskValue[], cut: boolean): string {
+  const found = matches(text, values, cut);
+  let output = '';
+  let at = 0;
+  for (let index = 0; index < found.length; ) {
+    const first = found[index++];
+    if (first === undefined) break;
+    let end = first.end;
+    const run = [first];
+    // Touching matches keep their own labels; overlapping matches must hide the entire union.
+    for (let next = found[index]; next !== undefined && next.start < end; next = found[++index]) {
+      end = Math.max(end, next.end);
+      run.push(next);
+    }
+    const covering = run.find(match => match.start === first.start && match.end === end);
+    const mixed = run.some(match => match.entry.input) && run.some(match => !match.entry.input);
+    const marker =
+      covering === undefined || mixed ? '[redacted]' : (covering.entry.marker ?? secretMask(covering.entry.name));
+    output += text.slice(at, first.start) + marker;
+    at = end;
+  }
+  return output + text.slice(at);
 }
 
 /**
@@ -137,14 +192,18 @@ export function redactOutput(text: string, values: ReadonlyMap<SecretName, strin
  * A byte cut can split a character, which the decoder writes as U+FFFD, so trailing replacement
  * characters are set aside before matching — otherwise one would shield the prefix in front of it.
  */
-function maskCutValue(text: string, values: ReadonlyMap<SecretName, string>): string {
+function cutValue(text: string, values: readonly MaskValue[]): Match | undefined {
   const body = text.replace(/\uFFFD+$/u, '');
-  let longest: { readonly name: SecretName; readonly length: number } | undefined;
-  for (const [name, value] of values)
+  let longest: { readonly entry: MaskValue; readonly length: number } | undefined;
+  for (const entry of values) {
+    const { value } = entry;
     for (let length = Math.min(value.length - 1, body.length); length > (longest?.length ?? 0); length--)
       if (body.endsWith(value.slice(0, length))) {
-        longest = { name, length };
+        longest = { entry, length };
         break;
       }
-  return longest === undefined ? text : body.slice(0, body.length - longest.length) + secretMask(longest.name);
+  }
+  return longest === undefined
+    ? undefined
+    : { start: body.length - longest.length, end: text.length, entry: longest.entry };
 }

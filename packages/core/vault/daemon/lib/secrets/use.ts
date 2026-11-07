@@ -39,7 +39,7 @@ import { isAbsolute } from 'node:path';
 import type { ChildEnvironments } from './child-environments.ts';
 import { earnedRecipes, resolveChildEnvironment } from './policy.ts';
 import type { SecretChildRunner } from './types.ts';
-import { redactOutput, type TextRedactor } from './redaction.ts';
+import { namedMasks, NO_REDACTION, type TextRedactor } from './redaction.ts';
 import type { SecretVault } from './vault.ts';
 
 /** Why a use was refused before anything ran. */
@@ -68,7 +68,7 @@ export const NO_RECIPES: SecretRecipes = { read: async () => ({}) };
 /**
  * Runs one command with secrets in its environment and returns its scrubbed output.
  *
- * Every string that leaves here has been through `redactSecretValues`, INCLUDING the case where the
+ * Every string that leaves here has been through `redactOutput`, INCLUDING the case where the
  * command's whole purpose was to print the value. That is the attack the integration tier tests by
  * name, because it is the one a person will actually try.
  */
@@ -102,18 +102,18 @@ export class SecretUseService {
       timeoutMs: request.timeoutMs,
       maxOutputBytes: MAX_SECRET_USE_OUTPUT_BYTES,
     });
-    const masked =
-      this.masks === undefined
-        ? outcome
-        : await this.masks.batch(scrub => ({
-            stdout: scrub.text(outcome.stdout, outcome.truncated),
-            stderr: scrub.text(outcome.stderr, outcome.truncated),
-          }));
+    // Keep the injected snapshot even if the vault rotates during the child. It joins current,
+    // contributed and typed values BEFORE any of them can rewrite the original output.
+    const injected = namedMasks(values);
+    const masked = await (this.masks ?? NO_REDACTION).batch(scrub => ({
+      stdout: scrub.text(outcome.stdout, outcome.truncated, injected),
+      stderr: scrub.text(outcome.stderr, outcome.truncated, injected),
+    }));
     return {
       outcome: outcome.outcome,
       ...(outcome.exitCode === undefined ? {} : { exitCode: outcome.exitCode }),
-      stdout: redactOutput(masked.stdout, values, outcome.truncated),
-      stderr: redactOutput(masked.stderr, values, outcome.truncated),
+      stdout: masked.stdout,
+      stderr: masked.stderr,
       truncated: outcome.truncated,
       used: named,
     };

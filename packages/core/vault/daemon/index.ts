@@ -83,7 +83,16 @@ export default implementDaemon(manifest, {
     );
     // As today: close every surface before exposing readers, until durable holds have been replayed (I82).
     quarantine.lock();
-    const contributedMasks = new RetainedMaskSource(() => ctx.hooks.provider(RedactionSources, 'source'));
+    // Declaration metadata names even a failed or stopped provider. Missing
+    // metadata is unavailable, never evidence that Accounts has no saved values to mask.
+    const hooks = ctx.hooks as typeof ctx.hooks & {
+      declaredProvider?: (hook: typeof RedactionSources, key: 'source') => string | undefined;
+    };
+    const contributedMasks = new RetainedMaskSource(() => {
+      if (hooks.declaredProvider === undefined) return 'unavailable';
+      if (hooks.declaredProvider(RedactionSources, 'source') === undefined) return 'absent';
+      return hooks.provider(RedactionSources, 'source');
+    });
     const maskSources = combinedValues(vault, contributedMasks);
     const masks = new EphemeralAwareRedactor(new SecretRedactor(maskSources), values);
     const redaction = new VaultRedaction(maskSources, scrub => masks.scope(scrub));

@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeGate } from '@ferretry/core-gate/contract/testing';
-import type { ChildEnvironment, ChildEnvironmentOpener, FerretId } from '@ferretry/kernel/contract';
+import type { ChildEnvironment, ChildEnvironmentOpener, FerretId, Log } from '@ferretry/kernel/contract';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
+import { HookEngine } from '@ferretry/kernel/host';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import {
   ChildEnvironmentPort,
@@ -26,7 +27,7 @@ afterEach(async () => {
   for (const host of hosts.splice(0)) await host.stop();
 });
 
-async function setup() {
+async function setup(declared = true, metadata = true) {
   let entries = new Map([
     [LABEL, LOGIN],
     ['2fa:test', SEED],
@@ -67,6 +68,11 @@ async function setup() {
       if (vault.build === undefined) throw new Error('Vault must have a daemon half');
       return vault.build({
         ...ctx,
+        hooks: {
+          ...ctx.hooks,
+          // The approved kernel declaration seam; source presence is independent of its handler.
+          ...(metadata ? { declaredProvider: () => (declared ? 'accounts' : undefined) } : {}),
+        } as typeof ctx.hooks,
         kernel: {
           ...ctx.kernel,
           spawn: {
@@ -88,7 +94,7 @@ async function setup() {
     },
   });
   const host = await testHost({
-    plugins: [instrumented, accounts],
+    plugins: declared ? [instrumented, accounts] : [instrumented],
     fakes: { asks: new FakeAsks(), gate: new FakeGate() },
   });
   hosts.push(host);
@@ -220,15 +226,84 @@ test('S10 I126 an initial provider failure refuses the read without exposing its
   expect(called).toBe(false);
 });
 
-test('S10 I126 an absent provider masks nothing and does not affect the vault', async () => {
-  const fixture = await setup();
-  fixture.remove();
+for (const state of ['failed', 'skeleton'] as const) {
+  test(`S19 I126 a declared ${state} Accounts provider refuses the first read`, async () => {
+    const offerer = definePlugin({
+      id: 'vault',
+      title: 'Vault fixture',
+      version: '1.0.0',
+      api: 5,
+      core: true,
+      kinds: [],
+      hooks: { offers: [{ hook: RedactionSources }] },
+    });
+    const accounts = definePlugin({
+      id: 'accounts',
+      title: 'Accounts fixture',
+      version: '1.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: RedactionSources, key: 'source' }] },
+    });
+    const log: Log = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {}, child: () => log };
+    const { engine, refusals } = HookEngine.plan([offerer, accounts], log, () => ({
+      promise: new Promise<'timeout'>(() => {}),
+      cancel: () => {},
+    }));
+    expect(refusals).toEqual([]);
+    if (state === 'failed') engine.markFailed('accounts');
+    const retained = new RetainedMaskSource(() => engine.invokerFor('vault').provider(RedactionSources, 'source'));
+    let called = false;
+    await expect(
+      new SecretRedactor(retained).batch(scrub => {
+        called = true;
+        return scrub.text(LOGIN);
+      }),
+    ).rejects.toThrow('mask source unavailable before its first successful read');
+    expect(called).toBe(false);
+  });
+}
+
+test('S10 I126 only an undeclared provider masks nothing and does not affect the vault', async () => {
+  const fixture = await setup(false);
   expect(await fixture.redaction.read(scope => scope.text('ordinary text'))).toBe('ordinary text');
   const source = combinedValues(
     { values: async () => new Map([['KEY', 'vault-fixture-value']]) },
-    new RetainedMaskSource(() => 'unavailable'),
+    new RetainedMaskSource(() => 'absent'),
   );
   expect(await new VaultRedaction(source).read(scope => scope.text('vault-fixture-value'))).toBe('[redacted:KEY]');
+});
+
+test('S19 I126 a declared provider missing its handler refuses a composed read before the first snapshot', async () => {
+  const fixture = await setup();
+  fixture.remove();
+  let called = false;
+  await expect(
+    fixture.redaction.read(() => {
+      called = true;
+    }),
+  ).rejects.toThrow('mask source unavailable before its first successful read');
+  expect(called).toBe(false);
+});
+
+test('S19 I126 missing declaration metadata refuses a composed read', async () => {
+  const fixture = await setup(true, false);
+  await expect(fixture.redaction.read(scope => scope.text(LOGIN))).rejects.toThrow(
+    'mask source unavailable before its first successful read',
+  );
+});
+
+test('S19 I126 absence is not a snapshot; only a successful empty read permits later unavailability', async () => {
+  let provider: MaskSource | 'unavailable' | 'absent' = 'absent';
+  const source = new RetainedMaskSource(() => provider);
+  expect(await source.values()).toEqual(new Map());
+  provider = 'unavailable';
+  await expect(source.values()).rejects.toThrow('mask source unavailable before its first successful read');
+  provider = { values: async () => new Map() };
+  expect(await source.values()).toEqual(new Map());
+  provider = 'unavailable';
+  expect(await source.values()).toEqual(new Map());
 });
 
 test('S10 I126 retained snapshots cannot be mutated by the provider or a reader', async () => {
