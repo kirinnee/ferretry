@@ -199,6 +199,7 @@ export default definePlugin({
     settings: [settingsTab('devices', { label: 'Devices', order: 20 })],
     panels: [
       panel('daemon.status', { id: 'unlock', order: 10 }),
+      panel('daemon.status', { id: 'notifications-off', order: 20 }),
       panel('device.settings', { id: 'notifications', order: 30 }),
     ],
   },

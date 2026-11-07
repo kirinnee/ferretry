@@ -1,6 +1,10 @@
-import type { PanelProps } from '@ferretry/kernel/manifest';
+import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { AddDeviceSurface } from './features/settings/add-device-settings.tsx';
 import { DevicePermissionsSetting } from './features/settings/device-permissions-settings.tsx';
+import {
+  MachineNotificationsSettings,
+  NotificationsOffPanel,
+} from './features/settings/machine-notifications-settings.tsx';
 import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { useOpenSecurity, useSelectedDaemon } from './shell-grants.ts';
 
@@ -17,9 +21,25 @@ export function UnlockPanel({ subject }: PanelProps) {
   return connection === undefined ? null : <PasskeyNudge connection={connection} onOpenSecurity={openSecurity} />;
 }
 
-/** `device.settings` › notifications: this browser's own permissions (notifications among them). */
-export function NotificationsPanel() {
-  return <DevicePermissionsSetting />;
+/**
+ * `device.settings` › notifications: this browser's own permissions (notifications among them), and beneath them this
+ * machine's Web Push — the permission, the switch that enrols this browser with it, and its registered devices.
+ * Built per machine: the half's client reaches that machine only.
+ */
+export function notificationsPanel(client: PluginClient) {
+  return function NotificationsPanel() {
+    return (
+      <>
+        <DevicePermissionsSetting />
+        <MachineNotificationsSettings client={client} />
+      </>
+    );
+  };
 }
 
-/** Access's app half (§2.3): Devices settings, the unlock nudge and this device's notification permission. */
+/** `daemon.status` › notifications-off: one line when this machine has no device enrolled anywhere to push to. */
+export function notificationsOffPanel(client: PluginClient) {
+  return function NotificationsOff() {
+    return <NotificationsOffPanel client={client} />;
+  };
+}
