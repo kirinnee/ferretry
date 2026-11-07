@@ -306,6 +306,10 @@ export interface RootStat {
   readonly kind: 'file' | 'directory';
   readonly size: number;
   readonly modified: Instant;
+  /** POSIX permission bits (`& 0o7777`), so a copy or a replace can keep them. */
+  readonly mode: number;
+  /** Hard links to the object: a file with more than one may be a file from anywhere and is never read or copied. */
+  readonly links: number;
 }
 
 /** What is AT a name, the leaf not followed: a link is reported as a `symlink`, never as what it points at. */
@@ -313,6 +317,15 @@ export interface RootLstat {
   readonly kind: 'file' | 'directory' | 'symlink' | 'other';
   readonly size: number;
   readonly modified: Instant;
+  /** POSIX permission bits (`& 0o7777`) of the leaf itself. */
+  readonly mode: number;
+  /** Hard links to the leaf itself. */
+  readonly links: number;
+}
+
+/** One name in a folder, as `RootHandle.entries` lists it: the leaf as it is, never followed. */
+export interface RootEntry extends RootLstat {
+  readonly name: string;
 }
 
 export interface RootWriteOptions {
@@ -320,6 +333,12 @@ export interface RootWriteOptions {
   readonly mode?: number;
   /** Create only: refused when anything (a file, a link) is already at the name; never follows a link. */
   readonly exclusive?: boolean;
+  /**
+   * Replace an EXISTING regular file only, never through a link (today's MCP project-file replace, O_NOFOLLOW):
+   * refused when nothing, a link or anything but a regular file is at the name. The new file lands atomically
+   * under the name and keeps the old file's mode unless `mode` is given.
+   */
+  readonly replaceExisting?: boolean;
 }
 
 /**
@@ -344,6 +363,8 @@ export interface RootHandle {
   /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */
   ensurePrivateDirectory(path: FencedPath): Promise<void>;
   list(path: FencedPath): Promise<readonly string[]>;
+  /** The folder's names with each leaf's own kind, size, mode and hard-link count (a link is listed, never entered). */
+  entries(path: FencedPath): Promise<readonly RootEntry[]>;
   stat(path: FencedPath): Promise<RootStat | undefined>;
   /** The leaf's own kind (a link is `symlink`); its parents are resolved and fenced as for every call. */
   lstat(path: FencedPath): Promise<RootLstat | undefined>;

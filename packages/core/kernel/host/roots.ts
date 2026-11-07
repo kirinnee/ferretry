@@ -2,7 +2,15 @@ import type { Result } from '@ferretry/std';
 import { err, instantFromEpochMs, ok } from '@ferretry/std';
 import type { FencedPath, FolderRefusal, WorkFolders } from '../contract/bound.ts';
 import { insideFence } from '../contract/home.ts';
-import type { RootHandle, RootLstat, RootName, RootsPort, RootStat, RootWriteOptions } from '../contract/ports.ts';
+import type {
+  RootEntry,
+  RootHandle,
+  RootLstat,
+  RootName,
+  RootsPort,
+  RootStat,
+  RootWriteOptions,
+} from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import type { PinRegistry } from './pins.ts';
 
@@ -15,6 +23,15 @@ export interface RootPinning {
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports']);
 const READ_ONLY_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'imports']);
+/** A leaf as the host filesystem reported it, in the port's words. */
+const leafOf = (info: NonNullable<Awaited<ReturnType<HostFs['lstat']>>>): RootLstat => ({
+  kind: info.kind === 'link' ? 'symlink' : info.kind,
+  size: info.size,
+  modified: instantFromEpochMs(info.mtimeMs),
+  mode: info.mode ?? 0,
+  links: info.links ?? 1,
+});
+
 /** Internal roots only one plugin may have, whatever another manifest declares. */
 const ROOT_OWNERS: Partial<Record<RootName, string>> = { credentials: 'logins' };
 const DEFAULT_COPY_ENTRIES = 10_000;
@@ -137,6 +154,14 @@ function rootHandle(
   };
   const write = async (path: FencedPath, data: string | Uint8Array, options?: RootWriteOptions): Promise<void> => {
     writable();
+    if (options?.replaceExisting === true) {
+      // the leaf is looked at, never followed: a link there is refused, and the rename replaces the NAME
+      const leaf = await realParent(path);
+      const current = await fs.lstat(leaf);
+      if (current?.kind !== 'file') throw new RootError(current?.kind === 'link' ? 'link_escape' : 'outside');
+      await fs.writeAtomic(leaf, data, options.mode ?? current.mode ?? 0o600);
+      return;
+    }
     const mode = options?.mode ?? 0o600;
     if (options?.exclusive === true) await fs.writeExclusive(await realParent(path), data, mode);
     else await fs.writeAtomic(await real(path), data, mode);
@@ -201,8 +226,7 @@ function rootHandle(
     lstat: async (path): Promise<RootLstat | undefined> => {
       const info = await fs.lstat(await realParent(path));
       if (info === undefined) return undefined;
-      const kind = info.kind === 'link' ? 'symlink' : info.kind;
-      return { kind, size: info.size, modified: instantFromEpochMs(info.mtimeMs) };
+      return leafOf(info);
     },
     makeDirectory: async (path, options) => {
       writable();
@@ -217,10 +241,25 @@ function rootHandle(
       return resolved;
     },
     list: async path => await fs.list(await real(path)),
+    entries: async path => {
+      const folder = await real(path);
+      const out: RootEntry[] = [];
+      for (const name of await fs.list(folder)) {
+        const info = await fs.lstat(`${folder}/${name}`);
+        if (info !== undefined) out.push({ name, ...leafOf(info) });
+      }
+      return out;
+    },
     stat: async (path): Promise<RootStat | undefined> => {
       const info = await fs.lstat(await real(path));
       if (info === undefined || (info.kind !== 'file' && info.kind !== 'directory')) return undefined;
-      return { kind: info.kind, size: info.size, modified: instantFromEpochMs(info.mtimeMs) };
+      return {
+        kind: info.kind,
+        size: info.size,
+        modified: instantFromEpochMs(info.mtimeMs),
+        mode: info.mode ?? 0,
+        links: info.links ?? 1,
+      };
     },
     remove: async path => {
       writable();

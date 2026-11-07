@@ -547,6 +547,13 @@ async function start(world: World): Promise<TestHost> {
     root(name) {
       if (!(manifest.permissions?.roots ?? []).includes(name))
         throw new Error(`${manifest.id}: root ${name} is not declared`);
+      const fileStat = (path: string) => ({
+        kind: 'file' as const,
+        size: (world.roots.get(path) ?? '').length,
+        modified: clock.now(),
+        mode: 0o600,
+        links: 1,
+      });
       const handle: RootHandle = {
         name,
         resolve(relative) {
@@ -561,10 +568,12 @@ async function start(world: World): Promise<TestHost> {
         readBytes: async path => new TextEncoder().encode(await handle.readText(path)),
         writeText: async (path, text, writeOptions) => {
           if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
+          if (writeOptions?.replaceExisting === true && !world.roots.has(path)) throw new Error(`no such file ${path}`);
           world.roots.set(path, text);
         },
         writeBytes: async (path, bytes, writeOptions) => {
           if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
+          if (writeOptions?.replaceExisting === true && !world.roots.has(path)) throw new Error(`no such file ${path}`);
           world.roots.set(path, new TextDecoder().decode(bytes));
         },
         copyTree: async (_source, from, to, copyOptions) => {
@@ -575,10 +584,9 @@ async function start(world: World): Promise<TestHost> {
         },
         ensurePrivateDirectory: async () => {},
         lstat: async path => {
-          if (world.roots.has(path))
-            return { kind: 'file', size: (world.roots.get(path) as string).length, modified: clock.now() };
+          if (world.roots.has(path)) return fileStat(path);
           return [...world.roots.keys()].some(p => p.startsWith(`${path}/`))
-            ? { kind: 'directory', size: 0, modified: clock.now() }
+            ? { kind: 'directory', size: 0, modified: clock.now(), mode: 0o700, links: 1 }
             : undefined;
         },
         makeDirectory: async () => {},
@@ -589,10 +597,11 @@ async function start(world: World): Promise<TestHost> {
         },
         list: async path =>
           [...world.roots.keys()].filter(p => p.startsWith(`${path}/`)).map(p => p.slice(path.length + 1)),
-        stat: async path =>
-          world.roots.has(path)
-            ? { kind: 'file', size: (world.roots.get(path) as string).length, modified: clock.now() }
-            : undefined,
+        entries: async path =>
+          [...world.roots.keys()]
+            .filter(p => p.startsWith(`${path}/`))
+            .map(p => ({ name: p.slice(path.length + 1), ...fileStat(p) })),
+        stat: async path => (world.roots.has(path) ? fileStat(path) : undefined),
         remove: async path => {
           world.roots.delete(path);
         },

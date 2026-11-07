@@ -60,6 +60,8 @@ export function nodeFs(randomSuffix: () => string): HostFs {
       const temp = `${path}.${randomSuffix()}.tmp`;
       const handle = await open(temp, 'wx', mode);
       try {
+        // exactly the asked bits: the mode `open` was given is filtered by the umask
+        await handle.chmod(mode);
         await handle.writeFile(data);
         await handle.sync();
       } finally {

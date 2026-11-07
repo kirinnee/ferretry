@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { link, mkdir, mkdtemp, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { err, ok } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
@@ -228,5 +228,65 @@ describe('HH writeBytes, a fenced tree copy or link, and the credentials root', 
     const file = logins.resolve('file');
     if (!file.ok) throw new Error(file.error);
     await expect(logins.ensurePrivateDirectory(file.value)).rejects.toThrow(RootError);
+  });
+});
+
+describe('QQ replace an existing file without following a link; links and mode at list and stat time', () => {
+  async function downloads() {
+    const { home } = await layout();
+    const root = rootsPortFor(
+      fs,
+      { home, plugin: 'mcp', worktrees: `${home}-worktrees` },
+      ['downloads'],
+      () => undefined,
+    ).root('downloads');
+    const at = (relative: string): FencedPath => {
+      const resolved = root.resolve(relative);
+      if (!resolved.ok) throw new Error(resolved.error);
+      return resolved.value;
+    };
+    const dir = `${home}/state/mcp/downloads`;
+    await mkdir(dir, { recursive: true });
+    return { home, root, at, dir };
+  }
+
+  test('replaceExisting keeps the old mode, and refuses a link at the leaf, a missing file and a folder', async () => {
+    const { home, root, at, dir } = await downloads();
+    await writeFile(`${dir}/.mcp.json`, '{}', { mode: 0o664 });
+    await chmod(`${dir}/.mcp.json`, 0o664);
+    await root.writeText(at('.mcp.json'), '{"a":1}', { replaceExisting: true });
+    expect(await Bun.file(`${dir}/.mcp.json`).text()).toBe('{"a":1}');
+    expect((await Bun.file(`${dir}/.mcp.json`).stat()).mode & 0o777).toBe(0o664);
+    await writeFile(`${dir}/target.json`, 'kept');
+    await symlink(`${dir}/target.json`, `${dir}/linked.json`);
+    await expect(root.writeText(at('linked.json'), 'x', { replaceExisting: true })).rejects.toThrow(RootError);
+    expect(await Bun.file(`${dir}/target.json`).text()).toBe('kept');
+    expect(await readlink(`${dir}/linked.json`)).toBe(`${dir}/target.json`);
+    await expect(root.writeText(at('absent.json'), 'x', { replaceExisting: true })).rejects.toThrow(RootError);
+    await mkdir(`${dir}/folder`);
+    await expect(root.writeBytes(at('folder'), new Uint8Array([1]), { replaceExisting: true })).rejects.toThrow(
+      RootError,
+    );
+    void home;
+  });
+
+  test('entries lists each leaf with its kind, mode and hard-link count, a link listed and never followed', async () => {
+    const { home, root, at, dir } = await downloads();
+    await writeFile(`${dir}/one`, 'x', { mode: 0o640 });
+    await chmod(`${dir}/one`, 0o640);
+    await link(`${dir}/one`, `${dir}/two`);
+    await symlink(`${home}/state/vault/vault.key`, `${dir}/key`);
+    const entries = Object.fromEntries((await root.entries(at(''))).map(entry => [entry.name, entry]));
+    expect(entries['one']).toMatchObject({ kind: 'file', links: 2, mode: 0o640 });
+    expect(entries['two']).toMatchObject({ kind: 'file', links: 2 });
+    expect(entries['key']?.kind).toBe('symlink');
+  });
+
+  test('stat and lstat carry the mode and the link count', async () => {
+    const { root, at, dir } = await downloads();
+    await writeFile(`${dir}/run`, '#!/bin/sh', { mode: 0o755 });
+    await chmod(`${dir}/run`, 0o755);
+    expect(await root.stat(at('run'))).toMatchObject({ kind: 'file', mode: 0o755, links: 1 });
+    expect(await root.lstat(at('run'))).toMatchObject({ kind: 'file', mode: 0o755, links: 1 });
   });
 });
