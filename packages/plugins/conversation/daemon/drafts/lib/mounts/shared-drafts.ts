@@ -10,7 +10,7 @@ import { ApiError } from '../../../seams/api.ts';
 import { type ApiResponse, decodeParameter } from '../../../seams/api.ts';
 import { jsonResponse } from '../../../seams/api.ts';
 import type { MountRoute, RouteContext } from '../../../seams/api.ts';
-import type { MountContribution, MountSocket } from '../../../seams/api.ts';
+import type { MountSocket } from '../../../seams/api.ts';
 import {
   SharedDraftError,
   type SharedDraftErrorCode,
@@ -52,7 +52,7 @@ const OWNER_ACTOR_KINDS: ReadonlySet<string> = new Set(['admin-cli', 'device']);
  * An edit is at most one draft's worth of escaped text plus twenty items, far under this. A text route
  * must not inherit the attachment-sized default ceiling (`api/body.ts`).
  */
-export const SHARED_DRAFT_MAX_BODY_BYTES = 128 * 1024;
+const SHARED_DRAFT_MAX_BODY_BYTES = 128 * 1024;
 
 const ERROR_STATUS: Readonly<Record<SharedDraftErrorCode, readonly [number, string]>> = {
   'not-found': [404, 'not-found'],
@@ -68,7 +68,7 @@ const ERROR_STATUS: Readonly<Record<SharedDraftErrorCode, readonly [number, stri
 const isDraftOwner = (actor: ApiActor | undefined): boolean => OWNER_ACTOR_KINDS.has(parseActor(actor ?? '').kind);
 
 /** Refuses anybody but the owner, before the draft is even looked at. */
-export function assertDraftOwner(actor: ApiActor | undefined): void {
+function assertDraftOwner(actor: ApiActor | undefined): void {
   if (!isDraftOwner(actor))
     throw new ApiError(
       403,
@@ -240,16 +240,4 @@ export function sentDraftClearer(drafts: Pick<SharedDraftService, 'edit'>): Sent
       { metered: false, ...(sent.slot === undefined ? {} : { slot: sent.slot }) },
     );
   };
-}
-
-/**
- * What the shared-drafts module adds to the daemon: the draft's two routes and its live stream socket. It has no
- * audit rule (an edit is the owner typing, which the security log deliberately does not record) and claims no
- * protocol feature.
- */
-export function sharedDraftsContribution(
-  drafts: SharedDraftService,
-  stream: SharedDraftStreamSubsystem,
-): MountContribution {
-  return { routes: sharedDraftRoutes(drafts), sockets: sharedDraftSocketRoutes(drafts, stream) };
 }

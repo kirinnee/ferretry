@@ -58,7 +58,7 @@ import {
  * One opened set of values, as `batch` hands it over: pure, and valid only while that batch runs.
  * Structurally `lib/secrets`'s `Scrub`, declared here for the reason the redactor is.
  */
-export interface TranscriptReadScrub {
+interface TranscriptReadScrub {
   text(text: string): string;
   data(value: unknown): unknown;
 }
@@ -79,7 +79,7 @@ export interface TranscriptReadRedactor {
 }
 
 /** A daemon with nothing to scrub. Its input is its output — a fact, not a fallback. */
-export const UNREDACTED: TranscriptReadRedactor = {
+const UNREDACTED: TranscriptReadRedactor = {
   redact: async text => text,
   batch: async work => work({ text: text => text, data: value => value }),
 };
@@ -139,7 +139,7 @@ export interface SessionTranscriptTail {
 }
 
 /** Which page of a transcript a `logPage` read is for: the tail when `before` is absent. */
-export interface TranscriptPageQuery {
+interface TranscriptPageQuery {
   /** The byte the page ends before — the `start` of the page the caller already holds. */
   readonly before?: number;
   /** The lowest byte the page may begin at; only meaningful with `before`. */
@@ -170,7 +170,7 @@ export interface SessionTranscriptPages {
 }
 
 /** What a transcript search asks the file for: a needle the raw records must hold, and the test for an event. */
-export interface TranscriptSearchQuery {
+interface TranscriptSearchQuery {
   readonly needle: string | undefined;
   readonly accept: (event: TranscriptEvent) => boolean;
   readonly limit: number;
@@ -288,11 +288,11 @@ export const DEFAULT_LOG_TAIL = 200;
 export const MAX_LOG_TAIL = 2_000;
 
 /** Matches a `logSearch` answers when the caller names no limit, and the most it will. */
-export const DEFAULT_LOG_SEARCH = 500;
-export const MAX_LOG_SEARCH = 2_000;
+const DEFAULT_LOG_SEARCH = 500;
+const MAX_LOG_SEARCH = 2_000;
 
 /** The longest query a search takes. */
-export const MAX_LOG_SEARCH_QUERY = 200;
+const MAX_LOG_SEARCH_QUERY = 200;
 
 /** Two digits, for a wall-clock stamp. */
 function pad(value: number): string {

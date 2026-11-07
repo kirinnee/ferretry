@@ -9,9 +9,9 @@ import type {
 import { extendSessionTranscriptRawPrefix, sessionTranscriptRawPrefixStart } from './raw-prefix.ts';
 
 /** The roles a replacement harness can receive as ordinary conversation context. */
-export type ConversationMessageRole = Extract<TranscriptRole, 'user' | 'assistant' | 'developer' | 'system'>;
+type ConversationMessageRole = Extract<TranscriptRole, 'user' | 'assistant' | 'developer' | 'system'>;
 
-export interface ConversationMessage {
+interface ConversationMessage {
   readonly point: ConversationMessagePoint;
   readonly role: ConversationMessageRole;
   readonly text: string;
@@ -31,7 +31,7 @@ export interface PortableConversationRow extends ConversationMessage {
 }
 
 /** Evidence deliberately omitted because it cannot be replayed across harnesses. */
-export interface ConversationDigestOmission {
+interface ConversationDigestOmission {
   readonly point: ConversationMessagePoint;
   readonly kind: Exclude<TranscriptEvent['kind'], 'message'>;
   readonly reason: 'harness-specific' | 'unreadable';
@@ -56,7 +56,7 @@ export interface ConversationDigestOmission {
  * commitment would be a durable fingerprint of raw text sitting beside its redacted display, which
  * is the offline oracle the whole token design exists to avoid.
  */
-export interface ConversationSelectionEvidence {
+interface ConversationSelectionEvidence {
   /** The cut coordinate, restated so evidence cannot drift from the point it speaks for. */
   readonly point: ConversationMessagePoint;
   /** `H_i` — 32 bytes — for the physical record the cut was normalized from. */

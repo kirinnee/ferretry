@@ -14,15 +14,12 @@
 export {
   BottomSheet,
   Button,
-  type ClassValue,
   type ClipboardWriter,
   browserClipboardWriter,
   ConcurrencyLimit,
-  type ContextChip,
   ContextFilterChips,
   CopyButton,
   cn,
-  type ComposerQuoteTarget,
   composerQuoteTarget,
   registerComposerQuoteTarget,
   useQuoteMenu,
@@ -34,9 +31,7 @@ export {
   Spinner,
   Textarea,
   useDialogFocus,
-  useDocumentVisible,
   useLayoutMode,
-  useNow,
   usePrefersReducedMotion,
   wordCut,
 } from '@ferretry/app/ui';
@@ -45,8 +40,6 @@ export {
   ChatProse,
   clockOfInstant,
   daemonOfClient,
-  FY_REQUEST_ID_HEADER,
-  LIST_REFRESH_MIN_MS,
   ListRefresh,
   type ListRefreshEnvironment,
   MachineDeadlineError,
@@ -63,14 +56,12 @@ export {
 
 export {
   type DaemonConnection,
-  type DaemonConnectionInput,
   type DaemonId,
   type DaemonSessionScope,
   daemonConnection,
   daemonId,
   daemonSessionKey,
   daemonSessionScope,
-  THIS_MACHINE,
 } from './lib/machine.ts';
 export { DaemonResponseError, FyHttpError } from './lib/agenda-call.ts';
 export {
@@ -118,7 +109,7 @@ export const agendaDeepLinkFromFragment = (
 };
 
 /** A release or transcript replacement invalidated the caller's message evidence. */
-export const staleMessageEvidence = (reason: unknown, code: 'message_cursor_stale' | 'selection_stale'): boolean =>
+const staleMessageEvidence = (reason: unknown, code: 'message_cursor_stale' | 'selection_stale'): boolean =>
   reason instanceof DaemonResponseError && reason.status === 409 && reason.code === code;
 
 /** Restart a whole paged read once, with fresh accumulators and no cursor from the failed attempt. */

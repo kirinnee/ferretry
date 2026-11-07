@@ -13,10 +13,10 @@ type TitledConfig = Pick<FerretView['config'], 'name' | 'cwd' | 'teammate' | 'id
 const baseName = (path: string): string => path.replace(/\/+$/u, '').split('/').pop() ?? '';
 
 /** THE TASK A FERRET WAS GIVEN, or `''` when it has none. */
-export const sessionTask = (name?: string | null): string => parseTaskName(name).task;
+const sessionTask = (name?: string | null): string => parseTaskName(name).task;
 
 /** A ferret's two names: the task (else its folder, else its callsign) over the callsign. */
-export const sessionTitles = (config: TitledConfig): { readonly title: string; readonly ferret: string | null } => {
+const sessionTitles = (config: TitledConfig): { readonly title: string; readonly ferret: string | null } => {
   const callsign = displayCallsign(config.teammate);
   const task = sessionTask(config.name);
   if (task !== '' && task !== callsign) return { title: task, ferret: callsign === '' ? null : callsign };

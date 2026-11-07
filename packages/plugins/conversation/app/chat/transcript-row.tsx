@@ -374,7 +374,7 @@ function HandoffRow({
  * (`handoff-message.tsx`), never the pointer it was typed. An agenda item's conversation draws the owner's words with
  * this same row (`agenda-item-history.tsx`), its `receipt` saying how far they are known to have got.
  */
-export function OwnMessageRow({
+function OwnMessageRow({
   entry,
   rhythm,
   answered,
@@ -443,7 +443,7 @@ function OwnWords({ text, onItsWay = false }: { readonly text: string; readonly 
  * conversation draws the ferret's words with this same row (`agenda-item-history.tsx`), in its own prose (`body`) and
  * with a tag beside the name (`aside`).
  */
-export function TranscriptTextRow({
+function TranscriptTextRow({
   entry,
   rhythm,
   run,

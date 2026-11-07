@@ -99,7 +99,7 @@ export interface SessionChatPageProps {
 }
 
 /** A ferret as its words name it: the callsign, else the task's name, else the id (today's `sessionDisplayName`). */
-export const ferretDisplayName = (session: FerretView): string =>
+const ferretDisplayName = (session: FerretView): string =>
   displayCallsign(session.config.teammate) || session.config.name || session.config.id;
 
 /**

@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { SendRecordSchema } from '../../../../daemon/seams/protocol.ts';
 import should from 'should';
-import { parseSessionId, type SessionId } from '../../../../daemon/seams/index.ts';
+import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
 import {
   AgentSendFailureNotifier,
   type SendRecord,

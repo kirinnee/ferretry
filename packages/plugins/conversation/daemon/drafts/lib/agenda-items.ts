@@ -16,7 +16,7 @@ export interface AgendaBoardChange {
 }
 
 /** Told after a durable board change. */
-export interface AgendaChangeObserver {
+interface AgendaChangeObserver {
   changed(sessionId: string, change: AgendaBoardChange): Promise<void>;
 }
 import type { SharedDraftSessionDirectory } from './types.ts';

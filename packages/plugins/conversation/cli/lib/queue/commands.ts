@@ -8,12 +8,6 @@ export interface QueuePorts {
   readonly out: QueueOutput;
 }
 
-export const QUEUE_HELP = `A message can be changed only while it waits (✓). Once it is typed into the ferret it is the ferret's.
-
-  fy queue <ferret>                      list the queue
-  fy queue edit <ferret> <id> <text...>  new words for a waiting message
-  fy queue cancel <ferret> <id>          take back a waiting message`;
-
 const usage = (ports: QueuePorts, line: string): number => {
   ports.out.report(`usage: ${line}`);
   return 2;

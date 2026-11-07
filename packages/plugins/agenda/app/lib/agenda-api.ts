@@ -14,7 +14,7 @@ import { type AgendaCall, agendaCall, requestIdHeaders } from './agenda-call.ts'
 import { AGENDA_MODE } from './agenda-wire.ts';
 
 /** The switch as it reads now. */
-export const AGENDA_MODE_READ = 'GET /v1/ferrets/:ferretId/agenda-mode';
+const AGENDA_MODE_READ = 'GET /v1/ferrets/:ferretId/agenda-mode';
 
 /** Reads whether one ferret is told to keep an agenda, and the daemon's sentence about it. */
 export const readSessionAgenda = async (client: AgendaCall, ferret: string): Promise<AgendaMode> =>

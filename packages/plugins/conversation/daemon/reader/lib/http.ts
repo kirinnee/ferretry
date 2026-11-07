@@ -14,7 +14,7 @@ const ENCODED_PAYLOAD_BYTES = Math.ceil(LARGEST_PAYLOAD_BYTES / 3) * 4;
 const ENVELOPE_BYTES = 4 * 1024 * 1024;
 
 /** Today's `MAX_REQUEST_BODY_BYTES`: one base64 attachment and its envelope. */
-export const MAX_REQUEST_BODY_BYTES = ENCODED_PAYLOAD_BYTES + ENVELOPE_BYTES;
+const MAX_REQUEST_BODY_BYTES = ENCODED_PAYLOAD_BYTES + ENVELOPE_BYTES;
 
 export async function parseBody<Schema extends z.ZodType>(
   request: ApiRequest,

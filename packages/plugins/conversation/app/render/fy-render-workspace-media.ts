@@ -41,7 +41,7 @@ const FsFileSchema = z.looseObject({
 });
 
 /** Decoded into an ordinary ArrayBuffer: a renderer must never smuggle a shared buffer to Blob. */
-export const bytesFromBase64 = (value: string): Uint8Array<ArrayBuffer> => {
+const bytesFromBase64 = (value: string): Uint8Array<ArrayBuffer> => {
   const binary = atob(value);
   const bytes = new Uint8Array(new ArrayBuffer(binary.length));
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);

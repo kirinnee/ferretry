@@ -38,7 +38,7 @@ export interface ConversationFileEntry {
   readonly kind: 'file' | 'directory' | 'other';
 }
 
-export interface ConversationFileInfo {
+interface ConversationFileInfo {
   readonly modifiedAtMs: number;
   readonly size: number;
 }
@@ -126,7 +126,7 @@ async function boundedTranscript(
  * The working folder a transcript records — Claude on every record, Codex in its `session_meta` — and,
  * for Codex, the conversation id that record carries (Claude names a conversation by its file).
  */
-export function conversationHead(
+function conversationHead(
   harness: Harness,
   text: string,
 ): { readonly project: string; readonly id: string | undefined } | undefined {
@@ -168,7 +168,7 @@ function conversationIdOf(
  * name is the owner's, else the CLI's generated one unless that title describes the wrapper it was
  * generated from (a turn-file pointer, an AGENTS.md block) — then the first real message heads it.
  */
-export function describeConversation(
+function describeConversation(
   candidate: { readonly harness: Harness; readonly nameId?: string | undefined },
   text: string,
   events: readonly TranscriptEvent[],

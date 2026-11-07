@@ -18,7 +18,7 @@ import { createElement, Fragment, type ReactNode } from 'react';
 
 // ─── the ferret's Actions menu (Ferrets) ───────────────────────────────────────────────────────────────────────────
 
-export type FerretActionGroup = 'session' | 'move' | 'tools' | 'learning' | 'warden' | 'danger';
+type FerretActionGroup = 'session' | 'move' | 'tools' | 'learning' | 'warden' | 'danger';
 
 interface EntryBase {
   readonly id: string;
@@ -32,7 +32,7 @@ interface EntryBase {
 }
 
 /** The two entry kinds the chat contributes (today's `SessionActionEntry` `run` and `confirm`). */
-export type FerretActionEntry =
+type FerretActionEntry =
   | (EntryBase & { readonly kind: 'run'; readonly run: () => Promise<void> | void })
   | (EntryBase & {
       readonly kind: 'confirm';

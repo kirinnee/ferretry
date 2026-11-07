@@ -238,7 +238,7 @@ export function InboxHarness({
  * The route table the suites draw in, as a shell with Conversation and Board installed would spell it: a ferret's chat,
  * a card, and this half's own Agenda page, each on its machine.
  */
-export const SCREENS: ScreenHrefOf = (daemon, plugin, screen, params = {}) => {
+const SCREENS: ScreenHrefOf = (daemon, plugin, screen, params = {}) => {
   const at = `/d/${encodeURIComponent(daemon)}`;
   if (plugin === 'conversation' && screen === 'chat') return `${at}/session/${encodeURIComponent(params.ferret ?? '')}`;
   if (plugin === 'board' && screen === 'card') return `${at}/board/${encodeURIComponent(params.id ?? '')}`;

@@ -27,9 +27,6 @@ export {
   type DaemonFerretScope,
   daemonFerretKey,
   daemonFerretScope,
-  type DevicePreference,
-  devicePreference,
-  getForegroundPinScope,
   setForegroundPinScope,
 } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
@@ -51,33 +48,6 @@ export const daemonConnection = (daemonId: string): DaemonConnection => ({ daemo
 export type ConversationCaller = Pick<PluginClient, 'call'>;
 
 export { DaemonCallError };
-
-/** A refusal as the composer reads it: the status, the daemon's machine code when it sent one, and its sentence. */
-export interface CallRefusal {
-  readonly status: number;
-  readonly code?: string;
-  readonly message: string;
-}
-
-/** The refusal inside a thrown value, or `undefined` for anything that is not the daemon answering no. */
-export const callRefusal = (error: unknown): CallRefusal | undefined => {
-  if (error instanceof DaemonCallError)
-    return { status: error.status, ...(error.code === '' ? {} : { code: error.code }), message: error.message };
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    typeof (error as { status?: unknown }).status === 'number' &&
-    error instanceof Error
-  ) {
-    const code = (error as { code?: unknown }).code;
-    return {
-      status: (error as unknown as { status: number }).status,
-      ...(typeof code === 'string' ? { code } : {}),
-      message: error.message,
-    };
-  }
-  return undefined;
-};
 
 /**
  * Whether a request that failed on the carrier may have reached the daemon: `unsent` (proved not to have left), or

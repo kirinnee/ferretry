@@ -6,9 +6,6 @@ import { decryptPdfInMemory } from './adapters/decrypt-pdf.ts';
 import { StateAttachmentOriginals } from './adapters/originals.ts';
 import { AttachmentStore, ferretScopedAttachments } from './lib/ferret-attachments.ts';
 import { downloadRoute, lockRoute, unlockRoute, uploadRoute } from './routes.ts';
-
-export { ATTACHMENT_MANIFEST_STATE, ATTACHMENT_ORIGINAL_STATE } from './adapters/state.ts';
-export { decryptPdfInMemory, probePdfDecryptWorker } from './adapters/decrypt-pdf.ts';
 export * from './lib/index.ts';
 
 export interface AttachmentsNeeds {

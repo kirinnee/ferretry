@@ -1,7 +1,8 @@
 import type { Instant } from '@ferretry/std';
 import type { StoredRenderMeta } from '../../contract/index.ts';
 
-import { RenderService, serialExecutor, type RenderRepository } from '../../daemon/renders/lib/index.ts';
+import { RenderService } from '../../daemon/renders/lib/service.ts';
+import { serialExecutor, type RenderRepository } from '../../daemon/renders/lib/types.ts';
 
 /** A render repository over memory: the service's rules are real, the disk is not. */
 export class MemoryRenderRepository implements RenderRepository {

@@ -25,7 +25,7 @@ export interface HistoryReceipt {
 }
 
 /** The mark the owner's words carry: the chat's ledger when it recorded the send, else what the item itself says. */
-export const historyReceipt = (reached: OwnerWordsReach | undefined): HistoryReceipt => {
+const historyReceipt = (reached: OwnerWordsReach | undefined): HistoryReceipt => {
   const send = reached?.send;
   if (send !== undefined) {
     if (send.fate === 'delivered')

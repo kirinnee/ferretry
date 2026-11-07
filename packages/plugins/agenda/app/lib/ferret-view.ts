@@ -71,10 +71,7 @@ const inDiscussion = (item: Pick<AgendaItem, 'waitingOn' | 'waitingFor'>): boole
  * and `decoratedSummary`): a parked item or a notice waits on nobody; an idle ferret with an item on the owner's turn
  * is stopped on the owner.
  */
-export const agendaSummaryOf = (
-  items: readonly AgendaItem[],
-  status?: FerretStatus,
-): SessionAgendaSummary | undefined => {
+const agendaSummaryOf = (items: readonly AgendaItem[], status?: FerretStatus): SessionAgendaSummary | undefined => {
   const open = items.filter(item => item.notice !== true && item.parked === undefined);
   const [oldest] = open;
   if (oldest === undefined) return undefined;
@@ -152,7 +149,7 @@ export const parseFerretList = (value: unknown): readonly ListedFerret[] => {
 };
 
 /** One ferret's view: its identity from Ferrets, its summary from its items. */
-export const ferretView = (ferret: ListedFerret, items: readonly AgendaItem[]): FerretView => {
+const ferretView = (ferret: ListedFerret, items: readonly AgendaItem[]): FerretView => {
   const status: FerretStatus =
     ferret.state !== undefined && STATUSES.has(ferret.state) ? (ferret.state as FerretStatus) : 'idle';
   const agenda = agendaSummaryOf(items, status);
