@@ -14,7 +14,7 @@ import { LoginsPort } from '@ferretry/plugin-logins/contract';
 /**
  * Voice (§2.3): talk instead of type. Recognition runs in the browser; the daemon's part is the one JSON exchange a
  * browser cannot perform (`POST /v1/stt/enhance`: a transcript repaired by a hosted chat model, spending a key only the
- * daemon holds, R626: no audio crosses the daemon) and the speed-up keys' status and Test. Routes are today's mounts
+ * daemon holds, R626: no audio crosses the daemon; a person's act, since a ferret may not trigger a paid call unattended) and the speed-up keys' status and Test. Routes are today's mounts
  * (`stt.ts`, `speedups.ts`), descriptor fields copied exactly; the paths contain no replaced word, so they are kept.
  *
  * Keys are Vault secrets by NAME (`GROQ_API_KEY`, `CEREBRAS_API_KEY`, `JEV_API_KEY`), spent only through the Vault's
@@ -37,7 +37,7 @@ export default definePlugin({
     routes: [
       route('POST /v1/stt/enhance', {
         minimum: 'operator',
-        caller: 'any',
+        caller: 'person',
         audit: {
           skip: 'not recorded today (no rule in lib/audit/routes.ts); the payload is dictated speech and is never logged',
         },

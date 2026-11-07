@@ -36,10 +36,29 @@ let
       parts = lib.splitString "/" dir;
     in
     map (n: lib.concatStringsSep "/" (lib.take n parts)) (lib.range 1 (builtins.length parts));
-  installDirs = lib.unique (lib.concatMap ancestorsOf workspaceDirs);
+  # Every directory a `file:` entry of the root manifest's `overrides` names (the vendored `sharp` and
+  # `onnxruntime-node` stand-ins): `bun install` links those packages from the source tree, so they are
+  # install inputs too, derived from the manifest rather than listed by hand.
+  overrideDirs = map (lib.removePrefix "file:./") (
+    lib.filter (lib.hasPrefix "file:./") (
+      lib.attrValues ((lib.importJSON "${src}/package.json").overrides or { })
+    )
+  );
+  # Every file under those directories, as a source-relative path (a store path would move the digest
+  # with the commit), for the digest below.
+  overrideFiles = lib.concatMap (
+    dir:
+    map (file: lib.removePrefix "${toString src}/" (toString file)) (
+      lib.filesystem.listFilesRecursive (src + "/${dir}")
+    )
+  ) overrideDirs;
+  installDirs = lib.unique (lib.concatMap ancestorsOf (workspaceDirs ++ overrideDirs));
+  isUnderOverride =
+    relative: lib.any (dir: relative == dir || lib.hasPrefix "${dir}/" relative) overrideDirs;
 
-  # The only files `bun install` reads: the lockfile and the workspace manifests. The dependency
-  # derivation is built from exactly these, so nothing outside them can move its output unseen.
+  # The only files `bun install` reads: the lockfile, the workspace manifests and the packages the
+  # root `overrides` vendor by `file:` path. The dependency derivation is built from exactly these, so
+  # nothing outside them can move its output unseen.
   isInstallInput =
     path: type:
     let
@@ -50,7 +69,8 @@ let
       "package.json"
     ]
     || (type == "directory" && builtins.elem relative installDirs)
-    || builtins.elem relative (map (dir: "${dir}/package.json") workspaceDirs);
+    || builtins.elem relative (map (dir: "${dir}/package.json") workspaceDirs)
+    || isUnderOverride relative;
   installInputs = builtins.path {
     name = "ferretry-bun-install-inputs";
     path = src;
@@ -76,6 +96,11 @@ let
       manifests = map (manifest: removeAttrs (lib.importJSON "${src}/${manifest}") [ "version" ]) (
         [ "package.json" ] ++ map (dir: "${dir}/package.json") workspaceDirs
       );
+      # The vendored packages' bytes are install inputs, so editing one is a cache miss like any other.
+      vendored = map (file: {
+        inherit file;
+        content = builtins.readFile "${src}/${file}";
+      }) overrideFiles;
     }
   );
 
@@ -90,7 +115,7 @@ let
     outputHashAlgo = "sha256";
     # When a build reports a hash mismatch here, the install inputs changed what it installs: take the
     # `got:` hash. It is the same on every builder, so a mismatch is never fixed by rerunning.
-    outputHash = "sha256-V/NLeeF1vssIuXl1zAvx2UZOrEC3KUOOQVGML3K8l0M=";
+    outputHash = "sha256-vXk82QZ+lf/379Ktx8zpQiAZe04cvCg83ftmQuEI9pE=";
     dontFixup = true;
 
     buildPhase = ''

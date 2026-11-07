@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { assembleBrowserStream, EMPTY_BROWSER_STREAM_ASSEMBLY } from '../../../daemon/stream/wire.ts';
-import { type BrowserInputEvent, type BrowserScreencastFrame } from '../../../daemon/pages/wire/browser.ts';
+import { assembleBrowserStream, EMPTY_BROWSER_STREAM_ASSEMBLY } from '../../../contract/wire/stream.ts';
+import { type BrowserInputEvent, type BrowserScreencastFrame } from '../../../contract/wire/browser.ts';
 import { BrowserViewerStream } from '../../../daemon/stream/viewer-stream.ts';
 import {
   type BrowserViewerHost,

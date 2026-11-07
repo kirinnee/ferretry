@@ -17,8 +17,8 @@ import {
   type BrowserPageLifecycleRequest,
   type BrowserResourceType,
   type BrowserWaitCondition,
-} from '../../pages/wire/page-lifecycle.ts';
-import { type BrowserElementTarget } from '../../pages/wire/target.ts';
+} from '../../../contract/wire/page-lifecycle.ts';
+import { type BrowserElementTarget } from '../../../contract/wire/target.ts';
 import { browserSelectorOf } from '../../pages/page-acts.ts';
 
 /**

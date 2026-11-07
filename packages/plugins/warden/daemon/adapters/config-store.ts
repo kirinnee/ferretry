@@ -19,7 +19,8 @@ export class WardenConfigRefused extends Error {
  * kernel's ConfigPort offers no owner-acknowledged write, so on 5.0:
  * - while the kernel holds an edit, the owner's save is refused (this error), never written over it;
  * - a broken file is OVERWRITTEN with the value in effect: every setting is written from the settings in effect plus
- *   the owner's patch, so such an edit is never put into effect, but it is lost (today's fail-safe);
+ *   the owner's patch, so such an edit is never put into effect, but it is lost (today's fail-safe) (a file with a
+ *   top-level key the schema does not know is refused instead; the owner repairs it by hand);
  * - a hand edit the kernel has not reloaded yet is not lost: the kernel refuses the write as moved since its last
  *   reload (`conflict`, `WardenConfigMoved`) and the owner saves again once it has been read.
  */

@@ -87,7 +87,7 @@ export class ControlLaneTransport implements DaemonTransport {
     return await this.#control.request(request);
   }
 
-  events: DaemonTransport['events'] = (listener, onClose) => this.main.events(listener, onClose);
+  events: DaemonTransport['events'] = (listener, onClose, onOpen) => this.main.events(listener, onClose, onOpen);
   socket: DaemonTransport['socket'] = (path, listeners) => this.main.socket(path, listeners);
   onReconnect: DaemonTransport['onReconnect'] = listener => this.main.onReconnect(listener);
 

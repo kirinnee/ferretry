@@ -3,7 +3,7 @@
  * the manifest AND answered by the daemon half, through the test host's admission, as the ferret that calls it.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
+import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
@@ -55,7 +55,12 @@ async function built(): Promise<TestHost> {
   const gate = new StandInAdmission(request =>
     request.arrival.kind === 'local' && request.arrival.privileged ? ferretStanding('f1' as FerretId) : ownerStanding(),
   );
-  return await testHost({ plugins: [half], uses: { ferrets: FERRETS }, fakes: { vault: new FakeVault() }, gate });
+  return await testHost({
+    plugins: [half],
+    uses: { ferrets: FERRETS },
+    fakes: { vault: new FakeVault(), gate: new FakeGate() },
+    gate,
+  });
 }
 
 describe("today's browser agent tools", () => {

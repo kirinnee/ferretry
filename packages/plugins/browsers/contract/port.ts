@@ -58,12 +58,15 @@ export interface BrowsersApi {
 
 export const BrowsersPort = definePort<BrowsersApi>('browsers');
 
-/** A page opened or closed, or a person took the browser over or handed it back. Read the port for the truth. */
+/**
+ * A page opened or closed, a person took the browser over or handed it back, or an agent is driving a page (the
+ * "Ferret is typing here" marker). Read the port for the truth.
+ */
 export const PageChanged = defineEvent(
   'browsers.page-changed',
   z.strictObject({
     ferret: z.string().min(1),
     page: BrowserPageIdSchema,
-    change: z.enum(['opened', 'closed', 'taken-over', 'handed-back', 'handed-over', 'asked']),
+    change: z.enum(['opened', 'closed', 'taken-over', 'handed-back', 'handed-over', 'asked', 'driving']),
   }),
 );

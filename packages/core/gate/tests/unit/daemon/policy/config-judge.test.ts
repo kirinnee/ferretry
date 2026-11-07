@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Actor, CallStanding, ConfigWriteJudgement } from '@ferretry/kernel/contract';
-import { FULL_DEVICE_GRANTS, remedyRef } from '../../../../contract/index.ts';
+import * as contract from '../../../../contract/index.ts';
+import { claimOwnerOnly, FULL_DEVICE_GRANTS, type OwnerOnlyCall, remedyRef } from '../../../../contract/index.ts';
 import { CLIENT_HEADER, SESSION_ID_HEADER } from '../../../../daemon/lib/api/admission.ts';
 import { judgeLooseningWrite } from '../../../../daemon/lib/policy/config-judge.ts';
 import {
@@ -163,13 +164,15 @@ describe('G131 a ferret’s write, a warden’s and a job’s are always held', 
     expect(kernelsReading(judgement('owner-tools', failing))).toBe(false);
   });
 
-  test('G131 a proof that cannot be spent is not taken: a standing without its spend holds', () => {
+  test('G131 a proof that cannot be claimed is not taken: a standing without its claim holds', () => {
     const w = world();
     w.enrol('phone');
     w.stepUps.grant(subjectOf('phone'));
     const device = standingOf(w, { device: 'phone' });
-    const { spendFreshStepUp: _spend, ...unspendable } = device;
-    expect(judgeLooseningWrite(judgement('owner-viewer', unspendable as CallStanding))).toBe('hold');
+    const { claimFreshStepUp: _claim, ...unclaimable } = device;
+    expect(judgeLooseningWrite(judgement('owner-viewer', unclaimable as CallStanding))).toBe('hold');
+    // Nothing was taken: the same proof still serves a standing that can claim it.
+    expect(judgeLooseningWrite(judgement('owner-viewer', device))).toBe('apply');
   });
 });
 
@@ -178,5 +181,132 @@ describe('G131 the built admission asks this rule', () => {
     const w = world();
     expect(w.gate.judgeConfigWrite(judgement('owner-tools', standingOf(w, atMachine)))).toBe('apply');
     expect(w.gate.judgeConfigWrite(judgement('ferret', standingOf(w, atMachine)))).toBe('hold');
+  });
+});
+
+/** The kernel builds a call as a COPY of the standing (`{ request, params, ...standing }`), so a route's `call` is not the judge's standing. */
+const callOf = (standing: CallStanding): OwnerOnlyCall =>
+  ({ request: {}, params: new Map(), ...standing }) as unknown as OwnerOnlyCall;
+
+/** Counts the fresh proofs actually taken from the registry (a claim answered `true`). */
+function countTaken(w: World): () => number {
+  let taken = 0;
+  const real = w.stepUps.claimFresh;
+  Object.assign(w.stepUps, {
+    claimFresh: (...args: Parameters<typeof real>) => {
+      const claimed = real(...args);
+      if (claimed) taken += 1;
+      return claimed;
+    },
+  });
+  return () => taken;
+}
+
+/** A paired device holding ONE fresh proof; every standing taken before a request runs snapshots it as fresh. */
+function deviceWithOneProof() {
+  const w = world();
+  w.enrol('phone');
+  w.stepUps.grant(subjectOf('phone'));
+  const taken = countTaken(w);
+  const standings = (count: number): CallStanding[] => {
+    const all = Array.from({ length: count }, () => standingOf(w, { device: 'phone' }));
+    for (const standing of all) expect(standing.presentation?.freshStepUp).toBe(true);
+    return all;
+  };
+  return { w, taken, standings };
+}
+
+const applied = (answer: 'apply' | 'hold'): boolean => answer === 'apply';
+const admitted = (answer: ReturnType<typeof claimOwnerOnly>): boolean => answer === undefined;
+
+describe('G22 G25 G131 one proof cannot carry a second act', () => {
+  test('G22 G131 a loosening write and the autoInstall-on act admitted on one proof: the claim goes first, one applies', () => {
+    const { taken, standings } = deviceWithOneProof();
+    const [update, config] = standings(2) as [CallStanding, CallStanding];
+    const act = claimOwnerOnly(callOf(update), 'turn on automatic updates');
+    const loosening = judgeLooseningWrite(judgement('owner-viewer', config));
+    expect([admitted(act), applied(loosening)]).toEqual([true, false]);
+    expect(taken()).toBe(1);
+  });
+
+  test('G22 G131 a loosening write and the autoInstall-on act admitted on one proof: the judge goes first, one applies', () => {
+    const { taken, standings } = deviceWithOneProof();
+    const [update, config] = standings(2) as [CallStanding, CallStanding];
+    const loosening = judgeLooseningWrite(judgement('owner-viewer', config));
+    const act = claimOwnerOnly(callOf(update), 'turn on automatic updates');
+    expect([applied(loosening), admitted(act)]).toEqual([true, false]);
+    expect(act?.status).toBe(403);
+    expect(JSON.parse(act?.body ?? '{}')).toMatchObject({ demand: { capability: 'fleet', axis: 'configure' } });
+    expect(taken()).toBe(1);
+  });
+
+  test('G22 G25 G131 two owner-only acts (a proxy test and an update) and a loosening on one proof: exactly one of the three', () => {
+    const { taken, standings } = deviceWithOneProof();
+    const [proxyTest, update, config] = standings(3) as [CallStanding, CallStanding, CallStanding];
+    const results = [
+      admitted(claimOwnerOnly(callOf(proxyTest), 'test the browser proxy')),
+      admitted(claimOwnerOnly(callOf(update), 'update this machine')),
+      applied(judgeLooseningWrite(judgement('owner-viewer', config))),
+    ];
+    expect(results).toEqual([true, false, false]);
+    expect(taken()).toBe(1);
+  });
+
+  test('G22 G131 the autoInstall-on PATCH with a fresh proof still applies on its own claim, and takes the proof exactly once', () => {
+    const { w, taken, standings } = deviceWithOneProof();
+    const [update] = standings(1) as [CallStanding];
+    expect(claimOwnerOnly(callOf(update), 'turn on automatic updates')).toBeUndefined();
+    // The act's own write: the judge reads THIS call's standing, whose proof the act already claimed.
+    expect(judgeLooseningWrite(judgement('owner-viewer', update))).toBe('apply');
+    expect(taken()).toBe(1);
+    // That claim buys one loosening, not two, and no later call rides on it.
+    expect(judgeLooseningWrite(judgement('owner-viewer', update))).toBe('hold');
+    expect(judgeLooseningWrite(judgement('owner-viewer', standingOf(w, { device: 'phone' })))).toBe('hold');
+    expect(taken()).toBe(1);
+  });
+
+  test('G131 a governed loosening write with a fresh proof and no prior claim applies and takes the proof', () => {
+    const { w, taken, standings } = deviceWithOneProof();
+    const [config] = standings(1) as [CallStanding];
+    expect(judgeLooseningWrite(judgement('owner-viewer', config))).toBe('apply');
+    expect(taken()).toBe(1);
+    expect(judgeLooseningWrite(judgement('owner-viewer', config))).toBe('hold');
+    expect(claimOwnerOnly(callOf(standingOf(w, { device: 'phone' })), 'update this machine')?.status).toBe(403);
+    expect(taken()).toBe(1);
+  });
+
+  test('G131 a claim by one standing is not another standing’s: a second PATCH on the same proof is held', () => {
+    const { taken, standings } = deviceWithOneProof();
+    const [first, second] = standings(2) as [CallStanding, CallStanding];
+    expect(claimOwnerOnly(callOf(first), 'turn on automatic updates')).toBeUndefined();
+    expect(claimOwnerOnly(callOf(second), 'turn on automatic updates')?.status).toBe(403);
+    expect(judgeLooseningWrite(judgement('owner-viewer', second))).toBe('hold');
+    expect(taken()).toBe(1);
+  });
+
+  test('G131 the owner at the machine claims nothing, and a ferret is refused before any claim', () => {
+    const w = world();
+    const taken = countTaken(w);
+    const owner = standingOf(w, atMachine);
+    expect(claimOwnerOnly(callOf(owner), 'update this machine')).toBeUndefined();
+    expect(judgeLooseningWrite(judgement('owner-tools', owner))).toBe('apply');
+    const ferret = standingOf(w, { bearer: FERRET_TOKEN, arrival: local(true) });
+    expect(() => claimOwnerOnly(callOf(ferret), 'update this machine')).toThrow();
+    expect(judgeLooseningWrite(judgement('ferret', ferret))).toBe('hold');
+    expect(taken()).toBe(0);
+  });
+
+  test('G131 the relayed admin token is governed: it needs a proof, and a claimed one is taken once', () => {
+    const w = world();
+    const taken = countTaken(w);
+    w.stepUps.grant(subjectOf('admin'));
+    const relayed = standingOf(w, { bearer: ADMIN, arrival: carried(), headers: { [CLIENT_HEADER]: 'cli' } });
+    expect(judgeLooseningWrite(judgement('owner-tools', relayed))).toBe('hold');
+    expect(claimOwnerOnly(callOf(relayed), 'update this machine')?.status).toBe(403);
+    expect(taken()).toBe(0);
+  });
+
+  test('G131 the marker is Gate-private: no contract export names it', () => {
+    expect(Object.keys(contract).filter(name => /claimed|markProof|proofClaimed/iu.test(name))).toEqual([]);
   });
 });

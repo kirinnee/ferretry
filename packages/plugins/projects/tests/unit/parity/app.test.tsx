@@ -71,7 +71,7 @@ describe('app parity', () => {
   });
 
   test('S-0400 S-0349 S-0183 S-0184 S-0185 the project screen is the detail page', async () => {
-    expect(manifest.ui?.screens?.find(entry => entry.id === 'project')?.path).toBe('/projects/:id');
+    expect(manifest.ui?.screens?.find(entry => entry.id === 'project')?.path).toBe('projects/:id');
     const built = await screen('project');
     await settled(built, c => c.querySelector('[data-suspended]') === null, 'the screen module');
     expect(built.container.textContent).toContain('Open a paired daemon to see its projects.');

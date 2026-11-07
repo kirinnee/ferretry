@@ -10,26 +10,26 @@ import {
   type BrowserScreencastFrame,
   type BrowserStatus,
   type BrowserViewport,
-} from './wire/browser.ts';
+} from '../../contract/wire/browser.ts';
 import {
   type BrowserDialogInfo,
   BrowserDialogInfoSchema,
   type BrowserPageLifecycleReply,
   type BrowserPageLifecycleRequest,
-} from './wire/page-lifecycle.ts';
+} from '../../contract/wire/page-lifecycle.ts';
 import {
   type BrowserElementTarget,
   type BrowserTarget,
   type BrowserTargetFields,
   browserReadModeOf,
   browserTargetOf,
-} from './wire/target.ts';
-import { type SurfaceOpener } from './wire/surface.ts';
+} from '../../contract/wire/target.ts';
+import { type SurfaceOpener } from '../../contract/wire/surface.ts';
 import type { BrowserAutomation, BrowserPageActed } from './automation.ts';
 import type { BrowserCopyPort } from './copy-contracts.ts';
 import type { BrowserInputFieldsPort } from '../target/lib/contracts.ts';
 import type { BrowserUploadMode } from './page-acts.ts';
-import type { PageScript } from './wire/page-script.ts';
+import type { PageScript } from '../../contract/wire/page-script.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../stream/viewer-contracts.ts';
 import type { WorkerStagedFile } from '../worker/protocol.ts';
 import { type BrowserSignInWatch, pageActLeavesSignIn, toolbarActLeavesSignIn } from '../target/sign-in/watch.ts';

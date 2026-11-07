@@ -62,7 +62,8 @@ export default definePlugin({
   },
 
   ui: {
-    screens: [screen('onboarding', { path: '/onboarding' })],
+    // Daemon-less on purpose: the first run happens before any daemon is paired.
+    screens: [screen('onboarding', { path: '/onboarding', daemonless: true })],
   },
 
   data: {
