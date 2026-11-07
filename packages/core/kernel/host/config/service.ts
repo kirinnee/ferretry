@@ -41,6 +41,7 @@ import type {
   Log,
   StatePort,
 } from '../../contract/index.ts';
+import { judgeLoosening } from '../../contract/define.ts';
 import { StoreDamagedError } from '../state/errors.ts';
 import type { HostFs } from '../state/host-fs.ts';
 import { createStatePort } from '../state/state-port.ts';
@@ -120,7 +121,7 @@ export type ConfigWriteResult =
 export type ConfigRemoveResult =
   | { readonly kind: 'applied'; readonly loosened: readonly string[] }
   | { readonly kind: 'held'; readonly id: string; readonly sentences: readonly string[] }
-  | { readonly kind: 'refused'; readonly reason: 'not_declared' | 'bad_name' };
+  | { readonly kind: 'refused'; readonly reason: 'not_declared' | 'bad_name' | 'conflict' };
 
 export interface ConfigFileView {
   readonly path: string;
@@ -627,7 +628,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       const etag = digest(text);
       const before = settled.get(slot.path)?.evaluated.value;
       const loosens =
-        etag === settled.get(slot.path)?.evaluated.inEffect?.etag ? [] : def.loosens(before, checked.value);
+        etag === settled.get(slot.path)?.evaluated.inEffect?.etag ? [] : judgeLoosening(def, before, checked.value);
       const confirmed =
         writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false));
       if (loosens.length === 0 || confirmed) acknowledge(slot.path, text);
@@ -652,12 +653,15 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (slot === undefined) return { kind: 'refused', reason: 'bad_name' };
     return await serial(async () => {
       await load();
+      const disk = await readDisk(slot.path);
+      const etag = disk.kind === 'text' ? digest(disk.text) : ABSENT_CONFIG_ETAG;
+      if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== etag)
+        return { kind: 'refused', reason: 'conflict' };
       const current = settled.get(slot.path);
       const defaults = defaultsOf(def);
+      // A deletion is judged even with no defaults: `after` is then `undefined` (K5).
       const sentences =
-        current?.evaluated.inEffect === undefined || defaults === undefined
-          ? []
-          : def.loosens(current.evaluated.value, defaults);
+        current?.evaluated.inEffect === undefined ? [] : judgeLoosening(def, current.evaluated.value, defaults);
       const confirmed =
         writeOptions.confirmedLoosening === true || (sentences.length > 0 && askJudge(writeOptions, sentences, true));
       if (sentences.length === 0 || confirmed) acknowledgedRemovals.set(slot.path, options.clock.nowMs());
@@ -683,14 +687,11 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     name: string | undefined,
     writeOptions: ConfigWriteOptions,
   ): Promise<ConfigWriteOutcome> => {
-    if (writeOptions.ifMatch !== undefined) {
-      const view = await read(plugin, def, name);
-      if (view !== undefined && view.etag !== writeOptions.ifMatch) return { kind: 'conflict' };
-    }
     const removed = await remove(plugin, def, name, writeOptions);
     if (removed.kind === 'applied') return { kind: 'written', etag: ABSENT_CONFIG_ETAG, loosened: removed.loosened };
     if (removed.kind === 'held')
       return { kind: 'held', etag: ABSENT_CONFIG_ETAG, id: removed.id, sentences: removed.sentences };
+    if (removed.reason === 'conflict') return { kind: 'conflict' };
     return { kind: 'refused', reason: removed.reason, issues: [] };
   };
 

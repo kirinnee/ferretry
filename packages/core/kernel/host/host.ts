@@ -33,6 +33,7 @@ import type {
   DaemonContext,
   DaemonHalf,
   DaemonImplementation,
+  DoctorRun,
   ToolHandler,
   ToolResult,
 } from '../manifest/implement.ts';
@@ -42,6 +43,7 @@ import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { currentActor, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
+import { type InstalledItems, installedItemReach } from './items.ts';
 import {
   admitCall,
   Dispatcher,
@@ -61,9 +63,32 @@ import { PluginLifecycle } from './lifecycle.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
-import { openChildEnvironments, restrictFetch, restrictSpawn, restrictWebSocket } from './permissions.ts';
+import {
+  effectivePermissions,
+  openChildEnvironments,
+  restrictFetch,
+  restrictSpawn,
+  type ResolverOf,
+  restrictWebSocket,
+  workersFor,
+} from './permissions.ts';
+import type { HostStatePort } from './state/state-port.ts';
 import { openHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
+import { PinRegistry } from './pins.ts';
+import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
+import type { ScratchPort } from '../contract/ports.ts';
+
+const NO_PINNER: SessionRootPinner = {
+  pin: async () => {
+    throw unsupportedPlatform(process.platform);
+  },
+};
+const NO_SCRATCH: ScratchPort = {
+  open: async () => {
+    throw new FsError('unsupported', 'this daemon was started with no scratch folders');
+  },
+};
 import { buildSnapshot, type DataPluginManifest } from './snapshot.ts';
 import { type DaemonIdentity, daemonNameFrom, loadIdentity } from './identity.ts';
 import {
@@ -118,6 +143,10 @@ export interface HostAdapters {
   readonly websocket?: WebSocketPort;
   /** The machine's host name, for the daemon name. Absent: `Ferretry daemon`. */
   readonly hostname?: () => string;
+  /** Holds a folder open for `RootHandle.pin`. Absent: every pin is refused (`unsupported`). */
+  readonly pinner?: SessionRootPinner;
+  /** Private scratch folders. Absent: every open is refused. */
+  readonly scratch?: ScratchPort;
 }
 
 export interface Listening {
@@ -161,6 +190,10 @@ export interface DoctorLine {
   readonly plugin: string;
   readonly state: 'ok' | 'warn' | 'fail';
   readonly detail: string;
+  /** The manifest `doctor` id that produced it, when a declared check did. */
+  readonly check?: string;
+  /** What to do about it, when the check said. */
+  readonly fix?: string;
 }
 
 export interface RunningHost {
@@ -306,6 +339,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   const { engine: hooks } = HookEngine.plan(order, log, deadline);
 
   const data = await loadDataPlugins(adapters.fs, home, new Set(manifests.map(manifest => manifest.id)));
+  const items = await installedItemReach(adapters.fs, home, data.accepted as readonly InstalledItems[]);
 
   const records = new Map<string, PluginRecord>();
   for (const manifest of manifests) {
@@ -358,6 +392,14 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     return record === undefined || key === undefined ? undefined : { record, key };
   };
 
+  const pins = new PinRegistry(() => adapters.pinner ?? NO_PINNER);
+  /** A plugin's own `resolvers` section, read at each call (unset during build: nothing resolves yet). */
+  const resolversOf =
+    (id: string): ResolverOf =>
+    name =>
+      (
+        records.get(id)?.half?.resolvers as Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
+      )?.[name];
   const portsFor = (manifest: Manifest, lifecycle: PluginLifecycle): KernelPorts => ({
     clock,
     log: scopedLog(adapters.logSink, manifest.id),
@@ -368,17 +410,36 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       { home, plugin: manifest.id, worktrees: options.worktrees ?? `${home}-worktrees` },
       manifest.permissions?.roots ?? [],
       () => bound.workFolders,
+      pins,
     ),
     events: events.portFor(manifest.id, manifest.data?.publishes ?? []),
     jobs: jobs.portFor(manifest.id),
-    workers: adapters.workers,
+    workers: workersFor(adapters.workers, () => {
+      const port = records.get(manifest.id)?.state?.port as HostStatePort | undefined;
+      return port === undefined ? undefined : (def, name) => port.sqliteGrant(def, name);
+    }),
     spawn: restrictSpawn(
       manifest.id,
-      manifest.permissions?.spawn ?? [],
+      effectivePermissions(manifest.core, manifest.permissions?.spawn ?? []),
       openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
+      items,
+      pins,
     ),
-    fetch: restrictFetch(manifest.id, manifest.permissions?.network ?? [], adapters.fetch),
-    websocket: restrictWebSocket(manifest.id, manifest.permissions?.network ?? [], websockets),
+    scratch: adapters.scratch ?? NO_SCRATCH,
+    fetch: restrictFetch(
+      manifest.id,
+      effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+      adapters.fetch,
+      items,
+      resolversOf(manifest.id),
+    ),
+    websocket: restrictWebSocket(
+      manifest.id,
+      effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+      websockets,
+      items,
+      resolversOf(manifest.id),
+    ),
     identity: identityPort,
     signer: signerFor(manifest.id, sessionSigner),
     ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
@@ -623,12 +684,34 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     if (entry.decl.input !== undefined && !entry.decl.input.safeParse(input).success)
       return { text: `The input for ${name} does not fit.`, isError: true };
     const handle = entry.handle;
-    const call = { request, params: new Map(), ...decision.standing } as Parameters<ToolHandler>[0];
+    const params = new Map<string, string>();
+    const call = { request, params, ...decision.standing } as Parameters<ToolHandler>[0];
+    let result: ToolResult;
+    let status: number;
     try {
-      return await runInCall({ actor: decision.actor }, () => handle(call, input));
+      result = await runInCall({ actor: decision.actor }, () => handle(call, input));
+      status = result.isError === true ? 500 : 200;
     } catch (error) {
-      return { text: error instanceof ApiError ? error.message : 'The tool failed.', isError: true };
+      result = { text: error instanceof ApiError ? error.message : 'The tool failed.', isError: true };
+      status = error instanceof ApiError ? error.status : 500;
     }
+    if ('record' in entry.decl.audit) {
+      try {
+        bindings.admission()?.recorded?.({
+          table: 'tool',
+          descriptor,
+          request,
+          params,
+          standing: decision.standing,
+          actor: decision.actor,
+          ...(request.principal === undefined ? {} : { principal: request.principal }),
+          status,
+        });
+      } catch {
+        // The record is Gate's; the tool's answer stands.
+      }
+    }
+    return result;
   };
 
   // The session layer: one per daemon; every carrier opens a link per session on it (§4.8).
@@ -743,6 +826,31 @@ async function doctorLines(
       });
   for (const note of hooks.notes) lines.push({ plugin: 'kernel', state: 'warn', detail: note });
   for (const refused of dataRefused) lines.push({ plugin: refused.folder, state: 'fail', detail: refused.sentence });
+  // Each started plugin's declared checks (manifest `doctor`), in start order; a check that throws is a failure that
+  // names the check, never the thrown text (which may carry anything).
+  for (const [id, record] of records) {
+    if (record.status !== 'serving' && record.status !== 'damaged') continue;
+    const runs = (record.half?.doctor ?? {}) as Readonly<Record<string, DoctorRun | undefined>>;
+    for (const check of record.manifest.doctor ?? []) {
+      const run = runs[check];
+      if (run === undefined) {
+        lines.push({ plugin: id, check, state: 'fail', detail: `The check ${check} has no implementation.` });
+        continue;
+      }
+      try {
+        const finding = await run();
+        lines.push({
+          plugin: id,
+          check,
+          state: finding.state,
+          detail: finding.detail,
+          ...(finding.fix === undefined ? {} : { fix: finding.fix }),
+        });
+      } catch {
+        lines.push({ plugin: id, check, state: 'fail', detail: `The check ${check} failed to run.` });
+      }
+    }
+  }
   const checks: readonly { readonly id: string; readonly item: DoctorCheck }[] = hooks.contributions(DoctorChecks);
   for (const check of checks) {
     try {

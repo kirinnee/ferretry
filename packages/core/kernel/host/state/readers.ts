@@ -1,5 +1,5 @@
 import { err, ok, type Result } from '@ferretry/std';
-import type { StateDamage, StateFileDef } from '../../contract/index.ts';
+import type { JsonlRecords, StateDamage, StateFileDef } from '../../contract/index.ts';
 import { damageOf, decodeJson, describeFault, openDocument, shapeOf } from './format.ts';
 import type { HostFs } from './host-fs.ts';
 import { scanJsonl } from './jsonl-scan.ts';
@@ -53,6 +53,45 @@ export async function readJsonlRecords<Shape>(
     shapes.push(shape.value);
   }
   return ok(shapes);
+}
+
+/**
+ * A JSONL file's records line by line: a line that does not parse or check is counted in `unreadable` and skipped.
+ * With `maxBytes`, only the end of the file is read, and a line the window cut at its start is dropped. Only an io
+ * fault (or a `required` file that is missing) is a damage.
+ */
+export async function readJsonlLines<Shape>(
+  fs: HostFs,
+  def: StateFileDef<string, Shape>,
+  path: string,
+  label: string,
+  maxBytes?: number,
+): Promise<Result<JsonlRecords<Shape>, StateDamage>> {
+  let bytes: Uint8Array | undefined;
+  try {
+    if (maxBytes === undefined) bytes = await fs.readBytes(path);
+    else {
+      const tail = await fs.readTail(path, maxBytes);
+      if (tail !== undefined) {
+        const firstBreak = tail.from === 0 ? -1 : tail.bytes.indexOf(0x0a);
+        bytes = tail.from === 0 ? tail.bytes : firstBreak < 0 ? new Uint8Array() : tail.bytes.subarray(firstBreak + 1);
+      }
+    }
+  } catch (error) {
+    return err(damageOf(label, 'io', describeFault(error)));
+  }
+  if (bytes === undefined)
+    return def.required === true ? err(damageOf(label, 'missing')) : ok({ records: [], unreadable: 0 });
+  const scan = scanJsonl(bytes);
+  let unreadable = scan.problems.length;
+  const records: Shape[] = [];
+  for (const record of scan.records) {
+    const opened = openDocument(def, `${label} line ${record.line}`, record.value);
+    const shape = opened.ok ? shapeOf(def, `${label} line ${record.line}`, opened.value) : opened;
+    if (shape.ok) records.push(shape.value);
+    else unreadable += 1;
+  }
+  return ok({ records, unreadable });
 }
 
 /** Opaque bytes (`secret`, `opaque`): present or not, never parsed. */

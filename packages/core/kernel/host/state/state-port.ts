@@ -1,10 +1,20 @@
 import { err, type Instant, ok, type Result } from '@ferretry/std';
-import type { Clock, SqliteHandle, StateDamage, StateFileDef, StatePort, StateRead } from '../../contract/index.ts';
+import {
+  type Clock,
+  type JsonlRecords,
+  MAX_STATE_TAIL_BYTES,
+  type SqliteHandle,
+  type StateDamage,
+  type StateFileDef,
+  type StatePort,
+  type StateRead,
+  type StateVersion,
+} from '../../contract/index.ts';
 import { StoreDamagedError, UndeclaredStateFileError } from './errors.ts';
 import { encodeDocument, stateLabel } from './format.ts';
 import type { HostFs } from './host-fs.ts';
 import { assertRecordSize } from './jsonl-scan.ts';
-import { readBytesFile, readJsonDocument, readJsonlRecords } from './readers.ts';
+import { readBytesFile, readJsonDocument, readJsonlLines, readJsonlRecords } from './readers.ts';
 import { KeyedSerialExecutor } from './serial-executor.ts';
 import { nodeSqliteFiles, openSqlite, type SqliteFiles } from './sqlite-store.ts';
 
@@ -40,6 +50,8 @@ export interface StatePortOptions {
 export interface HostStatePort extends StatePort {
   /** Files that are damaged but read as their narrower value (`onDamaged: { narrower }`): never the subsystem. */
   narrowed(): readonly StateDamage[];
+  /** Where a DECLARED sqlite file lives, for a worker to open itself; anything else throws. */
+  sqliteGrant(def: StateFileDef, name?: string): { readonly path: string; readonly label: string };
 }
 
 interface Located {
@@ -110,6 +122,23 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     narrowed.delete(label);
   };
 
+  /** Line-by-line reading (`records` / `tail`): only an io fault or a missing required file is a damage. */
+  const lenient = async <Shape>(
+    def: StateFileDef<string, Shape>,
+    name: string | undefined,
+    maxBytes: number | undefined,
+  ): Promise<JsonlRecords<Shape>> => {
+    const at = locate(def, name);
+    if (def.store !== 'jsonl') throw new TypeError(`state ${def.name}: only a jsonl file is read line by line`);
+    const read = await readJsonlLines(fs, def, at.path, at.label, maxBytes);
+    if (!read.ok) {
+      note(def, read.error);
+      if (def.onDamaged === 'subsystem') throw new StoreDamagedError(read.error);
+      return { records: [], unreadable: 0 };
+    }
+    return read.value;
+  };
+
   /** A file once found damaged is never written over: it is looked at again, and cleared only if it was repaired. */
   const guardWrite = async (def: StateFileDef, at: Located): Promise<void> => {
     if (!damaged.has(at.label) && !narrowed.has(at.label)) return;
@@ -134,6 +163,12 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
   };
 
   const port: HostStatePort = {
+    sqliteGrant(def: StateFileDef, name?: string) {
+      const at = locate(def, name);
+      if (def.store !== 'sqlite' && def.store !== 'sqlite-cache')
+        throw new TypeError(`state ${def.name}: only a sqlite file is opened on a worker`);
+      return { path: at.path, label: at.label };
+    },
     async read<Shape>(def: StateFileDef<string, Shape>, name?: string): Promise<StateRead<Shape>> {
       const at = locate(def, name);
       const result = await readRaw(def, at);
@@ -163,7 +198,7 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
 
     async update<Shape>(
       def: StateFileDef<string, Shape>,
-      fn: (current: Shape | undefined) => Shape,
+      fn: (current: Shape | undefined) => Shape | Promise<Shape>,
       name?: string,
     ): Promise<Result<Shape, StateDamage>> {
       const at = locate(def, name);
@@ -176,7 +211,9 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
           return err(current.error);
         }
         healthy(at.label);
-        const next = fn(current.value);
+        const next = await fn(current.value);
+        // Declined: the transform answered the very value it was given, so nothing is written.
+        if (current.value !== undefined && next === current.value) return ok(next);
         await fs.writeAtomic(at.path, `${encodeDocument(def, next, true)}\n`, fileMode(def));
         return ok(next);
       });
@@ -194,17 +231,29 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     },
 
     async *lines<Shape>(def: StateFileDef<string, Shape>, name?: string): AsyncIterable<Shape> {
+      // Today's journal read: a bad line is skipped and the rest still read (records() counts what was skipped).
+      for (const record of (await lenient(def, name, undefined)).records) yield record;
+    },
+
+    async version(def: StateFileDef, name?: string): Promise<StateVersion | undefined> {
       const at = locate(def, name);
-      if (def.store !== 'jsonl') throw new TypeError(`state ${def.name}: only a jsonl file is read with lines()`);
-      const records = await readJsonlRecords(fs, def, at.path, at.label);
-      if (!records.ok) {
-        note(def, records.error);
-        // The whole file is checked before the first line is handed out: half a history is not a history.
-        if (def.onDamaged === 'subsystem') throw new StoreDamagedError(records.error);
-        return;
-      }
-      healthy(at.label);
-      for (const record of records.value) yield record;
+      const info = await fs.info(at.path);
+      if (info === undefined) return undefined;
+      return { size: info.size, etag: `${info.inode}:${info.size}:${info.modifiedAtMs}` };
+    },
+
+    async records<Shape>(def: StateFileDef<string, Shape>, name?: string): Promise<JsonlRecords<Shape>> {
+      return await lenient(def, name, undefined);
+    },
+
+    async tail<Shape>(
+      def: StateFileDef<string, Shape>,
+      options: { readonly maxBytes: number; readonly name?: string },
+    ): Promise<JsonlRecords<Shape>> {
+      const { maxBytes } = options;
+      if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_STATE_TAIL_BYTES)
+        throw new TypeError(`state ${def.name}: tail reads 1 to ${MAX_STATE_TAIL_BYTES} bytes`);
+      return await lenient(def, options.name, maxBytes);
     },
 
     async list(def: StateFileDef): Promise<readonly string[]> {

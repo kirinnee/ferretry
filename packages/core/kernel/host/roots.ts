@@ -2,8 +2,15 @@ import type { Result } from '@ferretry/std';
 import { err, instantFromEpochMs, ok } from '@ferretry/std';
 import type { FencedPath, FolderRefusal, WorkFolders } from '../contract/bound.ts';
 import { insideFence } from '../contract/home.ts';
-import type { RootHandle, RootName, RootsPort, RootStat } from '../contract/ports.ts';
+import type { RootHandle, RootLstat, RootName, RootsPort, RootStat } from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
+import type { PinRegistry } from './pins.ts';
+
+/** Where a root's pins come from: the kernel's registry, and the plugin they are minted for. */
+export interface RootPinning {
+  readonly registry: PinRegistry;
+  readonly plugin: string;
+}
 
 /** Owner's roots refuse everything inside the fence; internal roots reach only their own subtree (§7.7). */
 const OWNER_ROOTS: ReadonlySet<RootName> = new Set(['harness-history', 'work', 'imports']);
@@ -89,6 +96,7 @@ function rootHandle(
   name: RootName,
   base: () => string | undefined,
   check: (path: string) => Result<FencedPath, FolderRefusal> | undefined,
+  pinning?: RootPinning,
 ): RootHandle {
   const ownerRoot = OWNER_ROOTS.has(name);
   const readOnly = READ_ONLY_ROOTS.has(name);
@@ -98,6 +106,21 @@ function rootHandle(
     const resolved = await resolveInRoot(fs, home, root, ownerRoot, path);
     if (!resolved.ok) throw new RootError(resolved.error);
     return resolved.value;
+  };
+  /**
+   * The leaf NOT followed: its parent resolved and fenced, the leaf's own name appended. What sits at the name (a
+   * link included) is then judged by the call itself — `lstat` reports it, an exclusive create refuses it.
+   */
+  const realParent = async (path: FencedPath): Promise<FencedPath> => {
+    const slash = path.lastIndexOf('/');
+    const leaf = path.slice(slash + 1);
+    if (slash <= 0 || leaf === '' || leaf === '.' || leaf === '..') return await real(path);
+    const parent = await real(path.slice(0, slash) as FencedPath);
+    const full = `${parent}/${leaf}`;
+    const root = base();
+    if (root === undefined) throw new RootError('outside');
+    if (ownerRoot && insideFence(home, full)) throw new RootError('fenced');
+    return full as FencedPath;
   };
   const writable = (): void => {
     if (readOnly) throw new RootError('read_only');
@@ -119,9 +142,29 @@ function rootHandle(
       const bytes = await fs.readBytes(await real(path));
       return limit === undefined ? bytes : bytes.slice(0, limit);
     },
-    writeText: async (path, text) => {
+    writeText: async (path, text, options) => {
       writable();
-      await fs.writeAtomic(await real(path), text, 0o600);
+      const mode = options?.mode ?? 0o600;
+      if (options?.exclusive === true) await fs.writeExclusive(await realParent(path), text, mode);
+      else await fs.writeAtomic(await real(path), text, mode);
+    },
+    lstat: async (path): Promise<RootLstat | undefined> => {
+      const info = await fs.lstat(await realParent(path));
+      if (info === undefined) return undefined;
+      const kind = info.kind === 'link' ? 'symlink' : info.kind;
+      return { kind, size: info.size, modified: instantFromEpochMs(info.mtimeMs) };
+    },
+    makeDirectory: async (path, options) => {
+      writable();
+      await fs.mkdirp(await real(path), options?.mode ?? 0o700);
+    },
+    realPath: async path => {
+      // `real` resolved every existing component inside the root; the whole must exist (a broken link throws), and a
+      // name that moved between the two answers is refused rather than re-resolved.
+      const resolved = await real(path);
+      const full = await fs.realpath(resolved);
+      if (full !== resolved) throw new RootError('link_escape');
+      return resolved;
     },
     list: async path => await fs.list(await real(path)),
     stat: async (path): Promise<RootStat | undefined> => {
@@ -133,6 +176,23 @@ function rootHandle(
       writable();
       await fs.remove(await real(path));
     },
+    pin: async (path, options) => {
+      if (pinning === undefined) throw new RootError('not_declared');
+      const resolved = await real(path);
+      const pinned = await pinning.registry.pin(pinning.plugin, resolved, options);
+      // The name was checked; now the OBJECT held: what the descriptor resolves to must still be in the root.
+      try {
+        const root = base();
+        if (root === undefined) throw new RootError('outside');
+        const realBase = await fs.realpath(root);
+        if (!inside(realBase, pinned.rootReal)) throw new RootError('link_escape');
+        if (ownerRoot && insideFence(home, pinned.rootReal)) throw new RootError('fenced');
+      } catch (error) {
+        await pinned.close();
+        throw error;
+      }
+      return pinned;
+    },
   };
 }
 
@@ -142,6 +202,7 @@ export function rootsPortFor(
   layout: RootLayout,
   declared: readonly RootName[],
   workFolders: () => WorkFolders | undefined,
+  pins?: PinRegistry,
 ): RootsPort {
   const allowed = new Set(declared);
   return {
@@ -167,7 +228,14 @@ export function rootsPortFor(
         if (name !== 'work' || scope?.ferret === undefined) return undefined;
         return workFolders()?.check(scope.ferret, path) ?? err('unknown_ferret');
       };
-      return rootHandle(fs, layout.home, name, base, check);
+      return rootHandle(
+        fs,
+        layout.home,
+        name,
+        base,
+        check,
+        pins === undefined ? undefined : { registry: pins, plugin: layout.plugin },
+      );
     },
   };
 }

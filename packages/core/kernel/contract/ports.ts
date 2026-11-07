@@ -3,6 +3,7 @@ import type { ActRunner, OpaqueId } from './act.ts';
 import type { ChildEnvironment, FencedPath, FolderRefusal, Redaction } from './bound.ts';
 import type { ConfigCollectionDef, ConfigFileDef, EventDef, StateFileDef } from './define.ts';
 import type { FerretId } from './ids.ts';
+import type { HeldRoot, PinnedWorkingDirectory, PinOptions } from './pinned.ts';
 import type { IdentitySigner } from './session.ts';
 import type { PostBuildSnapshot } from './snapshot.ts';
 
@@ -20,6 +21,8 @@ export interface KernelPorts {
   readonly jobs: JobsPort;
   readonly workers: WorkersPort;
   readonly spawn: SpawnPort;
+  /** Fresh private (0700) folders for staging files a child reads (today's diff scratch), removed on close. */
+  readonly scratch: ScratchPort;
   readonly fetch: FetchPort;
   /** WebSocket clients to the hosts the manifest declared in `permissions.network` (`ws:`/`wss:` only). */
   readonly websocket: WebSocketPort;
@@ -91,6 +94,22 @@ export interface SqliteHandle {
   close(): void;
 }
 
+/** {@link StatePort.version}: `etag` is opaque; equal etags mean the same file, unchanged. */
+export interface StateVersion {
+  readonly size: number;
+  readonly etag: string;
+}
+
+/** A JSONL file read line by line: every record that checked, and how many lines did not (never their text). */
+export interface JsonlRecords<Shape> {
+  readonly records: readonly Shape[];
+  /** Lines that were not JSON, not UTF-8, too large, or failed the format check. A torn last line is not counted. */
+  readonly unreadable: number;
+}
+
+/** The most `tail` reads from the end of a file. */
+export const MAX_STATE_TAIL_BYTES = 64 * 1024 * 1024;
+
 /**
  * `state/<id>/` and nothing else: atomic JSON/JSONL, SQLite transactions, each declared file's format check. `name`
  * fills the `*` of a collection path. Writes stamp `format` first.
@@ -98,14 +117,40 @@ export interface SqliteHandle {
 export interface StatePort {
   read<Shape>(file: StateFileDef<string, Shape>, name?: string): Promise<StateRead<Shape>>;
   write<Shape>(file: StateFileDef<string, Shape>, value: Shape, name?: string): Promise<void>;
-  /** Read-modify-write on one serialization chain per file. */
+  /**
+   * Read-modify-write on one serialization chain per file. `fn` may be async (it runs inside the chain). Returning
+   * `current` itself (the same reference) DECLINES: nothing is written and `current` is answered (today's session
+   * storage: a CAS loser or an already-applied transform has no write).
+   */
   update<Shape>(
     file: StateFileDef<string, Shape>,
-    fn: (current: Shape | undefined) => Shape,
+    fn: (current: Shape | undefined) => Shape | Promise<Shape>,
     name?: string,
   ): Promise<Result<Shape, StateDamage>>;
   append<Shape>(file: StateFileDef<string, Shape>, entry: Shape, name?: string): Promise<void>;
+  /**
+   * Each record in order. A line that does not parse or check is SKIPPED and reading goes on (today's journal read);
+   * `records()` says how many were skipped. Only an io fault or a missing `required` file is damage.
+   */
   lines<Shape>(file: StateFileDef<string, Shape>, name?: string): AsyncIterable<Shape>;
+  /**
+   * A cheap identity of one file from a single `lstat` (no read): its size and an etag that moves on any rewrite or
+   * append, so a reader can tell "unchanged since I last looked" without re-reading a journal. `undefined` when absent.
+   */
+  version(file: StateFileDef, name?: string): Promise<StateVersion | undefined>;
+  /**
+   * Every line checked on its own (a log, a journal): a bad line is skipped and counted rather than damaging the file,
+   * so one torn or hand-edited line never hides the rest. A missing file is no records.
+   */
+  records<Shape>(file: StateFileDef<string, Shape>, name?: string): Promise<JsonlRecords<Shape>>;
+  /**
+   * The same, over only the last `maxBytes` of the file (at most {@link MAX_STATE_TAIL_BYTES}): a line cut by the
+   * window's start is dropped, not counted. Reads no more than that from disk.
+   */
+  tail<Shape>(
+    file: StateFileDef<string, Shape>,
+    options: { readonly maxBytes: number; readonly name?: string },
+  ): Promise<JsonlRecords<Shape>>;
   list(file: StateFileDef): Promise<readonly string[]>;
   remove(file: StateFileDef, name?: string): Promise<void>;
   sqlite(file: StateFileDef, name?: string): SqliteHandle;
@@ -245,6 +290,20 @@ export interface RootStat {
   readonly modified: Instant;
 }
 
+/** What is AT a name, the leaf not followed: a link is reported as a `symlink`, never as what it points at. */
+export interface RootLstat {
+  readonly kind: 'file' | 'directory' | 'symlink' | 'other';
+  readonly size: number;
+  readonly modified: Instant;
+}
+
+export interface RootWriteOptions {
+  /** POSIX mode of a file this write creates. Default `0o600`. */
+  readonly mode?: number;
+  /** Create only: refused when anything (a file, a link) is already at the name; never follows a link. */
+  readonly exclusive?: boolean;
+}
+
 /**
  * A scoped handle on one root: resolves symlinks before checking, refuses `..`, keeps today's link and device-file
  * checks, and refuses everything inside the fence for an owner's root.
@@ -254,9 +313,22 @@ export interface RootHandle {
   resolve(relative: string): Result<FencedPath, FolderRefusal>;
   readText(path: FencedPath, limitBytes?: number): Promise<string>;
   readBytes(path: FencedPath, limitBytes?: number): Promise<Uint8Array>;
-  writeText(path: FencedPath, text: string): Promise<void>;
+  /** Atomic replace by default; `exclusive` creates only (today's worktree registry write, `wx`). */
+  writeText(path: FencedPath, text: string, options?: RootWriteOptions): Promise<void>;
   list(path: FencedPath): Promise<readonly string[]>;
   stat(path: FencedPath): Promise<RootStat | undefined>;
+  /** The leaf's own kind (a link is `symlink`); its parents are resolved and fenced as for every call. */
+  lstat(path: FencedPath): Promise<RootLstat | undefined>;
+  /** `mkdir -p` inside the root; a new folder gets `mode` (default `0o700`). */
+  makeDirectory(path: FencedPath, options?: { readonly mode?: number }): Promise<void>;
+  /** The real path of an EXISTING name, links resolved, checked again to be inside the root. */
+  realPath(path: FencedPath): Promise<FencedPath>;
+  /**
+   * Holds a folder in this root OPEN and walks beneath it by descriptor (today's session-viewer pinner): the
+   * folder is fenced like every call, and the object actually held is checked again to be inside the root. Its
+   * `policyCwd` is the only cwd `kernel.spawn` accepts as a pin, and only from the plugin whose root minted it.
+   */
+  pin(path: FencedPath, options?: PinOptions): Promise<HeldRoot>;
   remove(path: FencedPath): Promise<void>;
 }
 
@@ -303,15 +375,32 @@ export interface WorkerHandle {
   terminate(): Promise<void>;
 }
 
+/** A declared `sqlite` / `sqlite-cache` state file a worker may open (a collection member names its `name`). */
+export type WorkerStateGrant = StateFileDef | { readonly def: StateFileDef; readonly name: string };
+
+export interface WorkerStartOptions {
+  readonly name?: string;
+  /**
+   * Declared sqlite state files the worker opens itself with `workerState().sqlite(def, name?)` from
+   * `@ferretry/kernel/worker` (today's version archive runs bun:sqlite on a worker thread). The kernel resolves each
+   * inside this plugin's state folder; an undeclared or non-sqlite file refuses the start. No path is passed in.
+   */
+  readonly state?: readonly WorkerStateGrant[];
+}
+
 export interface WorkersPort {
   /** A Bun worker thread from the subsystem's own package (a module URL resolved from the half). */
-  start(moduleUrl: URL, options?: { readonly name?: string }): WorkerHandle;
+  start(moduleUrl: URL, options?: WorkerStartOptions): WorkerHandle;
 }
 
 // spawn ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface SpawnOptions {
-  readonly cwd?: FencedPath;
+  /**
+   * A fenced folder, or a directory held open by `RootHandle.pin` (`policyCwd`): the child starts INSIDE the held
+   * object, installed for the instant of the spawn. A pin this plugin's roots did not mint is refused.
+   */
+  readonly cwd?: FencedPath | PinnedWorkingDirectory;
   /**
    * Plain values the half owns, or a Vault {@link ChildEnvironment} (secrets resolved for this child). A handle is
    * opened inside the kernel's adapter at exec time; its values never pass through the plugin (lead decision 9).
@@ -331,6 +420,25 @@ export interface SpawnResult {
   readonly stderr: string;
 }
 
+/** `runBytes`: caps on what is kept of each stream (today's Git runner). */
+export interface SpawnBytesOptions extends SpawnOptions {
+  /** Default 1 MiB. Bytes past it are dropped and `stdoutTruncated` is set. */
+  readonly maxStdoutBytes?: number;
+  /** Default 64 KiB. */
+  readonly maxStderrBytes?: number;
+}
+
+/** A finished child's raw stdout, capped (today's `GitExecution`). A timeout kills it (`SIGKILL`). */
+export interface SpawnBytesResult {
+  /** `-1` when the child was abandoned at its timeout. */
+  readonly exitCode: number;
+  readonly stdout: Uint8Array;
+  readonly stderr: string;
+  readonly stdoutTruncated: boolean;
+  readonly stderrTruncated: boolean;
+  readonly timedOut: boolean;
+}
+
 export interface ChildHandle {
   readonly pid: number;
   readonly stdout: ReadableStream<Uint8Array>;
@@ -343,7 +451,28 @@ export interface ChildHandle {
 export interface SpawnPort {
   /** Only programs the manifest declared in `permissions.spawn`. */
   run(program: string, args: readonly string[], options?: SpawnOptions): Promise<SpawnResult>;
+  /** The same, keeping stdout as bytes up to a cap and saying whether it was cut. */
+  runBytes(program: string, args: readonly string[], options?: SpawnBytesOptions): Promise<SpawnBytesResult>;
   start(program: string, args: readonly string[], options?: SpawnOptions): ChildHandle;
+}
+
+// scratch ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** One private folder; every name is relative to it, and nothing is written through a link it made. */
+export interface ScratchDirectory {
+  /** The folder, for a child's cwd or arguments. Gone after `close`. */
+  readonly path: FencedPath;
+  makeDirectory(rel: string, mode?: number): Promise<void>;
+  /** Create only (refused when anything is at the name), with exactly `mode` (umask does not apply). */
+  writeFile(rel: string, data: string | Uint8Array, mode?: number): Promise<void>;
+  /** A link whose target is text, never followed here. */
+  symlink(rel: string, target: string): Promise<void>;
+  /** Removes the folder and everything in it. */
+  close(): Promise<void>;
+}
+
+export interface ScratchPort {
+  open(): Promise<ScratchDirectory>;
 }
 
 // fetch ────────────────────────────────────────────────────────────────────────────────────────────────────────────

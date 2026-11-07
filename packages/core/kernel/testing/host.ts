@@ -10,7 +10,7 @@ import type {
   RedactionScope,
   WorkFolders,
 } from '../contract/bound.ts';
-import { WITHHELD_SENTENCE } from '../contract/bound.ts';
+import { KERNEL_ONLY_PORTS, WITHHELD_SENTENCE } from '../contract/bound.ts';
 import type {
   ConfigCollectionDef,
   ConfigFileDef,
@@ -19,6 +19,7 @@ import type {
   HookDecision,
   PortToken,
 } from '../contract/define.ts';
+import { judgeLoosening } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse, finalised, headersFrom, queryFrom } from '../contract/http.ts';
 import type {
@@ -37,12 +38,24 @@ import type {
 import { parse as parseYaml } from 'yaml';
 import { KERNEL_REFUSALS, skeletonSentence } from '../contract/refusals.ts';
 import { createIdentitySigner, signerFor } from '../host/session/signer.ts';
+import {
+  effectivePermissions,
+  hostPermitted,
+  type ItemReachOf,
+  NO_ITEMS,
+  spawnPermitted,
+} from '../host/permissions.ts';
+import { scratchPort } from '../host/scratch.ts';
+import { PinRegistry } from '../host/pins.ts';
+import { type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
+import type { ScratchPort } from '../contract/ports.ts';
 import { testIdentity } from './identity.ts';
 import type { IdentitySigner } from '../contract/session.ts';
 import type { CallContext, MemberRouteHandler, RouteDescriptor, RouteHandler } from '../contract/route.ts';
+import type { DoctorFinding } from '../contract/kernel.ts';
 import type { PostBuildSnapshot } from '../contract/snapshot.ts';
 import type { SocketAccept, SocketDownstream, SocketHandler } from '../contract/socket.ts';
-import type { DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
+import type { DoctorRun, DaemonImplementation, HookInvoker, ToolHandler, ToolResult } from '../manifest/implement.ts';
 import type { Manifest, ToolDecl } from '../manifest/types.ts';
 import { type ActRecord, TestMintedIds, testActRunner } from './act.ts';
 import { type TestCaller, owner, standInAdmission, testArrival, testPrincipal } from './admission.ts';
@@ -78,6 +91,12 @@ export interface TestHostOptions {
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
   /** Answers `kernel.websocket.connect` for declared hosts (`ws:`/`wss:`). Without it a dial fails. */
   readonly websocket?: (url: URL) => WebSocketClient;
+  /** Answers `RootHandle.pin` (with the path the test root resolved). Without it a pin is refused. */
+  readonly pinner?: SessionRootPinner;
+  /** `kernel.scratch`. Default: real private temp folders, as the daemon's. */
+  readonly scratch?: ScratchPort;
+  /** What the owner's installed items name, for `permissions.spawn`/`network` `{ items }` entries. Default: none. */
+  readonly items?: ItemReachOf;
   /** What `kernel.identity` answers. Default: the throwaway identity's id and `test-daemon`. */
   readonly identity?: IdentityPort;
   /** Text the stand-in redaction masks (same-width `*`). */
@@ -135,6 +154,8 @@ export interface TestHost {
   state(pluginId: string): MemoryStateFolder;
   setConfig(fileOrCollection: string, value: unknown): void;
   runJob(id: string): Promise<void>;
+  /** Runs a half's declared `doctor` check (manifest `doctor` id) as `fy doctor` would. */
+  doctor(plugin: string, check: string): Promise<DoctorFinding>;
   jobIds(): readonly string[];
   /** Makes `InputHolds.decide` refuse this target (when the stand-in holds are in use). */
   hold(target: TargetRef, code?: RefusalCode): void;
@@ -476,7 +497,7 @@ async function start(world: World): Promise<TestHost> {
         if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
           return { kind: 'conflict' };
         const prior = before === undefined ? undefined : def.schema.safeParse(before);
-        const sentences = def.loosens(prior?.success === true ? prior.data : undefined, checked.data);
+        const sentences = judgeLoosening(def, prior?.success === true ? prior.data : undefined, checked.data);
         const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
         if (sentences.length > 0 && !judged(manifest.id, path, false, sentences))
           return { kind: 'held', etag, id: `${path}@held`, sentences };
@@ -495,7 +516,9 @@ async function start(world: World): Promise<TestHost> {
           return { kind: 'conflict' };
         const prior = before === undefined ? undefined : def.schema.safeParse(before);
         const defaults = def.schema.safeParse({});
-        const sentences = prior?.success === true && defaults.success ? def.loosens(prior.data, defaults.data) : [];
+        // as the real port: judged even with no defaults (`after` undefined), a throwing judgement held
+        const sentences =
+          prior?.success === true ? judgeLoosening(def, prior.data, defaults.success ? defaults.data : undefined) : [];
         const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
         if (sentences.length > 0 && !judged(manifest.id, path, true, sentences))
           return { kind: 'held', etag: 'absent', id: `${path}@held`, sentences };
@@ -510,6 +533,14 @@ async function start(world: World): Promise<TestHost> {
     };
   };
 
+  const pins = new PinRegistry(
+    () =>
+      options.pinner ?? {
+        pin: async () => {
+          throw unsupportedPlatform('the test host');
+        },
+      },
+  );
   const rootsFor = (manifest: Manifest): KernelPorts['roots'] => ({
     root(name) {
       if (!(manifest.permissions?.roots ?? []).includes(name))
@@ -526,8 +557,22 @@ async function start(world: World): Promise<TestHost> {
           return text;
         },
         readBytes: async path => new TextEncoder().encode(await handle.readText(path)),
-        writeText: async (path, text) => {
+        writeText: async (path, text, writeOptions) => {
+          if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
           world.roots.set(path, text);
+        },
+        lstat: async path => {
+          if (world.roots.has(path))
+            return { kind: 'file', size: (world.roots.get(path) as string).length, modified: clock.now() };
+          return [...world.roots.keys()].some(p => p.startsWith(`${path}/`))
+            ? { kind: 'directory', size: 0, modified: clock.now() }
+            : undefined;
+        },
+        makeDirectory: async () => {},
+        realPath: async path => {
+          if (!world.roots.has(path) && ![...world.roots.keys()].some(p => p.startsWith(`${path}/`)))
+            throw new Error(`no such file ${path}`);
+          return path;
         },
         list: async path =>
           [...world.roots.keys()].filter(p => p.startsWith(`${path}/`)).map(p => p.slice(path.length + 1)),
@@ -537,6 +582,9 @@ async function start(world: World): Promise<TestHost> {
             : undefined,
         remove: async path => {
           world.roots.delete(path);
+        },
+        pin: async (path, pinOptions) => {
+          return await pins.pin(manifest.id, path, pinOptions);
         },
       };
       return handle;
@@ -580,10 +628,29 @@ async function start(world: World): Promise<TestHost> {
       },
       spawn: {
         async run(program, args, spawnOptions) {
-          if (!(manifest.permissions?.spawn ?? []).includes(program))
+          if (
+            !spawnPermitted(
+              effectivePermissions(manifest.core, manifest.permissions?.spawn ?? []),
+              options.items ?? NO_ITEMS,
+              program,
+            )
+          )
             throw new Error(`${manifest.id}: spawn ${program} is not declared`);
           if (options.spawn === undefined) throw new Error(`${manifest.id}: spawn ${program} with no spawn fake`);
           return options.spawn(program, args, spawnOptions);
+        },
+        async runBytes(program, args, spawnOptions) {
+          const result = await this.run(program, args, spawnOptions);
+          const all = new TextEncoder().encode(result.stdout);
+          const cap = spawnOptions?.maxStdoutBytes ?? 1024 * 1024;
+          return {
+            exitCode: result.exitCode ?? -1,
+            stdout: all.slice(0, cap),
+            stderr: result.stderr,
+            stdoutTruncated: all.byteLength > cap,
+            stderrTruncated: false,
+            timedOut: false,
+          };
         },
         start(program): ChildHandle {
           throw new Error(
@@ -594,18 +661,45 @@ async function start(world: World): Promise<TestHost> {
       fetch: {
         async request(url, init) {
           const parsed = new URL(url);
-          if (!(manifest.permissions?.network ?? []).includes(parsed.host))
+          if (
+            !hostPermitted(
+              effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+              options.items ?? NO_ITEMS,
+              parsed.hostname,
+              name =>
+                (
+                  built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
+                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
+                    | undefined
+                )?.[name],
+              parsed.host,
+            )
+          )
             throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
           if (options.fetch === undefined) throw new Error(`${manifest.id}: fetch ${parsed.host} with no fetch fake`);
           return options.fetch(parsed, init);
         },
       },
+      scratch: options.scratch ?? scratchPort('fy-test-'),
       websocket: {
         connect(url) {
           const parsed = new URL(String(url));
           if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:')
             throw new Error(`${manifest.id}: ${parsed.protocol} is not a WebSocket address`);
-          if (!(manifest.permissions?.network ?? []).includes(parsed.host))
+          if (
+            !hostPermitted(
+              effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+              options.items ?? NO_ITEMS,
+              parsed.hostname,
+              name =>
+                (
+                  built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
+                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
+                    | undefined
+                )?.[name],
+              parsed.host,
+            )
+          )
             throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
           if (options.websocket === undefined)
             throw new Error(`${manifest.id}: dial ${parsed.host} with no websocket fake`);
@@ -648,6 +742,11 @@ async function start(world: World): Promise<TestHost> {
       built.push({ impl, manifest, half: undefined });
       continue;
     }
+    const kernelOnly = [...Object.values(manifest.needs ?? {}), ...Object.values(manifest.uses ?? {})].find(token =>
+      KERNEL_ONLY_PORTS.includes(token.name),
+    );
+    if (kernelOnly !== undefined)
+      throw new Error(`testHost: ${manifest.id} asks for ${kernelOnly.name}, which only the kernel may hold`);
     const needs: Record<string, unknown> = {};
     for (const [field, token] of Object.entries(manifest.needs ?? {})) {
       const value = lookup(options.fakes ?? {}, field, token) ?? providedBy.get(token.name);
@@ -840,6 +939,15 @@ async function start(world: World): Promise<TestHost> {
       return toTestResponse(
         await actorScope.run(actorOf(caller), () => runHandler(() => handler(call), route.guard, route.noStore)),
       );
+    },
+    async doctor(plugin, check) {
+      const entry = built.find(b => b.manifest.id === plugin);
+      if (entry === undefined) throw new Error(`no plugin ${plugin} under test`);
+      if (!(entry.manifest.doctor ?? []).includes(check))
+        throw new Error(`${plugin} declares no doctor check ${check}`);
+      const run = (entry.half?.doctor as Readonly<Record<string, DoctorRun | undefined>> | undefined)?.[check];
+      if (run === undefined) throw new Error(`${plugin}: the doctor check ${check} has no implementation`);
+      return await run();
     },
     async tool(name, input, init = {}) {
       const entry = tools.get(name);

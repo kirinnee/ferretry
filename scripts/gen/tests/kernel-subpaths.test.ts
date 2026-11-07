@@ -63,3 +63,13 @@ describe('context-imports: a plugin’s halves share pure code through their own
     );
   });
 });
+
+describe('context-imports: @ferretry/kernel/worker', () => {
+  test('a daemon half (its worker module) imports it; an app half or a contract does not', () => {
+    expect(refusal(edge('asks', 'daemon/lib/archive/worker.ts', '@ferretry/kernel/worker'))).toBeUndefined();
+    expect(refusal(edge('asks', 'app/index.ts', '@ferretry/kernel/worker'))).toBe(
+      "@ferretry/kernel/worker is imported only by a daemon half's worker module",
+    );
+    expect(refusal(edge('asks', 'contract/index.ts', '@ferretry/kernel/worker'))).toBeDefined();
+  });
+});

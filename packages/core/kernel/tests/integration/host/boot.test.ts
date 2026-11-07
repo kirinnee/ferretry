@@ -136,6 +136,9 @@ function plugins(admission: Admission, events: string[]) {
               },
             ],
           },
+          doctor: {
+            'board-ok': async () => ({ state: 'warn', detail: 'two cards are stale', fix: 'Run fy board tidy.' }),
+          },
         };
       },
     }),
@@ -270,6 +273,14 @@ describe('boot (§7.6)', () => {
     for (let i = 0; i < 20 && events.length < 2; i += 1) await new Promise(resolve => setTimeout(resolve, 5));
     expect(events).toEqual(['job', 'heard:F1']);
     expect(await host.doctor()).toContainEqual({ plugin: 'board-ok', state: 'ok', detail: 'fine' });
+    // the manifest's declared check, run from the half's `doctor` section
+    expect(await host.doctor()).toContainEqual({
+      plugin: 'board',
+      check: 'board-ok',
+      state: 'warn',
+      detail: 'two cards are stale',
+      fix: 'Run fy board tidy.',
+    });
   });
 
   test('a plugin turned off is not mounted, and what needs it is not started', async () => {

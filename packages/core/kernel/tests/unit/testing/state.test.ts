@@ -52,3 +52,54 @@ describe('the test host state port mirrors the real one for secret and opaque st
     expect(folder.raw(Doc)).toBe('{"format":1,"n":3}');
   });
 });
+
+describe('the test host state port: records() and tail() as the real one', () => {
+  const Log = defineState({
+    name: 'log',
+    path: 'log.jsonl',
+    store: 'jsonl',
+    format: 1,
+    schema: z.strictObject({ n: z.number() }),
+  });
+  test('2 valid + 2 malformed lines: 2 records and unreadable 2; a torn last line is not counted', async () => {
+    const folder = new MemoryStateFolder();
+    const port = folder.port([Log]);
+    folder.plant(Log, '{"format":1,"n":1}\n{ bad\n{"format":1,"n":"x"}\n{"format":1,"n":2}\n{"format":1,"n');
+    expect(await port.records(Log)).toEqual({ records: [{ n: 1 }, { n: 2 }], unreadable: 2 });
+  });
+  test('tail reads the end and drops the line its window cut', async () => {
+    const folder = new MemoryStateFolder();
+    const port = folder.port([Log]);
+    folder.plant(Log, `${Array.from({ length: 100 }, (_, n) => `{"format":1,"n":${n}}`).join('\n')}\n`);
+    const tail = await port.tail(Log, { maxBytes: 40 });
+    expect(tail.records.at(-1)).toEqual({ n: 99 });
+    expect(tail.unreadable).toBe(0);
+    expect(tail.records.length).toBeLessThan(3);
+  });
+});
+
+describe('the test host state port: lines() skips, update() declines, version()', () => {
+  const Log = defineState({
+    name: 'log',
+    path: 'log.jsonl',
+    store: 'jsonl',
+    format: 1,
+    schema: z.strictObject({ n: z.number() }),
+  });
+  test('lines skips a bad line; update with the same value writes nothing; version moves with the bytes', async () => {
+    const folder = new MemoryStateFolder();
+    const port = folder.port([Log, Doc]);
+    folder.plant(Log, '{"format":1,"n":1}\n{ bad\n{"format":1,"n":2}\n');
+    const seen: unknown[] = [];
+    for await (const record of port.lines(Log)) seen.push(record);
+    expect(seen).toEqual([{ n: 1 }, { n: 2 }]);
+    await port.write(Doc, { n: 1 });
+    const raw = folder.raw(Doc);
+    const v1 = await port.version(Doc);
+    expect(await port.update(Doc, async current => current as { n: number })).toEqual({ ok: true, value: { n: 1 } });
+    expect(folder.raw(Doc)).toBe(raw);
+    expect(await port.version(Doc)).toEqual(v1);
+    await port.update(Doc, current => ({ n: (current?.n ?? 0) + 1 }));
+    expect((await port.version(Doc))?.etag).not.toBe(v1?.etag);
+  });
+});
