@@ -47,7 +47,6 @@
         "daemon/adapters/names/file-system-callsign-counters.ts",
         "daemon/lib/session/events/index.ts",
         "daemon/lib/session/events/service.ts",
-        "daemon/lib/session/events/shared-backlog.ts",
         "daemon/lib/session/peers/reads.ts",
         "daemon/lib/session/observer/index.ts",
         "daemon/lib/session/observer/facts.ts",

@@ -30,7 +30,7 @@ export interface FerretFilter {
  * What other subsystems and the app read: the record without its format stamp and runner handle, with the model and
  * card it was started with and its title from `details.json`. The pin instant is the reader's to add.
  */
-function summaryOf(
+export function summaryOf(
   record: FerretRecord,
   details?: FerretDetails,
   waiting?: FerretWaiting,
