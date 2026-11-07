@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  DEFAULT_AGENT_CONTROL,
+  effectiveAgentControl,
   FerretRecordSchema,
   FerretSummarySchema,
   limitsLoosen,
   LimitsFileSchema,
   MAX_HARNESS_FLAG_LENGTH,
   MAX_HARNESS_FLAGS,
+  NO_AGENT_CONTROL,
   parseLimitSize,
   StartDecideInputSchema,
   StartOptionsSchema,
@@ -179,5 +182,56 @@ describe('limits.yaml', () => {
     ]);
     expect(limitsLoosen({}, { enabled: false })).toEqual(['limits turned off']);
     expect(limitsLoosen({ fleet: { tasksMax: 100 } }, { fleet: {} })).toEqual(['fleet.tasksMax removed']);
+  });
+});
+
+describe('what agents may control (limits.yaml agentControl)', () => {
+  test('today’s defaults: terminals, browsers and files on; Ferretry settings and page scripts off', () => {
+    expect(effectiveAgentControl(undefined)).toEqual({
+      terminals: true,
+      browsers: true,
+      files: true,
+      ferretrySettings: false,
+      pageScripts: false,
+    });
+    expect(effectiveAgentControl({})).toEqual(DEFAULT_AGENT_CONTROL);
+  });
+
+  test('a limits.yaml override wins switch by switch, and an unknown switch or a non-boolean is refused', () => {
+    const limits = LimitsFileSchema.parse({ agentControl: { files: false, pageScripts: true } });
+    expect(effectiveAgentControl(limits)).toEqual({
+      terminals: true,
+      browsers: true,
+      files: false,
+      ferretrySettings: false,
+      pageScripts: true,
+    });
+    expect(LimitsFileSchema.safeParse({ agentControl: { webcams: true } }).success).toBe(false);
+    expect(LimitsFileSchema.safeParse({ agentControl: { browsers: 'yes' } }).success).toBe(false);
+  });
+
+  test('switching a control ON loosens; switching one off, or restating a default, does not', () => {
+    expect(limitsLoosen(undefined, { agentControl: { pageScripts: true } })).toEqual([
+      'agents may now control page scripts',
+    ]);
+    expect(limitsLoosen({ agentControl: { browsers: false } }, { agentControl: { browsers: true } })).toEqual([
+      'agents may now control browsers',
+    ]);
+    // Removing a stated "off" puts the default (on) back in effect: that is switching it on.
+    expect(limitsLoosen({ agentControl: { files: false } }, {})).toEqual(['agents may now control project files']);
+    expect(limitsLoosen({}, { agentControl: { files: false, terminals: false } })).toEqual([]);
+    expect(limitsLoosen({}, { agentControl: { files: true, ferretrySettings: false } })).toEqual([]);
+    expect(limitsLoosen({ agentControl: { ferretrySettings: true } }, { agentControl: { ferretrySettings: true } })).toEqual(
+      [],
+    );
+  });
+
+  test('FakeFerrets answers today’s defaults, a ferret’s override, and nothing for an unknown ferret', async () => {
+    const ferrets = new FakeFerrets();
+    ferrets.add({ id: ferretId('f1') });
+    expect(await ferrets.agentControl(ferretId('f1'))).toEqual(DEFAULT_AGENT_CONTROL);
+    ferrets.setAgentControl(ferretId('f1'), { browsers: false });
+    expect((await ferrets.agentControl(ferretId('f1'))).browsers).toBe(false);
+    expect(await ferrets.agentControl(ferretId('nobody'))).toEqual(NO_AGENT_CONTROL);
   });
 });

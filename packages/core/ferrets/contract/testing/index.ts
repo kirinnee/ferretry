@@ -25,6 +25,7 @@ import type {
   Started,
 } from '../kinds.ts';
 import type { FerretsApi, Sitrep, StartFailure, StartRequest } from '../port.ts';
+import { type AgentControl, DEFAULT_AGENT_CONTROL, NO_AGENT_CONTROL } from '../state.ts';
 
 /** 2026-11-07T12:00:00Z. */
 export const T0: Instant = instantFromEpochMs(1_794_052_800_000);
@@ -383,6 +384,15 @@ export class FakeFerrets implements FerretsApi {
   async sitrep(ferret: FerretId): Promise<Sitrep | undefined> {
     const summary = this.#ferrets.get(ferret);
     return summary === undefined ? undefined : { ferret: summary, lines: [], blockers: [] };
+  }
+  readonly #controls = new Map<FerretId, Partial<AgentControl>>();
+  /** TEST ONLY: what one ferret may control, over today's defaults. */
+  setAgentControl(ferret: FerretId, control: Partial<AgentControl>): void {
+    this.#controls.set(ferret, control);
+  }
+  async agentControl(ferret: FerretId): Promise<AgentControl> {
+    if (!this.#ferrets.has(ferret)) return NO_AGENT_CONTROL;
+    return { ...DEFAULT_AGENT_CONTROL, ...this.#controls.get(ferret) };
   }
 }
 

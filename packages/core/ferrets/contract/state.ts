@@ -266,13 +266,82 @@ export const FerretLimitsSchema = z.strictObject({
   tasksMax: TasksSchema.optional(),
   cpuPercent: CpuPercentSchema.optional(),
 });
+// ─── what agents may control (today's `machine.agentControl`, `fleet/src/lib/account/schema.ts`) ─────────────
+
+/**
+ * "What agents may control" (T, session-spec.html Settings): the things a person can switch off independently for
+ * every ferret on this machine — terminals, browsers, the project files, this machine's configuration files
+ * (`config.*`) and an agent's own page scripts (`browser.eval`). Never a security boundary against the operator's
+ * own agents, only a kill switch for one kind of thing they do. The effective value: every switch stated.
+ */
+export const AgentControlSchema = z.strictObject({
+  terminals: z.boolean(),
+  browsers: z.boolean(),
+  files: z.boolean(),
+  /**
+   * Whether an agent may read and edit this machine's configuration files through the `config.*`
+   * tools (docs/config-files.md). OFF by default, unlike the three above: it is how an agent changes
+   * what every other agent may do. Even on, an agent's edit that loosens spend or authority is held
+   * until the owner confirms it — this switch is a kill switch, the confirmation is the guard.
+   */
+  ferretrySettings: z.boolean(),
+  /**
+   * Whether an agent may run its own JavaScript in a page it drives (`browser.eval`, in an isolated
+   * world: docs/agent-tools.md). OFF by default, like Ferretry settings: a script can read what the
+   * page holds — on the shared agent profile, sign-ins included. Turning it on is a loosening, so it
+   * is held until the owner confirms it.
+   */
+  pageScripts: z.boolean(),
+});
+export type AgentControl = z.infer<typeof AgentControlSchema>;
+
+/**
+ * Today's defaults: terminals, browsers and files on, because the product starts open and the switch is the escape
+ * hatch; Ferretry settings and page scripts off.
+ */
+export const DEFAULT_AGENT_CONTROL: AgentControl = Object.freeze({
+  terminals: true,
+  browsers: true,
+  files: true,
+  ferretrySettings: false,
+  pageScripts: false,
+});
+
+/** Every switch an answer names: a ferret this daemon does not know may control nothing. */
+export const NO_AGENT_CONTROL: AgentControl = Object.freeze({
+  terminals: false,
+  browsers: false,
+  files: false,
+  ferretrySettings: false,
+  pageScripts: false,
+});
+
+/** The switches `limits.yaml` states; an unstated one keeps today's default. */
+export const AgentControlOverridesSchema = AgentControlSchema.partial();
+
 export const LimitsFileSchema = z.strictObject({
   enabled: z.boolean().optional(),
   fleet: FleetLimitsSchema.optional(),
   perFerret: FerretLimitsSchema.optional(),
   ionice: z.boolean().optional(),
+  /** What every ferret on this machine may control; unstated switches keep {@link DEFAULT_AGENT_CONTROL}. */
+  agentControl: AgentControlOverridesSchema.optional(),
 });
 export type LimitsFile = z.infer<typeof LimitsFileSchema>;
+
+/** The switches in effect: today's defaults with what `limits.yaml` states over them. */
+export function effectiveAgentControl(limits: LimitsFile | undefined): AgentControl {
+  return { ...DEFAULT_AGENT_CONTROL, ...limits?.agentControl };
+}
+
+/** How a loosening names each switch (today's `AGENT_CONTROL_WORDS`). */
+const AGENT_CONTROL_WORDS: Readonly<Record<keyof AgentControl, string>> = {
+  terminals: 'terminals',
+  browsers: 'browsers',
+  files: 'project files',
+  ferretrySettings: 'Ferretry settings',
+  pageScripts: 'page scripts',
+};
 
 const sizeBytes = (value: unknown): number => {
   const parsed = parseLimitSize(value);
@@ -284,11 +353,16 @@ const raised = (before: unknown, after: unknown): boolean =>
 
 /**
  * Which `limits.yaml` edits loosen (docs/ferret-limits.md: raising a cap is held for the owner): turning limits off,
- * raising any memory, swap, task or CPU cap, or dropping the disk priority.
+ * raising any memory, swap, task or CPU cap, dropping the disk priority, or switching ON anything agents may control
+ * (compared in effect, so removing a stated "off" whose default is on loosens too).
  */
 export function limitsLoosen(before: LimitsFile | undefined, after: LimitsFile): readonly string[] {
   const from = before ?? {};
   const loosened: string[] = [];
+  const controlWas = effectiveAgentControl(before);
+  const controlNow = effectiveAgentControl(after);
+  for (const kind of Object.keys(AGENT_CONTROL_WORDS) as (keyof AgentControl)[])
+    if (!controlWas[kind] && controlNow[kind]) loosened.push(`agents may now control ${AGENT_CONTROL_WORDS[kind]}`);
   if (from.enabled !== false && after.enabled === false) loosened.push('limits turned off');
   if (from.ionice !== false && after.ionice === false) loosened.push('ferret disk priority no longer lowered');
   for (const scope of ['fleet', 'perFerret'] as const)

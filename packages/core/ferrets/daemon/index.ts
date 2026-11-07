@@ -21,6 +21,7 @@ import {
   FerretsChanged,
   FerretTokensFile,
   type HarnessKey,
+  LimitsConfigFile,
   Harnesses,
   LaunchParts,
   Runners,
@@ -179,6 +180,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     saveDetails: async (ferret, details) => await kernel.state.write(FerretDetailsFiles, details, ferret),
     history: appendHistory,
+    limits: () => kernel.config.file(LimitsConfigFile),
     pinnedAt: async () => await agentPins.pinnedAt(),
     // Binds to the `work` root's `RootHandle.realPath` when kernel item N reaches the base; until then no work folder
     // is answered (fails closed: Accounts gets no folder default).

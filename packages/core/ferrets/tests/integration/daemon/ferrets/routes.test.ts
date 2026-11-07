@@ -74,7 +74,11 @@ const runnerPlugin = (runner: FakeRunner) =>
 
 async function host(
   records: readonly FerretRecord[] = [],
-  extra: { readonly harness?: FakeHarness; readonly runner?: FakeRunner } = {},
+  extra: {
+    readonly harness?: FakeHarness;
+    readonly runner?: FakeRunner;
+    readonly config?: Readonly<Record<string, unknown>>;
+  } = {},
 ): Promise<TestHost> {
   const plugins = [
     ferrets,
@@ -85,6 +89,7 @@ async function host(
     plugins,
     gate: new StandInAdmission(standingFor),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
+    ...(extra.config === undefined ? {} : { config: extra.config }),
   });
   if (records.length === 0) return first;
   for (const each of records) first.state('ferrets').plant(FerretFiles, JSON.stringify(each), each.id);
@@ -503,6 +508,29 @@ describe('today’s start fields, the title, and the stop and resume words', () 
   test('the port’s work folder answers nothing while no real-path seam is bound (kernel item N)', async () => {
     const h = await host([record('lead')]);
     expect(await h.provided(FerretsPort).workFolder(ferretId('lead'))).toBeUndefined();
+  });
+});
+
+describe('what a ferret may control (limits.yaml agentControl)', () => {
+  test('with no limits.yaml a ferret gets today’s defaults, and an unknown ferret controls nothing', async () => {
+    const h = await host([record('lead')]);
+    const api = h.provided(FerretsPort);
+    expect(await api.agentControl(ferretId('lead'))).toEqual({
+      terminals: true,
+      browsers: true,
+      files: true,
+      ferretrySettings: false,
+      pageScripts: false,
+    });
+    expect(Object.values(await api.agentControl(ferretId('nobody'))).some(Boolean)).toBe(false);
+  });
+
+  test('limits.yaml’s switches win over the defaults, and a change applies to the very next answer', async () => {
+    const h = await host([record('lead')], { config: { 'limits.yaml': { agentControl: { files: false, pageScripts: true } } } });
+    const api = h.provided(FerretsPort);
+    expect(await api.agentControl(ferretId('lead'))).toMatchObject({ files: false, pageScripts: true, browsers: true });
+    h.setConfig('limits.yaml', { agentControl: { browsers: false } });
+    expect(await api.agentControl(ferretId('lead'))).toMatchObject({ files: true, pageScripts: false, browsers: false });
   });
 });
 

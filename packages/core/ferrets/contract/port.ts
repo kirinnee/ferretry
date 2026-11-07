@@ -11,6 +11,7 @@ import {
   type PackId,
 } from './ids.ts';
 import type { RunnerHandle, SitrepLine } from './kinds.ts';
+import type { AgentControl } from './state.ts';
 
 /**
  * The most free-form harness flags one start may carry, and the longest one may be (today's `protocol/src/lib/
@@ -152,6 +153,12 @@ export interface FerretsApi {
    */
   workFolder(ferret: FerretId): Promise<{ readonly folder: string } | undefined>;
   sitrep(ferret: FerretId): Promise<Sitrep | undefined>;
+  /**
+   * What this ferret may control right now (today's "What agents may control"): `limits.yaml`'s `agentControl` over
+   * today's defaults, read fresh on every call so a change applies to the ferret's very next action. A ferret this
+   * daemon does not know may control nothing.
+   */
+  agentControl(ferret: FerretId): Promise<AgentControl>;
 }
 
 export const FerretsPort = definePort<FerretsApi>('ferrets');

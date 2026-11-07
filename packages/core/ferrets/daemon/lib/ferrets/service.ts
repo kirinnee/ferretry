@@ -27,6 +27,7 @@ import type {
 import { HARNESS_KEYS } from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
 import type { FerretDetails } from '../state.ts';
+import { type AgentControl, effectiveAgentControl, type LimitsFile, NO_AGENT_CONTROL } from '../../../contract/index.ts';
 import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../tokens/tokens.ts';
 
 /**
@@ -79,6 +80,8 @@ export interface FerretsPorts {
    * it cannot be resolved. Unbound, no work folder is answered.
    */
   realPath?(folder: string): Promise<string | undefined>;
+  /** `limits.yaml` as it is now (the kernel's config port), read fresh for every agent-control answer. */
+  limits?(): LimitsFile | undefined;
   /** Ferret id → the instant the owner pinned it (`agent-pins.json`). */
   pinnedAt?(): Promise<ReadonlyMap<string, string>>;
   vault: Pick<VaultApi, 'childEnvironment'>;
@@ -296,6 +299,16 @@ export class FerretsService implements FerretsApi {
     if (name !== undefined) await this.write({ ...record, name }, record.state, 'renamed');
     else this.ports.changed({ ferret, state: record.state, previous: record.state, change: 'renamed' });
     return ok((await this.get(ferret)) as FerretSummary);
+  }
+
+  /**
+   * What a ferret may control (today's `AccountModelAgentControlPolicy`, over `limits.yaml`): read fresh for every
+   * call, so a change applies to its very next action with no restart and no cache. An unknown ferret controls nothing.
+   */
+  async agentControl(ferret: FerretId): Promise<AgentControl> {
+    await this.ports.ready?.();
+    if (this.registry.get(ferret) === undefined) return NO_AGENT_CONTROL;
+    return effectiveAgentControl(this.ports.limits?.());
   }
 
   /** Revokes a ferret's token (owner only at the route); it can no longer call the daemon until it restarts. */
