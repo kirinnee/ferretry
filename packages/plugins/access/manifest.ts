@@ -1,6 +1,6 @@
 import { defineState, SessionModes } from '@ferretry/kernel/contract';
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { Credentials, StepUp } from './contract/core.ts';
+import { Credentials, StepUp } from '@ferretry/core-gate/contract';
 import {
   ACCESS_WORDS,
   AccessPort,

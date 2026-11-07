@@ -1,6 +1,7 @@
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
-import { InputTargets, Runners } from './contract/core.ts';
+import { InputTargets } from '@ferretry/core-vault/contract';
+import { Runners } from '@ferretry/core-ferrets/contract';
 import {
   AUDIT,
   GUARD_ACK,

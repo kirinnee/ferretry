@@ -7,7 +7,7 @@
  */
 import { durationWords, InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { CAPABILITY_NAMES, CapabilityGrantsSchema, type CapabilityName } from './core.ts';
+import { CAPABILITY_NAMES, CapabilityGrantsSchema, type CapabilityName } from '@ferretry/core-gate/contract';
 
 // ─── pairing ──────────────────────────────────────────────────────────────────────────────────────────────────────
 

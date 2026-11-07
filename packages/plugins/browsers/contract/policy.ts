@@ -3,7 +3,7 @@
  * browser surface control and owner-tools routes of `agent-tools.ts`, and their audit rules.
  */
 import type { AuditDeclaration, CapabilityDemand, GuardDeclaration } from '@ferretry/kernel/contract';
-import { auditKind, CAPABILITIES } from './core.ts';
+import { auditKind, CAPABILITIES } from '@ferretry/core-gate/contract';
 
 export const CAPABILITY = {
   browser: CAPABILITIES.browser,
