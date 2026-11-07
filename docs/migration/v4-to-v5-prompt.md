@@ -102,6 +102,13 @@ bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
 - **Exit 0** means complete: every item converted, and `H/home.json` written **last**. **Exit 3** means some step did
   not finish: there is no `home.json`, so v5 refuses to start on `H` by design. Do not "fix" that by writing a
   `home.json` yourself; tell the owner, and roll back (§9) or wait for a fixed converter.
+- A step that **failed** names the v4 file (never its contents) and, where the owner can fix it, how. Two such fixes
+  are expected; each is done in **v4** (roll back §9, fix, stop v4, back up again, convert again), never by editing
+  `B` or `H` by hand:
+  - **A login id with capital letters** (v5 login ids are lowercase): the owner renames that login in v4 first.
+    The converter never renames it, because runtimes, budgets and usage are joined on the id.
+  - **A sign-in file the converting user cannot read**: the owner makes it readable by its owner (`chmod u+r`). The
+    converter copies sign-in files and never hard-links them, so the backup stays a separate copy for rollback.
 
 ## 5. Install v5 (do not start it) and check the new home
 
