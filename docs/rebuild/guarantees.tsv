@@ -165,7 +165,7 @@ G163	kept	kernel	vault	behaviour as written	grants	G163
 G164	kept	kernel	vault	behaviour as written	grants	G164
 G165	kept	access	gate	behaviour as written	grants	G165
 G166	kept	access	-	behaviour as written	grants	G166
-G167	kept	access	gate	behaviour as written	grants	G167
+G167	kept	agenda	access,gate	behaviour as written	grants	G167
 G168	removed	access	-	-	grants	-
 G169	kept	gate	-	behaviour as written	grants	G169
 G170	kept	catalogs	gate	`STEP_UP_ACTS.catalogInstall`	grants	G170
