@@ -1,35 +1,20 @@
-import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { appAction, definePlugin, panel, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import {
   AGENDA_CLEARED_AUDIT,
   AGENDA_MODE_CHANGED_AUDIT,
   AgendaBuzzed,
-  AgendaConfigSchema,
+  AGENDA_CONFIG,
   AgendaModeChanged,
   AgendaPort,
-  BuzzRecordSchema,
   MACHINE_AGENDA_ACTED_AUDIT,
-  SeenFileSchema,
+  BUZZES,
+  MODES,
+  SEEN,
+  cap,
 } from './contract/index.ts';
-import { AskAnswered, AsksPort } from '@ferretry/core-asks/contract';
+import { AskAnswered, AsksChanged, AsksPort } from '@ferretry/core-asks/contract';
+import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { AccessPort } from './contract/others.ts';
-
-const SEEN = defineState({ name: 'seen', path: 'seen.json', store: 'json', format: 1, schema: SeenFileSchema });
-/** The buzz ledger: one line per moment the phone was buzzed, so a restart never buzzes twice. */
-const BUZZES = defineState({
-  name: 'buzzes',
-  path: 'buzzes.jsonl',
-  store: 'jsonl',
-  format: 1,
-  schema: BuzzRecordSchema,
-});
-
-const AGENDA_CONFIG = defineConfig({
-  file: 'agenda.yaml',
-  schema: AgendaConfigSchema,
-  axis: 'configure',
-  loosens: neverLoosens,
-}) as ConfigDef;
 
 /**
  * Agenda (§2.3): your list of asks and notices, grouped, with buzzes to your phone. The asks themselves are Asks'
@@ -39,8 +24,9 @@ const AGENDA_CONFIG = defineConfig({
  *  - The per-ferret item routes (`/v1/ferrets/:ferretId/agenda…`: raise, patch, reply, versions, conversation, seen) are
  *    ASKS', not declared here: answering is a security act (§2.2). So are the `fy agenda add|answer|…` item verbs, which
  *    become `fy ask`. Agenda keeps `fy notify` (it raises a notice through the Asks port) and the owner-only views.
- *  - The push routes (`/v1/push/*`) are ACCESS': `push.json` and `push-keys.json` are Access state (§9.2). Agenda sends a
- *    buzz through Access's port (`uses`).
+ *  - The push SUBSCRIPTION routes (`/v1/push/subscriptions`, `/vapid`) are ACCESS': `push.json` and `push-keys.json` are
+ *    Access state (§9.2). `POST /v1/push/seen` is Agenda's (DECISIONS-1 #4: it is about an ask the owner opened). Agenda
+ *    sends a buzz through Access's port (`uses`).
  *  - `GET|PATCH /v1/ferrets/:ferretId/agenda-mode` is Agenda's (ports/agenda.md lists session/agenda-mode with it).
  */
 export default definePlugin({
@@ -55,7 +41,7 @@ export default definePlugin({
     { word: 'buzz', means: 'a push to your phone', insteadOf: ['ping'] },
   ],
 
-  needs: { asks: AsksPort },
+  needs: { asks: AsksPort, ferrets: FerretsPort },
   uses: { access: AccessPort },
   provides: { agenda: AgendaPort },
 
@@ -88,6 +74,14 @@ export default definePlugin({
         noStore: true,
         audit: { record: AGENDA_MODE_CHANGED_AUDIT },
         guard: { none: 'a boolean and a sentence' },
+      }),
+      route('POST /v1/push/seen', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('fleet', 'use'),
+        noStore: true,
+        audit: { skip: 'the owner opened an ask; the call carries no content and changes nothing but a seen mark' },
+        guard: { none: 'an ask id and a board id' },
       }),
       route('GET /v1/machine/agenda', {
         minimum: 'operator',
@@ -137,12 +131,15 @@ export default definePlugin({
   },
 
   data: {
-    state: [SEEN, BUZZES],
+    state: [SEEN, BUZZES, MODES],
     config: [AGENDA_CONFIG],
     readModels: ['open', 'daemon-agenda', 'mode'],
     publishes: [AgendaModeChanged, AgendaBuzzed],
-    subscribes: [AskAnswered],
+    subscribes: [AskAnswered, AsksChanged],
   },
+
+  // A ferret that goes idle with asks waiting is stopped on the owner: one buzz for the stop.
+  hooks: { takes: [{ hook: FerretChanged }] },
 
   instructions: [{ id: 'notify', text: 'instructions/notify.md', when: { role: 'any' } }],
   doctor: ['agenda-buzz'],
