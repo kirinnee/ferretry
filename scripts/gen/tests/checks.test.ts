@@ -13,7 +13,7 @@ import { check as contractConsumes } from '../../validate/contract-consumes.ts';
 import { check as contractGraph } from '../../validate/contract-graph.ts';
 import { check as coreClosed } from '../../validate/core-closed.ts';
 import { parity, readChanges } from '../../validate/descriptor-parity.ts';
-import { check as glossary } from '../../validate/glossary.ts';
+import { check as glossary, glossaryFindings } from '../../validate/glossary.ts';
 import { enforcerSymbols, guaranteeFindings, parseTsv } from '../../validate/guarantees.ts';
 import { check as hostFiles } from '../../validate/host-files.ts';
 import { check as manifestMatch } from '../../validate/manifest-match.ts';
@@ -391,6 +391,41 @@ describe('act-runner', () => {
     expect(found).not.toContain('alpha_read declares');
     expect(found).toContain('never calls kernel.act');
   });
+
+  const askAndInputTools = [
+    'terminal_ask_owner',
+    'terminal_request_input',
+    'browser_ask_owner',
+    'browser_request_input',
+  ];
+  const noOpTool = (name: string): string =>
+    `tool('${name}', { minimum: 'authenticated', caller: 'any', audit: { skip: 'fixture' }, guard: { none: 'fixture' } })`;
+  const noOpPlugin = (names: readonly string[]) =>
+    ws(
+      [
+        {
+          id: 'alpha',
+          kinds: ['tool'],
+          manifestImports: `import { tool } from '${SDK}';`,
+          manifest: `  actions: { agentTools: [${names.map(noOpTool).join(', ')}] },`,
+        },
+      ],
+      { pending: ['alpha'] },
+    );
+  test('each listed ask and input-request tool passes with no Op', async () => {
+    for (const name of askAndInputTools) {
+      const found = messages(await run(actRunner, noOpPlugin([name])));
+      expect(found).not.toContain('declares');
+    }
+  });
+  test('an unlisted look-alike of a listed tool still fails with no Op', async () => {
+    const found = messages(
+      await run(actRunner, noOpPlugin(['terminal_ask_owner2', 'xterminal_ask_owner', 'browser_ask'])),
+    );
+    expect(found).toContain('tool terminal_ask_owner2 declares no Op');
+    expect(found).toContain('tool xterminal_ask_owner declares no Op');
+    expect(found).toContain('tool browser_ask declares no Op');
+  });
 });
 
 describe('words and glossary', () => {
@@ -422,6 +457,27 @@ describe('words and glossary', () => {
     expect(found).toContain('verb card move: says "task"; the word is "card"');
     expect(found).toContain('instructions/cards.md:2');
     expect(found).not.toContain('cards.md:1');
+  });
+});
+
+describe('glossary phrase exceptions', () => {
+  const index = new Map([
+    ['proxy', 'relay'],
+    ['timer', 'job'],
+  ]);
+  test('the reviewed phrases pass', () => {
+    expect(glossaryFindings('x', 'check the saved browser proxy without saving it', index)).toEqual([]);
+    expect(glossaryFindings('x', 'print the Firewall Timer that runs the verify unit', index)).toEqual([]);
+    expect(glossaryFindings('x', 'Browser proxy. Firewall timer.', index)).toEqual([]);
+  });
+  test('the bare banned word in another phrase still fails', () => {
+    expect(glossaryFindings('x', 'check the saved proxy', index).length).toBe(1);
+    expect(glossaryFindings('x', 'print the systemd timer', index).length).toBe(1);
+    expect(glossaryFindings('x', 'a proxy server for the browser', index).length).toBe(1);
+  });
+  test('the phrase covers only itself: a second bare use beside it still fails', () => {
+    expect(glossaryFindings('x', 'the browser proxy, not a plain proxy', index).length).toBe(1);
+    expect(glossaryFindings('x', 'the firewall timer and a second timer', index).length).toBe(1);
   });
 });
 
