@@ -18,6 +18,7 @@ import {
   type SourceKey,
 } from '../../contract/index.ts';
 import type { AgendaActor, AgendaService, RaiseAgendaRequest } from '../lib/agenda/index.ts';
+import { SerialQueue } from '../lib/agenda/serial-queue.ts';
 import { askForKind } from '../lib/protocol/agenda-card.ts';
 import type { AgendaItem, AgendaResponse, AgendaSnapshot, ResolvedAgendaItem } from '../lib/protocol/agenda.ts';
 
@@ -166,10 +167,11 @@ export interface AskBoards {
  * `ask.sources` — and its `ref` parses with that source's own schema before anything is written.
  */
 export function asksPort(
-  agenda: Pick<AgendaService, 'list' | 'raise' | 'resolve' | 'dismiss'>,
+  agenda: Pick<AgendaService, 'list' | 'raise' | 'resolve' | 'dismiss' | 'raisedObligation'>,
   boards: AskBoards,
   sources: (key: SourceKey) => AskSourceSpec | 'unavailable',
 ): AsksApi {
+  const raises = new SerialQueue();
   const checkSource = (draft: { readonly source: string; readonly ref: unknown }): void => {
     if ((BUILT_IN_SOURCES as readonly string[]).includes(draft.source)) return;
     const spec = sources(draft.source as SourceKey);
@@ -182,12 +184,14 @@ export function asksPort(
   };
   const raise = async (draft: AskDraft, notice: boolean): Promise<AskRef> => {
     const parsed = AskDraftSchema.parse(draft);
-    checkSource(parsed);
     const ferret = boardOf(parsed);
     const sourceRef = obligationOf(parsed.source, parsed.entry);
-    // Idempotent by (source, entry): an open ask for the same obligation is the one already raised.
-    const held = (await snapshot(ferret))?.items.find(item => item.sourceRef === sourceRef);
-    if (held !== undefined) return { ferret, id: held.id as AskId };
+    // (source, entry) identifies an obligation for life, even when retried on another board or with its source off.
+    for (const board of new Set([...(await boards.ferrets()), ferret])) {
+      const held = await agenda.raisedObligation(board, sourceRef);
+      if (held !== undefined) return { ferret: board, id: held as AskId };
+    }
+    checkSource(parsed);
     const kind = parsed.kind === 'notice' ? 'info' : parsed.kind;
     const ask = askForKind(kind, parsed.options ?? []);
     const request: RaiseAgendaRequest = {
@@ -204,7 +208,7 @@ export function asksPort(
     };
     const mutation = await agenda.raise(ferret, request, PORT_ACTOR);
     if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
-    const id = mutation.item?.id;
+    const id = mutation.item?.id ?? (await agenda.raisedObligation(ferret, sourceRef));
     if (id === undefined) throw new AskRefusedError('the board took the ask but named no item for it');
     return { ferret, id: id as AskId };
   };
@@ -217,8 +221,8 @@ export function asksPort(
     return out;
   };
   return {
-    raise: async draft => await raise(draft, false),
-    notify: async notice => await raise({ ...notice, kind: 'notice' }, true),
+    raise: async draft => await raises.run(() => raise(draft, false)),
+    notify: async notice => await raises.run(() => raise({ ...notice, kind: 'notice' }, true)),
     answers: async (filter, since) =>
       (
         await everyBoard((ferret, board) =>

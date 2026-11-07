@@ -262,6 +262,12 @@ export class AgendaService {
     return listed.ok ? { ok: true, value: listed.value.count } : listed;
   }
 
+  /** The first ask for a source obligation, including asks whose closed history has been archived. */
+  async raisedObligation(sessionId: string, sourceRef: string): Promise<AgendaId | undefined> {
+    const ledger = await this.read(sessionId);
+    return ledger?.raisedObligations?.[sourceRef];
+  }
+
   /**
    * A daemon raise about a sub-ferret that is not a hands-on card lands on the sub-ferret's agenda home instead
    * (docs/agenda.md § Sub-ferret agenda); the mutation's snapshot says where it landed.

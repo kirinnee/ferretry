@@ -144,6 +144,8 @@ export interface AgendaLedger {
   readonly sessionId: string;
   readonly nextId: number;
   readonly entries: readonly AgendaEntry[];
+  /** Source obligations retain their first id even after the bounded closed history is archived. */
+  readonly raisedObligations?: Readonly<Record<string, AgendaId>>;
   /** Full threads, outside the bounded current item, committed atomically with the ledger. Never sent in snapshots. */
   readonly conversations?: Readonly<Record<string, readonly AgendaConversationEntry[]>>;
   /** Entries whose bounded history/revisions had to move to make room for new metadata, kept for their versions. */
@@ -651,6 +653,9 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
   }
   const threads = z.record(AgendaIdSchema, z.array(AgendaConversationEntrySchema)).safeParse(raw.conversations ?? {});
   if (!threads.success) return null;
+  const obligations = z.record(z.string().startsWith('ask:'), AgendaIdSchema).safeParse(raw.raisedObligations ?? {});
+  if (!obligations.success || Object.values(obligations.data).some(id => idNumber(id) >= (raw.nextId as number)))
+    return null;
   const carriedEntries: Record<string, AgendaEntry> = {};
   if (raw.carriedEntries !== undefined) {
     if (raw.carriedEntries === null || typeof raw.carriedEntries !== 'object' || Array.isArray(raw.carriedEntries))
@@ -707,6 +712,7 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
     sessionId,
     nextId: raw.nextId as number,
     entries,
+    ...(Object.keys(obligations.data).length === 0 ? {} : { raisedObligations: obligations.data }),
     ...(Object.keys(threads.data).length === 0 ? {} : { conversations: threads.data }),
     ...(Object.keys(carriedEntries).length === 0 ? {} : { carriedEntries }),
     updatedAt: raw.updatedAt,
@@ -1081,6 +1087,8 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   }
 
   const active = ledger.entries.filter(isActiveAgenda);
+  if (request.sourceRef !== null && ledger.raisedObligations?.[request.sourceRef] !== undefined)
+    return unchanged(ledger);
   // A gate and its follow-up are raised once per entry: an open one is refreshed below, a closed one never comes
   // back (the owner's "Not needed" stays said).
   const once =
@@ -1170,6 +1178,11 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
     ...ledger,
     nextId: ledger.nextId + 1,
     entries: [...ledger.entries, { lifecycle: 'active', origin: actor, item }],
+    ...(request.sourceRef?.startsWith('ask:') === true
+      ? {
+          raisedObligations: { ...ledger.raisedObligations, [request.sourceRef]: item.id },
+        }
+      : {}),
     updatedAt: command.at,
   };
   return success(next, true, 'created', item);
