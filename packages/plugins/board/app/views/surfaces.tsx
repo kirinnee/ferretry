@@ -15,8 +15,9 @@ import { readChatTasksUrl } from '../lib/board-chat-url.ts';
 import { ferretNamer } from '../lib/board-present.ts';
 import { THIS_MACHINE } from '../lib/machine.ts';
 import { navigateTo } from '../lib/navigate.ts';
-import { boardCardPath, boardPath, cardPagePath } from '../lib/paths.ts';
+import { boardCardPath, boardPath, cardPagePath, projectLanesPath } from '../lib/paths.ts';
 import { BoardPage } from './board-page.tsx';
+import { LaneEditorPage } from './lane-editor.tsx';
 import { ChatTasks } from './chat-tasks.tsx';
 import { BoardDetail } from './detail/board-detail.tsx';
 import { useLocationSearch } from './location.ts';
@@ -71,13 +72,24 @@ const boardScreen = (runtime: BoardRuntime): AppComponent<ScreenProps> =>
     const callsigns = useCallsigns(useFerrets(runtime));
     const named = params.project;
     const openCard = named !== undefined && CARD_ID_PATTERN.test(named.toUpperCase()) ? named.toUpperCase() : null;
+    const editingLanes = openCard === null && named !== undefined && new URLSearchParams(search).get('lanes') === '1';
     const withProject = useMemo(() => {
       if (named === undefined || openCard !== null) return search;
       const next = new URLSearchParams(search);
       if (next.get('project') === null) next.set('project', named);
       return next.toString();
     }, [named, openCard, search]);
-    return (
+    if (editingLanes)
+      return (
+        <LaneEditorPage
+          callsigns={callsigns}
+          connection={THIS_MACHINE}
+          onBack={() => navigateTo(`${boardPath()}/${encodeURIComponent(named)}`)}
+          projectId={named}
+          store={runtime.store}
+        />
+      );
+    const page = (
       <BoardPage
         callsigns={callsigns}
         machines={MACHINES}
@@ -88,6 +100,17 @@ const boardScreen = (runtime: BoardRuntime): AppComponent<ScreenProps> =>
         search={withProject}
         store={runtime.store}
       />
+    );
+    if (named === undefined || openCard !== null) return page;
+    return (
+      <>
+        <p data-board-lanes-link={named}>
+          <RouteLink onNavigate={navigateTo} to={projectLanesPath(named)}>
+            Edit lanes
+          </RouteLink>
+        </p>
+        {page}
+      </>
     );
   };
 

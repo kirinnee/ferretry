@@ -4,6 +4,7 @@
  * (`parseLaneProposalReference`), and the choice label is the board's own.
  */
 
+import { projectLanesPath } from './paths.ts';
 import { LANE_PROPOSAL_ANSWERS, parseLaneProposalReference } from '../../contract/index.ts';
 
 /** The one answer shape this reads: a multiple-choice response with the label the owner pressed. */
@@ -22,5 +23,5 @@ export const laneEditDestination = (
   if (response.kind !== 'multiple-choice') return undefined;
   if (((response as { readonly choice: string }).choice ?? '').trim() !== LANE_PROPOSAL_ANSWERS.edit) return undefined;
   const proposal = parseLaneProposalReference(item.sourceRef ?? null);
-  return proposal === undefined ? undefined : `/projects/${encodeURIComponent(proposal.projectId)}/lanes`;
+  return proposal === undefined ? undefined : projectLanesPath(proposal.projectId);
 };

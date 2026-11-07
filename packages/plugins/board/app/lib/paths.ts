@@ -13,5 +13,5 @@ export const cardPagePath = (cardId: string): string => `/card/${encodeURICompon
 /** A ferret's chat, owned by Conversation. */
 export const ferretPath = (_daemonId: DaemonId | undefined, ferret: string): string =>
   `/ferrets/${encodeURIComponent(ferret)}`;
-/** A project's lanes, owned by Projects. */
-export const projectLanesPath = (projectId: string): string => `/projects/${encodeURIComponent(projectId)}/lanes`;
+/** A project's lanes, edited on this plugin's own board screen (`/board/<project>?lanes=1`). */
+export const projectLanesPath = (projectId: string): string => `/board/${encodeURIComponent(projectId)}?lanes=1`;
