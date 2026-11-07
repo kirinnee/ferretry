@@ -560,12 +560,12 @@ async function build(): Promise<void> {
     };
     const first = await create('feature', 'Fixture card one', []);
     const second = await create('bug', 'Fixture card two', ['--depends-on', first]);
-    await fyOk(['task', 'link', first, '--pr', 'https://example.invalid/fixture/pull/1']);
+    await fyOk(['task', 'link', first, '--branch', 'fixture/card-one']);
     await fyOk(['task', 'note', first, 'fixture history note one']);
     await fyOk(['task', 'note', second, 'fixture history note two']);
     await fyOk(['task', 'move', second, 'implement']);
     made.cards = [
-      { id: first, lane: 'todo', link: 'pr', dependencyOf: second },
+      { id: first, lane: 'todo', link: 'branch', dependencyOf: second },
       { id: second, lane: 'implement', dependsOn: first },
     ];
   });
