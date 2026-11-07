@@ -18,7 +18,10 @@ import {
   type CardRef,
   type CardView,
   type CountersFileSchema,
+  type FocusCard,
   type FocusFile,
+  type LaneSet,
+  type OrphanedCards,
   BoardQuerySchema,
   parseGateReference,
   type SweepFile,
@@ -46,6 +49,8 @@ import {
   AsksLaneProposals,
 } from './adapters/lanes/index.ts';
 import { ConversationMessages } from './adapters/messages.ts';
+import { ConversationOwnerWords } from './adapters/owner-words.ts';
+import { BoardWorkSource } from './adapters/work-source.ts';
 import { KernelFerretFocus } from './adapters/store/focus-store.ts';
 import { KernelCardStore } from './adapters/store/card-store.ts';
 import { KernelSweepMemory } from './adapters/store/sweep-memory.ts';
@@ -69,6 +74,7 @@ import {
   type StartOnCardPorts,
   type GateBoard,
   type GateCard,
+  BoardError,
   BoardIndex,
   stillBuilding,
   ownerDelegation,
@@ -122,6 +128,8 @@ export interface BoardWiringNeeds {
 /** Everything the plugin assembles, so `index.ts` stays a table of what is provided. */
 export interface BoardWorld {
   readonly service: BoardService;
+  /** Board's cards as work, for Conversation's `search.sources`: `fy search` and `search_work` find them. */
+  readonly workSource: BoardWorkSource;
   readonly lanes: LaneSetService;
   readonly switches: BoardSwitchService;
   readonly gates: GateItems;
@@ -144,6 +152,12 @@ export interface BoardWorld {
   readonly sweepTick: () => Promise<void>;
   readonly lines: (ferret: string) => Promise<readonly SitrepLine[]>;
   readonly heldBy: (ferret: string) => Promise<readonly CardView[]>;
+  /** The lane set of every project that has a card (`BoardApi.laneSets`). */
+  readonly laneSets: () => Promise<readonly LaneSet[]>;
+  /** Every open orphaned card with every board's lanes, from one snapshot (`BoardApi.orphanedCards`). */
+  readonly orphanedCards: () => Promise<OrphanedCards>;
+  /** The card a ferret works on with its lane set, when it is on this machine (`BoardApi.focusOf`). Not-found is `undefined`. */
+  readonly focusCard: (ferret: string) => Promise<FocusCard | undefined>;
   /** `turn.ended` (Conversation): the turn-end check and the gate check, each failure said, never thrown. */
   readonly turnEnded: (ferret: string) => Promise<void>;
   /** `ferret.started` (Ferrets): the started ferret's card (today's `SessionCards`). Never rejects. */
@@ -278,6 +292,8 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     adoption: { adopt: async (ferret, proposed) => await adoption.adopt(ferret, proposed) },
     helpers,
     optIn,
+    // What the owner said to a ferret, read through Conversation (strict for a ferret's private choice, F-0001).
+    ownerWords: new ConversationOwnerWords(needs.conversation),
     threads: new AsksThreads(asks),
     gates: { written: async id => await gateItems?.written(id) },
     moving: needs.moving,
@@ -599,6 +615,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
 
   return {
     service,
+    workSource: new BoardWorkSource(service),
     lanes,
     switches,
     gates,
@@ -627,6 +644,23 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
         ref: `&${card.id}`,
       })),
     heldBy,
+    laneSets: async () => [...(await service.snapshot()).laneSets.values()],
+    orphanedCards: async () => {
+      const { views, laneSets } = await service.orphanedCards();
+      return { cards: views, laneSets: [...laneSets.values()] };
+    },
+    focusCard: async ferret => {
+      const ref = await focus.focusOf(ferret);
+      if (ref === null) return undefined;
+      // A card of another machine is not answered here: its id means nothing in this store (today's guard).
+      if (ref.machineId !== undefined && ref.machineId !== machineId()) return undefined;
+      try {
+        return await service.card(ref.id);
+      } catch (error) {
+        if (error instanceof BoardError && error.code === 'not-found') return undefined;
+        throw error;
+      }
+    },
     turnEnded,
     ferretStarted,
   };

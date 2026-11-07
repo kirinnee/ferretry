@@ -2,3 +2,4 @@ export * from './policy.ts';
 export * from './service.ts';
 export * from './usage-limit.ts';
 export * from './boundaries.ts';
+export * from './owner-words.ts';

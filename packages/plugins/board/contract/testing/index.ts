@@ -13,6 +13,8 @@ const AT = '2026-11-07T09:00:00.000Z' as Instant;
 export function fakeBoard(): BoardApi {
   const cards = new Map<string, Card>();
   const counters = { bug: 0, feature: 0, infra: 0, chore: 0 };
+  /** A ferret's write focuses it on the card (the real board does the same); the owner has no focus. */
+  const focus = new Map<string, string>();
   const view = (card: Card): CardView => ({
     ...card,
     lastTouchedAt: null,
@@ -43,11 +45,33 @@ export function fakeBoard(): BoardApi {
     },
     cards: async query =>
       [...cards.values()].filter(card => query.project === undefined || card.projectId === query.project).map(view),
+    // The cursor is the offset of the next card; the last page's is `null`.
+    cardsPage: async query => {
+      const all = [...cards.values()]
+        .filter(card => query.project === undefined || card.projectId === query.project)
+        .map(view);
+      const start = query.cursor === undefined ? 0 : Number(query.cursor);
+      const end = start + query.limit;
+      return { cards: all.slice(start, end), nextCursor: end < all.length ? String(end) : null };
+    },
+    // The fake has no lane sets of its own: a consumer names a lane by its id.
+    laneSets: async () => [],
+    // The fake's views are all `active`, so no card is ever orphaned here.
+    orphanedCards: async () => ({
+      cards: [...cards.values()].map(view).filter(each => each.activity === 'orphaned'),
+      laneSets: [],
+    }),
+    focusOf: async ferret => {
+      const id = focus.get(ferret);
+      const card = id === undefined ? undefined : cards.get(id);
+      return card === undefined ? undefined : { card: view(card), laneSet: null };
+    },
     create: async (by, request) => {
       counters[request.kind] += 1;
       const id = `${CARD_KIND_PREFIX[request.kind]}${counters[request.kind]}`;
       const actor = by === 'owner' ? ({ kind: 'owner' } as const) : ({ kind: 'ferret', name: by, ferret: by } as const);
       const laneId = request.laneId ?? 'todo';
+      if (by !== 'owner') focus.set(by, id);
       return ok(
         store({
           format: 1,
@@ -86,6 +110,7 @@ export function fakeBoard(): BoardApi {
       const card = cards.get(id);
       if (card === undefined) return err({ code: 'not-found', message: `no card ${id}` });
       if (request.action !== 'move') return err({ code: 'refused', message: `the fake does not do ${request.action}` });
+      if (by !== 'owner') focus.set(by, id);
       const actor = by === 'owner' ? ({ kind: 'owner' } as const) : ({ kind: 'ferret', name: by, ferret: by } as const);
       return ok(
         store({
@@ -107,9 +132,10 @@ export function fakeBoard(): BoardApi {
         }),
       );
     },
-    progress: async (_by, id, parts) => {
+    progress: async (by, id, parts) => {
       const card = cards.get(id);
       if (card === undefined) return err({ code: 'not-found', message: `no card ${id}` });
+      focus.set(by, id);
       const merged: Progress = { now: '', doneSoFar: '', next: '', ...card.progress, ...parts };
       return ok(store({ ...card, progress: merged }));
     },
@@ -118,9 +144,10 @@ export function fakeBoard(): BoardApi {
   };
 }
 
-export function boardConformance(name: string, make: () => BoardApi): void {
+export function boardConformance(name: string, make: () => BoardApi | Promise<BoardApi>): void {
   describe(`BoardApi conformance: ${name}`, () => {
-    const create = (api: BoardApi) =>
+    // The owner makes a card for a ferret (a card needs one to own it); a ferret's own cards need an approved board.
+    const create = (api: BoardApi, assignee = 'f1') =>
       api.create('owner', {
         kind: 'feature',
         title: 'Badge colour',
@@ -133,27 +160,85 @@ export function boardConformance(name: string, make: () => BoardApi): void {
         howToTest: '',
         workflow: 'quick',
         parent: null,
-        assignee: null,
+        assignee,
         dependsOn: [],
         files: [],
         docs: [],
       });
     test('a created card is read back with an id that starts with its kind', async () => {
-      const api = make();
+      const api = await make();
       const made = await create(api);
       expect(made.ok && made.value.id.startsWith('F')).toBe(true);
       if (made.ok) expect((await api.card(made.value.id as CardId))?.title).toBe('Badge colour');
     });
     test('progress replaces the parts named and keeps the rest', async () => {
-      const api = make();
+      const api = await make();
       const made = await create(api);
       if (!made.ok) throw new Error('setup');
       await api.progress('f1' as FerretId, made.value.id as CardId, { now: 'building', next: 'test' });
       const after = await api.progress('f1' as FerretId, made.value.id as CardId, { doneSoFar: '- the colour' });
       expect(after.ok && after.value.progress).toEqual({ now: 'building', doneSoFar: '- the colour', next: 'test' });
     });
-    test('a card has no way to ask or to be answered', () => {
-      const api = make() as unknown as Record<string, unknown>;
+    test('cardsPage reads past one page: the cursor leads to the next and is null on the last', async () => {
+      const api = await make();
+      for (let each = 0; each < 3; each += 1) await create(api);
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      let pages = 0;
+      do {
+        const page = await api.cardsPage({ state: 'open', limit: 2, ...(cursor === undefined ? {} : { cursor }) });
+        seen.push(...page.cards.map(card => card.id));
+        cursor = page.nextCursor ?? undefined;
+        pages += 1;
+      } while (cursor !== undefined && pages < 5);
+      expect(pages).toBe(2);
+      expect(new Set(seen).size).toBe(3);
+    });
+    test('focusOf is undefined for a ferret with none, and the owner’s writes focus nobody', async () => {
+      const api = await make();
+      expect(await api.focusOf('nobody' as FerretId)).toBeUndefined();
+      const made = await create(api);
+      if (!made.ok) throw new Error('setup');
+      expect(await api.focusOf('f1' as FerretId)).toBeUndefined();
+    });
+    test('a ferret is focused on the card it last wrote, by reporting progress or by moving it', async () => {
+      const api = await make();
+      const first = await create(api);
+      const second = await create(api);
+      if (!first.ok || !second.ok) throw new Error('setup');
+      const firstId = first.value.id as CardId;
+      const secondId = second.value.id as CardId;
+      expect((await api.progress('f1' as FerretId, firstId, { now: 'building' })).ok).toBe(true);
+      const focus = await api.focusOf('f1' as FerretId);
+      expect(focus?.card.id).toBe(firstId);
+      // The lanes of the card's board come with it (`null` for a board with none).
+      expect(focus?.laneSet === null || focus?.laneSet?.projectId === focus?.card.projectId).toBe(true);
+      expect((await api.progress('f1' as FerretId, secondId, { now: 'building' })).ok).toBe(true);
+      expect((await api.focusOf('f1' as FerretId))?.card.id).toBe(secondId);
+      expect((await api.act('f1' as FerretId, firstId, { action: 'move', to: 'doing' })).ok).toBe(true);
+      expect((await api.focusOf('f1' as FerretId))?.card.id).toBe(firstId);
+    });
+    test('the owner’s write moves no ferret’s focus', async () => {
+      const api = await make();
+      const mine = await create(api);
+      const other = await create(api);
+      if (!mine.ok || !other.ok) throw new Error('setup');
+      await api.progress('f1' as FerretId, mine.value.id as CardId, { now: 'building' });
+      expect((await api.act('owner', other.value.id as CardId, { action: 'move', to: 'doing' })).ok).toBe(true);
+      expect((await api.focusOf('f1' as FerretId))?.card.id).toBe(mine.value.id);
+    });
+    test('orphanedCards lists no card while every card has a live ferret, and the lanes as a list', async () => {
+      const api = await make();
+      await create(api);
+      const read = await api.orphanedCards();
+      expect(read.cards).toEqual([]);
+      expect(Array.isArray(read.laneSets)).toBe(true);
+    });
+    test('laneSets lists lane sets (none for a board with no lanes of its own)', async () => {
+      expect(Array.isArray(await (await make()).laneSets())).toBe(true);
+    });
+    test('a card has no way to ask or to be answered', async () => {
+      const api = (await make()) as unknown as Record<string, unknown>;
       for (const name of ['ask', 'answer', 'reply']) expect(name in api).toBe(false);
     });
   });

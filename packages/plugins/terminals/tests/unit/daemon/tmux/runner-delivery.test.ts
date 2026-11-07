@@ -105,6 +105,7 @@ function subject() {
       run: async () => {
         throw new Error('delivery must not spawn');
       },
+      runBytes: () => Promise.reject(new Error('the fixture runs no bytes')),
       start: () => {
         throw new Error('delivery must not start');
       },

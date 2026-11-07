@@ -1,4 +1,5 @@
 import type { Admission, AdmissionDecision, OutputGuard } from '../contract/bound.ts';
+import { compressed, type ResponseCompressor } from './compression.ts';
 import { WITHHELD_SENTENCE } from '../contract/bound.ts';
 import type { Actor } from '../contract/act.ts';
 import type {
@@ -70,6 +71,8 @@ export interface DispatchBindings {
   /** Undefined, a throw or a damaged Vault: a `guard: 'secrets'` body is withheld. */
   outputGuard(): OutputGuard | undefined;
   readonly version: string;
+  /** Gzips an opted-in answer (`compress: true`); absent, every answer is plain. */
+  readonly compressor?: ResponseCompressor;
 }
 
 /**
@@ -140,6 +143,8 @@ async function run(
   descriptor: RouteDescriptor | MemberRouteDescriptor,
   build: () => Promise<ApiResponse>,
   owner?: Owner,
+  /** What the dispatcher decides about the built answer before its final check (a route's compression). */
+  prepare?: (built: ApiResponse) => Promise<ApiResponse>,
 ): Promise<ApiResponse> {
   const policy = <R extends ApiResponse>(response: R): R =>
     withVersion(descriptor.noStore === true ? noStore(response) : response, bindings.version);
@@ -160,6 +165,8 @@ async function run(
   } catch (error) {
     built = failureResponse(error);
   }
+  // Never a guarded answer: its body is chosen by the final check.
+  if (prepare !== undefined && !guarded && built.late === undefined) built = await prepare(built);
   const showable = (): boolean => {
     if (!guarded) return true;
     try {
@@ -251,18 +258,39 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as CallContext;
+    let executed = false;
     const response = await runInCall({ actor: decision.actor }, () =>
-      run(this.bindings, found.route, () => handle(call), found.route.owner),
+      run(
+        this.bindings,
+        found.route,
+        () => {
+          executed = true;
+          return handle(call);
+        },
+        found.route.owner,
+        // Decided once, after the handler (and any 304 it chose), before the final check publishes it: only an
+        // opted-in route's plain 200 JSON GET.
+        async built => {
+          const packed = await compressed(
+            request,
+            built,
+            this.bindings.compressor,
+            found.route.compress === true,
+          ).catch((): { readonly response: ApiResponse; readonly gzip?: Uint8Array } => ({ response: built }));
+          return packed.gzip === undefined ? packed.response : { ...packed.response, gzip: packed.gzip };
+        },
+      ),
     );
-    this.recorded({
-      table: 'route',
-      descriptor: found.route,
-      request,
-      params: found.params,
-      decision,
-      status: response.status,
-      response,
-    });
+    if (executed)
+      this.recorded({
+        table: 'route',
+        descriptor: found.route,
+        request,
+        params: found.params,
+        decision,
+        status: response.status,
+        response,
+      });
     return response;
   }
 
@@ -316,18 +344,28 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as MemberCallContext;
+    let executed = false;
     const response = await runInCall({ actor: decision.actor }, () =>
-      run(this.bindings, found.route, () => handle(call), found.route.owner),
+      run(
+        this.bindings,
+        found.route,
+        () => {
+          executed = true;
+          return handle(call);
+        },
+        found.route.owner,
+      ),
     );
-    this.recorded({
-      table: 'member',
-      descriptor: found.route,
-      request,
-      params: found.params,
-      decision,
-      status: response.status,
-      response,
-    });
+    if (executed)
+      this.recorded({
+        table: 'member',
+        descriptor: found.route,
+        request,
+        params: found.params,
+        decision,
+        status: response.status,
+        response,
+      });
     return response;
   }
 

@@ -132,7 +132,20 @@ export const WITHHELD_SENTENCE = 'This was withheld because a private value was 
 
 /** Asked by `kernel.act` inside the target's queue immediately before every act (§4.7). Synchronous. */
 export interface InputHolds {
+  /**
+   * The fresh read a decision needs (the target adapter's `document()` / facts), awaited by the kernel INSIDE the
+   * target's queue; the kernel then calls {@link decide} synchronously in the same continuation, with no await
+   * between, so the decision is made on what the target is now rather than on a read from before a queued act. A
+   * throw fails closed (`holds_unavailable`).
+   */
+  prepare?(target: TargetRef, op: Op, actor: Actor): Promise<void>;
   decide(target: TargetRef, op: Op, actor: Actor, reveal?: RevealGrant): HoldDecision;
+  /**
+   * Told by the kernel after each act that was allowed and whose `fn` settled successfully (a write-only act only
+   * when its Ack is `done`); never for a refused or failed act, never by a tool. Feeds what follows from acts (today's
+   * sign-in lock from page acts). A throw is swallowed: the act already happened.
+   */
+  observed?(target: TargetRef, op: Op, actor: Actor): void;
 }
 
 export const InputHoldsPort = defineBoundPort<InputHolds>('input-holds', 'vault');
@@ -200,6 +213,24 @@ export interface ChildEnvironmentOpener {
 
 export const ChildEnvironmentPort = defineBoundPort<ChildEnvironmentOpener>('child-environment', 'vault');
 
+/**
+ * The Vault's value for one secret name, for the KERNEL's own-secret resolve only (`kernel.secrets`, lead decision J):
+ * the kernel asks it after checking the plugin declared the name and its own configuration names it. `undefined` =
+ * the Vault has no such secret. No half may hold it.
+ */
+export interface SecretResolver {
+  resolve(name: string): Promise<string | undefined>;
+}
+
+export const SecretResolverPort = defineBoundPort<SecretResolver>('secret-resolver', 'vault');
+
+/**
+ * Kernel-bound ports no half may hold, not even through `needs` or `uses`: the kernel binds them into its own
+ * adapters only (the ChildEnvironment opener into the spawn adapter, lead decision 8). A manifest that asks for one
+ * is refused at plan, and plugin-graph refuses it in CI.
+ */
+export const KERNEL_ONLY_PORTS: readonly string[] = Object.freeze([ChildEnvironmentPort.name, SecretResolverPort.name]);
+
 export const KERNEL_BOUND_PORTS = [
   AdmissionPort,
   OutputGuardPort,
@@ -207,4 +238,5 @@ export const KERNEL_BOUND_PORTS = [
   RedactionPort,
   WorkFoldersPort,
   ChildEnvironmentPort,
+  SecretResolverPort,
 ] as const;

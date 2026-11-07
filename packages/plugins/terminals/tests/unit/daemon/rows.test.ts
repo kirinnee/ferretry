@@ -158,6 +158,7 @@ describe('the tmux runner', () => {
       tmux,
       spawn: {
         run: async () => ({ exitCode: 1, signal: null, stdout: '', stderr: '' }),
+        runBytes: () => Promise.reject(new Error('the fixture runs no bytes')),
         start: () => undefined as never,
       },
       socketPath: '/state/terminals/tmux.sock',
@@ -190,6 +191,7 @@ describe('the tmux runner', () => {
       tmux,
       spawn: {
         run: async () => ({ exitCode: 1, signal: null, stdout: '', stderr: '' }),
+        runBytes: () => Promise.reject(new Error('the fixture runs no bytes')),
         start: () => undefined as never,
       },
       socketPath: '/s/tmux.sock',

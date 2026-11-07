@@ -29,11 +29,26 @@ function memoryRoot(files: Record<string, string>, outside: readonly string[] = 
     },
     stat: async path =>
       path in files
-        ? { kind: 'file' as const, size: files[path]!.length, modified: '2026-01-01T00:00:00Z' as never }
+        ? {
+            kind: 'file' as const,
+            size: files[path]!.length,
+            modified: '2026-01-01T00:00:00Z' as never,
+            mode: 0o600,
+            links: 1,
+          }
         : isDir(path)
-          ? { kind: 'directory' as const, size: 0, modified: '2026-01-01T00:00:00Z' as never }
+          ? { kind: 'directory' as const, size: 0, modified: '2026-01-01T00:00:00Z' as never, mode: 0o600, links: 1 }
           : undefined,
     remove: async () => undefined,
+    readTail: () => Promise.reject(new Error('the fixture has no readTail')),
+    writeBytes: () => Promise.reject(new Error('the fixture has no writeBytes')),
+    copyTree: () => Promise.reject(new Error('the fixture has no copyTree')),
+    ensurePrivateDirectory: () => Promise.reject(new Error('the fixture has no ensurePrivateDirectory')),
+    entries: () => Promise.reject(new Error('the fixture has no entries')),
+    lstat: () => Promise.reject(new Error('the fixture has no lstat')),
+    makeDirectory: () => Promise.reject(new Error('the fixture has no makeDirectory')),
+    realPath: () => Promise.reject(new Error('the fixture has no realPath')),
+    pin: () => Promise.reject(new Error('the fixture has no pin')),
   };
 }
 

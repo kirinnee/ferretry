@@ -244,22 +244,56 @@ describe('StatePort: jsonl files', () => {
     expect(again).toEqual([{ count: 1 }, { count: 2 }]);
   });
 
-  test('a bad line in the middle, a lower format line or a schema failure damages the whole file', async () => {
+  test('AA a bad line in the middle, a lower format line or a schema failure is skipped and reading goes on (today)', async () => {
     const cases = [
       '{"format":1,"count":1}\nnot json\n{"format":1,"count":2}\n',
-      '{"format":1,"count":1}\n{"format":0,"count":2}\n',
-      '{"format":1,"count":1}\n{"format":1,"count":"x"}\n',
+      '{"format":1,"count":1}\n{"format":0,"count":2}\n{"format":1,"count":2}\n',
+      '{"format":1,"count":1}\n{"format":1,"count":"x"}\n{"format":1,"count":2}\n',
     ];
     for (const text of cases) {
       const { port, fs, path } = memoryStore();
       fs.seed(path('log.jsonl'), text);
-      await expect(
-        (async () => {
-          for await (const _ of port.lines(logFile)) void _;
-        })(),
-      ).rejects.toBeInstanceOf(StoreDamagedError);
-      expect(port.damaged()).toHaveLength(1);
+      const seen: unknown[] = [];
+      for await (const record of port.lines(logFile)) seen.push(record);
+      expect(seen).toEqual([{ count: 1 }, { count: 2 }]);
+      expect((await port.records(logFile)).unreadable).toBe(1);
+      expect(port.damaged()).toEqual([]);
     }
+  });
+
+  test('AA version: one lstat, an etag that moves on append and stays put otherwise', async () => {
+    const { port } = memoryStore();
+    expect(await port.version(logFile)).toBeUndefined();
+    await port.append(logFile, { count: 1 });
+    const first = await port.version(logFile);
+    expect(first?.size).toBeGreaterThan(0);
+    expect(await port.version(logFile)).toEqual(first);
+    await port.append(logFile, { count: 2 });
+    const second = await port.version(logFile);
+    expect(second?.etag).not.toBe(first?.etag);
+    expect(second?.size).toBeGreaterThan(first?.size ?? 0);
+  });
+
+  test('AA update takes an async transform, and answering the current value itself writes nothing', async () => {
+    const { port, fs, path } = memoryStore();
+    await port.write(counterFile, { count: 1 });
+    const before = fs.snapshot().get(path('counter.json'));
+    fs.seed(path('counter.json'), `${before}`);
+    let writes = 0;
+    const original = fs.writeAtomic.bind(fs);
+    fs.writeAtomic = async (...args: Parameters<typeof fs.writeAtomic>) => {
+      writes += 1;
+      await original(...args);
+    };
+    const declined = await port.update(counterFile, async current => {
+      await Promise.resolve();
+      return current as { count: number };
+    });
+    expect(declined).toEqual({ ok: true, value: { count: 1 } });
+    expect(writes).toBe(0);
+    const bumped = await port.update(counterFile, async current => ({ count: (current?.count ?? 0) + 1 }));
+    expect(bumped).toEqual({ ok: true, value: { count: 2 } });
+    expect(writes).toBe(1);
   });
 
   test('an oversized record is refused at append, so a read never meets one', async () => {
@@ -277,5 +311,80 @@ describe('StatePort: jsonl files', () => {
   test('read() on a jsonl file is a programming error', async () => {
     const { port } = memoryStore();
     await expect(port.read(logFile)).rejects.toBeInstanceOf(TypeError);
+  });
+});
+
+describe('StatePort: records() and tail() check each line on its own', () => {
+  const two = '{"format":1,"count":1}\n{"format":1,"count":2}\n';
+  test('T 2 valid + 2 malformed lines: 2 records and unreadable 2, and the file is not damaged', async () => {
+    const { port, fs, path } = memoryStore();
+    fs.seed(
+      path('log.jsonl'),
+      `{"format":1,"count":1}\n{ not json\n{"format":1,"count":"x"}\n{"format":1,"count":2}\n`,
+    );
+    expect(await port.records(logFile)).toEqual({ records: [{ count: 1 }, { count: 2 }], unreadable: 2 });
+    expect(port.damaged()).toEqual([]);
+  });
+
+  test('a torn last line is not counted; a missing file is no records', async () => {
+    const { port, fs, path } = memoryStore();
+    expect(await port.records(logFile)).toEqual({ records: [], unreadable: 0 });
+    fs.seed(path('log.jsonl'), `${two}{"format":1,"cou`);
+    expect(await port.records(logFile)).toEqual({ records: [{ count: 1 }, { count: 2 }], unreadable: 0 });
+  });
+
+  test('U tail reads only the end of a large file, drops the line its window cut, and checks each line', async () => {
+    const { port, fs, path } = memoryStore();
+    const many = Array.from({ length: 5000 }, (_, i) => `{"format":1,"count":${i}}`).join('\n');
+    fs.seed(path('log.jsonl'), `${many}\n{ bad\n{"format":1,"count":5000}\n`);
+    const tail = await port.tail(logFile, { maxBytes: 64 });
+    expect(tail.records.at(-1)).toEqual({ count: 5000 });
+    expect(tail.unreadable).toBe(1);
+    expect(tail.records.length).toBeLessThan(4);
+    // the whole file fits: every record, nothing dropped
+    expect((await port.tail(logFile, { maxBytes: 1024 * 1024 })).records).toHaveLength(5001);
+  });
+
+  test('tail refuses a window outside 1..MAX_STATE_TAIL_BYTES, and a non-jsonl file', async () => {
+    const { port } = memoryStore();
+    await expect(port.tail(logFile, { maxBytes: 0 })).rejects.toThrow(TypeError);
+    await expect(port.tail(logFile, { maxBytes: 2 ** 40 })).rejects.toThrow(TypeError);
+    await expect(port.records(counterFile as never)).rejects.toThrow(TypeError);
+  });
+});
+
+describe('SS pathOf: the absolute path of an own declared opaque file only', () => {
+  test('an opaque file gets its path under the plugin’s state folder; any other store or an undeclared file throws', () => {
+    const { port, path } = memoryStore();
+    expect(port.pathOf(blobFile)).toBe(path('blob.bin'));
+    expect(() => port.pathOf(keyFile)).toThrow(TypeError);
+    expect(() => port.pathOf(counterFile)).toThrow(TypeError);
+    const theirs = defineState({ name: 'sock', path: 'tmux.sock', store: 'opaque', format: 1 });
+    expect(() => port.pathOf(theirs)).toThrow(UndeclaredStateFileError);
+  });
+});
+
+describe('SS widened: an opaque named tree takes path-safe segments, in the plugin’s own folder only', () => {
+  const turns = defineState({ name: 'ferret-files', path: 'ferrets/*', store: 'opaque', format: 1 });
+  test('a named file is written and its absolute path handed out; traversal and a claimed folder are refused', async () => {
+    const { port, fs, path } = memoryStore({ files: [...allFiles, turns] });
+    await port.write(turns, new TextEncoder().encode('# turn 1') as never, 'F12/turns/turn-001.md');
+    expect(port.pathOf(turns, 'F12/turns/turn-001.md')).toBe(path('ferrets/F12/turns/turn-001.md'));
+    expect(port.pathOf(turns, 'F12/queued-7.md')).toBe(path('ferrets/F12/queued-7.md'));
+    expect(fs.snapshot().has(path('ferrets/F12/turns/turn-001.md'))).toBe(true);
+    for (const bad of ['F12/../../vault/key', '../x', 'F12//x', 'F12/./x', '/abs'])
+      expect(() => port.pathOf(turns, bad)).toThrow(UndeclaredStateFileError);
+    // segments are only for a tree: a plain opaque collection, or a tree whose folder another file claims, refuse
+    const flat = defineState({ name: 'flat', path: 'flat-*.bin', store: 'opaque', format: 1 });
+    const claimed = defineState({ name: 'claimed', path: 'cards/*', store: 'opaque', format: 1 });
+    const { port: other } = memoryStore({
+      files: [
+        flat,
+        claimed,
+        defineState({ name: 'inside', path: 'cards/index.json', store: 'json', format: 1, schema: z.strictObject({}) }),
+      ],
+    });
+    expect(() => other.pathOf(flat, 'a/b')).toThrow(UndeclaredStateFileError);
+    expect(() => other.pathOf(claimed, 'a/b')).toThrow(UndeclaredStateFileError);
   });
 });

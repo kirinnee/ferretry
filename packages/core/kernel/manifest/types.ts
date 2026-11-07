@@ -195,15 +195,32 @@ export interface OnboardingDecl {
  * pinned items of that kind (an MCP server's `command` / `url`), resolved by the kernel when the call is made from
  * the installed items it holds; refused when no installed item names it.
  */
-export type PermissionEntry = string | { readonly items: ItemKind };
+export type PermissionEntry = string | { readonly items: ItemKind } | ResolverEntry;
+
+/**
+ * A `permissions.network` entry whose hosts the plugin's OWN daemon half answers at each call (Connections' relay
+ * endpoint, from its configured or advertised value): the half implements `resolvers: { [name]: () => readonly
+ * string[] }`, called with no request data; the host is allowed only when it equals one answer exactly (`host` or
+ * `host:port`, no wildcard). A throwing resolver refuses.
+ */
+export interface ResolverEntry {
+  readonly resolver: string;
+}
+
+/** A `permissions.spawn` entry: a program, or what installed items name. A resolver reaches hosts, never programs. */
+export type SpawnEntry = string | { readonly items: ItemKind };
 
 /** What it may touch outside its own folder (§3.7). Anything undeclared is refused by the kernel ports. */
 export interface Permissions {
   readonly roots?: readonly RootName[];
   readonly network?: readonly PermissionEntry[];
-  readonly spawn?: readonly PermissionEntry[];
+  readonly spawn?: readonly SpawnEntry[];
   /** Vault secret names it may use by name (never read). */
   readonly secrets?: readonly string[];
+  /** It reads this machine's `/proc` and `/sys` facts through `kernel.hostFacts` (today's Terminals). */
+  readonly hostFacts?: true;
+  /** It reads the running build's facts and launches the self-update through `kernel.updateHost` (Updates). */
+  readonly updateHost?: true;
 }
 
 // the manifest ─────────────────────────────────────────────────────────────────────────────────────────────────────

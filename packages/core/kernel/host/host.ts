@@ -1,3 +1,4 @@
+import type { HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
 import { decideHome } from '../contract/home.ts';
 import { milliseconds } from '@ferretry/std';
@@ -6,6 +7,8 @@ import {
   AdmissionPort,
   type ChildEnvironmentOpener,
   ChildEnvironmentPort,
+  SecretResolverPort,
+  type SecretResolver,
   InputHoldsPort,
   OutputGuardPort,
   RedactionPort,
@@ -15,6 +18,8 @@ import type { ConfigDef, PortToken } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError } from '../contract/http.ts';
 import { CORE_IDS, type PluginId } from '../contract/ids.ts';
+import { beforeListen } from './before-listen.ts';
+import { type HomeLockLease, StateHomeLockedError } from './state/home-lock.ts';
 import { Carriers, type DoctorCheck, DoctorChecks, PluginsChanged, SessionModes } from '../contract/kernel.ts';
 import type {
   Clock,
@@ -34,6 +39,7 @@ import type {
   DaemonContext,
   DaemonHalf,
   DaemonImplementation,
+  DoctorRun,
   ToolHandler,
   ToolResult,
 } from '../manifest/implement.ts';
@@ -59,16 +65,45 @@ import { dependentsOf, type GraphRefusal, planGraph } from './graph.ts';
 import { type Deadline, HookEngine } from './hooks.ts';
 import { type InventoryEntry, kernelRoutes } from './kernel-half.ts';
 import { JobRunner } from './jobs.ts';
+import type { ResponseCompressor } from './compression.ts';
+import { pluginsYamlLine, readAcceptedPlugins, writeAcceptedPlugins } from './accepted-plugins.ts';
 import { PluginLifecycle } from './lifecycle.ts';
 import { livePort } from './live-port.ts';
 import { guardedToolResult } from './tool-result.ts';
 import { type LogSink, scopedLog } from './log.ts';
 import { noWebSockets } from './adapters/process.ts';
+import { ownSecretsPort } from './secrets.ts';
+import { NO_HOST_FACTS } from './no-host-facts.ts';
+import { undeclaredHostFacts } from './adapters/host-facts.ts';
+import { undeclaredUpdateHost } from './adapters/update-host.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
-import { openChildEnvironments, restrictFetch, restrictSpawn, restrictWebSocket } from './permissions.ts';
+import { type DaemonTimings, DEFAULT_DAEMON_TIMINGS } from './session/timings.ts';
+import {
+  effectivePermissions,
+  openChildEnvironments,
+  restrictFetch,
+  restrictSpawn,
+  type ResolverOf,
+  restrictWebSocket,
+  workersFor,
+} from './permissions.ts';
+import type { HostStatePort } from './state/state-port.ts';
 import { openHome, probeHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
-import { type HomeLockLease, StateHomeLockedError } from './state/home-lock.ts';
+import { PinRegistry } from './pins.ts';
+import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
+import type { PathsPort, ScratchPort } from '../contract/ports.ts';
+
+const NO_PINNER: SessionRootPinner = {
+  pin: async () => {
+    throw unsupportedPlatform(process.platform);
+  },
+};
+const NO_SCRATCH: ScratchPort = {
+  open: async () => {
+    throw new FsError('unsupported', 'this daemon was started with no scratch folders');
+  },
+};
 import { buildSnapshot, type DataPluginManifest } from './snapshot.ts';
 import { type DaemonIdentity, daemonNameFrom, loadIdentity } from './identity.ts';
 import {
@@ -97,6 +132,8 @@ export interface HostConfig {
   writer?(): ConfigFilesWriter;
   reload(): Promise<void>;
   startWatching?(): () => void;
+  /** The `${secret:NAME}` names a plugin's own files in effect name. Absent: none, so `kernel.secrets` refuses. */
+  secretReferences?(plugin: string): ReadonlySet<string>;
 }
 
 /** Gate's judge of a plugin's own loosening config write, as the config service asks it. */
@@ -126,6 +163,18 @@ export interface HostAdapters {
   readonly websocket?: WebSocketPort;
   /** The machine's host name, for the daemon name. Absent: `Ferretry daemon`. */
   readonly hostname?: () => string;
+  /** The owner's home directory (`homedir()`), for `kernel.paths.home()`. Absent: the process's `HOME`, else `/`. */
+  readonly ownerHome?: () => string;
+  /** `kernel.hostFacts` (`/proc`, `/sys`). Absent: every read refuses. */
+  readonly hostFacts?: HostFactsPort;
+  /** Gzips an opted-in route's answer. Absent: every answer is plain. */
+  readonly compressor?: ResponseCompressor;
+  /** `kernel.updateHost` per plugin. Absent: facts refuse, launches fail. */
+  readonly updateHost?: (plugin: string) => UpdateHostPort;
+  /** Holds a folder open for `RootHandle.pin`. Absent: every pin is refused (`unsupported`). */
+  readonly pinner?: SessionRootPinner;
+  /** Private scratch folders. Absent: every open is refused. */
+  readonly scratch?: ScratchPort;
   /**
    * Takes the home's lifetime lock (`run/daemon.lock`, §9.2): held from just after the nonmutating home decision until
    * stop, so a second daemon on the same home is refused (G57) before it writes anything or removes the socket.
@@ -157,6 +206,10 @@ export interface HostOptions {
   readonly pid?: number;
   /** `<home>-worktrees` unless given. */
   readonly worktrees?: string;
+  /** `FYD_TEST_TIMINGS` as `fyd` parsed it (R247); absent is the shipped numbers exactly. */
+  readonly timings?: DaemonTimings;
+  /** `FYD_BACKGROUND_DELAY_SECONDS` as `fyd` parsed it: when the `worker` job lane opens after start. */
+  readonly backgroundDelayMs?: number;
 }
 
 export type PluginStatus = 'serving' | 'skeleton' | 'failed' | 'damaged' | 'off' | 'refused';
@@ -175,6 +228,10 @@ export interface DoctorLine {
   readonly plugin: string;
   readonly state: 'ok' | 'warn' | 'fail';
   readonly detail: string;
+  /** The manifest `doctor` id that produced it, when a declared check did. */
+  readonly check?: string;
+  /** What to do about it, when the check said. */
+  readonly fix?: string;
 }
 
 export interface RunningHost {
@@ -288,11 +345,11 @@ async function bootLocked(
   const { adapters, home } = options;
   const log = scopedLog(adapters.logSink, 'kernel');
   const clock = adapters.clock;
-  const deadline = deadlineFrom(clock);
 
   // Home and fence, identity (before anything is read from the home).
   const opened = await openHome(adapters.fs, home, `fyd ${options.version}`, clock.now() as Instant);
   if (opened.kind === 'refused') return { kind: 'refused', sentence: opened.decision.sentence, trace };
+  const deadline = deadlineFrom(clock);
   trace.push('identity');
   const identityOutcome = await loadIdentity(adapters.fs, home);
   if (identityOutcome.kind === 'damaged') return { kind: 'refused', sentence: identityOutcome.sentence, trace };
@@ -330,28 +387,76 @@ async function bootLocked(
 
   // 1. Check the enabled graph.
   trace.push('check');
-  const enabled = (id: string): boolean => isCore(id) || (options.enabled?.(id) ?? pluginsYaml?.plugins[id] !== 'off');
-  const enabledManifests = manifests.filter(manifest => enabled(manifest.id));
-  const planned = HookEngine.plan(enabledManifests, log, deadline);
-  const hookRefused = new Set(planned.refusals.flatMap(refusal => refusal.plugins));
-  const hookEdges = (manifest: Manifest): readonly string[] =>
-    (manifest.hooks?.takes ?? []).flatMap(take => {
-      const offerer = planned.engine.offererOf(take.hook);
-      return offerer === undefined ? [] : [offerer];
-    });
-  const graph = planGraph(
-    manifests.filter(manifest => !hookRefused.has(manifest.id) || isCore(manifest.id)),
-    enabled,
-    hookEdges,
-  );
-  const refusals: GraphRefusal[] = [
-    ...graph.refused,
-    ...planned.refusals.flatMap(refusal =>
-      refusal.plugins
-        .filter(plugin => !isCore(plugin))
-        .map(plugin => ({ plugin, reason: 'hook' as const, sentence: refusal.sentence })),
-    ),
-  ];
+  const yamlEnabled = (id: string): boolean =>
+    isCore(id) || (options.enabled?.(id) ?? pluginsYaml?.plugins[id] !== 'off');
+  const planWith = (on: (id: string) => boolean) => {
+    const planned = HookEngine.plan(
+      manifests.filter(manifest => on(manifest.id)),
+      log,
+      deadline,
+      manifests,
+    );
+    const hookRefused = new Set(planned.refusals.flatMap(refusal => refusal.plugins));
+    const hookEdges = (manifest: Manifest): readonly string[] =>
+      (manifest.hooks?.takes ?? []).flatMap(take => {
+        const offerer = planned.engine.offererOf(take.hook);
+        return offerer === undefined ? [] : [offerer];
+      });
+    const graph = planGraph(
+      manifests.filter(manifest => !hookRefused.has(manifest.id) || isCore(manifest.id)),
+      on,
+      hookEdges,
+    );
+    const refusals: GraphRefusal[] = [
+      ...graph.refused,
+      ...planned.refusals.flatMap(refusal =>
+        refusal.plugins
+          .filter(plugin => !isCore(plugin))
+          .map(plugin => ({ plugin, reason: 'hook' as const, sentence: refusal.sentence })),
+      ),
+    ];
+    // a plugin left without a provider only because the enabled set turned that provider off
+    const stranded = graph.refused.filter(
+      refusal =>
+        (refusal.reason === 'needs-refused' || refusal.reason === 'missing-provider') &&
+        !planGraph(manifests, () => true, hookEdges).refused.some(other => other.plugin === refusal.plugin),
+    );
+    return { planned, graph, refusals, stranded };
+  };
+  let enabled = yamlEnabled;
+  let plan = planWith(enabled);
+  const bootNotes: DoctorLine[] = [];
+  // §2.4: a hand-edited plugins.yaml that strands a plugin is refused; boot keeps the last accepted set. A caller
+  // that names the enabled set itself (a suite) is not second-guessed.
+  if (options.enabled === undefined) {
+    const accepted = await readAcceptedPlugins(adapters.fs, home);
+    if (plan.stranded.length === 0)
+      await writeAcceptedPlugins(
+        adapters.fs,
+        home,
+        plan.graph.order.map(manifest => manifest.id),
+        accepted,
+      ).catch(() => log.warn('the accepted plugin set could not be written'));
+    else if (accepted !== undefined) {
+      const fallback = (id: string): boolean => isCore(id) || accepted.has(id);
+      const kept = planWith(fallback);
+      if (kept.stranded.length === 0) {
+        const turnedOff = manifests.filter(manifest => accepted.has(manifest.id) && !yamlEnabled(manifest.id));
+        for (const manifest of turnedOff) {
+          const line = await pluginsYamlLine(adapters.fs, home, manifest.id);
+          bootNotes.push({
+            plugin: 'kernel',
+            state: 'warn',
+            detail: `config/plugins.yaml${line === undefined ? '' : ` line ${String(line)}`} turns ${manifest.title} off, which ${plan.stranded.map(refusal => manifests.find(item => item.id === refusal.plugin)?.title ?? refusal.plugin).join(', ')} needs, so the daemon started with the last enabled set it accepted.`,
+            fix: `Turn ${manifest.title} back on, or turn off what needs it too (fy plugin off ${manifest.id} --with-dependents).`,
+          });
+        }
+        enabled = fallback;
+        plan = kept;
+      }
+    }
+  }
+  const { planned, graph, refusals } = plan;
   const coreRefusal = [
     ...refusals,
     ...planned.refusals.map(r => ({ plugin: r.plugins[0] ?? '', sentence: r.sentence })),
@@ -359,7 +464,8 @@ async function bootLocked(
   if (coreRefusal !== undefined) return { kind: 'refused', sentence: coreRefusal.sentence, trace };
   // The engine is re-planned over the started set, so a refused plugin's takes do not exist.
   const order = graph.order;
-  const { engine: hooks } = HookEngine.plan(order, log, deadline);
+  // Every installed manifest is declared, so a provider turned off or refused is named, unavailable, never absent.
+  const { engine: hooks } = HookEngine.plan(order, log, deadline, manifests);
 
   const data = await loadDataPlugins(adapters.fs, home, new Set(manifests.map(manifest => manifest.id)));
   const items = await installedItemReach(adapters.fs, home, data.accepted as readonly InstalledItems[]);
@@ -400,7 +506,12 @@ async function bootLocked(
 
   // Shared kernel machinery.
   const events = new EventBus(log);
-  const jobs = new JobRunner(clock, log, plugin => records.get(plugin)?.status === 'serving');
+  const jobs = new JobRunner(
+    clock,
+    log,
+    plugin => records.get(plugin)?.status === 'serving',
+    options.backgroundDelayMs === undefined ? {} : { backgroundDelayMs: options.backgroundDelayMs },
+  );
   own(() => jobs.stop());
   const ids = new MintedIdRegistry(adapters.random);
   const bound: {
@@ -410,6 +521,7 @@ async function bootLocked(
     redaction?: Redaction;
     workFolders?: WorkFolders;
     childEnvironments?: ChildEnvironmentOpener;
+    secretResolver?: SecretResolver;
   } = {};
   const act = createActRunner(() => bound.holds, ids);
   const redaction: Redaction = {
@@ -421,6 +533,7 @@ async function bootLocked(
   };
   let frozen: PostBuildSnapshot | undefined;
   let phase: 'building' | 'bound' | 'started' = 'building';
+  const bootContexts = new Map<string, DaemonContext<Manifest>>();
   const providerHalf = (token: PortToken<unknown>): { record: PluginRecord; key: string } | undefined => {
     const provider = graph.providers.get(token.name);
     const record = provider === undefined ? undefined : records.get(provider);
@@ -433,6 +546,15 @@ async function bootLocked(
         throw new ApiError(503, `${record.manifest.title} is not running.`, 'plugin_unavailable');
     });
 
+  const pins = new PinRegistry(() => adapters.pinner ?? NO_PINNER);
+  const ownerPaths: PathsPort = Object.freeze({ home: () => adapters.ownerHome?.() ?? process.env.HOME ?? '/' });
+  /** A plugin's own `resolvers` section, read at each call (unset during build: nothing resolves yet). */
+  const resolversOf =
+    (id: string): ResolverOf =>
+    name =>
+      (
+        records.get(id)?.half?.resolvers as Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
+      )?.[name];
   const portsFor = (manifest: Manifest, lifecycle: PluginLifecycle): KernelPorts => ({
     clock,
     log: scopedLog(adapters.logSink, manifest.id),
@@ -443,20 +565,52 @@ async function bootLocked(
       { home, plugin: manifest.id, worktrees: options.worktrees ?? `${home}-worktrees` },
       manifest.permissions?.roots ?? [],
       () => bound.workFolders,
-      { random: adapters.random },
+      { random: adapters.random, ...(pins === undefined ? {} : { pins }) },
     ),
     events: events.portFor(manifest.id, manifest.data?.publishes ?? []),
     jobs: jobs.portFor(manifest.id),
-    workers: adapters.workers,
+    workers: workersFor(adapters.workers, () => {
+      const port = records.get(manifest.id)?.state?.port as HostStatePort | undefined;
+      return port === undefined ? undefined : (def, name) => port.sqliteGrant(def, name);
+    }),
     spawn: restrictSpawn(
       manifest.id,
-      manifest.permissions?.spawn ?? [],
+      effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
       openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
       items,
+      pins,
     ),
-    fetch: restrictFetch(manifest.id, manifest.permissions?.network ?? [], adapters.fetch, items),
-    websocket: restrictWebSocket(manifest.id, manifest.permissions?.network ?? [], websockets, items),
+    scratch: adapters.scratch ?? NO_SCRATCH,
+    fetch: restrictFetch(
+      manifest.id,
+      effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
+      adapters.fetch,
+      items,
+      resolversOf(manifest.id),
+    ),
+    websocket: restrictWebSocket(
+      manifest.id,
+      effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
+      websockets,
+      items,
+      resolversOf(manifest.id),
+    ),
     identity: identityPort,
+    paths: ownerPaths,
+    updateHost:
+      manifest.permissions?.updateHost === true && adapters.updateHost !== undefined
+        ? adapters.updateHost(manifest.id)
+        : undeclaredUpdateHost(manifest.id, options.version),
+    hostFacts:
+      manifest.permissions?.hostFacts === true
+        ? (adapters.hostFacts ?? NO_HOST_FACTS)
+        : undeclaredHostFacts(manifest.id, adapters.hostFacts ?? NO_HOST_FACTS),
+    timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
+    secrets: ownSecretsPort(
+      manifest.permissions?.secrets ?? [],
+      () => config.secretReferences?.(manifest.id) ?? new Set<string>(),
+      () => bound.secretResolver,
+    ),
     signer: signerFor(manifest.id, sessionSigner),
     ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
     act,
@@ -546,6 +700,7 @@ async function bootLocked(
       if (built === null || typeof built !== 'object' || typeof (built as { then?: unknown }).then === 'function')
         throw new TypeError('build must return the half synchronously');
       record.half = built;
+      bootContexts.set(manifest.id, ctx);
       record.status = record.damage.length > 0 ? 'damaged' : 'serving';
       hooks.attach(
         manifest.id,
@@ -580,7 +735,9 @@ async function bootLocked(
     redaction: { get: () => boundValue(RedactionPort) },
     workFolders: { get: () => boundValue(WorkFoldersPort) },
     childEnvironments: { get: () => boundValue(ChildEnvironmentPort) },
+    secretResolver: { get: () => boundValue(SecretResolverPort) },
   });
+  // Gate's config judge is read live as well.
   Object.defineProperty(judgeAdmission, 'current', { get: () => boundValue(AdmissionPort) });
   phase = 'bound';
   trace.push('snapshot');
@@ -689,6 +846,7 @@ async function bootLocked(
     admission: () => bound.admission,
     outputGuard: () => bound.outputGuard,
     version: options.version,
+    ...(adapters.compressor === undefined ? {} : { compressor: adapters.compressor }),
   };
   const dispatcher = new Dispatcher(bindings, { routes, sockets, memberRoutes });
 
@@ -705,15 +863,45 @@ async function bootLocked(
       return { text: `The input for ${name} does not fit.`, isError: true };
     const handle = entry.handle;
     const call = { request, params: new Map(), ...decision.standing } as Parameters<ToolHandler>[0];
-    return await guardedToolResult(
+    let ran = false;
+    let status = 200;
+    const result = await guardedToolResult(
       entry.decl.guard === 'secrets',
       bindings.outputGuard(),
-      () => runInCall({ actor: decision.actor }, () => handle(call, input)),
+      async () => {
+        ran = true;
+        try {
+          const built = await runInCall({ actor: decision.actor }, () => handle(call, input));
+          status = built.isError === true ? 500 : 200;
+          return built;
+        } catch (error) {
+          status = error instanceof ApiError ? error.status : 500;
+          throw error;
+        }
+      },
       () => {
         const unavailable = notServing(entry.owner);
         return unavailable === undefined ? undefined : { text: refusalText(unavailable), isError: true };
       },
     );
+    // Audited after the handler settled; the record is Gate's and never changes the answer.
+    if (ran && 'record' in entry.decl.audit) {
+      try {
+        bindings.admission()?.recorded?.({
+          table: 'tool',
+          descriptor,
+          request,
+          params: call.params,
+          standing: decision.standing,
+          actor: decision.actor,
+          ...(request.principal === undefined ? {} : { principal: request.principal }),
+          status,
+        });
+      } catch {
+        // The record is Gate's; the tool's answer stands.
+      }
+    }
+    return result;
   };
 
   // The session layer: one per daemon; every carrier opens a link per session on it (§4.8).
@@ -730,6 +918,7 @@ async function bootLocked(
       reauthorize: request => dispatcher.reauthorize(request),
     },
     clock,
+    lease: (options.timings ?? DEFAULT_DAEMON_TIMINGS).lease,
   });
   own(() => sessionLayer.close());
   let carriersChanged = (): void => undefined;
@@ -793,9 +982,17 @@ async function bootLocked(
     ids,
     dispatch: request => dispatcher.dispatch(request),
     callTool,
-    doctor: async () => doctorLines(records, hooks, jobs, data.refused),
+    doctor: async () => [...bootNotes, ...(await doctorLines(records, hooks, jobs, data.refused))],
     stop: () => stopHost(),
   };
+
+  for (const [id, ctx] of bootContexts) {
+    const record = records.get(id);
+    const run = record?.half?.beforeListen;
+    if (record?.status !== 'serving' || run === undefined) continue;
+    trace.push(`beforeListen:${id}`);
+    await beforeListen(() => run(ctx), id, clock, log);
+  }
 
   // 7. Listen: the local listener and every carrier.
   trace.push('listen');
@@ -839,23 +1036,26 @@ async function bootLocked(
   let stopping: Promise<void> | undefined;
   stopHost = (): Promise<void> => {
     stopping ??= (async () => {
-      trace.push('stop:listen');
-      stopCarriers();
-      for (const listener of [...listening].reverse()) await listener.stop().catch(() => undefined);
-      sessionLayer.close();
-      for (const cancel of unwatchState) cancel();
-      stopWatching?.();
-      trace.push('stop:jobs');
-      await jobs.stop();
-      for (const manifest of [...order].reverse()) {
-        const record = records.get(manifest.id) as PluginRecord;
-        trace.push(`stop:${manifest.id}`);
-        await record.lifecycle.stop(() => log.warn('an onStop handler failed', { plugin: manifest.id }));
-        await record.state?.close().catch(() => undefined);
+      try {
+        trace.push('stop:listen');
+        stopCarriers();
+        for (const listener of [...listening].reverse()) await listener.stop().catch(() => undefined);
+        sessionLayer.close();
+        for (const cancel of unwatchState) cancel();
+        stopWatching?.();
+        trace.push('stop:jobs');
+        await jobs.stop();
+        for (const manifest of [...order].reverse()) {
+          const record = records.get(manifest.id) as PluginRecord;
+          trace.push(`stop:${manifest.id}`);
+          await record.lifecycle.stop(() => log.warn('an onStop handler failed', { plugin: manifest.id }));
+          await record.state?.close().catch(() => undefined);
+        }
+      } finally {
+        // Last, even when a step above threw: the home is free only once nothing of this daemon still writes in it.
+        trace.push('stop:lock');
+        await lease.release();
       }
-      // Last: the home is free only once nothing of this daemon still writes in it.
-      trace.push('stop:lock');
-      await lease.release();
     })();
     return stopping;
   };
@@ -904,6 +1104,7 @@ async function doctorLines(
       });
   for (const note of hooks.notes) lines.push({ plugin: 'kernel', state: 'warn', detail: note });
   for (const refused of dataRefused) lines.push({ plugin: refused.folder, state: 'fail', detail: refused.sentence });
+  // Contributed checks first, in contribution order (G158: reachability leads `fyd --check`), then the declared ones.
   const checks: readonly { readonly id: string; readonly item: DoctorCheck }[] = hooks.contributions(DoctorChecks);
   for (const check of checks) {
     try {
@@ -911,6 +1112,31 @@ async function doctorLines(
       lines.push({ plugin: check.id, state: finding.state, detail: finding.detail });
     } catch {
       lines.push({ plugin: check.id, state: 'fail', detail: `The check ${check.item.title} failed to run.` });
+    }
+  }
+  // Each started plugin's declared checks (manifest `doctor`), in start order; a check that throws is a failure that
+  // names the check, never the thrown text (which may carry anything).
+  for (const [id, record] of records) {
+    if (record.status !== 'serving' && record.status !== 'damaged') continue;
+    const runs = (record.half?.doctor ?? {}) as Readonly<Record<string, DoctorRun | undefined>>;
+    for (const check of record.manifest.doctor ?? []) {
+      const run = runs[check];
+      if (run === undefined) {
+        lines.push({ plugin: id, check, state: 'fail', detail: `The check ${check} has no implementation.` });
+        continue;
+      }
+      try {
+        const finding = await run();
+        lines.push({
+          plugin: id,
+          check,
+          state: finding.state,
+          detail: finding.detail,
+          ...(finding.fix === undefined ? {} : { fix: finding.fix }),
+        });
+      } catch {
+        lines.push({ plugin: id, check, state: 'fail', detail: `The check ${check} failed to run.` });
+      }
     }
   }
   return lines;

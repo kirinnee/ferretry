@@ -37,6 +37,7 @@ import {
   openRecord,
   SESSION_PROTOCOL_ID,
   type SessionFrame,
+  type SessionCrypto,
   type SessionId,
   type SessionLayerHost,
   sealRecord,
@@ -64,6 +65,11 @@ class FakeClock {
     const id = this.#next++;
     this.#timers.set(id, { at: this.#now + delay, fn });
     return () => this.#timers.delete(id);
+  }
+
+  /** Moves the clock WITHOUT firing anything: a timer that fires late (R245). */
+  skew(ms: number): void {
+    this.#now += ms;
   }
 
   advance(ms: number): void {
@@ -135,7 +141,7 @@ export interface Fixture {
   modesOff: Set<string>;
 }
 
-export async function fixture(options: { lease?: AccessLeasePolicy } = {}): Promise<Fixture> {
+export async function fixture(options: { lease?: AccessLeasePolicy; crypto?: SessionCrypto } = {}): Promise<Fixture> {
   const identity = await newDaemonIdentity();
   const clock = new FakeClock();
   const device = new FakeDeviceMode();
@@ -164,7 +170,7 @@ export async function fixture(options: { lease?: AccessLeasePolicy } = {}): Prom
     modesOff: new Set(),
   };
   const layer = createSessionLayer({
-    crypto: relayCrypto,
+    crypto: options.crypto ?? relayCrypto,
     identity,
     modes: key => {
       if (state.modesOff.has(key)) return undefined;

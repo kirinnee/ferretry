@@ -1,15 +1,21 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FetchPort, SpawnPort, WebSocketClient, WebSocketPort } from '../../../contract/ports.ts';
 import { daemonNameFrom } from '../../../host/identity.ts';
 import { installedItemReach } from '../../../host/items.ts';
 import {
+  effectivePermissions,
+  hostPermitted,
   type ItemReach,
   PermissionError,
   restrictFetch,
   restrictSpawn,
   restrictWebSocket,
+  spawnPermitted,
 } from '../../../host/permissions.ts';
-import type { HostFs } from '../../../host/adapters/node-fs.ts';
+import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 
 function recordingSockets(): WebSocketPort & { readonly dialled: string[] } {
   const dialled: string[] = [];
@@ -61,6 +67,9 @@ describe('kernel.spawn / fetch: declared names, absolute paths and installed ite
       ran.push(program);
       return { exitCode: 0, signal: null, stdout: '', stderr: '' };
     },
+    runBytes: async () => {
+      throw new Error('not run here');
+    },
     start: () => {
       throw new Error('not started here');
     },
@@ -80,6 +89,8 @@ describe('kernel.spawn / fetch: declared names, absolute paths and installed ite
       'updates may not run curl: its manifest does not declare it.',
     );
     expect(ran.at(-1)).toBe('/usr/bin/git');
+    // runBytes is refused alike, before anything starts
+    await expect(port.runBytes('curl', [])).rejects.toThrow(PermissionError);
   });
 
   test('{ items: mcp } allows what an installed item names, read when the call is made', async () => {
@@ -104,6 +115,56 @@ describe('kernel.spawn / fetch: declared names, absolute paths and installed ite
 });
 
 describe('installedItemReach: what installed data-plugin items name', () => {
+  for (const linkKind of ['parent', 'leaf', 'plugin', 'plugin sibling', 'prefix sibling'] as const) {
+    test(`an installed item's ${linkKind} symlink cannot grant outside spawn or network reach`, async () => {
+      const home = await mkdtemp(join(tmpdir(), 'kernel-item-reach-'));
+      try {
+        const plugins = join(home, 'state/kernel/plugins');
+        const plugin = join(plugins, 'installed');
+        const outside =
+          linkKind === 'prefix sibling' || linkKind === 'plugin sibling' ? `${plugin}-outside` : join(home, 'outside');
+        await mkdir(outside, { recursive: true });
+        await writeFile(join(outside, 'item.yaml'), 'command: /tmp/outside-program\nurl: https://outside.test/\n');
+        if (linkKind === 'plugin' || linkKind === 'plugin sibling') {
+          await mkdir(plugins, { recursive: true });
+          await symlink(outside, plugin);
+        } else {
+          await mkdir(plugin, { recursive: true });
+          await symlink(
+            linkKind === 'leaf' ? join(outside, 'item.yaml') : outside,
+            join(plugin, linkKind === 'leaf' ? 'item.yaml' : 'nested'),
+          );
+        }
+        const fs = nodeFs(() => 'test');
+        const reads: string[] = [];
+        const readText = fs.readText;
+        fs.readText = path => {
+          reads.push(path);
+          return readText(path);
+        };
+        const reach = await installedItemReach(fs, home, [
+          {
+            id: 'installed',
+            items: [
+              {
+                id: 'server',
+                kind: 'mcp',
+                file:
+                  linkKind === 'leaf' || linkKind === 'plugin' || linkKind === 'plugin sibling'
+                    ? 'item.yaml'
+                    : 'nested/item.yaml',
+              },
+            ],
+          },
+        ]);
+        expect(reach('mcp')).toEqual({ programs: [], hosts: [] });
+        expect(reads).toEqual([]);
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    });
+  }
+
   test('reads command and url from each installed item file; a missing or escaping file names nothing', async () => {
     const files = new Map([
       ['/home/fy/state/kernel/plugins/acme/items/files.yaml', 'command: npx\nargs: [-y, files]\n'],
@@ -112,6 +173,7 @@ describe('installedItemReach: what installed data-plugin items name', () => {
       ['/home/fy/state/kernel/plugins/other/items/x.yaml', 'command: rm\n'],
     ]);
     const fs = {
+      realpath: async (file: string) => file,
       lstat: async (file: string) => {
         const text = files.get(file);
         return text === undefined ? undefined : { kind: 'file' as const, size: text.length, mtimeMs: 0 };
@@ -133,5 +195,133 @@ describe('installedItemReach: what installed data-plugin items name', () => {
     expect(reach('mcp')).toEqual({ programs: ['npx'], hosts: ['mcp.acme.test'] });
     expect(reach('shell')).toEqual({ programs: ['zsh'], hosts: [] });
     expect(reach('skill')).toEqual({ programs: [], hosts: [] });
+  });
+});
+
+describe('BB wildcard reach: core only', () => {
+  const spawn: SpawnPort = {
+    run: async () => ({ exitCode: 0, signal: null, stdout: '', stderr: '' }),
+    runBytes: async () => {
+      throw new Error('not run here');
+    },
+    start: () => {
+      throw new Error('not started here');
+    },
+  };
+  const fetchPort: FetchPort = { request: async () => new Response('') };
+
+  test("a core piece's '*' runs any program and reaches any host", async () => {
+    await restrictSpawn('vault', effectivePermissions('vault', ['*']), spawn).run('/opt/owner/tool', []);
+    await restrictFetch('vault', effectivePermissions('vault', ['*']), fetchPort).request('https://anything.example/');
+  });
+
+  test("a plugin's '*' grants nothing (and plugin-graph refuses it)", async () => {
+    await expect(restrictSpawn('mcp', effectivePermissions('mcp', ['*']), spawn).run('ls', [])).rejects.toThrow(
+      PermissionError,
+    );
+    await expect(
+      restrictFetch('mcp', effectivePermissions('mcp', ['*']), fetchPort).request('https://anything.example/'),
+    ).rejects.toThrow(PermissionError);
+  });
+});
+
+describe('an installed item never grants a pattern', () => {
+  test("S? items wildcard: an item naming '*' (or any pattern) reaches nothing for a non-core { items } plugin", async () => {
+    // At use: what an item reach answers is filtered, whoever produced it.
+    const wild = (): ItemReach => ({ programs: ['*', 'np*'], hosts: ['*', '*.example', 'ev*l.example'] });
+    expect(spawnPermitted([{ items: 'mcp' }], wild, '/bin/sh')).toBe(false);
+    expect(spawnPermitted([{ items: 'mcp' }], wild, 'npx')).toBe(false);
+    expect(hostPermitted([{ items: 'mcp' }], wild, 'evil.example')).toBe(false);
+    expect(hostPermitted([{ items: 'mcp' }], wild, 'sub.example')).toBe(false);
+    const spawned: string[] = [];
+    const base: SpawnPort = {
+      run: async program => {
+        spawned.push(program);
+        return { exitCode: 0, signal: null, stdout: '', stderr: '' };
+      },
+      runBytes: async () => {
+        throw new Error('not run here');
+      },
+      start: () => {
+        throw new Error('not started here');
+      },
+    };
+    await expect(restrictSpawn('mcp', [{ items: 'mcp' }], base, wild).run('/bin/sh', [])).rejects.toThrow(
+      PermissionError,
+    );
+    expect(spawned).toEqual([]);
+    // A literal item name still passes beside the dropped patterns.
+    const mixed = (): ItemReach => ({ programs: ['*', 'npx'], hosts: ['*', 'mcp.acme.test'] });
+    expect(spawnPermitted([{ items: 'mcp' }], mixed, 'npx')).toBe(true);
+    expect(hostPermitted([{ items: 'mcp' }], mixed, 'mcp.acme.test')).toBe(true);
+    expect(hostPermitted([{ items: 'mcp' }], mixed, 'other.example')).toBe(false);
+    // At read: an installed item file whose command or url is a pattern names nothing.
+    const files = new Map([
+      ['/home/fy/state/kernel/plugins/acme/items/any.yaml', "command: '*'\nurl: https://*/x\n"],
+      ['/home/fy/state/kernel/plugins/acme/items/sub.yaml', 'command: np*\nurl: https://*.acme.test/x\n'],
+    ]);
+    const fs = {
+      realpath: async (file: string) => file,
+      lstat: async (file: string) => {
+        const text = files.get(file);
+        return text === undefined ? undefined : { kind: 'file' as const, size: text.length, mtimeMs: 0 };
+      },
+      readText: async (file: string) => files.get(file) ?? '',
+    } as unknown as HostFs;
+    const reach = await installedItemReach(fs, '/home/fy', [
+      {
+        id: 'acme',
+        items: [
+          { kind: 'mcp', id: 'any', file: 'items/any.yaml' },
+          { kind: 'mcp', id: 'sub', file: 'items/sub.yaml' },
+        ],
+      },
+    ]);
+    expect(reach('mcp')).toEqual({ programs: [], hosts: [] });
+  });
+});
+
+describe('CC a { resolver } network entry: the plugin half answers its own hosts, with no request data', () => {
+  const reached: string[] = [];
+  const fetchPort: FetchPort = {
+    request: async url => {
+      reached.push(String(url));
+      return new Response('');
+    },
+  };
+
+  test('an answered host (or host:port) passes; any other host, or a wildcard answer, is refused', async () => {
+    const port = restrictFetch('connections', [{ resolver: 'relay' }], fetchPort, undefined, name =>
+      name === 'relay' ? () => ['relay.example.test', 'self.example.test:8443', '*.workers.dev'] : undefined,
+    );
+    await port.request('https://relay.example.test/v1/rendezvous');
+    await port.request('https://self.example.test:8443/x');
+    await expect(port.request('https://self.example.test/x')).rejects.toThrow(PermissionError);
+    await expect(port.request('https://evil.test/')).rejects.toThrow(PermissionError);
+    await expect(port.request('https://a.workers.dev/')).rejects.toThrow(PermissionError);
+    expect(reached).toEqual(['https://relay.example.test/v1/rendezvous', 'https://self.example.test:8443/x']);
+  });
+
+  test('a throwing or missing resolver refuses; the resolver is called with no arguments', async () => {
+    const seen: unknown[][] = [];
+    const throwing = restrictFetch('connections', [{ resolver: 'relay' }], fetchPort, undefined, () => () => {
+      throw new Error('config unreadable');
+    });
+    await expect(throwing.request('https://relay.example.test/')).rejects.toThrow(PermissionError);
+    const missing = restrictFetch('connections', [{ resolver: 'relay' }], fetchPort);
+    await expect(missing.request('https://relay.example.test/')).rejects.toThrow(PermissionError);
+    const spying = restrictWebSocket(
+      'connections',
+      [{ resolver: 'relay' }],
+      { connect: () => ({ binaryType: 'arraybuffer' }) as unknown as WebSocketClient },
+      undefined,
+      () =>
+        (...args: unknown[]) => {
+          seen.push(args);
+          return ['relay.example.test'];
+        },
+    );
+    spying.connect('wss://relay.example.test/v1/rendezvous/abc/daemon?token=x');
+    expect(seen).toEqual([[]]);
   });
 });

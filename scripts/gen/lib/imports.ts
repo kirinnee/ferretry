@@ -35,6 +35,7 @@ export type Area =
   | 'kernel-testing'
   | 'kernel-host'
   | 'kernel-plugin'
+  | 'kernel-worker'
   | 'root'
   | 'other';
 
@@ -53,6 +54,7 @@ export function areaOf(pkg: WorkspacePackage, file: string): Area {
     if (rel.startsWith('testing/')) return 'kernel-testing';
     if (rel.startsWith('host/') || rel.startsWith('src/')) return 'kernel-host';
     if (rel === 'plugin.ts') return 'kernel-plugin';
+    if (rel === 'worker.ts') return 'kernel-worker';
     return 'other';
   }
   if (rel.startsWith('contract/testing/')) return 'contract-testing';
@@ -78,6 +80,8 @@ function areaOfSubpath(pkg: WorkspacePackage, subpath: string): Area {
       testing: 'kernel-testing',
       host: 'kernel-host',
       plugin: 'kernel-plugin',
+      // A worker thread's opener for the sqlite files its half granted: daemon-side code only.
+      worker: 'kernel-worker',
     };
     return kernelAreas[subpath] ?? 'other';
   }
