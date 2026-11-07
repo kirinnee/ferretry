@@ -15,6 +15,7 @@ import {
   SendRequestSchema,
   WorkSearchQuerySchema,
 } from '../../contract/index.ts';
+import { at } from '../support/instant.ts';
 
 conversationConformance('fakeConversation', () => fakeConversation());
 
@@ -31,9 +32,9 @@ describe('conversation wire schemas', () => {
       sender: 'human',
       text: 'x',
       attachmentIds: [],
-      enqueuedAt: '2026-11-07T09:00:00Z' as Instant,
+      enqueuedAt: at('2026-11-07T09:00:00Z') as Instant,
       state: 'queued',
-      stateAt: '2026-11-07T09:00:00Z' as Instant,
+      stateAt: at('2026-11-07T09:00:00Z') as Instant,
       revision: 1,
     };
     expect(QueuedMessageSchema.safeParse(base).success).toBe(true);
@@ -56,7 +57,7 @@ describe('conversation wire schemas', () => {
       mime: 'application/pdf',
       size: 1,
       sha256: 'a'.repeat(64),
-      createdAt: '2026-11-07T09:00:00Z',
+      createdAt: at('2026-11-07T09:00:00Z'),
       encrypted: { kind: 'pdf', locked: true },
     };
     expect(AttachmentViewSchema.safeParse(view).success).toBe(true);

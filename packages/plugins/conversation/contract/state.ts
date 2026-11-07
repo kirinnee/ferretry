@@ -1,35 +1,22 @@
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { LinksFileSchema } from './wire-link.ts';
-import { AnswerRecordSchema, QuestionSchema } from './wire-question.ts';
-import { QueuedMessageSchema, SendRecordSchema } from './wire-send.ts';
+import { QuestionSchema } from './wire-question.ts';
 
 /**
  * The files under `state/conversation/` (§9.2). `*` is the ferret's folder. Every JSON document starts at format 1;
  * a JSONL line carries its own `v: 1`. A damaged file fails the whole plugin closed, except the two caches, which
  * are dropped and rebuilt (a cache rule).
  */
-export const QUEUE_STATE = defineState({
-  name: 'queue',
-  path: '*/queue.jsonl',
-  store: 'jsonl',
-  format: 1,
-  schema: QueuedMessageSchema,
-});
-export const SENDS_STATE = defineState({
-  name: 'sends',
-  path: '*/sends.jsonl',
-  store: 'jsonl',
-  format: 1,
-  schema: SendRecordSchema,
-});
-export const ANSWERS_STATE = defineState({
-  name: 'answers',
-  path: '*/answers.jsonl',
-  store: 'jsonl',
-  format: 1,
-  schema: AnswerRecordSchema,
-});
+/** Lines are the queue's own events (enqueued, edited, moved, waiting); the fold is the schema, parsed at the boundary. */
+export const QUEUE_STATE = defineState({ name: 'queue', path: '*/queue.jsonl', store: 'jsonl', format: 1 });
+/** Lines are the ledger's own records, last write wins; `SendRecordSchema` is the wire view of one. */
+export const SENDS_STATE = defineState({ name: 'sends', path: '*/sends.jsonl', store: 'jsonl', format: 1 });
+/** What reached a ferret, and what it sent. */
+export const INBOX_STATE = defineState({ name: 'inbox', path: '*/inbox.jsonl', store: 'jsonl', format: 1 });
+export const OUTBOX_STATE = defineState({ name: 'outbox', path: '*/outbox.jsonl', store: 'jsonl', format: 1 });
+/** Lines are the answer ledger's receipts, last write per request wins. */
+export const ANSWERS_STATE = defineState({ name: 'answers', path: '*/answers.jsonl', store: 'jsonl', format: 1 });
 export const TURNS_STATE = defineState({ name: 'turns', path: '*/turns', store: 'opaque', format: 1 });
 export const QUESTION_STATE = defineState({
   name: 'question',
@@ -78,6 +65,8 @@ export const MESSAGE_TOKEN_KEY_STATE = defineState({
 export const CONVERSATION_STATE = [
   QUEUE_STATE,
   SENDS_STATE,
+  INBOX_STATE,
+  OUTBOX_STATE,
   ANSWERS_STATE,
   TURNS_STATE,
   QUESTION_STATE,
