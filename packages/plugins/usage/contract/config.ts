@@ -26,9 +26,10 @@ const raised = (before: number, after: number, what: string): readonly string[] 
  * per-login map.
  */
 export const usageLoosens: Loosens<UsageFile> = (before, after) => {
-  if (before === undefined) return [];
+  // A first file is compared against the defaults a missing file means: no budgets and a private feed. Only the budgets
+  // are empty then (nothing to remove); the feed is not, so a first file that turns it on is a loosening.
   const sentences: string[] = [];
-  for (const [id, was] of Object.entries(before.budgets ?? {})) {
+  for (const [id, was] of Object.entries(before?.budgets ?? {})) {
     const now = after?.budgets?.[id];
     for (const period of BUDGET_PERIODS)
       for (const level of ['trigger', 'hard'] as const) {
@@ -40,7 +41,7 @@ export const usageLoosens: Loosens<UsageFile> = (before, after) => {
         else sentences.push(...raised(had, has, what));
       }
   }
-  if (before.publicFeed !== true && after?.publicFeed === true)
+  if (before?.publicFeed !== true && after?.publicFeed === true)
     sentences.push('the usage feed is served to callers with no credential');
   return sentences;
 };
@@ -51,4 +52,3 @@ export const USAGE_CONFIG = defineConfig({
   axis: 'configure',
   loosens: usageLoosens,
 });
-
