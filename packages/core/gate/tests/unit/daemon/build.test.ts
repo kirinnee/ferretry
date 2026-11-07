@@ -16,6 +16,7 @@ import {
   DEFAULT_GATE_CONFIG,
   type GateApi,
   type GateConfig,
+  GatePolicyChanged,
   WardenTokenFile,
 } from '../../../contract/index.ts';
 import gateDaemon from '../../../daemon/index.ts';
@@ -45,6 +46,8 @@ function boot(options: FakeKernelOptions = {}) {
   const writes: string[] = [];
   const jobs = new Map<string, () => Promise<void>>();
   const releases: (() => void)[] = [];
+  const watchers: (() => void)[] = [];
+  const published: { event: string; payload: unknown }[] = [];
   const held = (): Promise<void> =>
     options.slowReads === true ? new Promise(resolve => releases.push(resolve)) : Promise.resolve();
   const state = {
@@ -82,7 +85,10 @@ function boot(options: FakeKernelOptions = {}) {
       return options.config;
     },
     collection: () => new Map(),
-    watch: () => () => undefined,
+    watch: (_def: unknown, listener: () => void) => {
+      watchers.push(listener);
+      return () => undefined;
+    },
     ...(options.fileState === undefined ? {} : { fileState: () => options.fileState }),
   };
   const log = { debug() {}, info() {}, warn() {}, error() {}, child: () => log };
@@ -91,7 +97,10 @@ function boot(options: FakeKernelOptions = {}) {
     state,
     config,
     jobs: { add: (job: { id: string; run: () => Promise<void> }) => jobs.set(job.id, job.run) },
-    events: { publish() {}, subscribe: () => () => undefined },
+    events: {
+      publish: (event: { name: string }, payload: unknown) => published.push({ event: event.name, payload }),
+      subscribe: () => () => undefined,
+    },
     clock: { now: () => '2026-11-07T12:00:00.000Z', nowMs: () => Date.parse('2026-11-07T12:00:00.000Z') },
     lifecycle: { onStop() {}, onStart() {} },
   };
@@ -112,6 +121,8 @@ function boot(options: FakeKernelOptions = {}) {
     secrets,
     jsonl,
     jobs,
+    watchers,
+    published,
     settle,
     release: () => {
       for (const release of releases.splice(0)) release();
@@ -279,5 +290,18 @@ describe('grant provenance in the built daemon', () => {
     const response = await dispatch(built, 'GET /v1/grants', { bearer: ADMIN });
     const body = bodyOf(response) as { capabilities: { origin: string }[] };
     expect(body.capabilities.every(capability => capability.origin === 'default')).toBe(true);
+  });
+});
+
+describe('a policy change in the built daemon', () => {
+  test('G149 a gate.yaml change publishes GatePolicyChanged with a new generation, so every open stream is re-asked', () => {
+    const built = boot({ config: DEFAULT_GATE_CONFIG });
+    expect(built.watchers).toHaveLength(1);
+    built.watchers[0]?.();
+    built.watchers[0]?.();
+    expect(built.published).toEqual([
+      { event: GatePolicyChanged.name, payload: { generation: 1 } },
+      { event: GatePolicyChanged.name, payload: { generation: 2 } },
+    ]);
   });
 });
