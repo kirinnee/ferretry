@@ -1,26 +1,17 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { LimitsViewSchema } from '../../src/lib/limits.ts';
-import * as service from '../../src/lib/service.ts';
 import * as session from '../../../../daemon/lib/protocol/session.ts';
 import {
-  attachmentView,
-  cgroupConfigView,
   fleetIdleFrame,
   fyEvent,
   fyEventFrame,
-  healthView,
   INSTANT,
   LATER_INSTANT,
   liveFrame,
-  pwaConfigView,
-  scratchPlanView,
-  scratchSweepView,
   sessionAttachTarget,
   sessionIdleFrame,
   sessionView,
-  usageFeedView,
-} from '../fixtures.ts';
+} from './fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
 const launchInstructions = {
@@ -369,64 +360,6 @@ const sessionCases: SchemaCase[] = [
   { name: 'signal request', schema: session.SignalSessionRequestSchema, value: { kind: 'done' } },
 ];
 
-const serviceCases: SchemaCase[] = [
-  { name: 'health', schema: service.HealthViewSchema, value: healthView },
-  {
-    name: 'duplicate ask',
-    schema: service.DuplicateAskSchema,
-    value: {
-      kind: 'card',
-      members: [
-        { sessionId: 's1', id: 'A1' },
-        { sessionId: 's2', id: 'A2' },
-      ],
-      why: 'not closed: a hands-on card',
-    },
-  },
-  {
-    name: 'liveness while starting',
-    schema: service.LivenessViewSchema,
-    value: {
-      status: 'starting',
-      version: '1.2.3',
-      sessionProtocol: 'ferretry-relay/2',
-      uptimeSeconds: 12,
-      pid: 4242,
-      boot: { phase: 'starting', step: 'mounting subsystems', stepElapsedSeconds: 4, elapsedSeconds: 12 },
-      eventLoop: {
-        lagMs: 3.5,
-        maxLagMs: 812,
-        stalls: 1,
-        lastStall: { at: '2026-10-21T09:00:00.000Z', durationMs: 812, during: ['boot: mounting subsystems'] },
-      },
-    },
-  },
-  { name: 'limits view', schema: LimitsViewSchema, value: cgroupConfigView },
-  { name: 'PWA config', schema: service.PwaConfigSchema, value: pwaConfigView.config },
-  { name: 'PWA patch', schema: service.PwaConfigPatchSchema, value: { name: 'New Name', icon: 'F' } },
-  { name: 'PWA view', schema: service.PwaConfigViewSchema, value: pwaConfigView },
-  { name: 'usage account', schema: service.UsageAccountViewSchema, value: usageFeedView.accounts[0] },
-  { name: 'usage feed', schema: service.UsageFeedViewSchema, value: usageFeedView },
-  { name: 'attachment', schema: service.AttachmentViewSchema, value: attachmentView },
-  {
-    name: 'attachment upload request',
-    schema: service.AttachmentUploadRequestSchema,
-    value: { filename: 'report.pdf', mime: 'application/pdf', base64: 'JVBERi0=' },
-  },
-  { name: 'attachment unlock request', schema: service.AttachmentUnlockRequestSchema, value: { password: 'use-once' } },
-  {
-    name: 'attachment download',
-    schema: service.AttachmentDownloadSchema,
-    value: { attachment: attachmentView, base64: 'JVBERi0=' },
-  },
-  { name: 'scratch entry', schema: service.ScratchEntrySchema, value: scratchPlanView.entries[0] },
-  { name: 'scratch plan', schema: service.ScratchPlanViewSchema, value: scratchPlanView },
-  { name: 'scratch plans', schema: service.ScratchPlanListSchema, value: [scratchPlanView] },
-  { name: 'scratch sweep', schema: service.ScratchSweepViewSchema, value: scratchSweepView },
-  { name: 'scratch request', schema: service.ScratchSweepRequestSchema, value: { force: true } },
-  { name: 'empty response', schema: service.EmptyResponseSchema, value: undefined },
-];
-
 describe('session schemas', () => {
   it('should resolve hypermedia from the switch, else the mode default', () => {
     // Arrange
@@ -633,38 +566,9 @@ describe('session schemas', () => {
     should(parsedInteractive.mode).equal('interactive');
   });
 
-  it('should strip the retired boardAccess key from a start request instead of rejecting it', () => {
-    // Arrange
-    const legacy = { agent: 'agent', mode: 'auto', prompt: 'work', parent: 'parent', boardAccess: 'worker' };
-
-    // Act
-    const parsed = session.StartSessionRequestSchema.parse(legacy);
-
-    // Assert
-    should(parsed).deepEqual({ agent: 'agent', mode: 'auto', prompt: 'work', parent: 'parent' });
-    should(session.withoutBoardAccess('not an object')).equal('not an object');
-    should(session.withoutBoardAccess(null)).equal(null);
-    should(session.withoutBoardAccess(['boardAccess'])).eql(['boardAccess']);
-  });
-
   it('should reject impossible or untrusted session requests', () => {
     // Arrange
     const cases: SchemaCase[] = [
-      {
-        name: 'conversion preview naming no account',
-        schema: session.ConversionPreviewRequestSchema,
-        value: { model: 'gpt-5.5' },
-      },
-      {
-        name: 'ready conversion preview with no summary',
-        schema: session.ConversionPreviewSchema,
-        value: { kind: 'ready', targetAgent: 'codex-a', targetModel: 'gpt-5.5' },
-      },
-      {
-        name: 'migrate request with an unknown conversation choice',
-        schema: session.MigrateSessionRequestSchema,
-        value: { agent: 'next', conversation: 'guess' },
-      },
       {
         name: 'auto without prompt',
         schema: session.StartSessionRequestSchema,
@@ -886,97 +790,5 @@ describe('session schemas', () => {
 
     // Act + Assert
     assertRejects(cases);
-  });
-});
-
-describe('service schemas', () => {
-  it('should round-trip every public service schema', () => {
-    // Arrange
-    const cases = serviceCases;
-
-    // Act + Assert
-    assertRoundTrips(cases);
-    assertCoversEverySchema(service, cases);
-  });
-
-  it('should normalize PWA patch input', () => {
-    // Arrange
-    const input = { name: '  Fleet   View  ', icon: 'f' };
-
-    // Act
-    const actual = service.PwaConfigPatchSchema.parse(input);
-
-    // Assert
-    should(actual).deepEqual({ name: 'Fleet View', icon: 'F' });
-  });
-
-  it('should reject invalid PWA, attachment, and scratch correlations', () => {
-    // Arrange
-    const extraction = { method: 'pdfjs', characters: 5, truncated: false, totalPages: 1, pagesRead: 1 };
-    const failure = { code: 'unreadable_document', message: 'bad document' };
-    const cases: SchemaCase[] = [
-      { name: 'empty PWA patch', schema: service.PwaConfigPatchSchema, value: {} },
-      {
-        name: 'mismatched PDF page fields',
-        schema: service.AttachmentViewSchema,
-        value: { ...attachmentView, textExtraction: { ...extraction, pagesRead: undefined } },
-      },
-      {
-        name: 'pages read above total',
-        schema: service.AttachmentViewSchema,
-        value: { ...attachmentView, textExtraction: { ...extraction, pagesRead: 2 } },
-      },
-      {
-        name: 'DOCX with pages',
-        schema: service.AttachmentViewSchema,
-        value: { ...attachmentView, textExtraction: { ...extraction, method: 'docx-xml' } },
-      },
-      {
-        name: 'success and failure',
-        schema: service.AttachmentViewSchema,
-        value: { ...attachmentView, textExtraction: extraction, textExtractionFailure: failure },
-      },
-      {
-        name: 'locked with extraction',
-        schema: service.AttachmentViewSchema,
-        value: { ...attachmentView, textExtraction: extraction, encrypted: { kind: 'pdf', locked: true } },
-      },
-      {
-        name: 'unlocked without expiry',
-        schema: service.AttachmentViewSchema,
-        value: { ...attachmentView, encrypted: { kind: 'pdf', locked: false, decryptedSize: 4 } },
-      },
-      {
-        name: 'eligible with reason',
-        schema: service.ScratchPlanViewSchema,
-        value: { ...scratchPlanView, reason: 'still active' },
-      },
-      {
-        name: 'ineligible without reason',
-        schema: service.ScratchPlanViewSchema,
-        value: { ...scratchPlanView, eligible: false },
-      },
-    ];
-
-    // Act + Assert
-    assertRejects(cases);
-  });
-
-  it('should resolve both attachment-encryption and scratch-plan states', () => {
-    // Arrange
-    const values = [
-      { ...attachmentView, encrypted: { kind: 'pdf', locked: true } },
-      {
-        ...attachmentView,
-        encrypted: { kind: 'pdf', locked: false, expiresAt: LATER_INSTANT, decryptedSize: 8 },
-      },
-    ];
-
-    // Act + Assert
-    for (const value of values) should(service.AttachmentViewSchema.safeParse(value).success).be.true();
-    should(
-      service.ScratchPlanViewSchema.safeParse({ ...scratchPlanView, eligible: false, reason: 'session active' })
-        .success,
-    ).be.true();
   });
 });

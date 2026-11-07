@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { reviveOf, reviveRuling, SessionStatusSchema } from '../../src/lib/index.ts';
+import { reviveOf, reviveRuling } from '../../../../daemon/lib/protocol/session-revive.ts';
+import { SessionStatusSchema } from '../../../../daemon/lib/protocol/session.ts';
 
 describe('reviveRuling', () => {
   it('gives every status a verdict with a reason', () => {
