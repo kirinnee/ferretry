@@ -113,7 +113,7 @@ describe('the Warden flags what the liveness monitor sees through Terminals (tod
 describe('the Warden closes a browser left under a ferret’s pane (today’s remedy, behind mayActAlone.closeLeftovers)', () => {
   it('should close it through Browsers once its turn has ended and ten minutes passed, when the owner allows it', async () => {
     // Arrange
-    const browsers = fakeBrowsers({}, undefined, { f1: 1 });
+    const browsers = fakeBrowsers({}, undefined, { f1: { closed: 1, leftAlone: [] } });
     const host = livenessHost({ state: 'idle', sample: () => leftover, browsers });
     const disarm = host.arm();
 
@@ -130,7 +130,7 @@ describe('the Warden closes a browser left under a ferret’s pane (today’s re
 
   it('should never close it when the owner has not let the Warden close leftovers alone: it is held, and said', async () => {
     // Arrange
-    const browsers = fakeBrowsers({}, undefined, { f1: 1 });
+    const browsers = fakeBrowsers({}, undefined, { f1: { closed: 1, leftAlone: [] } });
     const host = livenessHost({
       state: 'idle',
       sample: () => leftover,
@@ -165,9 +165,85 @@ describe('the Warden closes a browser left under a ferret’s pane (today’s re
     should(actions).eql([]);
   });
 
+  it('should record the pids a close left alone, with why, in its action and its WardenActed event', async () => {
+    // Arrange: one browser closed, one Browsers could not prove (its pid now another process's).
+    const browsers = fakeBrowsers({}, undefined, { f1: { closed: 1, leftAlone: [{ pid: 905, why: 'not-proved' }] } });
+    const host = livenessHost({ state: 'idle', sample: () => leftover, browsers });
+    const disarm = host.arm();
+
+    // Act
+    await host.ticks(22);
+    await host.sweep();
+    const actions = (await host.subsystem.status()).actions.filter(action => action.action === 'close_leftover');
+    const acted = host.published.filter(event => event.event === 'warden.acted');
+    disarm();
+
+    // Assert: every sweep that closed one says so (each sweep re-reads the pane), naming what it left alone.
+    should(actions.length).be.above(0);
+    for (const action of actions) {
+      should(action.outcome).equal('done');
+      should(action.detail).match(/Left alone: pid 905 \(not proved\)\./u);
+    }
+    should(acted.length).equal(actions.length);
+    for (const event of acted)
+      should(event.payload).eql({
+        ferret: FERRET,
+        action: 'close_leftover',
+        outcome: 'done',
+        leftAlone: [{ pid: 905, why: 'not-proved' }],
+      });
+  });
+
+  it('should record a failed close only when every browser it proved refused the signal, naming them', async () => {
+    // Arrange
+    const browsers = fakeBrowsers({}, undefined, {
+      f1: { closed: 0, leftAlone: [{ pid: 701, why: 'signal-refused' }] },
+    });
+    const host = livenessHost({ state: 'idle', sample: () => leftover, browsers });
+    const disarm = host.arm();
+
+    // Act
+    await host.ticks(22);
+    await host.sweep();
+    const actions = (await host.subsystem.status()).actions.filter(action => action.action === 'close_leftover');
+    const acted = host.published.filter(event => event.event === 'warden.acted');
+    disarm();
+
+    // Assert: said once per leftover in the actions; every attempt is told in the event.
+    should(actions.map(action => action.outcome)).eql(['failed']);
+    should(actions[0]?.detail).match(/the signal was refused\. Left alone: pid 701 \(signal refused\)\./u);
+    should(acted.length).be.above(0);
+    for (const event of acted)
+      should(event.payload).eql({
+        ferret: FERRET,
+        action: 'close_leftover',
+        outcome: 'failed',
+        leftAlone: [{ pid: 701, why: 'signal-refused' }],
+      });
+  });
+
+  it('should record no close at all when nothing it could prove was closed or refused (only left alone)', async () => {
+    // Arrange: the browser exited before its re-proof.
+    const browsers = fakeBrowsers({}, undefined, { f1: { closed: 0, leftAlone: [{ pid: 701, why: 'gone' }] } });
+    const host = livenessHost({ state: 'idle', sample: () => leftover, browsers });
+    const disarm = host.arm();
+
+    // Act
+    await host.ticks(22);
+    await host.sweep();
+    const actions = (await host.subsystem.status()).actions.filter(action => action.action === 'close_leftover');
+    const acted = host.published.filter(event => event.event === 'warden.acted');
+    disarm();
+
+    // Assert
+    should(browsers.closed).containEql(FERRET);
+    should(actions).eql([]);
+    should(acted).eql([]);
+  });
+
   it('should close nothing before the ten-minute grace has passed', async () => {
     // Arrange
-    const browsers = fakeBrowsers({}, undefined, { f1: 1 });
+    const browsers = fakeBrowsers({}, undefined, { f1: { closed: 1, leftAlone: [] } });
     const host = livenessHost({ state: 'idle', sample: () => leftover, browsers });
     const disarm = host.arm();
 

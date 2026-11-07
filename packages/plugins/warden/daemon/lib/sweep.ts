@@ -204,6 +204,7 @@ import {
   jevActDetail,
   jevNudgeMessage,
   mayActAlone,
+  type WardenLeftAlone,
   verdictAct,
   type WardenRemedyPort,
   type WardenVerdictAct,
@@ -2198,18 +2199,36 @@ export class WardenSweepService {
         continue;
       }
       try {
-        const closed = await this.ports.remedies.closeLeftoverBrowsers(candidate.sessionId);
-        if (closed === 0) continue;
-        next = this.recordAction(next, {
-          ...base,
-          outcome: 'done',
-          detail: `Closed ${closed === 1 ? 'a leftover browser' : `${closed} leftover browsers`}: its turn had ended and nothing else of its own was running. The ferret itself was not touched.`,
-        });
-        this.ports.journal.record('fleet.warden_leftover_closed', {
-          sessionId: candidate.sessionId,
-          browsers: closed,
-          since: candidate.since,
-        });
+        const { closed, leftAlone } = await this.ports.remedies.closeLeftoverBrowsers(candidate.sessionId);
+        const left = leftAloneSentence(leftAlone);
+        const refused = leftAlone.filter(browser => browser.why === 'signal-refused').length;
+        if (closed > 0) {
+          next = this.recordAction(next, {
+            ...base,
+            outcome: 'done',
+            detail: `Closed ${closed === 1 ? 'a leftover browser' : `${closed} leftover browsers`}: its turn had ended and nothing else of its own was running. The ferret itself was not touched.${left}`,
+          });
+          this.ports.journal.record('fleet.warden_leftover_closed', {
+            sessionId: candidate.sessionId,
+            browsers: closed,
+            since: candidate.since,
+            leftAlone,
+          });
+        } else if (refused > 0) {
+          // Every browser it could prove refused the signal: the close did not take.
+          next = this.recordAction(next, {
+            ...base,
+            outcome: 'failed',
+            detail: `Closing its leftover browser did not take: the signal was refused.${left}`,
+          });
+        } else if (leftAlone.length > 0) {
+          // Nothing it could prove was there to close: no act is recorded, but what it left alone is kept.
+          this.ports.journal.record('fleet.warden_leftover_left_alone', {
+            sessionId: candidate.sessionId,
+            since: candidate.since,
+            leftAlone,
+          });
+        }
       } catch (error) {
         next = this.recordAction(next, {
           ...base,
@@ -3859,4 +3878,10 @@ function withJevHandoff(
       ...(outcome.node === undefined ? {} : { node: outcome.node }),
     }),
   };
+}
+
+/** What a leftover close left alone, for the owner: each pid and the closed reason, never a command line. */
+function leftAloneSentence(leftAlone: readonly WardenLeftAlone[]): string {
+  if (leftAlone.length === 0) return '';
+  return ` Left alone: ${leftAlone.map(browser => `pid ${browser.pid} (${browser.why.replaceAll('-', ' ')})`).join(', ')}.`;
 }

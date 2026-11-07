@@ -19,6 +19,10 @@ import {
 function subject(
   options: {
     readonly rows?: readonly ProcessDetailRow[];
+    /** The rows of the n-th walk (1-based), when they change between looks; `rows` otherwise. */
+    readonly rowsAt?: (walk: number) => readonly ProcessDetailRow[];
+    /** What `startOf` answers for a pid now; absent: the start of that pid in the latest walk, else gone. */
+    readonly startNow?: (pid: number) => number | undefined;
     readonly screen?: string;
     readonly refusal?: Error;
     readonly absent?: boolean;
@@ -26,6 +30,7 @@ function subject(
   } = {},
 ) {
   const asked = { proofs: [] as string[], walked: [] as number[], screens: [] as string[], absent: [] as string[] };
+  let latest: readonly ProcessDetailRow[] = [];
   const ports: PaneLookPorts = {
     panes: {
       resolve: async ferret => {
@@ -43,7 +48,8 @@ function subject(
     tree: {
       tree: async rootPid => {
         asked.walked.push(rootPid);
-        return options.tree ?? { kind: 'read', rows: options.rows ?? [HARNESS_ROW, MCP_ROW] };
+        latest = options.rowsAt?.(asked.walked.length) ?? options.rows ?? [HARNESS_ROW, MCP_ROW];
+        return options.tree ?? { kind: 'read', rows: latest };
       },
       listening: async () => new Set<number>(),
       startOf: async () => undefined,
@@ -57,6 +63,9 @@ function subject(
         }
         return known;
       },
+    },
+    incarnation: {
+      startOf: async pid => options.startNow?.(pid) ?? latest.find(row => row.pid === pid)?.start,
     },
     paneAbsent: async ferret => {
       asked.absent.push(ferret);
@@ -218,7 +227,7 @@ describe('the browsers left under a ferret’s pane, read afresh (the read half 
 
     // Assert
     should(asked.walked).eql([PANE_PID]);
-    should(read).eql({ kind: 'observed', toolCommandRunning: false, browsers: [{ pid: 701 }] });
+    should(read).eql({ kind: 'observed', toolCommandRunning: false, browsers: [{ pid: 701, start: browser.start }] });
   });
 
   it('should say a tool command runs now, so the caller closes nothing', async () => {
@@ -229,7 +238,7 @@ describe('the browsers left under a ferret’s pane, read afresh (the read half 
     const read = await look.browsers('f1');
 
     // Assert
-    should(read).eql({ kind: 'observed', toolCommandRunning: true, browsers: [{ pid: 701 }] });
+    should(read).eql({ kind: 'observed', toolCommandRunning: true, browsers: [{ pid: 701, start: browser.start }] });
   });
 
   it('should never list the pane process (the ferret) nor anything outside the walk from its pid', async () => {
@@ -257,5 +266,101 @@ describe('the browsers left under a ferret’s pane, read afresh (the read half 
     // Assert
     should(first).eql({ kind: 'unobservable', reason: "This ferret's pane could not be read." });
     should(second).eql({ kind: 'unobservable', reason: 'no complete identity' });
+  });
+});
+
+describe('a browser re-proved just before Browsers signals it (paneBrowserStill: only a pid it can prove)', () => {
+  const listed = { pid: browser.pid, start: browser.start };
+  const leftover = [HARNESS_ROW, MCP_ROW, browserShell, browser, renderer];
+
+  it('should prove the same browser by a FRESH walk: same pid, same start, still top-level under the proved pane', async () => {
+    // Arrange
+    const { look, asked } = subject({ rows: leftover });
+
+    // Act
+    const first = await look.still('f1', listed);
+    const second = await look.still('f1', listed);
+
+    // Assert: nothing is cached; each re-proof proves the pane and walks it again.
+    should(first).eql({ still: true });
+    should(second).eql({ still: true });
+    should(asked.proofs).eql(['f1', 'f1']);
+    should(asked.walked).eql([PANE_PID, PANE_PID]);
+  });
+
+  it('should not prove a pid whose start changed between the look and the signal (the pid was reused)', async () => {
+    // Arrange: the second walk finds pid 701 again, but a later process holds it.
+    const reused = rowOf({ pid: 701, ppid: 700, argv: '/opt/google/chrome/chrome --headless', ageSeconds: 1 });
+    const later = { ...reused, start: browser.start + 5 };
+    const { look } = subject({ rowsAt: walk => (walk === 1 ? leftover : [HARNESS_ROW, MCP_ROW, browserShell, later]) });
+
+    // Act
+    const read = await look.browsers('f1');
+    const still = await look.still('f1', listed);
+
+    // Assert
+    should(read).eql({ kind: 'observed', toolCommandRunning: false, browsers: [listed] });
+    should(still).eql({ still: false, why: 'not-proved' });
+  });
+
+  it('should say gone when no process holds the pid any more', async () => {
+    // Arrange
+    const { look } = subject({ rows: [HARNESS_ROW, MCP_ROW] });
+
+    // Act
+    const still = await look.still('f1', listed);
+
+    // Assert
+    should(still).eql({ still: false, why: 'gone' });
+  });
+
+  it('should not prove the same process once it is no longer under that pane (it moved out of the tree)', async () => {
+    // Arrange: the process still runs with the same start, but the walk from the proved pane no longer reaches it.
+    const { look } = subject({ rows: [HARNESS_ROW, MCP_ROW], startNow: () => browser.start });
+
+    // Act
+    const still = await look.still('f1', listed);
+
+    // Assert
+    should(still).eql({ still: false, why: 'not-proved' });
+  });
+
+  it('should not prove it while a tool command runs under the pane (it may be using that browser)', async () => {
+    // Arrange
+    const { look } = subject({ rows: [...leftover, command, commandChild] });
+
+    // Act
+    const still = await look.still('f1', listed);
+
+    // Assert
+    should(still).eql({ still: false, why: 'tool-running' });
+  });
+
+  it('should not prove anything when the pane cannot be proved, even if the pid still runs', async () => {
+    // Arrange
+    const { look } = subject({
+      refusal: new SessionAttachError('invalid_registration', 'no complete identity'),
+      startNow: () => browser.start,
+    });
+
+    // Act
+    const still = await look.still('f1', listed);
+
+    // Assert
+    should(still).eql({ still: false, why: 'not-proved' });
+  });
+
+  it('should never prove pid 1 or below, or what is not a pid, and never walk for one', async () => {
+    // Arrange
+    const { look, asked } = subject({ rows: leftover });
+
+    // Act
+    const answers = await Promise.all(
+      [1, 0, -4, Number.NaN].map(async pid => await look.still('f1', { pid, start: 1 })),
+    );
+
+    // Assert
+    should(answers.every(answer => !answer.still && answer.why === 'not-proved')).be.true();
+    should(asked.walked).eql([]);
   });
 });

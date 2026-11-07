@@ -155,6 +155,7 @@ export function buildProcesses(deps: ProcessesDeps): Processes {
     panes: attach,
     tree,
     provenance,
+    incarnation,
     // Confirmed gone: no registration, or tmux answers that its session does not exist (today's second question).
     paneAbsent: async ferret => {
       const registered = await deps.paneOf(ferret as FerretId);

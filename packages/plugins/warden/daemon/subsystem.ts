@@ -111,8 +111,13 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   const artifacts = new FileWardenArtifacts(files, reader, REPORTS_DIRECTORY);
   const configStore = new ConfigWardenConfigStore(kernel.config);
 
-  const acted = (ferret: string, action: string, outcome: 'done' | 'failed'): void =>
-    kernel.events.publish(WardenActed, { ferret: ferret as FerretId, action, outcome });
+  const acted: Parameters<typeof createWardenRemedies>[0]['acted'] = (ferret, action, outcome, leftAlone) =>
+    kernel.events.publish(WardenActed, {
+      ferret: ferret as FerretId,
+      action,
+      outcome,
+      ...(leftAlone === undefined || leftAlone.length === 0 ? {} : { leftAlone: [...leftAlone] }),
+    });
   // ── the remedies: every one goes through Ferrets or Conversation, never around them (`remedies.ts`) ──────────────
   const terminals = (): TerminalsApi | undefined => host.terminals?.();
   const browsers = (): BrowsersApi | undefined => host.browsers?.();

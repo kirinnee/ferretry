@@ -10,7 +10,8 @@
  *
  * NOTHING HERE ACTS. No key is typed, no size changed, no process signalled: closing a leftover browser is Browsers'.
  */
-import type { LivenessSample, PaneBrowsers } from '../../../contract/index.ts';
+import type { LivenessSample, PaneBrowser, PaneBrowsers, PaneBrowserStill } from '../../../contract/index.ts';
+import type { ProcessIncarnation } from '../protocol/process-incarnation.ts';
 import { SessionAttachError } from './attach/service.ts';
 import { type LivenessLook, livenessSampleOf, lookAtPaneProcesses, type TextDigest } from './liveness.ts';
 import { classifyPaneProcesses, type PaneProcess } from './processes/pane-processes.ts';
@@ -26,6 +27,8 @@ export interface PaneLookPorts {
   readonly panes: SessionPaneProofPort;
   readonly tree: ProcessTreePort;
   readonly provenance: ProcessProvenancePort;
+  /** A pid's start now (the attach proof's own source), to tell a browser that is gone from one that moved. */
+  readonly incarnation: ProcessIncarnation;
   /**
    * Whether tmux CONFIRMS the ferret has no pane (no registration, or its session is gone on the private server). A
    * pane that is gone runs nothing; any other failure to prove the pane stays a blind spot.
@@ -42,8 +45,11 @@ export interface PaneLookPorts {
 
 /** The pane's processes as one look saw them, or why they could not be seen. */
 export type PaneProcessObservation =
-  | { readonly kind: 'observed'; readonly paneId?: string; readonly processes: readonly PaneProcess[] }
+  | { readonly kind: 'observed'; readonly paneId?: string; readonly processes: readonly ObservedPaneProcess[] }
   | { readonly kind: 'unobservable'; readonly reason: string };
+
+/** A process as one look saw it, with the start that, with its pid, is its identity. */
+export type ObservedPaneProcess = PaneProcess & { readonly start: number };
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -108,11 +114,38 @@ export class PaneLook {
     const observed = await this.processes(ferret);
     if (observed.kind === 'unobservable') return observed;
     const view = classifyPaneProcesses(observed.processes);
+    const startOf = new Map(observed.processes.map(seen => [seen.pid, seen.start]));
     return {
       kind: 'observed',
       toolCommandRunning: view.toolCommands.length > 0,
-      browsers: view.leftoverBrowsers.map(browser => ({ pid: browser.pid })),
+      browsers: view.leftoverBrowsers.flatMap(browser => {
+        const start = startOf.get(browser.pid);
+        return start === undefined ? [] : [{ pid: browser.pid, start }];
+      }),
     };
+  }
+
+  /**
+   * Whether one browser `browsers` listed is STILL that browser, by a FRESH walk (nothing cached): the same pid with
+   * the same start, still a top-level browser under the attach-proved pane, and no tool command running. Read only.
+   */
+  async still(ferret: string, browser: PaneBrowser): Promise<PaneBrowserStill> {
+    if (!Number.isSafeInteger(browser.pid) || browser.pid <= 1) return { still: false, why: 'not-proved' };
+    const observed = await this.processes(ferret).catch(
+      (error): PaneProcessObservation => ({ kind: 'unobservable', reason: message(error) }),
+    );
+    if (observed.kind === 'observed') {
+      const view = classifyPaneProcesses(observed.processes);
+      if (view.toolCommands.length > 0) return { still: false, why: 'tool-running' };
+      const listed = new Set(view.leftoverBrowsers.map(seen => seen.pid));
+      const same = observed.processes.some(
+        seen => seen.pid === browser.pid && seen.start === browser.start && listed.has(seen.pid),
+      );
+      if (same) return { still: true };
+    }
+    // Not that browser under that pane now: say `gone` only when no process holds the pid at all.
+    const now = await this.ports.incarnation.startOf(browser.pid).catch(() => -1);
+    return { still: false, why: now === undefined ? 'gone' : 'not-proved' };
   }
 }
 
@@ -122,9 +155,10 @@ function paneProcessOf(
   known: { readonly kind: string } | undefined,
   listening: ReadonlySet<number>,
   nowMs: number,
-): PaneProcess {
+): ObservedPaneProcess {
   return {
     pid: row.pid,
+    start: row.start,
     ppid: row.ppid,
     argv: row.argv,
     startedSecondsAgo: Math.max(0, Math.floor((nowMs - row.startedAtMs) / 1000)),

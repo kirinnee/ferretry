@@ -64,7 +64,9 @@ export function livenessHost(options: LivenessHostOptions = {}) {
     },
   };
   const browsers =
-    options.browsers === 'off' ? undefined : (options.browsers ?? fakeBrowsers({}, undefined, { f1: 1 }));
+    options.browsers === 'off'
+      ? undefined
+      : (options.browsers ?? fakeBrowsers({}, undefined, { f1: { closed: 1, leftAlone: [] } }));
   const subsystem = createWardenSubsystem({
     kernel: fake.kernel,
     ferrets,

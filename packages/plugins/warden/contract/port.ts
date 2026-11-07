@@ -2,6 +2,7 @@ import { definePort, defineEvent } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
+import { LeftAloneWhySchema } from '@ferretry/plugin-browsers/contract';
 import type {
   WardenBlessingView,
   WardenConfig,
@@ -37,5 +38,11 @@ export const WardenFlagged = defineEvent(
 );
 export const WardenActed = defineEvent(
   'warden.acted',
-  z.strictObject({ ferret: FerretIdSchema, action: z.string().min(1), outcome: z.enum(['done', 'held', 'failed']) }),
+  z.strictObject({
+    ferret: FerretIdSchema,
+    action: z.string().min(1),
+    outcome: z.enum(['done', 'held', 'failed']),
+    /** A leftover close only: each browser it left alone, by pid, and the closed reason (never text or argv). */
+    leftAlone: z.array(z.strictObject({ pid: z.number().int(), why: LeftAloneWhySchema })).optional(),
+  }),
 );

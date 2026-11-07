@@ -1,6 +1,6 @@
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
-import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
+import type { BrowsersApi, LeftoverBrowsersClosed } from '@ferretry/plugin-browsers/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { hasOpenQuestion } from './fleet.ts';
 import type { WardenRemedyPort, WardenResumeOutcome } from './lib/index.ts';
@@ -11,8 +11,16 @@ export interface WardenRemedyHost {
   readonly ferrets: FerretsApi;
   readonly conversation: ConversationApi;
   readonly asks: AsksApi;
-  /** Told after every remedy, whether it was done or failed (the `WardenActed` event). */
-  readonly acted: (ferret: string, action: string, outcome: 'done' | 'failed') => void;
+  /**
+   * Told after every remedy, whether it was done or failed (the `WardenActed` event), with the browsers a leftover
+   * close left alone (each pid and why), so the owner is told what was not closed.
+   */
+  readonly acted: (
+    ferret: string,
+    action: string,
+    outcome: 'done' | 'failed',
+    leftAlone?: LeftoverBrowsersClosed['leftAlone'],
+  ) => void;
   /** Browsers, while it is on (an optional use): it closes the browsers left under a ferret's pane. */
   readonly browsers?: () => BrowsersApi | undefined;
 }
@@ -88,16 +96,20 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
     // GAP(ferrets): moving a ferret to another login needs Ferrets' additive `move`; until then a failover refuses.
     failover: async () => refuse('Moving a ferret to another account'),
     // Today's remedy, through Browsers: the pane's tree is read again at this moment (through Terminals), nothing is
-    // closed while a tool command runs, and only top-level browsers under THAT pane are signalled — never the ferret.
+    // closed while a tool command runs, and only a top-level browser under THAT pane that Terminals re-proves just
+    // before its signal is closed — never the ferret; every other one is left alone and reported.
     // The sweep calls this only when the owner lets the Warden close leftovers alone (`mayActAlone.closeLeftovers`).
     // Browsers off: nothing closes, and the sweep is never told of a leftover to close (`withLiveness`).
+    // Recorded `done` only when one closed, `failed` only when every browser it proved refused the signal.
     closeLeftoverBrowsers: async ferret => {
       const browsers = host.browsers?.();
-      if (browsers === undefined) return 0;
+      if (browsers === undefined) return { closed: 0, leftAlone: [] };
       try {
-        const closed = await browsers.closeLeftoverBrowsers(ferret as FerretId);
-        if (closed > 0) acted(ferret, 'close_leftover', 'done');
-        return closed;
+        const result = await browsers.closeLeftoverBrowsers(ferret as FerretId);
+        const refused = result.leftAlone.some(browser => browser.why === 'signal-refused');
+        if (result.closed > 0) acted(ferret, 'close_leftover', 'done', result.leftAlone);
+        else if (refused) acted(ferret, 'close_leftover', 'failed', result.leftAlone);
+        return result;
       } catch (error) {
         acted(ferret, 'close_leftover', 'failed');
         throw error;

@@ -31,6 +31,16 @@ export interface LivenessSample {
 }
 
 /**
+ * One browser under a ferret's pane, by its process identity: the pid AND the start the attach proof already tells
+ * one incarnation of a pid from a later one by (`ProcessIncarnation`'s start value: Linux `/proc/<pid>/stat` start
+ * ticks, macOS epoch seconds). A pid alone is not proof: it can be reused once the browser exits.
+ */
+export interface PaneBrowser {
+  readonly pid: number;
+  readonly start: number;
+}
+
+/**
  * The browsers left under a ferret's pane, read at the moment of asking (today's `classifyPaneProcesses` over a fresh
  * walk of the pane's process tree). `observed` lists only top-level browsers the agent launched — never the harness,
  * a helper's browser, or anything outside that pane's tree; `unobservable` says why the tree could not be read.
@@ -40,9 +50,20 @@ export type PaneBrowsers =
       readonly kind: 'observed';
       /** A tool command runs under the pane now: it may be using a browser, so none is a leftover. */
       readonly toolCommandRunning: boolean;
-      readonly browsers: readonly { readonly pid: number }[];
+      readonly browsers: readonly PaneBrowser[];
     }
   | { readonly kind: 'unobservable'; readonly reason: string };
+
+/**
+ * Whether one browser is STILL what `paneBrowsers` found, re-proved by a fresh walk (nothing cached): the same pid
+ * with the same start, still a top-level browser in that ferret's proved pane tree, and no tool command running.
+ * Otherwise why not: `gone` (no such process now), `tool-running` (a tool command runs under the pane), or
+ * `not-proved` (anything else — another process now holds the pid, it is no longer under that pane, or the pane
+ * could not be proved).
+ */
+export type PaneBrowserStill =
+  | { readonly still: true }
+  | { readonly still: false; readonly why: 'gone' | 'tool-running' | 'not-proved' };
 
 export interface TerminalsApi {
   /** The terminals one ferret holds. */
@@ -53,6 +74,11 @@ export interface TerminalsApi {
   liveness(ferret: FerretId): Promise<LivenessSample>;
   /** The top-level browsers under the pane the ferret runs in, read afresh. Read only: closing them is Browsers'. */
   paneBrowsers(ferret: FerretId): Promise<PaneBrowsers>;
+  /**
+   * Re-prove one browser `paneBrowsers` listed, immediately before it is signalled (see {@link PaneBrowserStill}).
+   * Read only. Browsers signals a pid only on `{ still: true }`.
+   */
+  paneBrowserStill(ferret: FerretId, browser: PaneBrowser): Promise<PaneBrowserStill>;
 }
 
 export const TerminalsPort = definePort<TerminalsApi>('terminals');
