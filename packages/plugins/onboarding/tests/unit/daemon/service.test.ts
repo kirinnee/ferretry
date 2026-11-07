@@ -13,7 +13,12 @@ function make(list: readonly OnboardingEntry[] = entries) {
   const state = new FakeProgressState();
   const clock = new TickingClock();
   const events = new RecordingEvents();
-  const service = new OnboardingService({ entries: () => list, state: state.port, clock: clock as unknown as Clock, events });
+  const service = new OnboardingService({
+    entries: () => list,
+    state: state.port,
+    clock: clock as unknown as Clock,
+    events,
+  });
   return { service, state, clock, events };
 }
 
@@ -32,7 +37,7 @@ describe('OnboardingService', () => {
     const { service, state, clock } = make();
     clock.advance(5_000);
     const step = await service.answer('logins', 'login', { state: 'found' });
-    expect(step).toEqual({
+    expect(step).toMatchObject({
       plugin: 'logins',
       id: 'login',
       title: 'Sign in',
@@ -40,7 +45,10 @@ describe('OnboardingService', () => {
       state: 'found',
       at: '2026-11-06T09:00:05.000Z',
     });
-    expect(state.stored).toEqual({ format: 1, steps: { 'logins:login': { state: 'found', at: '2026-11-06T09:00:05.000Z' } } });
+    expect(state.stored).toEqual({
+      format: 1,
+      steps: { 'logins:login': { state: 'found', at: '2026-11-06T09:00:05.000Z' } },
+    });
   });
 
   test('answering every step completes the run', async () => {

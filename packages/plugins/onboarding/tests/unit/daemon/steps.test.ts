@@ -49,7 +49,7 @@ describe('first-run step order', () => {
   test('ordering never mutates what the snapshot holds', () => {
     const frozen = Object.freeze([...ENTRIES]);
     expect(() => orderedSteps(frozen)).not.toThrow();
-    expect(frozen[0]?.plugin).toBe('shells');
+    expect(String(frozen[0]?.plugin)).toBe('shells');
   });
 });
 

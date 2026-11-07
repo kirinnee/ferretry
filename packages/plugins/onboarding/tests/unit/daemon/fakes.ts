@@ -11,7 +11,7 @@ export class FakeProgressState {
   writes = 0;
 
   readonly port: StatePort = {
-    read: async (file: StateFileDef) => {
+    read: async () => {
       if (this.damage !== undefined) return err(this.damage);
       return ok(this.stored) as never;
     },

@@ -1,139 +1,160 @@
-import type { DaemonInspection } from '../daemon/controller.ts';
-import type {
-  IOnboardDaemon,
-  IOnboardMachine,
-  IOnboardOutput,
-  IOnboardPairing,
-  IOnboardPrompt,
-  IOnboardRelay,
-  RelayReach,
-} from './ports.ts';
+import type { StepAnswerRequest, StepView } from '../../contract/index.ts';
+import { checkFor, type Reading } from './checks.ts';
+import type { OnboardClient, OnboardOutput, OnboardPrompt } from './ports.ts';
 import {
-  type DaemonAction,
-  type PairingOffer,
-  planDaemon,
-  renderSetupSummary,
-  renderSetupSummaryJson,
+  renderClosing,
+  renderStatus,
+  renderSummaryJson,
+  reportLine,
+  reportOf,
+  row,
+  type StepReport,
   summarize,
+  titleWidth,
 } from './summary.ts';
+import { linkCosts, NO_STEPS, WAITING_NO_TERMINAL } from './words.ts';
 
-/** Flags `fy setup` accepts. */
-export interface SetupOptions {
-  /** Answer yes to installing the daemon, and ask nothing — required off a terminal. */
+/** Flags `onboard` accepts. */
+export interface OnboardOptions {
+  /** Leave every step it cannot find for later without asking; required off a terminal to settle anything. */
   readonly yes?: boolean;
-  /** Print the summary as JSON instead of the human report. Implies no pairing QR. */
+  /** Print the summary as JSON instead of the report. Implies no questions. */
   readonly json?: boolean;
-  /** Change nothing: report what is there and what setup would do. */
+  /** Change nothing: report what each step finds and what is left. */
   readonly check?: boolean;
 }
 
 export interface OnboardDeps {
-  /** The daemon verbs, built for this run; `quiet` sends their progress lines to stderr. */
-  readonly daemon: (quiet: boolean) => IOnboardDaemon;
-  readonly relay: IOnboardRelay;
-  readonly machine: IOnboardMachine;
-  readonly pairing: IOnboardPairing;
-  readonly prompt: IOnboardPrompt;
-  readonly out: IOnboardOutput;
-  /** Whether a person is at this terminal, asked when a question would be. */
-  readonly interactive: () => boolean;
-  readonly clientName: string;
-  readonly clientVersion: string;
+  readonly client: OnboardClient;
+  /** Absent when nobody is at a terminal. */
+  readonly prompt: OnboardPrompt | undefined;
+  readonly out: OnboardOutput;
+  readonly bin: string;
 }
 
+const EXIT_OK = 0;
+const EXIT_FAILURE = 1;
+
 /**
- * Drives `fy setup`: the one command after an install that leaves a machine ready to pair.
+ * Drives `fy onboard`: the first run at a terminal (design §6.1). FIND BEFORE ASKING: for each step still pending, in
+ * the order the plugins declared, it runs the owning plugin's live check and records `found` when that sees the step is
+ * already done. It asks only about what the check did not find, and the answers are the three the daemon records: later,
+ * skipped, or done (which looks again).
  *
- * IDEMPOTENT. It inspects first and only then acts — install the user service, or start the daemon
- * where there is no service manager, or nothing at all when the daemon already serves under its
- * manager. Running it twice is the same as running it once, so an agent can tell a person to run it
- * without first working out what state the machine is in.
- *
- * IT NEVER UPDATES. It reports an update and names the command, because an update restarts the daemon
- * and that is a separate decision (`fy daemon update`, or the app's Update button).
- *
- * THE PAIRING CODE NEVER LEAVES THE TERMINAL. The QR is offered only to a person at a terminal, after
- * the report; `--json`, `--yes` and a run with no terminal name `fy pair` as the next step instead.
- * That is what keeps a live credential out of anything a script or an agent keeps: the summary has no
- * field that could carry one.
+ * IDEMPOTENT. A step that is already answered is shown and left alone, so running it twice is the same as running it
+ * once; `onboard reset` starts over. A step whose check cannot be called stays pending and is never recorded: nothing
+ * is decided about what was not looked at.
  */
 export class OnboardController {
   constructor(private readonly deps: OnboardDeps) {}
 
-  async setup(options: SetupOptions): Promise<void> {
+  async run(options: OnboardOptions): Promise<number> {
     const json = options.json === true;
-    const check = options.check === true;
-    const daemon = this.deps.daemon(json);
-    const before = await daemon.inspect();
-    const plan = planDaemon(before);
-
-    let action: DaemonAction = 'none';
-    let problem: string | undefined;
-    if (plan === 'missing') action = 'failed';
-    else if (plan !== 'none') {
-      if (check) action = plan === 'install' ? 'would-install' : 'would-start';
-      else if (options.yes !== true && !this.deps.interactive()) action = 'needs-terminal';
-      else if (options.yes !== true && !(await this.#askYes(this.#question(plan)))) action = 'declined';
-      else {
-        try {
-          await (plan === 'install' ? daemon.install() : daemon.start());
-          action = plan === 'install' ? 'installed' : 'started';
-        } catch (error: unknown) {
-          action = 'failed';
-          problem = error instanceof Error ? error.message : String(error);
-        }
+    const view = await this.#view();
+    if (view === undefined) return EXIT_FAILURE;
+    if (view.steps.length === 0) {
+      this.deps.out.report(NO_STEPS);
+      return EXIT_OK;
+    }
+    const prompt = json || options.check === true || options.yes === true ? undefined : this.deps.prompt;
+    const width = titleWidth(view.steps);
+    const reports: StepReport[] = [];
+    for (const step of view.steps) {
+      const report = step.state === 'pending' ? await this.#settle(step, options, prompt) : settled(step);
+      reports.push(report);
+      if (!json) this.deps.out.report(row(report.step, reportLine(report), width));
+    }
+    const summary = summarize(reports);
+    if (json) this.deps.out.report(renderSummaryJson(summary));
+    else {
+      this.deps.out.report('');
+      if (summary.linkedSignIn) {
+        this.deps.out.report(linkCosts(this.deps.bin));
+        this.deps.out.report('');
       }
+      this.deps.out.report(renderClosing(summary));
     }
-
-    const after =
-      action === 'installed' || action === 'started' || problem !== undefined
-        ? await this.#reinspect(daemon, before)
-        : before;
-    const serving = after.view.reachability === 'serving';
-    const relay: RelayReach = serving
-      ? await this.deps.relay.reach()
-      : { state: 'unknown', reason: 'the daemon is not running' };
-    const setUp = serving ? await this.deps.machine.setUp() : undefined;
-    const pairing: PairingOffer =
-      serving && !json && !check && options.yes !== true && this.deps.interactive() ? 'now' : 'later';
-
-    const summary = summarize({
-      clientVersion: this.deps.clientVersion,
-      clientName: this.deps.clientName,
-      inspection: after,
-      action,
-      problem,
-      relay,
-      setUp,
-      pairing,
-    });
-    if (json) this.deps.out.report(renderSetupSummaryJson(summary));
-    else if (summary.ready) this.deps.out.success(renderSetupSummary(summary));
-    else this.deps.out.warn(renderSetupSummary(summary));
-    if (summary.exitCode !== 0) this.deps.out.setExitCode(summary.exitCode);
-
-    if (pairing === 'now' && (await this.#askYes('Pair your phone now?'))) await this.deps.pairing.pair();
-    else if (pairing === 'now') this.deps.out.report(`Pair later with \`${this.deps.clientName} pair\`.`);
+    const asked = options.yes !== true && options.check !== true && prompt === undefined && !json;
+    if (!summary.complete && asked) this.deps.out.warn(WAITING_NO_TERMINAL(this.deps.bin));
+    return summary.exitCode;
   }
 
-  #question(plan: 'install' | 'start'): string {
-    return plan === 'install'
-      ? 'Install the Ferretry daemon as a user service and start it?'
-      : 'Start the Ferretry daemon?';
+  async status(options: { readonly json?: boolean }): Promise<number> {
+    const view = await this.#view();
+    if (view === undefined) return EXIT_FAILURE;
+    this.deps.out.report(options.json === true ? JSON.stringify({ schema: 1, ...view }, null, 2) : renderStatus(view));
+    return EXIT_OK;
   }
 
-  /** After a change, read again; a failed install can leave nothing readable, and the old facts stand. */
-  async #reinspect(daemon: IOnboardDaemon, before: DaemonInspection): Promise<DaemonInspection> {
+  async reset(): Promise<number> {
     try {
-      return await daemon.inspect();
-    } catch {
-      return before;
+      await this.deps.client.reset();
+    } catch (error: unknown) {
+      this.deps.out.warn(sentenceOf(error));
+      return EXIT_FAILURE;
+    }
+    this.deps.out.report(`The first run starts again. Run \`${this.deps.bin} onboard\` to go through it.`);
+    return EXIT_OK;
+  }
+
+  async #view() {
+    try {
+      return await this.deps.client.view();
+    } catch (error: unknown) {
+      this.deps.out.warn(sentenceOf(error));
+      return undefined;
     }
   }
 
-  /** A yes/no a person answers, defaulting to yes. */
-  async #askYes(question: string): Promise<boolean> {
-    const answer = (await this.deps.prompt.ask(`${question} [Y/n]`)).trim().toLowerCase();
-    return answer === '' || answer === 'y' || answer === 'yes';
+  /** Looks, records what it found, and asks about what it did not. */
+  async #settle(step: StepView, options: OnboardOptions, prompt: OnboardPrompt | undefined): Promise<StepReport> {
+    let report = reportOf(step, await this.#look(step));
+    if (report.check === 'found') return options.check === true ? report : this.#record(report, 'found');
+    // Not looked at (the route could not be called): decide nothing about it.
+    if (report.check === 'unreachable' || options.check === true) return report;
+    if (options.yes === true) return this.#record(report, 'later');
+    if (prompt === undefined) return report;
+
+    const said = report.remedy === undefined ? report.line : `${report.line} ${report.remedy}`;
+    for (;;) {
+      const answer = (await prompt.ask(`${said}\n${step.title}: [L]ater, [s]kip, or [d]one (look again)?`))
+        .trim()
+        .toLowerCase();
+      if (answer === '' || answer === 'l' || answer === 'later') return this.#record(report, 'later');
+      if (answer === 's' || answer === 'skip') return this.#record(report, 'skipped');
+      if (answer === 'd' || answer === 'done') {
+        report = reportOf(step, await this.#look(step));
+        if (report.check === 'found') return this.#record(report, 'found');
+        return this.#record({ ...report, line: `${report.line} Still not found.` }, 'later');
+      }
+      this.deps.out.warn('Answer l, s or d.');
+    }
+  }
+
+  async #look(step: StepView): Promise<Reading | undefined> {
+    const check = checkFor(step.plugin, step.id);
+    if (check === undefined) return undefined;
+    try {
+      return check.read(await this.deps.client.check(check.route), this.deps.bin);
+    } catch (error: unknown) {
+      return { kind: 'unreadable', reason: sentenceOf(error) };
+    }
+  }
+
+  async #record(report: StepReport, state: StepAnswerRequest['state']): Promise<StepReport> {
+    const { step } = report;
+    try {
+      const recorded = await this.deps.client.record(step.plugin, step.id, { state });
+      return { ...report, step: recorded ?? { ...step, state } };
+    } catch (error: unknown) {
+      this.deps.out.warn(sentenceOf(error));
+      return { ...report, line: `${report.line} (could not be recorded)`, check: 'unreachable' };
+    }
   }
 }
+
+function settled(step: StepView): StepReport {
+  return { step, line: '', check: 'settled' };
+}
+
+const sentenceOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
