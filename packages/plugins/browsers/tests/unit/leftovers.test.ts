@@ -137,5 +137,7 @@ describe('Browsers’ manifest for the leftover close', () => {
     should(manifest.permissions.spawn).containEql('kill');
     should(Object.keys(manifest.uses)).containEql('terminals');
     should(Object.keys(manifest.needs)).not.containEql('terminals');
+    // Acyclic: Browsers never reaches the Warden, which uses Browsers.
+    should([...Object.keys(manifest.needs), ...Object.keys(manifest.uses)]).not.containEql('warden');
   });
 });
