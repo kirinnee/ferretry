@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { BrowserInputEvent } from '../../../daemon/pages/wire/browser.ts';
+import type { BrowserInputEvent } from '../../../contract/wire/browser.ts';
 import should from 'should';
 import { pointerAfter, pointerSequence } from '../../../daemon/pages/pointer.ts';
 

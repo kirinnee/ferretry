@@ -42,7 +42,7 @@ describe('the worker adapter tree — the daemon loads nothing from it', () => {
 
   it('should keep the page-script origin bound the daemon and the worker share in pages/wire/', async () => {
     // Act
-    const wire = await import('../../../daemon/pages/wire/page-script.ts');
+    const wire = await import('../../../contract/wire/page-script.ts');
 
     // Assert
     should(wire.PAGE_SCRIPT_ORIGIN_MAX_CHARS).equal(2_048);

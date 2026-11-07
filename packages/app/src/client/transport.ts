@@ -34,18 +34,28 @@ export interface RawEvent {
 /** A live stream (an event stream, a terminal, a page). Bytes or text frames in, frames out. */
 export interface TransportSocket {
   send(frame: string | Uint8Array): void;
-  close(): void;
+  /** Leave on purpose. The code and reason travel to the daemon (a deliberate leave is never spelled as a drop). */
+  close(code?: number, reason?: string): void;
 }
 
 export interface SocketListeners {
+  /** The daemon accepted the stream: from here a frame sent reaches it (a frame sent before is dropped). */
+  readonly onOpen?: () => void;
   readonly onFrame: (frame: string | Uint8Array) => void;
-  readonly onClose: (reason: string) => void;
+  /**
+   * The stream ended. `code` is the close code the daemon (or the carrier) ended it with — it is THIS code a caller
+   * decides to reconnect on (`1008` is a refusal, not a drop) — and is absent when the stream never opened.
+   */
+  readonly onClose: (reason: string, code?: number) => void;
 }
 
 export interface DaemonTransport {
   request(request: TransportRequest): Promise<TransportAnswer>;
-  /** Opens the daemon's event stream; every event is handed over raw. Returns a cancel. */
-  events(listener: (event: RawEvent) => void, onClose: (reason: string) => void): () => void;
+  /**
+   * Opens the daemon's event stream; every event is handed over raw. `onOpen` fires when the daemon accepted the
+   * stream (the feed is live from there to `onClose`). Returns a cancel.
+   */
+  events(listener: (event: RawEvent) => void, onClose: (reason: string) => void, onOpen?: () => void): () => void;
   /** Opens one socket route (`GET /v1/.../stream`). */
   socket(path: string, listeners: SocketListeners): TransportSocket;
   /** Fires after a reconnect, before anything resumes: the client re-reads the inventory first (§9.6). */

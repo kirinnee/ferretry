@@ -8,7 +8,7 @@ import {
   EMPTY_BROWSER_STREAM_ASSEMBLY,
   encodeBrowserStreamChunks,
   nextBrowserStreamSerial,
-} from '../../../daemon/stream/wire.ts';
+} from '../../../contract/wire/stream.ts';
 
 const envelopeOf = (length: number, seed = 1): Uint8Array =>
   Uint8Array.from({ length }, (_, index) => (index * 31 + seed) & 0xff);

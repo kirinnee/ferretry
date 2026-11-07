@@ -14,7 +14,7 @@ import {
   SurfaceOpenedSchema,
   type SurfaceTakeover,
   SurfaceTakeoverSchema,
-} from './control-wire.ts';
+} from '../../contract/wire/control.ts';
 import type { ResolvedSurface, SurfaceEventSink, ToolClock } from './types.ts';
 
 /**

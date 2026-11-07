@@ -12,8 +12,6 @@ export const AGENT_TOOL_MAX_OUTPUT_CHARS = 65_536;
 export const AGENT_TOOL_MAX_WAIT_MS = 25_000;
 export const AGENT_TOOL_DEFAULT_WAIT_MS = 10_000;
 export const AGENT_TOOL_MAX_TOTAL_WAIT_MS = 120_000;
-/** The longest URL an agent may navigate to. */
-export const AGENT_TOOL_MAX_URL_CHARS = 2_048;
 /** The longest selector an agent may click, type into or read. */
 export const AGENT_TOOL_MAX_SELECTOR_CHARS = 1_024;
 /** The longest script one `browser.eval` carries. */
@@ -31,5 +29,3 @@ export const AGENT_TOOL_MAX_UPLOAD_FILE_BYTES = 50 * 1024 * 1024;
 export const AGENT_TOOL_MAX_UPLOAD_CALL_BYTES = 200 * 1024 * 1024;
 /** The largest file a download or a PDF may be saved as. */
 export const AGENT_TOOL_MAX_DOWNLOAD_BYTES = 500 * 1024 * 1024;
-/** The longest sentence an agent may leave the owner when it hands a surface over. */
-export const AGENT_TOOL_MAX_ASK_CHARS = 280;
