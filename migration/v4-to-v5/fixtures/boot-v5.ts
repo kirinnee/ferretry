@@ -18,6 +18,9 @@
  *    skipped with a warning, and run by themselves once Gate lands.
  * 4. Stops the daemon with SIGTERM and kills the tmux server on the home's own socket.
  *
+ * BASELINE. v5 is booted on an EMPTY home first, the same way. A plugin down there too is v5's own bug (a manifest, a
+ * hook definition) and is a warning; only a plugin down on the converted home alone fails the run.
+ *
  * Imports product code only through `@ferretry/<x>/contract`; runs the product's daemon as a process.
  *
  *   bun boot-v5.ts --fixture <FIXTURE_OUT>     (reads made.json, report.json, v5/; writes boot/)
@@ -83,7 +86,8 @@ interface DownPlugin {
   /** The plugin it needs, which is not running: it is down only because that one is. */
   readonly blockedBy?: string;
 }
-const down: DownPlugin[] = [];
+/** What the boot in progress found down; each boot starts its own list ({@link bootHome}). */
+let down: DownPlugin[] = [];
 /** A plugin's id from the title a doctor line names it by (`Board` → `board`, `MCP` → `mcp`). */
 const idOf = (title: string): string =>
   title
@@ -147,182 +151,210 @@ for (const folder of missingFolders)
   fail(
     `the converted home has no ${folder}/: v5 makes it only for a NEW home${folder === 'logs' ? ', so fyd writes no log at all' : ''}`,
   );
-say(`booting v5 on the converted home itself: ${home}`);
 
-// ─── start fyd ───────────────────────────────────────────────────────────────────────────────────────────────────
+// ─── boot: an empty home first, as the baseline, then the converted one ──────────────────────────────────────────
 
-await mkdir(join(bootDir, 'user-home'), { recursive: true, mode: 0o700 });
-const stderrFile = join(bootDir, 'fyd.stderr');
-await writeFile(stderrFile, '', { mode: 0o600 });
-
-const child: Subprocess<'ignore', 'pipe', 'pipe'> = spawn({
-  cmd: [process.execPath, FYD, '--port', '0'],
-  cwd: REPO,
-  env: {
-    PATH: process.env.PATH ?? '/usr/bin:/bin',
-    HOME: join(bootDir, 'user-home'),
-    TMPDIR: process.env.TMPDIR ?? '/tmp',
-    LANG: 'C.UTF-8',
-    FY_HOME: home,
-  },
-  stdin: 'ignore',
-  stdout: 'pipe',
-  stderr: 'pipe',
-});
-
-const stderrLines: string[] = [];
-let readyLine: string | undefined;
-const pump = async (stream: ReadableStream<Uint8Array>, keep: boolean): Promise<void> => {
-  const decoder = new TextDecoder();
-  let pending = '';
-  for await (const chunk of stream) {
-    const text = decoder.decode(chunk, { stream: true });
-    appendFileSync(stderrFile, text);
-    if (!keep) continue;
-    pending += text;
-    const lines = pending.split('\n');
-    pending = lines.pop() ?? '';
-    for (const line of lines) {
-      stderrLines.push(line);
-      if (readyLine === undefined && /^fyd \S+ ready \(/u.test(line)) readyLine = line;
-    }
-  }
-  if (keep && pending !== '') stderrLines.push(pending);
-};
-const pumps = Promise.all([pump(child.stderr, true), pump(child.stdout, false)]);
-
-let exited: number | undefined;
-void child.exited.then(code => {
-  exited = code;
-});
-
-const deadline = Date.now() + READY_TIMEOUT_MS;
-while (readyLine === undefined && exited === undefined && Date.now() < deadline) await Bun.sleep(250);
-
-let token: string | undefined;
-let base: string | undefined;
-
-try {
-  if (readyLine === undefined) {
-    fail(
-      exited === undefined
-        ? `fyd did not say ready within ${String(READY_TIMEOUT_MS / 1000)}s`
-        : `fyd exited ${String(exited)} before it was ready (v5 refused the home): ${stderrLines.join(' | ')}`,
-    );
-    throw new BootStop();
-  }
-  say(`fyd: ${readyLine}`);
-  const run = DaemonRunSchema.parse(JSON.parse(await readFile(join(home, DAEMON_RUN_FILE), 'utf8')));
-  base = `http://127.0.0.1:${String(run.port)}`;
-  const healthy = await waitHealthy(base);
-  if (!healthy) {
-    fail('/healthz did not answer 200 after ready');
-    throw new BootStop();
-  }
-  token = (await readFile(join(home, 'state/gate/admin-token'), 'utf8')).trim();
-  if (token === '') {
-    fail('state/gate/admin-token is empty');
-    throw new BootStop();
-  }
-
-  // 2. Plugins: the doctor lines fyd printed before "ready" (every failed, refused or damaged plugin), then the
-  // inventory. A doctor line names a plugin by its title; the id is the title in kebab case (`MCP` → `mcp`).
-  const doctorFails = stderrLines.filter(line => line.startsWith('fyd: ')).map(line => line.slice('fyd: '.length));
-  const unexplained: string[] = [];
-  for (const line of doctorFails) {
-    const damage = /\bstate\/([a-z0-9-]+)\/([^\s,]+)/u.exec(line);
-    const needs = /^(.+?) needs (.+?), which (?:is not running|failed)\.$/u.exec(line);
-    const build = /^(.+?) failed to build: /u.exec(line);
-    const hook = /^([a-z0-9-]+) takes \S+ with a definition different from its offerer's\.$/u.exec(line);
-    if (damage?.[1] !== undefined && damage[2] !== undefined && /Ferretry will not use it|is missing/u.test(line))
-      down.push({ plugin: damage[1], file: `state/${damage[1]}/${damage[2]}`, why: reasonOf(line) });
-    else if (needs?.[1] !== undefined && needs[2] !== undefined)
-      down.push({ plugin: idOf(needs[1]), why: line, blockedBy: idOf(needs[2]) });
-    else if (build?.[1] !== undefined) down.push({ plugin: idOf(build[1]), why: line });
-    else if (hook?.[1] !== undefined) down.push({ plugin: hook[1], why: `refused: ${line}` });
-    else unexplained.push(line);
-  }
-  // A declared check failing on this CI machine (no harness installed, a check not built yet): not a plugin down.
-  for (const line of unexplained) say(`doctor (not a plugin down): ${line}`);
-
-  let admitted = true;
-  try {
-    const inventory = z
-      .object({ plugins: z.array(z.object({ id: z.string(), on: z.boolean() })) })
-      .parse(await get(base, token, '/v1/plugins'));
-    const switchedOff = await pluginsSwitchedOff(home);
-    for (const plugin of inventory.plugins) {
-      if (plugin.on) continue;
-      if (switchedOff.has(plugin.id)) {
-        say(`plugin ${plugin.id}: off in config/plugins.yaml (not a failure)`);
-        continue;
-      }
-      down.push({ plugin: plugin.id, why: 'not running (failed to build, or needs a plugin that did not start)' });
-    }
-    say(
-      `plugins: ${String(inventory.plugins.length)} known, ${String(inventory.plugins.filter(plugin => plugin.on).length)} on`,
-    );
-  } catch (error) {
-    // Gate (core) is still a skeleton in v5: with no admission, every route but the public ones refuses with this
-    // code. The data cannot be read through v5 yet; the checks run by themselves once Gate lands.
-    if (!(error instanceof RouteError && error.status === 503 && error.said.startsWith('admission_unavailable')))
-      throw error;
-    admitted = false;
-    warn(
-      'v5 has no admission yet (Gate is a skeleton in this build): every authenticated route answers 503 ' +
-        'admission_unavailable, so the plugin inventory and the data checks (ferrets, project, cards, agenda) ' +
-        'could NOT run; plugin health comes from the doctor lines and fyd.log alone',
-    );
-  }
-
-  // 3. The data, through v5's own routes.
-  if (admitted) {
-    await checkFerrets(base, token);
-    await checkProjects(base, token);
-    await checkCards(base, token);
-    await checkAgenda(base, token);
-  }
-} catch (error) {
-  if (!(error instanceof BootStop))
-    fail(`the boot proof stopped: ${error instanceof Error ? error.message : String(error)}`);
-} finally {
-  // 4. Stop: SIGTERM, then the tmux server on the home's own socket.
-  if (exited === undefined) {
-    child.kill('SIGTERM');
-    const stopped = await Promise.race([child.exited.then(() => true), Bun.sleep(STOP_TIMEOUT_MS).then(() => false)]);
-    if (!stopped) {
-      fail(`fyd did not stop within ${String(STOP_TIMEOUT_MS / 1000)}s of SIGTERM; killed`);
-      child.kill('SIGKILL');
-      await child.exited;
-    } else if ((await child.exited) !== 0) fail(`fyd exited ${String(await child.exited)} on SIGTERM`);
-    else say('fyd stopped cleanly on SIGTERM');
-  }
-  await pumps.catch(() => undefined);
-  await killTmux(home);
-}
-
-// Read after the daemon stopped: everything it logged, and any folder it moved aside.
-await readFydLog(home);
-await findMovedAside(home);
+// A plugin down on an EMPTY home is v5's own bug (a manifest, a hook definition), not the converter's: it is reported
+// as a warning. Only what is down on the converted home ALONE fails the run.
+say('--- baseline: v5 on an empty home ---');
+const baseline = await bootHome(join(bootDir, 'baseline', 'home'), join(bootDir, 'baseline'), false);
+say('--- v5 on the converted home ---');
+const converted = await bootHome(home, bootDir, true);
 
 // ─── verdict ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
-// Every down plugin is a converter bug. A plugin down only because one it needs is down is still listed, so the
-// whole effect shows; the root is the one without `blockedBy`.
+const keyOf = (entry: DownPlugin): string => `${entry.plugin}|${entry.file ?? ''}|${entry.why}`;
+const onEmptyHome = new Set(baseline.map(keyOf));
+// Every plugin down on the converted home alone is a converter bug. A plugin down only because one it needs is down
+// is still listed, so the whole effect shows; the root is the one without `blockedBy`.
 const seen = new Set<string>();
-for (const entry of down) {
-  const key = `${entry.plugin}|${entry.file ?? ''}|${entry.why}`;
+for (const entry of converted) {
+  const key = keyOf(entry);
   if (seen.has(key)) continue;
   seen.add(key);
-  fail(`plugin ${entry.plugin} is down${entry.file === undefined ? '' : ` (${entry.file})`}: ${entry.why}`);
+  const line = `plugin ${entry.plugin} is down${entry.file === undefined ? '' : ` (${entry.file})`}: ${entry.why}`;
+  if (onEmptyHome.has(key)) warn(`${line} — down on an empty home too: a v5 bug, not the converter's`);
+  else fail(line);
 }
-const downIds = new Set(down.map(entry => entry.plugin));
-say(`plugins down: ${[...downIds].join(', ') || 'none'}`);
+for (const entry of baseline)
+  if (!converted.some(other => keyOf(other) === keyOf(entry)))
+    say(`(baseline only, not on the converted home) plugin ${entry.plugin}: ${entry.why}`);
+say(`plugins down on the converted home: ${[...new Set(converted.map(entry => entry.plugin))].join(', ') || 'none'}`);
+say(`plugins down on an empty home: ${[...new Set(baseline.map(entry => entry.plugin))].join(', ') || 'none'}`);
 say(
   `${errors.length === 0 ? 'PASS' : 'FAIL'}: ${String(errors.length)} error(s), ${String(warnings.length)} warning(s)`,
 );
-await writeFile(join(bootDir, 'summary.json'), `${JSON.stringify({ home, down, errors, warnings }, null, 2)}\n`);
+await writeFile(
+  join(bootDir, 'summary.json'),
+  `${JSON.stringify({ home, down: converted, downOnEmptyHome: baseline, errors, warnings }, null, 2)}\n`,
+);
 process.exit(errors.length === 0 ? 0 : 1);
+
+// ─── one boot ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Starts fyd on `at`, waits for ready, reads which plugins are down, runs the data checks when `data` (the converted
+ * home), stops it, and reads its log. Writes `fyd.stderr` and `fyd.log` into `dir`.
+ */
+async function bootHome(at: string, dir: string, data: boolean): Promise<readonly DownPlugin[]> {
+  down = [];
+  await mkdir(join(dir, 'user-home'), { recursive: true, mode: 0o700 });
+  const stderrFile = join(dir, 'fyd.stderr');
+  await writeFile(stderrFile, '', { mode: 0o600 });
+
+  const child: Subprocess<'ignore', 'pipe', 'pipe'> = spawn({
+    cmd: [process.execPath, FYD, '--port', '0'],
+    cwd: REPO,
+    env: {
+      PATH: process.env.PATH ?? '/usr/bin:/bin',
+      HOME: join(dir, 'user-home'),
+      TMPDIR: process.env.TMPDIR ?? '/tmp',
+      LANG: 'C.UTF-8',
+      FY_HOME: at,
+    },
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const stderrLines: string[] = [];
+  let readyLine: string | undefined;
+  const pump = async (stream: ReadableStream<Uint8Array>, keep: boolean): Promise<void> => {
+    const decoder = new TextDecoder();
+    let pending = '';
+    for await (const chunk of stream) {
+      const text = decoder.decode(chunk, { stream: true });
+      appendFileSync(stderrFile, text);
+      if (!keep) continue;
+      pending += text;
+      const lines = pending.split('\n');
+      pending = lines.pop() ?? '';
+      for (const line of lines) {
+        stderrLines.push(line);
+        if (readyLine === undefined && /^fyd \S+ ready \(/u.test(line)) readyLine = line;
+      }
+    }
+    if (keep && pending !== '') stderrLines.push(pending);
+  };
+  const pumps = Promise.all([pump(child.stderr, true), pump(child.stdout, false)]);
+
+  let exited: number | undefined;
+  void child.exited.then(code => {
+    exited = code;
+  });
+
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  while (readyLine === undefined && exited === undefined && Date.now() < deadline) await Bun.sleep(250);
+
+  let token: string | undefined;
+  let base: string | undefined;
+
+  try {
+    if (readyLine === undefined) {
+      fail(
+        exited === undefined
+          ? `fyd did not say ready within ${String(READY_TIMEOUT_MS / 1000)}s`
+          : `fyd exited ${String(exited)} before it was ready (v5 refused the home): ${stderrLines.join(' | ')}`,
+      );
+      throw new BootStop();
+    }
+    say(`fyd: ${readyLine}`);
+    const run = DaemonRunSchema.parse(JSON.parse(await readFile(join(at, DAEMON_RUN_FILE), 'utf8')));
+    base = `http://127.0.0.1:${String(run.port)}`;
+    const healthy = await waitHealthy(base);
+    if (!healthy) {
+      fail('/healthz did not answer 200 after ready');
+      throw new BootStop();
+    }
+
+    // 2. Plugins: the doctor lines fyd printed before "ready" (every failed, refused or damaged plugin), then the
+    // inventory. A doctor line names a plugin by its title; the id is the title in kebab case (`MCP` → `mcp`).
+    const doctorFails = stderrLines.filter(line => line.startsWith('fyd: ')).map(line => line.slice('fyd: '.length));
+    const unexplained: string[] = [];
+    for (const line of doctorFails) {
+      const damage = /\bstate\/([a-z0-9-]+)\/([^\s,]+)/u.exec(line);
+      const needs = /^(.+?) needs (.+?), which (?:is not running|failed)\.$/u.exec(line);
+      const build = /^(.+?) failed to build: /u.exec(line);
+      const hook = /^([a-z0-9-]+) takes \S+ with a definition different from its offerer's\.$/u.exec(line);
+      if (damage?.[1] !== undefined && damage[2] !== undefined && /Ferretry will not use it|is missing/u.test(line))
+        down.push({ plugin: damage[1], file: `state/${damage[1]}/${damage[2]}`, why: reasonOf(line) });
+      else if (needs?.[1] !== undefined && needs[2] !== undefined)
+        down.push({ plugin: idOf(needs[1]), why: line, blockedBy: idOf(needs[2]) });
+      else if (build?.[1] !== undefined) down.push({ plugin: idOf(build[1]), why: line });
+      else if (hook?.[1] !== undefined) down.push({ plugin: hook[1], why: `refused: ${line}` });
+      else unexplained.push(line);
+    }
+    // A declared check failing on this CI machine (no harness installed, a check not built yet): not a plugin down.
+    for (const line of unexplained) say(`doctor (not a plugin down): ${line}`);
+
+    // The baseline stops here: an empty home holds no data to check, and no admin token unless Gate minted one.
+    if (!data) throw new BootStop();
+    token = (await readFile(join(at, 'state/gate/admin-token'), 'utf8')).trim();
+    if (token === '') {
+      fail('state/gate/admin-token is empty');
+      throw new BootStop();
+    }
+
+    let admitted = true;
+    try {
+      const inventory = z
+        .object({ plugins: z.array(z.object({ id: z.string(), on: z.boolean() })) })
+        .parse(await get(base, token, '/v1/plugins'));
+      const switchedOff = await pluginsSwitchedOff(at);
+      for (const plugin of inventory.plugins) {
+        if (plugin.on) continue;
+        if (switchedOff.has(plugin.id)) {
+          say(`plugin ${plugin.id}: off in config/plugins.yaml (not a failure)`);
+          continue;
+        }
+        down.push({ plugin: plugin.id, why: 'not running (failed to build, or needs a plugin that did not start)' });
+      }
+      say(
+        `plugins: ${String(inventory.plugins.length)} known, ${String(inventory.plugins.filter(plugin => plugin.on).length)} on`,
+      );
+    } catch (error) {
+      // Gate (core) is still a skeleton in v5: with no admission, every route but the public ones refuses with this
+      // code. The data cannot be read through v5 yet; the checks run by themselves once Gate lands.
+      if (!(error instanceof RouteError && error.status === 503 && error.said.startsWith('admission_unavailable')))
+        throw error;
+      admitted = false;
+      warn(
+        'v5 has no admission yet (Gate is a skeleton in this build): every authenticated route answers 503 ' +
+          'admission_unavailable, so the plugin inventory and the data checks (ferrets, project, cards, agenda) ' +
+          'could NOT run; plugin health comes from the doctor lines and fyd.log alone',
+      );
+    }
+
+    // 3. The data, through v5's own routes.
+    if (admitted) {
+      await checkFerrets(base, token);
+      await checkProjects(base, token);
+      await checkCards(base, token);
+      await checkAgenda(base, token);
+    }
+  } catch (error) {
+    if (!(error instanceof BootStop))
+      fail(`the boot proof stopped: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    // 4. Stop: SIGTERM, then the tmux server on the home's own socket.
+    if (exited === undefined) {
+      child.kill('SIGTERM');
+      const stopped = await Promise.race([child.exited.then(() => true), Bun.sleep(STOP_TIMEOUT_MS).then(() => false)]);
+      if (!stopped) {
+        fail(`fyd did not stop within ${String(STOP_TIMEOUT_MS / 1000)}s of SIGTERM; killed`);
+        child.kill('SIGKILL');
+        await child.exited;
+      } else if ((await child.exited) !== 0) fail(`fyd exited ${String(await child.exited)} on SIGTERM`);
+      else say('fyd stopped cleanly on SIGTERM');
+    }
+    await pumps.catch(() => undefined);
+    await killTmux(at);
+  }
+
+  // Read after the daemon stopped: everything it logged, and any folder it moved aside.
+  await readFydLog(at, dir);
+  await findMovedAside(at);
+  return down;
+}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -478,11 +510,11 @@ async function pluginsSwitchedOff(at: string): Promise<ReadonlySet<string>> {
 }
 
 /** What the kernel logged about a plugin's state: refused files, failed builds, folders moved aside. */
-async function readFydLog(at: string): Promise<void> {
+async function readFydLog(at: string, dir: string): Promise<void> {
   const path = join(at, 'logs/fyd.log');
   if (!existsSync(path)) return;
   const text = await readFile(path, 'utf8');
-  await writeFile(join(bootDir, 'fyd.log'), text, { mode: 0o600 });
+  await writeFile(join(dir, 'fyd.log'), text, { mode: 0o600 });
   for (const line of text.split('\n')) {
     if (line.trim() === '') continue;
     let record: { level?: string; message?: string; fields?: Record<string, unknown> };
