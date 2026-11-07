@@ -2,7 +2,8 @@
  * THE PAGE TOOLS THAT TYPE INTO A PAGE OR HAND IT TO ITS OWNER (§4.7): `browser_type` (Op `type`), `browser_fill_form`
  * (Op `fill`), `browser_request_input` and `browser_ask_owner` (no Op: they raise a card or hand a page over and act on
  * nothing). Copied from today's `daemon/src/lib/agent-tools/service.ts` (`browse` for type and fill, the
- * `browser.request_input` and `browser.ask_owner` cases, `noteIdentity` / `identityAfter`, `passwordNote`).
+ * `browser.request_input` and `browser.ask_owner` cases, `noteIdentity` / `identityAfter`). A type or a fill answers a
+ * strict `Done on %browser:…` (lead decision 4): whether it hit a password field stays inside, for `identityAfter`.
  *
  * What changed is where each check lives. Every act runs through `kernel.act` on the page's hold target (I119, I121), so
  * the Vault's `InputHolds` decides by effect: a pending card with any non-`code` field refuses `type` and `fill` (I118);
@@ -135,15 +136,6 @@ const surfaceReference = (page: ResolvedPage): string => `%browser:${page.name ?
 
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 
-/**
- * Told when an act put text in a password field. A real secret never belongs in a tool call: it would sit in the
- * agent's transcript. The owner types it, on a page handed to them.
- */
-function passwordNote(action: PageInputAction['action']): string {
-  const wrote = action === 'fill-form' ? 'filled' : 'typed into';
-  return ` That act ${wrote} a password field. A real secret must never go in a tool call: hand the page to the owner with browser_ask_owner so they type it themselves.`;
-}
-
 /** What an input act did to who the page signs in: named someone, or may have changed it unseen. */
 type IdentityAfter = 'clear' | { readonly host: string; readonly username: string };
 
@@ -240,8 +232,7 @@ export function pageInputTools(deps: PageToolDeps): {
     if (next === 'clear') deps.identities?.cleared(caller.ferret, page.id);
     else deps.identities?.typed(caller.ferret, page.id, next.host, next.username);
     await host.drove?.(caller, page).catch(() => undefined);
-    const secret = outcome.passwordField === true ? passwordNote(action.action) : '';
-    return { text: `Done on ${reference}.${secret}` };
+    return { text: `Done on ${reference}.` };
   };
 
   /** Every tool answers a refusal or a failure as an error result, never a throw past the kernel. */

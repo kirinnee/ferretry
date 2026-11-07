@@ -125,9 +125,10 @@ describe('browser_type and browser_fill_form', () => {
     expect(answer.text).toBe('Done on %browser:app.');
   });
 
-  test('a password field is told, so the ferret hands the page over instead', async () => {
+  test('a type or fill into a password field answers the same strict Done, saying nothing of the field', async () => {
     const w = world({ outcome: { passwordField: true } });
-    expect((await w.tools.browser_fill_form(CALL, FILL)).text).toContain('That act filled a password field.');
+    expect(await w.tools.browser_type(CALL, TYPE)).toEqual({ text: 'Done on %browser:app.' });
+    expect(await w.tools.browser_fill_form(CALL, FILL)).toEqual({ text: 'Done on %browser:app.' });
   });
 
   test('a body that names no element, or two, is refused before anything runs', async () => {

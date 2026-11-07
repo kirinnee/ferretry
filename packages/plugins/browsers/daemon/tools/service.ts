@@ -727,8 +727,7 @@ export class BrowserTools {
     const read = await this.readBack(surface, readingOf(answer));
     if (read === undefined) return { summary: `Done on ${reference}.` };
     const at = read.url === undefined ? '' : ` (now at ${read.url})`;
-    const secret = 'result' in answer && answer.result.passwordField === true ? passwordNote(call.tool) : '';
-    return { summary: `Done on ${reference}${at}.${secret}${notesOf(answer, surface.id, read)}` };
+    return { summary: `Done on ${reference}${at}.${notesOf(answer, surface.id, read)}` };
   }
 
   /**
@@ -1337,15 +1336,6 @@ function elementOfCall(call: object): { selector?: string; ref?: string } {
 
 function pointOf(call: { readonly x?: number | undefined; readonly y?: number | undefined }) {
   return call.x === undefined || call.y === undefined ? {} : { x: call.x, y: call.y };
-}
-
-/**
- * Told when an act put text in a password field. A real secret never belongs in a tool call: it would
- * sit in the agent's transcript. The owner types it, on a page handed to them.
- */
-function passwordNote(tool: PageToolName): string {
-  const wrote = tool === 'browser.fill_form' ? 'filled' : 'typed into';
-  return ` That act ${wrote} a password field. A real secret must never go in a tool call: hand the page to the owner with browser_ask_owner so they type it themselves.`;
 }
 
 /** Told after a snapshot: the refs in it are what every act accepts. */
