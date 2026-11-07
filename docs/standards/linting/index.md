@@ -44,6 +44,7 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 | `a-fetch-binding`           | the PWA never stores a `fetch` builtin or calls the network past the carrier                      |
 | `a-git-hooks-worktree`      | commit linting works from a linked worktree, concurrently and repeatedly                          |
 | `a-macos-policy`            | the darwin smoke is advisory on PRs, required and retried on main and a tag; free `macos-15` only |
+| `a-migration-isolated`      | the v4 -> v5 converter stays outside the product (workspaces, imports, release paths)             |
 | `a-no-fy-render-in-docs`    | `fy-render` fence openers appear only in their three teaching files                               |
 | `a-no-legacy-state`         | package code cannot reference predecessor state or identifiers                                    |
 | `a-no-pattern-kill`         | test code never kills processes by pattern (`pkill`, `killall`)                                   |
