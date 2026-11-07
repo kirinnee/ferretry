@@ -629,7 +629,9 @@ async function start(world: World): Promise<TestHost> {
           prior?.success === true ? judgeLoosening(def, prior.data, defaults.success ? defaults.data : undefined) : [];
         const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
         if (sentences.length > 0 && !judged(manifest.id, path, true, sentences))
-          return { kind: 'held', etag: 'absent', id: `${path}@held`, sentences };
+          return writeOptions.refuseIfHeld === true
+            ? { kind: 'refused', reason: 'would_hold', issues: [], sentences }
+            : { kind: 'held', etag: 'absent', id: `${path}@held`, sentences };
         if (def.shape === 'file') world.config.delete(key);
         else if (all !== undefined) {
           const { [name as string]: _gone, ...rest } = all;
@@ -811,7 +813,8 @@ async function start(world: World): Promise<TestHost> {
               name =>
                 (
                   built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
+                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
+                    | undefined
                 )?.[name],
               parsed.host,
             )
@@ -835,7 +838,8 @@ async function start(world: World): Promise<TestHost> {
               name =>
                 (
                   built.find(b => b.manifest.id === manifest.id)?.half?.resolvers as
-                    Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
+                    | Readonly<Record<string, (() => readonly string[]) | undefined>>
+                    | undefined
                 )?.[name],
               parsed.host,
             )
