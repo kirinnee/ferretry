@@ -53,7 +53,8 @@ export async function run(verb: string, given: RunOptions = {}): Promise<RunResu
     },
   };
   const half = cli.build?.(context as never);
-  const handler = (half?.verbs as Record<string, (invocation: unknown) => Promise<number>>)[verb];
+  const verbs = (half?.verbs ?? {}) as Record<string, (invocation: unknown) => Promise<number>>;
+  const handler = verbs[verb];
   if (handler === undefined) throw new Error(`the half does not implement "${verb}"`);
   const code = await handler({ args: given.args ?? [], options: given.options ?? {} });
   return { code, out, err, calls };

@@ -19,6 +19,7 @@ const recording = (answer: unknown) => {
   };
 };
 
+const initOf = (call: { init: unknown } | undefined) => (call?.init ?? {}) as { query?: unknown; body?: unknown };
 const declared = new Set<string>(manifest.actions?.routes?.map(route => route.key) ?? []);
 
 describe('the board gateway', () => {
@@ -34,13 +35,13 @@ describe('the board gateway', () => {
   it('should carry the visibility filter in the query', async () => {
     const { client, calls } = recording(response());
     await new ClientBoardGateway(client).board({ visibility: 'private', limit: 500 });
-    should((calls[0]?.init as { query: unknown }).query).eql({ visibility: 'private', limit: '500' });
+    should(initOf(calls[0]).query).eql({ visibility: 'private', limit: '500' });
   });
 
   it('should read the whole board when no query is given', async () => {
     const { client, calls } = recording(response());
     await new ClientBoardGateway(client).board({});
-    should((calls[0]?.init as { query: unknown }).query).eql({});
+    should(initOf(calls[0]).query).eql({});
   });
 
   it('should read one card by id', async () => {
@@ -73,7 +74,7 @@ describe('the board gateway', () => {
   it('should post a progress write as one edit', async () => {
     const { client, calls } = recording(cardResponse());
     await new ClientBoardGateway(client).act('F412', { action: 'edit', progress: { now: 'testing' } } as never);
-    should((calls[0]?.init as { body: unknown }).body).eql({ action: 'edit', progress: { now: 'testing' } });
+    should(initOf(calls[0]).body).eql({ action: 'edit', progress: { now: 'testing' } });
   });
 
   it('should post a skip', async () => {

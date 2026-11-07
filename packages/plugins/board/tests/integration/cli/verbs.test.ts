@@ -60,7 +60,7 @@ describe('fy board', () => {
     });
     should(result.code).equal(0);
     const board = result.calls.find(call => call.route === 'GET /v1/board');
-    should((board?.init as { query: Record<string, string> }).query).have.property('ferret', DENISHA);
+    should(((board?.init ?? {}) as { query: Record<string, string> }).query).have.property('ferret', DENISHA);
   });
 });
 
@@ -152,8 +152,7 @@ describe('fy card show, move and progress', () => {
       answers: { ...STANDARD, 'GET /v1/board/cards/:cardId': CARD, 'POST /v1/board/cards/:cardId': CARD },
     });
     should(result.code).equal(0);
-    const posted = result.calls.find(call => call.route === 'POST /v1/board/cards/:cardId');
-    should((posted?.init as { body: unknown }).body).containEql({ action: 'move', to: 'implement' });
+    should(written(result)).containEql({ action: 'move', to: 'implement' });
   });
 
   it('should write the progress as ONE edit with only the parts named (card progress replaces the status writer)', async () => {
