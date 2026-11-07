@@ -1,0 +1,24 @@
+What the Packs app half needs from the app shell before its React views can mount.
+Every item is one import seam in this half; nothing else in it reaches outside the package.
+
+1. Primitives (app/ui.ts, placeholders that throw until the shell offers `@ferretry/app/ui` to plugin halves):
+   Badge, BadgeTone, Button, RouteLink, Markdown (with the reference grammar proved), useReferenceSurface, PeerName,
+   MessageFooter, ToolGroup, cn.
+2. Clock and timers (ui.ts `ShellClock`, `useShellClock`): now(), after(ms, run), every(ms, run), each returning a cancel.
+   A half may not touch setTimeout/Date.now (banned-globals); the clean-up poll and the helpers panel refresh use these.
+3. Configuration files (ui.ts `useConfigFiles`, lib/pack-config.ts `ConfigFiles`): read(path) -> {text, etag},
+   write(path, text, etag) -> {outcome: 'applied'|'pending', changes?}, and `text`, the comment-preserving YAML editor
+   (`ConfigText`). GAP(config-files): the daemon's `/v1/config/file` routes are in no plugin's manifest, so this half
+   cannot name them (contract-consumes); the shell's settings frame owns them. The packs package has no `yaml`
+   dependency; the shell hands the editor in (tests use the kernel's, `@ferretry/kernel/host` `config`).
+4. Transcript hosting (lib/shell-ports.ts): `TranscriptEntry` / `ToolCall` are Conversation's row types, copied small.
+   The shell's transcript row should call `projectPackCalls(entries, clientName)` and draw `PackCallRow` for a row whose
+   `pack` is set, inside `PackRowsProvider rows=<the lead's pack table rows>` so a card stays live.
+   `lib/shell-words.ts` is a copy of today's shell-command reader (also read by Conversation for `send`).
+5. Formatters and routes (shell-ports.ts): absoluteTime, formatElapsedSeconds, stateLabel, clockOfInstant, ferretHref
+   (`/ferret/<id>`; the shell's real route for a ferret).
+6. Test harness: tests/unit/support/{dom,learning-dom,settle}.ts need `react`, `react-dom` and `@happy-dom/global-registrator`
+   in the workspace (same as `@ferretry/app/testing`); the .tsx suites are written but have not been run.
+7. CSS: components/pack-call.css (theme roles only) must be loaded by the shell with the Packs views.
+8. GAP(packs-contract): no read of ONE ferret's Pack switch exists, so the switch (features/pack/pack-ferret-switch.tsx)
+   shows ON until the daemon has answered on this page.
