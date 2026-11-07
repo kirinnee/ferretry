@@ -28,8 +28,13 @@ import { parseSync } from 'oxc-parser';
 
 const LEDGER = 'scripts/validate/sync-io-allowlist.txt';
 // Every daemon half and the kernel's daemon host (Ferretry 5.0 layout); a new plugin is in scope the moment it has
-// a `daemon/` half. A pathspec `*` crosses directories, so these reach every depth.
-const SCOPES = ['packages/core/kernel/host/*.ts', 'packages/core/*/daemon/*.ts', 'packages/plugins/*/daemon/*.ts'];
+// a `daemon/` half. Glob pathspecs: `*` stays inside one directory (so a test folder named `daemon` is out of
+// scope) and `**` reaches every depth below a half.
+const SCOPES = [
+  ':(glob)packages/core/kernel/host/**/*.ts',
+  ':(glob)packages/core/*/daemon/**/*.ts',
+  ':(glob)packages/plugins/*/daemon/**/*.ts',
+];
 
 /** The runtime's synchronous file functions, and the three that start a child and wait for it. */
 export const BLOCKING_NAMES: ReadonlySet<string> = new Set([
