@@ -1,5 +1,5 @@
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
-import { type AccountIndexDocument, AccountIndexDocumentSchema } from '../../shared/index.ts';
+import { type AccountIndexDocument, AccountIndexDocumentSchema } from '../../contract/routes/index.ts';
 import type { LoginIndexStore } from '../lib/accounts.ts';
 import { SecretStoreError } from '../lib/seal.ts';
 

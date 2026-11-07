@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import type { TotpParameters } from '../../shared/index.ts';
+import type { TotpParameters } from '../../contract/routes/index.ts';
 
 /**
  * A 2FA code from a saved seed (RFC 6238 over RFC 4226), made INSIDE the daemon.

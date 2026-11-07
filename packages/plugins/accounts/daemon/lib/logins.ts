@@ -13,7 +13,7 @@ import {
   placeHosts,
   placesOfMatch,
   type SitePlace,
-} from '../../shared/index.ts';
+} from '../../contract/routes/index.ts';
 import {
   type AccountDirectoryOptions,
   type AccountDraft,

@@ -8,7 +8,7 @@
  * left out: the card then falls to the next rule and is never lost to it. Nothing here chooses or types anything;
  * the answer only orders buttons among the sign-ins the daemon matched.
  */
-import type { AccountDefaultsFile, SignInChoiceContext } from '../../shared/index.ts';
+import type { AccountDefaultsFile, SignInChoiceContext } from '../../contract/routes/index.ts';
 
 /** A board project's id; the Unfiled board is {@link UNFILED_PROJECT_ID}. */
 export type BoardProjectId = string;

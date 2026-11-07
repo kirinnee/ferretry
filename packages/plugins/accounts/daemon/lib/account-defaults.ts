@@ -20,7 +20,7 @@ import {
   placeHosts,
   repointAccountDefaults,
   withAccountDefault,
-} from '../../shared/index.ts';
+} from '../../contract/routes/index.ts';
 import type { AccountListing } from './accounts.ts';
 import type { ProjectInfo } from './sign-in-context.ts';
 

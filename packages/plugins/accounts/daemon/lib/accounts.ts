@@ -1,5 +1,5 @@
 /**
- * ACCOUNTS AND SIGN-INS (docs/secrets.md, "Accounts and sign-ins"; the wire is `../../shared/accounts.ts`).
+ * ACCOUNTS AND SIGN-INS (docs/secrets.md, "Accounts and sign-ins"; the wire is `../../contract/routes/accounts.ts`).
  *
  * An ACCOUNT is one identity: a label, a PLAIN username, a password and its 2FA keys. A SIGN-IN is how that account
  * signs in at ONE place (a website, or a terminal tool) with its method, recipe and what the daemon saw there. It rests
@@ -57,7 +57,7 @@ import {
   recipeRenamed,
   sealedNamesOf,
   twoFactorKeySummaryOf,
-} from '../../shared/index.ts';
+} from '../../contract/routes/index.ts';
 import type { Clock } from '@ferretry/kernel/contract';
 import {
   type SealedSecret,

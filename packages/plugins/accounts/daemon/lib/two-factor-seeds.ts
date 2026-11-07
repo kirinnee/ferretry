@@ -41,7 +41,7 @@ import {
   type TwoFactorSeedStageView,
   type TwoFactorStageId,
   unpadInputValue,
-} from '../../shared/index.ts';
+} from '../../contract/routes/index.ts';
 import type { AccountDirectory } from './accounts.ts';
 import type { RedactionValueSource, SecretCipherPort } from './seal.ts';
 
