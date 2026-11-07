@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { MachineAgendaPort, MachineMembersStore, MachineRaise } from '../../../src/lib/agenda/index.ts';
+import type { MachineAgendaPort, MachineMembersStore, MachineRaise } from '../../daemon/lib/machine-notices.ts';
 import { AUTO_MOVE_FAILED_REF, AutoMoveFailures } from '../../daemon/lib/auto-move-failures.ts';
 import { INBOX_STUCK_REF, StuckInboxList } from '../../daemon/lib/inbox-stuck-list.ts';
 import { INPUT_STUCK_REF, StuckInputList } from '../../daemon/lib/input-stuck-list.ts';
@@ -23,7 +23,6 @@ function machine() {
   const port: MachineAgendaPort = {
     raiseOrUpdate: async (ref, request, members) => void raised.push({ ref, request, members }),
     resolve: async ref => void resolved.push(ref),
-    list: async () => ({ items: [], resolved: [], count: 0 }) as never,
   };
   return { raised, resolved, port };
 }

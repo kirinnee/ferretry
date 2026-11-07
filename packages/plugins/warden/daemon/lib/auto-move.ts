@@ -314,11 +314,7 @@ export function recordMove(memory: AutoMoveMemory, sessionId: string, nowMs: num
 }
 
 /** Forget ferrets that are gone and moves past the hour; an entry with nothing left in it goes too. */
-export function pruneAutoMoveMemory(
-  memory: AutoMoveMemory,
-  live: ReadonlySet<string>,
-  nowMs: number,
-): AutoMoveMemory {
+export function pruneAutoMoveMemory(memory: AutoMoveMemory, live: ReadonlySet<string>, nowMs: number): AutoMoveMemory {
   const sessions: Record<string, AutoMoveSessionMemory> = {};
   for (const [id, session] of Object.entries(memory.sessions)) {
     if (!live.has(id)) continue;

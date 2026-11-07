@@ -1,10 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  STALLED_MONITOR_FLEET_KEY,
-  collapseUnwatchedFleet,
-  UNSUPERVISED_FLEET_KEY,
-} from '../../daemon/lib/index.ts';
+import { STALLED_MONITOR_FLEET_KEY, collapseUnwatchedFleet, UNSUPERVISED_FLEET_KEY } from '../../daemon/lib/index.ts';
 import { enabled, harness, JEV_INVESTIGATE, journalTypes, session, triageable } from './sweep-harness.ts';
 
 /**

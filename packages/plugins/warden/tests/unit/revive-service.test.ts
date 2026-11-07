@@ -13,7 +13,7 @@ import {
   WardenReviveService,
   type WardenSessionView,
 } from '../../daemon/lib/index.ts';
-import { lanes, PROJECT } from '../board/support.ts';
+import { lanes, PROJECT } from '../support/board.ts';
 import { cardView } from './board-fixtures.ts';
 
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');

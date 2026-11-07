@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { OrphanMemory, WardenBoardPort, WardenBoardRead, WardenFocusCard } from '../../daemon/lib/index.ts';
-import { lanes, PROJECT } from '../board/support.ts';
+import { lanes, PROJECT } from '../support/board.ts';
 import { boardOf, cardView, orphanView } from './board-fixtures.ts';
 import { enabled, harness, type JevScript, journalTypes, NOW, no, session, triageable } from './sweep-harness.ts';
 

@@ -1,6 +1,5 @@
 /** Account health predicates (today's `usage/account-health.ts`, owned by Usage; the failover selector reads them). */
 
-
 /**
  * The health facts these predicates read. Deliberately structural and minimal, so both the feed's
  * full {@link AccountUsage} row and the warden's narrower view satisfy it without either module

@@ -14,12 +14,7 @@
  * Pure: no IO, no clock, no globals.
  */
 
-import {
-  WARDEN_REVIVE_PROGRESS_MINUTES,
-  type WardenAction,
-  type WardenActor,
-  wardenActionActor,
-} from './protocol.ts';
+import { WARDEN_REVIVE_PROGRESS_MINUTES, type WardenAction, type WardenActor, wardenActionActor } from './protocol.ts';
 import { settleRevive } from './action-tally.ts';
 import { dayOf, withDay } from './daily.ts';
 import type { WardenRuntimeState } from './state.ts';

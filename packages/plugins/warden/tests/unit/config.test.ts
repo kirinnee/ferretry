@@ -116,7 +116,7 @@ describe('applying an operator patch', () => {
 
     // Assert
     should(actual.providerOutage).deepEqual({
-      minDistinctSessions: defaultWardenConfig.providerOutage.minDistinctSessions,
+      minDistinctFerrets: defaultWardenConfig.providerOutage.minDistinctFerrets,
       persistenceSweeps: defaultWardenConfig.providerOutage.persistenceSweeps,
       tailLines: 60,
     });

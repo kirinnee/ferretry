@@ -27,6 +27,8 @@ interface UsageWindow {
 }
 export interface FleetCredentialView {
   readonly id: string;
+  readonly harness?: string;
+  readonly store?: string;
   readonly status: { readonly word?: string };
   readonly usage: {
     readonly at?: string;

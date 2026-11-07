@@ -17,7 +17,7 @@ import {
   triedLine,
 } from '../../daemon/lib/auto-move.ts';
 import type { WardenSessionView } from '../../daemon/lib/types.ts';
-import { credential, facts, runtime, tool } from '../pack/support.ts';
+import { credential, facts, runtime, tool } from '../support/pack.ts';
 
 const NOW = Date.parse('2026-11-01T12:00:00.000Z');
 const iso = (ms: number): string => new Date(ms).toISOString();

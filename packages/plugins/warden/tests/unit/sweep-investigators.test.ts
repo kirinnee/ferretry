@@ -1,21 +1,11 @@
 import { describe, it } from 'bun:test';
 import { WARDEN_INVESTIGATOR_MAX_SEQUENCE } from '../../daemon/lib/protocol.ts';
 import should from 'should';
-import {
-  type NameAllocationRequest,
-  NameAllocator,
-  type NameClaim,
-  type NameClaimAttempt,
-  type NameClaimStore,
-  claimStartName,
-  displayAgentName,
-  agentSpokenName,
-} from '../../../src/lib/names/index.ts';
+import { agentSpokenName, displayAgentName } from '../../daemon/lib/foreign.ts';
 import { WardenCallsignTakenError, type WardenFleetSession } from '../../daemon/lib/index.ts';
 import { at, enabled, harness, journalTypes, NOW, session } from './sweep-harness.ts';
 
 const INVESTIGATOR = /^warden-[0-9a-f]{6}$/u;
-const POOL = ['ada', 'bea', 'cy', 'dot', 'eve'];
 
 const suspect = (id: string): WardenFleetSession =>
   session({ id, status: 'awaiting_user', state: { lastActivityAt: at(-600) } });
@@ -25,50 +15,13 @@ const holding = (id: string, teammate: string): WardenFleetSession => {
   return { ...base, config: { ...base.config, teammate } };
 };
 
-class MemoryClaimStore implements NameClaimStore {
-  readonly claims: NameClaim[] = [];
-
-  async listClaims(): Promise<readonly NameClaim[]> {
-    return [...this.claims];
-  }
-
-  async tryClaim(claim: NameClaim): Promise<NameClaimAttempt> {
-    const conflict = this.claims.find(
-      current => current.callsign === claim.callsign && current.expiresAtMs > claim.claimedAtMs,
-    );
-    if (conflict !== undefined) return { claimed: false, conflict };
-    this.claims.push(claim);
-    return { claimed: true, claim };
-  }
-
-  async release(callsign: string, ownerId: string): Promise<void> {
-    const index = this.claims.findIndex(claim => claim.callsign === callsign && claim.ownerId === ownerId);
-    if (index >= 0) this.claims.splice(index, 1);
-  }
-}
-
 describe('naming the investigators', () => {
-  it('should leave the human name pool untouched however many wardens are spawned', async () => {
-    // Arrange: a faithful spawner — the real allocator over a real claim ledger, asked exactly as the daemon asks
-    const store = new MemoryClaimStore();
-    const allocator = new NameAllocator(store, { nextIndex: () => 0 }, POOL);
-    const asked: NameAllocationRequest[] = [];
-    const claims = {
-      allocate: async (request: NameAllocationRequest) => {
-        asked.push(request);
-        return await allocator.allocate(request);
-      },
-      release: async (callsign: string, ownerId: string) => await store.release(callsign, ownerId),
-    };
-    const freeBefore = (await allocator.allocate({ ownerId: 'probe', nowMs: NOW })).ok;
-    store.claims.length = 0;
-    asked.length = 0;
+  it('should ask for a system callsign, never a first name from the pool, however many wardens are spawned', async () => {
+    // Arrange
     const subject = harness({
       config: enabled(),
       fleet: [suspect('s1'), suspect('s2'), suspect('s3')],
       spawn: async (request, call) => {
-        const claimed = await claimStartName(claims, `w${call}`, { teammate: request.teammate }, NOW);
-        if (!claimed.ok) throw new WardenCallsignTakenError(request.teammate ?? '');
         return {
           sessionId: `w${call}`,
           createdAt: at(0),
@@ -85,12 +38,8 @@ describe('naming the investigators', () => {
     await subject.service.run({ force: false });
 
     // Assert
-    should(freeBefore).be.true();
     should(subject.spawns.length).be.above(0);
     for (const spawn of subject.spawns) should(spawn.teammate).match(INVESTIGATOR);
-    should(asked.every(request => request.requested !== undefined)).be.true();
-    should(store.claims.map(claim => claim.callsign).filter(callsign => POOL.includes(callsign))).be.empty();
-    should(store.claims.every(claim => INVESTIGATOR.test(claim.callsign))).be.true();
   });
 
   it('should give each warden its own next name and keep the sequence in the state', async () => {

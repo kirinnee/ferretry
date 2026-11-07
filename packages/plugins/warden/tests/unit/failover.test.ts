@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { confirmedUsableAccount, usableAccount } from '../../../src/lib/usage/index.ts';
+import { confirmedUsableAccount, usableAccount } from '../../daemon/lib/account-health.ts';
 import {
   classifyWardenFailure,
   DEFAULT_WARDEN_FAILOVER,

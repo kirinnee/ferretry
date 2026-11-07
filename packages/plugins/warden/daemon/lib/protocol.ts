@@ -73,7 +73,20 @@ export {
   WardenTriageReasonSchema,
   WardenVerdictKindSchema,
 };
-export { WardenJevActsSchema, WardenFailoverConfigSchema, WardenGuardConfigSchema, WardenCapsSchema, WardenMayActAloneSchema, WardenEventTriggersSchema, WardenInvestigationConfigSchema, WardenReviveConfigSchema, WardenAutoMoveConfigSchema, WardenLayersSchema, ProviderOutageConfigSchema, WardenSweepIntervalSchema };
+export {
+  WardenJevActsSchema,
+  WardenFailoverConfigSchema,
+  WardenGuardConfigSchema,
+  WardenCapsSchema,
+  WardenMayActAloneSchema,
+  WardenEventTriggersSchema,
+  WardenInvestigationConfigSchema,
+  WardenReviveConfigSchema,
+  WardenAutoMoveConfigSchema,
+  WardenLayersSchema,
+  ProviderOutageConfigSchema,
+  WardenSweepIntervalSchema,
+};
 export type { SessionStatus, WardenAnomalyKind, WardenConfig };
 export const WardenAutoMoveTriggerSchema = z.enum(WARDEN_AUTO_MOVE_TRIGGERS);
 export const WardenConfigPatchSchema = WardenFileSchema;
@@ -267,28 +280,28 @@ export const WardenGuardFailureCodeSchema = z.enum([
 export type WardenGuardFailureCode = z.infer<typeof WardenGuardFailureCodeSchema>;
 export type WardenLayerStatus = z.infer<typeof WardenLayerStatusSchema>;
 export const WardenTriageStatusSchema = z.object({
-    jev: WardenLayerStatusSchema,
-    llm: WardenLayerStatusSchema,
-    guardFailure: z.object({ code: WardenGuardFailureCodeSchema, at: InstantSchema }).optional(),
-    guardBackoffUntil: InstantSchema.optional(),
-  });
+  jev: WardenLayerStatusSchema,
+  llm: WardenLayerStatusSchema,
+  guardFailure: z.object({ code: WardenGuardFailureCodeSchema, at: InstantSchema }).optional(),
+  guardBackoffUntil: InstantSchema.optional(),
+});
 export type WardenTriageStatus = z.infer<typeof WardenTriageStatusSchema>;
 export const WardenSpendDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const WardenCapSchema = z.enum(['jev', 'investigation']);
 export type WardenCap = z.infer<typeof WardenCapSchema>;
 export const WardenSpendSchema = z.object({
-    day: WardenSpendDaySchema,
-    jevUsd: NonNegativeFiniteSchema,
-    jevCapUsd: NonNegativeFiniteSchema,
-    investigationUsd: NonNegativeFiniteSchema,
-    investigationCapUsd: NonNegativeFiniteSchema,
-    pendingInvestigations: NonNegativeIntegerSchema,
-    capsHit: z.array(WardenCapSchema),
-    capsPaced: z.array(WardenCapSchema).optional(),
-    pacedUntil: InstantSchema.optional(),
-    investigationsLastHour: NonNegativeIntegerSchema,
-    maxInvestigationsPerHour: PositiveIntegerSchema,
-  });
+  day: WardenSpendDaySchema,
+  jevUsd: NonNegativeFiniteSchema,
+  jevCapUsd: NonNegativeFiniteSchema,
+  investigationUsd: NonNegativeFiniteSchema,
+  investigationCapUsd: NonNegativeFiniteSchema,
+  pendingInvestigations: NonNegativeIntegerSchema,
+  capsHit: z.array(WardenCapSchema),
+  capsPaced: z.array(WardenCapSchema).optional(),
+  pacedUntil: InstantSchema.optional(),
+  investigationsLastHour: NonNegativeIntegerSchema,
+  maxInvestigationsPerHour: PositiveIntegerSchema,
+});
 export type WardenSpend = z.infer<typeof WardenSpendSchema>;
 export const WardenSavingsSchema = z.object({
   day: WardenSpendDaySchema,

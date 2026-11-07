@@ -58,6 +58,11 @@ export function displaySystemCallsign(callsign: string): string {
   if (match?.[1] === undefined || sequence === undefined) return callsign;
   return `${match[1].toLowerCase()}-${sequence.toString(16).toUpperCase().padStart(6, '0')}`;
 }
+/** What an agent is called in a sentence a person reads: its first name when it has one, its title otherwise. */
+export function agentSpokenName(ferret: { readonly teammate?: string; readonly name: string }): string {
+  const callsign = (ferret.teammate ?? '').trim().toLowerCase();
+  return callsign === '' ? ferret.name : displayAgentName(callsign);
+}
 /** Title-case a callsign for display: `hadi` → `Hadi`, `mary-jane` → `Mary-Jane`; a system callsign keeps its shape. */
 export function displayAgentName(callsign: string): string {
   if (/^(warden|miner|guide)-[0-9a-f]{6}$/iu.test(callsign)) return displaySystemCallsign(callsign);
@@ -121,6 +126,7 @@ export interface PrLink {
   readonly url: string;
   readonly state: string;
   readonly draft?: boolean;
+  readonly [key: string]: unknown;
 }
 export interface BoardTaskEvent {
   readonly type: string;
@@ -135,13 +141,9 @@ export interface BoardTask {
   readonly laneId: string;
   readonly projectId: string;
   readonly createdAt: string;
-  readonly lastTouchedAt?: string;
-  readonly [key: string]: any;
-}
-export interface BoardTaskView extends BoardTask {
-  readonly activity?: unknown;
+  readonly lastTouchedAt?: string | null;
   readonly ask: { readonly source: string; readonly text: string };
-  readonly clarifications: readonly { readonly source: string; readonly text: string }[];
+  readonly clarifications: readonly { readonly source: string; readonly text: string; readonly at?: string }[];
   readonly links: {
     readonly prs: readonly PrLink[];
     readonly branch: string | null;
@@ -149,6 +151,10 @@ export interface BoardTaskView extends BoardTask {
     readonly docs: readonly string[];
   };
   readonly history: readonly BoardTaskEvent[];
+  readonly [key: string]: any;
+}
+export interface BoardTaskView extends BoardTask {
+  readonly activity?: unknown;
 }
 export interface LaneSet {
   readonly lanes: readonly { readonly id: string; readonly name: string; readonly category?: string }[];

@@ -1,20 +1,16 @@
 import { describe, it } from 'bun:test';
 import { DEFAULT_WARDEN_CONFIG, type WardenConfig } from '../../daemon/lib/protocol.ts';
 import should from 'should';
-import type { AgentJob } from '../../../src/lib/move/agent-jobs.ts';
+import type { AgentJob } from '../../daemon/lib/foreign.ts';
 import {
   type AutoMoveMemory,
   type AutoMoveSubject,
   EMPTY_AUTO_MOVE_MEMORY,
   recordMove,
 } from '../../daemon/lib/auto-move.ts';
-import {
-  moveNote,
-  type StoppedAgentJobs,
-  WardenAutoMoveService,
-} from '../../daemon/lib/auto-move-service.ts';
+import { moveNote, type StoppedAgentJobs, WardenAutoMoveService } from '../../daemon/lib/auto-move-service.ts';
 import type { WardenSessionView } from '../../daemon/lib/types.ts';
-import { credential, facts, runtime, tool } from '../pack/support.ts';
+import { credential, facts, runtime, tool } from '../support/pack.ts';
 
 const NOW = Date.parse('2026-11-01T12:00:00.000Z');
 const MINUTE = 60_000;
@@ -279,10 +275,7 @@ describe('WardenAutoMoveService.run', () => {
     should(result.actions[0]?.detail).equal(
       'Moved it from claude-a-wrapper to claude-b-wrapper because claude-a-wrapper hit its usage limit. Stopped its background jobs first: pid 4242 (bun).',
     );
-    should(recorded.events.map(event => event.type)).deepEqual([
-      'warden.auto_move_stopped_jobs',
-      'warden.auto_moved',
-    ]);
+    should(recorded.events.map(event => event.type)).deepEqual(['warden.auto_move_stopped_jobs', 'warden.auto_moved']);
     should(recorded.events[0]?.data).deepEqual({ stopped: [{ pid: 4242, program: 'bun' }], survivors: [] });
   });
 

@@ -7,7 +7,7 @@ import {
   type WardenFocusCard,
   wardenResumeMessage,
 } from '../../daemon/lib/index.ts';
-import { lanes, PROJECT } from '../board/support.ts';
+import { lanes, PROJECT } from '../support/board.ts';
 import { cardView } from './board-fixtures.ts';
 
 const pr = (overrides: Partial<PrLink> = {}): PrLink => ({

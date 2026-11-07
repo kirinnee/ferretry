@@ -1,6 +1,6 @@
 import type { BoardTask, BoardTaskView } from '../../daemon/lib/protocol.ts';
 import type { WardenBoardRead } from '../../daemon/lib/index.ts';
-import { card, lanes, PROJECT } from '../board/support.ts';
+import { card, lanes, PROJECT } from '../support/board.ts';
 
 /** The `pr-release-verify` lanes, on the one project these cards live on. */
 const LANE_SETS = new Map([[PROJECT, lanes(PROJECT)]]);

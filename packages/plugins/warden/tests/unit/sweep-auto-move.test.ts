@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { DEFAULT_WARDEN_CONFIG, type WardenConfig } from '../../daemon/lib/protocol.ts';
 import should from 'should';
 import { WardenAutoMoveService, type WardenFleetSession } from '../../daemon/lib/index.ts';
-import { credential, facts, runtime, tool } from '../pack/support.ts';
+import { credential, facts, runtime, tool } from '../support/pack.ts';
 import type { WardenRuntimeState } from '../../daemon/lib/index.ts';
 import { at, enabled, harness, NOW, session } from './sweep-harness.ts';
 
