@@ -67,7 +67,6 @@ export class RecordingSessionLayer implements SessionLayer {
   }
 }
 
-
 export class RecordingLink implements CarrierLink {
   readonly inbounds: Uint8Array[] = [];
   closedWith: string | undefined;

@@ -30,7 +30,9 @@ describe('kernel.websocket: restricted like kernel.fetch', () => {
     expect(() => port.connect('wss://workers.dev/')).toThrow(PermissionError);
     expect(() => port.connect('https://relay.example.test/')).toThrow(PermissionError);
     expect(() => port.connect('not a url')).toThrow(PermissionError);
-    expect(() => port.connect('wss://evil.test/')).toThrow('connections may not reach evil.test: its manifest does not declare it.');
+    expect(() => port.connect('wss://evil.test/')).toThrow(
+      'connections may not reach evil.test: its manifest does not declare it.',
+    );
     expect(base.dialled).toEqual([]);
   });
 });

@@ -17,7 +17,8 @@ import { newDaemonIdentity, relayCrypto } from './identities.ts';
 
 const host = 'relay.example.test';
 const nonceText = (): string => toBase64Url(relayCrypto.randomBytes(NONCE_BYTES));
-const be32 = (value: number): Uint8Array => new Uint8Array([value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255]);
+const be32 = (value: number): Uint8Array =>
+  new Uint8Array([value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255]);
 
 describe('identity signer: the rendezvous claim', () => {
   it('signs the claim layout: label (not length-prefixed), then LP(protocol), LP(daemonId), LP(host), LP(nonce)', async () => {
@@ -75,12 +76,7 @@ describe('identity signer: the rendezvous claim', () => {
 });
 
 describe('identity signer: tunnel requests', () => {
-  const todaysTranscript = (
-    label: string,
-    daemonId: string,
-    nonce: Uint8Array,
-    port: string,
-  ): Uint8Array =>
+  const todaysTranscript = (label: string, daemonId: string, nonce: Uint8Array, port: string): Uint8Array =>
     concatBytes([
       utf8Bytes(label),
       lengthPrefixed(utf8Bytes('ferretry-tunnel/1')),
@@ -99,9 +95,15 @@ describe('identity signer: tunnel requests', () => {
       nonce: toBase64Url(nonce),
       originPort: 8443,
     });
-    expect(signed).toMatchObject({ daemonId: identity.daemonId, nonce: toBase64Url(nonce), publicKey: toBase64Url(identity.publicKeySpki) });
+    expect(signed).toMatchObject({
+      daemonId: identity.daemonId,
+      nonce: toBase64Url(nonce),
+      publicKey: toBase64Url(identity.publicKeySpki),
+    });
     const expected = todaysTranscript('ferretry-tunnel-provision-v1', identity.daemonId, nonce, '8443');
-    expect(tunnelTranscript({ action: 'provision', daemonId: identity.daemonId, host, nonce, originPort: 8443 })).toEqual(expected);
+    expect(
+      tunnelTranscript({ action: 'provision', daemonId: identity.daemonId, host, nonce, originPort: 8443 }),
+    ).toEqual(expected);
     const signature = fromBase64UrlFixed(signed.signature, 64) as Uint8Array;
     expect(await relayCrypto.verifyEd25519(identity.publicKeySpki, signature, expected)).toBe(true);
     const context = { action: 'provision' as const, daemonId: identity.daemonId, host, nonce, originPort: 8443 };
@@ -113,11 +115,17 @@ describe('identity signer: tunnel requests', () => {
   it('a release signs today’s exact transcript (empty port) and verifies', async () => {
     const identity = await newDaemonIdentity();
     const nonce = relayCrypto.randomBytes(NONCE_BYTES);
-    const signed = await createIdentitySigner(identity).signTunnel({ action: 'release', host, nonce: toBase64Url(nonce) });
+    const signed = await createIdentitySigner(identity).signTunnel({
+      action: 'release',
+      host,
+      nonce: toBase64Url(nonce),
+    });
     const expected = todaysTranscript('ferretry-tunnel-release-v1', identity.daemonId, nonce, '');
     const signature = fromBase64UrlFixed(signed.signature, 64) as Uint8Array;
     expect(await relayCrypto.verifyEd25519(identity.publicKeySpki, signature, expected)).toBe(true);
-    expect(await verifyTunnelRequest(relayCrypto, { action: 'release', daemonId: identity.daemonId, host, nonce }, signed)).toEqual({
+    expect(
+      await verifyTunnelRequest(relayCrypto, { action: 'release', daemonId: identity.daemonId, host, nonce }, signed),
+    ).toEqual({
       ok: true,
     });
   });

@@ -511,7 +511,8 @@ async function start(world: World): Promise<TestHost> {
             throw new Error(`${manifest.id}: ${parsed.protocol} is not a WebSocket address`);
           if (!(manifest.permissions?.network ?? []).includes(parsed.host))
             throw new Error(`${manifest.id}: network ${parsed.host} is not declared`);
-          if (options.websocket === undefined) throw new Error(`${manifest.id}: dial ${parsed.host} with no websocket fake`);
+          if (options.websocket === undefined)
+            throw new Error(`${manifest.id}: dial ${parsed.host} with no websocket fake`);
           return options.websocket(parsed);
         },
       },

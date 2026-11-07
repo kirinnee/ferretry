@@ -21,13 +21,7 @@
  */
 
 import { z } from 'zod';
-import {
-  type ApiRequest,
-  type ApiResponse,
-  finalised,
-  headersFrom,
-  queryFrom,
-} from '../../../contract/http.ts';
+import { type ApiRequest, type ApiResponse, finalised, headersFrom, queryFrom } from '../../../contract/http.ts';
 import { BodyTooLargeError } from '../../../contract/body.ts';
 import type { CarrierKey } from '../../../contract/ids.ts';
 import type { SessionPrincipal } from '../../../contract/session.ts';
@@ -444,8 +438,7 @@ export function sessionApiRequest(
     // The route's own bound applies to a session's body exactly as it does to an HTTP one: a body the
     // session reassembled up to 32 MiB is still refused by a route that reads at most 512 KiB.
     text: async limitBytes => {
-      if (limitBytes !== undefined && utf8Bytes(body).byteLength > limitBytes)
-        throw new BodyTooLargeError(limitBytes);
+      if (limitBytes !== undefined && utf8Bytes(body).byteLength > limitBytes) throw new BodyTooLargeError(limitBytes);
       return body;
     },
   };

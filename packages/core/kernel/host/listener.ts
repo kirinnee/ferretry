@@ -26,7 +26,6 @@ export { recordedBindAddress };
 export const runSocketPath = (home: string): string => `${home}/${DAEMON_SOCKET_FILE}`;
 export const runBindPath = (home: string): string => `${home}/${DAEMON_RUN_FILE}`;
 
-
 /** Reads at most `limit` bytes piece by piece; `request.text()` would allocate the whole body first. */
 async function boundedText(request: Request, limit: number | undefined): Promise<string> {
   if (limit === undefined) return await request.text();
