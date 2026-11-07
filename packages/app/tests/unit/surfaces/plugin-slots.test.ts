@@ -43,10 +43,17 @@ describe('the slots Ferrets offers', () => {
 });
 
 describe('the plugin graph with Runtimes using Usage', () => {
+  // The DEPENDENCY graph: each manifest's `needs` and `uses`. Not `consumes`, which is the §9.6 hash-folding set and
+  // runs the other way for an offered hook such as Vault's `input.targets` (the offerer re-hashes when a taker
+  // changes), so it may hold cycles the generator folds as one component.
+  const dependsOn = (id: string): readonly string[] => {
+    const manifest = entryOf(id)?.manifest;
+    return [...Object.keys(manifest?.needs ?? {}), ...Object.keys(manifest?.uses ?? {})];
+  };
   const reach = (from: string): ReadonlySet<string> => {
     const seen = new Set<string>();
     const walk = (id: string): void => {
-      for (const next of entryOf(id)?.consumes ?? []) {
+      for (const next of dependsOn(id)) {
         if (seen.has(next)) continue;
         seen.add(next);
         walk(next);
