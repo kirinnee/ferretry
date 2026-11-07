@@ -8,6 +8,7 @@ import {
   type WorktreeRemovalDecision,
   type WorktreeRemovalRequest,
 } from '../protocol/worktrees.ts';
+import type { ManagedWorktreeSummary } from '../../../contract/index.ts';
 import type { SessionStatus } from '../protocol/session-base.ts';
 import { WorktreeError, WorktreeRemovalRefusal } from './errors.ts';
 import { isWithinDirectory, sharingSessionIds } from './policy.ts';
@@ -248,6 +249,44 @@ export class ManagedWorktreeService {
 
   async list(): Promise<WorktreeListResponse> {
     return await this.#runLifecycle(async () => await this.#list());
+  }
+
+  /**
+   * The registry's durable facts, for a reader that maps a checkout to its project (Ferrets' `managedWorktrees()`):
+   * the same rows {@link list} answers (records, then interrupted creations), after the same settling, without the
+   * Git inspection, the session evidence or the owner, which only the worktrees surface needs. Runs no Git when the
+   * registry is settled, which is every ordinary read.
+   */
+  async records(): Promise<readonly ManagedWorktreeSummary[]> {
+    return await this.#runLifecycle(async () => {
+      const state = await this.#settled();
+      const rows: ManagedWorktreeSummary[] = state.worktrees.map(managed => ({
+        path: managed.path,
+        branch: managed.branch,
+        repositoryRoot: managed.repositoryRoot,
+        commonDirectory: managed.commonDir,
+        relativeCwd: managed.relativeCwd,
+        createdAt: managed.createdAt,
+        initialHead: managed.initialHead,
+        branchPreexisted: managed.branchPreexisted,
+        ...(managed.removedAt === undefined ? {} : { removedAt: managed.removedAt }),
+      }));
+      for (const intent of state.intents) {
+        const view = unresolvedView(intent);
+        rows.push({
+          path: view.path,
+          branch: view.branch,
+          repositoryRoot: view.repositoryRoot,
+          commonDirectory: view.commonDirectory,
+          relativeCwd: view.relativeCwd,
+          createdAt: view.createdAt,
+          initialHead: view.initialHead,
+          branchPreexisted: view.branchPreexisted,
+          ...(view.unresolved === undefined ? {} : { unresolved: view.unresolved }),
+        });
+      }
+      return rows;
+    });
   }
 
   async #list(): Promise<WorktreeListResponse> {

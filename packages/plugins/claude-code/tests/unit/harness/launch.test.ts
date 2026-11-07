@@ -131,6 +131,7 @@ describe('homeText', () => {
       });
       should(JSON.parse(text.claudeJson)).eql({
         hasCompletedOnboarding: true,
+        hasCompletedClaudeInChromeOnboarding: true,
         ...CLAUDE_PROMPTS_SEEN,
         projects: { '/work/repo': { hasTrustDialogAccepted: true } },
       });

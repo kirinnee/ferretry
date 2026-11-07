@@ -5,6 +5,8 @@
 import { err, ok, type Result } from '@ferretry/std';
 import {
   type ClaudeCodeApi,
+  type ProjectServerApprovals,
+  type ProjectServerQuery,
   type Discovery,
   type HarnessCliView,
   HarnessCliViewSchema,
@@ -29,14 +31,32 @@ export const ABSENT_VIEW: HarnessCliView = HarnessCliViewSchema.parse({
 export interface FakeClaudeCode extends ClaudeCodeApi {
   setView(view: HarnessCliView): void;
   setDiscovery(discovery: Discovery | undefined): void;
+  /** What `approvedProjectServers` answers; the default is every asked server pending (a fresh home). */
+  setApprovals(answer: (query: ProjectServerQuery) => ProjectServerApprovals): void;
+  approvedProjectServers(query: ProjectServerQuery): Promise<ProjectServerApprovals>;
+  /** Every `approvedProjectServers` query, in order. */
+  readonly approvalQueries: ProjectServerQuery[];
 }
 
 export function fakeClaudeCode(): FakeClaudeCode {
   let view: HarnessCliView = ABSENT_VIEW;
   let discovery: Discovery | undefined;
+  let approvals: (query: ProjectServerQuery) => ProjectServerApprovals = query => ({
+    state: 'read',
+    servers: Object.fromEntries(query.servers.map(name => [name, 'pending' as const])),
+  });
+  const approvalQueries: ProjectServerQuery[] = [];
   return {
     view: async () => view,
     discovery: async () => discovery,
+    approvedProjectServers: async query => {
+      approvalQueries.push(query);
+      return approvals(query);
+    },
+    setApprovals: answer => {
+      approvals = answer;
+    },
+    approvalQueries,
     setView: next => {
       view = next;
     },
@@ -60,5 +80,10 @@ export async function claudeCodeConformance(make: () => ClaudeCodeApi): Promise<
   if (answer.success) failures.push('a permission answer result carries no choice');
   const request = PermissionAnswerRequestSchema.safeParse({ kind: 'deny', requestId: 'not-a-digest' });
   if (request.success) failures.push('a permission answer names a 16-hex request id');
+  // A read answers one decision for every server asked about, and only those (the rule MCP binds by).
+  const asked = { ferret: 'f1' as ProjectServerQuery['ferret'], root: '/work/app', servers: ['docs', 'linear'] };
+  const approvals = await api.approvedProjectServers?.(asked);
+  if (approvals?.state === 'read' && Object.keys(approvals.servers).sort().join() !== 'docs,linear')
+    failures.push('approvedProjectServers() answers exactly the servers it was asked about');
   return failures.length === 0 ? ok(true) : err(failures);
 }

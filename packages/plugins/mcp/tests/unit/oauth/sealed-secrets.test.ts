@@ -170,7 +170,11 @@ describe('MCP sign-in secrets: the use path', () => {
     const half = daemon.build?.({
       manifest,
       needs: { ferrets: new FakeFerrets(), vault: new FakeVault(), sealed },
-      uses: {},
+      uses: {
+        claudeCode: { current: () => undefined },
+        codex: { current: () => undefined },
+        projects: { current: () => undefined },
+      },
       hooks: {} as never,
       kernel: { state: own, config: { collection: () => new Map() } } as unknown as DaemonContext<
         typeof manifest
