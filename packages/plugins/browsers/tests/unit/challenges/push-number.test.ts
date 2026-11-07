@@ -9,8 +9,21 @@ const FIXTURES = join(import.meta.dir, '../../fixtures/push');
 const fixture = (name: string): string => readFileSync(join(FIXTURES, name), 'utf8');
 
 const opened: Window[] = [];
+/**
+ * The page's box stub is installed on happy-dom's `HTMLElement` prototype, which every window in this process shares,
+ * so it must come off again: a suite that runs after this file, in the same process, would otherwise measure its own
+ * elements with it. What was there is put back exactly as it was — own property or inherited.
+ */
+const BOX = 'getBoundingClientRect';
+const prototypeOf = (window: Window): object => window.HTMLElement.prototype;
+const originalBox = new Map<object, PropertyDescriptor | undefined>();
 afterEach(async () => {
   for (const window of opened.splice(0)) await window.happyDOM.close();
+  for (const [prototype, descriptor] of originalBox) {
+    if (descriptor === undefined) Reflect.deleteProperty(prototype, BOX);
+    else Object.defineProperty(prototype, BOX, descriptor);
+  }
+  originalBox.clear();
 });
 
 /**
@@ -53,7 +66,8 @@ function pageOf(html: string, url: string): Window {
     indexOf.set(element, byIndex.length - 1);
     return byIndex.length - 1;
   };
-  const prototype = window.HTMLElement.prototype as unknown as { getBoundingClientRect: () => unknown };
+  const prototype = prototypeOf(window) as unknown as { getBoundingClientRect: () => unknown };
+  if (!originalBox.has(prototype)) originalBox.set(prototype, Object.getOwnPropertyDescriptor(prototype, BOX));
   prototype.getBoundingClientRect = function (this: Element) {
     if (hidden(this)) return { x: 0, y: 0, width: 0, height: 0 };
     return { x: index(this) * 4, y: 0, width: 2, height: 2 };
