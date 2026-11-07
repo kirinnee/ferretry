@@ -1,0 +1,16 @@
+  ⎿  Shell cwd was reset to /home/kirin/Workspace/atomi/sulfone.lite
+  ⎿  You've hit your org's monthly spend limit · run /usage-credits to ask your
+     admin for a higher limit
+
+✻ Brewed for 37s · done 5:57 AM
+
+❯ /rate-limit-options
+
+────────────────────────────────────────────────────────────────────────────────
+  What do you want to do?
+
+  ❯ 1. Stop and wait for limit to reset
+    2. Wait here, then continue automatically at Nov 1, 12am
+    3. Ask your admin for more usage
+
+  Enter to confirm · Esc to cancel
