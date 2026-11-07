@@ -421,9 +421,17 @@ export interface JobsPort {
 
 // workers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** How a worker ended: its exit code, and the uncaught error's message when one ended it. */
+export interface WorkerExit {
+  readonly code: number;
+  readonly reason?: string;
+}
+
 export interface WorkerHandle {
   post(message: unknown, transfer?: readonly ArrayBuffer[]): void;
   onMessage(listener: (message: unknown) => void): Cancel;
+  /** Called once when the worker ends (a crash included), so a dead worker is seen rather than waited on. */
+  onExit(listener: (exit: WorkerExit) => void): Cancel;
   terminate(): Promise<void>;
 }
 
@@ -463,6 +471,11 @@ export interface SpawnOptions {
   readonly signal?: AbortSignal;
   /** Runs inside this ferret's limits. */
   readonly forFerret?: FerretId;
+  /**
+   * `start` only: this many extra pipes beyond stdio 0-2, the child's fds 3, 4, … (today's Chrome launch,
+   * `--remote-debugging-pipe` on 3 and 4). The daemon's ends are {@link ChildHandle.pipes}. At most 4.
+   */
+  readonly extraPipes?: number;
 }
 
 export interface SpawnResult {
@@ -498,6 +511,13 @@ export interface ChildHandle {
   write(chunk: string | Uint8Array): void;
   kill(signal?: string): void;
   readonly exited: Promise<number | null>;
+  /**
+   * The daemon's ends of the {@link SpawnOptions.extraPipes}, in order (the child's fd 3 first); empty without any.
+   * Close-on-exec, so no other child inherits one. Hand them on (a worker's transport) and close with `closePipes`.
+   */
+  readonly pipes: readonly number[];
+  /** Closes the daemon's ends of the extra pipes, once; later calls do nothing. */
+  closePipes(): void;
 }
 
 export interface SpawnPort {
