@@ -17,6 +17,7 @@ import { ferretsStep } from './ferrets.ts';
 import { harnessHomesStep } from './harness-homes.ts';
 import { loginsStep } from './logins.ts';
 import { projectsStep } from './projects.ts';
+import { settingsStep } from './settings.ts';
 import { terminalsStep } from './terminals.ts';
 import { identityStep, vaultStep } from './secrets.ts';
 import { wardenStep } from './warden.ts';
@@ -109,33 +110,7 @@ export const STEPS: readonly Step[] = [
     },
     'the Catalogs, Skills and MCP state schemas',
   ),
-  pending(
-    {
-      id: 'layouts',
-      title: 'Layouts and settings',
-      owner: ['plugin-layouts', 'kernel'],
-      reads: ['config/*.yaml', 'config/logins/*.yaml (each login file; its sign-in folder is the Logins step)'],
-      sealed: [],
-      notCarried: [],
-    },
-    'the Layouts config schema and each plugin’s config schema',
-  ),
-  pending(
-    {
-      id: 'runtimes',
-      title: 'Runtimes and profiles',
-      owner: ['plugin-runtimes'],
-      reads: ['config/runtimes/**', 'config/profiles/**'],
-      sealed: [],
-      notCarried: [
-        {
-          what: 'fleet/ids.json formerNames (runtime aliases)',
-          why: 'owned by Runtimes/Logins; the runtime config schema has not yet declared where formerNames are kept',
-        },
-      ],
-    },
-    'the Runtimes config schemas',
-  ),
+  settingsStep,
   loginsStep,
   vaultStep,
   identityStep,
