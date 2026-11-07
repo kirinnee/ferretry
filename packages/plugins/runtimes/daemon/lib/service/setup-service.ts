@@ -113,6 +113,7 @@ import {
   type ToolInstallRequest,
   type ToolInstallResult,
 } from '../../../contract/index.ts';
+import { instantFromEpochMs } from '@ferretry/std';
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { ApiError } from '@ferretry/kernel/contract';
@@ -1179,7 +1180,7 @@ export class FleetSetupService {
             content: serializeCloneBase(
               applyCloneToBase(found.record, {
                 source: found.source,
-                at: new Date(this.deps.catalog.now()).toISOString(),
+                at: instantFromEpochMs(this.deps.catalog.now()),
                 replace: !found.known,
                 copied: plan.base,
                 sourceKeys: plan.sourceKeys,
@@ -1239,7 +1240,7 @@ export class FleetSetupService {
     }
     const next = applyCloneToBase(parseCloneBase(stored), {
       source,
-      at: new Date(this.deps.catalog.now()).toISOString(),
+      at: instantFromEpochMs(this.deps.catalog.now()),
       replace: change.mode === 'replace',
       copied: plan.base,
       sourceKeys: plan.sourceKeys,

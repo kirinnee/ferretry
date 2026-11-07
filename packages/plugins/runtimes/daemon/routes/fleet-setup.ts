@@ -15,25 +15,22 @@
  *
  * Every answer is a statement about now: what is installed, and what the host's setup says.
  */
-import {
-  FleetCloneBundleSchema,
-  FleetCloneForgetRequestSchema,
-  FleetCloneForgetResultSchema,
-  FleetCloneKeysRecordRequestSchema,
-  FleetCloneKeysRecordResultSchema,
-  FleetCloneReviewRequestSchema,
-  FleetCloneReviewSchema,
-  FleetSetupScanSchema,
-  FleetToolInstallRequestSchema,
-  FleetToolInstallResultSchema,
-} from '@ferretry/protocol';
+import { ApiError, type ApiResponse, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
 import type { z } from 'zod';
-import { parseBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import type { ApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute } from '../../api/route.ts';
+import {
+  CloneBundleSchema,
+  CloneForgetRequestSchema,
+  CloneForgetResultSchema,
+  CloneKeysRecordRequestSchema,
+  CloneKeysRecordResultSchema,
+  CloneReviewRequestSchema,
+  CloneReviewSchema,
+  SetupScanSchema,
+  ToolInstallRequestSchema,
+  ToolInstallResultSchema,
+} from '../../contract/index.ts';
 import { FleetSetupRefusal, type FleetSetupService } from '../lib/service/setup-service.ts';
+import { parseBody } from './body.ts';
 
 /** First-run scan, tool install, the clone export and the clone review. */
 export type FleetSetupSubsystem = Pick<
@@ -55,84 +52,36 @@ async function answer<Schema extends z.ZodType>(schema: Schema, work: () => Prom
   }
 }
 
-const CONFIGURE = { capability: 'fleet', axis: 'configure' } as const;
-
-/** This subsystem's route table. */
-export function fleetSetupRoutes(subsystem: FleetSetupSubsystem): readonly ApiRoute[] {
-  return [
-    {
-      method: 'GET',
-      path: '/v1/fleet/setup/scan',
-      minimum: 'operator',
-      caller: 'any',
-      capability: CONFIGURE,
-      noStore: true,
-      handle: async () => await answer(FleetSetupScanSchema, () => subsystem.scan()),
+/**
+ * This subsystem's handlers, keyed by the manifest's route keys. Who may call, and what the audit log records, are
+ * the manifest's descriptors now; a handler only does the work.
+ */
+export function fleetSetupRoutes(subsystem: FleetSetupSubsystem) {
+  return {
+    'GET /v1/runtimes/setup/scan': async () => await answer(SetupScanSchema, () => subsystem.scan()),
+    'POST /v1/runtimes/machine/tools/install': async call => {
+      const request = await parseBody(call.request, ToolInstallRequestSchema);
+      return await answer(ToolInstallResultSchema, () => subsystem.installTools(request, call.governance));
     },
-    {
-      method: 'POST',
-      path: '/v1/fleet/machine/tools/install',
-      minimum: 'operator',
-      caller: 'person',
-      capability: CONFIGURE,
-      noStore: true,
-      handle: async context => {
-        const request = await parseBody(context.request, FleetToolInstallRequestSchema);
-        return await answer(FleetToolInstallResultSchema, () => subsystem.installTools(request, context.governance));
-      },
+    'GET /v1/runtimes/export': async () => await answer(CloneBundleSchema, () => subsystem.exportBundle()),
+    // A review reads this machine's own setup against a bundle and writes nothing; `person` because what it answers is
+    // the diff of a configuration the caller is about to change.
+    'POST /v1/runtimes/clone/review': async call => {
+      const request = await parseBody(call.request, CloneReviewRequestSchema);
+      return await answer(CloneReviewSchema, () => subsystem.reviewClone(request, call.governance));
     },
-    {
-      method: 'GET',
-      path: '/v1/fleet/export',
-      minimum: 'operator',
-      caller: 'any',
-      capability: CONFIGURE,
-      noStore: true,
-      handle: async () => await answer(FleetCloneBundleSchema, () => subsystem.exportBundle()),
+    // Forgetting writes the "last copied" record and nothing else: no copied item, no login, no secret.
+    'POST /v1/runtimes/clone/forget': async call => {
+      const request = await parseBody(call.request, CloneForgetRequestSchema);
+      return await answer(CloneForgetResultSchema, async () => ({
+        forgotten: await subsystem.forgetCloneSource(request.source),
+      }));
     },
-    {
-      // A review reads this machine's own setup against a bundle and writes nothing; `person` because what
-      // it answers is the diff of a configuration the caller is about to change.
-      method: 'POST',
-      path: '/v1/fleet/clone/review',
-      minimum: 'operator',
-      caller: 'person',
-      capability: CONFIGURE,
-      noStore: true,
-      handle: async context => {
-        const request = await parseBody(context.request, FleetCloneReviewRequestSchema);
-        return await answer(FleetCloneReviewSchema, () => subsystem.reviewClone(request, context.governance));
-      },
+    // The sealed copy of the keys has landed here; this remembers when each side last changed them. It writes only
+    // `keys` of the record (timestamps).
+    'POST /v1/runtimes/clone/keys': async call => {
+      const request = await parseBody(call.request, CloneKeysRecordRequestSchema);
+      return await answer(CloneKeysRecordResultSchema, () => subsystem.recordCloneKeys(request));
     },
-    {
-      // Forgetting writes the "last copied" record and nothing else: no copied item, no login, no secret.
-      // `person` for the same reason the review is: it changes what a copy will do next.
-      method: 'POST',
-      path: '/v1/fleet/clone/forget',
-      minimum: 'operator',
-      caller: 'person',
-      capability: CONFIGURE,
-      noStore: true,
-      handle: async context => {
-        const request = await parseBody(context.request, FleetCloneForgetRequestSchema);
-        return await answer(FleetCloneForgetResultSchema, async () => ({
-          forgotten: await subsystem.forgetCloneSource(request.source),
-        }));
-      },
-    },
-    {
-      // The sealed copy of the keys has landed here; this remembers when each side last changed them. It
-      // writes only `keys` of the record (timestamps), and person-only like the review it follows.
-      method: 'POST',
-      path: '/v1/fleet/clone/keys',
-      minimum: 'operator',
-      caller: 'person',
-      capability: CONFIGURE,
-      noStore: true,
-      handle: async context => {
-        const request = await parseBody(context.request, FleetCloneKeysRecordRequestSchema);
-        return await answer(FleetCloneKeysRecordResultSchema, () => subsystem.recordCloneKeys(request));
-      },
-    },
-  ];
+  } satisfies Record<string, RouteHandler>;
 }
