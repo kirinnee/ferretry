@@ -1,22 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import logins from '@ferretry/plugin-logins/manifest';
-import { harnessHref, type MachineTabId, tabHref } from '../../../app/features/fleet/shell/machine-route.ts';
+import { harnessHref, tabHref } from '../../../app/features/fleet/shell/machine-route.ts';
 import runtimes from '../../../manifest.ts';
 
 /**
  * A link to another tab is a Settings path the app shell routes (`/d/<daemon>/settings/<plugin>/<tab>`). The shell
  * finds the active tab by plugin AND tab id, so a link only works if a manifest declares exactly that pair. This
- * proves every tab Runtimes links to is one, so a renamed tab or a mistyped id fails here, not in a browser.
+ * proves Runtimes' own links name its declared tabs; that Logins' tab exists is proved against the compiled manifests
+ * in the app's `plugin-calls` suite. A renamed tab or a mistyped id fails there, not in a browser.
  */
 
-const settingsTabs = new Map(
-  [runtimes, logins].map(manifest => [
-    manifest.id as string,
-    new Set((manifest.ui?.settings ?? []).map(tab => tab.id as string)),
-  ]),
-);
-
-const TABS: readonly MachineTabId[] = ['runtimes', 'profiles', 'model-sets', 'sign-ins'];
+const runtimesTabs = new Set((runtimes.ui?.settings ?? []).map(tab => tab.id as string));
 
 /** The (plugin, tab) a Settings path names, or `null` for anything else. */
 const settingsPair = (href: string): readonly [string, string | undefined] | null => {
@@ -25,12 +18,11 @@ const settingsPair = (href: string): readonly [string, string | undefined] | nul
 };
 
 describe('the links from the Runtimes screens to other tabs', () => {
-  for (const tab of TABS)
-    test(`the ${tab} tab link names a settings tab a manifest declares`, () => {
-      const pair = settingsPair(tabHref('d1', 'studio-mac', tab, 'item'));
-      expect(pair).not.toBeNull();
-      const [plugin, id] = pair as readonly [string, string];
-      expect(settingsTabs.get(plugin)?.has(id)).toBe(true);
+  for (const tab of ['runtimes', 'profiles', 'model-sets'] as const)
+    test(`the ${tab} tab link names one of Runtimes’ own declared settings tabs`, () => {
+      const [plugin, id] = settingsPair(tabHref('d1', 'studio-mac', tab, 'item')) ?? [];
+      expect(plugin).toBe('runtimes');
+      expect(runtimesTabs.has(id as string)).toBe(true);
     });
 
   test('Runtimes’ own three tabs are addressed by their own ids, and Sign-ins by Logins’', () => {
