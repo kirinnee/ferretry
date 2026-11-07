@@ -17,7 +17,7 @@ const Manifest = z.object({
       home: z.string().min(1),
     }),
   ),
-  runtimes: z.array(z.object({ id: z.uuid(), kind: Harness, home: z.string().min(1) })).optional(),
+  runtimes: z.array(z.object({ id: z.uuid(), name: z.string().min(1), harness: Harness })).optional(),
 });
 
 /** These are opaque owner-declared folders; no transcript or sign-in bytes become a JS value. */
@@ -67,7 +67,15 @@ export const harnessHomesStep: Step = {
       const ids = await runtimeIds(ctx.v4.fleet);
       const manifest = await json(join(ctx.v4.fleet, 'manifest.json'), Manifest);
       const known = new Map<string, { harness: 'claude' | 'codex'; home: string }>();
-      for (const runtime of [...(manifest?.accounts ?? []), ...(manifest?.runtimes ?? [])]) {
+      const inventory = [
+        ...(manifest?.accounts ?? []),
+        ...(manifest?.runtimes ?? []).map(runtime => {
+          const entry = ids?.runtimes[runtime.name];
+          if (entry !== undefined && entry.id !== runtime.id) throw new Error('runtime identity mismatch');
+          return { id: runtime.id, kind: runtime.harness, home: resolve(homes, entry?.home ?? runtime.id) };
+        }),
+      ];
+      for (const runtime of inventory) {
         const previous = known.get(runtime.id);
         if (previous !== undefined && (previous.harness !== runtime.kind || previous.home !== runtime.home))
           throw new Error('runtime identity mismatch');
