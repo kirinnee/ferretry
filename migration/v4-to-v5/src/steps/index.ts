@@ -184,7 +184,12 @@ export const STEPS: readonly Step[] = [
       owner: ['plugin-runtimes'],
       reads: ['config/runtimes/**', 'config/profiles/**'],
       sealed: [],
-      notCarried: [],
+      notCarried: [
+        {
+          what: 'fleet/ids.json formerNames (runtime aliases)',
+          why: 'owned by Runtimes/Logins; the runtime config schema has not yet declared where formerNames are kept',
+        },
+      ],
     },
     'the Runtimes config schemas',
   ),

@@ -3,6 +3,7 @@ import { FerretRecordSchema, FerretTokensSchema } from '@ferretry/core-ferrets/c
 import { readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ferretsStep } from '../../src/steps/ferrets.ts';
+import { harnessHomesStep } from '../../src/steps/harness-homes.ts';
 import { AT, FAKE_HASH, fixture, RUNTIME } from './ferret-fixture.ts';
 
 let f: Awaited<ReturnType<typeof fixture>>;
@@ -30,14 +31,30 @@ test('keeps live and archived ids, parent, runtime, resume id and D15 pane handl
   });
   await f.put('state/sessions/lead/state.json', { id: 'lead', status: 'thinking', lastActivityAt: AT });
   await f.pane('lead');
-  await f.session('child', {
+  const provenance = {
+    v: 1,
+    at: AT,
+    origin: 'session',
     parent: 'lead',
-    provenance: { origin: 'session' },
-    transferredFrom: { source: 'older' },
-    projectId: 'p1',
-  });
+    wardenLineage: false,
+    lineageSource: 'none',
+  } as const;
+  const transferredFrom = {
+    v: 1,
+    kind: 'fork',
+    sourceSessionId: 'older',
+    sourceIncarnation: 'i1',
+    sourceHarness: 'claude',
+    cutMessagePoint: { v: 1, byteOffset: 0, blockIndex: 0 },
+    planId: 'plan1',
+    at: AT,
+  } as const;
+  await f.session('child', { parent: 'lead', provenance, transferredFrom, projectId: RUNTIME });
   await f.put('state/sessions/child/state.json', { id: 'child', status: 'completed', finishedAt: AT });
-  await f.put('state/archived-sessions.json', { version: 1, sessions: [{ id: 'child' }] });
+  await f.put('state/archived-sessions.json', {
+    version: 1,
+    sessions: { child: { archivedAt: AT, lastSequence: 0, journalLine: 1, journal: null } },
+  });
   // A broken credential link must never be followed or opened.
   await symlink('/unreadable/fake-credential', join(f.from, 'state/sessions/lead/environment.json'));
   const report = await ferretsStep.run(f.ctx());
@@ -57,6 +74,14 @@ test('keeps live and archived ids, parent, runtime, resume id and D15 pane handl
   expect(String(child.parent)).toBe('lead');
   expect(child.role).toBe('helper');
   expect(child.state).toBe('stopped');
+  expect(child.provenance).toEqual(provenance);
+  expect(child.transferredFrom).toEqual(transferredFrom);
+  expect(child.projectId).toBe(RUNTIME);
+  const lead = await record('lead');
+  expect(lead.transcript?.home).toBe(join(f.to, 'state/claude-code/agent-homes', RUNTIME));
+  expect(lead.transcript?.file).toBe(
+    join(f.to, 'state/claude-code/agent-homes/_shared/projects/project/resume1.jsonl'),
+  );
   const tokens = FerretTokensSchema.parse(JSON.parse(await readFile(join(f.to, 'state/ferrets/tokens.json'), 'utf8')));
   expect(tokens.tokens).toHaveLength(1);
   expect(String(tokens.tokens[0]?.ferret)).toBe('lead');
@@ -64,10 +89,9 @@ test('keeps live and archived ids, parent, runtime, resume id and D15 pane handl
   expect(tokens.tokens[0]?.issuedAt).toBe(AT);
   expect((await stat(join(f.to, 'state/ferrets/lead/ferret.json'))).mode & 0o777).toBe(0o600);
   expect((await stat(join(f.to, 'state/ferrets/lead'))).mode & 0o777).toBe(0o700);
-  for (const path of ['history.jsonl', 'names.json', 'archive.json', 'worktrees.json', 'forks'])
+  for (const path of ['history.jsonl', 'names.json', 'worktrees.json', 'forks'])
     expect(await stat(join(f.to, 'state/ferrets', path)).catch(() => undefined)).toBeUndefined();
-  expect(report.notCarried.map(item => item.what).join(' ')).toContain('transcript.home');
-  expect(report.notCarried.map(item => item.what).join(' ')).toContain('formerNames');
+  expect(report.notCarried.map(item => item.what).join(' ')).not.toContain('formerNames');
   expect(JSON.stringify(report)).not.toContain(FAKE_HASH);
 });
 
@@ -91,6 +115,65 @@ test('resolves former runtime names to the current runtime name without writing 
   expect((await ferretsStep.run(f.ctx())).status).toBe('converted');
   expect((await record('f1')).runtime).toBe('codex-current');
   expect(await stat(join(f.to, 'state/ferrets/names.json')).catch(() => undefined)).toBeUndefined();
+});
+
+test('rewrites Codex home and pooled rollout paths to files the opaque copy creates', async () => {
+  const home = join(f.from, 'fleet/homes/custom-home');
+  const transcript = {
+    v: 1,
+    identity: 'correlated',
+    home,
+    file: join(home, 'sessions/year/rollout.jsonl'),
+    harnessSessionId: 'conversation1',
+    baseline: ['existing-conversation'],
+    correlationToken: 'FAKE-CORRELATION',
+    resolvedAt: AT,
+  };
+  await f.put('fleet/ids.json', {
+    version: 1,
+    runtimes: { 'codex-work': { id: RUNTIME, formerNames: [], home: 'custom-home' } },
+  });
+  await f.session('f1', { transcript });
+  await f.put('fleet/homes/custom-home/user-state', 'FAKE-USER-STATE');
+  await f.put('fleet/shared/codex/sessions/year/rollout.jsonl', 'FAKE-OPAQUE-ROLLOUT');
+  await symlink(join(f.from, 'fleet/shared/codex/sessions'), join(home, 'sessions'));
+  const report = await ferretsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect((await harnessHomesStep.run(f.ctx())).status).toBe('converted');
+  const rewritten = (await record('f1')).transcript;
+  expect(rewritten?.home).toBe(join(f.to, 'state/codex/agent-homes', RUNTIME));
+  expect(rewritten?.file).toBe(join(f.to, 'state/codex/agent-homes/_shared/sessions/year/rollout.jsonl'));
+  expect(rewritten?.baseline).toEqual(['existing-conversation']);
+  expect(rewritten?.correlationToken).toBe('FAKE-CORRELATION');
+  expect(await stat(rewritten!.home)).toBeDefined();
+  expect(await stat(rewritten!.file!)).toBeDefined();
+  expect(JSON.stringify(report)).not.toContain('FAKE-');
+});
+
+test('does not rewrite a transcript outside the owned home prefix but keeps its resume id', async () => {
+  await f.session('f1', {
+    transcript: {
+      v: 1,
+      identity: 'adopted',
+      home: join(f.from, 'fleet/homes-elsewhere', RUNTIME),
+      file: '/external/file.jsonl',
+      harnessSessionId: 'resume1',
+    },
+  });
+  const report = await ferretsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect((await record('f1')).harnessConversation).toBe('resume1');
+  expect((await record('f1')).transcript).toBeUndefined();
+  expect(report.notCarried.some(item => item.what.includes('transcript pointers outside'))).toBe(true);
+});
+
+test('a damaged warden provenance stamp fails rather than dropping the lineage fact', async () => {
+  await f.session('f1', {
+    provenance: { v: 1, at: AT, origin: 'warden', warden: 'FAKE-WARDEN', wardenLineage: false, lineageSource: 'none' },
+  });
+  const report = await ferretsStep.run(f.ctx());
+  expect(report.status).toBe('failed');
+  expect(JSON.stringify(report)).not.toContain('FAKE-');
 });
 
 test('missing session files carry zero and dry run writes nothing', async () => {
