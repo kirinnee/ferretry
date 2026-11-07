@@ -8,11 +8,13 @@ refresh token and any client secret go into a daemon-internal store nothing else
 A **project's** `.mcp.json` server signs in through this same flow, under a subject naming the server and
 its project, and reaches Claude Code as a local-scope entry for that project — see
 [mcp-scopes.md](mcp-scopes.md#signing-in-to-a-project-server), which also lists every scope a ferret reads
-servers from and how a server is checked. A ferret in a subfolder of a registered project, or in a worktree
-kept inside it, uses the project's sign-in. Whether the runtime declined the server is the harness's own
-answer, read from its own home; Ferretry's MCP code never reads that home. **On 5.0 the Claude Code harness
-is not ported yet**, so it gives no answer, and a project server's token is renewed but not handed to the
-ferret.
+servers from and how a server is checked. A ferret in a subfolder of a registered project, in a worktree
+kept inside it, or in a managed worktree of it, uses the project's sign-in, whether or not any ferret works in
+the project's root: Ferretry reads the `.mcp.json` at each registered project root and managed worktree itself,
+read-only, and no other file there. A Codex ferret is handed no project server and renews none, as today.
+Whether the runtime declined the server is the harness's own answer, read from its own home; Ferretry's MCP
+code never reads that home. **On 5.0 the Claude Code harness is not ported yet**, so it gives no answer, and a
+project server's token is renewed but not handed to the ferret.
 
 Read [secrets.md](secrets.md) first, and the [threat model](#threat-model) below. The useful property
 here is narrower than "the agent never sees the token" — **an agent CAN read the access token.**
