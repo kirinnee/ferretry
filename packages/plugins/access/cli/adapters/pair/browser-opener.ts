@@ -77,8 +77,11 @@ export interface BrowserOpenerEnvironment {
   readonly retentionMs: number;
   /** Runs `run` after `ms`, holding the process open until it has — injected so no suite waits on a clock. */
   readonly schedule: (run: () => void, ms: number) => void;
-  /** Runs `run` when this process exits or is told to stop — injected so no suite touches `process`. */
-  readonly onExit: (run: () => void) => void;
+  /**
+   * Runs `run` when this process exits or is told to stop — injected so no suite touches `process`. `run`
+   * answers a promise that settles once the page is gone, so a stop can wait for it before ending the process.
+   */
+  readonly onExit: (run: () => Promise<void>) => void;
 }
 
 export class DesktopBrowserOpener implements IBrowserOpener {
@@ -89,9 +92,19 @@ export class DesktopBrowserOpener implements IBrowserOpener {
     if (target === undefined) return false;
     let directory: string | undefined;
     let stored: Awaited<ReturnType<NonNullable<BrowserOpenerEnvironment['createPage']>>> | undefined;
-    const discard = (): void => {
-      if (stored !== undefined) void stored.discard().catch(() => undefined);
-      if (directory !== undefined) rmSync(directory, { recursive: true, force: true });
+    /*
+     * One removal however many paths ask for it (the timer, a failed launcher, a signal, the exit event), and
+     * one promise every caller can wait on. The direct page goes synchronously, inside the first call, so even
+     * the `exit` event — which cannot wait — still takes it; the state-backed page has to be awaited, which is
+     * why a signal waits on this promise before it ends the process.
+     */
+    let discarding: Promise<void> | undefined;
+    const discard = (): Promise<void> => {
+      discarding ??= (async () => {
+        if (directory !== undefined) rmSync(directory, { recursive: true, force: true });
+        if (stored !== undefined) await stored.discard();
+      })().catch(() => undefined);
+      return discarding;
     };
     try {
       const page = renderPairingRedirectPage(link);
@@ -106,7 +119,7 @@ export class DesktopBrowserOpener implements IBrowserOpener {
       }
       // Registered before the launcher starts, so there is no window in which the page exists unguarded.
       this.environment.onExit(discard);
-      this.environment.schedule(discard, this.environment.retentionMs);
+      this.environment.schedule(() => void discard(), this.environment.retentionMs);
       const child = this.environment.spawn(target.command, [...target.leading, file], {
         detached: true,
         stdio: 'ignore',
@@ -118,11 +131,11 @@ export class DesktopBrowserOpener implements IBrowserOpener {
        * here; the caller has already been told this may not work. The page has no
        * reader then, so it goes at once rather than waiting out its lifetime.
        */
-      child.on('error', discard);
+      child.on('error', () => void discard());
       child.unref();
       return true;
     } catch {
-      discard();
+      await discard();
       return false;
     }
   }
@@ -140,16 +153,29 @@ export interface ExitingProcess {
  * A signal's default action ends the process without an `exit` event, so Ctrl-C mid-countdown would
  * leave the page behind; handling it here means catching it, which is why it then exits with the
  * conventional `128 + signal` status the default action would have produced.
+ *
+ * A signal WAITS for the removal before it exits: the page lives in the fenced state, whose removal is
+ * asynchronous, and `exit` ends the process without running anything still pending. The `exit` event
+ * itself cannot wait, so it only starts the removal — by then the timer, which holds the process open, has
+ * normally already finished it. Each listener is `once`, so a second Ctrl-C during a stuck removal falls
+ * through to the default action and still ends the process.
  */
-export const onProcessExit = (host: ExitingProcess, run: () => void): void => {
-  host.once('exit', run);
+export const onProcessExit = (host: ExitingProcess, run: () => void | Promise<void>): void => {
+  // Started synchronously, so whatever part of the removal is synchronous happens inside the `exit` event.
+  const settle = (): Promise<void> => {
+    try {
+      return Promise.resolve(run()).catch(() => undefined);
+    } catch {
+      return Promise.resolve();
+    }
+  };
+  host.once('exit', () => void settle());
   for (const [signal, code] of [
     ['SIGINT', 130],
     ['SIGTERM', 143],
   ] as const) {
     host.once(signal, () => {
-      run();
-      host.exit(code);
+      void settle().then(() => host.exit(code));
     });
   }
 };

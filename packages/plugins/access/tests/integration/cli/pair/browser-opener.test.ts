@@ -257,9 +257,9 @@ describe('onProcessExit', () => {
     exits.should.be.empty();
   });
 
-  it('cleans up and then exits with the conventional status when it is signalled', () => {
+  it('cleans up and then exits with the conventional status when it is signalled', async () => {
     // Catching a signal replaces its default action, so the status the default would have produced
-    // is restored by hand: 128 plus the signal number.
+    // is restored by hand: 128 plus the signal number. The exit waits for the cleanup to settle.
     const { host, listeners, exits } = fakeProcess();
     let cleaned = 0;
     onProcessExit(host, () => {
@@ -268,6 +268,7 @@ describe('onProcessExit', () => {
     listeners.get('SIGINT')?.();
     listeners.get('SIGTERM')?.();
     cleaned.should.equal(2);
+    await new Promise(resolve => setTimeout(resolve, 0));
     exits.should.eql([130, 143]);
   });
 });
