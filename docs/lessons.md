@@ -25,8 +25,12 @@ The **only** thing the passive switch controls is whether a ferret is _instructe
   only place it lives. Settings › Lessons writes it with `PATCH /v1/lessons/config` through the kernel's
   config writer, which edits only that key (comments survive), refuses the write when the file holds a raw
   secret (the answer never repeats it) and keeps no copy of the switch anywhere else. The answer is the
-  settings IN EFFECT; when the kernel holds the edit for the owner (the file names a secret the owner has
-  not confirmed), the old value stays in effect and `held` lists what waits.
+  settings IN EFFECT; when the kernel holds the edit for the owner, the old value stays in effect and
+  `held` lists what waits (Settings › Lessons shows it). Unlike today, on 5.0 the owner's switch is
+  refused (`409 config_held`, nothing written, the held edit kept) while a hand edit of `lessons.yaml` is
+  held — for example one naming a secret the owner has not confirmed — instead of being made to both
+  versions and in effect at once (docs/config-files.md rule 3; GAP until the kernel offers an
+  owner-acknowledged write and Gate's judge lands).
   A miner or a warden is never instructed.
 - `PATCH /v1/ferrets/:ferretId/lessons {passive}` switches one ferret.
 - The teaching is a per-ferret part of the launch, contributed through the `launch.parts` hook: Lessons
@@ -107,19 +111,24 @@ a miner — `POST /v1/lessons/scan`, or `POST /v1/lessons/run {spawn: true}` —
 `503 miner_unavailable` with a sentence, before anything is written (GAP). The estimate, an ingest-only
 run and the board keep working. A scan is a real spend, so it stays the owner's act only.
 
+A miner's `agent` is a runtime name, as today. On 5.0 Ferrets does not resolve `runtime` to its harness or
+login, nor refuse an unknown one (today refuses it as `unknown_agent`), so a miner would launch on the first
+registered harness with its default sign-in (GAP). Nothing is spent while no miner can start, and this must
+close before the work-folder gap above does.
+
 ## Routes
 
-| Route                                                                   | Who                                                   |
-| ----------------------------------------------------------------------- | ----------------------------------------------------- |
-| `GET /v1/lessons/status`, `config`, `proposals`, `ferrets`, `directory` | operator                                              |
-| `PATCH /v1/lessons/config`                                              | operator, `fleet.configure` (GAP: refused, see above) |
-| `GET /v1/lessons/global`                                                | operator                                              |
-| `PUT /v1/lessons/global`                                                | operator (a person), `fleet.configure`                |
-| `POST /v1/lessons/proposals/:id`                                        | operator                                              |
-| `GET /v1/lessons/proposals/:id/apply-preview`, `patch`                  | operator                                              |
-| `POST /v1/lessons/proposals/:id/apply`                                  | operator; the target's grant (above)                  |
-| `PATCH /v1/ferrets/:ferretId/lessons`                                   | operator                                              |
-| `POST /v1/lessons/run`                                                  | operator                                              |
-| `POST /v1/lessons/scan/estimate`, `scan`, `cancel`                      | operator (a person)                                   |
-| `GET /v1/lessons/scan`                                                  | operator                                              |
-| `POST /v1/lessons/suggest`                                              | a ferret, by its own credential only                  |
+| Route                                                                   | Who                                                |
+| ----------------------------------------------------------------------- | -------------------------------------------------- |
+| `GET /v1/lessons/status`, `config`, `proposals`, `ferrets`, `directory` | operator                                           |
+| `PATCH /v1/lessons/config`                                              | operator (a person), `fleet.configure` (GAP above) |
+| `GET /v1/lessons/global`                                                | operator                                           |
+| `PUT /v1/lessons/global`                                                | operator (a person), `fleet.configure`             |
+| `POST /v1/lessons/proposals/:id`                                        | operator                                           |
+| `GET /v1/lessons/proposals/:id/apply-preview`, `patch`                  | operator                                           |
+| `POST /v1/lessons/proposals/:id/apply`                                  | operator; the target's grant (above)               |
+| `PATCH /v1/ferrets/:ferretId/lessons`                                   | operator                                           |
+| `POST /v1/lessons/run`                                                  | operator                                           |
+| `POST /v1/lessons/scan/estimate`, `scan`, `cancel`                      | operator (a person)                                |
+| `GET /v1/lessons/scan`                                                  | operator                                           |
+| `POST /v1/lessons/suggest`                                              | a ferret, by its own credential only               |

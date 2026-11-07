@@ -26,6 +26,7 @@ export function lessonsSubsystem(store: FakeLessonsStore, world: LessonsWorld = 
       world.config = { ...world.config, ...patch };
       return { kind: 'written', etag: 'etag-1', loosened: [] };
     },
+    configHeld: () => false,
     now: () => AT,
     changed: () => {},
     run: async (spawn): Promise<RunManifest> => ({

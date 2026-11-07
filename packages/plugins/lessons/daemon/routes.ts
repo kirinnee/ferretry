@@ -30,6 +30,7 @@ import {
   type LessonsGlobalDocument,
   LessonsGlobalWriteSchema,
   type LessonsConfig,
+  type LessonsConfigAnswer,
   LessonsRunRequestSchema,
   type LessonsPatchResponse,
   LessonsScanRequestSchema,
@@ -63,6 +64,8 @@ export interface LessonsSubsystem {
   config(): Promise<LessonsConfig>;
   /** Writes the machine switch into `lessons.yaml` through the kernel's config write port (the one writer). */
   writeConfig(patch: LessonsConfigPatch): Promise<ConfigWriteOutcome>;
+  /** Whether `lessons.yaml` holds an edit waiting for the owner (the kernel's file state). */
+  configHeld(): boolean;
   /** The instant a verdict is stamped with. */
   now(): string;
   /** Runs an ingest pass and, when requested, starts a bounded miner batch. */
@@ -407,7 +410,7 @@ function configWritten(outcome: ConfigWriteOutcome, inEffect: LessonsConfig): Ap
     case 'written':
       return jsonResponse(inEffect);
     case 'held':
-      return jsonResponse({ ...inEffect, held: [...outcome.sentences] });
+      return jsonResponse({ ...inEffect, held: [...outcome.sentences] } satisfies LessonsConfigAnswer);
     case 'conflict':
       throw new ApiError(409, 'config/lessons.yaml changed while it was being written; try again', 'conflict');
     case 'refused': {
@@ -420,6 +423,16 @@ function configWritten(outcome: ConfigWriteOutcome, inEffect: LessonsConfig): Ap
     }
   }
 }
+
+/**
+ * `lessons.yaml` already holds an edit waiting for the owner, so the save is refused before anything is written.
+ *
+ * DECLARED GAP: today the owner's own save is made to both versions and is in effect at once, the held edit kept
+ * (docs/config-files.md rule 3). The kernel's ConfigPort offers no owner-acknowledged write and Gate's judgeConfigWrite
+ * is not on 5.0, so the save would only wait behind the held edit; refusing says so instead.
+ */
+export const LESSONS_CONFIG_HELD =
+  'lessons.yaml has a change waiting for your approval; confirm or discard it first, then save again.';
 
 /** The capability ref a demand names; Gate owns the vocabulary and these two are core names. */
 function capabilityRef(name: 'fleet' | 'filesystem') {
@@ -464,6 +477,7 @@ export function lessonsRoutes(subsystem: LessonsSubsystem) {
     // `lessons.yaml` is the one source of truth: the switch is written there, key by key, through the kernel's writer.
     'PATCH /v1/lessons/config': async call => {
       const patch = await parseBody(call.request, LessonsConfigPatchSchema);
+      if (subsystem.configHeld()) throw new ApiError(409, LESSONS_CONFIG_HELD, 'config_held');
       const outcome = await subsystem.writeConfig(patch);
       return configWritten(outcome, await subsystem.config());
     },

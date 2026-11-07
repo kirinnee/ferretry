@@ -182,7 +182,12 @@ export class LessonsMiner implements ScanMinerPort {
    * Starts one miner ferret over `digests`, writing its brief; answers the miner's id. It runs in Lessons' own folder,
    * never an owner's project (today: the daemon's home), on the model the scan names (today's `--model`). `agent` is a
    * RUNTIME name, as today (`packages/daemon/src/adapters/learning/miner.ts:134` starts the session with it as its
-   * `agent`): Ferrets resolves it, and nothing here reads a harness or a login out of the name.
+   * `agent`), and nothing here reads a harness or a login out of the name.
+   *
+   * DECLARED GAP: Ferrets on 5.0 does NOT resolve `runtime` to a harness or a login, nor refuse an unknown one (today
+   * refuses it `unknown_agent`): its start copies the name onto the record and launches on the first registered
+   * harness with that harness's default sign-in. No miner starts on 5.0 (`folderFor` refuses first), so nothing is spent
+   * yet; it becomes live when Ferrets' start work folder (D2 #19) lands, and must not before Ferrets resolves runtimes.
    */
   private async launch(
     run: string,

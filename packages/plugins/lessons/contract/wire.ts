@@ -217,6 +217,13 @@ export const LessonsConfigPatchSchema = z.strictObject({ passiveDefault: z.boole
 export type LessonsConfigPatch = z.infer<typeof LessonsConfigPatchSchema>;
 
 /**
+ * What `PATCH /v1/lessons/config` answers: the settings IN EFFECT after the write, and `held` when the kernel held the
+ * write for the owner — plain sentences naming what waits, never a value.
+ */
+export const LessonsConfigAnswerSchema = LessonsConfigSchema.extend({ held: z.array(z.string()).optional() });
+export type LessonsConfigAnswer = z.infer<typeof LessonsConfigAnswerSchema>;
+
+/**
  * DECLARED GAP (D2 #19): a miner needs a work folder of Lessons' own (today's daemon home and `runs/` folder), and no
  * such folder can be given to a ferret on this base. Until it can, starting a miner answers `503` with this code and
  * sentence; it never falls back to running in, or writing into, an owner's project.

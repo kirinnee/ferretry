@@ -3,7 +3,8 @@
  * ferret's own switch.
  *
  * The machine default is `lessons.yaml`'s `passiveDefault`, written by the daemon through the kernel's config
- * writer; the switch shows the settings in effect afterwards, and any refusal. It only decides what a new ferret's fixed instructions say; a running ferret is switched on its own,
+ * writer; the switch shows the settings in effect afterwards, what waits for the owner when the write was held, and any
+ * refusal (a save while another edit of `lessons.yaml` waits for the owner is refused, and says so). It only decides what a new ferret's fixed instructions say; a running ferret is switched on its own,
  * which re-instructs it.
  */
 
@@ -27,6 +28,7 @@ export function LessonsSettingsSurface({ connection, ferrets = null }: LessonsSe
   const [config, setConfig] = useState<LessonsConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [held, setHeld] = useState<readonly string[]>([]);
   const [note, setNote] = useState<string | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
   const lessons = usePassiveLessons(connection);
@@ -53,8 +55,11 @@ export function LessonsSettingsSurface({ connection, ferrets = null }: LessonsSe
   const toggleDefault = async (passiveDefault: boolean) => {
     setSaving(true);
     setError(null);
+    setHeld([]);
     try {
-      setConfig(await patchLessonsConfig(connection, { passiveDefault }));
+      const { held: waiting = [], ...inEffect } = await patchLessonsConfig(connection, { passiveDefault });
+      setConfig(inEffect);
+      setHeld(waiting);
     } catch (reason) {
       setError(lessonsErrorMessage(reason));
     } finally {
@@ -120,6 +125,11 @@ export function LessonsSettingsSurface({ connection, ferrets = null }: LessonsSe
         <p className="m-0 text-meta text-faint">
           Change a running ferret from its Actions › Passive lessons, which re-instructs it.
         </p>
+        {held.map(sentence => (
+          <p key={sentence} role="status" className="m-0 text-meta text-warn" data-lessons-held="">
+            Waiting for your approval: {sentence}
+          </p>
+        ))}
         {error !== null && (
           <p role="alert" className="m-0 text-meta text-err">
             {error}

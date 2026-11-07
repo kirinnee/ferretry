@@ -4,6 +4,7 @@ import {
   AgentLessonToolResultSchema,
   LESSONS_APPLY_CONFLICT_CODE,
   LessonsApplyPreviewSchema,
+  LessonsConfigAnswerSchema,
   LessonsConfigSchema,
   LessonsPatchResponseSchema,
   LessonsScanEstimateSchema,
@@ -548,6 +549,58 @@ describe('the lessons mount', () => {
       should(answer.status).equal(200);
       should(LessonsConfigSchema.parse(answer.body)).deepEqual({ ...before, passiveDefault: !before.passiveDefault });
       should(JSON.stringify(await subject.store.loadState())).not.containEql('passiveDefault');
+    });
+
+    it('should answer the settings in effect and what waits when the kernel holds the write itself', async () => {
+      // Arrange: the file was not held when checked, but the kernel held this write (a race)
+      const subject = lessons();
+      const before = { ...subject.world.config };
+      const subsystem: LessonsSubsystem = {
+        ...subject.subsystem,
+        writeConfig: async () => ({ kind: 'held', etag: 'e', id: 'lessons.yaml@e', sentences: ['a secret is named'] }),
+      };
+
+      // Act
+      const answer = await drive(subsystem, {
+        method: 'PATCH',
+        path: '/v1/lessons/config',
+        body: { passiveDefault: !before.passiveDefault },
+      });
+
+      // Assert
+      should(answer.status).equal(200);
+      should(LessonsConfigAnswerSchema.parse(answer.body)).deepEqual({ ...before, held: ['a secret is named'] });
+    });
+
+    it('should refuse 409 config_held, writing nothing, while lessons.yaml holds an edit for the owner', async () => {
+      // Arrange
+      const subject = lessons();
+      const before = { ...subject.world.config };
+      let writes = 0;
+      const subsystem: LessonsSubsystem = {
+        ...subject.subsystem,
+        configHeld: () => true,
+        writeConfig: async patch => {
+          writes += 1;
+          return await subject.subsystem.writeConfig(patch);
+        },
+      };
+
+      // Act
+      const answer = await drive(subsystem, {
+        method: 'PATCH',
+        path: '/v1/lessons/config',
+        body: { passiveDefault: !before.passiveDefault },
+      });
+
+      // Assert
+      should(answer.status).equal(409);
+      should(answer.body).containEql({
+        code: 'config_held',
+        error: 'lessons.yaml has a change waiting for your approval; confirm or discard it first, then save again.',
+      });
+      should(writes).equal(0);
+      should(subject.world.config).deepEqual(before);
     });
 
     it('should report the passive default on the status read', async () => {

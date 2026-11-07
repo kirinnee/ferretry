@@ -193,20 +193,25 @@ describe('the lessons routes', () => {
     expect(text).toContain('passiveDefault: false');
   });
 
-  test('R-0222 a write the kernel holds for the owner is NOT in effect, and the answer says what waits', async () => {
+  test('R-0222 GAP (no owner both-versions write on 5.0, not parity) the owner flipping the switch while a hand edit naming a secret is held is refused 409, and nothing is lost', async () => {
+    // Today the owner's save is made to both versions and is in effect at once; 5.0 refuses it instead of holding it.
     const real = realLessonsConfig();
     await real.handEdit('passiveDefault: true\n');
     // A hand edit that names a secret waits for the owner; the version before it stays in effect.
-    await real.handEdit('passiveDefault: true\nmodel: ${secret:MINER_MODEL}\n');
+    const heldText = 'passiveDefault: true\nmodel: ${secret:MINER_MODEL}\n';
+    await real.handEdit(heldText);
+    expect(real.port.fileState(LESSONS_CONFIG)).toMatchObject({ state: 'held' });
     const { host } = await lessonsHost({ realConfig: real });
 
     const answer = await host.request('PATCH', '/v1/lessons/config', { as: owner(), body: { passiveDefault: false } });
 
-    expect(answer.status).toBe(200);
-    const body = json(answer);
-    expect(body.passiveDefault).toBe(true);
-    expect(body.held).toEqual([expect.stringContaining('MINER_MODEL')]);
+    expect(answer.status).toBe(409);
+    expect(json(answer)).toMatchObject({
+      code: 'config_held',
+      error: 'lessons.yaml has a change waiting for your approval; confirm or discard it first, then save again.',
+    });
     expect(json(await host.request('GET', '/v1/lessons/config', { as: owner() })).passiveDefault).toBe(true);
+    expect(await real.text()).toBe(heldText);
     expect(real.port.fileState(LESSONS_CONFIG)).toMatchObject({ state: 'held', inEffect: true });
   });
 
@@ -229,11 +234,23 @@ describe('the lessons routes', () => {
     expect(json(await host.request('GET', '/v1/lessons/config', { as: owner() })).passiveDefault).toBe(true);
   });
 
-  test('R-0222 a ferret cannot change the machine default: the route is for a person', () => {
+  test('R-0222 a ferret cannot change the machine default: 403 and lessons.yaml unchanged', async () => {
+    const real = realLessonsConfig();
+    await real.handEdit('passiveDefault: true\n');
+    const { host } = await lessonsHost({ realConfig: real });
+
+    const answer = await host.request('PATCH', '/v1/lessons/config', {
+      as: ferret('f1'),
+      body: { passiveDefault: false },
+    });
+
     expect(manifest.actions.routes.find(route => route.key === 'PATCH /v1/lessons/config')).toMatchObject({
       minimum: 'operator',
       caller: 'person',
     });
+    expect(answer.status).toBe(403);
+    expect(await real.text()).toBe('passiveDefault: true\n');
+    expect(json(await host.request('GET', '/v1/lessons/config', { as: owner() })).passiveDefault).toBe(true);
   });
 
   test.skip('R-0302 POST /v1/lessons/scan starts miners … pending port: Ferrets start work folder (D2 #19)', () => {});

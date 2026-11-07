@@ -39,6 +39,12 @@ const BINARY_NAME = 'fy';
  *    writes to an owner's project, so falling back to one is not an option. An estimate, an ingest-only run and the
  *    board keep working.
  *  - A transcript carries no tool results or interrupts, so a digest counts neither.
+ *  - An owner's own save of `lessons.yaml` is refused (409 `config_held`) while another edit is held, instead of today's
+ *    both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write
+ *    and Gate's judgeConfigWrite lands.
+ *  - A miner's `runtime` is not resolved: Ferrets' start on 5.0 does not resolve `runtime` to its harness or login, nor
+ *    refuse an unknown one (today: `unknown_agent`), so a miner would launch on the first registered harness. Inert
+ *    while no miner can start (the work-folder gap above); it must close before that one does.
  */
 export default implementDaemon(manifest, {
   build(ctx) {
@@ -76,6 +82,7 @@ export default implementDaemon(manifest, {
       serial,
       config: async () => config(),
       writeConfig: async (patch: LessonsConfigPatch) => await kernel.config.write(LESSONS_CONFIG, undefined, { patch }),
+      configHeld: () => kernel.config.fileState(LESSONS_CONFIG).state === 'held',
       now,
       run: async (spawn: boolean) => await miner.run(spawn),
       lessons,
