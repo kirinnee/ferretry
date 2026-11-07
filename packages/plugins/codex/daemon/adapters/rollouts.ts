@@ -38,7 +38,11 @@ function metadata(text: string): { id: string; cwd: string } | undefined {
   return undefined;
 }
 
-/** Same bounded sessions walk as the current rollout index, with every path checked again by the root port. */
+/**
+ * Today's sessions walk (`node-codex-rollout-index.ts`): only real folders and real `.jsonl` files, each named entry
+ * taken as it IS (`RootHandle.entries`, never followed), so a symbolic link — `rollout-alias.jsonl -> auth.json`, or a
+ * folder link back up the home — is skipped and never opened. Every path is checked again by the root port on read.
+ */
 async function rollouts(root: RootHandle, directory: string): Promise<readonly Rollout[]> {
   const pending = [directory];
   const found: Rollout[] = [];
@@ -47,21 +51,24 @@ async function rollouts(root: RootHandle, directory: string): Promise<readonly R
     const relative = pending.shift() as string;
     const path = root.resolve(relative);
     if (!path.ok) continue;
-    const names = await root.list(path.value).catch(() => []);
-    for (const name of names) {
+    const entries = await root.entries(path.value).catch(() => []);
+    for (const entry of entries) {
+      const name = entry.name;
       if (name.includes('/') || name === '.' || name === '..') continue;
       const childRelative = relative === '' ? name : `${relative}/${name}`;
+      if (entry.kind === 'directory') {
+        pending.push(childRelative);
+        continue;
+      }
+      // A link, a device or anything else is not a rollout: only a plain file is ever opened.
+      if (entry.kind !== 'file' || !name.endsWith('.jsonl')) continue;
       const child = root.resolve(childRelative);
       if (!child.ok) continue;
-      const info = await root.stat(child.value).catch(() => undefined);
-      if (info?.kind === 'directory') pending.push(childRelative);
-      else if (info?.kind === 'file' && name.endsWith('.jsonl')) {
-        const text = await root.readText(child.value).catch(() => undefined);
-        const meta = text === undefined ? undefined : metadata(text);
-        if (meta !== undefined && text !== undefined) {
-          found.push({ id: meta.id, folder: meta.cwd, file: child.value, text, modified: info.modified });
-          if (found.length >= MAX_ROLLOUTS) break;
-        }
+      const text = await root.readText(child.value).catch(() => undefined);
+      const meta = text === undefined ? undefined : metadata(text);
+      if (meta !== undefined && text !== undefined) {
+        found.push({ id: meta.id, folder: meta.cwd, file: child.value, text, modified: entry.modified });
+        if (found.length >= MAX_ROLLOUTS) break;
       }
     }
   }
@@ -218,7 +225,7 @@ export class CodexRollouts {
     list: async folder => {
       const history = await this.historyDirectory();
       if (history === undefined) return [];
-      // The root is scoped to sessions, so even a malformed listing cannot reach a Codex auth document.
+      // The root is scoped to sessions and the walk never follows a link, so no listing can reach a Codex auth document.
       const files = await rollouts(this.kernel.roots.root('harness-history', { subfolder: history }), '');
       const found: FoundConversation[] = files
         .filter(file => folder === undefined || file.folder === folder)

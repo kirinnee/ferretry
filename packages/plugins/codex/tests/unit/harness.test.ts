@@ -19,6 +19,7 @@ function fakeRoots() {
     resolve: (relative: string) =>
       ok((relative.startsWith('/') ? relative : relative === '' ? HOME : `${HOME}/${relative}`) as FencedPath),
     list: async () => [],
+    entries: async () => [],
     stat: async () => undefined,
     writeText: async (path: FencedPath, text: string) => void written.set(path, text),
   } as unknown as RootHandle;

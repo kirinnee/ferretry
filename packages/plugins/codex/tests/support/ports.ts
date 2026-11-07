@@ -42,7 +42,7 @@ export function realSpawn(faults: SpawnFaults = {}): RealSpawn {
   const children: ReturnType<typeof Bun.spawn>[] = [];
   const start = (program: string, args: readonly string[], options?: SpawnOptions): ChildHandle => {
     const child = Bun.spawn([program, ...args], {
-      ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),
+      ...(typeof options?.cwd === 'string' ? { cwd: options.cwd } : {}),
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -57,6 +57,8 @@ export function realSpawn(faults: SpawnFaults = {}): RealSpawn {
         child.stdin.write(chunk);
       },
       kill: signal => child.kill((signal ?? 'SIGTERM') as NodeJS.Signals),
+      pipes: [],
+      closePipes: () => undefined,
       // A getter: the report only fails when somebody asks for it, as a platform's does.
       get exited() {
         return faults.exitReport === 'rejects'
@@ -69,6 +71,9 @@ export function realSpawn(faults: SpawnFaults = {}): RealSpawn {
     children,
     port: {
       start,
+      runBytes: async () => {
+        throw new Error('not used by these tests');
+      },
       run: async (program, args, options): Promise<SpawnResult> => {
         const child = start(program, args, options);
         const [stdout, stderr, exitCode] = await Promise.all([

@@ -32,9 +32,28 @@ export function registeredCodex() {
       const path = relative.startsWith('/') ? relative : relative === '' ? directory : `${directory}/${relative}`;
       return path === directory || path.startsWith(`${directory}/`) ? ok(path as FencedPath) : err('outside' as const);
     };
-    return {
+    const names = (path: string) => [
+      ...new Set(
+        [...files.keys()]
+          .filter(file => file.startsWith(`${path}/`))
+          .map(file => file.slice(path.length + 1).split('/')[0] as string),
+      ),
+    ];
+    const kindOf = (path: string) =>
+      files.has(path) ? 'file' : [...files.keys()].some(file => file.startsWith(`${path}/`)) ? 'directory' : undefined;
+    // Only what the Codex reader uses; the rest of the root port is never reached by these fixtures.
+    const handle: Partial<RootHandle> = {
       name: name as RootHandle['name'],
       resolve,
+      entries: async path =>
+        names(path).map(leaf => ({
+          name: leaf,
+          kind: kindOf(`${path}/${leaf}`) ?? ('other' as const),
+          size: files.get(`${path}/${leaf}`)?.length ?? 0,
+          modified: at,
+          mode: 0o600,
+          links: 1,
+        })),
       readText: async path => {
         reads.push(path);
         const text = files.get(path);
@@ -56,14 +75,15 @@ export function registeredCodex() {
       ],
       stat: async path =>
         files.has(path)
-          ? { kind: 'file', size: files.get(path)?.length ?? 0, modified: at }
+          ? { kind: 'file', size: files.get(path)?.length ?? 0, modified: at, mode: 0o600, links: 1 }
           : [...files.keys()].some(file => file.startsWith(`${path}/`))
-            ? { kind: 'directory', size: 0, modified: at }
+            ? { kind: 'directory', size: 0, modified: at, mode: 0o700, links: 1 }
             : undefined,
       remove: async path => {
         files.delete(path);
       },
     };
+    return handle as RootHandle;
   };
   const kernel = {
     roots: { root },

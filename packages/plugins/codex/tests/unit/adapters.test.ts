@@ -26,6 +26,10 @@ class Scripted implements SpawnPort {
   start(): ChildHandle {
     throw new Error('not started here');
   }
+
+  async runBytes(): Promise<never> {
+    throw new Error('not used here');
+  }
 }
 
 describe('what the host says about programs', () => {
@@ -76,7 +80,12 @@ describe('the facts about a Codex file', () => {
       return { exitCode: 1 };
     });
     const facts = await new HostCodexFacts(new HostPrograms(scripted)).facts('/opt/bin/codex');
-    should(facts).eql({ launchedPath: '/opt/bin/codex', resolvedPath: '/opt/bin/codex', homeDirectory: '/home/kirin', platform: 'linux' });
+    should(facts).eql({
+      launchedPath: '/opt/bin/codex',
+      resolvedPath: '/opt/bin/codex',
+      homeDirectory: '/home/kirin',
+      platform: 'linux',
+    });
     should(scripted.asked.map(question => question.program)).not.containEql('readlink');
     should(scripted.asked.map(question => question.program)).not.containEql('nix');
   });
@@ -112,7 +121,9 @@ describe('asking the Codex binary about itself', () => {
   it('says why a version could not be read: no version printed, killed at the deadline, or a refused spawn', async () => {
     should((await probeOver(() => ({ stdout: 'nothing' })).probe.version('/opt/bin/codex')).state).equal('unreadable');
     should(
-      await probeOver(program => (program === '/opt/bin/codex' ? { exitCode: null } : {})).probe.version('/opt/bin/codex'),
+      await probeOver(program => (program === '/opt/bin/codex' ? { exitCode: null } : {})).probe.version(
+        '/opt/bin/codex',
+      ),
     ).containDeep({ state: 'unreadable', reason: 'it did not answer within 20 seconds' });
     should(
       await probeOver(program => (program === '/opt/bin/codex' ? 'throws' : {})).probe.version('/opt/bin/codex'),
@@ -121,7 +132,9 @@ describe('asking the Codex binary about itself', () => {
 
   it('checks that it starts by asking for --help', async () => {
     should(await probeOver(() => ({})).probe.startup('/opt/bin/codex')).eql({ ok: true });
-    should(await probeOver(program => (program === '/opt/bin/codex' ? { exitCode: 1 } : {})).probe.startup('/opt/bin/codex')).eql({
+    should(
+      await probeOver(program => (program === '/opt/bin/codex' ? { exitCode: 1 } : {})).probe.startup('/opt/bin/codex'),
+    ).eql({
       ok: false,
       reason: '--help exited 1',
     });
@@ -133,16 +146,32 @@ describe('the newest published Codex', () => {
   const fetchOf = (response: () => Response | Promise<Response>) => ({ request: async () => await response() });
 
   it('reads the registry answer', async () => {
-    const latest = new NpmCodexLatest(fetchOf(() => Response.json({ version: '0.145.0' })), clock, 'ferretry');
+    const latest = new NpmCodexLatest(
+      fetchOf(() => Response.json({ version: '0.145.0' })),
+      clock,
+      'ferretry',
+    );
     should(await latest.latest()).containDeep({ kind: 'ok', release: { version: '0.145.0' } });
   });
 
   it('says what went wrong without throwing: unreachable, a bad status, or an answer with no stable version', async () => {
-    const unreachable = new NpmCodexLatest(fetchOf(() => Promise.reject(new Error('offline'))), clock, 'ferretry');
+    const unreachable = new NpmCodexLatest(
+      fetchOf(() => Promise.reject(new Error('offline'))),
+      clock,
+      'ferretry',
+    );
     should(await unreachable.latest()).eql({ kind: 'failed', reason: 'could not reach npm' });
-    const bad = new NpmCodexLatest(fetchOf(() => new Response('', { status: 503 })), clock, 'ferretry');
+    const bad = new NpmCodexLatest(
+      fetchOf(() => new Response('', { status: 503 })),
+      clock,
+      'ferretry',
+    );
     should(await bad.latest()).eql({ kind: 'failed', reason: 'npm answered 503' });
-    const odd = new NpmCodexLatest(fetchOf(() => Response.json({ version: '1.0.0-rc.1' })), clock, 'ferretry');
+    const odd = new NpmCodexLatest(
+      fetchOf(() => Response.json({ version: '1.0.0-rc.1' })),
+      clock,
+      'ferretry',
+    );
     should(await odd.latest()).eql({ kind: 'failed', reason: 'npm did not name a stable version' });
   });
 });
@@ -154,13 +183,23 @@ describe('where Codex is', () => {
   });
 
   it('takes an explicit binary as an instruction, expanding ~, and never searches on when it is missing', async () => {
-    should(await locateCodex({ binary: '~/bin/codex', searchPaths: [] }, executables(['/home/kirin/bin/codex']), '/home/kirin')).eql({
+    should(
+      await locateCodex(
+        { binary: '~/bin/codex', searchPaths: [] },
+        executables(['/home/kirin/bin/codex']),
+        '/home/kirin',
+      ),
+    ).eql({
       outcome: 'located',
       path: '/home/kirin/bin/codex',
       rule: 'explicit override',
       declaredBy: 'harness-codex.yaml binary',
     });
-    const missing = await locateCodex({ binary: '/nope/codex', searchPaths: [] }, executables([], '/usr/bin/codex'), '/home/kirin');
+    const missing = await locateCodex(
+      { binary: '/nope/codex', searchPaths: [] },
+      executables([], '/usr/bin/codex'),
+      '/home/kirin',
+    );
     should(missing).containDeep({ outcome: 'override-absent', path: '/nope/codex' });
   });
 
@@ -181,7 +220,11 @@ describe('where Codex is', () => {
 });
 
 /** A manager child whose output and exit the test controls. */
-function manager(options: { readonly lines?: readonly string[]; readonly code?: number | null; readonly never?: boolean }) {
+function manager(options: {
+  readonly lines?: readonly string[];
+  readonly code?: number | null;
+  readonly never?: boolean;
+}) {
   const encoder = new TextEncoder();
   const stream = (text: string) =>
     new ReadableStream<Uint8Array>({
@@ -199,9 +242,17 @@ function manager(options: { readonly lines?: readonly string[]; readonly code?: 
       throw new Error('stdin is never written');
     },
     kill: signal => killed.push(signal),
+    pipes: [],
+    closePipes: () => undefined,
     exited: options.never === true ? new Promise<number | null>(() => undefined) : Promise.resolve(options.code ?? 0),
   };
-  const spawn: SpawnPort = { run: async () => ({ exitCode: 0, signal: null, stdout: '', stderr: '' }), start: () => child };
+  const spawn: SpawnPort = {
+    run: async () => ({ exitCode: 0, signal: null, stdout: '', stderr: '' }),
+    runBytes: async () => {
+      throw new Error('not used here');
+    },
+    start: () => child,
+  };
   return { spawn, killed };
 }
 
@@ -221,18 +272,25 @@ describe('running a package manager', () => {
   it('kills a manager that outlives its deadline and says so', async () => {
     const { spawn, killed } = manager({ never: true, lines: ['still going'] });
     const run = packageRunner(spawn, realClock(), host(spawn));
-    should(await run({ executable: '/usr/bin/npm', args: ['install'], timeoutMs: 20 })).containDeep({ kind: 'timed-out' });
+    should(await run({ executable: '/usr/bin/npm', args: ['install'], timeoutMs: 20 })).containDeep({
+      kind: 'timed-out',
+    });
     should(killed).eql(['SIGKILL']);
   });
 
   it('says a manager that could not start', async () => {
     const spawn: SpawnPort = {
       run: async () => ({ exitCode: 1, signal: null, stdout: '', stderr: '' }),
+      runBytes: async () => {
+        throw new Error('not used here');
+      },
       start: () => {
         throw new Error('npm is not declared');
       },
     };
-    should(await packageRunner(spawn, realClock(), host(spawn))({ executable: '/usr/bin/npm', args: [], timeoutMs: 100 })).eql({
+    should(
+      await packageRunner(spawn, realClock(), host(spawn))({ executable: '/usr/bin/npm', args: [], timeoutMs: 100 }),
+    ).eql({
       kind: 'not-started',
       reason: 'npm is not declared',
     });
