@@ -2,7 +2,7 @@ import type { Instant } from '@ferretry/std';
 import { milliseconds } from '@ferretry/std';
 import type { InputHolds, OutputGuard, Admission, Redaction, WorkFolders } from '../contract/bound.ts';
 import { AdmissionPort, InputHoldsPort, OutputGuardPort, RedactionPort, WorkFoldersPort } from '../contract/bound.ts';
-import type { PortToken } from '../contract/define.ts';
+import type { ConfigDef, PortToken } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError } from '../contract/http.ts';
 import { CORE_IDS, type PluginId } from '../contract/ids.ts';
@@ -60,13 +60,21 @@ export interface PluginStateHandle {
 }
 
 /** Everything IO the host is given. `fyd` wires the real ones; the test host wires in-memory ones. */
+/** The config service the host drives (`host/config`'s `createConfigFiles`). */
+export interface HostConfig {
+  port(plugin: string): ConfigPort;
+  reload(): Promise<void>;
+  startWatching?(): () => void;
+}
+
 export interface HostAdapters {
   readonly clock: Clock;
   readonly logSink: LogSink;
   readonly fs: HostFs;
   readonly random: () => string;
   readonly state: (manifest: Manifest) => PluginStateHandle;
-  readonly config: (manifest: Manifest) => ConfigPort;
+  /** The config service over every started plugin's declared files (§7.2); reloaded once before build. */
+  readonly config: (declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[]) => HostConfig;
   /** Unrestricted; the host narrows each to the manifest's `permissions`. */
   readonly spawn: SpawnPort;
   readonly fetch: FetchPort;
@@ -262,6 +270,13 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     record.damage = await state.open();
   }
 
+  trace.push('config');
+  const config = adapters.config(
+    order.flatMap(manifest => (manifest.data?.config ?? []).map(def => ({ plugin: manifest.id, def }))),
+  );
+  await config.reload();
+  const stopWatching = config.startWatching?.();
+
   // Shared kernel machinery.
   const events = new EventBus(log);
   const jobs = new JobRunner(clock, log);
@@ -293,7 +308,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     clock,
     log: scopedLog(adapters.logSink, manifest.id),
     state: records.get(manifest.id)?.state?.port as StatePort,
-    config: adapters.config(manifest),
+    config: config.port(manifest.id),
     roots: rootsPortFor(
       adapters.fs,
       { home, plugin: manifest.id, worktrees: options.worktrees ?? `${home}-worktrees` },
@@ -579,6 +594,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       carriersAbort.abort();
       for (const listener of [...listening].reverse()) await listener.stop().catch(() => undefined);
       sessionLayer?.close?.();
+      stopWatching?.();
       trace.push('stop:jobs');
       await jobs.stop();
       for (const manifest of [...order].reverse()) {

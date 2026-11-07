@@ -19,6 +19,8 @@ interface GeneratedRegistry {
 const REGISTRY = '../src/generated/plugins.ts';
 const VERSION = '5.0.0';
 const DEFAULT_PORT = 7457;
+/** The binary name is single-sourced from `packages/cli/package.json` `bin`; the release build replaces this. */
+const BINARY = process.env.FY_BINARY_NAME ?? 'fy';
 
 function argument(name: string): string | undefined {
   const index = process.argv.indexOf(name);
@@ -39,7 +41,7 @@ async function main(): Promise<number> {
     home,
     version: VERSION,
     implementations: registry.daemonImplementations,
-    adapters: realAdapters(sink, { childEnv: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: homedir() } }),
+    adapters: realAdapters(home, sink, { binary: BINARY, childEnv: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: homedir() } }),
     contractHash: id => registry.contractHashes?.[id]?.effective ?? 'unhashed',
     pid: process.pid,
     listen: async host =>
