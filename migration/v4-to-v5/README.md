@@ -43,7 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes, conversation, board, asks/agenda, projects, lessons, usage, warden, MCP, logins, website accounts, Gate, Access, settings, daemon settings and Packs have real conversions. The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
+terminals, harness-homes, conversation, board, asks/agenda, projects, lessons, usage, warden, catalogs and shares, MCP, logins, website accounts, Gate, Access, settings, daemon settings and Packs have real conversions: every step converts, so a complete v4 home converts with exit 0 and gets its `home.json`.
 Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
 
@@ -163,6 +163,21 @@ vendored in `src/v4/usage.ts`. These v5 schemas describe the body without `forma
 first, as the kernel does. The passive `fleet/credentials/<login>/usage.json` readings are only `lstat`ed and not
 carried: v5's `quotas/<login>.json` holds a provider-endpoint reading with no statusline source. None of these files
 holds a runtime uuid; the analytics index that does is a cache.
+
+Catalogs (`src/steps/catalogs.ts`) writes `state/catalogs/`: `catalogs.json`, `links.json`, `members.json`,
+`shares.json` and `member-passkeys.json` keep every v4 value under `format: 1` (`schemaVersion` dropped; a version-2
+`catalogs.json` is upgraded as v4 does, a version-1 one or a members file with two people of one name fails with
+"start v4.291.5 once"), `catalog-installs.json` becomes `installs.json` with every pin, publisher and revision (an
+install stays at its pinned version), and each `blobs/<sha256>.json` is copied as the same bytes (its name re-checked
+as the hash). v5 Catalogs declares these files but not yet their bodies, so the landing check is every joining id and
+digest through the contract's id schemas, and each install must read as `CatalogInstallSummarySchema`. Nothing signed
+is stored: the signed manifest is rebuilt from unchanged fields and blobs with the unchanged identity key, so nothing
+is re-signed. The sealed `link-keys.json` (AAD `catalog-link:<linkId>`, unstamped, under the vault key) is re-labelled
+with `rewrapSealed` (`v` → `format`, entries unchanged), and a test opens it with v5's own `KernelSealedDocuments`
+and the moved vault key. `local-skill-installs.json` becomes Skills' `state/skills/installs.json`
+(`LocalSkillInstallStateSchema`, harness `claude` → `claude-code`). A former runtime name becomes the current one
+(M7). Live member unlocks, the install hold/skip prefs, the upgrade backups and the runtime skill folders under
+`fleet/assets/skills/` (the Runtimes asset tree, whose v5 place is not declared yet) are listed in `notCarried`.
 
 MCP (`src/steps/mcp.ts`): `mcp-oauth.json` → `state/mcp/oauth.json`, envelope only (`v` → `format`); the records are
 the same in both. The access tokens are vault secrets kept by name (the Vault step). The sealed

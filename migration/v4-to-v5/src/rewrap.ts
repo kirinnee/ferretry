@@ -19,12 +19,14 @@ export interface RewrapSpec<Shape> {
   readonly stamped: boolean;
   /** The v5 schema the result must pass, from the owner's contract. */
   readonly schema: z.ZodType<Shape>;
+  /** `false`: check the envelope and the v5 schema only, write nothing (a dry run). Defaults to `true`. */
+  readonly write?: boolean;
 }
 
 export interface Rewrapped {
   readonly to: string;
   readonly entries: number;
-  /** The entry NAMES moved (a name is not its value), so a step can check them against the index that names them. */
+  /** The entry NAMES (a secret's name or a link id, never a value), for joins with the owner's other files. */
   readonly names: readonly string[];
 }
 
@@ -70,7 +72,9 @@ export async function rewrapSealed<Shape>(from: string, to: string, spec: Rewrap
     const where = result.error.issues.map(issue => issue.path.join('.')).join(', ');
     throw new SealedEnvelopeError(`${from} does not fit the v5 schema at: ${where || '(root)'}`);
   }
+  const names = Object.keys(copied);
+  if (spec.write === false) return { to, entries: names.length, names };
   await mkdir(dirname(to), { recursive: true, mode: 0o700 });
   await writeFile(to, `${JSON.stringify(result.data, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-  return { to, entries: Object.keys(copied).length, names: Object.keys(copied) };
+  return { to, entries: names.length, names };
 }
