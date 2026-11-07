@@ -7,6 +7,7 @@ import { chmod, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import type { DaemonImplementation } from '../manifest/implement.ts';
 import { toolEnvironment } from './adapters/process.ts';
+import { answerArguments, EXIT_USAGE } from './arguments.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
 import { bootHost } from './host.ts';
 import { parseBackgroundDelay } from './jobs.ts';
@@ -24,17 +25,26 @@ const DEFAULT_PORT = 7457;
 /** The client's binary name: the `bin` key of `packages/cli/package.json` (see `binaries.ts`), unless the operator names it. */
 const BINARY = process.env.FY_BINARY_NAME ?? PRODUCT_BINARIES.client;
 
-function argument(name: string): string | undefined {
-  const index = process.argv.indexOf(name);
-  return index === -1 ? undefined : process.argv[index + 1];
-}
-
 async function main(): Promise<number> {
+  // The command line is answered BEFORE anything with a side effect: a query (--version, --help) stays a query.
+  const usage = { daemonName: PRODUCT_BINARIES.daemon, clientName: BINARY, version: VERSION };
+  const answer = answerArguments(process.argv.slice(2), usage);
+  if (answer.kind === 'print' || answer.kind === 'refuse') {
+    (answer.kind === 'print' ? process.stdout : process.stderr).write(`${answer.text}\n`);
+    return answer.exitCode;
+  }
+  const { configFile, host: hostOverride, logLevel } = answer.overrides;
+  const unserved = [answer.kind !== 'boot' && `--${answer.kind}`, configFile !== undefined && '--config',
+    hostOverride !== undefined && '--host', logLevel !== undefined && '--log-level'].filter(Boolean);
+  if (unserved.length > 0) {
+    process.stderr.write(`${usage.daemonName}: ${unserved.join(', ')} is not served by this daemon yet.\n`);
+    return EXIT_USAGE;
+  }
   const home = (process.env.FY_HOME ?? `${homedir()}/.ferretry`).replace(/\/+$/, '');
-  const port = Number(argument('--port') ?? process.env.FY_PORT ?? DEFAULT_PORT);
+  const port = answer.overrides.port ?? Number(process.env.FY_PORT ?? DEFAULT_PORT);
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    process.stderr.write(`fyd: --port ${port} is not a port number.\n`);
-    return 64;
+    process.stderr.write(`${usage.daemonName}: FY_PORT ${String(port)} is not a port number.\n`);
+    return EXIT_USAGE;
   }
   // Nothing is written before the home is decided (§9.3): until boot creates `logs/`, a line is dropped.
   const sink = fileLogSink(line => {
