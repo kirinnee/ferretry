@@ -1,5 +1,6 @@
 import type { AskAnswer, AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretsApi, SitrepLine } from '@ferretry/core-ferrets/contract';
+import type { FerretsApi, FerretStartedPayload, SitrepLine } from '@ferretry/core-ferrets/contract';
+import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { type ConfigFileDef, type KernelPorts, type StateFileDef } from '@ferretry/kernel/contract';
 import {
   type BoardChangedEvent,
@@ -12,11 +13,13 @@ import {
   type CardView,
   type CountersFileSchema,
   type FocusFile,
+  parseGateReference,
   type SweepFile,
 } from '../contract/index.ts';
 import type { z } from 'zod';
 import {
   AsksCardObligations,
+  CARD_SOURCE,
   gateAnswerOf,
   AsksFerretReader,
   AsksOptIn,
@@ -35,7 +38,7 @@ import {
   UsedProjects,
   AsksLaneProposals,
 } from './adapters/lanes/index.ts';
-import { HeldMessages } from './adapters/messages.ts';
+import { ConversationMessages } from './adapters/messages.ts';
 import { KernelFerretFocus } from './adapters/store/focus-store.ts';
 import { KernelCardStore } from './adapters/store/card-store.ts';
 import { KernelSweepMemory } from './adapters/store/sweep-memory.ts';
@@ -62,6 +65,11 @@ import {
   BoardIndex,
   stillBuilding,
   ownerDelegation,
+  BoardGateCheck,
+  BoardTurnCheck,
+  FerretCards,
+  type GateCheckItem,
+  type TranscriptEvent,
 } from './lib/board/index.ts';
 import { githubWatchJob, type GithubWatch } from './lib/github/index.ts';
 import {
@@ -93,13 +101,12 @@ export interface BoardWiringNeeds {
   readonly asks: AsksApi;
   readonly ferrets: FerretsApi;
   readonly projects: () => import('@ferretry/plugin-projects/contract').ProjectsApi | undefined;
-  /** Decides `card.moving`: the first no wins. */
-  readonly moving: (input: {
-    card: CardId;
-    from: string;
-    to: string;
-    by: unknown;
-  }) => Promise<{ allow: true } | { allow: false; reason: string }>;
+  /** Conversation, when it is on (optional `uses`, D2 #12): Board's messages, alerts and transcript reads go through it. */
+  readonly conversation: () => ConversationApi | undefined;
+  /** Decides `card.moving` inside every lane change's write, by any path: the first no wins. */
+  readonly moving: NonNullable<import('./lib/board/index.ts').BoardServiceDependencies['moving']>;
+  /** Publishes `board.card-moved` once a lane change landed. */
+  readonly moved: NonNullable<import('./lib/board/index.ts').BoardServiceDependencies['moved']>;
   readonly product: string;
   readonly version: string;
   readonly defs: BoardDefs;
@@ -125,21 +132,37 @@ export interface BoardWorld {
   readonly liveness: FerretsLiveness;
   readonly parents: FerretsParents;
   readonly watchEnabled: () => boolean;
-  readonly watchEvery: () => number;
   readonly gateReconcile: () => Promise<void>;
   readonly applyAnswer: (answer: AskAnswer) => Promise<'applied' | { readonly refused: string }>;
   readonly sweepTick: () => Promise<void>;
   readonly lines: (ferret: string) => Promise<readonly SitrepLine[]>;
   readonly heldBy: (ferret: string) => Promise<readonly CardView[]>;
+  /** `turn.ended` (Conversation): the turn-end check and the gate check, each failure said, never thrown. */
+  readonly turnEnded: (ferret: string) => Promise<void>;
+  /** `ferret.started` (Ferrets): the started ferret's card (today's `SessionCards`). Never rejects. */
+  readonly ferretStarted: (started: FerretStartedPayload) => Promise<void>;
 }
 
-/** This daemon has no machine identity port yet (GAP); every card is stamped as made here. */
-export const LOCAL_MACHINE = 'local';
+/**
+ * The machine a card is made on: the daemon's id from the kernel's read-only identity port {daemonId, daemonName}
+ * (lead decisions DECISIONS-1 #1, D2 #13; today's `attachmentDaemonId`). GAP: that port is the kernel porter's and is
+ * not on 5.0 yet, so until it merges this reads nothing — and a card is then refused ("the daemon identity is not
+ * open yet") rather than stamped with a made-up id that a stored card would keep for good. Board stays in
+ * `ports-pending.json` until it lands.
+ */
+export const machineIdOf = (kernel: KernelPorts): string | undefined => {
+  const identity = (kernel as KernelPorts & { readonly identity?: { readonly daemonId?: unknown } }).identity;
+  return typeof identity?.daemonId === 'string' && identity.daemonId !== '' ? identity.daemonId : undefined;
+};
 
 const KEPT_START_KEYS = 256;
 
+/** The labels of the ferrets the daemon starts for itself (today's `ordinaryFerret`): no card is made for them. */
+const DAEMON_WORKER_LABELS: ReadonlySet<string> = new Set(['ferretry-learning', 'ferretry-guide-builder']);
+
 export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   const { kernel, asks, ferrets, defs } = needs;
+  const machineId = (): string | undefined => machineIdOf(kernel);
   const diagnostics = { warn: (message: string): void => kernel.log.warn(message) };
   const clock = { now: (): string => kernel.clock.now() as string };
   const serial = new KeyedSerial();
@@ -203,8 +226,8 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
   });
   const boards = new FerretBoardResolver(facts, ferretProjects, adoption);
 
-  // ── talking to ferrets: held until Conversation is reachable (see messages.ts) ────────────────────────────────
-  const messages = new HeldMessages(diagnostics);
+  // ── talking to ferrets: through Conversation when it is on, held with a warning when it is off (messages.ts) ───
+  const messages = new ConversationMessages(needs.conversation, ferrets, helpers, diagnostics);
   const reopen: ReopenNotifier = new ReopenDeliveryLadder(messages, diagnostics);
   const done: DoneNotifier = new DoneDeliveryLadder(messages, diagnostics);
 
@@ -242,13 +265,15 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     },
     clock,
     diagnostics,
-    machineId: () => LOCAL_MACHINE,
+    machineId,
     serial,
     adoption: { adopt: async (ferret, proposed) => await adoption.adopt(ferret, proposed) },
     helpers,
     optIn,
     threads: new AsksThreads(asks),
     gates: { written: async id => await gateItems?.written(id) },
+    moving: needs.moving,
+    moved: needs.moved,
   });
   board = service;
 
@@ -257,7 +282,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     const response = await service.card(stored.id);
     const name = (await lanes.project(stored.projectId))?.name;
     const snapshot = await service.snapshot();
-    const index = new BoardIndex(snapshot.cards, LOCAL_MACHINE);
+    const index = new BoardIndex(snapshot.cards, machineId() ?? '');
     return {
       task: stored,
       laneSet: response.laneSet,
@@ -346,20 +371,22 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     return (seed - 1) / 2147483646;
   };
   const roster = async (): Promise<FerretRoster> => await liveness.roster();
+  // ONE working-copies instance for the refile and the watcher, so a refile inside a tick reuses that tick's answers.
+  const workingCopies = new GitSpawnCopies(kernel.spawn, kernel.clock);
   const watch = githubWatchJob({
     alerts: {
       mode: async ferret => await messages.mode(ferret),
-      send: async ferret => {
-        throw new Error(`a board alert for ${ferret} was held: Board cannot reach Conversation on this daemon`);
+      send: async (ferret, message) => {
+        await messages.send(ferret, message, `board-alert-${kernel.ids.mint('alert')}`);
       },
-      withheld: async () => undefined,
+      withheld: async (ferret, message) => await messages.withheld(ferret, message),
     },
     surface: {
       snapshot: async () => await service.snapshot(),
       note: async (card, text) => {
         await service.act(card, { action: 'note', text }, { kind: 'daemon' });
       },
-      machineId: () => LOCAL_MACHINE,
+      machineId,
     },
     roster,
     helpers,
@@ -381,7 +408,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
             path: project.path,
           })) as never,
       },
-      copies: new GitSpawnCopies(kernel.spawn, kernel.clock),
+      copies: workingCopies,
       clock,
       diagnostics,
     },
@@ -391,8 +418,8 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
         recordPullRequests: async (id, update) => await service.recordPullRequests(id, update),
         act: async (id, request, caller) => await service.act(id, request, caller),
       },
-      gh: new GhSpawnRunner(kernel.spawn),
-      copies: new GitSpawnCopies(kernel.spawn, kernel.clock),
+      gh: new GhSpawnRunner(kernel.spawn, kernel.clock),
+      copies: workingCopies,
       sessions: {
         cwdOf: async ferret => (await ferrets.get(ferret as never))?.folder ?? null,
       },
@@ -425,6 +452,120 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     diagnostics,
   });
 
+  // ── the turn-end checks (Conversation's `turn.ended`; today's fyd.ts:10727-10783) ─────────────────────────────
+  const tailEvents = async (ferret: string, limit: number): Promise<readonly TranscriptEvent[]> => {
+    const read = await messages.tail(ferret, limit);
+    return read.kind === 'read' ? read.events : [];
+  };
+  const boardOn = async (ferret: string): Promise<boolean> => await switches.isOn(await lanes.projectOf(ferret));
+  const readable = async (): Promise<boolean> => needs.conversation() !== undefined;
+  const checkSend = async (ferret: string, sendId: string, message: string): Promise<void> => {
+    await messages.send(ferret, message, sendId);
+  };
+  const turnCheck = new BoardTurnCheck(
+    {
+      readable,
+      boardOn,
+      tail: tailEvents,
+      focus: {
+        focusOf: async ferret => await focus.focusOf(ferret),
+        skipOf: async ferret => await focus.skipOf(ferret),
+      },
+      card: async ref => await service.card(ref.id),
+      send: checkSend,
+      // GAP: Conversation offers no journal write, so the nudge is logged, not journalled on the ferret.
+      record: async (ferret, seen) => kernel.log.info(`board check nudged ${ferret} after: ${seen.join(', ')}`),
+      now: () => kernel.clock.nowMs(),
+    },
+    'fy',
+  );
+  const gateCheck = new BoardGateCheck(
+    {
+      readable,
+      boardOn,
+      tail: tailEvents,
+      // GAP: Asks' summary carries no card for a ferret's own ask, so a duplicate of a card's gate ask is not found.
+      open: async ferret =>
+        (await asks.open({ ferret: ferret as never, state: 'open' })).map(
+          (ask): GateCheckItem => ({
+            id: ask.id,
+            raisedBy: ask.raisedBy.kind === 'owner' ? 'human' : ask.raisedBy.kind === 'ferret' ? 'agent' : 'daemon',
+            card: null,
+            waitingSince: ask.raisedAt,
+            notice: ask.kind === 'notice',
+            gateOf:
+              ask.source === CARD_SOURCE
+                ? [parseGateReference(ask.entry)?.cardId].flatMap(id => (id === undefined ? [] : [id]))
+                : [],
+          }),
+        ),
+      card: async ref => await service.card(ref.id),
+      send: checkSend,
+      record: async (ferret, items) => kernel.log.info(`board gate check told ${ferret} about ${items.join(', ')}`),
+    },
+    'fy',
+  );
+  const turnEnded = async (ferret: string): Promise<void> => {
+    for (const [name, check] of [
+      ['turn', turnCheck],
+      ['gate', gateCheck],
+    ] as const)
+      await check
+        .check(ferret)
+        .catch((error: unknown) => diagnostics.warn(`the board ${name} check of ${ferret} failed: ${String(error)}`));
+  };
+
+  // ── a started ferret's card (Ferrets' `ferret.started`; today's SessionCards) ───────────────────────────────
+  const ferretCards = new FerretCards({
+    board: service,
+    lanes,
+    starts: {
+      projectForStart: async start =>
+        await ferretProjects.projectForStart({
+          folder: start.cwd,
+          ...(start.parent === undefined ? {} : { parent: start.parent }),
+        }),
+    },
+    switches,
+    proposer,
+    adoption,
+    projects: { nameOf: async project => (await lanes.project(project))?.name ?? project },
+    focus,
+    diagnostics,
+    bin: 'fy',
+  });
+  const ferretStarted = async (started: FerretStartedPayload): Promise<void> => {
+    // The board's own start assigned its card already; a daemon worker (a learning miner, a guide builder) is not work
+    // on a board. GAP: a warden's lineage is not in the payload, so a warden's helper is not told apart.
+    if (started.by === 'board' || (started.label !== undefined && DAEMON_WORKER_LABELS.has(started.label))) return;
+    try {
+      if (started.card !== undefined) {
+        // `--card`: handed over, or the ferret is stopped with the reason (today refused it before the launch; the
+        // observe hook runs once the record is written, so the stop comes just after).
+        const stop = async (reason: string): Promise<void> => {
+          diagnostics.warn(`stopping ${started.ferret}: ${reason}`);
+          await ferrets.stop(started.ferret, 'now', reason);
+        };
+        const handed = await ferretCards.startOn(started.parent, started.card as CardId);
+        if (handed.delegation === undefined)
+          return await stop(handed.refusal ?? `card ${started.card} cannot be handed over`);
+        await ferretCards.takeOver(handed.delegation, started.ferret, stop);
+        return;
+      }
+      if (started.brief === undefined) return;
+      const opened = await ferretCards.open({
+        ferret: started.ferret,
+        name: started.name,
+        brief: started.brief,
+        parent: started.parent,
+        ...(started.by === 'pack' ? { viaPack: true as const } : {}),
+      });
+      for (const note of opened.notes) kernel.log.info(`${started.ferret}: ${note}`);
+    } catch (error) {
+      diagnostics.warn(`the card of ${started.ferret} could not be made: ${String(error)}`);
+    }
+  };
+
   /**
    * Asks calls this BEFORE it records the answer (#1552: the card moves first): a refusal leaves the ask open and is the
    * sentence the owner is told. A replay finds the card gone from that gate and moves nothing.
@@ -433,7 +574,9 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     const shaped = await gateAnswerOf(asks, answer);
     if (shaped === undefined) return { refused: 'that question can no longer be read, so nothing was moved' };
     const outcome = await gates.answer(shaped);
-    if (!outcome.handled || 'applied' in outcome) return 'applied';
+    // An answer to a `card` entry that is not a gate's moved nothing: it is refused, so Asks keeps the ask open.
+    if (!outcome.handled) return { refused: 'that question is not a card’s gate, so nothing was moved' };
+    if ('applied' in outcome) return 'applied';
     return { refused: outcome.refused.message };
   };
 
@@ -455,7 +598,6 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     liveness,
     parents,
     watchEnabled: () => kernel.config.file(defs.config)?.github.watch ?? true,
-    watchEvery: () => (kernel.config.file(defs.config)?.github.pollSeconds ?? 60) * 1000,
     gateReconcile: async () => {
       await gates.backfill();
     },
@@ -471,5 +613,7 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
         ref: `&${card.id}`,
       })),
     heldBy,
+    turnEnded,
+    ferretStarted,
   };
 };

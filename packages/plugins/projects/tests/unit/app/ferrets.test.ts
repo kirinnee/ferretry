@@ -37,10 +37,11 @@ describe('project detail model', () => {
 });
 
 describe('projectLaunchRequest', () => {
-  test('builds a start rooted in the project folder', () => {
+  test('builds an interactive start rooted in the project folder', () => {
     expect(projectLaunchRequest('claude-code', '/work/ferretry')).toEqual({
       runtime: 'claude-code',
       folder: '/work/ferretry',
+      mode: 'interactive',
     });
   });
 

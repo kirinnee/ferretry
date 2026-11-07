@@ -33,11 +33,13 @@ export const StartedFerretSchema = z.looseObject({ id: z.string().min(1) });
 export const LaunchRequestSchema = z.strictObject({
   runtime: z.string().trim().min(1),
   folder: z.string().min(1),
+  /** Today's project start is the owner's terminal: interactive, never an autonomous ferret with no prompt. */
+  mode: z.literal('interactive'),
 });
 export type LaunchRequest = z.infer<typeof LaunchRequestSchema>;
 
 export const projectLaunchRequest = (runtime: string, folder: string): LaunchRequest =>
-  LaunchRequestSchema.parse({ runtime, folder });
+  LaunchRequestSchema.parse({ runtime, folder, mode: 'interactive' });
 
 export const startFerret = async (client: ProjectsClient, request: LaunchRequest) =>
   StartedFerretSchema.parse(await client.call(FERRETS_START_ROUTE, { body: request }));

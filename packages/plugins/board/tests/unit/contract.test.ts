@@ -40,9 +40,10 @@ describe('board wire schemas', () => {
   test('a create request defaults to the quick workflow and no parent; old fields are refused', () => {
     const parsed = CardCreateRequestSchema.parse({ kind: 'bug', title: 't', ask: { text: 'a', source: 's' } });
     expect([parsed.workflow, parsed.parent, parsed.visibility]).toEqual(['quick', null, undefined]);
-    expect(CardCreateRequestSchema.safeParse({ kind: 'bug', title: 't', ask: { text: 'a', source: 's' }, legacyRef: 'x:B1' }).success).toBe(
-      false,
-    );
+    expect(
+      CardCreateRequestSchema.safeParse({ kind: 'bug', title: 't', ask: { text: 'a', source: 's' }, legacyRef: 'x:B1' })
+        .success,
+    ).toBe(false);
   });
   test('lane edits carry the version they read', () => {
     expect(LaneSetActionRequestSchema.safeParse({ action: 'confirm', version: 2 }).success).toBe(true);
@@ -50,7 +51,7 @@ describe('board wire schemas', () => {
   });
   test('the config defaults the GitHub watch on', () => {
     expect(BoardConfigSchema.parse({})).toEqual({
-      github: { watch: true, pollSeconds: 60 },
+      github: { watch: true },
       projectRoots: ['~/Workspace', '~/.config'],
     });
   });

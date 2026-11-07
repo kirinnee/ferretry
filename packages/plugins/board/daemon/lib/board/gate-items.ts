@@ -11,9 +11,12 @@
  * - **Leaving.** A card no longer at that gate (moved on by the owner on the Board, dropped, refiled) has its open ask
  *   withdrawn quietly. A try-it gate whose card is blocked takes its ask back until it is unblocked.
  * - **Answering** ({@link GateItems.answer}): only a human, through Asks' own answer route (which Gate admitted). Asks
- *   records the answer and announces it (`asks.answered`); this applies it BY ANSWER ID, once: the card moves FIRST, as
- *   the owner, through the board, expecting to find it at that gate by that entry, so a replayed answer finds the card
- *   gone and moves nothing. The ferret is then told.
+ *   calls the source's `apply` BEFORE it records the answer (#1552); this applies it BY ANSWER ID, once: the card moves
+ *   FIRST, as the owner, through the board, expecting to find it at that gate by that entry, so a replayed answer finds
+ *   the card gone and moves nothing. The ferret is then told. Asks runs `apply` inside that ferret's own turn of
+ *   writes, so NOTHING here closes or raises an ask while an answer is being applied (that would wait on the turn that
+ *   waits on it): an applied answer is reconciled once Asks has recorded it ({@link GateItems.recorded}, from
+ *   `asks.answered`), and a refused one only after `apply` has returned.
  *
  * An internal card (its lead's bookkeeping) never asks: its owner ferret or a lead passes its gate itself. Nor does a
  * sub-card at a lane the owner tries things in: the owner tests the parent.
@@ -257,7 +260,10 @@ export class GateItems implements CardWriteObserver {
     const card = await this.ports.board.card(cardId);
     const here = card === undefined ? undefined : gateOf(card, this.ports.lanes);
     if (card === undefined || here === undefined || gateReference(here) !== answer.entry) {
-      await this.ports.obligations.withdraw(answer.entry, 'withdrawn').catch(() => undefined);
+      // The ask is still open (the refusal leaves it so) and Asks is inside its turn: it is taken back once that ends.
+      this.afterward(`the ask ${answer.entry}`, async () => {
+        await this.ports.obligations.withdraw(answer.entry, 'withdrawn');
+      });
       return refused(
         'moved-on',
         `${formatCardRef({ id: cardId })} is no longer at that question, so nothing was moved`,
@@ -268,16 +274,43 @@ export class GateItems implements CardWriteObserver {
     const unfit = this.filesRefusal(answer, decision);
     if (unfit !== undefined) return { handled: true, refused: unfit };
     this.answering.add(card.task.id);
+    let applied = false;
     try {
       const failed = await this.apply(card, here, decision, answer);
       if (failed !== undefined) return { handled: true, refused: failed };
       this.applied.add(answer.answerId);
+      applied = true;
       if (decision.kind === 'option') await this.tellAnswered(card.task, here, decision, answer);
       return { handled: true, applied: true };
     } finally {
       this.answering.delete(card.task.id);
-      await this.written(card.task.id);
+      // Never reconciled here: the ask being answered is still open in Asks, and withdrawing it would wait on the very
+      // turn this answer runs in. An applied answer is reconciled from `asks.answered` (`recorded`); a refused one,
+      // whose writes from other paths were set aside meanwhile, once Asks has finished with it.
+      if (!applied)
+        this.afterward(`the ask of ${formatCardRef(card.task)}`, async () => await this.written(card.task.id));
     }
+  }
+
+  /**
+   * Asks has recorded an answer to `entry` (`asks.answered`): the card's asks follow it now that the answered one is
+   * no longer open. Never rejects.
+   */
+  async recorded(entry: string): Promise<void> {
+    const reference = parseGateReference(entry);
+    if (reference !== undefined) await this.written(reference.cardId);
+  }
+
+  /**
+   * Work that must wait until Asks has finished the answer being applied: started now but never awaited by
+   * {@link answer}, so an ask it closes queues behind that answer's turn instead of waiting on it.
+   */
+  private afterward(what: string, work: () => Promise<void>): void {
+    void Promise.resolve()
+      .then(work)
+      .catch((error: unknown) =>
+        this.ports.diagnostics.warn(`${what} could not follow the answer: ${errorText(error)}`),
+      );
   }
 
   /** Brings one card's ask in line with its lane, one pass per card at a time; `true` when it raised a new ask. */

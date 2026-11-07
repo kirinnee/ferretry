@@ -1234,9 +1234,7 @@ export const GithubFileSchema = z.strictObject({
 
 /** `config/board.yaml`: the GitHub watch. Nothing here widens authority or spend. */
 export const BoardConfigSchema = z.strictObject({
-  github: z
-    .strictObject({ watch: z.boolean().default(true), pollSeconds: z.number().int().min(15).default(60) })
-    .default({ watch: true, pollSeconds: 60 }),
+  github: z.strictObject({ watch: z.boolean().default(true) }).default({ watch: true }),
   /**
    * The folders a ferret's repository is registered from when its first card is made on the Unfiled board
    * (`~` is the home folder). A repository outside every one of them stays Unfiled.

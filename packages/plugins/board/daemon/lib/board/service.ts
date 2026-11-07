@@ -87,6 +87,7 @@ import type {
   BoardSnapshot,
   BoardStore,
   BoardThreads,
+  BoardWrite,
   DoneNotice,
   DoneNotifier,
   LaneSetSource,
@@ -154,6 +155,24 @@ export interface BoardServiceDependencies {
    * follow the card's lane from here. Total in spirit: a failure is a diagnostic, never the write's.
    */
   readonly gates?: CardWriteObserver;
+  /**
+   * `card.moving` (the decide hook Board offers): asked inside the write of EVERY lane change, whatever made it — an
+   * act, a gate answer, a trigger, the watcher, a refile, the sweep, a close — so a no leaves the card where it is.
+   * Absent, every move is allowed.
+   */
+  readonly moving?: (
+    input: CardMoveInput,
+  ) => Promise<{ readonly allow: true } | { readonly allow: false; readonly reason: string }>;
+  /** Told once a lane change landed (`board.card-moved`). Total in spirit: never fails the write. */
+  readonly moved?: (input: Omit<CardMoveInput, 'by'>) => void;
+}
+
+/** One lane change, as `card.moving` is asked about it: the card, the lanes and who moves it. */
+export interface CardMoveInput {
+  readonly card: CardId;
+  readonly from: string;
+  readonly to: string;
+  readonly by: CardActor;
 }
 
 /** What follows a card's lane after each write: the gate items (`GateItems`). */
@@ -312,6 +331,34 @@ const subFerretDoing = (request: CardActionRequest): string => SUB_FERRET_DOING[
 export class BoardService {
   constructor(private readonly ports: BoardServiceDependencies) {}
 
+  /**
+   * THE one write of a card: the store's read-decide-write, with `card.moving` asked of any lane change inside it (a
+   * no refuses the write in words, nothing stored) and `board.card-moved` told once it landed.
+   */
+  private async write<T>(id: CardId, decide: (current: Card | undefined) => Promise<BoardWrite<T>>): Promise<T> {
+    let landed: Omit<CardMoveInput, 'by'> | undefined;
+    const result = await this.ports.store.write(id, async current => {
+      const decision = await decide(current);
+      const next = decision.task;
+      landed = undefined;
+      if (next === null || current === undefined || next.laneId === current.laneId) return decision;
+      const move = { card: id, from: current.laneId, to: next.laneId };
+      const by = next.history.at(-1)?.actor ?? { kind: 'daemon' as const };
+      const verdict = (await this.ports.moving?.({ ...move, by })) ?? { allow: true as const };
+      if (!verdict.allow) throw new BoardError('forbidden', verdict.reason);
+      landed = move;
+      return decision;
+    });
+    if (landed !== undefined) {
+      try {
+        this.ports.moved?.(landed);
+      } catch (error) {
+        this.ports.diagnostics.warn(`board: the move of ${id} could not be announced: ${String(error)}`);
+      }
+    }
+    return result;
+  }
+
   // -------------------------------------------------------------------------------------------------
   // Reads
   // -------------------------------------------------------------------------------------------------
@@ -367,7 +414,7 @@ export class BoardService {
    */
   async closeEndedHelper(id: CardId): Promise<boolean> {
     const caller: BoardCaller = { kind: 'daemon' };
-    const closed = await this.ports.store.write(id, async current => {
+    const closed = await this.write(id, async current => {
       if (current === undefined) return { task: null, result: null };
       const context = await this.context(current, caller);
       const reason = helperCloseReason(current, context.laneSet);
@@ -393,7 +440,7 @@ export class BoardService {
     reason: string,
   ): Promise<boolean> {
     const caller: BoardCaller = { kind: 'daemon' };
-    const closed = await this.ports.store.write(id, async current => {
+    const closed = await this.write(id, async current => {
       if (current === undefined) return { task: null, result: null };
       if (current.laneId !== expect.laneId || gateEntry(current) !== expect.entry) return { task: null, result: null };
       const context = await this.context(current, caller);
@@ -434,7 +481,7 @@ export class BoardService {
     const caller: BoardCaller = { kind: 'daemon' };
     const returned = await settle(
       async fresh =>
-        await this.ports.store.write(id, async current => {
+        await this.write(id, async current => {
           if (current === undefined || current.dropped !== null || effectiveAssignee(current) !== plan.from) {
             return { task: null, result: null };
           }
@@ -618,7 +665,7 @@ export class BoardService {
     doing: string,
     held: CardHolders,
   ): Promise<Card> {
-    return await this.ports.store.write(id, async current => {
+    return await this.write(id, async current => {
       const card = this.requireCard(current, id);
       // The caller's authority survives a change of assignee (a lead keeps the card it owns, the owner has it always), so
       // authority alone cannot tell a second start from the first: the card must still be held as the start judged it.
@@ -715,7 +762,7 @@ export class BoardService {
       throw new BoardError('invalid', 'focus is for a ferret: it names the card its session works on');
     }
     const write = async (hold?: AdoptionHold) =>
-      await this.ports.store.write(id, async current => {
+      await this.write(id, async current => {
         const card = this.requireCard(current, id);
         if (expect !== undefined && (card.laneId !== expect.laneId || gateEntry(card) !== expect.entry)) {
           throw new BoardError('invalid', `${formatCardRef(card)} has moved on from the gate the answer was about`);
@@ -773,7 +820,7 @@ export class BoardService {
   ): Promise<CardResponse | null> {
     const caller: BoardCaller =
       options.ferret === undefined ? { kind: 'daemon' } : { kind: 'daemon', ferret: options.ferret };
-    const moved = await this.ports.store.write(id, async current => {
+    const moved = await this.write(id, async current => {
       const card = this.requireCard(current, id);
       const context = await this.context(card, caller);
       const next = triggerMove(card, trigger, options.reason, context);
@@ -791,7 +838,7 @@ export class BoardService {
    */
   async recordPullRequests(id: CardId, update: PrUpdate): Promise<PrUpdateOutcome> {
     const caller: BoardCaller = { kind: 'daemon' };
-    const outcome = await this.ports.store.write(id, async current => {
+    const outcome = await this.write(id, async current => {
       const card = this.requireCard(current, id);
       const applied = applyPrUpdate(card, update, await this.context(card, caller));
       const task = applied.task === null ? null : requireValidCard(applied.task);
@@ -829,7 +876,7 @@ export class BoardService {
     });
     const moved: CardId[] = [];
     for (const { id } of pending) {
-      const task = await this.ports.store.write(id, async current => {
+      const task = await this.write(id, async current => {
         const to = current === undefined || current.projectId !== projectId ? undefined : moves[current.laneId];
         if (current === undefined || to === undefined || to === current.laneId) return { task: null, result: null };
         const next = withEvent(
@@ -944,7 +991,7 @@ export class BoardService {
       ...(facts.approval === undefined ? {} : { approval: facts.approval }),
     });
     const persist = async (ready: Card): Promise<Card> => {
-      await this.ports.store.write(id, async current => {
+      await this.write(id, async current => {
         if (current !== undefined)
           throw new BoardUnavailableError(`the counter issued ${id}, which a card already holds`);
         return { task: ready, result: undefined };
@@ -1165,6 +1212,11 @@ export class BoardService {
 
   /** Who asked for the card, or an unavailable board when that cannot be read: a guess here would hide a card for good. */
   private async settledAskedBy(card: Pick<Card, 'createdBy' | 'ask'>, ownerApp: boolean) {
+    // GAP (F-0001): this daemon has no owner-words read yet — today's reads the queue, the send ledger AND who wrote each
+    // turn (`turn-NNN.by.json`), and Conversation's contract offers no read of a turn's author (the additive read it
+    // needs: the owner's words of each turn of a ferret). Until it does, a private choice is judged as every other
+    // request is (the lenient read), never refused as an unavailable board.
+    if (this.ports.ownerWords === undefined) return await this.askedByOf(card, ownerApp, { lenient: true });
     try {
       return await this.askedByOf(card, ownerApp, { strict: true });
     } catch (error) {

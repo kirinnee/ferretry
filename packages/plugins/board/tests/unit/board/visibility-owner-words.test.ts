@@ -9,7 +9,16 @@ const OWNER_SAID = 'Build a board that shows only the work the owner asked for';
 const ask = { text: OWNER_SAID, source: `session:${SESSION}` };
 const lead = { kind: 'ferret', ferret: SESSION } as const;
 /** What the ferret's owner-words read can fail on: the adapter reads the queue, the ledger, the lineage and the turn files. */
-const failures = ['queue', 'ledger', 'lineage', 'directory-stat', 'directory-list', 'turn-stat', 'turn-read', 'author'] as const;
+const failures = [
+  'queue',
+  'ledger',
+  'lineage',
+  'directory-stat',
+  'directory-list',
+  'turn-stat',
+  'turn-read',
+  'author',
+] as const;
 type Failure = (typeof failures)[number];
 
 /** An OwnerWords port that fails while broken, whichever read failed; recovery just restores readability. */
@@ -82,17 +91,27 @@ describe('strict private choices through SessionOwnerWords', () => {
       });
     }
   }
+});
 
-  it('should refuse an explicit private choice when the OwnerWords port is absent', async () => {
-    // Arrange
-    const ports = world();
+describe('F-0001 GAP: a daemon with no owner-words read', () => {
+  it('should let a ferret make its own card private, judged on the card as stored, instead of refusing the board', async () => {
+    // Arrange: no OwnerWords port at all (Conversation offers no turn-author read yet)
+    const stored = card({ ask, askedBy: 'agent', visibility: 'public', visibilitySource: 'chosen' });
+    const ports = world({ store: new MemoryBoardStore([stored]) });
     const subject = new BoardService(ports);
 
-    // Act + Assert
-    await subject.create(request('private'), lead).then(
-      () => should.fail(undefined, undefined, 'missing owner words authorized private'),
-      (error: unknown) => should(error).be.instanceOf(BoardUnavailableError),
-    );
-    should(ports.store.cards.size).equal(0);
+    // Act
+    const changed = await subject.act(stored.id, { action: 'visibility', visibility: 'private' }, lead);
+
+    // Assert
+    should(changed.card.visibility).equal('private');
+  });
+
+  it('should make a ferret’s new private card without asking for owner words it cannot read', async () => {
+    const subject = new BoardService(world({ store: new MemoryBoardStore([]) }));
+
+    const made = await subject.create(request('private'), lead);
+
+    should(made.card.visibility).equal('private');
   });
 });

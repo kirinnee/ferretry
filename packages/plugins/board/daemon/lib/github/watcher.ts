@@ -41,6 +41,7 @@ import {
   cardCategory,
   isLinkable,
   isWatched,
+  jittered,
   MAX_COMPARES_PER_TICK,
   MAX_REPOSITORIES_PER_TICK,
   needsPoll,
@@ -49,6 +50,8 @@ import {
   prKey,
   repoKey,
   SHARED_BRANCHES,
+  WATCH_FIRST_TICK_MS,
+  WATCH_TICK_MS,
 } from './plan.ts';
 import type {
   GhOutcome,
@@ -64,6 +67,9 @@ import { parseRepositoryAnswer, pollArguments, type RepositoryAnswer, type Repos
 import { compareArguments, MAX_COMPARES_PER_PR, releaseCandidates, releasedIn, tagContains } from './releases.ts';
 import { createdPrUrls, TRANSCRIPT_EVENTS_SCANNED } from './transcript.ts';
 import { type ProjectRemote, readProjectRemotes, type UnfiledRefiler } from './unfiled.ts';
+
+/** Waits `ms` on the kernel clock; rejects once `signal` aborts. */
+export type WatchSleep = (ms: number, signal: AbortSignal) => Promise<void>;
 
 export interface GitHubWatcherPorts {
   readonly board: WatchedBoard;
@@ -131,6 +137,26 @@ export class GitHubWatcher {
 
   private get stopped(): boolean {
     return this.aborting?.aborted === true;
+  }
+
+  /**
+   * The watch, as one long run of its job: a first tick {@link WATCH_FIRST_TICK_MS} after start, then one every
+   * {@link WATCH_TICK_MS}, each delay jittered and each waited AFTER the last tick has finished, so two never overlap.
+   * Returns once `signal` aborts: no tick starts after it, and one already running writes nothing more.
+   */
+  async watch(signal: AbortSignal, sleep: WatchSleep): Promise<void> {
+    let delay = jittered(WATCH_FIRST_TICK_MS, this.ports.clock.random());
+    while (!signal.aborted) {
+      try {
+        await sleep(delay, signal);
+      } catch (error) {
+        if (signal.aborted) return;
+        throw error;
+      }
+      if (signal.aborted) return;
+      await this.run(signal);
+      delay = jittered(WATCH_TICK_MS, this.ports.clock.random());
+    }
   }
 
   /**

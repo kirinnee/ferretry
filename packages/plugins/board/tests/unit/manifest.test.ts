@@ -24,10 +24,17 @@ describe('board manifest', () => {
       expect(person.has(key)).toBe(true);
     expect([...person].filter(key => key.includes('/plans'))).toEqual([]);
   });
-  test('it takes the card ask source, start.decide and sitrep.lines, and offers card.moving', () => {
-    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['ask.sources', 'start.decide', 'sitrep.lines']);
+  test('it takes the card ask source, start.decide, sitrep.lines, turn.ended and ferret.started (D2 #12), uses Conversation, and offers card.moving', () => {
+    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
+      'ask.sources',
+      'start.decide',
+      'sitrep.lines',
+      'turn.ended',
+      'ferret.started',
+    ]);
     expect(manifest.hooks.takes[0]?.key).toBe('card');
     expect(manifest.hooks.offers.map(offer => offer.hook.name)).toEqual(['card.moving']);
+    expect(Object.keys(manifest.uses ?? {})).toEqual(['projects', 'conversation']);
   });
   test('state files are the §9.2 five plus the ferret focus, all format 1', () => {
     expect(manifest.data.state.map(file => [file.path, file.format])).toEqual([

@@ -12,7 +12,8 @@ import {
   verb,
 } from '@ferretry/kernel/manifest';
 import { AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
-import { FerretsPort, SitrepLines, StartDecide } from '@ferretry/core-ferrets/contract';
+import { FerretStarted, FerretsPort, SitrepLines, StartDecide } from '@ferretry/core-ferrets/contract';
+import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import {
   BOARD_SKIPPED_AUDIT,
   BOARD_SWITCHED_AUDIT,
@@ -102,7 +103,8 @@ export default definePlugin({
   ],
 
   needs: { asks: AsksPort, ferrets: FerretsPort },
-  uses: { projects: ProjectsPort },
+  // Conversation (optional, D2 #12): reopen and done delivery, nudges, alerts and the transcript tail. Off: held with a warning.
+  uses: { projects: ProjectsPort, conversation: ConversationPort },
   provides: { board: BoardPort },
 
   actions: {
@@ -302,6 +304,9 @@ export default definePlugin({
       { hook: AskSources, key: 'card', schema: CardAskRefSchema },
       { hook: StartDecide, priority: 60 },
       { hook: SitrepLines, priority: 50 },
+      // The turn-end checks (D2 #12) and a started ferret's card (Ferrets' additive `ferret.started`).
+      { hook: TurnEnded },
+      { hook: FerretStarted },
     ],
     offers: [{ hook: CardMoving, timeoutMs: 200 }],
   },

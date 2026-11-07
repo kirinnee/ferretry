@@ -1,4 +1,5 @@
-import { RouteLink, useRouter } from '@ferretry/app';
+import { useRouter } from '@ferretry/app';
+import { RouteLink } from '@ferretry/app/ui';
 import { ArrowLeft, Bot, FolderTree, KanbanSquare, LayoutList } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { type ProjectInfo, ProjectInfoSchema } from '../../contract/index.ts';
@@ -8,11 +9,11 @@ import {
   activeProjectFerrets,
   type FerretRow,
   projectFerrets,
-  projectLaunchRequest,
+  type projectLaunchRequest,
   readFerrets,
   startFerret,
 } from '../lib/ferrets.ts';
-import { ferretPath, projectBoardPath, projectsPath } from '../lib/paths.ts';
+import { ferretPath, projectLanesPath, projectsPath } from '../lib/paths.ts';
 import { ProjectBoardSwitch } from './project-board-switch.tsx';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
 import { ProjectFiles } from './project-files.tsx';
@@ -98,7 +99,7 @@ function ProjectDetailView({
             className="kt-btn kt-btn--sm"
             type="button"
             data-project-lanes-link={project.id}
-            onClick={() => onNavigate(projectBoardPath(daemon, project.id))}
+            onClick={() => onNavigate(projectLanesPath(daemon, project.id))}
           >
             Lanes ✎
           </button>

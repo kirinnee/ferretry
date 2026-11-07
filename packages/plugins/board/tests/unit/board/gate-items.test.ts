@@ -24,6 +24,25 @@ import { card, MemoryBoardStore, NOW, world } from './support.ts';
 
 const OWNER: BoardCaller = { kind: 'owner' };
 
+/**
+ * Asks' writes for one ferret, as its agenda service runs them (`KeyedSerialQueue`): one at a time, each starting only
+ * once the one before it settled, and never re-entered — work queued from inside a turn waits for that turn to end.
+ * Asks calls a source's `apply` INSIDE the turn that then records the answer, and its `close` and `raise` take a
+ * turn of their own: this is the lock the integration fake lacks.
+ */
+class AsksTurns {
+  private readonly tails = new Map<string, Promise<unknown>>();
+
+  async run<T>(ferret: string, work: () => Promise<T>): Promise<T> {
+    const next = (this.tails.get(ferret) ?? Promise.resolve()).then(work, work);
+    this.tails.set(
+      ferret,
+      next.catch(() => undefined),
+    );
+    return await next;
+  }
+}
+
 /** Asks' `card` source in memory: idempotent by entry, with the ledger id the real one would give. */
 class Obligations implements CardObligations {
   readonly raised: AskDraft[] = [];
@@ -31,19 +50,38 @@ class Obligations implements CardObligations {
   private readonly ledger = new Map<string, OpenCardAskEntry>();
   failing = false;
 
+  /** With `turns`, every raise and close takes the ferret's turn, as Asks' own do. */
+  constructor(private readonly turns?: AsksTurns) {}
+
+  private async turn<T>(ferret: string, work: () => Promise<T>): Promise<T> {
+    return this.turns === undefined ? await work() : await this.turns.run(ferret, work);
+  }
+
+  ferretOf(entry: string): string {
+    return this.ledger.get(entry)?.ferret ?? '';
+  }
+
   async raise(draft: AskDraft): Promise<boolean> {
     if (this.failing) throw new Error('Asks is unwritable');
-    const entry = String(draft.entry);
-    if (this.state.has(entry)) return false;
-    this.state.set(entry, 'open');
-    this.raised.push(draft);
-    const cardId = (draft.ref as { card: CardId }).card;
-    this.ledger.set(entry, { entry, ask: `A${String(this.raised.length)}`, ferret: draft.ferret as string, cardId });
-    return true;
+    return await this.turn(draft.ferret as string, async () => {
+      const entry = String(draft.entry);
+      if (this.state.has(entry)) return false;
+      this.state.set(entry, 'open');
+      this.raised.push(draft);
+      const cardId = (draft.ref as { card: CardId }).card;
+      this.ledger.set(entry, { entry, ask: `A${String(this.raised.length)}`, ferret: draft.ferret as string, cardId });
+      return true;
+    });
   }
 
   async withdraw(entry: string): Promise<void> {
-    if (this.state.get(entry) === 'open') this.state.set(entry, 'withdrawn');
+    await this.turn(this.ferretOf(entry), async () => {
+      if (this.state.get(entry) === 'open') this.state.set(entry, 'withdrawn');
+    });
+  }
+
+  stateOf(entry: string): 'open' | 'answered' | 'withdrawn' | undefined {
+    return this.state.get(entry);
   }
 
   async open(cardId?: CardId): Promise<readonly OpenCardAskEntry[]> {
@@ -54,7 +92,9 @@ class Obligations implements CardObligations {
 
   async answered(cardId: CardId): Promise<ReadonlySet<string>> {
     return new Set(
-      [...this.ledger.values()].filter(e => e.cardId === cardId && this.state.get(e.entry) === 'answered').map(e => e.entry),
+      [...this.ledger.values()]
+        .filter(e => e.cardId === cardId && this.state.get(e.entry) === 'answered')
+        .map(e => e.entry),
     );
   }
 
@@ -83,9 +123,12 @@ const external = (overrides: Partial<Card> = {}): Card => {
   });
 };
 
-const fixture = (cards: readonly Card[], options: { readonly noCarrier?: boolean } = {}) => {
+const fixture = (
+  cards: readonly Card[],
+  options: { readonly noCarrier?: boolean; readonly turns?: AsksTurns } = {},
+) => {
   const store = new MemoryBoardStore(cards);
-  const obligations = new Obligations();
+  const obligations = new Obligations(options.turns);
   const warnings: string[] = [];
   const told: { readonly card: string; readonly message: string; readonly key: string }[] = [];
   let gates: GateItems | undefined;
@@ -104,7 +147,8 @@ const fixture = (cards: readonly Card[], options: { readonly noCarrier?: boolean
   };
   const board: GateBoard = {
     card: read,
-    cards: async () => (await Promise.all([...store.cards.keys()].map(read))).flatMap(each => (each === undefined ? [] : [each])),
+    cards: async () =>
+      (await Promise.all([...store.cards.keys()].map(read))).flatMap(each => (each === undefined ? [] : [each])),
     act: async (id, request, caller, expect) => {
       await service.act(id, request, caller, expect);
     },
@@ -120,7 +164,9 @@ const fixture = (cards: readonly Card[], options: { readonly noCarrier?: boolean
       },
     },
     homes: { of: async ferret => ferret },
-    ...(options.noCarrier === true ? {} : { files: { carry: async (_from: string, _to: string, ids: readonly string[]) => ids } }),
+    ...(options.noCarrier === true
+      ? {}
+      : { files: { carry: async (_from: string, _to: string, ids: readonly string[]) => ids } }),
     diagnostics: { warn: message => warnings.push(message) },
   });
   const answer = async (entry: string, overrides: Partial<GateAnswer> = {}) => {
@@ -132,7 +178,10 @@ const fixture = (cards: readonly Card[], options: { readonly noCarrier?: boolean
       caller: OWNER,
       ...overrides,
     });
-    if (outcome.handled && 'applied' in outcome) obligations.markAnswered(entry);
+    if (outcome.handled && 'applied' in outcome) {
+      obligations.markAnswered(entry);
+      await (gates as GateItems).recorded(entry);
+    }
     return outcome;
   };
   return {
@@ -200,7 +249,9 @@ describe('a card at a gate has one obligation through Asks, never an ask of its 
     const w = fixture([external({ laneId: 'todo' })]);
     await w.service.act('F1', { action: 'move', to: 'plan', reason: 'plan first' }, { kind: 'owner' });
 
-    should(w.obligations.raised.map(draft => String(draft.entry))).eql([`gate:F1:plan:${w.stored().history.at(-1)?.seq ?? 0}`]);
+    should(w.obligations.raised.map(draft => String(draft.entry))).eql([
+      `gate:F1:plan:${w.stored().history.at(-1)?.seq ?? 0}`,
+    ]);
   });
 
   it('should leave the card where it is and warn when Asks cannot be written', async () => {
@@ -252,7 +303,15 @@ describe('answering a card ask', () => {
   it('should not handle an entry that is not a gate’s', async () => {
     const { world: w } = await atTest();
 
-    should(await w.gates.answer({ answerId: 'x', ask: { ferret: 'lead', id: 'A9' }, entry: 'something-else', human: true, caller: OWNER })).eql({
+    should(
+      await w.gates.answer({
+        answerId: 'x',
+        ask: { ferret: 'lead', id: 'A9' },
+        entry: 'something-else',
+        human: true,
+        caller: OWNER,
+      }),
+    ).eql({
       handled: false,
     });
   });
@@ -342,7 +401,12 @@ describe('a try-it is asked only when there is something to try', () => {
 
 describe('the boot backfill and the sweep', () => {
   it('should raise the ask of every card at a gate, once, and count them', async () => {
-    const w = fixture([external({ laneId: 'tested', history: [{ seq: 1, at: NOW, actor: { kind: 'ferret', ferret: 'child' }, type: 'created', laneId: 'tested' }] })]);
+    const w = fixture([
+      external({
+        laneId: 'tested',
+        history: [{ seq: 1, at: NOW, actor: { kind: 'ferret', ferret: 'child' }, type: 'created', laneId: 'tested' }],
+      }),
+    ]);
 
     const first = await w.gates.backfill();
     const second = await w.gates.backfill();
@@ -366,5 +430,110 @@ describe('the boot backfill and the sweep', () => {
 
     should(await w.gates.asking('F1')).match({ ferret: 'grandchild' });
     should(w.obligations.openEntries()).eql([entry]);
+  });
+});
+
+describe('#1552 (models Asks’ per-ferret turn, its KeyedSerialQueue) an answer applied inside that turn: the card moves first, then Asks records it, and nothing waits on itself', () => {
+  const DEADLOCK_MS = 2000;
+
+  /** Rejects when `work` has not settled in time: an answer that waits on its own turn never does. */
+  const within = async <T>(work: Promise<T>): Promise<T> =>
+    await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error('the answer never returned: it waits on the turn it runs in')), DEADLOCK_MS);
+      }),
+    ]);
+
+  /**
+   * Asks' answer route for a source question: in the ferret's turn it calls the source's `apply` FIRST and records
+   * the answer only when `apply` said applied; `asks.answered` is delivered after that turn's write.
+   */
+  const answerThroughAsks = async (
+    w: ReturnType<typeof fixture>,
+    turns: AsksTurns,
+    entry: string,
+    overrides: Partial<GateAnswer>,
+  ) => {
+    const ferret = w.obligations.ferretOf(entry);
+    const states: (string | undefined)[] = [];
+    const outcome = await within(
+      turns.run(ferret, async () => {
+        const applied = await w.gates.answer({
+          answerId: `ans-${entry}`,
+          ask: { ferret, id: 'A1' },
+          entry,
+          human: true,
+          caller: OWNER,
+          ...overrides,
+        });
+        states.push(w.obligations.stateOf(entry), w.stored().laneId);
+        if (applied.handled && 'applied' in applied) w.obligations.markAnswered(entry);
+        return applied;
+      }),
+    );
+    if (outcome.handled && 'applied' in outcome) await within(w.gates.recorded(entry));
+    // Work the answer left for after Asks' turn queues behind it: one more turn of that ferret runs after it.
+    await Bun.sleep(5);
+    await within(turns.run(ferret, async () => undefined));
+    return { outcome, during: states };
+  };
+
+  const atTestLocked = async () => {
+    const turns = new AsksTurns();
+    const w = fixture([external()], { turns });
+    await w.service.trigger('F1', 'release.running');
+    const [open] = await w.obligations.open('F1');
+    if (open === undefined) throw new Error('expected an obligation at To test');
+    return { w, turns, entry: open.entry };
+  };
+
+  it('should return a Done, with the card moved while the ask was still open, then the ask answered (never withdrawn)', async () => {
+    // Arrange
+    const { w, turns, entry } = await atTestLocked();
+
+    // Act
+    const { outcome, during } = await answerThroughAsks(w, turns, entry, { choice: 'Done' });
+
+    // Assert: the card moved FIRST (the ask still open), then Asks recorded the answer
+    should(outcome).eql({ handled: true, applied: true });
+    should(during).eql(['open', 'closed']);
+    should(w.obligations.stateOf(entry)).equal('answered');
+    should(w.obligations.openEntries()).be.empty();
+  });
+
+  it('should return a Not good (reopen) and leave no ask open once Asks recorded it', async () => {
+    const { w, turns, entry } = await atTestLocked();
+
+    const { outcome } = await answerThroughAsks(w, turns, entry, { choice: 'Not good', text: 'the badge is clipped' });
+
+    should(outcome).eql({ handled: true, applied: true });
+    should(w.stored().laneId).not.equal('tested');
+    should(w.obligations.stateOf(entry)).equal('answered');
+    should(w.obligations.openEntries()).be.empty();
+  });
+
+  it('should refuse an answer to a gate the card left without waiting on itself, and withdraw that ask after Asks’ turn', async () => {
+    // Arrange: the owner moved the card on the board; the ask is left open (a write that was missed)
+    const { w, turns, entry } = await atTestLocked();
+    w.store.cards.set('F1', { ...w.stored(), laneId: 'implement' });
+
+    // Act
+    const { outcome, during } = await answerThroughAsks(w, turns, entry, { choice: 'Done' });
+
+    // Assert: refused, the ask still open while Asks' turn ran, and withdrawn after it
+    should(outcome).match({ handled: true, refused: { code: 'moved-on' } });
+    should(during[0]).equal('open');
+    should(w.obligations.stateOf(entry)).equal('withdrawn');
+    should(w.stored().laneId).equal('implement');
+  });
+
+  it('should keep the ferret’s later asks working after an answer: a second card’s ask is raised in its own turn', async () => {
+    const { w, turns, entry } = await atTestLocked();
+    await answerThroughAsks(w, turns, entry, { choice: 'Done' });
+
+    // The next write of that ferret's board takes its turn and returns.
+    await within(w.obligations.withdraw('gate:F9:tested:1'));
+    should(w.obligations.openEntries()).be.empty();
   });
 });

@@ -3,14 +3,17 @@
  *
  * The watcher runs the host's own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. It
  * serves no route, so it contributes nothing to the mounted surface: it owns the alert path every board nudge passes
- * through ({@link BoardAlerts}) and the Unfiled board's refile ({@link UnfiledRefiler}). One job, armed after listen.
+ * through ({@link BoardAlerts}) and the Unfiled board's refile ({@link UnfiledRefiler}). Two jobs, armed after listen:
+ * the watch, and the refile once at start.
  *
  * WHAT `build()` MUST WIRE (the plugin's `daemon/index.ts`, in the adapters+routes half; this file is pure and builds
  * from ports alone):
  *
- * - `kernel.jobs.add(job)` with the {@link GithubWatch.job} this returns. Its schedule is `{ every: WATCH_TICK_MS }`, and
- *   its first run is the kernel's, after listen; the old jitter between ticks is dropped (the kernel coalesces a run
- *   that is still going, and each repository's own poll delay stays jittered in `plan.ts`).
+ * - `kernel.jobs.add` with the two jobs {@link GithubWatch.jobs} returns, given the kernel clock's `sleep`. The watch
+ *   is ONE long run (`onceAfterStart`): a first tick `WATCH_FIRST_TICK_MS` (20 s) after start, then one
+ *   `WATCH_TICK_MS` (30 s) after each tick FINISHES, every delay jittered by ±10% ({@link GitHubWatcher.watch}). The
+ *   refile runs once, {@link BOOT_REFILE_DELAY_MS} after start, whether or not the watch is on: a card that became
+ *   refilable while the daemon was down moves without waiting for the watch.
  * - `kernel.events` / the Board service's `afterWrite` is NOT involved: the watcher writes cards through
  *   {@link WatchedBoard.act} (the Board service, as `{ kind: 'daemon' }`), so every write goes through the one section.
  * - `ports.gh` = a `GhRunner` over `kernel.spawn` (`gh` with the host's own login; never a token of ours);
@@ -38,8 +41,7 @@ import {
   noticeRecipient,
   nudgeTarget,
 } from '../board/index.ts';
-import { WATCH_TICK_MS } from './plan.ts';
-import { GitHubWatcher, type GitHubWatcherPorts } from './watcher.ts';
+import { GitHubWatcher, type GitHubWatcherPorts, type WatchSleep } from './watcher.ts';
 import { UnfiledRefiler, type UnfiledRefilerPorts } from './unfiled.ts';
 
 /** What the watch is built from: every port, already shaped for this lib. */
@@ -64,13 +66,24 @@ export interface GithubWatch {
   /** The Unfiled board's refile: ONE instance, so the watcher's tick and the boot run never overlap. */
   readonly unfiled: UnfiledRefiler;
   readonly watcher: GitHubWatcher;
-  /** The job to add to the kernel: one tick every {@link WATCH_TICK_MS}, a failure reported, never thrown. */
-  readonly job: JobSpec;
+  /** The jobs to add to the kernel, waiting through `sleep` (the kernel clock's). */
+  jobs(sleep: WatchSleep): GithubWatchJobs;
+}
+
+/** The watch's two jobs. */
+export interface GithubWatchJobs {
+  /** The watch: ticks until the daemon stops; a failed tick is reported, never thrown. */
+  readonly watch: JobSpec;
+  /** The Unfiled board's refile, once at start. */
+  readonly refile: JobSpec;
 }
 
 export const GITHUB_WATCH_JOB_ID = 'board-github-watch';
+export const UNFILED_REFILE_JOB_ID = 'board-unfiled-refile';
+/** The refile at start waits this long, so it runs once the boot has settled. */
+export const BOOT_REFILE_DELAY_MS = 1_000;
 
-/** Builds the watch from its ports. Pure: no timer is started here; the kernel runs {@link GithubWatch.job}. */
+/** Builds the watch from its ports. Pure: no timer is started here; the kernel runs {@link GithubWatch.jobs}. */
 export const githubWatchJob = (needs: GithubWatchNeeds): GithubWatch => {
   const surface = new AlertSurface(needs.surface);
   const alerts = new BoardAlerts({
@@ -102,12 +115,21 @@ export const githubWatchJob = (needs: GithubWatchNeeds): GithubWatch => {
     alerts,
     unfiled,
     watcher,
-    job: {
-      id: GITHUB_WATCH_JOB_ID,
-      schedule: { every: milliseconds(WATCH_TICK_MS) },
-      run: async signal => {
-        await watcher.run(signal);
+    jobs: sleep => ({
+      watch: {
+        id: GITHUB_WATCH_JOB_ID,
+        schedule: { onceAfterStart: true },
+        run: async signal => {
+          await watcher.watch(signal, sleep);
+        },
       },
-    },
+      refile: {
+        id: UNFILED_REFILE_JOB_ID,
+        schedule: { onceAfterStart: true, delay: milliseconds(BOOT_REFILE_DELAY_MS) },
+        run: async () => {
+          await unfiled.run();
+        },
+      },
+    }),
   };
 };
