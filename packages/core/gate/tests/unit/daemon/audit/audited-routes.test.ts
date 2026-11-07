@@ -13,13 +13,6 @@ const ROOT = resolve(import.meta.dir, '../../../../../../..');
  * declared (the test below fails if a listed rule already matches), so this list can only shrink.
  */
 const PENDING: Readonly<Record<string, string>> = {
-  'POST /v1/accounts/:id/factors': 'accounts (declares audit.skip; today records it, routed by the lead)',
-  'PATCH /v1/accounts/:id/factors/:factor': 'accounts (declares audit.skip; today records it, routed by the lead)',
-  'DELETE /v1/accounts/:id/factors/:factor': 'accounts (declares audit.skip; today records it, routed by the lead)',
-  'POST /v1/accounts/:id/factors/seed': 'accounts (declares audit.skip; today records it, routed by the lead)',
-  'POST /v1/accounts/:id/factors/seed/:stage/commit': 'accounts (declares audit.skip; today records it, routed by the lead)',
-  'POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app': 'accounts (declares audit.skip; today records it, routed by the lead)',
-  'DELETE /v1/accounts/:id/factors/seed/:stage': 'accounts (declares audit.skip; today records it, routed by the lead)',
   'PUT /v1/config/file': 'kernel (config routes, D2 #3)',
   'POST /v1/config/confirm': 'kernel (config routes, D2 #3)',
   'POST /v1/agent/config': 'kernel (config routes, D2 #3)',
