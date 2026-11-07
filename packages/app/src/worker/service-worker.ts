@@ -12,11 +12,12 @@
  *     load from it and every subresource it lists, from bytes re-hashed on the way out, with the headers `_headers`
  *     names; leave everything else — every daemon request included — exactly as the page sent it;
  *   - message: answer the page's "check now", "what happened" and "is this new worker signed?".
+ *   - push / notificationclick: handed to the plugin worker extensions (`extensions.ts`): Access's push
+ *     subscription, Agenda's notifications. They are compiled into this file by the build and get a narrow scope
+ *     (no fetch, no caches, no registration control, this origin only); these two listeners are added AFTER the
+ *     release check's, and no extension ever sees a fetch, install, activate or message event.
  *
- * Push notifications are not the shell's: their handlers come back with the plugins that own them (Access's push
- * subscription, Agenda's notification filter). GAP: there is no worker-side extension point for them yet.
- *
- * Three values are compiled in by the build and nothing else: the release public key from
+ * Three values are compiled in by the build, beside the extensions' code: the release public key from
  * `packages/app/release-signing-key.pub`, the app's rewrites from `public/_redirects`, and its header rules from
  * `public/_headers`. The key is the ONE anchor: nothing this worker stores is trusted, because any page on this origin
  * can write IndexedDB and Cache Storage.
@@ -27,6 +28,8 @@ import { answerReleaseRequest, parseReleaseRequest, ReleaseKeeper } from '../rel
 import { isLoopbackHost } from '../release/loopback.ts';
 import type { ReleaseRewrite } from '../release/manifest.ts';
 import { CacheStorageReleaseCaches, FetchReleaseNetwork, IndexedDbReleaseState } from '../release/storage.ts';
+import { workerExtensions } from './extension-list.ts';
+import { extensionScope, type WorkerGlobals, WorkerExtensionHost } from './extensions.ts';
 
 declare const __FY_RELEASE_KEY__: string;
 declare const __FY_RELEASE_REWRITES__: readonly ReleaseRewrite[];
@@ -44,13 +47,23 @@ interface MessageEvent extends ExtendableEvent {
   readonly data: unknown;
   readonly ports: readonly MessagePort[];
 }
+interface PushEvent extends ExtendableEvent {
+  readonly data: { json(): unknown } | null;
+}
+interface NotificationEvent extends ExtendableEvent {
+  readonly action: string;
+  readonly notification: { readonly tag: string; readonly data?: unknown; close(): void };
+}
 interface WorkerScope {
   readonly location: { readonly origin: string; readonly hostname: string; readonly href: string };
-  readonly clients: { claim(): Promise<void> };
+  readonly registration: WorkerGlobals['registration'];
+  readonly clients: { claim(): Promise<void> } & WorkerGlobals['clients'];
   skipWaiting(): Promise<void>;
   addEventListener(type: 'install' | 'activate', listener: (event: ExtendableEvent) => void): void;
   addEventListener(type: 'fetch', listener: (event: FetchEvent) => void): void;
   addEventListener(type: 'message', listener: (event: MessageEvent) => void): void;
+  addEventListener(type: 'push', listener: (event: PushEvent) => void): void;
+  addEventListener(type: 'notificationclick', listener: (event: NotificationEvent) => void): void;
 }
 
 const worker = globalThis as unknown as WorkerScope;
@@ -121,4 +134,32 @@ worker.addEventListener('message', event => {
       () => port.postMessage(null),
     ),
   );
+});
+
+// ─── plugin worker extensions (after every release listener) ──────────────────────────────────────────────────────
+
+const extensions = new WorkerExtensionHost(workerExtensions);
+const scope = (): ReturnType<typeof extensionScope> =>
+  extensionScope({
+    origin,
+    indexedDB: globalThis.indexedDB,
+    now: () => Date.now(),
+    registration: worker.registration,
+    clients: worker.clients,
+  });
+
+worker.addEventListener('push', event => {
+  let payload: unknown = null;
+  try {
+    payload = event.data?.json() ?? null;
+  } catch {
+    payload = null;
+  }
+  event.waitUntil(extensions.push({ payload }, scope()).catch(() => undefined));
+});
+
+worker.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const { tag, data } = event.notification;
+  event.waitUntil(extensions.notificationClick({ tag, data, action: event.action }, scope()).catch(() => undefined));
 });
