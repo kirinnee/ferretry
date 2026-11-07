@@ -74,7 +74,7 @@ G72	removed	access	-	-	grants	-
 G73	kept	repo-tooling	-	`scripts/validate/conflict-markers.sh`	grants	G73
 G74	kept	gate	access	behaviour as written	grants	G74
 G75	kept	gate	access	`unlockValidityHours`	grants	G75
-G76	kept	gate	access	`state/unlocks.json`	grants	G76
+G76	kept	access	gate	`state/unlocks.json`	grants	G76
 G77	kept	gate	access	behaviour as written	grants	G77
 G78	kept	gate	access	behaviour as written	grants	G78
 G79	kept	gate	access	`stepUpOnActions`	grants	G79
@@ -84,7 +84,7 @@ G82	kept	gate	access	behaviour as written	grants	G82
 G83	kept	gate	access	`add-2fa-key`, `approve-task-plan`, `approve-sign-in-rule`, `approve-paste-rule`, `allow-profile-targets`	grants	G83
 G84	kept	gate	access	`st_…`, `tps_…`, `srs_…`, `prs_…`	grants	G84
 G85	kept	gate	access	`STEP_UP_ACTS_STORED_PROOF`, `ClaimStoredProof`	grants	G85
-G86	kept	gate	access	behaviour as written	grants	G86
+G86	kept	access	gate	behaviour as written	grants	G86
 G87	kept	gate	access	behaviour as written	grants	G87
 G88	kept	gate	access	behaviour as written	grants	G88
 G89	kept	vault	gate	behaviour as written	grants	G89
@@ -100,7 +100,7 @@ G98	kept	gate	access	`demandNeedsStepUp`	grants	G98
 G99	kept	gate	access	`demandNeedsStepUp`	grants	G99
 G100	kept	gate	access	`GrantsView.steppedUp`	grants	G100
 G101	kept	gate	access	`STEP_UP_REQUIRED_CODE`	grants	G101
-G102	kept	gate	access	behaviour as written	grants	G102
+G102	kept	access	gate	behaviour as written	grants	G102
 G103	kept	gate	access	behaviour as written	grants	G103
 G104	removed	gate	-	-	grants	-
 G105	kept	access	gate	behaviour as written	grants	G105
@@ -135,11 +135,11 @@ G133	kept	gate	access	`effective(...)`	grants	G133
 G134	split	gate	access	-	grants	G134
 G135	kept	gate	access	`FULL_DEVICE_GRANTS`	grants	G135
 G136	kept	gate	access	`LIMITED_DEVICE_GRANTS`	grants	G136
-G137	kept	gate	access	behaviour as written	grants	G137
+G137	kept	access	gate	behaviour as written	grants	G137
 G138	kept	gate	access	behaviour as written	grants	G138
 G139	kept	gate	access	`grant_device_not_granted`	grants	G139
 G140	kept	gate	access	behaviour as written	grants	G140
-G141	split	gate	access	-	grants	G141
+G141	split	access	gate	-	grants	G141
 G142	removed	access	-	-	grants	-
 G143	kept	access	gate	`DeviceGrantsPatch`	grants	G143
 G144	kept	access	gate	behaviour as written	grants	G144
@@ -206,7 +206,7 @@ P24	kept	connections	access,kernel	behaviour as written	pairing	P24
 P25	kept	access	kernel	behaviour as written	pairing	P25
 P26	kept	access	kernel	behaviour as written	pairing	P26
 P27	kept	access	kernel	behaviour as written	pairing	P27
-P28	kept	app-shell	access,kernel	`pairOverDirect` in app	pairing	P28
+P28	kept	app-shell	access,kernel	behaviour as written	pairing	P28
 P29	kept	connections	access,kernel	behaviour as written	pairing	P29
 P30	kept	connections	access,kernel	`PairingUnreachableError` in `packages/pwa/src/lib/pairing-unreachable.ts`	pairing	P30
 P31	kept	connections	access,kernel	behaviour as written	pairing	P31
@@ -980,7 +980,7 @@ R240	kept	access	gate	behaviour as written	relay-protocol	R240
 R241	kept	kernel	access,gate	`renew` / `renewed`	relay-protocol	R241
 R242	kept	access	gate	behaviour as written	relay-protocol	R242
 R243	kept	access	gate	behaviour as written	relay-protocol	R243
-R244	kept	kernel	access,gate,app-shell	kernel close codes; app read retry	relay-protocol	R244
+R244	kept	kernel	access,gate	behaviour as written	relay-protocol	R244
 R245	kept	kernel	access,gate	behaviour as written	relay-protocol	R245
 R246	kept	access	gate	behaviour as written	relay-protocol	R246
 R247	kept	kernel	access,gate	`FYD_TEST_TIMINGS` (`leaseSeconds`, `renewLeadSeconds`, `maxSessionSeconds`, `idleDaySeconds`)	relay-protocol	R247
@@ -1078,7 +1078,7 @@ R571	kept	access	kernel	behaviour as written	relay-protocol	R571
 R572	kept	kernel	access	behaviour as written	relay-protocol	R572
 R573	kept	access	kernel	behaviour as written	relay-protocol	R573
 R574	kept	access	kernel	`PairingResponseSchema`	relay-protocol	R574
-R575	kept	app-shell	access,kernel	`RelayClientSession` in app	relay-protocol	R575
+R575	kept	app-shell	access,kernel	behaviour as written	relay-protocol	R575
 R576	kept	access	kernel	behaviour as written	relay-protocol	R576
 R577	kept	access	kernel	`ApiRequest`	relay-protocol	R577
 R578	kept	access	kernel	behaviour as written	relay-protocol	R578
