@@ -704,6 +704,12 @@ export interface CarrierListenerSurface {
    * a bucket and nothing else: it can never make an arrival local. Absent: one shared identity for the listener.
    */
   readonly peer?: (headers: ApiHeaders) => string;
+  /**
+   * The browser origins an upgrade may present (today's `corsOrigins`). An upgrade whose `Origin` names another site is
+   * answered 404 before admission, like every path this listener does not serve; an absent `Origin`, or the listener's
+   * own, is not a browser cross-origin and passes. Absent: no origin gate.
+   */
+  readonly origins?: readonly string[];
 }
 
 /** A bound carrier listener. */

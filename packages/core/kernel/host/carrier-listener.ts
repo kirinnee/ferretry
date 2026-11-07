@@ -25,6 +25,8 @@ export interface CarrierListenerDeps {
   readonly daemonId: string;
   /** Stopping the plugin (or the daemon) closes every listener it still holds. */
   readonly onStop: (fn: () => void | Promise<void>) => void;
+  /** Whether the plugin's lifecycle has stopped: nothing is bound after it, because nothing would ever close it. */
+  readonly stopping?: () => boolean;
 }
 
 /**
@@ -36,7 +38,9 @@ export interface CarrierListenerDeps {
  *   dispatcher and the same admission as the direct carrier's, and 404 answers every other path and method;
  * - every arrival is stamped `{ kind: 'carried', carrier }` and never local, whatever its peer address says (the
  *   socket's own peer is not even read: it is the forwarder), so admission governs it as remote (`arrivedOnHost` false);
- * - the rate-limit identity is the surface's `peer` of the headers, else one shared identity.
+ * - the rate-limit identity is the surface's `peer` of the headers, else one shared identity;
+ * - an upgrade presenting an `Origin` the surface does not list is refused like any other path (today's tunnel listener
+ *   refused it on the upgrade itself, `corsOrigins`), and nothing is bound once the plugin's lifecycle has stopped.
  *
  * A plugin may open one only for a carrier whose hook it takes and a socket it declares.
  */
@@ -48,6 +52,8 @@ export function carrierListenerPort(deps: CarrierListenerDeps): CarrierListenerP
   return {
     open: async ({ carrier, surface }) => {
       const declared = declaredSocket(manifest, carrier, surface);
+      if (deps.stopping?.() === true)
+        throw new PermissionError(`${manifest.title} has stopped, so it cannot open a carrier listener.`);
       if (!watching) {
         watching = true;
         deps.onStop(async () => {
@@ -64,6 +70,7 @@ export function carrierListenerPort(deps: CarrierListenerDeps): CarrierListenerP
             const notServed = (): Response => toResponse(NOT_SERVED, false);
             if (request.method !== 'GET' || request.headers.get('upgrade')?.toLowerCase() !== 'websocket')
               return notServed();
+            if (!originAllowed(request, surface.origins)) return notServed();
             const api = toApiRequest(request, arrival, undefined);
             const route = served.lookup(api.method, api.path);
             if (route.kind !== 'matched') return notServed();
@@ -105,6 +112,17 @@ export function carrierListenerPort(deps: CarrierListenerDeps): CarrierListenerP
       return handle;
     },
   };
+}
+
+/**
+ * Today's gate (`BunApiServer`): an absent `Origin`, or the listener's own, is not a cross-origin browser call; any other
+ * must be on the surface's list. No list, no gate.
+ */
+function originAllowed(request: Request, origins: readonly string[] | undefined): boolean {
+  if (origins === undefined) return true;
+  const presented = request.headers.get('origin');
+  if (presented === null || presented === new URL(request.url).origin) return true;
+  return origins.includes(presented);
 }
 
 /**

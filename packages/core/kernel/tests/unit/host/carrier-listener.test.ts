@@ -86,14 +86,16 @@ function world(extra: readonly MountedSocket[] = [], refuse = false) {
     { routes: [], sockets: [mounted, ...extra], memberRoutes: [] },
   );
   const stops: (() => void | Promise<void>)[] = [];
+  const lifecycle = { stopped: false };
   const port = (plugin: Manifest = carrierPlugin() as unknown as Manifest) =>
     carrierListenerPort({
       manifest: plugin,
       dispatcher: () => dispatcher,
       daemonId: DAEMON,
       onStop: fn => void stops.push(fn),
+      stopping: () => lifecycle.stopped,
     });
-  return { asked, attached, stops, port, owner, shared: port() };
+  return { asked, attached, stops, lifecycle, port, owner, shared: port() };
 }
 
 const open: CarrierListenerHandle[] = [];
@@ -103,7 +105,11 @@ afterEach(async () => {
 
 async function listen(
   fixture: ReturnType<typeof world>,
-  surface: { socket: string; peer?: (headers: ReadonlyMap<string, string>) => string } = { socket: ROUTE },
+  surface: {
+    socket: string;
+    peer?: (headers: ReadonlyMap<string, string>) => string;
+    origins?: readonly string[];
+  } = { socket: ROUTE },
   carrier: CarrierKey = 'tunnel' as CarrierKey,
 ) {
   const handle = await fixture.shared.open({ carrier, surface });
@@ -124,7 +130,7 @@ function dial(port: number, path = PATH, headers: Record<string, string> = {}): 
 }
 
 describe('G15 G16 R625 the carrier listener: relayed loopback is remote', () => {
-  test('G15 a loopback upgrade is admitted as a carried arrival on the named carrier, never as local', async () => {
+  test('G15 R625 a loopback upgrade is admitted as a carried arrival on the named carrier, never as local', async () => {
     const fixture = world();
     const handle = await listen(fixture, {
       socket: ROUTE,
@@ -157,7 +163,7 @@ describe('G15 G16 R625 the carrier listener: relayed loopback is remote', () => 
     expect(fixture.asked[0]?.clientAddress).toBe(CARRIER_SHARED_PEER);
   });
 
-  test('G16 R625 every other path and method on the port is 404, and admission is never asked', async () => {
+  test('G16 R660 every other path and method on the port is 404, and admission is never asked', async () => {
     const fixture = world();
     const handle = await listen(fixture);
     const base = `http://127.0.0.1:${String(handle.port)}`;
@@ -196,6 +202,33 @@ describe('G15 G16 R625 the carrier listener: relayed loopback is remote', () => 
 
     expect(await dial(handle.port)).toBe('refused');
     expect(fixture.asked).toEqual([]);
+  });
+
+  test('G16 R660 an upgrade presenting an Origin the surface does not list is a 404 before admission', async () => {
+    const fixture = world();
+    const handle = await listen(fixture, { socket: ROUTE, origins: ['https://app.example'] });
+
+    // An Origin on another site: refused like any path not served; admission is never asked, nothing is attached.
+    expect(await dial(handle.port, PATH, { origin: 'https://evil.example' })).toBe('refused');
+    expect(fixture.asked).toHaveLength(0);
+    expect(fixture.attached).toHaveLength(0);
+    const refused = await fetch(`http://127.0.0.1:${String(handle.port)}${PATH}`, {
+      headers: { upgrade: 'websocket', connection: 'Upgrade', origin: 'https://evil.example' },
+    });
+    expect(refused.status).toBe(404);
+
+    // A listed Origin, no Origin at all (not a browser) and the listener's own all pass, as today's server let them.
+    expect(await dial(handle.port, PATH, { origin: 'https://app.example' })).toBe('open');
+    expect(await dial(handle.port)).toBe('open');
+    expect(await dial(handle.port, PATH, { origin: `http://127.0.0.1:${String(handle.port)}` })).toBe('open');
+    expect(fixture.asked).toHaveLength(3);
+  });
+
+  test('R660 a surface that lists no origins gates none', async () => {
+    const fixture = world();
+    const handle = await listen(fixture);
+
+    expect(await dial(handle.port, PATH, { origin: 'https://anywhere.example' })).toBe('open');
   });
 
   test('admission governs the arrival: a refusal is answered and nothing is attached', async () => {
@@ -244,6 +277,30 @@ describe('who may open a carrier listener', () => {
 });
 
 describe('closing', () => {
+  test('open() after the plugin has stopped binds nothing and is refused', async () => {
+    const fixture = world();
+    const first = await listen(fixture);
+    for (const stop of fixture.stops) await stop();
+    fixture.lifecycle.stopped = true;
+    const ports = new Set<number>();
+    const bound = Bun.serve;
+
+    // Watch every bind the refused open could make.
+    (Bun as { serve: unknown }).serve = ((options: { port?: number }) => {
+      const server = bound(options as never);
+      ports.add(server.port ?? 0);
+      return server;
+    }) as never;
+    try {
+      await expect(listen(fixture)).rejects.toThrow(/has stopped/);
+    } finally {
+      (Bun as { serve: unknown }).serve = bound;
+    }
+
+    expect(ports.size).toBe(0);
+    expect(await dial(first.port)).toBe('refused');
+  });
+
   test('close() releases the port, and closing twice is harmless', async () => {
     const fixture = world();
     const handle = await listen(fixture);

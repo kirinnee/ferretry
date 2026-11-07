@@ -1,78 +1,25 @@
 /**
- * The tunnel listener's boundary over the REAL kernel session layer: what an arrival through `cloudflared` is
- * opened as. The listener is the KERNEL'S production carrier listener, dialled over a real loopback WebSocket as
- * `cloudflared` would; the socket route behind it is a fixture of the direct carrier's (Connections A's) — it opens
- * the kernel session on the carrier the ARRIVAL names, as that route does — so a listener that let a tunnel socket
- * reach a `direct` session would show here as a pairing that went through.
+ * The tunnel listener's boundary over the REAL kernel session layer: what an arrival through `cloudflared` is opened as.
+ *
+ * Everything on the path is production code: the kernel's own carrier listener (`carrierListenerPort`), dialled over a
+ * real loopback WebSocket as `cloudflared` would, serving Connections' REAL `directCarrierSocketRoute` through the
+ * kernel's real `Dispatcher`, which opens the kernel's real session layer. The only stand-ins are the ones the kernel
+ * fixture has always had (an in-memory device table, a pair mode that RECORDS every attempt) and an admission that
+ * admits, because the sealed session proves the device itself. The one wrapper is `openSession`, which records the
+ * carrier key it was handed and passes the call straight to `openKernelSession`. A route that opened a tunnel socket as
+ * a `direct` session therefore shows here as a pairing that went through.
  */
 
 import { afterEach, expect, it } from 'bun:test';
-import {
-  type ApiRequest,
-  type CallStanding,
-  type CarrierKey,
-  isSessionEnd,
-  type SocketDownstream,
-  type SocketHandler,
-} from '@ferretry/kernel/contract';
+import type { CallStanding, CarrierKey } from '@ferretry/kernel/contract';
 import { carrierListenerPort } from '../../../../../core/kernel/host/carrier-listener.ts';
 import { Dispatcher } from '../../../../../core/kernel/host/dispatch.ts';
+import { openKernelSession } from '../../../daemon/index.ts';
+import { directCarrierSocketRoute } from '../../../daemon/lib/runtime/mounts/direct-carrier.ts';
 import { tunnelPeer } from '../../../daemon/lib/tunnel/listener.ts';
 import manifest from '../../../manifest.ts';
-import {
-  encodeControlMessage,
-  encodeFrame,
-  FRAME_KINDS,
-  RELAY_LIMITS,
-  RELAY_PROTOCOL_ID,
-  SESSION_ID_BYTES,
-  type SessionId,
-  sessionIdFromBytes,
-} from '../../../worker/src/lib/index.ts';
-import { BrowserEnd, type KernelFixture, kernelCrypto, kernelFixture } from '../../support/kernel-session.ts';
-
-/** The direct carrier's session route, as a fixture: one socket, one kernel session, on the arrival's carrier. */
-function directSessionRoute(fx: KernelFixture, opened: string[]) {
-  return (request: ApiRequest) =>
-    async (downstream: SocketDownstream): Promise<SocketHandler> => {
-      const sessionId = sessionIdFromBytes(kernelCrypto.randomBytes(SESSION_ID_BYTES)) as SessionId;
-      const carrier = request.arrival.kind === 'carried' ? request.arrival.carrier : ('local' as CarrierKey);
-      opened.push(`${String(carrier)} ${String(request.clientAddress)}`);
-      const link = fx.layer.open(carrier, { address: String(request.clientAddress) });
-      const pump = () => {
-        for (let next = link.outbound.next(); next !== undefined; next = link.outbound.next()) {
-          if (isSessionEnd(next)) {
-            downstream.close(next.code, next.reason);
-            return;
-          }
-          downstream.send(next.bytes);
-        }
-      };
-      return {
-        open: async () => {
-          downstream.send(
-            encodeFrame({
-              kind: FRAME_KINDS.control,
-              sessionId,
-              sequence: 0,
-              payload: encodeControlMessage({ t: 'ready', protocol: RELAY_PROTOCOL_ID, limits: RELAY_LIMITS }),
-            }),
-          );
-          link.outbound.onReady(pump);
-          pump();
-        },
-        fromClient: frame => {
-          if (typeof frame !== 'string')
-            link.inbound(
-              frame instanceof ArrayBuffer
-                ? new Uint8Array(frame)
-                : new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength),
-            );
-        },
-        close: () => link.closed('the socket closed'),
-      };
-    };
-}
+import type { SessionId } from '../../../worker/src/lib/index.ts';
+import { BrowserEnd, type KernelFixture, kernelFixture } from '../../support/kernel-session.ts';
 
 /** A browser end over a real socket: every round waits for the network as well as for the layer. */
 class NetworkBrowser extends BrowserEnd {
@@ -89,8 +36,20 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
+/** Opens one session as `cloudflared` would deliver it; `opened` collects `<carrier key> <peer address>` per session. */
 async function throughTheTunnel(fx: KernelFixture, opened: string[]) {
-  const route = directSessionRoute(fx, opened);
+  const route = directCarrierSocketRoute({
+    identity: { daemonId: fx.daemonId },
+    clock: { now: () => Date.now() },
+    scheduler: { after: () => ({ cancel: () => undefined }) },
+    randomBytes: length => crypto.getRandomValues(new Uint8Array(length)),
+    sessions: () => fx.layer,
+    openSession: (layer, key, peer, proved) => {
+      opened.push(`${String(key)} ${String(peer.address)}`);
+      return openKernelSession(layer, key, peer, proved);
+    },
+  });
+  cleanups.push(() => route.stop());
   // The kernel's dispatcher over the one declared socket, admitting what the sealed session itself will prove.
   const declared = manifest.actions.sockets[0] as NonNullable<typeof manifest.actions.sockets>[number];
   const dispatcher = new Dispatcher(
@@ -112,7 +71,7 @@ async function throughTheTunnel(fx: KernelFixture, opened: string[]) {
         {
           ...declared,
           owner: { plugin: 'connections' as never, title: 'Connections', serving: () => ({ kind: 'serving' }) },
-          accept: async call => route(call.request),
+          accept: route.accept,
         },
       ],
       memberRoutes: [],
@@ -145,7 +104,7 @@ async function throughTheTunnel(fx: KernelFixture, opened: string[]) {
   await browser.settled();
   const ready = browser.controls[0];
   if (ready?.message.t !== 'ready') throw new Error('no ready');
-  return { browser, sessionId: ready.sessionId };
+  return { browser, sessionId: ready.sessionId as SessionId };
 }
 
 it('G118 every tunnel session is the §6 handshake against the pinned identity, opened as a remote tunnel arrival', async () => {
@@ -176,14 +135,17 @@ for (const row of ['G118', 'R662'])
   it(`${row} a pairing through the tunnel listener gets the uniform pair-refused, spends no budget and records no grant`, async () => {
     // Arrange
     const fx = await kernelFixture();
-    const { browser, sessionId } = await throughTheTunnel(fx, []);
+    const opened: string[] = [];
+    const { browser, sessionId } = await throughTheTunnel(fx, opened);
     expect(await browser.handshake(sessionId, fx.daemonId)).toBe(true);
 
     // Act — a well-formed first contact, its proof bound to this session's own transcript.
     await browser.pair();
     await browser.settled();
 
-    // Assert — the pair mode (which owns the guess budget and the grant) was never asked.
+    // Assert — the session is a tunnel one, so the layer refuses before the pair mode (which owns the guess budget and
+    // records the grant) is ever asked: no attempt, therefore no budget spent and no grant.
+    expect(opened).toEqual(['tunnel 203.0.113.9']);
     expect(browser.last('pair-refused')).toMatchObject({ reason: 'pairing_refused' });
     expect(browser.last('paired')).toBeUndefined();
     expect(browser.end?.code).toBe(4440);

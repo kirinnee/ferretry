@@ -8,7 +8,7 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import { anonymous, device, owner } from '../../../../../core/kernel/testing/admission.ts';
 import { carrierListenerPort } from '../../../../../core/kernel/host/carrier-listener.ts';
 import { testHost } from '../../../../../core/kernel/testing/host.ts';
-import { TUNNEL_OFF_SENTENCE, TunnelStatusViewSchema } from '../../../contract/index.ts';
+import { HOSTED_APP_ORIGIN, TUNNEL_OFF_SENTENCE, TunnelStatusViewSchema } from '../../../contract/index.ts';
 import daemon, { buildConnections, kernelConnectionBindings } from '../../../daemon/index.ts';
 import { webrtcArrival } from '../../../daemon/lib/webrtc/carrier.ts';
 import manifest from '../../../manifest.ts';
@@ -173,6 +173,8 @@ describe('connections daemon half: tunnel and WebRTC composed', () => {
     );
     expect(opened?.surface.peer?.(headersFrom({ 'cf-connecting-ip': '203.0.113.9' }))).toBe('203.0.113.9');
     expect(opened?.surface.peer?.(headersFrom({}))).toBe('tunnel');
+    // The Origin gate is the daemon's own browser origins (today's browserOrigins(config)), handed to the kernel.
+    expect(opened?.surface.origins).toEqual([HOSTED_APP_ORIGIN]);
     await world.stop();
   });
 

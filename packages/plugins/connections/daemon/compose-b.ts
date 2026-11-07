@@ -72,6 +72,8 @@ export interface ComposeInput {
   readonly config: ConnectionsConfig | undefined;
   readonly directoryOrigin?: string;
   readonly host: TunnelHostPort;
+  /** The browser origins a tunnel upgrade may present (today's `browserOrigins(config)`), read as each listener opens. */
+  readonly origins?: () => readonly string[];
   /** Publishes the tunnel's address in the carrier set (or withdraws it with `undefined`). */
   readonly publishTunnel: (tunnelUrl: string | undefined) => void;
 }
@@ -114,7 +116,11 @@ export function composeOtherConnections(input: ComposeInput): OtherConnections {
         kernel.carrierListener.open({
           carrier: TUNNEL_CARRIER,
           // Rate limits key by the address Cloudflare's edge saw, else one shared bucket.
-          surface: { socket: TUNNEL_SOCKET, peer: tunnelPeer },
+          surface: {
+            socket: TUNNEL_SOCKET,
+            peer: tunnelPeer,
+            ...(input.origins === undefined ? {} : { origins: input.origins() }),
+          },
         }),
       // The kernel's spawn port supplies the child's base environment; only the token is added to this child's.
       processes: new BunConnectorProcesses({}, kernel.spawn, kernel.clock),

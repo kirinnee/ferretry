@@ -621,6 +621,7 @@ async function bootLocked(
       dispatcher: () => dispatcher,
       daemonId: identityPort.daemonId,
       onStop: lifecycle.onStop.bind(lifecycle),
+      stopping: () => lifecycle.stopping(),
     }),
     identity: identityPort,
     paths: ownerPaths,
