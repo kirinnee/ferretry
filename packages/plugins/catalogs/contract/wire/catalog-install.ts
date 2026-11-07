@@ -35,8 +35,8 @@ import {
 } from './shared-catalog.ts';
 import { CatalogChangesSchema } from './shared-catalog-diff.ts';
 import { CatalogInstallWarningSchema, CatalogReviewEntrySchema } from './shared-catalog-review.ts';
-import { CatalogInstallPreviewIdSchema, CatalogInstallIdSchema } from '../contract/wire.ts';
-export { CatalogInstallPreviewIdSchema, CatalogInstallIdSchema, type CatalogInstallId } from '../contract/wire.ts';
+import { CatalogInstallPreviewIdSchema, CatalogInstallIdSchema } from '../wire.ts';
+export { CatalogInstallPreviewIdSchema, CatalogInstallIdSchema, type CatalogInstallId } from '../wire.ts';
 
 export const CATALOG_INSTALLS_PATH = '/v1/catalog-installs' as const;
 

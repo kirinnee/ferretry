@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import { SharedCatalogItemSchema } from '../../../wire/shared-catalog.ts';
+import { SharedCatalogItemSchema } from '../../../contract/wire/shared-catalog.ts';
 import {
   catalogItemReview,
   catalogItemWarnings,
   packageRegistries,
   revealHidden,
   unpinnedPackages,
-} from '../../../wire/shared-catalog-review.ts';
+} from '../../../contract/wire/shared-catalog-review.ts';
 
 const head = {
   format: 'ferretry-catalog-item',

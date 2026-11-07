@@ -7,7 +7,7 @@ import {
   CatalogInstallPreviewIdSchema,
   CatalogInstallRequestSchema,
   CatalogInstallTargetSchema,
-} from '../../../wire/catalog-install.ts';
+} from '../../../contract/wire/catalog-install.ts';
 
 describe('catalog install wire', () => {
   it('accepts a project target by absolute root and harness, and a runtime target by runtime and profile', () => {

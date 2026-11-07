@@ -32,8 +32,8 @@ import {
   SharedCatalogItemSchema,
   SharedCatalogManifestEntrySchema,
 } from './shared-catalog.ts';
-import { CatalogLinkIdSchema, LinkBundleIdSchema } from '../contract/wire.ts';
-export { CatalogLinkIdSchema, LinkBundleIdSchema, type CatalogLinkId } from '../contract/wire.ts';
+import { CatalogLinkIdSchema, LinkBundleIdSchema } from '../wire.ts';
+export { CatalogLinkIdSchema, LinkBundleIdSchema, type CatalogLinkId } from '../wire.ts';
 
 export const CATALOG_LINK_FORMAT = 'ferretry-catalog-link' as const;
 export const CATALOG_LINK_BUNDLE_FORMAT = 'ferretry-catalog-link-bundle' as const;

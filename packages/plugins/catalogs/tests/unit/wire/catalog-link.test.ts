@@ -31,8 +31,8 @@ import {
   PUBLIC_LINK_EXPIRIES,
   PUBLIC_LINK_NOTICE,
   UpdateCatalogLinkRequestSchema,
-} from '../../../wire/catalog-link.ts';
-import { parseShareFragment } from '../../../wire/catalog-member.ts';
+} from '../../../contract/wire/catalog-link.ts';
+import { parseShareFragment } from '../../../contract/wire/catalog-member.ts';
 import { STEP_UP_ACTS, StepUpActSchema } from '@ferretry/core-gate/contract';
 
 const PUBLISHER = `fy_daemon_${'P'.repeat(43)}`;

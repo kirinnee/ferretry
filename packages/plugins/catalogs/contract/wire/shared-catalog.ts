@@ -46,7 +46,7 @@ import {
   CatalogSpkiSchema,
   CatalogSignatureSchema,
   type CatalogDigest,
-} from '../contract/wire.ts';
+} from '../wire.ts';
 export {
   SharedCatalogIdSchema,
   SharedCatalogItemIdSchema,
@@ -60,7 +60,7 @@ export {
   type SharedCatalogItemId,
   type CatalogDigest,
   type CatalogItemKind,
-} from '../contract/wire.ts';
+} from '../wire.ts';
 
 // ── Formats and bounds ───────────────────────────────────────────────────────────────────────────
 

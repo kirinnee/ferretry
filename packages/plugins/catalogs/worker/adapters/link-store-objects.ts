@@ -18,7 +18,7 @@
  * NOTHING IS LOGGED but a fixed sentence and an error class: never a body, a token, a verifier, a bundle
  * id, a daemon or an address.
  */
-import { LinkBundleIdSchema } from '../../wire/index.ts';
+import { LinkBundleIdSchema } from '../../contract/wire/index.ts';
 import { z } from 'zod';
 import {
   BundleDocSchema,

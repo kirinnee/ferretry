@@ -15,7 +15,7 @@ import {
   RetiredVersionSchema,
   SharedItemPreviewSchema,
   UpdateCatalogRequestSchema,
-} from '../../../wire/index.ts';
+} from '../../../contract/wire/index.ts';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 const ITEM = `itm_${'B'.repeat(22)}`;

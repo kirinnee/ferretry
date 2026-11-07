@@ -8,7 +8,7 @@ import {
   ProjectPathSchema,
   RegisterProjectRequestSchema,
   SessionSkillsSchema,
-} from '../../../wire/catalog.ts';
+} from '../../../contract/wire/catalog.ts';
 
 describe('catalog protocol contracts', () => {
   it('should accept display-safe skills and project metadata', () => {

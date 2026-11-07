@@ -14,7 +14,7 @@ import {
   SharedCatalogLinkBundleSchema,
   SharedCatalogLinkSchema,
   SignedCatalogLinkSchema,
-} from '../../../wire/shared-catalog-link.ts';
+} from '../../../contract/wire/shared-catalog-link.ts';
 
 const PUBLISHER = `fy_daemon_${'P'.repeat(43)}`;
 const ISSUED = '2026-10-31T09:00:00.000Z';

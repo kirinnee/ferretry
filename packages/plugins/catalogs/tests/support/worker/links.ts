@@ -9,7 +9,7 @@ import {
   type SharedCatalogLinkBundle,
   SharedCatalogLinkBundleSchema,
   SharedCatalogLinkSchema,
-} from '../../../wire/index.ts';
+} from '../../../contract/wire/index.ts';
 import { catalogItemDigest, mintLinkSecrets, signCatalogLink } from '../../../worker/lib/index.ts';
 import { newDaemonIdentity, relayCrypto } from './identities.ts';
 

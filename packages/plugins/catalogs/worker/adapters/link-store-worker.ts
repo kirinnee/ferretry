@@ -12,7 +12,7 @@
  * NOTHING IS LOGGED but a fixed sentence: never a body, a token, a verifier, a bundle id, a daemon or
  * an address. The IP the per-IP windows need goes to the control object in a request body and nowhere else.
  */
-import { LinkBundleIdSchema } from '../../wire/index.ts';
+import { LinkBundleIdSchema } from '../../contract/wire/index.ts';
 import type { z } from 'zod';
 import {
   DEFAULT_LINK_STORE_LIMITS,

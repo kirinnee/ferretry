@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
-import * as install from '../../../wire/catalog-install.ts';
-import * as catalog from '../../../wire/shared-catalog.ts';
+import * as install from '../../../contract/wire/catalog-install.ts';
+import * as catalog from '../../../contract/wire/shared-catalog.ts';
 import {
   CATALOG_MANIFEST_SIGNATURE_LABEL,
   CATALOG_SKILL_FILE_MAX_BYTES,
@@ -16,8 +16,8 @@ import {
   SharedCatalogFileSchema,
   SharedCatalogItemSchema,
   SharedCatalogManifestSchema,
-} from '../../../wire/shared-catalog.ts';
-import * as review from '../../../wire/shared-catalog-review.ts';
+} from '../../../contract/wire/shared-catalog.ts';
+import * as review from '../../../contract/wire/shared-catalog-review.ts';
 
 const PUBLISHER = `fy_daemon_${'P'.repeat(43)}`;
 const CATALOG = `cat_${'c'.repeat(22)}`;

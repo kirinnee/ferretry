@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { type SharedCatalogItem, SharedCatalogItemSchema } from '../../../wire/shared-catalog.ts';
+import { type SharedCatalogItem, SharedCatalogItemSchema } from '../../../contract/wire/shared-catalog.ts';
 import {
   CATALOG_DIFF_MAX_EDITS,
   CATALOG_DIFF_MAX_LINES,
@@ -11,7 +11,7 @@ import {
   hunksOf,
   lineEdits,
   newDiffBudget,
-} from '../../../wire/shared-catalog-diff.ts';
+} from '../../../contract/wire/shared-catalog-diff.ts';
 
 const head = {
   format: 'ferretry-catalog-item',

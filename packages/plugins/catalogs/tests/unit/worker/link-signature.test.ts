@@ -19,7 +19,7 @@ import {
   type SharedCatalogLinkBundle,
   type SharedCatalogManifest,
   SharedCatalogManifestSchema,
-} from '../../../wire/index.ts';
+} from '../../../contract/wire/index.ts';
 import should from 'should';
 import { relayCrypto } from '../../support/worker/identities.ts';
 import { LINK_AT, LINK_NOT_AFTER, linkSkill, linkWorld } from '../../support/worker/links.ts';

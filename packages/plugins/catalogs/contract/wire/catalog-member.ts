@@ -33,7 +33,7 @@ import {
   CatalogShareIdSchema,
   CatalogShareCodeSchema,
   type CatalogShareCode,
-} from '../contract/wire.ts';
+} from '../wire.ts';
 export {
   MEMBER_JOIN_ATTEMPTS_PER_MINUTE,
   MEMBER_JOINS_PER_HOUR,
@@ -46,7 +46,7 @@ export {
   type CatalogMemberKeyId,
   type CatalogShareId,
   type CatalogShareCode,
-} from '../contract/wire.ts';
+} from '../wire.ts';
 
 export const CATALOG_SHARES_PATH = '/v1/catalog-shares' as const;
 export const CATALOG_MEMBERS_PATH = '/v1/catalog-members' as const;

@@ -38,7 +38,7 @@ import {
   type SharedCatalogManifestEntry,
   type SignedCatalogItemVersions,
   type SignedCatalogManifest,
-} from '../../wire/index.ts';
+} from '../../contract/wire/index.ts';
 import { fromBase64UrlFixed, toBase64Url, utf8Bytes } from '../kernel-wire/index.ts';
 import { ED25519_SIGNATURE_BYTES, ED25519_SPKI_BYTES } from '../kernel-wire/index.ts';
 import type { DaemonIdentity, SessionCrypto } from '../kernel-wire/index.ts';

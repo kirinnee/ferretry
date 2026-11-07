@@ -18,7 +18,11 @@
  *
  * Pure and `SessionCrypto` only, so the daemon, the PWA and the CLI run the same code.
  */
-import { catalogCanonicalText, type SharedCatalogLinkBundle, SharedCatalogLinkBundleSchema } from '../../wire/index.ts';
+import {
+  catalogCanonicalText,
+  type SharedCatalogLinkBundle,
+  SharedCatalogLinkBundleSchema,
+} from '../../contract/wire/index.ts';
 import {
   bytesEqual,
   concatBytes,

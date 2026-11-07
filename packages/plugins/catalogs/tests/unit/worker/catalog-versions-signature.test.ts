@@ -20,7 +20,7 @@ import {
   type SharedCatalogManifest,
   SharedCatalogManifestSchema,
   type SignedCatalogItemVersions,
-} from '../../../wire/index.ts';
+} from '../../../contract/wire/index.ts';
 import should from 'should';
 import { newDaemonIdentity, relayCrypto } from '../../support/worker/identities.ts';
 

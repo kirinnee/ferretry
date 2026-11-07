@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
-import * as member from '../../../wire/catalog-member.ts';
+import * as member from '../../../contract/wire/catalog-member.ts';
 import {
   CATALOG_SHARE_EXPIRIES,
   CATALOG_SHARE_EXPIRY_SECONDS,
@@ -18,7 +18,7 @@ import {
   SHARE_LINK_RELAYED_NOTICE,
   shareLinkNotice,
   shareLinkUrl,
-} from '../../../wire/catalog-member.ts';
+} from '../../../contract/wire/catalog-member.ts';
 
 const DAEMON = `fy_daemon_${'D'.repeat(43)}`;
 const CATALOG = `cat_${'c'.repeat(22)}`;

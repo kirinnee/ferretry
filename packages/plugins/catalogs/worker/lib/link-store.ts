@@ -11,8 +11,8 @@
  * per action, the protocol id, the daemon, the HOST the store is serving and a single-use nonce the
  * store issued. A signed upload therefore cannot be replayed as a delete, at another store, or twice.
  */
-import { CatalogLinkKindSchema, LinkBundleIdSchema } from '../../wire/index.ts';
-import { InstantSchema } from '../../wire/foreign.ts';
+import { CatalogLinkKindSchema, LinkBundleIdSchema } from '../../contract/wire/index.ts';
+import { InstantSchema } from '../../contract/wire/foreign.ts';
 import { z } from 'zod';
 import {
   concatBytes,
