@@ -220,6 +220,18 @@ describe('the actions panel', () => {
     expect(movePath('dm1', 'a b')).toBe('/d/dm1/ferrets/a%20b/move');
   });
 
+  it('opens the move page on its CLI side for Move to Codex / Move to Claude, as today', async () => {
+    const h = harness(ferretSummary('a1', { runtime: 'nero', harness: 'claude-code' }));
+    window.history.pushState(null, '', '/d/dm1');
+    const root = await open(h);
+    const item = must(root.querySelector('[data-ferret-action-item="move-harness"]'), 'the convert row');
+    expect(item.textContent).toContain('Move to Codex…');
+    await click(root, '[data-ferret-action-item="move-harness"]');
+    expect(window.location.pathname).toBe('/d/dm1/ferrets/a1/move');
+    expect(window.location.search).toBe('?mode=cli');
+    expect(movePath('dm1', 'a1', true)).toBe('/d/dm1/ferrets/a1/move?mode=cli');
+  });
+
   it('says so, instead of going nowhere, when the page has no daemon', async () => {
     const h = harness(ferretSummary('a1', { runtime: 'nero' }));
     window.history.pushState(null, '', '/');

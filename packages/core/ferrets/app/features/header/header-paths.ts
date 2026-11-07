@@ -9,9 +9,9 @@
 
 import { daemonHomeHref } from '@ferretry/app';
 
-/** The move page of one ferret on one daemon. */
-export const movePath = (daemon: string, ferret: string): string =>
-  `${daemonHomeHref(daemon)}/ferrets/${encodeURIComponent(ferret)}/move`;
+/** The move page of one ferret on one daemon; `convert` opens it on "Move to Codex… / Move to Claude…". */
+export const movePath = (daemon: string, ferret: string, convert = false): string =>
+  `${daemonHomeHref(daemon)}/ferrets/${encodeURIComponent(ferret)}/move${convert ? '?mode=cli' : ''}`;
 
 /** The daemon a route is under, or `undefined` for a route with none (home, device settings, a daemon-less screen). */
 export const daemonOfRoute = (

@@ -28,6 +28,8 @@ export interface MovePageProps {
   readonly slot: RenderAccountSlot;
   /** Back to the ferret. */
   readonly onClose: () => void;
+  /** The switch the page opens on; "Move to Codex… / Move to Claude…" opens it on the CLI side. */
+  readonly initialMode?: Mode;
 }
 
 type Load =
@@ -36,12 +38,12 @@ type Load =
   | { readonly status: 'failed'; readonly message: string }
   | { readonly status: 'moved'; readonly summary: FerretSummary; readonly notice: string };
 
-type Mode = 'account' | 'cli';
+export type Mode = 'account' | 'cli';
 
-export function MovePage({ client, ferret, slot, onClose }: MovePageProps) {
+export function MovePage({ client, ferret, slot, onClose, initialMode = 'account' }: MovePageProps) {
   const headingId = useId().replace(/:/gu, '');
   const [load, setLoad] = useState<Load>({ status: 'loading' });
-  const [mode, setMode] = useState<Mode>('account');
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [attempt, setAttempt] = useState(0);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` is the deliberate re-read trigger

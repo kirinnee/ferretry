@@ -9,8 +9,12 @@ import type { ReactNode } from 'react';
 import { MOVE_ACCOUNT_SLOT } from '../../contract/index.ts';
 import type { AccountSlotField } from '../features/move/account-slot.tsx';
 import { chatHref } from '../features/move/chat-href.ts';
-import { MovePage } from '../features/move/move-page.tsx';
+import { MovePage, type Mode } from '../features/move/move-page.tsx';
 import type { LiveFerretsClient } from '../lib/client.ts';
+
+/** The switch a link named: `?mode=cli` on this page's address opens the CLI side; anything else is the account side. */
+export const initialModeOf = (search: string): Mode =>
+  new URLSearchParams(search).get('mode') === 'cli' ? 'cli' : 'account';
 
 export const createMoveScreen = (client: LiveFerretsClient): AppComponent<ScreenProps> =>
   function MoveScreen({ params }: ScreenProps): ReactNode {
@@ -39,6 +43,7 @@ export const createMoveScreen = (client: LiveFerretsClient): AppComponent<Screen
       <MovePage
         client={client}
         ferret={ferret}
+        initialMode={initialModeOf(globalThis.location?.search ?? '')}
         onClose={() => {
           const to = daemon === undefined ? undefined : chatHref(daemon, ferret);
           if (to !== undefined) router?.back(to);
