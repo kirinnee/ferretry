@@ -1,0 +1,235 @@
+/**
+ * Reading a provider's answer about how much quota an account has spent.
+ *
+ * Every reading converts to the single public unit — **consumed percent, `0..100`** — at its own
+ * boundary. The usage JSON, the statusLine block and the Codex sources all report percentages already.
+ *
+ * ## Fail closed
+ *
+ * A missing, unparseable or out-of-range measurement is **absent**, never zero. Zero is a claim that
+ * an account has spent nothing, and a probe that could not read a number is not entitled to make it.
+ * `hasQuotaSignal` is how a caller tells "I read 0% of quota used" from "I read nothing" — the
+ * distinction a probe needs so a failed read can never mark an account healthy.
+ *
+ * Pure throughout: no network, no clock, no credentials. Values in, verdict out.
+ */
+import type { FleetCredentialSignal, FleetUsageWindow } from './usage.ts';
+import { clampUsagePercent, normalizeResetAt } from './usage.ts';
+
+/** A pair of quota windows, shortest reset horizon first. */
+export interface QuotaWindows {
+  readonly shortWindow?: FleetUsageWindow;
+  readonly longWindow?: FleetUsageWindow;
+}
+
+/** What one source said, and whether it said anything measurable at all. */
+export interface QuotaReading extends QuotaWindows {
+  /**
+   * Whether any window carried a real measurement. False means the response was shaped like an answer
+   * but contained none, which is a failed reading rather than an idle account.
+   */
+  readonly hasQuotaSignal: boolean;
+  /** The provider itself declared the account over its limit, regardless of any percentage. */
+  readonly providerAtLimit: boolean;
+}
+
+const window = (usedPercent: number | undefined, resetAt: number | undefined): FleetUsageWindow | undefined =>
+  usedPercent === undefined && resetAt === undefined
+    ? undefined
+    : {
+        ...(usedPercent === undefined ? {} : { usedPercent }),
+        ...(resetAt === undefined ? {} : { resetAt }),
+      };
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+/**
+ * Utilization from the stored-OAuth usage JSON, which is **already a percentage**.
+ *
+ * Passed through the shared clamp rather than multiplied. A value outside `0..100` is a value this
+ * build does not understand, and clamping is what the public contract already promises.
+ */
+export function percentFromStoredUtilization(value: unknown): number | undefined {
+  return typeof value === 'number' ? clampUsagePercent(value) : undefined;
+}
+
+interface StoredUsageWindow {
+  readonly utilization?: unknown;
+  readonly resets_at?: unknown;
+}
+
+/**
+ * The stored subscription usage body: `GET /api/oauth/usage`.
+ *
+ * `five_hour` is the short window and `seven_day` the long one — named by the provider, so unlike the
+ * unnamed case there is nothing to infer from reset horizons.
+ */
+export function parseStoredUsageBody(body: unknown): QuotaReading {
+  const root = asRecord(body);
+  const short = asRecord(root.five_hour) as StoredUsageWindow;
+  const long = asRecord(root.seven_day) as StoredUsageWindow;
+
+  const shortPercent = percentFromStoredUtilization(short.utilization);
+  const longPercent = percentFromStoredUtilization(long.utilization);
+  const shortWindow = window(shortPercent, normalizeResetAt(short.resets_at));
+  const longWindow = window(longPercent, normalizeResetAt(long.resets_at));
+
+  return {
+    ...(shortWindow === undefined ? {} : { shortWindow }),
+    ...(longWindow === undefined ? {} : { longWindow }),
+    hasQuotaSignal: shortPercent !== undefined || longPercent !== undefined,
+    providerAtLimit: false,
+  };
+}
+
+/**
+ * What an HTTP status means about an account, for the two questions that are not the same question.
+ *
+ * - **`authOk`** — is the credential itself repudiated?
+ * - **`unavailable`** — can the account serve work right now?
+ */
+export interface QuotaHttpVerdict {
+  /** Absent when the status says nothing conclusive about the credential. */
+  readonly authOk?: boolean;
+  readonly unavailable: boolean;
+}
+
+export const UNAUTHORIZED = 401;
+export const FORBIDDEN = 403;
+
+/**
+ * The same two questions for the read-only usage endpoint.
+ *
+ * A confirmed Anthropic JSON `403` means the token lacks `user:profile`; an HTML `403` may be an edge
+ * challenge. Neither status-only response establishes that the account cannot serve inference, and a
+ * bare control-plane `401` cannot distinguish the credential from this HTTP client. Neither status
+ * therefore marks the account unavailable here.
+ */
+export function usageEndpointHttpVerdict(status: number): QuotaHttpVerdict {
+  // A bare control-plane 401 cannot distinguish a credential the provider repudiated from an HTTP
+  // client the control plane refused. It therefore cannot condemn the login or take the account out
+  // of routing; the response fingerprint retained by the adapter is what a later discriminator reads.
+  if (status === UNAUTHORIZED) return { unavailable: false };
+  if (status === FORBIDDEN) return { unavailable: false };
+  return { authOk: true, unavailable: false };
+}
+
+/**
+ * The same read-only usage status, as the credential classification a HEALTH verdict is built from.
+ *
+ * WHY THIS IS NOT `usageEndpointHttpVerdict`. That function answers the quota path's narrower
+ * availability question and still returns `authOk: true` for a `503`. Health asks a different question:
+ * was this credential ACCEPTED. A provider that never answered accepted nothing, and reusing the
+ * quota reading here would publish a healthy verdict for every outage, timeout and rate limit.
+ *
+ * The three interesting rows:
+ *
+ * - `401` -> `rejection_unconfirmed`. This control-plane client cannot yet distinguish a token
+ *   rejection from refusal of the client itself, so status alone must never instruct a re-login.
+ * - confirmed Anthropic JSON `403` -> `scope_unavailable`, which is a HEALTHY reading. A status-only
+ *   `403` is inconclusive because the same status can be an HTML edge challenge.
+ * - everything else non-2xx -> `inconclusive`, including `429`. A rate-limited account is an
+ *   authenticated account, and it is certainly not one whose login needs replacing.
+ *
+ * `timeout` and `absent` have no status to map from: they are decided by the caller, which is the
+ * only place that knows a request was abandoned or never made.
+ */
+export function usageEndpointCredentialSignal(
+  status: number,
+  evidence: { readonly scopeUnavailableConfirmed?: boolean } = {},
+): FleetCredentialSignal {
+  if (status === UNAUTHORIZED) return 'rejection_unconfirmed';
+  if (status === FORBIDDEN) return evidence.scopeUnavailableConfirmed === true ? 'scope_unavailable' : 'inconclusive';
+  return status >= 200 && status < 300 ? 'accepted' : 'inconclusive';
+}
+
+/**
+ * The `rate_limits` block Claude Code hands its statusLine command on stdin, each turn.
+ *
+ * `five_hour` / `seven_day` carry `used_percentage` — already a percentage, like the usage JSON — and
+ * `resets_at`, epoch seconds. Named by the harness, so the windows are not inferred from horizons.
+ * Takes the WHOLE statusLine payload, because the block is one field of it and a payload without one
+ * (a harness older than the field, or a turn that made no request) is a reading with no signal.
+ */
+export function parseClaudeStatuslineRateLimits(payload: unknown): QuotaReading {
+  const limits = asRecord(asRecord(payload).rate_limits);
+  const short = asRecord(limits.five_hour);
+  const long = asRecord(limits.seven_day);
+  const shortPercent = percentFromStoredUtilization(short.used_percentage);
+  const longPercent = percentFromStoredUtilization(long.used_percentage);
+  const shortWindow = window(shortPercent, normalizeResetAt(short.resets_at));
+  const longWindow = window(longPercent, normalizeResetAt(long.resets_at));
+  return {
+    ...(shortWindow === undefined ? {} : { shortWindow }),
+    ...(longWindow === undefined ? {} : { longWindow }),
+    hasQuotaSignal: shortPercent !== undefined || longPercent !== undefined,
+    providerAtLimit: false,
+  };
+}
+
+/** A reset given as seconds-from-an-instant, when that is all a Codex source said. */
+function resetFromRelative(seconds: unknown, from: number | undefined): number | undefined {
+  if (from === undefined || typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return undefined;
+  return Math.trunc(from + seconds * 1000);
+}
+
+function codexWindow(
+  value: unknown,
+  relativeKey: 'resets_in_seconds' | 'reset_after_seconds',
+  absoluteKey: 'resets_at' | 'reset_at',
+  from: number | undefined,
+): { readonly percent?: number; readonly window?: FleetUsageWindow } {
+  const record = asRecord(value);
+  const percent = percentFromStoredUtilization(record.used_percent);
+  const resetAt = normalizeResetAt(record[absoluteKey]) ?? resetFromRelative(record[relativeKey], from);
+  const built = window(percent, resetAt);
+  return { ...(percent === undefined ? {} : { percent }), ...(built === undefined ? {} : { window: built }) };
+}
+
+function codexReading(
+  short: ReturnType<typeof codexWindow>,
+  long: ReturnType<typeof codexWindow>,
+  providerAtLimit: boolean,
+): QuotaReading {
+  return {
+    ...(short.window === undefined ? {} : { shortWindow: short.window }),
+    ...(long.window === undefined ? {} : { longWindow: long.window }),
+    hasQuotaSignal: short.percent !== undefined || long.percent !== undefined,
+    providerAtLimit,
+  };
+}
+
+/**
+ * The `rate_limits` of a Codex rollout's `token_count` event: `primary` is the 5-hour window and
+ * `secondary` the weekly one, each `{used_percent, resets_at}` with `resets_at` in epoch seconds.
+ *
+ * An older rollout carries `resets_in_seconds` instead, relative to the event, so the event's own
+ * instant is taken as `observedAt` and a relative reset without one is absent rather than guessed.
+ * `used_percent` is a percentage, `0..100`, exactly like Claude's usage JSON.
+ */
+export function parseCodexRateLimits(rateLimits: unknown, observedAt?: number): QuotaReading {
+  const root = asRecord(rateLimits);
+  return codexReading(
+    codexWindow(root.primary, 'resets_in_seconds', 'resets_at', observedAt),
+    codexWindow(root.secondary, 'resets_in_seconds', 'resets_at', observedAt),
+    false,
+  );
+}
+
+/**
+ * The body of Codex's free usage read, `GET chatgpt.com/backend-api/wham/usage`.
+ *
+ * `rate_limit.primary_window` / `secondary_window` carry `used_percent` and either `reset_at` (epoch
+ * seconds) or `reset_after_seconds`, which is measured from `now`; `rate_limit.limit_reached` is the
+ * provider's own at-limit flag. NOT login proof: this endpoint answers for a stale token, so nothing
+ * here says anything about the credential.
+ */
+export function parseCodexUsageBody(body: unknown, now: number): QuotaReading {
+  const limit = asRecord(asRecord(body).rate_limit);
+  return codexReading(
+    codexWindow(limit.primary_window, 'reset_after_seconds', 'reset_at', now),
+    codexWindow(limit.secondary_window, 'reset_after_seconds', 'reset_at', now),
+    limit.limit_reached === true,
+  );
+}

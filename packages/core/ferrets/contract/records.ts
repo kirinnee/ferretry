@@ -23,6 +23,27 @@ export const StoredSessionIdSchema = z
 /** The harness family today's records name (`claude`, `codex`; today's `HarnessSchema`). */
 export const RecordedHarnessSchema = z.enum(['claude', 'codex']);
 
+/** Where a session stands, as today's wire spells it (`SessionStatusSchema`): the fork's summary names one. */
+export const SessionStatusSchema = z.enum([
+  'created',
+  'starting',
+  'running',
+  'thinking',
+  'tool_running',
+  'awaiting_question',
+  'awaiting_user',
+  'interrupted',
+  'rate_limited',
+  'retrying',
+  'kill_failed',
+  'waiting',
+  'completed',
+  'failed',
+  'stalled',
+  'stopped',
+]);
+export type SessionStatus = z.infer<typeof SessionStatusSchema>;
+
 /**
  * The board a ferret works on (today's `BoardProjectIdSchema`): a project's uuid, or `unfiled`. Ferrets is core and
  * cannot import the Board's contract, so the shape is kept here, as the card id is.

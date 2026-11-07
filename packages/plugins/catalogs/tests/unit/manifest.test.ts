@@ -24,11 +24,12 @@ describe('catalogs manifest', () => {
     ]);
     for (const entry of members) expect(entry.noStore).toBe(true);
   });
-  test('needs Access by token name and takes the member credential, step-up and session mode', () => {
-    expect(Object.keys(manifest.needs ?? {})).toEqual(['access']);
+  // A member unlocks with its own passkeys and never steps up: Gate's `step-up` hook has Access as its only taker.
+  test('needs Access by token name and takes the member credential and session mode (never a step-up)', () => {
+    expect(Object.keys(manifest.needs ?? {})).toEqual(['access', 'gate', 'vault', 'sealed']);
+    expect(Object.keys(manifest.uses)).toEqual(['connections', 'projects']);
     expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual([
       'credentials:member',
-      'step-up:member',
       'session.modes:member',
     ]);
   });

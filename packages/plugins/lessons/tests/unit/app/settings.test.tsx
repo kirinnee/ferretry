@@ -80,4 +80,34 @@ describe('Settings › Lessons', () => {
     await waitForText(view.container, 'fleet.configure is closed');
     await view.unmount();
   });
+
+  it('shows what waits for the owner when the save is held, and the refusal while another edit is held', async () => {
+    const daemon = fakeLessonsDaemon();
+    const view = await mount(<LessonsSettingsSurface connection={daemon.connection} />);
+    await waitForText(view.container, 'On');
+    const toggle = must(view.container.querySelector<HTMLButtonElement>('[role="switch"]'), 'switch');
+
+    // The kernel held the write: the switch shows the settings still in effect, and the daemon's sentence says why.
+    daemon.once('PATCH /v1/lessons/config', { body: { ...daemon.state.config, held: ['a secret is named in model'] } });
+    await click(toggle);
+    await waitForText(view.container, 'Waiting for your approval: a secret is named in model');
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+
+    // Another edit of lessons.yaml already waits for the owner: the save is refused, saying so.
+    daemon.once('PATCH /v1/lessons/config', {
+      refuse: {
+        status: 409,
+        code: 'config_held',
+        message: 'lessons.yaml has a change waiting for your approval; confirm or discard it first, then save again.',
+      },
+    });
+    await click(toggle);
+    await waitForText(
+      view.container,
+      'lessons.yaml has a change waiting for your approval; confirm or discard it first, then save again.',
+    );
+    expect(view.container.querySelector('[data-lessons-held]')).toBeNull();
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    await view.unmount();
+  });
 });

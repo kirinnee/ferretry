@@ -1,41 +1,28 @@
 /** Updates' route handlers: parse, ask the service, answer. Refusals are final sentences with a code. */
 import {
   ApiError,
-  type ApiRequest,
   type CallContext,
   errorResponse,
   jsonResponse,
   type PlainApiResponse,
+  parseBody,
 } from '@ferretry/kernel/contract';
-import type { z } from 'zod';
+import { claimOwnerOnly, isFerretCall } from '@ferretry/core-gate/contract';
 import {
   DaemonUpdateSettingsPatchSchema,
   DaemonUpdateStartRequestSchema,
+  type DaemonUpdateView,
   UPDATE_HOST_CODES,
   UPDATES_CONFIG,
 } from '../../contract/index.ts';
 import type { ConfigDoor } from './config-door.ts';
 import { DaemonUpdateRefusal, type DaemonUpdateSubsystem } from './service.ts';
 
-const BODY_LIMIT = 4 * 1024;
-
-async function bodyOf<S extends z.ZodType>(request: ApiRequest, schema: S): Promise<z.infer<S>> {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(await request.text(BODY_LIMIT));
-  } catch {
-    throw new ApiError(400, 'the request body is not JSON', 'invalid_request');
-  }
-  const parsed = schema.safeParse(raw);
-  if (!parsed.success)
-    throw new ApiError(
-      422,
-      'the request is not one this route takes',
-      'invalid_request',
-      parsed.error.issues.map(issue => ({ path: issue.path, message: issue.message })),
-    );
-  return parsed.data;
-}
+/**
+ * The largest body these routes have a use for. Read through the kernel's `parseBody` (today's `api/body.ts`), so the
+ * refusals are today's: `413 body_too_large`, `400 invalid_json`, `400 invalid_request`.
+ */
+const BODY_LIMIT = { maxBytes: 4 * 1024 } as const;
 
 /** Restates a domain refusal as a 409 carrying its code, so the app can say the right sentence. */
 function refuse(error: unknown): PlainApiResponse {
@@ -51,9 +38,12 @@ const hostUnavailable = (): PlainApiResponse =>
   );
 
 /**
- * `GET`, `POST` and `PATCH /v1/daemon/update[/settings]` (docs/updating.md). Who may update, and whether a remote
- * device confirms with a passkey, is decided before these run: Gate demands `fleet.configure` of a person and the
- * step-up of the act (an agent cannot update the machine; the owner does).
+ * `GET`, `POST` and `PATCH /v1/daemon/update[/settings]` (docs/updating.md). Gate demands `fleet.configure` of a person
+ * before these run; the handler adds today's `ownerOnly` gate (`runtime/mounts/daemon-update.ts`) through Gate's
+ * {@link claimOwnerOnly}: an agent cannot update the machine (the owner does), and a governed device confirms with a
+ * FRESH passkey that is CLAIMED before the act, so one proof admits one act and a failed act has used it up. Turning
+ * automatic install OFF never needs one — the safe direction is never gated — but a ferret still may not change how
+ * the machine updates.
  */
 export function updateRoutes(subsystem: DaemonUpdateSubsystem | undefined, door: ConfigDoor | undefined) {
   return {
@@ -61,17 +51,27 @@ export function updateRoutes(subsystem: DaemonUpdateSubsystem | undefined, door:
       subsystem === undefined ? hostUnavailable() : jsonResponse(await subsystem.view()),
 
     'POST /v1/daemon/update': async (call: CallContext) => {
-      const request = await bodyOf(call.request, DaemonUpdateStartRequestSchema);
+      const request = await parseBody(call.request, DaemonUpdateStartRequestSchema, BODY_LIMIT);
+      const refused = claimOwnerOnly(call, 'update this machine');
+      if (refused !== undefined) return refused;
       if (subsystem === undefined) return hostUnavailable();
+      let view: DaemonUpdateView;
       try {
-        return jsonResponse(await subsystem.start(request), 202);
+        view = await subsystem.start(request);
       } catch (error) {
         return refuse(error);
       }
+      return jsonResponse(view, 202);
     },
 
     'PATCH /v1/daemon/update/settings': async (call: CallContext) => {
-      const patch = await bodyOf(call.request, DaemonUpdateSettingsPatchSchema);
+      const patch = await parseBody(call.request, DaemonUpdateSettingsPatchSchema, BODY_LIMIT);
+      if (patch.autoInstall) {
+        const refused = claimOwnerOnly(call, 'turn on automatic updates');
+        if (refused !== undefined) return refused;
+      } else if (isFerretCall(call)) {
+        throw new ApiError(403, 'a ferret cannot change how this machine updates; the owner does', 'forbidden');
+      }
       if (subsystem === undefined) return hostUnavailable();
       if (door === undefined)
         return errorResponse(503, 'this daemon cannot change its settings yet', UPDATE_HOST_CODES.configUnavailable);

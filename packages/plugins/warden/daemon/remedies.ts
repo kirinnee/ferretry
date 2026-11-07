@@ -1,8 +1,9 @@
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
+import type { BrowsersApi, LeftoverBrowsersClosed } from '@ferretry/plugin-browsers/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import { hasOpenQuestion } from './fleet.ts';
-import type { WardenRemedyPort, WardenResumeOutcome } from './lib/index.ts';
+import { leftAloneUnproved, type WardenRemedyPort, type WardenResumeOutcome } from './lib/index.ts';
 import { authorizeWardenResume, WardenResumeRefused } from './resume-guard.ts';
 
 /** What the remedies act through: Ferrets and Conversation, never around them; Asks to know a pending question. */
@@ -10,8 +11,18 @@ export interface WardenRemedyHost {
   readonly ferrets: FerretsApi;
   readonly conversation: ConversationApi;
   readonly asks: AsksApi;
-  /** Told after every remedy, whether it was done or failed (the `WardenActed` event). */
-  readonly acted: (ferret: string, action: string, outcome: 'done' | 'failed') => void;
+  /**
+   * Told after every remedy, whether it was done or failed (the `WardenActed` event), with the browsers a leftover
+   * close left alone (each pid and why), so the owner is told what was not closed.
+   */
+  readonly acted: (
+    ferret: string,
+    action: string,
+    outcome: 'done' | 'held' | 'failed',
+    leftAlone?: LeftoverBrowsersClosed['leftAlone'],
+  ) => void;
+  /** Browsers, while it is on (an optional use): it closes the browsers left under a ferret's pane. */
+  readonly browsers?: () => BrowsersApi | undefined;
 }
 
 /** The reason the Warden's restart gives Ferrets for the stop half of it (today's restart recorded the Warden). */
@@ -84,10 +95,29 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
       await act(ferret, 'stop', async () => await ferrets.stop(ferret as FerretId, 'polite', reason)),
     // GAP(ferrets): moving a ferret to another login needs Ferrets' additive `move`; until then a failover refuses.
     failover: async () => refuse('Moving a ferret to another account'),
-    // GAP(terminals/browsers): today closed the browsers left under the ferret's own pane, read from its process tree.
-    // Neither Terminals' port (`of`, `holders`) nor Browsers' (`state`, `pagesOf`) reads a pane's processes or closes
-    // one, so nothing is closed and the sweep reports zero.
-    closeLeftoverBrowsers: async () => 0,
+    // Today's remedy, through Browsers: the pane's tree is read again at this moment (through Terminals), nothing is
+    // closed while a tool command runs, and only a top-level browser under THAT pane that Terminals re-proves just
+    // before its signal is closed — never the ferret; every other one is left alone and reported.
+    // The sweep calls this only when the owner lets the Warden close leftovers alone (`mayActAlone.closeLeftovers`).
+    // Browsers off: nothing closes, and the sweep is never told of a leftover to close (`withLiveness`).
+    // Recorded `done` when one closed, `failed` when every browser it proved refused the signal, and `held` when it
+    // closed and refused nothing but left a browser alone because it could not prove it (`not-proved`, `invalid-pid`):
+    // the owner is told. `gone` and `tool-running` alone are not ownership questions and raise nothing.
+    closeLeftoverBrowsers: async ferret => {
+      const browsers = host.browsers?.();
+      if (browsers === undefined) return { closed: 0, leftAlone: [] };
+      try {
+        const result = await browsers.closeLeftoverBrowsers(ferret as FerretId);
+        const refused = result.leftAlone.some(browser => browser.why === 'signal-refused');
+        if (result.closed > 0) acted(ferret, 'close_leftover', 'done', result.leftAlone);
+        else if (refused) acted(ferret, 'close_leftover', 'failed', result.leftAlone);
+        else if (leftAloneUnproved(result.leftAlone)) acted(ferret, 'close_leftover', 'held', result.leftAlone);
+        return result;
+      } catch (error) {
+        acted(ferret, 'close_leftover', 'failed');
+        throw error;
+      }
+    },
   };
 
   return {

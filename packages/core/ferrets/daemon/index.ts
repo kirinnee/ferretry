@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import type { BearerDigest } from '@ferretry/core-gate/contract';
+import { type BearerDigest, ferretOf } from '@ferretry/core-gate/contract';
 import {
   ApiError,
   type ApiResponse,
@@ -8,16 +8,18 @@ import {
   type FencedPath,
   headerValue,
   jsonResponse,
+  type PinnedWorkingDirectory,
   queryValue,
 } from '@ferretry/kernel/contract';
 import { type DaemonContext, type DaemonHalf, implementDaemon } from '@ferretry/kernel/manifest';
-import { err, ok } from '@ferretry/std';
+import { err, milliseconds, ok } from '@ferretry/std';
 import {
   type FerretId,
   FerretChanged,
   FerretStopping,
   FerretStarted,
   FerretFiles,
+  RestartsFile,
   FerretHistoryFiles,
   type FerretRecord,
   FerretsChanged,
@@ -48,10 +50,13 @@ import { FY_REQUEST_ID_HEADER } from './lib/protocol/headers.ts';
 import { WARDEN_LABEL } from './lib/session/peers/warden-lifecycle.ts';
 import { lookupStartRequest, StartRequestsFile, withStartRequest } from './lib/ferrets/start-requests.ts';
 import { sessionFilesystemRoutes } from './lib/runtime/mounts/session-filesystem.ts';
+import { AGENT_READ_FENCE, SessionFilesystem } from './lib/session/filesystem/index.ts';
+import { KernelGitRunner } from './adapters/git/runner.ts';
+import { KernelDiffScratch, KernelSessionRootPinner, RunnerSessionGit } from './adapters/session/filesystem/index.ts';
 import { StateAgentPinRepository } from './adapters/agent-pins/index.ts';
 import { RegistryPinSessionDirectory, StatePinRepository } from './adapters/pins/index.ts';
 import { KeyedSerialExecutor } from './adapters/storage/keyed-serial-executor.ts';
-import { stateHomeLaunchRefusal } from './lib/route-security/state-home.ts';
+import { type StateHomeLaunchReach, stateHomeLaunchRefusal } from './lib/route-security/state-home.ts';
 import { terminalLaunchRefusal } from './lib/route-security/launch.ts';
 import { confirmRestore } from './lib/route-security/restore.ts';
 import { AgentPinService, AgentPinSubsystem, withPinned } from './lib/agent-pins/index.ts';
@@ -59,16 +64,33 @@ import { PinService } from './lib/pins/index.ts';
 import { pinRoutes } from './lib/runtime/mounts/pins.ts';
 import { sessionPinRoutes } from './lib/runtime/mounts/session-pin.ts';
 import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './lib/runtime/mounts/session-archive.ts';
-import { type SessionRestartSubsystem, sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
-import { type SessionSignalSubsystem, sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
-import { AgentPinsFile, FerretDetailsFiles, FerretPinFiles, FerretSummaryFiles } from './lib/state.ts';
+import { sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
+import { FerretRestarts, restartService } from './lib/ferrets/restarts.ts';
+import { RestartQueueEntrySchema } from './lib/protocol/session-restart.ts';
+import { sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
+import { AgentPinsFile, FerretDetailsFiles, FerretPinFiles, FerretSummaryFiles, FerretWaitFiles } from './lib/state.ts';
+import { FerretSignals } from './lib/ferrets/signals.ts';
+import { SessionSignalService } from './lib/session/signal/service.ts';
+import {
+  FerretSignalArtifacts,
+  type FerretSignalHost,
+  FerretSignalRepository,
+  FerretSignalTerminal,
+} from './adapters/session/signal/ferret-signal.ts';
+import { DaemonStorage } from './adapters/storage/session-storage.ts';
+import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
+import { movesDeps } from './moves-deps.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
 
-/** The ferret a ferret token names, from Gate's standing; `undefined` for a person or another agent. */
+/**
+ * The ferret behind a call, from Gate's standing (`ferretOf`, today's `agentSessionOf`): a ferret's own token, or the
+ * admin token with a ferret named in `x-ferretry-session-id` (the call's actor is then that ferret's). `undefined` for a
+ * person (the admin token with no ferret behind it, a device) and for the Warden, which acts as no ferret.
+ */
 export function callerFerret(call: CallContext): FerretId | undefined {
-  return call.credential?.tokenClass === 'ferret' ? call.credential.ferret : undefined;
+  return ferretOf(call);
 }
 
 /** Whether the caller is an agent (a ferret's token, the warden, or the admin token with a ferret behind it). */
@@ -108,6 +130,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       const details = await kernel.state.read(FerretDetailsFiles, name);
       if (details.ok && details.value !== undefined) registry.putDetails(read.value.id, details.value);
       else if (!details.ok) log.warn('a ferret details file could not be read', { file: details.error.file });
+      // Its declared wait, if it was parked when the daemon last ran.
+      const wait = await kernel.state.read(FerretWaitFiles, name);
+      if (wait.ok && wait.value?.waiting !== undefined) registry.putWaiting(read.value.id, wait.value.waiting);
+      if (wait.ok && wait.value?.finishedAt !== undefined) registry.putFinished(read.value.id, wait.value.finishedAt);
+      if (!wait.ok) log.warn('a ferret waiting file could not be read', { file: wait.error.file });
     }
     const held = await kernel.state.read(FerretTokensFile);
     // An unreadable/missing token document beside existing records cannot prove no owner cut-off was held.
@@ -150,6 +177,12 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         }),
       );
 
+  /** A ferret's `waiting.json`, or an empty one: what it declared, the time credited for it, and when it finished. */
+  const parkedFile = async (ferret: FerretId) => {
+    const read = await kernel.state.read(FerretWaitFiles, ferret);
+    return read.ok && read.value !== undefined ? read.value : {};
+  };
+
   const service = new FerretsService(registry, tokens, {
     ready,
     now: () => kernel.clock.now(),
@@ -185,10 +218,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
     sitrepSources: () => hooks.contributions(SitrepLines).map(contribution => contribution.item),
     instructions: () => kernel.snapshot.current().instructions,
-    home: ferret => {
-      const home = kernel.roots.root('agent-homes', { ferret }).resolve('.');
-      return home.ok ? home.value : ('' as FencedPath);
-    },
     folder: path => {
       if (!path.startsWith('/')) return err('the folder must be an absolute path');
       return ok(path as FencedPath);
@@ -203,18 +232,30 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       hooks.observe(FerretStarted, payload);
     },
     saveDetails: async (ferret, details) => await kernel.state.write(FerretDetailsFiles, details, ferret),
+    // A stopped ferret holds no declared wait; the credit it banked stays.
+    endWait: async ferret => {
+      if (registry.waitingOf(ferret) === undefined) return;
+      const { waiting: _ended, ...kept } = await parkedFile(ferret);
+      await kernel.state.write(FerretWaitFiles, kept, ferret);
+      registry.putWaiting(ferret, undefined);
+    },
     history: appendHistory,
     limits: () => kernel.config.file(LimitsConfigFile),
     pinnedAt: async () => await agentPins.pinnedAt(),
-    // GAP: nothing writes `summary.md` on this base — `signal` is not built and `FileSignalArtifacts` is not wired —
-    // so this read answers nothing in a real daemon until the signal writer lands (Packs' result and Clean up wait on it).
+    // `signal done` writes the summary (Packs' result and Clean up read it); a ferret that has not finished has none.
     summaryText: async ferret => {
       const read = await kernel.state.read(FerretSummaryFiles, ferret);
       return read.ok && read.value !== undefined ? new TextDecoder().decode(read.value) : undefined;
     },
-    // Binds to the `work` root's `RootHandle.realPath` when kernel item N reaches the base; until then no work folder
-    // is answered (fails closed: Accounts gets no folder default).
-    realPath: async () => undefined,
+    // The ferret's own `work` root decides: the folder must lie inside what the registry holds for THAT ferret, outside
+    // the daemon's fence, and its links are resolved before the check. A refusal answers no folder (fails closed).
+    realPath: async (ferret, folder) => {
+      const root = kernel.roots.root('work', { ferret });
+      const checked = root.resolve(folder);
+      return checked.ok ? await root.realPath(checked.value) : undefined;
+    },
+    // The registry the worktrees module keeps (built below); read only, through its own lifecycle chain.
+    managedWorktrees: async () => await worktrees.service.records(),
     vault: needs.vault,
     asks: needs.asks,
   });
@@ -245,6 +286,15 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     newId: () => randomUUID(),
   });
 
+  /** The ferret an id or a name addresses; a name two ferrets hold on one footing addresses none. */
+  const resolveFerret = (reference: string): FerretId | undefined => {
+    const resolution = resolveAgentAddress(
+      reference,
+      registry.list().map(ferret => ({ id: ferret.id, name: ferret.name, status: ferret.state })),
+    );
+    return resolution.kind === 'session' ? (resolution.id as FerretId) : undefined;
+  };
+
   /** The ferret a path names: an exact id, or a name (a live holder wins; two on one footing are refused). */
   const pathFerret = async (call: CallContext): Promise<FerretId> => {
     await ready();
@@ -260,6 +310,14 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       throw new ApiError(409, ambiguousAgentAddressMessage(resolution.name, resolution.candidates), 'ambiguous_name');
     throw new ApiError(404, `no ferret ${raw}`, 'not-found');
   };
+
+  /**
+   * The kernel gives a plugin no state-home identity or link-hop reach yet, so the launch refusal (the folder a ferret
+   * is started in) fails closed for an agent with today's 503 `state_home_unresolved`, and never with a lexical
+   * stand-in. The file browser needs none: the pin a work root hands out judges every walk beneath it against the
+   * kernel's fence itself (S40, S47).
+   */
+  const stateHomeReach: StateHomeLaunchReach | undefined = undefined;
 
   /** S47: an agent reaches only its own ferret and its helpers'; a person is unaffected. */
   const agentMayReach = (call: CallContext, target: FerretId): void => {
@@ -286,24 +344,37 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       throw new ApiError(403, `a ferret acts only on itself and its helpers, and ${target} is neither`, 'forbidden');
   };
 
-  // The file browser's listing, index, changes and diff (today's session-filesystem mount). The service runs on the
-  // kernel's identity-returning root walk, which is not bound yet, so these answer 503 until it is.
+  // The file browser (today's session-filesystem mount) over the kernel: each ferret's `work` root pins its folder and
+  // walks beneath it by descriptor and Git runs in the held object. For an AGENT the pin refuses (`denied`, 403) every
+  // path inside the state home and every hard link, and the service asks the pin's name verdict wherever a name never
+  // passes through the walk (Git's change list, a HEAD read, a badge); a PERSON is unfenced, as today (S47). The
+  // service is stateless, so one is made for the ferret a request names.
+  const sessionGit = new RunnerSessionGit(
+    new KernelGitRunner({
+      // A string folder is one this module already fenced (a scratch folder); a held directory is the kernel's pin.
+      runBytes: async (program, args, { cwd, ...rest }) =>
+        await kernel.spawn.runBytes(program, args, {
+          ...rest,
+          ...(cwd === undefined ? {} : { cwd: cwd as FencedPath | PinnedWorkingDirectory }),
+        }),
+    }),
+    new KernelDiffScratch(kernel.scratch),
+  );
   const fileBrowser = sessionFilesystemRoutes({
-    filesystem: undefined,
+    filesystem: ferret =>
+      new SessionFilesystem(
+        new KernelSessionRootPinner(kernel.roots.root('work', { ferret: ferret as FerretId })),
+        sessionGit,
+        () => kernel.clock.nowMs(),
+      ),
     reach: async call => {
       const id = await pathFerret(call);
       agentMayReach(call, id);
       const folder = registry.get(id)?.folder;
       if (folder === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
-      // An agent's read sits behind the state-home fence, which the host resolves; with none resolved an agent is
-      // refused, exactly as today's daemon refused it when it could not resolve its own home.
-      if (callerIsAgent(call))
-        throw new ApiError(
-          503,
-          'this daemon cannot resolve its own state home, so it does nothing for an agent that could reach it',
-          'state_home_unresolved',
-        );
-      return { id, cwd: folder };
+      // S47, today's `agentFence`: an agent reads only its own ferret's and its helpers' files (above), behind the
+      // state-home fence; a person reads unfenced.
+      return { id, cwd: folder, ...(callerIsAgent(call) ? { fence: AGENT_READ_FENCE } : {}) };
     },
   });
 
@@ -327,8 +398,124 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         throw new ApiError(503, `${what} is not built yet in this version of Ferretry.`, 'plugin_unavailable');
       },
     });
-  const signals = sessionSignalRoutes(notBuilt<SessionSignalSubsystem>('The ferret lifecycle signal'));
-  const restarts = sessionRestartRoutes(notBuilt<SessionRestartSubsystem>('Restarting ferrets'));
+  // Moves and forks (ferrets-c): today's fork, handover and move modules, built once. The archive the session store
+  // keeps is read before the first of their routes answers; the handover's reconcile loop is armed once the daemon
+  // serves (today: beside the warden sweep) and disarmed when it stops.
+  const sessionStore = new DaemonStorage(kernel.state, { now: () => kernel.clock.now() }, log);
+  const storeLoaded = sessionStore.loadArchive().catch((error: unknown) => {
+    log.warn('the session store could not load its archive', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  });
+  const moves = buildMoves(ctx, movesDeps(ctx, { storage: sessionStore, clientName: 'fy' }));
+  const moveRoutes = Object.fromEntries(
+    MOVE_ROUTE_KEYS.map(key => [
+      key,
+      async (call: CallContext) => {
+        await storeLoaded;
+        return await moves.routes[key](call);
+      },
+    ]),
+  ) as typeof moves.routes;
+  kernel.jobs.add({
+    id: 'ferrets.handover-reconcile',
+    schedule: { onceAfterStart: true },
+    run: async () => {
+      await storeLoaded;
+      kernel.lifecycle.onStop(moves.arm());
+    },
+  });
+
+  const signalHost: FerretSignalHost = {
+    ready,
+    record: ferret => registry.get(ferret),
+    resolve: resolveFerret,
+    waitingOf: ferret => registry.waitingOf(ferret),
+    creditOf: async ferret => (await parkedFile(ferret)).creditSeconds,
+    saveWaiting: async (ferret, waiting, creditSeconds) => {
+      const { waiting: _before, creditSeconds: _credit, ...kept } = await parkedFile(ferret);
+      await kernel.state.write(
+        FerretWaitFiles,
+        {
+          ...kept,
+          ...(waiting === undefined ? {} : { waiting }),
+          ...(creditSeconds === undefined ? {} : { creditSeconds }),
+        },
+        ferret,
+      );
+      registry.putWaiting(ferret, waiting);
+    },
+    saveFinished: async (ferret, at) => {
+      await kernel.state.write(FerretWaitFiles, { ...(await parkedFile(ferret)), finishedAt: at as never }, ferret);
+      registry.putFinished(ferret, at);
+    },
+    writeSummary: async (ferret, text) => {
+      await kernel.state.write(FerretSummaryFiles, new TextEncoder().encode(text), ferret);
+    },
+    history: appendHistory,
+    stop: async (ferret, reason) => await service.stop(ferret, 'now', reason),
+  };
+  const signalRoutes = sessionSignalRoutes(
+    new FerretSignals(
+      new SessionSignalService({
+        repository: new FerretSignalRepository(signalHost),
+        artifacts: new FerretSignalArtifacts(signalHost),
+        terminal: new FerretSignalTerminal(signalHost),
+        serial: new KeyedSerialExecutor(),
+        clock: { now: () => kernel.clock.now() },
+      }),
+      { resolve: resolveFerret, view: async ferret => await service.get(ferret) },
+    ),
+  );
+  // A ferret signals for itself and its helpers; a person for any ferret (the same rule as stop, resume and rename).
+  const signals = {
+    'POST /v1/ferrets/:ferretId/signal': async (call: CallContext): Promise<ApiResponse> => {
+      mayAct(call, await pathFerret(call));
+      return await signalRoutes['POST /v1/ferrets/:ferretId/signal'](call);
+    },
+  };
+  const restartSubsystem = new FerretRestarts(
+    restartService({
+      ready,
+      ferrets: () => registry.list(),
+      waitingOf: ferret => registry.waitingOf(ferret),
+      stop: async (ferret, reason) => await service.stop(ferret, 'polite', reason),
+      resume: async ferret => await service.resume(ferret),
+      history: appendHistory,
+      // An entry that does not parse is dropped on its own; the rest survive, and a queue that cannot be read is empty.
+      loadQueue: async () => {
+        const read = await kernel.state.read(RestartsFile);
+        const queued = read.ok ? (read.value as { queued?: unknown } | undefined)?.queued : undefined;
+        if (!Array.isArray(queued)) return [];
+        return queued.flatMap(entry => {
+          const parsed = RestartQueueEntrySchema.safeParse(entry);
+          return parsed.success ? [parsed.data] : [];
+        });
+      },
+      saveQueue: async entries => {
+        await kernel.state.write(RestartsFile, { queued: entries });
+      },
+      now: () => kernel.clock.now(),
+    }),
+    { resolve: resolveFerret, mayTouch: (caller, target) => registry.mayTouch(caller, target) },
+  );
+  const restartRoutes = sessionRestartRoutes(restartSubsystem);
+  const restarts = {
+    ...restartRoutes,
+    // Clearing the queue clears every ferret's waiting restart: a person's act.
+    'DELETE /v1/restarts': async (call: CallContext): Promise<ApiResponse> => {
+      if (callerFerret(call) !== undefined)
+        throw new ApiError(403, 'a ferret does not clear the restart queue of every ferret', 'forbidden');
+      return await restartRoutes['DELETE /v1/restarts'](call);
+    },
+  };
+  // A waiting restart is tried again at its ferret's next idle moment; an empty queue costs no read.
+  kernel.jobs.add({
+    id: 'restart-drain',
+    schedule: { every: milliseconds(10_000) },
+    run: async () => await restartSubsystem.drain(),
+  });
   const archived = sessionArchiveRoutes(notBuilt<SessionArchiveSubsystem>('The archived ferret list'));
 
   // Pins (a3's handlers): the owner's sidebar pins (agent-pins.json) and each ferret's note board (<ferret>/pins.json).
@@ -404,6 +591,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     routes: {
       ...worktrees.routes,
+      ...moveRoutes,
       ...fileBrowser,
       ...signals,
       ...restarts,
@@ -452,7 +640,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
             'owner_only',
           );
         // No identity/link-hop state-home reach is available in this kernel yet. Never replace it with a lexical fence.
-        await stateHomeLaunchRefusal(callerIsAgent(call), undefined, parsed.folder);
+        await stateHomeLaunchRefusal(callerIsAgent(call), stateHomeReach, parsed.folder);
         // Project catalogs and the managed-root launch seam are unbound; a governed start fails closed without them.
         await terminalLaunchRefusal(call, parsed, undefined);
         let startedFerret: FerretId | undefined;
@@ -564,5 +752,5 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 }
 
-/** Ferrets' daemon half (§2.2). `buildMoves(ctx, deps)` (ferrets-c: fork, handover, move) joins `build` here. */
+/** Ferrets' daemon half (§2.2). */
 export default implementDaemon(manifest, { build });

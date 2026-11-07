@@ -142,6 +142,20 @@ export const FerretQuotaSchema = z.object({
 export type FerretQuota = z.infer<typeof FerretQuotaSchema>;
 
 /**
+ * A wait a ferret declared with `signal waiting` (today's `SessionState.waiting`, field for field): it is parked on an
+ * outside condition or on a peer's reply, not stuck, and the daemon holds it to the deadline. `peer` is always a
+ * resolved ferret id, never the reference the ferret gave.
+ */
+export const FerretWaitingSchema = z.strictObject({
+  since: InstantSchema,
+  until: InstantSchema.optional(),
+  condition: z.string().min(1).optional(),
+  peer: FerretIdSchema.optional(),
+  peerName: z.string().min(1).optional(),
+});
+export type FerretWaiting = z.infer<typeof FerretWaitingSchema>;
+
+/**
  * What other subsystems and the app read about a ferret: its record without the format stamp and runner handle, and
  * today's view fields Ferrets keeps beside it — the model and card it was started with and its task title (from its
  * `details.json`), the instant the owner pinned it, and its quota (no core source; see {@link FerretQuotaSchema}).
@@ -157,5 +171,12 @@ export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handl
   title: FerretTitleSchema.optional(),
   pinnedAt: InstantSchema.optional(),
   quota: FerretQuotaSchema.optional(),
+  /** Present exactly while the ferret has a declared wait (`signal waiting`); `signal working` clears it. */
+  waiting: FerretWaitingSchema.optional(),
+  /**
+   * When the ferret said `signal done`, present only while it is stopped on that word: a stopped ferret that did not
+   * say it (the owner stopped it, a launch failed) has none, and a resumed one is no longer finished.
+   */
+  finishedAt: InstantSchema.optional(),
 });
 export type FerretSummary = z.infer<typeof FerretSummarySchema>;

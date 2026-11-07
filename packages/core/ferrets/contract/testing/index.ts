@@ -24,7 +24,7 @@ import type {
   StartRefusal,
   Started,
 } from '../kinds.ts';
-import type { FerretsApi, Sitrep, StartFailure, StartRequest } from '../port.ts';
+import type { FerretsApi, ManagedWorktreeSummary, Sitrep, StartFailure, StartRequest } from '../port.ts';
 import { type AgentControl, DEFAULT_AGENT_CONTROL, NO_AGENT_CONTROL } from '../state.ts';
 
 /** 2026-11-07T12:00:00Z. */
@@ -153,19 +153,36 @@ export function runnerConformance(name: string, make: () => RunnerSubject | Prom
 
 // ─── harness ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** A harness that writes one file in the home, starts through the runner it is given and delivers idempotently. */
+/**
+ * A harness that names one home per ferret under its own `homes` folder (a fixture path, never a real one), writes
+ * one file there, starts through the runner it is given and delivers idempotently.
+ */
 export class FakeHarness implements Harness {
   readonly accepts: readonly LoginKindKey[] = ['anthropic', 'api-key'];
   readonly delivered: OutboundMessage[] = [];
   /** Every launch spec this harness was handed (start and resume), so a test sees what reached it. */
   readonly launched: LaunchSpec[] = [];
+  /** Every launch spec `prepareHome` was handed, in order. */
+  readonly prepared: LaunchSpec[] = [];
   readonly #seen = new Set<string>();
-  constructor(readonly key: HarnessKey = 'claude-code') {}
+  constructor(
+    readonly key: HarnessKey = 'claude-code',
+    /** This harness's own `agent-homes` folder: `homeFor` answers `<homes>/<ferret>`. */
+    readonly homes: string = '/home/agent-homes',
+  ) {}
 
   async discover() {
     return { found: true as const, binary: '/usr/bin/fake-harness', version: '1.0.0' };
   }
+  async homeFor(ferret: FerretId): Promise<FencedPath> {
+    if (ferret === '' || ferret.includes('/') || ferret === '.' || ferret === '..')
+      throw new Error('the ferret id must be one plain name');
+    return fenced(`${this.homes}/${ferret}`);
+  }
   async prepareHome(spec: LaunchSpec) {
+    if (spec.home !== (await this.homeFor(spec.ferret)))
+      throw new Error('the launch home is not this harness’s home for the ferret');
+    this.prepared.push(spec);
     return { files: [fenced(`${spec.home}/INSTRUCTIONS.md`)], args: [] };
   }
   async start(spec: LaunchSpec, runner: Runner, env: ChildEnvironment): Promise<Result<Started, StartRefusal>> {
@@ -206,6 +223,11 @@ export interface HarnessSubject {
   readonly spec: LaunchSpec;
   /** How many times a message with this id reached the ferret. */
   deliveredCount(id: string): number;
+  /**
+   * Set for a harness that refuses every `deliver` because another subsystem owns its send path (Codex: Conversation).
+   * The delivery case then holds it to refusing both attempts and reaching the ferret zero times.
+   */
+  readonly deliversElsewhere?: true;
 }
 
 export const sampleLaunchSpec = (harness: HarnessKey = 'claude-code'): LaunchSpec => ({
@@ -232,6 +254,16 @@ export function harnessConformance(name: string, make: () => HarnessSubject | Pr
       const plan = await harness.prepareHome(spec);
       for (const file of plan.files) expect(file.startsWith(`${spec.home}/`)).toBe(true);
     });
+    test('S42 homeFor names one absolute home per ferret, and prepareHome refuses any other home', async () => {
+      const { harness, spec } = await make();
+      const own = await harness.homeFor(spec.ferret);
+      const other = await harness.homeFor(ferretId(`${spec.ferret}-other`));
+      expect(own).toBe(spec.home);
+      expect(own.startsWith('/')).toBe(true);
+      expect(other).not.toBe(own);
+      expect(other.startsWith(`${own}/`) || own.startsWith(`${other}/`)).toBe(false);
+      await expect(harness.prepareHome({ ...spec, home: other })).rejects.toBeDefined();
+    });
     test('start runs through the runner it is given and stop ends it', async () => {
       const { harness, runner, spec } = await make();
       const started = await harness.start(spec, runner, emptyChildEnvironment());
@@ -245,8 +277,13 @@ export function harnessConformance(name: string, make: () => HarnessSubject | Pr
       const started = await subject.harness.start(subject.spec, subject.runner, emptyChildEnvironment());
       if (!started.ok) throw new Error('start refused');
       const message = { id: 'm1', text: 'hello' };
-      await subject.harness.deliver(subject.spec.ferret, started.value.running.handle, message);
-      await subject.harness.deliver(subject.spec.ferret, started.value.running.handle, message);
+      const first = await subject.harness.deliver(subject.spec.ferret, started.value.running.handle, message);
+      const second = await subject.harness.deliver(subject.spec.ferret, started.value.running.handle, message);
+      if (subject.deliversElsewhere === true) {
+        expect([first.status, second.status]).toEqual(['refused', 'refused']);
+        expect(subject.deliveredCount('m1')).toBe(0);
+        return;
+      }
       expect(subject.deliveredCount('m1')).toBe(1);
     });
   });
@@ -426,6 +463,14 @@ export class FakeFerrets implements FerretsApi {
   }
   async summary(ferret: FerretId): Promise<string | undefined> {
     return this.#ferrets.get(ferret)?.state === 'stopped' ? this.#summaries.get(ferret) : undefined;
+  }
+  #worktrees: readonly ManagedWorktreeSummary[] = [];
+  /** TEST ONLY: the managed worktree registry `managedWorktrees()` answers. */
+  setManagedWorktrees(rows: readonly ManagedWorktreeSummary[]): void {
+    this.#worktrees = rows;
+  }
+  async managedWorktrees(): Promise<readonly ManagedWorktreeSummary[]> {
+    return this.#worktrees;
   }
   readonly #controls = new Map<FerretId, Partial<AgentControl>>();
   /** TEST ONLY: what one ferret may control, over today's defaults. */

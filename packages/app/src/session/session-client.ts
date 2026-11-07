@@ -91,9 +91,8 @@ import {
   OwnerPayloadSchema,
   partitionTunnelBody,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
-  RELAY_SESSION_CONCLUDED_CLOSE_CODE,
-  relayDataByteBudget,
 } from './wire/index.ts';
+import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, relayDataByteBudget } from '@ferretry/kernel/session';
 import { z } from 'zod';
 import { acceptEncodingHeader, decodeCompressedAnswer } from './compression.ts';
 

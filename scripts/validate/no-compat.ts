@@ -12,17 +12,41 @@ import { loadWorkspace, sourceFiles } from '../gen/lib/workspace.ts';
 export const BANNED_WORDS = /legacy|deprecat|migrat|retired|compat(?!ib)/i;
 
 /**
- * Exported constants whose TEXT may name these words, by `file#name`, each with the lead's reason. Only the string
- * inside that one declaration is exempt; identifiers and every other string in the file are still read.
+ * Constants whose TEXT may name these words, by `file#name`, or a single literal by `file#name#literal`,
+ * each with the lead's reason. Identifiers and every other string are still read.
  */
 export const ALLOWED: ReadonlyMap<string, string> = new Map([
+  [
+    'packages/plugins/codex/daemon/lib/fixed-layer.ts#CODEX_HIDDEN_NOTICES#hide_gpt5_1_migration_prompt',
+    "Codex's own config notice key, written verbatim into the harness config",
+  ],
+  [
+    'packages/plugins/codex/daemon/lib/fixed-layer.ts#CODEX_HIDDEN_NOTICES#hide_gpt-5.1-codex-max_migration_prompt',
+    "Codex's own config notice key, written verbatim into the harness config",
+  ],
   [
     'packages/core/kernel/contract/home.ts#CARRY_OVER_PROMPT',
     'names the carry-over runbook path (docs/migration/); lead decision 2026-11-07',
   ],
   [
+    'packages/plugins/accounts/contract/routes/two-factor.ts#AUTHENTICATOR_EXPORT_SCHEME',
+    "Google Authenticator's own export-link scheme (`otpauth-migration://`), an external format name the key reader " +
+      'refuses by name; lead decision 2026-11-07 (DECISIONS-1 item 6)',
+  ],
+  [
     'packages/plugins/runtimes/daemon/lib/account/fixed-layer.ts#CODEX_HIDDEN_NOTICES',
     "Codex's own [notice] config key names, which spell 'migration'; the harness defines them, not Ferretry",
+  ],
+]);
+
+/** Real product words, scoped to their owning package (lead decision DECISIONS-1 #15). */
+export const PRODUCT_WORDS: ReadonlyMap<string, { readonly word: RegExp; readonly reason: string }> = new Map([
+  [
+    'packages/plugins/catalogs/',
+    {
+      word: /retired/gi,
+      reason: "Catalog version retirement is today's product state and signed wire wording; keep it unchanged.",
+    },
   ],
 ]);
 
@@ -31,7 +55,11 @@ export function compatIn(file: string, where = file): Finding[] {
   const parsed = parseFile(file);
   const seen = new Set<string>();
   const add = (start: number, text: string): void => {
-    const match = BANNED_WORDS.exec(text);
+    let checked = text;
+    for (const [prefix, allowed] of PRODUCT_WORDS) {
+      if (where.startsWith(prefix)) checked = checked.replace(allowed.word, '');
+    }
+    const match = BANNED_WORDS.exec(checked);
     if (match === null) return;
     const at = `${where}:${parsed.line(start)}:${text}`;
     if (seen.has(at)) return;
@@ -50,8 +78,14 @@ export function compatIn(file: string, where = file): Finding[] {
     );
     if (allowed && node.type !== 'Identifier') return;
     if (node.type === 'Identifier' || node.type === 'PrivateIdentifier') add(node.start, node.name as string);
-    else if (node.type === 'Literal' && typeof node.value === 'string') add(node.start, node.value);
-    else if (node.type === 'TemplateElement') add(node.start, (node.value as { raw: string }).raw);
+    else if (node.type === 'Literal' && typeof node.value === 'string') {
+      const exact = parents.some(
+        p =>
+          p.type === 'VariableDeclarator' &&
+          ALLOWED.has(`${where}#${(p.id as { name?: string } | undefined)?.name ?? ''}#${node.value}`),
+      );
+      if (!exact) add(node.start, node.value);
+    } else if (node.type === 'TemplateElement') add(node.start, (node.value as { raw: string }).raw);
   });
   return findings;
 }

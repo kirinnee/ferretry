@@ -126,6 +126,11 @@ export function fakeConversation(options: { readonly now?: () => Instant } = {})
       const all = events.get(ferret) ?? [];
       return ok({ v: 1, ferret, events: options?.limit === undefined ? all : all.slice(-options.limit) });
     },
+    transcriptLog: async (ferret, options) => {
+      const all = events.get(ferret) ?? [];
+      const tail = options?.limit === undefined ? all : all.slice(-options.limit);
+      return ok({ v: 1, ferret, log: tail.map(event => JSON.stringify(event)).join('\n') });
+    },
     ownerWords: async ferret => ok({ v: 1, ferret, words: [...new Set(said.get(ferret) ?? [])] }),
     logPage: async ferret => ok({ v: 1, ferret, log: '', start: 0, file: 'fake' }),
     logSearch: async (ferret, query) => ok({ v: 1, ferret, query, file: 'fake', matches: [], truncated: false }),

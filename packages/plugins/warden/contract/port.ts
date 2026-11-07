@@ -35,7 +35,19 @@ export const WardenFlagged = defineEvent(
   'warden.flagged',
   z.strictObject({ ferret: FerretIdSchema, kind: WardenAnomalyKindSchema }),
 );
+/**
+ * Why a leftover close left a browser alone: Browsers' closed `LeftAloneWhy` set, spelled again here because a plugin
+ * contract may not import another's. Browsers owns the words; a Warden test pins that the two sets are the same.
+ */
+export const WardenLeftAloneWhySchema = z.enum(['not-proved', 'gone', 'tool-running', 'invalid-pid', 'signal-refused']);
+
 export const WardenActed = defineEvent(
   'warden.acted',
-  z.strictObject({ ferret: FerretIdSchema, action: z.string().min(1), outcome: z.enum(['done', 'held', 'failed']) }),
+  z.strictObject({
+    ferret: FerretIdSchema,
+    action: z.string().min(1),
+    outcome: z.enum(['done', 'held', 'failed']),
+    /** A leftover close only: each browser it left alone, by pid, and the closed reason (never text or argv). */
+    leftAlone: z.array(z.strictObject({ pid: z.number().int(), why: WardenLeftAloneWhySchema })).optional(),
+  }),
 );

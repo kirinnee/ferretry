@@ -73,3 +73,30 @@ describe('context-imports: @ferretry/kernel/worker', () => {
     expect(refusal(edge('asks', 'contract/index.ts', '@ferretry/kernel/worker'))).toBeDefined();
   });
 });
+
+describe('context-imports: the app shell public API', () => {
+  test('an app half imports @ferretry/app, /ui and /worker; its tests also /testing', () => {
+    for (const specifier of ['@ferretry/app', '@ferretry/app/ui', '@ferretry/app/worker'])
+      expect(refusal(edge('connections', 'app/index.ts', specifier))).toBeUndefined();
+    expect(refusal(edge('connections', 'tests/unit/app/x.test.ts', '@ferretry/app/testing'))).toBeUndefined();
+  });
+
+  test('a daemon half, a contract, or an app half reaching for the fakes is refused', () => {
+    expect(refusal(edge('connections', 'daemon/index.ts', '@ferretry/app'))).toContain('only by app halves');
+    expect(refusal(edge('connections', 'app/index.ts', '@ferretry/app/testing'))).toContain('only by tests');
+    expect(refusal(edge('connections', 'contract/index.ts', '@ferretry/app'))).toBeDefined();
+  });
+
+  test('tests import the public API and /testing only: a private or unknown subpath of the shell is refused', () => {
+    for (const specifier of ['@ferretry/app', '@ferretry/app/ui', '@ferretry/app/worker', '@ferretry/app/testing'])
+      expect(refusal(edge('connections', 'tests/unit/app/x.test.ts', specifier))).toBeUndefined();
+    for (const specifier of [
+      '@ferretry/app/src/main.tsx',
+      '@ferretry/app/src/session/session-client.ts',
+      '@ferretry/app/internal',
+    ])
+      expect(refusal(edge('connections', 'tests/unit/app/x.test.ts', specifier))).toContain(
+        "not the app shell's public API",
+      );
+  });
+});

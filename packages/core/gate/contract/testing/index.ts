@@ -11,6 +11,7 @@ import {
   type ApiRequest,
   arrivedPrivileged,
   type CallStanding,
+  type Cancel,
   errorResponse,
   type FerretId,
   type HolderId,
@@ -29,10 +30,6 @@ import type {
   DeviceHolderStanding,
   FerretBearerDirectory,
   HolderStanding,
-  PasskeyDescriptor,
-  StepUpCeremony,
-  StepUpVerified,
-  StepUpWitness,
 } from '../credentials.ts';
 import { asksStepUpPerAction, DEFAULT_GATE_CONFIG, type GateConfig } from '../gate-config.ts';
 import {
@@ -48,16 +45,40 @@ import {
 import type { GateApi } from '../port.ts';
 import { callerIsAgent, deviceActor, ferretActor, wardenActor } from '../standing.ts';
 
+export {
+  FAKE_PROOF_TTL_MS,
+  FakeStepUpWitness,
+  type FakeStepUpWitnessOptions,
+  type StepUpWitnessSubject,
+  stepUpWitnessConformance,
+} from './step-up.ts';
+
 /** 2026-11-07T12:00:00Z. */
 export const T0: Instant = instantFromEpochMs(1_794_052_800_000);
 export const holder = (id: string): HolderId => id as HolderId;
 
 // ─── fakes ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** An in-memory device provider: enrol, revoke, narrow, unlock. Generation bumps on every change. */
+/**
+ * An in-memory device provider: enrol, revoke, narrow, unlock. Generation bumps on every change, and every watcher is
+ * told after the change is readable (the `watch` of the `credentials` contract).
+ */
 export class FakeDeviceProvider implements CredentialProvider<DeviceHolderStanding> {
   #generation = 0;
   readonly #holders = new Map<string, DeviceHolderStanding | 'revoked'>();
+  readonly #watchers = new Set<() => void>();
+
+  /** Moves the generation, then tells each watcher; a throwing watcher never hides the change from the next. */
+  #moved(): void {
+    this.#generation += 1;
+    for (const watcher of [...this.#watchers]) {
+      try {
+        watcher();
+      } catch {
+        // The watcher's own failure is not the provider's.
+      }
+    }
+  }
 
   enrol(id: HolderId, grants: CapabilityGrants = FULL_DEVICE_GRANTS, unlockedUntil?: Instant): void {
     this.#holders.set(id, {
@@ -66,23 +87,23 @@ export class FakeDeviceProvider implements CredentialProvider<DeviceHolderStandi
       grants,
       ...(unlockedUntil === undefined ? {} : { unlockedUntil }),
     });
-    this.#generation += 1;
+    this.#moved();
   }
   revoke(id: HolderId): void {
     this.#holders.set(id, 'revoked');
-    this.#generation += 1;
+    this.#moved();
   }
   narrow(id: HolderId, grants: CapabilityGrants): void {
     const current = this.#holders.get(id);
     if (current === undefined || current === 'revoked') return;
     this.#holders.set(id, { ...current, grants });
-    this.#generation += 1;
+    this.#moved();
   }
   unlock(id: HolderId, until: Instant): void {
     const current = this.#holders.get(id);
     if (current === undefined || current === 'revoked') return;
     this.#holders.set(id, { ...current, unlockedUntil: until });
-    this.#generation += 1;
+    this.#moved();
   }
   standing(id: HolderId): DeviceHolderStanding | 'unknown' | 'revoked' {
     return this.#holders.get(id) ?? 'unknown';
@@ -90,37 +111,13 @@ export class FakeDeviceProvider implements CredentialProvider<DeviceHolderStandi
   generation(): number {
     return this.#generation;
   }
-}
-
-/** A witness that verifies an assertion whose signature is `ok-<holder>` for an enrolled holder. Never a real key. */
-export class FakeStepUpWitness implements StepUpWitness {
-  readonly #passkeys = new Map<string, readonly PasskeyDescriptor[]>();
-
-  register(id: HolderId, credentialId = `cred${id.replaceAll(/[^A-Za-z0-9]/gu, '')}`): void {
-    this.#passkeys.set(id, [{ type: 'public-key', id: credentialId }]);
-  }
-  passkeys(id: HolderId): readonly PasskeyDescriptor[] | 'unknown' {
-    return this.#passkeys.get(id) ?? 'unknown';
-  }
-  async verify(
-    ceremony: StepUpCeremony,
-  ): Promise<StepUpVerified | { readonly refused: 'not-verified' | 'no-passkey' }> {
-    const known = this.#passkeys.get(ceremony.holder);
-    if (known === undefined) return { refused: 'no-passkey' };
-    const ownKey = known.some(key => key.id === ceremony.assertion.credentialId);
-    if (!ownKey || ceremony.assertion.signature !== `ok-${ceremony.holder}`.replaceAll(/[^A-Za-z0-9_-]/gu, ''))
-      return { refused: 'not-verified' };
-    return {
-      holder: ceremony.holder,
-      ...(ceremony.act === undefined ? {} : { act: ceremony.act }),
-      ...(ceremony.subject === undefined ? {} : { subject: ceremony.subject }),
-      provedAt: ceremony.now,
+  watch(listener: () => void): Cancel {
+    this.#watchers.add(listener);
+    return () => {
+      this.#watchers.delete(listener);
     };
   }
 }
-
-/** The signature `FakeStepUpWitness` accepts for a holder (base64url-safe). */
-export const fakeSignature = (id: HolderId): string => `ok-${id}`.replaceAll(/[^A-Za-z0-9_-]/gu, '');
 
 /** A ferret bearer directory over digests. */
 export class FakeFerretBearers implements FerretBearerDirectory {
@@ -242,7 +239,8 @@ const SECRET_FIELD = /token|digest|secret|password|key$/iu;
 
 /**
  * The `credentials` conformance suite (§4.13, §7.1): synchronous and memory-only, `unknown` for a holder it never
- * enrolled, `revoked` after a revoke, generation bumps on revoke and narrowing, and no secret-shaped field.
+ * enrolled, `revoked` after a revoke, generation bumps on revoke and narrowing, no secret-shaped field, and — for a
+ * provider that offers `watch` — a notice every time the generation moves, none after the cancel (G149).
  */
 export function credentialProviderConformance<S extends HolderStanding>(
   name: string,
@@ -282,52 +280,52 @@ export function credentialProviderConformance<S extends HolderStanding>(
       await subject.narrow(id);
       expect(subject.provider.generation()).toBeGreaterThan(before);
     });
-  });
-}
-
-export interface StepUpWitnessSubject {
-  readonly witness: StepUpWitness;
-  /** Enrols a holder with one passkey; returns it and an assertion that verifies for it. */
-  enrol(): Promise<{ readonly holder: HolderId; readonly good: StepUpCeremony['assertion'] }>;
-}
-
-/** The `step-up` conformance suite: unknown holders, a bad assertion refused, a good one bound to the act asked. */
-export function stepUpWitnessConformance(
-  name: string,
-  make: () => StepUpWitnessSubject | Promise<StepUpWitnessSubject>,
-): void {
-  const challenge = new Uint8Array([1, 2, 3, 4]);
-  describe(`step-up conformance: ${name}`, () => {
-    test('a holder it never enrolled has no passkeys to offer', async () => {
+    test('watch tells its listener when a revoke moves the generation, with the new standing already readable', async () => {
       const subject = await make();
-      expect(subject.witness.passkeys(holder('never-enrolled'), 'https://app.example.test')).toBe('unknown');
+      if (subject.provider.watch === undefined) return;
+      const id = await subject.enrol();
+      const seen: (string | object)[] = [];
+      const cancel = subject.provider.watch(() => seen.push(subject.provider.standing(id, T0)));
+      await subject.revoke(id);
+      cancel();
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.at(-1)).toBe('revoked');
     });
-    test('an assertion that does not check out is refused', async () => {
+    test('watch tells its listener when a narrowing moves the generation', async () => {
       const subject = await make();
-      const { holder: id, good } = await subject.enrol();
-      const answer = await subject.witness.verify({
-        holder: id,
-        origin: 'https://app.example.test',
-        challenge,
-        assertion: { ...good, signature: 'forged' },
-        now: T0,
+      if (subject.provider.watch === undefined || subject.narrow === undefined) return;
+      const id = await subject.enrol();
+      let told = 0;
+      const cancel = subject.provider.watch(() => {
+        told += 1;
       });
-      expect('refused' in answer).toBe(true);
+      await subject.narrow(id);
+      cancel();
+      expect(told).toBeGreaterThan(0);
     });
-    test('a verified ceremony is bound to the holder, the act and the subject asked', async () => {
+    test('watch tells nobody after its cancel, and a throwing listener does not hide a change from the next', async () => {
       const subject = await make();
-      const { holder: id, good } = await subject.enrol();
-      const act = 'add-2fa-key' as never;
-      const answer = await subject.witness.verify({
-        holder: id,
-        origin: 'https://app.example.test',
-        challenge,
-        assertion: good,
-        act,
-        subject: 'st_0123456789abcdef01234567',
-        now: T0,
+      if (subject.provider.watch === undefined) return;
+      const first = await subject.enrol();
+      const second = await subject.enrol();
+      let cancelled = 0;
+      let after = 0;
+      subject.provider.watch(() => {
+        throw new Error('a failing listener');
       });
-      expect(answer).toMatchObject({ holder: id, act, subject: 'st_0123456789abcdef01234567' });
+      const cancel = subject.provider.watch(() => {
+        cancelled += 1;
+      });
+      subject.provider.watch(() => {
+        after += 1;
+      });
+      await subject.revoke(first);
+      expect(cancelled).toBe(1);
+      expect(after).toBe(1);
+      cancel();
+      await subject.revoke(second);
+      expect(cancelled).toBe(1);
+      expect(after).toBe(2);
     });
   });
 }

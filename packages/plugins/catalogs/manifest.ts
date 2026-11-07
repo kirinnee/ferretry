@@ -1,12 +1,18 @@
-import { Credentials, StepUp } from '@ferretry/core-gate/contract';
+import { Credentials, GatePort } from '@ferretry/core-gate/contract';
+import { VaultPort, SealedDocumentsPort } from '@ferretry/core-vault/contract';
+import { CatalogLinkKeys, CatalogInstallPrefs } from './contract/storage.ts';
+import { CatalogsConfigFile } from './contract/config.ts';
 import { defineState, SessionModes } from '@ferretry/kernel/contract';
 import { definePlugin, memberRoute, route, screen, verb } from '@ferretry/kernel/manifest';
-import { AccessPort } from './contract/others.ts';
+import { AccessPort } from '@ferretry/plugin-access/contract';
+import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
+import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import {
   AUDIT,
   CATALOGS_WORDS,
   CatalogsChanged,
   CatalogsPort,
+  CatalogItems,
   CONFIGURE,
   GUARD_NONE,
   NARROW,
@@ -34,7 +40,13 @@ export default definePlugin({
   kinds: ['session-mode', 'credential-provider', 'item', 'command', 'view'],
   words: CATALOGS_WORDS,
 
-  needs: { access: AccessPort },
+  // TODO(kernel contract): `permissions: { network: [{ resolver: 'link-store' }] }` and the half's
+  // `resolvers['link-store']` (the configured `catalogs.linkStore.url` or Connections' directory origin, plus every
+  // existing link's remembered origin) need rebuild/port-kernel's ResolverEntry. Until then `kernel.fetch` refuses
+  // every link-store host, so making, refreshing or deleting a download link fails closed.
+  needs: { access: AccessPort, gate: GatePort, vault: VaultPort, sealed: SealedDocumentsPort },
+  /** Projects is optional: off, an install can only target the project folders the item providers name. */
+  uses: { connections: ConnectionsPort, projects: ProjectsPort },
   provides: { catalogs: CatalogsPort },
 
   actions: {
@@ -516,6 +528,7 @@ export default definePlugin({
   },
 
   data: {
+    config: [CatalogsConfigFile],
     state: [
       defineState({ name: 'catalogs', path: 'catalogs.json', store: 'json', format: 1 }),
       /** Frozen item versions by digest: content-addressed, re-checked against the signed document on read. */
@@ -527,22 +540,23 @@ export default definePlugin({
         onDamaged: { narrower: 'that version is refused; the catalog lists it as missing' },
       }),
       defineState({ name: 'links', path: 'links.json', store: 'json', format: 1 }),
-      defineState({ name: 'link-keys', path: 'link-keys.json', store: 'secret', format: 1, mode: 0o600 }),
+      CatalogLinkKeys.state,
       defineState({ name: 'members', path: 'members.json', store: 'json', format: 1 }),
       /** Shares keep a hash of their code, never the code. */
       defineState({ name: 'shares', path: 'shares.json', store: 'json', format: 1 }),
       defineState({ name: 'member-passkeys', path: 'member-passkeys.json', store: 'json', format: 1 }),
       defineState({ name: 'member-unlocks', path: 'member-unlocks.json', store: 'json', format: 1 }),
       defineState({ name: 'installs', path: 'installs.json', store: 'json', format: 1 }),
+      CatalogInstallPrefs,
     ],
     readModels: ['installs'],
     publishes: [CatalogsChanged],
   },
 
   hooks: {
+    offers: [{ hook: CatalogItems }],
     takes: [
       { hook: Credentials, key: 'member' },
-      { hook: StepUp, key: 'member' },
       { hook: SessionModes, key: 'member' },
     ],
   },

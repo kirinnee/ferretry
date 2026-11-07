@@ -7,10 +7,20 @@ import {
   callerIsAgent,
   coreCapabilityName,
   DEFAULT_GATE_CONFIG,
+  DEFAULT_GATE_SECURITY,
+  DEFAULT_SECURITY_SETTINGS,
   deviceAdmits,
   ferretOf,
   GateConfigSchema,
   gateConfigLoosens,
+  GRANT_AUDIT_MAX_ENTRIES,
+  GrantAuditEntryViewSchema,
+  GrantAuditViewSchema,
+  GrantsPatchSchema,
+  MEMBER_UNLOCK_DAYS_DEFAULT,
+  ReadCapabilityGrantsSchema,
+  SecuritySettingsSchema,
+  securitySettingsOf,
   grantRefusalCode,
   isFerretToken,
   LIMITED_DEVICE_GRANTS,
@@ -28,11 +38,11 @@ import {
   StandInAdmission,
   FakeDeviceProvider,
   FakeStepUpWitness,
-  fakeSignature,
   ferretStanding,
   holder,
   ownerStanding,
   stepUpWitnessConformance,
+  T0,
   wardenStanding,
 } from '../../contract/testing/index.ts';
 
@@ -53,19 +63,22 @@ credentialProviderConformance('FakeDeviceProvider', () => {
 });
 
 stepUpWitnessConformance('FakeStepUpWitness', () => {
-  const witness = new FakeStepUpWitness();
+  const witness = new FakeStepUpWitness({ nowMs: () => 0, settings: () => DEFAULT_GATE_CONFIG.security });
   return {
     witness,
-    enrol: async () => {
+    proved: act => {
       next += 1;
-      const id = holder(`dev-${next}`);
-      witness.register(id, 'credA');
-      return {
-        holder: id,
-        good: { credentialId: 'credA', clientDataJSON: 'Y2Q', authenticatorData: 'YWQ', signature: fakeSignature(id) },
-      };
+      const copy = { deviceId: `dev-${next}`, appSession: `app-${next}` };
+      witness.grant(copy, true, act);
+      return copy;
     },
   };
+});
+
+describe('the testing provider', () => {
+  test('G149 FakeDeviceProvider pushes (watch), so the credentials suite runs its watch checks against it', () => {
+    expect(typeof new FakeDeviceProvider().watch).toBe('function');
+  });
 });
 
 describe('policy vocabulary', () => {
@@ -279,5 +292,60 @@ describe('StandInAdmission', () => {
         route({ capability: { capability: CAPABILITIES.secrets, axis: 'configure' } }),
       ).outcome,
     ).toBe('admitted');
+  });
+});
+
+describe('gate.yaml security.memberUnlockDays', () => {
+  test('a whole number of days, 1 to 90, 30 unless the owner changed it', () => {
+    expect(GateConfigSchema.parse({}).security.memberUnlockDays).toBe(MEMBER_UNLOCK_DAYS_DEFAULT);
+    expect(
+      GateConfigSchema.parse({ security: { ...DEFAULT_GATE_SECURITY, memberUnlockDays: 90 } }).security
+        .memberUnlockDays,
+    ).toBe(90);
+    for (const bad of [0, 91, 1.5, '30'])
+      expect(
+        GateConfigSchema.safeParse({ security: { ...DEFAULT_GATE_SECURITY, memberUnlockDays: bad } }).success,
+      ).toBe(false);
+  });
+
+  test('raising it is a loosening, held like any other; lowering it is not', () => {
+    const at = (days: number) => ({
+      ...DEFAULT_GATE_CONFIG,
+      security: { ...DEFAULT_GATE_SECURITY, memberUnlockDays: days },
+    });
+    expect(gateConfigLoosens(at(30), at(31))).toEqual(['security memberUnlockDays loosened from 30 to 31']);
+    expect(gateConfigLoosens(at(30), at(7))).toEqual([]);
+  });
+
+  test('the security settings /v1/security serves do not carry it', () => {
+    expect(securitySettingsOf(DEFAULT_GATE_SECURITY)).toEqual(DEFAULT_SECURITY_SETTINGS);
+    expect(SecuritySettingsSchema.safeParse(DEFAULT_GATE_SECURITY).success).toBe(false);
+  });
+});
+
+describe('the grants wire', () => {
+  test('a client reads a capability an older daemon omitted as off, and drops one it does not know', () => {
+    const { sharing: _omitted, ...older } = DEFAULT_GATE_CONFIG.grants;
+    const read = ReadCapabilityGrantsSchema.parse({ ...older, someday: { use: true, configure: true } });
+    expect(read.sharing).toEqual({ use: false, configure: false });
+    expect(read).not.toHaveProperty('someday');
+  });
+
+  test('a grant patch must change something, and names only known capabilities and axes', () => {
+    expect(GrantsPatchSchema.safeParse({}).success).toBe(false);
+    expect(GrantsPatchSchema.safeParse({ fleet: { use: false } }).success).toBe(true);
+    expect(GrantsPatchSchema.safeParse({ fleet: { delete: true } }).success).toBe(false);
+  });
+
+  test('a grant history entry is names only, bounded', () => {
+    expect(GRANT_AUDIT_MAX_ENTRIES).toBe(50);
+    expect(
+      GrantAuditViewSchema.safeParse({
+        entries: [{ at: T0, actor: 'admin-cli', changes: ['fleet.use=off'] }],
+        unreadable: 0,
+        truncated: false,
+      }).success,
+    ).toBe(true);
+    expect(GrantAuditEntryViewSchema.safeParse({ at: T0, actor: 123, changes: [] }).success).toBe(false);
   });
 });

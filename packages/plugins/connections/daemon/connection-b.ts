@@ -2,7 +2,12 @@ import { ApiError, jsonResponse, type RouteHandler, type SessionLayer } from '@f
 import { TunnelChangeSchema, TunnelStatusViewSchema, WebRtcOfferRequestSchema } from '../contract/index.ts';
 import { TunnelCarrier, type TunnelCarrierDependencies } from './lib/tunnel/carrier.ts';
 import { TunnelCarrierSwitch, type TunnelEntryStorePort } from './lib/tunnel/switch.ts';
-import { WebRtcCarrier, type SessionDevice, type WebRtcCarrierDependencies } from './lib/webrtc/carrier.ts';
+import {
+  WebRtcCarrier,
+  type SessionDevice,
+  type WebRtcCarrierDependencies,
+  type WebRtcSessionFactory,
+} from './lib/webrtc/carrier.ts';
 import { sealedWebRtcSessions } from './lib/webrtc/session.ts';
 import type { z } from 'zod';
 
@@ -43,12 +48,13 @@ export function verifiedWebRtcDevice(call: Parameters<RouteHandler>[0]): Session
   return { deviceId: principal.holder, appSession };
 }
 
-/** B's copied lifecycles; Connections A composes these into the package's daemon half. */
+/** The tunnel and WebRTC lifecycles, composed into the package's daemon half by `compose-b.ts`. */
 export function createConnectionB(deps: {
   readonly tunnel: TunnelCarrierDependencies;
   readonly tunnelStore: TunnelEntryStorePort;
   readonly webrtc: Omit<WebRtcCarrierDependencies, 'sessions'>;
-  readonly sessionLayer: SessionLayer;
+  /** The kernel hands its session layer over when a carrier starts; before that no channel can have opened. */
+  readonly sessionLayer: () => SessionLayer | undefined;
   /** Derive the page-lifetime id from the kernel-verified call, never the offer body. */
   readonly device: (call: Parameters<RouteHandler>[0]) => SessionDevice | undefined;
   readonly onStop: (stop: () => Promise<void>) => void;
@@ -58,11 +64,21 @@ export function createConnectionB(deps: {
     explicit: deps.tunnel.explicit,
     store: deps.tunnelStore,
   });
+  let opener: { readonly layer: SessionLayer; readonly open: WebRtcSessionFactory } | undefined;
   const webrtc = new WebRtcCarrier({
     ...deps.webrtc,
-    sessions: sealedWebRtcSessions(deps.sessionLayer, deps.webrtc.scheduler, length =>
-      globalThis.crypto.getRandomValues(new Uint8Array(length)),
-    ),
+    sessions: (arrival, downstream, release) => {
+      const layer = deps.sessionLayer();
+      if (layer === undefined) return undefined;
+      if (opener?.layer !== layer)
+        opener = {
+          layer,
+          open: sealedWebRtcSessions(layer, deps.webrtc.scheduler, length =>
+            globalThis.crypto.getRandomValues(new Uint8Array(length)),
+          ),
+        };
+      return opener.open(arrival, downstream, release);
+    },
   });
   deps.onStop(async () => {
     webrtc.close();

@@ -15,6 +15,7 @@ import {
 } from '../account-support.ts';
 
 const PROPOSE = 'POST /v1/runtimes/proposals';
+const MOVE = 'POST /v1/ferrets/:ferretId/move';
 const APPLY = `POST /v1/runtimes/proposals/${CHANGE_ID}/apply`;
 /** The route key a call is recorded under: the template the half called, its parameter beside it. */
 const APPLY_CALL = 'POST /v1/runtimes/proposals/:proposalId/apply';
@@ -372,14 +373,68 @@ describe('Runtime actions: Remove', () => {
     expect(window.location.hash).toBe('#machines/studio-mac/runtimes');
   });
 
-  it('offers no move when the client cannot move a ferret', async () => {
+  it('R-0355 offers the move by default, and sends each ferret through Ferrets’ declared move route', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const view = await open({
+      calls,
+      routes: { [PROPOSE]: removalStaged(), [APPLY]: COMMITTED, [MOVE]: { id: 's-1' } },
+    });
+    await chooseRuntimeAction(view.container, 'claude-work', 'remove');
+
     // Act
-    const view = await open({ routes: { [PROPOSE]: removalStaged() } });
-    await chooseRuntimeAction(view.container, 'codex-default', 'remove');
+    await choose(
+      must(view.container.querySelector<HTMLSelectElement>('[data-runtime-move-target]'), 'move target'),
+      'codex-default',
+    );
+    await interact(() => submit(view.container).click());
+    await settle();
+
+    // Assert — one move per ferret, then the removal is staged afresh
+    expect(calls.filter(call => call.route === MOVE).map(call => [call.params, call.body])).toEqual([
+      [
+        { ferretId: 's-1' },
+        { agent: 'codex-default', allowContextDowngrade: false, forceInflight: false, conversation: 'convert' },
+      ],
+      [
+        { ferretId: 's-2' },
+        { agent: 'codex-default', allowContextDowngrade: false, forceInflight: false, conversation: 'convert' },
+      ],
+    ]);
+    expect(proposed(calls)).toHaveLength(2);
+    expect(view.container.querySelector('[data-runtime-dialog]')).toBeNull();
+  });
+
+  it('R-0355 shows a refusal from Ferrets’ move as the sentence it gave, and removes nothing', async () => {
+    // Arrange — Ferrets' resume and launch ports may still refuse (unbound); the dialog says so as it says any refusal.
+    const calls: Call[] = [];
+    const refusal = Object.assign(new Error('refused'), {
+      status: 409,
+      code: 'move_refused',
+      message: 'Ferrets cannot start a ferret on another runtime yet.',
+    });
+    const view = await open({
+      calls,
+      routes: { [PROPOSE]: removalStaged(), [APPLY]: COMMITTED, [MOVE]: refusal },
+    });
+    await chooseRuntimeAction(view.container, 'claude-work', 'remove');
+    await choose(
+      must(view.container.querySelector<HTMLSelectElement>('[data-runtime-move-target]'), 'move target'),
+      'claude-review',
+    );
+
+    // Act
+    await interact(() => submit(view.container).click());
+    await settle();
 
     // Assert
-    expect(view.container.querySelector('[data-runtime-move-target]')).toBeNull();
-    expect(view.container.querySelector('[data-runtime-running]')).not.toBeNull();
+    expect(calls.some(call => call.route.endsWith('/apply'))).toBe(false);
+    expect(text(view.container, '[data-runtime-move-failed]')).toContain(
+      '2 ferrets could not be moved, so claude-work was not removed.',
+    );
+    expect(text(view.container, '[data-runtime-move-failed]')).toContain(
+      'Fisher: Ferrets cannot start a ferret on another runtime yet.',
+    );
   });
 
   it('moves every ferret to the picked runtime, carrying each conversation, before it removes', async () => {

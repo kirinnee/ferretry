@@ -7,6 +7,7 @@ import {
   secretCoverage,
   earnedRecipes,
   expandSecretReferences,
+  launchEnvironment,
   recipeOrigin,
   redactJsonValue,
   redactSecretValues,
@@ -226,5 +227,41 @@ describe('where known secrets sit in a text', () => {
 
   it('should cover the values of a secret map', () => {
     should(secretCoverage(`x ${TOKEN} y`, values({ TOKEN }))).deepEqual([{ start: 2, end: 2 + TOKEN.length }]);
+  });
+});
+
+describe('a ferret child’s environment', () => {
+  it('S62 S64 expand a plain reference, and refuse naming every plain reference that is missing', () => {
+    // Act
+    const resolved = launchEnvironment({ AUTH: 'Bearer ${secret:TOKEN}', PLAIN: 'x' }, values());
+    const refused = launchEnvironment(
+      { A: '${secret:MISSING}', B: '${secret:ALSO_MISSING} ${secret:TOKEN}' },
+      values(),
+    );
+
+    // Assert
+    should(resolved).deepEqual({ ok: true, value: { AUTH: `Bearer ${TOKEN}`, PLAIN: 'x' } });
+    should(refused).deepEqual({ ok: false, unknown: ['MISSING', 'ALSO_MISSING'] });
+  });
+
+  it('should set a whole-value optional reference when held and leave the variable out when not, never empty', () => {
+    // Arrange — a sign-out landed between MCP naming SIGNED_OUT and the launch opening it.
+    const env = { HELD: '${secret?:TOKEN}', GONE: '${secret?:SIGNED_OUT}' };
+
+    // Act
+    const resolved = launchEnvironment(env, values());
+
+    // Assert
+    should(resolved).deepEqual({ ok: true, value: { HELD: TOKEN } });
+  });
+
+  it('should keep refusing a plain reference beside an optional one, and read an optional one inside text as text', () => {
+    // Act
+    const refused = launchEnvironment({ GONE: '${secret?:SIGNED_OUT}', X: '${secret:MISSING}' }, values());
+    const inText = launchEnvironment({ AUTH: 'Bearer ${secret?:TOKEN}' }, values());
+
+    // Assert — only the plain one is named; an optional reference is one only as a whole value.
+    should(refused).deepEqual({ ok: false, unknown: ['MISSING'] });
+    should(inText).deepEqual({ ok: true, value: { AUTH: 'Bearer ${secret?:TOKEN}' } });
   });
 });

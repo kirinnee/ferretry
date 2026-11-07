@@ -62,7 +62,7 @@ function signalling(fx: KernelFixture) {
         release: () => {},
       },
     },
-    sessionLayer: fx.layer,
+    sessionLayer: () => fx.layer,
     // TODO(kernel contract) as in `verifiedWebRtcDevice`: the kernel principal does not carry `appSession` yet,
     // so the page id is the kernel's own session id for that principal — still the verified call, never the body.
     device: call => {

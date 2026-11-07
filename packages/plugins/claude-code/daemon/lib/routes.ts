@@ -1,5 +1,12 @@
-import { ApiError, decodeParameter, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
-import { isFerretCall, STEP_UP_REQUIRED_CODE, type StepUpRequiredBody } from '@ferretry/core-gate/contract';
+import {
+  ApiError,
+  type ApiResponse,
+  decodeParameter,
+  jsonResponse,
+  parseBody as parseBoundedBody,
+  type RouteHandler,
+} from '@ferretry/kernel/contract';
+import { claimOwnerOnly } from '@ferretry/core-gate/contract';
 import type { ZodType, z } from 'zod';
 import {
   HARNESS_UPDATE_CODES,
@@ -78,39 +85,44 @@ export function updateViewRoute(update: HarnessUpdateSubsystem): RouteHandler {
   return async () => jsonResponse(await update.view());
 }
 
-const CONFIGURE = { capability: 'fleet', axis: 'configure' } as const;
+/**
+ * The largest body the start route has a use for: a version and a yes. Read through the kernel's `parseBody` (today's
+ * `api/body.ts`), so the refusals are today's: `413 body_too_large`, `400 invalid_json`, `400 invalid_request`.
+ */
+const MAX_START_BODY_BYTES = 4 * 1024;
+
+/** A domain refusal as a 409. The unverified one is an ANSWER, because its body carries both versions. */
+function refuseStart(error: unknown): ApiResponse {
+  if (!(error instanceof HarnessUpdateRefusal)) throw error;
+  if (error.unverified !== undefined)
+    return jsonResponse(
+      { error: error.message, code: HARNESS_UPDATE_CODES.unverified, ...error.unverified } satisfies z.infer<
+        typeof HarnessUpdateUnverifiedBodySchema
+      >,
+      409,
+    );
+  throw new ApiError(409, error.message, error.code);
+}
 
 /**
- * Starting an update. A ferret may never start one (it would be an agent replacing the program it runs as), and a
- * governed device confirms with a passkey first; the step-up is spent only once the update has been accepted.
+ * Starting an update: today's `harness-update.ts`. A ferret may never start one (it would be an agent replacing the
+ * program it runs as), and a governed device confirms with a passkey first — the gate is Gate's {@link claimOwnerOnly},
+ * the daemon update's own, so the acts can never be governed differently. The proof is claimed before the update
+ * starts, so one proof admits one start and a refused start has used it up.
  */
 export function updateStartRoute(update: HarnessUpdateSubsystem): RouteHandler {
   return async call => {
-    const request = await parseBody(call, HarnessUpdateStartRequestSchema);
-    if (isFerretCall(call))
-      throw new ApiError(403, 'a ferret cannot update Claude Code on this machine; the owner does', 'forbidden');
-    if (call.governance?.governed === true && call.presentation?.freshStepUp !== true)
-      return jsonResponse(
-        {
-          error: 'to update Claude Code on this machine from this device, confirm with a passkey',
-          code: STEP_UP_REQUIRED_CODE,
-          demand: CONFIGURE,
-        } satisfies StepUpRequiredBody,
-        403,
-      );
+    const request = await parseBoundedBody(call.request, HarnessUpdateStartRequestSchema, {
+      maxBytes: MAX_START_BODY_BYTES,
+    });
+    const refused = claimOwnerOnly(call, 'update the agent CLIs on this machine');
+    if (refused !== undefined) return refused;
+    let view: Awaited<ReturnType<HarnessUpdateSubsystem['start']>>;
     try {
-      const view = await update.start(request);
-      if (call.governance?.governed === true) call.spendFreshStepUp?.();
-      return jsonResponse(view, 202);
+      view = await update.start(request);
     } catch (error) {
-      if (!(error instanceof HarnessUpdateRefusal)) throw error;
-      // The unverified refusal is an ANSWER, because its body carries both versions.
-      if (error.unverified !== undefined)
-        return jsonResponse(
-          { error: error.message, code: HARNESS_UPDATE_CODES.unverified, ...error.unverified } satisfies z.infer<typeof HarnessUpdateUnverifiedBodySchema>,
-          409,
-        );
-      throw new ApiError(409, error.message, error.code);
+      return refuseStart(error);
     }
+    return jsonResponse(view, 202);
   };
 }

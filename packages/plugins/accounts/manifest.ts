@@ -1,6 +1,14 @@
 import { AskSources, AsksPort, type SourceKey } from '@ferretry/core-asks/contract';
-import { VaultPort } from '@ferretry/core-vault/contract';
-import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
+import { GatePort } from '@ferretry/core-gate/contract';
+import { accountDefaultsDifferences } from './contract/defaults-differences.ts';
+import { AccessPort, DevicesChanged } from '@ferretry/plugin-access/contract';
+import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
+import { FerretsPort } from '@ferretry/core-ferrets/contract';
+import { BoardPort } from '@ferretry/plugin-board/contract';
+import { ProjectsPort } from '@ferretry/plugin-projects/contract';
+import { RedactionSources, SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
+import { LOGIN_SECRETS } from './contract/routes/sealed.ts';
+import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { definePlugin, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
 import {
   ACCOUNTS_WORDS,
@@ -40,7 +48,15 @@ export default definePlugin({
   kinds: ['command', 'view', 'item'],
   words: ACCOUNTS_WORDS,
 
-  needs: { vault: VaultPort, asks: AsksPort },
+  /** `sealed`: the passwords and 2FA seeds, in Accounts' own sealed document (`login-secrets.json`). */
+  needs: { vault: VaultPort, asks: AsksPort, sealed: SealedDocumentsPort, gate: GatePort },
+  /** Optional: a revoked or expired device's standing sign-in rules are suspended (P124, S119). */
+  /**
+   * `browsers`: the address of a page a ferret names (`account_hint` by page). `ferrets`: where a ferret works, which
+   * orders its sign-in cards (I184); its project is the Board's (`projectOf`), named by Projects. All optional: without them,
+   * today's behaviour without the read.
+   */
+  uses: { access: AccessPort, browsers: BrowsersPort, ferrets: FerretsPort, board: BoardPort, projects: ProjectsPort },
   provides: { accounts: AccountsPort },
 
   actions: {
@@ -349,7 +365,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('GET /v1/sessions/:sessionId/copies', {
+      route('GET /v1/ferrets/:ferretId/copies', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -357,7 +373,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/copy-plans/:planId/approve', {
+      route('POST /v1/ferrets/:ferretId/copy-plans/:planId/approve', {
         minimum: 'operator',
         caller: 'person',
         capability: CONFIGURE.terminal,
@@ -365,7 +381,7 @@ export default definePlugin({
         audit: { record: AUDIT.securityChanged },
         guard: GUARD_NONE,
       }),
-      route('GET /v1/sessions/:sessionId/phone-approvals/:approvalId', {
+      route('GET /v1/ferrets/:ferretId/phone-approvals/:approvalId', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -373,7 +389,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/phone-approvals/:approvalId/refuse', {
+      route('POST /v1/ferrets/:ferretId/phone-approvals/:approvalId/refuse', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -381,7 +397,7 @@ export default definePlugin({
         audit: SKIP_UNRECORDED,
         guard: GUARD_NONE,
       }),
-      route('GET /v1/sessions/:sessionId/task-plans/:planId', {
+      route('GET /v1/ferrets/:ferretId/task-plans/:planId', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -389,7 +405,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/task-plans/:planId/approval', {
+      route('POST /v1/ferrets/:ferretId/task-plans/:planId/approval', {
         minimum: 'operator',
         caller: 'person',
         capability: CONFIGURE.terminal,
@@ -397,7 +413,7 @@ export default definePlugin({
         audit: SKIP_BY_SERVICE,
         guard: GUARD_NONE,
       }),
-      route('DELETE /v1/sessions/:sessionId/task-plans/:planId/approval/:stage', {
+      route('DELETE /v1/ferrets/:ferretId/task-plans/:planId/approval/:stage', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -405,7 +421,7 @@ export default definePlugin({
         audit: SKIP_BY_SERVICE,
         guard: GUARD_NONE,
       }),
-      route('GET /v1/sessions/:sessionId/task-plans/:planId/approval/:stage', {
+      route('GET /v1/ferrets/:ferretId/task-plans/:planId/approval/:stage', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -413,7 +429,7 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/commit', {
+      route('POST /v1/ferrets/:ferretId/task-plans/:planId/approval/:stage/commit', {
         minimum: 'operator',
         caller: 'person',
         capability: CONFIGURE.terminal,
@@ -421,7 +437,7 @@ export default definePlugin({
         audit: SKIP_BY_SERVICE,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app', {
+      route('POST /v1/ferrets/:ferretId/task-plans/:planId/approval/:stage/confirm-in-app', {
         minimum: 'operator',
         caller: 'person',
         capability: CONFIGURE.terminal,
@@ -429,7 +445,7 @@ export default definePlugin({
         audit: SKIP_BY_SERVICE,
         guard: GUARD_NONE,
       }),
-      route('POST /v1/sessions/:sessionId/task-plans/:planId/revoke', {
+      route('POST /v1/ferrets/:ferretId/task-plans/:planId/revoke', {
         minimum: 'operator',
         caller: 'person',
         capability: NARROW.terminal,
@@ -533,7 +549,7 @@ export default definePlugin({
         audit: SKIP_BY_SERVICE,
         guard: GUARD_NONE,
       }),
-      route('GET /v1/task-plans', {
+      route('GET /v1/accounts/plans', {
         minimum: 'operator',
         caller: 'person',
         capability: USE.terminal,
@@ -573,7 +589,7 @@ export default definePlugin({
         ...TOOL,
         capability: USE.terminal,
         guard: NO_VALUE,
-        summary: 'ask the owner to approve the sign-ins and pastes a task needs',
+        summary: 'ask the owner to approve planned sign-ins and pastes',
       }),
     ],
     cli: [
@@ -600,7 +616,7 @@ export default definePlugin({
       verb('rules narrow', { summary: 'take something away from a rule: the 2FA code, time or uses; no passkey' }),
       verb('rules rm', { summary: 'revoke a rule now, or every rule of an account; no passkey' }),
       verb('account ls', { summary: 'list the accounts, with their 2FA keys and sign-ins' }),
-      verb('account add', { summary: 'save a new account; the password is typed at a hidden prompt' }),
+      verb('account add', { summary: 'save a new account; type the password with echo off' }),
       verb('account edit', { summary: 'change the fields named; the rest are kept' }),
       verb('account rename', { summary: 'change a handle; the values follow it' }),
       verb('account rm', { summary: 'delete an account with its sign-ins and 2FA keys' }),
@@ -652,7 +668,9 @@ export default definePlugin({
   data: {
     state: [
       /** The index only: every value is sealed in the Vault under its sealed name. */
-      defineState({ name: 'accounts', path: 'accounts.json', store: 'json', format: 1 }),
+      defineState({ name: 'accounts', path: 'accounts.json', store: 'json', format: 1, mode: 0o600 }),
+      /** The values themselves, sealed by the Vault (`LOGIN_SECRETS`). */
+      LOGIN_SECRETS.state,
       defineState({ name: 'sign-in-rules', path: 'sign-in-rules.json', store: 'json', format: 1 }),
       defineState({ name: 'copy-rules', path: 'copy-rules.json', store: 'json', format: 1 }),
       defineState({ name: 'copy-plans', path: 'copy-plans/*.json', store: 'json', format: 1 }),
@@ -662,15 +680,18 @@ export default definePlugin({
         file: 'accounts.yaml',
         schema: AccountsConfigSchema,
         axis: 'configure',
-        loosens: neverLoosens,
+        loosens: (before, after) => accountDefaultsDifferences(before ?? {}, after),
       }) as ConfigDef,
     ],
     readModels: ['sign-ins'],
     publishes: [SignInsChanged],
+    /** A revoked or idle-expired device's standing rules are suspended (P124); Access's event, read through its contract. */
+    subscribes: [DevicesChanged],
   },
 
   hooks: {
     takes: [
+      { hook: RedactionSources, key: 'source' },
       { hook: AskSources, key: 'sign-in-approval' satisfies string as SourceKey, schema: SignInApprovalRefSchema },
     ],
   },

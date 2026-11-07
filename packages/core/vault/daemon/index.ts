@@ -14,7 +14,6 @@ import {
   type SecretUseCommand,
   type SecretUseRefusal,
   type SecretUseResult,
-  secretReferencesIn,
   type VaultApi,
 } from '../contract/index.ts';
 import { KernelOutboundTransport } from './adapters/secrets/kernel-outbound-transport.ts';
@@ -26,6 +25,7 @@ import { WebCryptoCloneCrypto } from './adapters/secrets/webcrypto-clone-crypto.
 import { FileSecretKey, WebCryptoSecretCipher } from './adapters/secrets/webcrypto-secret-cipher.ts';
 import { quarantineOverOutputGuard } from './adapters/inputs/output-guard.ts';
 import { buildInputs } from './inputs.ts';
+import type { AccountId, TwoFactorId } from './lib/inputs/borrowed.ts';
 import { INPUT_ASK_SOURCE } from './adapters/inputs/asks.ts';
 import type { AgendaId } from './lib/inputs/wire.ts';
 import { EphemeralAwareRedactor } from './lib/inputs/ephemeral-redactor.ts';
@@ -36,7 +36,7 @@ import { OutboundProviderAuthorizer } from './lib/secrets/authorizer.ts';
 import { ChildEnvironments } from './lib/secrets/child-environments.ts';
 import { type SecretCloneIdentitySource, SecretExportService, SecretImportService } from './lib/secrets/clone.ts';
 import { HoldRegistry } from './lib/secrets/output-guard.ts';
-import { expandSecretReferences } from './lib/secrets/policy.ts';
+import { launchEnvironment } from './lib/secrets/policy.ts';
 import { VaultRedaction } from './lib/secrets/read-scope.ts';
 import { DeclaredMaskSource } from './lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from './lib/secrets/redaction.ts';
@@ -137,20 +137,18 @@ export default implementDaemon(manifest, {
       }
     };
 
-    /** `${secret:NAME}` in a ferret child's environment (S62–S64): every name resolved, or the launch refused. */
+    /**
+     * `${secret:NAME}` in a ferret child's environment (S62–S64): every name resolved, or the launch refused. A
+     * variable whose whole value is `${secret?:NAME}` is set when held and left out when not (`launchEnvironment`).
+     */
     const childEnvironment = async (
       _ferret: FerretId,
       env: Readonly<Record<string, string>>,
     ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>> => {
       const values = await vault.values();
-      const unknown = [...new Set(Object.values(env).flatMap(value => secretReferencesIn(value)))].filter(
-        name => !values.has(name),
-      );
-      // A missing referenced secret refuses the launch, never an empty string (S64).
-      if (unknown.length > 0) return err({ unknown });
-      const resolved: Record<string, string> = {};
-      for (const [key, value] of Object.entries(env)) resolved[key] = expandSecretReferences(value, values);
-      return ok(environments.mint(resolved));
+      const resolved = launchEnvironment(env, values);
+      if (!resolved.ok) return err({ unknown: resolved.unknown });
+      return ok(environments.mint(resolved.value));
     };
 
     /**
@@ -197,6 +195,14 @@ export default implementDaemon(manifest, {
       pageActed: (ferret, script) => inputs.observer?.acted(ferret, 'browser', script) ?? { placed: () => undefined },
       scriptRunning: () => inputs.scripts.running(),
       scriptedOn: host => inputs.scripts.scriptedOn(host),
+      // The input card a 2FA seed is set up from (Accounts, I173): where the daemon saw its target, and "use it now".
+      cardTarget: requestId => inputs.service.cardTarget(requestId),
+      useNow: async (requestId, use) =>
+        await inputs.service.useNow(requestId, {
+          ...use,
+          account: use.account as AccountId,
+          factor: use.factor as TwoFactorId,
+        }),
     };
 
     return {

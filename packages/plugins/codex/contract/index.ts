@@ -4,6 +4,7 @@
  */
 import { InstantSchema } from '@ferretry/std';
 import {
+  type FerretId,
   defineConfig,
   defineEvent,
   definePort,
@@ -27,6 +28,29 @@ export * from './wire.ts';
 /** The harness key and plugin id. */
 export const CODEX = 'codex' as const;
 
+// ─── project servers (what MCP asks before handing a project server's sign-in to a launch) ───────────────────────
+
+/** What a harness decided about one project server for one ferret. Only `disabled` withholds it. */
+export type ProjectServerApproval = 'approved' | 'pending' | 'disabled';
+
+export interface ProjectServerQuery {
+  readonly ferret: FerretId;
+  /** The folder the servers are declared in; the harness keys its per-project decisions by it. */
+  readonly root: string;
+  /** The `.mcp.json` server names to answer for. */
+  readonly servers: readonly string[];
+}
+
+/**
+ * `read`: one decision per asked server. `unreadable`: the harness's own documents could not be read, so nobody can
+ * tell whether a server was declined. `not-taken`: this harness takes no project server's sign-in at all. A reason
+ * names a file or a rule, never a document's contents.
+ */
+export type ProjectServerApprovals =
+  | { readonly state: 'read'; readonly servers: Readonly<Record<string, ProjectServerApproval>> }
+  | { readonly state: 'unreadable'; readonly reason: string }
+  | { readonly state: 'not-taken'; readonly reason: string };
+
 // ─── port ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** What others (Updates, Onboarding, the app) may read about this harness. The harness itself is offered through Ferrets' `harnesses` hook. */
@@ -35,6 +59,12 @@ export interface CodexApi {
   view(): Promise<HarnessCliView>;
   /** What discovery last found; `undefined` before the first look. Never reads the harness's sign-in files. */
   discovery(): Promise<Discovery | undefined>;
+  /**
+   * ADDITIVE. Which of a project's `.mcp.json` servers this harness takes for one ferret. Codex has no per-project
+   * approval of `.mcp.json` servers: it reads a project's servers from `.codex/config.toml`, and today a Codex launch
+   * is handed no project server's sign-in. So it always answers `not-taken`, never "all approved".
+   */
+  approvedProjectServers?(query: ProjectServerQuery): Promise<ProjectServerApprovals>;
 }
 export const CodexPort = definePort<CodexApi>('codex');
 
@@ -65,6 +95,22 @@ export const CODEX_DISCOVERY = defineState({
   store: 'json',
   format: 1,
   schema: DiscoverySchema,
+});
+
+/** Per-ferret rollout provenance: baseline plus an explicitly resumed native conversation id. */
+export const CodexRolloutBindingSchema = z.strictObject({
+  format: z.literal(1),
+  home: z.string(),
+  baseline: z.array(z.string()),
+  native: z.string().optional(),
+});
+export type CodexRolloutBinding = z.infer<typeof CodexRolloutBindingSchema>;
+export const CODEX_ROLLOUTS = defineState({
+  name: 'rollouts',
+  path: 'rollouts/*.json',
+  store: 'json',
+  format: 1,
+  schema: CodexRolloutBindingSchema,
 });
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────

@@ -68,6 +68,7 @@ type ReadingApi = Pick<
   ConversationApi,
   | 'transcript'
   | 'transcriptEvents'
+  | 'transcriptLog'
   | 'logPage'
   | 'logSearch'
   | 'addAttachment'
@@ -165,6 +166,12 @@ export function buildReading(deps: {
       await guarded(async () => {
         if ((await ferrets.get(ferret)) === undefined) throw new ApiError(404, `no ferret ${ferret}`, 'not_found');
         return await reader.reads.transcriptEvents(ferret, options?.limit);
+      }),
+    // Today's `operatorReads.logs`: every event kind, rendered and masked as the log is.
+    transcriptLog: async (ferret, options) =>
+      await guarded(async () => {
+        if ((await ferrets.get(ferret)) === undefined) throw new ApiError(404, `no ferret ${ferret}`, 'not_found');
+        return { v: 1 as const, ferret, log: await reader.reads.logs(ferret, options?.limit) };
       }),
     logPage: pendingRefusal,
     logSearch: pendingRefusal,

@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ApiResponse } from '@ferretry/kernel/contract';
-import { HARNESS_UPDATE_CODES, PermissionAnswerResultSchema, HarnessDialogAnswerResultSchema } from '../../contract/index.ts';
+import { type ApiResponse, BodyTooLargeError } from '@ferretry/kernel/contract';
+import { deviceStanding, ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import {
+  HARNESS_UPDATE_CODES,
+  PermissionAnswerResultSchema,
+  HarnessDialogAnswerResultSchema,
+} from '../../contract/index.ts';
 import { DialogAnswerService } from '../../daemon/lib/dialog/service.ts';
 import { parseHarnessDialog } from '../../daemon/lib/pane/harness-dialog.ts';
 import { parsePermissionPrompt } from '../../daemon/lib/pane/permission-prompt.ts';
@@ -35,11 +40,24 @@ class Pane {
   }
 }
 
-const call = (body: unknown, extra: Record<string, unknown> = {}) =>
+const call = (body: unknown, extra: object = {}) =>
   ({
     request: { text: async () => JSON.stringify(body) },
     params: new Map([['ferretId', 'f1']]),
     ...extra,
+  }) as never;
+
+/** A call carrying exactly `text`, read the way every arrival reads one: over the route's bound is a 413. */
+const rawCall = (text: string) =>
+  ({
+    request: {
+      text: async (limit?: number) => {
+        if (limit !== undefined && new TextEncoder().encode(text).byteLength > limit)
+          throw new BodyTooLargeError(limit);
+        return text;
+      },
+    },
+    params: new Map([['ferretId', 'f1']]),
   }) as never;
 
 const body = (response: ApiResponse): { status: number; json: Record<string, unknown>; text: string } => {
@@ -54,6 +72,32 @@ const refused = async (promise: Promise<unknown>): Promise<{ status: number; cod
   );
   return error as { status: number; code?: string };
 };
+
+/**
+ * A remote device as Gate admits it: governed, holding a fresh passkey proof until a route claims it. Each request
+ * reads the standing again, as Gate stamps a new one per call — and `freshStepUp` is that admission's SNAPSHOT, so two
+ * standings taken before either request runs both say fresh. The claim is atomic, as Access's is. `spent` counts every
+ * claim and every spend, so a route that took the proof twice would show 2.
+ */
+function remoteDevice(fresh: boolean) {
+  const state = { fresh, spent: 0 };
+  const standing = () => ({
+    ...deviceStanding('phone'),
+    governance: { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) },
+    presentation: { local: false, adminToken: false, actor: 'device:phone', stepUp: false, freshStepUp: state.fresh },
+    claimFreshStepUp: () => {
+      if (!state.fresh) return false;
+      state.fresh = false;
+      state.spent += 1;
+      return true;
+    },
+    spendFreshStepUp: () => {
+      state.spent += 1;
+      state.fresh = false;
+    },
+  });
+  return { state, standing };
+}
 
 describe('the permission answer route', () => {
   const requestId = (frame: string): string => parsePermissionPrompt(frame)?.id as string;
@@ -178,7 +222,13 @@ describe('the update start route', () => {
 
   test('G25 a governed device without a fresh passkey proof is asked for one, and nothing starts', async () => {
     let started = 0;
-    const route = updateStartRoute({ view: async () => view, start: async () => { started += 1; return view; } });
+    const route = updateStartRoute({
+      view: async () => view,
+      start: async () => {
+        started += 1;
+        return view;
+      },
+    });
 
     const response = body(await route(call({}, { governance: { governed: true }, presentation: {} })));
 
@@ -187,7 +237,7 @@ describe('the update start route', () => {
     expect(started).toBe(0);
   });
 
-  test('G25 the passkey proof is spent once the update was accepted, and the answer is 202', async () => {
+  test('G25 the passkey proof is claimed before the update starts, and the answer is 202', async () => {
     const spent: string[] = [];
     const route = updateStartRoute(accepting(spent));
 
@@ -198,6 +248,7 @@ describe('the update start route', () => {
           {
             governance: { governed: true },
             presentation: { freshStepUp: true },
+            claimFreshStepUp: () => spent.push('claimed') > 0,
             spendFreshStepUp: () => spent.push('spent'),
           },
         ),
@@ -205,7 +256,24 @@ describe('the update start route', () => {
     );
 
     expect(response.status).toBe(202);
-    expect(spent).toEqual(['spent']);
+    expect(spent).toEqual(['claimed']);
+  });
+
+  test('G25 a governed device whose standing cannot claim is refused, and nothing starts (fail closed)', async () => {
+    let started = 0;
+    const route = updateStartRoute({
+      view: async () => view,
+      start: async () => {
+        started += 1;
+        return view;
+      },
+    });
+
+    const response = body(
+      await route(call({}, { governance: { governed: true }, presentation: { freshStepUp: true } })),
+    );
+
+    expect([response.status, response.json.code, started]).toEqual([403, 'grant_step_up_required', 0]);
   });
 
   test('past the verified version is a 409 whose body names both versions', async () => {
@@ -238,11 +306,146 @@ describe('the update start route', () => {
     expect(error).toMatchObject({ status: 409, code: 'harness_update_in_progress' });
   });
 
-  test('a body that is not an update request is a 400', async () => {
+  test('a body that is not an update request is a 400 naming the field, as today', async () => {
     const route = updateStartRoute(accepting([]));
 
     const error = await refused(route(call({ target: 'not-a-version' })));
 
-    expect(error).toMatchObject({ status: 400, code: 'invalid_body' });
+    expect(error).toMatchObject({ status: 400, code: 'invalid_request' });
+  });
+
+  test('a body that is not JSON is a 400, as today', async () => {
+    const route = updateStartRoute(accepting([]));
+
+    const error = await refused(route({ request: { text: async () => 'not json' }, params: new Map() } as never));
+
+    expect(error).toMatchObject({ status: 400, code: 'invalid_json' });
+  });
+
+  test('a body over 4 KiB is 413 body_too_large, and an empty one is 400 invalid_json, as today', async () => {
+    let started = 0;
+    const route = updateStartRoute({
+      view: async () => view,
+      start: async () => {
+        started += 1;
+        return view;
+      },
+    });
+
+    expect(await refused(route(rawCall(JSON.stringify({ target: 'x'.repeat(5 * 1024) }))))).toMatchObject({
+      status: 413,
+      code: 'body_too_large',
+    });
+    expect(await refused(route(rawCall('')))).toMatchObject({ status: 400, code: 'invalid_json' });
+    expect(started).toBe(0);
+  });
+
+  test('G25 a ferret is refused before anything starts', async () => {
+    let started = 0;
+    const route = updateStartRoute({
+      view: async () => view,
+      start: async () => {
+        started += 1;
+        return view;
+      },
+    });
+
+    const error = await refused(route(call({}, ferretStanding('F1' as never))));
+
+    expect(error).toMatchObject({ status: 403, code: 'forbidden' });
+    expect(started).toBe(0);
+  });
+
+  test('G25 the demand a governed device is asked for is fleet.configure', async () => {
+    const route = updateStartRoute(accepting([]));
+
+    const response = body(await route(call({}, remoteDevice(false).standing())));
+
+    expect([response.status, response.json.demand]).toEqual([403, { capability: 'fleet', axis: 'configure' }]);
+  });
+
+  test('G25 a spent passkey proof does not start a second update', async () => {
+    let started = 0;
+    const route = updateStartRoute({
+      view: async () => view,
+      start: async () => {
+        started += 1;
+        return view;
+      },
+    });
+    const phone = remoteDevice(true);
+
+    const first = body(await route(call({}, phone.standing())));
+    const second = body(await route(call({}, phone.standing())));
+
+    expect([first.status, second.status, second.json.code, started, phone.state.spent]).toEqual([
+      202,
+      403,
+      'grant_step_up_required',
+      1,
+      1,
+    ]);
+  });
+
+  test('G25 the owner at the machine starts an update with no passkey, and nothing is spent', async () => {
+    let spent = 0;
+    const route = updateStartRoute(accepting([]));
+
+    const response = body(
+      await route(
+        call(
+          {},
+          {
+            ...ownerStanding(),
+            claimFreshStepUp: () => {
+              spent += 1;
+              return true;
+            },
+            spendFreshStepUp: () => {
+              spent += 1;
+            },
+          },
+        ),
+      ),
+    );
+
+    expect([response.status, spent]).toEqual([202, 0]);
+  });
+
+  test('G25 a refused update has used the proof up, so a retry with the same proof is refused', async () => {
+    // Claim-first, no restore (today's claim-first routes): one proof admits one act, and the person confirms again.
+    const route = updateStartRoute({
+      view: async () => view,
+      start: async () => {
+        throw new HarnessUpdateRefusal(HARNESS_UPDATE_CODES.inProgress, 'busy');
+      },
+    });
+    const phone = remoteDevice(true);
+
+    const error = await refused(route(call({}, phone.standing())));
+    const retry = body(await route(call({}, phone.standing())));
+
+    expect([error.status, phone.state.spent]).toEqual([409, 1]);
+    expect([retry.status, retry.json.code]).toEqual([403, 'grant_step_up_required']);
+  });
+
+  test('G25 two requests racing on one fresh proof: exactly one update starts, the other is asked again', async () => {
+    let started = 0;
+    const route = updateStartRoute({
+      view: async () => view,
+      start: async () => {
+        started += 1;
+        return view;
+      },
+    });
+    const phone = remoteDevice(true);
+    // Both standings are taken before either request runs: each admission saw the proof fresh.
+    const [a, b] = [phone.standing(), phone.standing()];
+
+    const answers = (await Promise.all([route(call({}, a)), route(call({}, b))])).map(body);
+
+    expect(answers.map(each => each.status).sort()).toEqual([202, 403]);
+    expect(answers.find(each => each.status === 403)?.json.code).toBe('grant_step_up_required');
+    expect([started, phone.state.spent]).toEqual([1, 1]);
   });
 });

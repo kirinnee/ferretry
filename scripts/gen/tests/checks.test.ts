@@ -351,9 +351,9 @@ describe('source scans', () => {
         id: 'connections',
         files: {
           'worker/src/worker.ts': 'await fetch("https://fixture.invalid");',
-          'adapters/webrtc/node-datachannel-engine.ts': 'const platform = process.platform;',
+          'daemon/adapters/webrtc/node-datachannel-engine.ts': 'const platform = process.platform;',
           'daemon/worker.ts': 'await fetch("https://fixture.invalid");',
-          'adapters/webrtc/other.ts': 'const platform = process.platform;',
+          'daemon/adapters/webrtc/other.ts': 'const platform = process.platform;',
         },
       },
       { id: 'catalogs', files: { 'worker/src/worker.ts': 'await fetch("https://fixture.invalid");' } },
@@ -371,7 +371,7 @@ describe('source scans', () => {
     expect(messages(found)).toContain('connections/daemon/worker.ts');
     expect(messages(found)).toContain('browsers/daemon/worker/launcher.ts');
     expect(messages(found)).not.toContain('browsers/daemon/worker/adapters/');
-    expect(messages(found)).toContain('connections/adapters/webrtc/other.ts');
+    expect(messages(found)).toContain('connections/daemon/adapters/webrtc/other.ts');
     expect(messages(found)).toContain('other/worker/src/worker.ts');
   });
   test('banned-globals planted: clock, timers, env, fs, network and spawn around the ports', () => {
@@ -426,6 +426,36 @@ describe('source scans', () => {
     );
     expect(found.length).toBe(1);
     expect(found[0]?.where).toBe('packages/core/kernel/contract/home.ts:2');
+  });
+
+  test('catalog retirement wording stays scoped and does not allow format converters', () => {
+    const source = file(
+      'catalog-word.ts',
+      "export const retiredAt = 'version_retired';\nexport const legacyRetired = 'migration';\n",
+    );
+    const own = compatIn(source, 'packages/plugins/catalogs/daemon/lib/document.ts');
+    expect(own.length).toBe(2);
+    expect(own.every(finding => finding.where.endsWith(':2'))).toBe(true);
+    expect(compatIn(source, 'packages/plugins/access/daemon/lib/document.ts').length).toBe(4);
+  });
+
+  test('no-compat allows only the two exact native Codex notice literals in their declared constant', () => {
+    const path = 'packages/plugins/codex/daemon/lib/fixed-layer.ts';
+    const source = file(
+      'codex-notices.ts',
+      [
+        'const CODEX_HIDDEN_NOTICES = [',
+        '  "hide_gpt5_1_migration_prompt",',
+        '  "hide_gpt-5.1-codex-max_migration_prompt",',
+        '  "hide_gpt5_2_migration_prompt",',
+        '  "prefix_hide_gpt5_1_migration_prompt",',
+        '];',
+        'const OTHER = "hide_gpt5_1_migration_prompt";',
+      ].join('\n'),
+    );
+    const found = compatIn(source, path);
+    expect(found.map(item => item.where)).toEqual([path + ':4', path + ':5', path + ':7']);
+    expect(compatIn(source, 'another-file.ts')).toHaveLength(5);
   });
 
   test('one-format planted: two numbers, a range, a union schema; a validity guard stays', () => {

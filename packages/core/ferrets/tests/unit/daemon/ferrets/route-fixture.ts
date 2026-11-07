@@ -67,6 +67,10 @@ export async function host(
     readonly runner?: FakeRunner;
     readonly config?: Readonly<Record<string, unknown>>;
     readonly standing?: (request: ApiRequest) => CallStanding;
+    /** What `RootHandle.pin` answers: the kernel's descriptor walk, or a stand-in for it. */
+    readonly pinner?: Parameters<typeof testHost>[0]['pinner'];
+    /** Answers the Git the file browser runs. */
+    readonly spawn?: Parameters<typeof testHost>[0]['spawn'];
   } = {},
 ): Promise<TestHost> {
   const plugins = [
@@ -79,6 +83,8 @@ export async function host(
     gate: new StandInAdmission(extra.standing ?? standingFor),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
     ...(extra.config === undefined ? {} : { config: extra.config }),
+    ...(extra.pinner === undefined ? {} : { pinner: extra.pinner }),
+    ...(extra.spawn === undefined ? {} : { spawn: extra.spawn }),
   });
   if (records.length === 0) return first;
   for (const each of records) first.state('ferrets').plant(FerretFiles, JSON.stringify(each), each.id);

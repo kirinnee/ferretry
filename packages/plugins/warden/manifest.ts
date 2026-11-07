@@ -1,5 +1,7 @@
 import { BoardPort } from '@ferretry/plugin-board/contract';
+import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
+import { TerminalsPort } from '@ferretry/plugin-terminals/contract';
 import { appAction, definePlugin, panel, route, screen, settingsTab } from '@ferretry/kernel/manifest';
 import { AsksPort } from '@ferretry/core-asks/contract';
 import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
@@ -50,7 +52,12 @@ export default definePlugin({
   ],
 
   needs: { ferrets: FerretsPort, conversation: ConversationPort, asks: AsksPort },
-  uses: { usage: UsagePort, board: BoardPort },
+  /**
+   * Optional (D2 #19): Usage and Board as before; Terminals for the liveness look at each ferret's own pane (off:
+   * `dead_monitor`, `sus_*` and `agent_frozen` do not run), Browsers to close the browsers left under it (off: that
+   * check does not run). Neither Terminals nor Browsers uses the Warden, so no cycle.
+   */
+  uses: { usage: UsagePort, board: BoardPort, terminals: TerminalsPort, browsers: BrowsersPort },
   provides: { warden: WardenPort },
 
   actions: {

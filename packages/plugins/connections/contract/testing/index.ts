@@ -2,6 +2,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type ConnectionsApi,
+  HOSTED_APP_ORIGIN,
+  type ConnectionAdvertisement,
   type PublishedCarriers,
   PublishedCarriersSchema,
   type TunnelStatusView,
@@ -20,6 +22,11 @@ const TUNNEL_OFF: TunnelStatusView = {
 export function fakeConnections(
   initial: PublishedCarriers = [],
   tunnel: TunnelStatusView = TUNNEL_OFF,
+  advertisement: ConnectionAdvertisement = {
+    advertisement: { kind: 'none', refusal: 'no-port' },
+    appOrigin: HOSTED_APP_ORIGIN,
+    allowedOrigins: [HOSTED_APP_ORIGIN],
+  },
 ): ConnectionsApi & { set(carriers: PublishedCarriers): void } {
   let carriers = PublishedCarriersSchema.parse(initial);
   return {
@@ -27,6 +34,7 @@ export function fakeConnections(
       carriers = PublishedCarriersSchema.parse(next);
     },
     carriers: () => carriers,
+    advertisement: () => advertisement,
     tunnel: async () => TunnelStatusViewSchema.parse(tunnel),
   };
 }
