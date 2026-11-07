@@ -260,9 +260,7 @@ describe('AnalyticsIngestionService.ingest', () => {
   it('should store the turns the harness reported, and the daemon counter when it reported none', async () => {
     // Arrange
     const test = harness([candidate({ id: 's1', turns: 9 }), candidate({ id: 's2', turns: 4 })], async id =>
-      id === 's1'
-        ? readEvidence([usageEvent('claude-opus-5', 10, 5), usageEvent('claude-opus-5', 10, 5)])
-        : undefined,
+      id === 's1' ? readEvidence([usageEvent('claude-opus-5', 10, 5), usageEvent('claude-opus-5', 10, 5)]) : undefined,
     );
 
     // Act
@@ -317,7 +315,7 @@ describe('AnalyticsIngestionService.ingest', () => {
 
   it('should store a session whose transcript could not be read as unknown, never as zero', async () => {
     // Arrange
-    const test = harness([candidate({ id: 's1' })], async () => (undefined));
+    const test = harness([candidate({ id: 's1' })], async () => undefined);
 
     // Act
     const summary = await test.service.ingest();
@@ -619,11 +617,9 @@ describe('AnalyticsIngestionService.ingest', () => {
     // each minute was most of a second of a blocked loop per session, forever.
     // Arrange
     let nowMs = Date.parse('2026-08-02T00:00:00.000Z');
-    const test = harness(
-      [candidate({ id: 's1' })],
-      async () => readEvidence([]),
-      { clock: { now: () => new Date(nowMs).toISOString() } },
-    );
+    const test = harness([candidate({ id: 's1' })], async () => readEvidence([]), {
+      clock: { now: () => new Date(nowMs).toISOString() },
+    });
     await test.service.ingest();
 
     // Act
@@ -706,8 +702,7 @@ describe('AnalyticsIngestionService.read', () => {
     ];
     const test = harness(
       [candidate({ id: 'ok' }), candidate({ id: 'lost' })],
-      async id =>
-        id === 'ok' ? readEvidence([usageEvent('claude-opus-5', 1_000_000, 1_000_000)]) : undefined,
+      async id => (id === 'ok' ? readEvidence([usageEvent('claude-opus-5', 1_000_000, 1_000_000)]) : undefined),
       { clock: { now: () => '2026-11-01T00:00:00.000Z' } },
     );
     test.setPricing(dated);
@@ -754,7 +749,7 @@ describe('AnalyticsIngestionService.read', () => {
 
   it('should omit the last refresh instant while nothing is ingested rather than inventing one', async () => {
     // Arrange
-    const test = harness([], async () => (undefined));
+    const test = harness([], async () => undefined);
 
     // Act
     const read = test.service.read();
@@ -784,10 +779,8 @@ describe('AnalyticsIngestionService.rebuildRequired', () => {
     // DECLARED rather than inferred from an empty table: an index that was thrown away and one that has
     // simply never seen a finished session both hold no rows.
     // Arrange / Act / Assert
-    should(
-      harness([], async () => (undefined), { rebuildRequired: true }).service.rebuildRequired,
-    ).be.true();
-    should(harness([], async () => (undefined)).service.rebuildRequired).be.false();
+    should(harness([], async () => undefined, { rebuildRequired: true }).service.rebuildRequired).be.true();
+    should(harness([], async () => undefined).service.rebuildRequired).be.false();
   });
 });
 

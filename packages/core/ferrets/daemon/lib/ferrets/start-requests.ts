@@ -44,7 +44,11 @@ export type StartRequestLookup =
   | { readonly kind: 'same'; readonly ferret: FerretId }
   | { readonly kind: 'conflict' };
 
-export function lookupStartRequest(held: StartRequests | undefined, requestId: string, digest: string): StartRequestLookup {
+export function lookupStartRequest(
+  held: StartRequests | undefined,
+  requestId: string,
+  digest: string,
+): StartRequestLookup {
   const entry = held?.requests.find(request => request.requestId === requestId);
   if (entry === undefined) return { kind: 'none' };
   return entry.digest === digest ? { kind: 'same', ferret: entry.ferret as FerretId } : { kind: 'conflict' };

@@ -1,6 +1,6 @@
 /** Parity rows J-0024, J-0044, J-0089, J-0123, J-0244 (docs/design/rebuild-parity.tsv). */
 import { describe, expect, test } from 'bun:test';
-import type { JobSpec, KernelPorts } from '@ferretry/kernel/contract';
+import type { JobSpec, KernelPorts, UpdateHostPort } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
 import daemon from '../../../daemon/index.ts';
@@ -16,14 +16,25 @@ const RELEASE = {
   published_at: '2026-10-18T08:00:00Z',
 };
 
+/** What the kernel gives a plugin it has no build to show: facts that refuse, launches that fail. */
+const refusingHost: UpdateHostPort = {
+  release: '4.28.0',
+  compiled: false,
+  executable: async () => {
+    throw new Error('updates did not declare permissions.updateHost.');
+  },
+  launchUpdate: async () => ({ kind: 'failed', reason: 'updates did not declare permissions.updateHost.' }),
+};
+
 /** The half built over fakes: what it asked the kernel to schedule, and how often GitHub was asked. */
-function build() {
+function build(updateHost: UpdateHostPort = fakeHost().port) {
   const jobs: JobSpec[] = [];
   const asked: string[] = [];
   const stored = new Map<string, unknown>();
   const quiet = { debug() {}, info() {}, warn() {}, error() {}, child: () => quiet };
   const kernel = {
-    updateHost: fakeHost({ checks: true }),
+    updateHost,
+    paths: { home: () => '/home/kirin' },
     jobs: { add: (job: JobSpec) => void jobs.push(job), kick: () => undefined },
     config: { file: () => undefined, collection: () => new Map(), watch: () => () => undefined },
     state: {
@@ -69,18 +80,10 @@ describe('the update check loop', () => {
     expect(asked).toEqual(['https://api.github.com/repos/kirinnee/ferretry/releases/latest']);
   });
 
-  test('J-0024 without the host seam nothing is scheduled', () => {
-    const jobs: JobSpec[] = [];
-    daemon.build?.({
-      manifest,
-      needs: { ferrets: { list: async () => [] } },
-      uses: {},
-      hooks: {} as never,
-      kernel: {
-        jobs: { add: (job: JobSpec) => void jobs.push(job) },
-        config: { file: () => undefined, watch: () => () => undefined },
-      } as unknown as KernelPorts,
-    } as unknown as DaemonContext<typeof manifest>);
-    expect(jobs).toEqual([]);
+  test('J-0024 without the host seam the armed loop asks GitHub nothing', async () => {
+    const { jobs, asked } = build(refusingHost);
+    const signal = new AbortController().signal;
+    for (const job of jobs) await job.run(signal);
+    expect(asked).toEqual([]);
   });
 });

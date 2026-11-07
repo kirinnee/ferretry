@@ -255,7 +255,11 @@ describe('StatePasskeyStore', () => {
     const cases: readonly (readonly [string, string, RegExp])[] = [
       ['is not JSON', '{ not json', /does not describe/u],
       ['has another format', JSON.stringify({ format: 2, passkeys: [] }), /does not describe/u],
-      ['holds a row with an unknown field', JSON.stringify({ format: 1, passkeys: [{ extra: 1 }] }), /does not describe/u],
+      [
+        'holds a row with an unknown field',
+        JSON.stringify({ format: 1, passkeys: [{ extra: 1 }] }),
+        /does not describe/u,
+      ],
       ['holds one credential twice', JSON.stringify(duplicated), /one credential twice/u],
     ];
 

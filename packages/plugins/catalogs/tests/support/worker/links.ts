@@ -10,7 +10,7 @@ import {
   SharedCatalogLinkBundleSchema,
   SharedCatalogLinkSchema,
 } from '../../../contract/wire/index.ts';
-import { catalogItemDigest, mintLinkSecrets, signCatalogLink } from '../../../worker/lib/index.ts';
+import { catalogItemDigest, mintLinkSecrets, signCatalogLink } from '../../../worker/src/lib/index.ts';
 import { newDaemonIdentity, relayCrypto } from './identities.ts';
 
 export const LINK_AT = '2026-10-31T09:00:00.000Z';

@@ -26,14 +26,7 @@ import {
 import { ArrowLeft, Link, MessageSquare, X } from 'lucide-react';
 import { Component, type ErrorInfo, type ReactNode, useMemo, useState } from 'react';
 import { type BoardMachine, useBoardCard } from '../../hooks/use-board.ts';
-import {
-  activityText,
-  hasLinks,
-  kindLabel,
-  laneCategoryOf,
-  laneNameOf,
-  written,
-} from '../../lib/board-detail.ts';
+import { activityText, hasLinks, kindLabel, laneCategoryOf, laneNameOf, written } from '../../lib/board-detail.ts';
 import type { RunningOnMachine } from '../../lib/board-model.ts';
 import type { FerretNames } from '../../lib/board-present.ts';
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
@@ -62,7 +55,10 @@ const markedTexts = (task: CardView) => {
   const seen = new Set<number>();
   const mark = (text: string): string | null => (written(text) ? markTerms(text, task.terms, seen) : null);
   return {
-    progress: writtenProgressParts(task.progress).map(part => ({ ...part, text: markTerms(part.text, task.terms, seen) })),
+    progress: writtenProgressParts(task.progress).map(part => ({
+      ...part,
+      text: markTerms(part.text, task.terms, seen),
+    })),
     premise: mark(task.premise),
     context: mark(task.context),
     howToTest: mark(task.howToTest),
@@ -214,8 +210,7 @@ function DetailBody({
     () => ({ names, laneName: (laneId: string) => laneNameOf(laneSet, laneId) }),
     [names, laneSet],
   );
-  const open = (id: string): void =>
-    onNavigate(`${boardPath(machine.connection.daemonId)}/${encodeURIComponent(id)}`);
+  const open = (id: string): void => onNavigate(`${boardPath(machine.connection.daemonId)}/${encodeURIComponent(id)}`);
   const marked = useMemo(() => markedTexts(task), [task]);
   const firstPr = task.links.prs[0] ?? null;
 
@@ -303,7 +298,12 @@ function DetailBody({
       </header>
 
       <TermLayer renderProse={cardProse} terms={task.terms}>
-        <Situation context={marked.context} premise={marked.premise} renderProse={cardProse} progress={marked.progress} />
+        <Situation
+          context={marked.context}
+          premise={marked.premise}
+          renderProse={cardProse}
+          progress={marked.progress}
+        />
 
         <DetailSection id="ask" title="Ask">
           <AskSection

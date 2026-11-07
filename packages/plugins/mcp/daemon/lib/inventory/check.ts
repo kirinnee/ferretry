@@ -15,7 +15,12 @@
  * sentence a check answers passes through the secret redactor first, because a server's own error text
  * is the one thing here nobody controls.
  */
-import { MCP_CHECK_TIMEOUT_MS, MCP_CHECK_TOOL_NAMES, type McpCheckResult, type McpTransport } from '../../../contract/index.ts';
+import {
+  MCP_CHECK_TIMEOUT_MS,
+  MCP_CHECK_TOOL_NAMES,
+  type McpCheckResult,
+  type McpTransport,
+} from '../../../contract/index.ts';
 /** Scrubs a secret out of a check's own words (the kernel's redaction window, bound in the half). */
 export interface TextRedactor {
   redact(text: string): Promise<string>;

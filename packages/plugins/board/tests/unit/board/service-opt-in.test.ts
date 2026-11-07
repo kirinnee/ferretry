@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { type BoardProjectId, type Card, CardActionRequestSchema, type CardCreateRequestInput, CardCreateRequestSchema } from '../../../contract/index.ts';
+import {
+  type BoardProjectId,
+  type Card,
+  CardActionRequestSchema,
+  type CardCreateRequestInput,
+  CardCreateRequestSchema,
+} from '../../../contract/index.ts';
 import should from 'should';
 import {
   type BoardCaller,
@@ -34,7 +40,7 @@ class FakeOptIn implements BoardOptIn {
     return projectId === PROJECT ? 'ferretry' : projectId;
   }
 
-  async answered(ferret: string, id: string): Promise<AnsweredAsk & { readonly id: string } | undefined> {
+  async answered(ferret: string, id: string): Promise<(AnsweredAsk & { readonly id: string }) | undefined> {
     if (this.failing.asks === true) throw new Error('ledger is damaged');
     return this.answers[ferret]?.find(item => item.id === id);
   }

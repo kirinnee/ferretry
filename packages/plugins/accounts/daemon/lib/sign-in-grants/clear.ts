@@ -1,4 +1,3 @@
-
 import { type InputTargetFacts } from '@ferretry/core-vault/contract';
 
 /**

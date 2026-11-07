@@ -497,12 +497,7 @@ export class SessionWorkerRuntime {
     const cursor =
       cached?.file === bound.file
         ? cached.cursor
-        : this.deps.tail(
-            this.deps.transcripts[bound.harness],
-            bound.file,
-            hosted.session,
-            QUESTION_TAIL_EVENTS,
-          );
+        : this.deps.tail(this.deps.transcripts[bound.harness], bound.file, hosted.session, QUESTION_TAIL_EVENTS);
     const events = await cursor.read().catch(() => undefined);
     if (events === undefined) return undefined;
     hosted.tail = { file: bound.file, size: stats.size, mtimeMs: stats.mtimeMs, events, cursor };

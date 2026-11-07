@@ -24,7 +24,9 @@ const text = (invocation: VerbInvocation, name: string): string | undefined => {
 const itemVerb =
   (io: { err(text: string): void }, what: string): VerbHandler =>
   async () => {
-    io.err(`Claude Code ${what} items are edited through the item service, which is not served by this daemon yet; nothing was changed.`);
+    io.err(
+      `Claude Code ${what} items are edited through the item service, which is not served by this daemon yet; nothing was changed.`,
+    );
     return 69;
   };
 
@@ -52,7 +54,8 @@ export default implementCli(manifest, {
           const plan = current.plan;
           if (plan.kind === 'manual') {
             io.err(`Claude Code: ${plan.explanation}\n`);
-            for (const step of plan.steps) io.out(`  ${step.command}${step.note === undefined ? '' : `   # ${step.note}`}\n`);
+            for (const step of plan.steps)
+              io.out(`  ${step.command}${step.note === undefined ? '' : `   # ${step.note}`}\n`);
             return 1;
           }
           if (!on(invocation, 'yes')) {
@@ -69,7 +72,9 @@ export default implementCli(manifest, {
             },
           });
           const command = started.job?.state === 'running' ? ` (${started.job.command})` : '';
-          io.out(`Updating Claude Code${command}. This can take a few minutes; follow it with: fy harness claude-code status\n`);
+          io.out(
+            `Updating Claude Code${command}. This can take a few minutes; follow it with: fy harness claude-code status\n`,
+          );
           return 0;
         },
         'harness claude-code settings ls': itemVerb(io, 'settings'),

@@ -65,7 +65,7 @@ import {
   catalogManifestSignedBytes,
   catalogVersionsSignedBytes,
 } from '../../contract/wire/index.ts';
-import { WebCryptoSessionCrypto as CatalogWireCrypto, toBase64Url } from '../../worker/kernel-wire/index.ts';
+import { WebCryptoSessionCrypto as CatalogWireCrypto, toBase64Url } from '../../worker/src/kernel-wire/index.ts';
 
 export const kernelCrypto = new session.WebCryptoSessionCrypto();
 const wireCrypto = new CatalogWireCrypto();

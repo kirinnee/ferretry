@@ -124,7 +124,14 @@ describe('answering a harness dialog from the app', () => {
   });
 
   test('G32 the words name Claude Code and the trust a row grants', () => {
-    const dialog = { id: ID, harness: 'claude-code', kind: 'mcp-servers', title: 'New MCP server found', options: [], escape: 'skip' } as HarnessDialog;
+    const dialog = {
+      id: ID,
+      harness: 'claude-code',
+      kind: 'mcp-servers',
+      title: 'New MCP server found',
+      options: [],
+      escape: 'skip',
+    } as HarnessDialog;
 
     expect(harnessDialogSentence('Hadi', dialog)).toBe('Hadi’s Claude Code is waiting: New MCP server found');
     expect(harnessTrustNote(dialog)).toBe('Lets this MCP server run');
@@ -145,10 +152,10 @@ describe('the plain words for a permission prompt', () => {
   });
 
   test('buttons say what they do and keep the harness label', () => {
-    expect(request().options.map(permissionOptionWords).map(option => option.label)).toEqual([
-      'Allow once',
-      'Always allow',
-      'Deny',
-    ]);
+    expect(
+      request()
+        .options.map(permissionOptionWords)
+        .map(option => option.label),
+    ).toEqual(['Allow once', 'Always allow', 'Deny']);
   });
 });

@@ -625,8 +625,9 @@ describe('the device-grant service on its own', () => {
         throw error;
       },
     });
-    const undetermined = (await mount({ caller: MANAGER, service: failing(new GrantError('unavailable', 'unreadable')) }))
-      .dispatch;
+    const undetermined = (
+      await mount({ caller: MANAGER, service: failing(new GrantError('unavailable', 'unreadable')) })
+    ).dispatch;
     const broken = (await mount({ caller: MANAGER, service: failing(new Error('disk on fire')) })).dispatch;
 
     // Act

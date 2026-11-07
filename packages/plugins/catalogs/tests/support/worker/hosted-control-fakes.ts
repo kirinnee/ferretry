@@ -1,7 +1,7 @@
 import type {
   HostedRelayControlStorage,
   HostedRelayControlStorageTransaction,
-} from '../../../worker/adapters/durable-storage.ts';
+} from '../../../worker/src/adapters/durable-storage.ts';
 
 /**
  * Byte-ordered comparison, which is what Durable Object storage uses for both listing and `startAfter`.

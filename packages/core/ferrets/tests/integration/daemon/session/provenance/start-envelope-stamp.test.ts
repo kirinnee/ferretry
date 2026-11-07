@@ -2,7 +2,10 @@ import { describe, it } from 'bun:test';
 import { SessionConfigSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
 import { memoryStorage } from '../../../../support/daemon/storage.ts';
-import { type SessionProtocolEnvelope, StorageSessionLifecycleRepository } from '../../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
+import {
+  type SessionProtocolEnvelope,
+  StorageSessionLifecycleRepository,
+} from '../../../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import { StorageSessionProvenanceStore } from '../../../../../daemon/adapters/session/provenance/storage-session-provenance-store.ts';
 import { createSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
 import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';

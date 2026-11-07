@@ -7,7 +7,10 @@ import {
   type AnalyticsPricingConfigurationWrite,
   type AnalyticsPricingConfigurationWriteResult,
 } from '../../lib/analytics/pricing-service.ts';
-import { analyticsPricingFingerprint, analyticsPricingSourcesFingerprint } from '../../lib/analytics/pricing-catalog.ts';
+import {
+  analyticsPricingFingerprint,
+  analyticsPricingSourcesFingerprint,
+} from '../../lib/analytics/pricing-catalog.ts';
 
 const EMPTY: PricingFile = { catalog: [], sources: [] };
 
