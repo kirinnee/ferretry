@@ -1,9 +1,9 @@
 /** Fixtures shared by the Machines shell suites, written out longhand so a schema change fails them. */
 
 import type { FleetMachineView } from '@ferretry/protocol';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
-import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 
 export const machineView = (overrides: Partial<FleetMachineView> = {}): FleetMachineView => ({
   name: 'studio-mac',

@@ -7,7 +7,7 @@ import {
   InfoNote,
   InfoRow,
   InfoSection,
-} from '../../../../src/features/session-info/info-parts.tsx';
+} from '../../../../../app/features/session-info/info-parts.tsx';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 
 let mounted: Mounted | undefined;

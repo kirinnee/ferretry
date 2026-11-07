@@ -3,7 +3,7 @@ import {
   SKIPPED_REASON,
   skippedCountLine,
   skippedItems,
-} from '../../../../../src/features/fleet/shell/skipped-model.ts';
+} from '../../../../../../app/features/fleet/shell/skipped-model.ts';
 import { runtime } from '../account-support.ts';
 
 describe('skippedItems', () => {

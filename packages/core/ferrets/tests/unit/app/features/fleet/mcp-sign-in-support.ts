@@ -7,11 +7,11 @@
 
 import type { McpOAuthCompletion, McpOAuthConnection, McpOAuthFlow } from '@ferretry/protocol';
 import type { z } from 'zod';
-import type { FleetClient, FleetClientFactory } from '../../../../src/features/fleet/fleet-client.ts';
+import type { FleetClient, FleetClientFactory } from '../../../../../app/features/fleet/fleet-client.ts';
 import type {
   McpSignInChannel,
   McpSignInChannelFactory,
-} from '../../../../src/features/fleet/components/mcp-sign-in-sheet.tsx';
+} from '../../../../../app/features/fleet/components/mcp-sign-in-sheet.tsx';
 
 export const NOW = Date.parse('2026-10-16T10:00:00.000Z');
 

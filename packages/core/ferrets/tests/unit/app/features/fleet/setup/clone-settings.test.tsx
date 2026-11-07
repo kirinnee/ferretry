@@ -5,7 +5,7 @@ import {
   CloneLoginsSection,
   CloneNeedsList,
   CloneOutcomes,
-} from '../../../../../src/features/fleet/setup/clone-settings.tsx';
+} from '../../../../../../app/features/fleet/setup/clone-settings.tsx';
 import {
   CLONE_ITEMS,
   type CloneItem,
@@ -13,7 +13,7 @@ import {
   type CloneItemOutcome,
   type CloneLogin,
   type CloneNeed,
-} from '../../../../../src/features/fleet/setup/clone-settings-model.ts';
+} from '../../../../../../app/features/fleet/setup/clone-settings-model.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 
 const mounts: Mounted[] = [];

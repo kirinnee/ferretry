@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { clearForegroundPinScope, getForegroundPinScope, setForegroundPinScope } from '../../src/lib/pin-bridge.ts';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
+import { clearForegroundPinScope, getForegroundPinScope, setForegroundPinScope } from '../../../app/lib/pin-bridge.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { FleetComponentCatalogSchema } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { ComponentsSurface, ComponentsTab } from '../../../../../src/features/fleet/components/components-tab.tsx';
+import { ComponentsSurface, ComponentsTab } from '../../../../../../app/features/fleet/components/components-tab.tsx';
 import { DaemonConnectionStore } from '../../../../../src/lib/connections.ts';
-import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 import { type AppStore, StoreProvider } from '../../../../../src/lib/store.tsx';
 import { type Mounted, mount, must } from '../../../../support/dom.ts';
 import {

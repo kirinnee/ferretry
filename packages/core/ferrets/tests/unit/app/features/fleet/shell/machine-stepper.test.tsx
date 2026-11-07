@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { useState } from 'react';
-import { MachineStepper, shownSteps } from '../../../../../src/features/fleet/shell/machine-stepper.tsx';
+import { MachineStepper, shownSteps } from '../../../../../../app/features/fleet/shell/machine-stepper.tsx';
 import {
   currentFlow,
   cancelStepper,
@@ -8,7 +8,7 @@ import {
   type StepperState,
   startStepper,
   stepForward,
-} from '../../../../../src/features/fleet/shell/stepper-model.ts';
+} from '../../../../../../app/features/fleet/shell/stepper-model.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 
 const flow: StepperFlowInput = {

@@ -15,8 +15,8 @@ import {
   projectKeyFor,
   scopeSessions,
   sessionInScope,
-} from '../../src/lib/fleet-grouping.ts';
-import type { DaemonFleetSlice } from '../../src/lib/fleet-store.ts';
+} from '../../../app/lib/fleet-grouping.ts';
+import type { DaemonFleetSlice } from '../../../app/lib/fleet-store.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const filter = (overrides: Partial<FleetFilter> = {}): FleetFilter => ({

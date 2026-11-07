@@ -15,7 +15,7 @@ import {
   sessionsBarSubline,
   sessionsBarView,
   sidebarCompact,
-} from '../../src/shell/sessions-bar-model.ts';
+} from '../../../app/shell/sessions-bar-model.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const NOW = Date.parse('2026-10-16T12:00:00.000Z');

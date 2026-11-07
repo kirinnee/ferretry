@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { CheckCheck } from 'lucide-react';
 import { useState } from 'react';
-import { ActionsMenu } from '../../../../src/features/session-actions/actions-menu.tsx';
-import type { SessionActionSection } from '../../../../src/features/session-actions/registry.ts';
+import { ActionsMenu } from '../../../../../app/features/session-actions/actions-menu.tsx';
+import type { SessionActionSection } from '../../../../../app/features/session-actions/registry.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../../../support/dom.ts';
 
 let mounted: Mounted | undefined;

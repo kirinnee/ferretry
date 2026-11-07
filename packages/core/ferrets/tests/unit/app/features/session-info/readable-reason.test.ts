@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { readableReason } from '../../../../src/features/session-info/session-info.tsx';
+import { readableReason } from '../../../../../app/features/session-info/session-info.tsx';
 
 describe('readableReason', () => {
   it('keeps a daemon sentence as it is', () => {

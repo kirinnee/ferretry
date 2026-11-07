@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { ManagedWorktreeView } from '@ferretry/protocol';
-import { InfoOverview, type InfoOverviewProps } from '../../../../src/features/session-info/info-overview.tsx';
+import { InfoOverview, type InfoOverviewProps } from '../../../../../app/features/session-info/info-overview.tsx';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
 

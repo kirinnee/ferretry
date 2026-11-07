@@ -5,9 +5,9 @@
  */
 import { describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { DaemonFleetStore } from '../../../src/lib/fleet-store.ts';
-import type { DeadlineSchedule } from '../../../src/lib/machine-deadline.ts';
+import { daemonConnection } from '../../../../app/lib/daemon-connection.ts';
+import { DaemonFleetStore } from '../../../../app/lib/fleet-store.ts';
+import type { DeadlineSchedule } from '../../../../app/lib/machine-deadline.ts';
 import { sessionView } from '../../support/sessions.ts';
 
 const asleep = daemonConnection({ daemonId: 'asleep', baseUrl: 'https://asleep.invalid', deviceId: 'a' });

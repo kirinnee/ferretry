@@ -4,8 +4,8 @@ import {
   daemonDisplayName,
   distinctDaemonName,
   replacedPairing,
-} from '../../../../src/features/settings/daemon-settings.tsx';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+} from '../../../../../app/features/settings/daemon-settings.tsx';
+import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
 
 describe('what every screen calls a paired machine', () => {
   const at = (daemonName?: string) =>

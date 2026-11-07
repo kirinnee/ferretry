@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { secretReference } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { ReactElement } from 'react';
-import type { FleetClientFactory } from '../../../../../src/features/fleet/fleet-client.ts';
-import { downloadFile, ExportSettings } from '../../../../../src/features/fleet/setup/export-settings.tsx';
+import type { FleetClientFactory } from '../../../../../../app/features/fleet/fleet-client.ts';
+import { downloadFile, ExportSettings } from '../../../../../../app/features/fleet/setup/export-settings.tsx';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import { type Call, STUDIO, scriptedClient } from './setup-support.ts';
 

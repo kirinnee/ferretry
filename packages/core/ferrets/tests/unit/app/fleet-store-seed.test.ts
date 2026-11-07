@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { type DaemonFleetPort, DaemonFleetStore } from '../../src/lib/fleet-store.ts';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { type DaemonFleetPort, DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });

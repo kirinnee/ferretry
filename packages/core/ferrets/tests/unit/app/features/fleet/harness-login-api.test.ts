@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
 
-import type { FleetClient } from '../../../../src/features/fleet/fleet-client.ts';
+import type { FleetClient } from '../../../../../app/features/fleet/fleet-client.ts';
 import {
   cancelCredentialSignIn,
   FLEET_LOGIN_PATH,
@@ -12,7 +12,7 @@ import {
   startCredentialSignIn,
   submitCredentialSignInCode,
   switchCredentialSignInToLink,
-} from '../../../../src/features/fleet/harness-login-api.ts';
+} from '../../../../../app/features/fleet/harness-login-api.ts';
 import { CLAUDE_CREDENTIAL_ID, claudeFlow } from './harness-login-support.ts';
 
 interface Call {

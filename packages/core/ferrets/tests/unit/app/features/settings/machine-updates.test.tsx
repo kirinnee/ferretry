@@ -4,9 +4,9 @@ import {
   DAEMON_UPDATE_PATH,
   HARNESS_UPDATE_PATH,
   useMachineUpdates,
-} from '../../../../src/features/settings/machine-updates.ts';
+} from '../../../../../app/features/settings/machine-updates.ts';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
-import { type DaemonConnection, type DaemonId, daemonId } from '../../../../src/lib/daemon-connection.ts';
+import { type DaemonConnection, type DaemonId, daemonId } from '../../../../../app/lib/daemon-connection.ts';
 import { interact, type Mounted, mount } from '../../../support/dom.ts';
 import { pairing } from '../fleet/shell/machine-support.ts';
 import { updateView } from './about-machine-support.ts';

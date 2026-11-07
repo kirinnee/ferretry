@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { LimitsView } from '@ferretry/protocol';
 import { cgroupConfigView } from '../../../../../protocol/tests/fixtures.ts';
-import { InfoAbout } from '../../../../src/features/session-info/info-about.tsx';
-import { memoryNote } from '../../../../src/features/session-info/memory-note.ts';
+import { InfoAbout } from '../../../../../app/features/session-info/info-about.tsx';
+import { memoryNote } from '../../../../../app/features/session-info/memory-note.ts';
 import { render } from '../../../support/react.ts';
 
 const view = (over: Partial<LimitsView>): LimitsView => ({ ...cgroupConfigView, ...over });

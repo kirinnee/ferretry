@@ -21,7 +21,7 @@ import {
   type SourceSettingsFile,
   signInLink,
   sourceItemSummary,
-} from '../../../../../src/features/fleet/setup/clone-settings-model.ts';
+} from '../../../../../../app/features/fleet/setup/clone-settings-model.ts';
 import { bundle, machineView } from './setup-support.ts';
 
 const filesOf = (...list: readonly SourceSettingsFile[]): ReadonlyMap<string, SourceSettingsFile> =>

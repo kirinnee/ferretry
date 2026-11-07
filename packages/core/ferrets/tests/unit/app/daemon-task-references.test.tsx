@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { DaemonTaskReferences } from '../../src/components/daemon-task-references.tsx';
+import { DaemonTaskReferences } from '../../../app/components/daemon-task-references.tsx';
 import { Markdown } from '../../src/components/markdown.tsx';
 import { ReferenceSurfaceProvider, useReferenceSurface } from '../../src/components/reference-surface.tsx';
-import { useMachineTaskIds } from '../../src/hooks/use-machine-task-ids.ts';
+import { useMachineTaskIds } from '../../../app/hooks/use-machine-task-ids.ts';
 import { DaemonBoardStore } from '../../src/lib/board-store.ts';
-import type { DaemonConnection } from '../../src/lib/daemon-connection.ts';
+import type { DaemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { StoreProvider } from '../../src/lib/store.tsx';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { card, fakeEnvironment, fakePort, flush, laneSetFor, laptop, PROJECT } from './board-support.ts';

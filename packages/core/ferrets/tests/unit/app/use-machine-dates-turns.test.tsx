@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
-import { machineIsOlder, useMachineIsOlder } from '../../src/hooks/use-machine-dates-turns.ts';
-import { type DaemonConnection, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
-import { type DaemonFleetPort, DaemonFleetStore } from '../../src/lib/fleet-store.ts';
+import { machineIsOlder, useMachineIsOlder } from '../../../app/hooks/use-machine-dates-turns.ts';
+import { type DaemonConnection, daemonConnection, daemonId } from '../../../app/lib/daemon-connection.ts';
+import { type DaemonFleetPort, DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
 import type { AppStore } from '../../src/lib/store.tsx';
 import { render, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';

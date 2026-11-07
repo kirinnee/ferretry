@@ -19,9 +19,9 @@ import {
   resetFsProbes,
   resolveFsFilePaths,
   useFsProbe,
-} from '../../src/components/files-api.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+} from '../../../app/components/files-api.ts';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
 import { browserFetch, DaemonResponseError } from '../../src/lib/runtime-models.ts';
 import { render, runAsync } from '../support/react.ts';
 

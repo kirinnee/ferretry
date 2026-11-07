@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetCredentialList, FleetCredentialView, FleetMachineView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
-import { CredentialsTab } from '../../../../../src/features/fleet/credentials/credentials-tab.tsx';
-import { secretRef } from '../../../../../src/features/fleet/credentials/environment-model.ts';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
+import { CredentialsTab } from '../../../../../../app/features/fleet/credentials/credentials-tab.tsx';
+import { secretRef } from '../../../../../../app/features/fleet/credentials/environment-model.ts';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { localModelsFixture } from '../../../../support/local-models.ts';
 import {

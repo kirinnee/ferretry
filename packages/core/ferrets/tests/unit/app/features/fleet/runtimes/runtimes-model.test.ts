@@ -19,7 +19,7 @@ import {
   slug,
   suggestedRuntimeName,
   uniqueName,
-} from '../../../../../src/features/fleet/runtimes/runtimes-model.ts';
+} from '../../../../../../app/features/fleet/runtimes/runtimes-model.ts';
 import { COMPONENTS, machine, PROFILES, profile, RUNTIMES, runtime } from '../account-support.ts';
 
 const named = (...names: string[]): FleetRuntimeView[] => names.map(name => runtime({ name }));

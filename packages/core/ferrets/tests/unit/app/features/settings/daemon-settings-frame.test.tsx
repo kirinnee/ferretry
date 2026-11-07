@@ -20,10 +20,10 @@ import type { ComponentProps } from 'react';
 import {
   DaemonSettingsFrame,
   type DaemonSettingsTabDefinition,
-} from '../../../../src/features/settings/daemon-settings-frame.tsx';
+} from '../../../../../app/features/settings/daemon-settings-frame.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { needsNewerFerretry, UPDATE_MACHINE_WHERE } from '../../../../src/lib/machine-update-words.ts';
+import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
+import { needsNewerFerretry, UPDATE_MACHINE_WHERE } from '../../../../../app/lib/machine-update-words.ts';
 import { DaemonClientProvider } from '../../../../src/lib/store.tsx';
 import { interact, mount, must } from '../../../support/dom.ts';
 import { healthOf } from '../../../support/health.ts';

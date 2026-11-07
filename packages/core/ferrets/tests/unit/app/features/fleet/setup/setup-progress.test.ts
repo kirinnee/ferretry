@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import type { MachineSetupProgress } from '../../../../../src/features/fleet/setup/onboarding-model.ts';
+import type { MachineSetupProgress } from '../../../../../../app/features/fleet/setup/onboarding-model.ts';
 import {
   browserSetupStorage,
   MACHINE_SETUP_PROGRESS_KEY,
   readMachineSetupProgress,
   writeMachineSetupProgress,
-} from '../../../../../src/features/fleet/setup/setup-progress.ts';
-import { daemonId } from '../../../../../src/lib/daemon-connection.ts';
+} from '../../../../../../app/features/fleet/setup/setup-progress.ts';
+import { daemonId } from '../../../../../../app/lib/daemon-connection.ts';
 import '../../../../support/dom.ts';
 
 const studio = daemonId('studio');

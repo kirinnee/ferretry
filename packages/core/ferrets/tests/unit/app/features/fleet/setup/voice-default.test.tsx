@@ -8,8 +8,8 @@ import {
   useMachineVoiceEngine,
   VOICE_FILE,
   withMachineVoiceEngine,
-} from '../../../../../src/features/fleet/setup/voice-default.ts';
-import { type DaemonConnection, daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+} from '../../../../../../app/features/fleet/setup/voice-default.ts';
+import { type DaemonConnection, daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 import { DaemonClientProvider } from '../../../../../src/lib/store.tsx';
 import { type Mounted, mount } from '../../../../support/dom.ts';
 import { runAsync } from '../../../../support/react.ts';

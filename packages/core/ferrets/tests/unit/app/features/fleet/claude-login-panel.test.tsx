@@ -8,7 +8,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { ClaudeLoginFlow } from '@ferretry/protocol';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import { ClaudeLoginPanel } from '../../../../src/features/fleet/claude-login-panel.tsx';
+import { ClaudeLoginPanel } from '../../../../../app/features/fleet/claude-login-panel.tsx';
 import { render, run } from '../../../support/react.ts';
 import { CLAUDE_URL, claudeFlow } from './harness-login-support.ts';
 

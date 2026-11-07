@@ -9,9 +9,9 @@ import {
   type MachineFleetFeedOpener,
   PHONE_BACKGROUND_POLL_MS,
   useMachinesPoll,
-} from '../../src/hooks/use-machines-poll.ts';
-import { type DaemonConnection, type DaemonId, daemonConnection } from '../../src/lib/daemon-connection.ts';
-import type { FleetFeedEnvironment } from '../../src/lib/fleet-feed.ts';
+} from '../../../app/hooks/use-machines-poll.ts';
+import { type DaemonConnection, type DaemonId, daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import type { FleetFeedEnvironment } from '../../../app/lib/fleet-feed.ts';
 import '../support/dom.ts';
 import { interact, type Mounted, mount } from '../support/dom.ts';
 

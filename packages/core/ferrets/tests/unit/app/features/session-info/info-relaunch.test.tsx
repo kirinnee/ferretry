@@ -1,8 +1,8 @@
 /** Info › Runtime › Settings: whether the CLI runs on the settings a Restart would give it. */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { type InfoRelaunchRead, InfoRelaunchRow } from '../../../../src/features/session-info/info-relaunch.tsx';
-import { InfoRuntime } from '../../../../src/features/session-info/info-runtime.tsx';
+import { type InfoRelaunchRead, InfoRelaunchRow } from '../../../../../app/features/session-info/info-relaunch.tsx';
+import { InfoRuntime } from '../../../../../app/features/session-info/info-runtime.tsx';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
 

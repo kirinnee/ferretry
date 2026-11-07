@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import type { ChangeResult, StageResult } from '../../../../../src/features/fleet/shell/apply-change.ts';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
+import type { ChangeResult, StageResult } from '../../../../../../app/features/fleet/shell/apply-change.ts';
 import {
   type AccountChanges,
   ChangeApplyPanel,
   useAccountChanges,
-} from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
-import { type DaemonConnection, daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+} from '../../../../../../app/features/fleet/shell/apply-change-panel.tsx';
+import { type DaemonConnection, daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { APPLY_PATH, type Call, machineAnswer, OUTCOME, STAGED, scriptedClient } from './change-support.ts';
 

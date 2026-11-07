@@ -5,7 +5,7 @@ import {
   isDefaultRuntime,
   keepDefaultLabel,
   runtimeStateWords,
-} from '../../../../../src/features/fleet/runtimes/default-runtime-model.ts';
+} from '../../../../../../app/features/fleet/runtimes/default-runtime-model.ts';
 import { machine, runtime } from '../account-support.ts';
 
 describe('runtimeStateWords', () => {

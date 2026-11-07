@@ -3,7 +3,7 @@ import {
   readMachineTimeZone,
   withLoginBudget,
   withMachineTimeZone,
-} from '../../../../../src/features/fleet/credentials/login-budget-files.ts';
+} from '../../../../../../app/features/fleet/credentials/login-budget-files.ts';
 
 // A login file as a person keeps it: comments, keys the budget edit must not touch.
 const LOGIN = [

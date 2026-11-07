@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'bun:test';
 import { createElement } from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
-import { useInfoPlacement } from '../../../../src/features/session-info/use-info-placement.ts';
+import { useInfoPlacement } from '../../../../../app/features/session-info/use-info-placement.ts';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

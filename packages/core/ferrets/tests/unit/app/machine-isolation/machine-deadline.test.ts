@@ -9,7 +9,7 @@ import {
   MachineDeadlineError,
   untilAborted,
   withDeadline,
-} from '../../../src/lib/machine-deadline.ts';
+} from '../../../../app/lib/machine-deadline.ts';
 
 /** A clock a test fires by hand. */
 const manualClock = () => {

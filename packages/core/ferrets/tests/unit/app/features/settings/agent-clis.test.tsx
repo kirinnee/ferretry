@@ -4,8 +4,8 @@ import {
   type AgentClisClient,
   AgentClisSurface,
   agentClisSettingsTab,
-} from '../../../../src/features/settings/agent-clis.tsx';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+} from '../../../../../app/features/settings/agent-clis.tsx';
+import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { waitFor } from '../../../support/learning-dom.ts';
 import { claudeCli, clisView, codexCli, VERIFIED_URL } from './agent-clis-support.ts';

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
-import { useCompactAtSessionActions } from '../../../../src/features/session-actions/compact-at-session-actions.tsx';
-import type { SessionActionEntry, SessionActionFormHost } from '../../../../src/features/session-actions/registry.ts';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { useCompactAtSessionActions } from '../../../../../app/features/session-actions/compact-at-session-actions.tsx';
+import type { SessionActionEntry, SessionActionFormHost } from '../../../../../app/features/session-actions/registry.ts';
+import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
 import type { DaemonFetch } from '../../../../src/lib/runtime-models.ts';
 import { interact, mount, must, type Mounted } from '../../../support/dom.ts';
 import { schemaValidSessionView } from '../../../support/schema-valid-sessions.ts';

@@ -46,7 +46,7 @@ import {
   migrationTarget,
   oneMillionVariant,
   onlyAgentJobsBlock,
-} from './migrate-model.ts';
+} from './move-model.ts';
 
 export type MigrateSession = (
   connection: DaemonConnection,

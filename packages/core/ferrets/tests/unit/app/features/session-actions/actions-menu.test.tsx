@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { Copy, Plug, RotateCw, Server, Square } from 'lucide-react';
 import { useState } from 'react';
-import { ActionsMenu } from '../../../../src/features/session-actions/actions-menu.tsx';
-import type { SessionActionFormHost, SessionActionSection } from '../../../../src/features/session-actions/registry.ts';
+import { ActionsMenu } from '../../../../../app/features/session-actions/actions-menu.tsx';
+import type { SessionActionFormHost, SessionActionSection } from '../../../../../app/features/session-actions/registry.ts';
 import { interact, mount, must, pressKey, type Mounted } from '../../../support/dom.ts';
 
 let mounted: Mounted | undefined;

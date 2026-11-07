@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { buildLineage, byNewestActivity, lineageLabel } from '../../src/lib/lineage.ts';
+import { buildLineage, byNewestActivity, lineageLabel } from '../../../app/lib/lineage.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const session = (id: string, options: { parent?: string; teammate?: string; name?: string; activity?: string } = {}) =>

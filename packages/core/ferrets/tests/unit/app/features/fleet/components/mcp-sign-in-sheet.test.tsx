@@ -5,8 +5,8 @@ import {
   browserChannel,
   McpSignInSheet,
   type McpSignInSheetProps,
-} from '../../../../../src/features/fleet/components/mcp-sign-in-sheet.tsx';
-import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+} from '../../../../../../app/features/fleet/components/mcp-sign-in-sheet.tsx';
+import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 import type { Mounted } from '../../../../support/dom.ts';
 import {
   type Answers,

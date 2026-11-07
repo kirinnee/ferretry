@@ -7,7 +7,7 @@ import {
 } from '@ferretry/protocol';
 import type { z } from 'zod';
 
-import type { FleetClient } from '../../../../src/features/fleet/fleet-client.ts';
+import type { FleetClient } from '../../../../../app/features/fleet/fleet-client.ts';
 import {
   FLEET_EXPORT_PATH,
   FLEET_CLONE_REVIEW_PATH,
@@ -18,7 +18,7 @@ import {
   readFleetSetupScan,
   recordCloneKeys,
   reviewFleetClone,
-} from '../../../../src/features/fleet/setup-api.ts';
+} from '../../../../../app/features/fleet/setup-api.ts';
 
 interface Call {
   readonly path: string;

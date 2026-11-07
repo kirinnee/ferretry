@@ -2,9 +2,9 @@ import '../support/dom.ts';
 
 import { describe, expect, it } from 'bun:test';
 import type { ReactTestInstance } from 'react-test-renderer';
-import { SessionCard, SessionRow } from '../../src/components/session-dashboard-rows.tsx';
+import { SessionCard, SessionRow } from '../../../app/components/session-dashboard-rows.tsx';
 import type { PickerAccount } from '../../src/lib/account-picker-catalog.ts';
-import { daemonId } from '../../src/lib/daemon-connection.ts';
+import { daemonId } from '../../../app/lib/daemon-connection.ts';
 import { render } from '../support/react.ts';
 import { type SessionFixtureOverrides, sessionView } from '../support/sessions.ts';
 

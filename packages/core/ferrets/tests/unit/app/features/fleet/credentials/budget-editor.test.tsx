@@ -6,9 +6,9 @@ import {
   type FleetCredentialBudget,
   type FleetCredentialView,
 } from '@ferretry/protocol';
-import { BUDGET_UPDATE_WORDS } from '../../../../../src/features/fleet/credentials/budget-editor.tsx';
-import { CredentialsTab } from '../../../../../src/features/fleet/credentials/credentials-tab.tsx';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
+import { BUDGET_UPDATE_WORDS } from '../../../../../../app/features/fleet/credentials/budget-editor.tsx';
+import { CredentialsTab } from '../../../../../../app/features/fleet/credentials/credentials-tab.tsx';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { DaemonClientProvider } from '../../../../../src/lib/store.tsx';
 import { healthOf } from '../../../../support/health.ts';

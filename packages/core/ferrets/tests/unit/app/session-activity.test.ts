@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
-import { type PaneReading, sessionAtPrompt, sessionTurn, UNREAD_PANE } from '../../src/lib/session-activity.ts';
+import { type PaneReading, sessionAtPrompt, sessionTurn, UNREAD_PANE } from '../../../app/lib/session-activity.ts';
 import { sessionView } from '../support/sessions.ts';
 
 /**

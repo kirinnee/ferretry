@@ -8,9 +8,9 @@ import {
   scrollFileLineIntoView,
   selectionFromReference,
   writeFilesTabState,
-} from '../../src/components/files-tab-model.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+} from '../../../app/components/files-tab-model.ts';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
 
 const daemon = daemonConnection({
   daemonId: 'files-daemon',

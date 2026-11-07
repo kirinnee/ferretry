@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { ForkSessionOutcome, SessionView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { ForkForm } from '../../../../src/features/session-actions/fork-form.tsx';
-import { forkThroughLatest } from '../../../../src/features/session-actions/session-operations.ts';
-import type { SessionActionFormHost } from '../../../../src/features/session-actions/registry.ts';
+import { ForkForm } from '../../../../../app/features/session-actions/fork-form.tsx';
+import { forkThroughLatest } from '../../../../../app/features/session-actions/session-operations.ts';
+import type { SessionActionFormHost } from '../../../../../app/features/session-actions/registry.ts';
 import { interact, mount, must, type Mounted } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
 

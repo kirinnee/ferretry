@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import type { HarnessLoginFlow } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { CredentialSignIn } from '../../../../../src/features/fleet/credentials/credential-sign-in.tsx';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import type { CredentialLoginFlow } from '../../../../../src/features/fleet/harness-login-api.ts';
-import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
+import { CredentialSignIn } from '../../../../../../app/features/fleet/credentials/credential-sign-in.tsx';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
+import type { CredentialLoginFlow } from '../../../../../../app/features/fleet/harness-login-api.ts';
+import { useAccountChanges } from '../../../../../../app/features/fleet/shell/apply-change-panel.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { type Call, claudeFlow, credential, machineWith, READS, STUDIO, scripted } from '../account-support.ts';
 

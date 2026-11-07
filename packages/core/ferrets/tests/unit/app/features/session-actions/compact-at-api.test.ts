@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
 import { getSessionCompactAt, patchSessionCompactAt } from '../../../../src/lib/compact-at-api.ts';
 import { type DaemonFetch, DaemonResponseError } from '../../../../src/lib/runtime-models.ts';
 import { schemaValidSessionView } from '../../../support/schema-valid-sessions.ts';

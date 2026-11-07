@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { COMPACT_AT_TRADE_OFF, type CompactAt } from '@ferretry/protocol';
-import { CompactAtForm, choiceFor } from '../../../../src/features/session-actions/compact-at-form.tsx';
-import type { SessionActionFormHost } from '../../../../src/features/session-actions/registry.ts';
+import { CompactAtForm, choiceFor } from '../../../../../app/features/session-actions/compact-at-form.tsx';
+import type { SessionActionFormHost } from '../../../../../app/features/session-actions/registry.ts';
 import { interact, mount, must, type Mounted } from '../../../support/dom.ts';
 
 let mounted: Mounted | undefined;

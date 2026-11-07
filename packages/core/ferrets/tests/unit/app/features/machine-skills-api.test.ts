@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { SkillEntry } from '@ferretry/protocol';
 
 import { fetchMachineSkillEntries } from '../../../src/features/skills/machine-skills-api.ts';
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { daemonConnection } from '../../../../app/lib/daemon-connection.ts';
 import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
 
 const connection = daemonConnection({

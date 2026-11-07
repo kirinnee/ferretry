@@ -12,7 +12,7 @@ import {
   keptConversationAction,
   keptConversationsQuery,
   sessionActivityAt,
-} from '../../../../../src/features/fleet/conversations/continue-model.ts';
+} from '../../../../../../app/features/fleet/conversations/continue-model.ts';
 import { sessionView } from '../../../../support/sessions.ts';
 import { conversation, NOW } from './conversation-support.ts';
 

@@ -7,9 +7,9 @@ import {
   FullDensityGroups,
   LeanDensityGroups,
   LeanGroupPanel,
-} from '../../src/components/session-dashboard-groups.tsx';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import type { SessionGroup } from '../../src/lib/fleet-grouping.ts';
+} from '../../../app/components/session-dashboard-groups.tsx';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import type { SessionGroup } from '../../../app/lib/fleet-grouping.ts';
 import { render, run } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
 

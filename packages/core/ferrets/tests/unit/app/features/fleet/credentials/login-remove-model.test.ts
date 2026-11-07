@@ -14,7 +14,7 @@ import {
   signOutWarning,
   switchTargets,
   usedBySentence,
-} from '../../../../../src/features/fleet/credentials/login-remove-model.ts';
+} from '../../../../../../app/features/fleet/credentials/login-remove-model.ts';
 import { credential, machine, runtime, withStatus } from '../account-support.ts';
 
 const OLD = credential({ id: 'kirin-old', usedBy: ['alpha', 'beta'] });

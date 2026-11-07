@@ -17,8 +17,8 @@ import {
   sessionCountLabel,
   sessionTaskName,
   statusWord,
-} from '../../src/components/session-dashboard-model.ts';
-import type { SessionGroup } from '../../src/lib/fleet-grouping.ts';
+} from '../../../app/components/session-dashboard-model.ts';
+import type { SessionGroup } from '../../../app/lib/fleet-grouping.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const at = Date.parse('2026-08-01T12:00:00.000Z');

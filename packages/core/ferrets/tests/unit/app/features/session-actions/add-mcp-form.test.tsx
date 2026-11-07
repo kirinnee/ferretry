@@ -9,9 +9,9 @@ import type {
 } from '@ferretry/protocol';
 import { MCP_OAUTH_PATH } from '@ferretry/protocol';
 import type { ContextMcpSignInHost } from '../../../../src/features/context-rail/context-rail-mcp.tsx';
-import { AddMcpForm, type AddMcpPorts } from '../../../../src/features/session-actions/add-mcp-form.tsx';
-import type { SessionActionFormHost } from '../../../../src/features/session-actions/registry.ts';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { AddMcpForm, type AddMcpPorts } from '../../../../../app/features/session-actions/add-mcp-form.tsx';
+import type { SessionActionFormHost } from '../../../../../app/features/session-actions/registry.ts';
+import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { settleUntil } from '../../../support/settle.ts';
 import {

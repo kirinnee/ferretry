@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { FileTree, FileTreeRows } from '../../src/components/file-tree.tsx';
-import type { TreeRow } from '../../src/components/file-tree-model.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { FileTree, FileTreeRows } from '../../../app/components/file-tree.tsx';
+import type { TreeRow } from '../../../app/components/file-tree-model.ts';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
 import { render, run, runAsync } from '../support/react.ts';
 
 const daemon = daemonConnection({

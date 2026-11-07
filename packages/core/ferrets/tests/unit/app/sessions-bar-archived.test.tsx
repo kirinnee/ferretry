@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ComponentProps } from 'react';
-import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { SessionsBar } from '../../src/shell/sessions-bar.tsx';
-import type { SessionsBarArchived } from '../../src/shell/sessions-bar-archived.tsx';
+import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
+import { SessionsBar } from '../../../app/shell/sessions-bar.tsx';
+import type { SessionsBarArchived } from '../../../app/shell/sessions-bar-archived.tsx';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';

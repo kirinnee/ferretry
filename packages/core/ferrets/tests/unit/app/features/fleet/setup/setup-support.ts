@@ -14,7 +14,7 @@ import {
   type FleetSetupScan,
   FleetSetupScanSchema,
 } from '@ferretry/protocol';
-import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 
 export { APPLY_PATH, type Call, machineAnswer, STAGED, scriptedClient } from '../shell/change-support.ts';
 

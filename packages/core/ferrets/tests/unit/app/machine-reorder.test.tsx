@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { type AllMachinesView, allMachinesView, type MachineSource } from '../../src/lib/all-machines.ts';
-import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { LIFT_MS } from '../../src/shell/machine-reorder-model.ts';
-import { SessionsBarMachines } from '../../src/shell/sessions-bar-machines.tsx';
+import { type AllMachinesView, allMachinesView, type MachineSource } from '../../../app/lib/all-machines.ts';
+import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
+import { LIFT_MS } from '../../../app/shell/machine-reorder-model.ts';
+import { SessionsBarMachines } from '../../../app/shell/sessions-bar-machines.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 
 const [A, B, C] = ['alpha', 'beta', 'gamma'] as DaemonId[] as [DaemonId, DaemonId, DaemonId];

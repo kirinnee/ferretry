@@ -8,7 +8,7 @@ import {
   fleetApplyAuthority,
   readChangeAuthority,
   stageAccountChange,
-} from '../../../../../src/features/fleet/shell/apply-change.ts';
+} from '../../../../../../app/features/fleet/shell/apply-change.ts';
 import { APPLY_PATH, type Call, machineAnswer, OUTCOME, STAGED, scriptedClient } from './change-support.ts';
 
 const CHANGE = {

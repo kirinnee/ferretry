@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { paneActivityDetail, parsePaneActivity } from '../../src/lib/pane-activity.ts';
+import { paneActivityDetail, parsePaneActivity } from '../../../app/lib/pane-activity.ts';
 
 const frame = (...lines: string[]): string => lines.join('\n');
 

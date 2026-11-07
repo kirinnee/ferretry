@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { FleetCredentialList, FleetCredentialView, FleetMachineView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { AddLogin } from '../../../../../src/features/fleet/credentials/add-login.tsx';
-import { secretRef } from '../../../../../src/features/fleet/credentials/environment-model.ts';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import { useMachineData } from '../../../../../src/features/fleet/runtimes/machine-data.ts';
-import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
+import { AddLogin } from '../../../../../../app/features/fleet/credentials/add-login.tsx';
+import { secretRef } from '../../../../../../app/features/fleet/credentials/environment-model.ts';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
+import { useMachineData } from '../../../../../../app/features/fleet/runtimes/machine-data.ts';
+import { useAccountChanges } from '../../../../../../app/features/fleet/shell/apply-change-panel.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { localModelsFixture } from '../../../../support/local-models.ts';
 import {

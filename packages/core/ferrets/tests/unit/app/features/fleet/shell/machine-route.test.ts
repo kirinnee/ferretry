@@ -6,7 +6,7 @@ import {
   machineHash,
   parseMachineHash,
   redirectLegacyMachineHash,
-} from '../../../../../src/features/fleet/shell/machine-route.ts';
+} from '../../../../../../app/features/fleet/shell/machine-route.ts';
 
 describe('machine route', () => {
   it('names the six tabs by what a person looks for, Browser before Machine', () => {

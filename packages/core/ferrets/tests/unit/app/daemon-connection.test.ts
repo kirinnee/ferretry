@@ -7,7 +7,7 @@ import {
   daemonId,
   sameDaemonCarrier,
   sameDaemonConnection,
-} from '../../src/lib/daemon-connection.ts';
+} from '../../../app/lib/daemon-connection.ts';
 
 describe('daemon connection', () => {
   it('should preserve a runtime daemon identity and normalize its URL', () => {

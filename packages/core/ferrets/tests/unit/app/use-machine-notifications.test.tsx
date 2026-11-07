@@ -6,9 +6,9 @@ import {
   type MachineNotificationSource,
   type MachineNotifications,
   useMachineNotifications,
-} from '../../src/hooks/use-machine-notifications.ts';
+} from '../../../app/hooks/use-machine-notifications.ts';
 import type { NotificationControlsHost } from '../../src/hooks/use-notifications.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import { DaemonNotificationPreferences } from '../../src/lib/notification-preferences.ts';
 import type { NotificationPermissionState } from '../../src/lib/notify.ts';
 import {

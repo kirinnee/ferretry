@@ -23,7 +23,7 @@ import {
   runtimesReaching,
   sameContents,
   scopeWord,
-} from '../../../../../src/features/fleet/profiles/profile-model.ts';
+} from '../../../../../../app/features/fleet/profiles/profile-model.ts';
 import { profile, profileCatalog, runtimeCatalog, studioCatalog } from '../components/catalog-fixture.ts';
 
 const [, base, review] = profileCatalog().profiles as [

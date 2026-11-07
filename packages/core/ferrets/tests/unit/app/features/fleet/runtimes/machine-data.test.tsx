@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import {
   type MachineData,
   machineDetailFromHash,
@@ -9,8 +9,8 @@ import {
   type UseMachineData,
   useMachineData,
   useMachineDetail,
-} from '../../../../../src/features/fleet/runtimes/machine-data.ts';
-import { type DaemonConnection, daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+} from '../../../../../../app/features/fleet/runtimes/machine-data.ts';
+import { type DaemonConnection, daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { CREDENTIALS, DATA, READS, STUDIO, scripted } from '../account-support.ts';
 import { configChangeHarness } from '../../../config-change-support.tsx';

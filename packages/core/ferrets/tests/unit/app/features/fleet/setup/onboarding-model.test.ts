@@ -20,8 +20,8 @@ import {
   onboardingStepLabel,
   skipOnboardingStep,
   wardenStartingDraft,
-} from '../../../../../src/features/fleet/setup/onboarding-model.ts';
-import { daemonId } from '../../../../../src/lib/daemon-connection.ts';
+} from '../../../../../../app/features/fleet/setup/onboarding-model.ts';
+import { daemonId } from '../../../../../../app/lib/daemon-connection.ts';
 import { wardenConfig } from '../../../../support/warden.ts';
 
 const studio = daemonId('studio');

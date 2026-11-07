@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'bun:test';
-import type { FleetClientFactory } from '../../../../../src/features/fleet/fleet-client.ts';
-import type { ShownReach } from '../../../../../src/features/fleet/shell/machine-reach.ts';
-import type { MachineTabId } from '../../../../../src/features/fleet/shell/machine-route.ts';
+import type { FleetClientFactory } from '../../../../../../app/features/fleet/fleet-client.ts';
+import type { ShownReach } from '../../../../../../app/features/fleet/shell/machine-reach.ts';
+import type { MachineTabId } from '../../../../../../app/features/fleet/shell/machine-route.ts';
 import {
   type DaemonPanelsRenderer,
   EmptyMachineTab,
   emptyMachineTab,
   MachinesSurface,
   type MachineTabProps,
-} from '../../../../../src/features/fleet/shell/machines-surface.tsx';
+} from '../../../../../../app/features/fleet/shell/machines-surface.tsx';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
-import type { DaemonId } from '../../../../../src/lib/daemon-connection.ts';
+import type { DaemonId } from '../../../../../../app/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { machineClient, machineView, pairing } from './machine-support.ts';
 

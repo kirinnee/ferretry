@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { FsChange, FsEntry, FsFile } from '../../src/components/files-api.ts';
-import { parseUnifiedDiff } from '../../src/components/files-model.ts';
+import type { FsChange, FsEntry, FsFile } from '../../../app/components/files-api.ts';
+import { parseUnifiedDiff } from '../../../app/components/files-model.ts';
 import {
   BrowseList,
   ChangeIndicator,
@@ -11,7 +11,7 @@ import {
   Note,
   OpenFileTabs,
   SourceLines,
-} from '../../src/components/files-views.tsx';
+} from '../../../app/components/files-views.tsx';
 import { interact, mount, must } from '../support/dom.ts';
 
 const byLabel = (container: HTMLElement, label: string): HTMLElement =>

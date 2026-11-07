@@ -14,7 +14,7 @@ import {
   CLICK_SUPPRESS_MS,
   MOVE_CANCEL_PX,
   suppressesRowClick,
-} from '../../src/shell/agent-sidebar-model.ts';
+} from '../../../app/shell/agent-sidebar-model.ts';
 
 describe('row gesture policy', () => {
   it('keeps a press that has barely moved', () => {

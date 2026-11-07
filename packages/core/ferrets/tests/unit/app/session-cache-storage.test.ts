@@ -6,7 +6,7 @@ import {
   IndexedDbSessionCacheBackend,
   SESSION_CACHE_DATABASE,
   SESSION_CACHE_OBJECT_STORE,
-} from '../../src/lib/session-cache-storage.ts';
+} from '../../../app/lib/session-cache-storage.ts';
 
 interface FakeRequest<T> {
   result: T;

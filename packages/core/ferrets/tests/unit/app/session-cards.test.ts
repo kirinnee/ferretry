@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { NO_BOARD_FILTERS } from '../../src/lib/board-model.ts';
-import { projectCards, resolveCardReference, sessionCards } from '../../src/lib/session-cards.ts';
+import { projectCards, resolveCardReference, sessionCards } from '../../../app/lib/session-cards.ts';
 import { boardModelOf, card, laptop, originCard, phone, unasked } from './board-support.ts';
 
 const SESSION = 'session-a';

@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import { type MachineSetupStepId, ONBOARDING_START } from '../../../../../src/features/fleet/setup/onboarding-model.ts';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
+import { type MachineSetupStepId, ONBOARDING_START } from '../../../../../../app/features/fleet/setup/onboarding-model.ts';
 import {
   MACHINE_SETUP_PROGRESS_KEY,
   readMachineSetupProgress,
   writeMachineSetupProgress,
-} from '../../../../../src/features/fleet/setup/setup-progress.ts';
-import { MachineSetupScreen } from '../../../../../src/features/fleet/setup/setup-screen.tsx';
+} from '../../../../../../app/features/fleet/setup/setup-progress.ts';
+import { MachineSetupScreen } from '../../../../../../app/features/fleet/setup/setup-screen.tsx';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import { CREDENTIALS, PROFILES } from '../account-support.ts';

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { MigrationRefusal, SessionView } from '@ferretry/protocol';
-import { useRestartRefusal } from '../../../../src/features/session-actions/restart-refusal.tsx';
+import { useRestartRefusal } from '../../../../../app/features/session-actions/restart-refusal.tsx';
 import {
   RestartDowngradeRefused,
   RestartRefused,
   RestartUnresumable,
-} from '../../../../src/features/session-actions/session-operations.ts';
+} from '../../../../../app/features/session-actions/session-operations.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
 

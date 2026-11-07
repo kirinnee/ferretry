@@ -3,10 +3,10 @@ import type { SessionView } from '@ferretry/protocol';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
-import { createAgentReferenceResolver } from '../../src/lib/agent-references.ts';
-import type { DaemonId } from '../../src/lib/daemon-connection.ts';
+import { createAgentReferenceResolver } from '../../../app/lib/agent-references.ts';
+import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
 import { clockOfInstant } from '../../src/lib/message-clock.ts';
-import type { TranscriptEntry } from '../../src/lib/session-screens.ts';
+import type { TranscriptEntry } from '../../../app/lib/session-screens.ts';
 import { render, run } from '../support/react.ts';
 
 const textOf = (renderer: ReactTestRenderer): string => {

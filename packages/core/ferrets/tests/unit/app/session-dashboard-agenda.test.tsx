@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
-import { SessionDashboard, type SessionDashboardProps } from '../../src/components/session-dashboard.tsx';
-import { activityLine, pullDashboardNeedsYou } from '../../src/components/session-dashboard-model.ts';
-import { allMachinesView, type MachineSource } from '../../src/lib/all-machines.ts';
-import { type DaemonId, daemonConnection } from '../../src/lib/daemon-connection.ts';
-import type { SessionGroup } from '../../src/lib/fleet-grouping.ts';
+import { SessionDashboard, type SessionDashboardProps } from '../../../app/components/session-dashboard.tsx';
+import { activityLine, pullDashboardNeedsYou } from '../../../app/components/session-dashboard-model.ts';
+import { allMachinesView, type MachineSource } from '../../../app/lib/all-machines.ts';
+import { type DaemonId, daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import type { SessionGroup } from '../../../app/lib/fleet-grouping.ts';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';

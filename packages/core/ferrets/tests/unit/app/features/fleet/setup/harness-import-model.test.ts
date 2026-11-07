@@ -20,7 +20,7 @@ import {
   runtimePlan,
   scanHasHarness,
   scanSignedIn,
-} from '../../../../../src/features/fleet/setup/harness-import-model.ts';
+} from '../../../../../../app/features/fleet/setup/harness-import-model.ts';
 import { NOTHING_INSTALLED, scan } from './setup-support.ts';
 
 const claudeWith = (overrides: Record<string, unknown>): FleetHarnessScan => ({

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetProfileDraftView, FleetResolvedEntry } from '@ferretry/protocol';
-import { ProfilesTab } from '../../../../../src/features/fleet/profiles/profiles-tab.tsx';
+import { ProfilesTab } from '../../../../../../app/features/fleet/profiles/profiles-tab.tsx';
 import { interact, type Mounted, mount } from '../../../../support/dom.ts';
 import {
   profile,

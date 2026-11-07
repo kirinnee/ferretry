@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { ConversionPreview, SessionView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { ConvertSheet, type ConvertSheetProps } from '../../../../src/features/session-actions/convert-sheet.tsx';
+import { ConvertSheet, type ConvertSheetProps } from '../../../../../app/features/session-actions/convert-sheet.tsx';
 import type { PickerAccount } from '../../../../src/lib/account-picker-catalog.ts';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../src/lib/daemon-scope.ts';
+import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../../../app/lib/daemon-scope.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
 

@@ -9,9 +9,9 @@ import {
   needsYouUrgency,
   shortAge,
   waitingSince,
-} from '../../src/lib/all-machines.ts';
-import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import type { DaemonFleetSlice } from '../../src/lib/fleet-store.ts';
+} from '../../../app/lib/all-machines.ts';
+import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
+import type { DaemonFleetSlice } from '../../../app/lib/fleet-store.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const STUDIO = 'studio' as DaemonId;

@@ -8,13 +8,13 @@ import '../support/dom.ts';
 
 import { describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
-import { SessionsPage } from '../../src/components/sessions-page.tsx';
-import { type ListedMachine, useMachineSources } from '../../src/hooks/use-machine-sources.ts';
+import { SessionsPage } from '../../../app/components/sessions-page.tsx';
+import { type ListedMachine, useMachineSources } from '../../../app/hooks/use-machine-sources.ts';
 import type { ScopeNavigation } from '../../src/hooks/use-project-scope.ts';
 import type { ConnectionHealth, ConnectionHealthState } from '../../src/lib/connection-health.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../src/lib/controls.ts';
-import { type DaemonId, daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { DaemonFleetStore } from '../../src/lib/fleet-store.ts';
+import { type DaemonId, daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
 import { DaemonProjectsStore } from '../../src/lib/projects-store.ts';
 import { DaemonUsageStore } from '../../src/lib/usage-store.ts';
 import { interact, mount, must } from '../support/dom.ts';

@@ -9,9 +9,9 @@ import {
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
-import { ContinueConversation } from '../../../../../src/features/fleet/conversations/continue-conversation.tsx';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+import { ContinueConversation } from '../../../../../../app/features/fleet/conversations/continue-conversation.tsx';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
+import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import { sessionView } from '../../../../support/sessions.ts';
 import { RUNTIMES, runtime, STUDIO } from '../account-support.ts';

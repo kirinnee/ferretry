@@ -9,7 +9,7 @@ import {
   phaseAfter,
   runnableTools,
   toolCommand,
-} from '../../../../../src/features/fleet/setup/install-model.ts';
+} from '../../../../../../app/features/fleet/setup/install-model.ts';
 
 const runnable = (harness: 'claude' | 'codex', command: string): MissingTool => ({
   harness,

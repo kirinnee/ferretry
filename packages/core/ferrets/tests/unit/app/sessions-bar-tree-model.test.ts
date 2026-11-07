@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { sessionsBarView } from '../../src/shell/sessions-bar-model.ts';
+import { sessionsBarView } from '../../../app/shell/sessions-bar-model.ts';
 import {
   containsSession,
   rollupWords,
   sessionTree,
   subFerretCount,
   type TreeEntry,
-} from '../../src/shell/sessions-bar-tree.ts';
+} from '../../../app/shell/sessions-bar-tree.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const lead = sessionView('lead', { config: { teammate: 'hadi', label: 'Lead the pack' } });

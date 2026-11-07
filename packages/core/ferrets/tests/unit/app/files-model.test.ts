@@ -14,7 +14,7 @@ import {
   sortFsEntries,
   splitHighlightedLines,
   statusChip,
-} from '../../src/components/files-model.ts';
+} from '../../../app/components/files-model.ts';
 
 describe('files model', () => {
   it('normalizes navigation without rewriting unsupported daemon paths into another file', () => {

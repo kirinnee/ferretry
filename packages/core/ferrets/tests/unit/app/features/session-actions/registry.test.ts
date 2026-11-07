@@ -7,7 +7,7 @@ import {
   type SessionActionContribution,
   type SessionActionEntry,
   sessionActionSections,
-} from '../../../../src/features/session-actions/registry.ts';
+} from '../../../../../app/features/session-actions/registry.ts';
 
 interface Ctx {
   readonly flag: boolean;

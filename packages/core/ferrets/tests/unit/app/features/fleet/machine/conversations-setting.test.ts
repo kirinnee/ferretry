@@ -3,7 +3,7 @@ import {
   KEEP_IN_SYNC_EXPLANATION,
   readKeepInSync,
   withKeepInSync,
-} from '../../../../../src/features/fleet/machine/conversations-setting.ts';
+} from '../../../../../../app/features/fleet/machine/conversations-setting.ts';
 
 describe('Keep in sync as machine.yaml holds it', () => {
   it('is on unless the file says it is off', () => {

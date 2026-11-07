@@ -10,7 +10,7 @@ import {
   stepForward,
   stepPosition,
   withSteps,
-} from '../../../../../src/features/fleet/shell/stepper-model.ts';
+} from '../../../../../../app/features/fleet/shell/stepper-model.ts';
 
 const addRuntime: StepperFlowInput = {
   kind: 'add-runtime',

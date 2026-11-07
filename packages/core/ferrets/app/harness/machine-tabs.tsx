@@ -3,12 +3,12 @@
  * one line per tab, each owned by the unit that fills it.
  */
 
-import { SignInsSurface } from '../src/features/fleet/credentials/sign-ins-surface.tsx';
-import { AgentsTab } from '../src/features/fleet/machine/agents-tab.tsx';
+import { SignInsSurface } from '../features/fleet/credentials/sign-ins-surface.tsx';
+import { AgentsTab } from '../features/fleet/machine/agents-tab.tsx';
 import { BrowserTab } from '../src/features/fleet/machine/browser-tab.tsx';
-import { ProfilesSurface } from '../src/features/fleet/profiles/profiles-surface.tsx';
-import { RuntimesTab } from '../src/features/fleet/runtimes/runtimes-tab.tsx';
-import { emptyMachineTab, type MachineTabSurfaces } from '../src/features/fleet/shell/machines-surface.tsx';
+import { ProfilesSurface } from '../features/fleet/profiles/profiles-surface.tsx';
+import { RuntimesTab } from '../features/fleet/runtimes/runtimes-tab.tsx';
+import { emptyMachineTab, type MachineTabSurfaces } from '../features/fleet/shell/machines-surface.tsx';
 
 const HARNESS_MACHINE_NAMES: ReadonlyMap<string, string> = new Map([['clone-source-daemon', 'Work laptop']]);
 

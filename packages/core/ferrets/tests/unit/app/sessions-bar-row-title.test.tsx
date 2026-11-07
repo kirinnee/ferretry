@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
-import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { SessionsBarRow } from '../../src/shell/sessions-bar-row.tsx';
+import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
+import { SessionsBarRow } from '../../../app/shell/sessions-bar-row.tsx';
 import { type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 

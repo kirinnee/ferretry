@@ -13,8 +13,8 @@ import {
   documentSize,
   existingSentence,
   runnableTitle,
-} from '../../../../../src/features/fleet/setup/clone-model.ts';
-import type { MachineReach } from '../../../../../src/features/fleet/shell/machine-reach.ts';
+} from '../../../../../../app/features/fleet/setup/clone-model.ts';
+import type { MachineReach } from '../../../../../../app/features/fleet/shell/machine-reach.ts';
 import { bundle, credentialView, FRESH_MACHINE, machineView } from './setup-support.ts';
 
 describe('cloneSteps', () => {

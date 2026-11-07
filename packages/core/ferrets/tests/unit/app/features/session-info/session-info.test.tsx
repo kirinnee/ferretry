@@ -18,8 +18,8 @@ import {
   SessionInfo,
   type SessionInfoPorts,
   type SessionInfoProps,
-} from '../../../../src/features/session-info/session-info.tsx';
-import { type InfoPlacement, useInfoPlacement } from '../../../../src/features/session-info/use-info-placement.ts';
+} from '../../../../../app/features/session-info/session-info.tsx';
+import { type InfoPlacement, useInfoPlacement } from '../../../../../app/features/session-info/use-info-placement.ts';
 import { NO_SURFACE_DRIVING } from '../../../../src/features/workspace/use-surface-driving.ts';
 import { interact, type Mounted, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';

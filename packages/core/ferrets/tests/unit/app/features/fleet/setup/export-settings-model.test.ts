@@ -9,7 +9,7 @@ import {
   exportPlan,
   LEFT_OUT_INVALID,
   zipFiles,
-} from '../../../../../src/features/fleet/setup/export-settings-model.ts';
+} from '../../../../../../app/features/fleet/setup/export-settings-model.ts';
 
 const statusOf = (...files: readonly [path: string, state: 'ok' | 'invalid' | 'pending'][]): ConfigStatusView => ({
   directory: '/home/you/.ferretry/config',

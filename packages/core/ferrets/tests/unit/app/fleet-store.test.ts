@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import should from 'should';
-import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { type DaemonFleetPort, DaemonFleetStore } from '../../src/lib/fleet-store.ts';
+import { type DaemonConnection, daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
+import { type DaemonFleetPort, DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
 
 /**
  * A and B are two paired daemons that both own a session called `shared`.

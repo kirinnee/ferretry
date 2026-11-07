@@ -2,7 +2,7 @@ import '../support/dom.ts';
 
 import { describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
-import { renameErrorsFor, renamePatch } from '../../src/components/rename-sheet.tsx';
+import { renameErrorsFor, renamePatch } from '../../../app/components/rename-sheet.tsx';
 import { sessionView } from '../support/sessions.ts';
 
 const source = (parent = 'lead'): SessionView =>

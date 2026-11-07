@@ -23,8 +23,8 @@ import { request } from '../../../daemon/tests/unit/api/support.ts';
 import { CREDENTIALS, human } from '../../../daemon/tests/unit/runtime/mounts/support.ts';
 import { DaemonAgendaStore } from '../../src/lib/agenda-store.ts';
 import { DaemonAgendaClient, fetchAgendaSnapshot } from '../../src/lib/agenda-client.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
 import { machineSessionView, withMachineAgendas } from '../../src/lib/machine-agenda.ts';
 
 const NOW = '2026-07-31T10:00:00Z';

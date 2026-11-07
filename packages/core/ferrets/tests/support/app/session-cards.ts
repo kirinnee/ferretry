@@ -4,7 +4,7 @@
  * The shape is the app's own (`SessionCard`), so a change to it breaks these fixtures at compile time.
  */
 
-import type { SessionCard } from '../../src/lib/session-cards.ts';
+import type { SessionCard } from '../../../app/lib/session-cards.ts';
 
 export const sessionCard = (id: string, patch: Partial<SessionCard> = {}): SessionCard => ({
   id,

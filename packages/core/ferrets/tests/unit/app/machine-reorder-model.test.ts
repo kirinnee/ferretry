@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { DaemonId } from '../../src/lib/daemon-connection.ts';
+import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
 import {
   autoScrollDelta,
   cancelledMessage,
@@ -10,7 +10,7 @@ import {
   SCROLL_EDGE_PX,
   SCROLL_MAX_PX,
   shifted,
-} from '../../src/shell/machine-reorder-model.ts';
+} from '../../../app/shell/machine-reorder-model.ts';
 
 const [A, B, C] = ['a', 'b', 'c'] as DaemonId[] as [DaemonId, DaemonId, DaemonId];
 const boxes = [

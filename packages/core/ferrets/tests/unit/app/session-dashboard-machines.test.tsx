@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { SessionDashboard, type SessionDashboardProps } from '../../src/components/session-dashboard.tsx';
+import { SessionDashboard, type SessionDashboardProps } from '../../../app/components/session-dashboard.tsx';
 import type { PickerAccount } from '../../src/lib/account-picker-catalog.ts';
-import { allMachinesView, type MachineSource } from '../../src/lib/all-machines.ts';
-import { type DaemonId, daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { allMachinesView, type MachineSource } from '../../../app/lib/all-machines.ts';
+import { type DaemonId, daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';

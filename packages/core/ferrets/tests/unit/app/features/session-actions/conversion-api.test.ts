@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { ConversionPreview } from '@ferretry/protocol';
-import { moveToOtherHarness, readConversionPreview } from '../../../../src/features/session-actions/conversion-api.ts';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../src/lib/daemon-scope.ts';
+import { moveToOtherHarness, readConversionPreview } from '../../../../../app/features/session-actions/conversion-api.ts';
+import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../../../app/lib/daemon-scope.ts';
 import { DaemonResponseError } from '../../../../src/lib/runtime-models.ts';
 import { sessionView } from '../../../support/sessions.ts';
 

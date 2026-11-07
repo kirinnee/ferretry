@@ -5,7 +5,7 @@ import {
   archivedFooterWords,
   archivedRows,
   byNewestFinished,
-} from '../../src/shell/sessions-bar-archived.ts';
+} from '../../../app/shell/sessions-bar-archived.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const at = (minutes: number): string => new Date(Date.UTC(2026, 10, 2, 9, minutes)).toISOString();

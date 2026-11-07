@@ -4,8 +4,8 @@ import {
   CORE_SESSION_ACTIONS,
   type CoreActionContext,
   SESSION_ACTION_IDS,
-} from '../../../../src/features/session-actions/core-actions.ts';
-import { sessionActionSections } from '../../../../src/features/session-actions/registry.ts';
+} from '../../../../../app/features/session-actions/core-actions.ts';
+import { sessionActionSections } from '../../../../../app/features/session-actions/registry.ts';
 import { sessionView } from '../../../support/sessions.ts';
 
 const noop = (): void => undefined;

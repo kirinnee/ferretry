@@ -7,7 +7,7 @@ import {
   type InfoVerdictsRead,
   sessionVerdicts,
   VERDICT_WORDS,
-} from '../../../../src/features/session-info/info-warden.tsx';
+} from '../../../../../app/features/session-info/info-warden.tsx';
 import { type Mounted, mount, must } from '../../../support/dom.ts';
 
 const NOW = Date.parse('2026-10-16T10:00:00.000Z');

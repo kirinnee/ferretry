@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { SessionStatus } from '@ferretry/protocol';
 
-import { sessionActionSpecs, type SessionAction } from '../../src/shell/session-actions.ts';
+import { sessionActionSpecs, type SessionAction } from '../../../app/shell/session-actions.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const actionsFor = (status: SessionStatus, canMutate = true): readonly SessionAction[] =>

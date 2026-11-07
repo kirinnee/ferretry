@@ -7,7 +7,7 @@ import type {
   FleetMachineView,
 } from '@ferretry/protocol';
 import type { z } from 'zod';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 
 const CHANGE_ID = 'fy_fprop_abcdefghijklmnopqrstuv';
 

@@ -7,12 +7,12 @@ import {
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { useState } from 'react';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import type { MachineData } from '../../../../../src/features/fleet/runtimes/machine-data.ts';
-import type { HarnessAnswers } from '../../../../../src/features/fleet/setup/harness-import-model.ts';
-import { OnboardingHarnessStep, providerProfile } from '../../../../../src/features/fleet/setup/harness-step.tsx';
-import type { SetupHarness } from '../../../../../src/features/fleet/setup/setup-words.ts';
-import type { MachineTabProps } from '../../../../../src/features/fleet/shell/machines-surface.tsx';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
+import type { MachineData } from '../../../../../../app/features/fleet/runtimes/machine-data.ts';
+import type { HarnessAnswers } from '../../../../../../app/features/fleet/setup/harness-import-model.ts';
+import { OnboardingHarnessStep, providerProfile } from '../../../../../../app/features/fleet/setup/harness-step.tsx';
+import type { SetupHarness } from '../../../../../../app/features/fleet/setup/setup-words.ts';
+import type { MachineTabProps } from '../../../../../../app/features/fleet/shell/machines-surface.tsx';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import { profile as profileView } from '../account-support.ts';
 import { PROVIDERS } from '../credentials/environment-support.ts';

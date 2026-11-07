@@ -5,7 +5,7 @@ import {
   MachineSettingsTab,
   type MachineSettingsTabProps,
   runningSessionsSentence,
-} from '../../../../../src/features/fleet/machine/settings-tab.tsx';
+} from '../../../../../../app/features/fleet/machine/settings-tab.tsx';
 import { type DaemonConnectionRecord, DaemonConnectionStore } from '../../../../../src/lib/connections.ts';
 import { type AppStore, StoreProvider } from '../../../../../src/lib/store.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';

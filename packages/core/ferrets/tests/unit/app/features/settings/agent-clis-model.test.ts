@@ -11,7 +11,7 @@ import {
   unverifiedQuestion,
   updateChoices,
   verificationBadge,
-} from '../../../../src/features/settings/agent-clis-model.ts';
+} from '../../../../../app/features/settings/agent-clis-model.ts';
 import { CHANGELOG, claudeCli, clisView, codexCli } from './agent-clis-support.ts';
 
 const NOW = Date.parse('2026-10-20T12:00:00.000Z');

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import { InstallTool } from '../../../../../src/features/fleet/setup/install-flow.tsx';
-import type { SetupHarness } from '../../../../../src/features/fleet/setup/setup-words.ts';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
+import { InstallTool } from '../../../../../../app/features/fleet/setup/install-flow.tsx';
+import type { SetupHarness } from '../../../../../../app/features/fleet/setup/setup-words.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   type Call,

@@ -6,7 +6,7 @@ import {
   readMcpSignIns,
   signOutMcp,
   startMcpSignIn,
-} from '../../../../src/features/fleet/mcp-auth-api.ts';
+} from '../../../../../app/features/fleet/mcp-auth-api.ts';
 import { type Call, CALLBACK, completion, mcpConnection, mcpFlow, scriptedMcpClient } from './mcp-sign-in-support.ts';
 
 describe('the MCP sign-in client', () => {

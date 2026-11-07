@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { InfoAbout, type InfoAboutProps } from '../../../../src/features/session-info/info-about.tsx';
+import { InfoAbout, type InfoAboutProps } from '../../../../../app/features/session-info/info-about.tsx';
 import type { ChatChip } from '../../../../src/lib/board-chat.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';

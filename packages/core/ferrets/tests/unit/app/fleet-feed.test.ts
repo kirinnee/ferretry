@@ -7,7 +7,7 @@ import {
   type FleetFeedStatus,
   type OpenFleetFeed,
   startFleetFeed,
-} from '../../src/lib/fleet-feed.ts';
+} from '../../../app/lib/fleet-feed.ts';
 
 /** Timers and a clock the test moves by hand; `random` is 0, so every retry waits the shortest it may. */
 const handTime = () => {

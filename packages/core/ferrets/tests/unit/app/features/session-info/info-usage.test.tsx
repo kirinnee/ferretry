@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { AnalyticsMeasure, AnalyticsResponse } from '@ferretry/protocol';
-import { type InfoAnalyticsRead, InfoUsage } from '../../../../src/features/session-info/info-usage.tsx';
+import { type InfoAnalyticsRead, InfoUsage } from '../../../../../app/features/session-info/info-usage.tsx';
 import type { ResolvedQuota } from '../../../../src/lib/usage.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';

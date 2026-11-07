@@ -2,18 +2,18 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type { ConfigFileView, FleetMachineView, SpeedupStatus, SpeedupsView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
-import type { FleetClient, FleetClientFactory } from '../../../../../src/features/fleet/fleet-client.ts';
+import type { FleetClient, FleetClientFactory } from '../../../../../../app/features/fleet/fleet-client.ts';
 import {
   MachineOnboarding,
   type MachineOnboardingProps,
-} from '../../../../../src/features/fleet/setup/machine-onboarding.tsx';
+} from '../../../../../../app/features/fleet/setup/machine-onboarding.tsx';
 import {
   type MachineSetupProgress,
   ONBOARDING_START,
-} from '../../../../../src/features/fleet/setup/onboarding-model.ts';
+} from '../../../../../../app/features/fleet/setup/onboarding-model.ts';
 import type { PairingClientFactory } from '../../../../../src/features/settings/add-device-settings.tsx';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
-import type { DaemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+import type { DaemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 import type { ParakeetInstallSnapshot, ParakeetVoice } from '../../../../../src/lib/stt/parakeet-voice.ts';
 import { DEFAULT_STT_SETTINGS } from '../../../../../src/lib/stt/stt-settings.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';

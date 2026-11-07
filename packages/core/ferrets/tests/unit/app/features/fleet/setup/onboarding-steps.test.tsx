@@ -10,8 +10,8 @@ import type {
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { ReactElement } from 'react';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import type { OnboardingDoneRow } from '../../../../../src/features/fleet/setup/onboarding-model.ts';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
+import type { OnboardingDoneRow } from '../../../../../../app/features/fleet/setup/onboarding-model.ts';
 import {
   OnboardingControlsStep,
   OnboardingDoneStep,
@@ -22,8 +22,8 @@ import {
   OnboardingVoiceStep,
   OnboardingWardenStep,
   type VoiceCleanupPort,
-} from '../../../../../src/features/fleet/setup/onboarding-steps.tsx';
-import type { MachineTabProps } from '../../../../../src/features/fleet/shell/machines-surface.tsx';
+} from '../../../../../../app/features/fleet/setup/onboarding-steps.tsx';
+import type { MachineTabProps } from '../../../../../../app/features/fleet/shell/machines-surface.tsx';
 import type { PairingClientFactory } from '../../../../../src/features/settings/add-device-settings.tsx';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettingsPatch } from '../../../../../src/lib/stt/stt-settings.ts';

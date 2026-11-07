@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ComponentProps } from 'react';
-import type { MachineSource } from '../../src/lib/all-machines.ts';
-import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { SessionsBar } from '../../src/shell/sessions-bar.tsx';
+import type { MachineSource } from '../../../app/lib/all-machines.ts';
+import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
+import { SessionsBar } from '../../../app/shell/sessions-bar.tsx';
 import '../support/dom.ts';
 import { type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';

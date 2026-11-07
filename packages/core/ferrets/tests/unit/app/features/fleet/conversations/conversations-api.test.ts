@@ -4,7 +4,7 @@ import {
   adoptConversations,
   readConversationPreview,
   readImportableConversations,
-} from '../../../../../src/features/fleet/conversations/conversations-api.ts';
+} from '../../../../../../app/features/fleet/conversations/conversations-api.ts';
 import { type Call, scripted } from '../account-support.ts';
 import { conversation, listing } from './conversation-support.ts';
 

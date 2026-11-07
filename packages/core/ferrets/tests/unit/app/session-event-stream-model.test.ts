@@ -10,7 +10,7 @@ import {
   sessionEventStreamDeadlineMs,
   sessionEventStreamDelayMs,
   startSessionEventStream,
-} from '../../src/components/session-event-stream-model.ts';
+} from '../../../app/components/session-event-stream-model.ts';
 
 /**
  * The live feed's reconnect model, driven entirely against injected clocks.

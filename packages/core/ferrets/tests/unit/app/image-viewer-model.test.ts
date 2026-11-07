@@ -14,7 +14,7 @@ import {
   toggleZoom,
   wheelScale,
   zoomAround,
-} from '../../src/components/image-viewer-model.ts';
+} from '../../../app/components/image-viewer-model.ts';
 
 const stage = { width: 400, height: 800 };
 

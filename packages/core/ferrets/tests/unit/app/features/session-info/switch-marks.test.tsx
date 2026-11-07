@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { InfoAbout } from '../../../../src/features/session-info/info-about.tsx';
+import { InfoAbout } from '../../../../../app/features/session-info/info-about.tsx';
 import { useAgendaSessionActions } from '../../../../src/features/agenda/agenda-session-actions.tsx';
 import { useHypermediaSessionActions } from '../../../../src/features/hypermedia/hypermedia-session-actions.tsx';
 import { usePackSessionActions } from '../../../../src/features/pack/pack-session-actions.tsx';
@@ -10,8 +10,8 @@ import {
   SwitchMarks,
   type SwitchSection,
   switchTapper,
-} from '../../../../src/features/session-info/switch-marks.tsx';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+} from '../../../../../app/features/session-info/switch-marks.tsx';
+import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
 import type { DaemonFetch } from '../../../../src/lib/runtime-models.ts';
 import { type Mounted, mount, must } from '../../../support/dom.ts';
 import { click, waitForText } from '../../../support/learning-dom.ts';

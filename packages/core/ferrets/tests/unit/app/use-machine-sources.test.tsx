@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { type ListedMachine, useMachineSources } from '../../src/hooks/use-machine-sources.ts';
-import type { MachineSource } from '../../src/lib/all-machines.ts';
+import { type ListedMachine, useMachineSources } from '../../../app/hooks/use-machine-sources.ts';
+import type { MachineSource } from '../../../app/lib/all-machines.ts';
 import { DaemonConnectionHealth } from '../../src/lib/connection-health.ts';
-import { type DaemonConnection, type DaemonId, daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { DaemonFleetStore } from '../../src/lib/fleet-store.ts';
+import { type DaemonConnection, type DaemonId, daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
 import { DaemonProjectsStore } from '../../src/lib/projects-store.ts';
 import '../support/dom.ts';
 import { interact, type Mounted, mount } from '../support/dom.ts';

@@ -8,8 +8,8 @@ import {
   type ArchivedSessionsEnvironment,
   browserArchivedSessionsEnvironment,
   useArchivedSessions,
-} from '../../src/hooks/use-archived-sessions.ts';
-import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
+} from '../../../app/hooks/use-archived-sessions.ts';
+import { type DaemonConnection, daemonConnection } from '../../../app/lib/daemon-connection.ts';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';

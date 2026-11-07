@@ -6,7 +6,7 @@ import {
   listWords,
   SETUP_HARNESS_NAMES,
   SETUP_HARNESSES,
-} from '../../../../../src/features/fleet/setup/setup-words.ts';
+} from '../../../../../../app/features/fleet/setup/setup-words.ts';
 
 describe('setup harness names', () => {
   it('lists the harnesses in the order every screen shows them', () => {

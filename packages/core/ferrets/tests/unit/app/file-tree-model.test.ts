@@ -14,7 +14,7 @@ import {
   toggleTreeDir,
   treeDirNode,
   treeRows,
-} from '../../src/components/file-tree-model.ts';
+} from '../../../app/components/file-tree-model.ts';
 
 describe('file tree model', () => {
   it('only loads expanded visible non-refused directories', () => {

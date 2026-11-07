@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { HarnessDialog, PermissionRequest, SessionView } from '@ferretry/protocol';
-import { SessionTopBar, sessionDisplayName, sessionTitle } from '../../src/components/session-top-bar.tsx';
+import { SessionTopBar, sessionDisplayName, sessionTitle } from '../../../app/components/session-top-bar.tsx';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';

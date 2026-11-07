@@ -5,7 +5,7 @@ import {
   type InfoListRead,
   InfoRuntime,
   type InfoRuntimeProps,
-} from '../../../../src/features/session-info/info-runtime.tsx';
+} from '../../../../../app/features/session-info/info-runtime.tsx';
 import { type Mounted, mount, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
 

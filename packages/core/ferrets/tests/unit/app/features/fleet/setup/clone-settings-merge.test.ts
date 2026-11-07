@@ -14,7 +14,7 @@ import {
   settingsToSend,
   takeWords,
   undecidedKeys,
-} from '../../../../../src/features/fleet/setup/clone-settings-merge.ts';
+} from '../../../../../../app/features/fleet/setup/clone-settings-merge.ts';
 
 const review = (settings: FleetCloneReview['settings'], items: FleetCloneReview['items'] = []): FleetCloneReview => ({
   mode: 'update',

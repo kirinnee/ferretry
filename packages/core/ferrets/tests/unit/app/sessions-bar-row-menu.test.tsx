@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ComponentProps } from 'react';
-import type { MachineSource } from '../../src/lib/all-machines.ts';
-import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { LONG_PRESS_MS } from '../../src/shell/agent-sidebar-model.ts';
+import type { MachineSource } from '../../../app/lib/all-machines.ts';
+import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
+import { LONG_PRESS_MS } from '../../../app/shell/agent-sidebar-model.ts';
 import type { SessionMenuState } from '../../src/shell/session-menu-context.ts';
-import { SessionsBar } from '../../src/shell/sessions-bar.tsx';
+import { SessionsBar } from '../../../app/shell/sessions-bar.tsx';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';

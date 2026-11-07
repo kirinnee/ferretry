@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { SessionLiveActivity } from '@ferretry/protocol';
-import { LiveActivityLine, type PaneFrameReader, usePaneActivity } from '../../src/components/live-activity.tsx';
-import { type PaneReading, UNREAD_PANE } from '../../src/lib/session-activity.ts';
+import { LiveActivityLine, type PaneFrameReader, usePaneActivity } from '../../../app/components/live-activity.tsx';
+import { type PaneReading, UNREAD_PANE } from '../../../app/lib/session-activity.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { manualScheduler } from '../support/live-scheduler.ts';

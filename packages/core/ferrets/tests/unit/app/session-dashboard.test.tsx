@@ -3,9 +3,9 @@ import '../support/dom.ts';
 import { describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
-import { SessionDashboard, type SessionDashboardProps } from '../../src/components/session-dashboard.tsx';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import type { SessionGroup } from '../../src/lib/fleet-grouping.ts';
+import { SessionDashboard, type SessionDashboardProps } from '../../../app/components/session-dashboard.tsx';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import type { SessionGroup } from '../../../app/lib/fleet-grouping.ts';
 import { render, run } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
 

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { CloneKeyChoice } from '@ferretry/protocol';
-import { CloneSettingsKeys } from '../../../../../src/features/fleet/setup/clone-settings-keys.tsx';
-import type { ReviewedSettings, SettingsPicks } from '../../../../../src/features/fleet/setup/clone-settings-merge.ts';
+import { CloneSettingsKeys } from '../../../../../../app/features/fleet/setup/clone-settings-keys.tsx';
+import type { ReviewedSettings, SettingsPicks } from '../../../../../../app/features/fleet/setup/clone-settings-merge.ts';
 import { interact, type Mounted, mount } from '../../../../support/dom.ts';
 
 const mounts: Mounted[] = [];

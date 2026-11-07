@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
-import { type FleetViewResult, useFleetView } from '../../src/hooks/use-fleet-view.ts';
+import { type FleetViewResult, useFleetView } from '../../../app/hooks/use-fleet-view.ts';
 import { type ControlsStorage, DaemonControlsStore, type UiControls } from '../../src/lib/controls.ts';
-import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
-import type { FleetProject } from '../../src/lib/fleet-grouping.ts';
-import { type DaemonFleetPort, DaemonFleetStore } from '../../src/lib/fleet-store.ts';
+import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../../app/lib/daemon-connection.ts';
+import type { FleetProject } from '../../../app/lib/fleet-grouping.ts';
+import { type DaemonFleetPort, DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
 import { render, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
 

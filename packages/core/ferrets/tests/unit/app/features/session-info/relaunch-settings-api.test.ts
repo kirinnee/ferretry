@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { readRelaunchSettings } from '../../../../src/features/session-info/relaunch-settings-api.ts';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../src/lib/daemon-scope.ts';
+import { readRelaunchSettings } from '../../../../../app/features/session-info/relaunch-settings-api.ts';
+import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../../../app/lib/daemon-scope.ts';
 import { type DaemonFetch, DaemonResponseError } from '../../../../src/lib/runtime-models.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a-token' });

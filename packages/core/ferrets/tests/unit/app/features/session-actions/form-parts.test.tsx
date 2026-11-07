@@ -4,7 +4,7 @@ import {
   FormFailure,
   FormField,
   FormFoot,
-} from '../../../../src/features/session-actions/form-parts.tsx';
+} from '../../../../../app/features/session-actions/form-parts.tsx';
 import { mount, must, type Mounted } from '../../../support/dom.ts';
 
 let mounted: Mounted | undefined;

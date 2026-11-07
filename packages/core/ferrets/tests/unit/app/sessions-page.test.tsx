@@ -5,7 +5,7 @@ import type { SessionView, WardenStatusView } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import type { ComponentType } from 'react';
 
-import { SessionsPage, type SessionsPageProps } from '../../src/components/sessions-page.tsx';
+import { SessionsPage, type SessionsPageProps } from '../../../app/components/sessions-page.tsx';
 import { AgendaInboxContext } from '../../src/hooks/use-agenda-inbox.ts';
 import { projectScopePath, projectScopeState, type ScopeNavigation } from '../../src/hooks/use-project-scope.ts';
 import type { WardenStatusReader } from '../../src/hooks/use-warden-status.ts';
@@ -13,10 +13,10 @@ import type { AccountPickerHealthCatalog } from '../../src/lib/account-picker-ca
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import type { InboxCard } from '../../src/lib/agenda-inbox.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../src/lib/controls.ts';
-import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
-import type { FleetProject } from '../../src/lib/fleet-grouping.ts';
-import type { DaemonFleetPort } from '../../src/lib/fleet-store.ts';
-import { DaemonFleetStore } from '../../src/lib/fleet-store.ts';
+import { type DaemonConnection, daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import type { FleetProject } from '../../../app/lib/fleet-grouping.ts';
+import type { DaemonFleetPort } from '../../../app/lib/fleet-store.ts';
+import { DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
 import { PageHost } from '../../src/lib/pages/page-host.tsx';
 import { DaemonClientProvider } from '../../src/lib/store.tsx';
 import { type DaemonProjectsPort, DaemonProjectsStore } from '../../src/lib/projects-store.ts';

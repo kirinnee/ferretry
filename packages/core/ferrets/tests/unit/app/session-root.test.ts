@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { rootViews } from '../../src/lib/session-root.ts';
+import { rootViews } from '../../../app/lib/session-root.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const child = (id: string, parent: string | undefined) => sessionView(id, { config: { parent } as never });

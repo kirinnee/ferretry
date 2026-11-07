@@ -4,11 +4,11 @@ import type { SessionView, StartSessionRequest, UsageFeedView } from '@ferretry/
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactTestInstance } from 'react-test-renderer';
 
-import { NewSessionPage, type NewSessionPageProps } from '../../src/components/new-session-page.tsx';
+import { NewSessionPage, type NewSessionPageProps } from '../../../app/components/new-session-page.tsx';
 import type { PickerAccount } from '../../src/lib/account-picker-catalog.ts';
 import { type DaemonAccountPickerPort, DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
-import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { type DaemonFleetPort, DaemonFleetStore } from '../../src/lib/fleet-store.ts';
+import { type DaemonConnection, daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { type DaemonFleetPort, DaemonFleetStore } from '../../../app/lib/fleet-store.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from '../../src/lib/projects-store.ts';
 import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { type DaemonUsageSlice, DaemonUsageStore, daemonUsagePort } from '../../src/lib/usage-store.ts';

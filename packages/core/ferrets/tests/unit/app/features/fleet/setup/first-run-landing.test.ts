@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { landingAfterPairing } from '../../../../../src/features/fleet/setup/first-run-landing.ts';
+import { landingAfterPairing } from '../../../../../../app/features/fleet/setup/first-run-landing.ts';
 import { machineClient, machineView, pairing } from '../shell/machine-support.ts';
 
 const studio = pairing('studio', 'studio mac');

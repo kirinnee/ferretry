@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { type ReactElement, useEffect } from 'react';
-import type { FleetClient, FleetClientFactory } from '../../../../../src/features/fleet/fleet-client.ts';
+import type { FleetClient, FleetClientFactory } from '../../../../../../app/features/fleet/fleet-client.ts';
 import {
   type MachineReachOptions,
   type MachineReachState,
   useMachineReach,
-} from '../../../../../src/features/fleet/shell/use-machine-reach.ts';
+} from '../../../../../../app/features/fleet/shell/use-machine-reach.ts';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
-import { type DaemonId, daemonId } from '../../../../../src/lib/daemon-connection.ts';
+import { type DaemonId, daemonId } from '../../../../../../app/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { configChangeHarness } from '../../../config-change-support.tsx';
 import { machineClient, machineView, pairing } from './machine-support.ts';

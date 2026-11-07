@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { timeUntil } from '../../../../src/features/fleet/harness-login-model.ts';
+import { timeUntil } from '../../../../../app/features/fleet/harness-login-model.ts';
 import { NOW } from './harness-login-support.ts';
 
 describe('timeUntil', () => {

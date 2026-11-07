@@ -3,9 +3,9 @@
 import type { FleetMachineView } from '@ferretry/protocol';
 import type { ReactElement } from 'react';
 import type { AccountCatalog } from '../../../../../src/features/fleet/components/account-catalog.ts';
-import type { FleetClientFactory } from '../../../../../src/features/fleet/fleet-client.ts';
-import type { MachineTabProps } from '../../../../../src/features/fleet/shell/machines-surface.tsx';
-import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+import type { FleetClientFactory } from '../../../../../../app/features/fleet/fleet-client.ts';
+import type { MachineTabProps } from '../../../../../../app/features/fleet/shell/machines-surface.tsx';
+import { daemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import { APPLY_PATH, type Call, machineAnswer, OUTCOME, STAGED, scriptedClient } from '../shell/change-support.ts';
 import { studioCatalog, studioMachine } from './catalog-fixture.ts';

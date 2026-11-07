@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { IFyApiClient, LimitsView } from '@ferretry/protocol';
 import { cgroupConfigView } from '../../../../protocol/tests/fixtures.ts';
-import { LimitsCard, LimitsSurface, limitsBadge } from '../../../src/features/settings/limits-settings.tsx';
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { LimitsCard, LimitsSurface, limitsBadge } from '../../../../app/features/settings/limits-settings.tsx';
+import { daemonConnection } from '../../../../app/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 
 const connection = (id: string) =>

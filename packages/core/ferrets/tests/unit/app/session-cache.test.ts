@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 
-import { daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionKey, daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { daemonConnection, daemonId } from '../../../app/lib/daemon-connection.ts';
+import { daemonSessionKey, daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
 import {
   logTail,
   parseCacheRecord,
@@ -11,7 +11,7 @@ import {
   type SessionCacheBackend,
   type SessionCacheLimits,
   seedFleetFromCache,
-} from '../../src/lib/session-cache.ts';
+} from '../../../app/lib/session-cache.ts';
 import { schemaValidSessionView as sessionView } from '../support/schema-valid-sessions.ts';
 
 const alpha = daemonId('alpha');

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { MachineHome, type MachineHomeProps } from '../../src/components/machine-home.tsx';
-import { TOP_FERRETS } from '../../src/components/machine-home-model.ts';
-import { daemonId } from '../../src/lib/daemon-connection.ts';
+import { MachineHome, type MachineHomeProps } from '../../../app/components/machine-home.tsx';
+import { TOP_FERRETS } from '../../../app/components/machine-home-model.ts';
+import { daemonId } from '../../../app/lib/daemon-connection.ts';
 import { mount } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 

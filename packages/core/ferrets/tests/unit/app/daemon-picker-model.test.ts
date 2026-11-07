@@ -13,9 +13,9 @@ import {
   sameHarnessAccountOptions,
   sessionAccountLabel,
   sessionCapableAccountOptions,
-} from '../../src/components/daemon-picker-model.ts';
+} from '../../../app/components/daemon-picker-model.ts';
 import type { PickerAccount } from '../../src/lib/account-picker-catalog.ts';
-import type { FleetProject } from '../../src/lib/fleet-grouping.ts';
+import type { FleetProject } from '../../../app/lib/fleet-grouping.ts';
 import { sessionView } from '../support/sessions.ts';
 import { pickerHealth } from './picker-support.ts';
 

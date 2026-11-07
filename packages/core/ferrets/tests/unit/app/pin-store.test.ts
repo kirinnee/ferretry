@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import type { PinSnapshot } from '@ferretry/protocol';
 import should from 'should';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { DaemonPinStore } from '../../src/lib/pin-store.ts';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
+import { DaemonPinStore } from '../../../app/lib/pin-store.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });

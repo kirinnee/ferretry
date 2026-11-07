@@ -14,7 +14,7 @@
 import type { SessionView } from '@ferretry/protocol';
 import { Copy, MessageSquare } from 'lucide-react';
 import { type ReactNode, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
-import { MigrateSheet } from '../../components/migrate-sheet.tsx';
+import { MigrateSheet } from '../../components/move-sheet.tsx';
 import { sessionDisplayName } from '../../components/session-top-bar.tsx';
 import { useAccountPickerSlice } from '../../hooks/use-account-picker.ts';
 import { useKnownProjects } from '../../hooks/use-projects.ts';

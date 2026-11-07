@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { DaemonId } from '../../src/lib/daemon-connection.ts';
+import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
 import { SessionPinContext } from '../../src/shell/session-pin-context.ts';
-import { SessionsBarRow } from '../../src/shell/sessions-bar-row.tsx';
+import { SessionsBarRow } from '../../../app/shell/sessions-bar-row.tsx';
 import '../support/dom.ts';
 import { type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
-import { RenameForm } from '../../../../src/features/session-actions/rename-form.tsx';
-import type { SessionActionFormHost } from '../../../../src/features/session-actions/registry.ts';
+import { RenameForm } from '../../../../../app/features/session-actions/rename-form.tsx';
+import type { SessionActionFormHost } from '../../../../../app/features/session-actions/registry.ts';
 import { interact, mount, must, type Mounted } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
 

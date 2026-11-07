@@ -14,7 +14,7 @@ import {
   presetMatches,
   readPaste,
   secretFields,
-} from '../../../../../src/features/fleet/credentials/provider-model.ts';
+} from '../../../../../../app/features/fleet/credentials/provider-model.ts';
 import { CREDENTIALS, credential } from '../account-support.ts';
 import { AZURE, DEEPSEEK, DEEPSEEK_MIRROR, GATEWAY, PROVIDERS, ZAI, ZAI_CODEX } from './environment-support.ts';
 

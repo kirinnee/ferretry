@@ -9,12 +9,12 @@
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { useMachineOrder } from '../../../src/hooks/use-machine-order.ts';
-import { type MachineSource, machineDisplayOrder } from '../../../src/lib/all-machines.ts';
+import { useMachineOrder } from '../../../../app/hooks/use-machine-order.ts';
+import { type MachineSource, machineDisplayOrder } from '../../../../app/lib/all-machines.ts';
 import { browserControlsStorage, DaemonControlsStore } from '../../../src/lib/controls.ts';
-import { type DaemonId, daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { moveMachine } from '../../../src/lib/machine-order.ts';
-import { SessionsBar } from '../../../src/shell/sessions-bar.tsx';
+import { type DaemonId, daemonConnection } from '../../../../app/lib/daemon-connection.ts';
+import { moveMachine } from '../../../../app/lib/machine-order.ts';
+import { SessionsBar } from '../../../../app/shell/sessions-bar.tsx';
 import { sessionView } from '../../support/sessions.ts';
 
 const NOW = Date.parse('2026-10-20T12:00:00.000Z');

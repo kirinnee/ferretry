@@ -6,7 +6,7 @@ import {
   conversionFailure,
   conversionSentences,
   harnessProduct,
-} from '../../../../src/features/session-actions/conversion-model.ts';
+} from '../../../../../app/features/session-actions/conversion-model.ts';
 import type { PickerAccount } from '../../../../src/lib/account-picker-catalog.ts';
 
 const account = (id: string, kind: PickerAccount['kind'], over: Partial<PickerAccount> = {}): PickerAccount => ({

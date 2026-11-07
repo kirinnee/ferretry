@@ -12,7 +12,7 @@ import {
   secretRef,
   testNote,
   testResultLine,
-} from '../../../../../src/features/fleet/credentials/environment-model.ts';
+} from '../../../../../../app/features/fleet/credentials/environment-model.ts';
 import { CREDENTIALS, credential } from '../account-support.ts';
 import { BEDROCK, DEEPSEEK, DEEPSEEK_MIRROR, OLLAMA, PRESETS, ZAI, ZAI_CODEX } from './environment-support.ts';
 

@@ -15,7 +15,7 @@ import {
   onlyAgentJobsBlock,
   SMALL_CONTEXT_WINDOW,
   withoutOneMillionVariant,
-} from '../../src/components/migrate-model.ts';
+} from '../../../app/components/move-model.ts';
 
 describe('migration model selection', () => {
   it('uses the daemon model suffix rule for context windows and variants', () => {

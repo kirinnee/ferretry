@@ -7,7 +7,7 @@ import {
   reachWord,
   type ShownReach,
   shownReachSummary,
-} from '../../../../../src/features/fleet/shell/machine-reach.ts';
+} from '../../../../../../app/features/fleet/shell/machine-reach.ts';
 import { machineClient, machineView } from './machine-support.ts';
 
 describe('machine reach', () => {

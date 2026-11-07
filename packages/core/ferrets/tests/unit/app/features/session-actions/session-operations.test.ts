@@ -17,7 +17,7 @@ import {
   restartOnEarlierConversation,
   restartRefusedSentence,
   restartWithResume,
-} from '../../../../src/features/session-actions/session-operations.ts';
+} from '../../../../../app/features/session-actions/session-operations.ts';
 import { sessionView } from '../../../support/sessions.ts';
 
 /** Narrows away the `undefined` a `.find()` cannot promise is absent, failing out loud if it is. */

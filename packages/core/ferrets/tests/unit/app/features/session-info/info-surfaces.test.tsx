@@ -5,7 +5,7 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { BrowserPageSummary, BrowserStatus, TerminalListView, TerminalView } from '@ferretry/protocol';
-import { InfoSurfaces, type InfoSurfacesProps } from '../../../../src/features/session-info/info-surfaces.tsx';
+import { InfoSurfaces, type InfoSurfacesProps } from '../../../../../app/features/session-info/info-surfaces.tsx';
 import type { AgentControlDriver } from '../../../../src/features/workspace/agent-control-marker.tsx';
 import type { SurfaceDriving } from '../../../../src/features/workspace/use-surface-driving.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';

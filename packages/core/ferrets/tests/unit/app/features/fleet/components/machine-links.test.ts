@@ -3,7 +3,7 @@ import {
   isComponentReference,
   itemFromHash,
   itemHref,
-} from '../../../../../src/features/fleet/components/machine-links.ts';
+} from '../../../../../../app/features/fleet/components/machine-links.ts';
 
 describe('machine links', () => {
   it('reads the page a link names on its own tab only', () => {

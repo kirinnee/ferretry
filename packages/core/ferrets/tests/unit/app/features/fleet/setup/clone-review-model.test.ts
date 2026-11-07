@@ -29,7 +29,7 @@ import {
   updateCount,
   updateLabel,
   updateWrites,
-} from '../../../../../src/features/fleet/setup/clone-review-model.ts';
+} from '../../../../../../app/features/fleet/setup/clone-review-model.ts';
 import { FULL_REVIEW, ITEMS, NOTHING_REVIEW, review, UPDATE_BUNDLE } from './clone-review-support.ts';
 import { bundle } from './setup-support.ts';
 

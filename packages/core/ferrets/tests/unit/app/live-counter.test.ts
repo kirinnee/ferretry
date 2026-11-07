@@ -9,8 +9,8 @@ import {
   liveReadout,
   msToNextSecond,
   wholeSecondsSince,
-} from '../../src/lib/live-counter.ts';
-import type { PaneActivity } from '../../src/lib/pane-activity.ts';
+} from '../../../app/lib/live-counter.ts';
+import type { PaneActivity } from '../../../app/lib/pane-activity.ts';
 
 const TURN = '2026-10-18T07:00:00.000Z';
 const OTHER_TURN = '2026-10-18T06:00:00.000Z';

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { machineDisplayOrder } from '../../src/lib/all-machines.ts';
+import { machineDisplayOrder } from '../../../app/lib/all-machines.ts';
 import { parseControlsRecord } from '../../src/lib/controls.ts';
-import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { moveMachine, reconcileMachineOrder } from '../../src/lib/machine-order.ts';
+import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
+import { moveMachine, reconcileMachineOrder } from '../../../app/lib/machine-order.ts';
 
 const ids = (...names: string[]) => names as DaemonId[];
 const [A, B, C, D] = ids('a', 'b', 'c', 'd') as [DaemonId, DaemonId, DaemonId, DaemonId];

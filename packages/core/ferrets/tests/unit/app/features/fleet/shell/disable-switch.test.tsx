@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetCredentialList, FleetRuntimeCatalog } from '@ferretry/protocol';
-import { CredentialsTab } from '../../../../../src/features/fleet/credentials/credentials-tab.tsx';
-import { RuntimesTab } from '../../../../../src/features/fleet/runtimes/runtimes-tab.tsx';
+import { CredentialsTab } from '../../../../../../app/features/fleet/credentials/credentials-tab.tsx';
+import { RuntimesTab } from '../../../../../../app/features/fleet/runtimes/runtimes-tab.tsx';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import {
   APPLIED,

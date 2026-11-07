@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { MACHINE_TABS, type MachineTabId } from '../../../../../src/features/fleet/shell/machine-route.ts';
+import { MACHINE_TABS, type MachineTabId } from '../../../../../../app/features/fleet/shell/machine-route.ts';
 import {
   type PanelGroupId,
   panelGroup,
   panelsOnTab,
   panelTab,
-} from '../../../../../src/features/fleet/shell/machine-panels.ts';
+} from '../../../../../../app/features/fleet/shell/machine-panels.ts';
 
 describe('panelTab', () => {
   it.each<[string, MachineTabId]>([

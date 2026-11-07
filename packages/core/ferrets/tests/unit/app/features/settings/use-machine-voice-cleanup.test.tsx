@@ -6,8 +6,8 @@ import {
   type MachineVoiceCleanup,
   useMachineVoiceCleanup,
   type VoiceCleanupSave,
-} from '../../../../src/features/settings/use-machine-voice-cleanup.ts';
-import type { DaemonConnection } from '../../../../src/lib/daemon-connection.ts';
+} from '../../../../../app/features/settings/use-machine-voice-cleanup.ts';
+import type { DaemonConnection } from '../../../../../app/lib/daemon-connection.ts';
 import { DaemonClientProvider } from '../../../../src/lib/store.tsx';
 import { type Mounted, mount } from '../../../support/dom.ts';
 import { runAsync } from '../../../support/react.ts';

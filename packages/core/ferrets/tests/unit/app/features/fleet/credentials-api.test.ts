@@ -8,8 +8,8 @@ import {
   readFleetCredentials,
   readFleetPresets,
   testFleetCredential,
-} from '../../../../src/features/fleet/credentials-api.ts';
-import type { FleetClient } from '../../../../src/features/fleet/fleet-client.ts';
+} from '../../../../../app/features/fleet/credentials-api.ts';
+import type { FleetClient } from '../../../../../app/features/fleet/fleet-client.ts';
 
 interface Call {
   readonly path: string;

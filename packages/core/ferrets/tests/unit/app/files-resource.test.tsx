@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { useFsResource, type FsResource, type FsResourceOptions } from '../../src/components/files-resource.ts';
+import { useFsResource, type FsResource, type FsResourceOptions } from '../../../app/components/files-resource.ts';
 import { interact, mount, must } from '../support/dom.ts';
 
 interface ProbeProps {

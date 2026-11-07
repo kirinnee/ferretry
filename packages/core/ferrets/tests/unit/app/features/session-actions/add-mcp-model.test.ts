@@ -4,7 +4,7 @@ import {
   EMPTY_MCP_DRAFT,
   type McpDraft,
   parseEnvLines,
-} from '../../../../src/features/session-actions/add-mcp-model.ts';
+} from '../../../../../app/features/session-actions/add-mcp-model.ts';
 
 const draft = (overrides: Partial<McpDraft> = {}): McpDraft => ({ ...EMPTY_MCP_DRAFT, ...overrides });
 

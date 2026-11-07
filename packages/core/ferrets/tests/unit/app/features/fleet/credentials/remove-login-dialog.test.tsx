@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetCredentialList, FleetMachineView, FleetRunningSession, IFyApiClient } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { CredentialsTab } from '../../../../../src/features/fleet/credentials/credentials-tab.tsx';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
+import { CredentialsTab } from '../../../../../../app/features/fleet/credentials/credentials-tab.tsx';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   APPLIED,

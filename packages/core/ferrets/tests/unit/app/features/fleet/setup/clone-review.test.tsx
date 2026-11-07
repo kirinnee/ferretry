@@ -9,11 +9,11 @@ import {
   type FleetCloneReview,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import { CloneMachine } from '../../../../../src/features/fleet/setup/clone.tsx';
-import { controlsText } from '../../../../../src/features/fleet/setup/clone-settings-merge.ts';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
+import { CloneMachine } from '../../../../../../app/features/fleet/setup/clone.tsx';
+import { controlsText } from '../../../../../../app/features/fleet/setup/clone-settings-merge.ts';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
-import type { DaemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+import type { DaemonConnection } from '../../../../../../app/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   FIRST_REVIEW,

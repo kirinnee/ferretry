@@ -5,7 +5,7 @@ import {
   PRESENCE_WINDOW_MS,
   type PresenceEnvironment,
   PresenceTracker,
-} from '../../src/lib/presence.ts';
+} from '../../../app/lib/presence.ts';
 
 const page = (start = 1_000) => {
   let now = start;

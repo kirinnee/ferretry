@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { FileInstanceSurface } from '../../src/components/file-instance-surface.tsx';
-import { type FsChanges, type FsFile, resetFsProbes } from '../../src/components/files-api.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { FileInstanceSurface } from '../../../app/components/file-instance-surface.tsx';
+import { type FsChanges, type FsFile, resetFsProbes } from '../../../app/components/files-api.ts';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
 import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
 import type { SidePaneTabInstance } from '../../src/shell/side-pane-tab-model.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';

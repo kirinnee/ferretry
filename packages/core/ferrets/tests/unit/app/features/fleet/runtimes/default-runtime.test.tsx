@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetMachineView, FleetRuntimeCatalog } from '@ferretry/protocol';
-import { RuntimesTab } from '../../../../../src/features/fleet/runtimes/runtimes-tab.tsx';
+import { RuntimesTab } from '../../../../../../app/features/fleet/runtimes/runtimes-tab.tsx';
 import { interact, type Mounted, mount as mountView, must } from '../../../../support/dom.ts';
 import {
   type Call,

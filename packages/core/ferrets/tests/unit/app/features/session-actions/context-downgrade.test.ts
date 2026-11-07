@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { downgradeOf, downgradeSentence } from '../../../../src/features/session-actions/context-downgrade.ts';
+import { downgradeOf, downgradeSentence } from '../../../../../app/features/session-actions/context-downgrade.ts';
 
 describe('a smaller context window, in words', () => {
   const numbers = { model: 'm', targetWindow: 200_000, currentWindow: 1_000_000 };

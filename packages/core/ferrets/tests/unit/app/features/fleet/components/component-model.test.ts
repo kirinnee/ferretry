@@ -18,7 +18,7 @@ import {
   settingsEntries,
   settingsValue,
   splitCommandLine,
-} from '../../../../../src/features/fleet/components/component-model.ts';
+} from '../../../../../../app/features/fleet/components/component-model.ts';
 import {
   changeOf,
   claudeSettings,

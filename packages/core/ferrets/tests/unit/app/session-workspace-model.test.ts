@@ -12,8 +12,8 @@ import {
   sendSubmitter,
   startSessionWorkspaceRefresh,
   transcriptEntriesFromLog,
-} from '../../src/components/session-workspace-model.ts';
-import { startSessionEventStream } from '../../src/components/session-event-stream-model.ts';
+} from '../../../app/components/session-workspace-model.ts';
+import { startSessionEventStream } from '../../../app/components/session-event-stream-model.ts';
 import { rowAnchors, rowForOffset } from '../../src/lib/chat-search.ts';
 import { extractToolSummary, IMAGE_READ_TOOL } from '../../src/lib/tool-extract.ts';
 import { sessionView } from '../support/sessions.ts';

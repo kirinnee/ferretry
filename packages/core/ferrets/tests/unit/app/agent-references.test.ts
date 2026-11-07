@@ -1,8 +1,8 @@
 import type { SessionView } from '@ferretry/protocol';
 import { describe, test } from 'bun:test';
 import should from 'should';
-import { agentReferenceIdentityKey, createAgentReferenceResolver } from '../../src/lib/agent-references.ts';
-import type { DaemonId } from '../../src/lib/daemon-connection.ts';
+import { agentReferenceIdentityKey, createAgentReferenceResolver } from '../../../app/lib/agent-references.ts';
+import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
 
 const daemonA = 'daemon-a' as DaemonId;
 const daemonB = 'daemon-b' as DaemonId;

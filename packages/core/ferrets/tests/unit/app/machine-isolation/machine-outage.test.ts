@@ -9,7 +9,7 @@ import {
   NOT_ANSWERING_MARK,
   readOnlyReason,
   unreachableOutage,
-} from '../../../src/lib/machine-outage.ts';
+} from '../../../../app/lib/machine-outage.ts';
 
 const RAW =
   'could not reach fyd at http://127.0.0.1:7431 (this machine is reconnecting, so nothing was dialled for this request; the connection retries on its own schedule)';

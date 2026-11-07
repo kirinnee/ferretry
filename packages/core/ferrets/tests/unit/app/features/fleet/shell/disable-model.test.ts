@@ -10,7 +10,7 @@ import {
   switchOwner,
   untilFor,
   untilWords,
-} from '../../../../../src/features/fleet/shell/disable-model.ts';
+} from '../../../../../../app/features/fleet/shell/disable-model.ts';
 
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');
 const LOGIN = { kind: 'login', id: 'liftoff' } as const;

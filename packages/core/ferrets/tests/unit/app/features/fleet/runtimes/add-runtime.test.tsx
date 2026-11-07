@@ -8,10 +8,10 @@ import {
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { useState } from 'react';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import { AddRuntime } from '../../../../../src/features/fleet/runtimes/add-runtime.tsx';
-import type { MachineData } from '../../../../../src/features/fleet/runtimes/machine-data.ts';
-import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
+import { AddRuntime } from '../../../../../../app/features/fleet/runtimes/add-runtime.tsx';
+import type { MachineData } from '../../../../../../app/features/fleet/runtimes/machine-data.ts';
+import { useAccountChanges } from '../../../../../../app/features/fleet/shell/apply-change-panel.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   APPLIED,

@@ -39,7 +39,7 @@ import {
   usageBars,
   usageBarText,
   usdWords,
-} from '../../../../../src/features/fleet/credentials/credentials-model.ts';
+} from '../../../../../../app/features/fleet/credentials/credentials-model.ts';
 import { CREDENTIALS, credential, NOW, withStatus } from '../account-support.ts';
 
 const byId = (id: string) => {

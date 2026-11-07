@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { sessionLabel, sessionTask, sessionTitles } from '../../src/shell/session-title.ts';
+import { sessionLabel, sessionTask, sessionTitles } from '../../../app/shell/session-title.ts';
 
 const config = (over: Partial<{ name: string; cwd: string; teammate: string; id: string }>) => ({
   id: 'abc123',

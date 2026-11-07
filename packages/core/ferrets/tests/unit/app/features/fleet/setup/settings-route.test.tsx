@@ -1,6 +1,6 @@
 import { describe, expect, it, spyOn } from 'bun:test';
 import { useEffect } from 'react';
-import type { MachineTabId } from '../../../../../src/features/fleet/shell/machine-route.ts';
+import type { MachineTabId } from '../../../../../../app/features/fleet/shell/machine-route.ts';
 import {
   machineItemHash,
   machinePanelFromHash,
@@ -8,7 +8,7 @@ import {
   type SettingsFlowRoute,
   settingsFlowFromHash,
   useSettingsFlow,
-} from '../../../../../src/features/fleet/setup/settings-route.ts';
+} from '../../../../../../app/features/fleet/setup/settings-route.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 
 const fakeWindow = (hash: string): Window => {

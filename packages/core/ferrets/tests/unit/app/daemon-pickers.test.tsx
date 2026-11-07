@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { useState } from 'react';
-import { accountPickerOptions, projectPickerOptions } from '../../src/components/daemon-picker-model.ts';
+import { accountPickerOptions, projectPickerOptions } from '../../../app/components/daemon-picker-model.ts';
 import {
   AccountHealthCheck,
   AccountName,
@@ -16,7 +16,7 @@ import {
   ProjectPickerField,
   projectFieldOptions,
   projectFieldSource,
-} from '../../src/components/daemon-pickers.tsx';
+} from '../../../app/components/daemon-pickers.tsx';
 import type {
   AccountPickerHealthCatalog,
   PickerAccount,
@@ -27,9 +27,9 @@ import {
   type DaemonAccountPickerSlice,
   DaemonAccountPickerStore,
 } from '../../src/lib/account-picker-store.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import type { FleetProject } from '../../src/lib/fleet-grouping.ts';
-import type { DaemonFleetSlice } from '../../src/lib/fleet-store.ts';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import type { FleetProject } from '../../../app/lib/fleet-grouping.ts';
+import type { DaemonFleetSlice } from '../../../app/lib/fleet-store.ts';
 import type { DaemonProjectsSlice } from '../../src/lib/projects-store.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';

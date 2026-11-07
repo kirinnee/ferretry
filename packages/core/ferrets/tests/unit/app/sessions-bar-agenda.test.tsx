@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import type { ComponentProps } from 'react';
-import { allMachinesView, type MachineSource } from '../../src/lib/all-machines.ts';
-import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { SessionsBar } from '../../src/shell/sessions-bar.tsx';
+import { allMachinesView, type MachineSource } from '../../../app/lib/all-machines.ts';
+import type { DaemonId } from '../../../app/lib/daemon-connection.ts';
+import { SessionsBar } from '../../../app/shell/sessions-bar.tsx';
 import {
   agendaWords,
   hasAgenda,
@@ -11,7 +11,7 @@ import {
   rowPreview,
   sessionRowPath,
   sessionsBarView,
-} from '../../src/shell/sessions-bar-model.ts';
+} from '../../../app/shell/sessions-bar-model.ts';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';

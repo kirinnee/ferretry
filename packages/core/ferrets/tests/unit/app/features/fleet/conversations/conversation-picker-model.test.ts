@@ -20,7 +20,7 @@ import {
   toggleKeep,
   toggleStart,
   visibleConversations,
-} from '../../../../../src/features/fleet/conversations/conversation-picker-model.ts';
+} from '../../../../../../app/features/fleet/conversations/conversation-picker-model.ts';
 import { runtime } from '../account-support.ts';
 import { conversation, NOW } from './conversation-support.ts';
 

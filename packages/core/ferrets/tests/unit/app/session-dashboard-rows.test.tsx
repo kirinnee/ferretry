@@ -13,8 +13,8 @@ import {
   SessionRow,
   SkeletonRows,
   Th,
-} from '../../src/components/session-dashboard-rows.tsx';
-import { daemonId } from '../../src/lib/daemon-connection.ts';
+} from '../../../app/components/session-dashboard-rows.tsx';
+import { daemonId } from '../../../app/lib/daemon-connection.ts';
 import { DaemonUsageIndex } from '../../src/lib/usage.ts';
 import { render, run } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';

@@ -4,11 +4,11 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import {
   SessionRowActionsHost,
   sessionRowMenuRenderer,
-} from '../../../../src/features/session-actions/row-actions-host.tsx';
+} from '../../../../../app/features/session-actions/row-actions-host.tsx';
 import { DaemonAccountPickerStore } from '../../../../src/lib/account-picker-store.ts';
 import { DaemonConnectionStore } from '../../../../src/lib/connections.ts';
-import { type DaemonConnection, type DaemonId, daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { DaemonFleetStore } from '../../../../src/lib/fleet-store.ts';
+import { type DaemonConnection, type DaemonId, daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
+import { DaemonFleetStore } from '../../../../../app/lib/fleet-store.ts';
 import { DaemonProjectsStore } from '../../../../src/lib/projects-store.ts';
 import { type AppStore, StoreProvider } from '../../../../src/lib/store.tsx';
 import type { SessionMenuState } from '../../../../src/shell/session-menu-context.ts';

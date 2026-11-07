@@ -7,7 +7,7 @@ import {
   diskPressureSentence,
   machineLacks,
   machineOffers,
-} from '../../src/lib/daemon-health.ts';
+} from '../../../app/lib/daemon-health.ts';
 
 const read = (features?: string[]): DaemonHealthRead => ({
   kind: 'read',

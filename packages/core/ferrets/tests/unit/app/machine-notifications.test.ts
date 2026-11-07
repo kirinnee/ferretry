@@ -9,7 +9,7 @@ import {
   offEverywhereSentence,
   readingFromFailure,
   turnOnAllTargets,
-} from '../../src/lib/machine-notifications.ts';
+} from '../../../app/lib/machine-notifications.ts';
 import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
 
 const device = (id: string): PushDeviceView => ({

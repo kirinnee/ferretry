@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { FleetMachineView } from '@ferretry/protocol';
-import { AgentsTab } from '../../../../../src/features/fleet/machine/agents-tab.tsx';
-import type { MachineTabProps } from '../../../../../src/features/fleet/shell/machines-surface.tsx';
+import { AgentsTab } from '../../../../../../app/features/fleet/machine/agents-tab.tsx';
+import type { MachineTabProps } from '../../../../../../app/features/fleet/shell/machines-surface.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   APPLY_PATH,

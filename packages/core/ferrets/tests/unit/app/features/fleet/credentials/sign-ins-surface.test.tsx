@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { SignInsSurface } from '../../../../../src/features/fleet/credentials/sign-ins-surface.tsx';
-import type { MachineTabProps } from '../../../../../src/features/fleet/shell/machines-surface.tsx';
+import { SignInsSurface } from '../../../../../../app/features/fleet/credentials/sign-ins-surface.tsx';
+import type { MachineTabProps } from '../../../../../../app/features/fleet/shell/machines-surface.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { APPLIED, type Call, machine, READS, STUDIO, scripted, stagedFrom } from '../account-support.ts';
 

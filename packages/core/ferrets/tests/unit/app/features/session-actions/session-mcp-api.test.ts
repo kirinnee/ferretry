@@ -4,9 +4,9 @@ import {
   addSessionMcp,
   previewSessionMcp,
   readSessionMcp,
-} from '../../../../src/features/session-actions/session-mcp-api.ts';
-import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../src/lib/daemon-scope.ts';
+} from '../../../../../app/features/session-actions/session-mcp-api.ts';
+import { daemonConnection } from '../../../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../../../app/lib/daemon-scope.ts';
 import { type DaemonFetch, DaemonResponseError } from '../../../../src/lib/runtime-models.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a-token' });

@@ -11,7 +11,7 @@ import {
   receivedMessage,
   signedInSentence,
   signsInWithOAuth,
-} from '../../../../../src/features/fleet/components/mcp-sign-in-model.ts';
+} from '../../../../../../app/features/fleet/components/mcp-sign-in-model.ts';
 import { CALLBACK, mcpConnection, mcpFlow, NOW, OTHER_CALLBACK } from '../mcp-sign-in-support.ts';
 import { component, github } from './catalog-fixture.ts';
 

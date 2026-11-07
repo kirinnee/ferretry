@@ -9,7 +9,7 @@ import {
   RUN_GAP_MS,
   type TranscriptEntry,
   transcriptItems,
-} from '../../src/lib/session-screens.ts';
+} from '../../../app/lib/session-screens.ts';
 import { render as mount, run } from '../support/react.ts';
 
 // An unmounted tree is a subscriber the transcript-hold gate no longer counts; a leaked one starves later suites.

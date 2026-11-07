@@ -5,9 +5,9 @@ import {
   RichFilePreview,
   richFileKind,
   richFileMime,
-} from '../../src/components/rich-file-preview.tsx';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+} from '../../../app/components/rich-file-preview.tsx';
+import { daemonConnection } from '../../../app/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../app/lib/daemon-scope.ts';
 import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { interact, mount, must } from '../support/dom.ts';
 

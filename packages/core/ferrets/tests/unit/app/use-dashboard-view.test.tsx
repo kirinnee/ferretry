@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { DASHBOARD_TABLE_MIN, narrowForWidth, useDashboardNarrow } from '../../src/hooks/use-dashboard-view.ts';
+import { DASHBOARD_TABLE_MIN, narrowForWidth, useDashboardNarrow } from '../../../app/hooks/use-dashboard-view.ts';
 import { interact, mount } from '../support/dom.ts';
 
 type MediaListener = () => void;

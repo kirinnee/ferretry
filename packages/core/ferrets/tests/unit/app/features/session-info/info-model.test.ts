@@ -23,7 +23,7 @@ import {
   remoteControlLabel,
   scrollToShow,
   worktreeFact,
-} from '../../../../src/features/session-info/info-model.ts';
+} from '../../../../../app/features/session-info/info-model.ts';
 import { sessionView } from '../../../support/sessions.ts';
 
 describe('INFO_TABS', () => {

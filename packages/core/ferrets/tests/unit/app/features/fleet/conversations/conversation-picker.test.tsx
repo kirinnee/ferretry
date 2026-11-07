@@ -11,8 +11,8 @@ import type { z } from 'zod';
 import {
   ConversationPicker,
   ImportConversations,
-} from '../../../../../src/features/fleet/conversations/conversation-picker.tsx';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
+} from '../../../../../../app/features/fleet/conversations/conversation-picker.tsx';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import { runtime, STUDIO } from '../account-support.ts';
 import { conversation, listing, NOW, settle, type } from './conversation-support.ts';

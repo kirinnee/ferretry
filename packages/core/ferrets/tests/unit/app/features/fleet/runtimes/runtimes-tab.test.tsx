@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetMachineView, FleetRuntimeCatalog, FleetRuntimeView } from '@ferretry/protocol';
 import { FleetRuntimeCatalogSchema } from '@ferretry/protocol';
-import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import { launchHref, RuntimesTab } from '../../../../../src/features/fleet/runtimes/runtimes-tab.tsx';
+import type { FleetClient } from '../../../../../../app/features/fleet/fleet-client.ts';
+import { launchHref, RuntimesTab } from '../../../../../../app/features/fleet/runtimes/runtimes-tab.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   APPLIED,

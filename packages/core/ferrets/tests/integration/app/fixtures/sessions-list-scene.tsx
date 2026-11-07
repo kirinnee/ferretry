@@ -14,9 +14,9 @@
 import type { SessionView } from '@ferretry/protocol';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { MachineSource } from '../../../src/lib/all-machines.ts';
-import type { DaemonId } from '../../../src/lib/daemon-connection.ts';
-import { SessionsBar } from '../../../src/shell/sessions-bar.tsx';
+import type { MachineSource } from '../../../../app/lib/all-machines.ts';
+import type { DaemonId } from '../../../../app/lib/daemon-connection.ts';
+import { SessionsBar } from '../../../../app/shell/sessions-bar.tsx';
 import { sessionView } from '../../support/sessions.ts';
 
 const NOW = Date.parse('2026-10-19T12:00:00.000Z');

@@ -6,7 +6,7 @@ import {
   spendToday,
   TOP_FERRETS,
   topFerrets,
-} from '../../src/components/machine-home-model.ts';
+} from '../../../app/components/machine-home-model.ts';
 import { sessionView } from '../support/sessions.ts';
 import { rawRow } from '../support/analytics-rows.ts';
 import { wardenAnomaly, wardenStatus } from '../support/warden.ts';

@@ -5,8 +5,8 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { ReactNode } from 'react';
-import { INFO_TABS, type InfoTab } from '../../../../src/features/session-info/info-model.ts';
-import { InfoPanel, type InfoPanelProps } from '../../../../src/features/session-info/info-panel.tsx';
+import { INFO_TABS, type InfoTab } from '../../../../../app/features/session-info/info-model.ts';
+import { InfoPanel, type InfoPanelProps } from '../../../../../app/features/session-info/info-panel.tsx';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 
 let mounted: Mounted | undefined;
