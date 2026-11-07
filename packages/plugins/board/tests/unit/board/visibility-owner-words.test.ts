@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { type CardActionRequest, CardCreateRequestSchema } from '../../../contract/index.ts';
 import should from 'should';
 import { BoardError, BoardService, BoardUnavailableError, type OwnerWords } from '../../../daemon/lib/board/index.ts';
-import { card, MemoryBoardStore, PROJECT, world } from './support.ts';
+import { card, ferretActor, MemoryBoardStore, PROJECT, world } from './support.ts';
 
 const SESSION = 'lead';
 const OWNER_SAID = 'Build a board that shows only the work the owner asked for';
@@ -128,5 +128,37 @@ describe('F-0001 a daemon that cannot read what the owner said', () => {
     const made = await subject.create(request(), lead);
 
     should(made.card.id).be.ok();
+  });
+});
+
+describe('F-0001 a card whose creator ferret was removed', () => {
+  /** Conversation answers a strict read of a ferret the registry no longer has as "nobody the owner spoke to": no words, no failure. */
+  const removedCreator = () => {
+    const gone = card({
+      createdBy: ferretActor('gone'),
+      ask: { text: 'a ferret’s own follow-up errand', source: 'session:gone' },
+      askedBy: 'agent',
+      visibility: 'public',
+      visibilitySource: 'chosen',
+    });
+    const words: OwnerWords = { said: async () => [] };
+    const ports = world({ store: new MemoryBoardStore([gone]), ownerWords: words });
+    return { gone, ports, subject: new BoardService(ports) };
+  };
+
+  it('F-0001 should be made private by its owner ferret: the strict read of the removed creator settles, it does not refuse for ever', async () => {
+    const { gone, ports, subject } = removedCreator();
+
+    await subject.act(gone.id, { action: 'visibility', visibility: 'private' }, lead);
+
+    should((ports.store as MemoryBoardStore).cards.get(gone.id)?.visibility).equal('private');
+  });
+
+  it('F-0001 should be made private by the owner', async () => {
+    const { gone, ports, subject } = removedCreator();
+
+    await subject.act(gone.id, { action: 'visibility', visibility: 'private' }, { kind: 'owner' });
+
+    should((ports.store as MemoryBoardStore).cards.get(gone.id)?.visibility).equal('private');
   });
 });

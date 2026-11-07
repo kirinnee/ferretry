@@ -211,11 +211,17 @@ describe('Conversation’s port answers what the owner said', () => {
     await host.stop();
   });
 
-  test('F-0001 a strict read of a ferret that cannot be read is refused, where a best-effort one says nobody spoke', async () => {
-    const { host, api } = await conversation(undefined, false);
+  test('F-0001 a strict read of a ferret the registry no longer has answers "not started by a ferret", as today’s parent lookup does', async () => {
+    const { host, state, api } = await conversation(undefined, false);
+    await new StateQueueStore(state).append(ID, {
+      v: 1,
+      kind: 'enqueued',
+      at: AT,
+      message: queued({ text: 'build the board', state: 'queued' }),
+    });
     const strict = await api().ownerWords(ferretId('lead'), { strict: true });
-    expect(strict).toMatchObject({ ok: false, error: { code: 'unreadable' } });
-    expect(await api().ownerWords(ferretId('lead'))).toMatchObject({ ok: true, value: { words: [] } });
+    expect(strict).toEqual({ ok: true, value: { v: 1, ferret: ferretId('lead'), words: ['build the board'] } });
+    expect(await api().ownerWords(ferretId('lead'))).toMatchObject({ ok: true, value: { words: ['build the board'] } });
     await host.stop();
   });
 });

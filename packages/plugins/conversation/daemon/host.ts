@@ -169,8 +169,9 @@ export function buildConversationA(deps: {
     if (sendId === undefined) return undefined;
     const [rows, queued] = await Promise.all([ledger.list(ferret), queue.list(ferret)]);
     const waiting = queued.find(message => message.id === sendId);
+    // A withdrawn row typed nothing, so its id may start over: only the queue still holding the message keeps it answered.
     const row =
-      rows.find(entry => entry.sendId === sendId) ??
+      rows.find(entry => entry.sendId === sendId && (entry.fate !== 'withdrawn' || waiting !== undefined)) ??
       (waiting?.deliveredAs === undefined ? undefined : rows.find(entry => entry.sendId === waiting.deliveredAs));
     if (row === undefined && waiting === undefined) return undefined;
     const answer = answerOf(row, waiting);
@@ -190,11 +191,8 @@ export function buildConversationA(deps: {
     queue,
     sends: ledger,
     turns: NO_TURN_DOCUMENTS,
-    startedByFerret: async id => {
-      const found = await ferrets.get(id);
-      if (found === undefined) throw new Error(`ferret ${id} cannot be read`);
-      return found.parent !== undefined;
-    },
+    // An unknown ferret (one the registry has since removed) was not started by a ferret, as today's parent lookup answers.
+    startedByFerret: async id => (await ferrets.get(id))?.parent !== undefined,
   });
 
   const queueMessages = async (id: string): Promise<readonly QueuedMessage[]> => await queue.list(parseSessionId(id));

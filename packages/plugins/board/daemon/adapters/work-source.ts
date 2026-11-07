@@ -69,6 +69,8 @@ export const cardWork = (card: Card, laneSet: LaneSet | undefined): RawWork => {
  */
 export class BoardWorkSource implements WorkSource {
   readonly id = 'board';
+  /** Read on every search: the store is in memory and the identity-stable works make the re-index cheap, so a card made a moment ago is found. */
+  readonly cheap = true;
   private readonly kept = new Map<string, { readonly signature: string; readonly work: RawWork }>();
 
   constructor(private readonly board: BoardCards) {}

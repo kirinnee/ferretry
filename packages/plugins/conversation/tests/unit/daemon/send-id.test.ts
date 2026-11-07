@@ -160,6 +160,44 @@ describe('the same send id twice is one message, across daemon runs', () => {
     await host.stop();
   });
 
+  test('a withdrawn send typed nothing: with an empty queue a retry with the same id is a new send, and it reaches deliver', async () => {
+    const { host, state, api } = await conversation();
+    await ledgered(state, 'r-1', { fate: 'withdrawn' });
+
+    const retry = await api().send(F1, { kind: 'owner' }, { message: 'again', sendId: 'r-1' });
+
+    // new: it goes to the terminal seam (not connected yet), not answered "queued" for a message that is nowhere
+    expect(retry).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
+    expect((await api().queue(F1)).messages).toEqual([]);
+    await host.stop();
+  });
+
+  test('a withdrawn send whose message the queue still holds under that id is answered by the queue', async () => {
+    const { host, state, api } = await conversation();
+    await ledgered(state, 'r-2', { fate: 'withdrawn' });
+    await new StateQueueStore(state).append(parseSessionId('f1'), {
+      v: 1,
+      kind: 'enqueued',
+      at: AT,
+      message: {
+        v: 1,
+        id: 'r-2',
+        sender: 'human',
+        text: 'back in the queue',
+        attachmentIds: [],
+        enqueuedAt: AT,
+        state: 'queued',
+        stateAt: AT,
+        revision: 1,
+      },
+    });
+
+    const again = await api().send(F1, { kind: 'owner' }, { message: 'back in the queue', sendId: 'r-2' });
+
+    expect(again).toMatchObject({ ok: true, value: { sendId: 'r-2', disposition: 'queued', fate: 'accepted' } });
+    await host.stop();
+  });
+
   test('the route reads the id from the header, and a body that names another one is refused', async () => {
     const { host, state } = await conversation();
     await ledgered(state, 'req-1');
