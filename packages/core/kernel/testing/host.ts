@@ -1,7 +1,8 @@
 import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { failureResponse } from '../host/responses.ts';
-import type { HostFactsPort } from '../contract/ports.ts';
+import type { HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
+import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
 import type { DaemonTimings } from '../contract/ports.ts';
 import { DEFAULT_DAEMON_TIMINGS } from '../host/session/timings.ts';
@@ -113,6 +114,8 @@ export interface TestHostOptions {
   readonly secrets?: readonly string[];
   /** What `kernel.hostFacts` answers to a plugin that declared `permissions.hostFacts`. Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
+  /** What `kernel.updateHost` answers to a plugin that declared `permissions.updateHost`. */
+  readonly updateHost?: UpdateHostPort;
   /** What `kernel.timings` answers. Default: the shipped numbers (`DEFAULT_DAEMON_TIMINGS`). */
   readonly timings?: DaemonTimings;
   /** The Vault stand-in for `kernel.secrets.resolve`: name to value. Absent, every declared and configured name is `unknown`. */
@@ -759,6 +762,10 @@ async function start(world: World): Promise<TestHost> {
       },
       identity,
       paths: Object.freeze({ home: () => options.ownerHome ?? '/home/owner' }),
+      updateHost:
+        manifest.permissions?.updateHost === true && options.updateHost !== undefined
+          ? options.updateHost
+          : undeclaredUpdateHost(manifest.id, options.updateHost?.release ?? '5.0.0'),
       hostFacts:
         manifest.permissions?.hostFacts === true && options.hostFacts !== undefined
           ? options.hostFacts

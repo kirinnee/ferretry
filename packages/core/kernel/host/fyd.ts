@@ -59,6 +59,7 @@ async function main(): Promise<number> {
     implementations: registry.daemonImplementations,
     adapters: realAdapters(home, sink, {
       binary: BINARY,
+      release: VERSION,
       childEnv: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: homedir() },
     }),
     contractHash: id => registry.contractHashes?.[id]?.effective ?? 'unhashed',

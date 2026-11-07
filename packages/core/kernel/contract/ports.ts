@@ -33,6 +33,8 @@ export interface KernelPorts {
   readonly paths: PathsPort;
   /** Read-only facts about this machine from `/proc` and `/sys`; only for a manifest with `permissions.hostFacts`. */
   readonly hostFacts: HostFactsPort;
+  /** The running build and its self-update launch; only for a manifest with `permissions.updateHost` (Updates). */
+  readonly updateHost: UpdateHostPort;
   /**
    * The daemon's time-bound rules as this boot runs them: the shipped numbers, or `FYD_TEST_TIMINGS`'s shorter ones
    * (R247). Read-only; Access's idle expiry counts in `idleDayMs`.
@@ -678,6 +680,38 @@ export interface HostFactsPort {
    * disk's `queue/scheduler`): the device's name and the file's text.
    */
   blockScheduler(major: number, minor: number): Promise<{ readonly device: string; readonly scheduler: string }>;
+}
+
+/** What the running daemon executable is (today's update install facts seams). */
+export interface ExecutableFacts {
+  /** `process.argv0`: the path the daemon was launched as (a link the install made, often). */
+  readonly argv0: string;
+  /** `process.execPath`: the executable itself. */
+  readonly execPath: string;
+  /** `execPath` with every link resolved; `execPath` itself when it cannot be resolved. */
+  readonly resolvedExecPath: string;
+  /** `Bun.main`: `/$bunfs/…` inside a compiled binary, a source file otherwise. */
+  readonly main: string;
+  readonly workingDirectory: string;
+  readonly platform: string;
+}
+
+export type UpdateLaunchOutcome = { readonly kind: 'started' } | { readonly kind: 'failed'; readonly reason: string };
+
+/**
+ * The daemon's own update seam (today's `DaemonUpdateService` host parts): the release this build carries, what the
+ * running executable is, and one launch: `<client> update --run --yes --to <target> --report <report>`, detached in
+ * its own process group so it survives the daemon's restart, its output appended to the plugin's `update.log` and
+ * its report written to the plugin's `report.json` (both in the plugin's own state folder). No other command.
+ */
+export interface UpdateHostPort {
+  /** The release number this build carries. */
+  readonly release: string;
+  /** Whether this is a compiled release (a source run has no release to compare with). */
+  readonly compiled: boolean;
+  executable(): Promise<ExecutableFacts>;
+  /** `target` is a release number (`5.1.0`, `v5.1.0-rc.1`); anything else is refused without a launch. */
+  launchUpdate(target: string): Promise<UpdateLaunchOutcome>;
 }
 
 /** A session's lease, its renewal lead and its cap, in milliseconds. */

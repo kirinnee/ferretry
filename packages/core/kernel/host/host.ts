@@ -1,4 +1,4 @@
-import type { HostFactsPort } from '../contract/ports.ts';
+import type { HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
 import { milliseconds } from '@ferretry/std';
 import type { InputHolds, OutputGuard, Admission, Redaction, WorkFolders } from '../contract/bound.ts';
@@ -68,6 +68,7 @@ import { noWebSockets } from './adapters/process.ts';
 import { ownSecretsPort } from './secrets.ts';
 import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
+import { undeclaredUpdateHost } from './adapters/update-host.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
 import { type DaemonTimings, DEFAULT_DAEMON_TIMINGS } from './session/timings.ts';
 import {
@@ -156,6 +157,8 @@ export interface HostAdapters {
   readonly ownerHome?: () => string;
   /** `kernel.hostFacts` (`/proc`, `/sys`). Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
+  /** `kernel.updateHost` per plugin. Absent: facts refuse, launches fail. */
+  readonly updateHost?: (plugin: string) => UpdateHostPort;
   /** Holds a folder open for `RootHandle.pin`. Absent: every pin is refused (`unsupported`). */
   readonly pinner?: SessionRootPinner;
   /** Private scratch folders. Absent: every open is refused. */
@@ -459,6 +462,10 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     ),
     identity: identityPort,
     paths: ownerPaths,
+    updateHost:
+      manifest.permissions?.updateHost === true && adapters.updateHost !== undefined
+        ? adapters.updateHost(manifest.id)
+        : undeclaredUpdateHost(manifest.id, options.version),
     hostFacts:
       manifest.permissions?.hostFacts === true
         ? (adapters.hostFacts ?? NO_HOST_FACTS)
