@@ -2,16 +2,14 @@ import { describe, expect, it } from 'bun:test';
 import type { WardenLeaveRequest, WardenStatusView } from '../../../app/wire.ts';
 
 import { WardenOverviewSurface, wardenSettingsHref } from '../../../app/features/warden/warden-overview-surface.tsx';
-import { daemonConnection } from '../../../app/shell.ts';
+import { daemonConnection } from '../../../app/lib/machine.ts';
 import { interact, mount, must } from '@ferretry/app/testing';
 import type { WardenClient } from '../../../app/lib/warden-client.ts';
 import { fakeWardenClient } from '../../support/app/clients.ts';
-import '../../support/app/shell-parts.ts';
 import { agendaItem, wardenFlag, wardenAgenda, wardenInvestigation, wardenStatus } from '../../support/app/warden.ts';
 
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
-const connection = (id: string) =>
-  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
+const connection = (id: string) => daemonConnection({ daemonId: id });
 const POLL = { isHidden: () => false, pollMs: 3_600_000 } as const;
 
 const settle = async (): Promise<void> => {
@@ -98,7 +96,7 @@ describe('WardenOverviewSurface', () => {
     const href = wardenSettingsHref(daemon);
 
     // Assert
-    expect(href).toBe('/d/a/settings#warden');
+    expect(href).toBe('/d/a/settings/warden');
   });
 
   it('should read through the paired client, sweep without spawning and say nothing was flagged', async () => {

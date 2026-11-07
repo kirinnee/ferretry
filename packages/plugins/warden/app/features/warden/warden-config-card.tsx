@@ -13,17 +13,13 @@
 import type { WardenAccount, WardenConfig, WardenConfigPatch, WardenConfigView } from '../../wire.ts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { daemonSettingsHref } from '@ferretry/app';
+import { useConfigChangeEffect } from '../../hooks/use-config-change-effect.ts';
+import { type PickerAccount, readAccountPickerCatalog } from '../../lib/account-picker.ts';
+import type { DaemonConnection } from '../../lib/machine.ts';
+import { readSpeedups, type SpeedupsView } from '../../lib/speedups.ts';
 import { useWardenClientFactory, type WardenClientFactory } from '../../lib/warden-client-context.tsx';
 import type { WardenClient } from '../../lib/warden-client.ts';
-import {
-  type DaemonConnection,
-  daemonSettingsPath,
-  type PickerAccount,
-  readAccountPickerCatalog,
-  readSpeedups,
-  type SpeedupsView,
-  useConfigChangeEffect,
-} from '../../shell.ts';
 import { WardenSettingsForm } from './warden-settings-form.tsx';
 import {
   hasWardenFormErrors,
@@ -134,7 +130,7 @@ export function WardenConfigCard({
 
 /**
  * What the surface reads besides the Warden's own routes. Each is another plugin's fact, so the shell supplies it
- * (`../../shell.ts`); a test hands its own.
+ * (`../../lib/speedups.ts`, `../../lib/account-picker.ts`); a test hands its own.
  */
 export interface WardenConfigDeps {
   /** The Speed-ups description of a machine: whether its Jev key is set. */
@@ -149,9 +145,10 @@ export interface WardenConfigDeps {
   ) => void;
 }
 
-const SHELL_DEPS: WardenConfigDeps = {
-  speedups: readSpeedups,
-  catalog: readAccountPickerCatalog,
+/** What the card reads besides the Warden's own routes (see the GAP in `../../lib/speedups.ts` and `account-picker.ts`). */
+const ROUTED_DEPS: WardenConfigDeps = {
+  speedups: async () => await readSpeedups(),
+  catalog: async () => await readAccountPickerCatalog(),
   useConfigChange: useConfigChangeEffect,
 };
 
@@ -184,7 +181,7 @@ export function WardenConfigSurface({
   createClient: injectedClient,
   unavailable = 'hide',
   onNavigate,
-  deps = SHELL_DEPS,
+  deps: injectedDeps,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: WardenClientFactory;
@@ -197,6 +194,7 @@ export function WardenConfigSurface({
   // The plugin client of the daemon unless a test or the harness hands one in.
   const routedClient = useWardenClientFactory();
   const createClient = injectedClient ?? routedClient;
+  const deps = injectedDeps ?? ROUTED_DEPS;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -328,8 +326,8 @@ export function WardenConfigSurface({
       jevKey={loaded.jevKey}
       loginOptions={loaded.loginOptions}
       runtimes={loaded.runtimes}
-      speedupsHref={`${daemonSettingsPath(connection.daemonId)}#speedups`}
-      browserHref={`${daemonSettingsPath(connection.daemonId)}/browser`}
+      speedupsHref={daemonSettingsHref(connection.daemonId, 'voice', 'speedups')}
+      browserHref={daemonSettingsHref(connection.daemonId, 'browsers', 'browser')}
       {...(onNavigate === undefined ? {} : { onNavigate })}
       saving={saving}
       error={error}

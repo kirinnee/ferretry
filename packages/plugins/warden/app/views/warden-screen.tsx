@@ -3,20 +3,22 @@
  * bound to its own daemon's client, so nothing read from one is shown or acted on through another.
  */
 
+import { deviceControls, useDaemonClients } from '@ferretry/app';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { useMemo } from 'react';
 import { WardenOverviewSurface } from '../features/warden/warden-overview-surface.tsx';
 import { WardenTotalsSurface } from '../features/warden/warden-totals-surface.tsx';
+import { useFerretsOf } from '../hooks/use-ferrets-of.ts';
 import { useWardenDaemonScope } from '../hooks/use-warden-daemon-scope.ts';
-import { WardenClientContext } from '../lib/warden-client-context.tsx';
-import { wardenClientFactory } from '../lib/warden-clients.ts';
+import { useCurrentDaemon, useWardenMachines } from '../hooks/use-warden-daemons.ts';
+import { DaemonReachContext, WardenClientContext } from '../lib/warden-client-context.tsx';
+import { daemonReach, wardenClientFactory } from '../lib/warden-clients.ts';
 import { WardenPage, type WardenSurfaceProps } from '../lib/warden-page.tsx';
-import { useCurrentDaemon, useDeviceControls, useFerretsOf, useWardenMachines } from '../shell.ts';
 import { useRouter } from '../ui.ts';
 
 function WardenOverviewRoute({ connection, machineName }: WardenSurfaceProps) {
   const { navigate } = useRouter();
-  const ferrets = useFerretsOf(connection.daemonId);
+  const ferrets = useFerretsOf(connection);
   return (
     <WardenOverviewSurface
       connection={connection}
@@ -31,20 +33,24 @@ const WARDEN_SLOTS = { Overview: WardenOverviewRoute, Totals: WardenTotalsSurfac
 
 export function createWardenScreen(client: PluginClient) {
   return function WardenScreen(_props: ScreenProps) {
-    const connection = useCurrentDaemon();
+    const connection = useCurrentDaemon(client);
     const machines = useWardenMachines();
-    const { remembered, remember } = useWardenDaemonScope(useDeviceControls());
-    const factory = useMemo(() => wardenClientFactory(connection, client), [connection]);
+    const others = useDaemonClients('warden');
+    const { remembered, remember } = useWardenDaemonScope(deviceControls());
+    const reach = useMemo(() => daemonReach(connection, client, others), [connection, others]);
+    const factory = useMemo(() => wardenClientFactory(reach), [reach]);
     return (
-      <WardenClientContext.Provider value={factory}>
-        <WardenPage
-          connection={connection}
-          slots={WARDEN_SLOTS}
-          machines={machines}
-          remembered={remembered}
-          onRemember={remember}
-        />
-      </WardenClientContext.Provider>
+      <DaemonReachContext.Provider value={reach}>
+        <WardenClientContext.Provider value={factory}>
+          <WardenPage
+            connection={connection}
+            slots={WARDEN_SLOTS}
+            machines={machines}
+            remembered={remembered}
+            onRemember={remember}
+          />
+        </WardenClientContext.Provider>
+      </DaemonReachContext.Provider>
     );
   };
 }

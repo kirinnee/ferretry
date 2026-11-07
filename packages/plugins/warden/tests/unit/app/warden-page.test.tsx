@@ -1,9 +1,8 @@
-import '../../support/app/shell-parts.ts';
 import { describe, expect, it } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 
-import { type DaemonConnection, daemonConnection } from '../../../app/shell.ts';
+import { type DaemonConnection, daemonConnection } from '../../../app/lib/machine.ts';
 import { WardenPage, type WardenSurfaceProps } from '../../../app/lib/warden-page.tsx';
 import { interact, type Mounted, mount } from '@ferretry/app/testing';
 
@@ -12,8 +11,6 @@ describe('WardenPage', () => {
     // Arrange
     const connection = daemonConnection({
       daemonId: 'daemon-a',
-      baseUrl: 'https://a.example.test',
-      deviceId: 'device-secret',
     });
     const received: DaemonConnection[] = [];
     const Overview = ({ connection: actual }: WardenSurfaceProps) => {
@@ -36,8 +33,8 @@ describe('WardenPage', () => {
 });
 
 describe('WardenPage across daemons', () => {
-  const ec2 = daemonConnection({ daemonId: 'daemon-ec2', baseUrl: 'https://ec2.example.test', deviceId: 'tok-a' });
-  const mbp = daemonConnection({ daemonId: 'daemon-mbp', baseUrl: 'https://mbp.example.test', deviceId: 'tok-b' });
+  const ec2 = daemonConnection({ daemonId: 'daemon-ec2' });
+  const mbp = daemonConnection({ daemonId: 'daemon-mbp' });
   const machines = [
     { connection: ec2, name: 'Liftoff EC2' },
     { connection: mbp, name: 'Liftoff MBP' },

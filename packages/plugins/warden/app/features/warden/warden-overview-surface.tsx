@@ -16,7 +16,9 @@ import { useCallback, useState } from 'react';
 import { useWardenPoll, type WardenPollOptions } from '../../hooks/use-warden-poll.ts';
 import { useWardenClientFactory, type WardenClientFactory } from '../../lib/warden-client-context.tsx';
 import type { WardenClient } from '../../lib/warden-client.ts';
-import { type DaemonConnection, daemonSettingsPath, type FerretView, shellClock } from '../../shell.ts';
+import { daemonSettingsHref } from '@ferretry/app';
+import type { FerretView } from '../../lib/callsign.ts';
+import type { DaemonConnection } from '../../lib/machine.ts';
 import type { WardenLeaveDuration } from '../../wire.ts';
 import type { WardenReportTarget } from './warden-overview-model.ts';
 import { type WardenNotice, WardenOverview } from './warden-overview.tsx';
@@ -38,7 +40,7 @@ export interface WardenOverviewSurfaceProps {
 
 /** Settings › Warden for one daemon. */
 export const wardenSettingsHref = (connection: DaemonConnection): string =>
-  `${daemonSettingsPath(connection.daemonId)}#warden`;
+  daemonSettingsHref(connection.daemonId, 'warden');
 
 const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
@@ -52,7 +54,7 @@ function WardenOverviewBody({
   ferrets = null,
   onNavigate,
   createClient: injected,
-  now = shellClock.nowMs,
+  now = Date.now,
   pollOptions = {},
 }: WardenOverviewSurfaceProps) {
   const routed = useWardenClientFactory();

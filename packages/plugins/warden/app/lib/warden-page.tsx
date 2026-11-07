@@ -1,7 +1,7 @@
 import type { ComponentType } from 'react';
 import { WardenDaemonFilter } from '../features/warden/warden-daemon-filter.tsx';
 import { resolveWardenScope, type WardenMachine } from '../features/warden/warden-daemon-scope.ts';
-import type { DaemonConnection } from '../shell.ts';
+import type { DaemonConnection } from './machine.ts';
 
 export interface WardenSurfaceProps {
   readonly connection: DaemonConnection;

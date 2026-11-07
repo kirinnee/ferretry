@@ -15,16 +15,11 @@
 import type { WardenInvestigateRequest, WardenInvestigateView, WardenStatusView } from '../../wire.ts';
 import { Shield } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useWardenClientFactory, type WardenClientFactory } from '../../lib/warden-client-context.tsx';
+import type { CoreActionContext, FerretActionContribution, FerretActionFormHost } from '../../lib/ferret-actions.ts';
 import { failureMessage, FormFailure, FormField, FormFoot } from '../../lib/form-parts.tsx';
-import {
-  type CoreActionContext,
-  type DaemonConnection,
-  type FerretActionContribution,
-  type FerretActionFormHost,
-  type GrantsView,
-  readGrants,
-} from '../../shell.ts';
+import { type GrantsView, readGrants } from '../../lib/grants.ts';
+import type { DaemonConnection } from '../../lib/machine.ts';
+import { useDaemonReach, useWardenClientFactory, type WardenClientFactory } from '../../lib/warden-client-context.tsx';
 import {
   ASK_WARDEN_FOCI,
   ASK_WARDEN_NOTES_MAX,
@@ -188,8 +183,13 @@ const NONE: readonly FerretActionContribution<CoreActionContext>[] = [];
 export function useAskWardenActions(
   connection: DaemonConnection,
   createClient?: AskWardenClientFactory,
-  grantsOf: (connection: DaemonConnection) => Promise<GrantsView> = readGrants,
+  injectedGrantsOf?: (connection: DaemonConnection) => Promise<GrantsView>,
 ): readonly FerretActionContribution<CoreActionContext>[] {
+  const reach = useDaemonReach();
+  const grantsOf = useMemo(
+    () => injectedGrantsOf ?? (async (connection: DaemonConnection) => await readGrants(await reach(connection))),
+    [injectedGrantsOf, reach],
+  );
   const routedClient = useWardenClientFactory();
   const factory: AskWardenClientFactory = createClient ?? routedClient;
   const daemonId = connection.daemonId;

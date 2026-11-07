@@ -1,6 +1,6 @@
 /** One login as the account picker offers it: the shell's `PickerAccount`, filled with what the Warden form reads. */
 
-import type { PickerAccount } from '../../../app/shell.ts';
+import type { PickerAccount } from '../../../app/lib/account-picker.ts';
 
 export const pickerAccount = (overrides: Partial<PickerAccount> & { wrapper: string }): PickerAccount => ({
   id: `rt-${overrides.wrapper}`,

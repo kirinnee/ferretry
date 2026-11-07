@@ -5,7 +5,7 @@
 
 import type { WardenStatusView } from '../../wire.ts';
 import { useState } from 'react';
-import { AnalyticsMetricChart } from '../../shell.ts';
+import { AnalyticsMetricChart } from '@ferretry/app/ui';
 import {
   ACTION_CHART_DAYS,
   type ActionFilterKey,

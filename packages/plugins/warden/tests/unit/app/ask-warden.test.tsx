@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { WardenInvestigateRequest, WardenInvestigateView, WardenStatusView } from '../../../app/wire.ts';
-import type { CoreActionContext, FerretActionFormHost, GrantsView } from '../../../app/shell.ts';
+import type { CoreActionContext, FerretActionFormHost } from '../../../app/lib/ferret-actions.ts';
+import type { GrantsView } from '../../../app/lib/grants.ts';
 import { fakeWardenClient } from '../../support/app/clients.ts';
 import {
   ASK_WARDEN_ACTION_ID,
@@ -10,15 +11,14 @@ import {
   askWardenContribution,
   useAskWardenActions,
 } from '../../../app/features/warden/ask-warden.tsx';
-import { type DaemonConnection, daemonConnection } from '../../../app/shell.ts';
+import { type DaemonConnection, daemonConnection } from '../../../app/lib/machine.ts';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { ferretView } from '../../support/app/ferrets.ts';
 import { wardenConfig, wardenStatus } from '../../support/app/warden.ts';
 
 const ALPHA = `fy_daemon_${'a'.repeat(43)}`;
 const BETA = `fy_daemon_${'b'.repeat(43)}`;
-const connection = (id: string): DaemonConnection =>
-  daemonConnection({ daemonId: id, baseUrl: 'https://workstation.example.test', deviceId: `token-${id}` });
+const connection = (id: string): DaemonConnection => daemonConnection({ daemonId: id });
 
 let view: Mounted | null = null;
 afterEach(async () => {

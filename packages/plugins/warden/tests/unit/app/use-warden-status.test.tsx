@@ -1,17 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import type { WardenStatusView } from '../../../app/wire.ts';
 import { useWardenStatus } from '../../../app/hooks/use-warden-status.ts';
-import { type DaemonConnection, daemonConnection } from '../../../app/shell.ts';
+import { type DaemonConnection, daemonConnection } from '../../../app/lib/machine.ts';
 import { interact, mount } from '@ferretry/app/testing';
 import { type ManualEvery, manualEvery } from '../../support/app/manual-every.ts';
 import { wardenStatus } from '../../support/app/warden.ts';
 
 const alpha = daemonConnection({
   daemonId: 'daemon-alpha',
-  baseUrl: 'https://alpha.invalid',
-  deviceId: 'alpha-token',
 });
-const beta = daemonConnection({ daemonId: 'daemon-beta', baseUrl: 'https://beta.invalid', deviceId: 'beta-token' });
+const beta = daemonConnection({ daemonId: 'daemon-beta' });
 
 interface Probe {
   readonly daemon: DaemonConnection;

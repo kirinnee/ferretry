@@ -1,6 +1,6 @@
 /** A ferret as the shell lists it (`FerretView`): its config and its state, overridable field by field. */
 
-import type { FerretView } from '../../../app/shell.ts';
+import type { FerretView } from '../../../app/lib/callsign.ts';
 
 export interface FerretFixtureOverrides {
   readonly config?: Record<string, unknown>;

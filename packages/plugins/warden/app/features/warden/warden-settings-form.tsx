@@ -32,8 +32,8 @@ import {
 import { ArrowDown, ArrowUp, ExternalLink } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
 
-import { ModelSelect } from '../../shell.ts';
-import type { PickerAccount } from '../../shell.ts';
+import { ModelSelect } from '@ferretry/app/ui';
+import type { PickerAccount } from '../../lib/account-picker.ts';
 import { cn } from '../../ui.ts';
 import { Badge } from '../../ui.ts';
 import { RouteLink } from '../../ui.ts';

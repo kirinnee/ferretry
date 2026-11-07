@@ -21,7 +21,7 @@ import {
   type WardenEffort,
   type WardenMayActAlone,
 } from '../../wire.ts';
-import type { PickerAccount } from '../../shell.ts';
+import type { PickerAccount } from '../../lib/account-picker.ts';
 
 /** Whether the Jev key is in this machine's secret store. `unknown` when that could not be read. */
 type JevKeyState = 'set' | 'missing' | 'unknown';

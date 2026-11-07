@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { GrantsView } from '../../../app/shell.ts';
+import type { GrantsView } from '../../../app/lib/grants.ts';
 import {
   ASK_WARDEN_FOCI,
   ASK_WARDEN_NOTES_MAX,
