@@ -1,6 +1,6 @@
 import { beforeAll, describe, it } from 'bun:test';
 import type { CatalogInstallTarget, SharedCatalogItem } from '../../../daemon/lib/boundary.ts';
-import type { DaemonIdentity } from '../../../daemon/adapters/relay.ts';
+import type { DaemonIdentity } from '../../../daemon/lib/relay-wire/index.ts';
 import should from 'should';
 import { mayHoldSecret } from '../../../daemon/lib/catalog-installs/conservative-changes.ts';
 import { mcpItem, newIdentity, skillItem } from '../../support/catalog-fixtures.ts';

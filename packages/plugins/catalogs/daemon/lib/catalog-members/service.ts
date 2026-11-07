@@ -48,7 +48,7 @@ import {
   shareLinkUrl,
 } from '../boundary.ts';
 import { DaemonIdSchema } from '../boundary.ts';
-import type { RelayCrypto } from '../../adapters/relay.ts';
+import type { RelayCrypto } from '../relay-wire/index.ts';
 import { secretsMatch } from '../secrets-match.ts';
 import {
   admitJoin,

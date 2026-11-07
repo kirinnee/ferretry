@@ -64,7 +64,7 @@ import {
   signCatalogItemVersions,
   signCatalogManifest,
   verifySharedCatalogFile,
-} from '../../adapters/relay.ts';
+} from '../relay-wire/index.ts';
 import {
   bindingOf,
   canBeMadeCurrent,

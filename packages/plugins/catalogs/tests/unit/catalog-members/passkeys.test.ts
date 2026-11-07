@@ -4,7 +4,7 @@ import {
   memberPasskeyName,
   PASSKEY_CHALLENGE_TTL_SECONDS,
 } from '../../../daemon/lib/boundary.ts';
-import { toBase64Url } from '../../../daemon/adapters/relay.ts';
+import { toBase64Url } from '../../../daemon/lib/relay-wire/index.ts';
 import should from 'should';
 import type { AuditEntry } from '../../../daemon/lib/audit.ts';
 import { MEMBER_PASSKEY_REFUSALS, MemberPasskeyService } from '../../../daemon/lib/catalog-members/passkeys.ts';
