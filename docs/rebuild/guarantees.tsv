@@ -202,14 +202,14 @@ P20	kept	gate	-	behaviour as written	pairing	P20
 P21	kept	access	-	behaviour as written	pairing	P21
 P22	kept	access	kernel	behaviour as written	pairing	P22
 P23	kept	connections	-	`/v1/rendezvous/<daemonId>/client`	pairing	P23
-P24	kept	access	kernel	behaviour as written	pairing	P24
+P24	kept	connections	access,kernel	behaviour as written	pairing	P24
 P25	kept	access	kernel	behaviour as written	pairing	P25
 P26	kept	access	kernel	behaviour as written	pairing	P26
 P27	kept	access	kernel	behaviour as written	pairing	P27
-P28	kept	access	kernel	behaviour as written	pairing	P28
-P29	kept	access	kernel	behaviour as written	pairing	P29
-P30	kept	access	kernel	`PairingUnreachableError` in `packages/pwa/src/lib/pairing-unreachable.ts`	pairing	P30
-P31	kept	access	kernel	behaviour as written	pairing	P31
+P28	kept	app-shell	access,kernel	behaviour as written	pairing	P28
+P29	kept	connections	access,kernel	behaviour as written	pairing	P29
+P30	kept	connections	access,kernel	`PairingUnreachableError` in `packages/pwa/src/lib/pairing-unreachable.ts`	pairing	P30
+P31	kept	connections	access,kernel	behaviour as written	pairing	P31
 P32	kept	access	kernel	relay-protocol.md §10, §13	pairing	P32
 P33	kept	access	kernel	behaviour as written	pairing	P33
 P34	kept	access	-	`carriers`	pairing	P34
@@ -313,7 +313,7 @@ P131	kept	access	-	`fy passkey window <device>`; `POST /v1/passkeys/registration
 P132	kept	access	-	behaviour as written	pairing	P132
 P133	kept	access	-	behaviour as written	pairing	P133
 P134	kept	access	-	behaviour as written	pairing	P134
-P135	kept	access	kernel	behaviour as written	pairing	P135
+P135	kept	connections	access,kernel	behaviour as written	pairing	P135
 I1	kept	vault	-	behaviour as written	input-requests	I1
 I2	kept	vault	-	behaviour as written	input-requests	I2
 I3	kept	vault	terminals	quarantine	input-requests	I3
@@ -974,16 +974,16 @@ R234	kept	kernel	-	behaviour as written	relay-protocol	R234
 R235	kept	kernel	-	behaviour as written	relay-protocol	R235
 R236	kept	access	kernel	behaviour as written	relay-protocol	R236
 R237	kept	access	gate	behaviour as written	relay-protocol	R237
-R238	kept	access	kernel	behaviour as written	relay-protocol	R238
+R238	kept	kernel	access	behaviour as written	relay-protocol	R238
 R239	kept	access	gate	behaviour as written	relay-protocol	R239
 R240	kept	access	gate	behaviour as written	relay-protocol	R240
-R241	kept	access	gate	`renew` / `renewed`	relay-protocol	R241
+R241	kept	kernel	access,gate	`renew` / `renewed`	relay-protocol	R241
 R242	kept	access	gate	behaviour as written	relay-protocol	R242
 R243	kept	access	gate	behaviour as written	relay-protocol	R243
-R244	kept	access	gate	behaviour as written	relay-protocol	R244
-R245	kept	access	gate	behaviour as written	relay-protocol	R245
+R244	kept	kernel	access,gate	behaviour as written	relay-protocol	R244
+R245	kept	kernel	access,gate	behaviour as written	relay-protocol	R245
 R246	kept	access	gate	behaviour as written	relay-protocol	R246
-R247	kept	access	gate	`FYD_TEST_TIMINGS` (`leaseSeconds`, `renewLeadSeconds`, `maxSessionSeconds`, `idleDaySeconds`)	relay-protocol	R247
+R247	kept	kernel	access,gate	`FYD_TEST_TIMINGS` (`leaseSeconds`, `renewLeadSeconds`, `maxSessionSeconds`, `idleDaySeconds`)	relay-protocol	R247
 R248	kept	access	gate	`deviceKeyRotationDays`, `POST /v1/unlock`, `POST /v1/step-up`	relay-protocol	R248
 R249	kept	access	gate	behaviour as written	relay-protocol	R249
 R250	kept	access	gate	behaviour as written	relay-protocol	R250
@@ -1043,7 +1043,7 @@ R536	kept	kernel	-	behaviour as written	relay-protocol	R536
 R537	kept	kernel	-	behaviour as written	relay-protocol	R537
 R538	kept	kernel	-	behaviour as written	relay-protocol	R538
 R539	kept	kernel	-	socket route table	relay-protocol	R539
-R540	kept	access	gate	behaviour as written	relay-protocol	R540
+R540	kept	kernel	access,gate	behaviour as written	relay-protocol	R540
 R541	kept	kernel	-	behaviour as written	relay-protocol	R541
 R542	kept	kernel	-	behaviour as written	relay-protocol	R542
 R543	kept	kernel	-	behaviour as written	relay-protocol	R543
@@ -1073,19 +1073,19 @@ R566	kept	terminals	-	`adapters/tmux/control-tmux-process.ts`	relay-protocol	R56
 R567	kept	kernel	-	`openStream`	relay-protocol	R567
 R568	kept	kernel	-	behaviour as written	relay-protocol	R568
 R569	split	access	kernel	-	relay-protocol	R569
-R570	kept	access	kernel	behaviour as written	relay-protocol	R570
+R570	kept	connections	access,kernel	behaviour as written	relay-protocol	R570
 R571	kept	access	kernel	behaviour as written	relay-protocol	R571
-R572	kept	access	kernel	behaviour as written	relay-protocol	R572
+R572	kept	kernel	access	behaviour as written	relay-protocol	R572
 R573	kept	access	kernel	behaviour as written	relay-protocol	R573
 R574	kept	access	kernel	`PairingResponseSchema`	relay-protocol	R574
-R575	kept	access	kernel	behaviour as written	relay-protocol	R575
+R575	kept	app-shell	access,kernel	behaviour as written	relay-protocol	R575
 R576	kept	access	kernel	behaviour as written	relay-protocol	R576
 R577	kept	access	kernel	`ApiRequest`	relay-protocol	R577
 R578	kept	access	kernel	behaviour as written	relay-protocol	R578
 R579	kept	access	kernel	behaviour as written	relay-protocol	R579
 R580	kept	access	kernel	`HOSTED_RELAY_DIRECTORY_ORIGIN`	relay-protocol	R580
 R581	kept	connections	-	behaviour as written	relay-protocol	R581
-R582	kept	access	kernel	behaviour as written	relay-protocol	R582
+R582	kept	connections	access,kernel	behaviour as written	relay-protocol	R582
 R583	kept	access	kernel	behaviour as written	relay-protocol	R583
 R584	kept	access	kernel	`paired.response.carriers`	relay-protocol	R584
 R585	kept	access	kernel	`PAIRING_FRAGMENT_PATTERN`	relay-protocol	R585
@@ -1136,7 +1136,7 @@ R629	kept	kernel	-	behaviour as written	relay-protocol	R629
 R630	kept	connections	-	behaviour as written	relay-protocol	R630
 R631	split	connections	-	-	relay-protocol	R631
 R632	kept	connections	-	behaviour as written	relay-protocol	R632
-R633	kept	access	connections	behaviour as written	relay-protocol	R633
+R633	kept	connections	access	behaviour as written	relay-protocol	R633
 R634	split	connections	-	-	relay-protocol	R634
 R635	kept	connections	-	behaviour as written	relay-protocol	R635
 R636	kept	connections	-	behaviour as written	relay-protocol	R636
