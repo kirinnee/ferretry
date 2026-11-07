@@ -60,8 +60,8 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('voice', { summary: 'dictation: the speed-up keys and whether each works' }),
-      verb('voice enhance', { summary: 'clean up one dictated transcript with a hosted model' }),
+      verb('voice', { summary: 'clean up dictated text through the enhancement provider (same as voice enhance)' }),
+      verb('voice enhance', { summary: 'clean up dictated text — punctuation, casing and proper nouns' }),
     ],
   },
 
