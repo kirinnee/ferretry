@@ -2,14 +2,14 @@ import { describe, test } from 'bun:test';
 import should from 'should';
 import {
   FY_RENDER_IMAGE_MIMES,
+  FY_RENDER_LIMITS,
   FY_RENDER_MEDIA_TYPES,
   FY_RENDER_TYPES,
   fyRenderHtmlRunsScript,
   parseFyRenderHeaders,
   validateHtml,
   validateSvg,
-} from '../../../daemon/renders/lib/fy-render.ts';
-import { FY_RENDER_LIMITS } from '../../../daemon/renders/lib/fy-render-caps.ts';
+} from '../../../contract/index.ts';
 
 /**
  * The grammar core, read as a grammar. Every assertion here is about what the

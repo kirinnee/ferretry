@@ -396,6 +396,25 @@ describe('source scans', () => {
     ])
       expect(found).toContain(what);
   });
+  test('banned-globals in a browser app half: timers and the clock are allowed, the rest stays refused (DECISIONS-2 #4)', async () => {
+    const f = ws([
+      {
+        id: 'alpha',
+        files: {
+          'app/timers.ts':
+            'export const a = Date.now(); export const b = new Date(); setTimeout(() => {}, 1); setInterval(() => {}, 1);',
+          'app/network.ts': 'export const c = fetch("https://fixture.invalid");',
+          'app/process.ts': 'export const d = process.env.HOME;',
+          'daemon/timers.ts': 'export const a = Date.now(); setTimeout(() => {}, 1);',
+        },
+      },
+    ]);
+    const found = messages(await run(bannedGlobals, f));
+    expect(found).not.toContain('alpha/app/timers.ts');
+    expect(found).toContain('alpha/app/network.ts');
+    expect(found).toContain('alpha/app/process.ts');
+    expect(found).toContain('alpha/daemon/timers.ts');
+  });
   test('banned-globals clean: kernel ports, a fetch property, a typed Date', () => {
     const clean = file(
       'clean.ts',

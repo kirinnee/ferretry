@@ -1,4 +1,4 @@
-import { FY_RENDER_LIMITS } from './fy-render-caps.ts';
+import { FY_RENDER_LIMITS } from '../../../contract/index.ts';
 
 /**
  * The saved picture's numbers that the contract does not carry (today's `renders.ts`): the id grammar's length bounds

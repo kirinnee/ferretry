@@ -1,0 +1,952 @@
+/* ---- fy-render -------------------------------------------------------------
+   An illustration that reads as part of the message, not as a card inside it.
+
+   The owner's decision (`docs/fy-render.md`, "Inline by default"): no border,
+   no surface, no caption and no status line. A picture is sized to the message
+   column and bounded in height; an `html` page is frameless and painted with the
+   column's own background; a PDF is the same file row an attachment is. The
+   only chrome left is the corner tool cluster below, and it is invisible until
+   a reader hovers, focuses or long-presses. */
+.fy-render {
+  position: relative;
+  min-width: 0;
+  margin: 0.7em 0;
+}
+
+/* The stage is the positioning box for the corner tools and the off-stage
+   compile frame. It adds nothing visible of its own. */
+.fy-render-stage {
+  position: relative;
+  min-width: 0;
+}
+
+/* BOUNDED BOTH WAYS. The column's measure in width and the same height ceiling
+   `.kt-rich-file-image` uses, in DYNAMIC units: on iOS Safari `vh` resolves
+   against the large viewport, so a `60vh` picture took more than 60% of what the
+   reader could actually see. `contain` keeps the drawing's own proportions. */
+.fy-render-image {
+  display: block;
+  max-width: 100%;
+  max-height: min(60dvh, 720px);
+  height: auto;
+  object-fit: contain;
+}
+
+/* A PICTURE IN A VIEWPORT (`fy-render-viewport.tsx`): a compiled diagram, or an authored SVG that declares a
+   size. The viewport is the column wide; its pan box is as tall as the picture at its resting scale, up to 60dvh
+   (the script sets the height — it knows the picture's proportions), so the WHOLE picture is visible at rest and
+   nothing is clipped. The image inside is sized and offset by script and is clipped by the box, never by the page.
+   `touch-action` is set by script from what can actually be panned, so a picture that is wholly visible leaves
+   every touch to the transcript's scroll. */
+.fy-render-viewport {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  padding-top: calc(max(26px, var(--target-floor)) + 8px);
+}
+
+/* NO `overscroll-behavior` HERE, deliberately. This box is `overflow: hidden`, which makes it a scroll container
+   that can never scroll, and `contain` on such a box stops a wheel or a touch scroll that starts over the
+   picture from chaining on to the transcript — the page then stops scrolling whenever the pointer is on a diagram. */
+.fy-render-pan {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.fy-render-pan[data-fy-render-pannable='true'] {
+  cursor: grab;
+}
+
+.fy-render-pan[data-fy-render-dragging='true'] {
+  cursor: grabbing;
+}
+
+.fy-render-pan:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Drawn at the size the script computed, so neither the column's measure nor the height ceiling of a plain
+   picture applies. Offset by transform only: the image is RESIZED to zoom, so the vector is re-rasterised sharp. */
+/* THE PLANE the picture moves on: clipped to the box, and faded at each edge that has more picture beyond it, so a
+   reader can see it drags. A mask on the plane rather than the box, so the focus ring is never faded. */
+.fy-render-plane {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  -webkit-mask-image:
+    linear-gradient(
+      to right,
+      transparent 0,
+      currentcolor calc(var(--fy-fade-l, 0) * 28px),
+      currentcolor calc(100% - var(--fy-fade-r, 0) * 28px),
+      transparent 100%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      currentcolor calc(var(--fy-fade-t, 0) * 28px),
+      currentcolor calc(100% - var(--fy-fade-b, 0) * 28px),
+      transparent 100%
+    );
+  mask-image:
+    linear-gradient(
+      to right,
+      transparent 0,
+      currentcolor calc(var(--fy-fade-l, 0) * 28px),
+      currentcolor calc(100% - var(--fy-fade-r, 0) * 28px),
+      transparent 100%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      currentcolor calc(var(--fy-fade-t, 0) * 28px),
+      currentcolor calc(100% - var(--fy-fade-b, 0) * 28px),
+      transparent 100%
+    );
+}
+
+.fy-render-pan .fy-render-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  max-height: none;
+  pointer-events: none;
+}
+
+/* A button or key zoom eases; a drag or a pinch never does, and reduced motion removes it. */
+.fy-render-pan[data-fy-render-dragging='false'] .fy-render-image {
+  transition:
+    width 140ms ease,
+    height 140ms ease,
+    transform 140ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fy-render-pan[data-fy-render-dragging='false'] .fy-render-image {
+    transition: none;
+  }
+}
+
+/* ZOOM / RESET: the same quiet cluster as the corner tools, in the strip the viewport reserves ABOVE the drawing
+   (its padding-top, as tall as the tools), top left, level with the tools at top right — so no control ever sits on
+   the picture. Revealed the same ways — hover, focus within, a long press — and always while the picture is
+   zoomed, and always where there is no hover to find them with. */
+.fy-render-zoom {
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  left: 4px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.fy-render:hover .fy-render-zoom,
+.fy-render:focus-within .fy-render-zoom,
+.fy-render[data-fy-render-tools='shown'] .fy-render-zoom,
+.fy-render-viewport[data-fy-render-zoomed='true'] .fy-render-zoom {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .fy-render-zoom {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fy-render-zoom {
+    transition: none;
+  }
+}
+
+.fy-render-zoom .fy-render-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* AN INVISIBLE PLANE where a picture, a player or a first diagram will be, so the
+   prose under it does not jump twice. It paints nothing: a grey box that later
+   "renders" is exactly what made a block look bolted on. Its height is the one the
+   block last drew at when the block has drawn before (set inline), else this. */
+.fy-render-placeholder {
+  height: 160px;
+  background: transparent;
+}
+
+/* OFF STAGE: Mermaid compiles here and hands back an image. Hidden rather than
+   absent, because Mermaid measures text and needs a laid-out document; placed
+   over the stage so it costs no layout of its own. */
+.fy-render-offstage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ---- the corner tools --------------------------------------------------------
+   Source, Fullscreen and — for Lottie — Play/Pause, as small icons in the top
+   corner. Invisible until the figure is hovered or something inside it holds
+   focus, so a keyboard reader who tabs to one sees it; a long press on touch
+   pins them (`data-fy-render-tools='shown'`), as does a paused animation, so
+   reduced motion never hides Play.
+
+   NOT `display: none` when hidden: the buttons stay in the tab order and in the
+   accessibility tree, and appear the moment one is focused. */
+.fy-render-tools {
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.fy-render:hover .fy-render-tools,
+.fy-render:focus-within .fy-render-tools,
+.fy-render[data-fy-render-tools='shown'] .fy-render-tools {
+  opacity: 1;
+}
+
+/* THE TOUCH FLOOR IS POINTER-DERIVED. `--target-floor` is 0 on a fine pointer and
+   44px on a coarse one, so the icon stays small on desktop and becomes a real
+   thumb target on a phone without a second number living here. */
+.fy-render-tool {
+  display: inline-flex;
+  min-width: max(26px, var(--target-floor));
+  min-height: max(26px, var(--target-floor));
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-soft);
+  cursor: pointer;
+}
+
+.fy-render-tool:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.fy-render-tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fy-render-tools {
+    transition: none;
+  }
+}
+
+/* THE SOURCE PANEL is the ordinary fenced code block (`.md pre`), capped so one
+   long payload cannot push the rest of the message off screen. */
+.fy-render-source {
+  max-height: 50dvh;
+  overflow-y: auto;
+}
+
+.fy-render-source > pre {
+  margin: 0.4em 0 0;
+}
+
+.fy-render-truncated {
+  margin: 0.2em 0 0;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+}
+
+/* ---- quiet notes -------------------------------------------------------------
+   The two non-picture states: a frame that reached its permitted life, and the
+   retry under a fallen-back block. One muted line, the app's smallest type. */
+.fy-render-stopped {
+  margin: 0;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+}
+
+.fy-render-quiet-action {
+  display: inline-flex;
+  min-height: max(24px, var(--target-floor));
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-soft);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.fy-render-quiet-action:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+.fy-render--fallback > pre {
+  margin-bottom: 0.2em;
+}
+
+/* ---- html fragments ----------------------------------------------------------
+   A static fragment lives in a closed shadow root on this host (`fy-render-fragment.tsx`), so its
+   own styles reach nothing outside. The host adds the containment the shadow boundary does not give:
+   `contain: layout paint` makes it the containing block of every positioned descendant, so a
+   `position: fixed` overlay is fixed to the fragment and clipped by it rather than covering the app,
+   and the height is bounded like any other picture in the column. Custom properties still inherit,
+   which is how the theme tokens reach inside. */
+.fy-render-fragment {
+  position: relative;
+  display: block;
+  max-height: min(70dvh, 900px);
+  overflow: auto;
+  contain: layout paint;
+}
+
+/* ---- frames ------------------------------------------------------------------
+   THE LIBRARY FRAME is sized by this stylesheet and never by a message from
+   inside it: a frame that could ask the page for more room could ask for all
+   of it. Lottie draws into it; Mermaid compiles in it off stage.
+
+   NOT POINTER-FOCUSABLE (the other half is `tabIndex={-1}` in
+   `fy-render-sandbox.tsx`): the frame is a separate document, so focus resting
+   in it would swallow the Escape that leaves fullscreen, and nothing in it is
+   interactive — Play/Pause is a parent button. */
+.fy-render-frame {
+  display: block;
+  width: 100%;
+  min-height: 12rem;
+  max-height: min(60dvh, 720px);
+  aspect-ratio: 16 / 10;
+  border: 0;
+  background: transparent;
+  color-scheme: normal;
+  pointer-events: none;
+}
+
+/* THE `html` FRAME IS THE OPPOSITE CASE. Its page IS the interaction, so it takes
+   the pointer and a tab stop. Frameless: no border, a transparent element, and
+   the page paints the column's own background (`FyRenderHtmlPaint`), so it reads
+   as part of the message. Its height is the page's own report, clamped by the
+   parent and applied inline; it stays invisible until the page has drawn, so no
+   unpainted plane flashes in the prose. */
+.fy-render-frame--html {
+  min-height: 2rem;
+  max-height: none;
+  aspect-ratio: auto;
+  height: 160px;
+  background: transparent;
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.fy-render-frame--html[data-fy-render-ready='true'] {
+  opacity: 1;
+}
+
+/* THE "INTERACTIVE" MARKER: one muted line above a page that runs, so a reader can tell it from a
+   picture. In the flow rather than over the page, because over it would sit on the page's own
+   controls. The app's smallest type, the softest ink. */
+.fy-render-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+  color: var(--fg-soft);
+  font-size: var(--text-xs, 11px);
+  letter-spacing: 0.02em;
+}
+
+/* A `src:` block's players take the column's measure and keep their own controls. */
+.fy-render-video {
+  display: block;
+  width: 100%;
+  max-height: min(60dvh, 720px);
+  border-radius: var(--radius-sm);
+  /* theme-literal-ok: a video letterboxes onto black in every theme */
+  background: #000;
+}
+
+.fy-render-audio {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+}
+
+/* ---- the file row ------------------------------------------------------------
+   A PDF, or a media file this reader cannot see: the shape an attachment card
+   has in this transcript — an icon, the name, one muted line of facts, and the
+   actions. Its own rules rather than utility classes, so it reads the same on
+   every surface that bundles this stylesheet. The actions are links inside an
+   `.md` column, so the prose link styling is taken back off them. */
+.fy-render-row {
+  display: flex;
+  min-width: 0;
+  max-width: min(100%, 480px);
+  align-items: flex-start;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.fy-render-row-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--fg-soft);
+}
+
+.fy-render-row-icon[data-tone='warn'] {
+  color: var(--warn);
+}
+
+.fy-render-row-body {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.fy-render-row-name {
+  overflow: hidden;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fy-render-row-meta {
+  color: var(--fg-soft);
+}
+
+.fy-render-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+  margin-left: -6px;
+}
+
+.md .fy-render-row-action,
+.fy-render-row-action {
+  display: inline-flex;
+  min-height: max(28px, var(--target-floor));
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  color: var(--fg-soft);
+  text-decoration: none;
+}
+
+.md .fy-render-row-action:hover,
+.fy-render-row-action:hover {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+/* ---- fullscreen ------------------------------------------------------------
+   An in-app overlay rather than the Fullscreen API: `Element.requestFullscreen`
+   is unavailable on iOS Safari, a first-class target for this PWA, and an
+   overlay keeps Escape and the focus trap in the app's single `useDialogFocus`
+   stack. `z-index: 50` is the app's dialog/sheet layer, matching its peers.
+
+   THE SELECTOR CARRIES BOTH CLASSES ON PURPOSE. `.kt-overlay` owns the visible
+   box and the bottom safe-area inset and is defined LATER, so a single-class
+   rule here would lose every property they share. `inset-inline: 0` stays,
+   because `kt-overlay` anchors only the vertical box. */
+.kt-overlay.fy-render-fullscreen {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  overflow: auto;
+  padding: var(--pad-panel);
+  padding-bottom: max(var(--pad-panel), var(--safe-bottom));
+  background: var(--bg);
+  inset-inline: 0;
+  overscroll-behavior: contain;
+}
+
+.fy-render-fullscreen > .fy-render {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  margin: 0;
+}
+
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-stage {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+/* FIT THE PLANE in both axes — the biggest possible view, which is what the
+   control promises. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-image,
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-video {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* A viewport in fullscreen is the whole plane: it stretches to the stage and the pan box fills it. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-viewport {
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The plane-filling rule above caps a plain picture at the box; a viewport's picture is sized by script. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-pan .fy-render-image {
+  max-width: none;
+  max-height: none;
+}
+
+.fy-render-fullscreen .fy-render-frame {
+  max-height: none;
+  height: 100%;
+}
+
+/* ---- maps ------------------------------------------------------------------
+   `type: map` (`fy-render-map.tsx`): a Leaflet map drawn in the page itself, its stylesheet loaded
+   with the engine. The edge is a hairline, because a map with no edge is a hole in the message.
+
+   `isolation: isolate` CONTAINS LEAFLET'S Z-INDEXES. Its panes run up to 1000, which would otherwise
+   climb over the app's own dialogs and sheets; inside this box they are private, and the corner tools
+   (z-index 1 in the stage) still sit above the map.
+
+   DARK IS A FILTER ON THE TILE PANE ONLY, never on the container: inverting and rotating the hue turns
+   the light tiles into a dark map with roads and water kept in their familiar colours, while pins,
+   routes and popups stay in the theme's own paint. Zero requests extra and no second tile source. */
+.fy-render-map {
+  position: relative;
+  overflow: hidden;
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  isolation: isolate;
+}
+
+.fy-render-map-canvas {
+  width: 100%;
+  height: min(52dvh, 420px);
+  min-height: 220px;
+  background: var(--surface-2);
+  font: inherit;
+}
+
+.fy-render-map[data-fy-render-map-mode='dark'] .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.75);
+}
+
+.fy-render-map .leaflet-container {
+  font-family: inherit;
+}
+
+/* Zoom: two real buttons of the corner-tool kind, always visible (a map has no hover-only chrome). */
+.fy-render-map-zoom {
+  position: absolute;
+  z-index: 800;
+  bottom: 22px;
+  left: 6px;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  box-shadow: var(--shadow-sm);
+}
+
+.fy-render-map-zoom .fy-render-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The attribution OpenStreetMap's licence requires: always on screen, linked, never covered. */
+.fy-render-map-attribution {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  z-index: 800;
+  right: 0;
+  bottom: 0;
+  padding: 1px 6px;
+  border-top-left-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  color: var(--fg-soft);
+  font-size: var(--text-2xs);
+  text-decoration: none;
+}
+
+.fy-render-map-attribution:hover,
+.fy-render-map-attribution:focus-visible {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+/* A PIN is a CSS teardrop (no image to fetch, nothing the CSP has to allow) tinted by --fy-map-pin. */
+.fy-map-pin-icon {
+  border: 0;
+  background: none;
+}
+
+.fy-map-pin {
+  position: relative;
+  width: 22px;
+  height: 30px;
+  --fy-map-pin: var(--accent);
+}
+
+.fy-map-pin-dot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border: var(--stroke-heavy) solid var(--bg);
+  border-radius: 50% 50% 50% 0;
+  background: var(--fy-map-pin);
+  box-shadow: var(--shadow-sm);
+  transform: rotate(-45deg);
+}
+
+.fy-map-pin-dot::after {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-dot);
+  background: var(--bg);
+  content: '';
+}
+
+.fy-map-pin-label {
+  position: absolute;
+  top: 1px;
+  left: 26px;
+  max-width: 180px;
+  overflow: hidden;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  box-shadow: var(--shadow-sm);
+  color: var(--fg);
+  font-size: var(--text-xs);
+  line-height: 1.3;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Popups take the theme, not Leaflet's white. The tip shares the surface so the two always match. */
+.fy-render-map .leaflet-popup-content-wrapper,
+.fy-render-map .leaflet-popup-tip {
+  background: var(--surface);
+  color: var(--fg);
+  box-shadow: var(--shadow-md);
+}
+
+.fy-render-map .leaflet-popup-content {
+  margin: 8px 10px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.fy-map-popup-title {
+  display: block;
+}
+
+.fy-map-popup-body {
+  margin: 2px 0 0;
+  color: var(--fg-soft);
+}
+
+/* A map that could not be drawn: one muted line, then the coordinates it could read. */
+.fy-render-map-listing > ul {
+  margin: 0.3em 0 0;
+  padding-left: 1.2em;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Fullscreen: the map is the plane. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-map {
+  display: flex;
+  flex: 1 1 auto;
+  align-self: stretch;
+  flex-direction: column;
+}
+
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-map-canvas {
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* ---- chart -----------------------------------------------------------------
+   `type: chart` (`fy-render-chart.tsx`): a Chart.js canvas drawn in the page in the theme's own colours,
+   with its title, legend and step controls as page text around it. No surface of its own — it sits in
+   the column like a picture does. */
+.fy-render-chart {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Every rule below is scoped under `.fy-render`: a chart sits in a transcript's `.md` column, whose
+   `.md ul`, `.md li`, `.md p` and `.md table` rules would otherwise outrank a bare class — measured: a
+   legend grew list bullets and the screen-reader table painted over the canvas. */
+
+/* The title, clear of the corner tools that appear over its end on hover. */
+.fy-render .fy-render-chart-title {
+  margin: 0;
+  padding-inline-end: 64px;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--leading-tight);
+}
+
+/* The plot owns its height; Chart.js fills it (`maintainAspectRatio: false`) at any column width. */
+.fy-render-chart-plot {
+  position: relative;
+  width: 100%;
+  height: min(46dvh, 320px);
+  min-height: 200px;
+}
+
+.fy-render-chart-plot > canvas {
+  display: block;
+  max-width: 100%;
+}
+
+.fy-render-chart-reset {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+}
+
+/* The legend: real toggle buttons, a swatch each. A hidden series keeps its place, struck through. */
+.fy-render .fy-render-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fy-render .fy-render-chart-legend > li {
+  margin: 0;
+}
+
+/* The numbers behind the picture, for a screen reader only: clipped to nothing, never `display: none`. */
+.fy-render .fy-render-chart-data {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
+}
+
+.fy-render-chart-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--target-floor);
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--fg-soft);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.fy-render-chart-key[aria-pressed='false'] {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+
+.fy-render-chart-key:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+.fy-render-chart-swatch {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: var(--radius-xs);
+  background: var(--muted);
+}
+
+.fy-render-chart-key[aria-pressed='false'] .fy-render-chart-swatch {
+  opacity: 0.35;
+}
+
+/* Step-through: Previous, a slider, Next, and the step's own name. */
+.fy-render-chart-frames {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.fy-render-chart-frames .fy-render-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.fy-render-chart-slider {
+  flex: 1 1 120px;
+  min-width: 0;
+  min-height: var(--target-floor);
+  accent-color: var(--accent);
+}
+
+.fy-render-chart-step {
+  flex: 1 0 100%;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+}
+
+.fy-render-chart-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 640px) {
+  .fy-render-chart-step {
+    flex: 0 1 auto;
+  }
+}
+
+/* Fullscreen: the plot takes the plane. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-chart {
+  flex: 1 1 auto;
+  align-self: stretch;
+}
+
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-chart-plot {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* ---- a card or a board, inline ------------------------------------------------
+   The real board card in a transcript column. The card brings its own look (`board.css`); this only
+   keeps it to the column and spaces the lanes of a mini board. */
+.fy-card-embed {
+  display: flex;
+  min-width: 0;
+  max-width: min(100%, 560px);
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: var(--gap-xs) 0;
+}
+
+.fy-card-embed-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The mini board's frame: one visible surface the lanes sit in, so a board reads as a board next to a lone card. */
+.fy-card-embed-board {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: var(--gap-xs);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+
+/* The Board's own lane, stacked: it is a column on the Board page, here it is a band the full width of the frame. */
+.fy-card-embed-board .fy-board-lane {
+  min-width: 0;
+  max-width: none;
+  flex: none;
+}
+/* The agenda body (`.fy-attn-sec--open .md ul`, 0,3,1) and chat prose (`.md ul/li/h3`) restyle every list and heading
+   inside them; each rule below is written to out-rank the strongest of those so the Board's own lane and card look wins. */
+.md .fy-card-embed ul.fy-board-lane__cards,
+.md .fy-card-embed ul.fy-card-embed-list,
+.fy-attn-sec--open .md .fy-card-embed ul.fy-board-lane__cards,
+.fy-attn-sec--open .md .fy-card-embed ul.fy-card-embed-list {
+  margin: 0;
+  padding: 0;
+  gap: var(--fy-board-list-gap);
+  list-style: none;
+}
+.md .fy-card-embed li.fy-board-card,
+.fy-attn-sec--open .md .fy-card-embed li.fy-board-card {
+  margin-top: 0;
+  margin-bottom: 0;
+  padding: var(--fy-board-card-padding);
+}
+.md .fy-card-embed h3.fy-board-lane__head {
+  margin: 0;
+  font: inherit;
+  letter-spacing: normal;
+}
+
+/* A link inside Markdown turns accent and underlined; a card on the Board is not that, and nor is one here. */
+.md .fy-card-embed .fy-board-card__main {
+  color: inherit;
+  text-decoration: none;
+}
+
+.fy-card-embed-more {
+  margin: 0;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+}
+
+.fy-card-embed-loading {
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  opacity: 0.6;
+}
