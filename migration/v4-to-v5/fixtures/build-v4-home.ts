@@ -131,6 +131,15 @@ async function run(
   }
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** One agenda item as v4's `agenda --json ls` lists it: its id and title only. */
+interface AgendaView {
+  readonly id: string;
+  readonly title: string;
+}
+
 function parseJson(text: string): unknown {
   try {
     return JSON.parse(text);
@@ -570,9 +579,11 @@ async function build(): Promise<void> {
     ];
   });
 
-  await step('raise agenda asks: one answered, one open, and a notice', false, async () => {
-    const add = async (kind: string, title: string, ask: string): Promise<string> => {
-      const text = await fyOk(
+  await step('raise agenda asks: one closed, one answered (held), one open, and a notice', false, async () => {
+    // `agenda --json add` prints the whole board, not the new item, so ids are read afterwards by title from v4's own
+    // view (`agenda --json ls`), and so is each item's state: the boot proof compares v5 with what v4 SHOWED.
+    const add = async (kind: string, title: string, ask: string): Promise<void> => {
+      await fyOk(
         [
           'agenda',
           '--json',
@@ -594,17 +605,47 @@ async function build(): Promise<void> {
           as: target,
         },
       );
-      const id = findString(parseJson(text), ['id']) ?? /\bA[1-9][0-9]*\b/u.exec(text)?.[0];
-      if (id === undefined) throw new Error('fy agenda add printed no item id');
-      return id.replace(/^[!&]/u, '');
     };
-    const answered = await add('yesno', 'Fixture answered ask', 'Fixture: ship it?');
-    const open = await add('yesno', 'Fixture open ask', 'Fixture: still open?');
+    const board = async (): Promise<{ readonly items: AgendaView[]; readonly resolved: AgendaView[] }> => {
+      const view = parseJson(await fyOk(['agenda', '--json', 'ls', '--session', target]));
+      const list = (key: string): AgendaView[] =>
+        isRecord(view) && Array.isArray(view[key])
+          ? (view[key] as unknown[]).flatMap(item =>
+              isRecord(item) && typeof item.id === 'string' && typeof item.title === 'string'
+                ? [{ id: item.id, title: item.title }]
+                : [],
+            )
+          : [];
+      return { items: list('items'), resolved: list('resolved') };
+    };
+    const idOf = async (title: string): Promise<string> => {
+      const found = (await board()).items.find(item => item.title === title);
+      if (found === undefined) throw new Error(`v4's agenda does not list "${title}" as open after adding it`);
+      return found.id;
+    };
+    const asks = [
+      { title: 'Fixture closed ask', ask: 'Fixture: still needed?' },
+      { title: 'Fixture answered ask', ask: 'Fixture: ship it?' },
+      { title: 'Fixture open ask', ask: 'Fixture: still open?' },
+    ] as const;
+    for (const each of asks) await add('yesno', each.title, each.ask);
+    const closed = await idOf('Fixture closed ask');
+    const answered = await idOf('Fixture answered ask');
+    // Closed by the owner with a reason and no answer: v4 resolves it at once.
+    await fyOk(['agenda', 'done', `!${closed}`, '--reason', 'fixture: no longer needed', '--session', target]);
+    // Answered yes: v4 HOLDS the answer for the ferret, and the item stays on its list until it is delivered.
     await fyOk(['agenda', 'done', `!${answered}`, '--yes', '--note', 'fixture answer', '--session', target]);
-    made.agenda = [
-      { id: answered, kind: 'yesno', state: 'answered', answer: 'yes' },
-      { id: open, kind: 'yesno', state: 'open' },
-    ];
+    const after = await board();
+    const recorded = asks.map(each => {
+      const resolved = after.resolved.find(item => item.title === each.title);
+      const open = after.items.find(item => item.title === each.title);
+      const item = resolved ?? open;
+      if (item === undefined) throw new Error(`v4's agenda lists "${each.title}" nowhere`);
+      return { id: item.id, title: each.title, kind: 'yesno', state: resolved === undefined ? 'open' : 'resolved' };
+    });
+    made.agenda = recorded;
+    if (!recorded.some(item => item.state === 'resolved'))
+      throw new Error("v4 resolved none of the fixture's asks, so the boot proof could not check a resolved one");
     await fyOk(['notify', 'fixture notice'], { as: target });
     made.notices = [{ ferret: target, summary: 'fixture notice' }];
   });

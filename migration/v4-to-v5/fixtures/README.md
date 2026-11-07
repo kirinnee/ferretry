@@ -13,7 +13,7 @@ API:
 - a project (a git repo), and ferrets: a parent with two sub-ferrets (lineage), one ended ferret, one interactive ferret
   left running in its pane
 - queued messages and a shared draft for the running ferret, a pinned note and a pinned ferret
-- board cards in two lanes, with a link, a dependency and history; agenda asks (one answered, one open) and a notice
+- board cards in two lanes, with a link, a dependency and history; agenda asks (one closed, one answered and held for the ferret, one open; each state as v4 itself lists it) and a notice
 - a lesson suggestion, one secret set **by name** (the value is the constant `fixture-not-a-secret`), and a paired
   device (a code minted, redeemed with a generated device key)
 
