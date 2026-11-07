@@ -44,6 +44,7 @@ route	POST /v1/fleet/proposals/:proposalId/apply	removed	moved to the owning plu
 route	POST /v1/harnesses/update	removed	harness update split per harness plugin (fy harness <key> update, design §1.4); descriptor fields unchanged
 route	POST /v1/models/local/refresh	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	POST /v1/models/refresh	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
+route	POST /v1/recommend	removed	fy recommend is Packs' verb (D2 #14, served by POST /v1/pack/recommend); Runtimes no longer declares it
 route	POST /v1/sessions/:sessionId/dialog	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/mcp/login	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/mcp/login/preview	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
@@ -272,7 +273,6 @@ route	POST /v1/board/import	removed	compatibility importer deleted (clean slate,
 route	GET /v1/sessions/:sessionId/tasks	removed	legacy task listing deleted with the compatibility routes (clean slate, owner decision A452)
 route	POST /v1/imports/conversations/adopt	removed	imports are links (design §1.4): adopting a conversation is keeping it, POST /v1/links/conversations/keep; descriptor fields unchanged
 tool	card_progress	added	new in 5.0: writes one card's progress (design §3.3)
-route	GET /v1/plans	added	new in 5.0: the owner's list of staged plans (design §3.3)
 route	GET /v1/learning/config	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
 route	GET /v1/lessons/config	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
 route	PATCH /v1/learning/config	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
@@ -357,3 +357,9 @@ route	GET /v1/sessions/:sessionId/subtree	removed	session routes renamed /v1/ses
 route	GET /v1/ferrets/:ferretId/subtree	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/lessons/global	added	new in 5.0: the Global lessons document is the plugin's own state, not a file the owner opens in an editor (today <assets>/instructions/lessons.md), so the owner reads it here
 route	PUT /v1/lessons/global	added	new in 5.0: how the owner changes or removes an applied Global lesson (today: edit the file); the whole document against its etag, fleet.configure, a person only
+route	GET /v1/sessions/:sessionId/result	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/result	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	GET /v1/ferrets/:ferretId/pack	added	a lead's pack table (design §1.2), Packs' own route beside Ferrets' GET /v1/ferrets/:ferretId/subtree, which owns today's subtree route; descriptor fields as today's subtree
+route	PATCH /v1/sessions/:sessionId/pack	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	PATCH /v1/ferrets/:ferretId/pack	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
+route	POST /v1/pack/new	removed	fy new is Ferrets' verb (lead decision D2 #14): Packs starts no helper and shapes a start only through its start.decide taker and the start options

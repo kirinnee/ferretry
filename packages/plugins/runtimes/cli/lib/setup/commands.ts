@@ -109,21 +109,21 @@ async function openScan(deps: AccountCommandDeps): Promise<SetupScan> {
 }
 
 /**
- * `runtime import claude|codex`: the import with NO questions, for scripts — this tool's own login
+ * `runtime link claude|codex`: the link with NO questions, for scripts — this tool's own login
  * (shared in place) and setup, under `--name` or the suggested runtime name (`claude-default`).
  *
  * It never installs anything: a tool that is not installed is refused with the way to get it.
  * The question-by-question first run is `onboard`, which Onboarding owns.
  */
-export async function runtimeImport(deps: AccountCommandDeps, invocation: VerbInvocation): Promise<void> {
-  const harness = parseHarness(positional(invocation, 0, 'tool to import: claude or codex'));
+export async function runtimeLink(deps: AccountCommandDeps, invocation: VerbInvocation): Promise<void> {
+  const harness = parseHarness(positional(invocation, 0, 'tool to link: claude or codex'));
   const bin = deps.binaryName;
   const options: AccountWriteOptions = writeFlags(invocation.options);
   const scan = await openScan(deps);
   const found = scan.harnesses.find(candidate => candidate.harness === harness);
   if (found === undefined || !found.installed) {
     throw new AccountCommandError(
-      `${HARNESS_LABEL[harness]} is not installed on ${scan.machine}. Install it with \`${bin} onboard\`, then import it.`,
+      `${HARNESS_LABEL[harness]} is not installed on ${scan.machine}. Install it with \`${bin} onboard\`, then link it.`,
     );
   }
   for (const duplicate of scan.duplicates) {
