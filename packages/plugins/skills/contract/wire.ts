@@ -164,6 +164,8 @@ export const SkillProvenanceSchema = z.strictObject({
   digest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
 });
 
+export type SkillProvenance = z.infer<typeof SkillProvenanceSchema>;
+
 export const SkillReviewEntrySchema = z.strictObject({
   label: z.string().min(1),
   text: z.string(),

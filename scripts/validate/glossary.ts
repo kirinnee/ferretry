@@ -16,6 +16,7 @@ import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
  */
 export const PHRASE_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
   ['browser proxy', 'a real HTTP proxy the browser goes through; not a relay (docs/browser-proxy.md)'],
+  ['routing prompt', 'the one text Pack mode picks helper models with (docs/pack-mode.md); not a message to a ferret'],
   ['firewall timer', 'a systemd .timer unit that runs the loopback-firewall verify unit; not a job'],
 ]);
 

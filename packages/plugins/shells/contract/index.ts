@@ -72,6 +72,8 @@ export const shellLoosens: Loosens<ShellItem> = (before, after) => {
   if (before === undefined) return [`a new shell will build ${describe(after)}`];
   const sentences: string[] = [];
   if (describe(before) !== describe(after)) sentences.push(`the shell now builds ${describe(after)}`);
+  if (after.approvedHash !== before.approvedHash && after.approvedHash !== undefined)
+    sentences.push(`the shell will execute content ${after.approvedHash}`);
   if (!before.floating && after.floating) sentences.push('the shell may now resolve to a different build each time');
   return sentences;
 };

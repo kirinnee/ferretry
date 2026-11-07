@@ -46,7 +46,8 @@ all_tests() {
 mapfile -t tests < <(all_tests)
 # Ferretry 5.0 starts from a small spine, so there is no floor on the count: the extraction is proved
 # instead by finding the kernel's own contract suite, which the spine always carries.
-printf '%s\n' "${tests[@]}" | grep -qx 'packages/core/kernel/tests/unit/contract.test.ts' || {
+# `grep -q` would exit at the first match and SIGPIPE the writer, which `pipefail` reports as a failure at random; read it all.
+printf '%s\n' "${tests[@]}" | grep -x 'packages/core/kernel/tests/unit/contract.test.ts' >/dev/null || {
   echo "❌ the test extraction did not find packages/core/kernel/tests/unit/contract.test.ts; it is stale" >&2
   exit 1
 }

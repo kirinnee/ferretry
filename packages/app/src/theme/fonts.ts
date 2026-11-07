@@ -29,7 +29,7 @@ import jetBrainsMono700 from '../assets/fonts/jetbrains-mono-latin-700-normal.wo
 import publicSans from '../assets/fonts/public-sans-latin-wght-normal.woff2';
 import type { ThemeFamilyId } from './preferences.ts';
 
-export interface ThemeFontFiles {
+interface ThemeFontFiles {
   /** Drawn on first paint: preloaded. */
   readonly text: readonly string[];
   /** Drawn only inside code: fetched on first use. */
@@ -39,7 +39,7 @@ export interface ThemeFontFiles {
 const jetBrainsMono = [jetBrainsMono400, jetBrainsMono700] as const;
 const ibmPlexMono = [ibmPlexMono400, ibmPlexMono700] as const;
 
-export const THEME_FONT_FILES: Readonly<Partial<Record<ThemeFamilyId, ThemeFontFiles>>> = Object.freeze({
+const THEME_FONT_FILES: Readonly<Partial<Record<ThemeFamilyId, ThemeFontFiles>>> = Object.freeze({
   studio: { text: [inter], code: jetBrainsMono },
   mission: { text: [publicSans, cascadiaMono], code: [] },
   neo: { text: [archivoBlack], code: ibmPlexMono },
@@ -81,9 +81,4 @@ export function preloadThemeFonts(family: string | undefined, host: PreloadHost 
     link.href = href;
     host.head.append(link);
   }
-}
-
-/** `data-theme="<family>-<mode>"` → the family, without trusting the value to be one of ours. */
-export function familyOfThemeAttribute(attribute: string | undefined): string | undefined {
-  return attribute?.slice(0, Math.max(0, attribute.lastIndexOf('-')));
 }

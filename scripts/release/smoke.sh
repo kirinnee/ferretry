@@ -3,7 +3,9 @@ set -euo pipefail
 
 # Smoke-test one target's standalone binaries: every executable the CLI package (`fy`) and the daemon
 # host (the kernel package, `fyd`) declare is present beside the CLI binary with the same target suffix,
-# loads on this platform, and answers `--version` with exit 0.
+# loads on this platform, and answers `--version` with exit 0. The daemon's browser worker (the Browsers
+# package's bin, `fyd-browser-worker`) must be present beside them too, as today: it takes a CDP endpoint,
+# not `--version`, and `fyd --check` is what starts it.
 #
 # FERRETRY 5.0, DAY 1: the hosts are stubs (packages/cli/bin/fy.ts, packages/core/kernel/host/fyd.ts), so
 # this is the LAUNCH stage only — it proves the compiled bytes run on the target, which is what a broken
@@ -29,20 +31,32 @@ own_name() {
 }
 name="$(own_name packages/cli/package.json)"
 own_name packages/core/kernel/package.json >/dev/null
+own_name packages/plugins/browsers/package.json >/dev/null
 
 cli_base="$(basename "${bin}")"
 suffix="${cli_base#"${name}"}"
 [[ ${suffix} == "${cli_base}" ]] && echo "❌ ${bin} is not named after the CLI's bin key '${name}'" >&2 && exit 1
 
-count=0
-while IFS= read -r executable_name; do
-  executable="$(dirname "${bin}")/${executable_name}${suffix}"
+# present <name>: the target's binary is beside the CLI binary, executable and not quarantined.
+present() {
+  executable="$(dirname "${bin}")/$1${suffix}"
   [ ! -f "${executable}" ] && echo "❌ no binary at ${executable}" >&2 && exit 1
   chmod +x "${executable}"
   xattr -d com.apple.quarantine "${executable}" 2>/dev/null || true # mac-only; harmless elsewhere
+}
+
+count=0
+while IFS= read -r executable_name; do
+  present "${executable_name}"
   "${executable}" --version || { echo "❌ ${executable} --version failed" >&2 && exit 1; }
   echo "✅ launches: ${executable}"
   count=$((count + 1))
 done < <(jq -r '.bin | keys_unsorted[]' packages/cli/package.json packages/core/kernel/package.json)
+
+while IFS= read -r executable_name; do
+  present "${executable_name}"
+  echo "✅ present: ${executable}"
+  count=$((count + 1))
+done < <(jq -r '.bin | keys_unsorted[]' packages/plugins/browsers/package.json)
 
 echo "✅ smoke (launch stage) passed for ${count} executable(s) of ${suffix#-}"

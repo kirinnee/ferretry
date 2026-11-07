@@ -1,0 +1,24 @@
+  - Extras: Shadow, Icon
+
+✻ Worked for 5s · done 4:56 AM
+
+❯ Use the AskUserQuestion tool exactly once, right now, with exactly one
+  question: header "Extras", question "Which extras should ship?", multiSelect
+  true, options "Shadow" / "Adds a drop shadow.", "Border" / "Adds a thin
+  border.". After I answer, reply with exactly what I chose and stop.
+────────────────────────────────────────────────────────────────────────────────
+←  ☐ Extras  ✔ Submit  →
+
+Which extras should ship?
+
+❯ 1. [ ] Shadow
+         Adds a drop shadow.
+  2. [ ] Border
+         Adds a thin border.
+  3. [ ] Type something
+     Submit
+────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+

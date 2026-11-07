@@ -22,6 +22,6 @@ export class ToolClient {
     if (facts === undefined) throw new ShellError(`${plugin} declares no tool "${tool}"`, EXIT.failure);
     if (this.deps.inPane && facts.caller === 'person') throw new ShellError(PERSON_ONLY_REFUSAL, EXIT.failure);
     await ensureAllowed(this.deps, plugin);
-    return await sendChecked(this.deps, { method: 'POST', path: toolPath(plugin, tool), body: input ?? {} });
+    return await sendChecked(this.deps, { method: 'POST', path: toolPath(plugin, tool), body: input ?? {} }, [plugin]);
   }
 }

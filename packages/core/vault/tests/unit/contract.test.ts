@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import type { StatePort } from '@ferretry/kernel/contract';
 import {
   allowedDestination,
+  defineSealedDocument,
   InputRaiseSchema,
   InputTargetFactsSchema,
   isVaultKeyText,
@@ -15,6 +17,7 @@ import {
   FakeInputHolds,
   FakeOutputGuard,
   FakeRedaction,
+  FakeSealedDocuments,
   FakeVault,
   FakeInputTarget,
   fakeChildEnvironmentValues,
@@ -23,6 +26,7 @@ import {
   liveTargetFailure,
   outputGuardConformance,
   redactionConformance,
+  sealedDocumentsConformance,
   vaultConformance,
 } from '../../contract/testing/index.ts';
 
@@ -92,6 +96,12 @@ describe('input target conformance catches an adapter that ignores its bindings'
     );
   });
 });
+sealedDocumentsConformance('FakeSealedDocuments', () => ({
+  port: new FakeSealedDocuments(),
+  mine: {} as StatePort,
+  theirs: {} as StatePort,
+  document: defineSealedDocument({ name: 'oauth-secrets', path: 'oauth-secrets.json' }),
+}));
 
 const b64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
 

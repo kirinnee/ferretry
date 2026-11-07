@@ -1,2 +1,5 @@
-/** @ferretry/plugin-warden/contract — wire schemas, port + token, events, hook types, ids, policy refs (§2.1). Day-1 contract slice fills it. */
-export {};
+/** @ferretry/plugin-warden/contract — wire schemas, port + token, events, policy refs (§2.1). */
+export * from './policy.ts';
+export * from './port.ts';
+export * from './wire.ts';
+export * from './state.ts';

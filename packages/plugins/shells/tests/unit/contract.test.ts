@@ -34,3 +34,14 @@ describe('shells contract', () => {
     expect(shellLoosens(item, { ...item, packages: ['git', 'jq'] }).length).toBe(1);
   });
 });
+
+test('a changed resolved hash is held even when its floating source text stays the same', () => {
+  const before = ShellItemSchema.parse({
+    flake: 'github:me/shells#web',
+    floating: true,
+    approvedHash: 'sha256-' + 'A'.repeat(43) + '=',
+  });
+  const after = { ...before, approvedHash: 'sha256-' + 'B'.repeat(43) + '=' };
+  expect(shellLoosens(before, after)).toEqual([`the shell will execute content ${after.approvedHash}`]);
+  expect(shellLoosens(after, after)).toEqual([]);
+});

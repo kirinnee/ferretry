@@ -13,6 +13,7 @@ import type {
   ScopedRoute,
 } from '../contract/route.ts';
 import type { SocketAccept, SocketDescriptor, SocketUpgradeDecision } from '../contract/socket.ts';
+import { SOCKET_CLOSES } from '../contract/socket.ts';
 import { DEFAULT_ACTOR, runInCall } from './call-scope.ts';
 import {
   failureResponse,
@@ -131,6 +132,7 @@ async function run(
   bindings: DispatchBindings,
   descriptor: RouteDescriptor | MemberRouteDescriptor,
   build: () => Promise<ApiResponse>,
+  owner?: Owner,
 ): Promise<ApiResponse> {
   const policy = <R extends ApiResponse>(response: R): R =>
     withVersion(descriptor.noStore === true ? noStore(response) : response, bindings.version);
@@ -149,7 +151,7 @@ async function run(
   try {
     built = await build();
   } catch (error) {
-    return policy(failureResponse(error));
+    built = failureResponse(error);
   }
   const showable = (): boolean => {
     if (!guarded) return true;
@@ -160,22 +162,28 @@ async function run(
     }
   };
   const spell = built.late;
-  if (spell === undefined && !guarded) return policy(built);
+  if (spell === undefined && !guarded && owner === undefined) return policy(built);
   // Spelled again after the handler's last await; every carrier calls it (`finalised`) last, synchronously.
   let cached: { readonly source: PublishedApiResponse; readonly answer: PublishedApiResponse } | undefined;
+  let prepared: PublishedApiResponse | undefined;
   const last = (): PlainApiResponse | PublishedApiResponse => {
+    const refusal = owner === undefined ? undefined : notServing(owner);
+    if (refusal !== undefined) return policy(refusal);
     if (!showable()) return policy(withheld());
     if (spell === undefined) {
-      const { late: _late, ...plain } = built;
-      return policy(plain as PlainApiResponse);
+      prepared ??= publishResponse(policy(built));
+      return prepared;
     }
     try {
       const next = spell();
+      const unavailable = owner === undefined ? undefined : notServing(owner);
+      if (unavailable !== undefined) return policy(unavailable);
+      if (!showable()) return policy(withheld());
       if (!isPublishedResponse(next)) return policy(next);
       if (cached?.source !== next) cached = { source: next, answer: publishResponse(policy(next)) };
       return cached.answer;
     } catch (error) {
-      return policy(failureResponse(error));
+      return policy(showable() ? failureResponse(error) : withheld());
     }
   };
   return { ...last(), late: last };
@@ -190,6 +198,7 @@ export class Dispatcher {
   private readonly routes: Router<MountedRoute>;
   private readonly sockets: Router<MountedSocket>;
   private readonly members: Router<MountedMemberRoute>;
+  private readonly streams = new Set<() => void>();
 
   constructor(
     private readonly bindings: DispatchBindings,
@@ -235,7 +244,9 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as CallContext;
-    return await runInCall({ actor: decision.actor }, () => run(this.bindings, found.route, () => handle(call)));
+    return await runInCall({ actor: decision.actor }, () =>
+      run(this.bindings, found.route, () => handle(call), found.route.owner),
+    );
   }
 
   private async dispatchMember(request: ApiRequest): Promise<ApiResponse> {
@@ -260,7 +271,9 @@ export class Dispatcher {
     if (refusal !== undefined || handle === undefined)
       return withVersion(refusal ?? skeletonResponse(found.route.owner.title), this.bindings.version);
     const call = { request, params: found.params, ...decision.standing } as MemberCallContext;
-    return await runInCall({ actor: decision.actor }, () => run(this.bindings, found.route, () => handle(call)));
+    return await runInCall({ actor: decision.actor }, () =>
+      run(this.bindings, found.route, () => handle(call), found.route.owner),
+    );
   }
 
   /** The socket upgrade: the same admission, asked before `accept`. `unclaimed` lets the caller serve plain HTTP. */
@@ -276,10 +289,80 @@ export class Dispatcher {
     const call = { request, params: found.params, ...decision.standing } as CallContext;
     try {
       const attach = await runInCall({ actor: decision.actor }, () => accept(call));
-      return { outcome: 'accepted', attach };
+      return {
+        outcome: 'accepted',
+        attach: async downstream => {
+          let closed = false;
+          let handler: import('../contract/socket.ts').SocketHandler | undefined;
+          const end = (): void => {
+            if (closed) return;
+            closed = true;
+            this.streams.delete(recheck);
+            downstream.close(SOCKET_CLOSES.unauthorized.code, SOCKET_CLOSES.unauthorized.reason);
+            handler?.close(SOCKET_CLOSES.unauthorized);
+          };
+          const allowed = (): boolean => !closed && this.reauthorize(request);
+          const recheck = (): void => {
+            if (!allowed()) end();
+          };
+          this.streams.add(recheck);
+          recheck();
+          if (closed) throw new Error('this stream is no longer admitted');
+          try {
+            handler = await attach({
+              send: (frame, permit) => {
+                if (!allowed()) {
+                  end();
+                  return undefined;
+                }
+                return downstream.send(frame, () => allowed() && (permit === undefined || permit() === true));
+              },
+              close: (code, reason) => {
+                closed = true;
+                this.streams.delete(recheck);
+                downstream.close(code, reason);
+              },
+              bufferedBytes: () => downstream.bufferedBytes(),
+            });
+            if (closed) {
+              handler.close(SOCKET_CLOSES.unauthorized);
+              throw new Error('this stream is no longer admitted');
+            }
+            if (!allowed()) {
+              end();
+              throw new Error('this stream is no longer admitted');
+            }
+            const attached = handler;
+            return {
+              open: async () => {
+                recheck();
+                if (!closed) await attached.open();
+              },
+              fromClient: frame => {
+                recheck();
+                if (!closed) attached.fromClient(frame);
+              },
+              close: ended => {
+                closed = true;
+                this.streams.delete(recheck);
+                attached.close(ended);
+              },
+            };
+          } catch (error) {
+            this.streams.delete(recheck);
+            end();
+            throw error;
+          }
+        },
+      };
     } catch (error) {
       return { outcome: 'refused', response: failureResponse(error) };
     }
+  }
+
+  /** A live serving-state transition re-admits every attached stream immediately (§7.1). */
+  reauthorizeStreams(): void {
+    for (const recheck of [...this.streams]) recheck();
   }
 
   /** The session layer's question about a stream already open: the same socket route, asked again (R217). */
