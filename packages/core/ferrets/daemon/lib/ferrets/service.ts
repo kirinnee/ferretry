@@ -18,6 +18,7 @@ import type {
   LaunchPart,
   LaunchPartSource,
   LaunchSpec,
+  ManagedWorktreeSummary,
   PackId,
   Runner,
   RunnerHandle,
@@ -98,6 +99,8 @@ export interface FerretsPorts {
   pinnedAt?(): Promise<ReadonlyMap<string, string>>;
   /** A ferret's `summary.md` (what its `signal done` wrote), or `undefined` when it has none. */
   summaryText?(ferret: FerretId): Promise<string | undefined>;
+  /** The managed worktree registry's durable facts (`ManagedWorktreeService.records()`). Unbound: none. */
+  managedWorktrees?(): Promise<readonly ManagedWorktreeSummary[]>;
   vault: Pick<VaultApi, 'childEnvironment'>;
   asks: Pick<AsksApi, 'open'>;
 }
@@ -173,6 +176,11 @@ export class FerretsService implements FerretsApi {
     await this.ports.ready?.();
     if (this.registry.get(ferret)?.state !== 'stopped' || this.ports.summaryText === undefined) return undefined;
     return await this.ports.summaryText(ferret);
+  }
+
+  /** The managed worktree registry, durable facts only (the contract's `managedWorktrees()`). */
+  async managedWorktrees(): Promise<readonly ManagedWorktreeSummary[]> {
+    return (await this.ports.managedWorktrees?.()) ?? [];
   }
 
   mayTouch(caller: FerretId, target: FerretId): boolean {

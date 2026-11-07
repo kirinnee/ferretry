@@ -5,6 +5,7 @@ import type { FerretId, SpawnResult } from '@ferretry/kernel/contract';
 import { type Instant, ok } from '@ferretry/std';
 import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
 import { PaneDirectory } from '../../daemon/adapters/tmux-pane.ts';
+import { ClaudeProjectApprovals } from '../../daemon/lib/project-approvals.ts';
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -291,6 +292,93 @@ describe('ClaudeHarness', () => {
     expect(plan.files.every(path => path.startsWith(`${HOME}/`))).toBe(true);
     expect(plan.files.length).toBe(5);
     expect(await readFile(join(HOME, 'CLAUDE.md'), 'utf8')).toContain('Be brief.');
+  });
+
+  describe(".claude.json is merged at every launch, never replaced (today's wrapper seed)", () => {
+    const claudeJson = () => join(HOME, '.claude.json');
+    type Document = Record<string, unknown> & { projects: Record<string, Record<string, unknown>> };
+    const document = async () => JSON.parse(await readFile(claudeJson(), 'utf8')) as Document;
+    const project = (doc: Document, root: string): Record<string, unknown> => doc.projects[root] ?? {};
+    const approvals = (roots: ReturnType<typeof build>['roots']) =>
+      new ClaudeProjectApprovals(
+        ferret => roots.root('agent-homes', { ferret, subfolder: ferret }),
+        () => roots.root('agent-homes'),
+      );
+
+    test('a project server disabled in Claude stays disabled across three launches', async () => {
+      const { harness, roots } = build();
+      const ask = async () =>
+        await approvals(roots).approvedProjectServers({ ferret: FERRET, root: '/work', servers: ['docs', 'tracker'] });
+
+      await harness.prepareHome(spec());
+      // Session 1: the person approves one server and disables the other inside Claude, which writes them here.
+      const first = await document();
+      project(first, '/work').enabledMcpjsonServers = ['docs'];
+      project(first, '/work').disabledMcpjsonServers = ['tracker'];
+      await writeFile(claudeJson(), JSON.stringify(first));
+
+      for (const launch of [2, 3, 4]) {
+        await harness.prepareHome(spec());
+        const now = await document();
+        expect([launch, project(now, '/work').disabledMcpjsonServers]).toEqual([launch, ['tracker']]);
+        expect(await ask()).toEqual({ state: 'read', servers: { docs: 'approved', tracker: 'disabled' } });
+      }
+    });
+
+    test('the trust key and the fixed keys are set, and every other key is kept', async () => {
+      const { harness } = build();
+      await writeFile(
+        claudeJson(),
+        JSON.stringify({
+          userID: 'fake-user-id',
+          hasCompletedOnboarding: false,
+          projects: { '/work': { allowedTools: ['Bash'] }, '/elsewhere': { enabledMcpjsonServers: ['x'] } },
+        }),
+      );
+
+      const plan = await harness.prepareHome(spec());
+
+      const now = await document();
+      expect(now.userID).toBe('fake-user-id');
+      expect(now.hasCompletedOnboarding).toBe(true);
+      expect(now.projects['/work']).toEqual({ allowedTools: ['Bash'], hasTrustDialogAccepted: true });
+      expect(now.projects['/elsewhere']).toEqual({ enabledMcpjsonServers: ['x'] });
+      expect(plan.files as readonly string[]).toContain(claudeJson());
+    });
+
+    test('an already-seeded document is not rewritten', async () => {
+      const { harness } = build();
+      await harness.prepareHome(spec());
+      const plan = await harness.prepareHome(spec());
+      expect(plan.files as readonly string[]).not.toContain(claudeJson());
+      expect(plan.files.length).toBe(4);
+    });
+
+    test('a .claude.json that is not JSON is left as it is, and the approvals read then answers unreadable', async () => {
+      const { harness, roots } = build();
+      await writeFile(claudeJson(), '{"projects": {"/work": {"disabledMcpjsonServers": ["tracker"]');
+
+      const plan = await harness.prepareHome(spec());
+
+      expect(await readFile(claudeJson(), 'utf8')).toBe(
+        '{"projects": {"/work": {"disabledMcpjsonServers": ["tracker"]',
+      );
+      expect(plan.files as readonly string[]).not.toContain(claudeJson());
+      const answer = await approvals(roots).approvedProjectServers({
+        ferret: FERRET,
+        root: '/work',
+        servers: ['tracker'],
+      });
+      expect(answer.state).toBe('unreadable');
+    });
+
+    test('a .claude.json linked out of the home is refused before it is read or written', async () => {
+      const { harness } = build();
+      await writeFile(join(fixture, 'outside.json'), '{"outside":true}');
+      await symlink(join(fixture, 'outside.json'), claudeJson());
+      await expect(harness.prepareHome(spec())).rejects.toThrow();
+      expect(await readFile(join(fixture, 'outside.json'), 'utf8')).toBe('{"outside":true}');
+    });
   });
 
   test('start runs claude in the home with a session id the daemon assigned, and remembers the pane', async () => {

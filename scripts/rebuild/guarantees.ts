@@ -178,6 +178,31 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
     owner: 'agenda',
     reason: 'POST /v1/push/seen moved to Agenda (DECISIONS-1 #4); Agenda computes the seen outcome',
   },
+  G76: {
+    owner: 'access',
+    reason:
+      "per-device unlocks are Access's `state/unlocks.json` (`StateUnlockLedger`, read back by `StepUpService.restore`); Gate keeps the unlock policy",
+  },
+  G86: {
+    owner: 'access',
+    reason:
+      "the standing-rule options route is Access's `POST /v1/step-up/options` (`stepUpRoutes`): it answers only the device the stage waits on; Gate keeps the step-up policy",
+  },
+  G102: {
+    owner: 'access',
+    reason:
+      "the passkey registration window is Access's (`StepUpService.registrationOptions`/`register`/`reopenRegistration`); Gate keeps the step-up policy",
+  },
+  G137: {
+    owner: 'access',
+    reason:
+      "a full code needs a device holding everything: Access's `pairingRoutes` mint refuses it from the device half (`DeviceGrantService`); Gate keeps the daemon-wide half",
+  },
+  G141: {
+    owner: 'access',
+    reason:
+      "the kept half is Access's device document (`StatePairingRepository`, `DevicesFile`): malformed grants fail the document closed and every write carries grants; Gate keeps the daemon-wide half",
+  },
 };
 
 const cells = (line: string): string[] =>

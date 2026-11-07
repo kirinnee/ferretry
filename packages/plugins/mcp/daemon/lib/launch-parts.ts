@@ -1,5 +1,5 @@
 import type { HarnessKey, LaunchPart, LaunchPartSource, LaunchSpec } from '@ferretry/core-ferrets/contract';
-import { type SecretName, secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
+import { optionalSecretReference, type SecretName, secretReferencesIn } from '@ferretry/core-vault/contract';
 import type { JsonValue } from '@ferretry/std';
 import { McpEnvSchema, type McpItem, type McpOAuthSecretNames, mcpOAuthSecretNames } from '../../contract/index.ts';
 import type { ProjectMcpLaunchShare } from './inventory/project-sign-in.ts';
@@ -50,14 +50,14 @@ export interface McpLaunchPartsDeps {
  * 2. One `mcp` part per item ({@link mcpParts}); a signed-in one names its `bearer` VARIABLE (today's
  *    `adapt.ts`: Claude renders it as an `Authorization` header, Codex as `bearer_token_env_var`).
  * 3. One `mcp` part per signed-in project server, as the local-scope entry for its project root.
- * 4. One `env` part binding each variable to its `${secret:NAME}` reference. The Vault opens the references into the
- *    child as it starts, so no part holds a value. Only a token the Vault HOLDS is bound: an unbound reference would
- *    refuse the whole launch over one server nobody signed in to.
+ * 4. One `env` part binding each sign-in variable to its OPTIONAL `${secret?:NAME}` reference. The Vault opens the
+ *    references into the child as it starts, so no part holds a value. Only a token the Vault HOLDS is bound: an
+ *    unbound reference would refuse the whole launch over one server nobody signed in to. An item's own `env` keeps
+ *    its plain `${secret:NAME}` references, which still refuse when missing.
  *
- * A SIGN-OUT RACING A LAUNCH refuses that launch (accepted; docs/mcp-oauth.md). What is held is sampled here, but the
- * references are opened only once every `launch.parts` source has answered; a token signed out in between is an
- * unknown secret then, and the Vault refuses the launch naming the secret, never its value. Today's launch copied the
- * value early and never refused; resolving a missing reference to "unset" would need a Vault contract change.
+ * A SIGN-OUT RACING A LAUNCH never refuses it (today's launch read the value once into the environment). What is held
+ * is sampled here, but the references are opened only once every `launch.parts` source has answered; a token signed
+ * out in between is not held then, and the Vault leaves its variable unset — the server then reads as not signed in.
  */
 export class McpLaunchParts implements LaunchPartSource {
   constructor(private readonly deps: McpLaunchPartsDeps) {}
@@ -86,7 +86,7 @@ export class McpLaunchParts implements LaunchPartSource {
     const parts: LaunchPart[] = servers.map(part => {
       const names = signedIn.get(part.name);
       if (names === undefined || !held.has(names.access)) return part;
-      env[names.variable] = secretReference(names.access);
+      env[names.variable] = optionalSecretReference(names.access);
       return { ...part, config: { ...(part.config as Record<string, JsonValue>), bearer: names.variable } };
     });
     for (const [name, server] of Object.entries(project.servers))
