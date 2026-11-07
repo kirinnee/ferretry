@@ -10,7 +10,7 @@ import { ClaudeProjectApprovals } from '../../daemon/lib/project-approvals.ts';
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { rootsPortFor } from '../../../../core/kernel/host/roots.ts';
+import { ensureInternalRootBases, rootsPortFor } from '../../../../core/kernel/host/roots.ts';
 import { nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
 
 const FERRET = 'f1' as FerretId;
@@ -190,6 +190,39 @@ describe('ClaudeHarness', () => {
       ['.claude.json', 'CLAUDE.md', 'conversation.json', 'launch-settings.json', 'mcp.json', 'settings.json'].sort(),
     );
     expect(started.command).toContain(`CLAUDE_CONFIG_DIR=${fresh}`);
+  });
+
+  test('S42 first launch on a fresh FY_HOME: the kernel made the agent-homes base 0700 at boot, the launch makes the ferret home under it', async () => {
+    // A brand-new home: no state folder at all, none of the fixture's planted homes.
+    const fy = join(fixture, 'fy-home');
+    await rm(fy, { recursive: true });
+    await mkdir(fy, { mode: 0o700 });
+    expect(
+      await ensureInternalRootBases(
+        nodeFs(() => 'fixture'),
+        { home: fy, plugin: 'claude-code' },
+        ['agent-homes', 'harness-history'],
+      ),
+    ).toEqual([]);
+    expect((await lstat(AGENT_HOMES())).mode & 0o777).toBe(0o700);
+    expect(await readdir(AGENT_HOMES())).toEqual([]);
+    const { harness } = build();
+    const started: { command?: readonly string[] } = {};
+    expect((await harness.start(spec(), runner(started), {} as never)).ok).toBe(true);
+    expect((await lstat(HOME)).mode & 0o777).toBe(0o700);
+    expect(await readdir(AGENT_HOMES())).toEqual(['f1']);
+    expect(started.command).toContain(`CLAUDE_CONFIG_DIR=${HOME}`);
+  });
+
+  test('S42 first launch on a fresh FY_HOME whose kernel did not run: the harness refuses and makes no base of its own', async () => {
+    const fy = join(fixture, 'fy-home');
+    await rm(fy, { recursive: true });
+    await mkdir(fy, { mode: 0o700 });
+    const { harness } = build();
+    const started: { command?: readonly string[] } = {};
+    await expect(harness.start(spec(), runner(started), {} as never)).rejects.toThrow('root refused');
+    expect(started.command).toBeUndefined();
+    expect(await readdir(fy)).toEqual([]);
   });
 
   test('S42 homeFor names state/claude-code/agent-homes/<ferret> through its own root, and that home launches', async () => {

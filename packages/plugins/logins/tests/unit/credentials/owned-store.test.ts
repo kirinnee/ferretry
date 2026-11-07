@@ -7,7 +7,7 @@ import type { ChildHandle, RootName, RootsPort } from '@ferretry/kernel/contract
 import type { LoginKind } from '@ferretry/core-ferrets/contract';
 import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
 import { fakeBrowsers } from '@ferretry/plugin-browsers/contract/testing';
-import { nodeFs, rootsPortFor } from '@ferretry/kernel/host';
+import { ensureInternalRootBases, nodeFs, rootsPortFor } from '@ferretry/kernel/host';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { fixedClock, owner, standInAdmission, testHost } from '@ferretry/kernel/testing';
 import { instantFromEpochMs } from '@ferretry/std';
@@ -173,10 +173,41 @@ test('S175 owned store refuses a credentials root linked into another plugin’s
   await expect(lstat(join(foreign, 'claude/sign-in'))).rejects.toThrow();
 });
 
-test('S175 owned store refuses a missing credentials base and creates nothing (fresh home: the kernel makes the base)', async () => {
+test('S175 a fresh home whose kernel made the credentials base at boot: the owned store reads and signs in with no setup step', async () => {
+  const f = await fixture({ base: false });
+  // What the kernel does before it builds Logins (§7.7): the base is made 0700, whatever the home had before.
+  const refused = await ensureInternalRootBases(
+    nodeFs(() => 'fixture'),
+    { home: f.fyHome, plugin: 'logins' },
+    ['credentials'],
+  );
+  expect(refused).toEqual([]);
+  expect((await stat(f.base)).mode & 0o777).toBe(0o700);
+  const store = new OwnedLoginStore(f.root, () => NOW);
+  const catalog = store.catalog(claudeOnly);
+  const entry = await catalog.entry('claude');
+  if (
+    entry.resolution.store === 'environment' ||
+    'unavailable' in entry.resolution ||
+    entry.resolution.harness !== 'claude'
+  )
+    throw new Error('no store');
+  // Never signed in is a reading, not a refusal: the folder is there to be read.
+  expect((await store.inspectStored(entry.resolution)).reading.state).toBe('missing');
+  const target = catalog.signInTarget(entry);
+  if (target.kind !== 'store') throw new Error('owned target refused');
+  await target.prepare();
+  expect((await stat(join(f.base, 'claude/sign-in'))).mode & 0o777).toBe(0o700);
+  expect(await target.check()).toMatchObject({ signedIn: false });
+  await f.put('claude/.credentials.json', claude());
+  expect(await target.check()).toEqual({ signedIn: true });
+});
+
+test('S175 owned store refuses a missing credentials base and creates nothing (the kernel did not run: Logins never makes its own base)', async () => {
   const f = await fixture({ base: false });
   await expectRefused(new OwnedLoginStore(f.root, () => NOW), 'outside');
   await expect(lstat(f.base)).rejects.toThrow();
+  await expect(lstat(join(f.fyHome, 'state'))).rejects.toThrow();
 });
 
 test('S175 owned store refuses an inaccessible credentials base', async () => {

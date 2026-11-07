@@ -56,7 +56,6 @@
       "GAP(kernel): the five `fy harness codex settings` verbs refuse with exit 69, because a CLI half has no config/item service route to call yet"
     ],
     "logins": [
-      "GAP(kernel): a fresh home has no state/logins/credentials base, and the kernel's credentials root refuses every call until it exists, so no owned login can be read or signed in on a new machine until the kernel makes the base (sent to the kernel porter)",
       "S176 and S177 (the credential worker guarantees) are skipped as unproved, not ported",
       "GAP(vault): `fy login add <provider>` does not prompt for, nor store, a provider's secret (store each with the Vault's own verbs and name it as `${secret:NAME}`), and `fy login add --from-env` preset detection is not ported; `fy login budget` is Usage's and `login models list --login` reads Runtimes",
       "GAP(runtimes): `fy login rm` and the app's Remove cannot refuse a login a runtime still uses, because Logins cannot see runtime usage without a Logins-to-Runtimes edge; Runtimes' own change path must check its runtimes first, then call Logins' reviewed change routes (`POST /v1/logins/changes`, `GET /v1/logins/changes/:changeId`, `POST /v1/logins/changes/:changeId/apply`, kinds `login.*`)",
