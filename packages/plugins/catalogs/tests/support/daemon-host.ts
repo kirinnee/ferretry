@@ -80,9 +80,10 @@ function toPem(der: ArrayBuffer | Uint8Array): string {
 
 /** An accepting WebAuthn verifier: a member passkey ceremony is not what these tests are about. */
 export const CREDENTIAL = new TextEncoder().encode('credential-one');
-export function acceptingVerifier(): PasskeyVerifier & { refuse: boolean } {
+export function acceptingVerifier(): PasskeyVerifier & { refuse: boolean; counter: number } {
   const verifier = {
     refuse: false,
+    counter: 0,
     verifyRegistration: async (input: Parameters<PasskeyVerifier['verifyRegistration']>[0]) =>
       verifier.refuse
         ? ({ ok: false, reason: 'refused by the test' } as const)
@@ -99,7 +100,10 @@ export function acceptingVerifier(): PasskeyVerifier & { refuse: boolean } {
     verifyAssertion: async (input: Parameters<PasskeyVerifier['verifyAssertion']>[0]) =>
       verifier.refuse
         ? ({ ok: false, reason: 'refused by the test' } as const)
-        : ({ ok: true, value: { signCount: 1, origin: input.allowedOrigins[0] ?? APP_ORIGIN } } as const),
+        : ({
+            ok: true,
+            value: { signCount: ++verifier.counter, origin: input.allowedOrigins[0] ?? APP_ORIGIN },
+          } as const),
   };
   return verifier;
 }
@@ -365,10 +369,12 @@ export async function makeCatalog(fx: CatalogsFixture, name = 'Team'): Promise<s
 export interface MintOptions {
   readonly catalogIds: readonly string[];
   readonly member?: { kind: 'new'; label: string } | { kind: 'existing'; memberId: string };
-  readonly uses?: { kind: 'single' } | { kind: 'multi'; limit?: number };
+  readonly uses?: { kind: 'single' } | { kind: 'multi'; cap: number };
   readonly newPasskey?: boolean;
+  readonly expiresIn?: '15m' | '1h' | '3h' | '8h' | '1d';
 }
 
+let mintCount = 0;
 export async function mintShare(
   fx: CatalogsFixture,
   mint: MintOptions,
@@ -376,16 +382,16 @@ export async function mintShare(
   const minted = await fx.host.request('POST', '/v1/catalog-shares', {
     body: {
       catalogIds: mint.catalogIds,
-      member: mint.member ?? { kind: 'new', label: 'Alice' },
-      expiresIn: '1h',
+      member: mint.member ?? { kind: 'new', label: `Member ${String(++mintCount)}` },
+      expiresIn: mint.expiresIn ?? '1h',
       uses: mint.uses ?? { kind: 'single' },
       ...(mint.newPasskey === undefined ? {} : { newPasskey: mint.newPasskey }),
     },
   });
   if (minted.status !== 201) throw new Error(`share: ${minted.status} ${minted.body}`);
   const body = minted.json<Record<string, unknown>>();
-  const share = body['share'] as { id?: string; shareId?: string } | undefined;
-  return { code: String(body['code']), shareId: String(share?.id ?? share?.shareId ?? body['shareId']), body };
+  const share = body.share as { id?: string; shareId?: string } | undefined;
+  return { code: String(body.code), shareId: String(share?.id ?? share?.shareId ?? body.shareId), body };
 }
 
 // ─── the browser's side ──────────────────────────────────────────────────────────────────────────────────────────
@@ -535,15 +541,15 @@ export class BrowserEnd {
       ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
     });
     await this.pump();
-    const answer = this.records.find(entry => entry.message['t'] === 'res' && entry.message['id'] === id)?.message;
+    const answer = this.records.find(entry => entry.message.t === 'res' && entry.message.id === id)?.message;
     if (answer === undefined)
       throw new Error(`no answer to ${method} ${path}${this.end === undefined ? '' : ` (ended ${this.end.code})`}`);
     const res = answer as { status: number; headers?: Record<string, string>; body: string };
     const parsed = res.body === '' ? {} : (JSON.parse(res.body) as Record<string, unknown>);
-    const error = parsed['error'];
+    const error = parsed.error;
     const code =
-      typeof parsed['code'] === 'string'
-        ? parsed['code']
+      typeof parsed.code === 'string'
+        ? parsed.code
         : typeof error === 'object' && error !== null
           ? (error as { code?: string }).code
           : undefined;
@@ -576,6 +582,24 @@ export class BrowserEnd {
     }
   }
 
+  #window = session.newReceiveWindow();
+
+  /** The browser returns credit once half a window is owed, as the app's channel does (R96). */
+  #credit(): void {
+    if (this.end !== undefined) return;
+    const owed = session.creditToReturn(this.#window);
+    if (owed === 0) return;
+    this.#window = session.recordCredited(this.#window, owed);
+    this.link.inbound(
+      session.encodeFrame({
+        kind: session.FRAME_KINDS.credit,
+        sessionId: this.#sessionId,
+        sequence: 0,
+        payload: session.encodeCreditPayload(owed),
+      }),
+    );
+  }
+
   async #receive(bytes: Uint8Array): Promise<void> {
     this.wire.push(Uint8Array.from(bytes));
     const decoded = session.decodeFrame(bytes);
@@ -591,12 +615,14 @@ export class BrowserEnd {
     const opened = await session.openRecord(kernelCrypto, channel, frame);
     if (!opened.ok) throw new Error(opened.reason);
     this.#channel = opened.state;
+    this.#window = session.recordConsumed(this.#window);
+    this.#credit();
     const text = session.utf8Text(opened.plaintext) ?? '';
     this.records.push({ message: JSON.parse(text) as Record<string, unknown>, bytes: opened.plaintext.length, text });
   }
 
   last(t: string): Received | undefined {
-    return [...this.records].reverse().find(record => record.message['t'] === t);
+    return [...this.records].reverse().find(record => record.message.t === t);
   }
 }
 
@@ -612,11 +638,11 @@ export async function joinWith(
   const end = await fx.open(carrier).handshake();
   await end.join(who, code);
   const outcome = end.records[0]?.message;
-  if (outcome?.['t'] !== 'joined')
+  if (outcome?.t !== 'joined')
     throw new Error(
       `join: ${JSON.stringify(outcome)} end=${JSON.stringify(end.end)} records=${end.records.length} logs=${JSON.stringify(fx.host.logs)} report=${JSON.stringify(fx.layer.report())}`,
     );
-  return outcome['response'] as never;
+  return outcome.response as never;
 }
 
 /** A serving member session for a joined key. */
