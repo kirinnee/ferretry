@@ -63,11 +63,11 @@ import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../token
  */
 
 /** Today's launch variables: the ferret's own bearer and id, read by `fy` inside the pane. */
-export const FERRET_TOKEN_VARIABLE = 'FY_SESSION_TOKEN';
-export const FERRET_ID_VARIABLE = 'FY_SESSION_ID';
+const FERRET_TOKEN_VARIABLE = 'FY_SESSION_TOKEN';
+const FERRET_ID_VARIABLE = 'FY_SESSION_ID';
 
 /** The reason a stop records when its caller gave none (today's lifecycle `defaultStopReason`). */
-export const DEFAULT_STOP_REASON = 'stopped by client';
+const DEFAULT_STOP_REASON = 'stopped by client';
 
 /** Everything the service reaches outside its own memory. The daemon half binds these to kernel ports. */
 export interface FerretsPorts {

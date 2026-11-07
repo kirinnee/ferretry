@@ -22,10 +22,10 @@ import {
 import type { FerretsClient } from '../../lib/client.ts';
 import type { MoveTarget } from './move-model.ts';
 
-export const FERRET_ROUTE = 'GET /v1/ferrets/:ferretId';
-export const MOVE_ROUTE = 'POST /v1/ferrets/:ferretId/move';
-export const ASK_TO_STOP_JOBS_ROUTE = 'POST /v1/ferrets/:ferretId/move/ask-to-stop-jobs';
-export const CONVERSION_PREVIEW_ROUTE = 'POST /v1/ferrets/:ferretId/conversion-preview';
+const FERRET_ROUTE = 'GET /v1/ferrets/:ferretId';
+const MOVE_ROUTE = 'POST /v1/ferrets/:ferretId/move';
+const ASK_TO_STOP_JOBS_ROUTE = 'POST /v1/ferrets/:ferretId/move/ask-to-stop-jobs';
+const CONVERSION_PREVIEW_ROUTE = 'POST /v1/ferrets/:ferretId/conversion-preview';
 
 /** The answer was not the shape the contract says. Carries no daemon text: a raw parse dump says nothing to a person. */
 export class UnreadableAnswerError extends Error {

@@ -13,7 +13,7 @@ export type TranscriptJsonValue =
   | readonly TranscriptJsonValue[]
   | { readonly [key: string]: TranscriptJsonValue };
 
-export interface TranscriptQuestionOption {
+interface TranscriptQuestionOption {
   readonly label: string;
   readonly description?: string;
   readonly preview?: string;
@@ -58,13 +58,13 @@ export interface TranscriptMessageEvent extends TranscriptEventMetadata {
   readonly text: string;
 }
 
-export interface TranscriptReasoningEvent extends TranscriptEventMetadata {
+interface TranscriptReasoningEvent extends TranscriptEventMetadata {
   readonly kind: 'reasoning';
   readonly text: string;
   readonly format: 'thinking' | 'reasoning';
 }
 
-export interface TranscriptToolCallEvent extends TranscriptEventMetadata {
+interface TranscriptToolCallEvent extends TranscriptEventMetadata {
   readonly kind: 'tool-call';
   readonly call: {
     readonly id: string;
@@ -74,7 +74,7 @@ export interface TranscriptToolCallEvent extends TranscriptEventMetadata {
   };
 }
 
-export interface TranscriptToolResultEvent extends TranscriptEventMetadata {
+interface TranscriptToolResultEvent extends TranscriptEventMetadata {
   readonly kind: 'tool-result';
   readonly result: {
     readonly callId: string;
@@ -136,12 +136,12 @@ export type TranscriptAttachment =
       readonly url: string;
     };
 
-export interface TranscriptAttachmentEvent extends TranscriptEventMetadata {
+interface TranscriptAttachmentEvent extends TranscriptEventMetadata {
   readonly kind: 'attachment';
   readonly attachment: TranscriptAttachment;
 }
 
-export interface TranscriptErrorEvent extends TranscriptEventMetadata {
+interface TranscriptErrorEvent extends TranscriptEventMetadata {
   readonly kind: 'error';
   readonly error: {
     readonly message: string;
@@ -180,7 +180,7 @@ export interface TranscriptUsageEvent extends TranscriptEventMetadata {
   };
 }
 
-export interface TranscriptTurnEvent extends TranscriptEventMetadata {
+interface TranscriptTurnEvent extends TranscriptEventMetadata {
   readonly kind: 'turn';
   readonly state: 'started' | 'completed' | 'aborted';
 }
@@ -193,7 +193,7 @@ interface TranscriptCompactionEvent extends TranscriptEventMetadata {
   readonly tokensAfter?: number;
 }
 
-export interface TranscriptSettingsEvent extends TranscriptEventMetadata {
+interface TranscriptSettingsEvent extends TranscriptEventMetadata {
   readonly kind: 'settings';
   readonly settings: {
     readonly model?: string;
@@ -259,7 +259,7 @@ export interface TranscriptIssue {
  * the harness's own queue bookkeeping — it is holding the text, or it let go of it — which proves
  * where a message is while it waits, and never that it was read.
  */
-export type ObservedHumanInputProof =
+type ObservedHumanInputProof =
   | 'normal-user-record'
   | 'native-queue-drain'
   | 'native-queue-hold'
@@ -374,7 +374,7 @@ export interface TranscriptParser {
   createInputObserver(): TranscriptInputObserver;
 }
 
-export interface TranscriptFileCursor {
+interface TranscriptFileCursor {
   readonly identity?: string;
   readonly byteOffset: number;
   readonly pendingBytes: number;
@@ -405,11 +405,11 @@ export interface TranscriptBatch {
   readonly rawRecords?: readonly TranscriptRawRecord[];
 }
 
-export interface TranscriptReadOptions {
+interface TranscriptReadOptions {
   readonly sessionId?: string;
 }
 
-export interface TranscriptFollowOptions extends TranscriptReadOptions {
+interface TranscriptFollowOptions extends TranscriptReadOptions {
   readonly pollIntervalMs?: number;
   readonly startAt?: 'beginning' | 'end';
   readonly signal?: AbortSignal;

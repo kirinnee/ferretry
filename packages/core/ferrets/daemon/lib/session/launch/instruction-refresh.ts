@@ -26,9 +26,6 @@
 import { type AlwaysOnSection, instructionDigest } from '../peers/fleet.ts';
 import type { LaunchInstructionSection, SessionLaunchInstructions } from '../../protocol/session.ts';
 
-/** The sender chip's feature for the note: the app says "Ferretry · Instructions", never a tag in the text. */
-export const INSTRUCTIONS_FEATURE = 'Instructions';
-
 /** Each always-on section by the name a person reads it under. */
 const SECTION_NAMES: Readonly<Record<AlwaysOnSection['id'], string>> = {
   tools: 'Tools',

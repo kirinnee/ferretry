@@ -4,8 +4,6 @@ import { z } from 'zod';
 
 /** What GitHub said of a PR. `unknown` until the watcher has polled it once. */
 export const PrStateSchema = z.enum(['unknown', 'open', 'closed', 'merged']);
-export type PrState = z.infer<typeof PrStateSchema>;
 
 /** The PR's CI checks, summarised: none run, some still running, all passing, or any failing. */
 export const PrChecksSchema = z.enum(['none', 'pending', 'passing', 'failing']);
-export type PrChecks = z.infer<typeof PrChecksSchema>;

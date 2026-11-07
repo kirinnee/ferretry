@@ -84,7 +84,7 @@ async function checkWorkingDirectory(cwd: string): Promise<void> {
 }
 
 /** Today's `BunGitRunner` process half: the arguments and environment arrive already hardened. */
-export class BunGitByteSpawn implements GitByteSpawn {
+class BunGitByteSpawn implements GitByteSpawn {
   constructor(
     private readonly inheritedEnvironment: () => Readonly<Record<string, string | undefined>> = () => process.env,
   ) {}

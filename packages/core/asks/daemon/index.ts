@@ -16,7 +16,7 @@
  * - **Push counts** after a raise: Notify's; meanwhile a raise says nothing about devices.
  */
 import { randomUUID } from 'node:crypto';
-import { implementDaemon } from '@ferretry/kernel/manifest';
+import { implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
 import { AskDeliveries, AskSources, type SourceKey } from '../contract/index.ts';
 import manifest from '../manifest.ts';
@@ -30,6 +30,7 @@ import { FileAgendaOutboxRepository } from './adapters/agenda/file-agenda-outbox
 import { FileAgendaSeenStore, SqliteAgendaVersionStore } from './adapters/agenda/file-agenda-versions.ts';
 import { KeyedAgendaReplyTimers } from './adapters/agenda/keyed-agenda-reply-timers.ts';
 import { StateAgendaFiles } from './adapters/agenda/state-agenda-files.ts';
+import { tellFerret } from './adapters/agenda/tell-ferret.ts';
 import { AgendaReplyBatcher, AgendaService, isAgendaSessionId } from './lib/agenda/index.ts';
 import { KeyedSerialQueue } from './lib/agenda/serial-queue.ts';
 import { AgendaChangeFanout, AgendaReplyDelivery, AgendaBoardUndelivered } from './lib/agenda/observers.ts';
@@ -43,6 +44,9 @@ import { AsksConfigFile } from '../contract/index.ts';
 import { AgendaWaker, WAKE_SWEEP_MS } from './lib/agenda/waker.ts';
 import { AgendaResurfacer, RESURFACE_SWEEP_MS } from './lib/agenda/resurfacer.ts';
 import { AgendaLedgerFiles } from './lib/state.ts';
+
+/** The one plugin whose Asks view can tell a ferret something. */
+const TELLING_PLUGIN = 'vault';
 
 export default implementDaemon(manifest, {
   build({ kernel, hooks }) {
@@ -137,6 +141,10 @@ export default implementDaemon(manifest, {
       },
     });
 
+    // One port, one raise queue: the view without `tell` is the same port with that one call left off.
+    const withTell = asksPort(agenda, boards, sources, tellFerret(replies));
+    const { tell: _tell, ...withoutTell } = withTell;
+
     return {
       routes: {
         ...agendaRoutes(
@@ -148,7 +156,11 @@ export default implementDaemon(manifest, {
           sourceAnswers(agenda, sources, now),
         ),
       },
-      provides: { asks: asksPort(agenda, boards, sources) },
+      provides: {
+        // Typing into a ferret is not for every plugin that holds Asks: `tell` is on the view of the one plugin that
+        // owes a ferret something (Vault, when its request ends); every other needer's view has no `tell`.
+        asks: perNeeder(needer => (needer.id === TELLING_PLUGIN ? withTell : withoutTell)),
+      },
     };
   },
 });

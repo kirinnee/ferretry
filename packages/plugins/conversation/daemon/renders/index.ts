@@ -5,8 +5,6 @@ import { serialExecutor } from './lib/types.ts';
 import { bodyRoute, metaRoute, saveRoute } from './routes.ts';
 
 export { RENDER_META_STATE, RENDER_PAYLOAD_STATE } from './adapters/state.ts';
-export { RenderError } from './lib/types.ts';
-export { RenderService } from './lib/service.ts';
 
 /** What the renders slice is built from: the kernel's state and clock, nothing else. */
 export interface RendersNeeds {

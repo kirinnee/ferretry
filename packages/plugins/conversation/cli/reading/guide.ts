@@ -10,7 +10,7 @@
  */
 
 /** The heading that opens the guide section, matched as a whole line. */
-export const RENDER_GUIDE_HEADING = '## Guide for agents';
+const RENDER_GUIDE_HEADING = '## Guide for agents';
 
 /** Every type `fy render guide <type>` answers, in the order the overview lists them. */
 export const RENDER_GUIDE_TYPES = [

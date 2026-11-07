@@ -128,7 +128,7 @@ export function sameComposerText(left: string, right: string): boolean {
 const INLINE_PATHS: ReadonlySet<SendPath> = new Set<SendPath>(['direct', 'native-inline']);
 
 /** Below this many characters (whitespace ignored) a message could be a person's own words, so it is never claimed. */
-export const OWN_TEXT_MIN = 12;
+const OWN_TEXT_MIN = 12;
 
 /**
  * The text a send typed that may still be sitting in the composer: its pointer, or — for a message typed as

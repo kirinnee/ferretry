@@ -20,13 +20,13 @@ export const boardOk = <T>(value: T): BoardResult<T, never> => ({ ok: true, valu
 export const boardErr = <E>(error: E): BoardResult<never, E> => ({ ok: false, error });
 
 /** A refusal as the board answers it. */
-export interface BoardRefusal {
+interface BoardRefusal {
   readonly status: number;
   readonly message: string;
 }
 
 /** A card on one machine. */
-export interface BoardCardTarget {
+interface BoardCardTarget {
   readonly daemonId: DaemonId;
   readonly id: BoardTaskId;
 }

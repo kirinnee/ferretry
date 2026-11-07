@@ -5,11 +5,7 @@ declare const stateHomeBrand: unique symbol;
 /** Absolute root of one Ferretry installation. */
 export type StateHome = string & { readonly [stateHomeBrand]: true };
 
-export interface StateHomeInput {
-  readonly fyHome: string | undefined;
-  readonly homeDirectory: string;
-}
-export class InvalidStateHomeError extends Error {
+class InvalidStateHomeError extends Error {
   constructor(
     readonly value: string,
     readonly reason: string,

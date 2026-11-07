@@ -5,6 +5,10 @@ import should from 'should';
 import {
   extendSessionTranscriptRawPrefix,
   frameSessionTranscriptValue,
+  sessionTranscriptRawPrefixStart,
+  sessionTranscriptUnsigned64,
+} from '../../../daemon/reader/lib/session/raw-prefix.ts';
+import {
   issueSessionTranscriptMessageToken,
   readSessionTranscriptMessageCursor,
   SESSION_TRANSCRIPT_MESSAGE_TOKEN_CURSOR_DOMAIN,
@@ -14,10 +18,8 @@ import {
   type SessionTranscriptMessageTokenCodec,
   type SessionTranscriptMessageTokenContext,
   SessionTranscriptMessageTokenError,
-  sessionTranscriptRawPrefixStart,
-  sessionTranscriptUnsigned64,
   verifySessionTranscriptMessageToken,
-} from '../../../daemon/reader/lib/session/index.ts';
+} from '../../../daemon/reader/lib/session/message-token.ts';
 
 /**
  * The token owner, proved without a key file.

@@ -37,7 +37,7 @@ export const WORK_SEARCH_SWEEP_MS = 5_000;
  * window is applied when searching), so a first build over a large fleet is split up rather than run as one synchronous
  * pass that would stall the daemon.
  */
-export const WORK_SEARCH_INDEX_CHUNK = 100;
+const WORK_SEARCH_INDEX_CHUNK = 100;
 
 /** Gives the event loop back for a turn; the daemon runs on Bun, whose `sleep(0)` is a macrotask. */
 const yieldToLoop = async (): Promise<void> => await Bun.sleep(0);

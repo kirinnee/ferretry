@@ -15,13 +15,7 @@
  */
 
 /** Which picker Codex currently has open. */
-export type CodexPickerKind =
-  | 'quick-models'
-  | 'all-models'
-  | 'reasoning'
-  | 'advanced-reasoning'
-  | 'plan-scope'
-  | 'none';
+type CodexPickerKind = 'quick-models' | 'all-models' | 'reasoning' | 'advanced-reasoning' | 'plan-scope' | 'none';
 
 /** One selectable row: the digit that chooses it and the name it shows. */
 export interface CodexPickerRow {
@@ -116,45 +110,7 @@ export function parseCodexPickerScreen(pane: string): CodexPickerScreen {
   return { kind, ...(title === undefined ? {} : { title }), rows };
 }
 
-/**
- * True when the pane still shows the exact row a queued keystroke was aimed at.
- *
- * Re-checked immediately before every send: the picker is asynchronous, and a
- * digit typed into a screen that has since changed selects whatever now sits at
- * that position.
- */
-export function pickerStillShows(
-  pane: string,
-  expected: { readonly kind: CodexPickerKind; readonly title?: string; readonly row: CodexPickerRow },
-): boolean {
-  const current = parseCodexPickerScreen(pane);
-  return (
-    current.kind === expected.kind &&
-    current.title === expected.title &&
-    current.rows.some(row => row.number === expected.row.number && row.name === expected.row.name)
-  );
-}
-
 /** The row that selects a named choice on the current screen. */
 export function pickerRowFor(screen: CodexPickerScreen, name: string): CodexPickerRow | undefined {
   return screen.rows.find(row => row.name === name);
-}
-
-/**
- * Is a picker OPEN on this pane — as opposed to merely mentioned somewhere in its scrollback?
- *
- * DELIVERY ASKS THIS, and it used to ask a second implementation instead. `tmux/composer.ts` carried
- * its own `/Select Model and Effort|Select Reasoning Level for/` regex, which is a copy of the title
- * table above with two of its five entries — so `/model` opening Codex's QUICK picker, whose title is
- * exactly `Select Model`, matched nothing. Delivery then saw a payload gone from a composer that was
- * not prompt-ready, called it `turn-started`, and the driver refused every targeted Codex switch with
- * "Codex consumed the picker command as a model turn". One fact, two owners, and the copy was wrong.
- *
- * Deriving it from {@link parseCodexPickerScreen} is also STRICTLY SAFER than any regex over the
- * frame, and not by accident: a bare title match fires on a picker that has scrolled up into history,
- * whereas the parser refuses a title with a composer prompt below it — which is exactly the
- * "the modal already closed" frame a second Enter must never be sent into.
- */
-export function paneShowsOpenPicker(pane: string): boolean {
-  return parseCodexPickerScreen(pane).kind !== 'none';
 }

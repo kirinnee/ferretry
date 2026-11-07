@@ -122,7 +122,7 @@ export class DurableTerminalPaneRegistrar {
 }
 
 /** One registration that exists on disk and could not be read as one. */
-export interface DamagedTerminalPaneRegistration {
+interface DamagedTerminalPaneRegistration {
   readonly sessionId: string;
   /** The refusal itself, so a caller reports the reason rather than inventing one. */
   readonly error: unknown;

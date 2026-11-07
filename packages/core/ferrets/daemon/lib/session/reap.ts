@@ -7,7 +7,7 @@
  * incarnation agrees too.
  */
 
-export type ReapTerminalStatus = 'completed' | 'failed' | 'stalled' | 'stopped' | 'kill_failed';
+type ReapTerminalStatus = 'completed' | 'failed' | 'stalled' | 'stopped' | 'kill_failed';
 
 export interface RegisteredTerminalPane {
   readonly daemonId: string;
@@ -74,21 +74,6 @@ export function hasSafeTerminalPaneIdentity(pane: ObservedTerminalPane | Registe
     pane.pid > 1 &&
     Number.isSafeInteger(pane.processStartTicks) &&
     pane.processStartTicks > 0
-  );
-}
-
-/** Whether a fresh observation still names the complete process incarnation that was registered. */
-export function terminalPaneIdentityMatches(
-  registration: RegisteredTerminalPane,
-  observation: ObservedTerminalPane,
-): boolean {
-  return (
-    hasSafeTerminalPaneIdentity(registration) &&
-    hasSafeTerminalPaneIdentity(observation) &&
-    registration.tmuxSession === observation.tmuxSession &&
-    registration.paneId === observation.paneId &&
-    registration.pid === observation.pid &&
-    registration.processStartTicks === observation.processStartTicks
   );
 }
 

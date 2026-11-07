@@ -48,10 +48,6 @@ const fieldsOf = (scrub: ScrubText, pairs: RawWork['fields']) =>
     return trimmed.length === 0 ? [] : [{ field, text: scrub(trimmed) }];
   });
 
-/** The text lines of several optional texts, empties dropped. */
-export const joined = (texts: readonly (string | null | undefined)[]): string =>
-  texts.filter((text): text is string => typeof text === 'string' && text.trim().length > 0).join('\n');
-
 export const instantMs = (at: string): number => {
   const ms = Date.parse(at);
   return Number.isFinite(ms) ? ms : 0;

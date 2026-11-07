@@ -44,7 +44,7 @@ export interface CodexPickerFrame {
 }
 
 /** The exact row a queued keystroke is aimed at, re-verified by the transport before it is sent. */
-export interface CodexPickerKeyExpectation {
+interface CodexPickerKeyExpectation {
   readonly kind: CodexPickerScreen['kind'];
   readonly title?: string;
   readonly row: CodexPickerRow;
@@ -70,7 +70,7 @@ export interface PickerDrivePolicy {
   readonly maxStartupWaitObservations?: number;
 }
 
-export const defaultPickerDrivePolicy: PickerDrivePolicy = { settleMs: 50, maxObservations: 80 };
+const defaultPickerDrivePolicy: PickerDrivePolicy = { settleMs: 50, maxObservations: 80 };
 
 /**
  * How many frames of "Codex is still starting" a drive sits through before it counts them.
@@ -85,7 +85,7 @@ export const defaultPickerDrivePolicy: PickerDrivePolicy = { settleMs: 50, maxOb
  * to outlast that: 400 frames at the default 50 ms settle is at least twenty seconds, and a loaded host
  * only makes each frame slower, never the ceiling shorter.
  */
-export const CODEX_STARTUP_WAIT_OBSERVATIONS = 400;
+const CODEX_STARTUP_WAIT_OBSERVATIONS = 400;
 
 /** Sleeping is a capability, not a decision. */
 export interface PickerSleeper {
@@ -93,7 +93,7 @@ export interface PickerSleeper {
 }
 
 /** A picker drive that did not reach its target. Always paired with cleanup by the caller. */
-export class CodexPickerDriveError extends Error {
+class CodexPickerDriveError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'CodexPickerDriveError';
@@ -119,7 +119,7 @@ const EFFORT_LABELS: Readonly<Record<string, string>> = {
   ultra: 'Ultra',
 };
 
-export function codexEffortLabel(effort: string): string {
+function codexEffortLabel(effort: string): string {
   return EFFORT_LABELS[effort] ?? effort;
 }
 
@@ -161,7 +161,7 @@ function modelRow(screen: CodexPickerScreen, target: CodexPickerTarget): CodexPi
  * not running it. An unknown preset is refused for the same reason a differing one is: neither can
  * be shown to be the requested effort.
  */
-export function quickPickerRefusal(screen: CodexPickerScreen, target: CodexPickerTarget): string | undefined {
+function quickPickerRefusal(screen: CodexPickerScreen, target: CodexPickerTarget): string | undefined {
   if (screen.kind !== 'quick-models' || modelRow(screen, target) === undefined) return undefined;
   if (target.quickPickerAppliesPreset !== true) return undefined;
   const preset =

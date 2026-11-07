@@ -23,7 +23,7 @@ import { RendererView } from '../../shell.ts';
 import { AgendaCardsHost } from './agenda-cards-host.tsx';
 
 /** Accounts' renderer for the asks its sign-ins, plans and phone approvals raise. */
-export const SIGN_IN_APPROVAL_RENDERER = 'ask:sign-in-approval';
+const SIGN_IN_APPROVAL_RENDERER = 'ask:sign-in-approval';
 /** The input-request owner's renderer for a value typed into a prompt. */
 export const INPUT_RENDERER = 'ask:input';
 

@@ -18,9 +18,9 @@
 import type { TranscriptBytesRef } from '../../daemon/seams/transcript-types.ts';
 
 /** Records below this are parsed as they are: the scan would cost more than it saves. */
-export const LARGE_RECORD_BYTES = 64 * 1024;
+const LARGE_RECORD_BYTES = 64 * 1024;
 /** The smallest string literal worth referencing: a thumbnail, not an ordinary tool output. */
-export const LARGE_STRING_BYTES = 32 * 1024;
+const LARGE_STRING_BYTES = 32 * 1024;
 
 const QUOTE = 0x22;
 const BACKSLASH = 0x5c;
@@ -186,7 +186,7 @@ export function referenceLargeStrings(
 }
 
 /** The byte range a placeholder names, or `undefined` for any other value. */
-export function placeholderRef(value: unknown): TranscriptBytesRef | undefined {
+function placeholderRef(value: unknown): TranscriptBytesRef | undefined {
   if (typeof value !== 'string' || !value.startsWith(PLACEHOLDER_PREFIX)) return undefined;
   const [offset, length] = value.slice(PLACEHOLDER_PREFIX.length).split(':').map(Number);
   return { byteOffset: offset as number, byteLength: length as number };

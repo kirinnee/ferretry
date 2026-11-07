@@ -8,11 +8,13 @@ import {
   InvalidDeadlineRefused,
   parkedSeconds,
   parseDeadline,
+  waitDetail,
+} from '../../../../../daemon/lib/session/signal/policy.ts';
+import {
   PROTECTED_SIGNAL_STATUSES,
   signalStatusOf,
-  waitDetail,
   type SignalTarget,
-} from '../../../../../daemon/lib/session/signal/index.ts';
+} from '../../../../../daemon/lib/session/signal/types.ts';
 
 /**
  * The pure decisions a signal makes.

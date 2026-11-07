@@ -22,7 +22,7 @@ export interface DocumentSource {
   readonly problem?: string;
 }
 
-export interface JournalSource {
+interface JournalSource {
   readonly file: string;
   readonly scan: Pick<JournalScan, 'pointers' | 'problems' | 'scannedTo' | 'lastSequence'> & {
     /** One-based source line at `scannedTo`, retained for suffix-only reconciliation. */

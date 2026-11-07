@@ -1,16 +1,15 @@
 import { describe, it } from 'bun:test';
 import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
 import should from 'should';
+import { type QueueRequest } from '../../../../daemon/queue/lib/service.ts';
+import { QueueingSends } from '../../../../daemon/queue/lib/queueing-sends.ts';
+import { type SendMessageRequest, type SendOutcome } from '../../../../daemon/delivery/lib/service.ts';
 import {
-  type QueueRequest,
-  QueueingSends,
-  type SendMessageRequest,
-  type SendOutcome,
   type SendRecord,
   SendRefused,
   type SendTarget,
   SendUnavailable,
-} from '../../../../daemon/seams/index.ts';
+} from '../../../../daemon/delivery/lib/types.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
 import { at } from '../../../support/instant.ts';
 

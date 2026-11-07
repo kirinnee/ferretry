@@ -34,7 +34,7 @@ export interface TranscriptSearchResult {
  * The most records one search parses. A query whose needle is in nearly every record — or one with no
  * needle at all — would otherwise parse the whole conversation; it answers what it found by then.
  */
-export const MAX_SEARCH_RECORDS = 20_000;
+const MAX_SEARCH_RECORDS = 20_000;
 
 /**
  * The longest run of the lower-cased query a raw JSONL record must contain to hold the query at all,

@@ -1,5 +1,5 @@
 import { parseTranscriptJsonl } from './transcript-jsonl.ts';
-import { ClaudeObservedInputObserver } from '../../daemon/seams/observed-input.ts';
+import { ClaudeObservedInputObserver } from '../../daemon/reader/lib/transcript/observed-input.ts';
 import type {
   TranscriptAttachment,
   TranscriptEvent,

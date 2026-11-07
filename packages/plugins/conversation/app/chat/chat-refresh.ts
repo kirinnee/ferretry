@@ -8,7 +8,7 @@ import {
 import { cancelSend, retrySend, submitSend } from './chat-reads.ts';
 import type { FerretView } from '@ferretry/core-ferrets/contract';
 import { projectDeliveries } from './peer-delivery.ts';
-import { isTerminalSessionStatus, type TranscriptEntry } from './transcript-entries.ts';
+import { type TranscriptEntry } from './transcript-entries.ts';
 import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../composer/slash-commands.ts';
 import { classifySystemText } from './system-blocks.ts';
 import { IMAGE_READ_TOOL, type ToolResultData, type ToolUseData } from './tool-extract.ts';
@@ -711,15 +711,6 @@ export interface ChatRefreshEnvironment {
  * alive every thirty seconds, so a dead one is noticed long before this poll would have to cover for it.
  */
 export const RELAXED_REFRESH_MS = 120_000;
-
-/**
- * Whether nothing about this session can change without its journal saying so: the agent is idle at its
- * prompt or waiting on a question, or the session is over. A FINISHED session has no turn state at all,
- * and it used to keep the three-second poll for good — the most frequent poll on the page, for the one
- * session that can never move again until something (journaled) resumes it.
- */
-export const changesOnlyByJournal = (state: Pick<FerretView['state'], 'status' | 'turnState'>): boolean =>
-  state.turnState === 'your-turn' || state.turnState === 'needs-input' || isTerminalSessionStatus(state.status);
 
 /**
  * How long a nudge waits for the rest of its burst. A turn ending journals several events within a few

@@ -141,7 +141,7 @@ export interface FsListing {
 }
 
 /** Why a view carries no bytes. Distinct from the flags so a client can branch without prose. */
-export type FsRefusalReason = 'denylist' | 'ignored' | 'escapes';
+type FsRefusalReason = 'denylist' | 'ignored' | 'escapes';
 
 export interface FsFileView {
   readonly path: string;

@@ -1,12 +1,12 @@
 import type { SessionProvenance } from '../../../../../daemon/lib/protocol/session.ts';
 import { describe, expect, it } from 'bun:test';
+import { type SessionAncestor } from '../../../../../daemon/lib/session/provenance/types.ts';
 import {
-  type SessionAncestor,
   SessionProvenanceRecorder,
-  SessionProvenanceStamper,
   type SessionProvenanceRecord,
   type SessionProvenanceStore,
-} from '../../../../../daemon/lib/session/provenance/index.ts';
+} from '../../../../../daemon/lib/session/provenance/recorder.ts';
+import { SessionProvenanceStamper } from '../../../../../daemon/lib/session/provenance/stamper.ts';
 
 const AT = '2026-08-06T07:00:00.000Z';
 const LATER = '2026-08-06T09:00:00.000Z';

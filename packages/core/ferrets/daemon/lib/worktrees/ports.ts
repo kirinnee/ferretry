@@ -27,7 +27,7 @@ export interface PinnedWorkingDirectory {
 export type GitWorkingDirectory = string | PinnedWorkingDirectory;
 
 /** The minimal held-directory capability a worktree mutation needs. */
-export interface PinnedWorktreeDirectory {
+interface PinnedWorktreeDirectory {
   /** Realpath of the object that was actually opened, for identity comparison only. */
   readonly rootReal: string;
   /** The held object in the form the Git runner can inherit. */

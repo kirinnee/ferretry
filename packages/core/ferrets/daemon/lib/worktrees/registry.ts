@@ -30,7 +30,7 @@ import type { ManagedWorktree, ManagedWorktreeIntent } from './types.ts';
  * `state/ferrets/worktrees.json` (§9.2, the contract's `WorktreesFile`, which owns the schema). Its `format: 1` is
  * stamped and checked by the kernel's state port, so the document here is the body only.
  */
-export { type ManagedWorktreeDocument, ManagedWorktreeDocumentSchema } from '../../../contract/state.ts';
+export { type ManagedWorktreeDocument } from '../../../contract/state.ts';
 
 /** Everything the registry holds: finished records, and creations Git was asked for. */
 export interface ManagedWorktreeRegistryState {

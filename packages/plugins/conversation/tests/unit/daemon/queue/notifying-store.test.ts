@@ -2,13 +2,10 @@ import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import { QUEUE_CHANGED_EVENT, type QueueChangedEventData } from '../../../../daemon/seams/protocol.ts';
 import should from 'should';
-import {
-  NotifyingSessionQueueStore,
-  type QueueChangePublisher,
-  type QueueEvent,
-  SessionQueueService,
-  type SessionQueueStore,
-} from '../../../../daemon/seams/index.ts';
+import { NotifyingSessionQueueStore, type QueueChangePublisher } from '../../../../daemon/queue/lib/notifying-store.ts';
+import { type QueueEvent } from '../../../../daemon/queue/lib/model.ts';
+import { SessionQueueService } from '../../../../daemon/queue/lib/service.ts';
+import { type SessionQueueStore } from '../../../../daemon/queue/lib/ports.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
 import { at } from '../../../support/instant.ts';
 

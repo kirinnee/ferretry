@@ -46,7 +46,7 @@ export const subFerretState = (ferret: FerretSummary): SubFerretReading => {
 export const subFerretLive = (read: SubFerretReading): boolean => read.state !== 'done' && read.state !== 'stopped';
 
 /** The name a sub-ferret is called by: its callsign, else its task, else its short id. */
-export const subFerretName = (ferret: FerretSummary): string =>
+const subFerretName = (ferret: FerretSummary): string =>
   displayCallsign(ferret.name) || ferret.title || shortFerretId(ferret.id);
 
 const shortFerretId = (id: string): string => (id.length > 8 ? `${id.slice(0, 8)}…` : id);
@@ -79,7 +79,7 @@ export const activeSubFerrets = (children: readonly FerretSummary[]): readonly F
   children.filter(ferret => subFerretLive(subFerretState(ferret)));
 
 /** A small dot and a word for how a sub-ferret is doing, and why when there is a reason. */
-export function SubFerretStateLabel({ reading: read }: { readonly reading: SubFerretReading }) {
+function SubFerretStateLabel({ reading: read }: { readonly reading: SubFerretReading }) {
   return (
     <span className="fy-sub-ferret-state" data-sub-ferret-state={read.state}>
       <span aria-hidden="true" className="fy-sub-ferret-dot" />
@@ -110,7 +110,7 @@ function SubFerretRow({ item }: { readonly item: SubFerretItem }) {
   );
 }
 
-export function SubFerretList({ items }: { readonly items: readonly SubFerretItem[] }) {
+function SubFerretList({ items }: { readonly items: readonly SubFerretItem[] }) {
   return (
     <ul className="fy-sub-ferret-list" data-sub-ferret-list="">
       {items.map(item => (

@@ -1,20 +1,6 @@
-import type { IndexWrite } from './index-writes.ts';
-import type { FoundationPaths } from './paths.ts';
 import type { SessionId } from './session-id.ts';
-import type { StateHomeInput } from './state-home.ts';
-import type { EventPointer, IndexedSession, JournalFingerprint, RebuildPlan } from './storage-types.ts';
 
-export interface EnvironmentPort {
-  stateHomeInput(): StateHomeInput;
-  /**
-   * The origin of the relay directory this daemon asks which carrier is advertised, or nothing.
-   *
-   * An ORIGIN, never a carrier: it identifies a service, and the relay address plus the operator's
-   * kill switch both live behind it at runtime. `undefined` is a real answer — a build with no
-   * directory asks nobody anything and stays direct-only, saying so.
-   */
-  relayDirectoryOrigin(): string | undefined;
-}
+import type { EventPointer, IndexedSession, JournalFingerprint, RebuildPlan } from './storage-types.ts';
 
 export interface ClockPort {
   now(): string;
@@ -97,18 +83,6 @@ export interface FileSystemPort {
   sweepTemporaryFiles(): Promise<void>;
 }
 
-export interface FileSystemFactory {
-  create(paths: FoundationPaths): FileSystemPort;
-}
-
-export interface HomeLockLease {
-  release(): Promise<void>;
-}
-
-export interface HomeLockFactory {
-  acquire(paths: FoundationPaths, fileSystem: FileSystemPort): Promise<HomeLockLease>;
-}
-
 export interface SessionIndex {
   replaceAll(plan: RebuildPlan): void;
   replaceSession(session: IndexedSession, events: readonly EventPointer[]): void;
@@ -124,23 +98,6 @@ export interface SessionIndex {
   removeSession(id: SessionId): void;
   /** Persists every write still queued, then releases the index. */
   close(): Promise<void>;
-}
-
-/**
- * Where the session index's writes are made durable, behind the reads that are answered from memory.
- *
- * `persist` applies one batch, in order, as one transaction: all of it lands or none of it does. It may
- * be asked to apply a batch it already applied — a thread presumed stuck can have committed before it
- * was replaced — so every write must be idempotent on the disk side.
- */
-export interface IndexPersister {
-  persist(writes: readonly IndexWrite[]): Promise<void>;
-  /** Checkpoints and closes the file. Nothing is persisted after it. */
-  close(): Promise<void>;
-}
-
-export interface SessionIndexFactory {
-  open(paths: FoundationPaths, fileSystem: FileSystemPort): Promise<SessionIndex>;
 }
 
 export interface SerialExecutor {

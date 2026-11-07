@@ -3,7 +3,7 @@ import { errorResponse } from '@ferretry/kernel/contract';
 import type { TestCaller } from '@ferretry/kernel/testing';
 
 /** The header a test names its caller in; the stand-in admission below reads it. */
-export const AS_HEADER = 'x-test-as';
+const AS_HEADER = 'x-test-as';
 export const as = (caller: TestCaller): { readonly headers: Readonly<Record<string, string>> } => ({
   headers: { [AS_HEADER]: JSON.stringify(caller) },
 });

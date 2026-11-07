@@ -35,7 +35,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DaemonConnection, DaemonId } from '../shell.ts';
 import type { DaemonSessionScope } from '../shell.ts';
-import type { DeviceNotificationFilterPreferences, DeviceNotificationFilterStore } from '../lib/notification-filter.ts';
+import type { DeviceNotificationFilterStore } from '../lib/notification-filter.ts';
 import { type SessionsSource, startNotificationWatch } from '../lib/notification-ledger.ts';
 import type { DaemonNotificationPreferences, NotificationPreferences } from '../lib/notification-preferences.ts';
 import {
@@ -61,11 +61,6 @@ export const useNotificationPreferences = (
   const snapshot = useCallback(() => store.get(daemon), [daemon, store]);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 };
-
-/** This browser's one device-wide filter — the same for every daemon (`notification-filter.ts`). */
-export const useNotificationFilterPreferences = (
-  store: DeviceNotificationFilterStore,
-): DeviceNotificationFilterPreferences => useSyncExternalStore(store.subscribe, store.get, store.get);
 
 export interface NotificationWatchHost {
   /** The fleet cache, whose `null` snapshot means "not yet" rather than "empty". */

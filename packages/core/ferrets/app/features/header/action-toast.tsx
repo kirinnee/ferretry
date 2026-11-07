@@ -10,7 +10,7 @@
 import { X } from 'lucide-react';
 import { useEffect } from 'react';
 
-export const ACTION_TOAST_MS = 6_000;
+const ACTION_TOAST_MS = 6_000;
 
 export function ActionToast({
   notice,
