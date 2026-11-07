@@ -8,7 +8,7 @@ import {
   type MediaQueryListLike,
   type TouchModalitySignals,
 } from '../../../../app/shell.ts';
-import { render } from '../../../support/app/react.ts';
+import { render } from '@ferretry/app/testing';
 
 const DESKTOP: TouchModalitySignals = {
   finePrimary: true,

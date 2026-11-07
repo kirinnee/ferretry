@@ -3,7 +3,7 @@ import type { DaemonId } from '../../../app/shell.ts';
 import { AgendaInboxContext } from '../../../app/hooks/use-agenda-inbox.ts';
 import { SessionsBarNeedsYou } from '../../../app/shell.ts';
 import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../../support/app/agenda-inbox.tsx';
-import { type Mounted, mount, must } from '../../support/app/dom.ts';
+import { type Mounted, mount, must } from '@ferretry/app/testing';
 import { sessionView } from '../../support/app/sessions.ts';
 
 const DAEMON = 'alpha' as DaemonId;

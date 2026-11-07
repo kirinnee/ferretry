@@ -5,7 +5,7 @@ import { type AgendaSender, sendAgendaAction } from '../../../app/lib/agenda-sen
 import { daemonConnection } from '../../../app/shell.ts';
 import { daemonSessionScope } from '../../../app/shell.ts';
 
-const connection = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const connection = daemonConnection({ daemonId: 'daemon-a' });
 const scope = daemonSessionScope(connection, 'fr');
 
 const recorder = () => {

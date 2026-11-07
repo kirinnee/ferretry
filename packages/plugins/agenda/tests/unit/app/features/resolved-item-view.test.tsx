@@ -5,14 +5,13 @@ import { ResolvedItemView } from '../../../../app/features/agenda/resolved-item-
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import type { InboxResolved } from '../../../../app/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../../app/shell.ts';
-import '../../../support/app/dom.ts';
-import { render, run, runAsync } from '../../../support/app/react.ts';
+import { ensureDom } from '@ferretry/app/testing';
+ensureDom();
+import { render, run, runAsync } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
 
 const connection = daemonConnection({
   daemonId: 'fixture',
-  baseUrl: 'https://fixture.example.test',
-  deviceId: 'device',
 });
 const record = agendaListSnapshot(projectionSnapshot(0, 1)).resolved[0];
 if (record === undefined) throw new Error('fixture needs one resolved record');

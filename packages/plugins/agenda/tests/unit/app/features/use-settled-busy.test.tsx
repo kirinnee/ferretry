@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 import { useSettledBusy } from '../../../../app/shell.ts';
 import { unitClock } from '../../../../daemon/tests/support/unit-clock.ts';
-import { render, run } from '../../../support/app/react.ts';
+import { render, run } from '@ferretry/app/testing';
 
 const Probe = ({ busy, onValue }: { busy: boolean; onValue: (shown: boolean) => void }) => {
   onValue(useSettledBusy(busy, 300, 800));

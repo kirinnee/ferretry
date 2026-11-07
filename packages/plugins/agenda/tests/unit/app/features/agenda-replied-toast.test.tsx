@@ -1,4 +1,5 @@
-import '../../../support/app/dom.ts';
+import { ensureDom } from '@ferretry/app/testing';
+ensureDom();
 import { afterEach, describe, expect, it } from 'bun:test';
 import { useSyncExternalStore } from 'react';
 import { AgendaUndoToast } from '../../../../app/features/agenda/agenda-undo-toast.tsx';
@@ -6,7 +7,7 @@ import type { AgendaInbox } from '../../../../app/hooks/use-agenda-inbox.ts';
 import { type DeferredTimers, DeferredAgendaActions } from '../../../../app/lib/agenda-inbox.ts';
 import { RepliedAgenda, type RepliedPorts } from '../../../../app/lib/agenda-replied.ts';
 import { agendaItem, choices, inboxCard } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
 
 const card = inboxCard(

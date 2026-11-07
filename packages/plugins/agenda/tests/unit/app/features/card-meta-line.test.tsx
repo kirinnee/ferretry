@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { hasWords, joinMeta } from '../../../../app/features/agenda/card-meta-line.tsx';
-import { type Mounted, mount } from '../../../support/app/dom.ts';
+import { type Mounted, mount } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

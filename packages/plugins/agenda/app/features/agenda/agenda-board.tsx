@@ -5,7 +5,6 @@ import {
   type AgendaResponse,
   type ResolvedAgendaItem,
 } from '../../wire/index.ts';
-import { shellClock } from '../../shell.ts';
 import {
   BadgeCheck,
   Bot,
@@ -81,7 +80,7 @@ const sourceLabel = (source: AgendaItem['source']): string =>
   ({ task: 'Blocked task', question: 'Question', 'agent-raised': 'Agent request' })[source] ?? 'Unknown source';
 
 export const agendaReference = (id: string): string => `!${id}`;
-export const agendaAge = (waitingSince: string, now = shellClock.nowMs()): string => {
+export const agendaAge = (waitingSince: string, now = Date.now()): string => {
   const minutes = Math.max(0, Math.floor((now - Date.parse(waitingSince)) / 60_000));
   if (minutes < 1) return 'waiting now';
   if (minutes < 60) return `waiting ${minutes}m`;
@@ -127,13 +126,6 @@ export function resolutionBadge({
   response,
 }: AgendaResolution): { label: string; className: string; icon: typeof Check } {
   const agent = agentLabel(resolvedByName, resolvedBySession);
-  if (disposition === 'replied') {
-    return {
-      label: 'replied by you',
-      className: 'border-border bg-surface-2 text-muted',
-      icon: UserRoundCheck,
-    };
-  }
   if (disposition === 'dismissed') {
     if (resolvedBy === 'agent') {
       return {

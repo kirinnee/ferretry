@@ -27,7 +27,7 @@ import { answerAction, CLEAR_ACTION, kindWord, optionAction } from '../../lib/ag
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { DISMISS_ACTION, historyLine, type InboxAction, updatedSinceAsked } from '../../lib/agenda-inbox.ts';
 import { decidedSummary, type RevisionHighlight, revisionHighlight } from '../../lib/agenda-revisions.ts';
-import { RouteLink, shellClock } from '../../shell.ts';
+import { RouteLink } from '../../shell.ts';
 import { AgendaActions } from './agenda-actions.tsx';
 import { agendaAge, agendaKindMeta } from './agenda-board.tsx';
 import { AgendaBriefSections, cardLede } from './agenda-brief.tsx';
@@ -108,7 +108,7 @@ export function AgendaCard({
   error = null,
   swipeHints = false,
   highlighted = false,
-  now = shellClock.nowMs(),
+  now = Date.now(),
   renderProse = markdownProse,
   onAct,
   id,

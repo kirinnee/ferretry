@@ -11,7 +11,7 @@ import {
   InboxHarness,
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
-import { interact, mount, must } from '../../../support/app/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import { chooseFromMenu, openFind } from '../../../support/app/inbox-menus.ts';
 import { typeInto } from '../../../support/app/learning-dom.ts';
 import { sessionView } from '../../../support/app/sessions.ts';

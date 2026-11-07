@@ -11,10 +11,10 @@ import { AgendaOpenPageSchema, type AgendaOpenPage } from '../../contract/index.
  * than it read.
  */
 
-import { AGENDA_CHANNEL_HEADER, AGENDA_CHANNEL_VERSION, type AgendaItem } from '../wire/index.ts';
-import type { DaemonConnection, DaemonId } from '../shell.ts';
-import { daemonRequest } from '../shell.ts';
-import { type DaemonFetch, DaemonResponseError } from '../shell.ts';
+import type { AgendaItem } from '../wire/index.ts';
+import { AGENDA_READ_HEADERS, type AgendaCall, agendaCall, DaemonResponseError } from './agenda-call.ts';
+import { AGENDA_OPEN } from './agenda-wire.ts';
+import type { DaemonConnection, DaemonId } from './machine.ts';
 
 /** More pages than a machine could hold: a daemon that never stops saying `next` is not read forever. */
 export const ROLLUP_MAX_PAGES = 200;
@@ -23,18 +23,16 @@ export const ROLLUP_MAX_PAGES = 200;
 export type RollupBoards = ReadonlyMap<string, readonly AgendaItem[]>;
 
 /** Reads every page of the machine's roll-up. */
-export const fetchAgendaRollup = async (daemon: DaemonConnection, fetcher: DaemonFetch): Promise<RollupBoards> => {
+export const fetchAgendaRollup = async (_daemon: DaemonConnection, client: AgendaCall): Promise<RollupBoards> => {
   const boards = new Map<string, readonly AgendaItem[]>();
   let after: string | undefined;
   for (let page = 0; page < ROLLUP_MAX_PAGES; page += 1) {
-    const request = daemonRequest(
-      daemon,
-      after === undefined ? '/v1/agenda/open' : `/v1/agenda/open?after=${encodeURIComponent(after)}`,
-      { headers: { [AGENDA_CHANNEL_HEADER]: AGENDA_CHANNEL_VERSION } },
+    const read: AgendaOpenPage = AgendaOpenPageSchema.parse(
+      await agendaCall(client, AGENDA_OPEN, {
+        ...(after === undefined ? {} : { query: { after } }),
+        headers: AGENDA_READ_HEADERS,
+      }),
     );
-    const response = await fetcher(request.url, request.init);
-    if (!response.ok) throw new DaemonResponseError(response.status, `HTTP ${response.status}`, undefined);
-    const read: AgendaOpenPage = AgendaOpenPageSchema.parse(await response.json());
     for (const session of read.sessions) boards.set(session.sessionId, session.items);
     if (read.next === undefined) return boards;
     after = read.next;
@@ -57,7 +55,7 @@ export class AgendaRollupStore {
   readonly #inFlight = new Map<DaemonId, Promise<void>>();
   readonly #generations = new Map<DaemonId, number>();
 
-  constructor(private readonly fetcher: DaemonFetch) {}
+  constructor(private readonly client: AgendaCall) {}
 
   subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);
@@ -71,7 +69,7 @@ export class AgendaRollupStore {
     const existing = this.#inFlight.get(daemon.daemonId);
     if (existing !== undefined) return existing;
     const generation = this.#generations.get(daemon.daemonId) ?? 0;
-    const promise = fetchAgendaRollup(daemon, this.fetcher)
+    const promise = fetchAgendaRollup(daemon, this.client)
       .then(
         boards => {
           if ((this.#generations.get(daemon.daemonId) ?? 0) === generation) this.#hold(daemon.daemonId, boards, true);

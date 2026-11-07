@@ -23,11 +23,10 @@ import {
   type AgendaItem,
   type AgendaListSnapshot,
   agendaTurn,
-  isMachineAgendaId,
   type AgendaListRecord,
   type SessionAgendaSummary,
 } from '../wire/index.ts';
-import { agendaDeepLinkFromFragment, type SessionView, shellClock } from '../shell.ts';
+import { agendaDeepLinkFromFragment, type SessionView } from '../shell.ts';
 import {
   answerActions,
   type InboxAction,
@@ -39,7 +38,6 @@ import { clockWords } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
 import { type DaemonId, daemonId as toDaemonId } from '../shell.ts';
 import { BOARD_READ_FAILURE_WORDS, type BoardReadFailure } from './inbox-board-reads.ts';
-import { daemonSessionPath } from '../shell.ts';
 import { rootViews } from '../shell.ts';
 
 /** One machine's session list, as the inbox reads it. `sessions` is `null` before the first read. */
@@ -240,11 +238,12 @@ export const withFerretSessions = (sources: readonly AgendaInboxSource[]): reado
 export const agendaSummaryKey = (summary: SessionAgendaSummary): string =>
   `${summary.open}\u0000${summary.first}\u0000${summary.latestAt}\u0000${summary.discussing ?? 0}\u0000${summary.stopped === true ? 1 : 0}`;
 
-/** Where a conversation opens AT an item: the session's page, naming the ask (`?ask=A3`). */
+/**
+ * Where a conversation opens AT an item: the ask's own page (`/agenda/:ferret/:ask`), which draws the ask with its
+ * ferret's conversation and composer under it (Conversation's panel in the `agenda.conversation` slot).
+ */
 export const agendaConversationPath = (daemonId: DaemonId, sessionId: string, id: AgendaId): string =>
-  isMachineAgendaId(sessionId)
-    ? inboxTargetPath(daemonId, sessionId, id)
-    : `${daemonSessionPath(daemonId, sessionId)}?${ASK_LINK_PARAMETER}=${encodeURIComponent(id)}`;
+  inboxTargetPath(daemonId, sessionId, id);
 
 /** The item a conversation link names (`?ask=A3`), or `null` for none or a malformed one. */
 export const agendaTargetFromSearch = (search: string): AgendaId | null => {
@@ -560,7 +559,7 @@ export const swipeIntent = (
 };
 
 /** The words an undo toast uses for an action it is holding. */
-export const actionSentence = (action: InboxAction, id: AgendaId, now = shellClock.nowMs()): string => {
+export const actionSentence = (action: InboxAction, id: AgendaId, now = Date.now()): string => {
   if (action.kind === 'snooze') return `Snoozed !${id} until ${clockWords(action.until, now) ?? 'later'}`;
   if (action.kind === 'unsnooze') return `!${id} is back on your list`;
   if (action.kind === 'dismiss') return `Dismissed !${id}`;
@@ -606,9 +605,9 @@ export interface DeferredTimers {
 }
 
 export const browserDeferredTimers: DeferredTimers = {
-  setTimeout: (callback, milliseconds) => shellClock.after(callback, milliseconds),
-  clearTimeout: handle => (handle as () => void)(),
-  now: () => shellClock.nowMs(),
+  setTimeout: (callback, milliseconds) => globalThis.setTimeout(callback, milliseconds),
+  clearTimeout: handle => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
+  now: () => Date.now(),
 };
 
 type Commit = (card: InboxCard, action: InboxAction) => Promise<void>;

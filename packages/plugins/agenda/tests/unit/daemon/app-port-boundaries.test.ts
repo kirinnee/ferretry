@@ -9,16 +9,15 @@ import {
 } from '../../../app/wire/index.ts';
 import * as shell from '../../../app/shell.ts';
 import { fetchAgendaSnapshot } from '../../../app/lib/agenda-client.ts';
+import { callFromFetch } from '../../support/app/call-from-fetch.ts';
 
-test('pending Agenda reads require an injected transport and have no browser network default', async () => {
+test('Agenda reads go through the injected client by route key and have no browser network default', async () => {
   expect('browserFetch' in shell).toBe(false);
   const daemon = shell.daemonConnection({
     daemonId: 'test-daemon',
-    baseUrl: 'https://daemon.example.test',
-    deviceId: 'test-device',
   });
   const scope = shell.daemonSessionScope(daemon, 'test-ferret');
-  await expect(Reflect.apply(fetchAgendaSnapshot, undefined, [daemon, scope])).rejects.toBeInstanceOf(TypeError);
+  await expect(Reflect.apply(fetchAgendaSnapshot, undefined, [daemon, scope])).rejects.toThrow();
   const snapshot = {
     v: 1 as const,
     sessionId: scope.sessionId,
@@ -30,10 +29,14 @@ test('pending Agenda reads require an injected transport and have no browser net
   };
   const requests: string[] = [];
   expect(
-    await fetchAgendaSnapshot(daemon, scope, async url => {
-      requests.push(String(url));
-      return Response.json(snapshot);
-    }),
+    await fetchAgendaSnapshot(
+      daemon,
+      scope,
+      callFromFetch(async url => {
+        requests.push(url);
+        return Response.json(snapshot);
+      }, 'https://daemon.example.test'),
+    ),
   ).toEqual(snapshot);
   expect(requests).toEqual(['https://daemon.example.test/v1/ferrets/test-ferret/agenda']);
 });

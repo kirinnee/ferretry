@@ -7,13 +7,12 @@ import { daemonSessionScope } from '../../../../app/shell.ts';
 import { boundDaemonId } from '../../../../app/shell.ts';
 import type { DaemonFetch } from '../../../../app/shell.ts';
 import { type AppStore, StoreProvider } from '../../../../app/shell.ts';
-import '../../../support/app/dom.ts';
-import { render, run, runAsync } from '../../../support/app/react.ts';
+import { ensureDom } from '@ferretry/app/testing';
+ensureDom();
+import { render, run, runAsync } from '@ferretry/app/testing';
 
 const connection = daemonConnection({
   daemonId: 'fixture',
-  baseUrl: 'https://fixture.example.test',
-  deviceId: 'device',
 });
 const scope = daemonSessionScope(connection, 'session');
 const header = agendaListSnapshot(projectionSnapshot(0, 1)).resolved[0];

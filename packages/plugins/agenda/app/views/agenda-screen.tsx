@@ -1,63 +1,43 @@
 /**
- * The `agenda` screen: the Agenda page, every paired machine's asks and notices in one list (today's Inbox page).
- * The host data (the merged agenda model, the router, the layout mode, the clear-agents port) comes from the shell;
- * the page itself is this half's.
+ * The `agenda` screen: the Agenda page, every ferret's asks and notices on this machine in one list (today's Inbox
+ * page). The page itself is this half's; the runtime (the agenda client, the ferrets) is the half's one, shared with
+ * every view; the open card's conversation is Conversation's panel in the `agenda.conversation` slot.
  */
 
-import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
-import { MachineNotificationList, NotificationsOffBanner } from '../features/settings/notification-machines.tsx';
+import type { ScreenProps } from '@ferretry/kernel/manifest';
+import { AgendaConversationSlot } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
+import { AgendaInboxContext, useRuntimeInbox } from '../hooks/use-agenda-inbox.ts';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { inboxSourceFromSearch } from '../lib/agenda-inbox-list.ts';
-import { useAgendaInbox } from '../hooks/use-agenda-inbox.ts';
-import { useAgendaItemOpened, useAppStore, useLayoutMode, usePairedMachineNotifications, useRouter } from '../shell.ts';
+import { useAgendaLinks } from '../lib/agenda-links.ts';
+import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
+import { useLayoutMode, useRouter } from '../shell.ts';
 
-export function createAgendaScreen(client: PluginClient) {
+export function createAgendaScreen(runtime: AgendaRuntime) {
+  const daemon = runtime.connection.daemonId;
   return function AgendaScreen(_props: ScreenProps) {
     const { navigate } = useRouter();
-    const store = useAppStore();
-    const inbox = useAgendaInbox();
+    const links = useAgendaLinks();
+    const inbox = useRuntimeInbox(runtime, project => links.lanes(daemon, project));
     const phone = useLayoutMode() === 'drawer';
-    const machineNotifications = usePairedMachineNotifications();
-    const itemOpened = useAgendaItemOpened();
-    if (inbox === null) return null;
     return (
-      <AgendaClientContext.Provider value={client}>
-        <AgendaInboxPage
-          inbox={inbox}
-          phone={phone}
-          clearPort={store.clearPort}
-          onNavigate={navigate}
-          from={inboxSourceFromSearch(window.location.search)}
-          onClearFrom={() => navigate('/agenda')}
-          onItemOpened={(card: { daemonId: string; view: { config: { id: string } }; item: { id: string } }) => {
-            const target = inbox.connectionFor(card.daemonId);
-            if (target !== undefined) void itemOpened(target, card.view.config.id, card.item.id);
-          }}
-          banner={
-            <NotificationsOffBanner
-              rows={machineNotifications.rows}
-              canEnrol={machineNotifications.canEnrol}
-              busy={machineNotifications.busy}
-              onEnable={machineNotifications.enable}
-            />
-          }
-          notifications={
-            <MachineNotificationList
-              rows={machineNotifications.rows}
-              canEnrol={machineNotifications.canEnrol}
-              busy={machineNotifications.busy}
-              failures={machineNotifications.failures}
-              onEnable={machineNotifications.enable}
-              onDisable={machineNotifications.disable}
-              onTurnOnAll={machineNotifications.turnOnAll}
-              onToggleShown={machineNotifications.toggleShown}
-            />
-          }
-        />
+      <AgendaClientContext.Provider value={runtime.client}>
+        <AgendaInboxContext.Provider value={inbox}>
+          <AgendaInboxPage
+            inbox={inbox}
+            phone={phone}
+            clearPort={runtime.clearPort}
+            onNavigate={to => navigate(to)}
+            from={inboxSourceFromSearch(window.location.search)}
+            onClearFrom={() => navigate(links.agenda(daemon), { replace: true })}
+            onItemOpened={card => void runtime.itemOpened(card.view.config.id, card.item.id)}
+            renderComposer={card => (
+              <AgendaConversationSlot ask={card.item.id} daemon={daemon} ferret={card.view.config.id} />
+            )}
+          />
+        </AgendaInboxContext.Provider>
       </AgendaClientContext.Provider>
     );
   };
 }
-
-export default createAgendaScreen;

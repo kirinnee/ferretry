@@ -3,8 +3,8 @@ import type { AgendaItem, AgendaVersionList } from '../../../../app/wire/index.t
 import { VersionDiffPanel } from '../../../../app/features/agenda/agenda-version-diff.tsx';
 import type { AgendaVersionsView } from '../../../../app/features/agenda/use-item-lifecycle.ts';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
-import { settleUntil } from '../../../support/app/settle.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { settleUntil } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

@@ -1,10 +1,9 @@
 /**
- * THE AGENDA INBOX, wired: every paired machine's session list read for `state.agenda`, the
+ * THE AGENDA INBOX, wired: the machine's ferrets with their agenda summaries (`lib/ferret-store.ts`), the
  * boards of exactly the conversations it names, and the answers held for their undo window.
  *
- * Mounted ONCE, by the shell, and handed down through `AgendaInboxContext` — so the phone's
- * Inbox tab, the sidebar's entry, the Sessions page's Needs-you deck and the inbox page all count
- * and deal the same cards, and an answer still inside its undo window survives a navigation.
+ * Built over the half's one runtime (`lib/agenda-runtime.ts`) by every view that draws it, and handed down through
+ * `AgendaInboxContext`, so the Agenda page, the ask page and a ferret's panel count and deal the same cards.
  *
  * A BOARD IS READ WHEN ITS SUMMARY MOVES, and only then. The daemon rewrites `state.agenda` on every
  * board change and the fleet feed re-reads the list, so a changed summary is the signal; an unchanged
@@ -62,7 +61,8 @@ import { answeredSuggestions } from '../lib/answered-suggestions.ts';
 import type { DaemonConnection, DaemonId } from '../shell.ts';
 import { withMachineAgendas } from '../lib/machine-agenda.ts';
 import { daemonSessionKey, daemonSessionScope } from '../shell.ts';
-import type { DaemonFleetStore } from '../shell.ts';
+import type { DaemonFleetStore } from '../lib/ferret-store.ts';
+import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
 import { type BoardReadFailure, InboxBoardReads } from '../lib/inbox-board-reads.ts';
 
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
@@ -118,6 +118,10 @@ export interface AgendaInbox {
   readonly boardOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaItem[];
   /** The resolved records one conversation's board holds: where the title of an agenda merged away is read. */
   readonly recordsOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaListRecord[];
+  /** A project's lane editor (Board's page), where Edit on a lane-proposal card goes. Absent: Edit only answers. */
+  readonly laneEditor?: (projectId: string) => string | undefined;
+  /** Every machine's ferrets have been read and no board is on its first read: a card not listed now is not open. */
+  readonly settled?: boolean;
 }
 
 /** One paired machine to count Attention on: its pairing and the name the reader knows it by. */
@@ -524,6 +528,27 @@ export function useAgendaInboxModel(
     ],
   );
 }
+
+/**
+ * The inbox of the half's one machine, over its runtime: its ferrets (read as soon as something draws them) and the
+ * model above. `laneEditor` is the host's link to Board's lane editor.
+ */
+export const useRuntimeInbox = (
+  runtime: AgendaRuntime,
+  laneEditor?: (projectId: string) => string | undefined,
+): AgendaInbox => {
+  const pairings = useMemo(
+    () => [{ connection: runtime.connection, name: runtime.name }],
+    [runtime.connection, runtime.name],
+  );
+  const machines = useInboxMachines(runtime.ferrets, pairings);
+  const inbox = useAgendaInboxModel(runtime.agenda, machines);
+  const settled = machines.every(machine => machine.sessions !== null) && !inbox.reading;
+  return useMemo(
+    () => ({ ...inbox, settled, ...(laneEditor === undefined ? {} : { laneEditor }) }),
+    [inbox, settled, laneEditor],
+  );
+};
 
 export const AgendaInboxContext = createContext<AgendaInbox | null>(null);
 

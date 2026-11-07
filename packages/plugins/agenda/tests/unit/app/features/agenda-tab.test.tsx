@@ -2,8 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { AgendaTab } from '../../../../app/features/agenda/agenda-tab.tsx';
 import { agendaTabModel } from '../../../../app/lib/agenda-tab.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { render, run } from '../../../support/app/react.ts';
-import '../../../support/app/dom.ts';
+import { render, run } from '@ferretry/app/testing';
+import { ensureDom } from '@ferretry/app/testing';
+ensureDom();
 
 describe('AgendaTab', () => {
   test('shows the current stages and asks, and opens the lead’s agenda from a sub-ferret', () => {

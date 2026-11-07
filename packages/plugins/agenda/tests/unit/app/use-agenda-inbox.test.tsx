@@ -14,13 +14,14 @@ import { AgendaRollupStore } from '../../../app/lib/agenda-rollup.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../../../app/shell.ts';
 import type { DaemonSessionScope } from '../../../app/shell.ts';
 import type { DaemonFleetStore, FleetSnapshot } from '../../../app/shell.ts';
-import '../../support/app/dom.ts';
-import { interact, type Mounted, mount } from '../../support/app/dom.ts';
+import { ensureDom } from '@ferretry/app/testing';
+ensureDom();
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
 import { sessionView } from '../../support/app/sessions.ts';
-import { settleUntil } from '../../support/app/settle.ts';
+import { settleUntil } from '@ferretry/app/testing';
 
-const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio' });
-const laptop = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'd-laptop' });
+const studio = daemonConnection({ daemonId: 'studio' });
+const laptop = daemonConnection({ daemonId: 'laptop' });
 const at = (minutes: number): string => new Date(Date.UTC(2026, 9, 23, 12, minutes)).toISOString();
 
 const summary = (open: number, latest: number): SessionAgendaSummary => ({

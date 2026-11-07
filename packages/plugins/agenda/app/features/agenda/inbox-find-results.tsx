@@ -4,12 +4,12 @@
  * an OPEN item opens here as the deck's card, like a tap on the Open list does.
  */
 
+import { sessionsBarNames } from '../../lib/ferret-names.ts';
 import { Fragment } from 'react';
 import { agendaConversationPath } from '../../lib/agenda-inbox.ts';
 import type { FindRow, FindTone } from '../../lib/agenda-inbox-find.ts';
 import { inboxRowTitle, inboxWho } from '../../lib/agenda-inbox-list.ts';
 import { RouteLink } from '../../shell.ts';
-import { sessionsBarNames } from '../../shell.ts';
 import { agendaReference } from './agenda-board.tsx';
 
 const WHERE_WORDS = 'Find looks in Open, Snoozed, Replied, Resolved.';

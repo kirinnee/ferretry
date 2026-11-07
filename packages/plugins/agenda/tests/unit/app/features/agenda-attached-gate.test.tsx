@@ -3,7 +3,7 @@ import type { AgendaItem } from '../../../../app/wire/index.ts';
 import { ChatProse } from '../../../../app/shell.ts';
 import { AgendaItemCard } from '../../../../app/features/agenda/agenda-item-card.tsx';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

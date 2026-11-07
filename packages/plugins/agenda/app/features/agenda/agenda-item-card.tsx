@@ -34,7 +34,7 @@ import {
   plainLabel,
   singleAgendaQuestion,
 } from '../../wire/index.ts';
-import { inputContextLines } from '../../shell.ts';
+import { inputContextLines } from '../../lib/input-context.ts';
 import { Check } from 'lucide-react';
 import { type ReactNode, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -61,7 +61,6 @@ import { itemAtVersion, versionCount } from '../../lib/agenda-revisions.ts';
 import { openTab, sectionTab, viewTabs } from '../../lib/agenda-tab-view.ts';
 import { attachedGateLead, toGateAction, gateOf } from '../../lib/gate-items.ts';
 import { type ReplyApproval, replyApproval } from '../../lib/reply-approval.ts';
-import { HowToTest } from '../../shell.ts';
 import { AgendaActivityLog } from './agenda-activity-log.tsx';
 import { AgendaLinkRow, PointForm } from './agenda-brief.tsx';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
@@ -348,7 +347,7 @@ function CardAskBlock({
       {ask.howToTest === null || ask.howToTest.trim() === '' ? null : (
         <div className="fy-card__need-part" data-agenda-card-ask-test="">
           <h5 className="fy-card__label">How to test</h5>
-          <HowToTest renderProse={renderProse} text={ask.howToTest} />
+          <div className="fy-board-test">{renderProse(ask.howToTest)}</div>
         </div>
       )}
       {offer === null ? null : (
@@ -671,7 +670,7 @@ export function AgendaItemCard({
               )}
               {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
               {cardsForm}
-              {gated && body !== null ? <HowToTest renderProse={renderProse} text={body} /> : null}
+              {gated && body !== null ? <div className="fy-board-test">{renderProse(body)}</div> : null}
               {choosing && showList ? (
                 <OptionsList
                   busy={busy}

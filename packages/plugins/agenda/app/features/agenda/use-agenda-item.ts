@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { fetchAgendaItem } from '../../lib/agenda-item-client.ts';
 import type { DaemonConnection } from '../../shell.ts';
 import type { DaemonSessionScope } from '../../shell.ts';
-import { useDaemonFetch } from '../../shell.ts';
+import { useAgendaCall } from '../../lib/agenda-client-context.tsx';
 
 /** A list header never enters the document renderer. Closing or switching items fences an unfinished read. */
 export const useAgendaItem = (
@@ -11,25 +11,17 @@ export const useAgendaItem = (
   scope: DaemonSessionScope,
   candidate: AgendaItem | AgendaListRecord | undefined,
 ) => {
-  const fetcher = useDaemonFetch();
+  const agendaClient = useAgendaCall();
   const header = candidate !== undefined && isAgendaHeader(candidate) ? candidate : undefined;
   const [attempt, setAttempt] = useState(0);
-  const key = JSON.stringify([
-    connection.daemonId,
-    connection.baseUrl,
-    connection.deviceId,
-    scope.sessionId,
-    header?.id,
-    header?.resolvedAt,
-    attempt,
-  ]);
+  const key = JSON.stringify([connection.daemonId, scope.sessionId, header?.id, header?.resolvedAt, attempt]);
   const [read, setRead] = useState<{ key: string; item?: AgendaReadItem; error?: string } | null>(null);
   const id = header?.id;
   useEffect(() => {
     if (id === undefined) return;
     let live = true;
     setRead(null);
-    void fetchAgendaItem(connection, scope, id, fetcher).then(
+    void fetchAgendaItem(connection, scope, id, agendaClient).then(
       item => {
         if (live) setRead({ key, item });
       },
@@ -40,7 +32,7 @@ export const useAgendaItem = (
     return () => {
       live = false;
     };
-  }, [connection, scope, id, key, fetcher]);
+  }, [connection, scope, id, key, agendaClient]);
   const current = read?.key === key ? read : null;
   return {
     item: candidate === undefined || isAgendaHeader(candidate) ? current?.item : candidate,

@@ -33,7 +33,7 @@ import {
 import { type LineageTitles, lineageTitles, mergeCandidates, mergeOffered } from '../../lib/agenda-merge.ts';
 import type { DaemonConnection } from '../../shell.ts';
 import type { DaemonSessionScope } from '../../shell.ts';
-import { useDaemonFetch } from '../../shell.ts';
+import { useAgendaCall } from '../../lib/agenda-client-context.tsx';
 
 /** The versions of the open item, as the diff control reads them. */
 export interface AgendaVersionsView {
@@ -94,7 +94,7 @@ export const useItemLifecycle = ({
   board,
   records = NO_RECORDS,
 }: UseItemLifecycleInput): ItemLifecycle => {
-  const fetcher = useDaemonFetch();
+  const agendaClient = useAgendaCall();
   const offered = connection !== undefined && !isMachineAgendaId(scope.sessionId);
   const id = item?.id;
   const open = offered && connection !== undefined && id !== undefined;
@@ -115,7 +115,7 @@ export const useItemLifecycle = ({
     let live = true;
     void (async () => {
       try {
-        const list = await fetchAgendaVersions(connection, scope, id, fetcher);
+        const list = await fetchAgendaVersions(connection, scope, id, agendaClient);
         if (!live) return;
         // The baseline is the mark BEFORE this opening wrote its own; later reads of the same opening keep it.
         setRead(current => ({
@@ -125,7 +125,7 @@ export const useItemLifecycle = ({
         }));
         if (list.latest >= 1 && list.latest > (marked.current.get(key) ?? 0)) {
           marked.current.set(key, list.latest);
-          await markAgendaVersionSeen(connection, scope, id, list.latest, fetcher);
+          await markAgendaVersionSeen(connection, scope, id, list.latest, agendaClient);
         }
       } catch {
         if (live) setRead(current => (current.key === key ? current : { key, list: null, baseline: undefined }));
@@ -134,7 +134,7 @@ export const useItemLifecycle = ({
     return () => {
       live = false;
     };
-  }, [open, key, versionCount, fetcher]);
+  }, [open, key, versionCount, agendaClient]);
 
   const cache = useRef(new Map<string, Promise<AgendaItem>>());
   const load = useCallback(
@@ -143,14 +143,14 @@ export const useItemLifecycle = ({
       const at = `${key}:${String(version)}`;
       const kept = cache.current.get(at);
       if (kept !== undefined) return kept;
-      const next = fetchAgendaVersion(connection, scope, id as AgendaId, version, fetcher).then(
+      const next = fetchAgendaVersion(connection, scope, id as AgendaId, version, agendaClient).then(
         found => found.item as AgendaItem,
       );
       next.catch(() => cache.current.delete(at));
       cache.current.set(at, next);
       return next;
     },
-    [connection, scope, id, key, fetcher],
+    [connection, scope, id, key, agendaClient],
   );
 
   const mine = read.key === key ? read : null;
@@ -187,7 +187,7 @@ export const useItemLifecycle = ({
     }
     let live = true;
     setReading({ key: thread, count: earlierCount, state: 'loading' });
-    fetchAgendaConversation(connection, scope, id, { from: have.length, until: earlierCount }, fetcher)
+    fetchAgendaConversation(connection, scope, id, { from: have.length, until: earlierCount }, agendaClient)
       .then(read => {
         if (!live) return;
         earlier.current.set(thread, [...have, ...read.entries]);
@@ -199,7 +199,7 @@ export const useItemLifecycle = ({
     return () => {
       live = false;
     };
-  }, [stored, whole, thread, count, earlierCount, fetcher]);
+  }, [stored, whole, thread, count, earlierCount, agendaClient]);
   const inHand = whole ? [] : (earlier.current.get(thread) ?? []).slice(0, earlierCount);
   const missing = earlierCount - inHand.length;
   const state = reading?.key === thread ? reading.state : 'loading';

@@ -19,12 +19,12 @@ import type { DaemonSessionScope } from '../../../../app/shell.ts';
 import { AppBar, AppTabBar } from '../../../../app/shell.ts';
 import { SessionsBarAgenda } from '../../../../app/shell.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
 
-const ec2 = daemonConnection({ daemonId: 'ec2', baseUrl: 'https://ec2.example.test', deviceId: 'd-ec2' });
-const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio' });
-const laptop = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'd-laptop' });
+const ec2 = daemonConnection({ daemonId: 'ec2' });
+const studio = daemonConnection({ daemonId: 'studio' });
+const laptop = daemonConnection({ daemonId: 'laptop' });
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 
 const at = (minutes: number): string => new Date(Date.UTC(2026, 7, 1, 10, minutes)).toISOString();

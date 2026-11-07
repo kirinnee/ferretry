@@ -7,7 +7,7 @@ import {
 } from '../../../../app/features/agenda/agenda-brief.tsx';
 import { revisionHighlight } from '../../../../app/lib/agenda-revisions.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { type Mounted, mount, must } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

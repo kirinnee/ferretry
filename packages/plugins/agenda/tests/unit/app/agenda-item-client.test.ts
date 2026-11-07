@@ -1,41 +1,47 @@
 import { describe, expect, it } from 'bun:test';
 import { type AgendaId, MACHINE_AGENDA_ID, agendaListSnapshot } from '../../../app/wire/index.ts';
 import { projectionRecord, projectionSnapshot } from '../../support/app/agenda-projection.ts';
-import { fetchAgendaItem } from '../../../app/lib/agenda-item-client.ts';
-import { daemonConnection } from '../../../app/shell.ts';
+import { fetchAgendaItem as fetchItem } from '../../../app/lib/agenda-item-client.ts';
+import { type DaemonConnection, type DaemonSessionScope, daemonConnection } from '../../../app/shell.ts';
 import { daemonSessionScope } from '../../../app/shell.ts';
+import { callFromFetch, type TestFetch } from '../../support/app/call-from-fetch.ts';
+
+/** One item read through the half's client, answered by a scripted fetcher. */
+const fetchAgendaItem = (daemon: DaemonConnection, scope: DaemonSessionScope, item: AgendaId, fetcher: TestFetch) =>
+  fetchItem(daemon, scope, item, callFromFetch(fetcher));
 
 const connection = daemonConnection({
   daemonId: 'fixture',
-  baseUrl: 'https://fixture.example.test',
-  deviceId: 'device',
 });
 const scope = daemonSessionScope(connection, 'session');
 const id = 'A1' as AgendaId;
 
 describe('the one-item agenda client', () => {
-  it.each(['session', MACHINE_AGENDA_ID])('reads one full item from %s, with the channel header', async sessionId => {
-    // Arrange
-    const calls: { input: string; init?: RequestInit }[] = [];
-    const input = projectionRecord();
-    // Act
-    const actual = await fetchAgendaItem(
-      connection,
-      daemonSessionScope(connection, sessionId),
-      id,
-      async (url, init) => {
-        calls.push({ input: String(url), init });
-        return Response.json(input);
-      },
-    );
-    // Assert
-    expect(actual).toEqual(input);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.input).toContain(
-      sessionId === MACHINE_AGENDA_ID ? '/v1/machine/agenda/A1' : '/v1/ferrets/session/agenda/A1',
-    );
-    expect(new Headers(calls[0]?.init?.headers).get('x-fy-agenda-channel')).toBe('2');
-  });
+  it.each(['session', MACHINE_AGENDA_ID])(
+    'reads one full item from %s, with no channel header (GAP agenda-channel-header)',
+    async sessionId => {
+      // Arrange
+      const calls: { input: string; init?: RequestInit }[] = [];
+      const input = projectionRecord();
+      // Act
+      const actual = await fetchAgendaItem(
+        connection,
+        daemonSessionScope(connection, sessionId),
+        id,
+        async (url, init) => {
+          calls.push({ input: String(url), init });
+          return Response.json(input);
+        },
+      );
+      // Assert
+      expect(actual).toEqual(input);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.input).toContain(
+        sessionId === MACHINE_AGENDA_ID ? '/v1/machine/agenda/A1' : '/v1/ferrets/session/agenda/A1',
+      );
+      expect(new Headers(calls[0]?.init?.headers).has('x-fy-agenda-channel')).toBe(false);
+    },
+  );
 
   it('refuses another daemon scope, another item, a header and a malformed document', async () => {
     // Arrange / Act / Assert

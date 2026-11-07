@@ -1,34 +1,39 @@
 /**
- * The cards a machine notice is about (`AgendaItem.cards`), with the buttons wired to the board. The rows are the
- * daemon's; the three buttons are the board's own writes (`agendaCardsActions`), so a card is opened, started or
- * closed here with the same authority, and the same refusals, as on the board page.
- * Outside the app store (a harness) the board is idle: Open still goes to the card, Start and Close are refused.
+ * The cards a machine notice is about (`AgendaItem.cards`): one row per card, the daemon's own line and the card
+ * itself. A card is Board's, so Board draws it, through its `ask:card` renderer (the card's reference and title, a link
+ * to its page); this half imports nothing of Board's. With no Board on the machine (or outside a shell) the row shows
+ * the card's plain reference. Starting a ferret on a card and closing one are Board's writes, made on the card's page.
  */
 
-import type { AgendaCardRow } from '../../wire/index.ts';
-import { useMemo } from 'react';
-import { agendaCardsActions } from '../../lib/agenda-cards-actions.ts';
+import { type AgendaCardRow, formatTaskRef } from '../../wire/index.ts';
+import { RendererView } from '../../shell.ts';
 import type { DaemonConnection } from '../../shell.ts';
-import { useBoardActions } from '../../shell.ts';
-import { IDLE_STORE } from '../../shell.ts';
-import { useOptionalAppStore } from '../../shell.ts';
-import { AgendaCardsList } from './agenda-cards-list.tsx';
 
 export interface AgendaCardsHostProps {
   readonly connection: DaemonConnection;
   readonly cards: readonly AgendaCardRow[];
-  readonly onNavigate: (to: string) => void;
+  readonly onNavigate?: (to: string) => void;
 }
 
-const NO_AGENDA = { respond: () => Promise.reject(new Error('this host has no agenda')) };
+/** Board's renderer for a card an ask names. */
+export const CARD_ASK_RENDERER = 'ask:card';
 
-export function AgendaCardsHost({ connection, cards, onNavigate }: AgendaCardsHostProps) {
-  const store = useOptionalAppStore();
-  const machines = useMemo(() => [connection], [connection]);
-  const board = useBoardActions(store?.board ?? IDLE_STORE, store?.attention ?? NO_AGENDA, machines);
-  const actions = useMemo(
-    () => agendaCardsActions(board, connection.daemonId, onNavigate),
-    [board, connection.daemonId, onNavigate],
+export function AgendaCardsHost({ connection, cards }: AgendaCardsHostProps) {
+  return (
+    <ul className="fy-attn-cards" data-agenda-cards={cards.length}>
+      {cards.map(card => (
+        <li className="fy-attn-cards__row" data-agenda-card={card.task.id} key={formatTaskRef(card.task)}>
+          <span className="fy-attn-cards__card">
+            <RendererView
+              daemon={connection.daemonId}
+              fallback={formatTaskRef(card.task)}
+              rendererKey={CARD_ASK_RENDERER}
+              value={{ card: card.task.id }}
+            />
+          </span>
+          <span className="fy-attn-cards__line">{card.line}</span>
+        </li>
+      ))}
+    </ul>
   );
-  return <AgendaCardsList actions={actions} cards={cards} />;
 }

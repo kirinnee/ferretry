@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type { AgendaItem, ResolvedAgendaItem } from '../../../../app/wire/index.ts';
 import { AgendaSettled, isResolved } from '../../../../app/features/agenda/agenda-settled.tsx';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

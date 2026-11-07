@@ -1,15 +1,14 @@
 /**
  * "DONE · CLOSES &F12": one owner tap that closes the cards an agenda item is linked to AND resolves the item.
  *
- * The close is the board's own Done (`boardDone` + `moveTask` into the Closed lane), so the daemon records it in
- * the card's history and tells the card's ferret, exactly as the board's button does. The ORDER is the point:
+ * The close is the board's own Done, so the daemon records it in the card's history and tells the card's ferret,
+ * exactly as the board's button does; it is Board's write, so the host that can make it hands the item view a
+ * {@link DoneCloseSource} (this half imports nothing of Board's, and offers no Done · closes without one). The ORDER is the point:
  * every card is closed first, and only when all of them are does the item resolve. A card that will not close
  * stops the run and leaves the item open, with the reason, so the owner never believes work is closed that is not.
  */
 
 import { type AgendaItem, formatTaskRef, type TaskRef } from '../wire/index.ts';
-import type { LaneSet, Opaque } from '../shell.ts';
-import { boardDone } from '../shell.ts';
 
 export type DoneCloseResult = { readonly ok: true } | { readonly ok: false; readonly message: string };
 
@@ -46,27 +45,6 @@ export const doneCloseLabel = (refs: readonly TaskRef[]): string =>
  */
 export const doneCloseShortLabel = (refs: readonly TaskRef[]): string =>
   refs.length === 1 && refs[0] !== undefined ? `Close ${formatTaskRef(refs[0])}` : `Close ${refs.length} cards`;
-
-/** The card as the board read it: what a Done needs. */
-export interface CardForClose {
-  readonly laneId: string;
-  readonly dropped: boolean;
-  readonly laneSet: Pick<LaneSet, 'lanes' | 'variants'> | null;
-}
-
-/** The lane a Done moves the card into, `'closed'` when it already is, or why it cannot be closed. */
-export const closePlan = (
-  card: CardForClose | undefined,
-):
-  | { readonly kind: 'move'; readonly laneId: string }
-  | { readonly kind: 'closed' }
-  | { readonly kind: 'refused'; readonly message: string } => {
-  if (card === undefined) return { kind: 'refused', message: 'the card could not be read' };
-  const category = card.laneSet?.lanes.find((lane: Opaque) => lane.id === card.laneId)?.category ?? null;
-  const done = boardDone({ laneSet: card.laneSet, category, dropped: card.dropped });
-  if (done === null) return { kind: 'refused', message: 'the board has no Done for this card' };
-  return done.kind === 'reopen' ? { kind: 'closed' } : { kind: 'move', laneId: done.laneId };
-};
 
 /**
  * Closes each card in turn and stops at the first that will not close. A failure names the card and, when

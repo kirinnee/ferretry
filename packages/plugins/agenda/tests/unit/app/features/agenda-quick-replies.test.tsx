@@ -7,7 +7,7 @@ import {
 import { cardModel } from '../../../../app/lib/agenda-card-model.ts';
 import { type InboxAction, swipeMap } from '../../../../app/lib/agenda-inbox.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

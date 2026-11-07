@@ -15,11 +15,11 @@ import {
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
 import { openConversation } from '../../../support/app/agenda-folds.ts';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
-const laptop = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'token' });
+const laptop = daemonConnection({ daemonId: 'laptop' });
 
 const shipIt = inboxCard(
   agendaItem('A2', {

@@ -6,7 +6,7 @@ import { AgendaQuickReplies } from '../../../../app/features/agenda/agenda-quick
 import { cardModel } from '../../../../app/lib/agenda-card-model.ts';
 import { swipeMap } from '../../../../app/lib/agenda-inbox.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { type Mounted, mount, must } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

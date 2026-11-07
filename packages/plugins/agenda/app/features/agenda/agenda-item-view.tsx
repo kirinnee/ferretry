@@ -32,12 +32,10 @@
  */
 
 import { gateOf } from '../../lib/gate-items.ts';
-import type { AgendaCardAnswer, AgendaItem } from '../../wire/index.ts';
+import type { AgendaItem } from '../../wire/index.ts';
 import { GitCompareArrows, Merge } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { useQuoteMenu, shellClock } from '../../shell.ts';
-import { useDoneClose } from '../../hooks/use-done-close.ts';
-import { answerAction } from '../../lib/agenda-answers.ts';
+import type { DoneCloseSource } from '../../lib/agenda-done-close.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
@@ -45,9 +43,6 @@ import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inb
 import type { LineageTitles } from '../../lib/agenda-merge.ts';
 import { versionCount } from '../../lib/agenda-revisions.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
-import type { DaemonId } from '../../shell.ts';
-import type { DaemonSessionScope } from '../../shell.ts';
-import { composerQuoteTarget } from '../../shell.ts';
 import { agendaHeading } from './agenda-delivery.tsx';
 import { AgendaItemCard } from './agenda-item-card.tsx';
 import { AgendaItemMenu, MenuGroup, SnoozeChoices, VersionPicker } from './agenda-item-menu.tsx';
@@ -78,12 +73,11 @@ export interface AgendaItemViewProps {
   readonly onSnooze?: (until: string) => void;
   readonly renderProse: (text: string) => ReactNode;
   /**
-   * The conversation whose composer takes a quote: select any text in the item and "Quote in composer" puts it
-   * there, exactly as in the chat (`useQuoteMenu`). Absent: nothing to quote into.
+   * The cards an item that offers to close them would close, and how (Board's Done, from a host that can make it):
+   * with it, the item draws "Done · closes &F12". Absent: no such button. The composer is Conversation's (the ask
+   * screen's `agenda.conversation` slot), so this view takes no quote into it and sends no Request changes of its own.
    */
-  readonly quoteScope?: DaemonSessionScope | null;
-  /** The machine the item is on: with it, an item that offers to close its card draws "Done · closes &F12". */
-  readonly daemonId?: DaemonId;
+  readonly doneClose?: DoneCloseSource | undefined;
   /** What ✕ is called: "Back to the chat", unless the host is somewhere else (the Inbox). */
   readonly closeLabel?: string;
   /**
@@ -164,7 +158,7 @@ function useScrollPadding(
 export function AgendaItemView({
   item,
   ferret,
-  now = shellClock.nowMs(),
+  now = Date.now(),
   history,
   position,
   onPrevious,
@@ -178,14 +172,13 @@ export function AgendaItemView({
   onSnooze,
   renderProse,
   closeLabel = 'Back to the chat',
-  quoteScope = null,
   settled,
   parkedNote,
   inputForm,
   planForm,
   cardsForm,
   formKey,
-  daemonId,
+  doneClose: doneCloseSource,
   tools,
   startAt,
   startTap,
@@ -212,7 +205,6 @@ export function AgendaItemView({
   const latest = shown >= count;
   const showVersion = (version: number): void => setPicked(version >= count ? null : { id: item.id, version });
   useScrollPadding(body, top, dock);
-  const quote = useQuoteMenu(root, quoteScope);
   const map = swipeMap(item);
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
@@ -220,7 +212,7 @@ export function AgendaItemView({
   // The card draws the description under the title, whole. A gate item, whose card repeats nothing, and a notice drawn
   // with its card rows, which say its lines, keep it behind ⓘ instead.
   const infoDescription = gateOf(item) === undefined && cardsForm === undefined ? null : head.description;
-  const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));
+  const doneClose = useDoneCloseFlow(doneCloseSource, label => onAct({ kind: 'resolve', label }));
   const answerable = settled === undefined && !(inputForm !== undefined && item.kind === 'input');
   // Not needed: the host's own tools say it where it has them (the Inbox); otherwise the menu does, on an item that
   // can be put aside at all — not a gate, a notice, an input card, or one whose own answers already dismiss.
@@ -287,17 +279,6 @@ export function AgendaItemView({
     count > 1 ||
     onSnooze !== undefined ||
     (merge !== undefined && latest);
-  // Request changes IS the owner's words: sent with what the composer holds, or the owner is put in the composer first.
-  const requestChanges = (answer: AgendaCardAnswer): void => {
-    const composer = quoteScope === null ? null : composerQuoteTarget(quoteScope);
-    const words = composer?.draft().trim() ?? '';
-    if (words === '') {
-      composer?.replaceDraft(composer.draft());
-      return;
-    }
-    const action = answerAction(answer, words);
-    if (action !== null) onAct(action);
-  };
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus the dialog again whenever another item opens
   useEffect(() => {
@@ -342,7 +323,6 @@ export function AgendaItemView({
       className="fy-item-view"
       data-agenda-view={item.id}
       onKeyDown={onKeyDown}
-      {...quote.handlers}
       ref={root}
       role="dialog"
       tabIndex={-1}
@@ -403,12 +383,10 @@ export function AgendaItemView({
             {...(planForm === undefined ? {} : { planForm })}
             {...(cardsForm === undefined ? {} : { cardsForm })}
             {...(formKey === undefined ? {} : { formKey })}
-            {...(quoteScope === null ? {} : { onRequestChanges: requestChanges })}
           />
           <div className="fy-item-view__dock" data-agenda-dock="" ref={setDock} />
         </div>
       </div>
-      {quote.menu}
     </section>
   );
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { AgendaSnoozeMenu } from '../../../../app/features/agenda/agenda-snooze-menu.tsx';
 import { snoozeChoices } from '../../../../app/lib/agenda-snooze.ts';
-import { interact, mount, must, pressKey } from '../../../support/app/dom.ts';
+import { interact, mount, must, pressKey } from '@ferretry/app/testing';
 import { typeInto } from '../../../support/app/learning-dom.ts';
 
 const NOW = new Date(2026, 9, 30, 15, 20).getTime();

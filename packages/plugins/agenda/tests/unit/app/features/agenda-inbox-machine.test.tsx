@@ -6,12 +6,12 @@ import { agendaConversationPath, type InboxCard } from '../../../../app/lib/agen
 import { daemonConnection, daemonId } from '../../../../app/shell.ts';
 import { machineSessionView } from '../../../../app/lib/machine-agenda.ts';
 import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { chooseFromMenu } from '../../../support/app/inbox-menus.ts';
 import type { InboxResolved } from '../../../../app/lib/agenda-inbox.ts';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
-const PAIRED = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 't1' });
+const PAIRED = daemonConnection({ daemonId: 'studio' });
 
 const moved = agendaItem('M1', {
   notice: true,

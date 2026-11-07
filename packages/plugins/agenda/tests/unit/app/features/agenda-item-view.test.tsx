@@ -9,7 +9,7 @@ import { DISMISS_ACTION, type InboxAction } from '../../../../app/lib/agenda-inb
 import type { DaemonId } from '../../../../app/shell.ts';
 import { registerComposerQuoteTarget } from '../../../../app/shell.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must, pressKey } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

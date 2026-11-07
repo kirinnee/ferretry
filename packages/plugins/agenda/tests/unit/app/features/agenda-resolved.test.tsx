@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ResolvedAgendaItem } from '../../../../app/wire/index.ts';
 import { ResolvedRow, resolvedWhen } from '../../../../app/features/agenda/agenda-resolved.tsx';
-import '../../../support/app/dom.ts';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { ensureDom } from '@ferretry/app/testing';
+ensureDom();
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 const record = (
   id: string,

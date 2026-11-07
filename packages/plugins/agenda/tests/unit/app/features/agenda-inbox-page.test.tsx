@@ -22,7 +22,7 @@ import {
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
 import { openConversation } from '../../../support/app/agenda-folds.ts';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { chooseFromMenu, openFind } from '../../../support/app/inbox-menus.ts';
 import { sessionView } from '../../../support/app/sessions.ts';
 

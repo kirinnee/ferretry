@@ -4,7 +4,7 @@ import type { InboxCard, InboxResolved } from '../../../../app/lib/agenda-inbox.
 import { findRows, isFinding } from '../../../../app/lib/agenda-inbox-find.ts';
 import { NO_FILTER } from '../../../../app/lib/agenda-inbox-list.ts';
 import { agendaItem, choices, fakeInbox, InboxHarness, inboxCard } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { chooseFromMenu, openFind } from '../../../support/app/inbox-menus.ts';
 import { sessionView } from '../../../support/app/sessions.ts';
 import { flush } from '../board-support.ts';

@@ -49,7 +49,7 @@ import {
   swipeThreshold,
 } from '../../lib/agenda-inbox.ts';
 import { snoozePicks } from '../../lib/agenda-snooze.ts';
-import { usePrefersReducedMotion, shellClock } from '../../shell.ts';
+import { usePrefersReducedMotion } from '../../shell.ts';
 import { type CompassAvailable, compassReading } from './agenda-compass.ts';
 import { CustomSnoozeForm } from './agenda-snooze-menu.tsx';
 import {
@@ -174,7 +174,7 @@ const compassWord = (intent: ReturnType<typeof compassReading>['intent'] | undef
   if (intent === undefined) return 'Skip';
   if (intent.kind === 'not-needed') return 'Not needed';
   if (intent.kind === 'snooze')
-    return `Snooze ${snoozePicks(shellClock.nowMs()).find(pick => pick.id === intent.pick)?.label ?? ''}`.trim();
+    return `Snooze ${snoozePicks(Date.now()).find(pick => pick.id === intent.pick)?.label ?? ''}`.trim();
   if (intent.kind === 'snooze-pick') return 'Snooze';
   return 'Skip';
 };
@@ -396,7 +396,8 @@ export function AgendaSwipeDeck({
 
   useEffect(() => {
     if (leaving === null) return;
-    return shellClock.after(() => setLeaving(null), FLY_MS);
+    const handle = setTimeout(() => setLeaving(null), FLY_MS);
+    return () => clearTimeout(handle);
   }, [leaving]);
 
   const answer = (card: InboxCard, action: InboxAction, from: Drag): void => {
@@ -446,7 +447,7 @@ export function AgendaSwipeDeck({
 
   /** A pick of the shared list on the compass: a ready time snoozes; Custom… springs the card back and asks for one. */
   const snoozeByPick = (card: InboxCard, id: string, from: Drag): void => {
-    const pick = snoozePicks(shellClock.nowMs()).find(candidate => candidate.id === id);
+    const pick = snoozePicks(Date.now()).find(candidate => candidate.id === id);
     if (pick === undefined) return;
     if (pick.until !== null) {
       snooze(card, pick.until, from);
@@ -695,7 +696,7 @@ export function AgendaSwipeDeck({
       )}
       {custom === null || top?.key !== custom.key ? null : (
         <div aria-label="Snooze until" className="fy-attn-deck__custom" data-deck-custom="" role="dialog">
-          <CustomSnoozeForm now={shellClock.nowMs()} onSnooze={until => snooze(custom, until, { dx: 0, dy: 0 })} />
+          <CustomSnoozeForm now={Date.now()} onSnooze={until => snooze(custom, until, { dx: 0, dy: 0 })} />
           <button className="fy-attn-deck__custom-cancel" onClick={() => setCustom(null)} type="button">
             Cancel
           </button>

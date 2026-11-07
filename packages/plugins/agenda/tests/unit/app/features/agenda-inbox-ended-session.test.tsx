@@ -14,10 +14,10 @@ import { DaemonAgendaStore } from '../../../../app/lib/agenda-store.ts';
 import { type DaemonConnection, daemonConnection } from '../../../../app/shell.ts';
 import type { DaemonSessionScope } from '../../../../app/shell.ts';
 import { DEFAULT_LIST_FILTER, sessionsBarView } from '../../../../app/shell.ts';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
 
-const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio' });
+const studio = daemonConnection({ daemonId: 'studio' });
 const at = (minutes: number): string => new Date(Date.UTC(2026, 9, 30, 15, minutes)).toISOString();
 
 const summary = (extra: Partial<SessionAgendaSummary> = {}): SessionAgendaSummary => ({

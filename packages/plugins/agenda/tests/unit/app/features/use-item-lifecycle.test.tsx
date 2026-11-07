@@ -11,10 +11,10 @@ import { daemonSessionScope } from '../../../../app/shell.ts';
 import { type AppStore, StoreProvider } from '../../../../app/shell.ts';
 import { browserFetch } from '../../../../app/shell.ts';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount } from '../../../support/app/dom.ts';
-import { settleUntil } from '../../../support/app/settle.ts';
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
+import { settleUntil } from '@ferretry/app/testing';
 
-const connection = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
+const connection = daemonConnection({ daemonId: 'daemon-a' });
 const scope = daemonSessionScope(connection, 'sess');
 
 let view: Mounted | null = null;

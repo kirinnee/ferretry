@@ -10,7 +10,7 @@ import { AgendaBody } from '../../../../app/features/agenda/agenda-steps.tsx';
 import type { ClipboardWriter } from '../../../../app/shell.ts';
 import { historyLine, type InboxAction, swipeMap, updatedSinceAsked } from '../../../../app/lib/agenda-inbox.ts';
 import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {

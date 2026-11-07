@@ -3,14 +3,14 @@
  * (docs/agenda.md § Clearing the agent ferrets' backlog).
  *
  * Each machine is asked for a dry run first and then, once the owner confirms, to do it. One that did not answer is
- * listed as unreachable. Every request goes through the fetch a screen passes (`useDaemonFetch`) and carries no
+ * listed as unreachable. Every request goes through the client the page passes (this half's own) and carries no
  * credential.
  */
 
 import { AgendaClearAgentsResultSchema } from '../wire/index.ts';
-import { FY_REQUEST_ID_HEADER } from '../shell.ts';
-import type { DaemonConnection, DaemonId } from '../shell.ts';
-import { type DaemonFetch, DaemonResponseError, daemonRequest } from '../shell.ts';
+import { type AgendaCall, agendaCall, requestIdHeaders } from './agenda-call.ts';
+import { AGENDA_CLEAR_AGENTS } from './agenda-wire.ts';
+import type { DaemonConnection, DaemonId } from './machine.ts';
 
 /** One paired machine the clear may reach. */
 export interface ClearTarget {
@@ -19,9 +19,12 @@ export interface ClearTarget {
   readonly connection: DaemonConnection;
 }
 
-/** What the clear needs from the app: the fetch to send with. */
+/**
+ * What the clear needs from the app: the client that reaches a machine. A half's client reaches its own machine only, so
+ * a machine with no client here is listed as unreachable rather than asked through another machine's client.
+ */
 export interface ClearPort {
-  readonly fetcher: DaemonFetch;
+  readonly clientFor: (target: ClearTarget) => AgendaCall | undefined;
 }
 
 /** What one machine said to the dry run. */
@@ -50,22 +53,22 @@ export interface ClearOutcome {
 
 const clearRequest = async (
   target: ClearTarget,
-  fetcher: DaemonFetch,
+  port: ClearPort,
   dryRun: boolean,
 ): Promise<{ readonly cleared: number; readonly ferrets: number }> => {
-  const request = daemonRequest(target.connection, '/v1/agenda/clear-agents', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
-    body: JSON.stringify(dryRun ? { dryRun: true } : {}),
-  });
-  const response = await fetcher(request.url, request.init);
-  if (!response.ok) throw new DaemonResponseError(response.status, `HTTP ${response.status}`, undefined);
-  return AgendaClearAgentsResultSchema.parse(await response.json());
+  const client = port.clientFor(target);
+  if (client === undefined) throw new Error(`${target.name} is not reachable from here`);
+  return AgendaClearAgentsResultSchema.parse(
+    await agendaCall(client, AGENDA_CLEAR_AGENTS, {
+      body: dryRun ? { dryRun: true } : {},
+      headers: requestIdHeaders(),
+    }),
+  );
 };
 
 const previewOne = async (target: ClearTarget, port: ClearPort): Promise<ClearRow> => {
   try {
-    const counted = await clearRequest(target, port.fetcher, true);
+    const counted = await clearRequest(target, port, true);
     return { kind: 'ready', name: target.name, target, count: counted.cleared, ferrets: counted.ferrets };
   } catch {
     return { kind: 'unreachable', name: target.name };
@@ -87,7 +90,7 @@ export const clearAgentsEverywhere = async (preview: ClearPreview, port: ClearPo
   for (const row of preview.rows) {
     if (row.kind !== 'ready') continue;
     try {
-      const done = await clearRequest(row.target, port.fetcher, false);
+      const done = await clearRequest(row.target, port, false);
       cleared += done.cleared;
       ferrets += done.ferrets;
     } catch {

@@ -10,7 +10,7 @@ import { type InboxAction, swipeMap } from '../../../../app/lib/agenda-inbox.ts'
 import { DaemonBoardStore } from '../../../../app/shell.ts';
 import { type AppStore, StoreProvider } from '../../../../app/shell.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../../support/app/dom.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { card, deferred, fakeEnvironment, fakePort, flush, laneSetFor, laptop } from '../board-support.ts';
 
 let view: Mounted | null = null;
