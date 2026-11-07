@@ -53,7 +53,11 @@ export interface VaultApi {
     request: OutboundHttpRequest,
     placement?: CredentialPlacement,
   ): Promise<AuthorizedOutcome>;
-  /** Resolves `${secret:NAME}` in `env` for one ferret's child; a missing secret refuses the launch. */
+  /**
+   * Resolves `${secret:NAME}` in `env` for one ferret's child; a missing secret refuses the launch. A variable whose
+   * whole value is an optional reference (`${secret?:NAME}`, {@link optionalSecretReference}) is set when the secret
+   * is held and left out of the child's environment when it is not.
+   */
   childEnvironment(
     ferret: FerretId,
     env: Readonly<Record<string, string>>,
