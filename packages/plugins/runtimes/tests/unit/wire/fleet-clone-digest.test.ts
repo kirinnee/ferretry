@@ -4,17 +4,16 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { CLONE_PROVENANCE_FIELDS, type CloneFile } from '../../../contract/index.ts';
 import {
-  CLONE_PROVENANCE_FIELDS,
   type CloneDigestItem,
   type CloneIdentityOf,
   cloneItemDigest,
-} from '../../src/lib/fleet-clone-digest.ts';
-import type { FleetCloneFile } from '../../src/lib/fleet-setup.ts';
+} from '../../../daemon/lib/clone-digest.ts';
 
-const NONE: readonly FleetCloneFile[] = [];
+const NONE: readonly CloneFile[] = [];
 
-const file = (path: string, content: string): FleetCloneFile => ({ path, content });
+const file = (path: string, content: string): CloneFile => ({ path, content });
 
 const skills = (value: Record<string, unknown>): CloneDigestItem => ({ kind: 'skills', value });
 const mcp = (value: Record<string, unknown>): CloneDigestItem => ({ kind: 'mcp', value });
@@ -127,7 +126,7 @@ describe('cloneItemDigest', () => {
 
     it('should read a directory as its sorted relative paths and hashes, whatever the folder is called', () => {
       const hooks = (directory: string): CloneDigestItem => ({ kind: 'hooks', value: { directory } });
-      const files = (root: string, order: readonly string[]): FleetCloneFile[] =>
+      const files = (root: string, order: readonly string[]): CloneFile[] =>
         order.map(name => file(`${root}/${name}`, `content of ${name}`));
       const first = cloneItemDigest(hooks('hooks/guard'), files('hooks/guard', ['b.sh', 'sub/a.sh', 'a.sh']));
       should(cloneItemDigest(hooks('hooks/guard-2'), files('hooks/guard-2', ['a.sh', 'b.sh', 'sub/a.sh']))).equal(
@@ -165,10 +164,10 @@ describe('cloneItemDigest', () => {
       const store = [file('skills/review/SKILL.md', 'one'), file('skills/review/run.sh', 'two')];
       const digest = cloneItemDigest(skills({ items: ['review'] }), store);
       should(cloneItemDigest(skills({ items: ['review'], clonedFrom: 'studio' }), store)).equal(digest);
-      should(cloneItemDigest(skills({ items: ['review'] }), [store[0] as FleetCloneFile])).not.equal(digest);
+      should(cloneItemDigest(skills({ items: ['review'] }), [store[0] as CloneFile])).not.equal(digest);
       should(
         cloneItemDigest(skills({ items: ['review'] }), [
-          store[0] as FleetCloneFile,
+          store[0] as CloneFile,
           file('skills/review/run.sh', 'three'),
         ]),
       ).not.equal(digest);

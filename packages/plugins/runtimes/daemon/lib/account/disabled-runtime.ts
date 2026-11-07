@@ -71,7 +71,7 @@ export function runtimeDisable(
   if (login !== undefined) clauses.push(`its login "${runtime.credential}" is ${disabledPhrase(login)}`);
   if (budget !== undefined) clauses.push(`its login "${runtime.credential}" is ${budgetHoldPhrase(budget)}`);
   const instead = alternative === undefined ? 'No other runtime of this kind is on' : `Use "${alternative}" instead`;
-  const moveOne = `move one with \`${binary} migrate <id> -a ${alternative ?? '<runtime>'}\``;
+  const moveOne = `move one with \`${binary} ferret move <id> -a ${alternative ?? '<runtime>'}\``;
   if (own === undefined && login === undefined) {
     // Only the budget holds it: nothing to switch back on, it lifts by itself at the reset.
     clauses.push(`${instead}, or raise the login's budget. Ferrets already on it keep running; ${moveOne}`);

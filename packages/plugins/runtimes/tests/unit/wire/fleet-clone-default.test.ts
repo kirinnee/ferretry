@@ -4,22 +4,23 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { CLONE_FALLBACK_RUNTIME } from '../../../contract/index.ts';
 import {
-  CLONE_FALLBACK_RUNTIME,
   type CloneAgentRuntime,
   cloneAgentRuntimes,
   suggestCloneDefault,
-} from '../../src/lib/fleet-clone-default.ts';
-import type { FleetCloneBundle } from '../../src/lib/fleet-setup.ts';
-import { INSTANT } from '../fixtures.ts';
+} from '../../../daemon/lib/clone-default.ts';
+import type { CloneBundle } from '../../../contract/index.ts';
+import { INSTANT } from './fixtures.ts';
 
-const bundleWith = (runtimes: FleetCloneBundle['runtimes']): FleetCloneBundle => ({
+const bundleWith = (runtimes: CloneBundle['runtimes']): CloneBundle => ({
   format: 'ferretry-clone',
   version: 1,
   machine: 'ip-172-27-76-90',
+  daemon: 'daemon-source',
   exportedAt: INSTANT,
   credentials: [
-    { id: 'claude-you', harness: 'claude' },
+    { id: 'claude-you', harness: 'claude-code' },
     { id: 'codex-work', harness: 'codex' },
   ],
   components: {},
@@ -27,6 +28,7 @@ const bundleWith = (runtimes: FleetCloneBundle['runtimes']): FleetCloneBundle =>
   runtimes,
   files: [],
   notCopied: [],
+  keys: {},
 });
 
 const claude = (name: string): CloneAgentRuntime => ({ name, harness: 'claude' });
@@ -40,7 +42,7 @@ describe('cloneAgentRuntimes', () => {
         'codex-work': { credential: 'codex-work', profile: 'p', agent: true },
         'claude-b': { credential: 'claude-you', profile: 'p', agent: true },
         helper: { credential: 'claude-you', profile: 'p', agent: false },
-        'claude-a': { credential: 'claude-you', profile: 'p', agent: true, harness: 'claude' },
+        'claude-a': { credential: 'claude-you', profile: 'p', agent: true, harness: 'claude-code' },
         plain: { credential: 'claude-you', profile: 'p' },
         dual: { credential: 'claude-you', profile: 'p', agent: true, harness: 'codex' },
       }),

@@ -4,14 +4,14 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { CONFIG_FILE_MAX_BYTES } from '../../src/lib/config-files.ts';
-import { FleetAccountChangeSchema } from '../../src/lib/fleet-catalog.ts';
 import {
+  AccountChangeSchema,
   CLONE_SETTINGS_DOCS,
+  CONFIG_FILE_MAX_BYTES,
+  CloneReviewRequestSchema,
   CloneReviewSettingsSchema,
   CloneSettingsDecisionsSchema,
-  FleetCloneReviewRequestSchema,
-} from '../../src/lib/fleet-clone-diff.ts';
+} from '../../../contract/index.ts';
 
 const BUNDLE = { format: 'ferretry-clone' };
 
@@ -22,9 +22,9 @@ describe('the settings documents a copy merges', () => {
 
   it('should be what a review request and a clone.import may carry', () => {
     const settings = CLONE_SETTINGS_DOCS.map(path => ({ path, text: 'x' }));
-    should(FleetCloneReviewRequestSchema.safeParse({ bundle: BUNDLE, settings }).success).equal(true);
+    should(CloneReviewRequestSchema.safeParse({ bundle: BUNDLE, settings }).success).equal(true);
     should(
-      FleetAccountChangeSchema.safeParse({ kind: 'clone.import', mode: 'update', bundle: BUNDLE, settings }).success,
+      AccountChangeSchema.safeParse({ kind: 'clone.import', mode: 'update', bundle: BUNDLE, settings }).success,
     ).equal(true);
   });
 
@@ -38,9 +38,9 @@ describe('the settings documents a copy merges', () => {
     ],
     ['more documents than there are', [...CLONE_SETTINGS_DOCS, 'warden.yaml'].map(path => ({ path, text: '' }))],
   ])('should refuse %s', (_name, settings) => {
-    should(FleetCloneReviewRequestSchema.safeParse({ bundle: BUNDLE, settings }).success).equal(false);
+    should(CloneReviewRequestSchema.safeParse({ bundle: BUNDLE, settings }).success).equal(false);
     should(
-      FleetAccountChangeSchema.safeParse({ kind: 'clone.import', mode: 'update', bundle: BUNDLE, settings }).success,
+      AccountChangeSchema.safeParse({ kind: 'clone.import', mode: 'update', bundle: BUNDLE, settings }).success,
     ).equal(false);
   });
 });
@@ -53,7 +53,7 @@ describe('per-key decisions', () => {
     };
     should(CloneSettingsDecisionsSchema.parse(decisions)).eql(decisions);
     should(
-      FleetAccountChangeSchema.safeParse({
+      AccountChangeSchema.safeParse({
         kind: 'clone.import',
         mode: 'update',
         bundle: BUNDLE,

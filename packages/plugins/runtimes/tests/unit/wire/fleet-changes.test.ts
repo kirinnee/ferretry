@@ -1,17 +1,17 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  FleetApplyOutcomeSchema,
-  FleetManifestSummarySchema,
-  FleetProposalApplyRequestSchema,
-} from '../../src/lib/fleet-changes.ts';
+  ApplyOutcomeSchema,
+  ManifestSummarySchema,
+  ProposalApplyRequestSchema,
+} from '../../../contract/index.ts';
 
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
 const SECOND_ID = '00000000-0000-4000-8000-000000000002';
 
 const account = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   id: ACCOUNT_ID,
-  kind: 'claude',
+  kind: 'claude-code',
   mode: 'interactive',
   wrapper: 'claude-kirin',
   home: 'claude-kirin',
@@ -30,11 +30,11 @@ const manifestOf = (accounts: readonly Record<string, unknown>[]): Record<string
 });
 
 const issuesOf = (input: unknown): string => {
-  const parsed = FleetManifestSummarySchema.safeParse(input);
+  const parsed = ManifestSummarySchema.safeParse(input);
   return parsed.success ? '' : parsed.error.issues.map(issue => issue.message).join('; ');
 };
 
-describe('FleetManifestSummarySchema', () => {
+describe('ManifestSummarySchema', () => {
   it('should accept a coherent roster', () => {
     // Act + Assert
     should(issuesOf(manifestOf([account()]))).equal('');
@@ -104,11 +104,11 @@ describe('FleetManifestSummarySchema', () => {
   });
 });
 
-describe('FleetProposalApplyRequestSchema', () => {
+describe('ProposalApplyRequestSchema', () => {
   it('should accept an empty body, because the step-up gate is the whole confirmation', () => {
     // Act + Assert — a governed apply is held behind the passkey step-up at the boundary, so nothing
     // rides in the body.
-    should(FleetProposalApplyRequestSchema.safeParse({}).success).be.true();
+    should(ProposalApplyRequestSchema.safeParse({}).success).be.true();
   });
 
   it.each([
@@ -117,14 +117,14 @@ describe('FleetProposalApplyRequestSchema', () => {
     ['an approval code', { approvalCode: '7F3K-M9QW' }],
   ])('should refuse %s, because that vocabulary no longer exists', (_name, body) => {
     // Act + Assert — a strict object, so a client still sending one is told rather than ignored.
-    should(FleetProposalApplyRequestSchema.safeParse(body).success).be.false();
+    should(ProposalApplyRequestSchema.safeParse(body).success).be.false();
   });
 });
 
-describe('FleetApplyOutcomeSchema', () => {
+describe('ApplyOutcomeSchema', () => {
   it('should refuse a committed apply that published no manifest', () => {
     // Act + Assert — the empty string was how a scaffold masqueraded as an apply of zero accounts.
-    const actual = FleetApplyOutcomeSchema.safeParse({
+    const actual = ApplyOutcomeSchema.safeParse({
       outcome: 'committed',
       result: {
         accountCount: 0,
@@ -141,7 +141,7 @@ describe('FleetApplyOutcomeSchema', () => {
 
   it('should carry unrestored and displaced as separate lists', () => {
     // Act — they mean different things to an operator and must never be flattened together.
-    const actual = FleetApplyOutcomeSchema.safeParse({
+    const actual = ApplyOutcomeSchema.safeParse({
       outcome: 'rollback-incomplete',
       failedOperation: 'file /bin/claude-kirin',
       reason: 'disk is full',
@@ -157,7 +157,7 @@ describe('FleetApplyOutcomeSchema', () => {
   it('should refuse the retired host-preparation outcome, which nothing produces any more', () => {
     // Act + Assert — the scaffold that reported it is gone, so the wire no longer describes it.
     should(
-      FleetApplyOutcomeSchema.safeParse({
+      ApplyOutcomeSchema.safeParse({
         outcome: 'initialized',
         created: [],
         kept: [],

@@ -9,7 +9,7 @@ import {
   freeCloneName,
   matchCloneSignIn,
   planCloneLogins,
-} from '../../src/lib/fleet-clone-logins.ts';
+} from '../../../daemon/lib/clone-logins.ts';
 
 const here = (
   id: string,
@@ -24,10 +24,10 @@ const here = (
 describe('matchCloneSignIn', () => {
   it('should match the same CLI by email ignoring case and spacing, never another CLI', () => {
     const targets = [
-      here('claude-mine', 'claude', { email: ' Me@Work.Example ' }),
+      here('claude-mine', 'claude-code', { email: ' Me@Work.Example ' }),
       here('codex-mine', 'codex', { email: 'me@work.example' }),
     ];
-    should(matchCloneSignIn({ harness: 'claude', email: 'me@work.example' }, targets)).eql({
+    should(matchCloneSignIn({ harness: 'claude-code', email: 'me@work.example' }, targets)).eql({
       kind: 'one',
       id: 'claude-mine',
     });
@@ -43,8 +43,8 @@ describe('matchCloneSignIn', () => {
   });
 
   it('should never match an API-key login', () => {
-    const targets = [here('env', 'claude', { store: 'environment', email: 'me@work.example' })];
-    should(matchCloneSignIn({ harness: 'claude', email: 'me@work.example' }, targets)).eql({ kind: 'none' });
+    const targets = [here('env', 'claude-code', { store: 'environment', email: 'me@work.example' })];
+    should(matchCloneSignIn({ harness: 'claude-code', email: 'me@work.example' }, targets)).eql({ kind: 'none' });
   });
 
   it('should answer many, sorted, when two or more fit', () => {
@@ -66,12 +66,12 @@ describe('freeCloneName', () => {
 describe('planCloneLogins', () => {
   it('should reuse a match, and give any other sign-in its own id, renamed when taken', () => {
     const targets = [
-      here('claude-mine', 'claude', { email: 'me@work.example' }),
+      here('claude-mine', 'claude-code', { email: 'me@work.example' }),
       here('codex-you', 'codex', { email: 'someone@else.example' }),
     ];
     const settled = planCloneLogins(
       [
-        { id: 'claude-you', harness: 'claude', email: 'ME@work.example' },
+        { id: 'claude-you', harness: 'claude-code', email: 'ME@work.example' },
         { id: 'codex-you', harness: 'codex', email: 'new@work.example' },
       ],
       targets,
@@ -91,10 +91,10 @@ describe('planCloneLogins', () => {
   it('should not hand an id one source login took to the next, API-key logins included', () => {
     const settled = planCloneLogins(
       [
-        { id: 'glm', harness: 'claude', store: 'environment' },
+        { id: 'glm', harness: 'claude-code', store: 'environment' },
         { id: 'glm-2', harness: 'codex', label: 'Other' },
       ],
-      [here('glm', 'claude', { store: 'environment' })],
+      [here('glm', 'claude-code', { store: 'environment' })],
     );
     should([...settled.values()]).eql([
       { kind: 'new', id: 'glm-2' },

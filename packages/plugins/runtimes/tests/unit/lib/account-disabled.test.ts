@@ -115,7 +115,7 @@ describe('runtimeDisable', () => {
     should(off?.alternative).equal('claude-b');
     should(off?.clauses).eql([
       'runtime "claude-a" is disabled (spend limit)',
-      'Use "claude-b" instead, or turn it back on with `fy runtime enable claude-a`. Ferrets already on it keep running; move one with `fy migrate <id> -a claude-b`',
+      'Use "claude-b" instead, or turn it back on with `fy runtime enable claude-a`. Ferrets already on it keep running; move one with `fy ferret move <id> -a claude-b`',
     ]);
   });
 
@@ -144,7 +144,7 @@ describe('runtimeDisable', () => {
     should(off?.clauses.at(-1)).match(
       /^No other runtime of this kind is on, or turn it back on with `ferretry login enable only`/u,
     );
-    should(off?.clauses.at(-1)).match(/migrate <id> -a <runtime>/u);
+    should(off?.clauses.at(-1)).match(/ferret move <id> -a <runtime>/u);
   });
 
   it('should take the binary name from the command that runs it', () => {

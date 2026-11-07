@@ -6,14 +6,14 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import * as catalog from '../../src/lib/fleet-catalog.ts';
 import type {
-  FleetAccountChangeView,
-  FleetComponentView,
-  FleetLayeredProfileView,
-  FleetRuntimeView,
-} from '../../src/lib/index.ts';
-import { INSTANT } from '../fixtures.ts';
+  AccountChangeView,
+  ComponentView,
+  LayeredProfileView,
+  RuntimeView,
+} from '../../../contract/index.ts';
+import * as catalog from '../../../contract/wire/catalog.ts';
+import { INSTANT } from './fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
 const component = {
@@ -37,10 +37,10 @@ const component = {
   remove: { available: false, reason: 'It is a layer in default. Remove it from that profile first.' },
   content: { form: 'text', text: 'TOKEN=‹hidden›', redacted: true },
   checkPath: '/Users/other/notes',
-} satisfies FleetComponentView;
+} satisfies ComponentView;
 
 const stack = {
-  harness: 'claude',
+  harness: 'claude-code',
   available: { available: true },
   applied: ['instructions/main', 'mcp/notes'],
   skipped: [
@@ -48,7 +48,7 @@ const stack = {
   ],
   conflicts: [
     {
-      harness: 'claude',
+      harness: 'claude-code',
       field: 'settings',
       key: 'permissions.defaultMode',
       sentence: '`permissions.defaultMode` · Claude Code: acceptEdits (from agent) overrides plan (from default)',
@@ -65,16 +65,16 @@ const profile = {
   usedBy: ['claude-default'],
   baseFor: [],
   wouldIncludeItself: ['default'],
-  scope: { kind: 'scoped', scope: 'claude' },
+  scope: { kind: 'scoped', scope: 'claude-code' },
   harnesses: [stack],
   remove: { available: true },
-} satisfies FleetLayeredProfileView;
+} satisfies LayeredProfileView;
 
 const runtime = {
   id: '00000000-0000-4000-8000-000000000001',
   name: 'claude-default',
   wrapper: 'claude-default',
-  harness: 'claude',
+  harness: 'claude-code',
   credential: { id: 'claude-you', store: 'host', status: 'ready' },
   profile: 'default',
   agent: true,
@@ -100,7 +100,21 @@ const runtime = {
   },
   launch: { available: true },
   sameAs: [],
-} satisfies FleetRuntimeView;
+} satisfies RuntimeView;
+
+const MACHINE_SETTINGS = {
+  kind: 'machine.settings',
+  agentPermissions: 'auto',
+  defaultRuntime: null,
+  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
+  browserMode: 'headless',
+  browserProxy: null,
+  browserPorts: 'random',
+  browserFirewallFailure: 'warn',
+  autoResume: true,
+  agendaMode: false,
+  publicUsageFeed: false,
+} as const;
 
 const change = {
   kind: 'component.put',
@@ -124,84 +138,92 @@ const view = {
       { kind: 'credential-link', source: '/fy/fleet/credentials/codex/auth.json', path: '/fy/homes/x/auth.json' },
     ],
     documents: [{ path: '/fy/fleet/config.yaml', bytes: 120 }],
-    runtimes: [{ name: 'claude-default', harness: 'claude', agent: true, launch: { available: true } }],
+    runtimes: [{ name: 'claude-default', harness: 'claude-code', agent: true, launch: { available: true } }],
   },
-} satisfies FleetAccountChangeView;
+} satisfies AccountChangeView;
 
 const cases: readonly SchemaCase[] = [
-  { name: 'FleetComponentNameSchema', schema: catalog.FleetComponentNameSchema, value: 'main notes' },
-  { name: 'FleetComponentKindSchema', schema: catalog.FleetComponentKindSchema, value: 'modelSets' },
-  { name: 'FleetCatalogFormatSchema', schema: catalog.FleetCatalogFormatSchema, value: 'none' },
-  { name: 'FleetHarnessScopeSchema', schema: catalog.FleetHarnessScopeSchema, value: 'codex' },
+  { name: 'ComponentNameSchema', schema: catalog.ComponentNameSchema, value: 'main notes' },
+  { name: 'ComponentKindSchema', schema: catalog.ComponentKindSchema, value: 'modelSets' },
+  { name: 'CatalogFormatSchema', schema: catalog.CatalogFormatSchema, value: 'none' },
+  { name: 'HarnessScopeSchema', schema: catalog.HarnessScopeSchema, value: 'codex' },
   {
-    name: 'FleetProfileScopeSchema',
-    schema: catalog.FleetProfileScopeSchema,
+    name: 'ProfileScopeSchema',
+    schema: catalog.ProfileScopeSchema,
     value: { kind: 'mixed', sentence: "Profile default can't be both Claude only and Codex only." },
   },
-  { name: 'FleetCatalogActSchema', schema: catalog.FleetCatalogActSchema, value: { available: true } },
+  { name: 'CatalogActSchema', schema: catalog.CatalogActSchema, value: { available: true } },
   {
-    name: 'FleetMachineToolSchema',
-    schema: catalog.FleetMachineToolSchema,
+    name: 'MachineToolSchema',
+    schema: catalog.MachineToolSchema,
     value: { harness: 'codex', label: 'Codex', installed: false },
   },
   {
-    name: 'FleetMachineViewSchema',
-    schema: catalog.FleetMachineViewSchema,
+    name: 'MachineViewSchema',
+    schema: catalog.MachineViewSchema,
     value: {
       name: 'studio',
       format: 'none',
       setUp: false,
       agentPermissions: 'skip',
       defaultRuntime: null,
-      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
-      tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/bin/claude' }],
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
+      browserMode: 'headless',
+      browserProxy: null,
+      browserPorts: 'random',
+      browserFirewallFailure: 'warn',
+      autoResume: true,
+      agendaMode: false,
+      publicUsageFeed: false,
+      lastAutoResume: null,
+      tools: [{ harness: 'claude-code', label: 'Claude Code', installed: true, command: '/usr/bin/claude' }],
       runtimeCount: 0,
       runningSessions: 2,
       authority: { mayApply: false, applyRefusal: 'step-up-required' },
     },
   },
   {
-    name: 'FleetMachineAuthoritySchema',
-    schema: catalog.FleetMachineAuthoritySchema,
+    name: 'MachineAuthoritySchema',
+    schema: catalog.MachineAuthoritySchema,
     value: { mayApply: true, applyRefusal: 'granted' },
   },
   {
-    name: 'FleetAgentControlSchema',
-    schema: catalog.FleetAgentControlSchema,
-    value: { terminals: true, browsers: false, files: true, ferretrySettings: true },
+    name: 'AgentControlSchema',
+    schema: catalog.AgentControlSchema,
+    value: { terminals: true, browsers: false, files: true, ferretrySettings: true, pageScripts: false },
   },
-  { name: 'FleetEnvEntrySchema', schema: catalog.FleetEnvEntrySchema, value: { name: 'API_KEY', hidden: true } },
-  { name: 'FleetComponentDetailSchema', schema: catalog.FleetComponentDetailSchema, value: component.detail },
-  { name: 'FleetUsageSchema', schema: catalog.FleetUsageSchema, value: component.usedBy },
-  { name: 'FleetPartialSupportSchema', schema: catalog.FleetPartialSupportSchema, value: component.partial[0] },
-  { name: 'FleetComponentViewSchema', schema: catalog.FleetComponentViewSchema, value: component },
+  { name: 'EnvEntrySchema', schema: catalog.EnvEntrySchema, value: { name: 'API_KEY', hidden: true } },
+  { name: 'ComponentDetailSchema', schema: catalog.ComponentDetailSchema, value: component.detail },
+  { name: 'ComponentUsageSchema', schema: catalog.ComponentUsageSchema, value: component.usedBy },
+  { name: 'PartialSupportSchema', schema: catalog.PartialSupportSchema, value: component.partial[0] },
+  { name: 'ComponentViewSchema', schema: catalog.ComponentViewSchema, value: component },
   {
-    name: 'FleetComponentGroupSchema',
-    schema: catalog.FleetComponentGroupSchema,
+    name: 'ComponentGroupSchema',
+    schema: catalog.ComponentGroupSchema,
     value: { kind: 'mcp', label: 'MCP servers', description: 'Tools a session can call.', components: [component] },
   },
   {
-    name: 'FleetComponentCatalogSchema',
-    schema: catalog.FleetComponentCatalogSchema,
-    value: { format: 'version-2', kinds: [] },
+    name: 'ComponentCatalogSchema',
+    schema: catalog.ComponentCatalogSchema,
+    value: { format: 'present', kinds: [] },
   },
-  { name: 'FleetLayerConflictSchema', schema: catalog.FleetLayerConflictSchema, value: stack.conflicts[0] },
-  { name: 'FleetSkippedLayerSchema', schema: catalog.FleetSkippedLayerSchema, value: stack.skipped[0] },
-  { name: 'FleetStackViewSchema', schema: catalog.FleetStackViewSchema, value: stack },
-  { name: 'FleetLayeredProfileViewSchema', schema: catalog.FleetLayeredProfileViewSchema, value: profile },
+  { name: 'LayerConflictSchema', schema: catalog.LayerConflictSchema, value: stack.conflicts[0] },
+  { name: 'SkippedLayerSchema', schema: catalog.SkippedLayerSchema, value: stack.skipped[0] },
+  { name: 'StackViewSchema', schema: catalog.StackViewSchema, value: stack },
+  { name: 'LayeredProfileViewSchema', schema: catalog.LayeredProfileViewSchema, value: profile },
   {
-    name: 'FleetLayeredProfileCatalogSchema',
-    schema: catalog.FleetLayeredProfileCatalogSchema,
-    value: { format: 'version-2', profiles: [profile] },
+    name: 'LayeredProfileCatalogSchema',
+    schema: catalog.LayeredProfileCatalogSchema,
+    value: { format: 'present', profiles: [profile] },
   },
   {
-    name: 'FleetRuntimeModelSetSchema',
-    schema: catalog.FleetRuntimeModelSetSchema,
+    name: 'RuntimeModelSetSchema',
+    schema: catalog.RuntimeModelSetSchema,
     value: { source: 'harness-default' },
   },
   {
-    name: 'FleetRuntimeModelChoiceSchema',
-    schema: catalog.FleetRuntimeModelChoiceSchema,
+    name: 'RuntimeModelChoiceSchema',
+    schema: catalog.RuntimeModelChoiceSchema,
     value: {
       id: 'glm-5.3',
       label: 'GLM-5.3',
@@ -215,8 +237,8 @@ const cases: readonly SchemaCase[] = [
     },
   },
   {
-    name: 'FleetRuntimeModelsSchema',
-    schema: catalog.FleetRuntimeModelsSchema,
+    name: 'RuntimeModelsSchema',
+    schema: catalog.RuntimeModelsSchema,
     value: {
       catalog: {
         id: 'ollama',
@@ -239,37 +261,37 @@ const cases: readonly SchemaCase[] = [
       },
     },
   },
-  { name: 'FleetFixedLayerViewSchema', schema: catalog.FleetFixedLayerViewSchema, value: runtime.fixedLayer },
-  { name: 'FleetRuntimeViewSchema', schema: catalog.FleetRuntimeViewSchema, value: runtime },
+  { name: 'FixedLayerViewSchema', schema: catalog.FixedLayerViewSchema, value: runtime.fixedLayer },
+  { name: 'RuntimeViewSchema', schema: catalog.RuntimeViewSchema, value: runtime },
   {
-    name: 'FleetRuntimeViewSchema switched off',
-    schema: catalog.FleetRuntimeViewSchema,
+    name: 'RuntimeViewSchema switched off',
+    schema: catalog.RuntimeViewSchema,
     value: { ...runtime, disabled: { reason: 'resting it', source: 'runtime' } },
   },
   {
-    name: 'FleetRuntimeViewSchema with items the last apply skipped',
-    schema: catalog.FleetRuntimeViewSchema,
+    name: 'RuntimeViewSchema with items the last apply skipped',
+    schema: catalog.RuntimeViewSchema,
     value: { ...runtime, skipped: ['skills/review', 'commands/ship.md'] },
   },
   {
-    name: 'FleetRuntimeCatalogSchema',
-    schema: catalog.FleetRuntimeCatalogSchema,
-    value: { format: 'version-2', runtimes: [runtime] },
+    name: 'RuntimeCatalogSchema',
+    schema: catalog.RuntimeCatalogSchema,
+    value: { format: 'present', runtimes: [runtime] },
   },
   {
-    name: 'FleetEnvInputSchema',
-    schema: catalog.FleetEnvInputSchema,
+    name: 'EnvInputSchema',
+    schema: catalog.EnvInputSchema,
     value: { NOTES_DIR: '/srv/notes', NOTES_TOKEN: { keep: true } },
   },
   {
-    name: 'FleetComponentInputSchema',
-    schema: catalog.FleetComponentInputSchema,
-    value: { kind: 'settings', harness: 'claude', flags: ['--verbose'], env: { LOG: 'debug' } },
+    name: 'ComponentInputSchema',
+    schema: catalog.ComponentInputSchema,
+    value: { kind: 'settings', harness: 'claude-code', flags: ['--verbose'], env: { LOG: 'debug' } },
   },
-  { name: 'FleetAccountChangeSchema', schema: catalog.FleetAccountChangeSchema, value: change },
+  { name: 'AccountChangeSchema', schema: catalog.AccountChangeSchema, value: change },
   {
-    name: 'FleetCatalogInstallChangeSchema',
-    schema: catalog.FleetCatalogInstallChangeSchema,
+    name: 'CatalogInstallChangeSchema',
+    schema: catalog.CatalogInstallChangeSchema,
     value: {
       kind: 'catalog.install',
       name: 'pdf-tools',
@@ -290,25 +312,25 @@ const cases: readonly SchemaCase[] = [
       replace: false,
     },
   },
-  { name: 'FleetAccountChangeRequestSchema', schema: catalog.FleetAccountChangeRequestSchema, value: { change } },
+  { name: 'AccountChangeRequestSchema', schema: catalog.AccountChangeRequestSchema, value: { change } },
   {
-    name: 'FleetChangedRuntimeSchema',
-    schema: catalog.FleetChangedRuntimeSchema,
+    name: 'ChangedRuntimeSchema',
+    schema: catalog.ChangedRuntimeSchema,
     value: view.preview.runtimes[0],
   },
   {
-    name: 'FleetRunningSessionSchema',
-    schema: catalog.FleetRunningSessionSchema,
+    name: 'RunningSessionSchema',
+    schema: catalog.RunningSessionSchema,
     value: { id: 'ms0v8vgc-d445a669', name: 'Fisher', harness: 'codex' },
   },
   {
-    name: 'FleetAccountChangePreviewSchema',
-    schema: catalog.FleetAccountChangePreviewSchema,
+    name: 'AccountChangePreviewSchema',
+    schema: catalog.AccountChangePreviewSchema,
     value: { kind: 'sign-out', credential: 'codex-work', runtimesAffected: 2, signsOutTerminal: false },
   },
   {
-    name: 'FleetAccountChangePreviewSchema',
-    schema: catalog.FleetAccountChangePreviewSchema,
+    name: 'AccountChangePreviewSchema',
+    schema: catalog.AccountChangePreviewSchema,
     value: {
       kind: 'apply',
       operations: [],
@@ -317,21 +339,21 @@ const cases: readonly SchemaCase[] = [
       runningSessions: [{ id: 'ms0v8vgc-d445a669', name: 'Fisher', harness: 'codex' }],
     },
   },
-  { name: 'FleetAccountChangeViewSchema', schema: catalog.FleetAccountChangeViewSchema, value: view },
+  { name: 'AccountChangeViewSchema', schema: catalog.AccountChangeViewSchema, value: view },
   {
-    name: 'FleetAccountChangeOutcomeSchema',
-    schema: catalog.FleetAccountChangeOutcomeSchema,
+    name: 'AccountChangeOutcomeSchema',
+    schema: catalog.AccountChangeOutcomeSchema,
     value: { outcome: 'executed', executor: 'clone', summary: 'Cloned 3 runtimes' },
   },
-  { name: 'FleetCatalogRefusalCodeSchema', schema: catalog.FleetCatalogRefusalCodeSchema, value: 'fleet_change_stale' },
+  { name: 'CatalogRefusalCodeSchema', schema: catalog.CatalogRefusalCodeSchema, value: 'fleet_change_stale' },
   {
-    name: 'FleetSettingsEntrySchema',
-    schema: catalog.FleetSettingsEntrySchema,
+    name: 'SettingsEntrySchema',
+    schema: catalog.SettingsEntrySchema,
     value: { key: 'permissions.defaultMode', value: 'plan' },
   },
   {
-    name: 'FleetComponentContentSchema',
-    schema: catalog.FleetComponentContentSchema,
+    name: 'ComponentContentSchema',
+    schema: catalog.ComponentContentSchema,
     value: {
       form: 'entries',
       entries: [
@@ -341,30 +363,30 @@ const cases: readonly SchemaCase[] = [
     },
   },
   {
-    name: 'FleetSettingsEntriesInputSchema',
-    schema: catalog.FleetSettingsEntriesInputSchema,
+    name: 'SettingsEntriesInputSchema',
+    schema: catalog.SettingsEntriesInputSchema,
     value: { theme: { value: 'dark' }, 'env.API_TOKEN': { keep: true }, 'permissions.allow': { value: ['Bash'] } },
   },
   {
-    name: 'FleetProfileDraftRequestSchema',
-    schema: catalog.FleetProfileDraftRequestSchema,
+    name: 'ProfileDraftRequestSchema',
+    schema: catalog.ProfileDraftRequestSchema,
     value: { layers: ['profile/default', 'mcp/notes'], editing: 'agent' },
   },
   {
-    name: 'FleetResolvedFieldSchema',
-    schema: catalog.FleetResolvedFieldSchema,
+    name: 'ResolvedFieldSchema',
+    schema: catalog.ResolvedFieldSchema,
     value: 'env',
   },
   {
-    name: 'FleetResolvedSetterSchema',
-    schema: catalog.FleetResolvedSetterSchema,
+    name: 'ResolvedSetterSchema',
+    schema: catalog.ResolvedSetterSchema,
     value: { value: '‹hidden›', hidden: true, from: 'settings/claude' },
   },
   {
-    name: 'FleetResolvedEntrySchema',
-    schema: catalog.FleetResolvedEntrySchema,
+    name: 'ResolvedEntrySchema',
+    schema: catalog.ResolvedEntrySchema,
     value: {
-      harness: 'claude',
+      harness: 'claude-code',
       field: 'settings',
       key: 'permissions.defaultMode',
       value: 'acceptEdits',
@@ -373,8 +395,8 @@ const cases: readonly SchemaCase[] = [
     },
   },
   {
-    name: 'FleetProfileDraftViewSchema',
-    schema: catalog.FleetProfileDraftViewSchema,
+    name: 'ProfileDraftViewSchema',
+    schema: catalog.ProfileDraftViewSchema,
     value: {
       harnesses: [stack],
       resolved: [],
@@ -411,7 +433,7 @@ describe('the account-model catalogue wire contract', () => {
       {
         kind: 'component.put',
         name: 'claude',
-        component: { kind: 'settings', harness: 'claude', entries: { theme: { value: 'dark' } } },
+        component: { kind: 'settings', harness: 'claude-code', entries: { theme: { value: 'dark' } } },
         create: false,
       },
       { kind: 'component.remove', componentKind: 'skills', name: 'mine', removeFromProfiles: true },
@@ -419,7 +441,7 @@ describe('the account-model catalogue wire contract', () => {
       {
         kind: 'credential.add',
         id: 'glm',
-        harness: 'claude',
+        harness: 'claude-code',
         store: 'environment',
         preset: 'zai-glm',
         env: { ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' },
@@ -441,18 +463,9 @@ describe('the account-model catalogue wire contract', () => {
         defaultRuntime: 'alpha',
       },
       { kind: 'credential.signout', id: 'codex-work' },
-      {
-        kind: 'machine.settings',
-        agentPermissions: 'auto',
-        defaultRuntime: 'claude-default',
-        agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
-      },
-      {
-        kind: 'machine.settings',
-        agentPermissions: 'auto',
-        defaultRuntime: null,
-        agentControl: { terminals: true, browsers: true, files: true },
-      },
+      { ...MACHINE_SETTINGS, defaultRuntime: 'claude-default' },
+      { ...MACHINE_SETTINGS, browserPorts: { cdp: 9222, relay: 9223, vnc: 5901 } },
+      { ...MACHINE_SETTINGS, browserProxy: { url: 'http://proxy.example.test:3128', bypass: [] }, browserMode: 'window' },
       { kind: 'setup.import', acceptedUpdates: ['instructions/main'], addDuplicates: true },
       { kind: 'clone.import', mode: 'alongside', bundle: { version: 1 } },
       {
@@ -473,7 +486,7 @@ describe('the account-model catalogue wire contract', () => {
     ];
 
     // Act
-    const parsed = changes.map(entry => catalog.FleetAccountChangeSchema.safeParse(entry).success);
+    const parsed = changes.map(entry => catalog.AccountChangeSchema.safeParse(entry).success);
 
     // Assert
     should(parsed).deepEqual(changes.map(() => true));
@@ -501,19 +514,19 @@ describe('the account-model catalogue wire contract', () => {
       installedFrom,
       replace: false,
     });
-    const install = (component: unknown) => catalog.FleetCatalogInstallChangeSchema.safeParse(sent(component)).success;
+    const install = (component: unknown) => catalog.CatalogInstallChangeSchema.safeParse(sent(component)).success;
 
     // Act
     const actual = [
       install({ kind: 'skills', items: ['pdf-tools'] }),
       install({ kind: 'mcp', url: 'https://mcp.example.com/x' }),
-      install({ kind: 'hooks', harness: 'claude' }),
+      install({ kind: 'hooks', harness: 'claude-code' }),
     ];
 
     // Assert
     should(actual).deepEqual([true, true, false]);
     should(
-      catalog.FleetCatalogInstallChangeSchema.safeParse({
+      catalog.CatalogInstallChangeSchema.safeParse({
         ...sent({ kind: 'skills', items: ['x'] }),
         files: [{ path: '../x', content: 'x' }],
       }).success,
@@ -532,8 +545,8 @@ describe('the account-model catalogue wire contract', () => {
     };
 
     // Act
-    const asChange = catalog.FleetAccountChangeSchema.safeParse(forged);
-    const asRequest = catalog.FleetAccountChangeRequestSchema.safeParse({ change: forged });
+    const asChange = catalog.AccountChangeSchema.safeParse(forged);
+    const asRequest = catalog.AccountChangeRequestSchema.safeParse({ change: forged });
 
     // Assert
     should([asChange.success, asRequest.success]).deepEqual([false, false]);
@@ -541,7 +554,7 @@ describe('the account-model catalogue wire contract', () => {
 
   it('should accept a runtime.put naming which half of a dual login it runs, and leave it optional', () => {
     // Act
-    const named = catalog.FleetAccountChangeSchema.safeParse({
+    const named = catalog.AccountChangeSchema.safeParse({
       kind: 'runtime.put',
       name: 'Codex Review',
       credential: 'glm',
@@ -550,7 +563,7 @@ describe('the account-model catalogue wire contract', () => {
       agent: false,
       create: true,
     });
-    const unnamed = catalog.FleetAccountChangeSchema.safeParse({
+    const unnamed = catalog.AccountChangeSchema.safeParse({
       kind: 'runtime.put',
       name: 'Default',
       credential: 'claude-you',
@@ -564,73 +577,46 @@ describe('the account-model catalogue wire contract', () => {
     should(unnamed.success && unnamed.data.kind === 'runtime.put' && 'harness' in unnamed.data).be.false();
   });
 
-  it('should take browserPorts on a settings change, leave it optional, and refuse ports that cannot work', () => {
+  it('should take browserPorts on a settings change and refuse ports that cannot work', () => {
     // Arrange
-    const sent = {
-      kind: 'machine.settings',
-      agentPermissions: 'auto',
-      defaultRuntime: null,
-      agentControl: { terminals: true, browsers: true, files: true },
-    };
     const explicit = { cdp: 9222, relay: 9223, vnc: 5901 };
 
     // Act
-    const parse = (browserPorts?: unknown) =>
-      catalog.FleetAccountChangeSchema.safeParse(browserPorts === undefined ? sent : { ...sent, browserPorts });
+    const parse = (browserPorts: unknown) =>
+      catalog.AccountChangeSchema.safeParse({ ...MACHINE_SETTINGS, browserPorts });
 
     // Assert
-    should(parse().success).be.true();
+    should(parse('random').success).be.true();
     should(parse('per-user').success).be.true();
     should(parse(explicit).success).be.true();
     should(parse({ ...explicit, relay: 9222 }).success).be.false();
     should(parse('fixed').success).be.false();
   });
 
-  it('should take browserFirewallFailure on a settings change, leave it optional, and refuse another word', () => {
-    // Arrange
-    const sent = {
-      kind: 'machine.settings',
-      agentPermissions: 'auto',
-      defaultRuntime: null,
-      agentControl: { terminals: true, browsers: true, files: true },
-    };
-
+  it('should take browserFirewallFailure on a settings change and refuse another word', () => {
     // Act
-    const parse = (browserFirewallFailure?: unknown) =>
-      catalog.FleetAccountChangeSchema.safeParse(
-        browserFirewallFailure === undefined ? sent : { ...sent, browserFirewallFailure },
-      );
+    const parse = (browserFirewallFailure: unknown) =>
+      catalog.AccountChangeSchema.safeParse({ ...MACHINE_SETTINGS, browserFirewallFailure });
 
     // Assert
-    should(parse().success).be.true();
     should(parse('warn').success).be.true();
     should(parse('refuse').success).be.true();
     should(parse('ignore').success).be.false();
   });
 
-  it('should require ferretrySettings in what a machine reports, and leave it optional in what a client sends', () => {
+  it('should require every machine setting in what a caller sends, so one change never clobbers a field it was not shown', () => {
     // Arrange
-    const sent = { kind: 'machine.settings', agentPermissions: 'auto', defaultRuntime: null };
-    const control = { terminals: true, browsers: true, files: true };
+    const { browserPorts: _ports, ...withoutPorts } = MACHINE_SETTINGS;
+    const { ferretrySettings: _setting, ...control } = MACHINE_SETTINGS.agentControl;
 
-    // Act
-    const withoutOnSend = catalog.FleetAccountChangeSchema.safeParse({ ...sent, agentControl: control });
-    const withOnSend = catalog.FleetAccountChangeSchema.safeParse({
-      ...sent,
-      agentControl: { ...control, ferretrySettings: true },
-    });
-
-    // Assert — a client that predates the switch leaves it as it is; a machine always states it.
-    should(withoutOnSend.success).be.true();
-    should(withoutOnSend.success && 'agentControl' in withoutOnSend.data && withoutOnSend.data.agentControl).deepEqual(
-      control,
-    );
-    should(withOnSend.success).be.true();
+    // Assert
+    should(catalog.AccountChangeSchema.safeParse(MACHINE_SETTINGS).success).be.true();
     assertRejects([
-      rejects('a machine report that omits ferretrySettings', catalog.FleetAgentControlSchema, control),
-      rejects('a send that makes ferretrySettings a string', catalog.FleetAccountChangeSchema, {
-        ...sent,
-        agentControl: { ...control, ferretrySettings: 'yes' },
+      rejects('a send that omits browserPorts', catalog.AccountChangeSchema, withoutPorts),
+      rejects('a machine report that omits ferretrySettings', catalog.AgentControlSchema, control),
+      rejects('a send that makes ferretrySettings a string', catalog.AccountChangeSchema, {
+        ...MACHINE_SETTINGS,
+        agentControl: { ...MACHINE_SETTINGS.agentControl, ferretrySettings: 'yes' },
       }),
     ]);
   });
@@ -638,44 +624,44 @@ describe('the account-model catalogue wire contract', () => {
   it('should refuse a component name with a slash, a file path in a change, and an unknown field', () => {
     // Arrange / Act / Assert
     assertRejects([
-      rejects('a name with a slash', catalog.FleetComponentNameSchema, 'a/b'),
-      rejects('a name that climbs', catalog.FleetComponentNameSchema, '..'),
-      rejects('a name with edge spaces', catalog.FleetComponentNameSchema, ' main'),
-      rejects('a component input naming its own file', catalog.FleetComponentInputSchema, {
+      rejects('a name with a slash', catalog.ComponentNameSchema, 'a/b'),
+      rejects('a name that climbs', catalog.ComponentNameSchema, '..'),
+      rejects('a name with edge spaces', catalog.ComponentNameSchema, ' main'),
+      rejects('a component input naming its own file', catalog.ComponentInputSchema, {
         kind: 'instructions',
         file: '/etc/passwd',
       }),
-      rejects('a view carrying a raw environment map', catalog.FleetComponentViewSchema, {
+      rejects('a view carrying a raw environment map', catalog.ComponentViewSchema, {
         ...component,
         env: { NOTES_TOKEN: 'fake' },
       }),
-      rejects('an env entry with both a value and hidden', catalog.FleetEnvEntrySchema, {
+      rejects('an env entry with both a value and hidden', catalog.EnvEntrySchema, {
         name: 'TOKEN',
         value: 'fake',
         hidden: true,
       }),
-      rejects('text past the limit', catalog.FleetAccountChangeSchema, {
+      rejects('text past the limit', catalog.AccountChangeSchema, {
         ...change,
         content: 'x'.repeat(catalog.MAX_COMPONENT_CONTENT_BYTES + 1),
       }),
-      rejects('a settings entry with both a value and hidden', catalog.FleetSettingsEntrySchema, {
+      rejects('a settings entry with both a value and hidden', catalog.SettingsEntrySchema, {
         key: 'env.TOKEN',
         value: 'fake',
         hidden: true,
       }),
-      rejects('an entry value that is not JSON', catalog.FleetSettingsEntriesInputSchema, {
+      rejects('an entry value that is not JSON', catalog.SettingsEntriesInputSchema, {
         theme: { value: () => 1 },
       }),
-      rejects('a draft past the layer limit', catalog.FleetProfileDraftRequestSchema, {
+      rejects('a draft past the layer limit', catalog.ProfileDraftRequestSchema, {
         layers: Array.from({ length: 201 }, (_, index) => `mcp/m${String(index)}`),
       }),
-      rejects('a refusal code nobody declared', catalog.FleetCatalogRefusalCodeSchema, 'fleet_change_bad'),
-      rejects('an authority that still announces a confirmation', catalog.FleetMachineAuthoritySchema, {
+      rejects('a refusal code nobody declared', catalog.CatalogRefusalCodeSchema, 'fleet_change_bad'),
+      rejects('an authority that still announces a confirmation', catalog.MachineAuthoritySchema, {
         mayApply: true,
         applyRefusal: 'granted',
         confirmation: 'none',
       }),
-      rejects('an authority refused for a lock that no longer exists', catalog.FleetMachineAuthoritySchema, {
+      rejects('an authority refused for a lock that no longer exists', catalog.MachineAuthoritySchema, {
         mayApply: false,
         applyRefusal: 'locked',
       }),
