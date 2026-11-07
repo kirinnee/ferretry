@@ -115,6 +115,7 @@
       "name": "@ferretry/plugin-access",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/app": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-connections": "workspace:*",

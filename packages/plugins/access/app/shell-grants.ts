@@ -9,20 +9,19 @@
  * OUTSIDE the app store (no client, no prompt).
  *
  * Where each lives today, and whether `origin/rebuild/spine-app-shell` has it:
- *   - cn / ClassValue ............ pwa/src/lib/class-names.ts ............ nowhere (copy)
+ *   - cn / ClassValue ............ pwa/src/lib/class-names.ts ............ `@ferretry/app/ui` (REPLACED)
  *   - DaemonId / DaemonConnection  pwa/src/lib/daemon-connection.ts ...... nowhere (re-exported from shell-pairing.ts)
  *   - daemonConnection ........... pwa/src/lib/daemon-connection.ts ...... nowhere (re-exported from shell-pairing.ts)
  *   - useDaemonClient ............ pwa/src/lib/store.tsx ................. nowhere (stand-in: no store)
  *   - useStepUpRequest ........... pwa/src/lib/store.tsx ................. nowhere (stand-in: no store)
- *   - Button ..................... pwa/src/shell/primitives.tsx .......... nowhere (copy)
+ *   - Button ..................... pwa/src/shell/primitives.tsx .......... `@ferretry/app/ui` (REPLACED)
  *   - SettingRow / SettingDisclosureRow  pwa/src/features/settings/setting-row.tsx  nowhere (stand-in)
  *   - settingDefinition .......... pwa/src/features/settings/settings-catalog.ts  nowhere (stand-in, one entry)
- *   - useDialogFocus ............. pwa/src/hooks/use-dialog-focus.ts ..... nowhere (copy)
+ *   - useDialogFocus ............. pwa/src/hooks/use-dialog-focus.ts ..... `@ferretry/app/ui` (REPLACED)
  *   - installPlatform / InstallEnvironment  pwa/src/lib/install-prompt.ts  nowhere (copy)
  *   - IFyApiClient ............... protocol/src/lib/client.ts ............ nowhere (`request` only)
  *   - FyHttpError ................ protocol/src/adapters/fy-api-client.ts  nowhere (typed stand-in)
- *   - toBase64Url / fromBase64Url  relay/src/lib/binary.ts ............... spine-app-shell
- *                                  `packages/app/src/session/wire/binary.ts` (copy of it)
+ *   - toBase64Url / fromBase64Url  relay/src/lib/binary.ts ............... `@ferretry/app` (REPLACED)
  *   - SecurityNumberField, SecuritySettingsChange(Schema)  protocol/src/lib/security.ts  not in Gate's contract (copy)
  *   - UnlockGranted .............. protocol/src/lib/security.ts ........... Gate exports only the schema (type here)
  *   - AuditEvent ................. protocol/src/lib/audit.ts .............. Gate's `AuditKindName` (alias here)
@@ -35,55 +34,13 @@ import {
   type SecuritySwitchField,
   type UnlockGrantedSchema,
 } from '@ferretry/core-gate/contract';
-import {
-  type ComponentPropsWithRef,
-  createElement,
-  type KeyboardEvent,
-  type ReactNode,
-  type RefObject,
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
+import { createElement, type ReactNode, useCallback, useId, useState } from 'react';
 import { z } from 'zod';
 import type { DaemonConnection } from './shell-pairing.ts';
 
-// ─── class names (copy of pwa/src/lib/class-names.ts) ─────────────────────────────────────────────────────────────
+// ─── class names, buttons, dialog focus (the app shell's UI kit, `@ferretry/app/ui`) ─────────────────────────────
 
-export type ClassValue = string | number | bigint | null | undefined | boolean | ClassValue[] | ClassDictionary;
-
-interface ClassDictionary {
-  readonly [key: string]: unknown;
-}
-
-const appendTo = (parts: string[], value: ClassValue): void => {
-  if (value === null || value === undefined || value === false || value === true || value === '') return;
-  if (typeof value === 'string') {
-    parts.push(value);
-    return;
-  }
-  if (typeof value === 'number' || typeof value === 'bigint') {
-    parts.push(String(value));
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const entry of value) appendTo(parts, entry);
-    return;
-  }
-  for (const [key, enabled] of Object.entries(value)) {
-    if (enabled) parts.push(key);
-  }
-};
-
-/** Joins every truthy class expression with a single space. */
-export function cn(...values: readonly ClassValue[]): string {
-  const parts: string[] = [];
-  for (const value of values) appendTo(parts, value);
-  return parts.join(' ');
-}
+export { Button, type ButtonProps, type ClassValue, cn, useDialogFocus } from '@ferretry/app/ui';
 
 // ─── the daemon connection (pwa/src/lib/daemon-connection.ts) ─────────────────────────────────────────────────────
 
@@ -133,24 +90,6 @@ export function useDaemonClient(): (daemon: DaemonConnection) => Promise<IFyApiC
  */
 export function useStepUpRequest(): ((daemon: DaemonConnection, act?: string) => Promise<boolean>) | undefined {
   return undefined;
-}
-
-// ─── shell primitives (copy of pwa/src/shell/primitives.tsx `Button`) ─────────────────────────────────────────────
-
-type ButtonVariant = 'primary' | 'ghost' | 'outline' | 'danger';
-type ButtonSize = 'sm' | 'md';
-
-export interface ButtonProps extends ComponentPropsWithRef<'button'> {
-  readonly variant?: ButtonVariant;
-  readonly size?: ButtonSize;
-}
-
-export function Button({ className, variant = 'outline', size = 'md', ...rest }: ButtonProps) {
-  return createElement('button', {
-    'data-variant': variant === 'outline' ? undefined : variant,
-    className: cn('kt-btn', size === 'sm' && 'kt-btn--sm', className),
-    ...rest,
-  });
 }
 
 // ─── settings rows (stand-ins for pwa/src/features/settings/setting-row.tsx and settings-catalog.ts) ─────────────
@@ -224,101 +163,6 @@ export function settingDefinition(id: keyof typeof SETTING_DESCRIPTIONS): { read
   return { description: SETTING_DESCRIPTIONS[id] };
 }
 
-// ─── dialog focus (copy of pwa/src/hooks/use-dialog-focus.ts) ─────────────────────────────────────────────────────
-
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
-
-/** Open overlays, oldest first. Exactly one of them — the last — owns Escape. */
-const ESCAPE_LAYERS: object[] = [];
-
-export function pushEscapeLayer(token: object): () => void {
-  ESCAPE_LAYERS.push(token);
-  let removed = false;
-  return () => {
-    if (removed) return;
-    removed = true;
-    const at = ESCAPE_LAYERS.lastIndexOf(token);
-    if (at !== -1) ESCAPE_LAYERS.splice(at, 1);
-  };
-}
-
-export function isTopEscapeLayer(token: object): boolean {
-  return ESCAPE_LAYERS.length > 0 && ESCAPE_LAYERS[ESCAPE_LAYERS.length - 1] === token;
-}
-
-export interface DialogFocus {
-  readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
-}
-
-export function useDialogFocus(
-  open: boolean,
-  ref: RefObject<HTMLElement | null>,
-  onClose: () => void,
-  options: { autoFocus?: boolean } = {},
-): DialogFocus {
-  const { autoFocus = true } = options;
-  const restoreTo = useRef<HTMLElement | null>(null);
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  });
-  const layer = useRef<object>({});
-
-  useEffect(() => {
-    if (!open) return;
-    const token = layer.current;
-    const release = pushEscapeLayer(token);
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (!isTopEscapeLayer(token)) return;
-      event.stopPropagation();
-      onCloseRef.current();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      release();
-    };
-  }, [open]);
-
-  useLayoutEffect(() => {
-    if (open) {
-      restoreTo.current = document.activeElement as HTMLElement | null;
-      if (autoFocus) ref.current?.focus();
-      return;
-    }
-    const previous = restoreTo.current;
-    restoreTo.current = null;
-    if (previous && typeof previous.focus === 'function' && document.contains(previous)) previous.focus();
-  }, [open, autoFocus, ref]);
-
-  const onKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLElement>) => {
-      if (event.key !== 'Tab') return;
-      const root = ref.current;
-      if (!root) return;
-      const focusable = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-        element => element.offsetParent !== null || element === document.activeElement,
-      );
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (first === undefined || last === undefined) return;
-      const active = document.activeElement;
-      if (event.shiftKey && (active === first || active === root)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    },
-    [ref],
-  );
-
-  return { onKeyDown };
-}
-
 // ─── install platform (copy of pwa/src/lib/install-prompt.ts, the two names device-permissions reads) ───────────────
 
 export interface InstallEnvironment {
@@ -340,30 +184,9 @@ export const installPlatform = (environment: InstallEnvironment): InstallPlatfor
   return IOS_DEVICE.test(environment.userAgent) || iPadAsMac ? 'ios' : 'browser';
 };
 
-// ─── base64url (copy of spine-app-shell packages/app/src/session/wire/binary.ts) ──────────────────────────────────
+// ─── base64url (the app shell's session wire) ─────────────────────────────────────────────────────────────────────
 
-const BASE64URL_PATTERN = /^[A-Za-z0-9_-]*$/u;
-
-/** Encode bytes as unpadded base64url. */
-export function toBase64Url(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
-}
-
-/** Decode unpadded base64url, refusing anything that is not exactly that. */
-export function fromBase64Url(text: string): Uint8Array | null {
-  if (!BASE64URL_PATTERN.test(text)) return null;
-  if (text.length % 4 === 1) return null;
-  const padded = text
-    .replaceAll('-', '+')
-    .replaceAll('_', '/')
-    .padEnd(Math.ceil(text.length / 4) * 4, '=');
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return toBase64Url(bytes) === text ? bytes : null;
-}
+export { fromBase64Url, toBase64Url } from '@ferretry/app';
 
 // ─── wire names Gate's contract does not carry yet (copies of protocol/src/lib/security.ts and audit.ts) ─────────
 

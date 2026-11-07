@@ -1,20 +1,18 @@
 /**
- * STAND-INS for what Access's app half (pairing, devices, QR, push enrolment, device keys) needs and nothing in 5.0
- * provides yet (port brief: "if it has no home yet, keep the import pointing at a single local file"). Every item says
- * where it came from today, whether `origin/rebuild/spine-app-shell` has it (and where), and what should replace it.
+ * THE PAIRING HALF'S SHELL SEAM. What Access's app half (pairing, devices, QR, push enrolment, device keys) needs from
+ * outside itself, in one file.
  *
- * TWO KINDS, AND THE LINE BETWEEN THEM IS DELIBERATE:
+ * THREE KINDS, AND THE LINE BETWEEN THEM IS DELIBERATE:
  *
+ * - THE APP SHELL'S OWN EXPORT, where it has one: `@ferretry/app` (the session wire, the session client's refusal
+ *   error) and `@ferretry/app/ui` (the bottom sheet, the mark, the layout and viewport hooks, the Trusted Types
+ *   worker URL). Re-exported here, so the screens keep one import line and the shell stays the one owner.
  * - A SHORT COPY of today's code, for pure facts that carry no runtime identity: types, sentences, constants, and
  *   total functions over plain values (the daemon-connection value rules, the published-carrier mapping the §14
- *   pairing check reads, the base64url encoder). A copy here behaves exactly as today's does.
- * - A TYPED STAND-IN that throws, for everything that IS the shell: its components and hooks, its daemon client,
- *   its transport (whose request binding is a symbol only the router knows), its network, timers and routes, and the
- *   session client's errors whose class identity the session code itself must throw. Copying any of those would
- *   give the app two of them, and the pair would disagree at runtime. Each throws the same sentence naming itself, so
- *   a screen that reaches one before the shell lands fails loudly rather than quietly doing the wrong thing.
- *
- * REPLACE each with the app shell's own export (or a contract's, where noted) when it lands; nothing here is a design.
+ *   pairing check reads, the request URL rule, the visibility gate). A copy here behaves exactly as today's does.
+ * - A TYPED STAND-IN that throws, for what the shell has NO export for in 5.0: its network, its timers and routes,
+ *   the page model and the sessions bar (the shell holds no feature, §5). Each throws the same sentence naming
+ *   itself, so a screen that reaches one fails loudly rather than quietly doing the wrong thing.
  *
  * ONE COPY PER NAME ACROSS ACCESS'S APP HALF: `cn`, `IFyApiClient`, `useDaemonClient`, `useDialogFocus` and
  * `toBase64Url` are held by the grants half's seam (`shell-grants.ts`) and re-exported below, not copied twice.
@@ -32,7 +30,7 @@ import type { IFyApiClient } from './shell-grants.ts';
 
 /** The one sentence every throwing stand-in answers with. */
 const fromShell = (name: string): never => {
-  throw new Error(`${name} comes from the app shell, which this build of Access does not have yet`);
+  throw new Error(`${name} has no app shell export in this build of Access`);
 };
 
 // ─── 1. carriers (today: `relay/src/lib/connection.ts`; spine-app-shell: walked inside `src/session/`) ──────────
@@ -209,10 +207,8 @@ export const daemonDisplayName = (connection: DaemonConnection & { readonly labe
 /** Base64url without padding (spine-app-shell: `src/session/wire/binary.ts`). Held by `shell-grants.ts`. */
 export { toBase64Url } from './shell-grants.ts';
 
-/** An opaque private key the session signs with. COPY (spine-app-shell: `src/session/wire/crypto.ts`). */
-export interface PrivateKeyHandle {
-  readonly algorithm: 'X25519' | 'Ed25519';
-}
+/** An opaque private key the session signs with: the shell's own type. */
+export type { PrivateKeyHandle } from '@ferretry/app';
 
 // ─── 4. the session client's sentences and errors (today: `pwa/src/lib/relay-carrier.ts`, `relay-session.ts`) ──
 
@@ -220,17 +216,8 @@ export interface PrivateKeyHandle {
 export const DEVICE_NOT_ACCEPTED_SENTENCE =
   'This machine no longer accepts this browser — it was removed, or went unused for too long. Pair it again to keep using it.';
 
-/**
- * A sealed `pair-refused`: the daemon judged this code. COPY of today's class so the pairing screen can tell a refusal
- * from a transport failure. REPLACE WITH the session client's own export: `instanceof` only works when the session
- * code throws THIS class, so until the shell lands no refusal reaches the screen as one.
- */
-export class RelayPairingRefusedError extends Error {
-  constructor() {
-    super('this pairing code is wrong, expired or already spent');
-    this.name = 'RelayPairingRefusedError';
-  }
-}
+/** A sealed `pair-refused`: the daemon judged this code. The session client's own class, so `instanceof` holds. */
+export { RelayPairingRefusedError } from '@ferretry/app';
 
 // ─── 5. the daemon client and transport (today: `protocol/src/lib/client.ts`, `pwa/src/lib/runtime-models.ts`,
 //        `daemon-transport.ts`; spine-app-shell: `src/client/daemon-client.ts`, whose plugin client is `call`) ──────
@@ -258,7 +245,10 @@ export class DaemonResponseError extends Error {
 
 export type DaemonFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-/** The page's network, wrapped so it is never called with the wrong receiver. STAND-IN: the shell owns the network. */
+/**
+ * The page's network, wrapped so it is never called with the wrong receiver. STAND-IN: the shell owns the network, and
+ * a bare `fetch` here would put a plain request on the wire where today's router put a sealed session.
+ */
 export const browserFetch: DaemonFetch = async () => fromShell('browserFetch');
 
 export interface DaemonRequest {
@@ -266,23 +256,34 @@ export interface DaemonRequest {
   readonly init: RequestInit;
 }
 
-/** A request bound to one paired daemon (the router routes by a symbol on `init`). STAND-IN. */
-export function daemonRequest(_daemon: DaemonConnection, _path: string, _init?: RequestInit): DaemonRequest {
-  return fromShell('daemonRequest');
+/** Resolves a path against the paired daemon, never against the page origin. COPY of today's `daemonUrl`. */
+const daemonUrl = (daemon: DaemonConnection, path: string): string => {
+  if (!path.startsWith('/') || path.startsWith('//')) throw new Error('daemon path must be an origin-relative path');
+  const url = new URL(path, `${daemon.baseUrl}/`);
+  if (url.origin !== new URL(daemon.baseUrl).origin) throw new Error('daemon path must remain on the paired daemon');
+  return url.toString();
+};
+
+/**
+ * A request for one paired daemon: its own address for the path, and the browser's credentials. It carries no
+ * credential of its own: the device key that opened the sealed session the request rides on is the credential. COPY of
+ * today's `daemonRequest`, minus the router's per-daemon symbol binding, which belongs to the router the shell now
+ * owns (the shell routes by the session a client was built for, never by a mark on a request).
+ */
+export function daemonRequest(daemon: DaemonConnection, path: string, init: RequestInit = {}): DaemonRequest {
+  return { url: daemonUrl(daemon, path), init: { ...init, credentials: 'include' } };
 }
 
 /** The deadline every per-machine read gives up after. COPY of today's constant. */
 export const MACHINE_READ_DEADLINE_MS = 20_000;
 
-/** `read`, bounded by a deadline (a timer: the shell's clock). STAND-IN. */
+/** `read`, bounded by a deadline (a timer: the shell's clock). STAND-IN: the shell exports no deadline. */
 export function withDeadline<T>(_read: Promise<T>, _deadlineMs?: number): Promise<T> {
   return fromShell('withDeadline');
 }
 
-/** The script URL a service worker is registered from, through the page's Trusted Types policy. STAND-IN. */
-export function trustedWorkerUrl(_url: string): string {
-  return fromShell('trustedWorkerUrl');
-}
+/** The script URL a service worker is registered from, through the page's Trusted Types policy: the shell owns it. */
+export { trustedWorkerUrl } from '@ferretry/app/ui';
 
 /** Per-daemon notification delivery preference (today: `notification-preferences.ts`). STAND-IN type. */
 export interface DaemonNotificationPreferences {
@@ -409,59 +410,36 @@ export { cn } from './shell-grants.ts';
 
 // ─── 9. shell components and hooks (today: `pwa/src/shell/*`, `pwa/src/hooks/*`; spine-app-shell: `src/shell/`) ─
 
-export interface BottomSheetProps {
-  readonly id: string;
-  readonly open: boolean;
-  readonly onClose: () => void;
-  readonly labelledBy?: string;
-  readonly ariaLabel?: string;
-  readonly closeLabel: string;
-  readonly children: ReactNode;
-  readonly panelClassName?: string;
-  readonly maxHeight?: string;
-  readonly height?: string;
-  readonly zIndexClass?: string;
-}
+/** The shell's bottom sheet, the Ferretry mark, and the layout and viewport hooks: `@ferretry/app/ui`. */
+export {
+  BottomSheet,
+  type BottomSheetProps,
+  BrandMark,
+  type LayoutMode,
+  useAppViewport,
+  useKeyboardOpen,
+  useLayoutMode,
+} from '@ferretry/app/ui';
 
-/** The shell's bottom sheet. STAND-IN (today: `shell/bottom-sheet.tsx`). */
-export function BottomSheet(_props: BottomSheetProps): ReactNode {
-  return fromShell('BottomSheet');
-}
-
-/** The Ferretry mark. STAND-IN (today: `shell/brand-mark.tsx`). */
-export function BrandMark(_props: { readonly size?: number; readonly className?: string }): ReactNode {
-  return fromShell('BrandMark');
-}
-
-/** The shell's sessions bar, which the pairing harness opens its sheet from. STAND-IN (today: `shell/sessions-bar.tsx`). */
+/** The sessions bar the pairing harness opens its sheet from. STAND-IN: the shell holds no feature, and this bar is one. */
 export function SessionsBar(_props: Readonly<Record<string, unknown>>): ReactNode {
   return fromShell('SessionsBar');
 }
 
-export type LayoutMode = 'drawer' | 'rail' | 'full';
-
-/** Which layout the viewport is in. STAND-IN (today: `hooks/use-layout-mode.ts`). */
-export function useLayoutMode(): LayoutMode {
-  return fromShell('useLayoutMode');
-}
-
-/** Whether the on-screen keyboard is up. STAND-IN (today: `hooks/use-keyboard-open.ts`). */
-export function useKeyboardOpen(): boolean {
-  return fromShell('useKeyboardOpen');
-}
-
-/** Installs the app's viewport size variables. STAND-IN (today: `hooks/use-app-viewport.ts`). */
-export function useAppViewport(): void {
-  fromShell('useAppViewport');
-}
-
-/** Moves focus into an open dialog, traps Tab, and gives it back on close (today: `hooks/use-dialog-focus.ts`). */
+/** Moves focus into an open dialog, traps Tab, and gives it back on close: the shell's, held by `shell-grants.ts`. */
 export { useDialogFocus } from './shell-grants.ts';
 
-/** `read`, made to do nothing while the tab is hidden. STAND-IN (today: `lib/feed-aware-poll.ts`). */
-export function whileVisible(_read: () => void): () => void {
-  return fromShell('whileVisible');
-}
+/** `read`, made to do nothing while the tab is hidden. COPY of today's `whileVisible` (`lib/feed-aware-poll.ts`). */
+export const whileVisible =
+  (
+    read: () => void,
+    environment: { readonly hidden: () => boolean } = {
+      hidden: () => globalThis.document?.visibilityState === 'hidden',
+    },
+  ) =>
+  (): void => {
+    if (!environment.hidden()) read();
+  };
 
 /**
  * How many standing sign-in rules a device's passkey approved, under its row. STAND-IN: today's
