@@ -1,7 +1,9 @@
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import type { ChildEnvironment, VaultApi } from '@ferretry/core-vault/contract';
 import type { FencedPath, HookDecision, InstructionEntry } from '@ferretry/kernel/contract';
+import { ApiError } from '@ferretry/kernel/contract';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
+import { KeyedSerialExecutor } from './serial.ts';
 import type {
   FerretChangedPayload,
   FerretId,
@@ -27,7 +29,13 @@ import type {
 import { HARNESS_KEYS } from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
 import type { FerretDetails } from '../state.ts';
-import { type AgentControl, effectiveAgentControl, type LimitsFile, NO_AGENT_CONTROL } from '../../../contract/index.ts';
+import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
+import {
+  type AgentControl,
+  effectiveAgentControl,
+  type LimitsFile,
+  NO_AGENT_CONTROL,
+} from '../../../contract/index.ts';
 import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../tokens/tokens.ts';
 
 /**
@@ -91,12 +99,23 @@ export interface FerretsPorts {
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> =>
   err({ code, reason } as StartFailure);
 
+class ResumeRefusal extends Error {
+  constructor(readonly failure: StartFailure) {
+    super(failure.reason);
+  }
+}
+
 export class FerretsService implements FerretsApi {
+  /** Today's lifecycle gate: read the current record only after acquiring its key. */
+  private readonly serial = new KeyedSerialExecutor();
   /**
    * The pin-marked summary made from one registry summary, so the same summary with the same pin answers the same
    * object (R501: the fleet read reuses its body while nothing moved). Held weakly by the input summary.
    */
-  private readonly marked = new WeakMap<FerretSummary, { readonly pinnedAt: string; readonly summary: FerretSummary }>();
+  private readonly marked = new WeakMap<
+    FerretSummary,
+    { readonly pinnedAt: string; readonly summary: FerretSummary }
+  >();
 
   constructor(
     private readonly registry: FerretRegistry,
@@ -149,7 +168,8 @@ export class FerretsService implements FerretsApi {
   async start(request: StartRequest): Promise<Result<FerretId, StartFailure>> {
     if (request.parent !== undefined && this.registry.get(request.parent) === undefined)
       return failed('refused', `no ferret ${request.parent} to be the lead of this one`);
-    const name = request.name?.trim() || this.ports.newName(candidate => this.registry.nameHolder(candidate) !== undefined);
+    const name =
+      request.name?.trim() || this.ports.newName(candidate => this.registry.nameHolder(candidate) !== undefined);
     const holder = this.registry.nameHolder(name);
     if (holder !== undefined) return failed('refused', `the name ${name} is held by running ferret ${holder}`);
     const folder = this.ports.folder(request.folder);
@@ -196,15 +216,24 @@ export class FerretsService implements FerretsApi {
       createdAt: at,
       stateAt: at,
     };
-    await this.write(record, undefined, 'started');
-    return await this.launch(record, request.prompt, undefined);
+    return await this.serial.run(id, async () => {
+      await this.write(record, undefined, 'started');
+      return await this.launch(record, request.prompt, undefined);
+    });
   }
 
   async stop(ferret: FerretId, how: 'polite' | 'now', reason?: string): Promise<void> {
+    return await this.serial.run(ferret, () => this.stopHeld(ferret, how, reason));
+  }
+
+  private async stopHeld(ferret: FerretId, how: 'polite' | 'now', reason?: string): Promise<void> {
+    await this.ports.ready?.();
     const record = this.registry.get(ferret);
     if (record === undefined || record.state === 'stopped') return;
     const harness = this.ports.harness(record.harness);
     const runner = this.ports.runner();
+    if (record.handle !== undefined && (harness === undefined || runner === undefined))
+      throw new ApiError(503, 'the harness or runner needed to stop this ferret is unavailable', 'plugin_unavailable');
     if (record.handle !== undefined && harness !== undefined && runner !== undefined)
       await harness.stop(ferret, record.handle as RunnerHandle, runner, how);
     await this.settle(record, 'stopped', 'stopped');
@@ -216,7 +245,54 @@ export class FerretsService implements FerretsApi {
    * Revives a stopped ferret. A `message` is recorded with today's `session.resumed` event; delivering it into the
    * conversation is the Conversation's (not wired in this build).
    */
-  async resume(ferret: FerretId, message?: string): Promise<Result<FerretId, StartFailure>> {
+  async resume(
+    ferret: FerretId,
+    message?: string,
+    confirmRestore?: () => void,
+  ): Promise<Result<FerretId, StartFailure>> {
+    return await this.serial.run(ferret, async () => {
+      await this.ports.ready?.();
+      this.requireTokens();
+      try {
+        return await resumeUnderCutOff(
+          this.tokens.isCutOff(ferret) ? 'restore' : 'proceed',
+          {
+            confirm: confirmRestore,
+            unconfirmed: () =>
+              new ResumeRefusal({
+                code: 'refused',
+                reason: 'only a confirmed owner resume may restore a cut-off ferret',
+              }),
+            restore: async () => {
+              this.tokens.restore(ferret);
+              try {
+                await this.ports.saveTokens(this.tokens.snapshot());
+              } catch (error) {
+                this.tokens.cutOff(ferret, this.ports.now());
+                await this.ports.saveTokens(this.tokens.snapshot());
+                throw error;
+              }
+            },
+            markAgain: async () => {
+              this.tokens.cutOff(ferret, this.ports.now());
+              await this.ports.saveTokens(this.tokens.snapshot());
+            },
+          },
+          async () => {
+            const result = await this.resumeHeld(ferret, message);
+            if (!result.ok) throw new ResumeRefusal(result.error);
+            return result;
+          },
+        );
+      } catch (error) {
+        if (error instanceof ResumeRefusal) return err(error.failure);
+        throw error;
+      }
+    });
+  }
+
+  private async resumeHeld(ferret: FerretId, message?: string): Promise<Result<FerretId, StartFailure>> {
+    await this.ports.ready?.();
     const record = this.registry.get(ferret);
     if (record === undefined) return failed('refused', `no ferret ${ferret}`);
     if (record.state !== 'stopped') return ok(ferret);
@@ -313,9 +389,19 @@ export class FerretsService implements FerretsApi {
 
   /** Revokes a ferret's token (owner only at the route); it can no longer call the daemon until it restarts. */
   async revokeToken(ferret: FerretId): Promise<boolean> {
-    const revoked = this.tokens.revoke(ferret);
-    if (revoked) await this.ports.saveTokens(this.tokens.snapshot());
-    return revoked;
+    return await this.serial.run(ferret, async () => {
+      await this.ports.ready?.();
+      this.requireTokens();
+      const revoked = this.tokens.holds(ferret);
+      this.tokens.cutOff(ferret, this.ports.now());
+      await this.ports.saveTokens(this.tokens.snapshot());
+      return revoked;
+    });
+  }
+
+  private requireTokens(): void {
+    if (!this.tokens.isAvailable())
+      throw new ApiError(503, 'the ferret credential state cannot be read safely', 'credential_state_unavailable');
   }
 
   /** The owner's pins; a pin list that cannot be read is "nothing pinned" (the mark is a preference). */
@@ -343,10 +429,55 @@ export class FerretsService implements FerretsApi {
     prompt: string | undefined,
     conversation: string | undefined,
   ): Promise<Result<FerretId, StartFailure>> {
+    const created = new Set<RunnerHandle>();
+    let runner: Runner | undefined;
+    let failure: StartFailure;
+    try {
+      runner = this.ports.runner();
+      if (runner === undefined) return await this.abandon(record, 'runner_unavailable', 'no runner plugin is on');
+      const tracked = new Proxy(runner, {
+        get(target, property) {
+          if (property === 'start' || property === 'resume')
+            return async (...args: Parameters<Runner['resume']>) => {
+              const result = property === 'start' ? await target.start(args[0]) : await target.resume(...args);
+              if (result.ok) created.add(result.value.handle);
+              return result;
+            };
+          const value = Reflect.get(target, property);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const result = await this.launchAttempt(record, prompt, conversation, tracked);
+      if (result.ok) return result;
+      failure = result.error;
+    } catch {
+      // Port errors can contain launch environment values: never return their text to a caller.
+      failure = { code: 'failed', reason: 'a launch dependency failed before the ferret could start' };
+    }
+    if (this.tokens.revoke(record.id)) await this.ports.saveTokens(this.tokens.snapshot());
+    for (const handle of created) {
+      try {
+        await runner!.stop(handle, 'now');
+      } catch {
+        // Keep the handle recoverable by stop; a failed cleanup never claims the process stopped.
+        await this.write({ ...record, handle }, record.state, 'state');
+        return failed('runner_unavailable', 'the failed launch still has a process that could not be stopped');
+      }
+    }
+    return await this.abandon(record, failure.code, failure.reason);
+  }
+
+  private async launchAttempt(
+    record: FerretRecord,
+    prompt: string | undefined,
+    conversation: string | undefined,
+    runner: Runner,
+  ): Promise<Result<FerretId, StartFailure>> {
+    this.requireTokens();
+    if (this.tokens.isCutOff(record.id))
+      return failed('refused', 'the owner cut off this ferret; a confirmed owner resume is required');
     const harness = this.ports.harness(record.harness);
-    if (harness === undefined) return await this.abandon(record, 'harness_unavailable', `${record.harness} is off`);
-    const runner = this.ports.runner();
-    if (runner === undefined) return await this.abandon(record, 'runner_unavailable', 'no runner plugin is on');
+    if (harness === undefined) return failed('harness_unavailable', `${record.harness} is off`);
     const issued = issueToken(record.id, this.ports.now());
     this.tokens.add(issued.entry);
     await this.ports.saveTokens(this.tokens.snapshot());
@@ -362,11 +493,13 @@ export class FerretsService implements FerretsApi {
       ...launchOptions(this.registry.detailsOf(record.id)?.options),
       folder: record.folder as FencedPath,
       home: this.ports.home(record.id),
-      instructions: this.ports.instructions().filter(
-        entry =>
-          (entry.when.role === undefined || entry.when.role === 'any' || entry.when.role === record.role) &&
-          (entry.when.harness === undefined || entry.when.harness === record.harness),
-      ),
+      instructions: this.ports
+        .instructions()
+        .filter(
+          entry =>
+            (entry.when.role === undefined || entry.when.role === 'any' || entry.when.role === record.role) &&
+            (entry.when.harness === undefined || entry.when.harness === record.harness),
+        ),
       ...(prompt === undefined ? {} : { prompt }),
     };
     const parts = (
@@ -376,14 +509,14 @@ export class FerretsService implements FerretsApi {
     ).flat();
     const spec: LaunchSpec = { ...base, parts };
     const env = await this.environment(record.id, issued.token, parts);
-    if (!env.ok) return await this.abandon(record, 'login_unavailable', env.error);
+    if (!env.ok) return failed('login_unavailable', env.error);
     const started =
       conversation === undefined
         ? await harness.start(spec, runner, env.value)
         : await harness.resume(spec, runner, env.value, conversation);
     if (!started.ok) {
       const code = started.error === 'unavailable' ? 'runner_unavailable' : 'failed';
-      return await this.abandon(record, code, `the harness could not start: ${started.error}`);
+      return failed(code, `the harness could not start: ${started.error}`);
     }
     const working: FerretRecord = {
       ...record,
@@ -420,7 +553,11 @@ export class FerretsService implements FerretsApi {
     return failed(code, reason);
   }
 
-  private async settle(record: FerretRecord, state: FerretState, change: FerretChangedPayload['change']): Promise<void> {
+  private async settle(
+    record: FerretRecord,
+    state: FerretState,
+    change: FerretChangedPayload['change'],
+  ): Promise<void> {
     if (this.tokens.revoke(record.id)) await this.ports.saveTokens(this.tokens.snapshot());
     const { handle: _handle, ...rest } = record;
     await this.write({ ...rest, state, stateAt: this.ports.now() }, record.state, change);
@@ -446,9 +583,7 @@ export class FerretsService implements FerretsApi {
  * The launch spec's share of a ferret's start options: `model` and `effort` on their own fields (where the harness
  * already reads them), and the rest whole, so a harness, runner or supervisor reads today's start fields from the spec.
  */
-function launchOptions(
-  options: FerretDetails['options'],
-): Pick<LaunchSpec, 'model' | 'effort' | 'options'> {
+function launchOptions(options: FerretDetails['options']): Pick<LaunchSpec, 'model' | 'effort' | 'options'> {
   if (options === undefined) return {};
   return {
     ...(options.model === undefined ? {} : { model: options.model }),
