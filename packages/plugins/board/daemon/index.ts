@@ -163,7 +163,7 @@ export default implementDaemon(manifest, {
       },
       provides: { board: api },
       hooks: {
-        'ask.sources:card': { schema: CardAskRefSchema, title: '{card}', form: false },
+        'ask.sources:card': { schema: CardAskRefSchema, title: '{card}', form: false, apply: world.applyAnswer },
         'start.decide': () => ALLOW,
         'sitrep.lines': () => [{ id: 'board', order: 50, item: { lines: async ferret => await world.lines(ferret) } }],
       },
@@ -172,10 +172,7 @@ export default implementDaemon(manifest, {
           const answers = await ctx.needs.asks.answers({ source: wake.source, entry: wake.entry });
           const answer = answers.find(each => each.id === wake.answerId);
           if (answer === undefined) return;
-          if (wake.source === CARD_SOURCE) {
-            await world.applyAnswer(answer);
-            return;
-          }
+          if (wake.source === CARD_SOURCE) return; // applied by the source's own `apply`, before the answer was recorded
           // A lane proposal's Accept (a daemon ask whose entry names the project and version).
           await world.proposalAcceptance.answered({
             source: answer.source,

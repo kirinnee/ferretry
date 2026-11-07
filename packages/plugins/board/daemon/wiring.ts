@@ -17,7 +17,6 @@ import {
 import type { z } from 'zod';
 import {
   AsksCardObligations,
-  CARD_SOURCE,
   gateAnswerOf,
   AsksFerretReader,
   AsksOptIn,
@@ -128,7 +127,7 @@ export interface BoardWorld {
   readonly watchEnabled: () => boolean;
   readonly watchEvery: () => number;
   readonly gateReconcile: () => Promise<void>;
-  readonly applyAnswer: (answer: AskAnswer) => Promise<void>;
+  readonly applyAnswer: (answer: AskAnswer) => Promise<'applied' | { readonly refused: string }>;
   readonly sweepTick: () => Promise<void>;
   readonly lines: (ferret: string) => Promise<readonly SitrepLine[]>;
   readonly heldBy: (ferret: string) => Promise<readonly CardView[]>;
@@ -426,13 +425,16 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     diagnostics,
   });
 
-  const applyAnswer = async (answer: AskAnswer): Promise<void> => {
+  /**
+   * Asks calls this BEFORE it records the answer (#1552: the card moves first): a refusal leaves the ask open and is the
+   * sentence the owner is told. A replay finds the card gone from that gate and moves nothing.
+   */
+  const applyAnswer = async (answer: AskAnswer): Promise<'applied' | { readonly refused: string }> => {
     const shaped = await gateAnswerOf(asks, answer);
-    if (shaped === undefined) return;
+    if (shaped === undefined) return { refused: 'that question can no longer be read, so nothing was moved' };
     const outcome = await gates.answer(shaped);
-    if (outcome.handled && 'applied' in outcome) await asks.close(answer.ask, 'answered').catch(() => undefined);
-    else if (outcome.handled)
-      diagnostics.warn(`the answer to ${answer.ask} was not applied: ${outcome.refused.message}`);
+    if (!outcome.handled || 'applied' in outcome) return 'applied';
+    return { refused: outcome.refused.message };
   };
 
   const heldBy = async (ferret: string): Promise<readonly CardView[]> =>
@@ -456,9 +458,6 @@ export const assemble = (needs: BoardWiringNeeds): BoardWorld => {
     watchEvery: () => (kernel.config.file(defs.config)?.github.pollSeconds ?? 60) * 1000,
     gateReconcile: async () => {
       await gates.backfill();
-      // An answer Asks recorded that this daemon had not yet applied (it stopped between the two) is applied now; one
-      // already applied finds its card gone from that gate and moves nothing.
-      for (const answer of await asks.answers({ source: CARD_SOURCE })) await applyAnswer(answer);
     },
     applyAnswer,
     sweepTick: async () => {

@@ -49,7 +49,7 @@ export class AsksLaneProposals implements LaneProposalAsks {
     const open = await this.asks.open({ source: SOURCE, entry: entryOf(reference), state: 'open' });
     for (const ask of open) {
       if (ask.ferret !== undefined && ask.ferret !== ferretId) continue;
-      await this.asks.close(ask.id, note === LANE_ASK_WITHDRAWN.replaced ? 'superseded' : 'withdrawn');
+      await this.asks.close({ ferret: ask.ferret ?? ferretId, id: ask.id }, note === LANE_ASK_WITHDRAWN.replaced ? 'superseded' : 'withdrawn');
     }
   }
 }

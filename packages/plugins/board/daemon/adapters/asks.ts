@@ -36,7 +36,7 @@ export class AsksCardObligations implements CardObligations {
 
   async withdraw(entry: string, reason: 'withdrawn' | 'superseded'): Promise<void> {
     for (const ask of await this.asks.open({ source: CARD_SOURCE, entry: entry as EntryId, state: 'open' }))
-      await this.asks.close(ask.id, reason);
+      await this.asks.close({ ferret: ask.ferret ?? '', id: ask.id }, reason);
   }
 
   async open(card?: CardId): Promise<readonly OpenCardAskEntry[]> {
@@ -93,8 +93,8 @@ export class AsksOptIn {
   constructor(private readonly asks: Pick<AsksApi, 'get' | 'answers'>) {}
 
   async answered(ferret: string, id: string): Promise<AnsweredAsk | undefined> {
-    const ask = await this.asks.get(id as AskId);
-    if (ask === undefined || ask.ferret !== ferret || ask.state === 'open') return undefined;
+    const ask = await this.asks.get({ ferret, id: id as AskId });
+    if (ask === undefined || ask.state === 'open') return undefined;
     const answers = await this.asks.answers({ source: ask.source, entry: ask.entry });
     return answeredAsk(
       ask,
@@ -120,8 +120,8 @@ export class AsksThreads implements BoardThreads {
   constructor(private readonly asks: Pick<AsksApi, 'get'>) {}
 
   async open(ferret: string, id: string): Promise<AskThread | undefined> {
-    const ask = await this.asks.get(id as AskId);
-    if (ask === undefined || ask.state !== 'open' || ask.ferret !== ferret) return undefined;
+    const ask = await this.asks.get({ ferret, id: id as AskId });
+    if (ask === undefined || ask.state !== 'open') return undefined;
     return {
       raisedBy: ask.raisedBy.kind,
       ...(ask.raisedBy.kind === 'ferret' ? { raisedByFerret: ask.raisedBy.ferret } : {}),
@@ -145,11 +145,11 @@ export class AsksThreads implements BoardThreads {
  * when its ask can no longer be read.
  */
 export const gateAnswerOf = async (asks: Pick<AsksApi, 'get'>, answer: AskAnswer): Promise<GateAnswer | undefined> => {
-  const ask = await asks.get(answer.ask);
+  const ask = await asks.get({ ferret: answer.ferret, id: answer.ask });
   if (ask === undefined) return undefined;
   return {
     answerId: answer.id,
-    ask: { ferret: ask.ferret ?? '', id: ask.id },
+    ask: { ferret: answer.ferret, id: answer.ask },
     entry: answer.entry,
     ...(answer.choice === undefined ? {} : { choice: answer.choice }),
     ...(answer.text === undefined ? {} : { text: answer.text }),
