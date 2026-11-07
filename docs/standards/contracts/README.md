@@ -36,6 +36,7 @@ laundered a defect into something every gate was right to pass.
 | `executable-shells.sh`    | `a-enforce-exec`                         | every tracked `*.sh` (and the host firewall script) is executable                                                |
 | `fetch-binding.sh`        | `a-fetch-binding`                        | no unbound `fetch` builtin is stored, and no PWA network call skips the carrier                                  |
 | `macos-policy.sh`         | `a-macos-policy`                         | the darwin smoke is advisory on PRs, required and retried on main and a tag; free `macos-15` only                |
+| `migration-isolated.sh`   | `a-migration-isolated`                   | the one-time v4 -> v5 converter is no workspace member, imported by no package, and in no release path           |
 | `no-fy-render-in-docs.sh` | `a-no-fy-render-in-docs`                 | `fy-render` fence openers appear only in their three teaching files                                              |
 | `no-legacy-state.sh`      | `a-no-legacy-state`                      | package code names no legacy state, and package source no owner fleet wrapper                                    |
 | `no-pattern-kill.sh`      | `a-no-pattern-kill`                      | no test tree kills processes by pattern (`pkill`, `killall`)                                                     |
@@ -321,6 +322,7 @@ policy in [CI/CD](../ci-cd/index.md).
 ./scripts/validate/composition-invocation.sh      # every world field has a caller
 ./scripts/validate/daemon-scope.sh                # no PWA surface reads another daemon's data
 ./scripts/validate/fetch-binding.sh               # no stored fetch builtin, no direct network call that skips the relay
+./scripts/validate/migration-isolated.sh          # the v4 -> v5 converter stays outside the product
 ./scripts/validate/no-fy-render-in-docs.sh        # illustrations stay in conversation, out of durable files
 ./scripts/validate/no-pattern-kill.sh             # tests kill by pid or exact socket, never by pattern
 ./scripts/validate/no-sync-io.sh                  # every blocking file call in daemon code is declared
