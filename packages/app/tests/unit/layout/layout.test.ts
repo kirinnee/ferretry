@@ -19,7 +19,12 @@ function plugin(id: string, ui: NonNullable<Manifest['ui']>): SurfaceEntry {
 
 const surfaces = [
   plugin('agenda', { screens: [{ id: 'agenda', path: 'agenda', nav: { label: 'Agenda', order: 1 } }] }),
-  plugin('ferrets', { screens: [{ id: 'ferrets', path: 'ferrets' }, { id: 'ferret', path: 'ferret/:id' }] }),
+  plugin('ferrets', {
+    screens: [
+      { id: 'ferrets', path: 'ferrets' },
+      { id: 'ferret', path: 'ferret/:id' },
+    ],
+  }),
   plugin('board', {
     screens: [{ id: 'board', path: 'board' }],
     panels: [{ id: 'cards-of-ferret', slot: 'ferret.side', order: 1 }],
@@ -80,7 +85,10 @@ describe('choosing a layout', () => {
   test('the device override wins, then the daemon, then the default', () => {
     const device = { id: 'device', nav: { side: 'top', items: ['board'] } };
     const daemon = { id: 'daemon', nav: { side: 'right', items: ['agenda'] } };
-    expect(chooseLayout([device, daemon], views.installed)).toMatchObject({ kind: 'applied', layout: { id: 'device' } });
+    expect(chooseLayout([device, daemon], views.installed)).toMatchObject({
+      kind: 'applied',
+      layout: { id: 'device' },
+    });
     expect(chooseLayout([undefined, daemon], views.installed)).toMatchObject({ layout: { id: 'daemon' } });
     expect(chooseLayout([], views.installed)).toEqual({ kind: 'applied', layout: DEFAULT_LAYOUT });
   });
@@ -127,7 +135,11 @@ describe('the frame plan', () => {
 
   test('a slot the layout does not list shows every declared panel by order', () => {
     const layout = resolveLayout(LayoutSchema.parse({ id: 'bare', nav: { side: 'left', items: [] } }), 'wide');
-    expect(planFrame(layout, views).panels('ferret.side').map(p => p.id)).toEqual(['cards-of-ferret', 'sitrep', 'usage']);
+    expect(
+      planFrame(layout, views)
+        .panels('ferret.side')
+        .map(p => p.id),
+    ).toEqual(['cards-of-ferret', 'sitrep', 'usage']);
   });
 
   test('a screen id two plugins declare is reachable only qualified', () => {

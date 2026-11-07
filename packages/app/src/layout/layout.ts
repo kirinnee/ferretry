@@ -38,7 +38,10 @@ const PhoneSchema = z.strictObject({
 });
 
 export const LayoutSchema = z.strictObject({
-  id: z.string().regex(/^[a-z][a-z0-9-]*$/u).max(40),
+  id: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]*$/u)
+    .max(40),
   nav: NavSchema,
   side: SideSchema.default({ show: 'never', holds: 'none' }),
   top: z.array(ItemName).max(8).default(['daemon-picker', 'search']),
@@ -164,7 +167,12 @@ export function checkLayout(layout: Layout, installed: InstalledViews): readonly
 
 export type LayoutChoice =
   | { readonly kind: 'applied'; readonly layout: Layout }
-  | { readonly kind: 'refused'; readonly layout: Layout; readonly refused: string; readonly issues: readonly LayoutIssue[] };
+  | {
+      readonly kind: 'refused';
+      readonly layout: Layout;
+      readonly refused: string;
+      readonly issues: readonly LayoutIssue[];
+    };
 
 /**
  * Picks the layout in force: the device override first (`--device`, saved in this browser), then the daemon's, then

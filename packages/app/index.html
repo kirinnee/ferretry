@@ -19,7 +19,10 @@
     <script>
       !(function () {
         try {
-          if (!new URLSearchParams(location.search).has('stay') && /"daemons":\[\{/.test(localStorage.getItem('fy:app:daemons') || ''))
+          if (
+            !new URLSearchParams(location.search).has('stay') &&
+            /"daemons":\[\{/.test(localStorage.getItem('fy:app:daemons') || '')
+          )
             location.replace('/app/');
         } catch (_) {}
       })();

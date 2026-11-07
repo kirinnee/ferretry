@@ -160,7 +160,6 @@
       "dependencies": {
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
-        "@ferretry/plugin-access": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
       },

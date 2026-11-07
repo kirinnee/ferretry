@@ -38,14 +38,17 @@ export function daemonOrigin(value: string): string {
   return url.origin;
 }
 
-const OriginSchema = z.string().max(2048).transform((value, ctx) => {
-  try {
-    return daemonOrigin(value);
-  } catch (error) {
-    ctx.addIssue({ code: 'custom', message: (error as Error).message });
-    return z.NEVER;
-  }
-});
+const OriginSchema = z
+  .string()
+  .max(2048)
+  .transform((value, ctx) => {
+    try {
+      return daemonOrigin(value);
+    } catch (error) {
+      ctx.addIssue({ code: 'custom', message: (error as Error).message });
+      return z.NEVER;
+    }
+  });
 
 export const PairedDaemonSchema = z.strictObject({
   daemon: z.string().min(1).max(128),
@@ -105,7 +108,9 @@ export function groupByMachine(daemons: readonly PairedDaemon[]): readonly Machi
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, list]) => ({
       machine: names.get(key) ?? key,
-      daemons: [...list].sort((a, b) => daemonTitle(a).localeCompare(daemonTitle(b)) || a.daemon.localeCompare(b.daemon)),
+      daemons: [...list].sort(
+        (a, b) => daemonTitle(a).localeCompare(daemonTitle(b)) || a.daemon.localeCompare(b.daemon),
+      ),
     }));
 }
 
