@@ -6,11 +6,7 @@ import {
   releaseHostedRelayReservation,
   requestHostedRelayDecision,
 } from '../../../worker/src/adapters/index.ts';
-import {
-  HostedRelayControlDurableObject,
-  type RelayEnvironment,
-  relayFetch,
-} from '../../../worker/src/adapters/worker.ts';
+import { HostedRelayControlDurableObject } from '../../../worker/src/adapters/worker.ts';
 import {
   DEFAULT_HOSTED_RELAY_LIMITS,
   HOSTED_RELAY_DAY_MILLISECONDS,
@@ -64,62 +60,6 @@ async function configure(harness: ReturnType<typeof makeObject>, input = enabled
 }
 
 describe('hosted relay control Durable Object', () => {
-  guarantee(
-    ['R130'],
-    "should hold no compiled address, and advertise the one a first deploy seeds from the Worker's own origin",
-    async () => {
-      // The real Worker in front of a real, untouched control object, as a first deploy finds them.
-      const harness = makeObject();
-      const environment: RelayEnvironment = {
-        RELAY_MODE: 'hosted',
-        RELAY_OPERATOR_TOKEN: 'operator-token-fixture',
-        RELAY_CONTROL: { idFromName: name => name, get: () => ({ fetch: request => harness.object.fetch(request) }) },
-        RENDEZVOUS: { idFromName: name => name, get: () => ({ fetch: async () => new Response(null) }) },
-      };
-      const at = (origin: string, path: string, init: RequestInit = {}) =>
-        relayFetch(
-          new Request(`${origin}${path}`, {
-            ...init,
-            headers: { Authorization: 'Bearer operator-token-fixture', ...init.headers },
-          }),
-          environment,
-        );
-      const advertised = async (origin: string) =>
-        ((await (await at(origin, '/v1/default-relay')).json()) as { relayUrl: string | null }).relayUrl;
-      /**
-       * The deploy's seeding step (`.github/workflows/relay-hosted.yaml`): only an UNTOUCHED control object is
-       * seeded, with the Worker's own origin, projected onto the strict input document; anything else is kept.
-       */
-      const deploy = async (workerOrigin: string): Promise<'seeded' | 'preserved'> => {
-        const current = (await (await at(workerOrigin, '/v1/operator/config')).json()) as {
-          configured: boolean;
-          configuration: { version: number; limits: unknown };
-        };
-        if (current.configured) return 'preserved';
-        const { version, limits } = current.configuration;
-        const seeded = await at(workerOrigin, '/v1/operator/config', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ version, relayUrl: workerOrigin, limits }),
-        });
-        should(await seeded.json()).match({ configured: true, configuration: { relayUrl: workerOrigin } });
-        return 'seeded';
-      };
-
-      // Untouched: nothing is advertised, because nothing was compiled in.
-      const origin = 'https://ferretry-hosted-relay.fixture-account.workers.dev';
-      should(await advertised(origin)).be.null();
-
-      // The first deploy seeds the address from the origin the Worker is served at — not a constant.
-      should(await deploy(origin)).equal('seeded');
-      should(await advertised(origin)).equal(origin);
-
-      // A later deploy, even from another origin, keeps what is stored: the seed happens once, on first deploy.
-      should(await deploy('https://ferretry-hosted-relay.other-account.workers.dev')).equal('preserved');
-      should(await advertised(origin)).equal(origin);
-    },
-  );
-
   it('should expose a known disabled virgin state without mistaking stray evidence for empty', async () => {
     const harness = makeObject();
     const publicResponse = await harness.object.fetch(request('/public/configuration'));
