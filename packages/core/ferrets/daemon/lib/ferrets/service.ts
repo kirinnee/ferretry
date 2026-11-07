@@ -458,7 +458,16 @@ export class FerretsService implements FerretsApi {
       // Port errors can contain launch environment values: never return their text to a caller.
       failure = { code: 'failed', reason: 'a launch dependency failed before the ferret could start' };
     }
-    if (this.tokens.revoke(record.id)) await this.ports.saveTokens(this.tokens.snapshot());
+    if (this.tokens.revoke(record.id)) {
+      try {
+        await this.ports.saveTokens(this.tokens.snapshot());
+      } catch {
+        // Revocation persistence failing must not bypass process cleanup. Deny credential use and rotation
+        // until the state can be loaded safely; recovery still records the stopped process below.
+        this.tokens.unavailable();
+        failure = { code: 'failed', reason: 'the launch failed and its credential revocation could not be saved' };
+      }
+    }
     for (const handle of created) {
       try {
         await runner!.stop(handle, 'now');

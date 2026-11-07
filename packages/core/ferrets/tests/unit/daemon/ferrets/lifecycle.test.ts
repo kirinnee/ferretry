@@ -142,6 +142,24 @@ test('R-0332 a harness throwing after runner.start cleans up the created process
   expect(f.registry.get(f.id)?.state).toBe('stopped');
 });
 
+test('R-0332 failed token persistence cannot skip created-process cleanup or leave an active credential', async () => {
+  const f = fixture();
+  const start = f.harness.start.bind(f.harness);
+  f.harness.start = async (...args) => {
+    await start(...args);
+    f.ports.saveTokens = async () => {
+      throw new Error('token store unavailable');
+    };
+    throw new Error('harness failed after spawn');
+  };
+  const answer = await f.service.resume(f.id).catch(() => undefined);
+  expect(answer?.ok).toBe(false);
+  expect(await f.runner.alive('%1' as never)).toBe(false);
+  expect(f.tokens.holds(f.id)).toBe(false);
+  expect(f.tokens.isAvailable()).toBe(false);
+  expect(f.registry.get(f.id)?.state).toBe('stopped');
+});
+
 test('R-0363 owner cutoff survives reload and an unconfirmed port resume cannot restore it', async () => {
   const f = fixture();
   await f.service.resume(f.id);
