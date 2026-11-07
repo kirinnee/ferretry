@@ -26,15 +26,6 @@ import { PushError, type PushSubscriptionRecord, type PushSubscriptionStore } fr
  * reading is the more dangerous one: it answers every list with an empty set, silently drops every
  * notification, and looks exactly like a machine with nothing to say.
  *
- * ## ONE NAMED EXCEPTION: A RECORD AN OLDER BINARY OF THIS SAME DAEMON WROTE
- *
- * `prefs` was a real field on this record until this daemon stopped storing device preferences
- * (`packages/pwa/src/lib/notification-filter.ts` owns that decision now). A binary upgrade does not
- * rewrite the document already on disk, so the very first read after upgrading meets rows an older
- * version of THIS SAME PROCESS wrote, each still carrying `prefs`. Refusing that — "damage" by the
- * rule above — would turn an ordinary upgrade into every existing enrolment going dark. `prefs` is
- * therefore named and ignored, the one field this otherwise-strict record tolerates; anything else
- * unrecognised is still the real damage the rule describes.
  */
 export class StatePushRepository implements PushSubscriptionStore {
   constructor(private readonly state: StatePort) {}
