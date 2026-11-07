@@ -15,11 +15,11 @@ const catalog = (): ComponentCatalog => ({
 describe('model set renderings', () => {
   it('should show the models, where it is used, and why it cannot be removed', () => {
     const text = renderModelSet(
-      modelSet({ remove: { available: false, reason: '1 profile uses it.' }, warnings: ['mythos is retired'] }),
+      modelSet({ remove: { available: false, reason: '1 profile uses it.' }, warnings: ['mythos is slow today'] }),
     );
     should(text).match(/^modelSets\/heavy\n {2}Models: opus, sonnet\n {2}Starts with: opus/);
     should(text)
-      .match(/Note: mythos is retired/)
+      .match(/Note: mythos is slow today/)
       .and.match(/Used by profiles: default/)
       .and.match(/Used by runtimes: claude-default/)
       .and.match(/Cannot remove yet: 1 profile uses it\./);
