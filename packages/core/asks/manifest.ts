@@ -1,15 +1,7 @@
 import { GatePort } from '@ferretry/core-gate/contract';
 import { definePlugin } from '@ferretry/kernel/manifest';
-import {
-  AnswersFile,
-  AskAnswered,
-  AskHistoryFile,
-  AskSources,
-  AsksChanged,
-  AsksFile,
-  AsksPort,
-  AskVersionsFiles,
-} from './contract/index.ts';
+import { AskAnswered, AskSources, AsksChanged, AsksPort, AskVersionsFiles } from './contract/index.ts';
+import { ASKS_STATE } from './daemon/lib/state.ts';
 
 /**
  * Asks (§2.2): every question for the owner and the owner's answers; the Agenda plugin is how you see them. Core,
@@ -31,7 +23,8 @@ export default definePlugin({
   needs: { gate: GatePort },
   provides: { asks: AsksPort },
   data: {
-    state: [AsksFile, AnswersFile, AskHistoryFile, AskVersionsFiles],
+    // One ledger per ferret (daemon/lib/state.ts, lead decision 2026-11-07), and the contract's version archives.
+    state: [...ASKS_STATE, AskVersionsFiles],
     publishes: [AskAnswered, AsksChanged],
   },
   hooks: { offers: [{ hook: AskSources }] },

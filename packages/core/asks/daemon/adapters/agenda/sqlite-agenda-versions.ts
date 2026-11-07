@@ -1,7 +1,7 @@
-import { Database } from 'bun:sqlite';
+import type { SqliteHandle, StatePort } from '@ferretry/kernel/contract';
+import { deepFreezeJson, type JsonValue } from '@ferretry/std';
 import { createHash } from 'node:crypto';
-import { access, mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { AskVersionsFiles } from '../../../contract/index.ts';
 import {
   type AgendaConversationEntry,
   AgendaConversationEntrySchema,
@@ -20,24 +20,10 @@ import {
   CARRIED_VERSION,
   isAgendaSessionId,
 } from '../../lib/agenda/index.ts';
-import { deepFreezeJson, type JsonValue } from '../../lib/json.ts';
+import { versionArchiveName } from '../../lib/state.ts';
 
-/** The directory beside a session's board that holds one indexed version archive per item. */
-export const AGENDA_VERSIONS_DIRECTORY = 'agenda-versions';
-
-/** The `PRAGMA user_version` of a store this daemon reads and writes. */
-const STORE_VERSION = 1;
-
-const userVersion = (db: Database): number =>
-  db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0;
-
-const schemaObjects = (db: Database): number =>
-  db.query<{ n: number }, []>('SELECT count(*) AS n FROM sqlite_master').get()?.n ?? 0;
-
-const unsupportedStore = (file: string, found: number): string =>
-  found === 0
-    ? `the agenda version archive ${file} has no agenda schema version (user_version 0) but is not empty; this daemon reads only user_version ${String(STORE_VERSION)}, so it was left untouched`
-    : `the agenda version archive ${file} has user_version ${String(found)}; this daemon reads only user_version ${String(STORE_VERSION)}, so it was left untouched`;
+const tablesIn = (db: SqliteHandle): number =>
+  db.query<{ n: number }>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table'")[0]?.n ?? 0;
 
 const summaryOf = (version: AgendaVersion): AgendaVersionSummary => ({
   version: version.version,
@@ -55,66 +41,43 @@ interface CachedVersion {
 }
 
 /**
- * `agenda-versions/<id>.sqlite`: complete bounded snapshots indexed by version, immutable words keyed by SHA-256,
- * and per-version ordered word references. Appends inspect only the largest primary key, never historical payloads.
- * SQLite commits a version and all its references together; an interrupted append cannot publish half a version.
- * The caller serializes writes per session. Connections close after each operation; at most one read version is cached.
- * A store whose `user_version` is not 1 is refused by name, never upgraded or emptied; only a file with no schema at all is initialized.
+ * `state/asks/versions/<ferret>~<id>.sqlite`: complete bounded snapshots indexed by version, immutable words keyed by
+ * SHA-256, and per-version ordered word references. Appends inspect only the largest primary key, never historical
+ * payloads. SQLite commits a version and all its references together; an interrupted append cannot publish half a
+ * version. The caller serializes writes per session. Connections close after each operation; at most one read version
+ * is cached. The kernel opens each one at format 1 (`PRAGMA user_version`) and refuses any other, never upgrading or
+ * emptying it; the tables are built only in a file that holds none.
  */
 export class SqliteAgendaVersionStore implements AgendaVersionStore {
   private cached: CachedVersion | undefined;
 
-  constructor(
-    private readonly sessionDirectory: (sessionId: string) => string,
-    private readonly connect: (file: string) => Database = file => new Database(file),
-  ) {}
+  constructor(private readonly state: Pick<StatePort, 'sqlite' | 'list'>) {}
 
-  private file(sessionId: string, id: AgendaId): string {
+  private name(sessionId: string, id: AgendaId): string {
     if (!isAgendaSessionId(sessionId)) throw new Error(`not a valid agenda session id: ${sessionId}`);
     if (!AgendaIdSchema.safeParse(id).success) throw new Error(`not a valid agenda id: ${id}`);
-    return join(this.sessionDirectory(sessionId), AGENDA_VERSIONS_DIRECTORY, `${id}.sqlite`);
+    return versionArchiveName(sessionId, id);
   }
 
   /** A read opens only what a record created: an id nothing was recorded for has no store, and asking never makes one. */
-  private async openExisting(sessionId: string, id: AgendaId): Promise<Database | undefined> {
-    const file = this.file(sessionId, id);
-    const present = await access(file).then(
-      () => true,
-      (error: NodeJS.ErrnoException) => {
-        if (error.code !== 'ENOENT') throw error;
-        return false;
-      },
-    );
-    return present ? await this.open(sessionId, id) : undefined;
+  private async openExisting(sessionId: string, id: AgendaId): Promise<SqliteHandle | undefined> {
+    const name = this.name(sessionId, id);
+    return (await this.state.list(AskVersionsFiles)).includes(name) ? this.open(sessionId, id) : undefined;
   }
 
-  private async open(sessionId: string, id: AgendaId): Promise<Database> {
-    const file = this.file(sessionId, id);
-    await mkdir(join(this.sessionDirectory(sessionId), AGENDA_VERSIONS_DIRECTORY), { recursive: true, mode: 0o700 });
-    // Create privately before SQLite opens it; journal files inherit its permissions.
-    await writeFile(file, '', { flag: 'a', mode: 0o600 });
-    const db = this.connect(file);
+  private open(sessionId: string, id: AgendaId): SqliteHandle {
+    const db = this.state.sqlite(AskVersionsFiles, this.name(sessionId, id));
     try {
-      const stored = userVersion(db);
-      if (stored === STORE_VERSION) return db;
-      if (stored !== 0) throw new Error(unsupportedStore(file, stored));
-      // 0 is built here only when the file holds no schema at all: a file just created above, or one a crash left
-      // between create and commit. IMMEDIATE takes the write lock before the recheck, so two openers cannot both build.
+      if (tablesIn(db) > 0) return db;
       db.transaction(() => {
-        const rechecked = userVersion(db);
-        if (rechecked === STORE_VERSION) return;
-        if (rechecked !== 0 || schemaObjects(db) > 0) throw new Error(unsupportedStore(file, rechecked));
-        db.exec(`
-          CREATE TABLE mutations (id TEXT PRIMARY KEY) WITHOUT ROWID;
-          CREATE TABLE versions (version INTEGER PRIMARY KEY, snapshot TEXT NOT NULL, summary TEXT NOT NULL);
-          CREATE TABLE words (hash TEXT PRIMARY KEY, entry TEXT NOT NULL) WITHOUT ROWID;
-          CREATE TABLE version_words (
-            version INTEGER NOT NULL, position INTEGER NOT NULL, hash TEXT NOT NULL,
-            PRIMARY KEY (version, position)
-          ) WITHOUT ROWID;
-        `);
-        db.exec(`PRAGMA user_version = ${STORE_VERSION}`);
-      }).immediate();
+        if (tablesIn(db) > 0) return;
+        db.run('CREATE TABLE mutations (id TEXT PRIMARY KEY) WITHOUT ROWID');
+        db.run('CREATE TABLE versions (version INTEGER PRIMARY KEY, snapshot TEXT NOT NULL, summary TEXT NOT NULL)');
+        db.run('CREATE TABLE words (hash TEXT PRIMARY KEY, entry TEXT NOT NULL) WITHOUT ROWID');
+        db.run(
+          'CREATE TABLE version_words (version INTEGER NOT NULL, position INTEGER NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (version, position)) WITHOUT ROWID',
+        );
+      });
       return db;
     } catch (error) {
       db.close();
@@ -122,34 +85,33 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
     }
   }
 
-  private save(db: Database, snapshot: AgendaVersion, conversation?: readonly AgendaConversationEntry[]): void {
-    const inserted = db
-      .query('INSERT OR IGNORE INTO versions VALUES (?, ?, ?)')
-      .run(snapshot.version, JSON.stringify(snapshot), JSON.stringify(summaryOf(snapshot)));
+  private save(db: SqliteHandle, snapshot: AgendaVersion, conversation?: readonly AgendaConversationEntry[]): void {
+    const inserted = db.run('INSERT OR IGNORE INTO versions VALUES (?, ?, ?)', [
+      snapshot.version,
+      JSON.stringify(snapshot),
+      JSON.stringify(summaryOf(snapshot)),
+    ]);
     if (inserted.changes === 0) return;
-    const insertWords = db.query('INSERT OR IGNORE INTO words VALUES (?, ?)');
-    const reference = db.query('INSERT INTO version_words VALUES (?, ?, ?)');
     for (const [position, entry] of (conversation ?? snapshot.item.conversation ?? []).entries()) {
       const text = JSON.stringify(AgendaConversationEntrySchema.parse(entry));
       const hash = createHash('sha256').update(text).digest('hex');
-      insertWords.run(hash, text);
-      reference.run(snapshot.version, position, hash);
+      db.run('INSERT OR IGNORE INTO words VALUES (?, ?)', [hash, text]);
+      db.run('INSERT INTO version_words VALUES (?, ?, ?)', [snapshot.version, position, hash]);
     }
   }
 
   async record(sessionId: string, drafts: readonly AgendaVersionDraft[]): Promise<void> {
     for (const draft of drafts) {
-      const db = await this.open(sessionId, draft.entry.item.id);
+      const db = this.open(sessionId, draft.entry.item.id);
       try {
         db.transaction(() => {
           if (
             draft.mutationId !== undefined &&
-            db.query('INSERT OR IGNORE INTO mutations VALUES (?)').run(draft.mutationId).changes === 0
+            db.run('INSERT OR IGNORE INTO mutations VALUES (?)', [draft.mutationId]).changes === 0
           )
             return;
           let latest =
-            db.query<{ latest: number }, []>('SELECT COALESCE(MAX(version), 0) AS latest FROM versions').get()
-              ?.latest ?? 0;
+            db.query<{ latest: number }>('SELECT COALESCE(MAX(version), 0) AS latest FROM versions')[0]?.latest ?? 0;
           if (latest === 0 && draft.before !== undefined) {
             this.save(
               db,
@@ -176,7 +138,7 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
             }),
             draft.conversation,
           );
-        })();
+        });
       } finally {
         db.close();
       }
@@ -192,17 +154,15 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
       if (db === undefined) continue;
       try {
         db.transaction(() => {
-          if (db.query('DELETE FROM mutations WHERE id = ?').run(draft.mutationId ?? '').changes === 0) return;
-          const tail = db
-            .query<{ version: number; summary: string }, []>(
-              'SELECT version, summary FROM versions ORDER BY version DESC LIMIT 1',
-            )
-            .get();
-          const summary = tail === null ? undefined : AgendaVersionSummarySchema.parse(JSON.parse(tail.summary));
-          if (tail === null || summary?.at !== draft.at || summary.change !== draft.change) return;
-          db.query('DELETE FROM version_words WHERE version = ?').run(tail.version);
-          db.query('DELETE FROM versions WHERE version = ?').run(tail.version);
-        })();
+          if (db.run('DELETE FROM mutations WHERE id = ?', [draft.mutationId ?? '']).changes === 0) return;
+          const [tail] = db.query<{ version: number; summary: string }>(
+            'SELECT version, summary FROM versions ORDER BY version DESC LIMIT 1',
+          );
+          const summary = tail === undefined ? undefined : AgendaVersionSummarySchema.parse(JSON.parse(tail.summary));
+          if (tail === undefined || summary?.at !== draft.at || summary.change !== draft.change) return;
+          db.run('DELETE FROM version_words WHERE version = ?', [tail.version]);
+          db.run('DELETE FROM versions WHERE version = ?', [tail.version]);
+        });
       } finally {
         db.close();
       }
@@ -214,8 +174,7 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
     if (db === undefined) return [];
     try {
       return db
-        .query<{ summary: string }, []>('SELECT summary FROM versions ORDER BY version')
-        .all()
+        .query<{ summary: string }>('SELECT summary FROM versions ORDER BY version')
         .map(row => AgendaVersionSummarySchema.parse(JSON.parse(row.summary)));
     } finally {
       db.close();
@@ -223,15 +182,13 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
   }
 
   private async load(sessionId: string, id: AgendaId, version: number): Promise<CachedVersion | undefined> {
-    const key = `${this.file(sessionId, id)}:${version}`;
+    const key = `${this.name(sessionId, id)}:${version}`;
     if (this.cached?.key === key) return this.cached;
     const db = await this.openExisting(sessionId, id);
     if (db === undefined) return undefined;
     try {
-      const row = db
-        .query<{ snapshot: string }, [number]>('SELECT snapshot FROM versions WHERE version = ?')
-        .get(version);
-      if (row === null) return undefined;
+      const [row] = db.query<{ snapshot: string }>('SELECT snapshot FROM versions WHERE version = ?', [version]);
+      if (row === undefined) return undefined;
       const snapshot = deepFreezeJson(
         AgendaVersionSchema.parse(JSON.parse(row.snapshot)) as unknown as JsonValue,
       ) as unknown as AgendaVersion;
@@ -258,14 +215,10 @@ export class SqliteAgendaVersionStore implements AgendaVersionStore {
     const db = await this.openExisting(sessionId, id);
     if (db === undefined) return undefined;
     try {
-      const rows = db
-        .query<{ entry: string }, [number]>(
-          `
-        SELECT words.entry FROM version_words JOIN words ON words.hash = version_words.hash
-        WHERE version_words.version = ? ORDER BY version_words.position
-      `,
-        )
-        .all(version);
+      const rows = db.query<{ entry: string }>(
+        'SELECT words.entry FROM version_words JOIN words ON words.hash = version_words.hash WHERE version_words.version = ? ORDER BY version_words.position',
+        [version],
+      );
       found.conversation = deepFreezeJson(
         rows.map(row => AgendaConversationEntrySchema.parse(JSON.parse(row.entry))) as unknown as JsonValue,
       ) as unknown as readonly AgendaConversationEntry[];

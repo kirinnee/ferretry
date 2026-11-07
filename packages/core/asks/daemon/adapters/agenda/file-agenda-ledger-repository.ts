@@ -1,5 +1,6 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { AgendaConversationEntrySchema, AgendaIdSchema } from '../../lib/protocol/agenda.ts';
+import { createHash } from 'node:crypto';
+import { deepFreezeJson, type JsonValue } from '@ferretry/std';
+import { AgendaConversationEntrySchema } from '../../lib/protocol/agenda.ts';
 import { type AgendaVersionSummary, AgendaVersionSummarySchema } from '../../lib/protocol/agenda-versions.ts';
 import { z } from 'zod';
 import type { AgendaVia } from '../../lib/agenda/service.ts';
@@ -62,7 +63,6 @@ import {
 } from '../../lib/agenda/archive.ts';
 import {
   AGENDA_FILES,
-  AGENDA_LEDGER_VERSION,
   type AgendaFileStore,
   type AgendaLedger,
   type AgendaLedgerRepository,
@@ -80,12 +80,8 @@ import {
   appendedCursor,
   appendLogRecords,
   commitLogAppend,
-  completeLinesCursor,
-  uncommittedLogFrom,
 } from '../../lib/append-only-log.ts';
-import { deepFreezeJson, type JsonValue } from '../../lib/json.ts';
-import type { RecordedItem } from '../../lib/agenda/item-words.ts';
-import { FileAgendaFileStore } from './file-agenda-file-store.ts';
+import type { StateAgendaFiles } from './state-agenda-files.ts';
 
 /** Raised when a durable board cannot safely be supplied to the state machine. */
 export class InvalidAgendaLedgerError extends Error {
@@ -101,7 +97,7 @@ export const AGENDA_CACHE_LIMIT = 2_048;
 type IdentifiedAgendaFiles = AgendaFileStore &
   AppendOnlyFiles &
   Required<Pick<AgendaFileStore, 'identity' | 'readIdentified'>> &
-  Pick<FileAgendaFileStore, 'file'>;
+  Pick<StateAgendaFiles, 'file'>;
 
 /** One session's agenda as last parsed: how the file stood, and what it said. */
 interface CachedLedger {
@@ -127,28 +123,25 @@ function archiveRecords(text: string): AgendaArchiveRecord[] {
  * A PARSED COPY IS KEPT PER SESSION, against the identity of the file it was read from. A board read opens
  * the agenda of every ferret on the board — some two hundred — and checking each one's ledger entry by entry
  * was most of what it cost. The file stays the only truth: every write lands on disk first and then drops the
- * copy, every read first asks the file how it stands (one `stat`), and a file changed by anyone — this
- * daemon, the CLI, a second process, a person with an editor — is a new identity, read and parsed again. The
+ * copy, every read first asks the file how it stands (the digest of its bytes, through the kernel's state port), and
+ * a file changed by anyone — this daemon, a person with an editor — is a new identity, parsed again. The
  * copy is frozen, because every reader of this session shares it, and lives in memory only: a restart starts
  * from the files.
  */
 export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
   private readonly tails = new Map<string, Promise<void>>();
   private readonly cache = new Map<string, CachedLedger>();
-  private readonly files: IdentifiedAgendaFiles;
   readonly changeOutbox?: FileAgendaChangeOutbox;
 
   constructor(
-    sessionDirectory: (sessionId: string) => string,
-    private readonly uniqueId: () => string = randomUUID,
-    files?: IdentifiedAgendaFiles,
+    private readonly files: IdentifiedAgendaFiles,
+    private readonly uniqueId: () => string,
     /** Where every committed change is kept as a full version; absent, none is. */
     private readonly versions: AgendaVersionStore = NO_AGENDA_VERSIONS,
-    private readonly runtime: AgendaChangeOutboxRuntime = { now: Date.now, warn: message => console.warn(message) },
+    private readonly runtime: AgendaChangeOutboxRuntime,
     /** A ledger publication restores its session's membership; this takes no agenda or session document lane. */
     private readonly retained?: (sessionId: string) => Promise<void>,
   ) {
-    this.files = files ?? new FileAgendaFileStore(sessionDirectory, uniqueId);
     if (versions !== NO_AGENDA_VERSIONS)
       this.changeOutbox = new FileAgendaChangeOutbox(
         this.files,

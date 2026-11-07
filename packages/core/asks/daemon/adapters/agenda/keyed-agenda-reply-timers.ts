@@ -1,32 +1,35 @@
+import type { Cancel, Clock } from '@ferretry/kernel/contract';
+import { milliseconds } from '@ferretry/std';
 import type { AgendaReplyTimers } from '../../lib/agenda/index.ts';
 
 /**
- * One real timer per ferret's outbox. Scheduling a key again replaces its timer, and every timer is
- * `unref`'d: a held answer is durable in its outbox, so it must never be what keeps a stopping daemon
- * alive — the next start delivers it (`AgendaReplyBatcher.resume`).
+ * One timer per ferret's outbox, on the kernel's clock. Scheduling a key again replaces its timer. A held answer is
+ * durable in its outbox, so a timer is never what keeps a stopping daemon alive — the next start delivers it
+ * (`AgendaReplyBatcher.resume`); the kernel's clock lets a stopping daemon go.
  */
 export class KeyedAgendaReplyTimers implements AgendaReplyTimers {
-  readonly #timers = new Map<string, ReturnType<typeof setTimeout>>();
+  readonly #timers = new Map<string, { readonly cancel: Cancel }>();
+
+  constructor(private readonly clock: Pick<Clock, 'after'>) {}
 
   schedule(key: string, delayMs: number, task: () => void): void {
     this.cancel(key);
-    const timer = setTimeout(() => {
+    const timer: { cancel: Cancel } = { cancel: () => undefined };
+    timer.cancel = this.clock.after(milliseconds(delayMs), () => {
       if (this.#timers.get(key) === timer) this.#timers.delete(key);
       task();
-    }, delayMs);
-    timer.unref?.();
+    });
     this.#timers.set(key, timer);
   }
 
   cancel(key: string): void {
-    const timer = this.#timers.get(key);
-    if (timer !== undefined) clearTimeout(timer);
+    this.#timers.get(key)?.cancel();
     this.#timers.delete(key);
   }
 
   /** Stops every pending timer; the outboxes keep what they held. */
   close(): void {
-    for (const timer of this.#timers.values()) clearTimeout(timer);
+    for (const timer of this.#timers.values()) timer.cancel();
     this.#timers.clear();
   }
 }

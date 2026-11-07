@@ -72,7 +72,7 @@ export class FileAgendaChangeOutbox {
   constructor(
     private readonly files: AgendaFileStore,
     private readonly serial: <T>(sessionId: string, work: () => Promise<T>) => Promise<T>,
-    private readonly runtime: AgendaChangeOutboxRuntime = { now: Date.now, warn: message => console.warn(message) },
+    private readonly runtime: AgendaChangeOutboxRuntime,
   ) {}
 
   /** Called under the ledger queue after hot commit, before retiring its durable intent. Idempotent on recovery. */

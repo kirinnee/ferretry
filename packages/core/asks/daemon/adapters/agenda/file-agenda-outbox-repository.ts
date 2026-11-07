@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import {
   AGENDA_FILES,
   type AgendaOutbox,
@@ -6,7 +5,7 @@ import {
   AgendaOutboxSchema,
   isAgendaSessionId,
 } from '../../lib/agenda/index.ts';
-import { FileAgendaFileStore } from './file-agenda-file-store.ts';
+import type { StateAgendaFiles } from './state-agenda-files.ts';
 
 /**
  * Each ferret's held answers, as `agenda-replies.json` beside its board.
@@ -20,14 +19,10 @@ import { FileAgendaFileStore } from './file-agenda-file-store.ts';
  * thing lost is what that file held.
  */
 export class FileAgendaOutboxRepository implements AgendaOutboxRepository {
-  private readonly files: FileAgendaFileStore;
-
   constructor(
-    sessionDirectory: (sessionId: string) => string,
-    private readonly uniqueId: () => string = randomUUID,
-  ) {
-    this.files = new FileAgendaFileStore(sessionDirectory, uniqueId);
-  }
+    private readonly files: Pick<StateAgendaFiles, 'read' | 'writeAtomic' | 'rename' | 'file'>,
+    private readonly uniqueId: () => string,
+  ) {}
 
   file(sessionId: string): string {
     if (!isAgendaSessionId(sessionId)) throw new Error(`not a valid agenda session id: ${sessionId}`);
