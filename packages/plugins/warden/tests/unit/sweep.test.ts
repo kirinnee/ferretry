@@ -1,0 +1,1495 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import {
+  collapseUnwatchedFleet,
+  UNSUPERVISED_FLEET_KEY,
+  WARDEN_LABEL,
+  wardenEscalationSourceRef,
+  type WardenAnomaly,
+  type WardenConfig,
+  defaultWardenConfig,
+  type WardenEscalationVerdict,
+  type WardenFleetSession,
+} from '../../daemon/lib/index.ts';
+import {
+  at,
+  enabled,
+  escalated,
+  type Harness,
+  harness,
+  journalTypes,
+  session,
+  triageable,
+  unattended,
+} from './sweep-harness.ts';
+
+describe('collapsing an unwatched fleet into one fault', () => {
+  const dead = (id: string): WardenAnomaly => ({
+    kind: 'dead_monitor',
+    sessionId: id,
+    status: 'running',
+    detail: 'no live monitor handle',
+  });
+  const other: WardenAnomaly = {
+    kind: 'sus_thinking',
+    sessionId: 's9',
+    status: 'thinking',
+    detail: 'quiet transcript',
+  };
+
+  it('should leave the anomalies alone when the daemon does run monitors', () => {
+    // Arrange / Act
+    const actual = collapseUnwatchedFleet([dead('s1'), dead('s2')], undefined);
+
+    // Assert
+    should(actual).have.length(2);
+  });
+
+  it('should leave the anomalies alone when nothing was flagged as unmonitored', () => {
+    // Arrange / Act
+    const actual = collapseUnwatchedFleet([other], 'unsupervised');
+
+    // Assert
+    should(actual).deepEqual([other]);
+  });
+
+  it('should report one fault carrying every affected session', () => {
+    // Arrange / Act
+    const actual = collapseUnwatchedFleet([dead('s2'), dead('s1')], 'unsupervised');
+
+    // Assert
+    should(actual).have.length(1);
+    should(actual[0]?.fleetKey).equal(UNSUPERVISED_FLEET_KEY);
+    should(actual[0]?.affectedSessionIds).deepEqual(['s1', 's2']);
+    should(actual[0]?.sessionId).equal('s1');
+  });
+
+  it('should never hide an unwatched fleet, so a sweep over one cannot read as clean', () => {
+    // Arrange / Act
+    const actual = collapseUnwatchedFleet([dead('s1')], 'unsupervised');
+
+    // Assert
+    should(actual).have.length(1);
+    should(actual[0]?.detail).match(/no per-session monitor subsystem/u);
+  });
+
+  it('should keep every other anomaly beside the collapsed one', () => {
+    // Arrange / Act
+    const actual = collapseUnwatchedFleet([dead('s1'), other], 'unsupervised');
+
+    // Assert
+    should(actual.map(item => item.kind)).deepEqual(['sus_thinking', 'dead_monitor']);
+  });
+
+  it('should say "session" rather than "sessions" for exactly one', () => {
+    // Arrange / Act
+    const actual = collapseUnwatchedFleet([dead('s1')], 'unsupervised');
+
+    // Assert
+    should(actual[0]?.detail).match(/1 active session unsupervised/u);
+  });
+
+  it('should never ask for an assigned warden: the fault is the daemon, not a session', () => {
+    // Arrange / Act
+    const actual = collapseUnwatchedFleet([dead('s1')], 'unsupervised');
+
+    // Assert
+    should(actual[0]?.assignedWarden).be.undefined();
+  });
+});
+
+describe('reading the warden configuration', () => {
+  it('should report the stored configuration with its accounts', async () => {
+    // Arrange
+    const subject = harness({ config: enabled() });
+
+    // Act
+    const actual = await subject.service.view();
+
+    // Assert
+    should(actual.config.enabled).be.true();
+    should(actual.accounts).deepEqual([{ agent: 'claude-default' }]);
+  });
+
+  it('should carry the loader warning, and no login warning while the defaults keep investigations off', async () => {
+    // Arrange
+    const subject = harness({ config: { enabled: true }, installed: async () => ['someone-else'] });
+
+    // Act
+    const actual = await subject.service.view();
+
+    // Assert
+    should(actual.warnings).matchAny(/did not validate/u);
+    should(actual.warnings).have.length(1);
+  });
+
+  it('should warn about nobody when the host inventory cannot be read', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      installed: async () => {
+        throw new Error('the fleet manifest is unreadable');
+      },
+    });
+
+    // Act
+    const actual = await subject.service.view();
+
+    // Assert
+    should(actual.warnings).be.empty();
+  });
+});
+
+describe('changing the warden configuration', () => {
+  it('should persist the merged result', async () => {
+    // Arrange
+    const subject = harness({ config: enabled({ intervalMinutes: 5 }) });
+
+    // Act
+    await subject.service.updateConfig({ intervalMinutes: 10 });
+
+    // Assert
+    should((subject.storedConfig() as WardenConfig).intervalMinutes).equal(10);
+  });
+
+  it('should compose two successive single-field patches', async () => {
+    // Arrange
+    const subject = harness({ config: defaultWardenConfig });
+
+    // Act
+    await subject.service.updateConfig({ enabled: true });
+    const actual = await subject.service.updateConfig({ blessMinutes: 45 });
+
+    // Assert
+    should(actual.config.enabled).be.true();
+    should(actual.config.blessMinutes).equal(45);
+  });
+
+  it('should repair a stored document that did not parse rather than being blocked by it', async () => {
+    // Arrange
+    const subject = harness({ config: { intervalMinutes: 0 } });
+
+    // Act
+    const actual = await subject.service.updateConfig({ enabled: true });
+
+    // Assert
+    should(actual.config.intervalMinutes).equal(defaultWardenConfig.intervalMinutes);
+    should(actual.config.enabled).be.true();
+  });
+
+  it('should journal which fields changed', async () => {
+    // Arrange
+    const subject = harness();
+
+    // Act
+    await subject.service.updateConfig({ enabled: true, blessMinutes: 5 });
+
+    // Assert
+    should(subject.journal[0]).deepEqual({
+      type: 'fleet.warden_config_changed',
+      data: { fields: ['enabled', 'blessMinutes'] },
+    });
+  });
+});
+
+describe('the warden status', () => {
+  it('should omit the sweep instant entirely until a sweep has run', async () => {
+    // Arrange: "nothing has run" must never be confusable with "a sweep found nothing".
+    const actual = await harness().service.status();
+
+    // Assert
+    should(actual.lastSweepAt).be.undefined();
+    should(actual.anomalies).be.empty();
+    should(actual.fingerprint).equal('');
+  });
+
+  it('should report what the last sweep found without measuring again', async () => {
+    // Arrange
+    const subject = harness({ fleet: [unattended('s1')], config: enabled() });
+    await subject.service.run({ force: false });
+    subject.setFleet([]);
+
+    // Act
+    const actual = await subject.service.status();
+
+    // Assert
+    should(actual.anomalies.map(item => item.sessionId)).deepEqual(['s1']);
+  });
+
+  it('should name the live warden and omit it when none is running', async () => {
+    // Arrange
+    const live = session({ id: 'w1', label: WARDEN_LABEL });
+    const subject = harness({ fleet: [live] });
+
+    // Act
+    const withWarden = await subject.service.status();
+    subject.setFleet([session({ id: 'w1', label: WARDEN_LABEL, status: 'completed' })]);
+    const withoutWarden = await subject.service.status();
+
+    // Assert
+    should(withWarden.liveWarden).equal('w1');
+    should(withoutWarden.liveWarden).be.undefined();
+  });
+
+  it('should carry the last spawn instant once one has happened', async () => {
+    // Arrange
+    const subject = harness({ state: { lastSpawnAt: at(-30) } });
+
+    // Act / Assert
+    should((await subject.service.status()).lastSpawnAt).equal(at(-30));
+  });
+
+  it('should carry the newest report when one exists', async () => {
+    // Arrange
+    const subject = harness({ latest: async () => ({ reportId: 'r.md', head: 'Verdict: LEAVE' }) });
+
+    // Act / Assert
+    should((await subject.service.status()).lastReport).deepEqual({ reportId: 'r.md', head: 'Verdict: LEAVE' });
+  });
+
+  it('should omit the report rather than failing when the directory cannot be read', async () => {
+    // Arrange
+    const subject = harness({
+      latest: async () => {
+        throw new Error('the reports directory is unreadable');
+      },
+    });
+
+    // Act / Assert
+    should((await subject.service.status()).lastReport).be.undefined();
+  });
+
+  it('should report an eligible account with no reason', async () => {
+    // Arrange
+    const subject = harness({ config: enabled() });
+
+    // Act
+    const actual = await subject.service.status();
+
+    // Assert
+    should(actual.failover?.accounts).deepEqual([{ agent: 'claude-default', eligible: true }]);
+  });
+
+  it('should report why an account is ineligible', async () => {
+    // Arrange
+    const subject = harness({ installed: async () => ['someone-else'] });
+
+    // Act
+    const actual = await subject.service.status();
+
+    // Assert
+    should(actual.failover?.accounts[0]?.eligible).be.false();
+    should(actual.failover?.accounts[0]?.reason).match(/not installed/u);
+  });
+
+  it('should report a configured model, a demotion, its strikes and its live quota', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({ accounts: [{ agent: 'a', model: 'm' }] }),
+      installed: async () => ['a'],
+      usage: async () => [{ agent: 'a', atLimit: false }],
+      state: {
+        failover: { demotedUntil: { a: at(30) }, strikes: { a: { count: 2, lastAt: at(-1), lastReason: 'boom' } } },
+      },
+    });
+
+    // Act
+    const actual = await subject.service.status();
+
+    // Assert
+    should(actual.failover?.accounts[0]).deepEqual({
+      agent: 'a',
+      model: 'm',
+      eligible: false,
+      reason: `demoted until ${at(30)}`,
+      demotedUntil: at(30),
+      strikes: 2,
+      quota: { atLimit: false },
+    });
+  });
+
+  it('should carry the last selection and any exhaustion episode', async () => {
+    // Arrange
+    const lastSelection = { agent: 'a', policy: 'fallback' as const, at: at(-1), reason: 'preferred' as const };
+    const subject = harness({ state: { failover: { lastSelection, exhaustedSince: at(-2) } } });
+
+    // Act
+    const actual = await subject.service.status();
+
+    // Assert
+    should(actual.failover?.lastSelection).deepEqual(lastSelection);
+    should(actual.failover?.exhaustedSince).equal(at(-2));
+  });
+
+  it('should serve an empty account health rather than failing when the usage feed is down', async () => {
+    // Arrange
+    const subject = harness({
+      usage: async () => {
+        throw new Error('the collector is not listening');
+      },
+    });
+
+    // Act / Assert
+    should((await subject.service.status()).failover?.accounts).have.length(1);
+  });
+});
+
+describe('one sweep', () => {
+  it('should record the instant it swept and the anomalies it found', async () => {
+    // Arrange
+    const subject = harness({ fleet: [unattended('s1')] });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.sweptAt).equal(at(0));
+    should(actual.anomalies.map(item => item.kind)).deepEqual(['unattended_question']);
+    should(subject.state().lastSweepAt).equal(at(0));
+  });
+
+  it('should scan only live sessions while still reading terminal history', async () => {
+    // Arrange: a peer wait whose peer is finished is unanswerable, and telling that apart from a
+    // typo needs the whole index.
+    const waiter = session({
+      id: 's1',
+      status: 'waiting',
+      state: { waiting: { since: at(-1), peer: 's2', peerName: 'scout' } },
+    });
+    const subject = harness({ fleet: [waiter, session({ id: 's2', status: 'completed' })] });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.anomalies.map(item => item.kind)).containEql('peer_wait_unanswerable');
+  });
+
+  it('should collapse the unwatched fleet when no monitor subsystem is mounted', async () => {
+    // Arrange
+    const subject = harness({
+      fleet: [session({ id: 's1', hasLiveMonitor: false }), session({ id: 's2', hasLiveMonitor: false })],
+      settings: { supervisesMonitors: false },
+    });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.anomalies).have.length(1);
+    should(actual.anomalies[0]?.affectedSessionIds).deepEqual(['s1', 's2']);
+  });
+
+  it('should copy the anomaly arrays out of the domain on the way to the wire', async () => {
+    // Arrange
+    const subject = harness({
+      fleet: [session({ id: 's1', hasLiveMonitor: false })],
+      settings: { supervisesMonitors: false },
+    });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.anomalies[0]?.affectedSessionIds).deepEqual(['s1']);
+  });
+
+  it('should carry the liveness ledger through to the wire for a sus anomaly', async () => {
+    // Arrange
+    const suspect = session({
+      id: 's1',
+      status: 'thinking',
+      state: { startedAt: at(-120), lastCounterAdvanceAt: at(0), lastTranscriptAt: at(-60) },
+    });
+    const subject = harness({ fleet: [suspect] });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.anomalies[0]?.kind).equal('sus_thinking');
+    should(actual.anomalies[0]?.ledger?.lastTranscriptAt).equal(at(-60));
+  });
+
+  it('should bump the recovery generation when the fleet goes clean', async () => {
+    // Arrange
+    const subject = harness({ fleet: [unattended('s1')] });
+    await subject.service.run({ force: false });
+
+    // Act
+    subject.setFleet([]);
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().recoveryGeneration).equal(1);
+  });
+
+  it('should drop a blessing whose session changed status and say so', async () => {
+    // Arrange
+    const subject = harness({
+      fleet: [session({ id: 's1', status: 'running' })],
+      state: {
+        blessings: {
+          s1: { sessionId: 's1', kinds: ['sus_thinking'], status: 'thinking', blessedAt: at(-1), expiresAt: at(10) },
+        },
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject)).containEql('fleet.warden_bless_revoked');
+    should(subject.state().blessings).deepEqual({});
+  });
+});
+
+describe('escalating to a fleet warden', () => {
+  it('should refuse while the Warden is off', async () => {
+    // Arrange
+    const subject = harness({ config: enabled({ enabled: false }), fleet: [triageable('s1')] });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.message).equal('the Warden is off (enabled=false)');
+    should(subject.spawns).be.empty();
+  });
+
+  it('should say plainly that there was nothing to escalate', async () => {
+    // Arrange
+    const subject = harness({ config: enabled() });
+
+    // Act / Assert
+    should((await subject.service.run({ force: false })).message).equal('no anomalies to escalate');
+  });
+
+  it('should spawn a fleet warden and record it', async () => {
+    // Arrange
+    const subject = harness({ config: enabled(), fleet: [triageable('s1')] });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.spawned).equal('w0');
+    should(subject.spawns[0]?.name).equal('Fleet triage');
+    should(subject.spawns[0]?.stopCapability).be.undefined();
+    should(subject.state().lastSpawnAt).equal(at(0));
+    should(journalTypes(subject)).containEql('fleet.warden_spawned');
+  });
+
+  it('should write provenance beside the report it told the warden to write', async () => {
+    // Arrange
+    const subject = harness({ config: enabled(), fleet: [triageable('s1')] });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    const [path] = [...subject.provenance.keys()];
+    should(path).match(/2026-07-31T12-00-00-000Z\.md$/u);
+    should(subject.provenance.get(path as string)?.wardenSessionId).equal('w0');
+  });
+
+  it('should refuse a second escalation for an unchanged anomaly set', async () => {
+    // Arrange
+    const subject = harness({ config: enabled(), fleet: [triageable('s1')] });
+    await subject.service.run({ force: false });
+    subject.setFleet([triageable('s1'), session({ id: 'w0', label: WARDEN_LABEL, status: 'completed' })]);
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.message).equal('anomaly set unchanged since the last escalation');
+  });
+
+  it('should escalate the same set again after a clean recovery', async () => {
+    // Arrange
+    const subject = harness({ config: enabled(), fleet: [triageable('s1')] });
+    await subject.service.run({ force: false });
+    const retired = session({ id: 'w0', label: WARDEN_LABEL, status: 'completed' });
+    subject.setFleet([retired]);
+    await subject.service.run({ force: false });
+
+    // Act
+    subject.setFleet([triageable('s1'), retired]);
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.spawned).equal('w1');
+  });
+
+  it('should refuse while the concurrency cap is full', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [triageable('s1'), session({ id: 'w1', label: WARDEN_LABEL })],
+    });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.message).equal('warden concurrency cap reached (1/1 live)');
+  });
+
+  it('should refuse while the spawn gap has not elapsed', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({ minSpawnGapMinutes: 15 }),
+      fleet: [triageable('s1')],
+      state: { lastSpawnAt: at(-5) },
+    });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.message).match(/spawn gap not elapsed/u);
+  });
+
+  it('should bypass the gap, the flag and the suppression when an operator forces a run', async () => {
+    // Arrange
+    const subject = harness({
+      config: { ...defaultWardenConfig, minSpawnGapMinutes: 15 },
+      fleet: [triageable('s1')],
+      state: { lastSpawnAt: at(-1), lastSpawnFingerprint: '0:abandoned_wreckage:s1' },
+    });
+
+    // Act
+    const actual = await subject.service.run({ force: true });
+
+    // Assert
+    should(actual.spawned).equal('w0');
+  });
+
+  it('should never bypass the concurrency cap for a forced run', async () => {
+    // Arrange: the cap protects the host, not the operator's patience.
+    const subject = harness({
+      config: enabled(),
+      fleet: [triageable('s1'), session({ id: 'w1', label: WARDEN_LABEL })],
+    });
+
+    // Act / Assert
+    should((await subject.service.run({ force: true })).message).match(/concurrency cap reached/u);
+  });
+
+  it('should not consume the spawn gap when every account is ineligible', async () => {
+    // Arrange: the next sweep after any account recovers must escalate immediately.
+    const subject = harness({
+      config: enabled(),
+      fleet: [triageable('s1')],
+      usage: async () => [{ agent: 'claude-default', atLimit: true }],
+    });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.message).match(/exhausted/u);
+    should(subject.state().lastSpawnAt).be.undefined();
+    should(subject.state().lastSpawnFingerprint).be.undefined();
+  });
+
+  it('should consume the spawn gap but not the suppression key when a launch fails', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [triageable('s1')],
+      spawn: async () => {
+        throw new Error('tmux refused the pane');
+      },
+    });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.message).match(/warden spawn failed: tmux refused the pane/u);
+    should(subject.state().lastSpawnAt).equal(at(0));
+    should(subject.state().lastSpawnFingerprint).be.undefined();
+    should(journalTypes(subject)).containEql('fleet.warden_spawn_failed');
+  });
+
+  it('should describe a non-error launch failure rather than dropping it', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [triageable('s1')],
+      spawn: async () => {
+        throw 'the launcher rejected the request';
+      },
+    });
+
+    // Act / Assert
+    should((await subject.service.run({ force: false })).message).match(/the launcher rejected the request/u);
+  });
+
+  it('should clear the account strikes after a launch that worked', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [triageable('s1')],
+      state: {
+        failover: { strikes: { 'claude-default': { count: 1, lastAt: at(-9), lastReason: 'boom' } } },
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().failover?.strikes).deepEqual({});
+  });
+
+  it('should journal a provenance write failure without striking a working account', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [triageable('s1')],
+      writeProvenance: async () => {
+        throw new Error('the state home is read-only');
+      },
+    });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.spawned).equal('w0');
+    should(journalTypes(subject)).containEql('fleet.warden_provenance_failed');
+    should(subject.state().failover?.strikes ?? {}).deepEqual({});
+  });
+});
+
+describe('assigning a warden to one suspect session', () => {
+  const suspect = (id: string): WardenFleetSession =>
+    session({ id, status: 'awaiting_user', state: { lastActivityAt: at(-600) } });
+
+  it('should spawn one warden per suspect target with its own capability', async () => {
+    // Arrange
+    const subject = harness({ config: enabled(), fleet: [suspect('s1')] });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.assignedWardens).deepEqual(['w0']);
+    should(subject.spawns[0]?.name).equal('Investigate s1');
+    should(subject.spawns[0]?.stopCapability).equal('capability-1');
+    should(subject.state().assignments?.s1?.kinds).deepEqual(['unattended_question']);
+    should(journalTypes(subject)).containEql('fleet.warden_assigned');
+  });
+
+  it('should do nothing at all when there is no suspect, no queue and no assignment', async () => {
+    // Arrange
+    const subject = harness({ config: enabled(), fleet: [session({ id: 's1' })] });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.assignedWardens).be.undefined();
+    should(subject.spawns).be.empty();
+  });
+
+  it('should still reconcile a finished assignment while escalation is disabled', async () => {
+    // Arrange: a finished warden left in the record holds its target's slot forever.
+    const subject = harness({
+      fleet: [session({ id: 's1' })],
+      state: {
+        assignments: {
+          s1: { wardenId: 'w0', spawnedAt: at(-30), capability: 'c', kinds: ['sus_thinking'], reportPath: '/r.md' },
+        },
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().assignments).deepEqual({});
+    should(subject.state().assignedCooldowns?.s1).equal(at(0));
+  });
+
+  it('should bless a target whose warden cleared it', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [session({ id: 's1', status: 'thinking' })],
+      reports: { '/r.md': 'Verdict: LEAVE\n\nAll good.' },
+      state: {
+        assignments: {
+          s1: { wardenId: 'w0', spawnedAt: at(-30), capability: 'c', kinds: ['sus_thinking'], reportPath: '/r.md' },
+        },
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().blessings?.s1?.kinds).deepEqual(['sus_thinking']);
+    should(journalTypes(subject)).containEql('fleet.warden_blessed');
+  });
+
+  it.each([
+    { label: 'no report was written', reports: {} },
+    { label: 'the report is empty', reports: { '/r.md': '   ' } },
+    { label: 'the report says something else', reports: { '/r.md': 'Verdict: KILL\n\nBurning tokens.' } },
+  ])('should refuse to bless when $label', async ({ reports }) => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [session({ id: 's1', status: 'thinking' })],
+      reports,
+      state: {
+        assignments: {
+          s1: { wardenId: 'w0', spawnedAt: at(-30), capability: 'c', kinds: ['sus_thinking'], reportPath: '/r.md' },
+        },
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().blessings ?? {}).deepEqual({});
+  });
+
+  it('should refuse to bless a target that has since vanished', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [],
+      reports: { '/r.md': 'Verdict: LEAVE' },
+      state: {
+        assignments: {
+          s1: { wardenId: 'w0', spawnedAt: at(-30), capability: 'c', kinds: ['sus_thinking'], reportPath: '/r.md' },
+        },
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().blessings ?? {}).deepEqual({});
+  });
+
+  it('should refuse to bless when the warden was shown no anomaly kind at all', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [session({ id: 's1', status: 'thinking' })],
+      reports: { '/r.md': 'Verdict: LEAVE' },
+      state: {
+        assignments: { s1: { wardenId: 'w0', spawnedAt: at(-30), capability: 'c', kinds: [], reportPath: '/r.md' } },
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().blessings ?? {}).deepEqual({});
+  });
+
+  it('should treat an unreadable report as no evidence rather than failing the sweep', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [session({ id: 's1', status: 'thinking' })],
+      state: {
+        assignments: {
+          s1: { wardenId: 'w0', spawnedAt: at(-30), capability: 'c', kinds: ['sus_thinking'], reportPath: '/boom' },
+        },
+      },
+    });
+    // The fake report reader throws for this one path only.
+    // eslint-disable-next-line no-param-reassign -- exercising the catch on a port that can fail.
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().blessings ?? {}).deepEqual({});
+  });
+
+  it('should leave a blessed target alone before it can occupy the single warden slot', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [suspect('s1')],
+      state: {
+        blessings: {
+          s1: {
+            sessionId: 's1',
+            kinds: ['unattended_question'],
+            status: 'awaiting_user',
+            blessedAt: at(-1),
+            expiresAt: at(10),
+          },
+        },
+      },
+    });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.assignedWardens).be.undefined();
+  });
+
+  it('should leave a target alone inside its post-assignment cooldown', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({ assignedCooldownMinutes: 30 }),
+      fleet: [suspect('s1')],
+      state: { assignedCooldowns: { s1: at(-5) } },
+    });
+
+    // Act / Assert
+    should((await subject.service.run({ force: false })).assignedWardens).be.undefined();
+  });
+
+  it('should ignore the cooldown for a forced run', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({ assignedCooldownMinutes: 30 }),
+      fleet: [suspect('s1')],
+      state: { assignedCooldowns: { s1: at(-5) } },
+    });
+
+    // Act / Assert
+    should((await subject.service.run({ force: true })).assignedWardens).deepEqual(['w0']);
+  });
+
+  it('should queue a still-suspect target it had no slot for', async () => {
+    // Arrange
+    const subject = harness({ config: enabled(), fleet: [suspect('s1'), suspect('s2')] });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.assignedWardens).deepEqual(['w0']);
+    should(subject.state().assignedQueue?.map(item => item.sessionId)).deepEqual(['s2']);
+  });
+
+  it('should retry a queued target before a fresh one', async () => {
+    // Arrange
+    const queued: WardenAnomaly = {
+      kind: 'unattended_question',
+      sessionId: 's2',
+      status: 'awaiting_user',
+      detail: 'queued last sweep',
+    };
+    const subject = harness({
+      config: enabled(),
+      fleet: [suspect('s1'), suspect('s2')],
+      state: { assignedQueue: [queued] },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.spawns[0]?.name).equal('Investigate s2');
+  });
+
+  it('should drop a queued target that went terminal and say the investigation was closed', async () => {
+    // Arrange: a target that finished is neither spawned nor re-queued — the investigation is
+    // closed rather than lost, and the journal is what makes the difference visible.
+    const queued: WardenAnomaly = {
+      kind: 'unattended_question',
+      sessionId: 's2',
+      status: 'awaiting_user',
+      detail: 'queued last sweep',
+    };
+    const subject = harness({
+      config: enabled(),
+      fleet: [session({ id: 's2', status: 'completed' })],
+      state: { assignedQueue: [queued] },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().assignedQueue).be.empty();
+    should(journalTypes(subject)).containEql('fleet.warden_dequeued');
+  });
+
+  it('should cool a target down and strike the account when its warden could not launch', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [suspect('s1')],
+      spawn: async () => {
+        throw new Error('tmux refused the pane');
+      },
+    });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.assignedWardens).be.undefined();
+    should(subject.state().assignedCooldowns?.s1).equal(at(0));
+    should(subject.state().failover?.strikes?.['claude-default']?.count).equal(1);
+    should(journalTypes(subject)).containEql('fleet.warden_spawn_failed');
+  });
+
+  it('should queue rather than cool down a target it skipped for want of an account', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [suspect('s1')],
+      usage: async () => [{ agent: 'claude-default', atLimit: true }],
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().assignedQueue?.map(item => item.sessionId)).deepEqual(['s1']);
+    should(subject.state().assignedCooldowns ?? {}).deepEqual({});
+  });
+
+  it('should never put a second warden on a target already under investigation', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({ maxAssignedWardens: 4 }),
+      fleet: [suspect('s1'), session({ id: 'w0', label: WARDEN_LABEL })],
+      state: {
+        assignments: {
+          s1: { wardenId: 'w0', spawnedAt: at(-1), capability: 'c', kinds: ['sus_thinking'], reportPath: '/r.md' },
+        },
+      },
+    });
+
+    // Act / Assert
+    should((await subject.service.run({ force: false })).assignedWardens).be.undefined();
+  });
+});
+
+describe('choosing the account a warden runs on', () => {
+  it('should journal a restored account when the feed positively contradicts its demotion', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({ accounts: [{ agent: 'a' }] }),
+      fleet: [triageable('s1')],
+      installed: async () => ['a'],
+      usage: async () => [{ agent: 'a', authOk: true, atLimit: false, unavailable: false }],
+      state: { failover: { demotedUntil: { a: at(30) } } },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject)).containEql('fleet.warden_account_restored');
+  });
+
+  it('should journal exhaustion once per episode rather than once per sweep', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [triageable('s1')],
+      usage: async () => [{ agent: 'claude-default', atLimit: true }],
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject).filter(type => type === 'fleet.warden_exhausted')).have.length(1);
+  });
+
+  it('should journal a health-driven change of account', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({ accounts: [{ agent: 'a' }, { agent: 'b' }] }),
+      fleet: [triageable('s1')],
+      installed: async () => ['b'],
+      state: { failover: { lastSelection: { agent: 'a', policy: 'fallback', at: at(-9), reason: 'preferred' } } },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.journal.find(entry => entry.type === 'fleet.warden_failover')?.data).match({ from: 'a', to: 'b' });
+  });
+
+  it('should not journal a routine round-robin rotation', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({
+        accounts: [{ agent: 'a' }, { agent: 'b' }],
+        failover: { ...defaultWardenConfig.failover, policy: 'round_robin' },
+      }),
+      fleet: [triageable('s1')],
+      installed: async () => ['a', 'b'],
+      state: {
+        failover: { rrCursor: 0, lastSelection: { agent: 'a', policy: 'round_robin', at: at(-9), reason: 'rotation' } },
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject)).not.containEql('fleet.warden_failover');
+  });
+
+  it('should demote an account the usage feed already condemned, in one strike', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({ accounts: [{ agent: 'a' }] }),
+      fleet: [triageable('s1')],
+      installed: async () => ['a'],
+      spawn: async () => {
+        throw new Error('the account is at its usage limit');
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject)).containEql('fleet.warden_account_demoted');
+    should(subject.state().failover?.demotedUntil?.a).equal(at(30));
+  });
+
+  it('should not demote on a first raw launch error', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({ accounts: [{ agent: 'a' }] }),
+      fleet: [triageable('s1')],
+      installed: async () => ['a'],
+      spawn: async () => {
+        throw new Error('tmux refused the pane');
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject)).not.containEql('fleet.warden_account_demoted');
+  });
+
+  it('should record the configured first choice in provenance', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({ accounts: [{ agent: 'a' }, { agent: 'b' }] }),
+      fleet: [triageable('s1')],
+      installed: async () => ['b'],
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    const [spawn] = [...subject.provenance.values()];
+    should(spawn?.configuredFirst).equal('a');
+    should(spawn?.failedOver).be.true();
+  });
+});
+
+describe('what the daemon asks the sweep about itself', () => {
+  it('should report the cadence its timer should fire on', async () => {
+    // Arrange / Act / Assert
+    should(await harness({ config: enabled({ intervalMinutes: 10 }) }).service.intervalMs()).equal(10 * 60_000);
+  });
+
+  it('should report no last sweep until one has completed', async () => {
+    // Arrange
+    const subject = harness();
+
+    // Act / Assert
+    should(await subject.service.lastSweepAt()).be.undefined();
+  });
+
+  it('should report the last sweep once one has completed', async () => {
+    // Arrange
+    const subject = harness();
+    await subject.service.run({ force: false });
+
+    // Act / Assert
+    should(await subject.service.lastSweepAt()).equal(at(0));
+  });
+
+  it('should authorize a stop only for the target its live assignment names', async () => {
+    // Arrange
+    const subject = harness({
+      state: {
+        assignments: {
+          s1: { wardenId: 'w0', spawnedAt: at(-1), capability: 'secret', kinds: ['sus_thinking'], reportPath: '/r.md' },
+        },
+      },
+    });
+
+    // Act / Assert
+    should(await subject.service.mayStop('secret', 's1')).be.true();
+    should(await subject.service.mayStop('secret', 's2')).be.false();
+    should(await subject.service.mayStop('guessed', 's1')).be.false();
+  });
+});
+
+describe('escalating to a human, and clearing it again', () => {
+  /** A verdict the sweep will accept: an explicit marker, for this exact node and class. */
+  const needsHuman = (overrides: Partial<WardenEscalationVerdict> = {}): WardenEscalationVerdict => ({
+    at: at(-5),
+    targetSession: 's1',
+    anomalyKind: 'unattended_question',
+    verdict: 'needs_human',
+    explicitNeedsHuman: true,
+    reason: 'Answering could commit work nobody has reviewed.',
+    reportPath: '/state/warden/reports/r1.md',
+    ...overrides,
+  });
+
+  const escalating = (options: Parameters<typeof harness>[0] = {}): Harness =>
+    harness({
+      config: enabled(),
+      fleet: [unattended('s1')],
+      verdicts: async () => [needsHuman()],
+      ...options,
+    });
+
+  it('should write one node-scoped item for an explicit needs-human verdict', async () => {
+    // Arrange
+    const subject = escalating();
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).have.length(1);
+    should(subject.raises[0]?.sessionId).eql('s1');
+    should(subject.raises[0]?.request.sourceRef).eql(wardenEscalationSourceRef('unattended_question'));
+  });
+
+  it('should record the escalation for an operator to read', async () => {
+    // Arrange
+    const subject = escalating();
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject)).containEql('fleet.warden_escalated');
+  });
+
+  it('should refresh the one item rather than growing a second across sweeps', async () => {
+    // Arrange
+    const subject = escalating();
+
+    // Act
+    await subject.service.run({ force: false });
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.board('s1')).have.length(1);
+    should(subject.journal.filter(entry => entry.type === 'fleet.warden_escalated')).have.length(1);
+  });
+
+  it('should never escalate from prose that carried no explicit marker', async () => {
+    // Arrange
+    const subject = escalating({ verdicts: async () => [needsHuman({ explicitNeedsHuman: undefined })] });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).be.empty();
+  });
+
+  it('should clear the item once the node stops being flagged', async () => {
+    // Arrange
+    const subject = escalating();
+    await subject.service.run({ force: false });
+
+    // Act — the node answered its question and is working again.
+    subject.setFleet([session({ id: 's1', status: 'running' })]);
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved).have.length(1);
+    should(subject.board('s1')).be.empty();
+    should(journalTypes(subject)).containEql('fleet.warden_escalation_resolved');
+  });
+
+  it('should leave the row alone for a node that has left the fleet entirely', async () => {
+    // Arrange — the item is raised while the node is still there.
+    const subject = escalating();
+    await subject.service.run({ force: false });
+
+    // Act — the registry has dropped the session, so the fleet reader no longer returns it.
+    subject.setFleet([]);
+    await subject.service.run({ force: false });
+
+    // Assert — boards are read only for sessions still in the fleet, so this one is never
+    // reached: removal is an observation rather than an act, and nothing claims to clear it.
+    should(subject.raises).have.length(1);
+    should(subject.resolved).be.empty();
+    should(subject.board('s1')).have.length(1);
+    should(journalTypes(subject)).not.containEql('fleet.warden_escalation_resolved');
+  });
+
+  it('should keep clearing recovered items even while escalation is switched off', async () => {
+    // Arrange
+    const subject = escalating();
+    await subject.service.run({ force: false });
+    subject.setFleet([session({ id: 's1', status: 'running' })]);
+
+    // Act
+    await subject.service.updateConfig({ enabled: false });
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved).have.length(1);
+  });
+
+  it('should stay blind rather than clear items it could not read the reports for', async () => {
+    // Arrange
+    const subject = escalating();
+    await subject.service.run({ force: false });
+    subject.setFleet([session({ id: 's1', status: 'running' })]);
+
+    // Act
+    const blind = escalating({ verdicts: async () => undefined });
+    blind.seedBoard('s1', [escalated('unattended_question')]);
+    blind.setFleet([session({ id: 's1', status: 'running' })]);
+    await blind.service.run({ force: false });
+
+    // Assert
+    should(blind.resolved).be.empty();
+    should(blind.raises).be.empty();
+    should(journalTypes(blind)).containEql('fleet.warden_escalation_blind');
+  });
+
+  it('should neither raise nor clear for a node whose own board could not be read', async () => {
+    // Arrange — the board is unreadable, so its addressed history is invisible too.
+    const subject = escalating({ unreadableBoards: ['s1'] });
+    subject.seedBoard('s1', [escalated('unattended_question')]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).be.empty();
+    should(subject.resolved).be.empty();
+    should(journalTypes(subject)).containEql('fleet.warden_escalation_blind_node');
+  });
+
+  it('should not clear as recovered a sub-ferret’s escalation that stands on its agenda home', async () => {
+    // Arrange — s1 is a sub-ferret whose notifications sit on the lead's board, named for it.
+    const subject = escalating({
+      fleet: [unattended('s1'), session({ id: 'lead', status: 'running' })],
+      homeOf: async id => (id === 's1' ? 'lead' : id),
+    });
+    subject.seedBoard('lead', [
+      { ...escalated('unattended_question'), sourceRef: wardenEscalationSourceRef('unattended_question', 's1') },
+    ]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved).be.empty();
+  });
+
+  it('should clear the home’s row for a sub-ferret that stopped being flagged, and only that one', async () => {
+    // Arrange
+    const subject = escalating({
+      fleet: [session({ id: 's1', status: 'running' }), session({ id: 'lead', status: 'running' })],
+      homeOf: async id => (id === 's1' ? 'lead' : id),
+    });
+    subject.seedBoard('lead', [
+      { ...escalated('unattended_question'), sourceRef: wardenEscalationSourceRef('unattended_question', 's1') },
+      { ...escalated('unattended_question'), sourceRef: wardenEscalationSourceRef('unattended_question', 's2') },
+    ]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert — s1 recovered, and s2 is no longer in the fleet.
+    should(subject.resolved.map(each => [each.sessionId, each.sourceRef])).eql([
+      ['lead', wardenEscalationSourceRef('unattended_question', 's1')],
+      ['lead', wardenEscalationSourceRef('unattended_question', 's2')],
+    ]);
+  });
+
+  it('should read the machine agenda a ferret’s notice sits on, and clear its row once the ferret recovers', async () => {
+    // Arrange — s1 has no owner home, so its notice is on the machine agenda, which is no ferret of the fleet.
+    const subject = escalating({
+      fleet: [session({ id: 's1', status: 'running' })],
+      homeOf: async id => (id === 's1' ? 'machine-agenda' : id),
+    });
+    subject.seedBoard('machine-agenda', [
+      { ...escalated('unattended_question'), sourceRef: wardenEscalationSourceRef('unattended_question', 's1') },
+    ]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved.map(each => [each.sessionId, each.sourceRef])).eql([
+      ['machine-agenda', wardenEscalationSourceRef('unattended_question', 's1')],
+    ]);
+  });
+
+  it('should not judge a notice on a machine agenda that could not be read', async () => {
+    // Arrange
+    const subject = escalating({
+      fleet: [session({ id: 's1', status: 'running' })],
+      homeOf: async id => (id === 's1' ? 'machine-agenda' : id),
+      unreadableBoards: ['machine-agenda'],
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved).be.empty();
+  });
+
+  it('should leave a home’s row about a ferret whose own board could not be read', async () => {
+    // Arrange
+    const subject = escalating({
+      fleet: [session({ id: 's1', status: 'running' }), session({ id: 'lead', status: 'running' })],
+      homeOf: async id => (id === 's1' ? 'lead' : id),
+      unreadableBoards: ['s1'],
+    });
+    subject.seedBoard('lead', [
+      { ...escalated('unattended_question'), sourceRef: wardenEscalationSourceRef('unattended_question', 's1') },
+    ]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.resolved).be.empty();
+  });
+
+  it('should fall back to a ferret’s own board when its home cannot be found', async () => {
+    // Arrange
+    const subject = escalating({
+      homeOf: async () => {
+        throw new Error('unreadable');
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).have.length(1);
+    should(subject.raises[0]?.request.sourceRef).eql(wardenEscalationSourceRef('unattended_question'));
+  });
+
+  it('should report a write the board refused rather than swallow it', async () => {
+    // Arrange
+    const subject = escalating({ raiseWrite: 'rejected' });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(journalTypes(subject)).containEql('fleet.warden_escalation_failed');
+    should(journalTypes(subject)).not.containEql('fleet.warden_escalated');
+  });
+
+  it('should stay quiet about an item that already said the same thing', async () => {
+    // Arrange
+    const subject = escalating({ raiseWrite: 'unchanged' });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).have.length(1);
+    should(journalTypes(subject)).not.containEql('fleet.warden_escalated');
+  });
+
+  it('should record a refreshed item as the change it is', async () => {
+    // Arrange
+    const subject = escalating({ raiseWrite: 'refreshed' });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.journal.find(entry => entry.type === 'fleet.warden_escalated')?.data.change).eql('refreshed');
+  });
+
+  it('should not notify again about a subject the person was already told, once they read it', async () => {
+    // Arrange
+    const subject = escalating();
+    await subject.service.run({ force: false });
+    // Reading the notification resolves it.
+    subject.seedBoard('s1', []);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).have.length(1);
+    should(subject.state().notified).deepEqual({ [`s1|${wardenEscalationSourceRef('unattended_question')}`]: at(0) });
+  });
+
+  it('should notify again once the subject cleared and came back', async () => {
+    // Arrange
+    const subject = escalating();
+    await subject.service.run({ force: false });
+    subject.seedBoard('s1', []);
+    subject.setFleet([session({ id: 's1', status: 'running' })]);
+    await subject.service.run({ force: false });
+    should(subject.state().notified).deepEqual({});
+    subject.setFleet([unattended('s1')]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).have.length(2);
+  });
+
+  it('should tell a person the prohibition that stopped a repair being tried', async () => {
+    // Arrange
+    const subject = escalating();
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises[0]?.request.context).match(/holds no credential over any session/u);
+  });
+
+  it('should read every board only AFTER the anomaly set is already decided', async () => {
+    // Arrange — a board full of ordinary Attention, and a warden that judged nothing.
+    const subject = harness({ config: enabled(), fleet: [unattended('s1')] });
+    subject.seedBoard('s1', [
+      { source: 'task', sourceRef: 'task:T1', raisedBy: 'agent' },
+      { source: 'question', sourceRef: null, raisedBy: 'agent' },
+    ]);
+    const clean = harness({ config: enabled(), fleet: [unattended('s1')] });
+
+    // Act
+    const withBoard = await subject.service.run({ force: false });
+    const withoutBoard = await clean.service.run({ force: false });
+
+    // Assert — the same anomalies, the same prompt, and nothing raised.
+    should(withBoard.anomalies).eql(withoutBoard.anomalies);
+    should(subject.spawns.map(request => request.prompt)).eql(clean.spawns.map(request => request.prompt));
+    should(subject.raises).be.empty();
+  });
+});
