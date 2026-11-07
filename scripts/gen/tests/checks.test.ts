@@ -177,6 +177,36 @@ describe('core-closed', () => {
 // ─── import checks ────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('context-imports', () => {
+  test('app halves and their tests use only the public shell facilities; daemon halves and private paths are refused', async () => {
+    const f = ws([
+      {
+        id: 'alpha',
+        files: {
+          'app/view.tsx': `import '@ferretry/app';\nimport '@ferretry/app/ui';\n`,
+          'app/private.ts': `import '../../../app/src/private.ts';\n`,
+          'app/testing.ts': `import '@ferretry/app/testing';\n`,
+          'daemon/shell.ts': `import '@ferretry/app/ui';\n`,
+          'tests/ui.test.ts': `import '@ferretry/app/testing';\nimport '@ferretry/app/ui';\n`,
+        },
+      },
+    ]);
+    f.write(
+      'packages/app/package.json',
+      JSON.stringify({
+        name: '@ferretry/app',
+        exports: { '.': './src/index.ts', './ui': './src/ui.ts', './testing': './src/testing.ts' },
+      }),
+    );
+    for (const file of ['index.ts', 'ui.ts', 'testing.ts', 'private.ts'])
+      f.write(`packages/app/src/${file}`, 'export {};\n');
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('alpha/app/view.tsx');
+    expect(found).not.toContain('alpha/tests/ui.test.ts');
+    expect(found).toContain('alpha/app/private.ts');
+    expect(found).toContain('alpha/app/testing.ts');
+    expect(found).toContain('alpha/daemon/shell.ts');
+  });
+
   test('planted: a half reaches another package past its contract; a contract imports node:fs; a manifest imports a half', async () => {
     const f = ws(
       [
@@ -653,6 +683,30 @@ describe('registry generator', () => {
     };
     expect(registry.halves.daemon.skeleton).toBe(true);
     expect(typeof registry.contractTesting.alpha?.fakeAlpha).toBe('function');
+  });
+
+  test('pending app halves are omitted, ported halves register, and registries --check stays exact', async () => {
+    const f = ws([{ id: 'alpha' }, { id: 'beta' }]);
+    f.write(
+      'ports-pending.json',
+      JSON.stringify({ format: 1, pending: ['alpha', 'beta'], pendingHalves: { alpha: ['app'] } }),
+    );
+    const files = generateGlobal(await buildModel(f.root));
+    const surfaces = files.get('packages/app/src/generated/surfaces.ts') ?? '';
+    expect(surfaces).not.toContain('import app_alpha');
+    expect(surfaces).not.toContain('app: app_alpha');
+    expect(surfaces).toContain('manifest: manifest_alpha');
+    expect(surfaces).toContain('import app_beta');
+    expect(surfaces).toContain('app: app_beta');
+    writeFiles(f.root, files);
+    const check = () => Bun.spawnSync(['bun', join(import.meta.dir, '../registries.ts'), '--root', f.root, '--check']);
+    expect(check().exitCode).toBe(0);
+    f.write('ports-pending.json', JSON.stringify({ format: 1, pending: ['alpha', 'beta'], pendingHalves: {} }));
+    expect(check().exitCode).toBe(1);
+    const ported = generateGlobal(await buildModel(f.root));
+    expect(ported.get('packages/app/src/generated/surfaces.ts')).toContain('app: app_alpha');
+    writeFiles(f.root, ported);
+    expect(check().exitCode).toBe(0);
   });
 
   test('registries-fresh planted: a hand-edited generated file', async () => {

@@ -28,7 +28,7 @@ import { ListRefresh, type ListRefreshEnvironment, browserListRefreshEnvironment
 import type { DaemonConnection, DaemonId } from '../shell.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../shell.ts';
 import { daemonRequest } from '../shell.ts';
-import { browserFetch, type DaemonFetch, DaemonResponseError } from '../shell.ts';
+import { type DaemonFetch, DaemonResponseError } from '../shell.ts';
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('attention scope must belong to the requested daemon');
@@ -73,7 +73,7 @@ const fetchAgenda = async (
 export const fetchAgendaSnapshot = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = browserFetch,
+  fetcher: DaemonFetch,
 ): Promise<AgendaSnapshot> =>
   parseSnapshot(
     scope,
@@ -89,7 +89,7 @@ export const fetchAgendaSnapshot = async (
 export const fetchAgendaCount = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = browserFetch,
+  fetcher: DaemonFetch,
 ): Promise<AgendaCountResponse> => {
   const snapshot = await fetchAgendaSnapshot(daemon, scope, fetcher);
   return { sessionId: snapshot.sessionId, count: snapshot.count };
@@ -100,7 +100,7 @@ export const applyAgendaAction = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   action: AgendaActionRequest,
-  fetcher: DaemonFetch = browserFetch,
+  fetcher: DaemonFetch,
 ): Promise<AgendaSnapshot> => {
   const body = (isMachineAgendaId(scope.sessionId) ? DaemonAgendaActionSchema : AgendaActionRequestSchema).parse(
     action,
@@ -120,7 +120,7 @@ export const applyAgendaAction = async (
 export const sendAgendaReplies = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = browserFetch,
+  fetcher: DaemonFetch,
 ): Promise<AgendaSnapshot> =>
   parseSnapshot(
     scope,
@@ -147,7 +147,7 @@ export const fetchAgendaVersions = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   id: AgendaId,
-  fetcher: DaemonFetch = browserFetch,
+  fetcher: DaemonFetch,
 ): Promise<AgendaVersionList> =>
   AgendaVersionListSchema.parse(
     await fetchAgenda(daemon, scope, itemVersionsPath(scope.sessionId, id), { method: 'GET' }, fetcher),
@@ -159,7 +159,7 @@ export const fetchAgendaVersion = async (
   scope: DaemonSessionScope,
   id: AgendaId,
   version: number,
-  fetcher: DaemonFetch = browserFetch,
+  fetcher: DaemonFetch,
 ): Promise<AgendaVersion> =>
   AgendaVersionSchema.parse(
     await fetchAgenda(daemon, scope, `${itemVersionsPath(scope.sessionId, id)}/${version}`, { method: 'GET' }, fetcher),
@@ -194,7 +194,7 @@ export const fetchAgendaConversation = async (
   scope: DaemonSessionScope,
   id: AgendaId,
   range: AgendaConversationRange = {},
-  fetcher: DaemonFetch = browserFetch,
+  fetcher: DaemonFetch,
 ): Promise<AgendaConversationRead> => {
   const base = `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/agenda/${encodeURIComponent(id)}/conversation`;
   const from = range.from ?? 0;
@@ -226,7 +226,7 @@ export const markAgendaVersionSeen = async (
   scope: DaemonSessionScope,
   id: AgendaId,
   version: number,
-  fetcher: DaemonFetch = browserFetch,
+  fetcher: DaemonFetch,
 ): Promise<number> =>
   AgendaSeenResponseSchema.parse(
     await fetchAgenda(
@@ -292,7 +292,7 @@ export class DaemonAgendaClient {
 
   constructor(
     readonly store: DaemonAgendaStore = new DaemonAgendaStore(),
-    private readonly fetcher: DaemonFetch = browserFetch,
+    private readonly fetcher: DaemonFetch,
     private readonly refreshEnvironment: ListRefreshEnvironment = browserListRefreshEnvironment,
   ) {
     this.rollup = new AgendaRollupStore(fetcher);

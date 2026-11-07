@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { AskBoardSnapshotSchema, AskOwnerActionError } from '../../../contract/index.ts';
 import { asksHalf } from '../../support/daemon/asks-half.ts';
+import { MACHINE_AGENDA_ID } from '../../../contract/snapshot/agenda.ts';
 
 const opened: Awaited<ReturnType<typeof asksHalf>>[] = [];
 afterEach(async () => {
@@ -17,10 +18,31 @@ async function world() {
     subject: 'Build finished',
     why: 'The result is ready.',
     raisedBy: { kind: 'daemon' },
-    ferret: 'machine-agenda',
+    ferret: MACHINE_AGENDA_ID,
   });
   return { half, ref };
 }
+
+test('R-0044 real snapshots identify the machine board by exactly MACHINE_AGENDA_ID', async () => {
+  const { half } = await world();
+  expect(MACHINE_AGENDA_ID).toBe('machine-agenda');
+  expect((await half.asks.snapshots()).map(snapshot => snapshot.sessionId)).toEqual([MACHINE_AGENDA_ID]);
+  await half.asks.raise({
+    kind: 'yesno',
+    source: 'ferret',
+    entry: 'ferret-result',
+    ref: {},
+    subject: 'Conversation result',
+    why: 'Ready for the owner.',
+    raisedBy: { kind: 'ferret', ferret: 'n-ferret' },
+    ferret: 'n-ferret',
+  });
+  const snapshots = await half.asks.snapshots();
+  expect(snapshots.map(snapshot => snapshot.sessionId).sort()).toEqual([MACHINE_AGENDA_ID, 'n-ferret']);
+  expect(snapshots.find(snapshot => snapshot.sessionId === MACHINE_AGENDA_ID)?.items[0]?.subject).toBe(
+    'Build finished',
+  );
+});
 
 test('R-0044 full snapshots preserve open and parked boards and return an empty requested board', async () => {
   const { half, ref } = await world();

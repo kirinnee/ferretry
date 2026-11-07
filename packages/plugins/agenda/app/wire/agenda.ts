@@ -1,3 +1,15 @@
+import {
+  AskItemSchema as AgendaItemSchema,
+  AskBoardSnapshotSchema as AgendaSnapshotSchema,
+  AskListSnapshotSchema as AgendaListSnapshotSchema,
+  type AskItem as AgendaItem,
+  type AskBoardSnapshot as AgendaSnapshot,
+  type AskListSnapshot as AgendaListSnapshot,
+} from '@ferretry/core-asks/contract';
+
+export { AgendaItemSchema, AgendaSnapshotSchema, AgendaListSnapshotSchema };
+export type { AgendaItem, AgendaSnapshot, AgendaListSnapshot };
+
 import { z } from 'zod';
 import {
   AccountIdSchema,
@@ -7,12 +19,10 @@ import {
 } from './account-ids.ts';
 import {
   AgendaRestingSchema,
-  AgendaStageEntrySchema,
   AgendaStageSchema,
   type AgendaStateSource,
   agendaState,
   MAX_AGENDA_REST_WHY_LENGTH,
-  MAX_AGENDA_STAGES,
 } from './agenda-state.ts';
 import { BoardReopenAttachmentsSchema, TaskRefSchema } from './board-refs.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
@@ -1304,290 +1314,6 @@ export const AgendaOwnerAnswerSchema = z
   });
 export type AgendaOwnerAnswer = z.infer<typeof AgendaOwnerAnswerSchema>;
 
-const AgendaItemBaseShape = {
-  id: AgendaIdSchema,
-  source: AgendaSourceSchema,
-  sourceRef: z.string().max(MAX_AGENDA_SOURCE_REF_LENGTH).nullable(),
-  sourceSeq: PositiveIntegerSchema.optional(),
-  subject: singleLine(MAX_AGENDA_SUBJECT_LENGTH),
-  why: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
-  context: z.string().max(MAX_AGENDA_CONTEXT_LENGTH).nullable().optional(),
-  waitingSince: InstantSchema,
-  howToResolve: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
-  ask: AgendaAskSchema.optional(),
-  ...AgendaCardShape,
-  ...AgendaBriefShape,
-  /** The indices of the steps the owner has ticked: sorted, unique, each below `steps.length`; absent when none. */
-  stepsDone: z.array(NonNegativeIntegerSchema).min(1).max(MAX_AGENDA_STEPS).optional(),
-  /**
-   * Set while the item waits on its raising ferret: the ask is IN DISCUSSION (every ferret-raised ask starts
-   * there, until `surface`), or the owner asked for more information and it has not yet updated it.
-   */
-  waitingOn: z.literal('ferret').optional(),
-  /** When the wait began (the raise, for an ask born in discussion); present exactly while `waitingOn` is. */
-  askedAt: InstantSchema.optional(),
-  /**
-   * What the wait is FOR, only while `waitingOn` is set: `discussion` while the ask is being talked through in
-   * the ferret's chat, before it reaches the owner's queue ("in discussion"); an ask a ferret raises starts
-   * there, and the owner's `discuss` puts a surfaced one back. Absent reads as `info`, so an item written
-   * before discussions existed reads exactly as it did.
-   */
-  waitingFor: z.enum(['info', 'discussion']).optional(),
-  /** How many times the owner has asked for more information or to discuss it: one request counter for both. */
-  infoRequests: PositiveIntegerSchema.optional(),
-  /** Bounded, oldest first: when the owner asked for more information and when the ferret added it. */
-  history: z.array(AgendaHistoryEntrySchema).min(1).max(MAX_AGENDA_HISTORY).optional(),
-  /** Bounded, oldest first: every edit since the item was raised (`AgendaRevision`). Absent: never edited. */
-  revisions: z.array(AgendaRevisionSchema).min(1).max(MAX_AGENDA_REVISIONS).optional(),
-  /**
-   * Bounded recent tail of complete entries, oldest first. The full thread lives outside the item and is read
-   * through GET …/conversation. Count and last time describe the full thread, including words outside this tail.
-   */
-  conversation: z.array(AgendaConversationEntrySchema).min(1).optional(),
-  conversationCount: z.number().int().nonnegative().optional(),
-  conversationLastAt: InstantSchema.optional(),
-  /** The items this one absorbed (`fy agenda merge`), oldest first; on the survivor. */
-  mergedFrom: z.array(AgendaIdSchema).min(1).optional(),
-  /** The item this one was merged into; on the closed, absorbed item. */
-  mergedInto: AgendaIdSchema.optional(),
-  /** The item this one was split off (`fy agenda split`); on the new item. */
-  splitFrom: AgendaIdSchema.optional(),
-  /** The items split off this one, oldest first; on the original. */
-  splitInto: z.array(AgendaIdSchema).min(1).optional(),
-  /** The cards of the items merged into this one, besides its own `task`: nothing a merge absorbed loses its card. */
-  relatedTasks: z.array(TaskRefSchema).min(1).max(MAX_AGENDA_CARDS).readonly().optional(),
-  /** Off the owner's queue for now, and why (`AgendaParked`); absent on an item in play. */
-  parked: AgendaParkedSchema.optional(),
-  /** When the ferret last woke a snoozed item as urgent (`now`): it may again only `AGENDA_URGENT_WAKE_MS` later. */
-  urgentAt: InstantSchema.optional(),
-  /** The owner's last action on this item never reached the ferret; present only on an open item. */
-  undelivered: AgendaUndeliveredSchema.optional(),
-  /**
-   * A PLAIN NOTIFICATION (`fy notify`), not an agenda item: a summary the owner reads in the ferret's Inbox
-   * group and taps to open its chat. It has no answers and no turn; reading or clearing it resolves it. An old
-   * app reads it as an info card.
-   */
-  notice: z.literal(true).optional(),
-  /** The ferret asked for the phone to buzz for this notification (`fy notify --ping`). */
-  ping: z.literal(true).optional(),
-  /** The held configuration change the owner's Allow puts into effect (`AgendaConfirms`). */
-  confirms: AgendaConfirmsSchema.optional(),
-  /**
-   * The board card this item belongs to (`board.ts`): the card derives "waiting on you" from its open,
-   * blocking items. Absent or `null` reads as "no card": an item raised before cards existed, or by a client
-   * that named none. An older app reading a newer board drops the field.
-   */
-  task: TaskRefSchema.nullable().optional(),
-  /**
-   * The owner's one tap may close the linked card too: the answer row offers "Done · closes &F12". Set by
-   * `fy agenda add --offer-close`, and by the daemon for a to-do or review on a card in the to-test lane.
-   */
-  offerClose: z.literal(true).optional(),
-  /** The input request an `input` card presents; present exactly on that kind (`agendaInputProblems`). */
-  input: AgendaInputRefSchema.optional(),
-  /** The paste plan a card presents: the plan's own form answers it, never the generic answer. */
-  copyPlan: AgendaCopyPlanRefSchema.optional(),
-  /** The task plan a card presents: the plan's own form and passkey answer it, never the generic answer. */
-  taskPlan: AgendaTaskPlanRefSchema.optional(),
-  /** The approve-on-phone card an `info` item presents; only an `info` item carries one. */
-  phoneApproval: AgendaPhoneApprovalRefSchema.optional(),
-  /** The board cards a machine notice lists, each with Open, Start and Close (`AgendaCardRow`); only the daemon raises them. */
-  cards: z.array(AgendaCardRowSchema).min(1).max(MAX_AGENDA_CARDS).readonly().optional(),
-  /** The staged 2FA seed a card asks the owner to save with a passkey; answered by that ceremony, never the generic answer. */
-  twoFactorSeed: AgendaTwoFactorSeedRefSchema.optional(),
-  /** A ferret's suggested standing rule: its card opens the create sheet with nothing ticked, never the generic answer. */
-  signInRuleSuggestion: AgendaSignInRuleSuggestionRefSchema.optional(),
-  /** A standing rule a fill suspended; only an `info` item carries one, and no answer resumes it. */
-  signInRuleSuspended: AgendaSignInRuleSuspendedRefSchema.optional(),
-  /** The card asks this agenda carries, oldest first (`AgendaCardAsk`); only the daemon writes them. */
-  cardAsks: z.array(AgendaCardAskSchema).min(1).max(MAX_AGENDA_CARD_ASKS).optional(),
-  /**
-   * A digest of the thread as the daemon last left it, apart from its card asks: when the thread no longer matches it,
-   * the owner or a ferret has touched it since, and a withdrawn ask leaves it where it is. Only the daemon writes it;
-   * absent on a thread from before it, which a withdrawn ask never moves.
-   */
-  cardAsksSeal: z.string().max(64).optional(),
-  /**
-   * The subject the daemon last wrote on the card agenda it opened (`card-agenda:<card>`), exactly as written, every
-   * time it raises, restates or carries one: while the subject still equals it, the item's ask is the daemon's own, and
-   * once a ferret or the owner rewrites the subject it is the item's own question (`isGeneratedCardAgendaAsk`). Durable
-   * where the revision tail is not (it keeps only the newest few). Only the daemon writes it; absent on any other item
-   * and on a card agenda from before it, which is read by its words instead.
-   */
-  generatedSubject: singleLine(MAX_AGENDA_SUBJECT_LENGTH).optional(),
-  /**
-   * A digest of the item's OWN ask — its ask line, questions, fields, steps, ask and ask version — as it stood when the
-   * owner last answered the item in words (a reply, or a chat message logged on it): while the ask still digests to
-   * this, the owner has answered it, so a card ask's answer rests the item rather than putting that question back in
-   * front of them. Once a ferret rewrites or re-asks the question it no longer matches, and no earlier reply ever
-   * answers the new one. Only the daemon writes it; absent until the owner first replies.
-   */
-  ownAskRepliedTo: z.string().max(64).optional(),
-  /**
-   * How a RESTING item rests (`agenda-state.ts`): waiting on its ferret, or the ferret working on it, and the nudge
-   * clock. It rides beside the `parked: replied` (or `waitingOn: 'ferret'`) every app reads, which stays the field
-   * that says the item rests; absent on an item parked before Resting existed, which reads as waiting on the ferret.
-   */
-  resting: AgendaRestingSchema.optional(),
-  /** What the item needs from the owner right now; absent on an item from before stages, read from its kind (`agendaStage`). */
-  stage: AgendaStageSchema.optional(),
-  /** Bounded, oldest first: every stage the item entered, so its history keeps each one. */
-  stages: z.array(AgendaStageEntrySchema).min(1).max(MAX_AGENDA_STAGES).optional(),
-  /** The owner's latest answer while the item stays open (`AgendaOwnerAnswer`); absent until they answer. */
-  ownerAnswer: AgendaOwnerAnswerSchema.optional(),
-  /**
-   * Which ask the item is asking: 1 when absent, one more each time a ferret REPLACES the ask (its ask, kind,
-   * answers or questions). An answer that names an older one is refused `ask_changed`, never applied to the new ask.
-   */
-  askVersion: PositiveIntegerSchema.optional(),
-};
-
-/** Stored entries are decoded before the transport budget is applied. */
-export const StoredAgendaItemSchema = z
-  .discriminatedUnion('raisedBy', [
-    z.object({
-      ...AgendaItemBaseShape,
-      raisedBy: z.literal('human'),
-      raisedBySession: z.null(),
-      raisedByName: z.null(),
-    }),
-    z.object({
-      ...AgendaItemBaseShape,
-      raisedBy: z.literal('agent'),
-      raisedBySession: z.string().min(1),
-      raisedByName: z.string().nullable(),
-    }),
-    z.object({
-      ...AgendaItemBaseShape,
-      raisedBy: z.literal('daemon'),
-      raisedBySession: z.null(),
-      raisedByName: z.null(),
-    }),
-  ])
-  .superRefine((value, context) => {
-    for (const [path, message] of agendaAnswerProblems(value.answers ?? [], value.ask)) {
-      context.addIssue({ code: 'custom', message, path: path.split('.') });
-    }
-    for (const message of agendaOptionDetailProblems(value)) {
-      context.addIssue({ code: 'custom', message, path: ['optionDetails'] });
-    }
-    for (const problem of agendaInputProblems(value)) {
-      context.addIssue({ code: 'custom', message: problem, path: ['input'] });
-    }
-    if (value.phoneApproval !== undefined && value.kind !== 'info') {
-      context.addIssue({
-        code: 'custom',
-        message: 'only an info card presents a phone approval',
-        path: ['phoneApproval'],
-      });
-    }
-    if (value.cards !== undefined && value.kind !== 'info') {
-      context.addIssue({ code: 'custom', message: 'only an info card lists cards', path: ['cards'] });
-    }
-    if (value.signInRuleSuspended !== undefined && value.kind !== 'info') {
-      context.addIssue({
-        code: 'custom',
-        message: 'only an info card says a standing rule was suspended',
-        path: ['signInRuleSuspended'],
-      });
-    }
-    const asked = (value.cardAsks ?? []).map(ask => `${ask.gate.cardId}:${ask.gate.laneId}:${String(ask.gate.entry)}`);
-    if (new Set(asked).size !== asked.length) {
-      context.addIssue({ code: 'custom', message: 'an agenda carries each ask about a card once', path: ['cardAsks'] });
-    }
-    for (const problem of agendaFormProblems(value)) {
-      context.addIssue({ code: 'custom', message: problem, path: ['fields'] });
-    }
-    if (value.sourceSeq !== undefined && value.source !== 'agent-raised') {
-      context.addIssue({ code: 'custom', message: 'sourceSeq is valid only for agent-raised agenda items' });
-    }
-    if ((value.waitingOn === undefined) !== (value.askedAt === undefined)) {
-      context.addIssue({ code: 'custom', message: 'waitingOn and askedAt are set together', path: ['askedAt'] });
-    }
-    if (value.waitingFor !== undefined && value.waitingOn === undefined) {
-      context.addIssue({ code: 'custom', message: 'waitingFor is set only while waitingOn is', path: ['waitingFor'] });
-    }
-    if (value.stepsDone !== undefined) {
-      const done = value.stepsDone;
-      const ordered = done.every((step, index) => index === 0 || step > (done[index - 1] ?? -1));
-      if (!ordered || done.some(step => step >= (value.steps?.length ?? 0))) {
-        context.addIssue({
-          code: 'custom',
-          message: 'stepsDone must be sorted, unique and each below the number of steps',
-          path: ['stepsDone'],
-        });
-      }
-    }
-  });
-export const AgendaItemSchema = StoredAgendaItemSchema.superRefine(agendaItemSizeProblems);
-
-function agendaItemSizeProblems(
-  value: { readonly history?: readonly { readonly kind: string }[] },
-  context: z.RefinementCtx,
-): void {
-  if (agendaContentLength(value) > MAX_AGENDA_CONTENT_LENGTH) {
-    context.addIssue({
-      code: 'custom',
-      message: `an agenda item's own content is at most ${MAX_AGENDA_CONTENT_LENGTH} characters as JSON: move the long part to a file and link it`,
-    });
-  }
-  if (
-    JSON.stringify(value.history?.filter(entry => entry.kind === 'gate-answered') ?? []).length >
-    MAX_AGENDA_GATE_HISTORY_LENGTH
-  ) {
-    context.addIssue({
-      code: 'custom',
-      message: `agenda gate receipts are at most ${MAX_AGENDA_GATE_HISTORY_LENGTH} characters as JSON`,
-    });
-  }
-  if (JSON.stringify(value).length > MAX_AGENDA_ITEM_LENGTH) {
-    context.addIssue({
-      code: 'custom',
-      message: `an agenda item is at most ${MAX_AGENDA_ITEM_LENGTH} characters as JSON: move the long part to a file and link it`,
-    });
-  }
-}
-export type AgendaItem = z.infer<typeof AgendaItemSchema>;
-
-const ResolvedAgendaBaseShape = {
-  resolvedAt: InstantSchema,
-  resolutionNote: z.string().max(MAX_AGENDA_REPLY_LENGTH).nullable(),
-  response: AgendaResponseSchema.optional(),
-  /** A SHA-256 of everything a gate answer said, kept with the answered item so an exact repeat reads as one. */
-  answerReceipt: z
-    .string()
-    .regex(/^[0-9a-f]{64}$/)
-    .optional(),
-  disposition: AgendaDispositionSchema,
-};
-
-const AgendaResolutionSchema = z.discriminatedUnion('resolvedBy', [
-  z.object({
-    ...ResolvedAgendaBaseShape,
-    resolvedBy: z.literal('human'),
-    resolvedBySession: z.null(),
-    resolvedByName: z.null(),
-  }),
-  z.object({
-    ...ResolvedAgendaBaseShape,
-    resolvedBy: z.literal('agent'),
-    resolvedBySession: z.string().min(1),
-    resolvedByName: z.string().nullable(),
-  }),
-  z.object({
-    ...ResolvedAgendaBaseShape,
-    resolvedBy: z.literal('daemon'),
-    resolvedBySession: z.null(),
-    resolvedByName: z.null(),
-  }),
-]);
-
-/** A response fits its ask by kind, except `other`: the owner's own words, which any ask with options takes. */
-function responseKindFitsAsk(ask: string | undefined, response: string): boolean {
-  if (response === 'other') return ask !== undefined && ask !== 'open-question' && ask !== 'task';
-  return ask === response;
-}
-
 /** The keys that are about the item's life, not what it says: its versions, its state and how it was closed. */
 const AGENDA_CONTROL_KEYS: ReadonlySet<string> = new Set([
   'stage',
@@ -1663,39 +1389,11 @@ export function fitAgendaItem<
   return fitted;
 }
 
-export const StoredResolvedAgendaItemSchema = z
-  .intersection(StoredAgendaItemSchema, AgendaResolutionSchema)
-  .superRefine((value, context) => {
-    if (
-      agendaReplyEnvelopeLength({ response: value.response, note: value.resolutionNote }) >
-      MAX_AGENDA_REPLY_ENVELOPE_LENGTH
-    ) {
-      context.addIssue({
-        code: 'custom',
-        message: `an answer plus note is at most ${MAX_AGENDA_REPLY_ENVELOPE_LENGTH} characters as JSON`,
-      });
-    }
-    if (value.disposition !== 'done' && value.response !== undefined) {
-      context.addIssue({ code: 'custom', message: 'only a done item may carry a response', path: ['response'] });
-    }
-    // A form is asked as an open question (an old app still lets the owner reply) but answered by field.
-    const answeredAsForm = value.kind === 'form' && value.response?.kind === 'form';
-    if (value.response !== undefined && !answeredAsForm && !responseKindFitsAsk(value.ask?.kind, value.response.kind)) {
-      context.addIssue({ code: 'custom', message: 'response kind must match the original ask', path: ['response'] });
-    }
-    if (value.response?.kind === 'multiple-choice' && value.ask?.kind === 'multiple-choice') {
-      const choices = value.ask.options.map(option => option.label.trim());
-      if (!choices.includes(value.response.choice.trim())) {
-        context.addIssue({
-          code: 'custom',
-          message: 'choice must name one of the ask options',
-          path: ['response', 'choice'],
-        });
-      }
-    }
-  });
-export const ResolvedAgendaItemSchema = StoredResolvedAgendaItemSchema.superRefine(agendaItemSizeProblems);
-export type ResolvedAgendaItem = z.infer<typeof ResolvedAgendaItemSchema>;
+// Wire items are owned by Asks; the app only names their public projections.
+export const StoredAgendaItemSchema = AgendaItemSchema;
+export const ResolvedAgendaItemSchema = AgendaSnapshotSchema.shape.resolved.element;
+export const StoredResolvedAgendaItemSchema = ResolvedAgendaItemSchema;
+export type ResolvedAgendaItem = AgendaSnapshot['resolved'][number];
 
 /**
  * The owner's answers a machine is holding for one ferret, to deliver them as ONE message once the owner
@@ -1729,85 +1427,11 @@ export const AgendaDeliverySchema = z.strictObject({
 });
 export type AgendaDelivery = z.infer<typeof AgendaDeliverySchema>;
 
-const AgendaSnapshotObjectSchema = z.object({
-  v: z.literal(AGENDA_SCHEMA_VERSION),
-  sessionId: z.string().min(1),
-  items: z.array(AgendaItemSchema).max(MAX_AGENDA_PER_SESSION),
-  resolved: z.array(ResolvedAgendaItemSchema).max(MAX_AGENDA_RESOLUTIONS),
-  count: NonNegativeIntegerSchema,
-  parseErrors: NonNegativeIntegerSchema,
-  updatedAt: InstantSchema,
-  /** Writing advice for the item just raised or edited; present only on that response. */
-  warnings: z.array(z.string().trim().min(1).max(MAX_AGENDA_WARNING_LENGTH)).max(MAX_AGENDA_WARNINGS).optional(),
-  /** What the daemon did to the request that the caller should know, not advice on its writing (a card link left off). */
-  notes: z.array(z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH)).max(MAX_AGENDA_WARNINGS).optional(),
-  /**
-   * How many devices this machine has enrolled for push, counted as an item was raised; present only on
-   * the response to that raise. Zero means the owner was told nothing: the ask is on the board, and no
-   * phone or browser will hear of it until one turns notifications on.
-   */
-  enrolled: NonNegativeIntegerSchema.optional(),
-  /** Answers held for this ferret and when they go; absent when nothing is held. */
-  replies: AgendaRepliesSchema.optional(),
-  /** Answers on their way to the ferret and not yet proven to arrive; absent when there are none. */
-  delivery: AgendaDeliverySchema.optional(),
-});
-const agendaSnapshotProblems = (
-  value: { count: number; items: readonly { id: string }[]; resolved: readonly { id: string }[] },
-  context: z.RefinementCtx,
-): void => {
-  if (value.count !== value.items.length) {
-    context.addIssue({ code: 'custom', message: 'count must equal the number of active items', path: ['count'] });
-  }
-  const activeIds = new Set(value.items.map(item => item.id));
-  if (activeIds.size !== value.items.length) {
-    context.addIssue({ code: 'custom', message: 'active agenda ids must be unique', path: ['items'] });
-  }
-  const resolvedIds = value.resolved.map(item => item.id);
-  if (new Set(resolvedIds).size !== resolvedIds.length) {
-    context.addIssue({ code: 'custom', message: 'resolved agenda ids must be unique', path: ['resolved'] });
-  }
-  if (resolvedIds.some(id => activeIds.has(id))) {
-    context.addIssue({ code: 'custom', message: 'active and resolved agenda ids must be disjoint' });
-  }
-};
-export const AgendaSnapshotSchema = AgendaSnapshotObjectSchema.superRefine(agendaSnapshotProblems);
-export type AgendaSnapshot = z.infer<typeof AgendaSnapshotSchema>;
+export const AgendaListRecordSchema = AgendaListSnapshotSchema.shape.resolved.element;
+export type AgendaListRecord = AgendaListSnapshot['resolved'][number];
+export const ResolvedAgendaHeaderSchema = AgendaListRecordSchema.options[0];
+export type ResolvedAgendaHeader = z.infer<typeof ResolvedAgendaHeaderSchema>;
 
-/** List-only metadata. The complete document is read through GET …/agenda/:id. */
-const ResolvedAgendaHeaderObjectSchema = z
-  .object({
-    projection: z.literal('header'),
-    lifecycle: z.literal('addressed'),
-    id: AgendaIdSchema,
-    title: AgendaCardShape.title.unwrap(),
-    kind: AgendaKindSchema,
-    subject: AgendaItemBaseShape.subject,
-    /** The Inbox's Find searches this one-line reason as well as the title and subject. */
-    why: AgendaItemBaseShape.why,
-    sourceRef: AgendaItemBaseShape.sourceRef,
-    raisedBy: z.enum(['human', 'agent', 'daemon']),
-    raisedByName: z.string().nullable(),
-    conversationCount: NonNegativeIntegerSchema,
-    task: AgendaItemBaseShape.task,
-    relatedTasks: AgendaItemBaseShape.relatedTasks,
-    links: AgendaBriefShape.links,
-    stage: AgendaItemBaseShape.stage,
-    stages: AgendaItemBaseShape.stages,
-    fields: AgendaBriefShape.fields,
-  })
-  .and(AgendaResolutionSchema);
-
-/** Omitted document fields are unavailable until the one-item read completes. */
-export type ResolvedAgendaHeader = z.infer<typeof ResolvedAgendaHeaderObjectSchema> &
-  Partial<Omit<AgendaItem, 'raisedBy' | 'raisedByName'>>;
-export const ResolvedAgendaHeaderSchema: z.ZodType<ResolvedAgendaHeader> = ResolvedAgendaHeaderObjectSchema;
-export const AgendaListRecordSchema = z.union([ResolvedAgendaHeaderSchema, ResolvedAgendaItemSchema]);
-export type AgendaListRecord = z.infer<typeof AgendaListRecordSchema>;
-export const AgendaListSnapshotSchema = AgendaSnapshotObjectSchema.extend({
-  resolved: z.array(AgendaListRecordSchema).max(MAX_AGENDA_RESOLUTIONS),
-}).superRefine(agendaSnapshotProblems);
-export type AgendaListSnapshot = z.infer<typeof AgendaListSnapshotSchema>;
 export const AgendaReadItemSchema = z.union([
   ResolvedAgendaItemSchema,
   z.intersection(AgendaItemSchema, z.object({ resolvedAt: z.never().optional(), projection: z.never().optional() })),

@@ -15,10 +15,12 @@ import { AgendaOpenPageSchema, DaemonAgendaSchema, DAEMON_AGENDA_ID } from '../.
 import { AgendaRollup } from '../../../daemon/lib/rollup.ts';
 import { MachineAgendaView } from '../../../daemon/lib/machine-agenda.ts';
 import { agendaRoutes, type AgendaRouteParts } from '../../../daemon/routes.ts';
+import { MACHINE_AGENDA_ID } from '../../../app/wire/index.ts';
+import { raiseAsk } from './support.ts';
 
 test('Agenda remains pending until app-shell-fill supplies its runtime and shell', async () => {
   const pending = await Bun.file(new URL('../../../../../../ports-pending.json', import.meta.url)).json();
-  expect(pending.pending).toContain('agenda');
+  expect(pending.pendingHalves.agenda).toContain('app');
   const reason = await Bun.file(new URL('../../../APP-PENDING.md', import.meta.url)).text();
   expect(reason).toContain('app-shell-fill');
   expect(reason).toContain('Parity rows remain unchecked');
@@ -112,6 +114,33 @@ test('R-0044 roll-up round-trips full items in sessions and never splits a board
   expect(response.status).toBe(200);
   expect(AgendaOpenPageSchema.parse(response.json()).sessions).toHaveLength(2);
   expect(AgendaOpenPageSchema.parse({ sessions: [] })).toEqual({ sessions: [] });
+});
+
+test('R-0044 a machine-only board leaves the conversation roll-up empty', async () => {
+  const asks = new FakeAsks();
+  await raiseAsk(asks, MACHINE_AGENDA_ID, 'machine-only');
+  expect(DAEMON_AGENDA_ID).toBe(MACHINE_AGENDA_ID);
+  expect(await new AgendaRollup(asks).page({ limit: 1 })).toEqual({ sessions: [] });
+  expect((await new MachineAgendaView(asks, board).list()).items).toHaveLength(1);
+});
+
+test('R-0044 machine items never consume the conversation page limit or cursor', async () => {
+  const asks = new FakeAsks();
+  // The reserved id sorts before both ferret ids, so including it would take the whole first page.
+  await raiseAsk(asks, MACHINE_AGENDA_ID, 'machine-first');
+  await raiseAsk(asks, MACHINE_AGENDA_ID, 'machine-second');
+  await raiseAsk(asks, 'n-ferret', 'first-conversation');
+  await raiseAsk(asks, 'z-ferret', 'last-conversation');
+  const rollup = new AgendaRollup(asks);
+  const first = await rollup.page({ limit: 1 });
+  expect(first.sessions.map(session => session.sessionId)).toEqual(['n-ferret']);
+  expect(first.next).toBe('n-ferret');
+  const last = await rollup.page({ after: first.next, limit: 1 });
+  expect(last.sessions.map(session => session.sessionId)).toEqual(['z-ferret']);
+  expect(last.next).toBeUndefined();
+  expect(
+    (await rollup.page({ after: MACHINE_AGENDA_ID, limit: 2 })).sessions.map(session => session.sessionId),
+  ).toEqual(['n-ferret', 'z-ferret']);
 });
 
 test('R-0110 R-0111 machine reads round-trip a complete list snapshot and an item', async () => {

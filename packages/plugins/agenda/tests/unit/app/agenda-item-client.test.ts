@@ -40,7 +40,11 @@ describe('the one-item agenda client', () => {
   it('refuses another daemon scope, another item, a header and a malformed document', async () => {
     // Arrange / Act / Assert
     const other = daemonSessionScope(daemonConnection({ ...connection, daemonId: 'other' }), 'session');
-    await expect(fetchAgendaItem(connection, other, id)).rejects.toThrow('scope must belong');
+    await expect(
+      fetchAgendaItem(connection, other, id, async () => {
+        throw new Error('must not read another daemon');
+      }),
+    ).rejects.toThrow('scope must belong');
     await expect(
       fetchAgendaItem(connection, scope, id, async () => Response.json(projectionRecord('A2'))),
     ).rejects.toThrow('another agenda item');

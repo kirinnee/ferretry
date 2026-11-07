@@ -1,6 +1,7 @@
 import type { AskItem, AsksApi } from '@ferretry/core-asks/contract';
 import {
   AGENDA_OPEN_DEFAULT_LIMIT,
+  DAEMON_AGENDA_ID,
   type AgendaOpenSession,
   type AgendaOpenPage,
   type AgendaOpenQuery,
@@ -22,6 +23,7 @@ export class AgendaRollup {
     const after = query.after;
     const byFerret = new Map<string, AskItem[]>();
     for (const board of await this.asks.snapshots()) {
+      if (board.sessionId === DAEMON_AGENDA_ID) continue;
       if (board.items.length > 0) byFerret.set(board.sessionId, board.items);
     }
     const ids = [...byFerret.keys()].sort().filter(id => after === undefined || id > after);

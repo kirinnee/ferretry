@@ -407,8 +407,8 @@ export class DaemonResponseError extends Error {
 
 export type DaemonFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-/** The one spelling of "the real network" for a half; a bare `fetch` stored and called later loses its receiver. */
-export const browserFetch: DaemonFetch = (input, init) => globalThis.fetch(input, init);
+// Daemon reads must be supplied by the public @ferretry/app client/connect facility.
+// This pending half has no browser-network default.
 
 const requirePath = (value: string): string => {
   if (!value.startsWith('/') || value.startsWith('//')) throw new Error('daemon path must be an origin-relative path');

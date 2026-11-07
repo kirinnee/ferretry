@@ -9,14 +9,14 @@ import {
 import type { DaemonConnection } from '../shell.ts';
 import type { DaemonSessionScope } from '../shell.ts';
 import { daemonRequest } from '../shell.ts';
-import { browserFetch, type DaemonFetch, DaemonResponseError } from '../shell.ts';
+import { type DaemonFetch, DaemonResponseError } from '../shell.ts';
 
 /** A complete document is read only when its list header is opened, through the same daemon transport. */
 export const fetchAgendaItem = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   id: AgendaId,
-  fetcher: DaemonFetch = browserFetch,
+  fetcher: DaemonFetch,
 ): Promise<AgendaReadItem> => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('agenda scope must belong to the requested daemon');
   const init = {
