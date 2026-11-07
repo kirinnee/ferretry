@@ -28,8 +28,7 @@ async function plantLogins() {
   await mkdir(join(work, 'nested'), { recursive: true, mode: 0o700 });
   await writeFile(join(work, '.credentials.json'), FAKE_CLAUDE, { mode: 0o600 });
   await writeFile(join(work, 'nested', 'state.bin'), FAKE_NESTED, { mode: 0o640 });
-  await writeFile(join(work, 'locked.json'), FAKE_LOCKED, { mode: 0o600 });
-  await chmod(join(work, 'locked.json'), 0o000);
+  await writeFile(join(work, 'locked.json'), FAKE_LOCKED, { mode: 0o400 });
   await writeFile(join(work, 'usage.json'), '{"version":1,"source":"claude-statusline","at":1}');
   // A link out of the home (the harness's own store): made again as the same link, never followed.
   await symlink('/nonexistent/FAKE-host-store/.credentials.json', join(work, 'host.json'));
@@ -50,11 +49,11 @@ test('moves each sign-in folder whole: same bytes, same modes, links remade, not
   const to = join(f.to, V5_CREDENTIALS);
   expect((await readdir(to)).sort()).toEqual(['codex-1', 'shared', 'work']);
 
-  // The mode-0000 file moved although the step may not open it: still mode 0000, same bytes (checked by the test).
   const locked = join(to, 'work/locked.json');
-  expect((await lstat(locked)).mode & 0o777).toBe(0o000);
-  await chmod(locked, 0o600);
+  expect((await lstat(locked)).mode & 0o777).toBe(0o400);
   expect(await readFile(locked, 'utf8')).toBe(FAKE_LOCKED);
+  // A copy, never a second name for the backup's file.
+  expect((await lstat(locked)).ino).not.toBe((await lstat(join(f.from, 'fleet/credentials/work/locked.json'))).ino);
 
   expect(await readFile(join(to, 'work/.credentials.json'), 'utf8')).toBe(FAKE_CLAUDE);
   expect((await stat(join(to, 'work/.credentials.json'))).mode & 0o777).toBe(0o600);
@@ -78,9 +77,6 @@ test('moves each sign-in folder whole: same bytes, same modes, links remade, not
     { file: join(V5_CREDENTIALS, 'work/nested/state.bin'), bytes: FAKE_NESTED.length },
   ]);
   expect(report.note).toContain('1 passive usage reading(s) left for Usage');
-  // Not root: the kernel refused to open the mode-0000 file, so it was given a second name, never read.
-  if (process.getuid?.() !== 0)
-    expect(report.note).toContain('1 unreadable sign-in file(s) given a second name (link(2)) instead of a copy');
   const text = JSON.stringify(report);
   for (const secret of ['FAKE-ACCESS', 'FAKE-LOCKED', 'FAKE-NESTED', 'FAKE-REFRESH'])
     expect(text).not.toContain(secret);
@@ -91,7 +87,7 @@ test('the v4 credentials are left where they were', async () => {
   const before = (await readdir(join(f.from, 'fleet/credentials'), { recursive: true })).sort();
   await loginsStep.run(f.ctx());
   expect((await readdir(join(f.from, 'fleet/credentials'), { recursive: true })).sort()).toEqual(before);
-  expect((await lstat(join(f.from, 'fleet/credentials/work/locked.json'))).mode & 0o777).toBe(0o000);
+  expect((await lstat(join(f.from, 'fleet/credentials/work/locked.json'))).mode & 0o777).toBe(0o400);
 });
 
 test('a login id with capitals fails naming the login, never a byte of it', async () => {
@@ -148,4 +144,18 @@ test('a home with no logins converts to nothing', async () => {
   expect(report.status).toBe('converted');
   expect(report.sealed).toEqual([]);
   expect(await stat(f.to).catch(() => undefined)).toBeUndefined();
+});
+
+test('a sign-in file this user cannot read fails the step by path, in a dry run too, and is never hard-linked', async () => {
+  if (process.getuid?.() === 0) return; // root reads a mode-0000 file
+  await plantLogins();
+  await chmod(join(f.from, 'fleet/credentials/work/locked.json'), 0o000);
+  for (const dryRun of [true, false]) {
+    const report = await loginsStep.run(f.ctx(dryRun));
+    expect(report.status).toBe('failed');
+    expect(report.note).toContain('fleet/credentials/work/locked.json');
+    expect(report.note).toContain('chmod u+r');
+    expect(JSON.stringify(report)).not.toContain('FAKE-');
+  }
+  expect((await lstat(join(f.from, 'fleet/credentials/work/locked.json'))).nlink).toBe(1);
 });

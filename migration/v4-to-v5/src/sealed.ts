@@ -7,7 +7,19 @@
  * here reads, hashes, decrypts, prints or logs content; the report names the file and its size, never a byte of it.
  */
 import { constants } from 'node:fs';
-import { chmod, copyFile, link, lstat, mkdir, readdir, readlink, stat, symlink, utimes } from 'node:fs/promises';
+import {
+  access,
+  chmod,
+  copyFile,
+  link,
+  lstat,
+  mkdir,
+  readdir,
+  readlink,
+  stat,
+  symlink,
+  utimes,
+} from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export interface SealedMove {
@@ -36,22 +48,31 @@ export async function moveSealed(from: string, to: string): Promise<SealedMove> 
   return { from, to, bytes: source.size, mode };
 }
 
-/** One entry of a sealed folder as it landed: a copied file, a second name for an unreadable file, or a link. */
+/** One entry of a sealed folder as it landed: a copied file or a link. */
 export interface SealedTreeEntry {
   readonly to: string;
-  readonly kind: 'file' | 'hard-link' | 'link';
+  readonly kind: 'file' | 'link';
   readonly bytes: number;
 }
 
-const unreadable = (error: unknown): boolean =>
-  ['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '');
+/**
+ * A sealed file this program may not copy (mode 0000, or another owner). It is refused rather than given a second
+ * name with `link(2)`: a hard link would make the new home and the kept v4 backup ONE file, so a harness rewriting
+ * its sign-in in place would change the backup too and spoil a rollback. Carries the path only.
+ */
+export class SealedUnreadableError extends Error {
+  override readonly name = 'SealedUnreadableError';
+  constructor(readonly path: string) {
+    super(`sealed file cannot be copied by this user: ${path}`);
+  }
+}
 
 /**
  * Carry a sealed folder (a harness's sign-in folder) to a path that must not exist yet, looking at nothing but
  * `lstat` and directory names:
  *
- * - a regular file is copied with {@link moveSealed}. One this program may not open (mode 0000) is given a second
- *   name with `link(2)` instead, which needs no read: the same bytes, still never opened;
+ * - a regular file is copied with {@link moveSealed}. One this user may not copy (mode 0000) is refused with
+ *   {@link SealedUnreadableError}, in a dry run too (`access(2)` asks the kernel; nothing is opened);
  * - a symbolic link is made again as a link, never followed: `relink` gets its target (a path, not content) and
  *   says where the new link points, so a link out of the home stays the same link;
  * - a folder is made again with its mode and times, after its contents;
@@ -94,18 +115,19 @@ export async function moveSealedTree(
       return;
     }
     if (!facts.isFile()) throw new Error(`sealed source is not a file, folder or link: ${source}`);
+    if (
+      !(await access(source, constants.R_OK).then(
+        () => true,
+        () => false,
+      ))
+    )
+      throw new SealedUnreadableError(source);
     if (!options.write) {
       entries.push({ to: target, kind: 'file', bytes: facts.size });
       return;
     }
-    try {
-      const moved = await moveSealed(source, target);
-      entries.push({ to: target, kind: 'file', bytes: moved.bytes });
-    } catch (error) {
-      if (!unreadable(error) || (await lstat(target).catch(() => undefined)) !== undefined) throw error;
-      await link(source, target);
-      entries.push({ to: target, kind: 'hard-link', bytes: facts.size });
-    }
+    const moved = await moveSealed(source, target);
+    entries.push({ to: target, kind: 'file', bytes: moved.bytes });
   };
   await walk(from, to);
   return entries;

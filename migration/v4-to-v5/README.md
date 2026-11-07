@@ -95,7 +95,8 @@ memory under `format: 1` (v5's schema is still the condensed `looseObject`, so t
 blessings to `remembered.json`, rewrites each `reportPath` into the new home, copies reports unopened and turns each
 `jev-checks/<day>.jsonl` into `{format: 1, day, checks}`; the per-assignment stop capability is a secret and is
 dropped. Logins moves each `fleet/credentials/<login>/` whole with `moveSealedTree` (lstat and folder listings only;
-a file this program may not open gets a second name with `link(2)`; a link is made again, never followed) and turns
+a file this user may not read fails the step by path, never hard-linked, so the backup stays its own file; a link is
+made again, never followed) and turns
 `state/model-catalog.json` into `models.json` `published`. A v4 login id with capitals fails the step: v5 login ids
 are lowercase. `config/warden.yaml` and `config/logins/*.yaml` belong to the pending Layouts and settings step.
 
