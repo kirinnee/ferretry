@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
+import { AsksChanged, AskIdSchema } from '@ferretry/core-asks/contract';
 import { FakeGate, ferretStanding } from '@ferretry/core-gate/contract/testing';
 import {
   type FerretId,
@@ -61,9 +62,11 @@ async function setup(beforeRestore?: (host: TestHost) => void) {
   });
   let guard: OutputGuard;
   const admission = standInAdmission(() => owner());
+  const asks = new FakeAsks();
+  const gate = new FakeGate();
   const host = await testHost({
     plugins: [vault, terminals],
-    fakes: { asks: new FakeAsks(), gate: new FakeGate() },
+    fakes: { asks, gate },
     gate: {
       ...admission,
       admit: input =>
@@ -102,10 +105,27 @@ async function setup(beforeRestore?: (host: TestHost) => void) {
         submit: false,
       },
     });
-  return { host, api, id, request, target, deliver, built, send, guard };
+  return { host, api, id, request, target, deliver, built, send, guard, asks, gate };
 }
 
 describe('the composed Vault input half', () => {
+  test('I53 owner-dismissed asks cancel the current pending input and prevent any later delivery', async () => {
+    const { host, asks, gate, api, id, request, target, deliver } = await setup();
+    const askId = AskIdSchema.parse(request.agendaItemId);
+    // An open-card notification cannot withdraw it.
+    host.emit(AsksChanged, { askId, state: 'open' });
+    await host.settle();
+    expect(await api.inputState(id)).toBe('pending');
+    await asks.close(askId, 'dismissed');
+    host.emit(AsksChanged, { askId, state: 'closed' });
+    await host.settle();
+    expect(await api.inputState(id)).toBe('cancelled');
+    expect((await deliver()).status).toBe(410);
+    expect(target.live.writes()).toBe(0);
+    host.emit(AsksChanged, { askId, state: 'closed' });
+    await host.settle();
+    expect(gate.audits.filter(event => event.event === 'input.cancelled')).toHaveLength(1);
+  });
   test('I82 the composed Vault locks reads before exposing inputHolds, until restore completes', async () => {
     const { host } = await setup(before => {
       const holds = before.provided(InputHoldsPort);

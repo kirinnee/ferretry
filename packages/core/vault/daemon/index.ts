@@ -24,6 +24,8 @@ import { WebCryptoCloneCrypto } from './adapters/secrets/webcrypto-clone-crypto.
 import { FileSecretKey, WebCryptoSecretCipher } from './adapters/secrets/webcrypto-secret-cipher.ts';
 import { quarantineOverOutputGuard } from './adapters/inputs/output-guard.ts';
 import { buildInputs } from './inputs.ts';
+import { INPUT_ASK_SOURCE } from './adapters/inputs/asks.ts';
+import type { AgendaId } from './lib/inputs/wire.ts';
 import { EphemeralAwareRedactor } from './lib/inputs/ephemeral-redactor.ts';
 import { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
 import { InputRequestError } from './lib/inputs/errors.ts';
@@ -181,6 +183,15 @@ export default implementDaemon(manifest, {
         sealedDocuments: new KernelSealedDocuments(key, kernel.clock),
       },
       hooks: { 'ask.sources:input': inputs.askSource },
+      subscribers: {
+        'asks.changed': async ({ askId, state }) => {
+          if (state !== 'closed') return;
+          const ask = await ctx.needs.asks.get(askId);
+          if (ask?.source !== INPUT_ASK_SOURCE || ask.state !== 'closed' || ask.ferret === undefined) return;
+          // As today, only the request's current pending card is ended; our own final-card close is a no-op.
+          await inputs.service.cardDismissed(ask.ferret, askId as string as AgendaId);
+        },
+      },
     };
   },
 });

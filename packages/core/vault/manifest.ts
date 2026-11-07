@@ -1,4 +1,4 @@
-import { AskSources, AsksPort } from '@ferretry/core-asks/contract';
+import { AskSources, AsksChanged, AsksPort } from '@ferretry/core-asks/contract';
 import { CAPABILITIES, GatePort } from '@ferretry/core-gate/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { definePlugin, route, tool } from '@ferretry/kernel/manifest';
@@ -170,6 +170,7 @@ export default definePlugin({
   data: {
     state: [VaultFile, VaultKeyFile, HoldsFile, InputRequestFiles],
     publishes: [SecretsChanged, HoldsChanged],
+    subscribes: [AsksChanged],
   },
   hooks: {
     offers: [{ hook: InputTargets }],
