@@ -5,7 +5,8 @@
  * The kernel does not yet expose this internal root. This seam grants no filesystem access by itself; composition
  * must supply the declared root, including its link/device checks, private mkdir and metadata-only file stamp.
  */
-import { dirname, relative } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
 import type { LoginFile } from '../../../contract/index.ts';
 import { FleetCredentialCatalog, type CredentialEmailSource } from '../../lib/credentials/credentials-service.ts';
@@ -53,10 +54,23 @@ export class OwnedLoginStore {
 
   constructor(
     private readonly root: OwnedLoginRoot,
+    kernelHome: string | undefined,
     private readonly now: () => number,
   ) {
+    // Only daemon composition may supply the kernel-known home, never config, routes or caller input.
+    // Keep it independent of the injected root; the kernel porter will wire both together later.
+    if (kernelHome === undefined || !isAbsolute(kernelHome)) throw new Error('the kernel home is required');
     const base = root.resolve('');
     if (!base.ok) throw new Error('the owned login root could not be resolved');
+    let owned = false;
+    try {
+      owned =
+        isAbsolute(base.value) &&
+        realpathSync(base.value) === join(realpathSync(kernelHome), 'state', 'logins', 'credentials');
+    } catch {
+      // Refuse an unreachable home/root without exposing a filesystem error or its path.
+    }
+    if (!owned) throw new Error('the root is not the owned login credentials subtree');
     this.#base = base.value;
   }
 

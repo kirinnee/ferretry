@@ -45,13 +45,15 @@ afterEach(async () => {
 });
 
 /** Only a temporary FY_HOME. Use the kernel's actual lexical/link/device checks around the injected seam. */
-async function fixture() {
+async function fixture(plugin = 'logins') {
   const fyHome = await mkdtemp(join(tmpdir(), 'logins-owned-'));
   tempHomes.push(fyHome);
-  const base = join(fyHome, 'state/logins/credentials');
+  const base = join(fyHome, 'state', plugin, 'credentials');
   await mkdir(base, { recursive: true, mode: 0o700 });
   const fs = nodeFs(() => 'fixture');
+  const checkedPaths: FencedPath[] = [];
   const checked = async (path: FencedPath): Promise<FencedPath> => {
+    checkedPaths.push(path);
     const result = await resolveInRoot(fs, fyHome, base, false, path);
     if (!result.ok) throw new Error(`owned root refused: ${result.error}`);
     return result.value;
@@ -91,7 +93,7 @@ async function fixture() {
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
     await writeFile(target, JSON.stringify(value), { mode: 0o600 });
   };
-  return { fyHome, base, root, put };
+  return { fyHome, base, root, put, checkedPaths };
 }
 
 const jwt = (claims: unknown) => `fixture.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.fixture`;
@@ -115,13 +117,45 @@ const config = {
   },
 };
 
+test('S175 owned store refuses another plugin’s fenced root before credential operations', async () => {
+  const f = await fixture('another-plugin');
+  await f.put('claude/.credentials.json', claude());
+  const file = f.root.resolve('claude/.credentials.json');
+  if (!file.ok) throw new Error('fixture file refused');
+  // This is a usable root with the real kernel fence checks, not an escaping or dishonest handle.
+  expect((await f.root.stat(file.value))?.kind).toBe('file');
+  f.checkedPaths.length = 0;
+  expect(() => new OwnedLoginStore(f.root, f.fyHome, () => NOW)).toThrow(
+    'the root is not the owned login credentials subtree',
+  );
+  expect(f.checkedPaths).toEqual([]);
+});
+
+test('S175 owned store requires an independent kernel home before accepting an injected root', async () => {
+  const f = await fixture();
+  expect(() => new OwnedLoginStore(f.root, undefined, () => NOW)).toThrow('the kernel home is required');
+  expect(f.checkedPaths).toEqual([]);
+});
+
+test('S175 owned store refuses a credentials root linked into another plugin’s subtree', async () => {
+  const f = await fixture();
+  const foreign = join(f.fyHome, 'state/another-plugin/credentials');
+  await mkdir(foreign, { recursive: true, mode: 0o700 });
+  await rm(f.base, { recursive: true });
+  await symlink(foreign, f.base);
+  expect(() => new OwnedLoginStore(f.root, f.fyHome, () => NOW)).toThrow(
+    'the root is not the owned login credentials subtree',
+  );
+  expect(f.checkedPaths).toEqual([]);
+});
+
 test('S175 owned store metadata reaches the actual daemon list: status, email, plan and private sign-in paths', async () => {
   const f = await fixture();
   await f.put('claude/.credentials.json', claude());
   await f.put('claude/sign-in/.claude.json', { oauthAccount: { emailAddress: ' claude@example.test ' } });
   await f.put('codex/auth.json', codex());
   const host = await testHost({
-    plugins: [buildLoginsDaemon(f.root)],
+    plugins: [buildLoginsDaemon(f.root, f.fyHome)],
     fakes: { vault: emptyVault() },
     config,
     clock: fixedClock(instantFromEpochMs(NOW)),
@@ -139,7 +173,7 @@ test('S175 owned store metadata reaches the actual daemon list: status, email, p
     expect(wire.includes(TOKEN) || wire.includes(REFRESH)).toBe(false);
     expect(wire).not.toMatch(/fingerprint|access_token|refresh_token|accessToken|refreshToken/u);
 
-    const store = new OwnedLoginStore(f.root, () => NOW);
+    const store = new OwnedLoginStore(f.root, f.fyHome, () => NOW);
     const catalog = store.catalog(() => new Map([['new', { harness: 'claude-code', store: 'ferretry' }]]));
     const target = catalog.signInTarget(await catalog.entry('new'));
     expect(target.kind).toBe('store');
@@ -161,7 +195,7 @@ test('owned metadata retains today’s expiry/missing/unreadable rules and rerea
   await f.put('claude/.credentials.json', claude(NOW - 1));
   await f.put('codex/auth.json', codex(NOW + 60_000));
   const host = await testHost({
-    plugins: [buildLoginsDaemon(f.root)],
+    plugins: [buildLoginsDaemon(f.root, f.fyHome)],
     fakes: { vault: emptyVault() },
     config,
     clock: fixedClock(instantFromEpochMs(NOW)),
@@ -170,7 +204,7 @@ test('owned metadata retains today’s expiry/missing/unreadable rules and rerea
     const list = await host.provided(LoginsPort).list();
     expect(list.logins.find(login => login.id === 'claude')?.status.word).toBe('refresh_due');
     expect(list.logins.find(login => login.id === 'codex')?.status.word).toBe('refresh_due');
-    const store = new OwnedLoginStore(f.root, () => NOW);
+    const store = new OwnedLoginStore(f.root, f.fyHome, () => NOW);
     const catalog = store.catalog(() => new Map([['claude', { harness: 'claude-code', store: 'ferretry' }]]));
     const entry = await catalog.entry('claude');
     if (entry.resolution.store === 'environment' || 'unavailable' in entry.resolution) throw new Error('no store');
@@ -192,7 +226,7 @@ test('owned metadata retains today’s expiry/missing/unreadable rules and rerea
 
 test('S175 owned store refuses host paths, traversal, Claude links and links escaping the owned root', async () => {
   const f = await fixture();
-  const store = new OwnedLoginStore(f.root, () => NOW);
+  const store = new OwnedLoginStore(f.root, f.fyHome, () => NOW);
   const catalog = store.catalog(
     () =>
       new Map([
@@ -244,6 +278,7 @@ test('S175 owned store refuses host paths, traversal, Claude links and links esc
         throw new Error(TOKEN);
       },
     },
+    f.fyHome,
     () => NOW,
   );
   // Use an ordinary owned file so the read, rather than the link check, is what fails.
@@ -258,7 +293,7 @@ test('S178 actual daemon Check now makes only the free provider read; values and
   await f.put('claude/.credentials.json', claude());
   const requests: { url: string; method: string }[] = [];
   const host = await testHost({
-    plugins: [buildLoginsDaemon(f.root)],
+    plugins: [buildLoginsDaemon(f.root, f.fyHome)],
     fakes: { vault: emptyVault() },
     config,
     clock: fixedClock(instantFromEpochMs(NOW)),
@@ -287,7 +322,7 @@ test('owned passive usage supplies measured windows; a list never rotates Codex,
   await f.put('codex/auth.json', codex(NOW - 1));
   await f.put('claude/.credentials.json', claude());
   await f.put('claude/usage.json', { version: 1, source: 'claude-statusline', at: NOW, fiveHour: { usedPercent: 24 } });
-  const daemon = buildLoginsDaemon(f.root);
+  const daemon = buildLoginsDaemon(f.root, f.fyHome);
   const starts: { program: string; args: readonly string[]; env: unknown }[] = [];
   let launchKind: LoginKind | undefined;
   const wired = implementDaemon(daemon.manifest, {
@@ -399,7 +434,7 @@ const sharingCases: readonly { name: string; browsers?: BrowsersApi; automatic?:
 for (const scenario of sharingCases) {
   test(`${scenario.name} in real composition selects the safe Codex fallback and explicit-choice sentence`, async () => {
     const f = await fixture();
-    const daemon = buildLoginsDaemon(f.root);
+    const daemon = buildLoginsDaemon(f.root, f.fyHome);
     const calls: string[][] = [];
     let launchKind: LoginKind | undefined;
     const wired = implementDaemon(daemon.manifest, {
@@ -493,7 +528,11 @@ for (const scenario of sharingCases) {
 
 test('external entrypoints still refuse missing governance after private launch orchestration is wired', async () => {
   const f = await fixture();
-  const host = await testHost({ plugins: [buildLoginsDaemon(f.root)], fakes: { vault: emptyVault() }, config });
+  const host = await testHost({
+    plugins: [buildLoginsDaemon(f.root, f.fyHome)],
+    fakes: { vault: emptyVault() },
+    config,
+  });
   try {
     const signIn = await host.request('POST', '/v1/logins/sign-in', { body: { loginId: 'codex' } });
     const refresh = await host.request('POST', '/v1/logins/codex/check', { body: {} });

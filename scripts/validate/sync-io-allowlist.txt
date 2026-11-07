@@ -27,3 +27,4 @@
 1 packages/core/kernel/host/fyd.ts  # gap: the daemon log sink appends each line synchronously, so a slow disk holds the loop; move to a buffered async writer
 2 packages/core/kernel/host/state/home-lock.ts  # boot: takes the home lock (creates run/, sets its mode) once while the daemon starts, before it serves
 4 packages/core/kernel/host/state/sqlite-store.ts  # boot: opens a plugin's database (directory, mode, existence, removal of a refused file) while plugins start, before the daemon serves; bun:sqlite itself is synchronous
+2 packages/plugins/logins/daemon/adapters/credentials/owned-store.ts  # boot: verifies the injected credentials root against the kernel-known home during synchronous plugin build, before any catalog or serving path can use the store
