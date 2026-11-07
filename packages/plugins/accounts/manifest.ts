@@ -1,4 +1,5 @@
 import { AskSources, AsksPort, type SourceKey } from '@ferretry/core-asks/contract';
+import { AccessPort, DevicesChanged } from '@ferretry/plugin-access/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { definePlugin, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
@@ -41,6 +42,8 @@ export default definePlugin({
   words: ACCOUNTS_WORDS,
 
   needs: { vault: VaultPort, asks: AsksPort },
+  /** Optional: a revoked or expired device's standing sign-in rules are suspended (P124, S119). */
+  uses: { access: AccessPort },
   provides: { accounts: AccountsPort },
 
   actions: {
@@ -667,6 +670,7 @@ export default definePlugin({
     ],
     readModels: ['sign-ins'],
     publishes: [SignInsChanged],
+    subscribes: [DevicesChanged],
   },
 
   hooks: {

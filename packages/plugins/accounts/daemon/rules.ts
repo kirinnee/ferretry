@@ -7,7 +7,9 @@
  * subscribers half b answers, keyed exactly as the manifest declares them; `./index.ts` answers every declared key
  * neither half returns with `503 plugin_unavailable`, so nothing here is required until it is ported.
  */
+import type { PayloadOf } from '@ferretry/kernel/contract';
 import type { ApiResponse, CallContext } from '@ferretry/kernel/contract';
+import type { DevicesChanged } from '@ferretry/plugin-access/contract';
 import type { ToolHandler } from '@ferretry/kernel/manifest';
 import type { AccountsContext, AccountsCore } from './accounts.ts';
 import type { RecipeMasking } from './routes/accounts.ts';
@@ -17,6 +19,11 @@ export interface RulesHalf {
   readonly tools: Readonly<Record<string, ToolHandler>>;
   /** The recipe masking half a's routes and `account_hint` serve through (I133); absent until recipes are ported. */
   readonly recipes?: RecipeMasking;
+  /**
+   * A device was revoked or expired: suspend every standing rule it approved (today's
+   * `signInRuleDevices.forgetDevice`; P124, S119). Absent until rules are ported.
+   */
+  readonly onDevicesChanged?: (payload: PayloadOf<typeof DevicesChanged>) => Promise<void>;
 }
 
 export function buildRules(_ctx: AccountsContext, _core: AccountsCore): RulesHalf {
