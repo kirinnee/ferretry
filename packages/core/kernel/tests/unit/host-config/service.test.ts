@@ -182,6 +182,26 @@ describe('config files: no raw secret', () => {
     expect(h.fs.snapshot().has(h.path('updates.yaml'))).toBe(false);
   });
 
+  test('a token-shaped unknown KEY is refused like a raw-secret value and appears in no answer, sentence or log line', async () => {
+    const h = configHarness();
+    const NAME = `ghp_${'a1B2c3D4'.repeat(3)}`;
+    const result = await h.files.write('updates', updatesDef, undefined, `limit: 3\n${NAME}: true\n`);
+    expect(result.kind).toBe('refused');
+    if (result.kind !== 'refused') return;
+    expect(result.reason).toBe('raw_secret');
+    expect(JSON.stringify(result)).not.toContain(NAME);
+    expect(JSON.stringify(result)).toContain('a name in here looks like a raw secret');
+    expect(h.fs.snapshot().has(h.path('updates.yaml'))).toBe(false);
+    // the same key found on disk: the last good version stays, and neither the status nor the log carry the key
+    await h.files.write('updates', updatesDef, undefined, 'limit: 5\n');
+    h.fs.seed(h.path('updates.yaml'), `limit: 1\n${NAME}: true\n`);
+    await h.files.reload();
+    expect(limitOf(h)).toBe(5);
+    expect(h.log.lines.join('\n')).not.toContain(NAME);
+    expect(JSON.stringify(h.files.status())).not.toContain(NAME);
+    expect(h.files.status().issues[0]?.fix).toContain('fy secret set NAME');
+  });
+
   test('a ${secret:NAME} placeholder is allowed', async () => {
     const h = configHarness();
     const result = await h.files.write('updates', updatesDef, undefined, 'limit: 3\napiKey: ${secret:UPDATES_KEY}\n');
