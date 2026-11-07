@@ -67,12 +67,12 @@ async function doctorWith(plugin: Record<string, unknown>): Promise<{ body: stri
   }
 }
 
-test('R-0081 n3 a data plugin.json with a ghp_ key never names it in the doctor body or sentence; the local log does', async () => {
+test('R-0081 n3 a data plugin.json with a ghp_ key never names it in the doctor body, the sentence or the log', async () => {
   const result = await doctorWith({ ...valid, [GITHUB_KEY]: true });
   expect(result.body).not.toContain(GITHUB_KEY);
   expect(result.sentences).not.toContain(GITHUB_KEY);
   expect(result.body).toContain('does not check');
-  expect(result.logged).toContain(GITHUB_KEY);
+  expect(result.logged).not.toContain(GITHUB_KEY);
 });
 
 test('R-0081 n3 a data plugin.json with an sk-ant- key never names it in the doctor body or sentence', async () => {
@@ -80,6 +80,7 @@ test('R-0081 n3 a data plugin.json with an sk-ant- key never names it in the doc
   expect(result.body).not.toContain(ANTHROPIC_KEY);
   expect(result.sentences).not.toContain(ANTHROPIC_KEY);
   expect(result.body).not.toContain('sk-ant');
+  expect(result.logged).not.toContain(ANTHROPIC_KEY);
 });
 
 test('R-0081 n3 a normal unknown key is still named, next to a hidden token-shaped one', async () => {

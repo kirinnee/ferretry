@@ -32,10 +32,11 @@ const DataPluginSchema = z.strictObject({
 
 export interface DataPluginRefusal {
   readonly folder: string;
-  /** What `fy doctor` and `GET /v1/doctor` say: it never repeats a name that looks like a token. */
+  /**
+   * What `fy doctor`, `GET /v1/doctor` and the log say: it never repeats a name that looks like a token (a key can
+   * be a token pasted by mistake, so zod's own text, which names it, is never kept anywhere).
+   */
   readonly sentence: string;
-  /** The same refusal with zod's own text, for the local log ONLY — it may name a key that was pasted by mistake. */
-  readonly detail?: string;
 }
 
 /** The config writer's own test for a token-shaped name (`config/secrets.ts`), applied to a name that would be echoed. */
@@ -83,7 +84,6 @@ export async function loadDataPlugins(
       refused.push({
         folder,
         sentence: `The data plugin in ${folder} does not check: ${safeIssue(parsed.error.issues[0])}.`,
-        detail: `The data plugin in ${folder} does not check: ${parsed.error.issues[0]?.message ?? 'invalid'}.`,
       });
       continue;
     }
