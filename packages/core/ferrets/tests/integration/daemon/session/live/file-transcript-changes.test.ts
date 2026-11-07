@@ -3,14 +3,12 @@ import { appendFile, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { unrefFileEventTimers } from '../../../../src/adapters/file-events/bun-file-event-source.ts';
-import { platformFileEventSource } from '../../../../src/adapters/file-events/platform.ts';
 import {
   FileTranscriptChanges,
   type TranscriptFileEvents,
   type TranscriptFileStamp,
 } from '../../../../../daemon/adapters/session/live/file-transcript-changes.ts';
-import { FileEventHub } from '../../../../src/lib/file-events/hub.ts';
+import { FileEventHub } from '../../support/file-event-hub.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
 /**
@@ -38,7 +36,7 @@ async function workspace(): Promise<string> {
 }
 
 function hub(): FileEventHub {
-  const events = new FileEventHub(platformFileEventSource(), unrefFileEventTimers);
+  const events = new FileEventHub();
   cleanups.add(() => events.close());
   return events;
 }

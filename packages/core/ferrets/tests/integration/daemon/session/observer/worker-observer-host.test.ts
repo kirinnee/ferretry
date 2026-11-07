@@ -4,43 +4,34 @@
  * itself when the worker cannot; and its 2 s tick only hands sessions to workers and observes the rest.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import should from 'should';
+import { InlineObserverHost } from '../../../../../daemon/adapters/session/observer/inline-observer-host.ts';
+import { SessionObservationApplier } from '../../../../../daemon/adapters/session/observer/session-observation-applier.ts';
+import { countWorkerChildren } from '../../../../../daemon/adapters/session/observer/worker-children.ts';
+import { WorkerObserverHost } from '../../../../../daemon/adapters/session/observer/worker-observer-host.ts';
+import { type ObserverWorker, WorkerSupervisor } from '../../../../../daemon/adapters/session/observer/worker-supervisor.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
+import { type ObserverPatch, SessionObserver } from '../../../../../daemon/lib/session/observer/observer.ts';
+import type {
+  FromSessionWorker,
+  SessionBinding,
+  ToSessionWorker,
+  TranscriptStamp,
+  WorkerAsk,
+  WorkerChild,
+} from '../../../../../daemon/lib/session/observer/protocol.ts';
+import type { TranscriptEvent } from '../../../../../daemon/lib/session/peers/transcript.ts';
+import { TURN_WATCH_INTERVAL_MS, type TurnPaneEvidence } from '../../../../../daemon/lib/session/peers/turn.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import {
-  BunSqliteIndexFactory,
-  countWorkerChildren,
-  type DaemonStorage,
-  DaemonStorageFactory,
-  InlineObserverHost,
-  KeyedSerialExecutor,
-  type ObserverWorker,
-  RuntimeEnvironment,
-  SessionObservationApplier,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  SystemClock,
-  WorkerObserverHost,
-  WorkerSupervisor,
-} from '../../../../src/adapters/index.ts';
-import {
-  type FromSessionWorker,
-  type ObserverPatch,
-  parseSessionId,
-  projectStructuredQuestion,
-  type SessionBinding,
-  type SessionId,
-  SessionObserver,
-  type ToSessionWorker,
-  type TranscriptEvent,
-  type TranscriptStamp,
-  TURN_WATCH_INTERVAL_MS,
-  type TurnPaneEvidence,
-  type WorkerAsk,
-  type WorkerChild,
-} from '../../../../src/lib/index.ts';
+  INERT_PANE_WORK,
+  INERT_QUESTIONS,
+  testTurnWatcher,
+  UNWIRED_PANE_WORK,
+  UNWIRED_QUESTIONS,
+} from '../../../../support/daemon/observer-peers.ts';
+import { memoryStorage } from '../../../../support/daemon/storage.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
 const NOW = '2026-10-22T08:00:00.000Z';
@@ -67,21 +58,9 @@ const question: TranscriptEvent = {
 };
 
 async function openStorage(): Promise<DaemonStorage> {
-  const home = await mkdtemp(join(tmpdir(), 'fy-worker-host-'));
-  const opened = await new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  ).open();
-  cleanups.push(async () => {
-    await opened.storage.close();
-    await rm(home, { recursive: true, force: true });
-  });
-  return opened.storage;
+  const { storage } = await memoryStorage({ clock: { now: () => NOW } });
+  cleanups.push(async () => await storage.close());
+  return storage;
 }
 
 type Ask = Extract<ToSessionWorker, { kind: 'request' }>;
@@ -143,7 +122,7 @@ async function rig(
   const storage = await openStorage();
   const ledgerRows = new Map<string, never>();
   const answers = { all: async () => ledgerRows, append: async () => undefined };
-  const applier = new SessionObservationApplier(storage, answers, new KeyedSerialExecutor());
+  const applier = new SessionObservationApplier(storage, answers, new KeyedSerialExecutor(), INERT_QUESTIONS);
   const reads: string[] = [];
   const serial = new KeyedSerialExecutor();
   const answerSerial = {
@@ -169,6 +148,7 @@ async function rig(
         },
         transcript: async () => 'lines',
         processes: async () => ({ kind: 'observed', processes: [] }),
+        paneWork: INERT_PANE_WORK,
       },
       clock: { now: () => NOW },
       yieldToLoop: async () => undefined,
@@ -186,8 +166,9 @@ async function rig(
         const timer = setInterval(tick, intervalMs);
         return () => clearInterval(timer);
       },
+      turnWatcher: testTurnWatcher,
     },
-    new SessionObserver(text => `digest(${text})`),
+    new SessionObserver(text => `digest(${text})`, INERT_QUESTIONS),
   );
   const workers: AnsweringWorker[] = [];
   const scheduled: number[] = [];
@@ -236,11 +217,12 @@ async function rig(
         return { close: () => closedWatches.push(path) };
       },
     },
-    observer: new SessionObserver(text => `digest(${text})`),
+    observer: new SessionObserver(text => `digest(${text})`, INERT_QUESTIONS),
     liveness: {
       redact: async text => text.replaceAll('secret', '[redacted]'),
       processes: async () =>
         ({ kind: 'observed', processes: [{ pid: 1, argv: 'bash -c sleep 600', verdict: 'unknown' }] }) as never,
+      paneWork: UNWIRED_PANE_WORK,
     },
     clock: { now: () => NOW },
     barrierMs: options.barrierMs ?? 1_000,
@@ -250,6 +232,7 @@ async function rig(
       const timer = setTimeout(run, delayMs);
       return () => clearTimeout(timer);
     },
+    turnWatcher: testTurnWatcher,
     activity: async work => {
       activities.count += 1;
       await options.activity?.();
@@ -294,7 +277,7 @@ describe('WorkerObserverHost — what a worker found', () => {
     const patches: readonly ObserverPatch[] = [
       {
         kind: 'question',
-        projection: projectStructuredQuestion([question]),
+        projection: UNWIRED_QUESTIONS.projectStructuredQuestion([question]),
         records: [],
         settlements: [],
         runtime: {},
@@ -323,7 +306,7 @@ describe('WorkerObserverHost — what a worker found', () => {
     subject.observed(A, [
       {
         kind: 'question',
-        projection: projectStructuredQuestion([question]),
+        projection: UNWIRED_QUESTIONS.projectStructuredQuestion([question]),
         records: [],
         settlements: [],
         runtime: {},

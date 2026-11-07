@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { KeyedSerialExecutor } from '../../../../src/adapters/system/keyed-serial-executor.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import {
   type FleetBacklogPasses,
   type FleetEventBacklog,

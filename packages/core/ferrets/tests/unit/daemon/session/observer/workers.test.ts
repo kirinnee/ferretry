@@ -10,7 +10,8 @@ import {
   turnPaneEvidenceOf,
 } from '../../../../../daemon/lib/session/observer/index.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
-import type { PaneState } from '../../../../src/lib/tmux/contracts.ts';
+import type { PaneState } from '../../../../../daemon/lib/session/peers/tmux.ts';
+import { UNWIRED_PANE_PARSERS } from '../../../../support/daemon/observer-peers.ts';
 
 /**
  * The pure halves of the session workers: which thread hosts which session, what a crash costs, what
@@ -177,9 +178,9 @@ describe('turnPaneEvidenceOf', () => {
     const permission = ' Do you want to proceed?\n ❯ 1. Yes\n   2. No, and tell Claude what to do differently';
 
     // Act
-    const busy = turnPaneEvidenceOf(pane(working, false));
-    const idle = turnPaneEvidenceOf(pane('│ > ', true));
-    const asking = turnPaneEvidenceOf(pane(permission, false));
+    const busy = turnPaneEvidenceOf(pane(working, false), UNWIRED_PANE_PARSERS);
+    const idle = turnPaneEvidenceOf(pane('│ > ', true), UNWIRED_PANE_PARSERS);
+    const asking = turnPaneEvidenceOf(pane(permission, false), UNWIRED_PANE_PARSERS);
 
     // Assert
     should(busy.working).be.true();

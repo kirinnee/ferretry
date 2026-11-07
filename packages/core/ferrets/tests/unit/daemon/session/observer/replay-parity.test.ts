@@ -17,8 +17,7 @@ import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { SessionState } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import { backgroundTerminalCount } from '../../../../src/lib/migrate/background-terminals.ts';
-import { observedRuntimeStatePatch, projectObservedRuntime } from '../../../../src/lib/session/harness/observation.ts';
+import { backgroundTerminalCount } from '../../../../../daemon/lib/session/peers/move.ts';
 import {
   foldSendEvidenceBatch,
   INITIAL_OBSERVER_STATE,
@@ -30,14 +29,14 @@ import {
   type TurnStateChange,
   turnFactsOf,
 } from '../../../../../daemon/lib/session/observer/index.ts';
-import {
-  type AnswerOperationRecord,
-  reconcileAnswerEvidence,
-} from '../../../../src/lib/session/question/answer-ledger.ts';
-import {
-  projectStructuredQuestion,
-  structuredQuestionStatePatch,
-} from '../../../../src/lib/session/question/projection.ts';
+import type { AnswerOperationRecord } from '../../../../../daemon/lib/session/peers/question.ts';
+import type {
+  ObservedHumanInput,
+  TranscriptBatch,
+  TranscriptEvent,
+  TranscriptIssueCode,
+  TranscriptParseResult,
+} from '../../../../../daemon/lib/session/peers/transcript.ts';
 import {
   isTurnStatus,
   observeTurn,
@@ -48,18 +47,27 @@ import {
   type TurnObservation,
   type TurnPaneEvidence,
   transcriptTurnPhase,
-} from '../../../../src/lib/session/turn/policy.ts';
-import { parseHarnessDialog } from '../../../../src/lib/tmux/harness-dialog.ts';
-import { paneBlockingPrompt, paneShowsActiveWork, paneShowsPermissionPrompt } from '../../../../src/lib/tmux/pane.ts';
-import { parsePermissionPrompt } from '../../../../src/lib/tmux/permission-prompt.ts';
-import { ClaudeTranscriptParser } from '../../../../src/lib/transcript/claude.ts';
-import { CodexTranscriptParser } from '../../../../src/lib/transcript/codex.ts';
-import type {
-  ObservedHumanInput,
-  TranscriptBatch,
-  TranscriptEvent,
-  TranscriptIssueCode,
-} from '../../../../src/lib/transcript/types.ts';
+} from '../../../../../daemon/lib/session/peers/turn.ts';
+import {
+  UNWIRED_PANE_PARSERS,
+  UNWIRED_QUESTIONS,
+  unwiredTranscriptEvents,
+} from '../../../../support/daemon/observer-peers.ts';
+
+/*
+ * The question projection, the observed runtime, the pane parsers and the transcript parsers are other owners'
+ * (conversation, claude-code/codex, terminals) and host-provided in core: each replay below needs them wired.
+ */
+const {
+  projectStructuredQuestion,
+  structuredQuestionStatePatch,
+  reconcileAnswerEvidence,
+  projectObservedRuntime,
+  observedRuntimeStatePatch,
+} = UNWIRED_QUESTIONS;
+const { parseHarnessDialog, paneBlockingPrompt, paneShowsPermissionPrompt, parsePermissionPrompt } =
+  UNWIRED_PANE_PARSERS;
+const paneShowsActiveWork = (visible: string): boolean => UNWIRED_PANE_PARSERS.paneActiveWork(visible) !== undefined;
 
 const NOW = '2026-10-22T08:00:00.000Z';
 const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -202,14 +210,16 @@ function referenceSendEvidence(
 
 // ─── Recordings ─────────────────────────────────────────────────────────────────────────────────
 
-const claude = new ClaudeTranscriptParser();
-const codex = new CodexTranscriptParser();
-const parse = (harness: 'claude' | 'codex', records: readonly object[]) =>
-  (harness === 'claude' ? claude : codex).parse({
-    text: records.map(record => `${JSON.stringify(record)}\n`).join(''),
-    endOfInput: true,
-    sessionId: 's',
-  });
+/** Today's `ClaudeTranscriptParser` / `CodexTranscriptParser` parse (conversation): host-provided in core. */
+const parse = (harness: 'claude' | 'codex', records: readonly object[]): TranscriptParseResult => ({
+  harness,
+  events: unwiredTranscriptEvents(harness, records.map(record => `${JSON.stringify(record)}\n`).join('')),
+  observedInputs: [],
+  issues: [],
+  remainder: '',
+  parsedRecords: records.length,
+  ignoredRecords: 0,
+});
 
 const claudeUser = (id: string, content: unknown) => ({
   type: 'user',
@@ -364,7 +374,7 @@ const TURN_RECORDINGS: readonly (readonly [string, readonly Moment[]])[] = [
 describe('replay parity — the turn part', () => {
   it.each(TURN_RECORDINGS)('should record what the pre-3a watcher recorded: %s', (_name, moments) => {
     // Arrange
-    const subject = new SessionObserver(sha256);
+    const subject = new SessionObserver(sha256, UNWIRED_QUESTIONS);
     let referenceDocument: Record<string, unknown> = { id: 's', status: 'running', turn: 1 };
     let foldDocument: Record<string, unknown> = { ...referenceDocument };
     let previous: TurnObservation | undefined;
@@ -462,7 +472,7 @@ const QUESTION_RECORDINGS: readonly (readonly [string, QuestionRecording])[] = [
 describe('replay parity — the question and runtime part', () => {
   it.each(QUESTION_RECORDINGS)('should write what the pre-3a projection wrote: %s', (_name, recording) => {
     // Arrange
-    const subject = new SessionObserver(sha256);
+    const subject = new SessionObserver(sha256, UNWIRED_QUESTIONS);
     const harness = recording.records.some(record => 'payload' in record) ? 'codex' : 'claude';
     const events = parse(harness, recording.records).events;
     const current = { id: 's', status: 'running', turn: 1, ...recording.state } as SessionState;
@@ -478,7 +488,7 @@ describe('replay parity — the question and runtime part', () => {
     const patch = step.patches.find(candidate => candidate.kind === 'question');
     let document: Record<string, unknown> | undefined;
     if (patch?.writes === true) {
-      const decided = questionDocumentPatch(locked as unknown as SessionState, patch);
+      const decided = questionDocumentPatch(locked as unknown as SessionState, patch, UNWIRED_QUESTIONS);
       document = decided === undefined ? locked : { ...locked, ...decided.fields };
       for (const field of decided?.removals ?? []) delete document[field];
     }
@@ -509,7 +519,7 @@ describe('replay parity — the liveness sample', () => {
     ['nothing readable', undefined, undefined, undefined],
   ] as const)('should sample what the pre-3a sampler sampled: %s', (_name, pane, transcript, observed) => {
     // Arrange
-    const subject = new SessionObserver(sha256);
+    const subject = new SessionObserver(sha256, UNWIRED_QUESTIONS);
     const children = observed?.kind === 'observed' ? observed.processes.length > 0 : undefined;
 
     // Act

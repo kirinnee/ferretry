@@ -1,5 +1,5 @@
 import type { MonitorNudge } from '../../../lib/session/monitor/types.ts';
-import type { SessionSendService } from '../../../lib/session/send/service.ts';
+import type { SessionSendService } from '../../../lib/session/peers/send.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
 
 /**

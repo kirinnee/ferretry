@@ -1,4 +1,4 @@
-import type { ObservedHumanInput, TranscriptBatch, TranscriptIssueCode } from '../../transcript/types.ts';
+import type { ObservedHumanInput, TranscriptBatch, TranscriptIssueCode } from '../peers/transcript.ts';
 
 /**
  * Issues that make a transcript read BLIND to its newest records — the only ones a send could be

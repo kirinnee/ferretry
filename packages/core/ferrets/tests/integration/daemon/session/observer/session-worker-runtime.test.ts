@@ -13,21 +13,29 @@ import { appendFile, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { SessionWorkerRuntime, type WorkerTmuxClient } from '../../../../src/adapters/index.ts';
-import { readAskedQuestion } from '../../../../src/adapters/session/question/index.ts';
-import { NodeTranscriptSource } from '../../../../src/adapters/transcript/index.ts';
 import {
-  type AnswerOperationRecord,
-  ClaudeTranscriptParser,
-  CodexTranscriptParser,
-  type FromSessionWorker,
-  type ObserverFacts,
-  type SessionBinding,
-  SessionObserver,
-  type TmuxCommandResult,
-  type ToSessionWorker,
-} from '../../../../src/lib/index.ts';
-import type { TranscriptSource } from '../../../../src/lib/transcript/types.ts';
+  SessionWorkerRuntime,
+  type WorkerTmuxClient,
+} from '../../../../../daemon/adapters/session/observer/session-worker-runtime.ts';
+import type { ObserverFacts } from '../../../../../daemon/lib/session/observer/facts.ts';
+import { SessionObserver } from '../../../../../daemon/lib/session/observer/observer.ts';
+import type {
+  FromSessionWorker,
+  SessionBinding,
+  ToSessionWorker,
+} from '../../../../../daemon/lib/session/observer/protocol.ts';
+import type { AnswerOperationRecord } from '../../../../../daemon/lib/session/peers/question.ts';
+import type { TmuxCommandResult } from '../../../../../daemon/lib/session/peers/tmux.ts';
+import type { TranscriptSource } from '../../../../../daemon/lib/session/peers/transcript.ts';
+import {
+  UNWIRED_PANE_FRAMES,
+  UNWIRED_PANE_PARSERS,
+  UNWIRED_QUESTIONS,
+  UNWIRED_SEND_EVIDENCE,
+  UNWIRED_TAIL,
+  unwiredReadAskedQuestion as readAskedQuestion,
+  unwiredTranscriptSource,
+} from '../../../../support/daemon/observer-peers.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
 const NOW = '2026-10-22T08:00:00.000Z';
@@ -160,7 +168,7 @@ async function rig() {
       reading -= 1;
     }
   };
-  const readingThrough = (inner: NodeTranscriptSource): TranscriptSource => ({
+  const readingThrough = (inner: TranscriptSource): TranscriptSource => ({
     harness: inner.harness,
     read: async (file, options) => await counted(async () => await inner.read(file, options)),
     follow: (file, options) => inner.follow(file, options),
@@ -185,8 +193,8 @@ async function rig() {
       }) as WorkerTmuxClient;
     },
     transcripts: {
-      claude: readingThrough(new NodeTranscriptSource(new ClaudeTranscriptParser())),
-      codex: readingThrough(new NodeTranscriptSource(new CodexTranscriptParser())),
+      claude: readingThrough(unwiredTranscriptSource('claude')),
+      codex: readingThrough(unwiredTranscriptSource('codex')),
     },
     stat: async file =>
       await counted(async () => {
@@ -205,7 +213,11 @@ async function rig() {
       };
     },
     children: () => [],
-    observer: new SessionObserver(text => `digest(${text})`),
+    observer: new SessionObserver(text => `digest(${text})`, UNWIRED_QUESTIONS),
+    frames: UNWIRED_PANE_FRAMES,
+    tail: UNWIRED_TAIL,
+    sendEvidence: UNWIRED_SEND_EVIDENCE,
+    paneParsers: UNWIRED_PANE_PARSERS,
   });
   const binding: SessionBinding = {
     tmux: { executable: '/usr/bin/tmux', socket: '/tmp/s', target: 'fy-a' },

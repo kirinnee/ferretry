@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type ClockPort, parseSessionId, type SessionId } from '../../../../src/lib/index.ts';
+import type { ClockPort } from '../../../../../daemon/lib/ports.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import {
   defaultSessionMonitorSettings,
   type MonitorMonotonicClock,

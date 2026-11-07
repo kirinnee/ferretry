@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { stepTurn, type TurnFacts, type TurnLook } from '../../../../../daemon/lib/session/observer/index.ts';
-import { limitPatch } from '../../../../src/lib/session/turn/usage-limit.ts';
-import { CodexTranscriptParser } from '../../../../src/lib/transcript/codex.ts';
+import { limitPatch } from '../../../../../daemon/lib/session/peers/turn.ts';
+import { unwiredTranscriptEvents } from '../../../../support/daemon/observer-peers.ts';
 
 /**
  * A Codex sub-ferret on a spent login (2026-10-31): every message to it ended in half a second with
@@ -27,7 +27,7 @@ const REFUSED = [
 const CLEAN = [record('task_started', { turn_id: 'turn-5' }), record('task_complete', { turn_id: 'turn-5' })];
 
 const transcript = (lines: readonly string[]) =>
-  new CodexTranscriptParser().parse({ text: `${lines.join('\n')}\n` }).events;
+  unwiredTranscriptEvents('codex', `${lines.join('\n')}\n`);
 /** No pane frame: the transcript alone ends the turn, so it takes two looks, as it does on a live ferret. */
 const look = (lines: readonly string[]): TurnLook => ({ transcript: transcript(lines), pane: undefined });
 

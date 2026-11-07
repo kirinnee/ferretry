@@ -3,7 +3,7 @@ import type {
   SessionLiveActivity,
   SessionLiveTokensSource,
 } from '../../protocol/session-live.ts';
-import type { TranscriptEvent, TranscriptHarness, TranscriptUsageEvent } from '../../transcript/types.ts';
+import type { TranscriptEvent, TranscriptHarness, TranscriptUsageEvent } from '../peers/transcript.ts';
 
 /**
  * WHAT A WORKING TURN HAS DONE SO FAR, from the two places a harness says it.

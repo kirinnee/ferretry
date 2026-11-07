@@ -11,16 +11,15 @@ import {
   type WantedSession,
   type WorkerLookReport,
   WorkerSupervisor,
-} from '../../../../src/adapters/index.ts';
-import {
-  type FromSessionWorker,
-  type ObserverPatch,
-  parseSessionId,
-  type SessionBinding,
-  type SessionId,
-  type ToSessionWorker,
-  type WorkerLiveness,
-} from '../../../../src/lib/index.ts';
+} from '../../../../../daemon/adapters/session/observer/worker-supervisor.ts';
+import type { ObserverPatch } from '../../../../../daemon/lib/session/observer/observer.ts';
+import type {
+  FromSessionWorker,
+  SessionBinding,
+  ToSessionWorker,
+  WorkerLiveness,
+} from '../../../../../daemon/lib/session/observer/protocol.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 
 /** A thread that records what it is sent and answers only when the test says so. */
 class ScriptedWorker implements ObserverWorker {

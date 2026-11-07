@@ -7,33 +7,22 @@
  * raced a write never puts the older document back.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import should from 'should';
 import {
-  BunSqliteIndexFactory,
-  type DaemonStorage,
-  DaemonStorageFactory,
   InlineObserverHost,
   type InlineObserverPorts,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SessionObservationApplier,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  SystemClock,
-} from '../../../../src/adapters/index.ts';
-import {
-  type AnswerOperationRecord,
-  type LivenessTarget,
-  parseSessionId,
-  type SessionId,
-  SessionObserver,
-  type TranscriptEvent,
-  type TurnPaneEvidence,
-} from '../../../../src/lib/index.ts';
+} from '../../../../../daemon/adapters/session/observer/inline-observer-host.ts';
+import { SessionObservationApplier } from '../../../../../daemon/adapters/session/observer/session-observation-applier.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
+import { SessionObserver } from '../../../../../daemon/lib/session/observer/observer.ts';
+import type { AnswerOperationRecord } from '../../../../../daemon/lib/session/peers/question.ts';
+import type { TranscriptEvent } from '../../../../../daemon/lib/session/peers/transcript.ts';
+import type { TurnPaneEvidence } from '../../../../../daemon/lib/session/peers/turn.ts';
+import type { LivenessTarget } from '../../../../../daemon/lib/session/peers/warden.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import { INERT_PANE_WORK, INERT_QUESTIONS, testTurnWatcher } from '../../../../support/daemon/observer-peers.ts';
+import { memoryStorage } from '../../../../support/daemon/storage.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
 const NOW = '2026-10-22T08:00:00.000Z';
@@ -60,21 +49,9 @@ const question: TranscriptEvent = {
 };
 
 async function openStorage(): Promise<DaemonStorage> {
-  const home = await mkdtemp(join(tmpdir(), 'fy-observer-host-'));
-  const opened = await new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  ).open();
-  cleanups.push(async () => {
-    await opened.storage.close();
-    await rm(home, { recursive: true, force: true });
-  });
-  return opened.storage;
+  const { storage } = await memoryStorage({ clock: { now: () => NOW } });
+  cleanups.push(async () => await storage.close());
+  return storage;
 }
 
 interface World {
@@ -135,7 +112,7 @@ function host(subject: World, overrides: Partial<InlineObserverPorts> = {}): Inl
       answerSerial: {
         runIfIdle: async (key, work) => (subject.busy === key ? undefined : await serial.runIfIdle(key, work)),
       },
-      applier: new SessionObservationApplier(subject.storage, answers, new KeyedSerialExecutor()),
+      applier: new SessionObservationApplier(subject.storage, answers, new KeyedSerialExecutor(), INERT_QUESTIONS),
       liveness: {
         screen: async id => {
           subject.looks.push(`screen ${id}`);
@@ -150,6 +127,7 @@ function host(subject: World, overrides: Partial<InlineObserverPorts> = {}): Inl
           subject.looks.push(`processes ${tmuxSession}`);
           return { kind: 'observed', processes: [] };
         },
+        paneWork: INERT_PANE_WORK,
       },
       clock: { now: () => NOW },
       yieldToLoop: async () => {
@@ -158,9 +136,10 @@ function host(subject: World, overrides: Partial<InlineObserverPorts> = {}): Inl
       paneState: async () => undefined,
       sendEvidence: { read: async () => ({ readable: true, inputs: [] }) },
       every: () => () => undefined,
+      turnWatcher: testTurnWatcher,
       ...overrides,
     },
-    new SessionObserver(text => `digest(${text})`),
+    new SessionObserver(text => `digest(${text})`, INERT_QUESTIONS),
   );
 }
 
@@ -413,6 +392,7 @@ describe('InlineObserverHost — liveness', () => {
         processes: async () => {
           throw new Error('must not be asked');
         },
+        paneWork: INERT_PANE_WORK,
       },
     });
 

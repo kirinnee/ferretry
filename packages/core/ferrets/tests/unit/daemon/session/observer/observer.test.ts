@@ -15,9 +15,10 @@ import {
   turnFactsOf,
   turnLeftToSettle,
 } from '../../../../../daemon/lib/session/observer/index.ts';
-import type { AnswerOperationRecord } from '../../../../src/lib/session/question/answer-ledger.ts';
-import type { TurnPaneEvidence } from '../../../../src/lib/session/turn/policy.ts';
-import type { TranscriptBatch, TranscriptEvent } from '../../../../src/lib/transcript/types.ts';
+import type { AnswerOperationRecord } from '../../../../../daemon/lib/session/peers/question.ts';
+import type { TurnPaneEvidence } from '../../../../../daemon/lib/session/peers/turn.ts';
+import type { TranscriptBatch, TranscriptEvent } from '../../../../../daemon/lib/session/peers/transcript.ts';
+import { UNWIRED_QUESTIONS } from '../../../../support/daemon/observer-peers.ts';
 
 /**
  * The session observer's fold over scripted looks: what each part answers, the order its patches come
@@ -64,7 +65,7 @@ const accepted: AnswerOperationRecord = {
 describe('SessionObserver.step', () => {
   it('should remember the facts it is told, and change nothing else', () => {
     // Arrange
-    const subject = new SessionObserver(digest);
+    const subject = new SessionObserver(digest, UNWIRED_QUESTIONS);
     const input = { kind: 'facts' as const, facts: { status: 'thinking' as const, turn: 3 } };
 
     // Act
@@ -83,7 +84,7 @@ describe('SessionObserver.step', () => {
 
   it('should record a turn start at once and end it only on the second idle look', () => {
     // Arrange
-    const subject = new SessionObserver(digest);
+    const subject = new SessionObserver(digest, UNWIRED_QUESTIONS);
     const look = (pane: TurnPaneEvidence, facts: TurnFacts) => ({
       kind: 'look' as const,
       facts,
@@ -104,7 +105,7 @@ describe('SessionObserver.step', () => {
 
   it('should decide the turn from the facts it holds when the look carries none, and not without any', () => {
     // Arrange
-    const subject = new SessionObserver(digest);
+    const subject = new SessionObserver(digest, UNWIRED_QUESTIONS);
     const told = subject.step(INITIAL_OBSERVER_STATE, { kind: 'facts', facts: running });
 
     // Act
@@ -122,7 +123,7 @@ describe('SessionObserver.step', () => {
 
   it('should put the question patch before the turn patch of the same look (#689)', () => {
     // Arrange
-    const subject = new SessionObserver(digest);
+    const subject = new SessionObserver(digest, UNWIRED_QUESTIONS);
     const input = {
       kind: 'look' as const,
       facts: running,
@@ -139,7 +140,7 @@ describe('SessionObserver.step', () => {
 
   it('should keep the previous turn observation through a look that has no turn part', () => {
     // Arrange
-    const subject = new SessionObserver(digest);
+    const subject = new SessionObserver(digest, UNWIRED_QUESTIONS);
     const before: ObserverState = { facts: running, turn: { state: 'working', confirmed: true } };
 
     // Act
@@ -157,7 +158,7 @@ describe('stepQuestion', () => {
     const input = { state: state(), events: [question], answers: new Map<string, AnswerOperationRecord>() };
 
     // Act
-    const actual = stepQuestion(input);
+    const actual = stepQuestion(input, UNWIRED_QUESTIONS);
 
     // Assert
     should(actual?.writes).be.true();
@@ -170,7 +171,7 @@ describe('stepQuestion', () => {
     const input = { state: state(), events: [] as readonly TranscriptEvent[], answers: new Map() };
 
     // Act + Assert
-    should(stepQuestion(input)).be.undefined();
+    should(stepQuestion(input, UNWIRED_QUESTIONS)).be.undefined();
   });
 
   it('should settle an accepted receipt the tail shows advanced, even when no field changes', () => {
@@ -182,7 +183,7 @@ describe('stepQuestion', () => {
     };
 
     // Act
-    const actual = stepQuestion(input);
+    const actual = stepQuestion(input, UNWIRED_QUESTIONS);
 
     // Assert
     should(actual?.settlements.map(record => record.outcome)).deepEqual(['confirmed']);
@@ -194,7 +195,7 @@ describe('stepQuestion', () => {
     const input = { state: state(), events: [usage('claude-opus-5-5')], answers: new Map() };
 
     // Act
-    const actual = stepQuestion(input);
+    const actual = stepQuestion(input, UNWIRED_QUESTIONS);
 
     // Assert
     should(actual?.runtime).deepEqual({ model: 'claude-opus-5-5', at: NOW });
@@ -212,7 +213,7 @@ describe('stepQuestion', () => {
     } as TranscriptEvent;
 
     // Act
-    const actual = stepQuestion({ state: state(), events: [sized], answers: new Map() });
+    const actual = stepQuestion({ state: state(), events: [sized], answers: new Map() }, UNWIRED_QUESTIONS);
 
     // Assert
     should(actual?.runtime).deepEqual({
@@ -230,7 +231,7 @@ describe('questionReceipts', () => {
       state: state({ lastAnsweredQuestionToolUseId: 'tool-1' }),
       events: [question, answered],
       answers: new Map([[accepted.requestId, accepted]]),
-    });
+    }, UNWIRED_QUESTIONS);
     if (patch === undefined) throw new Error('the look implied nothing');
     return patch;
   };
@@ -291,7 +292,7 @@ describe('questionDocumentPatch', () => {
       state: state({ status: 'awaiting_question', pendingQuestion: { toolUseId: 'tool-1', questions: [] } }),
       events: [question, answered],
       answers: new Map(),
-    });
+    }, UNWIRED_QUESTIONS);
     const locked = state({
       status: 'awaiting_question',
       pendingQuestion: { toolUseId: 'tool-1', questions: [] },
@@ -299,7 +300,7 @@ describe('questionDocumentPatch', () => {
     });
 
     // Act
-    const actual = patch === undefined ? undefined : questionDocumentPatch(locked, patch);
+    const actual = patch === undefined ? undefined : questionDocumentPatch(locked, patch, UNWIRED_QUESTIONS);
 
     // Assert
     should(actual?.removals).deepEqual(['pendingQuestion', 'needsHumanKind']);
@@ -308,11 +309,11 @@ describe('questionDocumentPatch', () => {
 
   it('should answer nothing when the locked document already holds the patch', () => {
     // Arrange
-    const patch = stepQuestion({ state: state(), events: [usage('m')], answers: new Map() });
+    const patch = stepQuestion({ state: state(), events: [usage('m')], answers: new Map() }, UNWIRED_QUESTIONS);
     const locked = state({ observedModel: 'm', observedModelAt: NOW });
 
     // Act + Assert
-    should(patch === undefined ? 'missing' : questionDocumentPatch(locked, patch)).be.undefined();
+    should(patch === undefined ? 'missing' : questionDocumentPatch(locked, patch, UNWIRED_QUESTIONS)).be.undefined();
   });
 });
 

@@ -9,14 +9,10 @@ import {
   type LiveActivityReads,
   StorageLiveActivitySource,
 } from '../../../../../daemon/adapters/session/live/index.ts';
-import type {
-  CompactionHistory,
-  CompactionRecord,
-  PaneState,
-  SessionTranscriptTail,
-  TranscriptEvent,
-  TranscriptTailResult,
-} from '../../../../src/lib/index.ts';
+import type { CompactionHistory, CompactionRecord } from '../../../../../daemon/lib/session/live/compaction.ts';
+import type { SessionTranscriptTail, TranscriptTailResult } from '../../../../../daemon/lib/session/peers/reads.ts';
+import type { PaneState } from '../../../../../daemon/lib/session/peers/tmux.ts';
+import type { TranscriptEvent } from '../../../../../daemon/lib/session/peers/transcript.ts';
 
 /**
  * The live readout over its ports: a real transcript FILE (so the stat-keyed cache is exercised for

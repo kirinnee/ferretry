@@ -11,8 +11,8 @@ import {
   type SessionDirectoryPorts,
 } from '../../../../../daemon/lib/session/directory/session-directory.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
-import type { IndexedSession } from '../../../../src/lib/storage-types.ts';
-import { sessionView } from '../../runtime/mounts/support.ts';
+import type { IndexedSession } from '../../../../../daemon/lib/storage-types.ts';
+import { sessionView } from '../../../../support/daemon/session-view.ts';
 
 /** The loop budget no single slice of a list may exceed. */
 const BUDGET_MS = 50;

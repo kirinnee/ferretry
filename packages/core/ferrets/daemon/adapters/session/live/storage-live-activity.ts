@@ -1,24 +1,21 @@
 import { stat } from 'node:fs/promises';
 import { type SessionCompactionState, type SessionLiveActivity } from '../../../lib/protocol/session-live.ts';
 import { SessionStateSchema } from '../../../lib/protocol/session.ts';
+import type { ClockPort } from '../../../lib/ports.ts';
+import { type SessionId, tryParseSessionId } from '../../../lib/session-id.ts';
+import type { LiveActivitySource } from '../../../lib/session/events/service.ts';
 import {
-  type ClockPort,
   type CompactionHistory,
   type CompactionTracker,
-  type LiveActivitySource,
-  liveActivitySample,
-  type PaneState,
-  paneLiveReading,
+  expectedCompaction,
   type PaneCompaction,
   paneCompaction,
-  expectedCompaction,
   resolveCompaction,
-  type SessionId,
-  type SessionTranscriptTail,
-  type TranscriptEvent,
-  tryParseSessionId,
-  turnTokensSince,
-} from '../../../lib/index.ts';
+} from '../../../lib/session/live/compaction.ts';
+import { liveActivitySample, paneLiveReading, turnTokensSince } from '../../../lib/session/live/policy.ts';
+import type { SessionTranscriptTail } from '../../../lib/session/peers/reads.ts';
+import type { PaneState } from '../../../lib/session/peers/tmux.ts';
+import type { TranscriptEvent } from '../../../lib/session/peers/transcript.ts';
 
 /**
  * How much of a transcript's end one sample reads. A working turn's usage records are near the end,

@@ -1,4 +1,4 @@
-import { WAITING_BACKSTOP_MS } from '../../warden/detect.ts';
+import { WAITING_BACKSTOP_MS } from '../peers/warden.ts';
 
 /** Every tunable the monitor slice owns, injected rather than hard-coded. */
 export interface SessionMonitorSettings {

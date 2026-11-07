@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { type FyEventStreamFrame, FyEventStreamFrameSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import { type SessionLiveActivity } from '../../../../../daemon/lib/protocol/session-live.ts';
 import should from 'should';
-import type { SocketDownstream } from '../../../../src/lib/api/socket.ts';
+import type { SocketDownstream } from '@ferretry/kernel/contract';
 import {
   EVENT_STREAM_IDLE_MS,
   EVENT_STREAM_MAX_BUFFER_BYTES,
@@ -20,7 +20,7 @@ import {
   type TranscriptChangeSource,
   type TranscriptChangeWatch,
 } from '../../../../../daemon/lib/session/events/index.ts';
-import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index.ts';
+import type { StoredSessionEvent } from '../../../../../daemon/lib/session/peers/reads.ts';
 
 /**
  * The live event feed, seen from the domain.

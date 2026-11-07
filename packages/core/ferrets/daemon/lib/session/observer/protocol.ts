@@ -16,9 +16,9 @@
  * must see what the transcript says (`observe`), the live readout's frame (`pane`), the Warden's liveness
  * look (`liveness`) and the send tracker's evidence (`send-evidence`).
  */
-import type { PaneState } from '../../tmux/contracts.ts';
-import type { ObservedHumanInput } from '../../transcript/types.ts';
-import type { AnswerOperationRecord } from '../question/answer-ledger.ts';
+import type { PaneState } from '../peers/tmux.ts';
+import type { ObservedHumanInput } from '../peers/transcript.ts';
+import type { AnswerOperationRecord } from '../peers/question.ts';
 import type { ObserverFacts } from './facts.ts';
 import type { ObserverPatch } from './observer.ts';
 

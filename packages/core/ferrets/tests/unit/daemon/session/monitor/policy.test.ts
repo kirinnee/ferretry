@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parseSessionId } from '../../../../src/lib/index.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import {
   defaultSessionMonitorSettings,
   heartbeatDue,

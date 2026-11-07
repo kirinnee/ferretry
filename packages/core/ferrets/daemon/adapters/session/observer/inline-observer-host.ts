@@ -1,33 +1,30 @@
+import type { JsonValue } from '@ferretry/std';
 import { type SessionState, SessionStateSchema } from '../../../lib/protocol/session.ts';
-import {
-  type AnswerLedger,
-  type AskedQuestion,
-  type ClockPort,
-  INITIAL_OBSERVER_STATE,
-  type JsonValue,
-  LIVENESS_TAIL_LINES,
-  type LivenessSample,
-  type LivenessTarget,
-  lookAtPaneProcesses,
-  type ObserverFacts,
-  observerFactsOf,
-  type PaneState,
-  type ProcessObservation,
-  QUESTION_TAIL_EVENTS,
-  type SendEvidenceReading,
-  type SendEvidenceSource,
-  type SessionId,
-  type SessionObserver,
-  type SessionObserverHost,
-  type SessionTranscriptTail,
-  type SessionTurnPorts,
-  SessionTurnWatcher,
-  TURN_TAIL_EVENTS,
-  type TurnPaneEvidence,
-  type TurnWatchLoop,
-  type TurnWatchSession,
-  turnLeftToSettle,
-} from '../../../lib/index.ts';
+import type { ClockPort } from '../../../lib/ports.ts';
+import { type ObserverFacts, observerFactsOf } from '../../../lib/session/observer/facts.ts';
+import type { SessionObserverHost } from '../../../lib/session/observer/host.ts';
+import { LIVENESS_TAIL_LINES, lookAtPaneProcesses } from '../../../lib/session/observer/liveness.ts';
+import { INITIAL_OBSERVER_STATE, type SessionObserver } from '../../../lib/session/observer/observer.ts';
+import { QUESTION_TAIL_EVENTS } from '../../../lib/session/observer/question.ts';
+import { TURN_TAIL_EVENTS, turnLeftToSettle } from '../../../lib/session/observer/turn.ts';
+import type { AnswerLedger, AskedQuestion } from '../../../lib/session/peers/question.ts';
+import type { SessionTranscriptTail } from '../../../lib/session/peers/reads.ts';
+import type { SendEvidenceReading, SendEvidenceSource } from '../../../lib/session/peers/send.ts';
+import type { PaneState } from '../../../lib/session/peers/tmux.ts';
+import type {
+  SessionTurnPorts,
+  SessionTurnWatcherFactory,
+  TurnPaneEvidence,
+  TurnWatchLoop,
+  TurnWatchSession,
+} from '../../../lib/session/peers/turn.ts';
+import type {
+  LivenessSample,
+  LivenessTarget,
+  PaneWorkSummarizer,
+  ProcessObservation,
+} from '../../../lib/session/peers/warden.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
 import type { SessionObservationApplier } from './session-observation-applier.ts';
 
@@ -58,6 +55,8 @@ export interface InlineObserverPorts {
     screen(id: string): Promise<string>;
     transcript(id: string, lines: number): Promise<string>;
     processes(tmuxSession: string): Promise<ProcessObservation>;
+    /** The Warden's pane work classifier (`paneWorkSummary`), handed in by the host. */
+    readonly paneWork: PaneWorkSummarizer;
   };
   readonly clock: ClockPort;
   /** Hands the event loop back between two sessions of a question pass. */
@@ -68,6 +67,8 @@ export interface InlineObserverPorts {
   readonly sendEvidence: SendEvidenceSource;
   /** Runs `tick` every `intervalMs` until the answer is called. */
   readonly every: (intervalMs: number, tick: () => void) => () => void;
+  /** Builds the turn watcher over this host's turn ports (today's `new SessionTurnWatcher(ports)`, conversation-owned). */
+  readonly turnWatcher: SessionTurnWatcherFactory;
 }
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -107,7 +108,7 @@ export class InlineObserverHost implements SessionObserverHost {
   ) {
     // For as long as the storage is open: closing it drops every listener, this one included.
     ports.storage.subscribeStates((id, state) => this.tell(id, state));
-    this.turns = new SessionTurnWatcher(this.turnPortsFor(async () => await this.turnRoster()));
+    this.turns = ports.turnWatcher(this.turnPortsFor(async () => await this.turnRoster()));
   }
 
   /** The 2 s turn tick, armed: the whole fleet is observed on this thread. */
@@ -184,7 +185,10 @@ export class InlineObserverHost implements SessionObserverHost {
     const transcript = await reads.transcript(target.id, LIVENESS_TAIL_LINES).catch(() => undefined);
     const observed =
       target.tmuxSession === undefined ? undefined : await reads.processes(target.tmuxSession).catch(() => undefined);
-    const processes = lookAtPaneProcesses(observed?.kind === 'observed' ? observed.processes : undefined);
+    const processes = lookAtPaneProcesses(
+      observed?.kind === 'observed' ? observed.processes : undefined,
+      reads.paneWork,
+    );
     const step = this.observer.step(INITIAL_OBSERVER_STATE, {
       kind: 'look',
       liveness: { screen, transcript, ...processes },

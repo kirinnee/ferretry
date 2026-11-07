@@ -48,14 +48,14 @@ describe('SessionPackService', () => {
 
   it('should read a ferret from before the switch as on, so turning it on changes nothing', async () => {
     // Arrange
-    const legacy = service({ enabled: undefined, running: true });
+    const unset = service({ enabled: undefined, running: true });
 
     // Act
-    const outcome = await legacy.subject.set('s1', true);
+    const outcome = await unset.subject.set('s1', true);
 
     // Assert
     should(outcome).deepEqual({ restartRequired: false, note: 'Pack mode was already on.' });
-    should(legacy.writes).deepEqual([['s1', true, AT]]);
+    should(unset.writes).deepEqual([['s1', true, AT]]);
   });
 
   it('should still write when the switch is unchanged, so the launch environment is made to agree', async () => {

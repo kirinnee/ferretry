@@ -1,16 +1,16 @@
 import { SessionStateSchema } from '../../../lib/protocol/session.ts';
+import type { SerialExecutor } from '../../../lib/ports.ts';
+import type { ObserverPatch } from '../../../lib/session/observer/observer.ts';
 import {
-  type AnswerLedger,
-  isTurnStatus,
-  limitPatch,
-  type ObserverPatch,
   type QuestionPatch,
+  type QuestionStepPolicy,
   questionDocumentPatch,
   questionReceipts,
-  type SerialExecutor,
-  type SessionId,
-  type TurnStateChange,
-} from '../../../lib/index.ts';
+} from '../../../lib/session/observer/question.ts';
+import type { TurnStateChange } from '../../../lib/session/observer/turn.ts';
+import type { AnswerLedger } from '../../../lib/session/peers/question.ts';
+import { isTurnStatus, limitPatch } from '../../../lib/session/peers/turn.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
 
 /** The storage writes a patch is applied through: the same locked path every other writer takes. */
@@ -100,6 +100,8 @@ export class SessionObservationApplier {
     private readonly storage: ObservationStorage,
     private readonly answers: Pick<AnswerLedger, 'all' | 'append'>,
     private readonly serial: SerialExecutor,
+    /** The question part's foreign behaviour, the same one the observer folds through (handed in by the host). */
+    private readonly questions: QuestionStepPolicy,
   ) {}
 
   /** Applies one patch; answers whether the state document was written. */
@@ -127,7 +129,7 @@ export class SessionObservationApplier {
     await this.storage.updateState(id, raw => {
       const verified = SessionStateSchema.safeParse(raw);
       if (!verified.success) return raw;
-      const decided = questionDocumentPatch(verified.data, decidedFrom);
+      const decided = questionDocumentPatch(verified.data, decidedFrom, this.questions);
       if (decided === undefined) return raw;
       const next: Record<string, unknown> = { ...(raw as Record<string, unknown>), ...decided.fields };
       for (const field of decided.removals) delete next[field];

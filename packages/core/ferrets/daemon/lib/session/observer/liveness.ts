@@ -1,6 +1,5 @@
-import { backgroundTerminalCount } from '../../migrate/background-terminals.ts';
-import type { LivenessSample } from '../../warden/liveness.ts';
-import { type PaneProcess, paneWorkSummary } from '../../warden/pane-processes.ts';
+import { backgroundTerminalCount } from '../peers/move.ts';
+import type { LivenessSample, PaneProcess, PaneWorkSummarizer } from '../peers/warden.ts';
 
 /** How many transcript lines the liveness digest covers: enough that a new line always changes it. */
 export const LIVENESS_TAIL_LINES = 20;
@@ -28,10 +27,12 @@ export interface LivenessLook {
 
 /**
  * The process part of a look, from the pane's observed process tree: `undefined` when it could not be
- * observed, which is no evidence either way.
+ * observed, which is no evidence either way. `paneWorkSummary` is the Warden's classifier, handed in by the host
+ * (Ferrets cannot import the warden plugin).
  */
 export function lookAtPaneProcesses(
   processes: readonly PaneProcess[] | undefined,
+  paneWorkSummary: PaneWorkSummarizer,
 ): Pick<LivenessLook, 'children' | 'commandKey' | 'leftoverBrowser'> {
   if (processes === undefined) return {};
   const work = paneWorkSummary(processes);

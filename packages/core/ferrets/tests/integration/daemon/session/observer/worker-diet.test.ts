@@ -12,7 +12,7 @@ import { describe, it } from 'bun:test';
 import { join } from 'node:path';
 import should from 'should';
 
-const ENTRY = join(import.meta.dir, '../../../../bin/session.worker.ts');
+const ENTRY = join(import.meta.dir, '../../../../../daemon/workers/session.worker.ts');
 /** Bytes of the unminified bundle: about 160 KB today, and an order of magnitude under the 15 MB worker. */
 const BUDGET_BYTES = 256 * 1024;
 /**

@@ -8,9 +8,12 @@ import {
   type TurnLook,
   turnPaneEvidenceOf,
 } from '../../../../../daemon/lib/session/observer/index.ts';
-import type { TurnObservation } from '../../../../src/lib/session/turn/policy.ts';
-import { parsePaneMetadata, paneStateFrom } from '../../../../src/lib/tmux/pane.ts';
-import { ClaudeTranscriptParser } from '../../../../src/lib/transcript/claude.ts';
+import type { TurnObservation } from '../../../../../daemon/lib/session/peers/turn.ts';
+import {
+  UNWIRED_PANE_PARSERS,
+  unwiredPaneState,
+  unwiredTranscriptEvents,
+} from '../../../../support/daemon/observer-peers.ts';
 
 /**
  * A finished turn the daemon held at `working` for three hours — Claude Code 2.1.281's feedback-draft
@@ -45,11 +48,11 @@ const ENDED = [
   record({ type: 'system', subtype: 'turn_duration', durationMs: 22312, timestamp: '2026-10-29T00:09:49.195Z' }),
 ];
 const transcript = (lines: readonly string[]) =>
-  new ClaudeTranscriptParser().parse({ text: `${lines.join('\n')}\n` }).events;
+  unwiredTranscriptEvents('claude', `${lines.join('\n')}\n`);
 
 const look = (visible: string, lines: readonly string[]): TurnLook => ({
   transcript: transcript(lines),
-  pane: turnPaneEvidenceOf(paneStateFrom(parsePaneMetadata(`0||${CURSOR_X}|${CURSOR_Y}|24|80`), visible)),
+  pane: turnPaneEvidenceOf(unwiredPaneState(`0||${CURSOR_X}|${CURSOR_Y}|24|80`, visible), UNWIRED_PANE_PARSERS),
 });
 
 /** Two looks in a row, as the watcher and a session worker take them: the second confirms the first. */

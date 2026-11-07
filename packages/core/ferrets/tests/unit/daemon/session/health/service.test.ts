@@ -1,7 +1,5 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AsyncActivityScope } from '../../../../src/adapters/runtime/stall-attribution.ts';
-import { ActivityLedger } from '../../../../src/lib/runtime/liveness.ts';
 import {
   type ConsistencyPassPort,
   type DaemonHealthSnapshot,
@@ -13,6 +11,7 @@ import {
   SelfRestartCoordinator,
   type SelfRestartHandler,
   type SelfRestartStamp,
+  type SelfCheckActivityPort,
   type SelfRestartStampStore,
   type SessionExitObservation,
   type SessionHealthEvent,
@@ -21,6 +20,28 @@ import {
   type SurveyedSession,
 } from '../../../../../daemon/lib/session/health/index.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+
+/**
+ * Today's composition root hands in the kernel's activity ledger (`ActivityLedger` over `AsyncActivityScope`),
+ * which is not in the kernel yet: this recorder nests the same way for stages that run one after another, and
+ * reports each label as it ends.
+ */
+class NestingActivities implements SelfCheckActivityPort {
+  private readonly path: string[] = [];
+
+  constructor(private readonly report: (label: string) => void) {}
+
+  async run<T>(name: string, work: () => Promise<T>): Promise<T> {
+    this.path.push(name);
+    const label = this.path.join(' › ');
+    try {
+      return await work();
+    } finally {
+      this.path.pop();
+      this.report(label);
+    }
+  }
+}
 
 const SETTINGS = defaultSessionHealthSettings;
 const AT = '2026-07-31T10:00:00.000Z';
@@ -211,7 +232,7 @@ describe('session health service', () => {
   it('should run as the self-check activity with every stage nested inside it', async () => {
     // Arrange — the composition root's own arrangement: one ledger, carried across awaits.
     const labels: string[] = [];
-    const ledger = new ActivityLedger({ now: () => 0 }, new AsyncActivityScope(), label => labels.push(label));
+    const ledger = new NestingActivities(label => labels.push(label));
     const harness = new Harness(snapshot());
     const service = new SessionHealthService({ ...harness.ports(), activities: ledger }, SETTINGS);
 

@@ -1,20 +1,19 @@
-import {
-  type AnswerOperationRecord,
-  type FromSessionWorker,
-  NEW_WORKER,
-  type ObserverFacts,
-  type ObserverPatch,
-  planSessionWorkers,
-  type SessionBinding,
-  type SessionId,
-  sessionWorkerRestart,
-  type ToSessionWorker,
-  type TranscriptStamp,
-  type WorkerAnswers,
-  type WorkerAsk,
-  type WorkerChild,
-  type WorkerLiveness,
-} from '../../../lib/index.ts';
+import type { ObserverFacts } from '../../../lib/session/observer/facts.ts';
+import type { ObserverPatch } from '../../../lib/session/observer/observer.ts';
+import { NEW_WORKER, planSessionWorkers } from '../../../lib/session/observer/plan.ts';
+import type {
+  FromSessionWorker,
+  SessionBinding,
+  ToSessionWorker,
+  TranscriptStamp,
+  WorkerAnswers,
+  WorkerAsk,
+  WorkerChild,
+  WorkerLiveness,
+} from '../../../lib/session/observer/protocol.ts';
+import { sessionWorkerRestart } from '../../../lib/session/observer/restart.ts';
+import type { AnswerOperationRecord } from '../../../lib/session/peers/question.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 
 /** The part of a Worker the supervisor uses, so a test can stand in a thread that misbehaves on cue. */
 export interface ObserverWorker {

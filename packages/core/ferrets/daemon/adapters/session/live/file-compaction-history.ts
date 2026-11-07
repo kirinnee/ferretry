@@ -1,10 +1,6 @@
 import type { FileSystemPort } from '../../../lib/ports.ts';
-import {
-  type CompactionHistory,
-  type CompactionRecord,
-  CompactionRecordSchema,
-  type TranscriptHarness,
-} from '../../../lib/index.ts';
+import { type CompactionHistory, type CompactionRecord, CompactionRecordSchema } from '../../../lib/session/live/compaction.ts';
+import type { TranscriptHarness } from '../../../lib/session/peers/transcript.ts';
 import { z } from 'zod';
 
 /** Entries kept: enough for a stable median, few enough that the file stays one screenful. */

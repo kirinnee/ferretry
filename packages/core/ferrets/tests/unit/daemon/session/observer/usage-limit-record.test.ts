@@ -4,7 +4,7 @@ import {
   type ObservationStorage,
   recordTurnChange,
 } from '../../../../../daemon/adapters/session/observer/session-observation-applier.ts';
-import { parseSessionId } from '../../../../src/lib/index.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
 /** The usage-limit dialog is recorded as a rate-limited session, and released again when it closes. */
 

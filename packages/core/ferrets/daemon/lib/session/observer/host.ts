@@ -1,9 +1,8 @@
 import type { SessionId } from '../../session-id.ts';
-import type { PaneState } from '../../tmux/contracts.ts';
-import type { LivenessSample } from '../../warden/liveness.ts';
-import type { LivenessTarget } from '../../warden/liveness-monitor.ts';
-import type { SendEvidenceReading } from '../send/tracker.ts';
-import type { TurnWatchLoop } from '../turn/service.ts';
+import type { PaneState } from '../peers/tmux.ts';
+import type { LivenessSample, LivenessTarget } from '../peers/warden.ts';
+import type { SendEvidenceReading } from '../peers/send.ts';
+import type { TurnWatchLoop } from '../peers/turn.ts';
 
 /**
  * WHERE THE SESSION OBSERVER RUNS — the port the composition root's existing timers drive.

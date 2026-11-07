@@ -24,7 +24,7 @@ describe('FileLastSnapshotStore', () => {
       // The whole point of this store is that absent evidence stays absent. An operator asking how a
       // session ended must be able to tell "nothing was captured" from "something is there and I
       // cannot read it" — collapsing the two into one empty answer is the false-success shape this
-      // migration has already had to fix in the warden and the session stores.
+      // move has already had to fix in the warden and the session stores.
       // Arrange
       const subject = storeAt(root);
       await mkdir(join(root, 'captured'), { recursive: true });

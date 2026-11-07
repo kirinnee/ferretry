@@ -4,33 +4,28 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
   FileWaitHeartbeat,
-  KeyedSerialExecutor,
   MonitorTickRunner,
-  RuntimeEnvironment,
   SendMonitorNudge,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
   StorageMonitorWaits,
-  StorageSignalRepository,
-  SystemClock,
-} from '../../../../src/adapters/index.ts';
+} from '../../../../../daemon/adapters/session/monitor/index.ts';
+import { StorageSignalRepository } from '../../../../../daemon/adapters/session/signal/index.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import {
   defaultSessionMonitorSettings,
   type MonitorNudge,
-  parseSessionId,
-  type SessionId,
   SessionMonitorService,
+  type WaitHeartbeat,
+} from '../../../../../daemon/lib/session/monitor/index.ts';
+import type { SessionSendService } from '../../../../../daemon/lib/session/peers/send.ts';
+import {
   SessionSignalService,
   type SignalArtifacts,
   type SignalRepository,
   type SignalTerminal,
-  type WaitHeartbeat,
-} from '../../../../src/lib/index.ts';
-import type { SessionSendService } from '../../../../src/lib/session/send/service.ts';
+} from '../../../../../daemon/lib/session/signal/index.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import { memoryStorage, sessionConfig } from '../../../../support/daemon/storage.ts';
 
 /**
  * The durable side of one monitor tick: the parks it can see, the two writes it makes to one, and the
@@ -50,23 +45,12 @@ const clock = { now: () => NOW };
 const SETTINGS = defaultSessionMonitorSettings;
 
 async function openStorage() {
-  const home = await mkdtemp(join(tmpdir(), 'ferretry-monitor-test-'));
-  homes.add(home);
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  );
-  return { home, opened: await factory.open() };
+  const { storage } = await memoryStorage({ clock });
+  return { opened: { storage } };
 }
 
 function config(id: string, overrides: Record<string, unknown> = {}) {
-  return {
-    id,
+  return sessionConfig(id, {
     name: 'Park and wake',
     agent: '/opt/fleet/bin/claude-auto-loge',
     command: ['/opt/fleet/bin/claude-auto-loge'],
@@ -77,7 +61,7 @@ function config(id: string, overrides: Record<string, unknown> = {}) {
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
-  };
+  });
 }
 
 /** A port the tick must never reach. Throwing is the assertion: the call itself is the failure. */

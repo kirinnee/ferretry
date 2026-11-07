@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { sessionAddressCandidates } from '../../../../daemon/adapters/session/session-address-candidates.ts';
-import { parseSessionId, type SessionId } from '../../../src/lib/index.ts';
+import { parseSessionId, type SessionId } from '../../../../daemon/lib/session-id.ts';
 
 const ANIYA = parseSessionId('mvb0sw7d-27f71326');
 const BROKEN = parseSessionId('lzz00000-00000000');

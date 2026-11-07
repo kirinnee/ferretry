@@ -8,7 +8,7 @@ import {
   tokenCounterValue,
   turnTokensSince,
 } from '../../../../../daemon/lib/session/live/policy.ts';
-import type { TranscriptEvent, TranscriptHarness } from '../../../../src/lib/transcript/types.ts';
+import type { TranscriptEvent, TranscriptHarness } from '../../../../../daemon/lib/session/peers/transcript.ts';
 
 /**
  * The live readout's reading rules.

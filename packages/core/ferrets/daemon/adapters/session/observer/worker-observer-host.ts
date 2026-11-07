@@ -1,28 +1,28 @@
+import type { ClockPort } from '../../../lib/ports.ts';
+import type { SessionObserverHost } from '../../../lib/session/observer/host.ts';
+import { lookAtPaneProcesses } from '../../../lib/session/observer/liveness.ts';
+import { INITIAL_OBSERVER_STATE, type ObserverPatch, type SessionObserver } from '../../../lib/session/observer/observer.ts';
+import type { SessionBinding, TranscriptStamp, WorkerLiveness } from '../../../lib/session/observer/protocol.ts';
+import type { TurnStateChange } from '../../../lib/session/observer/turn.ts';
+import type { AnswerLedger } from '../../../lib/session/peers/question.ts';
+import type { SendEvidenceReading } from '../../../lib/session/peers/send.ts';
+import type { PaneState } from '../../../lib/session/peers/tmux.ts';
 import {
-  type AnswerLedger,
-  type ClockPort,
-  INITIAL_OBSERVER_STATE,
   isTurnStatus,
-  type LivenessSample,
-  type LivenessTarget,
-  lookAtPaneProcesses,
-  type ObserverPatch,
-  type PaneState,
-  type ProcessObservation,
-  type SendEvidenceReading,
-  type SessionBinding,
-  type SessionId,
-  type SessionObserver,
-  type SessionObserverHost,
-  SessionTurnWatcher,
-  type TranscriptStamp,
+  type SessionTurnWatcher,
+  type SessionTurnWatcherFactory,
   TURN_WATCH_INTERVAL_MS,
-  type TurnStateChange,
   type TurnWatchLoop,
   type TurnWatchReport,
   type TurnWatchSession,
-  type WorkerLiveness,
-} from '../../../lib/index.ts';
+} from '../../../lib/session/peers/turn.ts';
+import type {
+  LivenessSample,
+  LivenessTarget,
+  PaneWorkSummarizer,
+  ProcessObservation,
+} from '../../../lib/session/peers/warden.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 import type { InlineObserverHost } from './inline-observer-host.ts';
 import type { SessionObservationApplier } from './session-observation-applier.ts';
 import type { WantedSession, WorkerSupervisor } from './worker-supervisor.ts';
@@ -48,6 +48,8 @@ export interface WorkerObserverPorts {
   readonly liveness: {
     redact(text: string): Promise<string>;
     processes(tmuxSession: string): Promise<ProcessObservation>;
+    /** The Warden's pane work classifier (`paneWorkSummary`), handed in by the host. */
+    readonly paneWork: PaneWorkSummarizer;
   };
   readonly clock: ClockPort;
   /** How long a read waits on its session's worker before it projects the session itself. */
@@ -58,6 +60,8 @@ export interface WorkerObserverPorts {
   readonly schedule: (delayMs: number, run: () => void) => () => void;
   /** Runs one reconcile as the profile's `turn watcher` activity. */
   readonly activity: (work: () => Promise<unknown>) => Promise<unknown>;
+  /** Builds the watcher for the sessions no worker hosts (today's `new SessionTurnWatcher(ports)`, conversation-owned). */
+  readonly turnWatcher: SessionTurnWatcherFactory;
 }
 
 /** How long after a change the host reconciles hosting: a burst of writes is one reconcile. */
@@ -261,7 +265,10 @@ export class WorkerObserverHost implements SessionObserverHost {
       target.tmuxSession === undefined
         ? undefined
         : await this.ports.liveness.processes(target.tmuxSession).catch(() => undefined);
-    const processes = lookAtPaneProcesses(observed?.kind === 'observed' ? observed.processes : undefined);
+    const processes = lookAtPaneProcesses(
+      observed?.kind === 'observed' ? observed.processes : undefined,
+      this.ports.liveness.paneWork,
+    );
     const step = this.ports.observer.step(INITIAL_OBSERVER_STATE, {
       kind: 'look',
       liveness: { screen, transcript: looked.transcript, ...processes },
@@ -343,7 +350,7 @@ class WorkerTurnLoop implements TurnWatchLoop {
     private readonly ports: WorkerObserverPorts,
     private readonly host: WorkerObserverHost,
   ) {
-    this.inlineWatcher = new SessionTurnWatcher(ports.inline.turnPortsFor(async () => this.local));
+    this.inlineWatcher = ports.turnWatcher(ports.inline.turnPortsFor(async () => this.local));
   }
 
   async run(): Promise<TurnWatchReport | undefined> {

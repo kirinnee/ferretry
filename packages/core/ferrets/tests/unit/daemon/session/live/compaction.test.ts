@@ -12,7 +12,7 @@ import {
   resolveCompaction,
   TYPICAL_COMPACTION_MS,
 } from '../../../../../daemon/lib/session/live/compaction.ts';
-import type { TranscriptEvent } from '../../../../src/lib/transcript/types.ts';
+import type { TranscriptEvent } from '../../../../../daemon/lib/session/peers/transcript.ts';
 
 /**
  * Compaction detection.

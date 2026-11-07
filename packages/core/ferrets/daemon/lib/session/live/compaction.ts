@@ -1,6 +1,6 @@
 import type { SessionCompactionBasis, SessionCompactionState } from '../../protocol/session-live.ts';
 import { z } from 'zod';
-import type { TranscriptEvent, TranscriptHarness } from '../../transcript/types.ts';
+import type { TranscriptEvent, TranscriptHarness } from '../peers/transcript.ts';
 import { tokenCounterValue } from './policy.ts';
 
 /**

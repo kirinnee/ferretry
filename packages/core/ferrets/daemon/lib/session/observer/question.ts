@@ -1,23 +1,19 @@
 import type { SessionState } from '../../protocol/session.ts';
-import type { TranscriptEvent } from '../../transcript/types.ts';
-import {
-  type ObservedRuntime,
-  observedRuntimeStatePatch,
-  projectObservedContext,
-  projectObservedRuntime,
-} from '../harness/observation.ts';
-import {
-  type AnswerOperationRecord,
-  type QuestionDocument,
-  reconcileAnswerEvidence,
-} from '../question/answer-ledger.ts';
-import { type AskedQuestion, withAskedQuestion } from '../question/asked.ts';
-import {
-  projectStructuredQuestion,
-  type StructuredQuestionProjection,
-  structuredQuestionStatePatch,
-} from '../question/projection.ts';
-import { DEFAULT_TRANSCRIPT_TAIL } from '../transcript/reader.ts';
+import type { ObservedRuntime, ObservedRuntimePolicy } from '../peers/harness-observation.ts';
+import type {
+  AnswerOperationRecord,
+  AskedQuestion,
+  QuestionDocument,
+  QuestionPolicy,
+  StructuredQuestionProjection,
+} from '../peers/question.ts';
+import { DEFAULT_TRANSCRIPT_TAIL, type TranscriptEvent } from '../peers/transcript.ts';
+
+/**
+ * What the question part folds through that Ferrets does not own: the conversation plugin's question projection
+ * and answer reconciliation, and the harness plugins' observed-runtime projection — handed in by the host.
+ */
+export type QuestionStepPolicy = QuestionPolicy & ObservedRuntimePolicy;
 
 /** How much of a transcript's end the question part reads: any in-flight question sits inside it. */
 export const QUESTION_TAIL_EVENTS = DEFAULT_TRANSCRIPT_TAIL;
@@ -74,24 +70,24 @@ export interface QuestionPatch {
  * account of which model it is running are both recovered from the same events, and both are additive
  * over whatever the document already holds, so neither can erase the other's fields.
  */
-export function stepQuestion(look: QuestionLook): QuestionPatch | undefined {
-  const projection = projectStructuredQuestion(withAskedQuestion(look.events, look.asked));
-  const answerEvidence = reconcileAnswerEvidence(look.answers, look.state, {
+export function stepQuestion(look: QuestionLook, policy: QuestionStepPolicy): QuestionPatch | undefined {
+  const projection = policy.projectStructuredQuestion(policy.withAskedQuestion(look.events, look.asked));
+  const answerEvidence = policy.reconcileAnswerEvidence(look.answers, look.state, {
     ...(projection.kind === 'pending' ? { activeToolUseId: projection.question.toolUseId } : {}),
     ...(projection.kind === 'resolved' ? { resolvedToolUseId: projection.toolUseId } : {}),
   });
   const records = [...answerEvidence.records.values()];
-  const context = projectObservedContext(look.events);
+  const context = policy.projectObservedContext(look.events);
   const runtime: ObservedRuntime = {
-    ...projectObservedRuntime(look.events),
+    ...policy.projectObservedRuntime(look.events),
     ...(context === undefined ? {} : { context }),
   };
   // The model the harness SAID it was using, never the one the session was launched with. Nothing else
   // in the daemon writes these fields, so every surface that shows a running model is reading this.
   const writes =
     Object.keys({
-      ...structuredQuestionStatePatch(look.state, projection, records),
-      ...observedRuntimeStatePatch(look.state, runtime),
+      ...policy.structuredQuestionStatePatch(look.state, projection, records),
+      ...policy.observedRuntimeStatePatch(look.state, runtime),
     }).length > 0;
   if (!writes && answerEvidence.settlements.length === 0) return undefined;
   return { kind: 'question', projection, records, settlements: answerEvidence.settlements, runtime, writes };
@@ -152,9 +148,13 @@ export interface QuestionDocumentPatch {
  * Removals belong to the QUESTION projection alone and only when it explicitly names the field. A model
  * observation must never erase a picker or answer quarantine.
  */
-export function questionDocumentPatch(current: SessionState, patch: QuestionPatch): QuestionDocumentPatch | undefined {
-  const question = structuredQuestionStatePatch(current, patch.projection, patch.records);
-  const fields = { ...question, ...observedRuntimeStatePatch(current, patch.runtime) };
+export function questionDocumentPatch(
+  current: SessionState,
+  patch: QuestionPatch,
+  policy: QuestionStepPolicy,
+): QuestionDocumentPatch | undefined {
+  const question = policy.structuredQuestionStatePatch(current, patch.projection, patch.records);
+  const fields = { ...question, ...policy.observedRuntimeStatePatch(current, patch.runtime) };
   if (Object.keys(fields).length === 0) return undefined;
   return {
     fields,

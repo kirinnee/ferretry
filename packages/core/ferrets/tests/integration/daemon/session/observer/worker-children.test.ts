@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { countWorkerChildren } from '../../../../src/adapters/index.ts';
+import { countWorkerChildren } from '../../../../../daemon/adapters/session/observer/worker-children.ts';
 
 /**
  * The worker's own child counter, for a child whose exit cannot be reported.

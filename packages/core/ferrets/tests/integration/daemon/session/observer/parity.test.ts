@@ -21,49 +21,74 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type SessionState, SessionStateSchema } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import { unrefFileEventTimers } from '../../../../src/adapters/file-events/bun-file-event-source.ts';
-import { platformFileEventSource } from '../../../../src/adapters/file-events/platform.ts';
+import { InlineObserverHost } from '../../../../../daemon/adapters/session/observer/inline-observer-host.ts';
+import { SessionObservationApplier } from '../../../../../daemon/adapters/session/observer/session-observation-applier.ts';
+import { WorkerObserverHost } from '../../../../../daemon/adapters/session/observer/worker-observer-host.ts';
 import {
-  BunSqliteIndexFactory,
-  BunTmuxProcess,
-  bundledWorkerUrl,
-  type DaemonStorage,
-  DaemonStorageFactory,
   DEFAULT_WORKER_SUPERVISOR_SETTINGS,
-  FileAnswerLedger,
-  InlineObserverHost,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SessionObservationApplier,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  StorageTurnPorts,
-  SystemClock,
-  WorkerObserverHost,
   WorkerSupervisor,
-} from '../../../../src/adapters/index.ts';
-import { NodeTranscriptSource } from '../../../../src/adapters/transcript/index.ts';
-import { FileEventHub } from '../../../../src/lib/file-events/hub.ts';
+} from '../../../../../daemon/adapters/session/observer/worker-supervisor.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
+import type { SessionObserverHost } from '../../../../../daemon/lib/session/observer/host.ts';
+import { SessionObserver } from '../../../../../daemon/lib/session/observer/observer.ts';
+import type { SessionBinding } from '../../../../../daemon/lib/session/observer/protocol.ts';
+import type { SessionTranscriptTail } from '../../../../../daemon/lib/session/peers/reads.ts';
+import type { PaneState } from '../../../../../daemon/lib/session/peers/tmux.ts';
+import type { SessionTurnPorts } from '../../../../../daemon/lib/session/peers/turn.ts';
+import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import {
-  ClaudeTranscriptParser,
-  CodexTranscriptParser,
-  createSessionPaths,
-  observedRuntimeStatePatch,
-  parseSessionId,
-  projectObservedRuntime,
+  MemoryAnswerLedger,
+  testTurnWatcher,
+  UNWIRED_PANE_WORK,
+  UNWIRED_QUESTIONS,
+  UnwiredPeer,
+  unwiredTranscriptSource,
+} from '../../../../support/daemon/observer-peers.ts';
+import { memoryStorage } from '../../../../support/daemon/storage.ts';
+import { FileEventHub } from '../../support/file-event-hub.ts';
+import { waitFor } from '../../support/wait-for.ts';
+
+/*
+ * HOST-PROVIDED IN CORE. The real tmux client (`TmuxController` over `BunTmuxProcess`, terminals), the transcript
+ * parsers (conversation), the storage-backed turn ports (`StorageTurnPorts`, conversation), the file answer ledger
+ * (conversation, here in memory), the question projection (conversation, claude-code/codex) and the bundled worker
+ * URL (kernel) are other owners' code. Each stand-in below throws, naming it, until the host's own is wired in.
+ */
+const {
   projectStructuredQuestion,
   reconcileAnswerEvidence,
-  type SessionBinding,
-  type SessionId,
-  SessionObserver,
-  type SessionObserverHost,
-  type SessionTranscriptTail,
-  SessionTurnWatcher,
+  projectObservedRuntime,
   structuredQuestionStatePatch,
-  TmuxController,
-} from '../../../../src/lib/index.ts';
-import { waitFor } from '../../support/wait-for.ts';
+  observedRuntimeStatePatch,
+} = UNWIRED_QUESTIONS;
+interface ParityTmux {
+  launch(spec: {
+    readonly session: string;
+    readonly cwd: string;
+    readonly command: readonly [string, ...string[]];
+    readonly width?: number;
+    readonly height?: number;
+  }): Promise<unknown>;
+  visible(session: string): Promise<string | undefined>;
+}
+const unwiredTmux = (_tmux: string, _socket: string): ParityTmux => ({
+  launch: async () => {
+    throw new UnwiredPeer('TmuxController over BunTmuxProcess (terminals)');
+  },
+  visible: async () => {
+    throw new UnwiredPeer('TmuxController over BunTmuxProcess (terminals)');
+  },
+});
+const unwiredTurnPorts = (): SessionTurnPorts & { paneState(id: SessionId): Promise<PaneState | undefined> } => {
+  const refuse = async (): Promise<never> => {
+    throw new UnwiredPeer('StorageTurnPorts (conversation)');
+  };
+  return { sessions: refuse, transcript: refuse, pane: refuse, record: refuse, paneState: refuse, clock };
+};
+const bundledWorkerUrl = (_name: 'session'): string => {
+  throw new UnwiredPeer('bundledWorkerUrl (kernel)');
+};
 
 const NOW = '2026-10-22T08:00:00.000Z';
 const clock = { now: () => NOW };
@@ -123,17 +148,8 @@ const ANSWER = claudeUser('u-answer', [{ type: 'tool_result', tool_use_id: 'tool
 const codexEvent = (type: string) => line({ timestamp: NOW, type: 'event_msg', payload: { type, turn_id: 'turn-1' } });
 const CODEX_CONTEXT = line({ timestamp: NOW, type: 'turn_context', payload: { model: 'gpt-5.5', effort: 'high' } });
 
-async function openStorage(home: string): Promise<DaemonStorage> {
-  const opened = await new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  ).open();
-  return opened.storage;
+async function openStorage(_home: string): Promise<DaemonStorage> {
+  return (await memoryStorage({ clock })).storage;
 }
 
 /** One side of the comparison: a storage home with its own transcript, observing the shared pane. */
@@ -141,7 +157,7 @@ interface Side {
   readonly storage: DaemonStorage;
   readonly transcript: string;
   readonly tail: SessionTranscriptTail;
-  readonly ledger: FileAnswerLedger;
+  readonly ledger: MemoryAnswerLedger;
 }
 
 interface Pair {
@@ -190,12 +206,10 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
   );
   await chmod(player, 0o755);
   const socket = join(root, 'tmux.sock');
-  const controller = new TmuxController(new BunTmuxProcess(tmux, socket));
+  const controller = unwiredTmux(tmux, socket);
   await controller.launch({ session: tmuxSession, cwd: root, command: ['/bin/sh', player], width: 100, height: 40 });
 
-  const source = new NodeTranscriptSource(
-    harness === 'claude' ? new ClaudeTranscriptParser() : new CodexTranscriptParser(),
-  );
+  const source = unwiredTranscriptSource(harness);
   const side = async (name: string): Promise<Side> => {
     const storage = await openStorage(join(root, name));
     await storage.writeConfig(id, { id, name: 'Parity', tmuxSession, harness, mode: 'interactive' });
@@ -208,7 +222,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
       tail: {
         tail: async (_id, limit) => ({ kind: 'read', events: (await source.read(transcript)).events.slice(-limit) }),
       },
-      ledger: new FileAnswerLedger(session => createSessionPaths(storage.paths, session).directory, clock),
+      ledger: new MemoryAnswerLedger(),
     };
   };
   const reference = await side('reference');
@@ -221,8 +235,8 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
   });
 
   // THE PRE-3a PATH.
-  const watcher = new SessionTurnWatcher(
-    new StorageTurnPorts(reference.storage, reference.tail, async () => reference.transcript, controller, clock),
+  const watcher = testTurnWatcher(
+    unwiredTurnPorts(),
   );
   const referenceSerial = new KeyedSerialExecutor();
   const referenceProject = async (session: SessionId): Promise<void> => {
@@ -263,9 +277,12 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
   };
 
   // THE HOST UNDER TEST: the inline host, or the worker host over it with a real session-worker thread.
-  const hostPanes = new StorageTurnPorts(host.storage, host.tail, async () => host.transcript, controller, clock);
-  const applier = new SessionObservationApplier(host.storage, host.ledger, new KeyedSerialExecutor());
-  const fold = new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'));
+  const hostPanes = unwiredTurnPorts();
+  const applier = new SessionObservationApplier(host.storage, host.ledger, new KeyedSerialExecutor(), UNWIRED_QUESTIONS);
+  const fold = new SessionObserver(
+    text => createHash('sha256').update(text, 'utf8').digest('hex'),
+    UNWIRED_QUESTIONS,
+  );
   const answerSerial = new KeyedSerialExecutor();
   const inline = new InlineObserverHost(
     {
@@ -286,6 +303,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
         processes: async () => {
           throw new Error('not looked at here');
         },
+        paneWork: UNWIRED_PANE_WORK,
       },
       clock,
       yieldToLoop: async () => undefined,
@@ -295,6 +313,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
         const timer = setInterval(tick, intervalMs);
         return () => clearInterval(timer);
       },
+      turnWatcher: testTurnWatcher,
     },
     fold,
   );
@@ -327,7 +346,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
       transcript: { file: host.transcript, harness },
     });
     // The real file-event hub, so a transcript append reaches the worker as it does in the daemon.
-    const files = new FileEventHub(platformFileEventSource(), unrefFileEventTimers);
+    const files = new FileEventHub();
     workerHost = new WorkerObserverHost({
       inline,
       supervisor,
@@ -340,6 +359,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
       liveness: {
         redact: async text => text,
         processes: async () => ({ kind: 'unobserved', reason: 'not looked at here' }) as never,
+        paneWork: UNWIRED_PANE_WORK,
       },
       clock,
       barrierMs: 5_000,
@@ -349,6 +369,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
         const timer = setTimeout(run, delayMs);
         return () => clearTimeout(timer);
       },
+      turnWatcher: testTurnWatcher,
       activity: async work => await work(),
     });
     observer = workerHost;

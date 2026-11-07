@@ -24,10 +24,10 @@
  * commute; the observer learns the new value from the facts that follow the write.
  */
 
-import type { LivenessSample } from '../../warden/liveness.ts';
-import type { TurnObservation } from '../turn/policy.ts';
+import type { TurnObservation } from '../peers/turn.ts';
+import type { LivenessSample } from '../peers/warden.ts';
 import { type LivenessLook, livenessSampleOf, type TextDigest } from './liveness.ts';
-import { type QuestionLook, type QuestionPatch, stepQuestion } from './question.ts';
+import { type QuestionLook, type QuestionPatch, type QuestionStepPolicy, stepQuestion } from './question.ts';
 import { stepTurn, type TurnFacts, type TurnLook, type TurnStateChange } from './turn.ts';
 
 /**
@@ -83,13 +83,17 @@ export interface ObserverStep {
 
 /** A stateless service: every changing value comes in through `step` and goes out through its answer. */
 export class SessionObserver {
-  constructor(private readonly digest: TextDigest) {}
+  constructor(
+    private readonly digest: TextDigest,
+    /** The question part's foreign behaviour (question projection, observed runtime), handed in by the host. */
+    private readonly questions: QuestionStepPolicy,
+  ) {}
 
   step(state: ObserverState, input: ObserverInput): ObserverStep {
     if (input.kind === 'facts') return freeze({ ...state, facts: input.facts }, [], []);
     const facts = input.facts ?? state.facts;
     const patches: ObserverPatch[] = [];
-    const question = input.question === undefined ? undefined : stepQuestion(input.question);
+    const question = input.question === undefined ? undefined : stepQuestion(input.question, this.questions);
     if (question !== undefined) patches.push(question);
     let turn = state.turn;
     if (input.turn !== undefined && facts !== undefined) {

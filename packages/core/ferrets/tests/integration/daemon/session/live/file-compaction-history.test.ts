@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { FileCompactionHistory } from '../../../../../daemon/adapters/session/live/index.ts';
-import type { CompactionRecord, FileSystemPort } from '../../../../src/lib/index.ts';
+import type { FileSystemPort } from '../../../../../daemon/lib/ports.ts';
+import type { CompactionRecord } from '../../../../../daemon/lib/session/live/compaction.ts';
 
 /**
  * The compaction duration history over a file port.

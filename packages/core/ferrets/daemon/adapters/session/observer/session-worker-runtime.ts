@@ -17,16 +17,16 @@ import type {
 } from '../../../lib/session/observer/protocol.ts';
 import { QUESTION_TAIL_EVENTS } from '../../../lib/session/observer/question.ts';
 import { TURN_TAIL_EVENTS } from '../../../lib/session/observer/turn.ts';
-import type { AnswerOperationRecord } from '../../../lib/session/question/answer-ledger.ts';
-import type { AskedQuestion } from '../../../lib/session/question/asked.ts';
-import { TranscriptSendEvidence } from '../../../lib/session/send/view.ts';
-import { IncrementalTranscriptTail } from '../../../lib/session/transcript/reader.ts';
-import { isTurnStatus } from '../../../lib/session/turn/policy.ts';
-import type { TmuxCommandPort } from '../../../lib/tmux/contracts.ts';
-import { parsePaneWatch } from '../../../lib/tmux/control-protocol.ts';
-import { TmuxController } from '../../../lib/tmux/controller.ts';
-import type { TranscriptEvent, TranscriptSource } from '../../../lib/transcript/types.ts';
-import { PaneFrames } from '../turn/pane-frames.ts';
+import type { AnswerOperationRecord, AskedQuestion } from '../../../lib/session/peers/question.ts';
+import type { TranscriptSendEvidence, TranscriptSendEvidenceFactory } from '../../../lib/session/peers/send.ts';
+import { type PaneParsers, parsePaneWatch, type TmuxCommandPort } from '../../../lib/session/peers/tmux.ts';
+import type {
+  IncrementalTranscriptTail,
+  IncrementalTranscriptTailFactory,
+  TranscriptEvent,
+  TranscriptSource,
+} from '../../../lib/session/peers/transcript.ts';
+import { isTurnStatus, type PaneFrames, type PaneFramesFactory } from '../../../lib/session/peers/turn.ts';
 
 /** One session's attached tmux client, as a worker holds it. */
 export interface WorkerTmuxClient {
@@ -82,6 +82,16 @@ export interface SessionWorkerDeps {
   /** The children this worker started since the last report. */
   readonly children: () => readonly WorkerChild[];
   readonly observer: SessionObserver;
+  /**
+   * What a worker reads through that Ferrets does not own, handed in by the host: the frames of a pane read
+   * through its client (`new PaneFrames(new TmuxController(port), clock)` today), the incremental transcript tail
+   * (`new IncrementalTranscriptTail(…)`), the send tracker's transcript evidence (`new TranscriptSendEvidence(…)`)
+   * and the terminals plugin's pane parsers a frame is read as turn evidence by.
+   */
+  readonly frames: PaneFramesFactory;
+  readonly tail: IncrementalTranscriptTailFactory;
+  readonly sendEvidence: TranscriptSendEvidenceFactory;
+  readonly paneParsers: PaneParsers;
   readonly pacing?: SessionWorkerPacing;
 }
 
@@ -304,7 +314,7 @@ export class SessionWorkerRuntime {
     const tmux = this.deps.tmux(binding);
     const stopWatching = tmux.onPaneWatch(drew);
     void tmux.watch().catch(() => false);
-    return { tmux, frames: new PaneFrames(new TmuxController(tmux.port), this.deps.clock), stopWatching };
+    return { tmux, frames: this.deps.frames(tmux.port, this.deps.clock), stopWatching };
   }
 
   private paneDrew(hosted: Hosted, value: string): void {
@@ -364,7 +374,7 @@ export class SessionWorkerRuntime {
       live ? hosted.frames.state(hosted.binding.tmux.target).catch(() => undefined) : Promise.resolve(undefined),
       this.askedOf(hosted.binding),
     ]).catch(() => [undefined, undefined, undefined] as const);
-    const pane = frame === undefined ? undefined : turnPaneEvidenceOf(frame);
+    const pane = frame === undefined ? undefined : turnPaneEvidenceOf(frame, this.deps.paneParsers);
     // Detached or re-attached while it looked: what it found belongs to nobody.
     if (this.hosted.get(hosted.session) !== hosted) return;
     hosted.lastLookAt = this.deps.nowMs();
@@ -487,7 +497,7 @@ export class SessionWorkerRuntime {
     const cursor =
       cached?.file === bound.file
         ? cached.cursor
-        : new IncrementalTranscriptTail(
+        : this.deps.tail(
             this.deps.transcripts[bound.harness],
             bound.file,
             hosted.session,
@@ -550,7 +560,7 @@ export class SessionWorkerRuntime {
   /** The send tracker's evidence over this session's own transcript, read here instead of on the main thread. */
   private sendEvidence(hosted: Hosted): TranscriptSendEvidence {
     if (hosted.sendEvidence !== undefined) return hosted.sendEvidence;
-    const evidence = new TranscriptSendEvidence(
+    const evidence = this.deps.sendEvidence(
       async sessionId => {
         const bound = hosted.binding.transcript;
         return bound === undefined ? undefined : { sessionId, harness: bound.harness };

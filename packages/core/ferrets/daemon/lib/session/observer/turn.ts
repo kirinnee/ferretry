@@ -1,7 +1,7 @@
 import type { HarnessDialog } from '../../protocol/session-dialog.ts';
 import type { PermissionRequest } from '../../protocol/session-permission.ts';
 import type { SessionState, SessionTurnState } from '../../protocol/session.ts';
-import type { TranscriptEvent } from '../../transcript/types.ts';
+import type { TranscriptEvent } from '../peers/transcript.ts';
 import {
   isTurnStatus,
   observeTurn,
@@ -12,8 +12,9 @@ import {
   type TurnObservation,
   type TurnPaneEvidence,
   transcriptTurnPhase,
-} from '../turn/policy.ts';
-import { transcriptUsageLimit, type UsageLimit } from '../turn/usage-limit.ts';
+  transcriptUsageLimit,
+  type UsageLimit,
+} from '../peers/turn.ts';
 
 /** How much of a transcript's end a turn decision reads: the last turn boundary is always near the end. */
 export const TURN_TAIL_EVENTS = 80;

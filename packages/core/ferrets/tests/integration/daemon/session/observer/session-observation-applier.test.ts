@@ -7,33 +7,21 @@
  * document it holds the lock on.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { SessionState } from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
+import { SessionObservationApplier } from '../../../../../daemon/adapters/session/observer/session-observation-applier.ts';
+import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import type { DaemonStorage } from '../../../../../daemon/adapters/storage/session-storage.ts';
+import { type QuestionPatch, stepQuestion } from '../../../../../daemon/lib/session/observer/question.ts';
+import type { AnswerOperationRecord } from '../../../../../daemon/lib/session/peers/question.ts';
+import type { TranscriptEvent } from '../../../../../daemon/lib/session/peers/transcript.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import {
-  BunSqliteIndexFactory,
-  type DaemonStorage,
-  DaemonStorageFactory,
-  FileAnswerLedger,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SessionObservationApplier,
-  SqliteHomeLockFactory,
-  storagePaneLimits,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  SystemClock,
-} from '../../../../src/adapters/index.ts';
-import {
-  type AnswerOperationRecord,
-  createSessionPaths,
-  parseSessionId,
-  type QuestionPatch,
-  stepQuestion,
-  type TranscriptEvent,
-} from '../../../../src/lib/index.ts';
+  MemoryAnswerLedger,
+  UNWIRED_QUESTIONS,
+  unwiredPaneLimits as storagePaneLimits,
+} from '../../../../support/daemon/observer-peers.ts';
+import { memoryStorage } from '../../../../support/daemon/storage.ts';
 
 const NOW = '2026-10-22T08:00:00.000Z';
 const ID = parseSessionId('applied-1');
@@ -44,21 +32,9 @@ afterEach(async () => {
 });
 
 async function openStorage(): Promise<DaemonStorage> {
-  const home = await mkdtemp(join(tmpdir(), 'fy-observation-applier-'));
-  const opened = await new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(() => new Date(NOW)),
-    () => new KeyedSerialExecutor(),
-  ).open();
-  cleanups.push(async () => {
-    await opened.storage.close();
-    await rm(home, { recursive: true, force: true });
-  });
-  return opened.storage;
+  const { storage } = await memoryStorage({ clock: { now: () => NOW } });
+  cleanups.push(async () => await storage.close());
+  return storage;
 }
 
 const question: TranscriptEvent = {
@@ -96,22 +72,18 @@ const patchFor = (
     state: { id: ID, status: 'running', turn: 1, ...state } as SessionState,
     events,
     answers,
-  });
+  }, UNWIRED_QUESTIONS);
   if (patch === undefined) throw new Error('the look implied nothing');
   return patch;
 };
 
-/** The real receipt file beside the session, and what each of its lines says happened. */
-function ledgerFor(storage: DaemonStorage) {
-  const ledger = new FileAnswerLedger(
-    session => createSessionPaths(storage.paths, session).directory,
-    new SystemClock(() => new Date(NOW)),
-  );
+/** The receipt ledger beside the session (in memory: today's `FileAnswerLedger` is conversation's), and what each of its rows says happened. */
+function ledgerFor(_storage: DaemonStorage) {
+  const ledger = new MemoryAnswerLedger();
   const outcomes = async (): Promise<string[]> =>
-    (await readFile(ledger.file(ID), 'utf8'))
-      .split('\n')
-      .filter(Boolean)
-      .map(line => JSON.parse(line) as { readonly outcome: string; readonly resolution?: string })
+    ledger
+      .rows(ID)
+      .map(row => row as AnswerOperationRecord & { readonly resolution?: string })
       .map(row => row.resolution ?? row.outcome);
   return { ledger, outcomes };
 }
@@ -128,6 +100,7 @@ describe('SessionObservationApplier', () => {
       storage,
       { all: noReceipts, append: async (_id, record) => void appended.push(record) },
       new KeyedSerialExecutor(),
+      UNWIRED_QUESTIONS,
     );
 
     // Act — both handed in at once; the turn's compare-and-set would refuse if it ran first, because the
@@ -157,6 +130,7 @@ describe('SessionObservationApplier', () => {
         append: async (_id, record) => void appended.push(record),
       },
       new KeyedSerialExecutor(),
+      UNWIRED_QUESTIONS,
     );
     const patch = patchFor(
       { lastAnsweredQuestionToolUseId: 'tool-1' },
@@ -184,6 +158,7 @@ describe('SessionObservationApplier', () => {
       storage,
       { all: noReceipts, append: async () => undefined },
       new KeyedSerialExecutor(),
+      UNWIRED_QUESTIONS,
     );
     const patch = patchFor({}, [question]);
     await storage.writeState(ID, {
@@ -214,7 +189,7 @@ describe('SessionObservationApplier', () => {
     const patch = patchFor({ lastAnsweredQuestionToolUseId: 'tool-1' }, [question], new Map([['request-1', accepted]]));
     should(patch.settlements.map(record => record.outcome)).deepEqual(['confirmed']);
     await ledger.append(ID, { ...accepted, outcome: 'confirmed' });
-    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor());
+    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor(), UNWIRED_QUESTIONS);
 
     // Act — the patch reaches the writer only now, with the answer key idle again.
     const written = await subject.apply(ID, patch, NOW);
@@ -242,7 +217,7 @@ describe('SessionObservationApplier', () => {
     const answered = { id: ID, status: 'running', turn: 1, lastAnsweredQuestionToolUseId: 'tool-1' } as const;
     await storage.writeState(ID, answered);
     await ledger.append(ID, { ...accepted, outcome: 'confirmed' });
-    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor());
+    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor(), UNWIRED_QUESTIONS);
 
     // Act
     const written = await subject.apply(ID, patch, NOW);
@@ -262,7 +237,7 @@ describe('SessionObservationApplier', () => {
     const { ledger, outcomes } = ledgerFor(storage);
     await ledger.append(ID, accepted);
     const patch = patchFor({}, [question, released], new Map([['request-1', accepted]]));
-    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor());
+    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor(), UNWIRED_QUESTIONS);
 
     // Act
     const written = await subject.apply(ID, patch, NOW);
@@ -324,6 +299,7 @@ describe('a session parked on the usage-limit dialog, over real storage', () => 
       storage,
       { all: noReceipts, append: async () => {} },
       new KeyedSerialExecutor(),
+      UNWIRED_QUESTIONS,
     );
     const nowMs = Date.parse(NOW);
 

@@ -5,76 +5,78 @@
  * no file: it reads its sessions' panes through their own attached observe-only tmux clients and their
  * transcripts from disk, and posts turn patches the main thread applies (`docs/design/session-workers.md`).
  * Kept lean on purpose — no zod, no protocol schemas, no storage, no vault — and held so by the diet test.
+ *
+ * WHAT FERRETS DOES NOT OWN IS HANDED IN. The session's attached control client (the terminals plugin's
+ * `ControlModeTmuxProcess` over `BunTmuxProcess`, attached with `SESSION_WORKER_ATTACH_FLAGS` and subscribed to
+ * `PANE_WATCH`), the transcript sources and their parsers, the asked-question reader, the pane frames, the
+ * incremental tail, the send evidence and the question and observed-runtime projections are other owners' code,
+ * which Ferrets cannot import (§2.1). The thread's entry module — the host's — builds {@link SessionWorkerPeers}
+ * and calls {@link serveSessionWorker} with its own `self`.
  */
 import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
-import { SessionWorkerRuntime } from '../adapters/session/observer/session-worker-runtime.ts';
+import {
+  type SessionWorkerDeps,
+  SessionWorkerRuntime,
+} from '../adapters/session/observer/session-worker-runtime.ts';
 import { countWorkerChildren } from '../adapters/session/observer/worker-children.ts';
-import { BunTmuxProcess } from '../src/adapters/tmux/bun-tmux-process.ts';
-import { ControlModeTmuxProcess } from '../src/adapters/tmux/control-tmux-process.ts';
-import { readAskedQuestion } from '../src/adapters/session/question/asked-question-file.ts';
-import { NodeTranscriptSource } from '../src/adapters/transcript/file-source.ts';
 import { SessionObserver } from '../lib/session/observer/observer.ts';
 import type { FromSessionWorker, ToSessionWorker } from '../lib/session/observer/protocol.ts';
-import { PANE_WATCH, PANE_WATCH_FORMAT, SESSION_WORKER_ATTACH_FLAGS } from '../src/lib/tmux/control-protocol.ts';
-import { ClaudeTranscriptParser } from '../src/lib/transcript/claude.ts';
-import { CodexTranscriptParser } from '../src/lib/transcript/codex.ts';
+import type { QuestionStepPolicy } from '../lib/session/observer/question.ts';
 
-declare const self: { onmessage: ((event: MessageEvent<ToSessionWorker>) => void) | null };
+/** The thread's own message scope: what `self` is inside a worker. */
+export interface SessionWorkerScope {
+  onmessage: ((event: MessageEvent<ToSessionWorker>) => void) | null;
+}
 
-const post = (message: FromSessionWorker): void => postMessage(message);
-const nowMs = (): number => performance.timeOrigin + performance.now();
-const children = countWorkerChildren(Bun, nowMs);
+/**
+ * The parts of a session worker other owners supply. `tmux` builds the session's own ATTACHED, REFUSING control
+ * client: anything that is not an allowlisted read is refused without running — that refusal is what keeps a worker
+ * from typing; `no-output`, so the pane's bytes are never streamed, only a subscription to its
+ * `#{pane_dead} #{window_activity}` says when it drew.
+ */
+export interface SessionWorkerPeers
+  extends Pick<SessionWorkerDeps, 'tmux' | 'transcripts' | 'asked' | 'frames' | 'tail' | 'sendEvidence' | 'paneParsers'> {
+  readonly questions: QuestionStepPolicy;
+}
 
-const runtime = new SessionWorkerRuntime({
-  post,
-  // ATTACHED, REFUSING: the session's own control client answers reads in-band, and anything that is not
-  // an allowlisted read is refused without running — that refusal is what keeps a worker from typing. NOT
-  // tmux's `read-only`: from 3.7 a read-only client refuses the daemon's own `send-keys` whenever tmux
-  // picks it as their target client. `no-output`: the pane's bytes are never streamed here; a subscription
-  // to its `#{pane_dead} #{window_activity}` says when it drew, at most once a second, all a look needs.
-  tmux: ({ executable, socket, target }) => {
-    const port = new ControlModeTmuxProcess(executable, socket, new BunTmuxProcess(executable, socket), {
-      attach: { target, flags: SESSION_WORKER_ATTACH_FLAGS },
-      mutations: 'refuse',
-    });
-    return {
-      port,
-      get connected() {
-        return port.connected;
-      },
-      watch: async () => await port.watch(PANE_WATCH, PANE_WATCH_FORMAT),
-      onPaneWatch: listener =>
-        port.subscribe(notification => {
-          if (notification.kind === 'subscription-changed' && notification.name === PANE_WATCH)
-            listener(notification.value);
-        }),
-      stop: async () => await port.stop(),
-    };
-  },
-  transcripts: {
-    claude: new NodeTranscriptSource(new ClaudeTranscriptParser()),
-    codex: new NodeTranscriptSource(new CodexTranscriptParser()),
-  },
-  stat: async file => {
-    const info = await stat(file);
-    return { size: info.size, mtimeMs: info.mtimeMs };
-  },
-  asked: readAskedQuestion,
-  clock: { now: () => new Date().toISOString() },
-  nowMs,
-  schedule: (delayMs, run) => {
-    const timer = setTimeout(run, delayMs);
-    return () => clearTimeout(timer);
-  },
-  children,
-  observer: new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex')),
-});
+/** Runs the session-worker program on `scope`, posting through `post` (the thread's `postMessage`). */
+export function serveSessionWorker(
+  scope: SessionWorkerScope,
+  post: (message: FromSessionWorker) => void,
+  peers: SessionWorkerPeers,
+): void {
+  const nowMs = (): number => performance.timeOrigin + performance.now();
+  const children = countWorkerChildren(Bun, nowMs);
 
-self.onmessage = event => {
-  void runtime
-    .handle(event.data)
-    .catch((error: unknown) =>
-      post({ kind: 'fault', message: error instanceof Error ? error.message : String(error), fatal: false }),
-    );
-};
+  const runtime = new SessionWorkerRuntime({
+    post,
+    tmux: peers.tmux,
+    transcripts: peers.transcripts,
+    stat: async file => {
+      const info = await stat(file);
+      return { size: info.size, mtimeMs: info.mtimeMs };
+    },
+    ...(peers.asked === undefined ? {} : { asked: peers.asked }),
+    clock: { now: () => new Date().toISOString() },
+    nowMs,
+    schedule: (delayMs, run) => {
+      const timer = setTimeout(run, delayMs);
+      return () => clearTimeout(timer);
+    },
+    children,
+    observer: new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'), peers.questions),
+    frames: peers.frames,
+    tail: peers.tail,
+    sendEvidence: peers.sendEvidence,
+    paneParsers: peers.paneParsers,
+  });
+
+  scope.onmessage = event => {
+    void runtime
+      .handle(event.data)
+      .catch((error: unknown) =>
+        post({ kind: 'fault', message: error instanceof Error ? error.message : String(error), fatal: false }),
+      );
+  };
+}
