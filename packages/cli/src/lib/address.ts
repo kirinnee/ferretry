@@ -1,12 +1,14 @@
 /**
- * Where a client on this machine dials the daemon, and what counts as this machine (P90, S57).
- * Copied from today's `protocol/address.ts` and `cli/lib/daemon/address.ts`, whole-domain loopback rule intact.
+ * Where a client on this machine dials the daemon, and what counts as this machine (P89, P90, S57).
+ * The loopback rule is copied from today's `protocol/address.ts`, whole-domain rule intact; the recorded bind is the
+ * kernel's run record (`DAEMON_RUN_FILE`), read through the kernel's own schema and address function.
  */
+import { type DaemonRun, DaemonRunSchema, recordedBindAddress } from '@ferretry/kernel/contract';
 
 /** Loopback, never a routable interface: a daemon binds the machine it runs on and nothing else. */
 const LOOPBACK = '127.0.0.1';
-/** The port a daemon binds when its operator has named none. */
-const DEFAULT_DAEMON_PORT = 7431;
+/** The port a daemon binds when its operator has named none: the same number as `DEFAULT_PORT` in the kernel's `host/fyd.ts`. */
+const DEFAULT_DAEMON_PORT = 7457;
 
 const LOOPBACK_IPV4_BLOCK = /^127(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/u;
 const IPV6_GROUP = /^[0-9a-f]{1,4}$/u;
@@ -46,20 +48,7 @@ export function isLoopbackHost(host: string): boolean {
   return groups.every((group, index) => group === (index === IPV6_GROUP_COUNT - 1 ? 1 : 0));
 }
 
-/** Every spelling of the unspecified address (`0.0.0.0`, `::`, `::0`, …): a bind instruction, not a destination. */
-export function isWildcardHost(host: string): boolean {
-  const bare = bareHost(host);
-  if (bare === '0.0.0.0') return true;
-  const groups = ipv6Groups(bare);
-  return groups?.every(group => group === 0) === true;
-}
-
-function daemonAddress(host: string, port: number): string {
-  const authorityHost = host.startsWith('[') && host.endsWith(']') ? host : host.includes(':') ? `[${host}]` : host;
-  return `http://${authorityHost}:${String(port)}`;
-}
-
-export const DEFAULT_DAEMON_URL = daemonAddress(LOOPBACK, DEFAULT_DAEMON_PORT);
+export const DEFAULT_DAEMON_URL = recordedBindAddress({ host: LOOPBACK, port: DEFAULT_DAEMON_PORT });
 
 /**
  * Whether a daemon URL names this machine and may therefore be sent a locally minted credential. Decided from the
@@ -74,35 +63,25 @@ export function isLocalDaemonUrl(url: string): boolean {
   }
 }
 
-function declaredBind(document: object): object {
-  const carriers = (document as { readonly carriers?: unknown }).carriers;
-  if (!Array.isArray(carriers)) return document;
-  const bind: unknown = carriers.find(
-    entry => typeof entry === 'object' && entry !== null && (entry as { readonly kind?: unknown }).kind === 'bind',
-  );
-  return (bind as object | undefined) ?? document;
+/**
+ * The daemon's run record (`run/daemon.json`), or `undefined` when there is none this client can read. Tolerant by
+ * design: an unreadable record leaves the client on the well-known default, which fails by reporting the daemon away.
+ */
+export function parseDaemonRun(documentText: string | undefined): DaemonRun | undefined {
+  if (documentText === undefined) return undefined;
+  try {
+    const parsed = DaemonRunSchema.safeParse(JSON.parse(documentText));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
- * Where the daemon says it listens, from `config/daemon.json`: the BIND, never the advertisement (`publicUrl`
- * answers where somebody else reaches this machine). A wildcard bind answers loopback. Tolerant by design: a
- * document this cannot read leaves the client on the well-known default, which fails by reporting the daemon away.
+ * An explicit `FY_URL` wins outright (P90); then the bind the daemon recorded, through the kernel's own
+ * {@link recordedBindAddress} so client and daemon cannot disagree (P89); then the well-known default.
  */
-export function recordedBindAddress(document: unknown): string | undefined {
-  if (typeof document !== 'object' || document === null) return undefined;
-  const recorded = declaredBind(document) as { readonly host?: unknown; readonly port?: unknown };
-  if (typeof recorded.port !== 'number' || !Number.isInteger(recorded.port)) return undefined;
-  const host = typeof recorded.host === 'string' && recorded.host.trim() !== '' ? recorded.host.trim() : LOOPBACK;
-  return daemonAddress(isWildcardHost(host) ? LOOPBACK : host, recorded.port);
-}
-
-/** An explicit `FY_URL` wins outright (P90); then what the daemon recorded; then the well-known default. */
-export function resolveDaemonUrl(explicitUrl: string, documentText: string | undefined): string {
+export function resolveDaemonUrl(explicitUrl: string, run: DaemonRun | undefined): string {
   if (explicitUrl.trim() !== '') return explicitUrl.trim();
-  if (documentText === undefined) return DEFAULT_DAEMON_URL;
-  try {
-    return recordedBindAddress(JSON.parse(documentText)) ?? DEFAULT_DAEMON_URL;
-  } catch {
-    return DEFAULT_DAEMON_URL;
-  }
+  return run === undefined ? DEFAULT_DAEMON_URL : recordedBindAddress(run);
 }
