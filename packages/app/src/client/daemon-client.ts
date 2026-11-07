@@ -73,7 +73,7 @@ function refusal(answer: TransportAnswer): DaemonCallError {
   const body = typeof answer.body === 'object' && answer.body !== null ? (answer.body as Record<string, unknown>) : {};
   const code = typeof body.code === 'string' ? body.code : `http_${answer.status}`;
   const message = typeof body.error === 'string' ? body.error : `The daemon answered ${answer.status}.`;
-  return new DaemonCallError(answer.status, code, message);
+  return new DaemonCallError(answer.status, code, message, answer.body);
 }
 
 export class DaemonClient {
