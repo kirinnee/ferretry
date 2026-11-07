@@ -10,7 +10,7 @@ afterAll(async () => {
 });
 
 describe('XX updateHostFor launch', () => {
-  test('<client beside argv0> update --run --yes --to <target> --report <state>/report.json, FY_HOME set', async () => {
+  test('<client beside argv0> daemon update --yes --to <target> --report <state>/report.json, FY_HOME set', async () => {
     const home = await mkdtemp(`${tmpdir()}/fy-update-`);
     homes.push(home);
     const calls: { argv: readonly string[]; environment: Record<string, string | undefined>; logFile: string }[] = [];
@@ -31,8 +31,8 @@ describe('XX updateHostFor launch', () => {
     expect(await port.launchUpdate('v5.1.0')).toEqual({ kind: 'started' });
     expect(calls[0]?.argv).toEqual([
       '/home/owner/.local/bin/fy',
+      'daemon',
       'update',
-      '--run',
       '--yes',
       '--to',
       'v5.1.0',

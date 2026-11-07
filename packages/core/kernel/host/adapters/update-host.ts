@@ -8,6 +8,12 @@ import { mkdir, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import type { ExecutableFacts, UpdateHostPort } from '../../contract/ports.ts';
 
+/**
+ * The client verb the launch runs, today's `daemon update` (`update-files.ts` CliUpdateLauncher). One constant, so
+ * the 5.0 verb the Updates plugin declares is a one-line change.
+ */
+export const UPDATE_LAUNCH_VERB: readonly string[] = Object.freeze(['daemon', 'update']);
+
 /** A release number as GitHub tags it: `5.1.0`, `v5.1.0`, `5.1.0-rc.1`. */
 const RELEASE = /^v?[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}(?:-[0-9A-Za-z.]{1,40})?$/u;
 
@@ -75,8 +81,9 @@ export function updateHostFor(options: UpdateHostOptions): (plugin: string) => U
         const client = join(dirname(launched), options.binary);
         const report = join(directory, 'report.json');
         try {
-          await mkdir(directory, { recursive: true, mode: 0o700 });
-          spawn([client, 'update', '--run', '--yes', '--to', target, '--report', report], {
+          // today's ensureDirectory(dirname(report), 0o700)
+          await mkdir(dirname(report), { recursive: true, mode: 0o700 });
+          spawn([client, ...UPDATE_LAUNCH_VERB, '--yes', '--to', target, '--report', report], {
             environment: { ...(options.environment ?? process.env), FY_HOME: options.home },
             logFile: join(directory, 'update.log'),
           });

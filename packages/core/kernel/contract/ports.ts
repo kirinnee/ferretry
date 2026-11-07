@@ -705,7 +705,8 @@ export type UpdateLaunchOutcome = { readonly kind: 'started' } | { readonly kind
 
 /**
  * The daemon's own update seam (today's `DaemonUpdateService` host parts): the release this build carries, what the
- * running executable is, and one launch: `<client> update --run --yes --to <target> --report <report>`, detached in
+ * running executable is, and one launch: `<client> daemon update --yes --to <target> --report <report>` (the verb is
+ * the host's `UPDATE_LAUNCH_VERB`), detached in
  * its own process group so it survives the daemon's restart, its output appended to the plugin's `update.log` and
  * its report written to the plugin's `report.json` (both in the plugin's own state folder). No other command.
  */
