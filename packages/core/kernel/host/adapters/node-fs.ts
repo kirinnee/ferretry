@@ -1,3 +1,4 @@
+import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -14,6 +15,8 @@ export interface HostFs {
   readBytes(path: string): Promise<Uint8Array>;
   /** Atomic: a temp file in the same folder, fsync, rename. */
   writeAtomic(path: string, data: string | Uint8Array, mode?: number): Promise<void>;
+  /** Create only (`O_CREAT|O_EXCL|O_NOFOLLOW`): refused when anything, a link included, is at the name. */
+  writeExclusive(path: string, data: string | Uint8Array, mode: number): Promise<void>;
   list(path: string): Promise<readonly string[]>;
   remove(path: string): Promise<void>;
   mkdirp(path: string, mode?: number): Promise<void>;
@@ -55,6 +58,19 @@ export function nodeFs(randomSuffix: () => string): HostFs {
         await handle.close();
       }
       await rename(temp, path);
+    },
+    writeExclusive: async (path, data, mode) => {
+      const handle = await open(
+        path,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        mode,
+      );
+      try {
+        await handle.writeFile(data);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
     },
     list: async path => {
       try {

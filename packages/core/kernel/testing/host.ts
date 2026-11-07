@@ -532,8 +532,22 @@ async function start(world: World): Promise<TestHost> {
           return text;
         },
         readBytes: async path => new TextEncoder().encode(await handle.readText(path)),
-        writeText: async (path, text) => {
+        writeText: async (path, text, writeOptions) => {
+          if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
           world.roots.set(path, text);
+        },
+        lstat: async path => {
+          if (world.roots.has(path))
+            return { kind: 'file', size: (world.roots.get(path) as string).length, modified: clock.now() };
+          return [...world.roots.keys()].some(p => p.startsWith(`${path}/`))
+            ? { kind: 'directory', size: 0, modified: clock.now() }
+            : undefined;
+        },
+        makeDirectory: async () => {},
+        realPath: async path => {
+          if (!world.roots.has(path) && ![...world.roots.keys()].some(p => p.startsWith(`${path}/`)))
+            throw new Error(`no such file ${path}`);
+          return path;
         },
         list: async path =>
           [...world.roots.keys()].filter(p => p.startsWith(`${path}/`)).map(p => p.slice(path.length + 1)),
@@ -590,6 +604,19 @@ async function start(world: World): Promise<TestHost> {
             throw new Error(`${manifest.id}: spawn ${program} is not declared`);
           if (options.spawn === undefined) throw new Error(`${manifest.id}: spawn ${program} with no spawn fake`);
           return options.spawn(program, args, spawnOptions);
+        },
+        async runBytes(program, args, spawnOptions) {
+          const result = await this.run(program, args, spawnOptions);
+          const all = new TextEncoder().encode(result.stdout);
+          const cap = spawnOptions?.maxStdoutBytes ?? 1024 * 1024;
+          return {
+            exitCode: result.exitCode ?? -1,
+            stdout: all.slice(0, cap),
+            stderr: result.stderr,
+            stdoutTruncated: all.byteLength > cap,
+            stderrTruncated: false,
+            timedOut: false,
+          };
         },
         start(program): ChildHandle {
           throw new Error(

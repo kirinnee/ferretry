@@ -3,6 +3,7 @@ import type { ActRunner, OpaqueId } from './act.ts';
 import type { ChildEnvironment, FencedPath, FolderRefusal, Redaction } from './bound.ts';
 import type { ConfigCollectionDef, ConfigFileDef, EventDef, StateFileDef } from './define.ts';
 import type { FerretId } from './ids.ts';
+import type { PinnedWorkingDirectory } from './pinned.ts';
 import type { IdentitySigner } from './session.ts';
 import type { PostBuildSnapshot } from './snapshot.ts';
 
@@ -268,6 +269,20 @@ export interface RootStat {
   readonly modified: Instant;
 }
 
+/** What is AT a name, the leaf not followed: a link is reported as a `symlink`, never as what it points at. */
+export interface RootLstat {
+  readonly kind: 'file' | 'directory' | 'symlink' | 'other';
+  readonly size: number;
+  readonly modified: Instant;
+}
+
+export interface RootWriteOptions {
+  /** POSIX mode of a file this write creates. Default `0o600`. */
+  readonly mode?: number;
+  /** Create only: refused when anything (a file, a link) is already at the name; never follows a link. */
+  readonly exclusive?: boolean;
+}
+
 /**
  * A scoped handle on one root: resolves symlinks before checking, refuses `..`, keeps today's link and device-file
  * checks, and refuses everything inside the fence for an owner's root.
@@ -277,9 +292,16 @@ export interface RootHandle {
   resolve(relative: string): Result<FencedPath, FolderRefusal>;
   readText(path: FencedPath, limitBytes?: number): Promise<string>;
   readBytes(path: FencedPath, limitBytes?: number): Promise<Uint8Array>;
-  writeText(path: FencedPath, text: string): Promise<void>;
+  /** Atomic replace by default; `exclusive` creates only (today's worktree registry write, `wx`). */
+  writeText(path: FencedPath, text: string, options?: RootWriteOptions): Promise<void>;
   list(path: FencedPath): Promise<readonly string[]>;
   stat(path: FencedPath): Promise<RootStat | undefined>;
+  /** The leaf's own kind (a link is `symlink`); its parents are resolved and fenced as for every call. */
+  lstat(path: FencedPath): Promise<RootLstat | undefined>;
+  /** `mkdir -p` inside the root; a new folder gets `mode` (default `0o700`). */
+  makeDirectory(path: FencedPath, options?: { readonly mode?: number }): Promise<void>;
+  /** The real path of an EXISTING name, links resolved, checked again to be inside the root. */
+  realPath(path: FencedPath): Promise<FencedPath>;
   remove(path: FencedPath): Promise<void>;
 }
 
@@ -334,7 +356,11 @@ export interface WorkersPort {
 // spawn ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface SpawnOptions {
-  readonly cwd?: FencedPath;
+  /**
+   * A fenced folder, or a directory held open by `RootHandle.pin` (`policyCwd`): the child starts INSIDE the held
+   * object, installed for the instant of the spawn. A pin this plugin's roots did not mint is refused.
+   */
+  readonly cwd?: FencedPath | PinnedWorkingDirectory;
   /**
    * Plain values the half owns, or a Vault {@link ChildEnvironment} (secrets resolved for this child). A handle is
    * opened inside the kernel's adapter at exec time; its values never pass through the plugin (lead decision 9).
@@ -354,6 +380,25 @@ export interface SpawnResult {
   readonly stderr: string;
 }
 
+/** `runBytes`: caps on what is kept of each stream (today's Git runner). */
+export interface SpawnBytesOptions extends SpawnOptions {
+  /** Default 1 MiB. Bytes past it are dropped and `stdoutTruncated` is set. */
+  readonly maxStdoutBytes?: number;
+  /** Default 64 KiB. */
+  readonly maxStderrBytes?: number;
+}
+
+/** A finished child's raw stdout, capped (today's `GitExecution`). A timeout kills it (`SIGKILL`). */
+export interface SpawnBytesResult {
+  /** `-1` when the child was abandoned at its timeout. */
+  readonly exitCode: number;
+  readonly stdout: Uint8Array;
+  readonly stderr: string;
+  readonly stdoutTruncated: boolean;
+  readonly stderrTruncated: boolean;
+  readonly timedOut: boolean;
+}
+
 export interface ChildHandle {
   readonly pid: number;
   readonly stdout: ReadableStream<Uint8Array>;
@@ -366,6 +411,8 @@ export interface ChildHandle {
 export interface SpawnPort {
   /** Only programs the manifest declared in `permissions.spawn`. */
   run(program: string, args: readonly string[], options?: SpawnOptions): Promise<SpawnResult>;
+  /** The same, keeping stdout as bytes up to a cap and saying whether it was cut. */
+  runBytes(program: string, args: readonly string[], options?: SpawnBytesOptions): Promise<SpawnBytesResult>;
   start(program: string, args: readonly string[], options?: SpawnOptions): ChildHandle;
 }
 

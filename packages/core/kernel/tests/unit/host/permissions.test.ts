@@ -61,6 +61,9 @@ describe('kernel.spawn / fetch: declared names, absolute paths and installed ite
       ran.push(program);
       return { exitCode: 0, signal: null, stdout: '', stderr: '' };
     },
+    runBytes: async () => {
+      throw new Error('not run here');
+    },
     start: () => {
       throw new Error('not started here');
     },
@@ -80,6 +83,8 @@ describe('kernel.spawn / fetch: declared names, absolute paths and installed ite
       'updates may not run curl: its manifest does not declare it.',
     );
     expect(ran.at(-1)).toBe('/usr/bin/git');
+    // runBytes is refused alike, before anything starts
+    await expect(port.runBytes('curl', [])).rejects.toThrow(PermissionError);
   });
 
   test('{ items: mcp } allows what an installed item names, read when the call is made', async () => {

@@ -61,6 +61,10 @@ export function restrictSpawn(
       check(program);
       return await base.run(program, args, options);
     },
+    runBytes: async (program, args, options) => {
+      check(program);
+      return await base.runBytes(program, args, options);
+    },
     start: (program, args, options) => {
       check(program);
       return base.start(program, args, options);
@@ -113,6 +117,7 @@ export function openChildEnvironments(base: SpawnPort, opener: () => ChildEnviro
     options?.env === undefined ? options : { ...options, env: resolveEnv(options.env, opener()) };
   return {
     run: async (program, args, options) => await base.run(program, args, resolved(options)),
+    runBytes: async (program, args, options) => await base.runBytes(program, args, resolved(options)),
     start: (program, args, options) => base.start(program, args, resolved(options)),
   };
 }
