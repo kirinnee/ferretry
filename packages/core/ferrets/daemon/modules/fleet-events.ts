@@ -14,6 +14,8 @@ import {
   type FleetEventBacklog,
   type FleetEventSource,
   type FleetEventStreamScope,
+  type LiveActivitySource,
+  type TranscriptChangeSource,
 } from '../lib/session/events/service.ts';
 import { type FleetBacklogPasses, SharedFleetBacklog } from '../lib/session/events/shared-backlog.ts';
 import { SESSION_LIVE_STREAM_FLAG, SESSION_TRANSCRIPT_STREAM_FLAG } from '../lib/protocol/session-live.ts';
@@ -173,13 +175,20 @@ export function eventStreamScope(call: CallContext, exists: (id: string) => bool
   };
 }
 
+/** What a stream can carry beyond the journal: the `?live=1` readout and the `?transcript=1` signal. Absent, those frames never appear. */
+export interface FleetEventExtras {
+  readonly live?: LiveActivitySource;
+  readonly transcript?: TranscriptChangeSource;
+}
+
 /** The accept for `GET /v1/events`. */
 export function fleetEventsAccept(
   source: FleetEventSource,
   scheduler: EventStreamScheduler,
   exists: (id: string) => boolean,
+  extras: FleetEventExtras = {},
 ): SocketAccept {
-  const service = new FleetEventStreamService(source, scheduler);
+  const service = new FleetEventStreamService(source, scheduler, extras.live, extras.transcript);
   return async call => {
     const scope = eventStreamScope(call, exists);
     return async downstream => service.handler(scope, downstream);
