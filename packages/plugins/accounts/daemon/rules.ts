@@ -8,6 +8,9 @@
  * - passkeys and stored proofs use Access's approved additive reads (a local adapter until its port reaches the base).
  *   A missing or unreadable provider verifies nothing. Gate keeps the service's complete audit evidence.
  * - secure copies (the Vault's child runner and folders): no copy exists, so the copy routes list none.
+ * - phone approval from a terminal (DECISIONS-2 #6): TODO(contract): the Vault's additive push raise (`raiseInput` with a
+ *   push variant, today's agent-tools service :793/:1629) is not on the Vault contract of this base, so no approval is
+ *   raised here; the `input.targets` push look (`pushNumber`) is already declared.
  * - the passkeys-changed signal and pairing's purge: Access's `DevicesChanged` subscriber is the one live path.
  */
 import { gateAuditSink } from './adapters/gate-audit.ts';

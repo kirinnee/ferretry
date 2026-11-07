@@ -15,7 +15,7 @@ import type { IPlanGateway, PlanPorts } from '../../../../cli/lib/copy/ports.ts'
 import { OWNER_COMMAND_REFUSAL } from '../../../../cli/lib/shared.ts';
 import { FyHttpError } from '../../../../cli/shell.ts';
 
-const STAGE = `tps_${'a'.repeat(24)}`;
+const STAGE = `tps_${'a'.repeat(24)}` as const;
 const WORK = `si_${'1'.repeat(16)}`;
 const HOME = `si_${'2'.repeat(16)}`;
 const ONLY = `si_${'3'.repeat(16)}`;

@@ -126,7 +126,8 @@ function world(options: { fail?: { status: number; code: string } } = {}) {
     client,
     io: { out: (text: string) => out.push(text), err: (text: string) => err.push(text), isTty: false },
   });
-  const run = async (verb: string, invocation: VerbInvocation) => await half.verbs[verb]!(invocation);
+  const run = async (verb: string, invocation: VerbInvocation) =>
+    await (half.verbs as Record<string, (invocation: VerbInvocation) => Promise<number>>)[verb]!(invocation);
   return { calls, out, err, run };
 }
 
