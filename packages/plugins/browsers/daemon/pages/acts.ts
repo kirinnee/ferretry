@@ -83,18 +83,27 @@ export async function writeAct(act: ActRunner, target: TargetRef, op: Op, work: 
   if (ack.status === 'refused') throw refusedAct({ refused: ack.code ?? 'holds_unavailable' });
 }
 
-/** A page snapshot with its address and title masked (S16, for agent and person alike). */
-export function maskedSnapshot<T extends Pick<BrowserPageSnapshot, 'url' | 'title'>>(scope: RedactionScope, page: T): T {
-  return { ...page, url: scope.text(page.url), title: scope.text(page.title) };
+/**
+ * A page snapshot with its address, its title and its error masked (S16, for agent and person alike). The error is
+ * the worker's first line of a failed navigation, which ends with the address it failed at.
+ */
+export function maskedSnapshot<T extends Pick<BrowserPageSnapshot, 'url' | 'title'> & { readonly pageError?: string }>(
+  scope: RedactionScope,
+  page: T,
+): T {
+  return {
+    ...page,
+    url: scope.text(page.url),
+    title: scope.text(page.title),
+    ...(page.pageError === undefined ? {} : { pageError: scope.text(page.pageError) }),
+  };
 }
 
-/** The status with every page's address and title masked (S16). */
+/** The status with every page's address and title, and the viewed page's error, masked (S16). */
 export function maskedStatus(scope: RedactionScope, status: BrowserStatus): BrowserStatus {
   if (status.state !== 'running' || !('url' in status)) return status;
   return {
-    ...status,
-    url: scope.text(status.url),
-    title: scope.text(status.title),
+    ...maskedSnapshot(scope, status as typeof status & { readonly pageError?: string }),
     pages: status.pages.map(page => maskedSnapshot(scope, page)),
   } as BrowserStatus;
 }

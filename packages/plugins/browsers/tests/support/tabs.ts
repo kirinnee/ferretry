@@ -32,6 +32,8 @@ export class Tabs {
   documentHost: string | undefined;
   /** While set, a click does not return: the page's queue is stuck behind it, as it is behind a dialog. */
   clickGate: Promise<void> | undefined;
+  /** What a page in the error state says went wrong (the worker's first line of a failed navigation). */
+  pageError = 'it broke';
   private minted = 0;
   private exited!: (code: number) => void;
   readonly exit = new Promise<number>(resolve => {
@@ -55,7 +57,7 @@ export class Tabs {
       pages: this.pages.map(({ pageState: _state, ...summary }) => summary),
       activePageId: page.id,
       pageState: page.pageState ?? 'ready',
-      ...(page.pageState === 'error' ? { pageError: 'it broke' } : {}),
+      ...(page.pageState === 'error' ? { pageError: this.pageError } : {}),
       canGoBack: page.pageState !== 'error',
       canGoForward: false,
     };

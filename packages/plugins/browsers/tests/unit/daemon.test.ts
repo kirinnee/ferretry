@@ -8,6 +8,9 @@ import daemon, { buildBrowsers } from '../../daemon/index.ts';
 import { TypedIdentities } from '../../daemon/target/sign-in/identities.ts';
 import { Tabs } from '../support/tabs.ts';
 
+/** A vault secret the stand-in redaction masks. */
+const SECRET = 'hunter2-token';
+
 /** The ferrets Browsers knows of: a page belongs to one, and a call about any other is refused. */
 const FERRETS = { get: async (id: string) => (id === 'f1' || id === 'f2' ? { name: id } : undefined) };
 
@@ -31,7 +34,7 @@ async function built(): Promise<{ host: TestHost; tabs: Tabs; identities: TypedI
   const gate = new StandInAdmission(request =>
     request.arrival.kind === 'local' && request.arrival.privileged ? ferretStanding(calling) : ownerStanding(),
   );
-  const host = await testHost({ plugins: [half], uses: { ferrets: FERRETS }, gate });
+  const host = await testHost({ plugins: [half], uses: { ferrets: FERRETS }, gate, secrets: [SECRET] });
   return { host, tabs, identities };
 }
 
@@ -106,5 +109,28 @@ describe('the browsers daemon half', () => {
     should(kept).equal('alice@example.test');
     should(reloaded.status).equal(200);
     should(world.identities.at('f1', 'p1', 'example.test')).be.undefined();
+  });
+
+  it('S16 should mask the error of a page that failed to load in its status, as it masks the address', async () => {
+    // Arrange
+    const world = await built();
+    host = world.host;
+    await host.tool('browser_open', { name: 'app', url: 'https://example.test/' }, as('f1'));
+    const page = world.tabs.pages.find(each => each.id === 'p1');
+    if (page === undefined) throw new Error('the page should be open');
+    page.pageState = 'error';
+    page.url = `https://login.example.test/?token=${SECRET}`;
+    world.tabs.pageError = `page.goto: net::ERR_NAME_NOT_RESOLVED at https://login.example.test/?token=${SECRET}`;
+    await host.request('POST', '/v1/sessions/f1/browser', { body: { action: 'activate-page', pageId: 'p1' } });
+
+    // Act
+    const status = await host.request('GET', '/v1/sessions/f1/browser');
+
+    // Assert
+    should(status.status).equal(200);
+    should(status.body).not.containEql(SECRET);
+    should(status.json<{ pageError?: string }>().pageError).equal(
+      'page.goto: net::ERR_NAME_NOT_RESOLVED at https://login.example.test/?token=*************',
+    );
   });
 });
