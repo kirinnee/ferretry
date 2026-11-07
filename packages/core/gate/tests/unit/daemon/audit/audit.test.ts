@@ -49,7 +49,7 @@ const paired = (actor: 'host' | 'device') => ({
 });
 
 describe('the audit log', () => {
-  test('repeats of one refusal fold into one counted line per window', async () => {
+  test('J-0004 J-0114 repeats of one refusal fold into one counted line, written at the window flush', async () => {
     const { audit, journal, advance } = log();
     for (let i = 0; i < 5; i += 1) await audit.record({ ...refused, subject: `guess-${i}` });
     expect(journal.lines).toHaveLength(1);

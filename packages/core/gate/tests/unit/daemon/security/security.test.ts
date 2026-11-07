@@ -74,7 +74,7 @@ describe('security settings', () => {
     expect(writes).toEqual([]);
   });
 
-  test('G114 G115 a device may raise unlockValidityHours with a passkey proved for it, journaled as such', async () => {
+  test('G114 G115 F-0295 a device may raise unlockValidityHours with a passkey proved for it, journaled as such', async () => {
     const { svc, writes, audits } = service();
     expect(await svc.patch({ unlockValidityHours: 24 }, phone)).toEqual({
       ok: false,
@@ -99,7 +99,7 @@ describe('security settings', () => {
     expect(atHost.ok && atHost.spentPasskey).toBe(false);
   });
 
-  test('a remote tightening applies at once', async () => {
+  test('F-0296 F-0406 a remote tightening applies at once and is what the settings document then reads', async () => {
     const { svc, writes } = service();
     const outcome = await svc.patch({ unlockValidityHours: 2 }, phone);
     expect(outcome.ok).toBe(true);
