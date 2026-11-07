@@ -82,8 +82,16 @@ interface DownPlugin {
   readonly plugin: string;
   readonly why: string;
   readonly file?: string;
+  /** The plugin it needs, which is not running: it is down only because that one is. */
+  readonly blockedBy?: string;
 }
 const down: DownPlugin[] = [];
+/** A plugin's id from the title a doctor line names it by (`Board` → `board`, `MCP` → `mcp`). */
+const idOf = (title: string): string =>
+  title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-|-$/gu, '');
 
 // ─── inputs: made.json and the conversion report ─────────────────────────────────────────────────────────────────
 
@@ -165,9 +173,11 @@ if (report.complete) {
   say(`  Plugins owned by a pending step may be down: ${[...pendingPlugins].join(', ') || 'none'}.`);
   say('==================================================================================================');
 }
-const hadLogs = existsSync(join(home, 'logs'));
-if (!hadLogs)
-  warn('the converted home has no logs/ folder: v5 creates it only for a NEW home, so fyd.log is not written');
+if (!existsSync(join(home, 'logs'))) {
+  warn('the converted home has no logs/ folder: v5 makes it only for a NEW home, so fyd would write no log');
+  // Only on the probe copy: the real output is booted exactly as converted.
+  if (!report.complete) await mkdir(join(home, 'logs'), { mode: 0o700 });
+}
 
 // ─── start fyd ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -245,41 +255,63 @@ try {
     throw new BootStop();
   }
 
-  // 2. Plugins: the doctor lines fyd printed, then the inventory.
+  // 2. Plugins: the doctor lines fyd printed before "ready" (every failed, refused or damaged plugin), then the
+  // inventory. A doctor line names a plugin by its title; the id is the title in kebab case (`MCP` → `mcp`).
   const doctorFails = stderrLines.filter(line => line.startsWith('fyd: ')).map(line => line.slice('fyd: '.length));
   const unexplained: string[] = [];
   for (const line of doctorFails) {
-    const damage = /\bstate\/([a-z0-9-]+)\/(\S+?)( cannot| has no| was written| does not| is missing| could not)/u.exec(
-      line,
-    );
-    if (damage?.[1] !== undefined && damage[2] !== undefined)
+    const damage = /\bstate\/([a-z0-9-]+)\/([^\s,]+)/u.exec(line);
+    const needs = /^(.+?) needs (.+?), which (?:is not running|failed)\.$/u.exec(line);
+    const build = /^(.+?) failed to build: /u.exec(line);
+    const hook = /^([a-z0-9-]+) takes \S+ with a definition different from its offerer's\.$/u.exec(line);
+    if (damage?.[1] !== undefined && damage[2] !== undefined && /Ferretry will not use it|is missing/u.test(line))
       down.push({ plugin: damage[1], file: `state/${damage[1]}/${damage[2]}`, why: reasonOf(line) });
+    else if (needs?.[1] !== undefined && needs[2] !== undefined)
+      down.push({ plugin: idOf(needs[1]), why: line, blockedBy: idOf(needs[2]) });
+    else if (build?.[1] !== undefined) down.push({ plugin: idOf(build[1]), why: line });
+    else if (hook?.[1] !== undefined) down.push({ plugin: hook[1], why: `refused: ${line}` });
     else unexplained.push(line);
   }
-  const inventory = z
-    .object({ plugins: z.array(z.object({ id: z.string(), on: z.boolean() })) })
-    .parse(await get(base, token, '/v1/plugins'));
-  const switchedOff = await pluginsSwitchedOff(home);
-  for (const plugin of inventory.plugins) {
-    if (plugin.on) continue;
-    if (switchedOff.has(plugin.id)) {
-      say(`plugin ${plugin.id}: off in config/plugins.yaml (not a failure)`);
-      continue;
-    }
-    down.push({ plugin: plugin.id, why: 'not running (failed to build, or needs a plugin that did not start)' });
-  }
-  say(
-    `plugins: ${String(inventory.plugins.length)} known, ${String(inventory.plugins.filter(plugin => plugin.on).length)} on`,
-  );
-  // Doctor lines that name no state file: a declared check failing on this CI machine (no harness installed …).
-  // Printed for the report; a plugin that is truly down is caught by the inventory or the damage lines above.
+  // A declared check failing on this CI machine (no harness installed, a check not built yet): not a plugin down.
   for (const line of unexplained) say(`doctor (not a plugin down): ${line}`);
 
+  let admitted = true;
+  try {
+    const inventory = z
+      .object({ plugins: z.array(z.object({ id: z.string(), on: z.boolean() })) })
+      .parse(await get(base, token, '/v1/plugins'));
+    const switchedOff = await pluginsSwitchedOff(home);
+    for (const plugin of inventory.plugins) {
+      if (plugin.on) continue;
+      if (switchedOff.has(plugin.id)) {
+        say(`plugin ${plugin.id}: off in config/plugins.yaml (not a failure)`);
+        continue;
+      }
+      down.push({ plugin: plugin.id, why: 'not running (failed to build, or needs a plugin that did not start)' });
+    }
+    say(
+      `plugins: ${String(inventory.plugins.length)} known, ${String(inventory.plugins.filter(plugin => plugin.on).length)} on`,
+    );
+  } catch (error) {
+    // Gate (core) is still a skeleton in v5: with no admission, every route but the public ones refuses with this
+    // code. The data cannot be read through v5 yet; the checks run by themselves once Gate lands.
+    if (!(error instanceof RouteError && error.status === 503 && error.said.startsWith('admission_unavailable')))
+      throw error;
+    admitted = false;
+    warn(
+      'v5 has no admission yet (Gate is a skeleton in this build): every authenticated route answers 503 ' +
+        'admission_unavailable, so the plugin inventory and the data checks (ferrets, project, cards, agenda) ' +
+        'could NOT run; plugin health comes from the doctor lines and fyd.log alone',
+    );
+  }
+
   // 3. The data, through v5's own routes.
-  await checkFerrets(base, token);
-  await checkProjects(base, token);
-  await checkCards(base, token);
-  await checkAgenda(base, token);
+  if (admitted) {
+    await checkFerrets(base, token);
+    await checkProjects(base, token);
+    await checkCards(base, token);
+    await checkAgenda(base, token);
+  }
 } catch (error) {
   if (!(error instanceof BootStop))
     fail(`the boot proof stopped: ${error instanceof Error ? error.message : String(error)}`);
@@ -313,6 +345,8 @@ for (const entry of down) {
   const where = entry.file === undefined ? '' : ` (${entry.file})`;
   if (pendingPlugins.has(entry.plugin))
     warn(`plugin ${entry.plugin} is down${where}: ${entry.why} — its conversion step is pending, so this is expected`);
+  else if (entry.blockedBy !== undefined && pendingPlugins.has(entry.blockedBy))
+    warn(`plugin ${entry.plugin} is down: ${entry.why} — ${entry.blockedBy}'s conversion step is pending`);
   else fail(`plugin ${entry.plugin} is down${where}: ${entry.why}`);
 }
 const downIds = new Set(down.map(entry => entry.plugin));
@@ -502,6 +536,14 @@ async function readFydLog(at: string): Promise<void> {
     const plugin = typeof record.fields?.plugin === 'string' ? record.fields.plugin : undefined;
     const file = typeof record.fields?.file === 'string' ? record.fields.file : undefined;
     const reason = typeof record.fields?.reason === 'string' ? record.fields.reason : undefined;
+    // Every warning and error the kernel logged, for the next fix: the message and the names only, no other field.
+    if (record.level === 'warn' || record.level === 'error')
+      say(
+        `fyd.log ${record.level}: ${record.message ?? '?'}${[plugin, file, reason]
+          .filter(part => part !== undefined)
+          .map(part => ` [${part}]`)
+          .join('')}`,
+      );
     if (plugin === undefined) continue;
     switch (record.message) {
       case 'a plugin failed to build':
