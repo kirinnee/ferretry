@@ -12,13 +12,14 @@ import {
   queryValue,
 } from '@ferretry/kernel/contract';
 import { type DaemonContext, type DaemonHalf, implementDaemon } from '@ferretry/kernel/manifest';
-import { err, ok } from '@ferretry/std';
+import { err, milliseconds, ok } from '@ferretry/std';
 import {
   type FerretId,
   FerretChanged,
   FerretStopping,
   FerretStarted,
   FerretFiles,
+  RestartsFile,
   FerretHistoryFiles,
   type FerretRecord,
   FerretsChanged,
@@ -67,7 +68,9 @@ import { PinService } from './lib/pins/index.ts';
 import { pinRoutes } from './lib/runtime/mounts/pins.ts';
 import { sessionPinRoutes } from './lib/runtime/mounts/session-pin.ts';
 import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './lib/runtime/mounts/session-archive.ts';
-import { type SessionRestartSubsystem, sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
+import { sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
+import { FerretRestarts, restartService } from './lib/ferrets/restarts.ts';
+import { RestartQueueEntrySchema } from './lib/protocol/session-restart.ts';
 import { sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
 import { AgentPinsFile, FerretDetailsFiles, FerretPinFiles, FerretSummaryFiles, FerretWaitFiles } from './lib/state.ts';
 import { FerretSignals } from './lib/ferrets/signals.ts';
@@ -223,6 +226,14 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       hooks.observe(FerretStarted, payload);
     },
     saveDetails: async (ferret, details) => await kernel.state.write(FerretDetailsFiles, details, ferret),
+    // A stopped ferret holds no declared wait; the credit it banked stays.
+    endWait: async ferret => {
+      if (registry.waitingOf(ferret) === undefined) return;
+      const kept = await kernel.state.read(FerretWaitFiles, ferret);
+      const creditSeconds = kept.ok ? kept.value?.creditSeconds : undefined;
+      await kernel.state.write(FerretWaitFiles, creditSeconds === undefined ? {} : { creditSeconds }, ferret);
+      registry.putWaiting(ferret, undefined);
+    },
     history: appendHistory,
     limits: () => kernel.config.file(LimitsConfigFile),
     pinnedAt: async () => await agentPins.pinnedAt(),
@@ -410,7 +421,47 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return await signalRoutes['POST /v1/ferrets/:ferretId/signal'](call);
     },
   };
-  const restarts = sessionRestartRoutes(notBuilt<SessionRestartSubsystem>('Restarting ferrets'));
+  const restartSubsystem = new FerretRestarts(
+    restartService({
+      ready,
+      ferrets: () => registry.list(),
+      waitingOf: ferret => registry.waitingOf(ferret),
+      stop: async (ferret, reason) => await service.stop(ferret, 'polite', reason),
+      resume: async ferret => await service.resume(ferret),
+      history: appendHistory,
+      // An entry that does not parse is dropped on its own; the rest survive, and a queue that cannot be read is empty.
+      loadQueue: async () => {
+        const read = await kernel.state.read(RestartsFile);
+        const queued = read.ok ? (read.value as { queued?: unknown } | undefined)?.queued : undefined;
+        if (!Array.isArray(queued)) return [];
+        return queued.flatMap(entry => {
+          const parsed = RestartQueueEntrySchema.safeParse(entry);
+          return parsed.success ? [parsed.data] : [];
+        });
+      },
+      saveQueue: async entries => {
+        await kernel.state.write(RestartsFile, { queued: entries });
+      },
+      now: () => kernel.clock.now(),
+    }),
+    { resolve: resolveFerret, mayTouch: (caller, target) => registry.mayTouch(caller, target) },
+  );
+  const restartRoutes = sessionRestartRoutes(restartSubsystem);
+  const restarts = {
+    ...restartRoutes,
+    // Clearing the queue clears every ferret's waiting restart: a person's act.
+    'DELETE /v1/restarts': async (call: CallContext): Promise<ApiResponse> => {
+      if (callerFerret(call) !== undefined)
+        throw new ApiError(403, 'a ferret does not clear the restart queue of every ferret', 'forbidden');
+      return await restartRoutes['DELETE /v1/restarts'](call);
+    },
+  };
+  // A waiting restart is tried again at its ferret's next idle moment; an empty queue costs no read.
+  kernel.jobs.add({
+    id: 'restart-drain',
+    schedule: { every: milliseconds(10_000) },
+    run: async () => await restartSubsystem.drain(),
+  });
   const archived = sessionArchiveRoutes(notBuilt<SessionArchiveSubsystem>('The archived ferret list'));
 
   // Pins (a3's handlers): the owner's sidebar pins (agent-pins.json) and each ferret's note board (<ferret>/pins.json).

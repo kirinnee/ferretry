@@ -86,6 +86,8 @@ export interface FerretsPorts {
   started?(payload: FerretStartedPayload): void;
   /** Writes a ferret's `details.json` (its start options and title). */
   saveDetails?(ferret: FerretId, details: FerretDetails): Promise<void>;
+  /** A stopped ferret holds no declared wait: ended when the ferret is settled as stopped. */
+  endWait?(ferret: FerretId): Promise<void>;
   /** Appends one event to the ferret's `history.jsonl` (today's journal event shape). */
   history?(ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>): Promise<void>;
   /**
@@ -605,6 +607,7 @@ export class FerretsService implements FerretsApi {
     if (this.tokens.revoke(record.id)) await this.ports.saveTokens(this.tokens.snapshot());
     const { handle: _handle, ...rest } = record;
     await this.write({ ...rest, state, stateAt: this.ports.now() }, record.state, change);
+    if (state === 'stopped') await this.ports.endWait?.(record.id).catch(() => undefined);
   }
 
   private async write(

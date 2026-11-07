@@ -230,7 +230,7 @@ export default definePlugin({
         audit: { skip: 'a lifecycle signal is recorded in the ferret history, as today' },
         guard: { none: 'answers the ferret state' },
       }),
-      // Restarts (today's mounts/session-restart.ts, paths unchanged). 503 until the session services are bound.
+      // Restarts (today's mounts/session-restart.ts, paths unchanged).
       // R-0323
       route('POST /v1/restarts', {
         minimum: 'operator',

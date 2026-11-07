@@ -540,12 +540,10 @@ describe('what a ferret may control (limits.yaml agentControl)', () => {
 });
 
 describe('session routes whose services are not bound in this build', () => {
-  test('restarts and the archive list answer 503 not built yet rather than a missing route', async () => {
+  test('the archive list and an out-of-date restart answer 503 not built yet rather than a missing route', async () => {
     const h = await host([record('lead')]);
     const answers = [
       await h.request('POST', '/v1/restarts', { body: { scope: 'outdated' } }),
-      await h.request('GET', '/v1/restarts'),
-      await h.request('DELETE', '/v1/restarts'),
       await h.request('GET', '/v1/archived-sessions'),
     ];
     for (const answer of answers) {
