@@ -40,7 +40,7 @@ import {
 } from '../../../contract/index.ts';
 import { accessConformance } from '../../../contract/testing/index.ts';
 import { toBase64Url } from '../../../daemon/lib/proof/binary.ts';
-import { type AccessHost, AccessRuntime } from '../../../daemon/runtime.ts';
+import { type AccessHost, AccessRuntime, type AccessRuntimeDeps } from '../../../daemon/runtime.ts';
 import { call, jsonBody } from '../../support/daemon/call.ts';
 import {
   assertion,
@@ -76,8 +76,14 @@ interface World {
   policy: GateConfig | undefined;
 }
 
-function world(options: { readonly identity?: AccessHost['identity'] } = {}): World {
-  const folder = new MemoryStateFolder();
+function world(
+  options: {
+    readonly identity?: AccessHost['identity'];
+    readonly folder?: MemoryStateFolder;
+    readonly stages?: AccessRuntimeDeps['stages'];
+  } = {},
+): World {
+  const folder = options.folder ?? new MemoryStateFolder();
   const clock = fixedClock('2026-11-06T09:00:00.000Z');
   const logged: string[] = [];
   const log: Log = {
@@ -115,7 +121,13 @@ function world(options: { readonly identity?: AccessHost['identity'] } = {}): Wo
     ed25519,
     clientName: 'fy',
   };
-  const runtime = new AccessRuntime({ kernel, gate, connections: () => undefined, host });
+  const runtime = new AccessRuntime({
+    kernel,
+    gate,
+    connections: () => undefined,
+    host,
+    ...(options.stages === undefined ? {} : { stages: options.stages }),
+  });
   return Object.assign(state, { runtime, clock, folder, drafts, published, logged }) as World;
 }
 
@@ -574,8 +586,8 @@ describe('the credentials:device provider', () => {
 accessConformance('AccessRuntime.port', () => world().runtime.port);
 
 /** A real runtime, real durable passkey store and real WebAuthn verifier; only the authenticator is software. */
-async function prepared() {
-  const w = world();
+async function prepared(options: Parameters<typeof world>[0] = {}) {
+  const w = world(options);
   const device = await paired(w);
   const wired = await w.runtime.ready();
   const authenticator = await es256Authenticator();
@@ -743,4 +755,165 @@ test('the provider refuses all authority before the runtime opens', async () => 
   expect(runtime.witness.unlockRequired(subject)).toBe(true);
   expect(runtime.witness.claimFresh(subject, STEP_UP_ACTS.addDevice)).toBe(false);
   expect(runtime.witness.rotateBy(subject.deviceId)).toBeUndefined();
+});
+
+// ─── rows Access owns with Gate: through the real runtime (production path) ───────────────────────────────────────
+
+const ORIGIN = 'https://app.example.test';
+
+/** A person-route call made as a paired device, through the runtime's own handler. */
+async function asDevice(
+  w: World,
+  key: string,
+  deviceId: string,
+  body: unknown,
+  extra: Partial<Parameters<typeof call>[0]> = {},
+) {
+  const [method, path] = key.split(' ') as [string, string];
+  return await w.runtime.handler(key)(
+    call({ method, path, device: { deviceId, appSession: 'page' }, body: JSON.stringify(body), ...extra }),
+  );
+}
+
+test('G76 an unlock is kept as a device id and an instant only, and a restarted runtime restores it for a device still paired', async () => {
+  const p = await prepared();
+  const options = await asDevice(p.w, 'POST /v1/unlock/options', p.device.deviceId, { origin: ORIGIN });
+  expect(options.status).toBe(200);
+  const unlocked = await asDevice(
+    p.w,
+    'POST /v1/unlock',
+    p.device.deviceId,
+    await signed(p, { challenge: String(jsonBody(options).challenge) }),
+  );
+  expect(unlocked.status).toBe(200);
+  const stored = JSON.parse(p.w.folder.raw(UnlocksFile) ?? 'null');
+  expect(stored.unlocks).toEqual([{ deviceId: p.device.deviceId, unlockedAt: p.w.clock.now() }]);
+  expect(Object.keys(stored.unlocks[0]).sort()).toEqual(['deviceId', 'unlockedAt']);
+  expect(p.w.folder.raw(UnlocksFile)).not.toContain(p.device.key);
+  // A restart: a second runtime over the same state restores the unlock for the device that is still paired.
+  const again = world({ folder: p.w.folder });
+  await again.runtime.ready();
+  const standing = again.runtime.credentials.standing(p.device.deviceId as HolderId, again.clock.now());
+  expect(typeof standing === 'object' && standing.unlockedUntil).toBeTruthy();
+  // ... and not for a device nobody paired: a ledger row for it restores nothing.
+  const stranger = `fy_device_id_${'z'.repeat(22)}`;
+  p.w.folder.plant(
+    UnlocksFile,
+    JSON.stringify({
+      format: 1,
+      daemonId: stored.daemonId,
+      unlocks: [{ deviceId: stranger, unlockedAt: p.w.clock.now() }],
+    }),
+  );
+  const restarted = world({ folder: p.w.folder });
+  await restarted.runtime.ready();
+  expect(restarted.runtime.credentials.standing(stranger as HolderId, restarted.clock.now())).toBe('unknown');
+  const withoutUnlock = restarted.runtime.credentials.standing(p.device.deviceId as HolderId, restarted.clock.now());
+  expect(typeof withoutUnlock === 'object' && withoutUnlock.unlockedUntil).toBeUndefined();
+});
+
+test('G86 standing-rule options answer only the device the stage waits on; anyone else, or a stage not waiting, gets 404 stage_not_found and no challenge', async () => {
+  const STAGE = `srs_${'a'.repeat(24)}`;
+  const DERIVED = new Uint8Array(32).fill(9);
+  let waiting = '';
+  const p = await prepared({
+    stages: act =>
+      act === 'approve-sign-in-rule'
+        ? { challengeOf: (stage, deviceId) => (stage === STAGE && deviceId === waiting ? DERIVED : undefined) }
+        : undefined,
+  });
+  waiting = p.device.deviceId;
+  const other = await paired(p.w);
+  const body = (subject: string) => ({ origin: ORIGIN, act: STEP_UP_ACTS.approveSignInRule, subject });
+  const refusals = [
+    await asDevice(p.w, 'POST /v1/step-up/options', other.deviceId, body(STAGE)),
+    await asDevice(p.w, 'POST /v1/step-up/options', p.device.deviceId, body(`srs_${'b'.repeat(24)}`)),
+    await p.w.runtime.handler('POST /v1/step-up/options')(
+      call({ host: true, method: 'POST', path: '/v1/step-up/options', body: JSON.stringify(body(STAGE)) }),
+    ),
+  ];
+  for (const refused of refusals) {
+    expect([refused.status, jsonBody(refused).code]).toEqual([404, 'stage_not_found']);
+    expect(jsonBody(refused)).not.toHaveProperty('challenge');
+  }
+  const answered = await asDevice(p.w, 'POST /v1/step-up/options', p.device.deviceId, body(STAGE));
+  expect(answered.status).toBe(200);
+  expect(jsonBody(answered).challenge).toBe(toBase64Url(DERIVED));
+});
+
+test('G102 a device without a passkey registers one within its pairing window, and losing every passkey is repaired at the machine', async () => {
+  const w = world();
+  const device = await paired(w);
+  const options = () => asDevice(w, 'POST /v1/passkeys/options', device.deviceId, { origin: ORIGIN });
+  expect((await options()).status).toBe(200);
+  await w.clock.advance(11 * 60_000);
+  const closed = await options();
+  expect([closed.status, jsonBody(closed).code]).toEqual([403, 'step_up_registration_closed']);
+  // Only the owner at the machine re-opens it.
+  const fromDevice = await asDevice(w, 'POST /v1/passkeys/registration-window', device.deviceId, {
+    deviceId: device.deviceId,
+  });
+  expect(fromDevice.status).toBe(403);
+  const reopened = await w.runtime.handler('POST /v1/passkeys/registration-window')(
+    call({
+      host: true,
+      method: 'POST',
+      path: '/v1/passkeys/registration-window',
+      body: JSON.stringify({ deviceId: device.deviceId }),
+    }),
+  );
+  expect(reopened.status).toBe(200);
+  expect((await options()).status).toBe(200);
+});
+
+test('G137 a full code minted by a device is refused unless that device holds everything; a limited code is not', async () => {
+  const w = world();
+  const holder = async (grants?: 'full' | 'limited') => {
+    const device = await paired(w, grants);
+    const standing = w.runtime.credentials.standing(device.deviceId as HolderId, w.clock.now());
+    if (typeof standing !== 'object') throw new Error('expected a standing');
+    return { deviceId: device.deviceId, grants: standing.grants };
+  };
+  const mintAs = async (device: Awaited<ReturnType<typeof holder>>, grants: 'full' | 'limited') =>
+    await asDevice(
+      w,
+      'POST /v1/pair/code',
+      device.deviceId,
+      { grants },
+      { deviceGrants: device.grants, presentation: { stepUp: true, freshStepUp: true } },
+    );
+  const everything = await holder();
+  const fleetOnly = await holder('limited');
+  const full = await mintAs(fleetOnly, 'full');
+  expect([full.status, jsonBody(full).code]).toEqual([403, 'grant_forbidden']);
+  expect((await mintAs(fleetOnly, 'limited')).status).toBe(201);
+  expect((await mintAs(everything, 'full')).status).toBe(201);
+  // The choice is carried in the daemon and reported on the mint response, not encoded in the code itself.
+  expect(jsonBody(await mintAs(everything, 'limited')).grants).toBe('limited');
+});
+
+test('G141 a malformed grants field fails the device document closed, and every write carries the field', async () => {
+  const w = world();
+  const device = await paired(w);
+  const written = JSON.parse(w.folder.raw(DevicesFile) ?? '{}');
+  expect(written.devices.every((record: { grants?: unknown }) => record.grants !== undefined)).toBe(true);
+  const planted = (mutate: (record: Record<string, unknown>) => void) => {
+    const folder = new MemoryStateFolder();
+    const document = JSON.parse(w.folder.raw(DevicesFile) ?? '{}');
+    mutate(document.devices[0]);
+    folder.plant(DevicesFile, JSON.stringify(document));
+    return world({ folder });
+  };
+  for (const damaged of [
+    planted(record => {
+      record.grants = { fleet: { use: 'yes' } };
+    }),
+    planted(record => {
+      delete record.grants;
+    }),
+  ]) {
+    const response = await damaged.runtime.handler('GET /v1/pair/devices')(call({ host: true }));
+    expect([response.status, jsonBody(response).code]).toEqual([503, 'plugin_failed']);
+    expect(damaged.runtime.credentials.standing(device.deviceId as HolderId, damaged.clock.now())).toBe('unknown');
+  }
 });
