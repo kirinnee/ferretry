@@ -84,11 +84,15 @@ const mintId = (nowMs: number): FerretId => `${nowMs.toString(36)}-${randomBytes
 function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest> {
   const { kernel, hooks, needs } = ctx;
   const log = kernel.log.child('ferrets');
-  const registry = new FerretRegistry();
+  let generation = 0;
+  // I108: publish at the registry mutation, including removal, after the service's durable write.
+  const registry = new FerretRegistry([], change => {
+    generation += 1;
+    kernel.events.publish(FerretsChanged, { ...change, generation });
+  });
   const tokens = new FerretTokenDirectory();
   const workFolders = new RegistryWorkFolders(registry);
   const fleetList = new ConditionalFleetList();
-  let generation = 0;
 
   // Load what is held. Sync answers (`mayTouch`, `bearers:ferret`, `WorkFolders`) see nothing until this lands,
   // which fails closed: an unknown ferret is refused, an unknown digest is no ferret.
@@ -188,9 +192,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return ok(path as FencedPath);
     },
     changed: payload => {
-      generation += 1;
       hooks.observe(FerretChanged, payload);
-      kernel.events.publish(FerretsChanged, { ferret: payload.ferret, generation });
     },
     saveDetails: async (ferret, details) => await kernel.state.write(FerretDetailsFiles, details, ferret),
     history: appendHistory,

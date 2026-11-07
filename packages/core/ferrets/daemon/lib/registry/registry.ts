@@ -54,7 +54,14 @@ export class FerretRegistry {
   private readonly details = new Map<FerretId, FerretDetails>();
   private moved = 0;
 
-  constructor(records: readonly FerretRecord[] = []) {
+  constructor(
+    records: readonly FerretRecord[] = [],
+    private readonly changed: (change: {
+      readonly ferret: FerretId;
+      readonly state: FerretState;
+      readonly gone?: true;
+    }) => void = () => {},
+  ) {
     for (const record of records) this.put(record);
   }
 
@@ -88,6 +95,7 @@ export class FerretRegistry {
     this.records.set(record.id, record);
     this.summaries.set(record.id, summaryOf(record, this.details.get(record.id)));
     this.moved += 1;
+    this.changed({ ferret: record.id, state: record.state });
   }
 
   /** A ferret's start options and title; its summary is remade when the ferret is known. */
@@ -97,6 +105,7 @@ export class FerretRegistry {
     if (record === undefined) return;
     this.summaries.set(ferret, summaryOf(record, details));
     this.moved += 1;
+    this.changed({ ferret, state: record.state });
   }
 
   detailsOf(ferret: FerretId): FerretDetails | undefined {
@@ -104,10 +113,14 @@ export class FerretRegistry {
   }
 
   remove(ferret: FerretId): boolean {
+    const record = this.records.get(ferret);
     const had = this.records.delete(ferret);
     this.summaries.delete(ferret);
     this.details.delete(ferret);
-    if (had) this.moved += 1;
+    if (had && record !== undefined) {
+      this.moved += 1;
+      this.changed({ ferret, state: record.state, gone: true });
+    }
     return had;
   }
 
