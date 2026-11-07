@@ -67,6 +67,8 @@ export interface FakeLoginChanges extends LoginChangesApi {
   refuseApply(error: LoginChangeError | undefined): void;
   /** The `usersMovedFirst` of every `stage`, in order. */
   readonly movedFirst: readonly (readonly string[])[];
+  /** Every id discarded, in order. */
+  readonly discarded: readonly string[];
 }
 
 const FAKE_EXPIRY = instantFromEpochMs(4_070_908_800_000);
@@ -75,6 +77,7 @@ export function fakeLoginChanges(): FakeLoginChanges {
   const staged: LoginChange[] = [];
   const movedFirst: (readonly string[])[] = [];
   const applied: string[] = [];
+  const discarded: string[] = [];
   let outcome: LoginChangeOutcome = { outcome: 'applied' };
   let stageRefusal: LoginChangeError | undefined;
   let applyRefusal: LoginChangeError | undefined;
@@ -82,6 +85,7 @@ export function fakeLoginChanges(): FakeLoginChanges {
     staged,
     applied,
     movedFirst,
+    discarded,
     setOutcome: next => {
       outcome = next;
     },
@@ -108,6 +112,9 @@ export function fakeLoginChanges(): FakeLoginChanges {
       if (applyRefusal !== undefined) throw applyRefusal;
       applied.push(id);
       return outcome;
+    },
+    discard: async id => {
+      discarded.push(id);
     },
   };
 }

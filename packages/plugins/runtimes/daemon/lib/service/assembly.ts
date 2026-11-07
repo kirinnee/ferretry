@@ -24,6 +24,7 @@ export function unavailableCatalogDeps(
   now: () => number,
   logins: Pick<import('@ferretry/plugin-logins/contract').LoginsApi, 'list'>,
   loginChanges: import('@ferretry/plugin-logins/contract').LoginChangesApi,
+  warn?: FleetCatalogServiceDeps['warn'],
 ): FleetCatalogServiceDeps {
   const nowhere = '';
   return {
@@ -37,6 +38,7 @@ export function unavailableCatalogDeps(
     machineName: () => 'this machine',
     credentials: logins,
     loginChanges,
+    ...(warn === undefined ? {} : { warn }),
     configWriter: refusingConfigWriter,
     provisioner: { preview: unavailable, apply: unavailable },
     // Never read: every method reads the configuration first, and that refuses.

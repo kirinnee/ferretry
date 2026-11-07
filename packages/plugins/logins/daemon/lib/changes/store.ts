@@ -91,6 +91,11 @@ export class LoginChangeStore<Payload> {
     return held;
   }
 
+  /** Forget a change that is still waiting. Quietly nothing for one already applied, expired or never held. */
+  discard(id: string): void {
+    if (this.#held.get(id)?.state === 'pending') this.#held.delete(id);
+  }
+
   /** Put a consumed change back, when the apply it authorised never reached the host. */
   restore(held: HeldChange<Payload>): void {
     if (this.#held.has(held.id)) held.state = 'pending';

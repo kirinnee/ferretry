@@ -114,6 +114,9 @@ import { applyFailureSummary, applyResultSummary, operationSummary, skippedWithi
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
+/** What a person is told when a login's removal fails after its runtimes moved, for a reason that is not Logins' own sentence. */
+const LOGINS_COULD_NOT_FINISH = 'Logins could not finish removing it';
+
 /** Every refusal this surface answers with, so a client branches on cause rather than on prose. */
 export class FleetCatalogRefusal extends Error {
   constructor(
@@ -252,6 +255,8 @@ export interface FleetCatalogServiceDeps {
   readonly credentials: Pick<LoginsApi, 'list'>;
   /** Writing a login: Logins stages and applies it (`LoginChangesPort`). */
   readonly loginChanges: LoginChangesApi;
+  /** A warning for the daemon log: a message and fields that carry names and kinds, never values or a lower layer's text. */
+  readonly warn?: (message: string, fields: Readonly<Record<string, string>>) => void;
   /** Writes the configuration documents of a change. GAP(kernel): no plugin config write port; see `ports.ts`. */
   readonly configWriter: RuntimeConfigWriter;
   readonly provisioner: Pick<FleetProvisioner, 'preview' | 'apply'>;
@@ -1086,7 +1091,18 @@ export class FleetCatalogService {
       // The runtimes' move is committed and is not undone (the safe order: no runtime points at a missing login). Say so,
       // rather than a bare "review it again" that reads as if nothing happened.
       if (movedApply !== undefined && record.mutation.kind === 'credential.remove') {
-        const reason = error instanceof FleetCatalogRefusal ? error.message : errorMessage(error);
+        // The held Logins change carried the runtimes this move already took off the login; it must not stay applicable.
+        await this.deps.loginChanges.discard(payload.loginChangeId).catch(() => undefined);
+        // Only Logins' own sentences are repeated. Anything else a lower layer threw is not: a fixed reason, and the
+        // cause (its kind, never its text) goes to the log.
+        const refused = error instanceof FleetCatalogRefusal;
+        if (!refused) {
+          this.deps.warn?.('Logins could not finish removing a login after its runtimes moved', {
+            login: record.mutation.id,
+            cause: error instanceof Error ? error.name : 'unknown',
+          });
+        }
+        const reason = refused ? error.message : LOGINS_COULD_NOT_FINISH;
         throw new FleetCatalogRefusal(
           'fleet_change_failed',
           `${movedSentence(record.mutation)}, but login ${record.mutation.id} was not removed: ${reason.replace(/[.\s]+$/u, '')}. Remove it again.`,

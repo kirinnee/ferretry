@@ -56,13 +56,17 @@ const UNTIL = instantFromEpochMs(1_793_491_200_000);
 
 const OWNER = { governed: false, decide: () => ({ allowed: true, refusal: 'granted' as const }) };
 
-function world(options: { readonly failPlan?: boolean } = {}) {
+function world(options: { readonly failPlan?: boolean; readonly applyThrows?: Error } = {}) {
   const order: string[] = [];
+  const warnings: { readonly message: string; readonly fields: Readonly<Record<string, string>> }[] = [];
   const logins = fakeLogins([sampleLogin('claude-you')]);
   const changes = fakeLoginChanges();
   const base = unavailableCatalogDeps(() => 1_794_052_800_000, logins, changes);
   const deps: FleetCatalogServiceDeps = {
     ...base,
+    warn: (message, fields) => {
+      warnings.push({ message, fields });
+    },
     document: async () => ({
       format: 'present',
       model: MODEL,
@@ -80,8 +84,10 @@ function world(options: { readonly failPlan?: boolean } = {}) {
       stage: (change, options) => changes.stage(change, options),
       apply: async id => {
         order.push('logins');
+        if (options.applyThrows !== undefined) throw options.applyThrows;
         return await changes.apply(id);
       },
+      discard: id => changes.discard(id),
     },
     configWriter: {
       write: async () => {
@@ -107,7 +113,7 @@ function world(options: { readonly failPlan?: boolean } = {}) {
     },
   };
   const { catalog } = assembleServices(deps, unavailableSetupDeps);
-  return { catalog: catalog as FleetCatalogService, logins: changes, order };
+  return { catalog: catalog as FleetCatalogService, logins: changes, order, warnings };
 }
 
 const rejection = async (work: Promise<unknown>): Promise<unknown> =>
@@ -334,6 +340,64 @@ describe('removing a login', () => {
     should((failure as FleetCatalogRefusal).message).equal(
       'claude-default moved to login second, but login claude-you was not removed: the logins on this machine changed after this change was previewed; review it again. Remove it again.',
     );
+  });
+
+  it('should discard the held Logins change when its apply fails after the runtimes moved, so it is never left applicable', async () => {
+    const w = world();
+    const view = await w.catalog.propose({
+      kind: 'credential.remove',
+      id: 'claude-you',
+      switchRuntimes: { 'claude-default': 'second' },
+    });
+    w.logins.refuseApply(new LoginChangeError('login_change_refused', '1 runtime still uses this login (x).'));
+
+    await rejection(w.catalog.apply(view.id, OWNER));
+
+    should(w.logins.discarded).deepEqual(['change-1']);
+  });
+
+  it('should not discard anything when no runtime moved (the review stays usable) or the move did not land', async () => {
+    const unmoved = world();
+    const view = await unmoved.catalog.propose({ kind: 'credential.remove', id: 'spare' });
+    unmoved.logins.refuseApply(new LoginChangeError('login_change_stale', 'review it again'));
+    await rejection(unmoved.catalog.apply(view.id, OWNER));
+
+    const failed = world({ failPlan: true });
+    const planned = await failed.catalog.propose({
+      kind: 'credential.remove',
+      id: 'claude-you',
+      switchRuntimes: { 'claude-default': 'second' },
+    });
+    await rejection(failed.catalog.apply(planned.id, OWNER));
+
+    should(unmoved.logins.discarded).deepEqual([]);
+    should(failed.logins.discarded).deepEqual([]);
+  });
+
+  it('should use a fixed reason, and log only the kind of the cause, when Logins fails after the move for a reason that is not its own sentence', async () => {
+    const w = world({
+      applyThrows: new TypeError('write failed for ANTHROPIC_AUTH_TOKEN=sk-ant-api03-abcdefghijklmnopq'),
+    });
+    const view = await w.catalog.propose({
+      kind: 'credential.remove',
+      id: 'claude-you',
+      switchRuntimes: { 'claude-default': 'second' },
+    });
+
+    const failure = await rejection(w.catalog.apply(view.id, OWNER));
+
+    should((failure as FleetCatalogRefusal).code).equal('fleet_change_failed');
+    should((failure as FleetCatalogRefusal).message).equal(
+      'claude-default moved to login second, but login claude-you was not removed: Logins could not finish removing it. Remove it again.',
+    );
+    should(JSON.stringify(w.warnings)).not.containEql('sk-ant');
+    should(w.warnings).deepEqual([
+      {
+        message: 'Logins could not finish removing a login after its runtimes moved',
+        fields: { login: 'claude-you', cause: 'TypeError' },
+      },
+    ]);
+    should(w.logins.discarded).deepEqual(['change-1']);
   });
 
   it('should report the move in the outcome of a removal that moved runtimes, with what the change was', async () => {

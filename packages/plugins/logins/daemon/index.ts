@@ -257,7 +257,8 @@ export function buildLoginsDaemon() {
       // same held review and the same events. `changes` is built after `api` (it reads `api.get`); these call it lazily.
       const changesApi: LoginChangesApi = loginChangesPort({
         stage: (change, options) => changes.stage(change, options),
-        apply: id => changes.apply(id),
+        apply: (id, door) => changes.apply(id, door),
+        discard: id => changes.discard(id),
       });
 
       // Logins OWNS its change routes: add, sign out, disable, enable, label, remove. A change edits this plugin's own

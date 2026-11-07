@@ -120,8 +120,8 @@ describe('LoginChangeService', () => {
       id: 'h',
       sentences: ['login "this login"\'s daily hard limit in dollars is removed (was 5)'],
     };
-    const { service } = world({ remove: async () => held });
-    const view = await service.stage({ kind: 'login.remove', id: 'work' });
+    const { service } = world({ write: async () => held });
+    const view = await service.stage({ kind: 'login.label', id: 'work', label: 'Work' });
 
     should(await service.apply(view.id)).deepEqual({ outcome: 'held', sentences: held.sentences });
   });
@@ -337,19 +337,159 @@ describe('LoginChangeService: removing a login', () => {
     should(writes).deepEqual([]);
   });
 
-  it('should not count runtimes the caller moves first, at staging or at apply, but still refuse any other', async () => {
+  it('should not count runtimes the caller moves first at staging, but ask plainly at apply, when the move has landed', async () => {
     let users: readonly string[] = ['claude-default'];
     const { service, writes } = world({ usedBy: async () => users });
+    const port = loginChangesPort(service);
 
-    const view = await service.stage({ kind: 'login.remove', id: 'work' }, { usersMovedFirst: ['claude-default'] });
-    users = ['claude-default', 'surprise'];
-    const error = (await service.apply(view.id).catch(caught => caught)) as LoginChangeError;
-    users = ['claude-default'];
-    const outcome = await service.apply(view.id);
+    const view = await port.stage({ kind: 'login.remove', id: 'work' }, { usersMovedFirst: ['claude-default'] });
+    // The move did not take: the provider still says it uses the login. Nothing is excluded now.
+    const error = (await port.apply(view.id).catch(caught => caught)) as LoginChangeError;
+    users = [];
+    const outcome = await port.apply(view.id);
 
-    should(error.message).equal('1 runtime still uses this login (surprise). Move it to another login first.');
+    should(error.code).equal('login_change_refused');
+    should(error.message).equal(IN_USE);
     should(outcome).deepEqual({ outcome: 'applied' });
     should(writes).deepEqual([{ id: 'work', removed: true }]);
+  });
+
+  it('should refuse to apply a change that waits on a move through the route, and keep it for the port', async () => {
+    let users: readonly string[] = ['claude-default'];
+    const { service, writes } = world({ usedBy: async () => users });
+    const port = loginChangesPort(service);
+    const routes = changeRoutes(service);
+    const view = await port.stage({ kind: 'login.remove', id: 'work' }, { usersMovedFirst: ['claude-default'] });
+    users = [];
+
+    const viaRoute = await call(routes, 'POST /v1/logins/changes/:changeId/apply', {
+      path: `/v1/logins/changes/${view.id}/apply`,
+    }).catch(caught => caught);
+
+    should(viaRoute).containDeep({ status: 409, code: 'login_change_refused' });
+    should(writes).deepEqual([]);
+    should(service.view(view.id).state).equal('pending');
+    should(await port.apply(view.id)).deepEqual({ outcome: 'applied' });
+    should(writes).deepEqual([{ id: 'work', removed: true }]);
+  });
+
+  it('should refuse a list naming something that is not a runtime when the provider still says what uses the login', async () => {
+    // A caller names invented runtimes as "moved first": they are excluded at staging, but at apply the provider is
+    // asked plainly and still names them, so the removal is refused through either door.
+    const { service, writes } = world({ usedBy: async () => ['claude-default'] });
+    const port = loginChangesPort(service);
+    const view = await port.stage(
+      { kind: 'login.remove', id: 'work' },
+      { usersMovedFirst: ['claude-default', 'zzz-not-a-runtime'] },
+    );
+
+    const viaPort = (await port.apply(view.id).catch(caught => caught)) as LoginChangeError;
+    const viaRoute = await call(changeRoutes(service), 'POST /v1/logins/changes/:changeId/apply', {
+      path: `/v1/logins/changes/${view.id}/apply`,
+    }).catch(caught => caught);
+
+    should(viaPort.message).equal(IN_USE);
+    should(viaRoute).containDeep({ status: 409, code: 'login_change_refused' });
+    should(writes).deepEqual([]);
+  });
+
+  it('should forget a held change that is discarded, and say it is unknown afterwards', async () => {
+    const { service, writes } = world();
+    const port = loginChangesPort(service);
+    const view = await port.stage({ kind: 'login.remove', id: 'work' }, { usersMovedFirst: [] });
+
+    await port.discard(view.id);
+    const error = (await port.apply(view.id).catch(caught => caught)) as LoginChangeError;
+
+    should(error.code).equal('login_change_unknown');
+    should(writes).deepEqual([]);
+  });
+
+  for (const [what, answer] of [
+    ['undefined', undefined],
+    ['a string', 'claude-default'],
+    ['a Set', new Set(['claude-default'])],
+    ['an object with a length', { length: 1 }],
+    ['names that are not strings', [1]],
+  ] as const) {
+    it(`should refuse in the fixed sentence, at staging and at apply, when the provider answers ${what}`, async () => {
+      // Staging.
+      const staging = world({ usedBy: async () => answer as never });
+      const refused = (await staging.service
+        .stage({ kind: 'login.remove', id: 'work' })
+        .catch(caught => caught)) as LoginChangeError;
+
+      // Apply: the provider answered properly at the review, then garbage.
+      let garbage = false;
+      const applying = world({ usedBy: async () => (garbage ? (answer as never) : []) });
+      const view = await applying.service.stage({ kind: 'login.remove', id: 'work' });
+      garbage = true;
+      const later = (await applying.service.apply(view.id).catch(caught => caught)) as LoginChangeError;
+
+      should(refused.code).equal('login_change_refused');
+      should(refused.message).equal(UNKNOWN);
+      should(later.code).equal('login_change_refused');
+      should(later.message).equal(UNKNOWN);
+      should(staging.writes).deepEqual([]);
+      should(applying.writes).deepEqual([]);
+    });
+  }
+
+  it('should refuse a removal that would be held, naming both steps, and stage nothing (the port and the route)', async () => {
+    const budgeted = new Map<string, LoginFile>([
+      ['work', { harness: 'claude-code', store: 'ferretry', budget: { daily: { hard: 5 } } } as LoginFile],
+    ]);
+    const held = world({ files: () => budgeted });
+    const port = loginChangesPort(held.service);
+
+    const viaPort = (await port
+      .stage({ kind: 'login.remove', id: 'work' })
+      .catch(caught => caught)) as LoginChangeError;
+    const viaRoute = await call(changeRoutes(held.service), 'POST /v1/logins/changes', {
+      body: { kind: 'login.remove', id: 'work' },
+    }).catch(caught => caught);
+    // Nothing was held: the next change gets the first handle.
+    const next = await held.service.stage({ kind: 'login.label', id: 'work', label: 'Work' });
+
+    const sentence =
+      'This login has a budget, so it was not removed: first drop its budget (you confirm that), then remove the login.';
+    should(viaPort.code).equal('login_change_refused');
+    should(viaPort.message).equal(sentence);
+    should(viaRoute).containDeep({ status: 409, code: 'login_change_refused', message: sentence });
+    should(next.id).equal('chg1');
+    should(held.writes).deepEqual([]);
+  });
+
+  it('should ask what uses the login again once the budget is dropped, and refuse if a runtime moved onto it meanwhile', async () => {
+    let users: readonly string[] = [];
+    let files = new Map<string, LoginFile>([
+      ['work', { harness: 'claude-code', store: 'ferretry', budget: { daily: { hard: 5 } } } as LoginFile],
+    ]);
+    const asked: string[] = [];
+    const { service, writes } = world({
+      files: () => files,
+      usedBy: async id => {
+        asked.push(id);
+        return users;
+      },
+    });
+    const refused = (await service
+      .stage({ kind: 'login.remove', id: 'work' })
+      .catch(caught => caught)) as LoginChangeError;
+    // The owner confirms the budget drop (a separate, held loosening): the login now has no budget.
+    files = new Map([['work', { harness: 'claude-code', store: 'ferretry' } as LoginFile]]);
+    // A runtime moved onto the login in the meantime.
+    users = ['claude-default'];
+
+    const again = (await service
+      .stage({ kind: 'login.remove', id: 'work' })
+      .catch(caught => caught)) as LoginChangeError;
+
+    should(refused.message).containEql('first drop its budget');
+    should(asked).deepEqual(['work', 'work']);
+    should(again.code).equal('login_change_refused');
+    should(again.message).equal(IN_USE);
+    should(writes).deepEqual([]);
   });
 
   it('should still refuse when the runtimes named as moved first are not all of them', async () => {
@@ -452,10 +592,12 @@ describe('the Logins port parses what the route parses', () => {
   }
 
   it('should stage and apply a valid change through the port, passing the moved-first runtimes on', async () => {
-    const { service, writes } = world({ usedBy: async () => ['claude-default'] });
+    let users: readonly string[] = ['claude-default'];
+    const { service, writes } = world({ usedBy: async () => users });
     const port = loginChangesPort(service);
 
     const view = await port.stage({ kind: 'login.remove', id: 'work' }, { usersMovedFirst: ['claude-default'] });
+    users = [];
     const outcome = await port.apply(view.id);
 
     should(outcome).deepEqual({ outcome: 'applied' });

@@ -76,7 +76,14 @@ export type RuntimesAssembler = (ctx: DaemonContext<typeof manifest>) => Runtime
 
 /** The assembly of a daemon whose host seams are not wired: every read and change answers in a sentence. */
 export const unavailableAssembly: RuntimesAssembler = ctx => {
-  const catalogDeps = unavailableCatalogDeps(() => ctx.kernel.clock.nowMs(), ctx.needs.logins, ctx.needs.loginChanges);
+  const catalogDeps = unavailableCatalogDeps(
+    () => ctx.kernel.clock.nowMs(),
+    ctx.needs.logins,
+    ctx.needs.loginChanges,
+    (message, fields) => {
+      ctx.kernel.log.warn(message, fields);
+    },
+  );
   const services = assembleServices(catalogDeps, unavailableSetupDeps);
   return services;
 };

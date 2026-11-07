@@ -100,11 +100,17 @@ export interface LoginChangesApi {
   /**
    * Hold a change and say what applying it does. `usersMovedFirst` names runtimes the caller will move off the login
    * (or remove) BEFORE it applies this removal: they are not counted as users here. It exists only on this in-process
-   * port, never on the wire, so the route cannot be asked to skip the check.
+   * port, never on the wire, so the route cannot be asked to skip the check. A change that carries them is applied only
+   * through this port: the route refuses it.
    */
   stage(change: LoginChange, options?: { readonly usersMovedFirst?: readonly string[] }): Promise<LoginChangeView>;
-  /** Run exactly what was held. */
+  /**
+   * Run exactly what was held. A removal asks `logins.used-by` again and counts EVERY runtime it names, including any
+   * given as `usersMovedFirst` at stage: by now the move has landed, so a runtime still on the login refuses it.
+   */
   apply(id: string): Promise<LoginChangeOutcome>;
+  /** Forget a held change that must not be applied any more (its caller's move landed but its removal cannot). */
+  discard(id: string): Promise<void>;
 }
 export const LoginChangesPort = definePort<LoginChangesApi>('logins.changes');
 

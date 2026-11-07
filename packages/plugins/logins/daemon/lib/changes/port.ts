@@ -7,7 +7,7 @@
 import { type LoginChangesApi, LoginChangeError, LoginChangeSchema } from '../../../contract/index.ts';
 import type { LoginChangeService } from './service.ts';
 
-export function loginChangesPort(service: Pick<LoginChangeService, 'stage' | 'apply'>): LoginChangesApi {
+export function loginChangesPort(service: Pick<LoginChangeService, 'stage' | 'apply' | 'discard'>): LoginChangesApi {
   return {
     stage: async (change, options) => {
       const parsed = LoginChangeSchema.safeParse(change);
@@ -21,6 +21,10 @@ export function loginChangesPort(service: Pick<LoginChangeService, 'stage' | 'ap
       }
       return await service.stage(parsed.data, options);
     },
-    apply: id => service.apply(id),
+    // This is the door a change that waited on a move is applied through; the routes never are.
+    apply: id => service.apply(id, 'port'),
+    discard: async id => {
+      service.discard(id);
+    },
   };
 }
