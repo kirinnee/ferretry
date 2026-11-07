@@ -23,7 +23,8 @@
     "zod": "4.4.3",
     "react": "^19.0.0",
     "lucide-react": "^0.468.0",
-    "node-datachannel": "0.33.4"
+    "node-datachannel": "0.33.4",
+    "@ferretry/app": "workspace:*"
   },
   "sideEffects": false,
   "devDependencies": {

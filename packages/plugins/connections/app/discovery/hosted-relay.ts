@@ -252,3 +252,28 @@ export const HOSTED_RELAY_DISABLED_NOTE =
 export const HOSTED_RELAY_UNDETERMINED_NOTE =
   'Treat the fallback as unavailable until this page can confirm it. Direct still works whenever the daemon is ' +
   'reachable, and pairing over the hosted relay is the one thing that needs this answer.';
+
+/** What this document learned from its one directory read: the fallback state, and the address when there is one. */
+export interface DocumentRelayDiscovery {
+  /** The advertisement's state, read once. */
+  readonly fallback: () => Promise<HostedRelayFallback>;
+  /** The advertised rendezvous, or `undefined` when there is none (disabled, undetermined, no directory). */
+  readonly hostedRelay: () => Promise<string | undefined>;
+}
+
+/**
+ * THE ONE ADVERTISEMENT READ THIS DOCUMENT PERFORMS (R580, today's `createAppStore`): started at once, from the
+ * build-time directory origin and nothing else, through the shell's directory port; never asked again, so
+ * `relayUrl: null` withdraws the relay on the next load rather than being remembered, and a router that asked per
+ * request would both hammer the directory and hold two answers. A build with no directory (or no port) answers
+ * {@link NO_RELAY_DIRECTORY} without dialling, which is what a local build or a fork honestly is.
+ */
+export function documentRelayDiscovery(
+  fetcher: HostedRelayFetch | undefined,
+  directoryUrl: string | undefined = bundledRelayDirectory(),
+): DocumentRelayDiscovery {
+  const read: Promise<HostedRelayFallback> =
+    fetcher === undefined ? Promise.resolve(NO_RELAY_DIRECTORY) : readHostedRelayFallback({ directoryUrl, fetcher });
+  const address = read.then(fallback => (fallback.kind === 'available' ? fallback.relayUrl : undefined));
+  return { fallback: async () => await read, hostedRelay: async () => await address };
+}
