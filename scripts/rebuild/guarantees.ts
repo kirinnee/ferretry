@@ -213,6 +213,11 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
     reason:
       "the composer action is Conversation's (design D2 #7, lead ruling port-conversation r1 #5): it acts on the draft Conversation holds; Terminals types it and Gate checks terminal/use, so both stay co-owners",
   },
+  G163: {
+    owner: 'conversation',
+    reason:
+      "the log page is Conversation's (`GET /v1/ferrets/:ferretId/log-page`, `daemon/reader/routes.ts` `logPage` over `TranscriptReadService.logPage`): it pages a ferret's transcript, not the daemon log, scrubs every line through the read-scoped Redaction before the validator is cut, and keeps `file` an opaque digest; the Kernel (which only writes `logs/fyd.log`, no read route) and the Vault redaction stay co-owners",
+  },
   G164: {
     owner: 'conversation',
     reason:
