@@ -1,10 +1,15 @@
-import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 /** The kernel's filesystem seam: the only place `node:fs` is used by the host (§7.7 `banned-globals`). */
 export interface HostFs {
   realpath(path: string): Promise<string>;
-  lstat(path: string): Promise<{ readonly kind: 'file' | 'directory' | 'link' | 'other'; readonly size: number; readonly mtimeMs: number } | undefined>;
+  lstat(
+    path: string,
+  ): Promise<
+    | { readonly kind: 'file' | 'directory' | 'link' | 'other'; readonly size: number; readonly mtimeMs: number }
+    | undefined
+  >;
   readText(path: string): Promise<string>;
   readBytes(path: string): Promise<Uint8Array>;
   /** Atomic: a temp file in the same folder, fsync, rename. */
@@ -24,7 +29,13 @@ export function nodeFs(randomSuffix: () => string): HostFs {
     lstat: async path => {
       try {
         const info = await lstat(path);
-        const kind = info.isSymbolicLink() ? 'link' : info.isDirectory() ? 'directory' : info.isFile() ? 'file' : 'other';
+        const kind = info.isSymbolicLink()
+          ? 'link'
+          : info.isDirectory()
+            ? 'directory'
+            : info.isFile()
+              ? 'file'
+              : 'other';
         return { kind, size: info.size, mtimeMs: info.mtimeMs };
       } catch (error) {
         if (isMissing(error)) return undefined;
@@ -61,16 +72,3 @@ export function nodeFs(randomSuffix: () => string): HostFs {
     rename: (from, to) => rename(from, to),
   };
 }
-
-/** `stat` that follows links, for the home probe. */
-export async function statKind(path: string): Promise<'missing' | 'file' | 'directory' | 'other'> {
-  try {
-    const info = await stat(path);
-    return info.isDirectory() ? 'directory' : info.isFile() ? 'file' : 'other';
-  } catch (error) {
-    if (isMissing(error)) return 'missing';
-    throw error;
-  }
-}
-
-export { writeFile };

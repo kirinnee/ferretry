@@ -50,7 +50,7 @@ export class InventoryCache {
   }
 }
 
-export interface RouteFacts {
+interface RouteFacts {
   readonly owner: string;
   readonly caller: 'person' | 'any';
 }

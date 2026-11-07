@@ -23,7 +23,8 @@
     },
     "packages/cli": {
       "entry": ["bin/*.ts", "src/index.ts"],
-      "project": ["src/**/*.ts", "bin/**/*.ts"]
+      "project": ["src/**/*.ts", "bin/**/*.ts"],
+      "ignore": ["src/lib/tool-client.ts"]
     },
     "packages/app": {
       "entry": ["src/index.ts", "src/main.tsx"],

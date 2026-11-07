@@ -1,5 +1,5 @@
 /**
- * Updates' policy entries (§7.1), copied from today's `runtime/mounts/{daemon-update,harness-update,update}.ts` and
+ * Updates' policy entries (§7.1), copied from today's `runtime/mounts/{daemon-update,update}.ts` and
  * their audit rules: updating runs new code on the machine, so it is kept as a change to the machine's security.
  */
 import type { AuditDeclaration, CapabilityDemand, GuardDeclaration } from '@ferretry/kernel/contract';

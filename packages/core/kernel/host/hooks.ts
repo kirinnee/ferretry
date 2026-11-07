@@ -119,7 +119,9 @@ export class HookEngine {
             continue;
           }
           if (hook.takers !== undefined && !hook.takers.includes(manifest.id)) {
-            refuse(`${manifest.id} may not take the security-path hook ${hook.name}; only ${hook.takers.join(', ')} may.`);
+            refuse(
+              `${manifest.id} may not take the security-path hook ${hook.name}; only ${hook.takers.join(', ')} may.`,
+            );
             continue;
           }
           const key = `${hook.name}:${take.key}`;
@@ -235,7 +237,12 @@ export class HookEngine {
   private async bounded<T>(work: () => T | Promise<T>, ms: number): Promise<{ value: T } | 'timeout' | 'threw'> {
     const deadline = this.deadline(ms);
     try {
-      const answer = await Promise.race([Promise.resolve().then(work).then(value => ({ value })), deadline.promise]);
+      const answer = await Promise.race([
+        Promise.resolve()
+          .then(work)
+          .then(value => ({ value })),
+        deadline.promise,
+      ]);
       return answer;
     } catch {
       return 'threw';
@@ -257,7 +264,10 @@ export class HookEngine {
       const decision = answer.value;
       if (decision === null || typeof decision !== 'object' || decision.allow !== true) {
         const reason =
-          decision !== null && typeof decision === 'object' && decision.allow === false && typeof decision.reason === 'string'
+          decision !== null &&
+          typeof decision === 'object' &&
+          decision.allow === false &&
+          typeof decision.reason === 'string'
             ? decision.reason
             : `${taker.plugin} refused.`;
         return { allow: false, reason };
@@ -345,7 +355,9 @@ export class HookEngine {
       if (hook === undefined) continue;
       out.set(
         name,
-        this.ordered(hook).map(taker => (taker.take.key === undefined ? taker.plugin : `${taker.plugin}:${taker.take.key}`)),
+        this.ordered(hook).map(taker =>
+          taker.take.key === undefined ? taker.plugin : `${taker.plugin}:${taker.take.key}`,
+        ),
       );
     }
     return out;

@@ -26,14 +26,14 @@ export function assertRecordSize(encoded: string, maxBytes: number = MAX_JSONL_R
   if (byteLength > maxBytes) throw new JsonlRecordTooLargeError(byteLength, maxBytes);
 }
 
-export interface JsonlRecord {
+interface JsonlRecord {
   /** 1-based line number. */
   readonly line: number;
   readonly byteOffset: number;
   readonly value: unknown;
 }
 
-export interface JsonlProblem {
+interface JsonlProblem {
   readonly line: number;
   readonly byteOffset: number;
   readonly message: string;

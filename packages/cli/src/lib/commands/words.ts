@@ -18,7 +18,7 @@ const WordSchema = z.object({
 });
 
 /** The daemon serves the joined glossary at `GET /v1/glossary` (data plugins' words included). */
-export const GlossarySchema = z.union([z.array(WordSchema), z.object({ words: z.array(WordSchema) })]);
+const GlossarySchema = z.union([z.array(WordSchema), z.object({ words: z.array(WordSchema) })]);
 
 /** The words compiled into this fy: every code plugin's manifest. A data plugin's words come only from the daemon. */
 export function compiledWords(registry: CommandRegistry): readonly OwnedWord[] {
@@ -37,7 +37,7 @@ export function findWords(words: readonly OwnedWord[], query: string | undefined
   );
 }
 
-export function renderWords(words: readonly OwnedWord[], titles: Readonly<Record<string, string>>): string {
+function renderWords(words: readonly OwnedWord[], titles: Readonly<Record<string, string>>): string {
   return renderTable(
     ['WORD', 'OWNER', 'MEANS', 'INSTEAD OF'],
     words.map(entry => [

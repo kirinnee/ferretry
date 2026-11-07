@@ -40,7 +40,8 @@ const dispatcher = (
     { routes, sockets: [], memberRoutes: [] },
   );
 
-const body = (response: { body: string }): Record<string, unknown> => JSON.parse(response.body) as Record<string, unknown>;
+const body = (response: { body: string }): Record<string, unknown> =>
+  JSON.parse(response.body) as Record<string, unknown>;
 
 describe('the dispatcher (§7.1, §7.6 step 6)', () => {
   test('admission is asked before every handler, and its standing reaches the handler', async () => {
@@ -59,7 +60,10 @@ describe('the dispatcher (§7.1, §7.6 step 6)', () => {
         return jsonResponse({});
       },
     });
-    const response = await dispatcher([route], recordingAdmission(() => false)).dispatch(request('GET', '/v1/board'));
+    const response = await dispatcher(
+      [route],
+      recordingAdmission(() => false),
+    ).dispatch(request('GET', '/v1/board'));
     expect(response.status).toBe(401);
     expect(ran).toBe(false);
   });
@@ -85,7 +89,12 @@ describe('the dispatcher (§7.1, §7.6 step 6)', () => {
   });
 
   test('an admission that throws refuses the call', async () => {
-    const broken = { ...recordingAdmission(), admit: () => { throw new Error('boom'); } };
+    const broken = {
+      ...recordingAdmission(),
+      admit: () => {
+        throw new Error('boom');
+      },
+    };
     const response = await dispatcher([mounted('/v1/board')], broken).dispatch(request('GET', '/v1/board'));
     expect(response.status).toBe(503);
   });
@@ -94,7 +103,10 @@ describe('the dispatcher (§7.1, §7.6 step 6)', () => {
     const skeleton = mounted('/v1/board', { owner: owner({ kind: 'skeleton' }) });
     const response = await dispatcher([skeleton]).dispatch(request('GET', '/v1/board'));
     expect(response.status).toBe(503);
-    expect(body(response)).toEqual({ error: 'Board is not built yet in this version of Ferretry.', code: 'plugin_unavailable' });
+    expect(body(response)).toEqual({
+      error: 'Board is not built yet in this version of Ferretry.',
+      code: 'plugin_unavailable',
+    });
   });
 
   test('a failed plugin answers plugin_failed and a damaged one store_damaged naming the file', async () => {
@@ -122,7 +134,10 @@ describe('the dispatcher (§7.1, §7.6 step 6)', () => {
       },
     });
     const table = dispatcher([named, bare]);
-    expect(body(await table.dispatch(request('GET', '/v1/a')))).toEqual({ error: 'That card moved.', code: 'card_moved' });
+    expect(body(await table.dispatch(request('GET', '/v1/a')))).toEqual({
+      error: 'That card moved.',
+      code: 'card_moved',
+    });
     const failure = await table.dispatch(request('GET', '/v1/b'));
     expect(failure.status).toBe(500);
     expect(failure.body).not.toContain('secret');
@@ -152,7 +167,10 @@ describe('the final check on a guard: secrets route (§7.3)', () => {
       return stamp.generation === state.generation;
     },
   });
-  const secretRoute = mounted('/v1/pane', { guard: 'secrets', handle: async () => jsonResponse({ text: 'masked ****' }) });
+  const secretRoute = mounted('/v1/pane', {
+    guard: 'secrets',
+    handle: async () => jsonResponse({ text: 'masked ****' }),
+  });
 
   test('late keeps the masked body while nothing changed', async () => {
     const response = await dispatcher([secretRoute], recordingAdmission(), guardWith({ generation: 1 })).dispatch(
@@ -173,11 +191,15 @@ describe('the final check on a guard: secrets route (§7.3)', () => {
   });
 
   test('a missing or throwing OutputGuard withholds', async () => {
-    const missing = await dispatcher([secretRoute], recordingAdmission(), undefined).dispatch(request('GET', '/v1/pane'));
-    expect(finalised(missing).body).toContain(WITHHELD_SENTENCE);
-    const throwing = await dispatcher([secretRoute], recordingAdmission(), guardWith({ generation: 1, throws: true })).dispatch(
+    const missing = await dispatcher([secretRoute], recordingAdmission(), undefined).dispatch(
       request('GET', '/v1/pane'),
     );
+    expect(finalised(missing).body).toContain(WITHHELD_SENTENCE);
+    const throwing = await dispatcher(
+      [secretRoute],
+      recordingAdmission(),
+      guardWith({ generation: 1, throws: true }),
+    ).dispatch(request('GET', '/v1/pane'));
     expect(finalised(throwing).body).toContain(WITHHELD_SENTENCE);
   });
 });

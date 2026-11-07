@@ -23,3 +23,7 @@
 # Ferretry 5.0 starts with no blocking call in any daemon half or the kernel host. A port that carries one over
 # from 4.x (packages/daemon/bin/fyd.ts, the browser and tunnel adapters, the fleet descriptor brackets) adds its
 # line here, under its new path, with the same reasoning.
+
+1 packages/core/kernel/host/fyd.ts  # gap: the daemon log sink appends each line synchronously, so a slow disk holds the loop; move to a buffered async writer
+2 packages/core/kernel/host/state/home-lock.ts  # boot: takes the home lock (creates run/, sets its mode) once while the daemon starts, before it serves
+4 packages/core/kernel/host/state/sqlite-store.ts  # boot: opens a plugin's database (directory, mode, existence, removal of a refused file) while plugins start, before the daemon serves; bun:sqlite itself is synchronous

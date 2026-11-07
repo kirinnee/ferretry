@@ -30,7 +30,7 @@ import {
   sha256,
   surfaceOf,
 } from './lib/hashes.ts';
-import { type ImportEdge, importsOf } from './lib/imports.ts';
+import { type ImportEdge, importsOf, scannedImportsOf } from './lib/imports.ts';
 import {
   HALVES,
   type LoadedSubsystem,
@@ -66,23 +66,30 @@ export interface Model {
   readonly hashes: ReadonlyMap<string, ContractHashes>;
 }
 
-/** Everything the generator and the checks share: manifests, graph, import edges, hashes. */
-export async function buildModel(root: string): Promise<Model> {
+/**
+ * Everything the generator and the checks share: manifests, graph, import edges, hashes. The hashes always come from
+ * the scanned edges, so a generation and a check agree. `precise` (the default) also parses every file with
+ * oxc-parser for `model.edges`, which only the checks read; the generator passes `false` because oxc-parser is a
+ * devDependency the production install (the Nix build) does not have.
+ */
+export async function buildModel(root: string, precise = true): Promise<Model> {
   const ws = loadWorkspace(root);
   const { loaded, failures } = await loadManifests(ws);
   const graph = buildGraph(loaded);
+  const scanned: ImportEdge[] = [];
   const edges: ImportEdge[] = [];
   const parseFailures: string[] = [];
   for (const pkg of ws.packages)
     for (const file of sourceFiles(pkg)) {
       if (file.includes(`${sep}generated${sep}`)) continue;
       try {
-        edges.push(...importsOf(ws, file));
+        scanned.push(...scannedImportsOf(ws, file));
+        if (precise) edges.push(...importsOf(ws, file));
       } catch (error) {
         parseFailures.push(error instanceof Error ? error.message : String(error));
       }
     }
-  const consumed = consumedBy(graph, edges);
+  const consumed = consumedBy(graph, scanned);
   const toJsonSchema = await loadToJsonSchema(ws);
   const canonical = new Map<string, string>();
   const hashFailures: string[] = [];
@@ -101,7 +108,7 @@ export async function buildModel(root: string): Promise<Model> {
     loaded,
     failures: [...failures, ...parseFailures, ...hashFailures],
     graph,
-    edges,
+    edges: precise ? edges : scanned,
     consumed,
     hashes: effectiveHashes(canonical, consumed),
   };
@@ -386,7 +393,7 @@ function argValue(args: readonly string[], flag: string): string | undefined {
 async function main(args: readonly string[]): Promise<number> {
   const root = argValue(args, '--root') ?? join(import.meta.dir, '..', '..');
   const only = argValue(args, '--package');
-  const model = await buildModel(root);
+  const model = await buildModel(root, false);
   for (const failure of model.failures) console.error(`⚠️  ${failure}`);
   const files = only === undefined ? generateGlobal(model) : generatePackage(model, only);
   if (args.includes('--check')) {

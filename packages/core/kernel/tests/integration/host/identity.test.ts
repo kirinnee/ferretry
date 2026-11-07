@@ -54,7 +54,13 @@ describe('the identity key (D17: today’s layout, byte for byte)', () => {
     if (outcome.kind !== 'ready') throw new Error('no identity');
     const message = new TextEncoder().encode('transcript');
     const signature = await outcome.identity.sign(message);
-    const key = await crypto.subtle.importKey('spki', new Uint8Array(outcome.identity.publicKeySpki), { name: 'Ed25519' }, false, ['verify']);
+    const key = await crypto.subtle.importKey(
+      'spki',
+      new Uint8Array(outcome.identity.publicKeySpki),
+      { name: 'Ed25519' },
+      false,
+      ['verify'],
+    );
     expect(await crypto.subtle.verify({ name: 'Ed25519' }, key, new Uint8Array(signature), message)).toBe(true);
   });
 

@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import type { CarrierKey } from '../contract/ids.ts';
-import type { Carrier, CarrierLink, SealedFrame, SealedOutbound, SessionEnd, SessionLayer } from '../contract/session.ts';
+import type {
+  Carrier,
+  CarrierLink,
+  SealedFrame,
+  SealedOutbound,
+  SessionEnd,
+  SessionLayer,
+} from '../contract/session.ts';
 
 /** The far end of a carrier's own transport, driven by the suite (a WebSocket client, a relay peer, a data channel). */
 export interface CarrierPeer {

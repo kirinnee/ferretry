@@ -42,4 +42,4 @@ export interface CliWorld {
   launch(): Promise<LaunchResult>;
 }
 
-export type { Health, PluginInventory };
+export type { PluginInventory };
