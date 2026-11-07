@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { type ApiResponse, jsonResponse } from '../../../contract/http.ts';
+import type { CarrierKey } from '../../../contract/ids.ts';
 import type { SocketDownstream, SocketHandler } from '../../../contract/socket.ts';
 import {
   CREDIT_WINDOW_FRAMES,
@@ -376,25 +377,38 @@ describe('the session layer: one session, one job', () => {
     fx.clock.advance(SESSION_CREDENTIAL_DEADLINE_MS);
     await idle.pump();
     expect(idle.end?.code).toBe(4400);
-    const waiting = Array.from({ length: MAX_PRE_CREDENTIAL_SESSIONS }, () => TestClient.open(fx, 'relay'));
-    const seventh = TestClient.open(fx, 'relay');
+    const rendezvous = fx.layer.connection('relay' as CarrierKey);
+    const waiting = Array.from({ length: MAX_PRE_CREDENTIAL_SESSIONS }, () => TestClient.on(rendezvous));
+    const seventh = TestClient.on(rendezvous);
     await seventh.pump();
     expect(seventh.end?.code).toBe(4429);
-    // A different carrier has its own bound.
-    const other = TestClient.open(fx, 'direct');
+    // Another connection of the same carrier has its own bound, as today's RelayLink per socket had.
+    const other = TestClient.on(fx.layer.connection('relay' as CarrierKey));
     await other.pump();
     expect(other.end).toBeUndefined();
     expect(waiting.every(client => client.end === undefined)).toBe(true);
   });
 
+  test('the pre-credential bound is per connection: 8 unproven peers on 8 direct sockets all stay', async () => {
+    const fx = await fixture();
+    const peers = Array.from({ length: 8 }, (_, index) =>
+      TestClient.open(fx, 'direct', { address: `192.0.2.${index + 1}` }),
+    );
+    for (const peer of peers) await peer.pump();
+    expect(peers.every(peer => peer.end === undefined)).toBe(true);
+    // the direct mount's own admission (16 unproven, 2 per peer, evict oldest) is the carrier's, not the layer's
+    expect(fx.layer.report().preCredential).toBe(8);
+  });
+
   test('R233 a 4429 is a busy refusal, retryable once a slot frees', async () => {
     const fx = await fixture();
-    const waiting = Array.from({ length: MAX_PRE_CREDENTIAL_SESSIONS }, () => TestClient.open(fx));
-    const refused = TestClient.open(fx);
+    const rendezvous = fx.layer.connection('relay' as CarrierKey);
+    const waiting = Array.from({ length: MAX_PRE_CREDENTIAL_SESSIONS }, () => TestClient.on(rendezvous));
+    const refused = TestClient.on(rendezvous);
     await refused.pump();
     expect(refused.end?.code).toBe(4429);
     waiting[0]?.link.closed('gone');
-    const retried = TestClient.open(fx);
+    const retried = TestClient.on(rendezvous);
     await retried.pump();
     expect(retried.end).toBeUndefined();
   });

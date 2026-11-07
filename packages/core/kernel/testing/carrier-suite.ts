@@ -55,6 +55,21 @@ export class RecordingSessionLayer implements SessionLayer {
     };
   }
 
+  /** Every connection a carrier asked for, with the links opened on it. */
+  readonly connections: { readonly carrier: CarrierKey; readonly links: RecordingLink[] }[] = [];
+
+  connection(carrier: CarrierKey): { open(peer?: SessionPeer): CarrierLink } {
+    const record = { carrier, links: [] as RecordingLink[] };
+    this.connections.push(record);
+    return {
+      open: peer => {
+        const link = this.open(carrier, peer) as RecordingLink;
+        record.links.push(link);
+        return link;
+      },
+    };
+  }
+
   open(carrier: CarrierKey, peer?: SessionPeer): CarrierLink {
     this.carriers.push(carrier);
     this.peers.push(peer);
