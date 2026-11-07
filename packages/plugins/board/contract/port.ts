@@ -1,13 +1,13 @@
 import { definePort } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
+import type { CardId } from './refs.ts';
 import type {
   BoardQuery,
   BoardSwitch,
   Card,
   CardActionRequest,
   CardCreateRequest,
-  CardId,
   CardView,
   Progress,
 } from './wire.ts';

@@ -70,6 +70,7 @@ export const MAX_SESSIONS_PER_RENDEZVOUS = 8 as const;
 
 /** How often each socket must be heard from, and how long the rendezvous waits before evicting it. */
 export const HEARTBEAT_SECONDS = 30 as const;
+/** @public A docs/relay-protocol.md number kept with the client's copy of the protocol; the daemon and the rendezvous enforce it. */
 export const HEARTBEAT_GRACE_SECONDS = 45 as const;
 
 /**
@@ -83,6 +84,7 @@ export const HEARTBEAT_REQUEST = 'fy-ping' as const;
 export const HEARTBEAT_RESPONSE = 'fy-pong' as const;
 
 /** How long an unclaimed daemon socket may sit on a challenge before the rendezvous drops it. */
+/** @public A docs/relay-protocol.md number kept with the client's copy of the protocol; the daemon and the rendezvous enforce it. */
 export const CLAIM_DEADLINE_SECONDS = 10 as const;
 
 /**
@@ -93,6 +95,7 @@ export const CLAIM_DEADLINE_SECONDS = 10 as const;
  * well below the number a single honest daemon needs — which is one, with a second only while a
  * reconnection overlaps an old socket.
  */
+/** @public A docs/relay-protocol.md number kept with the client's copy of the protocol; the daemon and the rendezvous enforce it. */
 export const MAX_PENDING_DAEMON_SOCKETS = 4 as const;
 
 /**
@@ -103,7 +106,9 @@ export const MAX_PENDING_DAEMON_SOCKETS = 4 as const;
  * it is the bound that stops a known fingerprint, leaked or misconfigured, from turning into an
  * open-ended bill. Reconnection after a dropped network is a handful of attempts, not thirty.
  */
+/** @public A docs/relay-protocol.md number kept with the client's copy of the protocol; the daemon and the rendezvous enforce it. */
 export const CONNECTION_RATE_LIMIT = 30 as const;
+/** @public A docs/relay-protocol.md number kept with the client's copy of the protocol; the daemon and the rendezvous enforce it. */
 export const CONNECTION_RATE_WINDOW_SECONDS = 60 as const;
 
 /**
@@ -125,6 +130,7 @@ export const MAX_FRAME_SEQUENCE = 0xffff_ffff as const;
 export const HANDSHAKE_FRAME_SEQUENCE = 0 as const;
 
 /** Signed by the daemon to prove it may claim a rendezvous under its own fingerprint. */
+/** @public A docs/relay-protocol.md number kept with the client's copy of the protocol; the daemon and the rendezvous enforce it. */
 export const CLAIM_SIGNATURE_LABEL = 'ferretry-relay-claim-v1' as const;
 
 /** Hashed over the handshake transcript both peers reconstruct independently. */

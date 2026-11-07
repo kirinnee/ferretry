@@ -13,6 +13,8 @@ asksConformance('FakeAsks', () => {
       close: asks.close.bind(asks),
       open: asks.open.bind(asks),
       get: asks.get.bind(asks),
+      snapshots: asks.snapshots.bind(asks),
+      ownerAction: asks.ownerAction.bind(asks),
     },
     answer: (id, effect) => asks.answerAs(id, effect),
   };
@@ -61,6 +63,7 @@ describe('the envelope', () => {
   test('only the owner answers: a ferret is not an answerer', () => {
     const answer = {
       id: 'an_0123456789abcdef01234567',
+      ferret: 'f1',
       ask: 'A1',
       source: 'card',
       entry: 'e1',

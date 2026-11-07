@@ -1,5 +1,29 @@
-import { skeletonApp } from '@ferretry/kernel/manifest';
+import type { AppComponent, ScreenProps } from '@ferretry/kernel/manifest';
+import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import type { ProjectsClient } from './lib/client.ts';
+import { lazyComponent } from './lazy.ts';
 
-/** Skeleton app half (§10.3): listed in ports-pending.json until the port lands. */
-export default skeletonApp(manifest);
+/**
+ * A view module (React), loaded on first use. The specifier is a Vite dynamic-import variable, which is also why the
+ * type-checker, which has no React in this workspace yet, does not follow it into the views.
+ */
+const loadScreens = (): Promise<Record<string, unknown>> => import(`./views/${'screens'}.tsx`);
+
+type ScreenFactory = (client: ProjectsClient) => AppComponent<ScreenProps>;
+
+const screen = (factory: 'createProjectsScreen' | 'createProjectScreen', client: ProjectsClient) =>
+  lazyComponent<ScreenProps>(async () => ((await loadScreens())[factory] as ScreenFactory)(client));
+
+/**
+ * Projects' app half: the `projects` screen (the registry, the add form, the discoveries) and the `project` screen (one
+ * project's provenance, board switch, ferrets and files). The lane editor draws Board's data and is Board's.
+ */
+export default implementApp(manifest, {
+  build: ({ client }) => ({
+    screens: {
+      projects: screen('createProjectsScreen', client),
+      project: screen('createProjectScreen', client),
+    },
+  }),
+});

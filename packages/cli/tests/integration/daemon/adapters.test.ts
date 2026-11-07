@@ -3,7 +3,8 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { readDaemonConfigDocument } from '../../../src/adapters/daemon/config-file.ts';
+import { HttpTransport } from '../../../src/adapters/daemon/http-transport.ts';
+import { readDaemonRunDocument } from '../../../src/adapters/daemon/run-file.ts';
 import { findDaemonBinary, launchDaemon, type LaunchPorts } from '../../../src/adapters/daemon/launcher.ts';
 import { probeHealth } from '../../../src/adapters/daemon/probe.ts';
 import { DaemonTokenFileError, readAdminToken } from '../../../src/adapters/daemon/token-file.ts';
@@ -53,13 +54,13 @@ describe('the admin token file', () => {
   });
 });
 
-describe('the daemon config document', () => {
+describe('the daemon run record', () => {
   it('should read it, and answer undefined for a missing one', async () => {
     await temp(async dir => {
       const path = join(dir, 'daemon.json');
       await writeFile(path, '{"port":1}');
-      should(await readDaemonConfigDocument(path)).equal('{"port":1}');
-      should(await readDaemonConfigDocument(join(dir, 'absent.json'))).be.undefined();
+      should(await readDaemonRunDocument(path)).equal('{"port":1}');
+      should(await readDaemonRunDocument(join(dir, 'absent.json'))).be.undefined();
     });
   });
 });
@@ -152,5 +153,84 @@ describe('launching the daemon', () => {
       return result.state === 'up' ? result : undefined;
     }, 'the stand-in daemon to answer');
     should(probe.state).equal('up');
+  });
+});
+
+describe('riding out a restart', () => {
+  const refused = () => Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+  const restart = (slept: number[]) => ({
+    patience: { expected: () => true, waiting: () => undefined },
+    nowMs: () => slept.reduce((sum, ms) => sum + ms, 0),
+    sleep: async (ms: number) => {
+      slept.push(ms);
+    },
+  });
+
+  it('should ask the guard again BEFORE sending a request a second time, and send nothing when it refuses', async () => {
+    // Arrange: the first attempt finds the daemon away; the daemon that comes back has the plugin off.
+    const asked: string[] = [];
+    const order: string[] = [];
+    const transport = new HttpTransport({
+      baseUrl: async () => 'http://127.0.0.1:7457',
+      authorization: async () => undefined,
+      fetcher: async url => {
+        asked.push(url);
+        order.push('send');
+        throw refused();
+      },
+      restart: restart([]),
+    });
+
+    // Act
+    const error = await transport
+      .send(
+        { method: 'POST', path: '/v1/cards/a/move' },
+        {
+          repeatable: false,
+          recheck: async () => {
+            order.push('recheck');
+            throw new Error('Board is turned off');
+          },
+        },
+      )
+      .catch((failure: unknown) => failure);
+
+    // Assert
+    should((error as Error).message).equal('Board is turned off');
+    should(asked).deepEqual(['http://127.0.0.1:7457/v1/cards/a/move']);
+    should(order).deepEqual(['send', 'recheck']);
+  });
+
+  it('should send again after a recheck that passes, and keep waiting while the recheck finds the daemon away', async () => {
+    // Arrange
+    const order: string[] = [];
+    let rechecks = 0;
+    const transport = new HttpTransport({
+      baseUrl: async () => 'http://127.0.0.1:7457',
+      authorization: async () => undefined,
+      fetcher: async () => {
+        order.push('send');
+        if (order.length === 1) throw refused();
+        return Response.json({ ok: true });
+      },
+      restart: restart([]),
+    });
+
+    // Act
+    const reply = await transport.send(
+      { method: 'GET', path: '/v1/cards/a' },
+      {
+        repeatable: true,
+        recheck: async () => {
+          rechecks += 1;
+          order.push('recheck');
+          if (rechecks === 1) throw refused();
+        },
+      },
+    );
+
+    // Assert
+    should(reply).deepEqual({ status: 200, body: { ok: true } });
+    should(order).deepEqual(['send', 'recheck', 'recheck', 'send']);
   });
 });

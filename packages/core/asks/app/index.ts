@@ -1,5 +1,5 @@
-import { skeletonApp } from '@ferretry/kernel/manifest';
+import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 
-/** Skeleton app half (§10.3): listed in ports-pending.json until the port lands. */
-export default skeletonApp(manifest);
+/** Asks' app half: Asks puts nothing in the app. The Agenda plugin is how the owner sees and answers asks (§2.2). */
+export default implementApp(manifest, { build: () => ({}) });

@@ -16,8 +16,8 @@ describe('updates manifest', () => {
       expect(route.audit).toHaveProperty('record');
     }
   });
-  test('listens for ferret changes to install when idle, and owns `fy update`', () => {
+  test('listens for ferret changes to install when idle, and owns only the cached update check', () => {
     expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['ferret.changed']);
-    expect(manifest.actions.cli.map(verb => verb.verb)).toEqual(['update']);
+    expect(manifest.actions.cli.map(verb => verb.verb)).toEqual(['update check']);
   });
 });

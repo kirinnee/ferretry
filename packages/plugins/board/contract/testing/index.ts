@@ -3,7 +3,9 @@ import { describe, expect, test } from 'bun:test';
 import { err, type Instant, ok } from '@ferretry/std';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { BoardApi } from '../port.ts';
-import { type Card, CARD_KIND_PREFIX, type CardId, CardSchema, type CardView, type Progress } from '../wire.ts';
+import type { CardId } from '../refs.ts';
+import { type Card, CardSchema, type CardView, type Progress } from '../wire.ts';
+import { CARD_KIND_PREFIX } from '../workflow.ts';
 
 const AT = '2026-11-07T09:00:00.000Z' as Instant;
 
@@ -11,7 +13,24 @@ const AT = '2026-11-07T09:00:00.000Z' as Instant;
 export function fakeBoard(): BoardApi {
   const cards = new Map<string, Card>();
   const counters = { bug: 0, feature: 0, infra: 0, chore: 0 };
-  const view = (card: Card): CardView => ({ ...card, activity: 'active', origin: 'human' });
+  const view = (card: Card): CardView => ({
+    ...card,
+    lastTouchedAt: null,
+    touchedBy: null,
+    activity: 'active',
+    rollup: {
+      children: 0,
+      byCategory: { backlog: 0, active: 0, review: 0, shipped: 0, verify: 0, closed: 0 },
+      active: 0,
+      lastTouchedAt: null,
+    },
+    suggestedLane: null,
+    openAsks: [],
+    blockedBy: [],
+    blocks: [],
+    shippedIn: null,
+    origin: 'human',
+  });
   const store = (card: Card): Card => {
     const parsed = CardSchema.parse(card);
     cards.set(parsed.id, parsed);
@@ -23,17 +42,19 @@ export function fakeBoard(): BoardApi {
       return card === undefined ? undefined : view(card);
     },
     cards: async query =>
-      [...cards.values()].filter(card => query.project === undefined || card.project === query.project).map(view),
+      [...cards.values()].filter(card => query.project === undefined || card.projectId === query.project).map(view),
     create: async (by, request) => {
       counters[request.kind] += 1;
       const id = `${CARD_KIND_PREFIX[request.kind]}${counters[request.kind]}`;
+      const actor = by === 'owner' ? ({ kind: 'owner' } as const) : ({ kind: 'ferret', name: by, ferret: by } as const);
+      const laneId = request.laneId ?? 'todo';
       return ok(
         store({
           format: 1,
           id,
-          machine: 'local',
-          project: request.project ?? 'unfiled',
-          lane: request.lane ?? 'todo',
+          machineId: 'local',
+          projectId: request.projectId ?? 'unfiled',
+          laneId,
           kind: request.kind,
           title: request.title,
           summary: request.summary,
@@ -45,31 +66,44 @@ export function fakeBoard(): BoardApi {
           brief: request.brief,
           howToTest: request.howToTest,
           ...(request.progress === undefined ? {} : { progress: request.progress }),
-          owner: (by === 'owner' ? 'owner' : by) as FerretId,
+          owner: by === 'owner' ? 'owner' : by,
           assignee: request.assignee,
           parent: request.parent,
           dependsOn: [],
           blocked: null,
           dropped: null,
           workflow: request.workflow,
-          links: {},
+          links: { prs: [], branch: null, commits: [], docs: [] },
           files: request.files,
           order: null,
           createdAt: AT,
-          createdBy: by === 'owner' ? { kind: 'owner' } : { kind: 'ferret', name: by, ferret: by },
-          history: [{ seq: 1, type: 'created', at: AT }],
+          createdBy: actor,
+          history: [{ seq: 1, type: 'created', at: AT, actor, laneId }],
         }),
       );
     },
-    act: async (_by, id, request) => {
+    act: async (by, id, request) => {
       const card = cards.get(id);
       if (card === undefined) return err({ code: 'not-found', message: `no card ${id}` });
       if (request.action !== 'move') return err({ code: 'refused', message: `the fake does not do ${request.action}` });
+      const actor = by === 'owner' ? ({ kind: 'owner' } as const) : ({ kind: 'ferret', name: by, ferret: by } as const);
       return ok(
         store({
           ...card,
-          lane: request.to,
-          history: [...card.history, { seq: card.history.length + 1, type: 'moved', at: AT }],
+          laneId: request.to,
+          history: [
+            ...card.history,
+            {
+              seq: card.history.length + 1,
+              type: 'moved',
+              at: AT,
+              actor,
+              from: card.laneId,
+              to: request.to,
+              backward: false,
+              reason: request.reason ?? null,
+            },
+          ],
         }),
       );
     },
@@ -86,10 +120,11 @@ export function fakeBoard(): BoardApi {
 
 export function boardConformance(name: string, make: () => BoardApi): void {
   describe(`BoardApi conformance: ${name}`, () => {
-    const request = { kind: 'feature', title: 'Badge colour', ask: 'make it blue' } as const;
     const create = (api: BoardApi) =>
       api.create('owner', {
-        ...request,
+        kind: 'feature',
+        title: 'Badge colour',
+        ask: { text: 'make it blue', source: 'owner' },
         summary: '',
         premise: '',
         context: '',

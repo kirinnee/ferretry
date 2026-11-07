@@ -1,11 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { pluginClient } from '../../src/lib/client.ts';
+import { pluginClient, type SendOptions } from '../../src/lib/client.ts';
 import { DaemonRefusal } from '../../src/lib/errors.ts';
 import { PluginPausedError } from '../../src/lib/guard.ts';
 import { PERSON_ONLY_REFUSAL } from '../../src/lib/credential.ts';
 import { ToolClient, toolPath } from '../../src/lib/tool-client.ts';
-import { boardEntry, depsOf, inventoryOf, registryOf } from './fakes.ts';
+import type { DaemonRequest } from '../../src/lib/request.ts';
+import { boardEntry, depsOf, inventoryOf, RecordingTransport, registryOf } from './fakes.ts';
 
 const registry = registryOf(boardEntry());
 const healthy = inventoryOf({ id: 'board', contract: 'h-board' });
@@ -184,5 +185,111 @@ describe('the agent-tool client', () => {
   it('should refuse a tool nobody declares', async () => {
     const { deps } = depsOf(registry, healthy);
     await should(new ToolClient(deps).call('board', 'nope', {})).be.rejectedWith(/declares no tool/u);
+  });
+});
+
+describe('the guard keeps up with the daemon (§9.6)', () => {
+  it('should read the inventory again when the daemon restarted, and send nothing the new one blocks', async () => {
+    // Arrange: the second call meets a daemon that came back as another process with Board off.
+    let pid = '100';
+    const { deps, transport, reads } = depsOf(
+      registry,
+      () => (pid === '100' ? healthy : inventoryOf({ id: 'board', on: false, contract: 'h-board' })),
+      { instance: async () => pid },
+    );
+    const client = pluginClient(deps, 'board');
+    await client.call('GET /v1/cards/:id', { params: { id: 'a' } });
+
+    // Act
+    pid = '200';
+    const error = await client.call('GET /v1/cards/:id', { params: { id: 'b' } }).catch((failure: unknown) => failure);
+
+    // Assert
+    should(error).be.instanceOf(PluginPausedError);
+    should(reads.count).be.above(1);
+    should(transport.sent.length).equal(1);
+  });
+
+  it('should drop the held inventory when kernel.plugins-changed is heard, and judge the next call afresh', async () => {
+    // Arrange
+    let board = healthy;
+    const { deps, transport, reads } = depsOf(registry, () => board);
+    const client = pluginClient(deps, 'board');
+    await client.call('GET /v1/cards/:id', { params: { id: 'a' } });
+
+    // Act
+    board = inventoryOf({ id: 'board', contract: 'another-build' });
+    deps.inventory.heard('board.changed');
+    const before = reads.count;
+    deps.inventory.heard('kernel.plugins-changed');
+    const error = await client.call('GET /v1/cards/:id', { params: { id: 'b' } }).catch((failure: unknown) => failure);
+
+    // Assert
+    should(before).equal(1);
+    should(error).be.instanceOf(PluginPausedError);
+    should(transport.sent.length).equal(1);
+  });
+
+  it('should hand the transport a recheck that re-reads the inventory and refuses the resend after a restart', async () => {
+    // Arrange: a transport that, like one riding out a restart, asks the recheck before sending again.
+    let board = healthy;
+    const rechecked: string[] = [];
+    const transport = new (class extends RecordingTransport {
+      override async send(request: DaemonRequest, options?: SendOptions) {
+        board = inventoryOf({ id: 'board', on: false, contract: 'h-board' });
+        try {
+          await options?.recheck?.();
+        } catch (error) {
+          rechecked.push((error as Error).name);
+          throw error;
+        }
+        return await super.send(request);
+      }
+    })();
+    const { deps, reads } = depsOf(registry, () => board, { transport });
+
+    // Act
+    const error = await pluginClient(deps, 'board')
+      .call('GET /v1/cards/:id', { params: { id: 'a' } })
+      .catch((failure: unknown) => failure);
+
+    // Assert
+    should(error).be.instanceOf(PluginPausedError);
+    should(rechecked).deepEqual(['PluginPausedError']);
+    should(reads.count).equal(3);
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('should block every plugin, unsent, when a core package differs, whatever the plugin’s own hash', async () => {
+    // Arrange: Board matches; Gate is another build.
+    const { deps, transport } = depsOf(
+      registry,
+      inventoryOf({ id: 'gate', contract: 'other-gate' }, { id: 'board', contract: 'h-board' }),
+    );
+
+    // Act
+    const error = await pluginClient(deps, 'board')
+      .call('GET /v1/cards/:id', { params: { id: 'a' } })
+      .catch((failure: unknown) => failure);
+
+    // Assert
+    should(error).be.instanceOf(PluginPausedError);
+    should((error as PluginPausedError).reason).equal('core');
+    should((error as PluginPausedError).plugin).equal('gate');
+    should((error as Error).message).containEql('Gate, which everything needs');
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('should send a Kernel route only once the Kernel’s own hash matches', async () => {
+    const blocked = depsOf(
+      registry,
+      inventoryOf({ id: 'kernel', contract: 'old-kernel' }, { id: 'board', contract: 'h-board' }),
+    );
+    await should(pluginClient(blocked.deps, 'kernel').call('GET /v1/glossary')).be.rejectedWith(PluginPausedError);
+    should(blocked.transport.sent).deepEqual([]);
+
+    const allowed = depsOf(registry, healthy);
+    await pluginClient(allowed.deps, 'kernel').call('GET /v1/glossary');
+    should(allowed.transport.sent).deepEqual([{ method: 'GET', path: '/v1/glossary' }]);
   });
 });

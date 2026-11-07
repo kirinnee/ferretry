@@ -169,6 +169,7 @@ describe('boot (§7.6)', () => {
     await host.stop();
     expect(host.trace).toEqual([
       'home',
+      'lock',
       'identity',
       'config',
       'check',
@@ -192,6 +193,7 @@ describe('boot (§7.6)', () => {
       'stop:board',
       'stop:gate',
       'stop:kernel',
+      'stop:lock',
     ]);
   });
 

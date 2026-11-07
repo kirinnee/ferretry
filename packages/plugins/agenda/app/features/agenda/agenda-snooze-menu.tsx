@@ -1,0 +1,203 @@
+/**
+ * THE SNOOZE CONTROL — a small clock button that opens a menu: "1 hour", "4 hours", "Tomorrow 9:00" and
+ * "Custom…" (a date-and-time field with a Snooze button). It sits beside the other header controls, never in the
+ * answer row. Esc and a click outside close it; ↑ ↓ walk the choices. A time that has passed is refused where the
+ * owner typed it. The choices are `snoozePicks` in `lib/agenda-snooze.ts` — the same list the swipe-down compass
+ * draws — and this only draws them.
+ */
+
+import { shellClock } from '../../shell.ts';
+import { Clock } from 'lucide-react';
+import { type FormEvent, type KeyboardEvent, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { customSnooze, localInputValue, snoozePicks } from '../../lib/agenda-snooze.ts';
+import { placeWithin } from './snooze-placement.ts';
+
+export interface AgendaSnoozeMenuProps {
+  /** Snooze until this instant. */
+  readonly onSnooze: (until: string) => void;
+  readonly now?: number;
+  readonly disabled?: boolean;
+  /** What the button is called to a screen reader (default: an agenda item). */
+  readonly label?: string;
+  /** The button's own class: the item view's pager and the card header each size it their way. */
+  readonly triggerClass: string;
+}
+
+const HOUR_MS = 3_600_000;
+const VIEWPORT_MARGIN_PX = 8;
+
+export interface CustomFormProps {
+  readonly now: number;
+  readonly onSnooze: (until: string) => void;
+}
+
+export function CustomSnoozeForm({ now, onSnooze }: CustomFormProps) {
+  const [value, setValue] = useState(() => localInputValue(now + HOUR_MS));
+  const [problem, setProblem] = useState<string | null>(null);
+  const fieldId = useId();
+  const submit = (event: FormEvent): void => {
+    event.preventDefault();
+    const parsed = customSnooze(value, shellClock.nowMs());
+    if (parsed.ok) onSnooze(parsed.until);
+    else setProblem(parsed.message);
+  };
+  return (
+    <form className="fy-snooze__custom" data-snooze-custom="" noValidate onSubmit={submit}>
+      <label className="fy-snooze__label" htmlFor={fieldId}>
+        Snooze until
+      </label>
+      <input
+        aria-describedby={problem === null ? undefined : `${fieldId}-problem`}
+        aria-invalid={problem === null ? undefined : true}
+        className="fy-snooze__field"
+        id={fieldId}
+        min={localInputValue(now)}
+        onChange={event => {
+          setValue(event.target.value);
+          setProblem(null);
+        }}
+        type="datetime-local"
+        value={value}
+      />
+      {problem === null ? null : (
+        <p className="fy-snooze__problem" id={`${fieldId}-problem`} role="alert">
+          {problem}
+        </p>
+      )}
+      <button className="fy-snooze__go" type="submit">
+        Snooze
+      </button>
+    </form>
+  );
+}
+
+const itemsOf = (root: HTMLElement | null): HTMLElement[] =>
+  root === null ? [] : [...root.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+
+export function AgendaSnoozeMenu({
+  onSnooze,
+  now,
+  disabled = false,
+  label = 'Snooze this agenda item',
+  triggerClass,
+}: AgendaSnoozeMenuProps) {
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState(false);
+  const root = useRef<HTMLDivElement | null>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const list = useRef<HTMLDivElement | null>(null);
+  const popover = useRef<HTMLDivElement | null>(null);
+  const menuId = useId();
+
+  // Measured where the stylesheet puts the menu, then slid (or turned over) until it is all on screen; the custom
+  // form makes the menu taller, so that is measured again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `custom` changes the menu's height
+  useLayoutEffect(() => {
+    const menu = popover.current;
+    const anchor = trigger.current;
+    if (!open || menu === null || anchor === null) return;
+    menu.style.transform = '';
+    menu.removeAttribute('data-flip');
+    const placed = placeWithin(
+      menu.getBoundingClientRect(),
+      anchor.getBoundingClientRect(),
+      { width: document.documentElement.clientWidth, height: window.innerHeight },
+      VIEWPORT_MARGIN_PX,
+    );
+    if (placed.flip) menu.setAttribute('data-flip', '');
+    if (placed.dx !== 0) menu.style.transform = `translateX(${placed.dx}px)`;
+  }, [open, custom]);
+
+  const close = (refocus: boolean): void => {
+    setOpen(false);
+    setCustom(false);
+    if (refocus) trigger.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    itemsOf(list.current)[0]?.focus();
+    const onPointer = (event: PointerEvent): void => {
+      if (event.target instanceof Node && root.current?.contains(event.target) !== true) {
+        setOpen(false);
+        setCustom(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointer);
+    return () => document.removeEventListener('pointerdown', onPointer);
+  }, [open]);
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (!open) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      close(true);
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const items = itemsOf(list.current);
+    const at = items.indexOf(document.activeElement);
+    if (at < 0) return;
+    event.preventDefault();
+    items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
+  };
+
+  const at = now ?? shellClock.nowMs();
+  const snooze = (until: string): void => {
+    close(false);
+    onSnooze(until);
+  };
+
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: the keys are the menu's own; the controls inside are real buttons
+    <div className="fy-snooze" onKeyDown={onKeyDown} ref={root}>
+      <button
+        aria-controls={open ? menuId : undefined}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={label}
+        className={triggerClass}
+        data-agenda-snooze=""
+        disabled={disabled}
+        onClick={() => (open ? close(false) : setOpen(true))}
+        ref={trigger}
+        title="Snooze"
+        type="button"
+      >
+        <Clock aria-hidden="true" size={18} />
+      </button>
+      {open ? (
+        <div className="fy-snooze__popover" id={menuId} ref={popover}>
+          <div aria-label="Snooze for" className="fy-snooze__list" ref={list} role="menu">
+            {snoozePicks(at).map(pick =>
+              pick.until === null ? (
+                <button
+                  aria-expanded={custom}
+                  className="fy-snooze__item"
+                  key={pick.id}
+                  onClick={() => setCustom(shown => !shown)}
+                  role="menuitem"
+                  type="button"
+                >
+                  {pick.label}
+                </button>
+              ) : (
+                <button
+                  className="fy-snooze__item"
+                  key={pick.id}
+                  onClick={() => snooze(pick.until as string)}
+                  role="menuitem"
+                  type="button"
+                >
+                  {pick.label}
+                </button>
+              ),
+            )}
+          </div>
+          {custom ? <CustomSnoozeForm now={at} onSnooze={snooze} /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
