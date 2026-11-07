@@ -9,15 +9,15 @@ describe('terminals manifest', () => {
   test("declares today's terminal, process, console, attach and surface routes and the viewer stream", () => {
     expect(routes).toHaveLength(16);
     expect(manifest.actions.sockets.map(socket => socket.key)).toEqual([
-      'GET /v1/sessions/:sessionId/terminals/:terminalId/stream',
+      'GET /v1/ferrets/:ferretId/terminals/:terminalId/stream',
     ]);
   });
   test('attaching to a pane must arrive over the privileged local listener', () => {
-    expect(routes.find(route => route.key === 'GET /v1/sessions/:sessionId/attach')?.privilegedOnly).toBe(true);
+    expect(routes.find(route => route.key === 'GET /v1/ferrets/:ferretId/attach')?.privilegedOnly).toBe(true);
   });
   test('anything that may show pane text is built inside one Redaction.read (guard: secrets)', () => {
     expect(manifest.actions.sockets[0]?.guard).toBe('secrets');
-    expect(routes.find(route => route.key === 'GET /v1/sessions/:sessionId/processes/:processId/output')?.guard).toBe(
+    expect(routes.find(route => route.key === 'GET /v1/ferrets/:ferretId/processes/:processId/output')?.guard).toBe(
       'secrets',
     );
   });

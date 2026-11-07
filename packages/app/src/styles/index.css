@@ -3,6 +3,12 @@
 @import './highlight.css';
 @import './shell.css';
 
+/* Tailwind's layers, before the base elements below, as in today's PWA. The component classes are
+   `ui/design-system.css`, loaded after this file. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* ============================================================================
    The app shell's base elements — token-driven only (copied from today's PWA `styles/index.css`, base section).
    THEME TOKENS LIVE IN `themes.css`; the frame's own rules are in `shell.css`. Plugin stylesheets come with their

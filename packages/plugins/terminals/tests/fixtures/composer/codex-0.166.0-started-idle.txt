@@ -1,0 +1,24 @@
+
+  >_ OpenAI Codex (v0.166.0)
+     /tmp/claude-1000/b170/demo
+  permissions: YOLO mode
+
+  Tip: Use /status to see the current model, approvals, and token usage.
+
+
+› Ask Codex to do anything
+
+  GPT-6.1-Sol high Fast · Context 0% used · weekly …  ⚠ 3 warnings · f2 to view
+
+
+
+
+
+
+
+
+
+
+
+
+
