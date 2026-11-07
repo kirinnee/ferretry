@@ -46,7 +46,6 @@
       "restart is stop then resume with today’s refusals checked first: needs a Ferrets additive automatic resume that replaces a live pane (today’s replaceLiveTerminal)",
       "nudges must carry actor warden (D2 #19); needs Conversation’s additive warden caller",
       "the Jev guard answers not_set (NO_VAULT) and nothing leaves the machine: needs the kernel’s secrets.resolve (OwnSecret) (D2 #19)",
-      "PATCH /v1/warden/config answers 503 plugin_unavailable: needs the kernel config write port (D2 #16)",
       "input_stuck and inbox_stuck never occur: Conversation’s send-path acts (resubmit, mark stalled, tracker and delivery looks) are not on 5.0",
       "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
       "a sub-ferret overdue on a report is flagged but never nudged, nor its parent told: overdue-report nudges need Ferrets’ waiting/done on FerretSummary and its signal route (today skipped a ferret that declared a wait or signalled done)"
