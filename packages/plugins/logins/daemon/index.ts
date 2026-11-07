@@ -9,13 +9,7 @@
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type Instant, milliseconds } from '@ferretry/std';
 import manifest from '../manifest.ts';
-import {
-  type LoginId,
-  type LoginsApi,
-  LoginChanged,
-  LoginSignedIn,
-  ModelsChanged,
-} from '../contract/index.ts';
+import { type LoginId, type LoginsApi, LoginChanged, LoginSignedIn, ModelsChanged } from '../contract/index.ts';
 import { HostedModelCatalog, StateModelCatalogCache } from './adapters/models/index.ts';
 import { AuthorizedProviderProbe, BoundedTransport } from './adapters/provider-probe/index.ts';
 import { deliverCodexCallback } from './adapters/harness-login/callback-delivery.ts';

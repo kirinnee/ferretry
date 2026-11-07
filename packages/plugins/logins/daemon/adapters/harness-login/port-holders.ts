@@ -86,7 +86,8 @@ export function systemPortHolders(
     port: number,
     entry: { readonly pid: number | undefined; readonly name: string; readonly uid?: number },
   ): Promise<CallbackPortHolder> => {
-    const listed = entry.pid === undefined ? undefined : await run(spawn, [ps, '-o', 'uid=,args=', '-p', String(entry.pid)]);
+    const listed =
+      entry.pid === undefined ? undefined : await run(spawn, [ps, '-o', 'uid=,args=', '-p', String(entry.pid)]);
     const line = listed === undefined ? undefined : parsePsLine(listed.stdout);
     return {
       port,

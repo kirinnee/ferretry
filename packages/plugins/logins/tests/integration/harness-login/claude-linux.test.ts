@@ -40,7 +40,6 @@ const PHONE: CallerGovernance = { governed: true, decide: () => ({ allowed: true
 
 const HOST_LOGIN = 'claude-you' as LoginId;
 
-
 interface Machine {
   readonly service: HarnessLoginService;
   readonly home: string;

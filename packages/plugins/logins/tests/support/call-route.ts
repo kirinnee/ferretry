@@ -1,9 +1,4 @@
-import {
-  type ApiResponse,
-  headersFrom,
-  queryFrom,
-  type RouteHandler,
-} from '@ferretry/kernel/contract';
+import { type ApiResponse, headersFrom, queryFrom, type RouteHandler } from '@ferretry/kernel/contract';
 import { localArrival } from '@ferretry/kernel/host';
 
 /**

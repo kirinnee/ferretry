@@ -1,6 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { CREDENTIAL_FINGERPRINT_LENGTH, credentialFingerprint } from '../../../daemon/adapters/credentials/credential-classifier.ts';
+import {
+  CREDENTIAL_FINGERPRINT_LENGTH,
+  credentialFingerprint,
+} from '../../../daemon/adapters/credentials/credential-classifier.ts';
 
 describe('credentialFingerprint', () => {
   it('is stable for the same bytes and different for different bytes', async () => {

@@ -73,7 +73,7 @@
  * else, exactly as Claude's code goes to stdin and nowhere else.
  */
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
-import { type HarnessKind } from '../shared/harness.ts';
+import type { HarnessKind } from '../shared/harness.ts';
 import { sanitizeHarnessEnv } from '../shared/harness-env.ts';
 import type {
   HarnessLoginFlow,
@@ -83,7 +83,11 @@ import type {
   LoginId,
 } from '../../../contract/index.ts';
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
-import { type CredentialSignInTarget, FleetCredentialRefusal, type SignInCheck } from '../credentials/credentials-service.ts';
+import {
+  type CredentialSignInTarget,
+  FleetCredentialRefusal,
+  type SignInCheck,
+} from '../credentials/credentials-service.ts';
 import {
   CLAUDE_LOGIN_ARGV,
   CLAUDE_LOGIN_START,

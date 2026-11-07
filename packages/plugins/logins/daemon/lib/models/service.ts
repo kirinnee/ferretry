@@ -7,9 +7,9 @@
  * set may travel to any caller with `fleet.use`.
  */
 import type { LocalModels } from '../../../contract/index.ts';
-import { type ModelCatalog } from '../catalog/schema.ts';
+import type { ModelCatalog } from '../catalog/schema.ts';
 import { type ModelCatalogSources, modelCatalogs } from '../catalog/catalog.ts';
-import { type ProviderPreset } from '../presets/schema.ts';
+import type { ProviderPreset } from '../presets/schema.ts';
 // Parsed when this build is made, never at boot: `../built-ins.ts` says why.
 import { checkedBuiltInModelCatalogs } from '../built-ins.ts' with { type: 'macro' };
 

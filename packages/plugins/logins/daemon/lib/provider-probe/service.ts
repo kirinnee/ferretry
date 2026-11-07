@@ -73,10 +73,7 @@ export interface ProviderProbeSubject {
 export class ProviderProbeService {
   constructor(private readonly parts: ProviderProbeServiceParts) {}
 
-  async test(
-    subject: ProviderProbeSubject,
-    consent: { readonly allowInference: boolean },
-  ): Promise<LoginTestResult> {
+  async test(subject: ProviderProbeSubject, consent: { readonly allowInference: boolean }): Promise<LoginTestResult> {
     const started = this.parts.clock.monotonicMs();
     const result = (
       code: LoginTestCode,

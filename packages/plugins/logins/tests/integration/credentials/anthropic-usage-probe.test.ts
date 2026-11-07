@@ -996,4 +996,3 @@ describe('AnthropicUsageProbe reading an account-model credential', () => {
     should(actual.longWindow?.usedPercent).equal(7);
   });
 });
-

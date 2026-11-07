@@ -35,7 +35,11 @@ describe('modelRoutes', () => {
     ];
 
     // Assert
-    should(Object.keys(routes)).deepEqual(['GET /v1/models', 'POST /v1/models/refresh', 'POST /v1/models/local/refresh']);
+    should(Object.keys(routes)).deepEqual([
+      'GET /v1/models',
+      'POST /v1/models/refresh',
+      'POST /v1/models/local/refresh',
+    ]);
     should(answers.map(answer => answer.status)).deepEqual([200, 200, 200]);
     should(json(answers[1] as ApiResponse)).deepEqual({ outcome: 'unchanged', version: 3 });
     should(json(answers[2] as ApiResponse)).deepEqual(LOCAL);

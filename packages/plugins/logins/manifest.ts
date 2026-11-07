@@ -207,9 +207,10 @@ export default definePlugin({
       'www.minimax.io',
       'api.moonshot.ai',
       'api.z.ai',
-      'localhost:11434',
+      'localhost',
+      '127.0.0.1',
     ],
-    spawn: ['claude', 'codex', 'ollama'],
+    spawn: ['claude', 'codex', 'ollama', 'lsof', 'ss', 'ps'],
     secrets: [],
   },
 });

@@ -11,12 +11,7 @@ import { type PresetTest, type ProviderPreset, presetHarnesses } from '../preset
 import { presetCatalog } from '../presets/catalog.ts';
 // Parsed when this build is made, never at boot: `../built-ins.ts` says why.
 import { checkedBuiltInPresets } from '../built-ins.ts' with { type: 'macro' };
-import type {
-  LoginAct,
-  LoginTestAct,
-  ProviderPresetCatalog,
-  ProviderPresetView,
-} from '../../../contract/index.ts';
+import type { LoginAct, LoginTestAct, ProviderPresetCatalog, ProviderPresetView } from '../../../contract/index.ts';
 
 /** This machine's own preset files that check, by id: the configuration in effect. */
 export interface MachinePresetSource {

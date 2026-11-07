@@ -394,9 +394,7 @@ describe('starting a harness login', () => {
     const subject = fixture();
 
     // Act
-    const actual = await refusalOf(async () =>
-      subject.service.start({ loginId: ENVIRONMENT_CREDENTIAL }, BROWSER),
-    );
+    const actual = await refusalOf(async () => subject.service.start({ loginId: ENVIRONMENT_CREDENTIAL }, BROWSER));
 
     // Assert
     should(actual.code).equal('fleet_login_unavailable');

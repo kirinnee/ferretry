@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { builtInModelCatalogs } from '../../../daemon/lib/catalog/catalog.ts';
 import { builtInPresets } from '../../../daemon/lib/presets/catalog.ts';
-import { type ModelCatalog } from '../../../daemon/lib/catalog/schema.ts';
+import type { ModelCatalog } from '../../../daemon/lib/catalog/schema.ts';
 import should from 'should';
 import type { Instant } from '@ferretry/std';
 import { ModelCatalogService } from '../../../daemon/lib/models/service.ts';

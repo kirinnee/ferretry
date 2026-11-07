@@ -6,7 +6,10 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { CredentialStoreResolution, StoredCredentialResolution } from '../../../daemon/lib/credentials/credentials.ts';
+import type {
+  CredentialStoreResolution,
+  StoredCredentialResolution,
+} from '../../../daemon/lib/credentials/credentials.ts';
 import {
   activeUsageReadDueAt,
   activeUsageReading,

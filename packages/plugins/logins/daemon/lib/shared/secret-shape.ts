@@ -133,8 +133,7 @@ export function findRawSecrets(document: unknown): readonly SecretFinding[] {
 }
 
 // ── looksSecret: one environment entry that looks like a secret (today's account import rule) ──
-import { MIN_SECRET_VALUE_LENGTH, secretReferencesIn } from "@ferretry/core-vault/contract";
-
+import { MIN_SECRET_VALUE_LENGTH, secretReferencesIn } from '@ferretry/core-vault/contract';
 
 /** Name words that say a variable holds a credential. Matched per `_`-separated word. */
 const SECRET_NAME_WORDS: ReadonlySet<string> = new Set([
@@ -178,8 +177,6 @@ const TOKEN_FORMATS: readonly (readonly [prefix: string, body: string])[] = [
 
 /** Value prefixes of well-known token formats, and of two more whose body is not a plain run (a Google OAuth token, a JWT). */
 const SECRET_VALUE_PREFIX = new RegExp(`^(?:${TOKEN_FORMATS.map(([prefix]) => prefix).join('|')}|ya29\\.|eyJ)`, 'u');
-
-
 
 /** A value that only points somewhere else: `$NAME`, `${NAME}`, `${secret:NAME}`. */
 const INDIRECT_VALUE = /^\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]+\})$/u;

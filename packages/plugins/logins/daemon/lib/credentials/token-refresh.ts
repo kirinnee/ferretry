@@ -10,7 +10,6 @@
  */
 import type { HarnessKind } from '../shared/harness.ts';
 
-
 /**
  * The home whose credential a renewal rotates.
  *
@@ -58,7 +57,6 @@ export type FleetTokenRefreshAttempt =
 export interface FleetTokenRefreshPort {
   refresh(target: FleetTokenRefreshTarget, settled: FleetTokenRefreshSettled): Promise<FleetTokenRefreshAttempt>;
 }
-
 
 /**
  * One piece of work per key at a time, and every caller asking during it gets ITS answer.

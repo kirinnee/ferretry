@@ -62,7 +62,11 @@ export function loginRoutes(subsystem: LoginsSubsystem) {
       await answer(
         async () => {
           const body = await parseBody(call.request, LoginTestRequestSchema);
-          return await subsystem.test(loginId(call.params), { allowInference: body.allowInference === true }, call.governance);
+          return await subsystem.test(
+            loginId(call.params),
+            { allowInference: body.allowInference === true },
+            call.governance,
+          );
         },
         value => LoginTestResultSchema.parse(value),
       )) satisfies RouteHandler,

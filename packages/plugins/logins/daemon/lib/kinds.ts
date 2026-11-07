@@ -16,7 +16,7 @@ import type {
 } from '@ferretry/core-ferrets/contract';
 import type { Clock } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
-import { LOGIN_KINDS, type LoginFile, type LoginView } from '../../contract/index.ts';
+import type { LOGIN_KINDS, LoginFile, LoginView } from '../../contract/index.ts';
 import type { HarnessLoginFlow } from '../../contract/index.ts';
 import { harnessKey } from './shared/harness.ts';
 import { looksLikeRawSecret } from './shared/secret-shape.ts';

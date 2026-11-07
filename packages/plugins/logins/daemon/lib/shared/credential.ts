@@ -9,12 +9,14 @@
  * Pure.
  */
 import type { LoginFile } from '../../../contract/index.ts';
+import { cloudCredentialVariable, parseCloudCredential, templatePlaceholders } from './environment.ts';
 import {
-  cloudCredentialVariable,
-  parseCloudCredential,
-  templatePlaceholders,
-} from './environment.ts';
-import { credentialCodexProvider, credentialHalves, credentialHarnesses, credentialVariables, hasHalves } from './halves.ts';
+  credentialCodexProvider,
+  credentialHalves,
+  credentialHarnesses,
+  credentialVariables,
+  hasHalves,
+} from './halves.ts';
 import { type HarnessKind, harnessKind } from './harness.ts';
 
 /** Where a login is kept (C3): the host's own sign-in, Ferretry's own copy, or environment variables. */
@@ -73,7 +75,8 @@ export function credentialIssues(credential: Credential): readonly string[] {
       );
     }
     for (const name of templatePlaceholders(provider.baseUrl ?? '')) {
-      if (env[name] === undefined) issues.push(`the Codex provider's base URL names {${name}}, so "env" must set ${name}`);
+      if (env[name] === undefined)
+        issues.push(`the Codex provider's base URL names {${name}}, so "env" must set ${name}`);
     }
   }
   const reference =

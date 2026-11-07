@@ -49,7 +49,10 @@ function fakeOllama(answer: () => Response) {
 
 const read = (address: string | undefined, enabled = true) => {
   const service: LocalModelsService = new LocalModelsService({
-    probe: new AuthorizedProviderProbe(new ScriptedAuthorizer({ kind: 'refused' }), new BoundedTransport(realFetch, realClock)),
+    probe: new AuthorizedProviderProbe(
+      new ScriptedAuthorizer({ kind: 'refused' }),
+      new BoundedTransport(realFetch, realClock),
+    ),
     address,
     enabled,
     suggested: async () => 'gpt-oss:20b',

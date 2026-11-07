@@ -195,7 +195,6 @@ export function classifyCredential(kind: HarnessKind, material: CredentialMateri
   return classifyShape(credentialShape(kind, material), now);
 }
 
-
 /**
  * A failure's message, or a stated fallback.
  *

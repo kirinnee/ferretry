@@ -46,7 +46,8 @@ describe('BudgetSchema', () => {
 
   it('should be accepted on a sign-in login as well as an environment one', () => {
     should(
-      LoginFileSchema.safeParse({ harness: 'claude-code', store: 'ferretry', budget: { daily: { trigger: 40 } } }).success,
+      LoginFileSchema.safeParse({ harness: 'claude-code', store: 'ferretry', budget: { daily: { trigger: 40 } } })
+        .success,
     ).be.true();
     should(
       LoginFileSchema.safeParse({ harness: 'claude-code', store: 'ferretry', budget: { daily: {} } }).success,

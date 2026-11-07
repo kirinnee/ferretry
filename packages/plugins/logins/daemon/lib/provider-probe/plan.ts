@@ -19,10 +19,10 @@
  *
  * Pure.
  */
-import { type Credential } from '../shared/credential.ts';
+import type { Credential } from '../shared/credential.ts';
 import { credentialVariables } from '../shared/halves.ts';
 import { isCredentialSafeUrl, templatePlaceholders } from '../shared/environment.ts';
-import { type PresetTest, type ProviderPreset } from '../presets/schema.ts';
+import type { PresetTest, ProviderPreset } from '../presets/schema.ts';
 import { isLoopbackHost } from '../shared/address.ts';
 import { SECRET_REFERENCE_SOURCE, type SecretName } from '@ferretry/core-vault/contract';
 import type { CredentialPlacement, OutboundHttpRequest } from '@ferretry/core-vault/contract';

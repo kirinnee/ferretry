@@ -9,7 +9,7 @@
  * Pure.
  */
 import { catalogDefault, MODEL_ID_PATTERN, type ModelCatalog } from '../catalog/schema.ts';
-import { type LocalModel, type LocalModels } from '../../../contract/index.ts';
+import type { LocalModel, LocalModels } from '../../../contract/index.ts';
 import { isLoopbackHost } from '../shared/address.ts';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
 import { z } from 'zod';

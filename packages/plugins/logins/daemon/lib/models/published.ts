@@ -19,8 +19,13 @@
  * runtime list, an apply) and the last check is older than the interval (six hours), and when the owner
  * asks (`fy models refresh`). A check is a plain GET with no credential and no inference.
  */
-import { type ModelCatalog } from '../catalog/schema.ts';
-import { PUBLISHED_MODEL_CATALOG_FILE, PUBLISHED_MODEL_CATALOG_VERSION_FILE, PublishedModelCatalogVersionSchema, readPublishedModelCatalog } from '../catalog/published.ts';
+import type { ModelCatalog } from '../catalog/schema.ts';
+import {
+  PUBLISHED_MODEL_CATALOG_FILE,
+  PUBLISHED_MODEL_CATALOG_VERSION_FILE,
+  PublishedModelCatalogVersionSchema,
+  readPublishedModelCatalog,
+} from '../catalog/published.ts';
 import type { ModelCatalogRefreshResult } from '../../../contract/index.ts';
 
 /** The signed release list and its signature, at the hosted app's root (docs/pwa-release-signing.md). */

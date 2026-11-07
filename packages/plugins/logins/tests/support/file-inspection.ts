@@ -21,7 +21,9 @@ export async function fileStoreInspection(resolution: StoredCredentialResolution
     const missing = (error as { code?: string }).code === 'ENOENT';
     return {
       reading: missing ? { state: 'missing' } : { state: 'unreadable', reason: 'it could not be read' },
-      checked: [{ location, found: missing ? 'nothing' : 'unreadable', ...(missing ? {} : { why: 'it could not be read' }) }],
+      checked: [
+        { location, found: missing ? 'nothing' : 'unreadable', ...(missing ? {} : { why: 'it could not be read' }) },
+      ],
     };
   }
 }

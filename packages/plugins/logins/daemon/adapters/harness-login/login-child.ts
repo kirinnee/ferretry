@@ -52,7 +52,6 @@ async function pump(stream: ReadableStream<Uint8Array> | undefined, onLine: (lin
   if (pending !== '') onLine(pending);
 }
 
-
 /**
  * Launch one harness login child through the kernel's spawn port.
  *

@@ -55,8 +55,7 @@ describe('models wire contract', () => {
     assertRoundTrips(cases);
   });
 
-  it('should cover every exported schema', () => {
-  });
+  it('should cover every exported schema', () => {});
 
   it('should refuse a state it does not know, a stray field and an empty command', () => {
     assertRejects([

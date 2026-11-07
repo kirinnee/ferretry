@@ -18,7 +18,12 @@
  *
  * Pure.
  */
-import { CloudCredentialKindSchema, type PresetGroup, PresetGroupSchema, ProviderQuotaSourceSchema } from '../../../contract/index.ts';
+import {
+  CloudCredentialKindSchema,
+  type PresetGroup,
+  PresetGroupSchema,
+  ProviderQuotaSourceSchema,
+} from '../../../contract/index.ts';
 import { SecretNameSchema } from '@ferretry/core-vault/contract';
 import { z } from 'zod';
 import { CodexProviderSchema } from '../shared/environment.ts';

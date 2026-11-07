@@ -31,15 +31,38 @@
 
 import { dirname, join } from 'node:path';
 import { activeDisable, type Disabled } from '../shared/disabled.ts';
-import { CLAUDE_SECURE_STORAGE_VARIABLE, type ClaudeStoreResolution, CODEX_CREDENTIAL_STORE_FILE, CODEX_CREDENTIAL_STORE_KEY, type CodexStoreResolution, type CredentialStorePaths, type CredentialStoreResolution, HOST_CLAUDE_SECURE_STORAGE, resolveCredentialStore, type StoredCredentialResolution, type UnavailableStoreResolution } from './credentials.ts';
-import { CREDENTIAL_STATUS_LABELS, type CredentialStatusReason, type CredentialStatusView, type CredentialSubject, type CredentialUsage, type CredentialViewOptions } from './credential-status.ts';
-import { type Credential } from '../shared/credential.ts';
-import { type CredentialStoreInspection, storeInspectionWords, usableCredentialReading } from '../shared/store-inspection.ts';
+import {
+  CLAUDE_SECURE_STORAGE_VARIABLE,
+  type ClaudeStoreResolution,
+  CODEX_CREDENTIAL_STORE_FILE,
+  CODEX_CREDENTIAL_STORE_KEY,
+  type CodexStoreResolution,
+  type CredentialStorePaths,
+  type CredentialStoreResolution,
+  HOST_CLAUDE_SECURE_STORAGE,
+  resolveCredentialStore,
+  type StoredCredentialResolution,
+  type UnavailableStoreResolution,
+} from './credentials.ts';
+import {
+  CREDENTIAL_STATUS_LABELS,
+  type CredentialStatusReason,
+  type CredentialStatusView,
+  type CredentialSubject,
+  type CredentialUsage,
+  type CredentialViewOptions,
+} from './credential-status.ts';
+import type { Credential } from '../shared/credential.ts';
+import {
+  type CredentialStoreInspection,
+  storeInspectionWords,
+  usableCredentialReading,
+} from '../shared/store-inspection.ts';
 import { credentialHarnesses } from '../shared/halves.ts';
-import { type FleetUsageWindow } from './usage.ts';
+import type { FleetUsageWindow } from './usage.ts';
 import { type HarnessKind, harnessKey } from '../shared/harness.ts';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
-import { type ProviderPreset } from '../presets/schema.ts';
+import type { ProviderPreset } from '../presets/schema.ts';
 import {
   type LoginAct,
   type LoginFile,
@@ -419,11 +442,7 @@ function whoOf(entry: CredentialEntry, email: string | undefined): string {
 }
 
 /** The sign-out confirm card's question, its consequences included (C7, E25). */
-export function signOutSentence(
-  entry: CredentialEntry,
-  email: string | undefined,
-  machine: string,
-): LoginSignOut {
+export function signOutSentence(entry: CredentialEntry, email: string | undefined, machine: string): LoginSignOut {
   const host = entry.credential.store === 'host';
   const runtimes = entry.usedBy.length;
   const terminal = host ? ` This also signs out ${entry.credential.harness} in your terminal on ${machine}.` : '';
@@ -529,10 +548,7 @@ export interface CredentialEnvironmentDeps {
   catalog(): Promise<ProviderPresetCatalog>;
   presets(): Promise<readonly ProviderPreset[]>;
   secretNames(): Promise<ReadonlySet<string> | undefined>;
-  test(
-    subject: ProviderProbeSubject,
-    consent: { readonly allowInference: boolean },
-  ): Promise<LoginTestResult>;
+  test(subject: ProviderProbeSubject, consent: { readonly allowInference: boolean }): Promise<LoginTestResult>;
 }
 
 export type LoginSignOutOutcome =

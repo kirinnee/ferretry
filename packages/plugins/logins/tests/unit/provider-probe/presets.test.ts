@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { builtInModelCatalogs } from '../../../daemon/lib/catalog/catalog.ts';
 import { builtInPresets } from '../../../daemon/lib/presets/catalog.ts';
-import { type ProviderPreset } from '../../../daemon/lib/presets/schema.ts';
+import type { ProviderPreset } from '../../../daemon/lib/presets/schema.ts';
 import { ProviderPresetCatalogSchema } from '../../../contract/index.ts';
 import should from 'should';
 import { ProviderPresetService, presetTestAct, presetView } from '../../../daemon/lib/provider-probe/presets.ts';
