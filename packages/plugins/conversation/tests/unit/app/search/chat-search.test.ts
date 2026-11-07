@@ -10,7 +10,7 @@ import {
   rowForOffset,
   stepMatch,
   withResults,
-} from '../../../../app/search/chat-search.ts';
+} from '../../../../app/search/chat-search-model.ts';
 
 const match = (offset: number) => ({ offset, role: 'user', kind: 'message', snippet: `at ${String(offset)}` });
 const answer = (offsets: readonly number[], truncated = false): LogSearch => ({

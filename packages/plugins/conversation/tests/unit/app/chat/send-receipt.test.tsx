@@ -10,7 +10,7 @@ import {
   RECEIPT_LEGEND,
   type SendReceiptKind,
   sendReceipt,
-} from '../../../../app/chat/send-receipt.ts';
+} from '../../../../app/chat/send-receipt-model.ts';
 import { type TranscriptEntry, transcriptItems } from '../../../../app/chat/transcript-entries.ts';
 import { render, runAsync } from '@ferretry/app/testing';
 

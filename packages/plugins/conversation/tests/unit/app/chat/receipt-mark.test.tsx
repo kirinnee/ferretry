@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ReceiptMark } from '@ferretry/app';
 import { MessageMarksLegend } from '../../../../app/chat/message-marks-legend.tsx';
-import type { SendReceiptKind } from '../../../../app/chat/send-receipt.ts';
+import type { SendReceiptKind } from '../../../../app/chat/send-receipt-model.ts';
 import { render } from '@ferretry/app/testing';
 
 const KINDS: readonly SendReceiptKind[] = [

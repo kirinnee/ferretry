@@ -1,7 +1,7 @@
 import { describe, test } from 'bun:test';
 import should from 'should';
 import { FY_RENDER_LIMITS } from '../../../../app/render/fy-render-bounds.ts';
-import { type ChartSpec, readChart } from '../../../../app/render/fy-render-chart.ts';
+import { type ChartSpec, readChart } from '../../../../app/render/fy-render-chart-model.ts';
 import { formatChartValue } from '../../../../app/render/fy-render-chart-format.ts';
 
 /**

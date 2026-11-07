@@ -14,7 +14,7 @@ import {
   rowForOffset,
   stepMatch,
   withResults,
-} from './chat-search.ts';
+} from './chat-search-model.ts';
 import './chat-search.css';
 
 /** What the chat's search needs from the daemon and from the chat's history. */

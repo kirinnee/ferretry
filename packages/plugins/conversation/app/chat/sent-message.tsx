@@ -15,7 +15,7 @@ import { useState } from 'react';
 import { displayCallsign } from '../transcript/callsign.ts';
 import { clockOfInstant } from '@ferretry/app';
 import type { SentMessage, SentState } from './peer-delivery.ts';
-import type { SendReceiptKind } from './send-receipt.ts';
+import type { SendReceiptKind } from './send-receipt-model.ts';
 import type { TranscriptEntry } from './transcript-entries.ts';
 import { PeerName } from '../transcript/agent-message-rows.tsx';
 import { Markdown } from '@ferretry/app';

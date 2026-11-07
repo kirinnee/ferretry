@@ -21,7 +21,7 @@
 import { Minus, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ExternalLink } from '@ferretry/app/ui';
-import type { MapSpec, readMap as ReadMap } from './fy-render-map.ts';
+import type { MapSpec, readMap as ReadMap } from './fy-render-map-model.ts';
 import { MAP_ATTRIBUTION } from './fy-render-map-tiles.ts';
 import type { MapHandle } from './fy-render-map-engine.ts';
 
@@ -31,7 +31,7 @@ export interface FyRenderMapModules {
 }
 
 const loadModules = async (): Promise<FyRenderMapModules> => {
-  const [lib, engine] = await Promise.all([import('./fy-render-map.ts'), import('./fy-render-map-engine.ts')]);
+  const [lib, engine] = await Promise.all([import('./fy-render-map-model.ts'), import('./fy-render-map-engine.ts')]);
   return { mountMap: engine.mountMap, readMap: lib.readMap };
 };
 

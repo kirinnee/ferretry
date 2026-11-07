@@ -19,7 +19,7 @@ import {
   startChatRefresh,
   transcriptEntriesFromLog,
 } from '../../../../app/chat/chat-refresh.ts';
-import { rowAnchors, rowForOffset } from '../../../../app/search/chat-search.ts';
+import { rowAnchors, rowForOffset } from '../../../../app/search/chat-search-model.ts';
 import { extractToolSummary, IMAGE_READ_TOOL } from '../../../../app/chat/tool-extract.ts';
 import { fakeClient } from '../../../support/app/fake-client.ts';
 import { ferretView } from '../../../support/app/ferret-view.ts';

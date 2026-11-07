@@ -13,7 +13,7 @@
 import { type ReactNode, useState } from 'react';
 import type { MessageClock } from '@ferretry/app';
 import type { LedgerSendRecord } from './send-ledger.ts';
-import { type SendReceipt, sendReceipt } from './send-receipt.ts';
+import { type SendReceipt, sendReceipt } from './send-receipt-model.ts';
 import { ReceiptMark } from '@ferretry/app';
 
 export interface MessageFooterProps {
