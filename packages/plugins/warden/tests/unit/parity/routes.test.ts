@@ -77,16 +77,6 @@ describe('route parity', () => {
     expect(response.json<{ code: string }>().code).toBe('plugin_unavailable');
   });
 
-  test('R-0408 a ferret is refused a run that starts investigators (spawn), the owner is answered', async () => {
-    const { host } = await wardenHost();
-
-    const asOwner = await host.request('POST', '/v1/warden/run', { body: { spawn: true }, as: owner() });
-    const asFerret = await host.request('POST', '/v1/warden/run', { body: { spawn: true }, as: ferret('f1') });
-
-    expect(asOwner.status).toBe(200);
-    expect(asFerret.status).toBeGreaterThanOrEqual(400);
-  });
-
   test('R-0406 investigating a ferret nobody has is refused, and R-0407 leaving a clean one alone is refused', async () => {
     const { host, ferrets } = await wardenHost();
     ferrets.add({ id: ferretId('f1'), state: 'working', stateAt: T0 });

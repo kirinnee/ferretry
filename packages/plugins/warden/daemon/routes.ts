@@ -5,6 +5,7 @@ import {
   type PlainApiResponse,
   textResponse,
 } from '@ferretry/kernel/contract';
+import { isFerretCall, OWNER_ONLY_CODE } from '@ferretry/core-gate/contract';
 import {
   WardenConfigPatchSchema,
   WardenInvestigateRequestSchema,
@@ -40,7 +41,11 @@ function refuse(error: unknown): never {
     throw new ApiError(refusal.status, error.message, refusal.code);
   }
   if (error instanceof WardenConfigRefused)
-    throw new ApiError(error.kind === 'unavailable' ? 503 : 400, error.message, error.kind === 'unavailable' ? 'plugin_unavailable' : 'invalid_request');
+    throw new ApiError(
+      error.kind === 'unavailable' ? 503 : 400,
+      error.message,
+      error.kind === 'unavailable' ? 'plugin_unavailable' : 'invalid_request',
+    );
   throw error;
 }
 
@@ -77,6 +82,10 @@ export function wardenRoutes(subsystem: WardenSubsystem) {
     'GET /v1/warden/agenda': guarded(async () => jsonResponse(toWireAgenda(await subsystem.agenda()))),
     'POST /v1/warden/run': guarded(async call => {
       const request = await parseOptionalBody(call.request, WardenRunRequestSchema);
+      // A sweep that may SPAWN investigators starts warden sessions with no parent, so only a person asks for one; a
+      // ferret may still ask for a sweep that only looks. No ferret starts a session that is not its own child.
+      if (request.spawn === true && isFerretCall(call))
+        throw new ApiError(403, 'a ferret cannot start Warden investigators; ask the owner', OWNER_ONLY_CODE);
       return jsonResponse(toWireRun(await subsystem.run(request.spawn === true)));
     }),
     'POST /v1/warden/investigate': guarded(async call => {
@@ -95,5 +104,3 @@ export function wardenRoutes(subsystem: WardenSubsystem) {
     }),
   };
 }
-
-
