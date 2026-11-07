@@ -1,10 +1,11 @@
 import { definePlugin, panel, renderer, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { audit, cap } from '@ferretry/core-gate/contract';
-import { LaunchParts } from '@ferretry/core-ferrets/contract';
+import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import {
   SKILLS_AUDIT,
   SKILLS_CONFIG,
   SKILLS_INSTALLED_STATE,
+  SKILLS_INSTALLS_STATE,
   SKILLS_READ_MODELS,
   SKILLS_WORDS,
   SkillsChanged,
@@ -20,10 +21,6 @@ import {
  * Departure: today's `GET /v1/sessions/:sessionId/skills` carries `precedence: 1` to keep a winner over
  * `/v1/sessions/by-request/skills`. That shadow belongs to the old layout; the new path has no such sibling, so the
  * field is dropped (the descriptor-parity harness will say if one turns up).
- *
- * GAP: `permissions.roots` is `imports` only (the copy source the owner names, once). The inventory also reads runtime
- * homes and project folders, and a project apply writes into a project; those need roots (or a Projects port) the lead
- * has not assigned. Left undeclared rather than guessed.
  */
 export default definePlugin({
   id: 'skills',
@@ -34,6 +31,7 @@ export default definePlugin({
   kinds: ['item', 'command', 'view'],
   words: SKILLS_WORDS,
 
+  needs: { ferrets: FerretsPort },
   provides: { skills: SkillsPort },
 
   actions: {
@@ -152,7 +150,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [SKILLS_INSTALLED_STATE],
+    state: [SKILLS_INSTALLED_STATE, SKILLS_INSTALLS_STATE],
     config: [SKILLS_CONFIG],
     readModels: SKILLS_READ_MODELS,
     publishes: [SkillsChanged],
@@ -163,7 +161,7 @@ export default definePlugin({
   },
 
   permissions: {
-    roots: ['imports'],
+    roots: ['work', 'imports'],
     network: [],
     spawn: [],
     secrets: [],
