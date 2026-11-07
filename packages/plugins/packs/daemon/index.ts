@@ -22,14 +22,14 @@ import { RuntimeLaunchProbe } from './adapters/launch-probe.ts';
 import { StateReplacedRouting } from './adapters/replaced.ts';
 import { StateCleanUpRunStore } from './adapters/run-store.ts';
 import { StatePackSwitches } from './adapters/switches.ts';
-import { packEligible, packInstructed } from './lib/admission.ts';
+import { packInstructed } from './lib/admission.ts';
 import type { ModelCatalogView } from './lib/catalog.ts';
 import { CleanUpService } from './lib/cleanup/service.ts';
 import { GuideFileService } from './lib/cleanup/file.ts';
 import { launchEnvironment, startDecision } from './lib/hooks.ts';
 import { ProbeCache } from './lib/probe.ts';
 import { PACK_ROUTING_MAX_AGE_MS, PackRoutingKeep } from './lib/routing-keep.ts';
-import { readFerretResult } from './lib/result.ts';
+import { readFerretResult, ResultUncheckedError } from './lib/result.ts';
 import { packRoutes } from './lib/routes.ts';
 import { PackService } from './lib/service.ts';
 import { packSwitchOutcome } from './lib/switch.ts';
@@ -78,15 +78,29 @@ export default implementDaemon(manifest, {
       now: () => kernel.clock.now(),
     });
 
-    /** Today's `pack.result`: the finished ferret's `summary.md`, read through Ferrets (`FerretsApi.summary`). */
+    /**
+     * Today's `pack.result`: the finished ferret's `summary.md`, read through Ferrets (`FerretsApi.summary`, NOT masked),
+     * then masked whole inside ONE `Redaction.read` before anything keeps or serves it: the result route,
+     * `PacksApi.result` and Clean up's rewrite all read it here. A redactor that fails withholds it: this throws
+     * {@link ResultUncheckedError} rather than hand back text that was not checked.
+     */
     const result = async (ferret: string): Promise<FerretResult | undefined> => {
       const summary = await ferrets().get(ferret as FerretId);
       if (summary === undefined) return undefined;
-      return await readFerretResult(
+      const found = await readFerretResult(
         summary,
         async () => await ferrets().summary(ferret as FerretId),
         DEFAULT_COMPLETION_SUMMARY,
       );
+      if (found.summary === undefined) return found;
+      const text = found.summary;
+      let masked: string;
+      try {
+        masked = await kernel.redaction.read(scope => scope.text(text));
+      } catch {
+        throw new ResultUncheckedError();
+      }
+      return { ...found, summary: masked };
     };
 
     const cleanUp = new CleanUpService({
@@ -138,8 +152,7 @@ export default implementDaemon(manifest, {
     });
 
     const instructed = async (ferret: string): Promise<boolean> => {
-      const summary = await ferrets().get(ferret as FerretId);
-      if (summary === undefined || !packEligible(summary)) return false;
+      if (!(await packFerrets.eligible(ferret))) return false;
       return packInstructed(config(), await switches.get(ferret), await packFerrets.depth(ferret));
     };
 
@@ -233,11 +246,10 @@ export default implementDaemon(manifest, {
             id: 'packs',
             item: {
               parts: async spec => {
-                const summary = await ferrets().get(spec.ferret);
                 const env = await launchEnvironment(
                   config(),
                   {
-                    eligible: packEligible(summary),
+                    eligible: await packFerrets.eligible(spec.ferret),
                     ownSwitch: await switches.get(spec.ferret),
                     depth: await packFerrets.depth(spec.ferret),
                   },

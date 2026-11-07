@@ -57,7 +57,7 @@ export interface PackSubsystem {
       undo(): Promise<PackRoutingWriteResult>;
     };
   };
-  /** `undefined` when there is no such ferret. */
+  /** `undefined` when there is no such ferret. The summary is already masked; a masking failure throws. */
   result(ferret: string): Promise<FerretResult | undefined>;
   /** `caller` is the asking ferret, derived from its credential; absent for a person. */
   table(ferret: string, caller?: string): Promise<PackTable | undefined>;
@@ -116,7 +116,18 @@ export function packRoutes(subsystem: PackSubsystem, redaction: Redaction) {
       const found =
         id === undefined || id === '' ? undefined : await subsystem.routing.cleanUp.job(id).catch(() => undefined);
       if (found === undefined) throw new ApiError(404, 'no such routing prompt clean-up', 'not-found');
-      return jsonResponse(PackCleanUpJobResultSchema.parse(found));
+      const { suggestion } = found;
+      if (suggestion === undefined) return jsonResponse(PackCleanUpJobResultSchema.parse(found));
+      // The rewrite was masked before it was kept (the daemon half's result read); it is masked again as it is served,
+      // inside this route's one `Redaction.read`, so a secret the vault learned since is not shown either.
+      return await redaction.read(scope =>
+        jsonResponse(
+          PackCleanUpJobResultSchema.parse({
+            ...found,
+            suggestion: { ...suggestion, before: scope.text(suggestion.before), after: scope.text(suggestion.after) },
+          }),
+        ),
+      );
     }) satisfies RouteHandler,
     'POST /v1/pack/routing/accept': (async call => {
       personOnly(call, 'accept a cleaned-up routing prompt');
@@ -133,16 +144,10 @@ export function packRoutes(subsystem: PackSubsystem, redaction: Redaction) {
     }) satisfies RouteHandler,
     'GET /v1/ferrets/:ferretId/result': (async call => {
       const id = ferretParameter(call);
-      return await redaction.read(async scope => {
-        const found = await subsystem.result(id);
-        if (found === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
-        return jsonResponse(
-          FerretResultSchema.parse({
-            ...found,
-            ...(found.summary === undefined ? {} : { summary: scope.text(found.summary) }),
-          }),
-        );
-      });
+      // `result` masks the summary inside its one `Redaction.read`, and withholds it (503) when that fails.
+      const found = await subsystem.result(id);
+      if (found === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
+      return jsonResponse(FerretResultSchema.parse(found));
     }) satisfies RouteHandler,
     'GET /v1/ferrets/:ferretId/pack': (async call => {
       const id = ferretParameter(call);

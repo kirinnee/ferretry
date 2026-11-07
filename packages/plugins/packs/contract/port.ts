@@ -16,7 +16,11 @@ export interface PacksApi {
   routingLine(): Promise<string>;
   /** Whether a ferret is told about Pack mode at its next launch: the machine's switch, its own, and its depth. */
   instructed(ferret: FerretId): Promise<boolean>;
-  /** What a finished ferret reported with `signal done`; `undefined` when there is no such ferret. */
+  /**
+   * What a finished ferret reported with `signal done`; `undefined` when there is no such ferret. The summary is MASKED
+   * (inside one `Redaction.read`) before it is handed back, and when masking fails this rejects rather than hand back
+   * text that was not checked.
+   */
   result(ferret: FerretId): Promise<FerretResult | undefined>;
   /** A lead's one-table view of its pack; `undefined` when there is no such ferret. `caller` is the asking ferret. */
   table(ferret: FerretId, caller?: FerretId): Promise<PackTable | undefined>;

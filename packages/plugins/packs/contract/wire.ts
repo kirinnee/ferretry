@@ -247,10 +247,6 @@ export type PackCleanUpStatus = z.infer<typeof PackCleanUpStatusSchema>;
  * - `over_budget`: its login has spent its daily or weekly trigger on this machine; it is back at the reset.
  * - `probe_failed`: the "reply OK" check did not answer OK in time.
  * - `no_candidate`: no model a runtime here offers can run now.
- * - `jev_unavailable` / `jev_cap_reached`: Jev decides, and could not.
- * - `scratch_cwd`: the folder named is a temporary or scratch folder, not a project; a helper runs in
- *   its parent's folder, so this comes only from an explicit `--cwd` or a start with no parent.
- * - `card_unavailable`: the card `--card` named does not exist here, or the caller may not hand it to a helper.
  * - `start_failed`: the start was accepted but the harness did not come up (the ferret is `stopped`, and its reason is
  *   the message); the ferret holds the evidence, and a ferret may try its next candidate.
  */
@@ -268,10 +264,6 @@ export const PACK_REFUSAL_CODES = [
   'over_budget',
   'probe_failed',
   'no_candidate',
-  'jev_unavailable',
-  'jev_cap_reached',
-  'scratch_cwd',
-  'card_unavailable',
   'start_failed',
 ] as const;
 export const PackRefusalCodeSchema = z.enum(PACK_REFUSAL_CODES);

@@ -15,8 +15,9 @@ import {
   PacksPort,
 } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
-import { LEARNING_MINER_LABEL } from '../../../daemon/lib/admission.ts';
-import { NO_CLEAN_UP_FOLDER } from '../../../daemon/lib/cleanup/service.ts';
+import { LEARNING_MINER_LABEL, WARDEN_LABEL } from '../../../daemon/lib/admission.ts';
+import { NO_CLEAN_UP_FOLDER, REWRITE_UNCHECKED } from '../../../daemon/lib/cleanup/service.ts';
+import { RESULT_UNCHECKED } from '../../../daemon/lib/result.ts';
 import { launchEnvironment, startDecision } from '../../../daemon/lib/hooks.ts';
 import manifest from '../../../manifest.ts';
 
@@ -195,42 +196,72 @@ describe('packs: no helper start, and what a finished ferret reported', () => {
     await h.stop();
   });
 
-  test('Clean up reads the rewrite from its ferret’s `signal done` summary once that ferret has finished', async () => {
+  test('Clean up keeps and serves its ferret’s `signal done` rewrite MASKED, inside one Redaction.read', async () => {
     // The kernel's memory state keeps JSON documents only, so the run's opaque files are kept by a stand-in here and the
-    // half is built over it: the route, the run store and the result read are the daemon's own.
-    const builder = ferretId('builder');
-    const ferrets = new FakeFerrets();
-    ferrets.add({ id: builder, state: 'stopped', pack: PACK_CLEAN_UP_PACK as FerretSummary['pack'] });
-    ferrets.setSummary(builder, JSON.stringify({ prompt: 'Use the strongest model for plans.', notes: [] }));
-    const files = new Map<string, string>([
-      [
-        'runs/run-1.run.json',
-        JSON.stringify({
-          format: 1,
-          job: {
-            id: 'run-1',
-            ferret: 'builder',
-            name: 'Routing Prompt Clean-up',
-            runtime: 'claude-work',
-            startedAt: '2026-11-07T10:00:00.000Z',
-            status: 'running',
-          },
-        }),
-      ],
-      ['runs/run-1.rough.txt', 'Use opus for plans.\n'],
-    ]);
-    const half = builtHalf(ferrets, files);
-    const route = half?.routes?.['GET /v1/pack/routing/jobs/:jobId'] as unknown as (
-      call: unknown,
-    ) => Promise<{ status: number; body: string }>;
+    // half is built over it: the route, the run store and the result read are the daemon's own. The redactor masks
+    // exactly as the test host's `secrets` do (same-width `*`).
+    const { ferrets, files } = cleanUpRun('Use the strongest model for plans; key sk-abc.');
+    const half = builtHalf(ferrets, files, maskingRedaction(['sk-abc']));
 
-    const response = await route({ params: new Map([['jobId', 'run-1']]), request: new Request('http://x/') });
+    const response = await jobRoute(half)('run-1');
 
     expect(response.status).toBe(200);
+    expect(response.body).not.toContain('sk-abc');
     const result = PackCleanUpJobResultSchema.parse(JSON.parse(response.body));
     expect(result.job.status).toBe('suggested');
-    expect(result.suggestion?.after).toBe('Use the strongest model for plans.');
+    expect(result.suggestion?.after).toBe('Use the strongest model for plans; key ******.');
     expect(result.suggestion?.before).toBe('Use opus for plans.');
+    // What is KEPT is masked too, not only what is served.
+    expect(files.get('runs/run-1.run.json')).not.toContain('sk-abc');
+    expect(files.get('runs/run-1.run.json')).toContain('******');
+  });
+
+  test('Clean up fails closed when the rewrite cannot be masked: the run fails, and no rewrite is kept or served', async () => {
+    const { ferrets, files } = cleanUpRun('Use the strongest model for plans; key sk-abc.');
+    const half = builtHalf(ferrets, files, failingRedaction());
+
+    const response = await jobRoute(half)('run-1');
+
+    expect(response.status).toBe(200);
+    expect(response.body).not.toContain('sk-abc');
+    const result = PackCleanUpJobResultSchema.parse(JSON.parse(response.body));
+    expect(result.job).toMatchObject({ status: 'failed', message: REWRITE_UNCHECKED });
+    expect(result.suggestion).toBeUndefined();
+    expect(files.get('runs/run-1.run.json')).not.toContain('sk-abc');
+  });
+
+  test('PacksApi.result hands back the summary masked, and withholds it (throws) when masking fails', async () => {
+    const ferrets = new FakeFerrets();
+    ferrets.add({ id: lead, state: 'stopped' });
+    ferrets.setSummary(lead, 'Fixed the bug; token sk-abc is rotated.\n');
+    const h = await testHost({
+      plugins: [daemon],
+      gate: new StandInAdmission(() => who),
+      fakes: { ferrets },
+      secrets: ['sk-abc'],
+    });
+    expect((await h.provided(PacksPort).result(lead))?.summary).toBe('Fixed the bug; token ****** is rotated.');
+    await h.stop();
+
+    const failing = builtHalf(ferrets, new Map(), failingRedaction());
+    await expect(failing?.provides?.packs.result(lead) ?? Promise.resolve()).rejects.toThrow(RESULT_UNCHECKED);
+  });
+
+  test('R-0170 the result route withholds a summary it could not mask (503), never the text', async () => {
+    const ferrets = new FakeFerrets();
+    ferrets.add({ id: lead, state: 'stopped' });
+    ferrets.setSummary(lead, 'token sk-abc\n');
+    who = ownerStanding();
+    const h = await testHost({
+      plugins: [daemon],
+      gate: new StandInAdmission(() => who),
+      fakes: { ferrets },
+      redaction: failingRedaction(),
+    });
+    const response = await h.request('GET', '/v1/ferrets/lead/result');
+    expect(response.status).not.toBe(200);
+    expect(response.body).not.toContain('sk-abc');
+    await h.stop();
   });
 
   test('Clean up refuses to start, saying why, while no folder for its ferret is handed to Pack mode', async () => {
@@ -258,8 +289,58 @@ describe('packs: a pack table in the reader’s own lineage', () => {
   });
 });
 
+/** A redactor that masks `secrets` the way the test host's stand-in does: each one becomes the same width of `*`. */
+function maskingRedaction(secrets: readonly string[]) {
+  const text = (s: string): string =>
+    secrets.reduce((out, secret) => out.split(secret).join('*'.repeat(secret.length)), s);
+  return { read: async <T>(fn: (scope: { text(s: string): string }) => T | Promise<T>) => await fn({ text }) } as never;
+}
+
+/** A redactor whose vault is unavailable: every read throws. */
+function failingRedaction() {
+  return {
+    read: async () => {
+      throw new Error('the vault is unavailable');
+    },
+  } as never;
+}
+
+/** A finished Clean up builder whose `signal done` handed back `prompt`, and its running run as the run store keeps it. */
+function cleanUpRun(prompt: string) {
+  const builder = ferretId('builder');
+  const ferrets = new FakeFerrets();
+  ferrets.add({ id: builder, state: 'stopped', pack: PACK_CLEAN_UP_PACK as FerretSummary['pack'] });
+  ferrets.setSummary(builder, JSON.stringify({ prompt, notes: [] }));
+  const files = new Map<string, string>([
+    [
+      'runs/run-1.run.json',
+      JSON.stringify({
+        format: 1,
+        job: {
+          id: 'run-1',
+          ferret: 'builder',
+          name: 'Routing Prompt Clean-up',
+          runtime: 'claude-work',
+          startedAt: '2026-11-07T10:00:00.000Z',
+          status: 'running',
+        },
+      }),
+    ],
+    ['runs/run-1.rough.txt', 'Use opus for plans.\n'],
+  ]);
+  return { ferrets, files };
+}
+
+/** The half's `GET /v1/pack/routing/jobs/:jobId` handler, called as the dispatcher would. */
+function jobRoute(half: ReturnType<typeof builtHalf>) {
+  const route = half?.routes?.['GET /v1/pack/routing/jobs/:jobId'] as unknown as (
+    call: unknown,
+  ) => Promise<{ status: number; body: string }>;
+  return async (id: string) => await route({ params: new Map([['jobId', id]]), request: new Request('http://x/') });
+}
+
 /** The daemon half built over small stand-ins (opaque state as text by path), to call what Ferrets or a route calls. */
-function builtHalf(ferrets: FakeFerrets, files = new Map<string, string>()) {
+function builtHalf(ferrets: FakeFerrets, files = new Map<string, string>(), redaction: unknown = maskingRedaction([])) {
   const at = (file: { path: string }, name?: string): string => file.path.replace('*', name ?? '');
   const now = '2026-11-07T10:00:00.000Z';
   const half = daemon.build?.({
@@ -285,7 +366,7 @@ function builtHalf(ferrets: FakeFerrets, files = new Map<string, string>()) {
       },
       clock: { now: () => now, nowMs: () => Date.parse(now) },
       ids: { mint: () => 'run-1' },
-      redaction: { read: async (fn: (scope: { text(s: string): string }) => unknown) => fn({ text: s => s }) },
+      redaction,
     } as unknown as DaemonContext<typeof manifest>['kernel'],
   } as DaemonContext<typeof manifest>);
   return half;
@@ -322,9 +403,32 @@ describe('packs launch.parts: the daemon’s own workers are never told about Pa
     expect(await launch({ label: PACK_CLEAN_UP_PACK })).toEqual([{ kind: 'env', env: { FY_PACK: '0' } }]);
   });
 
-  test('a warden’s lineage launches with FY_PACK=0', async () => {
-    expect(await launch({ provenance: { wardenLineage: true } } as unknown as Partial<FerretSummary>)).toEqual([
-      { kind: 'env', env: { FY_PACK: '0' } },
-    ]);
+  test('a warden, its helper and that helper’s own (started with --label fleet-warden, then by parent) launch with FY_PACK=0', async () => {
+    // The chain is made by Ferrets starts, as 5.0 records them: the label from the start options, the lineage from
+    // `parent`. No provenance stamp is written by any 5.0 start, so none is given here.
+    const ferrets = new FakeFerrets();
+    const start = async (request: Partial<Parameters<FakeFerrets['start']>[0]>) => {
+      const started = await ferrets.start({ folder: '/work/project', by: 'owner', ...request });
+      if (!started.ok) throw new Error(started.error.reason);
+      return started.value;
+    };
+    const warden = await start({ options: { label: WARDEN_LABEL, mode: 'auto' } });
+    const investigator = await start({ parent: warden, by: 'ferret' });
+    const helper = await start({ parent: investigator, by: 'ferret' });
+    const ordinary = await start({});
+    expect((await ferrets.get(warden))?.label).toBe(WARDEN_LABEL);
+    expect((await ferrets.get(warden)) as unknown as { provenance?: unknown }).not.toHaveProperty('provenance');
+
+    const half = builtHalf(ferrets);
+    const [contribution] = half?.hooks?.['launch.parts']() ?? [];
+    const parts = contribution?.item as LaunchPartSource;
+    for (const id of [warden, investigator, helper])
+      expect([id, await parts.parts({ ferret: id } as never)]).toEqual([id, [{ kind: 'env', env: { FY_PACK: '0' } }]]);
+    expect(await parts.parts({ ferret: ordinary } as never)).toMatchObject([{ kind: 'env', env: { FY_PACK: '1' } }]);
+
+    // `PacksApi.instructed` reads the same walk.
+    const packs = half?.provides?.packs;
+    expect(await packs?.instructed(helper)).toBe(false);
+    expect(await packs?.instructed(ordinary)).toBe(true);
   });
 });

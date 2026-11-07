@@ -1,6 +1,15 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { admitChild, depthOf, type Lineage, packInstructed, packLaunchDefault } from '../../../daemon/lib/admission.ts';
+import {
+  admitChild,
+  depthOf,
+  type Lineage,
+  type PackLineageFacts,
+  packEligibleInLineage,
+  packInstructed,
+  packLaunchDefault,
+  WARDEN_LABEL,
+} from '../../../daemon/lib/admission.ts';
 import { packConfig } from './support.ts';
 
 const LIMITS = packConfig().limits;
@@ -158,5 +167,41 @@ describe('packLaunchDefault', () => {
     // Assert
     should(told).equal('1');
     should([miner, switchedOff, deepest, machineOff]).deepEqual(['0', '0', '0', '0']);
+  });
+});
+
+describe('packEligibleInLineage', () => {
+  const chain = (ferrets: Record<string, PackLineageFacts>) => async (id: string) => ferrets[id];
+
+  it('should refuse a warden by its own label, and every ferret under one however deep', async () => {
+    const read = chain({
+      w: { label: ` ${WARDEN_LABEL} ` },
+      a: { parent: 'w' },
+      b: { parent: 'a' },
+      c: { parent: 'b' },
+    });
+    const told = await Promise.all(['w', 'a', 'b', 'c'].map(async id => await packEligibleInLineage(id, read)));
+    should(told).deepEqual([false, false, false, false]);
+  });
+
+  it('should still read a provenance stamp as a second guard', async () => {
+    const read = chain({ s: { provenance: { wardenLineage: true } }, k: { parent: 's' } });
+    should(await packEligibleInLineage('s', read)).be.false();
+    should(await packEligibleInLineage('k', read)).be.false();
+  });
+
+  it('should tell an ordinary ferret whose lead is gone, as today (unknown ancestry is not descent)', async () => {
+    const read = chain({ k: { parent: 'pruned' } });
+    should(await packEligibleInLineage('k', read)).be.true();
+  });
+
+  it('should end a loop and refuse an unknown ferret or a chain past the ceiling', async () => {
+    const loop = chain({ a: { parent: 'b' }, b: { parent: 'a' } });
+    should(await packEligibleInLineage('a', loop)).be.true();
+    should(await packEligibleInLineage('nobody', loop)).be.false();
+    const long: Record<string, PackLineageFacts> = {};
+    for (let i = 0; i < 20; i += 1) long[`f${String(i)}`] = { parent: `f${String(i + 1)}` };
+    should(await packEligibleInLineage('f0', chain(long), 16)).be.false();
+    should(await packEligibleInLineage('f10', chain(long), 16)).be.true();
   });
 });

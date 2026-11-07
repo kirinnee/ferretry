@@ -24,8 +24,8 @@ import {
  * placement lists it with Packs, so where it lives is the lead's to settle (ports-pending). `fy new` is Ferrets' verb and
  * `fy wait` Conversation's: Packs starts no helper and waits on none.
  *
- * `guard: 'secrets'` on the two routes that carry text a ferret wrote (a result, a pack table's last lines): their
- * bodies are built inside one `Redaction.read` (§7.3). The other answers are model ids, runtime and login NAMES,
+ * `guard: 'secrets'` on the three routes that carry text a ferret wrote (a result, a pack table's last lines, a Clean up
+ * run's rewrite): their bodies are built inside one `Redaction.read` (§7.3), and a rewrite is masked before it is kept. The other answers are model ids, runtime and login NAMES,
  * readiness and quota; the routing prompt is the owner's words.
  *
  * It shapes a start only through `start.decide` (admission: depth and how many children a parent may have, whichever
@@ -77,7 +77,7 @@ export default definePlugin({
         capability: packUse,
         noStore: true,
         audit: { skip: 'a read of one run' },
-        guard: { none: 'the rewrite the owner asked for; no pane text' },
+        guard: 'secrets',
       }),
       route('POST /v1/pack/routing/accept', {
         minimum: 'operator',
@@ -157,7 +157,7 @@ export default definePlugin({
 
   ui: {
     screens: [],
-    // Settings › Agents › Pack mode: the switch, who decides, the limits, the probe, Jev's cap and the routing prompt.
+    // Settings › Agents › Pack mode: the switch, who decides, the limits, the probe and the routing prompt.
     settings: [settingsTab('pack', { label: 'Pack mode', order: 40 })],
     // A parent's view of the helpers it started, beside the ferret.
     panels: [panel('ferret.side', { id: 'helpers', order: 40 })],
@@ -171,8 +171,9 @@ export default definePlugin({
 
   hooks: { takes: [{ hook: StartDecide }, { hook: LaunchParts }] },
 
-  // No root, host or secret: a finished ferret's summary is read through Ferrets (`FerretsApi.summary`), the clean-up
-  // ferret's folder comes from the kernel's paths, and the probe and the clean-up ferret run through Runtimes and Ferrets.
+  // No root, host or secret: a finished ferret's summary is read through Ferrets (`FerretsApi.summary`), Clean up refuses
+  // to start while no folder for its ferret is handed to Pack mode, and the probe and the clean-up ferret run through
+  // Runtimes and Ferrets.
   // Jev's ranking went with `fy new` (it ranked only `new --auto`), so nothing here calls out or spends.
   permissions: { roots: [], network: [], spawn: [], secrets: [] },
 });

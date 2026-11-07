@@ -1,6 +1,6 @@
 import type { FerretId, FerretsApi, FerretSummary, PackId } from '@ferretry/core-ferrets/contract';
 import { PACK_CLEAN_UP_PACK } from '../../contract/index.ts';
-import { depthOf, type ParentFacts, runningChildCount } from '../lib/admission.ts';
+import { depthOf, packEligibleInLineage, type ParentFacts, runningChildCount } from '../lib/admission.ts';
 import type { CleanUpStartRequest } from '../lib/cleanup/service.ts';
 
 /** A ferret that is a person's own terminal is interactive: its helpers are held to the wider limit. */
@@ -16,6 +16,11 @@ export class PackFerrets {
 
   async depth(ferret: string): Promise<number> {
     return await depthOf(ferret, async id => await this.ferrets().get(id as FerretId));
+  }
+
+  /** Whether the ferret is an ordinary one, told about Pack mode: its own label and pack, and no warden above it. */
+  async eligible(ferret: string): Promise<boolean> {
+    return await packEligibleInLineage(ferret, async id => await this.ferrets().get(id as FerretId));
   }
 
   async parent(id: string): Promise<ParentFacts | undefined> {

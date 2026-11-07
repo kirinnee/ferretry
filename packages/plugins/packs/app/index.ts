@@ -13,7 +13,7 @@ type ViewName = 'pack-settings' | 'helpers-panel';
 const loadView = (name: ViewName): Promise<Record<string, unknown>> => import(`./views/${name}.tsx`);
 
 /**
- * Packs' app half: Settings › Pack mode (the switch, who decides, the limits, the probe, Jev's cap and the routing prompt)
+ * Packs' app half: Settings › Pack mode (the switch, who decides, the limits, the probe and the routing prompt)
  * and the helpers panel beside a ferret (its own Pack mode switch, and the helpers it started). The views are React and
  * load on first use (`./lazy.ts`), so this module imports no React and stays loadable by the registry generator before the
  * app shell, which owns React, is in place.

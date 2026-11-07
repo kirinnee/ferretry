@@ -10,7 +10,9 @@ import {
   type CleanUpStartRequest,
   GENERATE_NAME,
   KEPT_RUNS,
+  REWRITE_UNCHECKED,
 } from '../../../../daemon/lib/cleanup/service.ts';
+import { ResultUncheckedError } from '../../../../daemon/lib/result.ts';
 import type { PackProbeOutcome, PackProbeRequest } from '../../../../daemon/lib/probe.ts';
 
 const NOW = '2026-10-22T12:00:00.000Z';
@@ -91,7 +93,7 @@ function build(
   const starts: CleanUpStartRequest[] = [];
   const stops: Array<readonly [string, string]> = [];
   const statuses = new Map<string, string>();
-  const results = new Map<string, string>();
+  const results = new Map<string, string | Error>();
   let ids = 0;
   let clock = 0;
   const service = new CleanUpService({
@@ -120,7 +122,11 @@ function build(
       return { id, name: 'gonzalo' };
     },
     status: async ferret => statuses.get(ferret),
-    result: async ferret => results.get(ferret),
+    result: async ferret => {
+      const found = results.get(ferret);
+      if (found instanceof Error) throw found;
+      return found;
+    },
     stop: async (ferret, reason) => {
       if (options.stopFails === true) throw new Error('the pane is gone');
       stops.push([ferret, reason]);
@@ -133,6 +139,12 @@ function build(
     bin: 'fy',
   });
   return { service, runs, probes, starts, stops, statuses, results };
+}
+
+/** The builder ferret finishes: its `signal done` message (masked, as the daemon half hands it) is `text`. */
+function finish(subject: ReturnType<typeof build>, text: string): void {
+  subject.results.set('cleanup-1', text);
+  subject.statuses.set('cleanup-1', 'stopped');
 }
 
 describe('CleanUpService.start', () => {
@@ -369,14 +381,14 @@ describe('CleanUpService.job', () => {
     should(done?.suggestion?.after).equal('Planning and review: opus. Chores: claude-ghost-9.');
   });
 
-  it('should stay running until the draft is written, then check it, keep the suggestion with before and after and stop the ferret', async () => {
+  it('should stay running until the ferret finishes, then check its rewrite and keep the suggestion with before and after', async () => {
     // Arrange
     const subject = build();
     await subject.service.start({ prompt: 'rough: opus' });
 
     // Act
     const waiting = await subject.service.job('run-1');
-    await subject.runs.writeFile('run-1', 'draft.json', DRAFT);
+    finish(subject, DRAFT);
     const done = await subject.service.job('run-1');
     const again = await subject.service.job('run-1');
 
@@ -397,7 +409,7 @@ describe('CleanUpService.job', () => {
         { kind: 'suggestion', message: 'Add a login for a cheaper model.' },
       ],
     });
-    should(subject.stops).deepEqual([['cleanup-1', 'the routing prompt it cleaned up has been read']]);
+    should(subject.stops).be.empty();
     should(again).deepEqual(done);
     should(await subject.service.job('nope')).be.undefined();
   });
@@ -406,7 +418,7 @@ describe('CleanUpService.job', () => {
     // Arrange
     const subject = build({ runtimes: [runtimeRow('claude-kirin')] });
     await subject.service.start({});
-    await subject.runs.writeFile('run-1', 'draft.json', JSON.stringify({ prompt: 'Opus for all.' }));
+    finish(subject, JSON.stringify({ prompt: 'Opus for all.' }));
 
     // Act
     const done = await subject.service.job('run-1');
@@ -422,7 +434,7 @@ describe('CleanUpService.job', () => {
     const subject = build();
     await subject.service.start({});
     subject.runs.files.delete('/fy/state/pack-cleanup/run-1/rough.txt');
-    await subject.runs.writeFile('run-1', 'draft.json', JSON.stringify({ prompt: 'Opus for all.' }));
+    finish(subject, JSON.stringify({ prompt: 'Opus for all.' }));
 
     // Act
     const done = await subject.service.job('run-1');
@@ -435,7 +447,7 @@ describe('CleanUpService.job', () => {
     // Arrange
     const subject = build({ stopFails: true });
     await subject.service.start({});
-    await subject.runs.writeFile('run-1', 'draft.json', DRAFT);
+    finish(subject, DRAFT);
 
     // Act
     const done = await subject.service.job('run-1');
@@ -448,7 +460,7 @@ describe('CleanUpService.job', () => {
     // Arrange
     const subject = build();
     await subject.service.start({});
-    await subject.runs.writeFile('run-1', 'draft.json', DRAFT);
+    finish(subject, DRAFT);
     subject.statuses.set('cleanup-1', 'stopped');
 
     // Act
@@ -459,19 +471,19 @@ describe('CleanUpService.job', () => {
     should(subject.stops).be.empty();
   });
 
-  it('should wait on a draft that does not read while the ferret runs, and fail it once the ferret is done', async () => {
+  it('should not read a rewrite while the ferret runs, and fail one that does not read once the ferret is done', async () => {
     // Arrange
     const subject = build();
     await subject.service.start({});
-    await subject.runs.writeFile('run-1', 'draft.json', '{"prompt": ');
+    subject.results.set('cleanup-1', '{"prompt": ');
 
     // Act
-    const partial = await subject.service.job('run-1');
+    const running = await subject.service.job('run-1');
     subject.statuses.set('cleanup-1', 'stopped');
     const failed = await subject.service.job('run-1');
 
     // Assert
-    should(partial?.job.status).equal('running');
+    should(running?.job.status).equal('running');
     should(failed?.job).containEql({
       status: 'failed',
       message: 'the clean-up did not write a prompt: its file is not a JSON object with "prompt".',
@@ -498,11 +510,27 @@ describe('CleanUpService.job', () => {
     should(gone?.job.message).equal('The clean-up ended without writing a prompt.');
   });
 
+  it('should fail closed, keeping no suggestion, when the rewrite could not be checked for secrets', async () => {
+    // Arrange
+    const subject = build();
+    await subject.service.start({});
+    subject.results.set('cleanup-1', new ResultUncheckedError());
+    subject.statuses.set('cleanup-1', 'stopped');
+
+    // Act
+    const failed = await subject.service.job('run-1');
+
+    // Assert
+    should(failed?.job).containEql({ status: 'failed', message: REWRITE_UNCHECKED });
+    should(failed?.suggestion).be.undefined();
+    should(subject.runs.runs.get('run-1')?.suggestion).be.undefined();
+  });
+
   it('should fail a run whose rewrite is empty once the ferret is done', async () => {
     // Arrange
     const subject = build();
     await subject.service.start({});
-    await subject.runs.writeFile('run-1', 'draft.json', JSON.stringify({ prompt: '   ' }));
+    finish(subject, JSON.stringify({ prompt: '   ' }));
     subject.statuses.set('cleanup-1', 'stopped');
 
     // Act
@@ -517,7 +545,7 @@ describe('CleanUpService.job', () => {
     const subject = build({ runtimes: [runtimeRow('claude-kirin')] });
     await subject.service.start({});
     await subject.runs.writeFile('run-1', 'inventory.json', 'not json');
-    await subject.runs.writeFile('run-1', 'draft.json', DRAFT);
+    finish(subject, DRAFT);
     subject.statuses.set('cleanup-1', 'stopped');
 
     // Act
@@ -535,7 +563,7 @@ describe('CleanUpService.job in generate mode', () => {
     // Arrange
     const subject = build({ routingSource: 'default' });
     await subject.service.start({ mode: 'generate', idea: 'cheap chores' });
-    await subject.runs.writeFile('run-1', 'draft.json', DRAFT);
+    finish(subject, DRAFT);
 
     // Act
     const done = await subject.service.job('run-1');
@@ -546,14 +574,14 @@ describe('CleanUpService.job in generate mode', () => {
     should(done?.suggestion?.after).equal('Planning and review: opus. Chores: claude-ghost-9.');
     should(done?.suggestion?.suggested).containEql({ mode: 'generate', via: 'claude-atomi' });
     should(done?.suggestion?.notes.map(note => note.kind)).deepEqual(['unknown_model', 'suggestion']);
-    should(subject.stops).deepEqual([['cleanup-1', 'the routing prompt it wrote has been read']]);
+    should(subject.stops).be.empty();
   });
 
   it('should keep the saved prompt as before when one existed', async () => {
     // Arrange
     const subject = build();
     await subject.service.start({ mode: 'generate' });
-    await subject.runs.writeFile('run-1', 'draft.json', JSON.stringify({ prompt: 'Opus for all.' }));
+    finish(subject, JSON.stringify({ prompt: 'Opus for all.' }));
 
     // Act
     const done = await subject.service.job('run-1');

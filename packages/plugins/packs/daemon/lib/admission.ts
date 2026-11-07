@@ -98,7 +98,7 @@ export async function depthOf(
 
 /** What deciding one ferret's Pack instruction at launch needs, read from its own record. */
 export interface PackLaunchFacts {
-  /** False for the learning miner, the clean-up ferret or a warden's descendant ({@link packEligible}): never told. */
+  /** False for the learning miner, the clean-up ferret or a warden's lineage ({@link packEligibleInLineage}): never told. */
   readonly eligible: boolean;
   /** `config.pack`; absent means on. */
   readonly ownSwitch: boolean | undefined;
@@ -117,17 +117,29 @@ export function packLaunchDefault(config: PackConfig, facts: PackLaunchFacts): '
 /** Today's `LEARNING_MINER_LABEL` (`adapters/learning/miner.ts`): the label Lessons' miner is started with. */
 export const LEARNING_MINER_LABEL = 'ferretry-learning';
 
+/**
+ * Today's `WARDEN_LABEL` (`lib/warden/types.ts`): the label the Warden's own ferret carries. A copy of its own, as
+ * Ferrets and Terminals keep theirs: no contract carries it.
+ */
+export const WARDEN_LABEL = 'fleet-warden';
+
 /** Who a ferret is, as {@link packEligible} reads it from its summary. */
 export interface PackEligibilityFacts {
   readonly label?: string | undefined;
   readonly pack?: string | undefined;
+  /** Today's start stamp. No 5.0 start writes it yet, so it is only a second guard beside the label walk. */
   readonly provenance?: { readonly wardenLineage?: boolean | undefined } | undefined;
 }
 
+/** A warden (by its own label) or a ferret already stamped as descending from one (today's `isWardenOrStamped`). */
+function isWardenOrStamped(ferret: PackEligibilityFacts): boolean {
+  return ferret.label?.trim() === WARDEN_LABEL || ferret.provenance?.wardenLineage === true;
+}
+
 /**
- * Whether a ferret is an ORDINARY one, told about Pack mode, rather than one of the daemon's own workers (today's
- * `ordinaryFerret`, fyd.ts): the learning miner (by its label), the routing prompt's clean-up ferret (its label or its
- * hidden pack) and a warden's lineage are never told, so none of them can spend on helpers of its own unattended.
+ * Whether this ONE ferret, read alone, is an ordinary one (today's `ordinaryFerret`, fyd.ts): not the learning miner
+ * (by its label), not the routing prompt's clean-up ferret (its label or its hidden pack) and not a warden. Its
+ * ancestors are {@link packEligibleInLineage}'s.
  */
 export function packEligible(ferret: PackEligibilityFacts | undefined): boolean {
   if (ferret === undefined) return false;
@@ -135,6 +147,34 @@ export function packEligible(ferret: PackEligibilityFacts | undefined): boolean 
     ferret.label !== LEARNING_MINER_LABEL &&
     ferret.label !== PACK_CLEAN_UP_PACK &&
     ferret.pack !== PACK_CLEAN_UP_PACK &&
-    ferret.provenance?.wardenLineage !== true
+    !isWardenOrStamped(ferret)
   );
+}
+
+/** A ferret in the parent chain, as {@link packEligibleInLineage} walks it. */
+export type PackLineageFacts = Lineage & PackEligibilityFacts;
+
+/**
+ * Whether a ferret is told about Pack mode at all: it is {@link packEligible} AND no ancestor is a warden or stamped as
+ * a warden's (today's `resolveWardenLineage`, `provenance/lineage.ts`: the ferret's own label, then every ancestor's).
+ * So the Warden, its investigators and every helper under them never start helpers of their own unattended.
+ *
+ * Fail closed: an unknown ferret, or a chain longer than `ceiling`, is not told. A parent that resolves nowhere ends the
+ * walk with what was found, as today (unknown ancestry is not descent).
+ */
+export async function packEligibleInLineage(
+  id: string,
+  read: (id: string) => Promise<PackLineageFacts | undefined>,
+  ceiling = 16,
+): Promise<boolean> {
+  let current = await read(id);
+  if (!packEligible(current)) return false;
+  const seen = new Set<string>([id]);
+  while (current?.parent !== undefined && !seen.has(current.parent)) {
+    if (seen.size > ceiling) return false;
+    seen.add(current.parent);
+    current = await read(current.parent);
+    if (current !== undefined && isWardenOrStamped(current)) return false;
+  }
+  return true;
 }

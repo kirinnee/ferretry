@@ -20,6 +20,13 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
   Today's "reply OK" run, which caught a login out of quota, is an additive `RuntimesApi.probe(runtime)` through the
   harness plugins. It spends, so it runs only on an owner's act (Clean up is person-only); nothing in Packs checks or
   starts a runtime unattended, and Packs arms no job.
+- **A finished ferret's result**: `FerretsApi.summary` reads `summary.md`, which nothing writes on this base (Ferrets'
+  `signal` is not built and its signal writer is not wired). Until it is, `GET /v1/ferrets/:ferretId/result` reports
+  every finished ferret with no summary, and a Clean up run (which cannot start yet either) would fail "without writing
+  a prompt".
+- **Warden lineage** is read from labels: a ferret whose own label, or any ancestor's, is `fleet-warden` is never told
+  about Pack mode. Today's start also stamped `provenance.wardenLineage`, which outlived a pruned warden; no 5.0 start
+  writes that stamp yet (Ferrets'), so it is read only as a second guard.
 - **Runtimes facts**: `catalog()`, `tools()` and `modelCatalogs()` are additive Runtimes members (D2 #15) not on this
   base. Until they are, Pack mode lists no usable model and says so.
 - **Routing prompt accept and undo** answer `503 config_write_unavailable` until the kernel's config write port
@@ -48,3 +55,17 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
 - **One ferret's own switch**: no read of a single ferret's Pack switch exists, so the panel's switch shows ON until the
   daemon has answered on that page.
 - **CSS**: `app/components/pack-call.css` (theme roles only) is loaded by the shell with the Packs views.
+
+## What is masked (not a gap; stated so a reader does not assume more)
+
+Every text a ferret wrote is masked inside ONE `Redaction.read` before Packs keeps or serves it, and a redactor that
+fails withholds it — never the raw text:
+
+- **A finished ferret's result** (`FerretsApi.summary` is NOT masked): masked in the daemon half's one result read,
+  which `GET /v1/ferrets/:ferretId/result` (503 when masking fails), `PacksApi.result` (rejects) and Clean up all use.
+- **Clean up's rewrite**: masked before it is checked and kept with the run; a run whose rewrite could not be masked
+  fails and keeps nothing. `GET /v1/pack/routing/jobs/:jobId` (`guard: 'secrets'`) masks the before and after again as
+  it serves them.
+- **A pack table's last lines**: masked whole before they are cut; every excerpt reads withheld on failure.
+
+Not masked: model ids, runtime and login names, readiness, quota, and the routing prompt (the owner's own words).

@@ -3,8 +3,8 @@
  * short-lived, hidden ferret, started through the ferret start every surface uses, on a runtime the person
  * picked or the ready one with the most quota left. One builder, two modes: `clean-up` rewrites the owner's
  * rough prompt, `generate` writes a whole one from a short idea (which may be empty). It is given the
- * owner's text and the harness inventory in files, writes its result to another, and signals done; the
- * result is checked against the inventory and kept with the run until a person reviews it as a before/after
+ * owner's text and the harness inventory in files, and hands its result back as its `signal done` message; the
+ * result is masked, checked against the inventory and kept with the run until a person reviews it as a before/after
  * diff (just "after" when there was nothing before).
  *
  * It runs only when a person asks (`fy guide clean-up`/`write`, the buttons): no timer starts one, and the
@@ -31,6 +31,7 @@ import {
   PackInventorySchema,
 } from '../../../contract/index.ts';
 import type { CachedProbe, PackProbeRequest } from '../probe.ts';
+import { ResultUncheckedError } from '../result.ts';
 import { checkRewrite } from './draft.ts';
 import { readyByHeadroom } from './inventory.ts';
 import { cleanUpBrief, generateBrief } from './prompt.ts';
@@ -93,7 +94,10 @@ export interface CleanUpPorts {
   start(request: CleanUpStartRequest): Promise<{ readonly id: string; readonly name?: string | undefined }>;
   /** A ferret's state, or `undefined` when there is no such ferret. */
   status(ferret: string): Promise<string | undefined>;
-  /** What a finished ferret handed back with `signal done`, or `undefined` when it gave nothing. */
+  /**
+   * What a finished ferret handed back with `signal done`, MASKED, or `undefined` when it gave nothing. Rejects with
+   * {@link ResultUncheckedError} when it could not be masked.
+   */
   result(ferret: string): Promise<string | undefined>;
   stop(ferret: string, reason: string): Promise<void>;
   runs: CleanUpRunStore;
@@ -110,7 +114,9 @@ export interface CleanUpPorts {
 const ROUGH_FILE = 'rough.txt';
 const IDEA_FILE = 'idea.txt';
 const INVENTORY_FILE = 'inventory.json';
-const DRAFT_FILE = 'draft.json';
+
+/** Why a run failed when its rewrite could not be masked: nothing unchecked is kept or served. */
+export const REWRITE_UNCHECKED = 'The rewrite could not be checked for secrets, so it was not kept.';
 
 const refused = (message: string): PackCleanUpStart => ({ outcome: 'refused', message });
 
@@ -199,21 +205,24 @@ export class CleanUpService {
     const mode = run.job.mode ?? 'clean-up';
     const status = await this.ports.status(run.job.ferret);
     const finished = status === undefined || FINISHED.has(status);
-    // The rewrite is the message of the ferret's `signal done`; one already kept with the run wins.
-    const draft =
-      (await this.ports.runs.readFile(id, DRAFT_FILE)) ??
-      (finished ? await this.ports.result(run.job.ferret).catch(() => undefined) : undefined);
-    if (draft === undefined) {
-      if (!finished) return run;
+    if (!finished) return run;
+    // The rewrite is the message of the ferret's `signal done`, masked before it is kept (fail closed: a rewrite that
+    // could not be checked for secrets is never kept).
+    let draft: string | undefined;
+    try {
+      draft = await this.ports.result(run.job.ferret);
+    } catch (error) {
+      if (error instanceof ResultUncheckedError)
+        return await this.settle(run, { status: 'failed', message: REWRITE_UNCHECKED });
+      draft = undefined;
+    }
+    if (draft === undefined)
       return await this.settle(run, {
         status: 'failed',
         message: `The ${mode === 'generate' ? 'writer' : 'clean-up'} ${status ?? 'ended'} without writing a prompt.`,
       });
-    }
     const checked = checkRewrite(draft, await this.shown(id));
-    // A rewrite still being written does not parse yet: wait for the ferret to finish before judging it.
-    if (!checked.ok)
-      return finished ? await this.settle(run, { status: 'failed', message: `${checked.message}.` }) : run;
+    if (!checked.ok) return await this.settle(run, { status: 'failed', message: `${checked.message}.` });
     const given = (await this.ports.runs.readFile(id, ROUGH_FILE))?.trim() ?? '';
     // A clean-up with nothing on file compares the rewrite to itself; a generate had no prompt to build on.
     const before = given === '' && mode === 'clean-up' ? checked.prompt : given;
