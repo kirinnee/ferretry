@@ -10,6 +10,7 @@ import type { V4Paths } from '../v4/layout.ts';
 import type { V5Writer } from '../v5/write.ts';
 import type { NotCarried, StepReport } from '../report.ts';
 import { accessStep } from './access.ts';
+import { agendaStep } from './agenda.ts';
 import { ferretsStep } from './ferrets.ts';
 import { harnessHomesStep } from './harness-homes.ts';
 import { terminalsStep } from './terminals.ts';
@@ -90,20 +91,7 @@ export const STEPS: readonly Step[] = [
     },
     'the Board state schema (@ferretry/plugin-board/contract)',
   ),
-  pending(
-    {
-      id: 'asks',
-      title: 'Asks and agenda (asks, answers, notices, seen)',
-      owner: ['core-asks', 'plugin-agenda'],
-      reads: [
-        'state/sessions/<sid>/{agenda,agenda-seen,agenda-replies}.json',
-        'state/sessions/<sid>/agenda-history.jsonl',
-      ],
-      sealed: [],
-      notCarried: [{ what: 'pending agenda change journals', why: 'applied or dropped by v4 before it stopped' }],
-    },
-    'the Asks and Agenda state schemas (asks get v5 global ids through one old-to-new map that also rewrites card and agenda links, M6)',
-  ),
+  agendaStep,
   pending(
     {
       id: 'projects',
