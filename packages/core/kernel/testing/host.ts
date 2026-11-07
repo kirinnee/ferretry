@@ -19,6 +19,7 @@ import type {
   HookDecision,
   PortToken,
 } from '../contract/define.ts';
+import { judgeLoosening } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse, finalised, headersFrom, queryFrom } from '../contract/http.ts';
 import type {
@@ -496,7 +497,7 @@ async function start(world: World): Promise<TestHost> {
         if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== JSON.stringify(before ?? null))
           return { kind: 'conflict' };
         const prior = before === undefined ? undefined : def.schema.safeParse(before);
-        const sentences = def.loosens(prior?.success === true ? prior.data : undefined, checked.data);
+        const sentences = judgeLoosening(def, prior?.success === true ? prior.data : undefined, checked.data);
         const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
         if (sentences.length > 0 && !judged(manifest.id, path, false, sentences))
           return { kind: 'held', etag, id: `${path}@held`, sentences };
@@ -515,7 +516,9 @@ async function start(world: World): Promise<TestHost> {
           return { kind: 'conflict' };
         const prior = before === undefined ? undefined : def.schema.safeParse(before);
         const defaults = def.schema.safeParse({});
-        const sentences = prior?.success === true && defaults.success ? def.loosens(prior.data, defaults.data) : [];
+        // as the real port: judged even with no defaults (`after` undefined), a throwing judgement held
+        const sentences =
+          prior?.success === true ? judgeLoosening(def, prior.data, defaults.success ? defaults.data : undefined) : [];
         const path = def.shape === 'file' ? key : `${key}/${name as string}.yaml`;
         if (sentences.length > 0 && !judged(manifest.id, path, true, sentences))
           return { kind: 'held', etag: 'absent', id: `${path}@held`, sentences };

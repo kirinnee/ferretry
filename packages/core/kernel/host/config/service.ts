@@ -41,6 +41,7 @@ import type {
   Log,
   StatePort,
 } from '../../contract/index.ts';
+import { judgeLoosening } from '../../contract/define.ts';
 import { StoreDamagedError } from '../state/errors.ts';
 import type { HostFs } from '../state/host-fs.ts';
 import { createStatePort } from '../state/state-port.ts';
@@ -627,7 +628,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
       const etag = digest(text);
       const before = settled.get(slot.path)?.evaluated.value;
       const loosens =
-        etag === settled.get(slot.path)?.evaluated.inEffect?.etag ? [] : def.loosens(before, checked.value);
+        etag === settled.get(slot.path)?.evaluated.inEffect?.etag ? [] : judgeLoosening(def, before, checked.value);
       const confirmed =
         writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false));
       if (loosens.length === 0 || confirmed) acknowledge(slot.path, text);
@@ -658,10 +659,9 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
         return { kind: 'refused', reason: 'conflict' };
       const current = settled.get(slot.path);
       const defaults = defaultsOf(def);
+      // A deletion is judged even with no defaults: `after` is then `undefined` (K5).
       const sentences =
-        current?.evaluated.inEffect === undefined || defaults === undefined
-          ? []
-          : def.loosens(current.evaluated.value, defaults);
+        current?.evaluated.inEffect === undefined ? [] : judgeLoosening(def, current.evaluated.value, defaults);
       const confirmed =
         writeOptions.confirmedLoosening === true || (sentences.length > 0 && askJudge(writeOptions, sentences, true));
       if (sentences.length === 0 || confirmed) acknowledgedRemovals.set(slot.path, options.clock.nowMs());

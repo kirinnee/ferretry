@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { z } from 'zod';
+import { defineConfig, type LoosensWithRemoval, neverLoosens } from '../../../contract/index.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { captureLog, configHarness, HOME, loginsDef, manualClock, updatesDef } from './support.ts';
@@ -141,5 +143,57 @@ describe('ConfigPort.write / remove: a plugin writes its own files through the o
       'apiKey: sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n',
     );
     expect(secret).toMatchObject({ kind: 'refused', reason: 'raw_secret' });
+  });
+});
+
+describe('EE a deletion with no schema defaults is judged too (K5)', () => {
+  const Budget = z.strictObject({ cap: z.number() });
+  const removalAware: LoosensWithRemoval<{ cap: number }> = (before, after) =>
+    before !== undefined && after === undefined ? ['removes the spending cap'] : [];
+  const capDef = defineConfig({ file: 'cap.yaml', schema: Budget, axis: 'configure', loosens: removalAware });
+  const oldStyle = defineConfig({
+    file: 'old.yaml',
+    schema: Budget,
+    axis: 'configure',
+    loosens: (_before, after) => (after.cap > 10 ? ['raises the cap'] : []),
+  });
+  const quiet = defineConfig({ file: 'quiet.yaml', schema: Budget, axis: 'configure', loosens: neverLoosens });
+
+  function harness() {
+    const fs = createMemoryHostFs();
+    const files = createConfigFiles({
+      home: HOME,
+      fs,
+      clock: manualClock(),
+      log: captureLog(),
+      binary: 'fy',
+      defs: [
+        { plugin: 'budget', def: capDef },
+        { plugin: 'budget', def: oldStyle },
+        { plugin: 'budget', def: quiet },
+      ],
+      judge: () => false,
+    });
+    return { files, port: files.port('budget') };
+  }
+
+  test('a removal its loosens names is held; a judgement that throws on the deletion is held too', async () => {
+    const { port } = harness();
+    await port.write(capDef, undefined, 'cap: 5\n');
+    expect(await port.remove(capDef, undefined)).toMatchObject({
+      kind: 'held',
+      sentences: ['removes the spending cap'],
+    });
+    await port.write(oldStyle, undefined, 'cap: 5\n');
+    expect(await port.remove(oldStyle, undefined)).toMatchObject({
+      kind: 'held',
+      sentences: ['Removing this file could not be judged, so it waits for the owner.'],
+    });
+  });
+
+  test('a removal that loosens nothing applies', async () => {
+    const { port } = harness();
+    await port.write(quiet, undefined, 'cap: 5\n');
+    expect(await port.remove(quiet, undefined)).toMatchObject({ kind: 'written' });
   });
 });

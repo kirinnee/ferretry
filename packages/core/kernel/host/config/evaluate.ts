@@ -19,6 +19,7 @@
  * Pure: the caller reads the file and the accepted record, and stores the next record.
  */
 import type { AnyConfigDef as ConfigDef } from './claims.ts';
+import { judgeLoosening } from '../../contract/define.ts';
 import { type ConfigIssue, checkConfigText } from './check.ts';
 
 /** What was put into effect for one file: the text, and its etag. */
@@ -117,7 +118,8 @@ export function evaluateConfig(input: EvaluateInput): EvaluatedConfig {
       return { state: 'absent', value: undefined, inEffect: undefined, issues: [], accepted: undefined };
     // A file that was in effect and is gone: a deletion, which is an edit to the defaults.
     const defaults = defaultsOf(def);
-    const sentences = defaults === undefined ? [] : def.loosens(previous.value, defaults);
+    // judged even with no defaults: `after` is `undefined`, so a deletion can be a loosening (K5)
+    const sentences = judgeLoosening(def, previous.value, defaults);
     if (sentences.length > 0) return kept('pending', previous, [], { etag: ABSENT_CONFIG_ETAG, sentences });
     return { state: 'absent', value: undefined, inEffect: undefined, issues: [], accepted: undefined };
   }
@@ -126,7 +128,7 @@ export function evaluateConfig(input: EvaluateInput): EvaluatedConfig {
   if (!checked.ok) return kept('invalid', previous, checked.issues);
   const etag = input.digest(disk.text);
   if (etag !== previous?.etag) {
-    const sentences = def.loosens(previous?.value, checked.value);
+    const sentences = judgeLoosening(def, previous?.value, checked.value);
     if (sentences.length > 0) return kept('pending', previous, [], { etag, sentences });
   }
   return {
