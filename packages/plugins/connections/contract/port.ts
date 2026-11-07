@@ -2,6 +2,7 @@
  * Connections' port (§2.3): the carriers this daemon publishes, for the screens and answers that name them (the
  * pairing mint, a member's join answer). Read-only: a carrier moves sealed bytes and can never mark a call local.
  */
+import type { ConnectionAdvertisement } from './advertisement.ts';
 import { defineEvent, definePort } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { CarrierKindSchema, type PublishedCarriers, type TunnelStatusView } from './wire.ts';
@@ -9,6 +10,8 @@ import { CarrierKindSchema, type PublishedCarriers, type TunnelStatusView } from
 export interface ConnectionsApi {
   /** What `GET /v1/carriers` answers now: current, never cached. */
   carriers(): PublishedCarriers;
+  /** Host-facing pairing reach; provenance is never inferred from the carrier list. */
+  advertisement(): ConnectionAdvertisement;
   tunnel(): Promise<TunnelStatusView>;
 }
 

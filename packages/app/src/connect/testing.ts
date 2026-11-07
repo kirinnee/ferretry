@@ -73,3 +73,11 @@ export function fakeCarrier(options: {
     },
   };
 }
+
+/**
+ * The shell's own session pieces, for a plugin's integration fixture: the real WebCrypto session crypto and the real
+ * `connect` / `pair` functions `src/main.tsx` binds, so a provider's suite drives the production path against a real
+ * daemon session layer rather than a fake of it.
+ */
+export { WebCryptoRelayCrypto } from '../session/webcrypto.ts';
+export { connector, pairOnLeg, pairOverCarriers } from './connector.ts';

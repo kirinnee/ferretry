@@ -1,12 +1,20 @@
-import { defineState, SessionModes } from '@ferretry/kernel/contract';
+import { SessionModes } from '@ferretry/kernel/contract';
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
-import { Credentials, StepUp } from '@ferretry/core-gate/contract';
+import { Credentials, GatePort, StepUp } from '@ferretry/core-gate/contract';
+import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import {
   ACCESS_WORDS,
   AccessPort,
   AUDIT,
   DevicesChanged,
-  DevicesFileSchema,
+  DevicesFile,
+  GrantAuditFile,
+  PairingRedirectsFile,
+  PasskeysFile,
+  StepUpStages,
+  PushFile,
+  PushKeysFile,
+  UnlocksFile,
   GUARD_NONE,
   NARROW,
   PUSH_SERVICE_HOSTS,
@@ -31,6 +39,8 @@ export default definePlugin({
   kinds: ['session-mode', 'credential-provider', 'view', 'command'],
   words: ACCESS_WORDS,
 
+  needs: { gate: GatePort },
+  uses: { connections: ConnectionsPort },
   provides: { access: AccessPort },
 
   actions: {
@@ -122,14 +132,6 @@ export default definePlugin({
         audit: { record: AUDIT.securityChanged },
         guard: GUARD_NONE,
       }),
-      route('POST /v1/push/seen', {
-        minimum: 'operator',
-        caller: 'person',
-        capability: USE.fleet,
-        noStore: true,
-        audit: SKIP_UNRECORDED,
-        guard: GUARD_NONE,
-      }),
       route('GET /v1/push/subscriptions', {
         minimum: 'operator',
         caller: 'person',
@@ -203,12 +205,15 @@ export default definePlugin({
 
   data: {
     state: [
-      defineState({ name: 'devices', path: 'devices.json', store: 'json', format: 1, schema: DevicesFileSchema }),
-      defineState({ name: 'passkeys', path: 'passkeys.json', store: 'json', format: 1 }),
-      defineState({ name: 'unlocks', path: 'unlocks.json', store: 'json', format: 1 }),
-      defineState({ name: 'push', path: 'push.json', store: 'json', format: 1 }),
+      DevicesFile,
+      PasskeysFile,
+      UnlocksFile,
+      PushFile,
       /** The VAPID key pair; the private half never leaves this file. */
-      defineState({ name: 'push-keys', path: 'push-keys.json', store: 'secret', format: 1, mode: 0o600 }),
+      PushKeysFile,
+      /** Device-grant and security changes, one line per axis, attributed to the actor (G150). */
+      GrantAuditFile,
+      PairingRedirectsFile,
     ],
     readModels: ['devices'],
     publishes: [DevicesChanged],
@@ -221,6 +226,7 @@ export default definePlugin({
       { hook: SessionModes, key: 'device' },
       { hook: SessionModes, key: 'pair' },
     ],
+    offers: [{ hook: StepUpStages }],
   },
 
   doctor: ['notifications'],
