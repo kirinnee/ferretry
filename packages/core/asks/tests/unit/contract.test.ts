@@ -4,6 +4,7 @@ import {
   AskAnswerSchema,
   AskDraftSchema,
   AskIdSchema,
+  AskOnScreenSchema,
   AsksConfigFile,
   AskSourceSchema,
 } from '../../contract/index.ts';
@@ -94,5 +95,23 @@ describe('the asks configuration file (today: attention.resurfaceAfterMinutes)',
   });
   test('never loosens: resurfacing is a reminder, not spend or authority', () => {
     expect(AsksConfigFile.loosens(undefined, { resurfaceAfterMinutes: 5 })).toEqual([]);
+  });
+});
+
+describe('AskOnScreen: what an ask’s renderer receives (the one home for the shape Agenda sends and Accounts reads)', () => {
+  const onScreen = { ref: { kind: 'task-plan', planId: 'p1' }, subject: 's', ferret: 'sess-1', ferretName: 'judson' };
+
+  test('names the ref, the ask’s words and WHO it is from; the project and the extra words are optional', () => {
+    expect(AskOnScreenSchema.safeParse(onScreen).success).toBe(true);
+    expect(AskOnScreenSchema.safeParse({ ...onScreen, why: 'w', context: 'c', projectId: 'p-9' }).success).toBe(true);
+  });
+
+  test('refuses an ask that names no ferret, no spoken name or no ref kind', () => {
+    const { ferret: _ferret, ...noFerret } = onScreen;
+    const { ferretName: _name, ...noName } = onScreen;
+    expect(AskOnScreenSchema.safeParse(noFerret).success).toBe(false);
+    expect(AskOnScreenSchema.safeParse(noName).success).toBe(false);
+    expect(AskOnScreenSchema.safeParse({ ...onScreen, ferret: '' }).success).toBe(false);
+    expect(AskOnScreenSchema.safeParse({ ...onScreen, ref: {} }).success).toBe(false);
   });
 });

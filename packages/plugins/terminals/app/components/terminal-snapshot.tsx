@@ -25,21 +25,16 @@
 
 import { Terminal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useLinkBehaviour } from '../../../browsers/app/features/browser/external-link.tsx';
-import { useLayoutMode } from '../../../layouts/app/hooks/use-layout-mode.ts';
-import { useStickToBottom } from '../../../conversation/app/hooks/use-stick-to-bottom.ts';
-import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { type DaemonSessionScope, daemonSessionKey } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { useDaemonFetch } from '@ferretry/app';
+import { useStickToBottom } from '@ferretry/app';
+import { JumpToLatest, useLayoutMode, useLinkBehaviour } from '@ferretry/app/ui';
+import { type DaemonConnection, type DaemonSessionScope, daemonSessionKey } from '../shell.ts';
 import { splitLinkedRuns } from '../lib/terminal-links.ts';
-import { JumpToLatest } from '../../../conversation/app/components/jump-to-latest.tsx';
 import {
   describeSnapshotError,
   fitFontPx,
   formatSnapshotAge,
   formatSnapshotClock,
   paneColumns,
-  readPaneSnapshot,
 } from './terminal-snapshot-model.ts';
 
 /** The `<pre>`'s horizontal padding (`px-3`), which the fitted text does not get to use. */
@@ -59,7 +54,8 @@ export interface TerminalSnapshotViewProps {
   tmuxSession?: string;
   /** Overridable so a test can drive the clock instead of waiting on it. */
   now?: () => number;
-  readSnapshot?: PaneSnapshotReader;
+  /** The daemon read: this half's client (`readPaneSnapshot`), supplied by the host, so a view never reaches a daemon itself. */
+  readSnapshot: PaneSnapshotReader;
   /** Changing this captures the pane now rather than at the next poll — the Console bumps it after a write. */
   refreshKey?: number;
   /** The pane's font, when the host draws it with something other than the theme's monospace stack. */
@@ -73,17 +69,11 @@ export const TerminalSnapshotView = ({
   scope,
   tmuxSession,
   now = Date.now,
-  readSnapshot: injectedReader,
+  readSnapshot,
   refreshKey = 0,
   fontFamily,
   live = false,
 }: TerminalSnapshotViewProps) => {
-  // Through the carrier router by default: a paired device has no bearer value of its own to read with.
-  const fetcher = useDaemonFetch();
-  const readSnapshot = useMemo<PaneSnapshotReader>(
-    () => injectedReader ?? ((daemon, scope) => readPaneSnapshot(daemon, scope, undefined, fetcher)),
-    [fetcher, injectedReader],
-  );
   const [text, setText] = useState('');
   // `stale` only ever turns true after a successful snapshot, so the initial
   // load cannot flash a "stale" chip before the first poll lands.

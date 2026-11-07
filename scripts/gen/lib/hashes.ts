@@ -113,6 +113,18 @@ export async function surfaceOf(_ws: Workspace, subsystem: LoadedSubsystem, toJs
 }
 
 /**
+ * The member surface of one package (§9.6): its member-table routes only, each with the JSON schema of the bodies it
+ * parses and answers. Undefined for a package with no member routes. Sorted by route key, so reordering declarations
+ * is not a change; nothing from the owner routes, the contract's other schemas or any consumed contract enters it.
+ */
+export function memberSurfaceOf(subsystem: LoadedSubsystem, toJsonSchema: ToJsonSchema): Json | undefined {
+  const routes = subsystem.manifest.actions?.memberRoutes ?? [];
+  if (routes.length === 0) return undefined;
+  const sorted = [...routes].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return { id: subsystem.manifest.id, memberRoutes: toStableJson(sorted, toJsonSchema) };
+}
+
+/**
  * Which packages each package consumes (§9.6): providers of its needs and uses, offerers of hooks it takes, the
  * registrar of each ask source it renders, and every contract its own files import.
  */
@@ -164,12 +176,15 @@ const INPUT_TARGETS = 'input.targets';
 export interface ContractHashes {
   readonly canonical: string;
   readonly effective: string;
+  /** Over the member-table routes only (§9.6); absent for a package with no member routes. */
+  readonly member?: string;
 }
 
 /** Folds canonical hashes into effective ones over the consumption graph (Tarjan SCCs, deterministic). */
 export function effectiveHashes(
   canonical: ReadonlyMap<string, string>,
   consumed: ReadonlyMap<string, ReadonlySet<string>>,
+  member: ReadonlyMap<string, string> = new Map(),
 ): ReadonlyMap<string, ContractHashes> {
   const ids = [...canonical.keys()].sort();
   let index = 0;
@@ -220,7 +235,12 @@ export function effectiveHashes(
   const result = new Map<string, ContractHashes>();
   for (const id of ids) {
     const own = canonical.get(id) as string;
-    result.set(id, { canonical: own, effective: sha256(`${own}\n${sccHash[sccOf.get(id) as number]}`) });
+    const surface = member.get(id);
+    result.set(id, {
+      canonical: own,
+      effective: sha256(`${own}\n${sccHash[sccOf.get(id) as number]}`),
+      ...(surface === undefined ? {} : { member: surface }),
+    });
   }
   return result;
 }

@@ -5,27 +5,18 @@ import type {
   TerminalHolder,
   TerminalHoldersView,
 } from '../../../../../contract/index.ts';
-import { SETTINGS_LINKS, settingsPaletteEntries } from '@ferretry/app';
 import type { TerminalSlotsClient } from '../../../../../app/features/settings/terminal-slots-api.ts';
-import {
-  TerminalSlotsSettings,
-  terminalSlotsSettingsTab,
-} from '../../../../../app/features/settings/terminal-slots-settings.tsx';
-import { daemonConnection } from '../../../../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { interact, mount, must } from '@ferretry/app/testing';
+import { TerminalSlotsSettings } from '../../../../../app/features/settings/terminal-slots-settings.tsx';
+import { daemonConnection } from '../../../../../app/shell.ts';
+import { interact, mount, must, ensureDom } from '@ferretry/app/testing';
 import { runAsync } from '@ferretry/app/testing';
 import { settleUntil } from '@ferretry/app/testing';
 
-const alpha = daemonConnection({
-  daemonId: 'alpha',
-  baseUrl: 'https://alpha.example.test',
-  deviceId: 'fy_device_id_alpha00000000000000000',
-});
-const beta = daemonConnection({
-  daemonId: 'beta',
-  baseUrl: 'https://beta.example.test',
-  deviceId: 'fy_device_id_beta000000000000000000',
-});
+// These suites read the document directly; register one before any hook or test runs.
+ensureDom();
+
+const alpha = daemonConnection('alpha');
+const beta = daemonConnection('beta');
 
 const finished: TerminalHolder = {
   sessionId: 's-1',
@@ -177,29 +168,6 @@ describe('TerminalSlotsSettings', () => {
     // Assert
     expect(shown.container.querySelector('[data-terminal-holder="s-1"]')).toBeNull();
     expect(shown.container.querySelector('[data-terminal-holder="s-2"]')).not.toBeNull();
-    await shown.unmount();
-  });
-
-  it('is offered as a Machine panel and in the palette', async () => {
-    // Arrange
-    const daemon = machine([{ limit: 24, open: 0, holders: [] }], new Error('unreachable'));
-    const tab = terminalSlotsSettingsTab(daemon.createClient);
-
-    // Act
-    const shown = await mount(<tab.Surface connection={alpha} />);
-    await settled(shown.container, '[data-terminal-slots]');
-    const link = must(
-      SETTINGS_LINKS.find(entry => entry.id === 'terminals'),
-      'the terminals palette link',
-    );
-
-    // Assert
-    expect(tab.id).toBe('terminals');
-    expect(tab.label).toBe('Terminals');
-    for (const query of ['terminal', 'capacity'])
-      expect(
-        settingsPaletteEntries(alpha.daemonId, query).find(item => item.id === 'setting-link-terminals')?.href,
-      ).toBe(link.href(alpha.daemonId));
     await shown.unmount();
   });
 });

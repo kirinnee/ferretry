@@ -261,7 +261,7 @@ export default implementDaemon(manifest, {
         frozenItem: async (id, item, version) => await catalogs.frozenItem(id, item, version),
       },
       publisher,
-      contractHash: () => kernel.contract.hash(),
+      contractHash: () => kernel.contract.hash('member'),
       audit,
       now,
     });
