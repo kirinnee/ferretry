@@ -43,7 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals and harness-homes have real conversions. The other steps remain `pending`, so the default conversion
+terminals, harness-homes and asks/agenda have real conversions. The other steps remain `pending`, so the default conversion
 still exits 3. Each step names what it waits for. Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
 
@@ -57,6 +57,16 @@ Declared files without a v5 schema are **not written**: moves, auto-resume, rest
 `formerNames` belongs to the pending Runtimes/Logins conversion, not the Ferrets callsign ledger. Card references,
 name counters, extra history artifacts and remaining config/state omissions are listed in `notCarried`. Frozen
 fork plans keep their original paths and fingerprints; changing their decision would invalidate replay checks.
+
+Agendas (every ferret's and the machine agenda) keep v5's per-ferret engine files. v5 reads ledger `version: 1`
+only and deleted v4's read-time upgrade, while v4 rewrote a board only on its next change, so many boards on disk are
+still unversioned or at 1–3. The step therefore reads each board with **v4.291.5's own engine, vendored verbatim**
+under `src/v4/agenda/engine` and `src/v4/agenda/protocol` (a header names the source commit; never edit, re-vendor),
+then applies the v4→v5 difference: `version` 4→1, the dropped `gate`/`gateAttached`/`gateAttachedChangedAt` fields,
+and a `replied` close (no longer a disposition) carried as `done` in the ledger, history and version snapshots. The
+history cursor is recomputed; version archives are copied and set to `user_version` 1. An unfinished v4 commit
+(`agenda-versions.pending.json`, `agenda-history.jsonl.pending`, a non-empty `agenda-changes.pending.json`) fails the
+step by name. `notifications.jsonl` yields only what v5 can meet again: an ask's own buzz and the owner's opens (seen).
 
 Harness files are copied unopened under `state/<claude-code|codex>/agent-homes/`: runtime UUID directories hold
 runtime-owned files; `_shared` holds each shared transcript pool (including Codex SQLite). Modes and times of these
