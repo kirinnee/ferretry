@@ -150,6 +150,18 @@ describe('direct carrier', () => {
     expect(h.layer.links[0]?.inbounds).toHaveLength(0);
     s.close();
   });
+  test('R64 the direct ready publishes the limits so no endpoint guesses: 65536 bytes, 32 credit, 8 sessions, 30 s', async () => {
+    const h = harness(),
+      s = h.make();
+    await s.open();
+    const ready = decodeFrame(h.sent[0] as Uint8Array);
+    if (!ready.ok) throw new Error(ready.reason);
+    expect(decodeControlMessage(ready.frame.payload)).toMatchObject({
+      t: 'ready',
+      limits: { maxFrameBytes: 65_536, creditWindowFrames: 32, maxSessions: 8, heartbeatSeconds: 30 },
+    });
+    s.close();
+  });
   test('R35 the Kernel final permit is pulled immediately before a socket write', async () => {
     const h = harness(),
       s = h.make();

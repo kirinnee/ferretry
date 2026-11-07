@@ -14,7 +14,13 @@ import {
 } from '@ferretry/kernel/wire';
 import { decodeControlMessage, encodeControlMessage, type ControlMessage } from '../../../daemon/lib/relay/control.ts';
 import { HOSTED_RELAY_BANDWIDTH_REASONS, hostedBandwidthReason } from '../../../daemon/lib/relay/bandwidth.ts';
-import { DaemonRelayConfigSchema } from '../../../daemon/lib/runtime/relay-config.ts';
+import {
+  ConfiguredRelayCarrierSchema,
+  DaemonRelayConfigSchema,
+  DISCOVERED_RELAY_CARRIER,
+} from '../../../daemon/lib/runtime/relay-config.ts';
+import { RELAY_CONNECT_DEADLINE_MS } from '../../../daemon/lib/relay/carrier.ts';
+import { chooseRelayCarrierSources } from '../../../daemon/lib/relay/discovery.ts';
 import { FakeSessions } from '../../support/sessions.ts';
 const relayCrypto = { randomBytes: (n: number) => new Uint8Array(n).fill(7) };
 const identity = {
@@ -168,7 +174,7 @@ describe('a carrier that survives a dropped rendezvous', () => {
     carrier.stop();
   });
 
-  it('should back off with each failed redial, never above the ceiling, and keep trying', () => {
+  it('R111 should back off with each failed redial, never above the ceiling, and keep trying, logging each', () => {
     // Arrange — the top of the jitter range, so the windows themselves are read off the delays.
     const { carrier, fake, clock, lines, socketAt } = redialingCarrier({ reconnectSeconds: 5 });
     carrier.start();
@@ -353,6 +359,25 @@ describe('a carrier that survives a dropped rendezvous', () => {
     socketAt(5).onclose?.({ code: 4432, reason: 'hosted relay per-daemon connection ceiling is reached' });
     should(clock.delays.at(-1)).equal(60_000);
     carrier.stop();
+  });
+
+  it('R142 should wait sixty to a hundred and twenty seconds after a 4432 before its next try', () => {
+    for (const [random, wait] of [
+      [0, 60_000],
+      [1, 120_000],
+    ] as const) {
+      const { carrier, clock, fake, socketAt } = redialingCarrier({}, random);
+      carrier.start();
+      socketAt(0).onopen?.(undefined);
+      socketAt(0).onclose?.({ code: 4432, reason: 'hosted relay per-daemon connection ceiling is reached' });
+      should(clock.delays.at(-1)).equal(wait);
+      // Nothing dials inside the wait, however the jitter fell.
+      clock.advance(wait - 1);
+      should(fake.sockets).have.length(1);
+      clock.advance(1);
+      should(fake.sockets).have.length(2);
+      carrier.stop();
+    }
   });
 
   it('R157 should wait for a spent relay data allowance to reset instead of redialling it', () => {
@@ -681,7 +706,7 @@ describe('a carrier that offers its last handover token to reclaim its own rende
     await until(() => (replacesOf(socket).length > 0 ? true : undefined), 'the claim');
   };
 
-  it('should claim without a token the first time, and offer the issued one only from the next socket', async () => {
+  it('R57 should claim without a token the first time, and offer the issued one only once its socket ended', async () => {
     const harness = redialingCarrier();
     harness.carrier.start();
     const first = harness.socketAt(0);
@@ -738,7 +763,7 @@ describe('a carrier that offers its last handover token to reclaim its own rende
     harness.carrier.stop();
   });
 
-  it('should drop the token once the rendezvous refuses a claim for any other reason', async () => {
+  it('R57 should drop the token once the rendezvous refuses a claim for any reason but 4409', async () => {
     const harness = redialingCarrier();
     harness.carrier.start();
     const first = harness.socketAt(0);
@@ -754,6 +779,26 @@ describe('a carrier that offers its last handover token to reclaim its own rende
 
     should(replacesOf(second)).deepEqual([TOKEN]);
     should(replacesOf(third)).deepEqual([undefined]);
+    harness.carrier.stop();
+  });
+
+  it('R60 should keep the token in memory only: never logged, never in status, sent only on its own socket', async () => {
+    const harness = redialingCarrier();
+    harness.carrier.start();
+    const first = harness.socketAt(0);
+    first.onopen?.(undefined);
+    await harness.claimOn(first, HANDING);
+    first.onclose?.({ code: 1006, reason: '' });
+    const second = redial(harness);
+    await challenge(second);
+
+    // The one place the token goes is the claim on this carrier's own next socket to the same rendezvous.
+    should(second.url).equal(first.url);
+    should(replacesOf(second)).deepEqual([TOKEN]);
+    const textSent = (socket: FakeSocket) => socket.sent.filter(data => typeof data === 'string').join('\n');
+    should(textSent(first) + textSent(second)).not.containEql(TOKEN);
+    should(harness.lines.join('\n')).not.containEql(TOKEN);
+    should(JSON.stringify(harness.carrier.status())).not.containEql(TOKEN);
     harness.carrier.stop();
   });
 
@@ -781,3 +826,41 @@ describe('a carrier that offers its last handover token to reclaim its own rende
 function session(): SessionId {
   return sessionIdFromBytes(new Uint8Array(16).fill(9))!;
 }
+
+describe('one redial cadence whatever the relay came from', () => {
+  it('R214 should give a configured relay and a discovered one the same schema defaults and the same redial cadence', () => {
+    const resolved = chooseRelayCarrierSources(
+      [ConfiguredRelayCarrierSchema.parse({ kind: 'relay', url: 'https://mine.example' }), DISCOVERED_RELAY_CARRIER],
+      { kind: 'available', relayUrl: 'https://hosted.example' },
+    );
+    if (resolved.kind !== 'resolved') throw new Error(resolved.reason);
+    const [mine, hosted] = resolved.sources;
+    if (mine?.kind !== 'configured' || hosted?.kind !== 'discovered') throw new Error('unexpected provenance');
+    // Same defaults, field for field, apart from the address itself.
+    should({ ...mine.config, url: '' }).deepEqual({ ...hosted.config, url: '' });
+
+    // And the same supervisor, fed the same failures, waits the same way for both.
+    const cadence = (relayConfig: typeof mine.config): number[] => {
+      const fake = fakeSockets();
+      const clock = fakeClock();
+      const carrier = new BunRelayCarrier({
+        config: relayConfig,
+        identity,
+        layer: new FakeSessions(),
+        socketFactory: fake.factory,
+        scheduler: clock.scheduler,
+        now: clock.now,
+        random: () => 1,
+      });
+      carrier.start();
+      for (let attempt = 0; attempt < 7; attempt += 1) {
+        fake.sockets[attempt]?.onclose?.({ code: 1006, reason: '' });
+        clock.advance(clock.delays.at(-1) ?? 0);
+      }
+      carrier.stop();
+      return clock.delays.filter(delay => delay !== RELAY_CONNECT_DEADLINE_MS);
+    };
+    should(cadence(mine.config)).deepEqual(cadence(hosted.config));
+    should(cadence(hosted.config)).deepEqual([0, 500, 1_000, 2_000, 4_000, 5_000, 5_000]);
+  });
+});

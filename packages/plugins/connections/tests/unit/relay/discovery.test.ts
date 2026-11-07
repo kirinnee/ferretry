@@ -133,7 +133,7 @@ describe('choosing the carrier', () => {
     should(chooseRelayCarrierSource(configured(), RELAY_DIRECTORY_NOT_ASKED).kind).equal('configured');
   });
 
-  it('R214 should resolve every ordinary relay entry in operator order and publish every dialled address', () => {
+  it('should resolve every ordinary relay entry in operator order and publish every dialled address', () => {
     const own = ConfiguredRelayCarrierSchema.parse({ kind: 'relay', url: 'https://mine.example' });
     const discovered = DiscoveredRelayCarrierSchema.parse({
       kind: 'relay',

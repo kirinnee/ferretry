@@ -69,7 +69,7 @@ describe('reading a stored preference', () => {
 });
 
 describe('CarrierPreferenceStore', () => {
-  test('keeps one preference per machine, on this device, and tells listeners which machine changed', () => {
+  test('R630 keeps one preference per machine, keyed by fingerprint on this device, and tells listeners which', () => {
     const storage = memory({ [CARRIER_PREFERENCE_KEY]: JSON.stringify({ [STUDIO]: 'webrtc' }) });
     const store = new CarrierPreferenceStore(storage);
     should(store.preference(STUDIO)).equal('webrtc');
@@ -104,6 +104,51 @@ describe('CarrierPreferenceStore', () => {
     unsubscribe();
     store.set(STUDIO, 'webrtc');
     should(heard).eql([LAPTOP, STUDIO, STUDIO]);
+  });
+
+  test('R630 choosing a preference reaches only this browser’s storage: no request and no socket to the daemon', () => {
+    const descriptors = ['fetch', 'WebSocket', 'XMLHttpRequest'].map(
+      name => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const,
+    );
+    const reached: string[] = [];
+    for (const [name] of descriptors)
+      Object.defineProperty(globalThis, name, {
+        configurable: true,
+        writable: true,
+        value: () => {
+          reached.push(name);
+          throw new Error(`${name} must not be used`);
+        },
+      });
+    try {
+      const storage = memory();
+      const store = new CarrierPreferenceStore(storage);
+      for (const preference of CARRIER_PREFERENCES) store.set(STUDIO, preference);
+      store.set(LAPTOP, 'tunnel');
+      should(store.preference(LAPTOP)).equal('tunnel');
+      should([...storage.values.keys()]).eql([CARRIER_PREFERENCE_KEY]);
+      should(reached).eql([]);
+    } finally {
+      for (const [name, descriptor] of descriptors)
+        if (descriptor === undefined) Reflect.deleteProperty(globalThis, name);
+        else Object.defineProperty(globalThis, name, descriptor);
+    }
+  });
+
+  test('R631 Relay is the default and Auto is only ever an explicit choice', () => {
+    should(DEFAULT_CARRIER_PREFERENCE).equal('relay');
+    // A device that never chose: nothing stored, an empty document, or an entry for another machine.
+    const seeds: Record<string, string>[] = [
+      {},
+      { [CARRIER_PREFERENCE_KEY]: '{}' },
+      { [CARRIER_PREFERENCE_KEY]: JSON.stringify({ [LAPTOP]: 'auto' }) },
+    ];
+    for (const seed of seeds) should(new CarrierPreferenceStore(memory(seed)).preference(STUDIO)).equal('relay');
+    should(carrierOrder(new CarrierPreferenceStore(memory()).preference(STUDIO))).eql(['relay']);
+    // Choosing Auto is what makes it Auto, and that choice is kept.
+    const storage = memory();
+    new CarrierPreferenceStore(storage).set(STUDIO, 'auto');
+    should(new CarrierPreferenceStore(storage).preference(STUDIO)).equal('auto');
   });
 
   test('reads an unknown stored value as Relay', () => {
