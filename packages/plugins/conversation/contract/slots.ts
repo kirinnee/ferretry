@@ -3,7 +3,7 @@
  * `panel(CONVERSATION_ROW_SLOT, { id })`; the chat mounts every panel contributed there once per transcript row, with
  * the row's entry in its props and the ferret as its `subject`. Conversation imports nothing of a contributor.
  *
- *   - `conversation.row` ........ beside a row of the transcript: Packs draws a ferret's Pack command as its card.
+ *   - `conversation.row` ........ beside a row of the transcript; the panel sees only {id, kind, text, at?, label?}, no tool calls.
  *   - `conversation.row-actions`  in an assistant message's footer: Voice offers "Read aloud" on the message.
  */
 

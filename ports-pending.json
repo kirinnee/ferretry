@@ -99,7 +99,8 @@
       "GAP(board): a card or board fence draws each card through the Board reference:& renderer; the mini board and the lane view of today are Board views",
       "GAP(browsers): ExternalLink and useLinkBehaviour keep the default (open in the reader's browser); the \"Open links in\" policy is the Browsers plugin's",
       "GAP(ferrets): StatusMark reads a structural view; SessionView is not in Ferrets' contract yet (plan Q0, C3 adds it)",
-      "live updates run on the polling fallback until the kernel serves /v1/bus and /v1/events (plan Q12)"
+      "live updates run on the polling fallback until the kernel serves /v1/bus and /v1/events (plan Q12)",
+      "GAP(packs): the conversation.row slot carries no tool calls, so Packs' Pack card (today reads entry.tools/sent) does not draw; adding masked tool calls to ConversationRowEntry is decided with the Packs slot contribution (its own security look)"
     ]
   },
   "pendingHalves": {

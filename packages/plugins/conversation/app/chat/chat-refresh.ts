@@ -672,8 +672,8 @@ export const transcriptEntriesFromLog = (
   }
   flush();
 
-  // A ferret's Pack commands are Packs' to draw: the row carries its tool calls, and Packs' `conversation.row` panel
-  // reads them from the entry (lead decision Q3).
+  // A row slot gets only {id, kind, text, at?, label?} (row-slots.tsx), so a ferret's Pack commands, which live in the
+  // tool calls of these entries, reach no `conversation.row` panel; the Pack card is a named GAP(packs).
   return projectDeliveries(projectRecords(records, now), clientName);
 };
 
