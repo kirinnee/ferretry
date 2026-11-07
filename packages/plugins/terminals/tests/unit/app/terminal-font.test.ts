@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { loadTerminalFont, terminalFontLoader } from '../../../app/components/terminal-font-loader.ts';
 import { TERMINAL_FONT_FACE, terminalFontFamily } from '../../../app/lib/terminal-font.ts';
 import { THEME_FAMILIES } from '@ferretry/app';
-import '@ferretry/app/testing';
+import { ensureDom } from '@ferretry/app/testing';
+
+// These suites read the document directly; register one before any hook or test runs.
+ensureDom();
 
 /**
  * WHY A TERMINAL DREW `b u n  d e v`, AND THE TWO THINGS THAT STOP IT.
@@ -17,9 +20,10 @@ import '@ferretry/app/testing';
  * pixel proof is the harness's terminal geometry pass; these are the two rules it rests on.
  */
 
-const srcDir = join(dirname(fileURLToPath(import.meta.url)), '../../src');
-const themes = readFileSync(join(srcDir, 'styles/themes.css'), 'utf8');
-const terminals = readFileSync(join(srcDir, 'components/web-terminals.css'), 'utf8');
+const here = dirname(fileURLToPath(import.meta.url));
+/** The themes are the shell's (`@ferretry/app`): this reads the stylesheet the app ships, not a copy of it. */
+const themes = readFileSync(join(here, '../../../../../app/src/styles/themes.css'), 'utf8');
+const terminals = readFileSync(join(here, '../../../app/components/web-terminals.css'), 'utf8');
 
 /** Every `--font-mono` a theme declares, base included. */
 const monoStacks = [...themes.matchAll(/--font-mono:\s*([^;]+);/gu)].map(match => (match[1] as string).trim());
@@ -124,7 +128,7 @@ describe('loading the bundled face in a browser', () => {
     });
     try {
       // A fresh copy of the module: the shipped loader is one load per page and may already have run.
-      const freshModule = '../../src/components/terminal-font-loader.ts?browser-face';
+      const freshModule = '../../../app/components/terminal-font-loader.ts?browser-face';
       const fresh = (await import(freshModule)) as {
         loadTerminalFont: () => Promise<void>;
       };

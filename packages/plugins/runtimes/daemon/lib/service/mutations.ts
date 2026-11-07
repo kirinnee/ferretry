@@ -74,7 +74,7 @@ export class FleetMutationRefusal extends Error {
 // lowered once, at {@link deriveAccountChange}, and every function below reads the lowered shape.
 type ComponentInput = LoweredHarness<WireComponentInput>;
 
-/** Every change to ONE login: Logins stages and applies them (`ctx.needs.logins.changes`); Runtimes only carries a removal's runtimes. */
+/** Every change to ONE login: Logins stages and applies them (`ctx.needs.loginChanges`); Runtimes only carries a removal's runtimes. */
 export type LoginAccountChange = Extract<
   WireAccountChange,
   {

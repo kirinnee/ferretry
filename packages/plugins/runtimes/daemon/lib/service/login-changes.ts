@@ -1,5 +1,5 @@
 /**
- * Every `credential.*` change is Logins' to stage and apply (`ctx.needs.logins.changes`): Runtimes names the intent
+ * Every `credential.*` change is Logins' to stage and apply (`ctx.needs.loginChanges`): Runtimes names the intent
  * in Logins' words and carries only what Logins cannot see — the runtimes on a login. Nothing here derives a login
  * file, and a secret never passes through: a `login.add` carries the variables the caller sent (plain values or
  * `${secret:NAME}` references, as today) and a `login.env` the same, with `{ keep: true }` for a value held back.
@@ -8,7 +8,23 @@
  */
 import type { LoginChange, LoginChangeError } from '@ferretry/plugin-logins/contract';
 import type { CatalogRefusalCode } from '../../../contract/index.ts';
-import type { LoginAccountChange } from './mutations.ts';
+import { listed } from './catalog.ts';
+import type { LoginAccountChange, LoginRemoval } from './mutations.ts';
+
+/**
+ * What a removal's move did to the runtimes, in a sentence: "alpha moved to login b and gamma was removed". Said when
+ * the move landed but the login then was not removed, so a person is never told "nothing happened".
+ */
+export function movedSentence(change: LoginRemoval): string {
+  const byTarget = new Map<string, string[]>();
+  for (const [name, to] of Object.entries(change.switchRuntimes ?? {}))
+    byTarget.set(to, [...(byTarget.get(to) ?? []), name]);
+  const parts = [...byTarget].map(([to, names]) => `${listed(names)} moved to login ${to}`);
+  const removed = [...new Set(change.removeRuntimes ?? [])];
+  if (removed.length > 0) parts.push(`${listed(removed)} ${removed.length === 1 ? 'was' : 'were'} removed`);
+  if (change.defaultRuntime !== undefined) parts.push(`the default runtime is now ${change.defaultRuntime}`);
+  return parts.join('; ');
+}
 
 /** The Logins change a `credential.*` change stands for. */
 export function loginChangeOf(change: LoginAccountChange): LoginChange {

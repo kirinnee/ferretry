@@ -1,7 +1,8 @@
 /**
  * `contract-graph` (§2.4, §7.9): the contract import graph has a cycle, a core contract imports a plugin contract, or
  * a plugin contract imports another plugin's contract outside the allowed edges (Usage → Logins for `LoginId`, Packs →
- * Runtimes for `RuntimeId`, Access → Connections for the published carriers a pairing answer carries; any other edge
+ * Runtimes for `RuntimeId`, Access → Connections for the published carriers a pairing answer carries, Board → Conversation
+ * as a reference.catalog provider (optional use); any other edge
  * needs the lead).
  */
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
@@ -14,6 +15,7 @@ export const ALLOWED_PLUGIN_EDGES: ReadonlySet<string> = new Set([
   'access→connections',
   // Lead-approved optional use: Catalogs shares pairing's advertised address and directory facts (P80).
   'catalogs→connections',
+  'board→conversation', // reference.catalog provider (lead ruling 2026-11-07: providers take Conversation as optional uses)
 ]);
 
 export function contractEdges(edges: readonly ImportEdge[]): Map<string, Set<string>> {

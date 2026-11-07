@@ -1,19 +1,17 @@
 import { describe, expect, it } from 'bun:test';
+import { daemonConnection, daemonSessionScope } from '../../../app/shell.ts';
+import { DaemonCallError, FY_REQUEST_ID_HEADER } from '@ferretry/app';
 import {
   applyOutput,
   EMPTY_OUTPUT,
-  PROCESS_OUTPUT_HELD_MAX,
-} from '../../../../layouts/app/features/workspace/use-session-processes.ts';
-import { daemonConnection } from '../../../../../core/ferrets/app/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { DaemonResponseError } from '../../../../runtimes/app/lib/runtime-models.ts';
-import {
   formatElapsed,
   formatMemory,
   groupProcesses,
   listSessionProcesses,
   liveProcessCount,
   PROCESS_CHANGED_TEXT,
+  PROCESS_OUTPUT_HELD_MAX,
+  PROCESS_ROUTES,
   PROCESSES_FORBIDDEN_TEXT,
   processElapsedText,
   processErrorText,
@@ -31,12 +29,33 @@ import {
   TERMINAL_ONLY,
   WATCH_TESTS,
 } from '../../support/app/session-processes.ts';
+import manifest from '../../../manifest.ts';
 
-const daemon = daemonConnection({ daemonId: 'proc-daemon', baseUrl: 'https://proc.example.test', deviceId: 'd' });
+const daemon = daemonConnection('proc-daemon');
 const scope = daemonSessionScope(daemon, 'agent-session');
 
-const json = (body: unknown, status = 200): Response =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+interface Call {
+  readonly route: string;
+  readonly init: {
+    readonly params?: Record<string, string>;
+    readonly query?: Record<string, string>;
+    readonly headers?: Record<string, string>;
+    readonly body?: unknown;
+  };
+}
+
+/** A client that records every call by route key and answers the scripted body (or throws a scripted refusal). */
+const answering = (answer: unknown) => {
+  const calls: Call[] = [];
+  const client = {
+    call: async <T>(route: string, init: Call['init'] = {}): Promise<T> => {
+      calls.push({ route, init });
+      if (answer instanceof Error) throw answer;
+      return answer as T;
+    },
+  };
+  return { calls, client };
+};
 
 describe('grouping the process list', () => {
   const groups = groupProcesses(ALL_PROCESSES);
@@ -117,15 +136,15 @@ describe('words for time and size', () => {
 
 describe('what a failure says', () => {
   it('names the grant when the daemon refuses with 403', () => {
-    expect(processErrorText(new DaemonResponseError(403, 'forbidden'))).toBe(PROCESSES_FORBIDDEN_TEXT);
+    expect(processErrorText(new DaemonCallError(403, 'forbidden', 'forbidden'))).toBe(PROCESSES_FORBIDDEN_TEXT);
     expect(PROCESSES_FORBIDDEN_TEXT).toBe(
       'This device can’t see this ferret’s processes. Allow Terminals for it in Settings › Devices.',
     );
   });
 
   it('says nothing was stopped when the process changed under the request', () => {
-    expect(processErrorText(new DaemonResponseError(409, 'changed', 'process_changed'))).toBe(PROCESS_CHANGED_TEXT);
-    expect(processErrorText(new DaemonResponseError(409, 'something else', 'other'))).toBe('something else');
+    expect(processErrorText(new DaemonCallError(409, 'process_changed', 'changed'))).toBe(PROCESS_CHANGED_TEXT);
+    expect(processErrorText(new DaemonCallError(409, 'other', 'something else'))).toBe('something else');
   });
 
   it('passes any other failure’s own message', () => {
@@ -135,60 +154,82 @@ describe('what a failure says', () => {
 });
 
 describe('the client', () => {
-  it('lists, addressing the session’s processes route and parsing the answer', async () => {
-    const calls: { url: string; method: string }[] = [];
-    const list = await listSessionProcesses(daemon, scope, async (url, init) => {
-      calls.push({ url: String(url), method: init?.method ?? 'GET' });
-      return json(ALL_PROCESSES);
-    });
-    expect(calls).toEqual([{ url: 'https://proc.example.test/v1/ferrets/agent-session/processes', method: 'GET' }]);
+  it('lists, addressing the session’s processes route by key and parsing the answer', async () => {
+    const { calls, client } = answering(ALL_PROCESSES);
+    const list = await listSessionProcesses(client, daemon, scope);
+    expect(calls).toEqual([{ route: PROCESS_ROUTES.list, init: { params: { ferretId: 'agent-session' } } }]);
     expect(list.processes).toHaveLength(6);
+  });
+
+  it('calls only routes the terminals manifest declares', () => {
+    const declared = new Set((manifest.actions?.routes ?? []).map(each => each.key));
+    for (const route of Object.values(PROCESS_ROUTES)) expect(declared.has(route)).toBe(true);
   });
 
   it('refuses an answer for another session or one that does not parse', async () => {
     await expect(
-      listSessionProcesses(daemon, scope, async () => json({ ...ALL_PROCESSES, sessionId: 'someone-else' })),
+      listSessionProcesses(answering({ ...ALL_PROCESSES, sessionId: 'someone-else' }).client, daemon, scope),
     ).rejects.toThrow();
-    await expect(listSessionProcesses(daemon, scope, async () => json({ nope: true }))).rejects.toThrow();
+    await expect(listSessionProcesses(answering({ nope: true }).client, daemon, scope)).rejects.toThrow();
   });
 
-  it('turns an error status into a DaemonResponseError carrying the code', async () => {
-    const error = await listSessionProcesses(daemon, scope, async () =>
-      json({ error: 'no', code: 'process_changed' }, 409),
+  it('refuses a scope belonging to another daemon before anything is sent', async () => {
+    const { calls, client } = answering(ALL_PROCESSES);
+    const other = daemonConnection('other-daemon');
+    await expect(listSessionProcesses(client, other, scope)).rejects.toThrow(
+      'terminal scope must belong to the requested daemon',
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it('passes the shell client’s refusal through, carrying the code', async () => {
+    const error = await listSessionProcesses(
+      answering(new DaemonCallError(409, 'process_changed', 'no')).client,
+      daemon,
+      scope,
     ).catch((cause: unknown) => cause);
-    expect(error).toBeInstanceOf(DaemonResponseError);
-    expect((error as DaemonResponseError).status).toBe(409);
-    expect((error as DaemonResponseError).code).toBe('process_changed');
+    expect(error).toBeInstanceOf(DaemonCallError);
+    expect((error as DaemonCallError).status).toBe(409);
+    expect((error as DaemonCallError).code).toBe('process_changed');
+  });
+
+  it('answers as the cancel when the read was cancelled while in flight', async () => {
+    const cancel = new AbortController();
+    const read = listSessionProcesses(answering(ALL_PROCESSES).client, daemon, scope, cancel.signal);
+    cancel.abort();
+    await expect(read).rejects.toThrow();
   });
 
   it('reads the tail first, then everything after the last end', async () => {
-    const urls: string[] = [];
-    const reader = async (url: RequestInfo | URL) => {
-      urls.push(String(url));
-      return json(outputAnswer('100.1', 'hi'));
-    };
-    await readSessionProcessOutput(daemon, scope, '100.1', undefined, reader);
-    await readSessionProcessOutput(daemon, scope, '100.1', 4096, reader);
-    expect(urls).toEqual([
-      'https://proc.example.test/v1/ferrets/agent-session/processes/100.1/output',
-      'https://proc.example.test/v1/ferrets/agent-session/processes/100.1/output?after=4096',
+    const { calls, client } = answering(outputAnswer('100.1', 'hi'));
+    await readSessionProcessOutput(client, daemon, scope, '100.1', undefined);
+    await readSessionProcessOutput(client, daemon, scope, '100.1', 4096);
+    expect(calls).toEqual([
+      {
+        route: PROCESS_ROUTES.output,
+        init: { params: { ferretId: 'agent-session', processId: '100.1' }, query: {} },
+      },
+      {
+        route: PROCESS_ROUTES.output,
+        init: { params: { ferretId: 'agent-session', processId: '100.1' }, query: { after: '4096' } },
+      },
     ]);
   });
 
   it('stops with a POST and no body, carrying a request id', async () => {
-    const seen: { url: string; init: RequestInit | undefined }[] = [];
-    const result = await stopSessionProcess(daemon, scope, '100.1', async (url, init) => {
-      seen.push({ url: String(url), init });
-      return json({ processId: '100.1', signalled: 3 });
-    });
+    const { calls, client } = answering({ processId: '100.1', signalled: 3 });
+    const result = await stopSessionProcess(client, daemon, scope, '100.1');
     expect(result.signalled).toBe(3);
-    expect(seen[0]?.url).toBe('https://proc.example.test/v1/ferrets/agent-session/processes/100.1/stop');
-    expect(seen[0]?.init?.method).toBe('POST');
-    expect(seen[0]?.init?.body).toBeUndefined();
+    expect(calls[0]?.route).toBe(PROCESS_ROUTES.stop);
+    expect(calls[0]?.init.params).toEqual({ ferretId: 'agent-session', processId: '100.1' });
+    expect(calls[0]?.init.body).toBeUndefined();
+    expect(calls[0]?.init.headers?.[FY_REQUEST_ID_HEADER]).toBeDefined();
   });
 
   it('refuses a process id that is not one the daemon mints', async () => {
-    await expect(stopSessionProcess(daemon, scope, '../etc', async () => json({}))).rejects.toThrow();
+    const { calls, client } = answering({});
+    await expect(stopSessionProcess(client, daemon, scope, '../etc')).rejects.toThrow();
+    expect(calls).toEqual([]);
     expect(DEV_SERVER_PARENT.id).toBe('200.2');
   });
 });

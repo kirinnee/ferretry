@@ -8,6 +8,30 @@ import { restrictSpawn } from '../../../host/permissions.ts';
 const readFd = promisify(read);
 const writeFd = promisify(write);
 
+const READ_RETRY_MS = 10;
+const READ_ATTEMPTS = 500;
+
+/**
+ * Reads `length` bytes from a pipe fd the spawn handed back. Those fds are the daemon's end of a non-blocking pipe, so
+ * a read that runs ahead of the child answers EAGAIN ("nothing yet") rather than waiting: that is the pipe working,
+ * and the reader's job is to ask again until the child has written. Anything else is a real failure.
+ */
+async function readFully(fd: number, length: number): Promise<Buffer> {
+  const buffer = Buffer.alloc(length);
+  let have = 0;
+  for (let attempt = 0; attempt < READ_ATTEMPTS && have < length; attempt += 1) {
+    try {
+      const { bytesRead } = await readFd(fd, buffer, have, length - have, null);
+      if (bytesRead === 0) break;
+      have += bytesRead;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EAGAIN') throw error;
+      await new Promise(resolve => setTimeout(resolve, READ_RETRY_MS));
+    }
+  }
+  return buffer.subarray(0, have);
+}
+
 describe('OO spawn: extra pipes, pid and stderr streaming; worker exit', () => {
   test('fds 3 and 4 are pipes the daemon holds the other end of; stderr streams; closePipes is once', async () => {
     const spawn = restrictSpawn('browsers', ['sh'], bunSpawn({ PATH: process.env.PATH ?? '/usr/bin:/bin' }));
@@ -17,9 +41,7 @@ describe('OO spawn: extra pipes, pid and stderr streaming; worker exit', () => {
     expect(child.pipes).toHaveLength(2);
     const [toChild, fromChild] = child.pipes as [number, number];
     await writeFd(toChild, Buffer.from('ping'));
-    const buffer = Buffer.alloc(4);
-    const { bytesRead } = await readFd(fromChild, buffer, 0, 4, null);
-    expect(buffer.subarray(0, bytesRead).toString()).toBe('ping');
+    expect((await readFully(fromChild, 4)).toString()).toBe('ping');
     expect(await new Response(child.stderr).text()).toBe('hello\n');
     expect(await child.exited).toBe(0);
     child.closePipes();
