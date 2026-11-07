@@ -22,7 +22,7 @@ import {
   utf8Bytes,
 } from '../../../host/session/index.ts';
 import { fixture, pairedDevice, serving, settle, TestClient } from './harness.ts';
-import { relayCrypto } from './identities.ts';
+import { relayCrypto, stubbedCrypto } from './identities.ts';
 
 const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -314,6 +314,71 @@ describe('the session layer: flow control', () => {
     expect(client.end?.code).toBe(4430);
   });
 
+  test('R555 two sessions on one connection share one seal queue and keep independent credit', async () => {
+    let active = 0;
+    let peak = 0;
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const started = new Promise<void>(resolve => {
+      entered = resolve;
+    });
+    const fx = await fixture({
+      crypto: stubbedCrypto({
+        seal: async (key, nonce, aad, plaintext) => {
+          if (JSON.parse(new TextDecoder().decode(plaintext)).t !== 'res')
+            return relayCrypto.seal(key, nonce, aad, plaintext);
+          active += 1;
+          peak = Math.max(peak, active);
+          entered();
+          try {
+            await held;
+            return await relayCrypto.seal(key, nonce, aad, plaintext);
+          } finally {
+            active -= 1;
+          }
+        },
+      }),
+    });
+    const connection = fx.layer.connection('relay' as CarrierKey);
+    const clients: TestClient[] = [];
+    try {
+      for (let index = 0; index < 2; index += 1) {
+        const client = TestClient.on(connection);
+        await client.handshake(fx.daemonId);
+        await client.auth(await pairedDevice(fx.device, `device-${index}`));
+        clients.push(client);
+      }
+      const [first, second] = clients as [TestClient, TestClient];
+      await first.send(req(1));
+      await started;
+      await second.send(req(1));
+      await wait(60);
+      expect(peak).toBe(1);
+      release();
+      await first.pump();
+      await second.pump();
+      expect(first.last('res')?.['id']).toBe(1);
+      expect(second.last('res')?.['id']).toBe(1);
+      // Exhaust only the first session. Its waiting payload must not block the second session's seal.
+      for (let id = 2; id <= CREDIT_WINDOW_FRAMES; id += 1) await first.send(req(id));
+      await first.pump();
+      expect(first.records.filter(record => record['t'] === 'res')).toHaveLength(CREDIT_WINDOW_FRAMES - 2);
+      await second.send(req(2));
+      await second.pump();
+      expect(second.last('res')?.['id']).toBe(2);
+      first.credit(16);
+      await first.pump();
+      expect(first.last('res')?.['id']).toBe(CREDIT_WINDOW_FRAMES);
+      expect(peak).toBe(1);
+    } finally {
+      release();
+      fx.layer.close();
+    }
+  });
+
   test('R555 the daemon seals only what the peer credited: a full window waits for credit', async () => {
     const fx = await fixture();
     const { client } = await serving(fx);
@@ -590,6 +655,40 @@ describe('the session layer: requests', () => {
     expect(client.records.length).toBe(before);
     expect(client.end).toEqual({ code: 4400, reason: 'what it was about to send changed before it left' });
   });
+
+  for (const change of ['body', 'status', 'header value', 'header order'] as const) {
+    test(`R516 R517 a same-object late answer changing its ${change} after sealing is withheld`, async () => {
+      const fx = await fixture();
+      const plain = {
+        status: 200,
+        headers: new Map([
+          ['a', '1'],
+          ['b', '2'],
+        ]),
+        body: 'private output',
+      };
+      fx.dispatch = async () => ({ ...plain, late: () => plain });
+      const { client } = await serving(fx);
+      try {
+        const before = client.records.length;
+        await client.send(req(1));
+        // Queue and seal the original answer without pulling it from the carrier yet.
+        await wait(60);
+        if (change === 'body') plain.body = 'withheld';
+        else if (change === 'status') plain.status = 403;
+        else if (change === 'header value') plain.headers.set('a', 'changed');
+        else {
+          plain.headers.delete('a');
+          plain.headers.set('a', '1');
+        }
+        await client.pump();
+        expect(client.records.length).toBe(before);
+        expect(client.end).toEqual({ code: 4400, reason: 'what it was about to send changed before it left' });
+      } finally {
+        fx.layer.close();
+      }
+    });
+  }
 
   test('R515 an unchanged late publication passes its permit and is sent', async () => {
     const fx = await fixture();
