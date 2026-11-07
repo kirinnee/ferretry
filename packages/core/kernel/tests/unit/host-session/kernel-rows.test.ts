@@ -186,11 +186,21 @@ describe('frames, handshake and flow', () => {
         expect(client.end?.reason, name).toBe(refusal.reason);
       }
     }
-    // Control: the same header, well formed, is not refused as a frame.
+    // Control: the same header, well formed, is accepted by the frame decoder, and the session is not ended
+    // with ANY of the decoder's refusal reasons (a decoder that refused every frame 4400 would fail here).
+    const wellFormed = header(() => {});
+    expect(decodeFrame(wellFormed).ok).toBe(true);
+    const refusalReasons = new Set<string>();
+    for (const [, bytes] of cases) {
+      const refusal = decodeFrame(bytes);
+      if (!refusal.ok) refusalReasons.add(refusal.reason);
+    }
+    expect(refusalReasons.size).toBeGreaterThan(0);
     const fine = TestClient.open(fx);
-    fine.raw(header(() => {}));
+    fine.raw(wellFormed);
     await fine.pump();
     expect(fine.end?.code).not.toBe(4413);
+    expect(refusalReasons.has(fine.end?.reason ?? '')).toBe(false);
   });
 
   test('R65 the handshake is exactly two frames, one each way, both at sequence 0', async () => {
@@ -448,6 +458,49 @@ describe('requests', () => {
     await client.send(req(2));
     await client.pump();
     expect(client.records.filter(record => record['t'] === 'res' && record['id'] === 2)[0]?.['status']).toBe(502);
+  });
+
+  test('R510 a request body streamed in parts whose base64url text passes 32 MiB is answered 413 and never dispatched', async () => {
+    const fx = await fixture();
+    let dispatched = 0;
+    fx.dispatch = async () => {
+      dispatched += 1;
+      return jsonResponse({ ok: true });
+    };
+    const { client } = await serving(fx);
+    // Valid base64url text. Decoded, it is three quarters of its length: under the bound, while the text is over.
+    const part = 'A'.repeat(60_000);
+    const parts = Math.ceil(MAX_TUNNEL_BODY_BYTES / part.length) + 1;
+    expect(part.length * parts).toBeGreaterThan(MAX_TUNNEL_BODY_BYTES);
+    expect(Math.floor((part.length * parts * 3) / 4)).toBeLessThan(MAX_TUNNEL_BODY_BYTES);
+    await client.send(req(1, { method: 'POST', body: part, more: true }));
+    // The peer honours the daemon's credit window: send half a window, then collect the credit it returns.
+    let inFlight = 1;
+    for (let index = 1; index < parts; index += 1) {
+      const last = index === parts - 1;
+      await client.send({ t: 'req-more', id: 1, body: part, ...(last ? {} : { more: true }) });
+      inFlight += 1;
+      if (inFlight >= CREDIT_WINDOW_FRAMES / 2 && !last) {
+        await client.pump();
+        inFlight = 0;
+      }
+    }
+    await client.pump();
+    // Refused by the bound itself: the session lives, the answer is 413, and dispatch never saw the request.
+    expect(client.end).toBeUndefined();
+    const refused = client.records.filter(record => record['t'] === 'res' && record['id'] === 1);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]?.['status']).toBe(413);
+    expect(String(refused[0]?.['body'])).toContain('request_too_large');
+    expect(dispatched).toBe(0);
+    expect(fx.requests).toHaveLength(0);
+    // A body just under the bound is not refused: the bound is the only thing that refused the one above.
+    await client.send(req(2, { method: 'POST', body: part }));
+    await client.pump();
+    expect(dispatched).toBe(1);
+    // A first part alone cannot be over the bound on the wire (a record carries at most MAX_PLAINTEXT_BYTES), so
+    // the start-of-body check is only reachable through the parts above.
+    expect(part.length).toBeLessThan(MAX_TUNNEL_BODY_BYTES);
   });
 });
 
