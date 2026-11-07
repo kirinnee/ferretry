@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { LayoutSchema, ThemeSchema } from '../../contract/index.ts';
+import {
+  BUILT_IN_LAYOUTS,
+  BUILT_IN_THEMES,
+  LayoutSchema,
+  LayoutSelectionSchema,
+  ThemeSchema,
+} from '../../contract/index.ts';
 import { fakeLayouts, layoutsConformance } from '../../contract/testing/index.ts';
 import manifest from '../../manifest.ts';
 
@@ -11,15 +17,19 @@ describe('layouts contract', () => {
     expect((await layoutsConformance(fakeLayouts)).ok).toBe(true);
   });
 
-  test('every layout and theme the manifest brings is a valid file', async () => {
+  test('every layout and theme the manifest brings is a valid file, and is the built-in the daemon serves', async () => {
     for (const layout of manifest.ui.layouts) {
       const parsed = LayoutSchema.parse(await read(layout.file));
       expect(parsed.id).toBe(layout.id);
+      expect(BUILT_IN_LAYOUTS.find(item => item.id === layout.id)).toEqual(parsed);
     }
     for (const theme of manifest.ui.themes) {
       const parsed = ThemeSchema.parse(await read(theme.file));
       expect(parsed.id).toBe(theme.id);
+      expect(BUILT_IN_THEMES.find(item => item.id === theme.id)).toEqual(parsed);
     }
+    expect(BUILT_IN_LAYOUTS.length).toBe(manifest.ui.layouts.length);
+    expect(BUILT_IN_THEMES.length).toBe(manifest.ui.themes.length);
   });
 
   test('reads are for any issued credential and ungoverned; every write is a person act on fleet.configure', () => {
@@ -32,5 +42,14 @@ describe('layouts contract', () => {
         expect(route.capability?.axis).toBe('configure');
       }
     }
+  });
+
+  test('an empty config/layout.yaml selects the default layout and theme with no overrides', () => {
+    expect(LayoutSelectionSchema.parse({})).toEqual({ layout: 'default', theme: 'default', overrides: {} });
+  });
+
+  test('a hand-written layout the app would refuse is refused here too (side.show is never, not none)', () => {
+    const bad = { ...BUILT_IN_LAYOUTS[0], side: { show: 'none', holds: 'ferret' } };
+    expect(LayoutSchema.safeParse(bad).success).toBe(false);
   });
 });
