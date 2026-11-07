@@ -137,8 +137,10 @@ function callerOf(context: RouteContext): CatalogCaller {
       : isAgentCaller(context)
         ? 'agents'
         : 'host';
-  // The same rule as listing secrets: the `secrets` capability's `use` axis for this caller.
-  return { id, mayListSecrets: context.governance?.decide(SECRETS_USE).allowed === true };
+  // Catalogs' secret-name picker is for a PERSON: a ferret through Catalogs is told no names, on a preview as on an
+  // install. Gate marks a ferret's call local and so ungoverned (always allowed), so the capability alone would let
+  // one through; the caller's kind is asked first. For a person it is the `secrets` capability's `use` axis.
+  return { id, mayListSecrets: !isAgentCaller(context) && context.governance?.decide(SECRETS_USE).allowed === true };
 }
 
 /**
