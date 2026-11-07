@@ -102,7 +102,19 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
       await place(def.path, `${JSON.stringify(parsed, null, 2)}\n`, def.mode ?? 0o600);
     },
     async jsonl(def, lines) {
-      const text = lines.map(line => JSON.stringify(def.schema.parse(line))).join('\n');
+      // Every v5 JSONL line is an object whose FIRST key is `"format": <n>` (the kernel's one-format rule,
+      // `packages/core/kernel/host/state/format.ts`): a line whose schema does not name `format` is stamped here, as
+      // the kernel's own append stamps it. A line that already carries its format is written as parsed.
+      const text = lines
+        .map(line => {
+          const parsed = def.schema.parse(line) as unknown;
+          const stamped =
+            typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) && !('format' in parsed)
+              ? { format: def.format, ...parsed }
+              : parsed;
+          return JSON.stringify(stamped);
+        })
+        .join('\n');
       await place(def.path, lines.length === 0 ? '' : `${text}\n`, def.mode ?? 0o600);
     },
     async stamped(def, body) {

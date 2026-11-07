@@ -149,7 +149,13 @@ test('keeps journal data and order, callsign claims, archive facts, worktrees, i
   const lines = (await readFile(join(f.to, 'state/ferrets/f1/history.jsonl'), 'utf8'))
     .trim()
     .split('\n')
-    .map(line => FerretHistoryEventSchema.parse(JSON.parse(line)));
+    // As the kernel reads a JSONL line: `format` first and exactly the declared one, then the body by its schema.
+    .map(line => {
+      const { format, ...body } = JSON.parse(line) as Record<string, unknown>;
+      expect(Object.keys(JSON.parse(line) as object)[0]).toBe('format');
+      expect(format).toBe(1);
+      return FerretHistoryEventSchema.parse(body);
+    });
   expect(lines.map(event => event.sequence)).toEqual([1, 2]);
   expect(lines[1]?.data).toEqual(events[1]?.data);
   for (const file of ['names.json', 'archive.json', 'worktrees.json', 'forks/plan1.json']) {
