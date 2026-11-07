@@ -987,3 +987,49 @@ test('the witness hands a kept proof as its holder, claims it once, and re-verif
   expect(await witness.verifyStoredProof(kept, CHALLENGE)).toBe(false);
   release?.();
 });
+
+// ─── `credentials:device` watch (Gate's optional push of a generation move; today's `recheckAll`) ──────────────────
+
+test('a device grant change fires the credentials watch once, and a cancelled watch hears nothing', async () => {
+  const w = world();
+  const device = await paired(w);
+  await w.runtime.ready();
+  let heard = 0;
+  const cancel = w.runtime.credentials.watch(() => {
+    heard += 1;
+  });
+  const generation = w.runtime.credentials.generation();
+  const narrow = async (use: boolean) =>
+    await w.runtime.handler('PATCH /v1/pair/devices/:deviceId/grants')(
+      call({
+        host: true,
+        method: 'PATCH',
+        path: `/v1/pair/devices/${device.deviceId}/grants`,
+        params: { deviceId: device.deviceId },
+        body: JSON.stringify({ terminal: { use } }),
+      }),
+    );
+  expect((await narrow(false)).status).toBe(200);
+  expect(heard).toBe(1);
+  expect(w.runtime.credentials.generation()).toBeGreaterThan(generation);
+  // The new standing is already readable when the listener hears.
+  const standing = w.runtime.credentials.standing(device.deviceId as HolderId, w.clock.now());
+  expect(typeof standing === 'object' && standing.grants.terminal.use).toBe(false);
+  cancel();
+  expect((await narrow(true)).status).toBeLessThan(500);
+  expect(heard).toBe(1);
+});
+
+test('a throwing credentials watcher never stops another from hearing', async () => {
+  const w = world();
+  const device = await paired(w);
+  let heard = 0;
+  w.runtime.credentials.watch(() => {
+    throw new Error('a listener fails');
+  });
+  w.runtime.credentials.watch(() => {
+    heard += 1;
+  });
+  expect((await revoke(w, device.deviceId)) === 200).toBe(true);
+  expect(heard).toBeGreaterThanOrEqual(1);
+});

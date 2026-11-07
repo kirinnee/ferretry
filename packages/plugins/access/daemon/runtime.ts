@@ -17,6 +17,7 @@ import {
   type StepUpWitness,
 } from '@ferretry/core-gate/contract';
 import {
+  type Cancel,
   errorResponse,
   type HolderId,
   type KernelPorts,
@@ -132,6 +133,8 @@ export class AccessRuntime {
   #wired: Promise<Wired> | undefined;
   #current: Wired | undefined;
   #generation = 0;
+  /** Whoever asked to hear of a generation move (Gate re-asks every open stream of the kind, G149). */
+  readonly #watchers = new Set<() => void>();
   /** Every device revoked or expired by this run: `revoked` to Gate, never `unknown` (a device id is never reminted). */
   readonly #revoked = new Set<string>();
 
@@ -291,7 +294,7 @@ export class AccessRuntime {
       clientName: host.clientName,
       changed: () => {
         this.#connections.recheckAll();
-        this.#generation += 1;
+        this.#moved();
       },
     });
     const guard = gateGuard(gate, host.clientName);
@@ -312,6 +315,7 @@ export class AccessRuntime {
     ledger.write = async unlocks => {
       this.#generation += 1;
       await write(unlocks);
+      this.#notify();
     };
     return ledger;
   }
@@ -331,8 +335,25 @@ export class AccessRuntime {
     );
   }
 
-  #changed(device: string, change: 'paired' | 'revoked' | 'expired' | 'grants'): void {
+  /** The standing of some device moved: bump the generation, then tell the watchers (the new standing is readable). */
+  #moved(): void {
     this.#generation += 1;
+    this.#notify();
+  }
+
+  /** Each watcher hears once per move; one that throws never stops the others. */
+  #notify(): void {
+    for (const watcher of [...this.#watchers]) {
+      try {
+        watcher();
+      } catch {
+        // A listener's failure is its own; the others still hear of the move.
+      }
+    }
+  }
+
+  #changed(device: string, change: 'paired' | 'revoked' | 'expired' | 'grants'): void {
+    this.#moved();
     const parsed = PairedDeviceIdSchema.safeParse(device);
     if (parsed.success) this.#deps.kernel.events.publish(DevicesChanged, { device: parsed.data, change });
   }
@@ -405,7 +426,7 @@ export class AccessRuntime {
   };
 
   /** `credentials:device`: what Gate asks about a device, synchronously, from memory. */
-  readonly credentials: CredentialProvider<DeviceHolderStanding> = {
+  readonly credentials: CredentialProvider<DeviceHolderStanding> & { watch(listener: () => void): Cancel } = {
     standing: (holder, now) => {
       const wired = this.#current;
       if (wired === undefined) return 'unknown';
@@ -420,6 +441,13 @@ export class AccessRuntime {
       };
     },
     generation: () => this.#generation,
+    /** Today's `recheckAll` on a grant change, pushed: each generation move tells the listener once, until cancelled. */
+    watch: listener => {
+      this.#watchers.add(listener);
+      return () => {
+        this.#watchers.delete(listener);
+      };
+    },
   };
 
   /** `step-up:device`: Gate's `StepUpWitness`, answered by Access's own step-up service (fail closed while none is open). */
