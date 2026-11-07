@@ -9,7 +9,10 @@
     "src/worker/service-worker.ts"
   ],
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./ui": "./src/ui/index.ts",
+    "./worker": "./src/worker/extensions.ts",
+    "./testing": "./src/connect/testing.ts"
   },
   "scripts": {
     "dev": "vite",

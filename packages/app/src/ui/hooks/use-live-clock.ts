@@ -143,7 +143,7 @@ export const createTranscriptHoldController = (
   let mayRearmCappedSelection = false;
   let cancelledTouchPointerDuringGesture = false;
   const activePointerIds = new Set<number>();
-  let activeLegacyTouches = 0;
+  let activeTouchEventTouches = 0;
   let heldSince: number | null = null;
   let holding = false;
   let capReached = false;
@@ -246,7 +246,7 @@ export const createTranscriptHoldController = (
     mayRearmCappedSelection = false;
     cancelledTouchPointerDuringGesture = false;
     activePointerIds.clear();
-    activeLegacyTouches = 0;
+    activeTouchEventTouches = 0;
     if (!settleRelease) {
       clearReleaseSettle();
       recompute();
@@ -276,7 +276,7 @@ export const createTranscriptHoldController = (
 
   const onPointerDown = (event: TranscriptHoldEventLike): void => {
     activePointerIds.add(event.pointerId ?? 0);
-    activeLegacyTouches = 0;
+    activeTouchEventTouches = 0;
     beginPointer(event.pointerType ?? '');
   };
 
@@ -301,14 +301,14 @@ export const createTranscriptHoldController = (
 
   const onTouchStart = (event: TranscriptHoldEventLike): void => {
     if (activePointerIds.size > 0) return;
-    activeLegacyTouches = Math.max(1, event.touches?.length ?? activeLegacyTouches + 1);
+    activeTouchEventTouches = Math.max(1, event.touches?.length ?? activeTouchEventTouches + 1);
     beginPointer('touch');
   };
 
   const onTouchEnd = (event: TranscriptHoldEventLike): void => {
     if (activePointerIds.size > 0) return;
-    activeLegacyTouches = event.touches?.length ?? Math.max(0, activeLegacyTouches - 1);
-    if (activeLegacyTouches > 0) {
+    activeTouchEventTouches = event.touches?.length ?? Math.max(0, activeTouchEventTouches - 1);
+    if (activeTouchEventTouches > 0) {
       recompute();
       return;
     }
@@ -324,12 +324,12 @@ export const createTranscriptHoldController = (
     }
     if (pointerDown) {
       activePointerIds.clear();
-      activeLegacyTouches = 0;
+      activeTouchEventTouches = 0;
       endPointer(pointerType);
       return;
     }
     activePointerIds.clear();
-    activeLegacyTouches = 0;
+    activeTouchEventTouches = 0;
     recompute();
   };
 
@@ -343,7 +343,7 @@ export const createTranscriptHoldController = (
     mayRearmCappedSelection = false;
     cancelledTouchPointerDuringGesture = false;
     activePointerIds.clear();
-    activeLegacyTouches = 0;
+    activeTouchEventTouches = 0;
     heldSince = null;
     capReached = false;
     publish(false);

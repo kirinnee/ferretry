@@ -15,7 +15,7 @@ function layoutsClient(answer: () => unknown) {
   const calls: string[] = [];
   const listeners = new Set<(payload: unknown) => void>();
   const client: ShellPluginClient = {
-    call: async <A,>(route: string) => {
+    call: async <A>(route: string) => {
       calls.push(route);
       return answer() as A;
     },
@@ -27,7 +27,14 @@ function layoutsClient(answer: () => unknown) {
       throw new Error('no sockets here');
     },
   };
-  return { client, calls, listeners, wake: () => listeners.forEach(listener => listener({ layout: 'owner' })) };
+  return {
+    client,
+    calls,
+    listeners,
+    wake: () => {
+      for (const listener of listeners) listener({ layout: 'owner' });
+    },
+  };
 }
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -47,12 +54,13 @@ describe('the daemon layout channel', () => {
     await settle();
     expect(asked).toEqual([`d1/${LAYOUTS_PLUGIN}`]);
     expect(fake.calls).toEqual(['GET /v1/layouts/current']);
-    expect(layouts.current('d1')?.density).toBe('compact');
+    expect(layouts.current('d1')?.layout.density).toBe('compact');
+    expect(layouts.current('d1')?.theme).toMatchObject({ id: 'default', base: 'studio' });
 
     current = { layout: { ...owner, density: 'comfortable' }, theme };
     fake.wake();
     await settle();
-    expect(layouts.current('d1')?.density).toBe('comfortable');
+    expect(layouts.current('d1')?.layout.density).toBe('comfortable');
   });
 
   test('sends nothing while Layouts may not run on that daemon, and drops the layout once it is blocked', async () => {
@@ -67,7 +75,7 @@ describe('the daemon layout channel', () => {
     allowed = true;
     layouts.watch('d1');
     await settle();
-    expect(layouts.current('d1')?.id).toBe('owner');
+    expect(layouts.current('d1')?.layout.id).toBe('owner');
 
     allowed = false;
     layouts.watch('d1');

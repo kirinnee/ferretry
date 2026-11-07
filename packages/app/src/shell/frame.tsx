@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DEFAULT_LAYOUT } from '../layout/layout.ts';
 import { CommandBar } from '../ui/command-bar.tsx';
+import { useAppViewport } from '../ui/hooks/use-app-viewport.ts';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../ui/palette-shortcut.ts';
 import { deviceLayoutSource, placeSource } from './command-sources.ts';
 import { daemonTitle } from '../daemons/daemon-list.ts';
@@ -207,6 +208,8 @@ export function Frame() {
   const openBar = useCallback(() => setBar(current => ({ open: true, signal: current.signal + 1 })), []);
   const closeBar = useCallback(() => setBar(current => ({ ...current, open: false })), []);
   useCommandBarShortcut(openBar);
+  // The visible height (`--app-h`) and the keyboard-open attribute every screen lays itself out by, as today.
+  useAppViewport();
   return (
     <div className={`fy-frame fy-frame--nav-${plan.nav.side}`} data-layout={plan.layoutId}>
       <Nav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />

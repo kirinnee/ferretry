@@ -42,7 +42,8 @@ const daemon: PairedDaemon = {
 };
 
 /** A dial that is never called in these suites: nothing here opens a session. */
-const dialOf = (name: string): CarrierDial => Object.assign(() => ({ send() {}, sendText() {}, close() {} }), { label: name });
+const dialOf = (name: string): CarrierDial =>
+  Object.assign(() => ({ send() {}, sendText() {}, close() {} }), { label: name });
 
 const ports = (): ConnectPorts => ({
   crypto: {} as ConnectPorts['crypto'],

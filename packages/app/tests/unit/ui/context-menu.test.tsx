@@ -137,7 +137,7 @@ describe('ContextMenu', () => {
     });
 
     const [plain, hinted] = menu.rows();
-    expect(plain?.dataset['menuKey']).toBe('plain');
+    expect(plain?.dataset.menuKey).toBe('plain');
     expect(plain?.querySelector('[data-menu-hint]')).toBeNull();
     expect(hinted?.querySelector('[data-menu-hint]')?.textContent).toBe('Says what it does');
     await menu.unmount();

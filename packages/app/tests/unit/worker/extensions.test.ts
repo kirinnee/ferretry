@@ -20,7 +20,8 @@ function globals(windows: WorkerWindow[] = []) {
     now: () => 7,
     registration: {
       scope: `${ORIGIN}/`,
-      showNotification: async (title, options) => void shown.push({ title, ...(options.body ? { body: options.body } : {}) }),
+      showNotification: async (title, options) =>
+        void shown.push({ title, ...(options.body ? { body: options.body } : {}) }),
       getNotifications: async () => [],
     },
     clients: {
@@ -48,7 +49,13 @@ describe('the worker extension point', () => {
   test('a push goes to each extension in order until one handles it', async () => {
     const seen: string[] = [];
     const host = new WorkerExtensionHost([
-      defineWorkerExtension({ id: 'access', push: () => (seen.push('access'), false) }),
+      defineWorkerExtension({
+        id: 'access',
+        push: () => {
+          seen.push('access');
+          return false;
+        },
+      }),
       defineWorkerExtension({
         id: 'agenda',
         push: async (push, scope) => {
@@ -57,7 +64,13 @@ describe('the worker extension point', () => {
           return true;
         },
       }),
-      defineWorkerExtension({ id: 'board', push: () => (seen.push('board'), true) }),
+      defineWorkerExtension({
+        id: 'board',
+        push: () => {
+          seen.push('board');
+          return true;
+        },
+      }),
     ]);
     const g = globals();
     await host.push({ payload: { title: 'Card moved' } }, extensionScope(g.value));
@@ -106,7 +119,10 @@ describe('the worker extension point', () => {
   test('a tap nobody claims opens the app itself, never what the notification named', async () => {
     const host = new WorkerExtensionHost([]);
     const g = globals();
-    await host.notificationClick({ tag: 't', data: { url: 'https://evil.example.test/' }, action: '' }, extensionScope(g.value));
+    await host.notificationClick(
+      { tag: 't', data: { url: 'https://evil.example.test/' }, action: '' },
+      extensionScope(g.value),
+    );
     expect(g.opened).toEqual([`${ORIGIN}/app/`]);
   });
 

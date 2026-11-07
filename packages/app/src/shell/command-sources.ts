@@ -41,9 +41,7 @@ export function placeSource(input: PlaceSourceInput): CommandBarSource {
       seen.add(key);
       const daemonLess = screen.path.startsWith('/');
       if (!daemonLess && input.daemon === undefined) continue;
-      const href = daemonLess
-        ? input.routes.href(screen, {})
-        : input.routes.href(screen, {}, input.daemon as string);
+      const href = daemonLess ? input.routes.href(screen, {}) : input.routes.href(screen, {}, input.daemon as string);
       go(`screen-${key}`, screen.label, href, { keywords: [screen.id, screen.plugin], resting: true });
     }
     go('device-settings', 'This device’s settings', DEVICE_SETTINGS_HREF, { keywords: ['theme', 'appearance'] });

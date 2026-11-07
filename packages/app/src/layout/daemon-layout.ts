@@ -1,5 +1,6 @@
 import { CurrentLayoutSchema, LayoutsChanged } from '@ferretry/plugin-layouts/contract';
 import type { ShellPluginClient } from '../client/daemon-client.ts';
+import { type ThemeItem, ThemeItemSchema } from '../theme/tokens.ts';
 import type { Layout } from './layout.ts';
 
 /**
@@ -22,10 +23,16 @@ export interface PackageClients {
   packageClient(daemon: string, packageId: string): ShellPluginClient | undefined;
 }
 
+/** What the daemon serves as the owner's: the layout, and the theme when its tokens are ones the shell reads. */
+export interface OwnerLayout {
+  readonly layout: Layout;
+  readonly theme: ThemeItem | undefined;
+}
+
 interface Watch {
   readonly client: ShellPluginClient;
   readonly cancel: () => void;
-  layout: Layout | undefined;
+  current: OwnerLayout | undefined;
   /** Bumped per read, so an older answer that lands late cannot replace a newer one. */
   generation: number;
 }
@@ -46,9 +53,9 @@ export class DaemonLayouts {
     };
   };
 
-  /** The owner's layout on this daemon, as last read; `undefined` until read, or when Layouts may not run there. */
-  current(daemon: string): Layout | undefined {
-    return this.#watches.get(daemon)?.layout;
+  /** The owner's layout and theme on this daemon, as last read; `undefined` until read, or when Layouts may not run there. */
+  current(daemon: string): OwnerLayout | undefined {
+    return this.#watches.get(daemon)?.current;
   }
 
   /**
@@ -62,12 +69,12 @@ export class DaemonLayouts {
     if (known !== undefined) {
       known.cancel();
       this.#watches.delete(daemon);
-      if (known.layout !== undefined) this.#changed();
+      if (known.current !== undefined) this.#changed();
     }
     if (client === undefined) return;
     const watch: Watch = {
       client,
-      layout: undefined,
+      current: undefined,
       generation: 0,
       cancel: client.subscribe(LayoutsChanged, () => void this.#read(daemon, watch)),
     };
@@ -87,15 +94,19 @@ export class DaemonLayouts {
   async #read(daemon: string, watch: Watch): Promise<void> {
     watch.generation += 1;
     const generation = watch.generation;
-    let layout: Layout | undefined;
+    let current: OwnerLayout | undefined;
     try {
       const parsed = CurrentLayoutSchema.safeParse(await watch.client.call(CURRENT_ROUTE));
-      layout = parsed.success ? parsed.data.layout : undefined;
+      if (parsed.success) {
+        // The theme's token names and values are the shell's grammar: one it refuses is no theme, not no layout.
+        const theme = ThemeItemSchema.safeParse(parsed.data.theme);
+        current = { layout: parsed.data.layout, theme: theme.success ? theme.data : undefined };
+      }
     } catch {
-      layout = undefined;
+      current = undefined;
     }
     if (this.#watches.get(daemon) !== watch || watch.generation !== generation) return;
-    watch.layout = layout;
+    watch.current = current;
     this.#changed();
   }
 

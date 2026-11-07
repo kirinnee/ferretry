@@ -3,6 +3,7 @@ import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
 import type { RelayPairingOutcome, SessionDeviceClaim } from '../session/session-client.ts';
 import type { CarrierDial } from '../session/session-transport.ts';
 import type { SocketLike } from '../session/direct-dial.ts';
+import type { WebCryptoRelayCrypto } from '../session/webcrypto.ts';
 import type { PrivateKeyHandle, RelayCrypto } from '../session/wire/index.ts';
 import type { SurfaceEntry } from '../surfaces/registry.ts';
 
@@ -79,8 +80,8 @@ export interface PairDirectInput {
  * walk around the session.
  */
 export interface ConnectPorts {
-  /** The session layer's crypto (WebCrypto). */
-  readonly crypto: RelayCrypto;
+  /** The session layer's crypto (WebCrypto), with the device-key half Access mints and wraps its keys through. */
+  readonly crypto: RelayCrypto & Pick<WebCryptoRelayCrypto, 'generateDeviceKey' | 'deviceKeyHandle'>;
   /** WebCrypto itself, for Access to mint non-extractable Ed25519 keys. */
   readonly subtle: SubtleCrypto;
   /** IndexedDB, or `null` where the browser refuses it (a private window). Each owner opens `fy-<id>` only (§9.4). */
@@ -124,7 +125,7 @@ export function provideToShell<M extends Manifest>(
 }
 
 /** The `shell` section of a registry entry's app half, or `undefined` (none, or a skeleton half). */
-export function shellProvidesOf(entry: SurfaceEntry): ShellProvides | undefined {
+function shellProvidesOf(entry: SurfaceEntry): ShellProvides | undefined {
   const half = entry.app as Partial<ShellAppImplementation> | undefined;
   if (half === undefined || half.skeleton === true) return undefined;
   const provides = half.shell;

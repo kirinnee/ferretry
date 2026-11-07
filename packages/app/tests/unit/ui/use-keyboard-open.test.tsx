@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { KEYBOARD_ATTRIBUTE, keyboardOpenFromAttribute, useKeyboardOpen } from '../../../src/ui/hooks/use-keyboard-open.ts';
+import {
+  KEYBOARD_ATTRIBUTE,
+  keyboardOpenFromAttribute,
+  useKeyboardOpen,
+} from '../../../src/ui/hooks/use-keyboard-open.ts';
 import { interact, mount } from '../../support/dom.ts';
 
 const Probe = () => <span data-open={String(useKeyboardOpen())} />;

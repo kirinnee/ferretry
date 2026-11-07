@@ -10,7 +10,12 @@ const places: CommandBarSource = () => [
   { id: 'settings', group: 'Go to', label: 'Settings', keywords: ['theme'], run: () => ran.push('settings') },
 ];
 const layout: CommandBarSource = () => [
-  { id: 'nav-right', group: 'Layout on this device', label: 'Move the navigation to the right', run: () => ran.push('right') },
+  {
+    id: 'nav-right',
+    group: 'Layout on this device',
+    label: 'Move the navigation to the right',
+    run: () => ran.push('right'),
+  },
 ];
 
 describe('the command bar model', () => {

@@ -26,6 +26,7 @@ import { ShellRuntime } from './shell/runtime.ts';
 import type { KeyValueStore } from './storage/records.ts';
 import { preloadThemeFonts } from './theme/fonts.ts';
 import { ThemePreferenceStore } from './theme/preferences.ts';
+import { installPortraitLock } from './ui/lib/orientation-lock.ts';
 import './styles/index.css';
 import './ui/design-system.css';
 
@@ -65,7 +66,8 @@ const crypto = new WebCryptoRelayCrypto();
 const now = (): number => Date.now();
 const openSocket = (url: string): SocketLike => new WebSocket(url) as unknown as SocketLike;
 const after = (delayMs: number, run: () => void): void => void window.setTimeout(run, delayMs);
-const direct: DirectDial = target => directDial({ address: target.address, daemonId: target.daemon, openSocket, after });
+const direct: DirectDial = target =>
+  directDial({ address: target.address, daemonId: target.daemon, openSocket, after });
 
 const daemons = new DaemonList({
   storage,
@@ -84,7 +86,8 @@ const registered = registeredConnect(generated.surfaces, {
   daemons,
   pairDirect: pairOverDirect(crypto, direct),
 });
-for (const failure of registered.failures) console.warn(`${failure.plugin} could not set up its connect part: ${failure.reason}`);
+for (const failure of registered.failures)
+  console.warn(`${failure.plugin} could not set up its connect part: ${failure.reason}`);
 
 const runtime = new ShellRuntime({
   appVersion: generated.appVersion,
@@ -101,6 +104,8 @@ window.addEventListener('storage', () => {
   layouts.adopt();
 });
 preloadThemeFonts(themes.snapshot().family);
+// A phone held sideways gets today's portrait gate (the app is drawn for an upright phone).
+installPortraitLock(window, document);
 themes.subscribe(() => preloadThemeFonts(themes.snapshot().family));
 
 // The signed-release service worker (docs/pwa-release-signing.md), built to /sw.verified.js by
@@ -112,12 +117,6 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
 
 createRoot(host).render(
   <StrictMode>
-    <App
-      runtime={runtime}
-      themes={themes}
-      layouts={layouts}
-      browser={window}
-      scroll={new ScrollMemory(tabStore())}
-    />
+    <App runtime={runtime} themes={themes} layouts={layouts} browser={window} scroll={new ScrollMemory(tabStore())} />
   </StrictMode>,
 );

@@ -216,7 +216,10 @@ describe('the app shell', () => {
     const themes = new ThemePreferenceStore(storage);
     themes.setFamily('mission');
     const view = await mount(
-      <App runtime={runtime} themes={themes} layouts={new DeviceLayoutStore(storage)}
+      <App
+        runtime={runtime}
+        themes={themes}
+        layouts={new DeviceLayoutStore(storage)}
         browser={browser}
         scroll={new ScrollMemory(null)}
       />,
