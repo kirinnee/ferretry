@@ -16,7 +16,10 @@
  * above both.
  */
 import { z } from 'zod';
-import type { ProjectInfo } from './catalog.ts';
+/** A Project as the worktree join reads it: only its Git attachment (Projects owns the rest). */
+export interface ProjectInfo {
+  readonly git?: { readonly commonDirectory?: string } | undefined;
+}
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
 
 const Text = z.string().min(1);
@@ -329,7 +332,10 @@ export function unclearedRemovalBlockers(
  * A Project with no Git attachment matches nothing, which is how non-Git Projects stay outside this
  * surface: there is no worktree to join them to and no control to hide.
  */
-export function projectForWorktree(projects: readonly ProjectInfo[], commonDirectory: string): ProjectInfo | undefined {
+export function projectForWorktree<P extends ProjectInfo>(
+  projects: readonly P[],
+  commonDirectory: string,
+): P | undefined {
   if (commonDirectory.length === 0) return undefined;
   return projects.find(project => project.git?.commonDirectory === commonDirectory);
 }
