@@ -17,7 +17,7 @@
 
 import type { WardenActor, WardenActorCounts, WardenDayStats, WardenOutcome, WardenStatusView } from '../../wire.ts';
 
-import type { MetricChartPoint, MetricChartSeries } from '../../shell.ts';
+import type { MetricChartPoint, MetricChartSeries } from '@ferretry/app/ui';
 import { jevCost } from './warden-jev-line.ts';
 import { usd } from './warden-overview-model.ts';
 import { wardenPacedUntil } from './warden-status-model.ts';

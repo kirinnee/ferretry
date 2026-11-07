@@ -20,7 +20,7 @@ import { Segmented } from '../../shell/segmented.tsx';
 import { MetricSplit } from './analytics-cost-rows.tsx';
 import type { AnalyticsRequest } from './analytics-custom-query.tsx';
 import { type AnalyticsMachine, type MachineOutcome, machinesSummary, readEveryMachine } from './analytics-fanout.ts';
-import { AnalyticsMetricChart, type MetricChartPoint, type MetricChartSeries } from './analytics-metric-chart.tsx';
+import { AnalyticsMetricChart, type MetricChartPoint, type MetricChartSeries } from '@ferretry/app/ui';
 import {
   ANALYTICS_BUCKETINGS,
   ANALYTICS_RANGES,

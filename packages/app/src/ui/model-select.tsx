@@ -5,22 +5,36 @@
  * catalog. A native `<select>`, so a phone gets its own wheel and a screen reader its own list.
  *
  * The live session pickers (the composer's chip and Info › Runtime) are menus instead, because choosing
- * there is an action sent to a running harness; they group by the same tiers (`../lib/model-tiers.ts`).
+ * there is an action sent to a running harness; they group by the same tiers (`./model-tiers.ts`).
  */
-import type { LocalModels } from '../../contract/index.ts';
+import type { LocalModelsSnapshot } from './local-models-note.tsx';
 import { useId, useState } from 'react';
-import type { ClipboardWriter } from '../ui.ts';
-import type { PickerModel } from '../lib/picker-model.ts';
-import { localNote } from '../lib/local-models.ts';
-import { CUSTOM_MODEL_ID, contextWords, groupByTier } from '../lib/model-tiers.ts';
-import { LocalModelsNote } from './local-models-note.tsx';
+import type { ClipboardWriter } from './copy-button.tsx';
+import { CUSTOM_MODEL_ID, contextWords, groupByTier, type ModelTier } from './model-tiers.ts';
+import { LocalModelsNote, localNote } from './local-models-note.tsx';
 
 /** The option that reveals the custom id box. Not a model id: the grammar has no leading space. */
 const CUSTOM = ' custom';
 
+/** One model a login offers, as a model field lists it (a login's catalog entry: tier, window, efforts, fast mode). */
+export interface ModelChoice {
+  readonly id: string;
+  readonly available: boolean;
+  readonly label?: string;
+  readonly tier?: ModelTier;
+  readonly context?: number;
+  /** The reasoning efforts it takes; empty when it takes none. Absent when no catalog says. */
+  readonly efforts?: readonly string[];
+  readonly defaultEffort?: string;
+  /** Whether the CLI offers fast mode on it; absent when the daemon did not say. */
+  readonly fast?: boolean;
+  /** Installed on this machine, as the local server (Ollama) reported it, rather than listed by the catalog. */
+  readonly local?: true;
+}
+
 export interface ModelSelectProps {
   readonly id: string;
-  readonly models: readonly PickerModel[];
+  readonly models: readonly ModelChoice[];
   /** The model chosen; `""` means the login's default. */
   readonly value: string;
   readonly onChange: (value: string) => void;
@@ -33,16 +47,16 @@ export interface ModelSelectProps {
   readonly disabled?: boolean;
   readonly 'aria-describedby'?: string;
   /** What the daemon last read from a local server (Ollama), for a login whose catalog detects one. */
-  readonly local?: LocalModels | null;
+  readonly local?: LocalModelsSnapshot | null;
   /** The clipboard the note's copy button writes to; the browser's by default. */
   readonly write?: ClipboardWriter;
 }
 
-const nameOf = (models: readonly PickerModel[], id: string | null): string | undefined =>
+const nameOf = (models: readonly ModelChoice[], id: string | null): string | undefined =>
   id === null ? undefined : (models.find(model => model.id === id)?.label ?? id);
 
 /** One option's words: its name, then what a reader weighs it by. */
-const optionText = (model: PickerModel, defaultModel: string | null): string =>
+const optionText = (model: ModelChoice, defaultModel: string | null): string =>
   [
     model.label ?? model.id,
     model.id === defaultModel ? 'default' : undefined,

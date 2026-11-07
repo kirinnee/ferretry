@@ -18,7 +18,7 @@
 
 import type { AnalyticsAggregateResult, AnalyticsMeasure, AnalyticsMetric } from '../../../contract/index.ts';
 
-import type { MetricChartPoint, MetricChartSeries, MetricChartTone } from './analytics-metric-chart.tsx';
+import type { MetricChartPoint, MetricChartSeries, MetricChartTone } from '@ferretry/app/ui';
 import {
   type AnalyticsAggregateResponse,
   analyticsMetricMeasure,

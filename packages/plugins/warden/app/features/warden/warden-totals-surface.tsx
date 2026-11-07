@@ -7,7 +7,7 @@ import { useCallback, useMemo } from 'react';
 import { readView, type WardenPollOptions } from '../../hooks/use-warden-poll.ts';
 import { useWardenStatuses } from '../../hooks/use-warden-statuses.ts';
 import { useWardenClientFactory } from '../../lib/warden-client-context.tsx';
-import { type DaemonConnection, shellClock } from '../../shell.ts';
+import type { DaemonConnection } from '../../lib/machine.ts';
 import { WardenCombinedTotals } from './warden-combined-totals.tsx';
 import type { WardenMachine } from './warden-daemon-scope.ts';
 import type { WardenOverviewClientFactory } from './warden-overview-surface.tsx';
@@ -23,7 +23,7 @@ export interface WardenTotalsSurfaceProps {
 export function WardenTotalsSurface({
   machines,
   createClient: injected,
-  now = shellClock.nowMs,
+  now = Date.now,
   pollOptions = {},
 }: WardenTotalsSurfaceProps) {
   const routed = useWardenClientFactory();

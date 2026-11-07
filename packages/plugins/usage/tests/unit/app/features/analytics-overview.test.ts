@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import type { AnalyticsResponse } from '../../../../contract/index.ts';
 
 import {
-  analyticsAxisTicks,
   analyticsModelShares,
   analyticsMonthGlobs,
   analyticsOverview,
@@ -296,14 +295,6 @@ describe('splits and top sessions', () => {
 });
 
 describe('axis and formatting', () => {
-  it('picks round ticks from zero past the maximum', () => {
-    expect(analyticsAxisTicks(109.4)).toEqual([0, 50, 100, 150]);
-    expect(analyticsAxisTicks(3)).toEqual([0, 1, 2, 3]);
-    expect(analyticsAxisTicks(0.6)).toEqual([0, 0.2, 0.4, 0.6]);
-    expect(analyticsAxisTicks(0.7)).toEqual([0, 0.25, 0.5, 0.75]);
-    expect(analyticsAxisTicks(0)).toEqual([0, 1]);
-  });
-
   it('picks duration ticks of whole hours, minutes or seconds', () => {
     expect(durationAxisTicks(5 * 3600)).toEqual([0, 7_200, 14_400, 21_600]);
     expect(durationAxisTicks(600)).toEqual([0, 300, 600]);

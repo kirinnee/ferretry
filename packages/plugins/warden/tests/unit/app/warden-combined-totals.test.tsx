@@ -3,7 +3,7 @@ import { WardenCombinedTotals } from '../../../app/features/warden/warden-combin
 import { fakeWardenClient } from '../../support/app/clients.ts';
 import { combinedTodayTotals } from '../../../app/features/warden/warden-stats-model.ts';
 import { WardenTotalsSurface } from '../../../app/features/warden/warden-totals-surface.tsx';
-import { daemonConnection } from '../../../app/shell.ts';
+import { daemonConnection } from '../../../app/lib/machine.ts';
 import { interact, mount } from '@ferretry/app/testing';
 import { wardenStatus } from '../../support/app/warden.ts';
 
@@ -50,8 +50,8 @@ describe('WardenCombinedTotals', () => {
 
 describe('WardenTotalsSurface', () => {
   it('should read each daemon through its own connection and add the answers', async () => {
-    const ec2 = daemonConnection({ daemonId: 'daemon-ec2', baseUrl: 'https://ec2.example.test', deviceId: 'a' });
-    const mbp = daemonConnection({ daemonId: 'daemon-mbp', baseUrl: 'https://mbp.example.test', deviceId: 'b' });
+    const ec2 = daemonConnection({ daemonId: 'daemon-ec2' });
+    const mbp = daemonConnection({ daemonId: 'daemon-mbp' });
     const answers = new Map([
       ['daemon-ec2', today(7, 3)],
       ['daemon-mbp', today(2, 1)],

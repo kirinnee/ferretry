@@ -6,7 +6,7 @@
 import type { WardenStatusView } from '../../wire.ts';
 import { useState } from 'react';
 import { cn } from '../../ui.ts';
-import { AnalyticsMetricChart } from '../../shell.ts';
+import { AnalyticsMetricChart } from '@ferretry/app/ui';
 import { WardenActionStats } from './warden-action-stats.tsx';
 import { ActorMark } from './warden-chips.tsx';
 import {

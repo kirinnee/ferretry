@@ -14,7 +14,7 @@ import {
   wardenSummary,
   withLogin,
 } from '../../../app/features/warden/warden-settings-model.ts';
-import type { PickerAccount } from '../../../app/shell.ts';
+import type { PickerAccount } from '../../../app/lib/account-picker.ts';
 import { wardenConfig } from '../../support/app/warden.ts';
 
 /** Both layers: Jev in front of an investigation. */

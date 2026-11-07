@@ -202,50 +202,6 @@ export const daemonConnection = (input: DaemonConnectionInput): DaemonConnection
 export const daemonDisplayName = (connection: DaemonConnection & { readonly label?: string }): string =>
   connection.label?.trim() || connection.daemonName || connection.baseUrl;
 
-/** A pairing as the naming rules below read it: its name, its address, and when this browser made it. COPY. */
-type NamedPairing = DaemonConnection & { readonly label?: string; readonly pairedAt?: number };
-
-/**
- * Whether a NEWER pairing with the same name at the same address has replaced this one (today's `replacedPairing`,
- * `daemon-settings.tsx`). One address answers for one machine at a time, so two pairings that agree on both are one
- * machine paired twice — almost always because it was reset. It is only ever labelled, never removed behind the
- * owner's back. COPY.
- */
-export const replacedPairing = (connection: NamedPairing, paired: readonly NamedPairing[]): boolean =>
-  paired.some(
-    other =>
-      other.daemonId !== connection.daemonId &&
-      other.baseUrl === connection.baseUrl &&
-      daemonDisplayName(other) === daemonDisplayName(connection) &&
-      (other.pairedAt ?? 0) > (connection.pairedAt ?? 0),
-  );
-
-/** "3 Oct": the day a pairing was made, which is how a person remembers it. */
-const pairedDay = (pairedAt: number): string =>
-  new Date(pairedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-
-/**
- * {@link daemonDisplayName}, told apart from every other paired machine that would read the same — in words a person
- * can use, never the machine's fingerprint (G95; today's `distinctDaemonName`). Two machines on one host both call
- * themselves by its name, so a prompt naming "dev-box" could not say WHICH machine wants the passkey: a twin is
- * followed by its address, a pairing a newer one replaced is the old pairing, and two that still share an address are
- * told apart by the day each was paired. COPY.
- */
-export const distinctDaemonName = (connection: NamedPairing, paired: readonly NamedPairing[]): string => {
-  const name = daemonDisplayName(connection);
-  if (replacedPairing(connection, paired)) return `${name} (old pairing)`;
-  const twins = paired.filter(
-    other =>
-      other.daemonId !== connection.daemonId && daemonDisplayName(other) === name && !replacedPairing(other, paired),
-  );
-  if (twins.length === 0) return name;
-  const sharedAddress = name === connection.baseUrl || twins.some(other => other.baseUrl === connection.baseUrl);
-  if (!sharedAddress) return `${name} (${connection.baseUrl.replace(/^[a-z]+:\/\//u, '')})`;
-  return connection.pairedAt === undefined
-    ? `${name} (another pairing)`
-    : `${name} (paired ${pairedDay(connection.pairedAt)})`;
-};
-
 // ─── 3. bytes and keys (today: `relay/src/lib/binary.ts`, `crypto.ts`; spine-app-shell: `src/session/wire/`) ───
 
 /** Base64url without padding (spine-app-shell: `src/session/wire/binary.ts`). Held by `shell-grants.ts`. */

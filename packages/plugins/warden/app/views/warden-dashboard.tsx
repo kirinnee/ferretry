@@ -10,14 +10,15 @@ import { WardenReportDialog, type WardenReportDialogRequest } from '../features/
 import { WardenStrip } from '../features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../features/warden/warden-verdicts.tsx';
 import { useWardenStatus } from '../hooks/use-warden-status.ts';
-import { wardenClientFactory } from '../lib/warden-clients.ts';
-import { type DaemonConnection, useCurrentDaemon } from '../shell.ts';
+import { useCurrentDaemon } from '../hooks/use-warden-daemons.ts';
+import type { DaemonConnection } from '../lib/machine.ts';
+import { homeClientFactory } from '../lib/warden-clients.ts';
 import type { WardenVerdict } from '../wire.ts';
 
 export function createWardenStripPanel(client: PluginClient) {
   return function WardenStripPanel(_props: PanelProps) {
-    const connection = useCurrentDaemon();
-    const factory = useMemo(() => wardenClientFactory(connection, client), [connection]);
+    const connection = useCurrentDaemon(client);
+    const factory = useMemo(() => homeClientFactory(client), []);
     const read = useCallback(async (daemon: DaemonConnection) => await (await factory(daemon)).status(), [factory]);
     return <WardenStrip status={useWardenStatus(connection, read)} />;
   };
@@ -25,8 +26,8 @@ export function createWardenStripPanel(client: PluginClient) {
 
 export function createWardenVerdictsPanel(client: PluginClient) {
   return function WardenVerdictsPanel(_props: PanelProps) {
-    const connection = useCurrentDaemon();
-    const factory = useMemo(() => wardenClientFactory(connection, client), [connection]);
+    const connection = useCurrentDaemon(client);
+    const factory = useMemo(() => homeClientFactory(client), []);
     const [verdicts, setVerdicts] = useState<readonly WardenVerdict[]>([]);
     const [report, setReport] = useState<WardenReportDialogRequest | null>(null);
     useEffect(() => {

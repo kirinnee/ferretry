@@ -1,11 +1,24 @@
 import { describe, expect, test } from 'bun:test';
 import { useState } from 'react';
-import { ModelSelect } from '../../../app/components/model-select.tsx';
-import type { PickerModel } from '../../../app/lib/picker-model.ts';
-import { interact, mount, must } from '../support/dom.ts';
-import { localModelsFixture, PULL } from './support/local-models.ts';
+import { type ModelChoice, ModelSelect } from '../../../src/ui/model-select.tsx';
+import type { LocalModelsSnapshot } from '../../../src/ui/local-models-note.tsx';
+import { interact, mount, must } from '../../support/dom.ts';
 
-const MODELS: readonly PickerModel[] = [
+const PULL = 'ollama pull gpt-oss:20b';
+
+const SENTENCE = {
+  found: 'Ollama has 2 models installed on this machine.',
+  'not-running':
+    'Ollama is not running at http://127.0.0.1:11434. Start it (open the Ollama app, or run: ollama serve), then check again.',
+} as const;
+
+const localModelsFixture = (state: keyof typeof SENTENCE): LocalModelsSnapshot => ({
+  state,
+  message: SENTENCE[state],
+  pullCommand: PULL,
+});
+
+const MODELS: readonly ModelChoice[] = [
   { id: 'glm-5.3-flash', label: 'GLM-5.3-Flash', tier: 'fast', available: true, efforts: [] },
   { id: 'glm-5.3', label: 'GLM-5.3', tier: 'best', context: 1_000_000, available: true, efforts: ['low'] },
   { id: 'glm-old', label: 'GLM old', tier: 'balanced', available: false },
@@ -51,6 +64,9 @@ describe('ModelSelect', () => {
     expect(select.options[0]?.textContent).toBe('Login default (GLM-5.3)');
     expect(select.options[1]?.textContent).toBe('GLM-5.3 · default · 1M context');
     expect([...select.options].find(option => option.value === 'glm-old')?.disabled).toBe(true);
+    expect([...select.options].find(option => option.value === 'glm-old')?.textContent).toBe(
+      'GLM old · not on this login',
+    );
     expect([...select.options].some(option => option.textContent === 'Custom id…')).toBe(false);
     await screen.unmount();
   });
@@ -91,7 +107,7 @@ describe('ModelSelect', () => {
 });
 
 describe('ModelSelect · models installed on this machine', () => {
-  const INSTALLED: readonly PickerModel[] = [
+  const INSTALLED: readonly ModelChoice[] = [
     { id: 'gpt-oss:20b', label: 'gpt-oss:20b', tier: 'best', available: true, efforts: [], local: true },
     { id: 'qwen3-coder:30b', label: 'qwen3-coder:30b', available: true, efforts: [], local: true },
   ];

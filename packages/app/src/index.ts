@@ -151,6 +151,15 @@ export {
 
 // ─── routing ───────────────────────────────────────────────────────────────────────────────────────────────────────
 export { type NavigateOptions, type RouterController, useOptionalRouter, useRouter } from './router/router.tsx';
+// ─── other paired daemons, for a page that reads several (the Warden page) ───────────────────────────────────────
+export {
+  distinctDaemonName,
+  machineDisplayOrder,
+  reconcileMachineOrder,
+  replacedPairing,
+} from './daemons/machine-names.ts';
+export { type DaemonClientOf, useDaemonClients, usePairedDaemons } from './shell/daemon-access.ts';
+
 export { DEVICE_SETTINGS_HREF, daemonHomeHref, daemonSettingsHref, HOME_HREF } from './router/routes.ts';
 
 // ─── the reference grammar (docs/reference-standard.md) ───────────────────────────────────────────────────────────

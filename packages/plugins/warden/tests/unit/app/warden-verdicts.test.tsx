@@ -5,13 +5,11 @@ import {
   WardenVerdicts,
   type WardenVerdictView,
 } from '../../../app/features/warden/warden-verdicts.tsx';
-import { daemonConnection } from '../../../app/shell.ts';
+import { daemonConnection } from '../../../app/lib/machine.ts';
 import { render, run } from '@ferretry/app/testing';
 
 const connection = daemonConnection({
   daemonId: 'daemon-a',
-  baseUrl: 'https://daemon-a.example.test',
-  deviceId: 'device-token-a',
 });
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
 const verdict: WardenVerdictView = {

@@ -40,7 +40,9 @@
       "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
       "a sub-ferret overdue on a report is flagged but never nudged, nor its parent told: overdue-report nudges need Ferrets’ waiting/done on FerretSummary and its signal route (today skipped a ferret that declared a wait or signalled done)",
       "the liveness reflex detects but never nudges (frozen, sus_* and dead_monitor still fire): reflex nudges need `FerretSummary` to carry `waiting` and the per-ferret `nudgeAfterSeconds`/`killAfterSeconds` (Ferrets additive)",
-      "an owner's own save is refused while the kernel holds another edit, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write (Gate's judgeConfigWrite judges the whole patched file, so an owner's plain save over a held edit could otherwise put that edit into effect); a broken file or a hand edit the kernel has not reloaded yet is overwritten with the value in effect (every setting is written from the settings in effect plus the owner's patch), never put into effect, but lost (a file with a top-level key the schema does not know is refused instead; the owner repairs it by hand); refusing a write over a file that moved since the kernel's last reload, so such an edit is held instead, waits on the kernel"
+      "an owner's own save is refused while the kernel holds another edit, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write (Gate's judgeConfigWrite judges the whole patched file, so an owner's plain save over a held edit could otherwise put that edit into effect); a broken file or a hand edit the kernel has not reloaded yet is overwritten with the value in effect (every setting is written from the settings in effect plus the owner's patch), never put into effect, but lost (a file with a top-level key the schema does not know is refused instead; the owner repairs it by hand); refusing a write over a file that moved since the kernel's last reload, so such an edit is held instead, waits on the kernel",
+      "the Ask the Warden to investigate now row (app/features/warden/ask-warden.tsx) is built and tested but has no mount: an app half has no action section and the Ferrets Actions menu takes no contributed rows yet",
+      "no stream of configuration changes reaches an app half: the settings card reads on mount, after its own save and when the tab becomes visible again, not the moment another editor (the CLI, a file edit) changes warden.yaml"
     ],
     "claude-code": [
       "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",
@@ -161,15 +163,8 @@
       "GAP(access): the update dot asks locked machines too: today it skipped them (rebuild-ref App.tsx:1099 useLockedMachines); useLockedDaemons() from @ferretry/app has no consumer yet, so the settings machine rows and the machine switcher (App.tsx:1961, :2637) do not mark a locked machine either (G95)"
     ]
   },
-  "pendingHalves": {
-    "warden": ["app"]
-  },
+  "pendingHalves": {},
   "pendingAppPorts": [
-    {
-      "plugin": "warden",
-      "path": "packages/plugins/warden/app",
-      "reason": "@ferretry/app exports none of: the current-daemon hook, the paired-daemon list, ferrets of a daemon, device controls, a plugin client for another paired daemon, Markdown, ModelSelect, AnalyticsMetricChart, the grants/speed-ups/account-picker reads, the config-change effect; app/shell.ts placeholders throw until it does (the warden screen and settings tab, the daemon.status strip and verdicts panels, the ask-warden form)"
-    },
     {
       "plugin": "packs",
       "path": "packages/plugins/packs/app/components/pack-call.tsx",
