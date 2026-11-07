@@ -584,6 +584,10 @@ async function start(world: World): Promise<TestHost> {
         for (const listener of configListeners.get(key) ?? []) listener();
         return { kind: 'written', etag, loosened: sentences };
       },
+      // The in-memory world holds no edit held for the owner, so the owner's patch is a write of that patch.
+      async writeAsOwner(def, name, edit, writeOptions = {}) {
+        return await this.write(def, name, edit, writeOptions);
+      },
       async remove(def, name, writeOptions = {}) {
         if (!declared.includes(def)) return { kind: 'refused', reason: 'not_declared', issues: [] };
         const key = keyOf(def);

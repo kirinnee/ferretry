@@ -18,16 +18,23 @@ export class WardenConfigRefused extends Error {
  * tightening applies at once and a held edit is neither lost nor put into effect (docs/config-files.md rule 3). The
  * kernel's ConfigPort offers no owner-acknowledged write, so on 5.0:
  * - while the kernel holds an edit, the owner's save is refused (this error), never written over it;
- * - a broken file, or a hand edit the kernel has not reloaded yet, is OVERWRITTEN with the value in effect: every
- *   setting is written from the settings in effect plus the owner's patch, so such an edit is never put into effect,
- *   but it is lost (today's fail-safe);
- * - refusing a write over a file that moved since the kernel's last reload (so that hand edit is held, not lost) waits
- *   on the kernel.
+ * - a broken file is OVERWRITTEN with the value in effect: every setting is written from the settings in effect plus
+ *   the owner's patch, so such an edit is never put into effect, but it is lost (today's fail-safe);
+ * - a hand edit the kernel has not reloaded yet is not lost: the kernel refuses the write as moved since its last
+ *   reload (`conflict`, `WardenConfigMoved`) and the owner saves again once it has been read.
  */
 export class WardenConfigHeld extends Error {
   constructor() {
     super('warden.yaml has a change waiting for your approval; confirm or discard it first, then save again.');
     this.name = 'WardenConfigHeld';
+  }
+}
+
+/** `warden.yaml` moved since the kernel last read it, so the save wrote nothing; saving again works from what it holds. */
+export class WardenConfigMoved extends Error {
+  constructor() {
+    super('warden.yaml changed since it was last read; nothing was saved. Try again.');
+    this.name = 'WardenConfigMoved';
   }
 }
 
@@ -108,7 +115,7 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
     const result = await this.config.write(WARDEN_CONFIG, undefined, { patch: wholeSettings(config, inEffect) });
     if (result.kind === 'refused')
       throw new WardenConfigRefused(result.issues.map(issue => issue.message).join('; ') || result.reason);
-    if (result.kind === 'conflict') throw new WardenConfigRefused('warden.yaml changed while it was being written');
+    if (result.kind === 'conflict') throw new WardenConfigMoved();
     return result.kind === 'held' ? result.sentences : [];
   }
 }

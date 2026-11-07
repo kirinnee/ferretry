@@ -808,6 +808,7 @@ async function bootLocked(
       }
     },
     snapshot: () => frozen as PostBuildSnapshot,
+    config: { writer: () => configWriter, admission: () => bound.admission, home },
     liveness: () => ({
       status: phase === 'started' ? 'ok' : 'starting',
       uptimeSeconds: Math.max(0, Math.round((clock.nowMs() - startedAtMs) / 1000)),

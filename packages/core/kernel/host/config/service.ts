@@ -120,6 +120,8 @@ export type ConfigWriteResult =
       readonly text: string;
       /** What the write loosened, when the caller confirmed it. */
       readonly loosened: readonly string[];
+      /** An owner write that left another edit of the file held: its id and what it widens. */
+      readonly stillHeld?: { readonly id: string; readonly sentences: readonly string[] };
     }
   | { readonly kind: 'held'; readonly etag: string; readonly id: string; readonly sentences: readonly string[] }
   | { readonly kind: 'refused'; readonly reason: ConfigWriteRefusal; readonly issues: readonly ConfigIssue[] };
@@ -177,6 +179,14 @@ export interface ConfigFiles {
     edit: ConfigEdit,
     options?: ConfigWriteOptions,
   ): Promise<ConfigWriteResult>;
+  /** The owner's own patch, made to BOTH the version in effect and an edit held for the owner (`ConfigPort.writeAsOwner`). */
+  writeAsOwner(
+    plugin: string,
+    def: ConfigDef,
+    name: string | undefined,
+    edit: { readonly patch: Readonly<Record<string, unknown>> },
+    options?: ConfigWriteOptions,
+  ): Promise<ConfigWriteResult>;
   /** Removes a file. Removing what loosens (a budget, a rule) is held like any loosening edit. */
   remove(
     plugin: string,
@@ -211,7 +221,13 @@ export interface ConfigFiles {
 
 /** A write result as the contract says it: never thrown, `conflict` on its own. */
 export function writeOutcome(result: ConfigWriteResult): ConfigWriteOutcome {
-  if (result.kind === 'applied') return { kind: 'written', etag: result.etag, loosened: result.loosened };
+  if (result.kind === 'applied')
+    return {
+      kind: 'written',
+      etag: result.etag,
+      loosened: result.loosened,
+      ...(result.stillHeld === undefined ? {} : { stillHeld: result.stillHeld }),
+    };
   if (result.kind === 'held') return { kind: 'held', etag: result.etag, id: result.id, sentences: result.sentences };
   if (result.reason === 'conflict') return { kind: 'conflict' };
   return {
@@ -220,7 +236,9 @@ export function writeOutcome(result: ConfigWriteResult): ConfigWriteOutcome {
     issues: result.issues.map(issue => ({
       path: issue.path,
       ...(issue.line === undefined ? {} : { line: issue.line }),
+      ...(issue.column === undefined ? {} : { column: issue.column }),
       message: issue.message,
+      fix: issue.fix,
     })),
   };
 }
@@ -542,6 +560,14 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
             ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
           }),
         ),
+      writeAsOwner: async (def, name, edit, writeOptions = {}): Promise<ConfigWriteOutcome> =>
+        writeOutcome(
+          await writeAsOwner(pluginId, def as ConfigDef, name, edit, {
+            byPlugin: true,
+            judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
+            ...(writeOptions.ifMatch === undefined ? {} : { ifMatch: writeOptions.ifMatch }),
+          }),
+        ),
       remove: async (def, name, writeOptions = {}): Promise<ConfigWriteOutcome> =>
         await removeOutcome(pluginId, def as ConfigDef, name, {
           judge: ownJudge(pluginId, () => pathOf(pluginId, def as ConfigDef, name)),
@@ -605,6 +631,61 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     (sentences: readonly string[], removal: boolean): boolean =>
       options.judge?.({ plugin, path: path(), removal, sentences }) === true;
 
+  const conflictOf = (slot: Slot, found: string, ifMatch: string | undefined): ConfigWriteResult | undefined => {
+    // The file moved since the editor read it, or since the last reload: nothing the readers (and so the editor) saw
+    // describes the disk any more, so an edit made from it is never applied.
+    const reloaded = settled.get(slot.path)?.diskEtag ?? ABSENT_CONFIG_ETAG;
+    const stale = ifMatch !== undefined && ifMatch !== found;
+    if (!stale && (found === reloaded || !loaded)) return undefined;
+    return {
+      kind: 'refused',
+      reason: 'conflict',
+      issues: [
+        {
+          path: slot.path,
+          severity: 'error',
+          message: `${slot.path} changed since it was read`,
+          fix: 'read it again and redo the edit',
+        },
+      ],
+    };
+  };
+
+  /** One write, inside the queue. The disk is read fresh and must be the disk the last reload saw. */
+  const writeLocked = async (
+    slot: Slot,
+    def: ConfigDef,
+    edit: ConfigEdit,
+    writeOptions: ConfigWriteOptions,
+  ): Promise<ConfigWriteResult> => {
+    const absolute = `${root}/${slot.path}`;
+    const disk = await readDisk(slot.path);
+    const existing = disk.kind === 'text' ? disk.text : undefined;
+    const found = existing === undefined ? ABSENT_CONFIG_ETAG : digest(existing);
+    const moved = conflictOf(slot, found, writeOptions.ifMatch);
+    if (moved !== undefined) return moved;
+    const text = typeof edit === 'string' ? edit : patched(slot, existing, edit.patch);
+    if (text === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
+    const checked = checkConfigText(def, slot.path, text, binary);
+    if (!checked.ok) return { kind: 'refused', reason: checked.reason, issues: checked.issues };
+    const etag = digest(text);
+    const before = settled.get(slot.path)?.evaluated.value;
+    const unchanged = etag === settled.get(slot.path)?.evaluated.inEffect?.etag;
+    const added =
+      unchanged || writeOptions.byPlugin !== true ? [] : addedSecretReferenceSentences(before, checked.value);
+    const loosens = unchanged ? [] : [...judgeLoosening(def, before, checked.value), ...added];
+    const confirmed =
+      added.length === 0 &&
+      (writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false)));
+    if (loosens.length === 0 || confirmed) acknowledge(slot.path, text);
+    await fs.writeAtomic(absolute, text, PRIVATE_FILE_MODE);
+    await load();
+    const held = settled.get(slot.path)?.evaluated.held;
+    return held !== undefined && held.etag === etag
+      ? { kind: 'held', etag, id: idOf(slot.path, etag), sentences: held.sentences }
+      : { kind: 'applied', etag, text, loosened: confirmed ? loosens : [] };
+  };
+
   const write = async (
     plugin: string,
     def: ConfigDef,
@@ -616,44 +697,82 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     if (declaration === undefined) return { kind: 'refused', reason: 'not_declared', issues: [] };
     const slot = slotFor(declaration, name);
     if (slot === undefined) return { kind: 'refused', reason: 'bad_name', issues: [] };
+    return await serial(async () => await writeLocked(slot, def, edit, writeOptions));
+  };
+
+  /**
+   * The owner's patch, made to both versions of a file with an edit held (docs/config-files.md rule 3). The judge is
+   * asked about the sentences of the owner's OWN patch against the version in effect, never about the held edit.
+   */
+  const writeAsOwner = async (
+    plugin: string,
+    def: ConfigDef,
+    name: string | undefined,
+    edit: { readonly patch: Readonly<Record<string, unknown>> },
+    writeOptions: ConfigWriteOptions = {},
+  ): Promise<ConfigWriteResult> => {
+    const declaration = declared(plugin, def);
+    if (declaration === undefined) return { kind: 'refused', reason: 'not_declared', issues: [] };
+    const slot = slotFor(declaration, name);
+    if (slot === undefined) return { kind: 'refused', reason: 'bad_name', issues: [] };
     return await serial(async () => {
+      const entry = settled.get(slot.path);
+      const heldNow = entry?.evaluated.held;
+      if (heldNow === undefined || entry === undefined) return await writeLocked(slot, def, edit, writeOptions);
       const absolute = `${root}/${slot.path}`;
       const disk = await readDisk(slot.path);
       const existing = disk.kind === 'text' ? disk.text : undefined;
-      const text = typeof edit === 'string' ? edit : patched(slot, existing, edit.patch);
-      if (text === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
-      const checked = checkConfigText(def, slot.path, text, binary);
-      if (!checked.ok) return { kind: 'refused', reason: checked.reason, issues: checked.issues };
       const found = existing === undefined ? ABSENT_CONFIG_ETAG : digest(existing);
-      if (writeOptions.ifMatch !== undefined && writeOptions.ifMatch !== found)
-        return {
-          kind: 'refused',
-          reason: 'conflict',
-          issues: [
-            {
-              path: slot.path,
-              severity: 'error',
-              message: `${slot.path} changed since it was read`,
-              fix: 'read it again and redo the edit',
-            },
-          ],
-        };
-      const etag = digest(text);
-      const before = settled.get(slot.path)?.evaluated.value;
-      const unchanged = etag === settled.get(slot.path)?.evaluated.inEffect?.etag;
+      const moved = conflictOf(slot, found, writeOptions.ifMatch);
+      if (moved !== undefined) return moved;
+      const inEffect = entry.evaluated.inEffect;
+      // The version in effect, patched: what the owner's act means today.
+      const effectiveText = patched(slot, inEffect?.text, edit.patch);
+      if (effectiveText === undefined) return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
+      const effective = checkConfigText(def, slot.path, effectiveText, binary);
+      if (!effective.ok) return { kind: 'refused', reason: effective.reason, issues: effective.issues };
+      // The held version (the file on disk), patched. A held REMOVAL has no text to carry the patch.
+      const heldText = existing === undefined ? undefined : patched(slot, existing, edit.patch);
+      if (existing !== undefined && heldText === undefined)
+        return { kind: 'refused', reason: 'not_a_mapping', issues: [] };
+      if (heldText !== undefined) {
+        const checkedHeld = checkConfigText(def, slot.path, heldText, binary);
+        if (!checkedHeld.ok) return { kind: 'refused', reason: checkedHeld.reason, issues: checkedHeld.issues };
+      }
+      const before = entry.evaluated.value;
+      const unchanged = digest(effectiveText) === inEffect?.etag;
       const added =
-        unchanged || writeOptions.byPlugin !== true ? [] : addedSecretReferenceSentences(before, checked.value);
-      const loosens = unchanged ? [] : [...judgeLoosening(def, before, checked.value), ...added];
+        unchanged || writeOptions.byPlugin !== true ? [] : addedSecretReferenceSentences(before, effective.value);
+      const loosens = unchanged ? [] : [...judgeLoosening(def, before, effective.value), ...added];
       const confirmed =
         added.length === 0 &&
         (writeOptions.confirmedLoosening === true || (loosens.length > 0 && askJudge(writeOptions, loosens, false)));
-      if (loosens.length === 0 || confirmed) acknowledge(slot.path, text);
-      await fs.writeAtomic(absolute, text, PRIVATE_FILE_MODE);
+      if (loosens.length === 0 || confirmed) {
+        // In effect at once; the held edit, changed, stays in the file and is judged against the new record.
+        await writeAccepted(slot.path, { etag: digest(effectiveText), text: effectiveText });
+        if (heldText !== undefined) await fs.writeAtomic(absolute, heldText, PRIVATE_FILE_MODE);
+        await load();
+        const still = settled.get(slot.path)?.evaluated.held;
+        return {
+          kind: 'applied',
+          etag: heldText === undefined ? ABSENT_CONFIG_ETAG : digest(heldText),
+          text: heldText ?? effectiveText,
+          loosened: confirmed ? loosens : [],
+          ...(still === undefined
+            ? {}
+            : { stillHeld: { id: idOf(slot.path, still.etag), sentences: still.sentences } }),
+        };
+      }
+      // The owner's patch itself waits: the version in effect is untouched, and the patch rides with the held edit
+      // (a held removal is superseded by the owner's newer act, said by the answer's sentences).
+      const waiting = heldText ?? effectiveText;
+      const etag = digest(waiting);
+      await fs.writeAtomic(absolute, waiting, PRIVATE_FILE_MODE);
       await load();
       const held = settled.get(slot.path)?.evaluated.held;
       return held !== undefined && held.etag === etag
         ? { kind: 'held', etag, id: idOf(slot.path, etag), sentences: held.sentences }
-        : { kind: 'applied', etag, text, loosened: confirmed ? loosens : [] };
+        : { kind: 'applied', etag, text: waiting, loosened: [] };
     });
   };
 
@@ -809,6 +928,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   return {
     port,
     write,
+    writeAsOwner,
     remove,
     read,
     secretReferences: plugin => {
@@ -838,6 +958,7 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
           text: view.text,
           etag: view.etag,
           status: statusOf(settled.get(slot.path)?.evaluated),
+          ...(view.issues.length === 0 ? {} : { issues: view.issues }),
         };
       },
       write: async (target, edit, writeOptions = {}) =>

@@ -34,6 +34,7 @@ export function configTree(initial: Record<string, Record<string, unknown>> = {}
     watch: () => () => {},
     fileState: () => ({ state: 'absent', inEffect: false, sentences: [] }),
     write: () => Promise.reject(new Error('the fixture writes through its config door')),
+    writeAsOwner: () => Promise.reject(new Error('the fixture writes through its config door')),
     remove: () => Promise.reject(new Error('the fixture removes through its config door')),
   };
   const door: ConfigDoor = {

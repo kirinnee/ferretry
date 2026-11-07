@@ -9,6 +9,8 @@ import {
   arrivedOnHost,
   arrivedPrivileged,
   type CallStanding,
+  type ConfigAccessJudgement,
+  type ConfigAccessVerdict,
   type ConfigWriteJudgement,
   errorResponse,
   headerValue,
@@ -62,6 +64,7 @@ import {
 } from '../../../contract/index.ts';
 import { recordedCallDraft } from '../audit/recorder.ts';
 import { judgeLooseningWrite } from '../policy/config-judge.ts';
+import { judgeConfigAccess } from '../policy/config-access.ts';
 import type { FailClosedStepUps } from '../step-up/witness.ts';
 import { resolveApiActor } from './actor.ts';
 import {
@@ -215,6 +218,11 @@ export class GateAdmission implements Admission {
     } catch {
       // The audit log reports its own failures; the answer is already decided.
     }
+  }
+
+  /** The kernel's config routes, asked per file: today's grants by file kind (`policy/config-access.ts`). */
+  judgeConfigAccess(input: ConfigAccessJudgement): ConfigAccessVerdict {
+    return judgeConfigAccess(input);
   }
 
   /** A plugin's own loosening config write (`kernel.config.write`/`remove`): today's held-loosening rule. */

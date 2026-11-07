@@ -240,7 +240,7 @@ describe('route parity', () => {
     expect(journal.map(entry => entry.fields)).toEqual([{ fields: JSON.stringify(['caps']) }]);
   });
 
-  test("R-0232 GAP an owner save over a hand edit the kernel has not reloaded yet overwrites it with the settings in effect, so its loosening is never put into effect (refusing it as moved since the last reload waits on the kernel), even where Gate's judge would apply the owner's call", async () => {
+  test('R-0232 an owner save over a hand edit the kernel has not reloaded yet is refused 409 (try again) and the hand edit is kept', async () => {
     const real = realWardenConfig({ judge: 'owner-at-machine' });
     await real.handEdit('enabled: false\n');
     const { host } = await wardenHost({ realConfig: real });
@@ -253,21 +253,12 @@ describe('route parity', () => {
       as: owner(),
     });
 
-    expect(response.status).toBe(200);
-    const answer = response.json<{
-      held?: string[];
-      config: { enabled: boolean; caps: { investigationUsdPerDay: number } };
-    }>();
-    expect(answer.held).toBeUndefined();
-    expect(answer.config).toMatchObject({ enabled: false, caps: { investigationUsdPerDay: 1 } });
-    const view = (await host.request('GET', '/v1/warden/config', { as: owner() })).json<{
-      config: { enabled: boolean; caps: { investigationUsdPerDay: number } };
-    }>();
-    expect(view.config).toMatchObject({ enabled: false, caps: { investigationUsdPerDay: 1 } });
+    expect(response.status).toBe(409);
+    expect(response.json<{ code: string }>().code).toBe('conflict');
+    // nothing was applied or lost: the hand edit is still on disk and the settings in effect are as they were
+    expect(await real.text()).toBe('enabled: true\n');
     expect(real.port.file(WARDEN_CONFIG)).toMatchObject({ enabled: false });
-    expect(await real.text()).toContain('enabled: false');
-    const journal = host.logs.filter(entry => entry.message === 'fleet.warden_config_changed');
-    expect(journal.map(entry => entry.fields)).toEqual([{ fields: JSON.stringify(['caps']) }]);
+    expect(host.logs.some(entry => entry.message === 'fleet.warden_config_changed')).toBe(false);
   });
 
   test('R-0232 a ferret cannot change the warden settings: 403 and warden.yaml unchanged', async () => {
