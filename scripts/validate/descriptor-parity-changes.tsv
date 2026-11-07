@@ -200,13 +200,6 @@ route	POST /v1/board/tasks/:taskId	removed	tasks are cards (design §1.4): /v1/b
 route	POST /v1/board/cards/:cardId	added	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
 route	POST /v1/board/tasks/:taskId/start	removed	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
 route	POST /v1/board/cards/:cardId/start	added	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
-route	GET /v1/ferrets/:ferretId/plans/:plan	added	new in 5.0: no counterpart in today's table (design §3.3)
-route	POST /v1/ferrets/:ferretId/plans/:plan/approval	added	new in 5.0: no counterpart in today's table (design §3.3)
-route	GET /v1/ferrets/:ferretId/plans/:plan/approval/:stage	added	new in 5.0: no counterpart in today's table (design §3.3)
-route	POST /v1/ferrets/:ferretId/plans/:plan/approval/:stage/commit	added	new in 5.0: no counterpart in today's table (design §3.3)
-route	POST /v1/ferrets/:ferretId/plans/:plan/approval/:stage/confirm-in-app	added	new in 5.0: no counterpart in today's table (design §3.3)
-route	DELETE /v1/ferrets/:ferretId/plans/:plan/approval/:stage	added	new in 5.0: no counterpart in today's table (design §3.3)
-route	POST /v1/ferrets/:ferretId/plans/:plan/revoke	added	new in 5.0: no counterpart in today's table (design §3.3)
 route	POST /v1/sessions/:sessionId/send	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/send	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/interrupt	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
@@ -280,9 +273,21 @@ route	DELETE /v1/projects/:id	added	new in 5.0: no counterpart in today's table 
 route	POST /v1/board/import	removed	compatibility importer deleted (clean slate, owner decision A452)
 route	GET /v1/sessions/:sessionId/tasks	removed	legacy task listing deleted with the compatibility routes (clean slate, owner decision A452)
 route	POST /v1/imports/conversations/adopt	removed	imports are links (design §1.4): adopting a conversation is keeping it, POST /v1/links/conversations/keep; descriptor fields unchanged
-tool	card_plan	added	tasks are cards (design §1.4): today's task_plan; descriptor fields unchanged
 tool	card_progress	added	new in 5.0: writes one card's progress (design §3.3)
-route	GET /v1/plans	added	new in 5.0: the owner's list of staged plans (design §3.3)
+route	GET /v1/tasks	removed	legacy task listing deleted with the compatibility routes (clean slate, owner decision A452)
+route	GET /v1/analytics	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	GET /v1/analytics/pricing	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	PATCH /v1/analytics/pricing	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	POST /v1/analytics/pricing/sync/apply	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	POST /v1/analytics/pricing/sync/preview	removed	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	GET /v1/usage/insights	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	GET /v1/usage/pricing	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	PATCH /v1/usage/pricing	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	POST /v1/usage/pricing/sync/apply	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	POST /v1/usage/pricing/sync/preview	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); the replaced word analytics leaves the path; descriptor fields unchanged
+route	GET /v1/usage/budgets	added	new: a login's budget standing was part of the fleet credentials list; Logins cannot import Usage, so the standing is served by the plugin that computes it (design §2.3)
+route	GET /usage	changed	available was a function of the machine's publicUsageFeed setting; a pure-data manifest cannot hold it, so the route is declared and the handler answers exactly what an unrouted path answers while usage.yaml publicFeed is off
+route	GET /metrics	changed	available was a function of the machine's publicUsageFeed setting; a pure-data manifest cannot hold it, so the route is declared and the handler answers exactly what an unrouted path answers while usage.yaml publicFeed is off
 route	GET /v1/sessions/:sessionId/attach	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/attach	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/console/input	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged

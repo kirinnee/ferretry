@@ -159,6 +159,11 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
   R633: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },
   P28: { owner: 'app-shell', reason: 'enforced by the app shell device store' },
   R575: { owner: 'app-shell', reason: 'enforced by the app shell device store' },
+  I98: {
+    owner: 'vault',
+    reason:
+      'enforced by the Vault sign-in lock (`LoginObserver.pageSteer`, `steerOf`); Browsers tells it what a page did',
+  },
   G167: {
     owner: 'agenda',
     reason: 'POST /v1/push/seen moved to Agenda (DECISIONS-1 #4); Agenda computes the seen outcome',

@@ -10,6 +10,7 @@ import { padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
 import should from 'should';
 import { identityOf, LoginObserver } from '../../../../daemon/lib/inputs/login-observer.ts';
 import type { ScriptedOriginsView } from '../../../../daemon/lib/inputs/borrowed-grants.ts';
+import { MachineScripts } from '../../../../daemon/lib/inputs/machine-scripts.ts';
 import type { InputCaller as ServiceCaller } from '../../../../daemon/lib/inputs/ports.ts';
 import { FACTS, inputRequestService, RAISE, SESSION } from './support.ts';
 
@@ -424,6 +425,47 @@ describe("what the ferret did, as the lock reads it: this card's page only", () 
     // Assert
     should(probed).equal(0);
     for (const lock of locks) should(lock).deepEqual({ seconds: 120, reason: 'scripted' });
+  });
+
+  it('I98 should hold the full lock, never probing, once Browsers tells the Vault a page script ran on the card site or is running', async () => {
+    // Arrange — the machine-wide taint Browsers feeds through VaultApi.scriptedOn / scriptRunning (lead DECISIONS-2 #5).
+    let probed = 0;
+    const raisedWith = async (scripts: MachineScripts) =>
+      (
+        await raised(
+          inputRequestService({
+            observer: observer(),
+            facts: PAGE,
+            probe: async () => {
+              probed += 1;
+              return 'hidden';
+            },
+            scripts,
+          }),
+          PAGE_RAISE,
+        )
+      ).request.lock;
+    const onSibling = new MachineScripts(() => NOW);
+    onSibling.scriptedOn('mail.example.test');
+    const unreadable = new MachineScripts(() => NOW);
+    unreadable.scriptedOn(undefined);
+    const running = new MachineScripts(() => NOW);
+    const finished = running.running();
+    const elsewhere = new MachineScripts(() => NOW);
+    elsewhere.scriptedOn('docs.other.test');
+
+    // Act
+    const locks = [await raisedWith(onSibling), await raisedWith(unreadable), await raisedWith(running)];
+    finished();
+    const ended = await raisedWith(running);
+    const otherSite = await raisedWith(elsewhere);
+
+    // Assert — a script on a sibling subdomain, on a host nobody could read, or one running now: scripted, no probe.
+    for (const lock of locks) should(lock).deepEqual({ seconds: 120, reason: 'scripted' });
+    // A script that has finished on an unread host leaves nothing behind; another site's script is not this card's.
+    should(ended).deepEqual({ seconds: 10, reason: 'probed-field' });
+    should(otherSite).deepEqual({ seconds: 10, reason: 'probed-field' });
+    should(probed).equal(2);
   });
 
   it('should not lengthen the lock for a script on another site in this session', async () => {

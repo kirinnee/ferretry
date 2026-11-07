@@ -1,6 +1,7 @@
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
-import { InputTargets } from '@ferretry/core-vault/contract';
+import { FerretsPort } from '@ferretry/core-ferrets/contract';
+import { InputTargets, VaultPort } from '@ferretry/core-vault/contract';
 import {
   AUDIT,
   BROWSERS_WORDS,
@@ -42,6 +43,13 @@ export default definePlugin({
   kinds: ['tool', 'command', 'view'],
   words: BROWSERS_WORDS,
 
+  /** Optional (§7.6): the ferret a page belongs to and the name it is grouped under; off, no ferret has pages. */
+  uses: { ferrets: FerretsPort },
+  /**
+   * The Vault: input requests raised from a page (`browser_request_input`), and what a ferret did to a page and where
+   * page scripts ran, told to its sign-in lock (lead DECISIONS-2 #5, I98–I100).
+   */
+  needs: { vault: VaultPort },
   provides: { browsers: BrowsersPort },
 
   actions: {
@@ -300,5 +308,32 @@ export default definePlugin({
 
   doctor: ['chrome', 'loopback-firewall'],
 
-  permissions: { spawn: ['chrome', 'chromium', 'google-chrome', 'Xvfb'] },
+  permissions: {
+    /**
+     * Chrome under each name a host installs it as, the private display, the sign-in window's VNC and its bound, and
+     * the browser worker process (lead decision, port-browsers r1): Node over the source entry, or the compiled worker
+     * under each name a release ships it as (`daemon/worker/program.ts` `BROWSER_WORKER_NAMES`).
+     */
+    spawn: [
+      'chrome',
+      'chromium',
+      'chromium-browser',
+      'google-chrome',
+      'google-chrome-stable',
+      'Google Chrome',
+      'Chromium',
+      'Xvfb',
+      'x11vnc',
+      'timeout',
+      'node',
+      'fyd-browser-worker',
+      'fyd-browser-worker-darwin-arm64',
+      'fyd-browser-worker-linux-arm64',
+      'fyd-browser-worker-linux-x64-baseline',
+    ],
+    /** Uploads come from the ferret's own folder, and downloads and PDFs are saved into it (S51). */
+    roots: ['work'],
+    /** Chrome's own DevTools endpoint on loopback, which the launcher waits for. */
+    network: ['127.0.0.1'],
+  },
 });

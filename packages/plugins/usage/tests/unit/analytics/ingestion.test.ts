@@ -1,0 +1,945 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import {
+  ANALYTICS_BACKSTOP_MS,
+  ANALYTICS_CATCH_UP_MS,
+  ANALYTICS_ENDED_SETTLE_MS,
+  ANALYTICS_PRICING_SETTLE_MS,
+  type AnalyticsIngestCandidate,
+  type AnalyticsIngestionParts,
+  AnalyticsIngestionService,
+  REFUSAL_RETRY_MS,
+} from '../../../daemon/lib/analytics/ingestion.ts';
+import type { AnalyticsPricingRate } from '../../../daemon/lib/analytics/pricing.ts';
+import type {
+  AnalyticsIndexStore,
+  AnalyticsIngestedMarker,
+  AnalyticsStoredSession,
+  AnalyticsStoreStatus,
+} from '../../../daemon/lib/analytics/store.ts';
+import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../daemon/lib/analytics/store.ts';
+import { foldAnalyticsTurns, type TurnEvidence } from '../../../daemon/lib/analytics/turn-fold.ts';
+import type { TurnUsage } from '@ferretry/core-ferrets/contract';
+import { instantFromEpochMs } from '@ferretry/std';
+
+/**
+ * The ingestion pass, over a store held in memory.
+ *
+ * The store is the only stand-in. The terminal-state gate, the transcript fold, the model-identity
+ * normaliser, the pricing snapshot and the row derivation are all production code, so what a case
+ * asserts about a stored row is what the daemon would store.
+ */
+
+const RATES: readonly AnalyticsPricingRate[] = [
+  {
+    pricingKey: 'operator:claude-opus-5:2026-08',
+    modelId: 'claude-opus-5',
+    aliases: [],
+    provider: 'anthropic',
+    currency: 'USD',
+    rates: {
+      input: 15_000_000,
+      output: 75_000_000,
+      cachedInput: 1_500_000,
+      cacheWrite: null,
+      cacheWrite5m: 18_750_000,
+      cacheWrite1h: 30_000_000,
+      reasoning: null,
+      image: null,
+      tool: null,
+    },
+    source: { kind: 'manual' },
+    verifiedAt: '2026-08-01T00:00:00.000Z',
+    validFrom: '2026-08-01T00:00:00.000Z',
+    validThrough: null,
+    lastSyncedAt: null,
+  },
+];
+
+/** An in-memory analytics store, keyed on session id exactly as the SQLite one is. */
+class MemoryStore implements AnalyticsIndexStore {
+  readonly saved = new Map<string, AnalyticsStoredSession>();
+  drops = 0;
+  closed = 0;
+
+  ingested(): ReadonlyMap<string, AnalyticsIngestedMarker> {
+    return new Map(
+      [...this.saved.values()].map(row => [
+        row.raw.id,
+        { signature: row.signature, hasUsage: row.usageRefusal === null },
+      ]),
+    );
+  }
+
+  upsert(rows: readonly AnalyticsStoredSession[]): void {
+    for (const row of rows) this.saved.set(row.raw.id, row);
+  }
+
+  forget(ids: readonly string[]): void {
+    for (const id of ids) this.saved.delete(id);
+  }
+
+  rows(): readonly AnalyticsStoredSession[] {
+    return [...this.saved.values()];
+  }
+
+  status(): AnalyticsStoreStatus {
+    const rows = this.rows();
+    const ingestedAt = rows.map(row => row.ingestedAt).toSorted();
+    return {
+      schemaVersion: ANALYTICS_INDEX_SCHEMA_VERSION,
+      sessions: rows.length,
+      tokenSessions: rows.filter(row => row.raw.tokens !== null).length,
+      refusedUsageSessions: rows.filter(row => row.usageRefusal !== null).length,
+      lastIngestedAt: ingestedAt.at(-1) ?? null,
+    };
+  }
+
+  drop(): void {
+    this.drops += 1;
+    this.saved.clear();
+  }
+
+  async close(): Promise<void> {
+    this.closed += 1;
+  }
+}
+
+function candidate(overrides: Partial<AnalyticsIngestCandidate> & { readonly id: string }): AnalyticsIngestCandidate {
+  return {
+    agent: 'claude',
+    selectedModel: 'claude-opus-5[1m]',
+    contextWindow: null,
+    harness: 'claude',
+    mode: 'auto',
+    label: null,
+    cwd: '/work',
+    parent: null,
+    createdAt: '2026-08-01T00:00:00.000Z',
+    startedAt: '2026-08-01T00:00:00.000Z',
+    finishedAt: '2026-08-01T01:00:00.000Z',
+    status: 'completed',
+    firstOutputAt: null,
+    turns: 3,
+    contextEndPercent: 40,
+    ...overrides,
+  };
+}
+
+let turnNumber = 0;
+
+/** One turn a harness reports. */
+function usageEvent(model: string, inputTokens: number, outputTokens: number): TurnUsage {
+  turnNumber += 1;
+  return {
+    turn: turnNumber,
+    at: instantFromEpochMs(Date.parse('2026-08-01T00:30:00.000Z')),
+    model,
+    inputTokens,
+    outputTokens,
+  };
+}
+
+const readEvidence = (turns: readonly TurnUsage[]): TurnEvidence => turns;
+
+interface Harness {
+  readonly service: AnalyticsIngestionService;
+  readonly store: MemoryStore;
+  /** Session ids whose transcript was actually read, in order. */
+  readonly reads: string[];
+  setCandidates(next: readonly AnalyticsIngestCandidate[]): void;
+  setPricing(next: readonly AnalyticsPricingRate[]): void;
+}
+
+function harness(
+  candidates: readonly AnalyticsIngestCandidate[],
+  evidence: (id: string) => Promise<TurnEvidence>,
+  overrides: Partial<AnalyticsIngestionParts> = {},
+): Harness {
+  const store = new MemoryStore();
+  const reads: string[] = [];
+  let current = candidates;
+  let pricing = RATES;
+  let tick = 0;
+  const service = new AnalyticsIngestionService({
+    candidates: { listCandidates: async () => current },
+    folds: {
+      foldFor: async (id, aliasGroups) => {
+        reads.push(id);
+        return foldAnalyticsTurns(await evidence(id), aliasGroups);
+      },
+    },
+    store,
+    pricing: async () => pricing,
+    clock: {
+      now: () => {
+        tick += 1;
+        return `2026-08-02T00:00:0${tick}.000Z`;
+      },
+    },
+    concurrency: 2,
+    rebuildRequired: false,
+    ...overrides,
+  });
+  return {
+    service,
+    store,
+    reads,
+    setCandidates: next => {
+      current = next;
+    },
+    setPricing: next => {
+      pricing = next;
+    },
+  };
+}
+
+describe('AnalyticsIngestionService.ingest', () => {
+  it('should price a session addressed by two spellings the catalog calls one model', async () => {
+    // THE WHOLE PATH, not just the pricing step. The catalog's alias groups have to reach the FOLD:
+    // that is where two spellings become one identity or a mixed-model refusal, and a refusal decided
+    // without them leaves the session permanently unpriced no matter what the catalog says next.
+    // Arrange
+    const aliased: readonly AnalyticsPricingRate[] = [{ ...RATES[0]!, aliases: ['claude-opus-5-preview'] }];
+    const test = harness(
+      [candidate({ id: 's1' })],
+      async () =>
+        readEvidence([usageEvent('claude-opus-5', 1_000, 500), usageEvent('claude-opus-5-preview', 1_000, 500)]),
+      { pricing: async () => aliased },
+    );
+
+    // Act
+    await test.service.ingest();
+
+    // Assert
+    const [row] = test.store.rows();
+    should(row?.raw.pricingModel).equal('claude-opus-5');
+    should(row?.pricing).have.property('kind', 'priced');
+    // 2000 input at 15 USD/M and 1000 output at 75 USD/M, in whole micros.
+    should(row?.raw.equivalentApiCostUsdMicros).equal(105_000);
+  });
+
+  it('should leave a genuinely mixed-model session unpriced with the catalog in hand', async () => {
+    // Aliases make one model addressable twice; they do not make two models one.
+    const test = harness([candidate({ id: 's1' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 1_000, 500), usageEvent('claude-sonnet-5', 1_000, 500)]),
+    );
+
+    await test.service.ingest();
+
+    const [row] = test.store.rows();
+    // The token total still stands — a count does not depend on which model produced it.
+    should(row?.raw.tokens).equal(3_000);
+    should(row?.raw.pricingModel).be.null();
+    should(row?.pricing).containDeep({ kind: 'unpriced', reason: 'missing_pricing_model' });
+    should(row?.raw.equivalentApiCostUsdMicros).be.null();
+  });
+
+  it('should store a finished session with the total folded from its own transcript', async () => {
+    // Arrange
+    const test = harness([candidate({ id: 's1' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 1_000, 500)]),
+    );
+
+    // Act
+    const summary = await test.service.ingest();
+
+    // Assert
+    should(summary.examined).equal(1);
+    should(summary.ingested).equal(1);
+    should(summary.usageRefused).equal(0);
+    const [row] = test.store.rows();
+    should(row?.raw.tokens).equal(1_500);
+    should(row?.raw.inputTokens).equal(1_000);
+    should(row?.usageRefusal).be.null();
+    // 1000 input at 15 USD/M and 500 output at 75 USD/M, in whole micros.
+    should(row?.raw.equivalentApiCostUsdMicros).equal(52_500);
+    should(row?.pricing?.kind).equal('priced');
+  });
+
+  it('should store the turns the harness reported, and the daemon counter when it reported none', async () => {
+    // Arrange
+    const test = harness([candidate({ id: 's1', turns: 9 }), candidate({ id: 's2', turns: 4 })], async id =>
+      id === 's1'
+        ? readEvidence([usageEvent('claude-opus-5', 10, 5), usageEvent('claude-opus-5', 10, 5)])
+        : undefined,
+    );
+
+    // Act
+    await test.service.ingest();
+
+    // Assert — the reported turn count wins; with no reader the daemon's own counter answers, and time is unknown
+    const rows = new Map(test.store.rows().map(row => [row.raw.id, row.raw]));
+    should(rows.get('s1')?.turns).equal(2);
+    should(rows.get('s1')?.activeDurationMs).be.null();
+    should(rows.get('s2')?.activeDurationMs).be.null();
+    should(rows.get('s2')?.turns).equal(4);
+  });
+
+  it('should keep the display model distinct from the model the transcript priced', async () => {
+    // A selector encodes a context-window choice the underlying model does not, so the display identity
+    // and the pricing evidence are two facts. Overwriting one with the other loses which was which.
+    // Arrange
+    const test = harness([candidate({ id: 's1', selectedModel: 'claude-opus-5[1m]' })], async () =>
+      readEvidence([usageEvent('claude-opus-5-20260101', 100, 100)]),
+    );
+
+    // Act
+    await test.service.ingest();
+
+    // Assert
+    const [row] = test.store.rows();
+    should(row?.raw.model).equal('claude-opus-5');
+    should(row?.raw.contextWindow).equal(1_000_000);
+    should(row?.raw.pricingModel).equal('claude-opus-5');
+  });
+
+  it('should refuse a session that has not reached a durable terminal state, counting the reason', async () => {
+    // Arrange
+    const test = harness(
+      [
+        candidate({ id: 'live', status: 'running' }),
+        candidate({ id: 'unstamped', finishedAt: null }),
+        candidate({ id: 'unknown', status: 'wrapped-up' }),
+      ],
+      async () => readEvidence([usageEvent('claude-opus-5', 10, 10)]),
+    );
+
+    // Act
+    const summary = await test.service.ingest();
+
+    // Assert
+    should(summary.gateRefused).equal(3);
+    should(summary.gateRefusals).deepEqual({ nonterminal_status: 1, no_finish_instant: 1, unknown_status: 1 });
+    should(test.store.rows()).be.empty();
+    should(test.reads).be.empty();
+  });
+
+  it('should store a session whose transcript could not be read as unknown, never as zero', async () => {
+    // Arrange
+    const test = harness([candidate({ id: 's1' })], async () => (undefined));
+
+    // Act
+    const summary = await test.service.ingest();
+
+    // Assert
+    should(summary.ingested).equal(1);
+    should(summary.usageRefused).equal(1);
+    should(summary.sourceErrors).equal(0);
+    const [row] = test.store.rows();
+    should(row?.usageRefusal).equal('transcript_unresolved');
+    should(row?.raw.tokens).be.null();
+    should(row?.raw.equivalentApiCostUsdMicros).be.null();
+    should(row?.pricing).be.null();
+  });
+
+  it('should treat a transcript read that raised as unreadable and count it as a source error', async () => {
+    // A read that threw is not an empty transcript. Counting it separately is what lets the index report
+    // that a source failed instead of reporting a fleet that spent nothing.
+    // Arrange
+    const test = harness([candidate({ id: 's1' })], async () => {
+      throw new Error('the transcript file vanished mid-read');
+    });
+
+    // Act
+    const summary = await test.service.ingest();
+
+    // Assert
+    should(summary.sourceErrors).equal(1);
+    should(test.store.rows()[0]?.usageRefusal).equal('transcript_unresolved');
+  });
+
+  it('should not read a transcript twice for a session whose total is already proven', async () => {
+    // Arrange
+    const test = harness([candidate({ id: 's1' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 1_000, 500)]),
+    );
+    await test.service.ingest();
+
+    // Act
+    const second = await test.service.ingest();
+
+    // Assert
+    should(second.unchanged).equal(1);
+    should(second.ingested).equal(0);
+    should(test.reads).deepEqual(['s1']);
+  });
+
+  it('should re-attempt a session whose fold was refused, because a refusal is not proof', async () => {
+    // A refusal states what this daemon could read at that moment — a transcript not yet resolved, a
+    // file mid-write — so the row is corrected as soon as the evidence can be read.
+    // Arrange
+    let resolvable = false;
+    const test = harness([candidate({ id: 's1' })], async () =>
+      resolvable ? readEvidence([usageEvent('claude-opus-5', 200, 100)]) : undefined,
+    );
+    await test.service.ingest();
+
+    // Act
+    resolvable = true;
+    const second = await test.service.ingest();
+
+    // Assert
+    should(second.ingested).equal(1);
+    should(second.unchanged).equal(0);
+    should(test.reads).deepEqual(['s1', 's1']);
+    should(test.store.rows()[0]?.raw.tokens).equal(300);
+    should(test.store.rows()[0]?.usageRefusal).be.null();
+  });
+
+  it('should re-ingest when the operator edits the rate catalog', async () => {
+    // THE CATALOG IS READ PER PASS, NEVER HELD. `parts.pricing` is a function the composition root
+    // supplies, called at the top of every sweep, so an operator editing prices while the daemon runs
+    // is reflected by the NEXT pass — no restart, and no rebuilt ingestion service. The catalog's
+    // fingerprint is part of each session's signature, which is what makes the edit re-price rows
+    // that were otherwise unchanged.
+    // Arrange
+    const test = harness([candidate({ id: 's1' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 1_000, 500)]),
+    );
+    await test.service.ingest();
+    const service = test.service;
+
+    // Act — the same service instance, a different catalog.
+    test.setPricing([{ ...RATES[0]!, rates: { ...RATES[0]!.rates, output: 150_000_000 } }]);
+    const second = await service.ingest();
+
+    // Assert
+    should(second.ingested).equal(1);
+    should(second.unchanged).equal(0);
+    should(test.store.rows()[0]?.raw.equivalentApiCostUsdMicros).equal(90_000);
+  });
+
+  it('should re-price a mixed-model refusal when a later catalog edit joins the spellings', async () => {
+    // The alias groups reach the fold, and the fold runs per pass — so an operator who adds the
+    // missing alias fixes the session that was reported unpriced, on the next pass, without a
+    // restart. If the aliases had been read once at construction this row would stay wrong forever.
+    // Arrange
+    const test = harness([candidate({ id: 's1' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 1_000, 500), usageEvent('claude-opus-5-preview', 1_000, 500)]),
+    );
+    await test.service.ingest();
+    should(test.store.rows()[0]?.raw.pricingModel).be.null();
+
+    // Act — the same service instance, a catalog that now says the two spellings are one model.
+    test.setPricing([{ ...RATES[0]!, aliases: ['claude-opus-5-preview'] }]);
+    await test.service.ingest();
+
+    // Assert
+    should(test.store.rows()[0]?.raw.pricingModel).equal('claude-opus-5');
+    should(test.store.rows()[0]?.raw.equivalentApiCostUsdMicros).equal(105_000);
+  });
+
+  it('should refuse the pass when the catalog cannot be read, not substitute an empty one', async () => {
+    // A pricing provider that REJECTS — the config document unreadable, the provider feed down — refuses
+    // the WHOLE pass. With no catalog no row could be priced, and the alternative, reading the rejection
+    // as an empty catalog, would store every session as unpriced and report a fleet that spent nothing.
+    // The rejection propagates out of the pass, and nothing is written behind it.
+    // Arrange
+    const test = harness(
+      [candidate({ id: 's1' })],
+      async () => readEvidence([usageEvent('claude-opus-5', 1_000, 500)]),
+      { pricing: async () => Promise.reject(new Error('catalog unavailable')) },
+    );
+
+    // Act / Assert
+    await should(test.service.ingest()).be.rejectedWith(/catalog unavailable/);
+    should(test.store.rows()).be.empty();
+  });
+
+  it('should replace rather than accumulate when the same session is ingested twice', async () => {
+    // A retry after a crash must not double-count. No column accumulates and the key is the session id,
+    // so a second pass over the same evidence produces the same row.
+    // Arrange
+    const test = harness([candidate({ id: 's1' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 1_000, 500)]),
+    );
+
+    // Act
+    await test.service.ingest();
+    const before = test.store.rows()[0]?.raw;
+    await test.service.rebuild();
+
+    // Assert
+    should(test.store.rows()).have.length(1);
+    should(test.store.rows()[0]?.raw).deepEqual(before!);
+    should(test.store.drops).equal(1);
+  });
+
+  it('should forget a row whose durable session records are gone', async () => {
+    // The records are authoritative; an index outliving them would answer for a fleet that is gone.
+    // Arrange
+    const test = harness([candidate({ id: 's1' }), candidate({ id: 's2' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 10, 10)]),
+    );
+    await test.service.ingest();
+
+    // Act
+    test.setCandidates([candidate({ id: 's1' })]);
+    const second = await test.service.ingest();
+
+    // Assert
+    should(second.forgotten).equal(1);
+    should(test.store.rows().map(row => row.raw.id)).deepEqual(['s1']);
+  });
+
+  it('should forget a row whose session went back to work', async () => {
+    // A revive puts a stopped session back to running, so the totals ingested when it ended are no
+    // longer its final ones. Keeping the row would report a running session's spend as a finished run's.
+    // Arrange
+    const test = harness([candidate({ id: 's1', status: 'stopped' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 10, 10)]),
+    );
+    await test.service.ingest();
+
+    // Act
+    test.setCandidates([candidate({ id: 's1', status: 'running' })]);
+    const second = await test.service.ingest();
+
+    // Assert
+    should(second.forgotten).equal(1);
+    should(second.gateRefused).equal(1);
+    should(test.store.rows()).be.empty();
+  });
+
+  it('should fold every session when there are more of them than the concurrency allows', async () => {
+    // Arrange
+    const test = harness(
+      [candidate({ id: 's1' }), candidate({ id: 's2' }), candidate({ id: 's3' })],
+      async () => readEvidence([usageEvent('claude-opus-5', 10, 10)]),
+      { concurrency: 2 },
+    );
+
+    // Act
+    const summary = await test.service.ingest();
+
+    // Assert
+    should(summary.ingested).equal(3);
+    should(test.reads).have.length(3);
+  });
+
+  it('should read at most its cap per pass and leave the rest for the next pass', async () => {
+    // Arrange
+    const test = harness(
+      ['s1', 's2', 's3', 's4', 's5'].map(id => candidate({ id })),
+      async () => readEvidence([usageEvent('claude-opus-5', 10, 10)]),
+      { concurrency: 2, readsPerPass: 2 },
+    );
+
+    // Act
+    const first = await test.service.ingest();
+    const second = await test.service.ingest();
+    const third = await test.service.ingest();
+
+    // Assert — every session is read once, two per pass, and nothing is read twice.
+    should([first.ingested, first.postponed]).deepEqual([2, 3]);
+    should([second.ingested, second.postponed]).deepEqual([2, 1]);
+    should([third.ingested, third.postponed, third.unchanged]).deepEqual([1, 0, 4]);
+    should(test.reads).deepEqual(['s1', 's2', 's3', 's4', 's5']);
+  });
+
+  it('should count a fold that raised as a source error with an unreadable refusal, never as zero', async () => {
+    // Arrange
+    const test = harness([candidate({ id: 's1' })], async () => readEvidence([]), {
+      folds: {
+        foldFor: async () => {
+          throw new Error('the analytics worker failed');
+        },
+      },
+    });
+
+    // Act
+    const summary = await test.service.ingest();
+
+    // Assert
+    should(summary.sourceErrors).equal(1);
+    should(summary.usageRefused).equal(1);
+  });
+
+  it('should run passes one at a time so neither re-folds what the other proved', async () => {
+    // Two overlapping passes would each read the store's markers before the other wrote its rows.
+    // Arrange
+    let release = (): void => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const test = harness([candidate({ id: 's1' })], async () => {
+      await gate;
+      return readEvidence([usageEvent('claude-opus-5', 10, 10)]);
+    });
+
+    // Act — the first pass is running when the second is asked for.
+    const first = test.service.ingest();
+    await new Promise(resolve => setImmediate(resolve));
+    const second = test.service.ingest();
+    release();
+
+    // Assert
+    should((await first).ingested).equal(1);
+    should((await second).ingested).equal(0);
+    should((await second).unchanged).equal(1);
+    should(test.reads).deepEqual(['s1']);
+  });
+
+  it('should join a pass that is already waiting instead of queueing another behind it', async () => {
+    // A timer that outpaced a slow pass used to grow the queue without bound; a waiting pass will read
+    // everything a second one would have.
+    // Arrange
+    let release = (): void => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let listings = 0;
+    const test = harness([candidate({ id: 's1' })], async () => readEvidence([usageEvent('claude-opus-5', 10, 10)]), {
+      candidates: {
+        listCandidates: async () => {
+          listings += 1;
+          await gate;
+          return [candidate({ id: 's1' })];
+        },
+      },
+    });
+
+    // Act — one pass running, then three asks while the next one waits behind it.
+    const running = test.service.ingest();
+    await new Promise(resolve => setImmediate(resolve));
+    const waiting = [test.service.ingest(), test.service.ingest(), test.service.ingest()];
+    release();
+    await running;
+    const joined = await Promise.all(waiting);
+
+    // Assert — two passes ran, not four, and the three asks share the second one's answer.
+    should(listings).equal(2);
+    should(joined[1]).equal(joined[0]);
+    should(joined[2]).equal(joined[0]);
+  });
+
+  it('should leave an unchanged read refusal unread until it is old, and re-read a changed one at once', async () => {
+    // A finished transcript too big to read whole is refused the same way on every pass; re-reading it
+    // each minute was most of a second of a blocked loop per session, forever.
+    // Arrange
+    let nowMs = Date.parse('2026-08-02T00:00:00.000Z');
+    const test = harness(
+      [candidate({ id: 's1' })],
+      async () => readEvidence([]),
+      { clock: { now: () => new Date(nowMs).toISOString() } },
+    );
+    await test.service.ingest();
+
+    // Act
+    nowMs += 60_000;
+    const soon = await test.service.ingest();
+    nowMs += REFUSAL_RETRY_MS;
+    const later = await test.service.ingest();
+    test.setPricing([{ ...RATES[0]!, rates: { ...RATES[0]!.rates, output: 150_000_000 } }]);
+    const repriced = await test.service.ingest();
+
+    // Assert
+    should(test.store.rows()[0]?.usageRefusal).equal('no_usage_evidence');
+    should(soon.deferred).equal(1);
+    should(soon.ingested).equal(0);
+    should(later.deferred).equal(0);
+    should(later.ingested).equal(1);
+    should(repriced.ingested).equal(1);
+    should(test.reads).deepEqual(['s1', 's1', 's1']);
+  });
+
+  it('should keep serving later passes after one of them failed', async () => {
+    // A background timer keeps firing; a pass that raised must not wedge the chain behind it.
+    // Arrange
+    let broken = true;
+    const test = harness([candidate({ id: 's1' })], async () => readEvidence([usageEvent('claude-opus-5', 10, 10)]), {
+      candidates: {
+        listCandidates: async () => {
+          if (broken) throw new Error('the state home could not be listed');
+          return [candidate({ id: 's1' })];
+        },
+      },
+    });
+
+    // Act
+    await test.service.ingest().should.be.rejected();
+    broken = false;
+
+    // Assert
+    should((await test.service.ingest()).ingested).equal(1);
+  });
+});
+
+describe('AnalyticsIngestionService.read', () => {
+  it('should report an unproven fold as a pending source rather than an indexed one', async () => {
+    // Arrange
+    const test = harness([candidate({ id: 's1' }), candidate({ id: 's2' })], async id =>
+      id === 's1' ? readEvidence([usageEvent('claude-opus-5', 10, 10)]) : undefined,
+    );
+
+    // Act
+    await test.service.ingest();
+    const read = test.service.read();
+
+    // Assert
+    should(read.rows).have.length(2);
+    should(read.status).deepEqual({
+      schemaVersion: ANALYTICS_INDEX_SCHEMA_VERSION,
+      sessions: 2,
+      tokenSessions: 1,
+      transcriptSources: 2,
+      indexedTranscriptSources: 1,
+      pendingTranscriptSources: 1,
+      sourceErrors: 0,
+      refreshing: false,
+      lastTokenRefreshAt: test.store.status().lastIngestedAt!,
+    });
+  });
+
+  it('should say why an unreadable session has no cost, and price a readable one at the rates of its day and of today', async () => {
+    // Arrange: the rate fell on 2026-09-01, after the session ran and before the read.
+    const [base] = RATES as [AnalyticsPricingRate];
+    const dated: readonly AnalyticsPricingRate[] = [
+      { ...base, validThrough: '2026-08-31T23:59:59.999Z' },
+      {
+        ...base,
+        pricingKey: 'operator:claude-opus-5:2026-09',
+        validFrom: '2026-09-01T00:00:00.000Z',
+        rates: { ...base.rates, input: 1_000_000, output: 5_000_000 },
+      },
+    ];
+    const test = harness(
+      [candidate({ id: 'ok' }), candidate({ id: 'lost' })],
+      async id =>
+        id === 'ok' ? readEvidence([usageEvent('claude-opus-5', 1_000_000, 1_000_000)]) : undefined,
+      { clock: { now: () => '2026-11-01T00:00:00.000Z' } },
+    );
+    test.setPricing(dated);
+
+    // Act
+    await test.service.ingest();
+    const rows = new Map(test.service.read().rows.map(row => [row.id, row]));
+
+    // Assert: 1M in × $15 + 1M out × $75 then; × $1 + × $5 today.
+    should(rows.get('ok')).match({
+      equivalentApiCostUsdMicros: 90_000_000,
+      equivalentApiCostCurrentUsdMicros: 6_000_000,
+      costGap: null,
+    });
+    should(rows.get('lost')).match({
+      equivalentApiCostUsdMicros: null,
+      equivalentApiCostCurrentUsdMicros: null,
+      costGap: 'transcript_unresolved',
+    });
+  });
+
+  it('should say a pass is in flight while one is running', async () => {
+    // An index that is mid-refresh and one that has nothing to say look identical from the outside and
+    // are completely different states.
+    // Arrange
+    let release = (): void => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const test = harness([candidate({ id: 's1' })], async () => {
+      await gate;
+      return readEvidence([usageEvent('claude-opus-5', 10, 10)]);
+    });
+
+    // Act
+    const pass = test.service.ingest();
+
+    // Assert
+    should(test.service.read().status.refreshing).be.true();
+    release();
+    await pass;
+    should(test.service.read().status.refreshing).be.false();
+  });
+
+  it('should omit the last refresh instant while nothing is ingested rather than inventing one', async () => {
+    // Arrange
+    const test = harness([], async () => (undefined));
+
+    // Act
+    const read = test.service.read();
+
+    // Assert
+    should(read.status).not.have.property('lastTokenRefreshAt');
+    should(read.status.sessions).equal(0);
+    should(read.rows).be.empty();
+  });
+
+  it('should carry the last pass‘s source errors into the account it reports', async () => {
+    // Arrange
+    const test = harness([candidate({ id: 's1' })], async () => {
+      throw new Error('unreadable');
+    });
+
+    // Act
+    await test.service.ingest();
+
+    // Assert
+    should(test.service.read().status.sourceErrors).equal(1);
+  });
+});
+
+describe('AnalyticsIngestionService.rebuildRequired', () => {
+  it('should report what the store said when it was opened', async () => {
+    // DECLARED rather than inferred from an empty table: an index that was thrown away and one that has
+    // simply never seen a finished session both hold no rows.
+    // Arrange / Act / Assert
+    should(
+      harness([], async () => (undefined), { rebuildRequired: true }).service.rebuildRequired,
+    ).be.true();
+    should(harness([], async () => (undefined)).service.rebuildRequired).be.false();
+  });
+});
+
+/** Records what the service asks of its trigger. */
+class RecordingTrigger {
+  readonly nudges: number[] = [];
+  nudge(withinMs: number): void {
+    this.nudges.push(withinMs);
+  }
+}
+
+describe('when an ingestion pass is owed', () => {
+  const evidence = async () => readEvidence([usageEvent('claude-opus-5', 10, 10)]);
+
+  it('should owe a pass for an ended session, and for a revived one the index holds — never for a running one', async () => {
+    // Arrange — one session ingested, then revived.
+    const trigger = new RecordingTrigger();
+    const test = harness([candidate({ id: 's1' })], evidence, { trigger });
+    await test.service.ingest();
+
+    // Act
+    test.service.ferretChanged('s1', false);
+    test.service.ferretChanged('s2', false);
+    test.service.ferretChanged('s3', true);
+
+    // Assert
+    should(trigger.nudges).deepEqual([ANALYTICS_ENDED_SETTLE_MS, ANALYTICS_ENDED_SETTLE_MS]);
+    should(test.service.owes('s1', false)).be.true();
+    should(test.service.owes('s2', false)).be.false();
+  });
+
+  it('should owe a pass soon after the rates may have moved', () => {
+    // Arrange
+    const trigger = new RecordingTrigger();
+    const test = harness([], evidence, { trigger });
+
+    // Act
+    test.service.pricingChanged();
+
+    // Assert
+    should(trigger.nudges).deepEqual([ANALYTICS_PRICING_SETTLE_MS]);
+  });
+
+  it('should ask for a catch-up pass only while a pass leaves reads over', async () => {
+    // Arrange
+    const trigger = new RecordingTrigger();
+    const test = harness(
+      ['s1', 's2', 's3'].map(id => candidate({ id })),
+      evidence,
+      { readsPerPass: 2, trigger },
+    );
+
+    // Act
+    await test.service.ingest();
+    await test.service.ingest();
+
+    // Assert
+    should(trigger.nudges).deepEqual([ANALYTICS_CATCH_UP_MS]);
+  });
+
+  it('should arm nothing without a trigger', () => {
+    // Arrange
+    const bare = harness([], evidence).service;
+
+    // Act
+    bare.ferretChanged('s1', true);
+    bare.pricingChanged();
+
+    // Assert
+    should(ANALYTICS_BACKSTOP_MS).equal(REFUSAL_RETRY_MS);
+  });
+});
+
+describe('AnalyticsIngestionService.ingest and the session archive', () => {
+  const finished = async () => readEvidence([usageEvent('claude-opus-5', 1_000, 500)]);
+
+  it('should keep the row of a session that left the list, because it left the list and not the disk', async () => {
+    const live = candidate({ id: 's1' });
+    const test = harness([live], finished);
+    await test.service.ingest();
+    should([...test.store.saved.keys()]).deepEqual(['s1']);
+
+    // The archive takes it out of the live list; it is named as archived.
+    test.setCandidates([]);
+    const archivedHarness = new AnalyticsIngestionService({
+      candidates: { listCandidates: async () => [], archived: () => ['s1'] },
+      folds: { foldFor: async (_id, aliasGroups) => foldAnalyticsTurns(await finished(), aliasGroups) },
+      store: test.store,
+      pricing: async () => RATES,
+      clock: { now: () => '2026-08-03T00:00:00.000Z' },
+      concurrency: 2,
+      rebuildRequired: false,
+    });
+    await archivedHarness.ingest();
+
+    should([...test.store.saved.keys()]).deepEqual(['s1']);
+    // And a pass is still owed if a write revives it.
+    should(archivedHarness.owes('s1', false)).be.true();
+  });
+
+  it('should still forget a stored row nothing names — not live, not archived', async () => {
+    const test = harness([candidate({ id: 's1' })], finished);
+    await test.service.ingest();
+    test.setCandidates([]);
+
+    await test.service.ingest();
+
+    should([...test.store.saved.keys()]).deepEqual([]);
+  });
+
+  it('should ingest an archived session the store never held, by reading it on demand', async () => {
+    const asked: string[] = [];
+    const store = new MemoryStore();
+    const service = new AnalyticsIngestionService({
+      candidates: {
+        listCandidates: async () => [],
+        archived: () => ['old', 'unreadable'],
+        candidate: async id => {
+          asked.push(id);
+          return id === 'old' ? candidate({ id: 'old' }) : undefined;
+        },
+      },
+      folds: { foldFor: async (_id, aliasGroups) => foldAnalyticsTurns(await finished(), aliasGroups) },
+      store,
+      pricing: async () => RATES,
+      clock: { now: () => '2026-08-03T00:00:00.000Z' },
+      concurrency: 2,
+      rebuildRequired: false,
+    });
+
+    await service.ingest();
+    await service.ingest();
+
+    should([...store.saved.keys()]).deepEqual(['old']);
+    // The second pass does not read what the store holds again; an unreadable one is asked about each time.
+    should(asked).deepEqual(['old', 'unreadable', 'unreadable']);
+  });
+
+  it('should read no archived session when the source cannot read one on demand', async () => {
+    const store = new MemoryStore();
+    const service = new AnalyticsIngestionService({
+      candidates: { listCandidates: async () => [], archived: () => ['old'] },
+      folds: { foldFor: async (_id, aliasGroups) => foldAnalyticsTurns(await finished(), aliasGroups) },
+      store,
+      pricing: async () => RATES,
+      clock: { now: () => '2026-08-03T00:00:00.000Z' },
+      concurrency: 2,
+      rebuildRequired: false,
+    });
+
+    await service.ingest();
+
+    should([...store.saved.keys()]).deepEqual([]);
+  });
+});

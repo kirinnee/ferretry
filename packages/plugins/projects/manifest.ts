@@ -86,5 +86,5 @@ export default definePlugin({
   },
 
   // Registering touches only the folder the owner named, once (`imports` root, §7.7); `git` clones and initialises.
-  permissions: { roots: ['imports'], spawn: ['git'] },
+  permissions: { roots: ['imports'], spawn: ['git', 'mkdir'] },
 });

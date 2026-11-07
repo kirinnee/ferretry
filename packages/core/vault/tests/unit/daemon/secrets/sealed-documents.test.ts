@@ -3,6 +3,7 @@ import type { Clock, StatePort } from '@ferretry/kernel/contract';
 import { state } from '@ferretry/kernel/host';
 import {
   defineSealedDocument,
+  MAX_SECRETS_PER_DAEMON,
   type SealedName,
   SealedDocumentsPort,
   VaultFile,
@@ -13,7 +14,7 @@ import { FileSecretDocumentStore } from '../../../../daemon/adapters/secrets/fil
 import { KernelSealedDocuments } from '../../../../daemon/adapters/secrets/kernel-sealed-documents.ts';
 import { kernelSealedFiles } from '../../../../daemon/adapters/secrets/kernel-sealed-files.ts';
 import { FileSecretKey, WebCryptoSecretCipher } from '../../../../daemon/adapters/secrets/webcrypto-secret-cipher.ts';
-import { SecretVault } from '../../../../daemon/lib/secrets/index.ts';
+import { SecretStoreError, SecretVault } from '../../../../daemon/lib/secrets/index.ts';
 import manifest from '../../../../manifest.ts';
 import {
   linkKeys,
@@ -126,6 +127,32 @@ describe('sealed documents: scope', () => {
     const vault = new SecretVault(new FileSecretDocumentStore(w.vaultFiles), new WebCryptoSecretCipher(w.key));
     expect((await vault.values()).has('MCP_X_REFRESH')).toBe(false);
     expect(text(w.fs, 'vault/vault.json')).toBeUndefined();
+  });
+
+  test("a document refuses a NEW name once it holds the daemon's limit, yet still lets one be replaced", async () => {
+    const w = world();
+    const own = w.port.open(w.plugin('mcp', MCP_SECRETS), MCP_SECRETS);
+    await own.put('HELD_0' as SealedName, 'fixture-held-value');
+    // Fill the document to the limit by copying the one sealed entry: the cap is counted before anything is opened.
+    const path = `${HOME}/state/mcp/oauth-secrets.json`;
+    const document = JSON.parse(w.fs.snapshot().get(path) ?? '{}') as { entries: Record<string, unknown> };
+    const held = document.entries.HELD_0;
+    for (let index = 1; index < MAX_SECRETS_PER_DAEMON; index += 1) document.entries[`HELD_${index}`] = held;
+    w.fs.seed(path, `${JSON.stringify(document, undefined, 2)}\n`, 0o600);
+    const full = w.fs.snapshot().get(path);
+
+    const refused = await own.put('ONE_MORE' as SealedName, 'fixture-one-more').then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(refused).toBeInstanceOf(SecretStoreError);
+    expect((refused as SecretStoreError).failure).toBe('full');
+    expect((refused as SecretStoreError).message).toBe(`this daemon already holds ${MAX_SECRETS_PER_DAEMON} secrets`);
+    expect(w.fs.snapshot().get(path)).toBe(full);
+    await own.put('HELD_0' as SealedName, 'fixture-held-value-replaced');
+    expect(await own.get('HELD_0' as SealedName)).toBe('fixture-held-value-replaced');
+    expect(await own.names()).toHaveLength(MAX_SECRETS_PER_DAEMON);
   });
 });
 
