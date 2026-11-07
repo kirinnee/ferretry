@@ -1,6 +1,5 @@
 import {
   AccountIdSchema,
-  DAEMON_FEATURES,
   placeKeys,
   ruleDeepLink,
   SIGN_IN_RULE_AUTO_RECIPE_WARNING,
@@ -26,12 +25,7 @@ import {
   signInRuleScopeWords,
   signInRuleStatusWords,
 } from '../../../contract/routes/index.ts';
-import { FyHttpError } from '@ferretry/protocol/client';
-import { daemonNeedsUpdate } from '../daemon/features.ts';
-import { refuseOwnerCommandInPane } from '../daemon/owner-only.ts';
-import { showUntrusted } from '../input/render.ts';
-import { parseLifetime, unique } from '../plan/controller.ts';
-import { RULES_FEATURE_WORDS } from './gateway.ts';
+import { parseLifetime, refusedWith, refuseOwnerCommandInPane, showUntrusted, unique } from '../shared.ts';
 import type { RulesPorts } from './ports.ts';
 
 /** Options every `fy rules` command accepts. */
@@ -376,19 +370,10 @@ export class RulesController {
 
   async #stageAndWait(draft: SignInRuleDraft, options: RulesStageOptions): Promise<void> {
     const { gateway } = this.ports;
-    // A health read that fails says so (`DaemonFeaturesUnreadable`): only a daemon that answered is called too old.
-    const features = await gateway.features();
-    if (!features.includes(DAEMON_FEATURES.signInRules)) throw new Error(daemonNeedsUpdate(RULES_FEATURE_WORDS));
     const eligibility = await gateway.eligibility(draft.signIn);
     if (!eligibility.eligible) throw new Error(SIGN_IN_RULE_INELIGIBLE_WORDS[eligibility.because]);
     const startedMs = this.ports.nowMs();
     const staged = await gateway.stage(draft);
-    if (staged.root && !features.includes(DAEMON_FEATURES.signInRulesTerminal)) {
-      await gateway.drop(staged.stage).catch(() => undefined);
-      throw new Error(
-        'a rule for sudo, su or doas is not offered by this daemon (it does not report terminal rules): nothing was staged',
-      );
-    }
     for (const line of renderStaged(staged, this.ports.red)) this.#say(options, line);
     const confirming = await gateway.confirmInApp(staged.stage);
     this.#say(
@@ -452,7 +437,7 @@ export class RulesController {
     const until = this.ports.nowMs() + WAIT_SECONDS * 1_000;
     for (;;) {
       const view = await this.ports.gateway.view(stage).catch((error: unknown) => {
-        if (error instanceof FyHttpError && error.status === 404) return undefined;
+        if (refusedWith(error, 404)) return undefined;
         throw error;
       });
       if (view === undefined) return 'expired';

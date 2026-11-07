@@ -1,6 +1,5 @@
 import type {
   DaemonId,
-  IFyApiClient,
   SignInRuleDraft,
   SignInRuleEligibility,
   SignInRuleList,
@@ -32,11 +31,8 @@ export interface IRulesGateway {
   revokeAccount(account: string): Promise<number>;
   /** Whether the owner could make a rule for this sign-in now, and why not. */
   eligibility(signIn: string): Promise<SignInRuleEligibility>;
-  /** The features the daemon reports (`DAEMON_FEATURES`); throws `DaemonFeaturesUnreadable` when it cannot be asked. */
-  features(): Promise<readonly string[]>;
 }
 
-export type RulesApiClient = Pick<IFyApiClient, 'request'>;
 
 export interface RulesPorts {
   readonly gateway: IRulesGateway;
