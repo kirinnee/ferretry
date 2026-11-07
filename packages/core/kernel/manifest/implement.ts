@@ -17,7 +17,7 @@ import type { DoctorFinding } from '../contract/kernel.ts';
 import type { Cancel, KernelPorts, StatePort } from '../contract/ports.ts';
 import type { CallContext, MemberRouteHandler, RouteHandler } from '../contract/route.ts';
 import type { SocketAccept } from '../contract/socket.ts';
-import type { Manifest } from './types.ts';
+import type { Manifest, Needer } from './types.ts';
 
 // ─── reading a manifest's literals ────────────────────────────────────────────────────────────────────────────────
 
@@ -49,6 +49,35 @@ type TokensOf<M, K extends 'needs' | 'uses' | 'provides'> = M extends { readonly
 
 /** `needs: { asks: AsksPort }` → `{ asks: AsksApi }`. */
 export type PortsOf<T> = { readonly [K in keyof T]: ApiOf<T[K]> };
+
+const PER_NEEDER: unique symbol = Symbol('fy.per-needer');
+
+/**
+ * A `provides` entry built once for EACH plugin that needs or uses it, instead of one value shared by all (§3.7):
+ * the kernel calls `build` with that plugin's id and effective permissions the first time it binds the port for it,
+ * and hands the same answer to it ever after. Mark one with {@link perNeeder}; a plain value is shared, as before.
+ */
+export interface PerNeeder<Api> {
+  readonly [PER_NEEDER]: (needer: Needer) => Api;
+}
+
+/** A per-needer `provides` entry: `provides: { vault: perNeeder(needer => apiFor(needer)) }`. */
+export function perNeeder<Api>(build: (needer: Needer) => Api): PerNeeder<Api> {
+  return Object.freeze({ [PER_NEEDER]: build });
+}
+
+/** Whether a provided value is a {@link perNeeder} factory rather than a shared value. */
+export function isPerNeeder(value: unknown): value is PerNeeder<unknown> {
+  return typeof value === 'object' && value !== null && PER_NEEDER in value;
+}
+
+/** The value a needer is handed: a shared value as it is, a {@link PerNeeder} built for that needer. */
+export function providedFor(value: unknown, needer: Needer): unknown {
+  return isPerNeeder(value) ? value[PER_NEEDER](needer) : value;
+}
+
+/** `provides: { vault: VaultPort }` → `{ vault: VaultApi | PerNeeder<VaultApi> }`. */
+export type ProvidedOf<T> = { readonly [K in keyof T]: ApiOf<T[K]> | PerNeeder<ApiOf<T[K]>> };
 
 /**
  * An optional port (§7.6 step 5): unbound during `build` (calling `current()` there throws); from `started` on it is
@@ -127,13 +156,12 @@ export type DaemonHalf<M extends Manifest> = Section<'routes', { readonly [K in 
   Section<'sockets', { readonly [K in SocketKeysOf<M>]: SocketAccept }> &
   Section<'memberRoutes', { readonly [K in MemberRouteKeysOf<M>]: MemberRouteHandler }> &
   Section<'tools', { readonly [K in ToolNamesOf<M>]: ToolHandler }> &
-  Section<'provides', PortsOf<TokensOf<M, 'provides'>>> &
+  Section<'provides', ProvidedOf<TokensOf<M, 'provides'>>> &
   Section<'hooks', HookImplsOf<M>> &
-  Section<'subscribers', SubscribersOf<M>> & /**
+  Section<'subscribers', SubscribersOf<M>> /**
    * A declared check with no run still boots: `fy doctor` reports it as a failure that names it (`has no
    * implementation`), so a missing check is seen, never silent. A run for an undeclared id is refused.
-   */
-  { readonly doctor?: { readonly [K in DoctorIdsOf<M>]?: DoctorRun } } & Section<
+   */ & { readonly doctor?: { readonly [K in DoctorIdsOf<M>]?: DoctorRun } } & Section<
     'resolvers',
     { readonly [K in ResolverIdsOf<M>]: NetworkResolver }
   > & {

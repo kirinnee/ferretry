@@ -223,6 +223,24 @@ export interface Permissions {
   readonly updateHost?: true;
 }
 
+/**
+ * The plugin a per-needer `provides` entry is built for (§3.7): its id and its EFFECTIVE permissions, the ones the
+ * kernel's own ports enforce for it (`effectivePermissions`: a `'*'` in `spawn` or `network` survives for a core id
+ * alone). A provider that acts on a caller's behalf narrows what it does to these, so a needer reaches nothing through
+ * the provider that its own manifest does not declare. The kernel itself, binding a kernel-bound port, is `kernel`.
+ */
+export interface Needer {
+  readonly id: string;
+  readonly permissions: Permissions;
+  /**
+   * Every `${secret:NAME}` the needer's OWN config files name, as they are IN EFFECT now (asked at each call): a
+   * reference added by a plugin or a hand edit is held for the owner and names nothing until the owner confirms it,
+   * so only an owner-written reference is here. The needer's records are the needer's to write; a provider may count
+   * these names as the needer's own, beside `permissions.secrets`.
+   */
+  readonly ownedSecretReferences: () => ReadonlySet<string>;
+}
+
 // the manifest ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The one declaration (§3.3). Plain data; every field of the "Every field" table. */

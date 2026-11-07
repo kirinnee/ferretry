@@ -38,7 +38,7 @@ test('I78 I84 page probe and field clear retain the target adapter receiver and 
   expect(await absent.clear(ferret, target, job)).toBe('unknown');
 });
 
-test('I93 I99 the login observer looks through the targets’ own reads, pinned to the surfaces it was given', async () => {
+test('I136 the login observer looks through the targets’ own reads, pinned to the surfaces it was given', async () => {
   const seen: unknown[][] = [];
   class Looking extends FakeInputTarget {
     async where(ferret: FerretId, key: string, surfaces: readonly string[]) {
@@ -70,7 +70,7 @@ test('I93 I99 the login observer looks through the targets’ own reads, pinned 
   expect(seen).toContainEqual(['promptLine', ferret, 'dev', ['dev', '%3']]);
 });
 
-test('I93 a target that offers no look, or a provider that is off, leaves every sign-in fact unknown', async () => {
+test('I136 a target that offers no look, or a provider that is off, leaves every sign-in fact unknown', async () => {
   const ferret = 'f1' as FerretId;
   const target = { kind: 'page', key: 'login' } as const;
   for (const provider of [() => new FakeInputTarget('page', 'login'), () => undefined]) {

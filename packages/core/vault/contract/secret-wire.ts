@@ -49,7 +49,7 @@ export type SecretList = z.infer<typeof SecretListSchema>;
 export const RemovedSecretSchema = z.object({ name: SecretNameSchema, removed: z.literal(true) }).strict();
 export type RemovedSecret = z.infer<typeof RemovedSecretSchema>;
 
-/** `POST /v1/secrets`: creating a secret, or replacing one that exists (today's `PutSecretRequestSchema`). */
+/** `POST /v1/secrets`: creating a secret, or replacing one that exists (today's put request). */
 export const PutSecretBodySchema = z
   .object({
     name: SecretNameSchema,

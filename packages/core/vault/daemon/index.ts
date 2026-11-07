@@ -1,6 +1,6 @@
 import type { ChildEnvironment, FerretId, SecretResolver } from '@ferretry/kernel/contract';
 import type { FerretState } from '@ferretry/core-ferrets/contract';
-import { implementDaemon } from '@ferretry/kernel/manifest';
+import { implementDaemon, type Needer, perNeeder } from '@ferretry/kernel/manifest';
 import { err, ok, type Result } from '@ferretry/std';
 import manifest from '../manifest.ts';
 import {
@@ -33,6 +33,14 @@ import { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
 import { InputRequestError } from './lib/inputs/errors.ts';
 import { secretRouteHandlers } from './lib/runtime/mounts/secrets.ts';
 import { OutboundProviderAuthorizer } from './lib/secrets/authorizer.ts';
+import {
+  isCoreNeeder,
+  mayRunProgram,
+  mayUseSecret,
+  reachableHosts,
+  secretsNamedBy,
+  UndeclaredProgramError,
+} from './lib/secrets/reach.ts';
 import { ChildEnvironments } from './lib/secrets/child-environments.ts';
 import { type SecretCloneIdentitySource, SecretExportService, SecretImportService } from './lib/secrets/clone.ts';
 import { HoldRegistry } from './lib/secrets/output-guard.ts';
@@ -160,7 +168,7 @@ export default implementDaemon(manifest, {
       resolve: async name => (await vault.values()).get(name as SecretName),
     };
 
-    const api: VaultApi = {
+    const full: VaultApi = {
       names: async () => await directory.list(),
       has: async name => (await directory.list()).some(secret => secret.name === name),
       put: async (name, value) => {
@@ -205,6 +213,36 @@ export default implementDaemon(manifest, {
         }),
     };
 
+    /**
+     * THE PORT EACH PLUGIN IS HANDED (§3.7), built once per needing plugin by the kernel. A core caller gets the
+     * Vault's own reach; any other plugin gets the same port with the three calls that spend something narrowed to
+     * what it is already allowed: a host its manifest's `network` names, a secret its manifest or its own records
+     * name ({@link mayUseSecret}), a program its manifest's `spawn` names. A request outside is refused the way
+     * today's Vault refuses a host, secret or program it does not allow.
+     */
+    const apiFor = (needer: Needer): VaultApi => {
+      if (isCoreNeeder(needer)) return full;
+      return {
+        ...full,
+        run: async (command, ferret) => {
+          const program = command.command[0];
+          if (program !== undefined && !mayRunProgram(needer, program))
+            throw new UndeclaredProgramError(needer, program);
+          if (!secretsNamedBy(command).every(name => mayUseSecret(needer, name))) return err('unknown_secret');
+          return await full.run(command, ferret);
+        },
+        authorizeFetch: async (name, hostAllowlist, request, placement) => {
+          if (!mayUseSecret(needer, name)) return { kind: 'refused' };
+          return await full.authorizeFetch(name, reachableHosts(needer, hostAllowlist), request, placement);
+        },
+        childEnvironment: async (ferret, env) => {
+          const refused = secretsNamedBy({ secrets: [], env }).filter(name => !mayUseSecret(needer, name));
+          if (refused.length > 0) return err({ unknown: refused });
+          return await full.childEnvironment(ferret, env);
+        },
+      };
+    };
+
     return {
       routes: {
         ...secretRouteHandlers({ directory, references: NO_REFERENCES, uses, imports, exports, changed }),
@@ -212,7 +250,7 @@ export default implementDaemon(manifest, {
       },
       tools: { ...inputs.tools },
       provides: {
-        vault: api,
+        vault: perNeeder(apiFor),
         outputGuard: holds,
         inputHolds: inputs.holds,
         redaction,

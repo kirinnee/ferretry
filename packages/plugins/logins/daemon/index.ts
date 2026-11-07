@@ -11,6 +11,7 @@ import { type Instant, milliseconds } from '@ferretry/std';
 import manifest from '../manifest.ts';
 import { type LoginId, type LoginsApi, LoginChanged, LoginSignedIn, ModelsChanged } from '../contract/index.ts';
 import { HostedModelCatalog, StateModelCatalogCache } from './adapters/models/index.ts';
+import { spendSecretOf } from './lib/credentials/spend-secret.ts';
 import { AuthorizedProviderProbe, BoundedTransport } from './adapters/provider-probe/index.ts';
 import { deliverCodexCallback } from './adapters/harness-login/callback-delivery.ts';
 import { harnessLoginTimer, spawnHarnessLoginChild } from './adapters/harness-login/login-child.ts';
@@ -206,6 +207,14 @@ export function buildLoginsDaemon() {
         quota: async id => (await credentials.list()).logins.find(login => login.id === id)?.usage,
         presets: () => credentials.presets(),
         models: modelsView,
+        // A login's key on ONE request (Usage's quota read): the secret is read from the login's OWN record, never from
+        // the caller, and the Vault holds this plugin to the secrets it declares or an owner-written record names.
+        authorizeFetch: async (loginId, variable, hostAllowlist, request, placement) => {
+          const login = (await credentials.list()).logins.find(candidate => candidate.id === loginId);
+          const name = spendSecretOf(login, variable);
+          if (name === undefined) return { kind: 'refused' };
+          return await needs.vault.authorizeFetch(name, hostAllowlist, request, placement);
+        },
       };
 
       const kinds = loginKinds({

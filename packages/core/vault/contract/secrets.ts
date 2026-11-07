@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 /**
  * Secrets: values ferrets use by name and never see (§2.2, docs/secrets.md). Today's `protocol/src/lib/secrets.ts`,
- * field for field. A value travels IN on `PutSecretRequestSchema` and never travels back: there is no schema for a
+ * field for field. A value travels IN on `PutSecretBodySchema` and never travels back: there is no schema for a
  * value on its way out, and no getter on the port. `${secret:NAME}` is the ONE reference grammar.
  */
 
@@ -21,8 +21,6 @@ export type SecretName = z.infer<typeof SecretNameSchema>;
 
 /** A value on its way IN. Not trimmed: whitespace can be load-bearing in a key. */
 export const SecretValueSchema = z.string().min(MIN_SECRET_VALUE_LENGTH).max(MAX_SECRET_VALUE_LENGTH);
-
-export const PutSecretRequestSchema = z.strictObject({ value: SecretValueSchema });
 
 /** What a listing says about one secret: its name and times, never a value or a digest of one. */
 export const SecretSummarySchema = z.strictObject({

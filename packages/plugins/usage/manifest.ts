@@ -1,5 +1,4 @@
 import { FerretsPort, StartDecide } from '@ferretry/core-ferrets/contract';
-import { VaultPort } from '@ferretry/core-vault/contract';
 import { definePlugin, panel, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import { LoginsPort } from '@ferretry/plugin-logins/contract';
@@ -48,7 +47,7 @@ export default definePlugin({
   kinds: ['command', 'view'],
   words: USAGE_WORDS,
 
-  needs: { ferrets: FerretsPort, conversation: ConversationPort, logins: LoginsPort, vault: VaultPort },
+  needs: { ferrets: FerretsPort, conversation: ConversationPort, logins: LoginsPort },
   provides: { usage: UsagePort },
 
   actions: {
