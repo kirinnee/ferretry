@@ -55,6 +55,15 @@ describe('browsers provides the %browser reference menu (reference.catalog)', ()
     for (const entry of entries) expect(ReferenceCatalogEntrySchema.safeParse(entry).success).toBe(true);
   });
 
+  test('a title or address a page set past the entry bound is cut, so the menu still answers', async () => {
+    const entries = await menu([
+      page({ id: 'p1', title: 'x'.repeat(5_000) }),
+      page({ id: 'p2', title: '', url: `data:text/plain,${'y'.repeat(5_000)}` }),
+    ]).entries(ask());
+    expect(entries.map(entry => entry.label.length)).toEqual([256, 256]);
+    expect(ReferenceCatalogEntrySchema.array().safeParse(entries).success).toBe(true);
+  });
+
   test('the detail says whether the page is incognito and who opened it; an unrecorded opener reads unrecorded, never a guess', async () => {
     const entries = await menu([
       page({ id: 'p1', openedBy: { by: 'agent', sessionId: 's1' } }),

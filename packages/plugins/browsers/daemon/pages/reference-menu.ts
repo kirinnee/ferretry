@@ -21,6 +21,9 @@ const ownershipText = (opener: BrowserPageSummary['openedBy']): string => {
 /** How a reference addresses a page: its name when it has one, else its id (`%browser:app`). */
 const keyOf = (page: BrowserPageSummary): string => page.name ?? page.id;
 
+/** The entry schema's own bounds: a page sets its own title (and an address can be long), so it is cut rather than failing the menu. */
+const clip = (text: string, max: number): string => (text.length <= max ? text : text.slice(0, max));
+
 /** The page's own tab copy: its title, else "New tab" or the address's host (today's `remotePageLabel`). */
 const labelOf = (page: BrowserPageSummary): string => {
   const title = page.title.trim();
@@ -43,7 +46,8 @@ const labelOf = (page: BrowserPageSummary): string => {
  *
  * DEMAND: `browser` use — exactly what `GET /v1/sessions/:sessionId/browser` declares, so a caller who could not read
  * the page list through that route is refused before `entries` runs. Titles and hosts are read inside ONE
- * `Redaction.read` like that route's (S16). Only keys, labels and an opener CLASS leave: never an address, a device id,
+ * `Redaction.read` like that route's (S16). Only keys, labels and an opener CLASS leave (a label is the address only when
+ * the page has neither a title nor a host, as today's tab label): never a device id,
  * a session id, a page's text, a token or a digest.
  */
 export class BrowsersReferenceMenu implements ReferenceCatalogProvider {
@@ -68,8 +72,8 @@ export class BrowsersReferenceMenu implements ReferenceCatalogProvider {
         .filter(({ key, label }) => wanted === '' || `${key} ${label}`.toLowerCase().includes(wanted))
         .slice(0, referenceCatalogLimit('%browser'))
         .map(({ key, label, page }) => ({
-          token: key,
-          label,
+          token: clip(key, 512),
+          label: clip(label, 256),
           detail: [...(page.incognito === true ? ['incognito'] : []), ownershipText(page.openedBy)].join(' · '),
         })),
     );
