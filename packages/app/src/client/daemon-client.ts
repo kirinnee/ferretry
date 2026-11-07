@@ -40,7 +40,13 @@ export interface DaemonClientOptions {
 
 /** The shell's widening of the leaf's `PluginClient`: the same guard over sockets. */
 export interface ShellPluginClient extends PluginClient {
-  socket(key: string, params: Readonly<Record<string, string>>, listeners: SocketListeners): TransportSocket;
+  /** `query` is appended to the route's path (a socket route that takes a query, e.g. `?reveal=1`). */
+  socket(
+    key: string,
+    params: Readonly<Record<string, string>>,
+    listeners: SocketListeners,
+    query?: Readonly<Record<string, string>>,
+  ): TransportSocket;
   /**
    * A read whose answer is text: the body exactly as the daemon sent it, never decoded as JSON. For a route that
    * carries a capture of someone's screen, where a capture that happens to parse as JSON must still read as typed.
@@ -186,7 +192,7 @@ export class DaemonClient {
       call: (route, init) => this.#call(caller, route, init),
       callText: async (route, init) => String(await this.#call<unknown>(caller, route, init, true)),
       subscribe: (event, listener) => this.#subscribe(caller, event, listener),
-      socket: (key, params, listeners) => this.#socket(caller, key, params, listeners),
+      socket: (key, params, listeners, query) => this.#socket(caller, key, params, listeners, query),
       onReconnect: listener => this.#transport.onReconnect(listener),
     };
   }
@@ -313,6 +319,7 @@ export class DaemonClient {
     key: string,
     params: Readonly<Record<string, string>>,
     listeners: SocketListeners,
+    query?: Readonly<Record<string, string>>,
   ): TransportSocket {
     const owner = this.#socketOwner.get(key);
     if (owner === undefined) throw new TypeError(`${caller} opened ${key}, which no compiled manifest declares`);
@@ -320,14 +327,18 @@ export class DaemonClient {
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
     const { path } = parseRouteKey(key);
     const entry: { open?: OpenSocket } = {};
-    const socket = this.#transport.socket(fillPath(path, params), {
-      onFrame: listeners.onFrame,
-      ...(listeners.onOpen === undefined ? {} : { onOpen: listeners.onOpen }),
-      onClose: (reason, detail) => {
-        if (entry.open !== undefined) this.#sockets.delete(entry.open);
-        listeners.onClose(reason, detail);
+    const search = query === undefined ? '' : new URLSearchParams(query).toString();
+    const socket = this.#transport.socket(
+      search === '' ? fillPath(path, params) : `${fillPath(path, params)}?${search}`,
+      {
+        onFrame: listeners.onFrame,
+        ...(listeners.onOpen === undefined ? {} : { onOpen: listeners.onOpen }),
+        onClose: (reason, detail) => {
+          if (entry.open !== undefined) this.#sockets.delete(entry.open);
+          listeners.onClose(reason, detail);
+        },
       },
-    });
+    );
     entry.open = { ids: [caller, owner], socket, listeners };
     this.#sockets.add(entry.open);
     return {

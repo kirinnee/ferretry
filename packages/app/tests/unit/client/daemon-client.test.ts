@@ -139,6 +139,19 @@ describe('what a half learns about its socket and its daemon', () => {
     expect(told).toEqual(['open', 'invalid terminal input {"code":1008}']);
   });
 
+  test('a socket route that takes a query is opened with it, encoded', async () => {
+    const { transport, client } = daemon();
+    await client.start();
+    client
+      .forPackage('board')
+      .socket('GET /v1/board/stream', {}, { onFrame: () => {}, onClose: () => {} }, { reveal: '1', note: 'a b' });
+    client.forPackage('board').socket('GET /v1/board/stream', {}, { onFrame: () => {}, onClose: () => {} });
+    expect(transport.sockets.map(socket => socket.path)).toEqual([
+      '/v1/board/stream?reveal=1&note=a+b',
+      '/v1/board/stream',
+    ]);
+  });
+
   test('a socket whose half does not listen for the open is opened without one', async () => {
     const { transport, client } = daemon();
     await client.start();
