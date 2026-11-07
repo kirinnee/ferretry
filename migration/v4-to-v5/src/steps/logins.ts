@@ -3,8 +3,9 @@
  * opaque, and `models.json`).
  *
  * - `fleet/credentials/<login>/` → `state/logins/credentials/<login>/`, moved WHOLE and NEVER OPENED
- *   (`moveSealedTree`): only `lstat` and folder listings are used; each file is copied by the kernel, or given a
- *   second name with `link(2)` when it is unreadable; a link is made again, never followed. A link that points
+ *   (`moveSealedTree`): only `lstat` and folder listings are used; each file is copied by the kernel, and one this user
+ *   may not read fails the step by path (never hard-linked: the backup must stay its own file); a link is made again,
+ *   never followed. A link that points
  *   outside the old credentials folder (a login kept in the harness's own store) stays the very same link; one that
  *   points inside it is pointed at the same place in the new home. The login id (the folder name) is kept: it is the
  *   key of `config/logins/<id>.yaml`, runtimes, budgets and spend.
@@ -17,7 +18,7 @@ import { LOGINS_CREDENTIALS, LOGINS_MODELS, LoginIdSchema, ModelsStateSchema } f
 import { lstat, readdir } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { KeptItem, StepReport } from '../report.ts';
-import { moveSealedTree } from '../sealed.ts';
+import { moveSealedTree, SealedUnreadableError } from '../sealed.ts';
 import { failureNote, isRecord, readV4Json, V4InputError } from '../v4/documents.ts';
 import { V4_CREDENTIALS, V4_MODEL_CATALOG, V4_PASSIVE_USAGE, V4LoginId, V4ModelCatalog } from '../v4/logins.ts';
 import type { Step } from './index.ts';
@@ -88,7 +89,6 @@ export const loginsStep: Step = {
       const sealed: { file: string; bytes: number }[] = [];
       let logins = 0;
       let links = 0;
-      let secondNames = 0;
       let usageLeft = 0;
       for (const name of root === undefined ? [] : (await readdir(credentialsFrom)).sort()) {
         const where = `${V4_CREDENTIALS}/${name}`;
@@ -109,8 +109,12 @@ export const loginsStep: Step = {
             const inside = within(credentialsFrom, target);
             return inside === undefined ? target : join(credentialsTo, inside);
           },
-        }).catch(() => {
+        }).catch((error: unknown) => {
           // The mover's own error names paths only, but this sentence is the one the report carries.
+          if (error instanceof SealedUnreadableError)
+            throw new V4InputError(
+              `${V4_CREDENTIALS}/${relative(credentialsFrom, error.path)}: this user cannot read it; give it back to its owner (chmod u+r) in the backup and run the converter again`,
+            );
           throw new V4InputError(`${where}: cannot be moved (a socket or device in it, or the target exists)`);
         });
         logins++;
@@ -119,14 +123,11 @@ export const loginsStep: Step = {
             links++;
             continue;
           }
-          if (entry.kind === 'hard-link') secondNames++;
           sealed.push({ file: relative(ctx.v5.resolve('.'), entry.to), bytes: entry.bytes });
         }
       }
 
       const notes: string[] = ctx.dryRun ? ['dry run: nothing written'] : [];
-      if (secondNames > 0)
-        notes.push(`${String(secondNames)} unreadable sign-in file(s) given a second name (link(2)) instead of a copy`);
       if (usageLeft > 0) notes.push(`${String(usageLeft)} passive usage reading(s) left for Usage`);
       const catalog = await publishedCatalog(home);
       if (catalog.held)
