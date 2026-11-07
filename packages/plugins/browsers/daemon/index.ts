@@ -5,6 +5,7 @@ import { type BrowsersConfig, PageChanged } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { type BrowserSessionLauncher, BrowserSessionService } from './pages/service.ts';
 import { type BrowserStreamOpener, pageRoutes, streamSocket } from './pages/routes.ts';
+import { BrowsersReferenceMenu } from './pages/reference-menu.ts';
 import { BrowserProxyTester, resolveBrowserProxy } from './proxy/index.ts';
 import { TunnelProxyProbe } from './proxy/adapters/probe.ts';
 import { proxyRoutes } from './proxy/routes.ts';
@@ -274,6 +275,9 @@ export function buildBrowsers(
           }),
       },
     },
-    hooks: { 'input.targets:page': target.adapter },
+    hooks: {
+      'input.targets:page': target.adapter,
+      'reference.catalog:%browser': new BrowsersReferenceMenu(pages, kernel.redaction),
+    },
   };
 }

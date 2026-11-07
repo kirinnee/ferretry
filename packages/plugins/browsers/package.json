@@ -27,6 +27,7 @@
     "@ferretry/std": "workspace:*",
     "playwright-core": "1.62.1",
     "zod": "4.4.3",
+    "@ferretry/plugin-conversation": "workspace:*",
     "@ferretry/plugin-terminals": "workspace:*",
     "@ferretry/app": "workspace:*",
     "react": "^19.0.0",
