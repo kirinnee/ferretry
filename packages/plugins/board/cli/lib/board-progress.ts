@@ -21,7 +21,11 @@ export type ProgressParts = Partial<Record<(typeof PARTS)[number], string>>;
 export function parseProgressFile(text: string, path: string): Required<ProgressParts> {
   if (text.trim() === '') return refuse(`${path} is empty: it must hold { now, doneSoFar, next }`);
   const read = readPatchText(text, path);
-  if (!read.ok) return refuse(read.problem.replace(/ is empty: a patch names at least one field$/u, ' is empty'));
+  if (!read.ok) {
+    if (read.problem.includes('is not YAML or JSON'))
+      return refuse(read.problem.replace(' is not YAML or JSON', ' cannot be read as YAML or JSON'));
+    return refuse(`${path} must hold { now, doneSoFar, next }, each a Markdown string`);
+  }
   const value = read.value;
   const unknown = Object.keys(value).filter(key => !(PARTS as readonly string[]).includes(key));
   if (unknown.length > 0) return refuse(`${path} has unknown keys (${unknown.join(', ')}): use now, doneSoFar, next`);
