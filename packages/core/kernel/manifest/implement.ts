@@ -278,6 +278,12 @@ export interface CliContext<M extends Manifest> {
   readonly manifest: M;
   readonly client: PluginClient;
   readonly io: TerminalIo;
+  /**
+   * UTF-8 text from a path (relative to the CLI working directory); '-' reads stdin.
+   * As today's readRecipe (Bun.file/Bun.stdin.text): no reader size cap. The caller validates length
+   * (a sign-in recipe, for example, must be 1–4000 characters).
+   */
+  readText?(path: string): Promise<string>;
   /** Own declared opaque defs only; private directory operations and stat require named trees. Optional until fy supplies it. */
   readonly ownState?: Pick<
     StatePort,
