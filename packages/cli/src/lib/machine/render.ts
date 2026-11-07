@@ -78,17 +78,36 @@ export function renderChangeOutcome(outcome: AccountChangeOutcome): RenderedOutc
   if (outcome.outcome === 'sign-out-failed') {
     return { ok: false, text: `Could not sign out ${outcome.credential.id}: ${outcome.reason}` };
   }
-  if (outcome.outcome === 'login-changed') {
-    if (outcome.result === 'applied') return { ok: true, text: 'Done.' };
+  if (outcome.outcome === 'login-changed') return renderLoginChanged(outcome);
+  return { ok: true, text: outcome.summary };
+}
+
+/**
+ * A change to one login: what it was (its summary) and, for a removal that moved runtimes first, what that move did,
+ * including the paths it left as they were. Nothing is reduced to a bare "Done.".
+ */
+function renderLoginChanged(outcome: Extract<AccountChangeOutcome, { outcome: 'login-changed' }>): RenderedOutcome {
+  const moved = outcome.moved === undefined ? undefined : renderApply(outcome.moved);
+  const movedLines =
+    moved === undefined
+      ? []
+      : ['Moved the runtimes first.', ...moved.text.split('\n').filter(line => line !== 'Done.')];
+  const ok = moved?.ok ?? true;
+  if (outcome.result === 'applied') {
     return {
-      ok: true,
-      text: [
-        'Saved, but this loosens something, so the owner has to confirm it before it takes effect. The tighter version stays in effect until then:',
-        ...(outcome.sentences ?? []).map(sentence => `  • ${sentence}`),
-      ].join('\n'),
+      ok,
+      text: [outcome.summary === undefined ? 'Done.' : `${outcome.summary}: done.`, ...movedLines].join('\n'),
     };
   }
-  return { ok: true, text: outcome.summary };
+  return {
+    ok,
+    text: [
+      ...(outcome.summary === undefined ? [] : [outcome.summary]),
+      'Saved, but this loosens something, so the owner has to confirm it before it takes effect. The tighter version stays in effect until then:',
+      ...(outcome.sentences ?? []).map(sentence => `  • ${sentence}`),
+      ...movedLines,
+    ].join('\n'),
+  };
 }
 
 /** What a committed apply left as the disk has it, one line each: an owner who removed a skill must hear it stayed. */
