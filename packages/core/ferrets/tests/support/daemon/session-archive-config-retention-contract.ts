@@ -3,7 +3,7 @@ import { fixture, ended } from './session-archive-commit-contract.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
 import { StorageSessionLifecycleRepository } from '../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import { createSessionArchive } from '../../../daemon/adapters/session/archive/session-archive.ts';
-import { createFoundationPaths } from '../../src/lib/paths.ts';
+import { createFoundationPaths } from '../../../daemon/lib/paths.ts';
 import { parseArchiveAfter } from '../../../daemon/lib/session/archive/policy.ts';
 
 function deferred() {
@@ -14,21 +14,34 @@ function deferred() {
   return { promise, resolve };
 }
 
-function writable(world: ReturnType<typeof fixture>) {
-  const documents = world.storage as unknown as {
-    ensureSessionDirectory(id: string): Promise<void>;
+/** The storage's document IO, routed through a facade a test may rewire: `/<id>/<kind>.json` paths and JSON text. */
+interface DocumentFacade {
+  assertJournalKept(id: string): Promise<void>;
+  readDocument(id: string, kind: 'config' | 'state'): Promise<unknown>;
+  writeDocument(path: string, value: string): Promise<void>;
+}
+
+function writable(world: ReturnType<typeof fixture>): DocumentFacade {
+  const facade: DocumentFacade = {
+    assertJournalKept: async () => {},
+    readDocument: async (id, kind) => world.docs.get(id)?.[kind],
+    writeDocument: async (path, value) => {
+      const id = path.split('/').at(-2) ?? '';
+      const doc = world.docs.get(id);
+      if (doc === undefined) throw new Error(`missing fixture document ${id}`);
+      doc.config = JSON.parse(value);
+    },
+  };
+  const storage = world.storage as unknown as {
+    assertJournalKept(id: string): Promise<void>;
     readDocument(id: string, kind: 'config' | 'state'): Promise<unknown>;
-    writeDocument(path: string, value: string): Promise<void>;
+    writeDocument(kind: 'config' | 'state', id: string, value: unknown): Promise<void>;
   };
-  documents.ensureSessionDirectory = async () => {};
-  documents.readDocument = async (id, kind) => world.docs.get(id)?.[kind];
-  documents.writeDocument = async (path, value) => {
-    const id = path.split('/').at(-2) ?? '';
-    const doc = world.docs.get(id);
-    if (doc === undefined) throw new Error(`missing fixture document ${id}`);
-    doc.config = JSON.parse(value);
-  };
-  return documents;
+  storage.assertJournalKept = async id => await facade.assertJournalKept(id);
+  storage.readDocument = async (id, kind) => await facade.readDocument(id, kind);
+  storage.writeDocument = async (kind, id, value) =>
+    await facade.writeDocument(`/${id}/${kind}.json`, JSON.stringify(value));
+  return facade;
 }
 
 export function sessionArchiveConfigRetentionContract(): void {
@@ -43,7 +56,7 @@ export function sessionArchiveConfigRetentionContract(): void {
         passLimit: 200,
         sources: {
           pinned: async () => new Map(),
-          board: async () => ({ cards: [], laneSets: new Map() }),
+          board: async () => [],
           hasOpenAgendaItem: async () => false,
         },
         yieldToLoop: async () => {},
@@ -70,7 +83,7 @@ export function sessionArchiveConfigRetentionContract(): void {
         const internal = writable(world);
         const original = new TypeError('foreign session directory');
         let refused = false;
-        internal.ensureSessionDirectory = async () => {
+        internal.assertJournalKept = async () => {
           refused = true;
           throw original;
         };
@@ -310,11 +323,7 @@ export function sessionArchiveConfigRetentionContract(): void {
         ['kid-1', { config: { mode: 'auto' }, state: { status: 'running' } }],
       ]),
     });
-    const internal = world.storage as unknown as {
-      ensureSessionDirectory(id: string): Promise<void>;
-      writeDocument(path: string, value: string): Promise<void>;
-    };
-    internal.ensureSessionDirectory = async () => {};
+    const internal = writable(world);
     internal.writeDocument = async (_path, value) => {
       started.resolve();
       await finish.promise;

@@ -5,46 +5,14 @@
  * turn fields without re-reading the document every tick (`docs/design/session-workers.md` §2.2).
  * Every write path is covered, a listener can never make a write fail, and config writes say nothing.
  */
-import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  type DaemonStorage,
-  DaemonStorageFactory,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  SystemClock,
-} from '../../src/adapters/index.ts';
-import { parseSessionId } from '../../src/lib/index.ts';
-
-const cleanups: Array<() => Promise<void>> = [];
-
-afterEach(async () => {
-  for (const cleanup of cleanups.splice(0)) await cleanup();
-});
+import type { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.ts';
+import { parseSessionId } from '../../../daemon/lib/session-id.ts';
+import { memoryStorage, sessionConfig } from '../../support/daemon/storage.ts';
 
 async function openStorage(): Promise<DaemonStorage> {
-  const home = await mkdtemp(join(tmpdir(), 'fy-state-listeners-'));
-  const opened = await new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(),
-    () => new KeyedSerialExecutor(),
-  ).open();
-  cleanups.push(async () => {
-    await opened.storage.close();
-    await rm(home, { recursive: true, force: true });
-  });
-  return opened.storage;
+  return (await memoryStorage()).storage;
 }
 
 const ID = parseSessionId('listened-1');
@@ -60,7 +28,7 @@ describe('DaemonStorage.subscribeStates', () => {
     await storage.writeState(ID, { id: ID, status: 'running', turn: 1 });
     await storage.updateState(ID, raw => ({ ...(raw as Record<string, unknown>), turnState: 'working' }));
     await storage.upsertState(ID, raw => ({ ...(raw as Record<string, unknown>), status: 'stopped' }));
-    await storage.writeConfig(ID, { id: ID, name: 'Not a state' });
+    await storage.writeConfig(ID, sessionConfig(ID, { name: 'Not a state' }));
     await storage.updateConfig(ID, raw => ({ ...(raw as Record<string, unknown>), name: 'Still not' }));
 
     // Assert

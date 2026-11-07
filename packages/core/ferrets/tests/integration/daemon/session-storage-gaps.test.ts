@@ -1,87 +1,49 @@
-import { afterEach, describe, it } from 'bun:test';
-import { rmSync } from 'node:fs';
-import { appendFile, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, it } from 'bun:test';
+import type { StatePort } from '@ferretry/kernel/contract';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorage,
-  DaemonStorageFactory,
-  KeyedSerialExecutor,
-  type OpenedDaemonStorage,
-  RuntimeEnvironment,
-  SessionLayoutError,
-  SqliteHomeLockFactory,
-  StateFileSystem,
-  StateHomeLayout,
-  SystemClock,
-} from '../../src/adapters/index.ts';
-import {
-  createSessionPaths,
-  encodeSessionEvent,
-  type FileSystemFactory,
-  type FileSystemPort,
-  type FoundationPaths,
-  parseSessionId,
-  type SessionIndex,
-  type SessionIndexFactory,
-} from '../../src/lib/index.ts';
-
-const homes = new Set<string>();
-const stores = new Set<DaemonStorage>();
+import { FerretHistoryFiles, FerretIndexFile } from '../../../contract/index.ts';
+import { ListedSessionIndex } from '../../../daemon/adapters/storage/listed-session-index.ts';
+import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.ts';
+import { StateSqliteIndex } from '../../../daemon/adapters/storage/sqlite-index.ts';
+import type { SessionIndex } from '../../../daemon/lib/ports.ts';
+import { parseSessionId } from '../../../daemon/lib/session-id.ts';
+import { SessionConfigFiles, SessionStateFiles } from '../../../daemon/lib/state.ts';
+import { RecordingLog, SESSION_STORE_FILES, sessionConfig, sessionState } from '../../support/daemon/storage.ts';
 
 /** Misbehaves on cue, at the exact read where a concurrent writer would land. */
-class DisturbedStateFileSystem extends StateFileSystem {
-  /** Appends foreign bytes before the next N journal scans, so each scan sees the file move under it. */
-  churnOnJournalScans = 0;
-  /** Runs once, instead of the next read of a session marker's text, then reports the marker gone. */
-  vanishOnMarkerRead: (() => Promise<void>) | undefined;
-  /** Makes every byte-range read answer nothing, as a journal truncated beneath its pointers would. */
-  blindSlices = false;
-
-  override async *readChunks(path: string, chunkSize: number, offset = 0): AsyncIterable<Uint8Array> {
-    if (this.churnOnJournalScans > 0 && path.endsWith('/events.jsonl')) {
-      this.churnOnJournalScans -= 1;
-      await appendFile(path, 'foreign\n');
-    }
-    yield* super.readChunks(path, chunkSize, offset);
-  }
-
-  override async readText(path: string): Promise<string | undefined> {
-    const vanish = this.vanishOnMarkerRead;
-    if (vanish !== undefined && path.endsWith('/session-version')) {
-      this.vanishOnMarkerRead = undefined;
-      await vanish();
-      return undefined;
-    }
-    return await super.readText(path);
-  }
-
-  override async readSlice(path: string, offset: number, length: number): Promise<Uint8Array | undefined> {
-    return this.blindSlices ? undefined : await super.readSlice(path, offset, length);
-  }
+interface Disturbance {
+  /** Session names whose document reads throw, as an unreadable file would. */
+  readonly unreadable: Set<string>;
+  /** While set, every journal read hands back each event with a type no earlier read gave: nothing is provable. */
+  restless: boolean;
 }
 
-class DisturbedFileSystemFactory implements FileSystemFactory {
-  instance: DisturbedStateFileSystem | undefined;
-
-  create(paths: FoundationPaths): FileSystemPort {
-    const fileSystem = new DisturbedStateFileSystem(paths);
-    this.instance = fileSystem;
-    return fileSystem;
-  }
+function disturbedPort(folder: MemoryStateFolder, disturbance: Disturbance): StatePort {
+  const real = folder.port(SESSION_STORE_FILES);
+  let reads = 0;
+  return {
+    ...real,
+    read: async (file, name) => {
+      if (name !== undefined && disturbance.unreadable.has(name)) throw new Error(`cannot read ${name}`);
+      return await real.read(file, name);
+    },
+    lines: (file, name) =>
+      (async function* () {
+        reads += 1;
+        for await (const value of real.lines(file, name))
+          yield disturbance.restless ? ({ ...(value as object), type: `restless-${String(reads)}` } as never) : value;
+      })(),
+  };
 }
 
-/** An index that, on cue, lets the disk change under a fleet listing or drops everything it lists. */
-class DisturbedIndexFactory implements SessionIndexFactory {
-  private readonly real = new BunSqliteIndexFactory();
+/** An index that, on cue, lets the state change under a fleet listing or drops everything it lists. */
+class DisturbedIndex {
   forgetAfterListings = Number.POSITIVE_INFINITY;
   /** Runs once, synchronously, as the next fleet listing is taken. */
   beforeNextListing: (() => void) | undefined;
 
-  async open(paths: FoundationPaths, fileSystem: FileSystemPort): Promise<SessionIndex> {
-    const index = await this.real.open(paths, fileSystem);
+  wrap(index: SessionIndex): SessionIndex {
     let listings = 0;
     return new Proxy(index, {
       get: (target, property) => {
@@ -100,31 +62,21 @@ class DisturbedIndexFactory implements SessionIndexFactory {
   }
 }
 
-async function createTemporaryHome(): Promise<string> {
-  const home = await mkdtemp(join(tmpdir(), 'ferretry-session-storage-gaps-'));
-  homes.add(home);
-  return home;
-}
-
-async function openStorage(
-  home: string,
-  fileSystems: FileSystemFactory = new DisturbedFileSystemFactory(),
-  indexes: SessionIndexFactory = new BunSqliteIndexFactory(),
-): Promise<OpenedDaemonStorage> {
+async function openStorage(options: { readonly index?: DisturbedIndex } = {}) {
+  const folder = new MemoryStateFolder();
+  const disturbance: Disturbance = { unreadable: new Set(), restless: false };
+  const state = disturbedPort(folder, disturbance);
   const start = Date.parse('2026-07-30T12:00:00.000Z');
   let tick = 0;
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    fileSystems,
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    indexes,
-    new SystemClock(() => new Date(start + tick++ * 1_000)),
-    () => new KeyedSerialExecutor(),
+  const index = new ListedSessionIndex(new StateSqliteIndex(folder.port(SESSION_STORE_FILES).sqlite(FerretIndexFile)));
+  const storage = new DaemonStorage(
+    state,
+    { now: () => new Date(start + tick++ * 1_000).toISOString() },
+    new RecordingLog(),
+    options.index?.wrap(index) ?? index,
   );
-  const opened = await factory.open();
-  stores.add(opened.storage);
-  return opened;
+  await storage.loadArchive();
+  return { storage, folder, disturbance, raw: folder.port(SESSION_STORE_FILES) };
 }
 
 async function capturedError(work: () => Promise<unknown>): Promise<unknown> {
@@ -136,83 +88,16 @@ async function capturedError(work: () => Promise<unknown>): Promise<unknown> {
   }
 }
 
-/** Rewrites a journal's bytes in place, then restores its mtime so only the content differs. */
-async function rewriteJournalInPlace(file: string, transform: (text: string) => string): Promise<void> {
-  const before = await stat(file);
-  const text = await readFile(file, 'utf8');
-  const rewritten = transform(text);
-  if (Buffer.byteLength(rewritten) !== Buffer.byteLength(text)) throw new Error('rewrite must keep the byte length');
-  await writeFile(file, rewritten);
-  await utimes(file, before.atime, before.mtime);
+/** Rewrites a session's journal text in place. */
+function rewriteJournal(folder: MemoryStateFolder, id: string, transform: (text: string) => string): void {
+  folder.plant(FerretHistoryFiles, transform(folder.raw(FerretHistoryFiles, id) ?? ''), id);
 }
 
-afterEach(async () => {
-  for (const storage of stores) await storage.close().catch(() => undefined);
-  stores.clear();
-  for (const home of homes) await rm(home, { recursive: true, force: true });
-  homes.clear();
-});
-
-describe('session storage — directories that are not sessions', () => {
-  it('should word a refused marker by its trimmed text', () => {
+describe('session storage — names that are not sessions', () => {
+  it('should treat a session with no files as nothing to index', async () => {
     // Arrange
-    const id = parseSessionId('marked');
-
-    // Act
-    const unmarked = new SessionLayoutError(id, undefined);
-    const unsupported = new SessionLayoutError(id, ' 9\n');
-
-    // Assert
-    should(unmarked.message).equal('session marked is non-empty but has no session-version marker');
-    should(unsupported.message).equal('session marked has unsupported session-version marker "9"');
-  });
-
-  it('should refuse to replay a session whose marker names a version this daemon does not know', async () => {
-    // Arrange
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
-    const id = parseSessionId('from-the-future');
-    const paths = createSessionPaths(opened.paths, id);
-    await mkdir(paths.directory, { recursive: true, mode: 0o700 });
-    await writeFile(paths.marker, '9\n', { mode: 0o600 });
-    await writeFile(paths.events, '', { mode: 0o600 });
-    await writeFile(paths.state, '{"status":"running"}\n', { mode: 0o600 });
-
-    // Act
-    const error = await capturedError(async () => await opened.storage.replay(id));
-
-    // Assert
-    should(error instanceof SessionLayoutError).be.true();
-    should(String(error)).containEql('unsupported session-version marker "9"');
-  });
-
-  it('should leave an unsupported-marker session out of the index when it is synchronized directly', async () => {
-    // Arrange
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
-    const id = parseSessionId('from-the-future');
-    const paths = createSessionPaths(opened.paths, id);
-    await mkdir(paths.directory, { recursive: true, mode: 0o700 });
-    await writeFile(paths.marker, '9\n', { mode: 0o600 });
-    await writeFile(paths.events, '', { mode: 0o600 });
-    await writeFile(paths.state, '{"status":"running"}\n', { mode: 0o600 });
-
-    // Act
-    const result = await opened.storage.syncSession(id);
-
-    // Assert
-    should(result.sessionCount).equal(0);
-    should(result.eventCount).equal(0);
-    should(result.problems.map(problem => problem.message)).deepEqual(['unsupported session marker']);
-    should(opened.storage.findSession(id)).be.undefined();
-  });
-
-  it('should treat an empty session directory as nothing to index', async () => {
-    // Arrange
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
+    const opened = await openStorage();
     const id = parseSessionId('bare-directory');
-    await mkdir(createSessionPaths(opened.paths, id).directory, { recursive: true, mode: 0o700 });
 
     // Act
     const result = await opened.storage.syncSession(id);
@@ -222,13 +107,12 @@ describe('session storage — directories that are not sessions', () => {
     should(opened.storage.findSession(id)).be.undefined();
   });
 
-  it('should report a directory whose name is not a session id, in a rebuild and in a reconcile', async () => {
+  it('should report a name that is not a session id, in a rebuild and in a reconcile', async () => {
     // Arrange
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
+    const opened = await openStorage();
     const kept = parseSessionId('kept-session');
-    await opened.storage.writeState(kept, { status: 'running' });
-    await mkdir(join(opened.paths.sessions, 'Not A Session!'), { mode: 0o700 });
+    await opened.storage.writeState(kept, sessionState(kept));
+    await opened.raw.write(SessionStateFiles, sessionState('stranger') as never, 'Not A Session!');
     const expected = [{ line: 0, byteOffset: 0, message: 'invalid session directory "Not A Session!"' }];
 
     // Act
@@ -241,19 +125,18 @@ describe('session storage — directories that are not sessions', () => {
       should(result.problems.map(({ line, byteOffset, message }) => ({ line, byteOffset, message }))).deepEqual(
         expected,
       );
-      should(result.problems[0]?.file).equal(join(opened.paths.sessions, 'Not A Session!'));
+      should(result.problems[0]?.file).equal('Not A Session!');
     }
   });
 
-  it('should skip a session whose marker cannot be read, and keep reconciling the others', async () => {
+  it('should skip a session whose documents cannot be read, and keep reconciling the others', async () => {
     // Arrange
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
+    const opened = await openStorage();
     const kept = parseSessionId('kept-session');
-    const broken = parseSessionId('broken-marker');
-    await opened.storage.writeState(kept, { status: 'running' });
-    const brokenPaths = createSessionPaths(opened.paths, broken);
-    await mkdir(brokenPaths.marker, { recursive: true, mode: 0o700 });
+    const broken = parseSessionId('broken-read');
+    await opened.storage.writeState(kept, sessionState(kept));
+    await opened.raw.write(SessionStateFiles, sessionState(broken) as never, broken);
+    opened.disturbance.unreadable.add(broken);
 
     // Act
     const result = await opened.storage.reconcile();
@@ -262,18 +145,17 @@ describe('session storage — directories that are not sessions', () => {
     should(result.sessionCount).equal(1);
     should(result.failedSessionIds).deepEqual([broken]);
     should(result.problems).have.length(1);
-    should(result.problems[0]?.file).equal(brokenPaths.directory);
+    should(result.problems[0]?.file).equal(broken);
     should(result.problems[0]?.message).startWith(`session ${broken} failed to read and was skipped: `);
     should(opened.storage.findSession(kept)?.id).equal(kept);
   });
 
   it('should forget a session whose config and state are gone and keep serving an empty replay', async () => {
-    // Arrange — only the marker and an empty journal are left, which is a reservation, not a session.
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
-    const id = parseSessionId('reduced-to-reservation');
-    await opened.storage.writeConfig(id, { name: 'gone soon' });
-    await rm(createSessionPaths(opened.paths, id).config);
+    // Arrange — no document and no journal is left, which is no session at all.
+    const opened = await openStorage();
+    const id = parseSessionId('reduced-to-nothing');
+    await opened.storage.writeConfig(id, sessionConfig(id, { name: 'gone soon' }));
+    await opened.raw.remove(SessionConfigFiles, id);
 
     // Act
     const replay = await opened.storage.replay(id);
@@ -282,65 +164,48 @@ describe('session storage — directories that are not sessions', () => {
     should(replay.events).deepEqual([]);
     should(opened.storage.findSession(id)).be.undefined();
   });
+
+  it('should report a damaged document as a problem and still index the session from its journal', async () => {
+    // Arrange
+    const opened = await openStorage();
+    const id = parseSessionId('damaged-state');
+    await opened.storage.append(id, 'first', {});
+    opened.folder.plant(SessionStateFiles, '{ torn', id);
+
+    // Act
+    const result = await opened.storage.rebuildIndex();
+
+    // Assert
+    should(result.sessionCount).equal(1);
+    should(result.problems.map(problem => problem.file)).deepEqual([`${id}/state.json`]);
+    should(opened.storage.findSession(id)?.lastSequence).equal(1);
+  });
 });
 
-describe('session storage — a journal that moves while it is read', () => {
-  it('should refuse a journal that keeps changing under every scan', async () => {
-    // Arrange — one event is indexed, a second line arrives unindexed, then every rescan sees yet more.
-    const home = await createTemporaryHome();
-    const fileSystems = new DisturbedFileSystemFactory();
-    const opened = await openStorage(home, fileSystems);
-    const id = parseSessionId('restless-journal');
+describe('session storage — a journal that grew outside the index', () => {
+  it('should index the new lines from a tail scan', async () => {
+    // Arrange — the index knows one event; a second landed in the journal without it.
+    const opened = await openStorage();
+    const id = parseSessionId('moving-tail');
     const first = await opened.storage.append(id, 'first', {});
-    const paths = createSessionPaths(opened.paths, id);
-    await appendFile(paths.events, `${encodeSessionEvent({ ...first, sequence: 2, type: 'second' })}\n`);
-    fileSystems.instance!.churnOnJournalScans = 3;
+    await opened.raw.append(FerretHistoryFiles, { ...first, sequence: 2, type: 'second' }, id);
 
     // Act
     const result = await opened.storage.reconcile();
 
     // Assert
-    should(result.failedSessionIds).deepEqual([id]);
-    should(result.problems.map(problem => problem.message)).deepEqual([
-      `session ${id} failed to reconcile and was skipped: journal changed repeatedly while reading ${paths.events}`,
-    ]);
-  });
-
-  it('should fall back to a full rescan when the journal moves again during a tail scan', async () => {
-    // Arrange — the index knows one event; a second landed on disk and a third lands mid-scan.
-    const home = await createTemporaryHome();
-    const fileSystems = new DisturbedFileSystemFactory();
-    const opened = await openStorage(home, fileSystems);
-    const id = parseSessionId('moving-tail');
-    const first = await opened.storage.append(id, 'first', {});
-    const paths = createSessionPaths(opened.paths, id);
-    const second = { ...first, sequence: 2, type: 'second' };
-    await appendFile(paths.events, `${encodeSessionEvent(second)}\n`);
-    fileSystems.instance!.churnOnJournalScans = 1;
-
-    // Act
-    const result = await opened.storage.reconcile();
-
-    // Assert — the foreign line is reported, and both real events are indexed from the full scan.
     should(result.sessionCount).equal(1);
     should(result.eventCount).equal(2);
-    should(result.problems.map(problem => problem.message)).deepEqual(['invalid JSON event record']);
+    should(result.problems).deepEqual([]);
     should(opened.storage.findSession(id)?.lastSequence).equal(2);
   });
 
-  it('should drop a session whose marker and documents vanish between observing it and rescanning it', async () => {
-    // Arrange — observed as a real session, then reduced to a bare reservation before the rescan reads it.
-    const home = await createTemporaryHome();
-    const fileSystems = new DisturbedFileSystemFactory();
-    const opened = await openStorage(home, fileSystems);
+  it('should drop a session whose documents are gone before a reconcile', async () => {
+    // Arrange
+    const opened = await openStorage();
     const id = parseSessionId('vanishing-session');
-    await opened.storage.writeConfig(id, { name: 'vanishing' });
-    opened.storage.forgetFromIndex(id);
-    const paths = createSessionPaths(opened.paths, id);
-    fileSystems.instance!.vanishOnMarkerRead = async () => {
-      await rm(paths.config);
-      await rm(paths.marker);
-    };
+    await opened.storage.writeConfig(id, sessionConfig(id, { name: 'vanishing' }));
+    await opened.raw.remove(SessionConfigFiles, id);
 
     // Act
     const result = await opened.storage.reconcile();
@@ -351,37 +216,30 @@ describe('session storage — a journal that moves while it is read', () => {
     should(opened.storage.findSession(id)).be.undefined();
   });
 
-  it('should rescan when the last indexed event was overwritten with bytes that are not JSON', async () => {
-    // Arrange — the file grew past what the index knows AND its last known record no longer parses.
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
+  it('should rescan when the last indexed event was replaced by a different one', async () => {
+    // Arrange — the journal grew past what the index knows AND its last known record is no longer the same event.
+    const opened = await openStorage();
     const id = parseSessionId('overwritten-record');
     const first = await opened.storage.append(id, 'first', {});
-    const paths = createSessionPaths(opened.paths, id);
-    const line = encodeSessionEvent(first);
-    await rewriteJournalInPlace(paths.events, () => `${'x'.repeat(line.length)}\n`);
-    await appendFile(paths.events, `${encodeSessionEvent({ ...first, sequence: 2, type: 'second' })}\n`);
+    rewriteJournal(opened.folder, id, text => text.replace('"type":"first"', '"type":"other"'));
+    await opened.raw.append(FerretHistoryFiles, { ...first, sequence: 2, type: 'second' }, id);
 
     // Act
     const result = await opened.storage.reconcile();
 
     // Assert — a full rescan, not a trusting tail scan from the stale pointer.
     should(result.sessionCount).equal(1);
-    should(result.problems.map(problem => problem.message)).containEql('invalid JSON event record');
     should(opened.storage.findSession(id)?.lastSequence).equal(2);
+    should((await opened.storage.replay(id)).events.map(event => event.type)).deepEqual(['other', 'second']);
   });
 });
 
-describe('session storage — a version-1 session that never had a journal', () => {
+describe('session storage — a session that never had a journal', () => {
   it('should keep it indexed without a journal across a reconcile, and replay it as empty', async () => {
     // Arrange
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
-    const id = parseSessionId('legacy-eventless');
-    const paths = createSessionPaths(opened.paths, id);
-    await mkdir(paths.directory, { recursive: true, mode: 0o700 });
-    await writeFile(paths.marker, '1\n', { mode: 0o600 });
-    await writeFile(paths.state, '{"status":"running"}\n', { mode: 0o600 });
+    const opened = await openStorage();
+    const id = parseSessionId('eventless');
+    await opened.raw.write(SessionStateFiles, sessionState(id) as never, id);
     await opened.storage.rebuildIndex();
 
     // Act
@@ -393,13 +251,31 @@ describe('session storage — a version-1 session that never had a journal', () 
     should(opened.storage.findSession(id)?.journal).be.null();
     should(replay.events).deepEqual([]);
   });
+
+  it('should refuse a session whose indexed journal has vanished', async () => {
+    // Arrange
+    const opened = await openStorage();
+    const id = parseSessionId('lost-journal');
+    await opened.storage.writeState(id, sessionState(id));
+    await opened.storage.append(id, 'first', {});
+    await opened.raw.remove(FerretHistoryFiles, id);
+
+    // Act
+    const write = await capturedError(async () => await opened.storage.writeState(id, sessionState(id)));
+    const survey = await opened.storage.surveySessionDirectories();
+    const rebuild = await opened.storage.rebuildIndex();
+
+    // Assert
+    should((write as Error).name).equal('MissingSessionJournalError');
+    should(survey).deepEqual([{ id, journalLost: true }]);
+    should(rebuild.lostJournalSessionIds).deepEqual([id]);
+  });
 });
 
 describe('session storage — replay and fleet tail', () => {
   it('should refuse replay arguments that are not whole, bounded numbers', async () => {
     // Arrange
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
+    const opened = await openStorage();
     const id = parseSessionId('bounded-replay');
 
     // Act
@@ -415,15 +291,31 @@ describe('session storage — replay and fleet tail', () => {
     should(String(huge)).containEql('limit must be an integer between 1 and 10000');
   });
 
-  it('should re-index and serve a replay whose indexed record changed type under the same bytes', async () => {
-    // Arrange — same length, same mtime, so only a byte-for-byte proof of the pointer can notice.
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
+  it('should page a replay by sequence', async () => {
+    // Arrange
+    const opened = await openStorage();
+    const id = parseSessionId('paged-replay');
+    for (const type of ['one', 'two', 'three']) await opened.storage.append(id, type, {});
+
+    // Act
+    const first = await opened.storage.replay(id, 0, 2);
+    const second = await opened.storage.replay(id, first.nextSequence, 2);
+
+    // Assert
+    should(first.events.map(event => event.type)).deepEqual(['one', 'two']);
+    should(first.hasMore).be.true();
+    should(first.nextSequence).equal(2);
+    should(second.events.map(event => event.sequence)).deepEqual([3]);
+    should(second.hasMore).be.false();
+  });
+
+  it('should re-index and serve a replay whose indexed record changed type', async () => {
+    // Arrange — same line count, so only a proof of the pointer against its line can notice.
+    const opened = await openStorage();
     const id = parseSessionId('retyped-record');
     await opened.storage.append(id, 'aaaa', {});
     await opened.storage.append(id, 'last', {});
-    const paths = createSessionPaths(opened.paths, id);
-    await rewriteJournalInPlace(paths.events, text => text.replace('"type":"aaaa"', '"type":"bbbb"'));
+    rewriteJournal(opened.folder, id, text => text.replace('"type":"aaaa"', '"type":"bbbb"'));
 
     // Act
     const replay = await opened.storage.replay(id);
@@ -432,32 +324,12 @@ describe('session storage — replay and fleet tail', () => {
     should(replay.events.map(event => event.type)).deepEqual(['bbbb', 'last']);
   });
 
-  it('should re-index and serve a replay whose indexed record is no longer JSON', async () => {
-    // Arrange
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
-    const id = parseSessionId('garbled-record');
-    const first = await opened.storage.append(id, 'first', {});
-    await opened.storage.append(id, 'last', {});
-    const paths = createSessionPaths(opened.paths, id);
-    const length = encodeSessionEvent(first).length;
-    await rewriteJournalInPlace(paths.events, text => `${'x'.repeat(length)}${text.slice(length)}`);
-
-    // Act
-    const replay = await opened.storage.replay(id);
-
-    // Assert
-    should(replay.events.map(event => event.type)).deepEqual(['last']);
-  });
-
   it('should refuse a replay that stays unprovable after re-indexing', async () => {
     // Arrange
-    const home = await createTemporaryHome();
-    const fileSystems = new DisturbedFileSystemFactory();
-    const opened = await openStorage(home, fileSystems);
+    const opened = await openStorage();
     const id = parseSessionId('unprovable-replay');
     await opened.storage.append(id, 'first', {});
-    fileSystems.instance!.blindSlices = true;
+    opened.disturbance.restless = true;
 
     // Act
     const error = await capturedError(async () => await opened.storage.replay(id));
@@ -468,14 +340,11 @@ describe('session storage — replay and fleet tail', () => {
 
   it('should re-index only the tail sessions when a tail record changed type, then serve the fleet tail', async () => {
     // Arrange
-    const home = await createTemporaryHome();
-    const opened = await openStorage(home);
+    const opened = await openStorage();
     const id = parseSessionId('retyped-tail');
     await opened.storage.append(id, 'aaaa', {});
     await opened.storage.append(id, 'last', {});
-    await rewriteJournalInPlace(createSessionPaths(opened.paths, id).events, text =>
-      text.replace('"type":"aaaa"', '"type":"bbbb"'),
-    );
+    rewriteJournal(opened.folder, id, text => text.replace('"type":"aaaa"', '"type":"bbbb"'));
 
     // Act
     const tail = await opened.storage.tailEvents();
@@ -486,11 +355,9 @@ describe('session storage — replay and fleet tail', () => {
 
   it('should refuse a fleet tail that stays unprovable after re-indexing', async () => {
     // Arrange
-    const home = await createTemporaryHome();
-    const fileSystems = new DisturbedFileSystemFactory();
-    const opened = await openStorage(home, fileSystems);
+    const opened = await openStorage();
     await opened.storage.append(parseSessionId('unprovable-tail'), 'first', {});
-    fileSystems.instance!.blindSlices = true;
+    opened.disturbance.restless = true;
 
     // Act
     const error = await capturedError(async () => await opened.storage.tailEvents());
@@ -499,13 +366,12 @@ describe('session storage — replay and fleet tail', () => {
     should(String(error)).containEql('fleet event index is inconsistent after re-indexing');
   });
 
-  it('should refuse a fleet whose index no longer matches the durable directories it just synchronized', async () => {
+  it('should refuse a fleet whose index no longer matches the sessions it just synchronized', async () => {
     // Arrange
-    const home = await createTemporaryHome();
-    const indexes = new DisturbedIndexFactory();
-    const opened = await openStorage(home, new DisturbedFileSystemFactory(), indexes);
+    const index = new DisturbedIndex();
+    const opened = await openStorage({ index });
     await opened.storage.append(parseSessionId('forgotten-session'), 'first', {});
-    indexes.forgetAfterListings = 0;
+    index.forgetAfterListings = 0;
 
     // Act
     const error = await capturedError(async () => await opened.storage.fleetSessionIds());
@@ -515,13 +381,12 @@ describe('session storage — replay and fleet tail', () => {
   });
 
   it('should name a session that stopped being one between the survey and its synchronization', async () => {
-    // Arrange — surveyed with a config, then reduced to a bare reservation as the survey is read back.
-    const home = await createTemporaryHome();
-    const indexes = new DisturbedIndexFactory();
-    const opened = await openStorage(home, new DisturbedFileSystemFactory(), indexes);
+    // Arrange — surveyed with a config, then left with nothing as the survey is read back.
+    const index = new DisturbedIndex();
+    const opened = await openStorage({ index });
     const id = parseSessionId('stopped-being-a-session');
-    await opened.storage.writeConfig(id, { name: 'fleeting' });
-    indexes.beforeNextListing = () => rmSync(createSessionPaths(opened.paths, id).config);
+    await opened.storage.writeConfig(id, sessionConfig(id, { name: 'fleeting' }));
+    index.beforeNextListing = () => opened.folder.files.delete(`${id}/config.json`);
 
     // Act
     const error = await capturedError(async () => await opened.storage.fleetSessionIds());
@@ -534,14 +399,13 @@ describe('session storage — replay and fleet tail', () => {
 describe('session storage — holding several sessions still', () => {
   it('should hold the lanes of every named session while the work reads them, then release them', async () => {
     // Arrange
-    const home = await createTemporaryHome();
-    const { storage } = await openStorage(home);
+    const { storage } = await openStorage();
     const one = parseSessionId('held-one');
     const two = parseSessionId('held-two');
     const other = parseSessionId('not-held');
-    await storage.writeState(one, { status: 'running' });
-    await storage.writeState(two, { status: 'running' });
-    await storage.writeState(other, { status: 'running' });
+    await storage.writeState(one, sessionState(one));
+    await storage.writeState(two, sessionState(two));
+    await storage.writeState(other, sessionState(other));
     const order: string[] = [];
     let release = (): void => undefined;
     const finish = new Promise<void>(done => {
@@ -560,25 +424,26 @@ describe('session storage — holding several sessions still', () => {
       return await storage.readState(one);
     });
     await started;
-    const later = storage.writeState(two, { status: 'completed' }).then(() => void order.push('later write'));
-    await storage.writeState(other, { status: 'completed' });
+    const later = storage
+      .writeState(two, sessionState(two, { status: 'completed' }))
+      .then(() => void order.push('later write'));
+    await storage.writeState(other, sessionState(other, { status: 'completed' }));
     order.push('other write');
     release();
     const seen = await held;
     await later;
 
     // Assert
-    should(seen).eql({ status: 'running' });
+    should(seen).eql(sessionState(one));
     should(order).eql(['other write', 'work', 'later write']);
-    should(await storage.readState(two)).eql({ status: 'completed' });
+    should(await storage.readState(two)).eql(sessionState(two, { status: 'completed' }));
   });
 
   it('should release the lanes when the work throws, and refuse a hold on a closed storage', async () => {
     // Arrange
-    const home = await createTemporaryHome();
-    const { storage } = await openStorage(home);
+    const { storage } = await openStorage();
     const id = parseSessionId('held-and-failed');
-    await storage.writeState(id, { status: 'running' });
+    await storage.writeState(id, sessionState(id));
 
     // Act
     const failed = await capturedError(
@@ -587,7 +452,7 @@ describe('session storage — holding several sessions still', () => {
           throw new Error('boom');
         }),
     );
-    await storage.writeState(id, { status: 'completed' });
+    await storage.writeState(id, sessionState(id, { status: 'completed' }));
     await storage.close();
     const refused = await capturedError(async () => await storage.holdSessions([id], async () => 'never'));
 

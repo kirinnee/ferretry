@@ -2,51 +2,21 @@
  * A SESSION THAT LEFT THE LIVE SET IS STILL THERE — AND COMES BACK WHEN SOMETHING WRITES TO IT.
  *
  * Archiving takes a session out of the index, the sessions-directory walks and the survey, and records it in one
- * registry document. Nothing on disk moves. These pin what that promises: the live set shrinks, an archived session
+ * registry document. No file moves. These pin what that promises: the live set shrinks, an archived session
  * stays readable, replayable and findable, the registry survives a reopen, a write brings the session back, and a
  * session that changed since the decision is not archived (docs/session-archive.md).
  */
-import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { describe, it } from 'bun:test';
+import type { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import {
-  BunSqliteIndexFactory,
-  type DaemonStorage,
-  DaemonStorageFactory,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystem,
-  StateHomeLayout,
-  SystemClock,
-} from '../../src/adapters/index.ts';
-import { createSessionPaths, type FoundationPaths, parseSessionId } from '../../src/lib/index.ts';
+import { ArchiveFile } from '../../../contract/index.ts';
+import { parseSessionId } from '../../../daemon/lib/session-id.ts';
+import { SessionConfigFiles, SessionStateFiles } from '../../../daemon/lib/state.ts';
+import { memoryStorage, sessionConfig, sessionState } from '../../support/daemon/storage.ts';
 
-const homes: string[] = [];
-const stores: DaemonStorage[] = [];
-
-afterEach(async () => {
-  for (const store of stores.splice(0)) await store.close().catch(() => undefined);
-  for (const home of homes.splice(0)) await rm(home, { recursive: true, force: true });
-});
-
-async function open(existing?: string) {
-  const home = existing ?? (await mkdtemp(join(tmpdir(), 'fy-session-archive-')));
-  if (existing === undefined) homes.push(home);
-  const factory = new DaemonStorageFactory(
-    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    { create: (paths: FoundationPaths) => new StateFileSystem(paths) },
-    new StateHomeLayout(),
-    new SqliteHomeLockFactory(),
-    new BunSqliteIndexFactory(),
-    new SystemClock(),
-    () => new KeyedSerialExecutor(),
-  );
-  const opened = await factory.open();
-  stores.push(opened.storage);
-  return { home, storage: opened.storage, paths: opened.paths };
+async function open(existing?: MemoryStateFolder) {
+  const { storage, folder } = await memoryStorage({ folder: existing });
+  return { folder, storage };
 }
 
 const OLD = parseSessionId('old-1');
@@ -58,8 +28,8 @@ async function seeded() {
     [OLD, 'completed'],
     [LIVE, 'running'],
   ] as const) {
-    await opened.storage.writeConfig(id, { id, mode: 'auto' });
-    await opened.storage.writeState(id, { id, status, finishedAt: '2026-11-01T00:00:00.000Z' });
+    await opened.storage.writeConfig(id, sessionConfig(id, { mode: 'auto' }));
+    await opened.storage.writeState(id, sessionState(id, { status, finishedAt: '2026-11-01T00:00:00.000Z' }));
     await opened.storage.append(id, 'session.created', { n: 1 });
     await opened.storage.append(id, 'session.note', { n: 2 });
   }
@@ -69,8 +39,8 @@ async function seeded() {
 const always = async (): Promise<{ name?: string }> => ({});
 
 describe('archiving a session in storage', () => {
-  it('should take the session out of the live list and the survey, and leave its directory where it was', async () => {
-    const { storage, paths } = await seeded();
+  it('should take the session out of the live list and the survey, and leave its files where they were', async () => {
+    const { storage, folder } = await seeded();
 
     const left = await storage.archiveSessions([OLD], always);
 
@@ -79,7 +49,8 @@ describe('archiving a session in storage', () => {
     should((await storage.surveySessionDirectories()).map(session => session.id)).deepEqual([LIVE]);
     should(storage.archivedCount()).equal(1);
     should(storage.isArchived(OLD)).be.true();
-    should((await stat(createSessionPaths(paths, OLD).directory)).isDirectory()).be.true();
+    should(folder.raw(SessionConfigFiles, OLD)).not.be.undefined();
+    should(folder.raw(SessionStateFiles, OLD)).not.be.undefined();
   });
 
   it('should still find the session, read its documents and replay its journal', async () => {
@@ -173,7 +144,7 @@ describe('archiving a session in storage', () => {
     should(storage.isArchived(OLD)).be.false();
 
     await storage.archiveSessions([OLD], always);
-    await storage.writeState(OLD, { id: OLD, status: 'running' });
+    await storage.writeState(OLD, sessionState(OLD));
     should(storage.isArchived(OLD)).be.false();
   });
 
@@ -193,7 +164,7 @@ describe('archiving a session in storage', () => {
     await first.storage.archiveSessions([OLD], always);
     await first.storage.close();
 
-    const second = await open(first.home);
+    const second = await open(first.folder);
 
     should(second.storage.archivedCount()).equal(1);
     should(second.storage.listSessions().map(session => session.id)).deepEqual([LIVE]);
@@ -202,16 +173,16 @@ describe('archiving a session in storage', () => {
     should(second.storage.isArchived(OLD)).be.false();
   });
 
-  it('should write the registry as one document in the state home', async () => {
-    const { storage, paths } = await seeded();
+  it('should write the registry as one document in the state folder', async () => {
+    const { storage, folder } = await seeded();
     await storage.archiveSessions([OLD], always);
 
-    const document = JSON.parse(await readFile(paths.archivedSessions, 'utf8')) as {
-      version: number;
+    const document = JSON.parse(folder.raw(ArchiveFile) ?? '{}') as {
+      format: number;
       sessions: Record<string, { lastSequence: number }>;
     };
 
-    should(document.version).equal(1);
+    should(document.format).equal(1);
     should(Object.keys(document.sessions)).deepEqual([OLD]);
     should(document.sessions[OLD]?.lastSequence).equal(2);
   });
@@ -220,9 +191,9 @@ describe('archiving a session in storage', () => {
     const first = await seeded();
     await first.storage.archiveSessions([OLD], always);
     await first.storage.close();
-    await writeFile(first.paths.archivedSessions, '{ torn');
+    first.folder.plant(ArchiveFile, '{ torn');
 
-    const second = await open(first.home);
+    const second = await open(first.folder);
     await second.storage.reconcile();
 
     should(second.storage.archivedCount()).equal(0);
@@ -238,10 +209,10 @@ describe('archiving a session in storage', () => {
     const first = await seeded();
     await first.storage.close();
     // The registry was written; the process died before the index row went.
-    await writeFile(
-      first.paths.archivedSessions,
+    first.folder.plant(
+      ArchiveFile,
       JSON.stringify({
-        version: 1,
+        format: 1,
         sessions: {
           [OLD]: {
             archivedAt: '2026-11-06T00:00:00.000Z',
@@ -253,7 +224,7 @@ describe('archiving a session in storage', () => {
       }),
     );
 
-    const second = await open(first.home);
+    const second = await open(first.folder);
 
     should(second.storage.listSessions().map(session => session.id)).deepEqual([LIVE]);
     should(second.storage.isArchived(OLD)).be.true();

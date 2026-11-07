@@ -1,10 +1,15 @@
 import { expect, test } from 'bun:test';
+import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
+import { ok } from '@ferretry/std';
+import { ArchiveFile, FerretHistoryFiles } from '../../../contract/index.ts';
 import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.ts';
-import { KeyedSerialExecutor } from '../../src/adapters/system/keyed-serial-executor.ts';
+import { KeyedSerialExecutor } from '../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import { createSessionArchive } from '../../../daemon/adapters/session/archive/session-archive.ts';
 import { StorageSessionLifecycleRepository } from '../../../daemon/adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
-import { createFoundationPaths, createSessionPaths } from '../../src/lib/paths.ts';
+import { createFoundationPaths } from '../../../daemon/lib/paths.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
+import { SessionConfigFiles, SessionStateFiles } from '../../../daemon/lib/state.ts';
+import { RecordingLog } from './storage.ts';
 
 const NOW = '2026-11-06T12:00:00.000Z';
 const OLD = '2026-11-01T00:00:00.000Z';
@@ -14,6 +19,54 @@ export const ended = (parent?: string): Doc => ({
   config: { mode: 'auto', ...(parent ? { parent } : {}) },
   state: { status: 'completed', finishedAt: OLD },
 });
+
+/**
+ * A state port over the fixture's documents: the session files are `docs`, the journal is always empty, and the
+ * archive registry is one value whose every write first runs `beforePersist` (the registry IO a test interleaves with).
+ */
+function documentsPort(docs: Map<string, Doc>, beforePersist: () => void | Promise<void>): StatePort {
+  let registry: unknown;
+  const kindOf = (file: StateFileDef): 'config' | 'state' | undefined =>
+    file === SessionConfigFiles ? 'config' : file === SessionStateFiles ? 'state' : undefined;
+  return {
+    read: async (file, name) => {
+      if (file === ArchiveFile) return ok(registry as never);
+      const kind = kindOf(file);
+      return ok((kind === undefined || name === undefined ? undefined : docs.get(name)?.[kind]) as never);
+    },
+    write: async (file, value, name) => {
+      if (file === ArchiveFile) {
+        await beforePersist();
+        registry = value;
+        return;
+      }
+      const kind = kindOf(file);
+      if (kind === undefined || name === undefined) throw new Error(`the fixture does not hold ${file.path}`);
+      const doc = docs.get(name) ?? { state: {} };
+      doc[kind] = value as Record<string, unknown>;
+      docs.set(name, doc);
+    },
+    update: async () => {
+      throw new Error('the fixture holds no update');
+    },
+    append: async () => {
+      throw new Error('the fixture holds no journal');
+    },
+    lines: () => (async function* () {})(),
+    list: async file =>
+      file === FerretHistoryFiles
+        ? []
+        : [...docs.entries()].filter(([, doc]) => doc[kindOf(file) ?? 'state'] !== undefined).map(([id]) => id),
+    remove: async (file, name) => {
+      const kind = kindOf(file);
+      if (kind !== undefined && name !== undefined) docs.delete(name);
+    },
+    sqlite: () => {
+      throw new Error('the fixture injects its index');
+    },
+    damaged: () => [],
+  };
+}
 
 export function fixture(
   options: {
@@ -42,19 +95,15 @@ export function fixture(
   const serial = new KeyedSerialExecutor();
   let keepReads = 0;
   const storage = new DaemonStorage(
-    paths,
-    {
-      writeTextAtomic: async () => {
-        await options.beforePersist?.(docs, pins);
-      },
-    } as never,
+    documentsPort(docs, async () => await options.beforePersist?.(docs, pins)),
+    { now: () => NOW },
+    new RecordingLog(),
     {
       findSession: (id: string) => rows.get(id),
       removeSession: (id: string) => rows.delete(id),
       // Publish new sessions in the index as soon as the scripted creation lands.
       listSessions: () => [...docs.keys()].filter(id => !storage.isArchived(parseSessionId(id))).map(id => ({ id })),
     } as never,
-    { now: () => NOW },
     {
       run: async (key: string, work: () => Promise<unknown>) => await serial.run(key, work),
       runAcross: async (ids: string[], work: () => Promise<unknown>) =>
@@ -63,7 +112,6 @@ export function fixture(
           return await work();
         }),
     } as never,
-    {} as never,
   );
   storage.readConfig = async id => {
     const config = docs.get(id)?.config;
@@ -88,12 +136,8 @@ export function fixture(
         if (keepReads === 2) options.duringBoundary?.(docs);
         return new Map(pins);
       },
-      board: async () => ({
-        cards: options.openCard?.()
-          ? [{ dropped: null, owner: 'lead-1', assignee: null, projectId: 'p-1', lane: 'working' } as never]
-          : [],
-        laneSets: new Map(),
-      }),
+      board: async () =>
+        options.openCard?.() ? [{ dropped: null, owner: 'lead-1', assignee: null, category: 'active' as const }] : [],
       hasOpenAgendaItem: async () => options.openAgenda?.() ?? false,
     },
   });
@@ -249,10 +293,10 @@ export function sessionArchiveCommitContract(): void {
       },
     });
     const documents = world.storage as unknown as {
-      ensureSessionDirectory(id: string): Promise<void>;
-      writeDocument(path: string, document: string): Promise<void>;
+      assertJournalKept(id: string): Promise<void>;
+      writeDocument(kind: string, id: string, value: unknown): Promise<void>;
     };
-    documents.ensureSessionDirectory = async () => {};
+    documents.assertJournalKept = async () => {};
     documents.writeDocument = async () => {};
     await world.archive.subsystem.run?.();
     await written;
@@ -334,7 +378,7 @@ export function sessionArchiveCommitContract(): void {
   for (const sweep of ['reconcile', 'rebuildIndex'] as const) {
     for (const held of [false, true]) {
       test(`successful retention ${held ? 'inside a board hold' : 'without document lanes'} keeps its row during ${sweep}`, async () => {
-        // Arrange: the double filesystem returns only an archived directory; no real IO occurs.
+        // Arrange: the fixture's state port holds only the documents; no real IO occurs.
         const persisting = deferred();
         const finish = deferred();
         let pause = false;
@@ -348,12 +392,6 @@ export function sessionArchiveCommitContract(): void {
         const id = parseSessionId('lead-1');
         await world.archive.subsystem.run?.();
         const internal = world.storage as unknown as {
-          fileSystem: {
-            listDirectory(path: string): Promise<unknown[]>;
-            readText(path: string): Promise<string | undefined>;
-            information(path: string): Promise<undefined>;
-            readChunks(): AsyncIterable<Uint8Array>;
-          };
           index: {
             listSessions(): readonly unknown[];
             refreshSession(session: Parameters<typeof world.rows.set>[1]): void;
@@ -362,18 +400,6 @@ export function sessionArchiveCommitContract(): void {
           };
           serial: { runExclusive<T>(work: () => Promise<T>): Promise<T> };
         };
-        internal.fileSystem.listDirectory = async () => [{ name: id, directory: true }];
-        const files = createSessionPaths(paths, id);
-        internal.fileSystem.readText = async path =>
-          path === files.marker
-            ? '1\n'
-            : path === files.config
-              ? JSON.stringify(world.docs.get(id)?.config)
-              : path === files.state
-                ? JSON.stringify(world.docs.get(id)?.state)
-                : undefined;
-        internal.fileSystem.information = async () => undefined;
-        internal.fileSystem.readChunks = async function* () {};
         // Use the actual index semantics: restored rows are visible immediately, even while archive membership remains.
         internal.index.listSessions = () => [...world.rows.values()];
         internal.index.refreshSession = session => {

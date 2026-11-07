@@ -1,26 +1,20 @@
-import { Database } from 'bun:sqlite';
 import { describe, it } from 'bun:test';
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import { BunSqliteIndex, ListedSessionIndex } from '../../src/adapters/index.ts';
-import { type EventPointer, type IndexedSession, parseSessionId, type SessionId } from '../../src/lib/index.ts';
+import { FerretIndexFile } from '../../../contract/index.ts';
+import { ListedSessionIndex } from '../../../daemon/adapters/storage/listed-session-index.ts';
+import { StateSqliteIndex } from '../../../daemon/adapters/storage/sqlite-index.ts';
+import { parseSessionId, type SessionId } from '../../../daemon/lib/session-id.ts';
+import type { EventPointer, IndexedSession } from '../../../daemon/lib/storage-types.ts';
 
 /**
- * The listing snapshot over the REAL index in memory: whatever sequence of writes lands, the snapshot's
- * list and lookups must be exactly what the index itself would answer — same rows, same order.
+ * The listing snapshot over the REAL index (the contract's `index.sqlite`, through the kernel test host's state):
+ * whatever sequence of writes lands, the snapshot's list and lookups must be exactly what the index itself would
+ * answer — same rows, same order.
  */
 
-function memoryIndex(): BunSqliteIndex {
-  const database = new Database(':memory:', { strict: true });
-  database.exec(`
-    PRAGMA foreign_keys = ON;
-    CREATE TABLE sessions (id TEXT PRIMARY KEY, status TEXT, created_at TEXT, updated_at TEXT,
-      last_sequence INTEGER NOT NULL, journal_line INTEGER NOT NULL, journal_device TEXT, journal_inode TEXT,
-      journal_size INTEGER, journal_mtime_ms INTEGER);
-    CREATE TABLE events (session_id TEXT NOT NULL, sequence INTEGER NOT NULL CHECK (sequence > 0), time TEXT NOT NULL,
-      type TEXT NOT NULL, byte_offset INTEGER NOT NULL, byte_length INTEGER NOT NULL CHECK (byte_length > 0),
-      PRIMARY KEY (session_id, sequence), FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE);
-  `);
-  return new BunSqliteIndex(database);
+function memoryIndex(): StateSqliteIndex {
+  return new StateSqliteIndex(new MemoryStateFolder().port([FerretIndexFile]).sqlite(FerretIndexFile));
 }
 
 const id = (n: number): SessionId => parseSessionId(`session-${String(n).padStart(3, '0')}`);

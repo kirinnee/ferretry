@@ -29,6 +29,7 @@ import {
   WorktreesFile,
 } from './contract/index.ts';
 import { StartRequestsFile } from './daemon/lib/ferrets/start-requests.ts';
+import { SessionConfigFiles, SessionStateFiles } from './daemon/lib/state.ts';
 
 /**
  * Ferrets (§2.2): who each ferret is, its name, parent, pack, token and state. Starting and stopping are done by a
@@ -269,6 +270,8 @@ export default definePlugin({
       LimitsAppliedFile,
       FerretIndexFile,
       StartRequestsFile,
+      SessionConfigFiles,
+      SessionStateFiles,
     ],
     // Cast: see packages/core/gate/manifest.ts (leaf `ConfigDef<unknown>` variance; reported to the lead).
     config: [LimitsConfigFile as ConfigDef<any>],
