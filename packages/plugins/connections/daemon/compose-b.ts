@@ -7,7 +7,7 @@
  * local. Nothing here logs a connector token, a tunnel credential, a code or a key: the token goes from a
  * provision straight to the child's environment (`BunConnectorProcesses`).
  */
-import type { Carrier, CarrierStatus, KernelPorts, RouteHandler } from '@ferretry/kernel/contract';
+import type { Carrier, CarrierStatus, ConfigFileDef, KernelPorts, RouteHandler } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { FileTunnelHolding } from './adapters/tunnel/file-tunnel-holding.ts';
 import { BunConnectorProcesses } from './adapters/tunnel/bun-connector-process.ts';
@@ -85,7 +85,7 @@ export function composeOtherConnections(input: ComposeInput): OtherConnections {
     : {
         kind: 'refused',
         code: 'webrtc_disabled',
-        reason: `peer-to-peer connections are switched off in ${manifest.data.config[0]?.file ?? 'connections.yaml'}`,
+        reason: `peer-to-peer connections are switched off in ${(manifest.data.config[0] as ConfigFileDef<ConnectionsConfig> | undefined)?.file ?? 'connections.yaml'}`,
       };
   let layer: SessionLayer | undefined;
   const built = createConnectionB({

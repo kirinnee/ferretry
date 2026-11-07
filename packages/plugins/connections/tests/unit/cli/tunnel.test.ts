@@ -35,8 +35,8 @@ describe('tunnel CLI', () => {
   });
   it('R657 changes the daemon switch and reports that it applied without restart', async () => {
     const { calls, lines, verbs } = harness();
-    expect(await verbs['tunnel on']({ args: [], options: {} })).toBe(0);
-    expect(await verbs['tunnel off']({ args: [], options: {} })).toBe(0);
+    expect(await verbs['tunnel on']!({ args: [], options: {} })).toBe(0);
+    expect(await verbs['tunnel off']!({ args: [], options: {} })).toBe(0);
     expect(calls).toEqual([
       { route: 'PUT /v1/tunnel', init: { body: { enabled: true } } },
       { route: 'PUT /v1/tunnel', init: { body: { enabled: false } } },
@@ -45,15 +45,15 @@ describe('tunnel CLI', () => {
   });
   it('V-0248 status renders the parsed live view as text or JSON', async () => {
     const { verbs, lines } = harness();
-    await verbs['tunnel status']({ args: [], options: {} });
-    await verbs['tunnel status']({ args: [], options: { json: true } });
+    await verbs['tunnel status']!({ args: [], options: {} });
+    await verbs['tunnel status']!({ args: [], options: { json: true } });
     expect(lines).toEqual([TUNNEL_OFF_SENTENCE, JSON.stringify(view)]);
   });
   it('V-0245 the bare tunnel verb is declared and shows the live status, as status does', async () => {
     const { calls, lines, verbs } = harness();
     expect(manifest.actions.cli.map(decl => decl.verb)).toContain('tunnel');
-    expect(await verbs.tunnel({ args: [], options: {} })).toBe(0);
-    expect(await verbs.tunnel({ args: [], options: { json: true } })).toBe(0);
+    expect(await verbs.tunnel!({ args: [], options: {} })).toBe(0);
+    expect(await verbs.tunnel!({ args: [], options: { json: true } })).toBe(0);
     expect(calls).toEqual([
       { route: 'GET /v1/tunnel', init: undefined },
       { route: 'GET /v1/tunnel', init: undefined },
@@ -68,6 +68,6 @@ describe('tunnel CLI', () => {
       err: () => undefined,
       isTty: false,
     });
-    await expect(verbs['tunnel status']({ args: [], options: {} })).rejects.toThrow();
+    await expect(verbs['tunnel status']!({ args: [], options: {} })).rejects.toThrow();
   });
 });
