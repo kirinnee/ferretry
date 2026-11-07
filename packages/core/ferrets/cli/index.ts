@@ -1,6 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { implementCli, type VerbInvocation } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { ClientRestartGateway, ClientSessionApi } from './lib/client.ts';
+import { moveOptions } from './lib/move/commands.ts';
+import { MoveController } from './lib/move/controller.ts';
+import { ClientMoveGateway } from './lib/move/gateway.ts';
+import { NO_PROGRESS, PlainProgress } from './lib/progress/index.ts';
 import { RestartController } from './lib/restart/controller.ts';
 import { SessionCommandError } from './lib/session/errors.ts';
 import { ResumeSessionController } from './lib/session/lifecycle-controllers.ts';
@@ -286,6 +291,16 @@ export default implementCli(manifest, {
       });
     });
 
+    // `fy ferret move <id>` (today's `fy migrate`, §1.4): one destructive call under a logical request id.
+    const move = verb(async (invocation, presenter, io) => {
+      const id = first(invocation, 'ferret id or callsign');
+      const progress = on(invocation, 'json') ? NO_PROGRESS : new PlainProgress(line => io.diagnostic(line));
+      await new MoveController(new ClientMoveGateway(client, () => randomUUID()), presenter, progress).execute(
+        id,
+        moveOptions(invocation),
+      );
+    });
+
     return {
       verbs: {
         ps: list,
@@ -315,6 +330,7 @@ export default implementCli(manifest, {
         'worktree remove <path>': worktreeRemove,
         'worktree fork <branch>': worktreeFork,
         'worktree add <branch>': worktreeFork,
+        'ferret move <id>': move,
       },
     };
   },

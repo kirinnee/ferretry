@@ -204,6 +204,7 @@ export const ForkFiles = defineState({
   path: 'forks/*.json',
   store: 'json',
   format: 1,
+  mode: 0o600,
   schema: SessionForkReceiptSchema,
 });
 export const MoveFiles = defineState({ name: 'moves', path: 'moves/*.json', store: 'json', format: 1 });
