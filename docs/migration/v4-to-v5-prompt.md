@@ -89,7 +89,7 @@ do not type into their panes: their harness folders moved with the home, so an i
 
 ```bash
 cd ~/ferretry-v5-src/migration/v4-to-v5 && bun install
-bun src/main.ts --from "$B" --to "$H" --dry-run      # reads only; prints what it would do
+bun src/main.ts --from "$B" --to "$H" --dry-run      # reads only; prints what it would do; exit 0 = every step would convert
 bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
 ```
 
@@ -99,6 +99,8 @@ bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
   second name inside the new home (a hard link, so the same running server answers there); this is why `B` and `H`
   must be on one filesystem. It prints counts and names
   only, and writes a report **beside** the new home: `$H.conversion-report.json`. Show the owner the printed summary.
+- A **dry run** writes nothing (not even `H`): exit 0 means every step would convert, exit 3 means one would not; read
+  the printed summary to the owner before the real run.
 - **Exit 0** means complete: every item converted, and `H/home.json` written **last**. **Exit 3** means some step did
   not finish: there is no `home.json`, so v5 refuses to start on `H` by design. Do not "fix" that by writing a
   `home.json` yourself; tell the owner, and roll back (§9) or wait for a fixed converter.
