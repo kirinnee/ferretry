@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 
 import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
@@ -29,6 +29,10 @@ const standingFor = (request: ApiRequest): CallStanding => {
   return raw?.startsWith('ferret:') === true ? ferretStanding(raw.slice(7) as FerretId) : ownerStanding();
 };
 const as = (ferret: string) => ({ headers: { [callerHeader]: `ferret:${ferret}` } });
+
+/** Each logical start carries one key; replay tests supply their explicit stable key. */
+const postStart = (h: TestHost, init: NonNullable<Parameters<TestHost['request']>[2]>) =>
+  h.request('POST', '/v1/ferrets', { ...init, headers: { 'x-fy-request-id': randomUUID(), ...init.headers } });
 
 const record = (id: string, parent?: string, folder = `/work/${id}`): FerretRecord => ({
   format: 1,
@@ -149,7 +153,7 @@ describe('reading a ferret’s files', () => {
     expect(refused.json<{ code: string }>().code).toBe('not_own_session');
   });
 
-  test('S47 an agent reads its own ferret’s and its helpers’ files', async () => {
+  test('S47 an agent reaches only its own ferret and helpers; file reads await the confined reader', async () => {
     const h = await host([record('lead'), record('helper', 'lead'), record('grand', 'helper')]);
     h.putRoot('work', 'notes.md', 'hello');
     for (const target of ['lead', 'helper', 'grand']) {
@@ -157,8 +161,8 @@ describe('reading a ferret’s files', () => {
         ...as('lead'),
         query: { path: 'notes.md' },
       });
-      expect(read.status).toBe(200);
-      expect(read.json<{ content: string }>().content).toBe('hello');
+      expect(read.status).toBe(503);
+      expect(read.body).not.toContain('hello');
     }
     const up = await h.request('GET', '/v1/ferrets/lead/fs/file', { ...as('helper'), query: { path: 'notes.md' } });
     expect(up.status).toBe(403);
@@ -170,9 +174,9 @@ describe('reading a ferret’s files', () => {
     const climb = await h.request('GET', '/v1/ferrets/lead/fs/file', { ...as('lead'), query: { path: '../x' } });
     expect(climb.status).toBeGreaterThanOrEqual(400);
     const secret = await h.request('GET', '/v1/ferrets/lead/fs/file', { ...as('lead'), query: { path: '.env' } });
-    expect(secret.status).toBe(403);
+    expect(secret.status).toBe(503);
     const person = await h.request('GET', '/v1/ferrets/other/fs/file', { query: { path: 'notes.md' } });
-    expect(person.status).toBe(200);
+    expect(person.status).toBe(503);
   });
 });
 
@@ -208,7 +212,7 @@ describe('starting, tokens and attach', () => {
     const harness = new FakeHarness();
     const runner = new FakeRunner();
     const h = await host([], { harness, runner });
-    const started = await h.request('POST', '/v1/ferrets', { body: { name: 'aniya', folder: '/work/a' } });
+    const started = await postStart(h, { body: { name: 'aniya', folder: '/work/a' } });
     expect(started.status).toBe(201);
     const id = started.json<{ id: FerretId }>().id;
     const stored = h.state('ferrets').raw(FerretTokensFile) as string;
@@ -220,36 +224,31 @@ describe('starting, tokens and attach', () => {
     expect(runner.starts).toBe(1);
   });
 
-  test('G12 a ferret’s start is its own helper: an absent parent is filled from its token', async () => {
+  test('G12 a ferret helper start waits for the identity-based state-home fence', async () => {
     const h = await host([record('lead')], { harness: new FakeHarness(), runner: new FakeRunner() });
-    const started = await h.request('POST', '/v1/ferrets', { ...as('lead'), body: { folder: '/work/b' } });
-    expect(started.status).toBe(201);
-    const id = started.json<{ id: string }>().id;
-    expect((await h.request('GET', `/v1/ferrets/${id}`)).json<{ parent: string; role: string }>()).toMatchObject({
-      parent: 'lead',
-      role: 'helper',
-    });
-    const named = await h.request('POST', '/v1/ferrets', { ...as('lead'), body: { folder: '/work/c', parent: 'lead' } });
-    expect(named.status).toBe(201);
+    const started = await postStart(h, { ...as('lead'), body: { folder: '/work/b' } });
+    expect(started.status).toBe(503);
+    expect(started.json<{ code: string }>().code).toBe('state_home_unresolved');
+    const named = await postStart(h, { ...as('lead'), body: { folder: '/work/c', parent: 'lead' } });
+    expect(named.status).toBe(503);
   });
 
-  test('G12 a ferret naming another parent is refused parent_mismatch; the owner may name any parent', async () => {
+  test('G12 another parent is refused; owner helper starts await definite Packs admission', async () => {
     const h = await host([record('lead'), record('other')], { harness: new FakeHarness(), runner: new FakeRunner() });
-    const mismatch = await h.request('POST', '/v1/ferrets', { ...as('lead'), body: { folder: '/work/c', parent: 'other' } });
+    const mismatch = await postStart(h, { ...as('lead'), body: { folder: '/work/c', parent: 'other' } });
     expect(mismatch.status).toBe(403);
     expect(mismatch.json<{ code: string }>().code).toBe('parent_mismatch');
-    const owners = await h.request('POST', '/v1/ferrets', { body: { folder: '/work/d', parent: 'other' } });
-    expect(owners.status).toBe(201);
-    const id = owners.json<{ id: string }>().id;
-    expect((await h.request('GET', `/v1/ferrets/${id}`)).json<{ parent: string }>().parent).toBe('other');
-    const missing = await h.request('POST', '/v1/ferrets', { body: { folder: '/work/e', parent: 'ghost' } });
+    const owners = await postStart(h, { body: { folder: '/work/d', parent: 'other' } });
+    expect(owners.status).toBe(503);
+    expect(owners.json<{ code: string }>().code).toBe('helper_admission_unavailable');
+    const missing = await postStart(h, { body: { folder: '/work/e', parent: 'ghost' } });
     expect(missing.status).toBe(404);
     expect(missing.json<{ code: string }>().code).toBe('unknown_parent');
   });
 
   test('revoke-credential is a person’s act and the bearer stops naming the ferret', async () => {
     const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
-    const id = (await h.request('POST', '/v1/ferrets', { body: { folder: '/work/a' } })).json<{ id: string }>().id;
+    const id = (await postStart(h, { body: { folder: '/work/a' } })).json<{ id: string }>().id;
     const byFerret = await h.request('POST', `/v1/ferrets/${id}/revoke-credential`, as(id));
     expect(byFerret.status).toBe(403);
     const revoked = await h.request('POST', `/v1/ferrets/${id}/revoke-credential`);
@@ -275,7 +274,7 @@ describe('starting, tokens and attach', () => {
   test('the port names a running ferret’s handle from ferret.json, after a restart too, and none once stopped', async () => {
     const runner = new FakeRunner();
     const h = await host([], { harness: new FakeHarness(), runner });
-    const id = (await h.request('POST', '/v1/ferrets', { body: { folder: '/work/a' } })).json<{ id: FerretId }>().id;
+    const id = (await postStart(h, { body: { folder: '/work/a' } })).json<{ id: FerretId }>().id;
     const handle = await h.provided(FerretsPort).handle(id);
     expect(handle).toBeDefined();
     // A fresh daemon reads only what ferret.json kept.
@@ -289,7 +288,6 @@ describe('starting, tokens and attach', () => {
     expect(await restarted.provided(FerretsPort).handle(ferretId('nobody'))).toBeUndefined();
   });
 });
-
 
 describe('managed worktrees and the file browser before the kernel host IO is bound', () => {
   test('the worktree list answers with no managed root, and a create or removal says why it cannot', async () => {
@@ -327,14 +325,14 @@ describe('a start retried under its request id, and recovered when both answers 
 
   test('the same id and body answer the ferret already started; another body under that id is refused', async () => {
     const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
-    const first = await h.request('POST', '/v1/ferrets', { body: startBody, headers: withId('req-1') });
+    const first = await postStart(h, { body: startBody, headers: withId('req-1') });
     expect(first.status).toBe(201);
     const id = first.json<{ id: string }>().id;
-    const again = await h.request('POST', '/v1/ferrets', { body: startBody, headers: withId('req-1') });
+    const again = await postStart(h, { body: startBody, headers: withId('req-1') });
     expect(again.status).toBe(200);
     expect(again.json<{ id: string }>().id).toBe(id);
     expect((await h.request('GET', '/v1/ferrets')).json<readonly unknown[]>()).toHaveLength(1);
-    const reused = await h.request('POST', '/v1/ferrets', {
+    const reused = await postStart(h, {
       body: { ...startBody, folder: '/work/b' },
       headers: withId('req-1'),
     });
@@ -344,9 +342,7 @@ describe('a start retried under its request id, and recovered when both answers 
 
   test('the recovery read answers only a caller that proves the exact body it sent', async () => {
     const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
-    const id = (
-      await h.request('POST', '/v1/ferrets', { body: startBody, headers: withId('req-2') })
-    ).json<{ id: string }>().id;
+    const id = (await postStart(h, { body: startBody, headers: withId('req-2') })).json<{ id: string }>().id;
     const proved = await h.request('GET', '/v1/ferrets/by-request/req-2', {
       query: { payload: sha(JSON.stringify(startBody)) },
     });
@@ -379,7 +375,9 @@ describe('pins', () => {
 
   test('a note pinned on a ferret’s board is read back from its own pins.json', async () => {
     const h = await host([record('lead')]);
-    const added = await h.request('POST', '/v1/ferrets/lead/pins', { body: { action: 'add', kind: 'note', text: 'ship it' } });
+    const added = await h.request('POST', '/v1/ferrets/lead/pins', {
+      body: { action: 'add', kind: 'note', text: 'ship it' },
+    });
     expect(added.status).toBe(200);
     const board = await h.request('GET', '/v1/ferrets/lead/pins');
     expect(board.status).toBe(200);
@@ -389,7 +387,7 @@ describe('pins', () => {
 
 describe('today’s start fields, the title, and the stop and resume words', () => {
   const started = async (h: TestHost, body: Record<string, unknown>): Promise<FerretId> => {
-    const answer = await h.request('POST', '/v1/ferrets', { body: { folder: '/work/a', ...body } });
+    const answer = await postStart(h, { body: { folder: '/work/a', ...body } });
     expect(answer.status).toBe(201);
     return answer.json<{ id: FerretId }>().id;
   };
@@ -498,7 +496,7 @@ describe('today’s start fields, the title, and the stop and resume words', () 
       { auto: true, runtime: 'claude-alpha' },
       { agent: 'claude-alpha' },
     ]) {
-      const refused = await h.request('POST', '/v1/ferrets', { body: { folder: '/work/a', ...body } });
+      const refused = await postStart(h, { body: { folder: '/work/a', ...body } });
       expect(refused.status).toBe(400);
       expect(refused.json<{ code: string }>().code).toBe('invalid_request');
     }
@@ -526,11 +524,17 @@ describe('what a ferret may control (limits.yaml agentControl)', () => {
   });
 
   test('limits.yaml’s switches win over the defaults, and a change applies to the very next answer', async () => {
-    const h = await host([record('lead')], { config: { 'limits.yaml': { agentControl: { files: false, pageScripts: true } } } });
+    const h = await host([record('lead')], {
+      config: { 'limits.yaml': { agentControl: { files: false, pageScripts: true } } },
+    });
     const api = h.provided(FerretsPort);
     expect(await api.agentControl(ferretId('lead'))).toMatchObject({ files: false, pageScripts: true, browsers: true });
     h.setConfig('limits.yaml', { agentControl: { browsers: false } });
-    expect(await api.agentControl(ferretId('lead'))).toMatchObject({ files: true, pageScripts: false, browsers: false });
+    expect(await api.agentControl(ferretId('lead'))).toMatchObject({
+      files: true,
+      pageScripts: false,
+      browsers: false,
+    });
   });
 });
 
@@ -555,7 +559,7 @@ describe('a start’s options reach the launch spec', () => {
   test('model, effort and the rest of today’s start fields are handed to the harness, on start and on resume', async () => {
     const harness = new FakeHarness();
     const h = await host([], { harness, runner: new FakeRunner() });
-    const started = await h.request('POST', '/v1/ferrets', {
+    const started = await postStart(h, {
       body: {
         folder: '/work/a',
         model: 'claude-opus-5-5',
