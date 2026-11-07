@@ -75,6 +75,7 @@
       "GAP(shell): SettingsProps carries no machine name and no online signal, so Settings › Browser says \"on this machine\" where today says \"on {machineName}\", and the status line does not say \"Offline · the status shows once this machine answers.\""
     ],
     "ferrets": [
+      "GAP(events): GET /v1/events cannot follow an archived ferret (its `sessionId` is a 404 where today's findSession also found archived sessions): the stream's `exists` is the live registry; an archived ferret's journal is read by its own routes",
       "Fork into a new ferret (the chat's fork action and the new-ferret page's fork seed) is not ported: it needs Conversation's transcript rows to offer it and the new-ferret page to take the seed",
       "Interrupt is not ported: it is Conversation's turn.interrupt, and Ferrets' Actions menu has no row for it until that route is bound",
       "Actions rows still to port: add MCP server, compact-at, the context menu, the ferret row-actions and the Warden and learning actions; each needs the plugin that owns it to contribute a row",

@@ -15,16 +15,29 @@ import {
   type FleetEventSource,
   type FleetEventStreamScope,
 } from '../lib/session/events/service.ts';
+import { type FleetBacklogPasses, SharedFleetBacklog } from '../lib/session/events/shared-backlog.ts';
 import { SESSION_LIVE_STREAM_FLAG, SESSION_TRANSCRIPT_STREAM_FLAG } from '../lib/protocol/session-live.ts';
 import type { StoredSessionEvent } from '../lib/session/peers/reads.ts';
 
-/** At most this much of one ferret's journal is read from its end to build the fleet's recent tail. */
-const BACKLOG_TAIL_BYTES = 4 * 1024 * 1024;
+/** The most of one ferret's journal a fleet backlog pass reads from its end, however large the tail asked for. */
+const BACKLOG_TAIL_MAX_BYTES = 4 * 1024 * 1024;
+/** The least it reads, so one unusually long line of a small tail is still found. */
+const BACKLOG_TAIL_MIN_BYTES = 64 * 1024;
+/** What one journal line is taken to cost on average: a tail of N records reads about N times this from a ferret. */
+const AVERAGE_JOURNAL_LINE_BYTES = 1024;
+
+/** How much of one ferret's journal a backlog of `limit` records reads: about `limit` average lines, never the whole 4 MiB for a short tail. */
+export const backlogTailBytes = (limit: number): number =>
+  Math.min(BACKLOG_TAIL_MAX_BYTES, Math.max(BACKLOG_TAIL_MIN_BYTES, limit * AVERAGE_JOURNAL_LINE_BYTES));
 const REPLAY_PAGE = 1_000;
 
 /** The journals as a source: replay and backlog read the ferrets' files, `publish` is the live append edge. */
 export class HistoryEventSource implements FleetEventSource {
   readonly #listeners = new Set<(event: StoredSessionEvent) => void>();
+  /** One pass reads at a time: the next waits its turn, which is when later feeds can still join it. */
+  #turn: Promise<unknown> = Promise.resolve();
+  /** Feeds that open while a pass is still waiting for its turn share it (one pass per limit), as today's did. */
+  readonly #shared = new SharedFleetBacklog({ fleetBacklog: (limit, claim) => this.#pass(limit, claim) } satisfies FleetBacklogPasses);
 
   constructor(
     private readonly state: Pick<StatePort, 'lines' | 'tail'>,
@@ -63,13 +76,26 @@ export class HistoryEventSource implements FleetEventSource {
     return page;
   }
 
+  /** Every reader's backlog: shared while a pass is still queued, so N sockets opening together read the fleet once. */
   async fleetBacklog(limit: number, signal: AbortSignal): Promise<FleetEventBacklog> {
+    return await this.#shared.backlog(limit, signal);
+  }
+
+  /** One pass: it waits for the pass before it, then asks `claim` whether any reader is still there; a pass nobody waits for reads nothing. */
+  async #pass(limit: number, claim: () => boolean): Promise<FleetEventBacklog | undefined> {
+    const pass = this.#turn
+      .catch(() => undefined)
+      .then(async () => (claim() ? await this.#survey(limit) : undefined));
+    this.#turn = pass.catch(() => undefined);
+    return await pass;
+  }
+
+  async #survey(limit: number): Promise<FleetEventBacklog> {
     const sessionIds = this.ferrets();
     if (limit === 0) return { sessionIds, events: [] };
     const events: StoredSessionEvent[] = [];
     for (const id of sessionIds) {
-      signal.throwIfAborted();
-      const tail = await this.state.tail(FerretHistoryFiles, { maxBytes: BACKLOG_TAIL_BYTES, name: id });
+      const tail = await this.state.tail(FerretHistoryFiles, { maxBytes: backlogTailBytes(limit), name: id });
       for (const record of tail.records.slice(-limit)) events.push(stored(record));
     }
     // Recent first by time (each ferret's own order is its sequence), then the last `limit`.

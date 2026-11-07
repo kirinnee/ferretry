@@ -4,7 +4,12 @@ import type { CallContext, SocketDownstream } from '@ferretry/kernel/contract';
 import { queryFrom } from '@ferretry/kernel/contract';
 import { state } from '@ferretry/kernel/host';
 import { FerretHistoryFiles } from '../../../../contract/state.ts';
-import { eventStreamScope, fleetEventsAccept, HistoryEventSource } from '../../../../daemon/modules/fleet-events.ts';
+import {
+  backlogTailBytes,
+  eventStreamScope,
+  fleetEventsAccept,
+  HistoryEventSource,
+} from '../../../../daemon/modules/fleet-events.ts';
 import { FyEventStreamFrameSchema } from '../../../../daemon/lib/protocol/session.ts';
 import { createSessionEvent, encodeSessionEvent } from '../../../../daemon/lib/storage/journal.ts';
 import type { SessionId } from '../../../../daemon/lib/session-id.ts';
@@ -76,6 +81,70 @@ describe('the journals as the stream’s source', () => {
       sessionIds: ['wren', 'oak'],
       events: [],
     });
+  });
+
+  test('feeds that open together share the backlog pass: N sockets read each ferret once, not N times', async () => {
+    const { port, append } = world();
+    await append('wren', 3);
+    await append('oak', 2);
+    const reads: number[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => (release = resolve));
+    const source = new HistoryEventSource(
+      {
+        lines: (file, name) => port.lines(file, name),
+        tail: async (file, options) => {
+          reads.push(options.maxBytes);
+          await gate;
+          return await port.tail(file, options);
+        },
+      },
+      () => ['wren', 'oak'],
+    );
+    const signal = new AbortController().signal;
+    // The first feed's pass is running (held in its first read); five more open meanwhile and join ONE queued pass.
+    const first = source.fleetBacklog(3, signal);
+    await Bun.sleep(5);
+    const burst = Array.from({ length: 5 }, () => source.fleetBacklog(3, signal));
+    release();
+    const all = await Promise.all([first, ...burst]);
+    expect(all.every(backlog => backlog.events.length === 3)).toBe(true);
+    // two passes (the running one and the one queued behind it) x two ferrets, however many feeds opened
+    expect(reads).toHaveLength(4);
+  });
+
+  test('a pass nobody is waiting for any more reads nothing', async () => {
+    const { port, append } = world();
+    await append('wren', 3);
+    let reads = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => (release = resolve));
+    const source = new HistoryEventSource(
+      {
+        lines: (file, name) => port.lines(file, name),
+        tail: async (file, options) => {
+          reads += 1;
+          await gate;
+          return await port.tail(file, options);
+        },
+      },
+      () => ['wren'],
+    );
+    const running = source.fleetBacklog(3, new AbortController().signal);
+    await Bun.sleep(5);
+    const leaver = new AbortController();
+    const gone = source.fleetBacklog(2, leaver.signal);
+    leaver.abort(new Error('closed'));
+    await expect(gone).rejects.toThrow('closed');
+    release();
+    await running;
+    expect(reads).toBe(1);
+  });
+
+  test('the tail read per ferret is about limit lines, not a flat 4 MiB (floor 64 KiB, cap 4 MiB)', () => {
+    expect(backlogTailBytes(1)).toBe(64 * 1024);
+    expect(backlogTailBytes(200)).toBe(200 * 1024);
+    expect(backlogTailBytes(5_000)).toBe(4 * 1024 * 1024);
   });
 
   test('publish reaches every subscriber until it cancels, and one failing reader never reaches the others', () => {
