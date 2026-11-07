@@ -101,13 +101,26 @@ function toWireAction(action: Internal.WardenAction): Record<string, unknown> {
 }
 
 export function toWireStatus(view: Internal.WardenStatusView): WardenStatusView {
-  const { anomalies: _a, stuckInput: _i, stuckInbox: _b, investigations, actions, blessings, ...rest } = view;
+  const {
+    anomalies: _a,
+    stuckInput: _i,
+    stuckInbox: _b,
+    investigations,
+    actions,
+    blessings,
+    jevChecks,
+    ...rest
+  } = view;
   return WardenStatusViewSchema.parse({
     ...rest,
     flags: flagsOf(view),
     investigations: investigations.map(toWireInvestigation),
     actions: actions.map(toWireAction),
     blessings: blessings.map(toWireBlessing),
+    // A Jev check names the ferret it was about, not the session.
+    ...(jevChecks === undefined
+      ? {}
+      : { jevChecks: jevChecks.map(({ sessionId, ...check }) => ({ ...check, ferret: sessionId })) }),
   });
 }
 
@@ -181,7 +194,11 @@ export function toWireAgenda(view: Internal.WardenAgendaView): WardenAgendaView 
                   judgedBy:
                     judgement.judgedBy === undefined
                       ? undefined
-                      : defined({ ...judgement.judgedBy, warden: judgement.judgedBy.wardenSessionId, wardenSessionId: undefined }),
+                      : defined({
+                          ...judgement.judgedBy,
+                          warden: judgement.judgedBy.wardenSessionId,
+                          wardenSessionId: undefined,
+                        }),
                 }),
         });
       }),

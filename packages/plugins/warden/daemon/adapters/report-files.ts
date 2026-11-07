@@ -35,6 +35,6 @@ export class StateWardenReportFiles implements WardenReportFileSystem {
   }
 
   async writeTextAtomic(path: string, text: string): Promise<void> {
-    await this.state.write(WARDEN_REPORTS, text as never, nameOf(path));
+    await this.state.write(WARDEN_REPORTS, text, nameOf(path));
   }
 }

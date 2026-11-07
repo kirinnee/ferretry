@@ -1,3 +1,4 @@
+import { InstantSchema } from '@ferretry/std';
 import { describe, expect, it } from 'bun:test';
 import type { WardenStatusView } from '../../../app/wire.ts';
 import type { WardenReadState } from '../../../app/hooks/use-warden-poll.ts';
@@ -207,7 +208,7 @@ describe('wardenStatusLine', () => {
       ...base.spend,
       capsHit: [cap],
       capsPaced: [cap],
-      pacedUntil: '2026-10-29T07:00:00.000Z',
+      pacedUntil: InstantSchema.parse('2026-10-29T07:00:00.000Z'),
     });
     const statuses = [
       jevStatus({ triage: { jev: on, llm: stopped('investigation_cap') }, spend: paced('investigation') }),

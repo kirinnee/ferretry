@@ -1,3 +1,4 @@
+import { InstantSchema } from '@ferretry/std';
 import { describe, expect, it } from 'bun:test';
 import type { WardenActorCounts, WardenDayStats, WardenStatusView } from '../../../app/wire.ts';
 import {
@@ -203,7 +204,7 @@ describe('layerLines', () => {
         jevCapUsd: 0.5,
         capsHit: ['jev'],
         capsPaced: ['jev'],
-        pacedUntil: '2026-07-31T13:00:00.000Z',
+        pacedUntil: InstantSchema.parse('2026-07-31T13:00:00.000Z'),
       },
     });
 
@@ -405,7 +406,7 @@ describe('Jev’s checks', () => {
         jevCapUsd: 0.5,
         capsHit: ['jev'],
         capsPaced: ['jev'],
-        pacedUntil: '2026-07-31T13:00:00.000Z',
+        pacedUntil: InstantSchema.parse('2026-07-31T13:00:00.000Z'),
       },
       savings: { ...wardenStatus().savings, savedUsd: 0.4 },
     });

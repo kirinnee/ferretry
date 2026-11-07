@@ -256,13 +256,6 @@ const context = (canControl: boolean): CoreActionContext => ({
   view: ferretView('sess-1'),
   name: 'hadi',
   canControl,
-  copyId: () => undefined,
-  openMigrate: () => undefined,
-  restart: async () => undefined,
-  stop: async () => undefined,
-  resume: async () => undefined,
-  renderRename: () => null,
-  renderFork: () => null,
 });
 
 describe('askWardenContribution', () => {

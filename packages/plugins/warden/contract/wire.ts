@@ -3,8 +3,8 @@
  * words renamed (session -> ferret, task -> card, `FleetAgendaItem` -> `WardenAgendaItem`) and every compatibility path
  * dropped (`LegacyWardenTriage`, `migrateLegacyWardenSettings`, `migrateLegacyTriageStatus`, the `triage` key).
  *
- * CONDENSED (honest gap): the daily statistics (`history`, `actionTotals`, `reviveTotals`, `jevChecks`, `spend`,
- * `savings`) are `looseObject`s here; the port restores today's strict schemas with the code that writes them.
+ * The status statistics (`spend`, `savings`, `history`, `actionTotals`, `reviveTotals`, `jevChecks`) are today's
+ * strict schemas, in the contract's words (a Jev check names its `ferret`); the daemon builds them and the app reads them.
  */
 import { InstantSchema, NonNegativeFiniteSchema } from '@ferretry/std';
 import { z } from 'zod';
@@ -367,6 +367,109 @@ export const WardenLayerStatusSchema = z.strictObject({
 });
 export const WardenTriageStatusSchema = z.looseObject({ jev: WardenLayerStatusSchema, llm: WardenLayerStatusSchema });
 
+// ─── the status statistics (today's `protocol/src/lib/warden.ts`) ──────────────────────────────────────────────────
+export const WardenSpendDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const WardenCapSchema = z.enum(['jev', 'investigation']);
+export const WardenSpendSchema = z.object({
+  day: WardenSpendDaySchema,
+  jevUsd: NonNegativeFiniteSchema,
+  jevCapUsd: NonNegativeFiniteSchema,
+  investigationUsd: NonNegativeFiniteSchema,
+  investigationCapUsd: NonNegativeFiniteSchema,
+  pendingInvestigations: NonNegative,
+  capsHit: z.array(WardenCapSchema),
+  capsPaced: z.array(WardenCapSchema).optional(),
+  pacedUntil: InstantSchema.optional(),
+  investigationsLastHour: NonNegative,
+  maxInvestigationsPerHour: Positive,
+});
+export const WardenSavingsSchema = z.object({
+  day: WardenSpendDaySchema,
+  flags: NonNegative,
+  jevDecisions: NonNegative,
+  jevSkips: NonNegative,
+  jevActions: NonNegative.optional(),
+  investigations: NonNegative,
+  averageInvestigationUsd: NonNegativeFiniteSchema.optional(),
+  savedUsd: NonNegativeFiniteSchema.optional(),
+});
+export const WardenActorCountsSchema = z.object({
+  auto: NonNegative,
+  jev: NonNegative,
+  llm: NonNegative,
+  owner: NonNegative.optional(),
+});
+/** An action kind as the statistics count it: `escalate` is a notification to the owner. */
+export const WardenStatActionSchema = z.enum([...WardenActionKindSchema.options, 'escalate']);
+export const WardenActionTallySchema = WardenActorCountsSchema.extend({
+  action: WardenStatActionSchema,
+  outcome: WardenActionOutcomeSchema,
+});
+export const WardenReviveResultsSchema = z.object({
+  progressed: WardenActorCountsSchema,
+  stalled: WardenActorCountsSchema,
+});
+export const WardenJevCheckVerdictSchema = z.enum(['healthy', 'acted', 'handed_on', 'skipped']);
+export const WardenJevCheckWhySchema = z.enum([
+  'unsure',
+  'not_sure_enough',
+  'never_alone',
+  'not_allowed',
+  'no_message',
+  'cannot_choose_login',
+  'not_offered',
+  'failed',
+  'already_acted',
+  'act_failed',
+  'jev_cap',
+  'jev_paced',
+]);
+export const WardenJevCheckRouteSchema = z.enum(['investigation', 'owner']);
+export const WARDEN_JEV_PATH_MAX = 12;
+export const WardenJevPathStepSchema = z.object({
+  node: z.string().min(1).max(64),
+  kind: z.enum(['fact', 'judgement']),
+  answer: z.enum(['yes', 'no']),
+  confidence: z.number().min(0).max(1).optional(),
+});
+export const WardenJevPathSchema = z.array(WardenJevPathStepSchema).max(WARDEN_JEV_PATH_MAX);
+/** One check Jev made of a flag, naming the ferret it was about. */
+export const WardenJevCheckSchema = z.object({
+  at: InstantSchema,
+  ferret: z.string().min(1),
+  anomalyKind: WardenAnomalyKindSchema,
+  verdict: WardenJevCheckVerdictSchema,
+  act: WardenActionKindSchema.exclude(['bless', 'close_leftover', 'revive']).optional(),
+  why: WardenJevCheckWhySchema.optional(),
+  route: WardenJevCheckRouteSchema.optional(),
+  confidence: z.number().min(0).max(1),
+  costUsd: NonNegativeFiniteSchema,
+  path: WardenJevPathSchema.optional(),
+  node: z.string().min(1).max(64).optional(),
+});
+export const WardenJevDayStatsSchema = z.object({
+  checks: NonNegative,
+  healthy: NonNegative,
+  acted: NonNegative,
+  handedOn: NonNegative,
+  skippedForCap: NonNegative,
+});
+export const WardenDayStatsSchema = z.object({
+  day: WardenSpendDaySchema,
+  flags: NonNegative,
+  jevDecisions: NonNegative,
+  investigations: NonNegative,
+  jevUsd: NonNegativeFiniteSchema,
+  investigationUsd: NonNegativeFiniteSchema,
+  moved: WardenActorCountsSchema,
+  cleared: WardenActorCountsSchema,
+  stopped: WardenActorCountsSchema,
+  asked: WardenActorCountsSchema,
+  jev: WardenJevDayStatsSchema.optional(),
+  acts: z.array(WardenActionTallySchema).optional(),
+  reviveResults: WardenReviveResultsSchema.optional(),
+});
+
 /** `GET /v1/warden/status`. */
 export const WardenStatusViewSchema = z.looseObject({
   config: WardenConfigSchema,
@@ -378,15 +481,15 @@ export const WardenStatusViewSchema = z.looseObject({
   lastSpawnAt: InstantSchema.optional(),
   lastReport: z.strictObject({ reportId: z.string().min(1), head: z.string() }).optional(),
   triage: WardenTriageStatusSchema,
-  spend: z.looseObject({}),
-  savings: z.looseObject({}),
+  spend: WardenSpendSchema,
+  savings: WardenSavingsSchema,
   investigations: z.array(WardenInvestigationSchema),
   actions: z.array(WardenActionSchema),
   blessings: z.array(WardenBlessingViewSchema),
-  history: z.array(z.looseObject({})).optional(),
-  actionTotals: z.array(z.looseObject({})).optional(),
-  reviveTotals: z.looseObject({}).optional(),
-  jevChecks: z.array(z.looseObject({})).optional(),
+  history: z.array(WardenDayStatsSchema).optional(),
+  actionTotals: z.array(WardenActionTallySchema).optional(),
+  reviveTotals: WardenReviveResultsSchema.optional(),
+  jevChecks: z.array(WardenJevCheckSchema).optional(),
 });
 /** `POST /v1/warden/run`: `spawn` also starts a warden for what the sweep found; default off. */
 export const WardenRunRequestSchema = z.strictObject({ spawn: z.boolean().default(false) });

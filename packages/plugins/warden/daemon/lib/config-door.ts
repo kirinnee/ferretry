@@ -16,11 +16,11 @@ export type DoorResult =
 
 export interface ConfigDoor {
   write(
-    def: ConfigFileDef<any> | ConfigCollectionDef<any>,
+    def: ConfigFileDef<unknown> | ConfigCollectionDef<unknown>,
     name: string | undefined,
     edit: ConfigEdit,
   ): Promise<DoorResult>;
-  remove(def: ConfigFileDef<any> | ConfigCollectionDef<any>, name: string | undefined): Promise<DoorResult>;
+  remove(def: ConfigFileDef<unknown> | ConfigCollectionDef<unknown>, name: string | undefined): Promise<DoorResult>;
 }
 
 /** The door the host's config port carries, if it carries one. */

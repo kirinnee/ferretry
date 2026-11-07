@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { QueuedMessage } from '../../daemon/lib/protocol.ts';
 import should from 'should';
+import { type Instant, instantFromEpochMs } from '@ferretry/std';
 import type { StuckInboxNotice } from '../../daemon/lib/inbox-stuck-list.ts';
 import type { InboxSend, WardenFleetSession, WardenStuckInboxPort } from '../../daemon/lib/index.ts';
 import { enabled, harness, journalTypes, NOW, session } from './sweep-harness.ts';
@@ -12,7 +13,7 @@ import { enabled, harness, journalTypes, NOW, session } from './sweep-harness.ts
  */
 
 const MINUTE = 60_000;
-const iso = (ms: number): string => new Date(ms).toISOString();
+const iso = (ms: number): Instant => instantFromEpochMs(ms);
 
 const ryu = (over: Partial<WardenFleetSession['state']> = {}): WardenFleetSession => {
   const base = session({

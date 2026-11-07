@@ -13,6 +13,7 @@ import {
   unattended,
   yes,
 } from './sweep-harness.ts';
+import { toWireStatus } from '../../daemon/lib/wire-map.ts';
 
 /**
  * Every flag Jev is put to leaves a record and is counted into its day — whatever Jev made of it. On
@@ -85,6 +86,42 @@ describe('Jev’s checks', () => {
     should(today(subject)?.jev).deepEqual({ checks: 1, healthy: 0, acted: 0, handedOn: 1, skippedForCap: 0 });
     should(status.jevChecks).deepEqual(subject.jevChecks);
     should(status.history?.at(-1)?.jev).match({ checks: 1, handedOn: 1 });
+  });
+
+  it('should leave on the status route as the contract\u2019s strict statistics, a Jev check naming its ferret', async () => {
+    // Arrange
+    const subject = harness({ config: layers(true), fleet: [unattended('s1')], guard: [JEV_INVESTIGATE] });
+    await subject.service.run({ force: false });
+
+    // Act
+    const wire = toWireStatus(await subject.service.status());
+
+    // Assert
+    should(wire.jevChecks).deepEqual([
+      {
+        at: at(0),
+        ferret: 's1',
+        anomalyKind: 'unattended_question',
+        verdict: 'handed_on',
+        why: 'not_sure_enough',
+        route: 'investigation',
+        confidence: 0.5,
+        costUsd: 0.001,
+        path: UNSURE_PATH,
+        node: 'waiting_on_real',
+      },
+    ]);
+    should(wire.history?.at(-1)?.jev).match({ checks: 1, handedOn: 1 });
+    should(wire.spend).have.properties(['day', 'jevUsd', 'capsHit', 'maxInvestigationsPerHour']);
+  });
+
+  it('should refuse a status whose statistics do not have today\u2019s shape', async () => {
+    // Arrange
+    const subject = harness({ config: layers(true), fleet: [unattended('s1')], guard: [JEV_INVESTIGATE] });
+    const status = await subject.service.status();
+
+    // Act / Assert
+    should(() => toWireStatus({ ...status, spend: { ...status.spend, capsHit: ['everything'] } } as never)).throw();
   });
 
   it('should send a hand-on to the owner when investigations are off', async () => {

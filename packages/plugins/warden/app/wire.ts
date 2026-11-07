@@ -32,6 +32,19 @@ import {
   type WardenTriageReasonSchema,
   type WardenVerdictKindSchema,
   type WardenAnomalyKindSchema,
+  type WardenActionTallySchema,
+  type WardenActorCountsSchema,
+  type WardenCapSchema,
+  type WardenDayStatsSchema,
+  type WardenJevCheckSchema,
+  type WardenJevCheckVerdictSchema,
+  type WardenJevCheckWhySchema,
+  type WardenJevDayStatsSchema,
+  type WardenJevPathStepSchema,
+  type WardenReviveResultsSchema,
+  type WardenSavingsSchema,
+  type WardenSpendSchema,
+  type WardenStatActionSchema,
 } from '../contract/index.ts';
 
 export {
@@ -230,8 +243,8 @@ export type WardenActor = 'auto' | 'jev' | 'llm' | 'owner';
 /** What an action came to, for the page's tiles. */
 export type WardenOutcome = 'moved' | 'cleared' | 'stopped' | 'asked';
 /** An action kind as the statistics count it: `escalate` is a notification to the owner. */
-export type WardenStatActionKind = WardenActionKind | 'escalate';
-export type WardenCap = 'jev' | 'investigation';
+export type WardenStatActionKind = z.infer<typeof WardenStatActionSchema>;
+export type WardenCap = z.infer<typeof WardenCapSchema>;
 
 /** The revives, as the statistics count them: a revive or a resume. */
 export const WARDEN_REVIVE_ACTIONS: readonly WardenStatActionKind[] = ['revive', 'resume'];
@@ -239,43 +252,14 @@ export const WARDEN_REVIVE_ACTIONS: readonly WardenStatActionKind[] = ['revive',
 export const WARDEN_REVIVE_PROGRESS_MINUTES = 10;
 
 // ─── Jev ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-export type WardenJevCheckVerdict = 'healthy' | 'acted' | 'handed_on' | 'skipped';
-export type WardenJevCheckWhy =
-  | 'unsure'
-  | 'not_sure_enough'
-  | 'never_alone'
-  | 'not_allowed'
-  | 'no_message'
-  | 'cannot_choose_login'
-  | 'not_offered'
-  | 'failed'
-  | 'already_acted'
-  | 'act_failed'
-  | 'jev_cap'
-  | 'jev_paced';
+export type WardenJevCheckVerdict = z.infer<typeof WardenJevCheckVerdictSchema>;
+export type WardenJevCheckWhy = z.infer<typeof WardenJevCheckWhySchema>;
 export type WardenJevAct = Exclude<WardenActionKind, 'bless' | 'close_leftover' | 'revive'>;
 
-export interface WardenJevPathStep {
-  readonly node: string;
-  readonly kind: 'fact' | 'judgement';
-  readonly answer: 'yes' | 'no';
-  readonly confidence?: number;
-}
+export type WardenJevPathStep = z.infer<typeof WardenJevPathStepSchema>;
 
-/** One check Jev made of a flag. */
-export interface WardenJevCheck {
-  readonly at: string;
-  readonly ferret: string;
-  readonly anomalyKind: WardenAnomalyKind;
-  readonly verdict: WardenJevCheckVerdict;
-  readonly act?: WardenJevAct;
-  readonly why?: WardenJevCheckWhy;
-  readonly route?: 'investigation' | 'owner';
-  readonly confidence: number;
-  readonly costUsd: number;
-  readonly path?: readonly WardenJevPathStep[];
-  readonly node?: string;
-}
+/** One check Jev made of a flag (the contract's: it names the ferret). */
+export type WardenJevCheck = z.infer<typeof WardenJevCheckSchema>;
 
 /** What Jev did about a flag before an investigation (or an act) that followed it. */
 export interface WardenJevBefore {
@@ -348,30 +332,8 @@ export interface WardenTriageStatus {
   readonly guardBackoffUntil?: string;
 }
 
-export interface WardenSpend {
-  readonly day: string;
-  readonly jevUsd: number;
-  readonly jevCapUsd: number;
-  readonly investigationUsd: number;
-  readonly investigationCapUsd: number;
-  readonly pendingInvestigations: number;
-  readonly capsHit: readonly WardenCap[];
-  readonly capsPaced?: readonly WardenCap[];
-  readonly pacedUntil?: string;
-  readonly investigationsLastHour: number;
-  readonly maxInvestigationsPerHour: number;
-}
-
-export interface WardenSavings {
-  readonly day: string;
-  readonly flags: number;
-  readonly jevDecisions: number;
-  readonly jevSkips: number;
-  readonly jevActions?: number;
-  readonly investigations: number;
-  readonly averageInvestigationUsd?: number;
-  readonly savedUsd?: number;
-}
+export type WardenSpend = z.infer<typeof WardenSpendSchema>;
+export type WardenSavings = z.infer<typeof WardenSavingsSchema>;
 
 export interface WardenInvestigation {
   readonly id: string;
@@ -411,46 +373,11 @@ export interface WardenAction {
   readonly jev?: WardenJevBefore;
 }
 
-export interface WardenActorCounts {
-  readonly auto: number;
-  readonly jev: number;
-  readonly llm: number;
-  readonly owner?: number;
-}
-
-export interface WardenActionTally extends WardenActorCounts {
-  readonly action: WardenStatActionKind;
-  readonly outcome: 'done' | 'held' | 'failed';
-}
-
-export interface WardenReviveResults {
-  readonly progressed: WardenActorCounts;
-  readonly stalled: WardenActorCounts;
-}
-
-export interface WardenJevDayStats {
-  readonly checks: number;
-  readonly healthy: number;
-  readonly acted: number;
-  readonly handedOn: number;
-  readonly skippedForCap: number;
-}
-
-export interface WardenDayStats {
-  readonly day: string;
-  readonly flags: number;
-  readonly jevDecisions: number;
-  readonly investigations: number;
-  readonly jevUsd: number;
-  readonly investigationUsd: number;
-  readonly moved: WardenActorCounts;
-  readonly cleared: WardenActorCounts;
-  readonly stopped: WardenActorCounts;
-  readonly asked: WardenActorCounts;
-  readonly jev?: WardenJevDayStats;
-  readonly acts?: readonly WardenActionTally[];
-  readonly reviveResults?: WardenReviveResults;
-}
+export type WardenActorCounts = z.infer<typeof WardenActorCountsSchema>;
+export type WardenActionTally = z.infer<typeof WardenActionTallySchema>;
+export type WardenReviveResults = z.infer<typeof WardenReviveResultsSchema>;
+export type WardenJevDayStats = z.infer<typeof WardenJevDayStatsSchema>;
+export type WardenDayStats = z.infer<typeof WardenDayStatsSchema>;
 
 /** `GET /v1/warden/status`: the contract's view with the loose parts written out. */
 export interface WardenStatusView {

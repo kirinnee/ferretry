@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { QueuedMessage } from '../../daemon/lib/protocol.ts';
 import should from 'should';
+import { type Instant, instantFromEpochMs } from '@ferretry/std';
 import {
   detectInboxStuck,
   INBOX_STUCK_HORIZON_MS,
@@ -27,7 +28,7 @@ import {
 
 const NOW = Date.parse('2026-11-02T14:00:00.000Z');
 const MINUTE = 60_000;
-const iso = (ms: number): string => new Date(ms).toISOString();
+const iso = (ms: number): Instant => instantFromEpochMs(ms);
 
 const ferret = (
   id: string,

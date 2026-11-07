@@ -1,3 +1,4 @@
+import { InstantSchema } from '@ferretry/std';
 import { describe, expect, it } from 'bun:test';
 import type { WardenLogin } from '../../../app/wire.ts';
 import {
@@ -181,7 +182,7 @@ describe('wardenTriageLabel', () => {
         ...base.spend,
         capsHit: ['jev', 'investigation'],
         capsPaced: ['jev'],
-        pacedUntil: '2026-10-29T07:00:00.000Z',
+        pacedUntil: InstantSchema.parse('2026-10-29T07:00:00.000Z'),
       },
     });
 

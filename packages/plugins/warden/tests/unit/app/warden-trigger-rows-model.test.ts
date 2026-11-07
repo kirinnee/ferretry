@@ -1,3 +1,4 @@
+import { instantFromEpochMs } from '@ferretry/std';
 import { describe, expect, it } from 'bun:test';
 import {
   displaySystemCallsign,
@@ -18,7 +19,7 @@ import {
 import { wardenAction, wardenInvestigation, wardenStatus } from '../../support/app/warden.ts';
 
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
-const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString();
+const at = (minutesAgo: number) => instantFromEpochMs(NOW - minutesAgo * 60_000);
 
 const check = (overrides: Partial<WardenJevCheck> = {}): WardenJevCheck => ({
   at: at(60),

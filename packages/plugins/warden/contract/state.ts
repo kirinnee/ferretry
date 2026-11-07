@@ -1,8 +1,7 @@
-import { type ConfigFileDef, defineConfig, defineState } from '@ferretry/kernel/contract';
+import { defineConfig, defineState } from '@ferretry/kernel/contract';
 import {
   JevChecksFileSchema,
   RememberedFileSchema,
-  type WardenFile,
   WardenFileSchema,
   WardenStateFileSchema,
   wardenLoosens,
@@ -45,4 +44,4 @@ export const WARDEN_CONFIG = defineConfig({
   schema: WardenFileSchema,
   axis: 'configure',
   loosens: wardenLoosens,
-}) as unknown as ConfigFileDef<WardenFile>;
+});

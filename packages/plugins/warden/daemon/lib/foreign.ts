@@ -104,21 +104,8 @@ export const clipAtWord = (text: string, limit: number): string => {
   return `${cut.trimEnd().replace(/[\s,;:.\-–—]+$/u, '')}…`;
 };
 
-// ─── Conversation: a message waiting in a ferret's queue (the fields the stuck-inbox rule reads) ─────────────────────
-export interface QueuedMessage {
-  readonly id: string;
-  readonly state: 'queued' | 'typing' | 'delivered' | 'cancelled' | string;
-  readonly sender: 'human' | 'agent' | 'daemon' | string;
-  readonly label?: string;
-  readonly interrupt?: boolean;
-  readonly replyExpected?: boolean;
-  readonly enqueuedAt: string;
-  readonly holdUntil?: string;
-  readonly waitReason?: string;
-  readonly deliveredAs?: string;
-  readonly waitBehind?: string;
-  readonly [key: string]: any;
-}
+// ─── Conversation: a message waiting in a ferret's queue — Conversation's own contract type, read, not restated ──────
+export type { QueuedMessage } from '@ferretry/plugin-conversation/contract';
 
 // ─── Board: a card as the orphan rule and the resume brief read it ───────────────────────────────────────────────────
 export interface PrLink {
@@ -143,7 +130,12 @@ export interface BoardTask {
   readonly createdAt: string;
   readonly lastTouchedAt?: string | null;
   readonly ask: { readonly source: string; readonly text: string };
-  readonly clarifications: readonly { readonly source: string; readonly text: string; readonly at?: string; readonly [key: string]: unknown }[];
+  readonly clarifications: readonly {
+    readonly source: string;
+    readonly text: string;
+    readonly at?: string;
+    readonly [key: string]: unknown;
+  }[];
   readonly links: {
     readonly prs: readonly PrLink[];
     readonly branch: string | null;
@@ -214,7 +206,7 @@ export interface CoreAccount {
   readonly agent: string;
   readonly mode: 'auto' | 'interactive';
   readonly available: boolean;
-  readonly [key: string]: any;
+  readonly [key: string]: unknown;
 }
 export interface AccountInventoryPort {
   accounts(): Promise<readonly CoreAccount[]>;

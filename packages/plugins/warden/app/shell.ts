@@ -7,34 +7,32 @@
  * The shell fills it by re-exporting, and nothing else in this half changes.
  */
 
+import type { PluginClient } from '@ferretry/kernel/manifest';
+import type { ReactNode } from 'react';
 import { displaySystemCallsign } from './wire.ts';
 
-type Primitive = (...args: Opaque[]) => Opaque;
+/** Any part the shell can lend: a function of some arguments (a component is one of its props). */
+type Part = (...args: never[]) => unknown;
 
 /**
- * A shell type this half only passes along or reads a field of. The shell's real types replace these when it exposes
- * them; until then a field read is unchecked, which is why each is named for what it stands for.
+ * What the shell has not lent this half yet. A name below is a stand-in, typed as exactly what this half calls it
+ * with, that delegates to the part the shell hands over through `provideShell` (the shell, or a test with a simple
+ * stand-in), and says so when it was handed none. ports-pending.json keeps the half out of the shell until then.
  */
-// biome-ignore lint/suspicious/noExplicitAny: a placeholder for a shell-owned type, replaced when the shell exposes it
-export type Opaque = any;
+const provided = new Map<string, Part>();
 
-/**
- * What the shell has not lent this half yet. A name below is a stand-in that delegates to the part the shell hands
- * over through `provideShell` (the shell, or a test with a simple stand-in), and says so when it was handed none.
- */
-const provided = new Map<string, Primitive>();
-
-export const provideShell = (parts: Readonly<Record<string, Primitive>>): void => {
+export const provideShell = (parts: Readonly<Record<string, Part>>): void => {
   for (const [name, part] of Object.entries(parts)) provided.set(name, part);
 };
 
-const missing =
-  (name: string): Primitive =>
-  (...args) => {
-    const part = provided.get(name);
+function missing<F extends Part>(name: string): F {
+  const stand = (...args: Parameters<F>): ReturnType<F> => {
+    const part = provided.get(name) as F | undefined;
     if (part === undefined) throw new Error(`The app shell does not provide ${name} to plugin halves yet.`);
-    return part(...args);
+    return part(...args) as ReturnType<F>;
   };
+  return stand as F;
+}
 
 // ─── the clock ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -82,9 +80,34 @@ export const shellClock: ShellClock = {
 
 // ─── UI primitives, components and hooks ──────────────────────────────────────────────────────────────────────────
 
-export const AnalyticsMetricChart: Primitive = missing('AnalyticsMetricChart');
-export const Markdown: Primitive = missing('Markdown');
-export const ModelSelect: Primitive = missing('ModelSelect');
+/** The per-day chart the Insights pages share (Analytics, Learning, Warden), as this half draws it. */
+export interface MetricChartProps {
+  readonly title: string;
+  readonly series: readonly MetricChartSeries[];
+  readonly points: readonly MetricChartPoint[];
+  readonly format: (value: number) => string;
+  readonly axisTicks?: (max: number) => readonly number[];
+  readonly emptyText?: string;
+  readonly flagNote?: string;
+  readonly plotClassName?: string;
+  readonly resting?: 'last';
+}
+export const AnalyticsMetricChart = missing<(props: MetricChartProps) => ReactNode>('AnalyticsMetricChart');
+/** The shell's Markdown reader (the report dialog). */
+export const Markdown = missing<(props: { readonly text: string }) => ReactNode>('Markdown');
+/** The shell's model picker over a login's catalog (the investigation model field). */
+export interface ModelSelectProps {
+  readonly id: string;
+  readonly models: readonly PickerModel[];
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly defaultLabel?: string;
+  readonly defaultModel?: string | null;
+  readonly customIds?: boolean;
+  readonly local?: LocalModels;
+  readonly disabled?: boolean;
+}
+export const ModelSelect = missing<(props: ModelSelectProps) => ReactNode>('ModelSelect');
 
 /** The width of the Insights column the Warden page shares with Analytics and Learning. */
 export const INSIGHTS_COLUMN_CLASS = 'w-full max-w-[1080px]';
@@ -132,23 +155,104 @@ export const daemonConnection = (input: DaemonConnectionInput): DaemonConnection
   };
 };
 
-/** One ferret as the shell lists it: its config (id, name, folder) and its state. */
-export type FerretView = Opaque;
-/** The device-local record of what this browser remembers (the daemon the Warden page is narrowed to). */
-export type DaemonControlsStore = Opaque;
-/** One login and its models as the account picker offers them. */
-export type PickerAccount = Opaque;
-/** The Speed-ups description of a machine, as the settings read it. */
-export type SpeedupsView = Opaque;
-/** The context a ferret action runs in. */
-export type CoreActionContext = Opaque;
+/** One ferret as the shell lists it: its config (id, callsign, task, folder), and its state, which this half never reads. */
+export interface FerretView {
+  readonly config: TitledConfig;
+  readonly state?: Readonly<Record<string, unknown>>;
+}
+/** The device-local record of what this browser remembers, as far as this half reads it (the Warden's daemon). */
+export interface DaemonControlsStore {
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly snapshot: () => { readonly device: { readonly wardenDaemon: string | null } };
+  readonly setDeviceControls: (patch: { readonly wardenDaemon: string | null }) => void;
+}
+/** A model a login offers, as the account picker lists it (today's `PickerModel`). */
+export interface PickerModel {
+  readonly id: string;
+  readonly available: boolean;
+  readonly label?: string;
+  readonly tier?: string;
+  readonly context?: number;
+  /** The reasoning efforts it takes; empty when it takes none. Absent when no catalog says. */
+  readonly efforts?: readonly string[];
+  readonly defaultEffort?: string;
+  readonly fast?: boolean;
+}
+/** The models a local server has installed, as the daemon last read them (opaque to this half: it passes them on). */
+export interface LocalModels {
+  readonly [key: string]: unknown;
+}
+/** One login and its models as the account picker offers them (today's `PickerAccount`). */
+export interface PickerAccount {
+  readonly id: string;
+  /** The value a caller types as `agent`. */
+  readonly wrapper: string;
+  readonly displayName: string;
+  readonly kind: string;
+  /** An agent runtime: the only kind the daemon starts a ferret on. */
+  readonly agent: boolean;
+  readonly credentialId: string;
+  /** `null` = the harness's own default. */
+  readonly defaultModel: string | null;
+  readonly models: readonly PickerModel[];
+  readonly modelCatalog?: {
+    readonly id: string;
+    readonly label: string;
+    readonly customIds: boolean;
+    readonly detect?: 'ollama';
+    readonly local?: LocalModels;
+  };
+  readonly available: boolean;
+  readonly unavailableReason: string | null;
+}
+/** One speed-up as Settings describes it (today's `SpeedupStatus`): never the key, only whether one is set. */
+export interface SpeedupStatus {
+  readonly provider: string;
+  readonly label: string;
+  readonly purpose: string;
+  readonly costNote: string;
+  readonly privacyNote: string;
+  readonly keyUrl: string;
+  readonly testNote: string;
+  readonly secretName: string;
+  readonly set: boolean;
+  readonly secretUpdatedAt?: string;
+  readonly lastTest?: Readonly<Record<string, unknown>>;
+  readonly testStale: boolean;
+}
+/** The Speed-ups description of a machine (today's `SpeedupsView`). */
+export interface SpeedupsView {
+  readonly providers: readonly SpeedupStatus[];
+  readonly vault: 'ok' | 'damaged';
+}
+/** The context a ferret action runs in (today's `CoreActionContext`, the fields this half reads). */
+export interface CoreActionContext {
+  readonly view: FerretView;
+  readonly name: string;
+  readonly canControl: boolean;
+}
+/** The host a ferret action's form opens in (today's `SessionActionFormHost`). */
+export interface FerretActionFormHost {
+  readonly close: () => void;
+  readonly open: (actionId: string) => void;
+  readonly notify: (sentence: string) => void;
+  readonly compact: boolean;
+}
+/** What a ferret action row offers: a form, rendered in the host. */
+export interface FerretActionForm {
+  readonly kind: 'form';
+  readonly id: string;
+  readonly label: string;
+  readonly title: string;
+  readonly icon: unknown;
+  readonly render: (host: FerretActionFormHost) => ReactNode;
+}
 /** An action offered on a ferret, and the host its form opens in. */
-export interface FerretActionContribution<Context = Opaque> {
+export interface FerretActionContribution<Context = CoreActionContext> {
   readonly group: string;
   readonly order: number;
-  readonly build: (context: Context) => Opaque | null;
+  readonly build: (context: Context) => FerretActionForm | null;
 }
-export type FerretActionFormHost = Opaque;
 export type MetricChartTone = 'accent' | 'ok' | 'pend' | 'info';
 export interface MetricChartSeries {
   readonly key: string;
@@ -184,12 +288,17 @@ export interface GrantsView {
   }[];
 }
 
-export const readGrants: Primitive = missing('readGrants');
-export const readSpeedups: Primitive = missing('readSpeedups');
-export const readAccountPickerCatalog: Primitive = missing('readAccountPickerCatalog');
-export const useConfigChangeEffect: Primitive = missing('useConfigChangeEffect');
+export const readGrants = missing<(connection: DaemonConnection) => Promise<GrantsView>>('readGrants');
+export const readSpeedups = missing<(connection: DaemonConnection) => Promise<SpeedupsView>>('readSpeedups');
+export const readAccountPickerCatalog =
+  missing<(connection: DaemonConnection) => Promise<{ readonly accounts: readonly PickerAccount[] }>>(
+    'readAccountPickerCatalog',
+  );
+export const useConfigChangeEffect =
+  missing<(daemonId: DaemonId, kinds: readonly string[], onChange: () => void) => void>('useConfigChangeEffect');
 /** The plugin client of another paired daemon, or the one this half was handed for the daemon on screen. */
-export const pluginClientFor: Primitive = missing('pluginClientFor');
+export const pluginClientFor =
+  missing<(connection: DaemonConnection, home: PluginClient) => Promise<PluginClient>>('pluginClientFor');
 
 // ─── how a ferret is named ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -231,16 +340,14 @@ export const daemonFerretPath = (id: DaemonId, ferret: string): string =>
 // ─── the daemon on screen and the paired daemons ──────────────────────────────────────────────────────────────────
 
 /** The daemon the screen or settings tab is on. */
-export const useCurrentDaemon: () => DaemonConnection = missing('useCurrentDaemon') as () => DaemonConnection;
+export const useCurrentDaemon = missing<() => DaemonConnection>('useCurrentDaemon');
 /** Every paired daemon, in the order and under the names the ferrets bar shows them (a twin is told apart). */
-export const useWardenMachines: () => readonly { readonly connection: DaemonConnection; readonly name: string }[] =
-  missing('useWardenMachines') as () => readonly { readonly connection: DaemonConnection; readonly name: string }[];
+export const useWardenMachines =
+  missing<() => readonly { readonly connection: DaemonConnection; readonly name: string }[]>('useWardenMachines');
 /** The ferrets of one paired daemon, or `null` while they are not read. */
-export const useFerretsOf: (daemonId: DaemonId) => readonly FerretView[] | null = missing('useFerretsOf') as (
-  daemonId: DaemonId,
-) => readonly FerretView[] | null;
+export const useFerretsOf = missing<(daemonId: DaemonId) => readonly FerretView[] | null>('useFerretsOf');
 /** This device's remembered choices (the daemon the Warden page is narrowed to). */
-export const useDeviceControls: () => DaemonControlsStore = missing('useDeviceControls') as () => DaemonControlsStore;
+export const useDeviceControls = missing<() => DaemonControlsStore>('useDeviceControls');
 
 // ─── pure helpers, copied unchanged from the app shell so this half runs and tests on its own ─────────────────────
 

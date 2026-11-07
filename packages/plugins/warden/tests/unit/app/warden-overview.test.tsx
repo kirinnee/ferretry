@@ -1,3 +1,4 @@
+import { InstantSchema } from '@ferretry/std';
 import { describe, expect, it } from 'bun:test';
 import type { WardenActorCounts, WardenDayStats, WardenStatusView } from '../../../app/wire.ts';
 
@@ -583,7 +584,7 @@ describe('WardenOverview stats', () => {
         jevUsd: 0.31,
         jevCapUsd: 0.5,
         capsPaced: ['jev'],
-        pacedUntil: '2026-07-31T13:00:00.000Z',
+        pacedUntil: InstantSchema.parse('2026-07-31T13:00:00.000Z'),
       },
     });
     const view = await render({ status: ready(paced) });
