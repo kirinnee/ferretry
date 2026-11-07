@@ -5,6 +5,8 @@ import type { WorkRedaction } from '../lib/service.ts';
 /**
  * Names the set of secret values the redaction knows: a different answer means the set may have changed. Reading it
  * may fail, and then the search fails closed (it answers nothing rather than from an index built on older values).
+ * Anything but {@link unchangingGeneration} must move EVERY time the set changes: the search then trusts the index's
+ * word counts for ranking (`WorkRedaction.epochTracksValues`).
  */
 export type RedactionGeneration = () => string | Promise<string>;
 
@@ -31,6 +33,7 @@ export function workRedaction(
         scope => work((text: string): string => scope.text(text)) as never as ReturnType<typeof work>,
       ),
     epoch: async () => await generation(),
+    epochTracksValues: generation !== unchangingGeneration,
   };
 }
 

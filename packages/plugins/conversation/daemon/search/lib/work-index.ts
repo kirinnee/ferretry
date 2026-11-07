@@ -24,6 +24,18 @@ import { matchLine, meaningfulTokens, normalizePhrase, tokensOf } from './text.t
 /** How surely a document is the one asked about. */
 export type WorkRelatedStrength = 'strong' | 'weak';
 
+/**
+ * Where a related check takes the rarity of a word it reads that was NOT asked (a candidate's own title, summary and
+ * ask words) — see {@link WorkIndex.relatedAmong}:
+ *
+ * - `index`: the index's own count. Honest only when the index is rebuilt every time the set of secret values changes
+ *   (a redaction generation that moves), because then the index was built from text scrubbed with the values known now.
+ * - `unknown`: every such word weighs as if no other item held it (frequency 1). Nothing the index counted before a
+ *   value became a secret can then move a score or an order. This is the only honest choice while the kernel's
+ *   `Redaction` announces no generation; it costs some ranking quality (a common word weighs like a rare one).
+ */
+export type UnaskedRarity = 'index' | 'unknown';
+
 const DAY_MS = 86_400_000;
 const CLOSED_WINDOW_MS = WORK_SEARCH_CLOSED_WINDOW_DAYS * DAY_MS;
 
@@ -239,8 +251,13 @@ export class WorkIndex {
    * was indexed AND now, so a word the scrub took away stops counting and a word the mask put in never starts (it would
    * make a document a candidate only because the asked secret named it). And how rare an ASKED word is comes from those
    * same documents, never from the index: the index's count still holds every item the secret was written in, and that
-   * count steers the score of every other hit. A secret therefore reads exactly like a word no item holds. The rarity
-   * of a document's own words that were not asked is still the index's: it does not depend on what was asked.
+   * count steers the score of every other hit. A secret therefore reads exactly like a word no item holds.
+   *
+   * The rarity of a document's own words that were NOT asked is `unaskedRarity` ({@link UnaskedRarity}). Those words
+   * were not re-scrubbed in every item that holds them, so the index's count of them still includes every item a
+   * secret was written in when it was indexed: `tokensOf` splits `sk-zqbody` into words, the vault masks the whole
+   * value only, and an ordinary card holding `zqbody` would rank by how many items hold a key containing it. Unless the
+   * index is rebuilt on every change of the values (`index`), such a word weighs as if no other item held it.
    */
   relatedAmong(
     title: string,
@@ -248,6 +265,7 @@ export class WorkIndex {
     nowMs: number,
     limit: number,
     documents: ReadonlyMap<string, WorkDocument>,
+    unaskedRarity: UnaskedRarity,
   ): readonly WorkRelatedMatch[] {
     const held = new Map<string, Indexed>();
     for (const [key, document] of documents) {
@@ -260,8 +278,8 @@ export class WorkIndex {
     const askedFrequency = new Map<string, number>();
     for (const { core } of held.values())
       for (const token of core) if (asked.has(token)) askedFrequency.set(token, (askedFrequency.get(token) ?? 0) + 1);
-    const frequency = (token: string): number =>
-      asked.has(token) ? (askedFrequency.get(token) ?? 0) : (this.coreFrequency.get(token) ?? 0);
+    const unasked = unaskedRarity === 'index' ? this.indexedFrequency : (): number => 1;
+    const frequency = (token: string): number => (asked.has(token) ? (askedFrequency.get(token) ?? 0) : unasked(token));
     return this.relatedMatches(title, ask, nowMs, key => held.get(key), frequency).slice(0, limit);
   }
 

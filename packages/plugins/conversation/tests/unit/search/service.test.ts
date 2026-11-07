@@ -197,3 +197,67 @@ describe('G164 work search cannot tell whether a value that became a secret appe
       await expect(service.related({ kind: 'card', title })).rejects.toThrow('vault closed');
   });
 });
+
+describe('G164 a related check that never names the secret cannot tell a guessed word of it (review round 3 probe)', () => {
+  /**
+   * Two worlds whose secret differs ONLY in the guessed word `zqbody`. `tokensOf` splits `sk-zqbody` into words while the
+   * vault masks the whole value, so an ordinary decoy card holding `zqbody` must not rank by how many items held the key.
+   */
+  const world = async (key: string, options: { tracks?: boolean } = {}) => {
+    const redaction = new FakeRedaction();
+    redaction.epochTracksValues = options.tracks ?? false;
+    const cards = new FakeSource(
+      'cards',
+      [
+        cardWork({ id: 'F1', title: 'Quokka widget' }),
+        cardWork({ id: 'F9', title: 'Quokka zqbody' }),
+        cardWork({ id: 'F4', title: 'Unrelated thing' }),
+        cardWork({ id: 'F20', title: `Deploy ${key}` }),
+        cardWork({ id: 'F21', title: `Rotate ${key}` }),
+      ],
+      true,
+    );
+    const { service } = build([cards], { redaction });
+    await service.search(query('quokka'));
+    redaction.values = [key];
+    return { service, redaction };
+  };
+  const answers = async (service: WorkSearchService) => ({
+    related: (await service.related({ kind: 'card', title: 'Quokka' })).matches.map(match => [
+      match.hit.id,
+      match.strength,
+      match.hit.score,
+    ]),
+    relatedAsk: (await service.related({ kind: 'card', title: 'Quokka', ask: 'widget rotate deploy' })).matches.map(
+      match => [match.hit.id, match.strength, match.hit.score],
+    ),
+    deploy: await service.search(query('deploy', { all: true })),
+    guessed: await service.search(query('zqbody', { all: true })),
+    quokka: await service.search(query('quokka', { all: true })),
+  });
+
+  test('G164 two worlds differing only in the guessed word give equal scores, order and strengths', async () => {
+    const a = await answers((await world('sk-zqbody')).service);
+    const b = await answers((await world('sk-zqother')).service);
+    expect(a).toEqual(b);
+    expect(a.related.map(([id]) => id).sort()).toEqual(['F1', 'F9']);
+    expect(a.guessed.hits.map(hit => hit.id)).toEqual(['F9']);
+  });
+
+  test('G164 the two worlds still agree once the generation moves and the index is rebuilt', async () => {
+    const a = await world('sk-zqbody');
+    const b = await world('sk-zqother');
+    a.redaction.generation += 1;
+    b.redaction.generation += 1;
+    expect(await answers(a.service)).toEqual(await answers(b.service));
+  });
+
+  test('G164 a generation that tracks the values restores real rarity, and its fresh index still cannot tell', async () => {
+    const a = await world('sk-zqbody', { tracks: true });
+    const b = await world('sk-zqother', { tracks: true });
+    // The values changed, so a generation that tracks them moves: the index is rebuilt from text scrubbed now.
+    a.redaction.generation += 1;
+    b.redaction.generation += 1;
+    expect(await answers(a.service)).toEqual(await answers(b.service));
+  });
+});

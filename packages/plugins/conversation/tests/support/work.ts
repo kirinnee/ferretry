@@ -86,6 +86,8 @@ export class FakeRedaction implements WorkRedaction {
   values: readonly string[] = [];
   generation = 1;
   batches = 0;
+  /** As the daemon is wired today: the kernel's redaction announces no generation, so the index's counts are not trusted. */
+  epochTracksValues = false;
 
   async batch<T>(work: (scrub: (text: string) => string) => T): Promise<T> {
     this.batches += 1;

@@ -106,3 +106,24 @@ describe('the work search index', () => {
     expect(matches[0]?.strength).toBe('strong');
   });
 });
+
+describe('the rarity a related check gives the words it did not re-scrub', () => {
+  const index = () =>
+    indexOf(
+      cardWork({ id: 'F1', title: 'Quokka widget' }),
+      cardWork({ id: 'F2', title: 'Widget polish' }),
+      cardWork({ id: 'F3', title: 'Widget colours' }),
+    );
+  const scoreOf = (rarity: 'index' | 'unknown') => {
+    const built = index();
+    const documents = new Map([['card:F1', doc(cardWork({ id: 'F1', title: 'Quokka widget' }))]]);
+    return built.relatedAmong('Quokka', '', NOW_MS, 5, documents, rarity).map(match => match.hit.score);
+  };
+
+  test('G164 unknown weighs an unasked word as if no other item held it; index uses the index count', () => {
+    // `widget` is held by three items: by the index it is common, so F1's body leans on `quokka` more.
+    const [byIndex] = scoreOf('index');
+    const [unknown] = scoreOf('unknown');
+    expect(byIndex).toBeGreaterThan(unknown ?? 0);
+  });
+});

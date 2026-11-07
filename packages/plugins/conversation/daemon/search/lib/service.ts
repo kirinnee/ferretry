@@ -27,7 +27,7 @@ import {
   type WorkSource,
 } from '../../../contract/index.ts';
 import { type RawWork, type ScrubText, type WorkDocument, workDocument } from './documents.ts';
-import { WorkIndex } from './work-index.ts';
+import { type UnaskedRarity, WorkIndex } from './work-index.ts';
 
 /** How stale a sweep of every source may grow before a search starts the next. */
 export const WORK_SEARCH_SWEEP_MS = 5_000;
@@ -56,6 +56,13 @@ export interface WorkRedaction {
   batch<T>(work: (scrub: ScrubText) => T): Promise<T>;
   /** Changes whenever the set of known secret values may have. */
   epoch(): Promise<string>;
+  /**
+   * Whether {@link epoch} moves EVERY time the set of known values changes. Only then is the index (rebuilt on each
+   * move) built from text scrubbed with the values known now, and only then may a related check weigh a word it did not
+   * re-scrub by the index's count of it ({@link UnaskedRarity}). False while the kernel's `Redaction` offers no
+   * generation; a generation that moves turns real rarity back on and nothing else changes.
+   */
+  readonly epochTracksValues: boolean;
 }
 
 export interface WorkSearchDependencies {
@@ -120,9 +127,21 @@ export class WorkSearchService {
     // now. And the read opens even when there is none, so a failing redaction refuses every check alike.
     const keys = this.index.relatedCandidates(request.title, ask);
     const matches = await this.ports.redaction.batch(scrub =>
-      this.index.relatedAmong(request.title, ask, nowMs, MAX_WORK_RELATED_HITS, this.rescrubbed(keys, scrub)),
+      this.index.relatedAmong(
+        request.title,
+        ask,
+        nowMs,
+        MAX_WORK_RELATED_HITS,
+        this.rescrubbed(keys, scrub),
+        this.unaskedRarity(),
+      ),
     );
     return { matches: [...matches] };
+  }
+
+  /** How a related check may weigh the words it did not re-scrub: by the index only when the index tracks the values. */
+  private unaskedRarity(): UnaskedRarity {
+    return this.ports.redaction.epochTracksValues ? 'index' : 'unknown';
   }
 
   /**
