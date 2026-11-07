@@ -62,6 +62,9 @@ import { type SessionArchiveSubsystem, sessionArchiveRoutes } from './lib/runtim
 import { type SessionRestartSubsystem, sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
 import { AgentPinsFile, FerretDetailsFiles, FerretPinFiles, FerretSummaryFiles } from './lib/state.ts';
+import { DaemonStorage } from './adapters/storage/session-storage.ts';
+import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
+import { movesDeps } from './moves-deps.ts';
 
 /** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
 export const NOT_OWN_FERRET_CODE = 'not_own_session';
@@ -325,6 +328,35 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         throw new ApiError(503, `${what} is not built yet in this version of Ferretry.`, 'plugin_unavailable');
       },
     });
+  // Moves and forks (ferrets-c): today's fork, handover and move modules, built once. The archive the session store
+  // keeps is read before the first of their routes answers; the handover's reconcile loop is armed once the daemon
+  // serves (today: beside the warden sweep) and disarmed when it stops.
+  const sessionStore = new DaemonStorage(kernel.state, { now: () => kernel.clock.now() }, log);
+  const storeLoaded = sessionStore.loadArchive().catch((error: unknown) => {
+    log.warn('the session store could not load its archive', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  });
+  const moves = buildMoves(ctx, movesDeps(ctx, { storage: sessionStore, clientName: 'fy' }));
+  const moveRoutes = Object.fromEntries(
+    MOVE_ROUTE_KEYS.map(key => [
+      key,
+      async (call: CallContext) => {
+        await storeLoaded;
+        return await moves.routes[key](call);
+      },
+    ]),
+  ) as typeof moves.routes;
+  kernel.jobs.add({
+    id: 'ferrets.handover-reconcile',
+    schedule: { onceAfterStart: true },
+    run: async () => {
+      await storeLoaded;
+      kernel.lifecycle.onStop(moves.arm());
+    },
+  });
+
   const signals = sessionSignalRoutes(notBuilt<SessionSignalSubsystem>('The ferret lifecycle signal'));
   const restarts = sessionRestartRoutes(notBuilt<SessionRestartSubsystem>('Restarting ferrets'));
   const archived = sessionArchiveRoutes(notBuilt<SessionArchiveSubsystem>('The archived ferret list'));
@@ -402,6 +434,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     routes: {
       ...worktrees.routes,
+      ...moveRoutes,
       ...fileBrowser,
       ...signals,
       ...restarts,
@@ -562,5 +595,5 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
 }
 
-/** Ferrets' daemon half (§2.2). `buildMoves(ctx, deps)` (ferrets-c: fork, handover, move) joins `build` here. */
+/** Ferrets' daemon half (§2.2). */
 export default implementDaemon(manifest, { build });

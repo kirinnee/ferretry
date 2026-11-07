@@ -19,7 +19,7 @@ import {
   type TwoFactorId,
   TwoFactorIdSchema,
   TwoFactorStageIdSchema,
-} from '../index.ts';
+} from '../wire.ts';
 
 export type { AccountId, AccountKey, SignInId, SignInRuleId, TwoFactorId };
 export {
