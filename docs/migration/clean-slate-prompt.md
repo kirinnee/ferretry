@@ -74,43 +74,58 @@ Do this **now**, before step 3 and before anything else seals a value: the new d
 old key copied over a new one would orphan whatever was sealed under it. The daemon may keep running: the Vault reads
 its key, and MCP its two files, from disk on every use.
 
+**Every command in this step must set `OLD` and `NEW` itself, as its first line, with literal values.** Tool shells
+do not keep variables from one call to the next, so a variable set in step 2 is gone by now. `OLD` is the path you
+noted in step 2; `NEW` is `~/.ferretry`, the home the daemon just made (it has `home.json`).
+
 1. Look only at whether the files exist (never at what is in them). If `$OLD/state/mcp-oauth.json` or
    `$OLD/state/mcp-oauth-secrets.json` is missing, carry nothing and skip to step 3; the owner signs in to each OAuth
    MCP server again. If `$OLD/state/mcp-oauth-secrets.json` exists but `$OLD/state/secrets.key` does not, carry
-   nothing and tell the owner: those tokens cannot be opened without it.
-2. With `NEW=~/.ferretry` (the home the daemon just made; it has `home.json`), check that none of the three targets
-   exists: `ls "$NEW/state/vault/vault.key" "$NEW/state/mcp/oauth.json" "$NEW/state/mcp/oauth-secrets.json"` must
-   answer "No such file" for all three. If any exists, stop and tell the owner. Never overwrite one.
-3. Run this as one block in your own shell. It prints nothing but a refusal, and a refusal names no content:
+   nothing and tell the owner: those tokens cannot be opened without it. Begin that command with
+   `: "${OLD:?set OLD}"` so an empty `OLD` stops it instead of reading as "missing".
+2. Run this as one block in your own shell, after setting `OLD` and `NEW` on its first line. It prints nothing but a
+   refusal, and a refusal names only a path. The block checks for itself, before it writes anything, that all three
+   targets (`state/vault/vault.key`, `state/mcp/oauth.json`, `state/mcp/oauth-secrets.json`) are absent, and each file
+   is put in place without overwriting. Never overwrite one.
 
    ```sh
    (
      set -e
+     : "${OLD:?set OLD}" "${NEW:?set NEW}"
+     [ -f "$NEW/home.json" ] || { echo "refusing: $NEW is not a Ferretry 5 home" >&2; exit 1; }
+     for t in "$NEW/state/vault/vault.key" "$NEW/state/mcp/oauth.json" "$NEW/state/mcp/oauth-secrets.json"; do
+       [ ! -e "$t" ] || { echo "refusing: $t exists" >&2; exit 1; }
+     done
      umask 077
      mkdir -p "$NEW/state/vault" "$NEW/state/mcp"
-     cp "$OLD/state/secrets.key" "$NEW/state/vault/vault.key"
-     chmod 600 "$NEW/state/vault/vault.key"
+     cp "$OLD/state/secrets.key" "$NEW/state/vault/vault.key.tmp"
      jq 'if .v == 1 and .cipher == "AES-256-GCM" then {format: 1} + del(.v) else error("not a version-1 sealed document") end' \
        "$OLD/state/mcp-oauth-secrets.json" > "$NEW/state/mcp/oauth-secrets.json.tmp"
      jq 'if .v == 1 then {format: 1} + del(.v) else error("not a version-1 MCP sign-in document") end' \
        "$OLD/state/mcp-oauth.json" > "$NEW/state/mcp/oauth.json.tmp"
-     chmod 600 "$NEW/state/mcp/oauth-secrets.json.tmp" "$NEW/state/mcp/oauth.json.tmp"
-     mv "$NEW/state/mcp/oauth-secrets.json.tmp" "$NEW/state/mcp/oauth-secrets.json"
-     mv "$NEW/state/mcp/oauth.json.tmp" "$NEW/state/mcp/oauth.json"
+     chmod 600 "$NEW/state/vault/vault.key.tmp" "$NEW/state/mcp/oauth-secrets.json.tmp" "$NEW/state/mcp/oauth.json.tmp"
+     ln "$NEW/state/vault/vault.key.tmp" "$NEW/state/vault/vault.key"
+     ln "$NEW/state/mcp/oauth-secrets.json.tmp" "$NEW/state/mcp/oauth-secrets.json"
+     ln "$NEW/state/mcp/oauth.json.tmp" "$NEW/state/mcp/oauth.json"
+     rm "$NEW/state/vault/vault.key.tmp" "$NEW/state/mcp/oauth-secrets.json.tmp" "$NEW/state/mcp/oauth.json.tmp"
    )
    ```
 
-   `jq` writes straight into the new file; you never see its output. If the block fails, delete the three targets
-   and any `*.tmp` it left (they are your copies, not the backup), carry nothing, and tell the owner the refusal.
+   `jq` writes straight into the new file; you never see its output. `ln` refuses to replace a file that exists, so
+   even a target that appears after the check is never overwritten.
+   - If it refuses with "exists", stop, delete nothing, and tell the owner the path.
+   - If it fails any other way, delete the `*.tmp` files it left, and delete a target only if it is the same file as
+     its `.tmp` (`[ "$t" -ef "$t.tmp" ]`): that one is your copy. Leave any other target alone; something else made
+     it. Carry nothing (never touch the backup) and tell the owner the refusal.
 
-4. Tell the owner, in one line each:
+3. Tell the owner, in one line each:
    - Carried: each OAuth MCP server's sign-in record, refresh token and registered client secret.
-   - Not carried: the **access tokens**. They live in the vault document `state/secrets.json`, which this runbook
-     never carries (its values are retyped, step 6). Each server shows "needs sign-in" until MCP mints a new access
-     token from the carried refresh token, which it does at a ferret launch that needs the server once the old token
-     is due to expire (only for a sign-in that had a refresh token and an expiry). To use one sooner, the owner signs
-     in to it again.
-5. After step 4 adds the servers, `fy mcp ls` shows each one's sign-in state.
+   - Not carried: the **access tokens**. They lived in the old `state/secrets.json`, which this runbook never carries
+     (its values are retyped, step 6).
+   - **On Ferretry 5 each OAuth MCP server needs a new sign-in.** Each shows "needs sign-in" until the owner signs in
+     to it again. The carried refresh token is not used to renew it at launch; it is kept so a later release can
+     renew it, and so signing out can revoke it. Do not promise the owner that any sign-in comes back by itself.
+4. After the main step 4 (Settings) adds the servers, `fy mcp ls` shows each one's sign-in state.
 
 ## 3. Clear each browser, then pair it (owner's hands)
 
