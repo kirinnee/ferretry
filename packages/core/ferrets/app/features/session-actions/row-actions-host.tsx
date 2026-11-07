@@ -14,7 +14,7 @@
 import type { SessionView } from '../../../contract/index.ts';
 import { Copy, MessageSquare } from 'lucide-react';
 import { type ReactNode, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
-import { MigrateSheet } from '../../components/move-sheet.tsx';
+import { MoveSheet } from '../../components/move-sheet.tsx';
 import { sessionDisplayName } from '../../components/session-top-bar.tsx';
 import { useAccountPickerSlice } from '../../../../../plugins/runtimes/app/hooks/use-account-picker.ts';
 import { useKnownProjects } from '../../../../../plugins/projects/app/hooks/use-projects.ts';
@@ -119,7 +119,7 @@ function RowActions({
   const agenda = useAgendaSessionActions({ connection, fetcher });
   const compactAt = useCompactAtSessionActions({ connection, fetcher });
   const [notice, setNotice] = useState<string | null>(null);
-  const [migrateOpen, setMigrateOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
   const dismissNotice = useCallback(() => setNotice(null), []);
 
   const name = sessionDisplayName(view);
@@ -177,7 +177,7 @@ function RowActions({
     name,
     canControl: true,
     copyId: () => copy(sessionId, 'session id'),
-    openMigrate: () => setMigrateOpen(true),
+    openMove: () => setMoveOpen(true),
     ...(convert.openConvert === undefined ? {} : { openConvert: convert.openConvert }),
     restart: async () => {
       publish(
@@ -270,13 +270,13 @@ function RowActions({
       <ActionToast notice={notice} onDismiss={dismissNotice} />
       {restartRefusal.panel}
       {convert.sheet}
-      <MigrateSheet
+      <MoveSheet
         accountPicker={store.accountPicker}
         canMutate
         connection={connection}
-        onClose={() => setMigrateOpen(false)}
-        onMigrated={(_daemon, _scope, migrated) => publish(migrated)}
-        open={migrateOpen}
+        onClose={() => setMoveOpen(false)}
+        onMoved={(_daemon, _scope, moved) => publish(moved)}
+        open={moveOpen}
         scope={daemonSessionScope(connection, sessionId)}
         usage={store.usage}
         view={view}

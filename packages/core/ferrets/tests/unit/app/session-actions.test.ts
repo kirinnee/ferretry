@@ -24,26 +24,26 @@ describe('sessionActionSpecs', () => {
 
   it('offers interrupt and stop, never resume, for a live session', () => {
     for (const status of ['created', 'starting', 'running', 'thinking', 'tool_running', 'waiting'] as const) {
-      expect(actionsFor(status)).toEqual(['interrupt', 'stop', 'rename', 'migrate']);
+      expect(actionsFor(status)).toEqual(['interrupt', 'stop', 'rename', 'move']);
     }
   });
 
   it('offers resume instead of interrupt or stop once a session has finished', () => {
     for (const status of ['completed', 'failed', 'stalled', 'stopped'] as const) {
-      expect(actionsFor(status)).toEqual(['resume', 'rename', 'migrate']);
+      expect(actionsFor(status)).toEqual(['resume', 'rename', 'move']);
     }
   });
 
   it('keeps stop — and only stop — available on a kill_failed session', () => {
     // kill_failed is terminal, but it is the previous STOP that failed, so the
     // one action it still needs is another stop. Resume would be wrong here.
-    expect(actionsFor('kill_failed')).toEqual(['stop', 'rename', 'migrate']);
+    expect(actionsFor('kill_failed')).toEqual(['stop', 'rename', 'move']);
   });
 
-  it('marks stop and migrate destructive and nothing else', () => {
+  it('marks stop and move destructive and nothing else', () => {
     const specs = sessionActionSpecs(sessionView('s1', { state: { status: 'running' } }), true);
     const danger = specs.filter(spec => spec.danger === true).map(spec => spec.action);
-    expect(danger).toEqual(['stop', 'migrate']);
+    expect(danger).toEqual(['stop', 'move']);
   });
 
   it('labels every action it offers', () => {

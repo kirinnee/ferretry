@@ -12,9 +12,9 @@ import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 /**
  * The client capability the fleet surfaces use: requests, and — where the client offers it — moving a
  * session to another runtime, which removing a runtime offers for the ferrets still on it. A client
- * without `migrate` simply does not offer that move.
+ * without `move` simply does not offer that move.
  */
-export type FleetClient = Pick<IFyApiClient, 'request'> & Partial<Pick<IFyApiClient, 'migrate'>>;
+export type FleetClient = Pick<IFyApiClient, 'request'> & Partial<Pick<IFyApiClient, 'move'>>;
 
 /** Makes a client bound to one paired machine. */
 export type FleetClientFactory = (connection: DaemonConnection) => Promise<FleetClient>;

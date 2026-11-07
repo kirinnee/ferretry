@@ -5,7 +5,7 @@
  * say something the other does not.
  */
 
-import { type ConversionSummary, type MigrationRefusal, MigrationRefusedBodySchema } from '../../../contract/index.ts';
+import { type ConversionSummary, type MoveRefusal, MoveRefusedBodySchema } from '../../../contract/index.ts';
 import { FyHttpError } from '@ferretry/app';
 import type { PickerAccount } from '../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 import { HARNESS_SHORT, type HarnessKind, otherHarness } from '../fleet/credentials/credentials-model.ts';
@@ -82,12 +82,12 @@ export const conversionSentences = (summary: ConversionSummary, targetModel: str
 
 /** How a move the daemon refused is shown: in-flight work that can be forced past, or a sentence. */
 export type ConversionFailure =
-  | { readonly kind: 'inflight'; readonly refusal: MigrationRefusal }
+  | { readonly kind: 'inflight'; readonly refusal: MoveRefusal }
   | { readonly kind: 'message'; readonly text: string };
 
 export const conversionFailure = (reason: unknown): ConversionFailure => {
-  if (reason instanceof FyHttpError && reason.code === 'migration_refused') {
-    const body = MigrationRefusedBodySchema.safeParse(reason.body);
+  if (reason instanceof FyHttpError && reason.code === 'move_refused') {
+    const body = MoveRefusedBodySchema.safeParse(reason.body);
     const refusal = body.success ? body.data.inflight : undefined;
     if (refusal?.items.some(item => item.blocks) === true) return { kind: 'inflight', refusal };
   }

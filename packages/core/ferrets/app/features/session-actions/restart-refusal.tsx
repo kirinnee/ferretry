@@ -12,7 +12,7 @@
  * restart looks like.
  */
 
-import type { ContextDowngrade, MigrationRefusal, SessionView } from '../../../contract/index.ts';
+import type { ContextDowngrade, MoveRefusal, SessionView } from '../../../contract/index.ts';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@ferretry/app';
 import { downgradeSentence } from './context-downgrade.ts';
@@ -43,7 +43,7 @@ function RestartRefusalPanel({
   onCancel,
   onRestartAnyway,
 }: {
-  readonly refusal: MigrationRefusal;
+  readonly refusal: MoveRefusal;
   readonly busy: boolean;
   readonly failure: string | null;
   readonly onCancel: () => void;

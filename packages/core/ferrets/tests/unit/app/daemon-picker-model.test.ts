@@ -133,7 +133,7 @@ describe('accountPickerOptions', () => {
     }
   });
 
-  it('narrows to one harness for migration without disturbing an unread roster', () => {
+  it('narrows to one harness for move without disturbing an unread roster', () => {
     const options = accountPickerOptions([claudeAccount(), codexAccount()], [], null);
 
     expect(sameHarnessAccountOptions(options, 'codex')?.map(option => option.wrapper)).toEqual(['codex-auto-forge']);

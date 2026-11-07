@@ -45,10 +45,10 @@ export const readConversionPreview = async (
  * Nothing changes when it throws. `forceInflight` is only ever set after the person confirmed it.
  */
 export const moveToOtherHarness = async (
-  client: Pick<IFyApiClient, 'migrate'>,
+  client: Pick<IFyApiClient, 'move'>,
   view: SessionView,
   agent: string,
   requestId: string,
   forceInflight: boolean,
 ): Promise<SessionView> =>
-  await client.migrate(view.config.id, agent, undefined, false, requestId, forceInflight ? true : undefined, 'convert');
+  await client.move(view.config.id, agent, undefined, false, requestId, forceInflight ? true : undefined, 'convert');

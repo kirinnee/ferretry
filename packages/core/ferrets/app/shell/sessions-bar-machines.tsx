@@ -126,7 +126,7 @@ export function SessionsBarMachines({
                 <p className="fy-sbar__empty">{everythingMoved(machine.pinned, machine.needsYou) ?? 'No sessions.'}</p>
               ) : (
                 // A machine that is down keeps its last rows, openable but READ-ONLY: no row menu, because
-                // Stop, Rename or Migrate would only fail on a machine nobody can reach — and the title says why.
+                // Stop, Rename or Move would only fail on a machine nobody can reach — and the title says why.
                 <OfflineRows offline={machine.outage !== null}>
                   {machine.groups.map(group => (
                     <div className="fy-sbar__group" key={group.path || group.name}>

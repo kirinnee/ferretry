@@ -795,7 +795,7 @@ describe('AccountPickerField', () => {
   });
 
   /**
-   * A migration narrows the roster to one harness. On a host with Claude accounts
+   * A move narrows the roster to one harness. On a host with Claude accounts
    * and no Codex one, "this daemon publishes no accounts" is a false statement
    * about the host, invented from a decision the browser made — and the one that
    * sends somebody to provision an account they already have.
@@ -1328,7 +1328,7 @@ describe('DaemonAccountPicker', () => {
     expect(find('[data-picker-advisory]')).toBeNull();
   });
 
-  it('offers only the same harness for a migration', async () => {
+  it('offers only the same harness for a move', async () => {
     const store = new DaemonAccountPickerStore(catalogPort());
     await show(
       <DaemonAccountPicker
@@ -1399,7 +1399,7 @@ describe('DaemonAccountPicker', () => {
   /**
    * The probe checks the WHOLE fleet — that is the host's business and the button
    * says so. The completion count is a sentence about the list in front of the
-   * reader, so a one-row Codex migration must never report the two Claude rows
+   * reader, so a one-row Codex move must never report the two Claude rows
    * that were also probed.
    */
   it('counts only the harness rows on screen, while still disclosing the whole-fleet scope', async () => {

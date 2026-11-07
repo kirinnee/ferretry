@@ -44,7 +44,7 @@ const open = (minutes: number) => ({ open: 1, first: 'A1', ask: 'Ask?', latestAt
 
 const STUDIO_SESSIONS: readonly SessionView[] = [
   session('s-ivo', 'ivo', 'Relay carrier bench', '/home/k/ferretry', 1, 'auto'),
-  session('s-hadi', 'hadi', 'Pick the migration strategy', '/home/k/ferretry', 3, 'interactive', {
+  session('s-hadi', 'hadi', 'Pick the move strategy', '/home/k/ferretry', 3, 'interactive', {
     status: 'awaiting_question',
     agenda: open(3),
   }),

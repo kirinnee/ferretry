@@ -617,9 +617,9 @@ export function DaemonAccountName({
 /**
  * WHY AN EMPTY LIST NEEDS TWO DIFFERENT SENTENCES.
  *
- * A migration narrows the roster to one harness, because Claude and Codex cannot
+ * A move narrows the roster to one harness, because Claude and Codex cannot
  * resume each other's conversation format. On a host with three Claude accounts
- * and no Codex one, a Codex migration therefore has an empty list and a fleet
+ * and no Codex one, a Codex move therefore has an empty list and a fleet
  * that is emphatically not empty — and "this daemon publishes no accounts" would
  * be a false statement about the host, invented from a decision this browser
  * made. It is also the statement that sends somebody to go and provision an
@@ -725,7 +725,7 @@ export interface ProjectPickerFieldProps extends DaemonPickerFieldProps {
  * `emptyNotice` and `emptyStatus` are a pair on purpose — `picker-combobox.tsx`
  * says so where it declares them — and the account field honours that pairing
  * through `accountEmptyCopy`. Accounts need two DIFFERENT sentences because a
- * migration filters the roster and the spoken half has to admit the filter.
+ * move filters the roster and the spoken half has to admit the filter.
  * Nothing filters folders, so the honest spoken sentence is the visible one, and
  * it is written once here rather than twice at the call site: two literals that
  * must agree are two literals that eventually will not.
@@ -842,7 +842,7 @@ export interface DaemonAccountPickerProps extends DaemonPickerFieldProps {
   readonly usage: readonly AccountUsageRow[];
   /** Why the cached quota feed is missing, if it is. Never fails the roster. */
   readonly usageError?: string | null;
-  /** Set for a migration, where cross-CLI is never offered. */
+  /** Set for a move, where cross-CLI is never offered. */
   readonly harness?: PickerAccount['kind'];
   /**
    * Offer only the accounts the daemon can run a session on — the manifest's
@@ -873,7 +873,7 @@ export interface DaemonAccountPickerProps extends DaemonPickerFieldProps {
   /**
    * Whether this surface offers the re-check control. Off by default so a screen
    * has to ask for it deliberately, and available to every surface that does —
-   * the new-session form and the migrate sheet both choose an account, and both
+   * the new-session form and the move sheet both choose an account, and both
    * have the same reason to want fresher evidence before they commit to one.
    *
    * IT NO LONGER GATES SEEING HEALTH. Every row carries its stored verdict
@@ -897,7 +897,7 @@ export interface DaemonAccountPickerProps extends DaemonPickerFieldProps {
  * The probe route checks the whole fleet — that is the host's business and the
  * button's copy says so plainly, which is the disclosure that has to stay. But
  * the completion count is a sentence about the list in front of the reader, and
- * on a Codex migration showing one row "3 accounts checked" is simply not about
+ * on a Codex move showing one row "3 accounts checked" is simply not about
  * anything they can see. It also reads as an invitation to look for the other two.
  *
  * So the count is an intersection: offered rows that have a result. A row the

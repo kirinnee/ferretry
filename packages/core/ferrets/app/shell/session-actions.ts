@@ -5,7 +5,7 @@
  * This is pure data, not a component, precisely so the fleet sidebar's row
  * context menu and the session header's inline controls agree BY CONSTRUCTION
  * rather than by two hand-kept copies that drift. It decides availability only —
- * it never performs an action and never bypasses a confirmation. Migrate stays a
+ * it never performs an action and never bypasses a confirmation. Move stays a
  * sheet with its own in-flight warning; this merely surfaces the entry point.
  *
  * WHAT CHANGED — survey row #4. kteam gated every action on `HAS_TOKEN`, a
@@ -20,13 +20,13 @@ import type { SessionStatus, SessionView } from '../../contract/index.ts';
 import { reviveOffer } from '../../../../plugins/updates/app/shell/revive-offer.ts';
 import { TERMINAL_STATUSES } from '@ferretry/app';
 
-export type SessionAction = 'interrupt' | 'stop' | 'resume' | 'rename' | 'migrate';
+export type SessionAction = 'interrupt' | 'stop' | 'resume' | 'rename' | 'move';
 
 export interface SessionActionSpec {
   readonly action: SessionAction;
   readonly label: string;
   /**
-   * Destructive tone for Stop and Migrate (relaunch) — the two that discard or
+   * Destructive tone for Stop and Move (relaunch) — the two that discard or
    * interrupt work.
    */
   readonly danger?: boolean;
@@ -48,7 +48,7 @@ const isKillFailed = (status: SessionStatus): boolean => status === 'kill_failed
  *   Resume    — a finished session that did not fail to die.
  *   Stop      — anything still running, plus a `kill_failed` session (Stop again).
  *   Rename    — always available.
- *   Migrate   — always available; opens the destructive sheet.
+ *   Move   — always available; opens the destructive sheet.
  */
 export const sessionActionSpecs = (view: SessionView, canMutate: boolean): readonly SessionActionSpec[] => {
   if (!canMutate) return [];
@@ -62,6 +62,6 @@ export const sessionActionSpecs = (view: SessionView, canMutate: boolean): reado
   if (resumable) specs.push({ action: 'resume', label: 'Resume session' });
   if (!terminal || killFailed) specs.push({ action: 'stop', label: 'Stop session', danger: true });
   specs.push({ action: 'rename', label: 'Rename…' });
-  specs.push({ action: 'migrate', label: 'Move account + relaunch…', danger: true });
+  specs.push({ action: 'move', label: 'Move account + relaunch…', danger: true });
   return specs;
 };

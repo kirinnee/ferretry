@@ -62,7 +62,7 @@ export type AccountUsageRow = Pick<
 export interface AccountPickerOption {
   /** Stable option identity: the runtime's id. */
   readonly key: string;
-  /** The value a caller types as `agent` when starting or migrating a session. */
+  /** The value a caller types as `agent` when starting or moving a session. */
   readonly value: string;
   readonly id: string;
   readonly wrapper: string;
@@ -96,7 +96,7 @@ export interface AccountPickerOption {
  * verbatim: nothing here derives a name from an id's spelling.
  *
  * Every surface that names an offered account — the closed box, each row, the
- * migrate sheet's "current" and "requested" lines — reads this one projection,
+ * move sheet's "current" and "requested" lines — reads this one projection,
  * so no two of them can disagree about which half leads.
  */
 export interface AccountLabel {
@@ -173,7 +173,7 @@ export const accountPickerOptions = (
   accounts === null ? null : accounts.map(account => accountPickerOption(account, usage, health));
 
 /**
- * Narrow to one harness for a migration target, where cross-CLI migration is
+ * Narrow to one harness for a move target, where cross-CLI move is
  * never offered. An unreadable roster stays unreadable — filtering a `null`
  * roster is still a `null` roster, not an empty list that would read as "no
  * accounts exist".

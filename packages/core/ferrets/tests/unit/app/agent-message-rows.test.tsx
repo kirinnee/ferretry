@@ -261,7 +261,7 @@ describe('a notice from Ferretry itself', () => {
 });
 
 describe('a Ferretry message from any part of Ferretry', () => {
-  const FEATURES = ['Warden', 'Agenda', 'Monitor', 'Lessons', 'Migrate', 'Restart', 'Delivery'];
+  const FEATURES = ['Warden', 'Agenda', 'Monitor', 'Lessons', 'Move', 'Restart', 'Delivery'];
   const entryFor = (feature: string, text: string) => ({
     id: `f-${feature}`,
     kind: 'user' as const,

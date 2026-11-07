@@ -119,28 +119,28 @@ const bodies = (calls: readonly Call[]): unknown[] =>
     .filter(call => `${call.method} ${call.path}` === CHANGES)
     .map(call => (call.body as { change: unknown }).change);
 
-type MigrateCall = Parameters<IFyApiClient['migrate']>;
+type MoveCall = Parameters<IFyApiClient['move']>;
 
 interface Options {
   readonly routes?: Record<string, unknown>;
   readonly machine?: FleetMachineView;
-  readonly migrate?: (call: MigrateCall) => unknown;
-  readonly migrations?: MigrateCall[];
+  readonly move?: (call: MoveCall) => unknown;
+  readonly moves?: MoveCall[];
 }
 
 const open = async (hash: string, options: Options = {}) => {
   window.location.hash = hash;
   const calls: Call[] = [];
   const base = scripted({ ...READS(data), [CHANGES]: staged(), [APPLY]: APPLIED, ...options.routes }, calls);
-  const migrate = options.migrate;
+  const move = options.move;
   const client: FleetClient =
-    migrate === undefined
+    move === undefined
       ? base
       : {
           ...base,
-          migrate: async (...call: MigrateCall) => {
-            options.migrations?.push(call);
-            const answer = migrate(call);
+          move: async (...call: MoveCall) => {
+            options.moves?.push(call);
+            const answer = move(call);
             if (answer instanceof Error) throw answer;
             return answer as never;
           },
@@ -399,11 +399,11 @@ describe('Remove a login · used by 2 runtimes', () => {
 
 describe('Remove a login · the ferrets on a runtime that goes', () => {
   it('moves them first, to the runtime chosen, then removes', async () => {
-    const migrations: MigrateCall[] = [];
+    const moves: MoveCall[] = [];
     const { view, calls } = await open(HASH, {
       routes: { [CHANGES]: staged(FERRETS) },
-      migrate: () => ({}),
-      migrations,
+      move: () => ({}),
+      moves,
     });
     await openFor(view.container, 'kirin-old');
     await click(dialog(view.container).querySelector('[data-login-remove-runtime-too="claude-agent"]'), 'remove');
@@ -414,7 +414,7 @@ describe('Remove a login · the ferrets on a runtime that goes', () => {
     expect(submit(view.container).textContent).toContain('Move 2 ferrets to claude-default');
 
     await click(submit(view.container), 'confirm');
-    expect(migrations.map(call => [call[0], call[1]])).toEqual([
+    expect(moves.map(call => [call[0], call[1]])).toEqual([
       ['s-1', 'claude-default'],
       ['s-2', 'claude-default'],
     ]);
@@ -425,7 +425,7 @@ describe('Remove a login · the ferrets on a runtime that goes', () => {
   it('stops before removing anything when a ferret cannot be moved', async () => {
     const { view, calls } = await open(HASH, {
       routes: { [CHANGES]: staged(FERRETS) },
-      migrate: ([id]) => (id === 's-2' ? new Error('Otter is mid-answer.') : {}),
+      move: ([id]) => (id === 's-2' ? new Error('Otter is mid-answer.') : {}),
     });
     await openFor(view.container, 'kirin-old');
     await click(dialog(view.container).querySelector('[data-login-remove-runtime-too="claude-agent"]'), 'remove');

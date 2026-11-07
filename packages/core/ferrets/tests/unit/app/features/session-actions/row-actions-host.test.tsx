@@ -86,7 +86,7 @@ const grants = (warden: boolean): GrantsView => ({
 interface Calls {
   readonly stop: string[];
   readonly resume: string[];
-  readonly migrate: unknown[][];
+  readonly move: unknown[][];
   readonly rename: unknown[][];
   readonly pin: string[];
   readonly unpin: string[];
@@ -103,7 +103,7 @@ const setup = (
     moveRefusal?: boolean;
   } = {},
 ) => {
-  const calls: Calls = { stop: [], resume: [], migrate: [], rename: [], pin: [], unpin: [], fork: [], fetches: [] };
+  const calls: Calls = { stop: [], resume: [], move: [], rename: [], pin: [], unpin: [], fork: [], fetches: [] };
   const record = { ...alpha, pairedAt: 1, lastSelectedAt: 1 };
   const client = {
     request: async () => grants(options.warden ?? false),
@@ -115,14 +115,14 @@ const setup = (
       calls.resume.push(id);
       return sessionView(id, { config: { teammate: 'ora' } });
     },
-    migrate: async (...args: unknown[]) => {
-      calls.migrate.push(args);
+    move: async (...args: unknown[]) => {
+      calls.move.push(args);
       if (options.moveRefusal === true && args[6] === 'convert')
         throw new FyHttpError('Codex rejected the converted file.', 409, 'conversation_unresumable');
       if (options.pausedRestart === true && args[5] !== true)
-        throw new FyHttpError('refused', 409, 'migration_refused', {
+        throw new FyHttpError('refused', 409, 'move_refused', {
           error: 'refused',
-          code: 'migration_refused',
+          code: 'move_refused',
           inflight: {
             status: 'running',
             turn: 2,
@@ -358,13 +358,13 @@ describe('the sessions bar row actions', () => {
     ).toBe('completed');
   });
 
-  it('goes back to the earlier conversation through a same-login migration that asks for it', async () => {
+  it('goes back to the earlier conversation through a same-login move that asks for it', async () => {
     const { root, calls } = await show();
     await choose(root, 'earlier-conversation');
     await confirmYes(root);
-    expect(calls.migrate).toHaveLength(1);
-    expect(calls.migrate[0]?.[0]).toBe('s-run');
-    expect(calls.migrate[0]?.[6]).toBe('previous');
+    expect(calls.move).toHaveLength(1);
+    expect(calls.move[0]?.[0]).toBe('s-run');
+    expect(calls.move[0]?.[6]).toBe('previous');
   });
 
   it('offers Move to Codex… only where the machine has a Codex account, and moves with conversation convert', async () => {
@@ -380,9 +380,9 @@ describe('the sessions bar row actions', () => {
     expect(sheet.textContent).toContain('All 4 turns will move.');
     await interact(() => must(document.body.querySelector<HTMLElement>('[data-convert-confirm]'), 'confirm').click());
     await settle();
-    expect(calls.migrate).toHaveLength(1);
-    expect(calls.migrate[0]?.slice(0, 2)).toEqual(['s-run', 'codex-a']);
-    expect(calls.migrate[0]?.[6]).toBe('convert');
+    expect(calls.move).toHaveLength(1);
+    expect(calls.move[0]?.slice(0, 2)).toEqual(['s-run', 'codex-a']);
+    expect(calls.move[0]?.[6]).toBe('convert');
     expect(must(root.querySelector('[data-action-toast] p'), 'toast').textContent).toBe('Moved to Codex (Codex A).');
     expect(
       store.fleet
@@ -402,13 +402,13 @@ describe('the sessions bar row actions', () => {
     );
   });
 
-  it('restarts the CLI through a same-login migration', async () => {
+  it('restarts the CLI through a same-login move', async () => {
     const { root, calls } = await show();
     await choose(root, 'restart');
     await confirmYes(root);
-    expect(calls.migrate).toHaveLength(1);
-    expect(calls.migrate[0]?.[0]).toBe('s-run');
-    expect(calls.migrate[0]?.[1]).toBe('nero');
+    expect(calls.move).toHaveLength(1);
+    expect(calls.move[0]?.[0]).toBe('s-run');
+    expect(calls.move[0]?.[1]).toBe('nero');
   });
 
   it('holds a restart the daemon pauses for a confirm, and Restart anyway forces it under a fresh id', async () => {
@@ -417,12 +417,12 @@ describe('the sessions bar row actions', () => {
     await confirmYes(root);
     expect(root.textContent).toContain('Restart paused');
     expect(root.querySelector('[data-action-toast] p')?.textContent ?? '').not.toContain('failed');
-    expect(calls.migrate).toHaveLength(1);
+    expect(calls.move).toHaveLength(1);
     await interact(() => must(root.querySelector<HTMLElement>('[data-restart-refusal-anyway]'), 'anyway').click());
     await settle();
-    expect(calls.migrate).toHaveLength(2);
-    expect(calls.migrate[1]?.[5]).toBe(true);
-    expect(calls.migrate[1]?.[4]).not.toBe(calls.migrate[0]?.[4]);
+    expect(calls.move).toHaveLength(2);
+    expect(calls.move[1]?.[5]).toBe(true);
+    expect(calls.move[1]?.[4]).not.toBe(calls.move[0]?.[4]);
     expect(root.querySelector('[data-restart-refusal]')).toBeNull();
     expect(seen.closes.length).toBeGreaterThan(0);
   });

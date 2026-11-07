@@ -138,7 +138,7 @@ describe('the switch on a login', () => {
     expect(proposed(calls)).toEqual([]);
     const form = must(view.container.querySelector('[data-disable-form]'), 'form');
     expect(form.textContent).toContain('Nothing is stopped');
-    expect(form.textContent).toContain('fy migrate <id> -a <other runtime>');
+    expect(form.textContent).toContain('fy move <id> -a <other runtime>');
   });
 
   it('should send the reason and the end, then read the machine again', async () => {

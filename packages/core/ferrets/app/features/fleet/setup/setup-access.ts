@@ -1,8 +1,8 @@
 /**
  * The setup surface's GUARDED reads and acts (docs/design/account-model.md §7, §9.6).
  *
- * The setup scan, the Clone export and the migration's dry run are `fleet.configure` reads — the scan
- * names every secret key and the export is everything a clone copies. Installing a tool and migrating
+ * The setup scan, the Clone export and the move's dry run are `fleet.configure` reads — the scan
+ * names every secret key and the export is everything a clone copies. Installing a tool and moving
  * are guarded acts that are not staged changes. A caller off the machine is asked for its passkey by the
  * carrier when the daemon wants one, so this module only runs the work and words a refusal.
  */
@@ -22,7 +22,7 @@ export interface SetupAccess {
   readonly changes: AccountChanges;
   /** One guarded read. */
   readonly read: <T>(work: (client: FleetClient) => Promise<T>) => Promise<Guarded<T>>;
-  /** One guarded act that is not a staged change: an install, a migration. A refusal is also shown on `changes`. */
+  /** One guarded act that is not a staged change: an install, a move. A refusal is also shown on `changes`. */
   readonly act: <T>(work: (client: FleetClient) => Promise<T>) => Promise<Guarded<T>>;
 }
 

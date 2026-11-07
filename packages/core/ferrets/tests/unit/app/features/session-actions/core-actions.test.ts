@@ -15,7 +15,7 @@ const context = (status: SessionStatus, overrides: Partial<CoreActionContext> = 
   name: 'Hadi',
   canControl: true,
   copyId: noop,
-  openMigrate: noop,
+  openMove: noop,
   restart: async () => undefined,
   stop: async () => undefined,
   resume: async () => undefined,
@@ -96,7 +96,7 @@ describe('CORE_SESSION_ACTIONS — a controlled, running ferret', () => {
       SESSION_ACTION_IDS.rename,
       SESSION_ACTION_IDS.fork,
       SESSION_ACTION_IDS.copyId,
-      SESSION_ACTION_IDS.migrate,
+      SESSION_ACTION_IDS.move,
       SESSION_ACTION_IDS.machine,
       SESSION_ACTION_IDS.restart,
       SESSION_ACTION_IDS.stop,
@@ -148,15 +148,15 @@ describe('CORE_SESSION_ACTIONS — a controlled, running ferret', () => {
       CORE_SESSION_ACTIONS,
       context('running', { view: sessionView('a1', { config: { agent: 'nero' } }) }),
     );
-    const migrate = sections.flatMap(section => section.entries).find(entry => entry.id === SESSION_ACTION_IDS.migrate);
-    expect(migrate?.detail).toBe('nero');
+    const move = sections.flatMap(section => section.entries).find(entry => entry.id === SESSION_ACTION_IDS.move);
+    expect(move?.detail).toBe('nero');
   });
 
-  it('runs copyId, openMigrate and the confirm actions through the context handed to it', async () => {
+  it('runs copyId, openMove and the confirm actions through the context handed to it', async () => {
     const calls: string[] = [];
     const ctx = context('running', {
       copyId: () => calls.push('copy'),
-      openMigrate: () => calls.push('migrate'),
+      openMove: () => calls.push('move'),
       restart: async () => {
         calls.push('restart');
       },
@@ -168,13 +168,13 @@ describe('CORE_SESSION_ACTIONS — a controlled, running ferret', () => {
     const entry = (id: string) => sections.flatMap(section => section.entries).find(item => item.id === id);
     const copyEntry = entry(SESSION_ACTION_IDS.copyId);
     if (copyEntry?.kind === 'run') copyEntry.run();
-    const migrateEntry = entry(SESSION_ACTION_IDS.migrate);
-    if (migrateEntry?.kind === 'run') migrateEntry.run();
+    const moveEntry = entry(SESSION_ACTION_IDS.move);
+    if (moveEntry?.kind === 'run') moveEntry.run();
     const restartEntry = entry(SESSION_ACTION_IDS.restart);
     if (restartEntry?.kind === 'confirm') await restartEntry.run();
     const stopEntry = entry(SESSION_ACTION_IDS.stop);
     if (stopEntry?.kind === 'confirm') await stopEntry.run();
-    expect(calls).toEqual(['copy', 'migrate', 'restart', 'stop']);
+    expect(calls).toEqual(['copy', 'move', 'restart', 'stop']);
   });
 });
 
@@ -258,7 +258,7 @@ describe('CORE_SESSION_ACTIONS — Move to the other harness', () => {
     });
     expect(convertLabel(claude)).toBe('Move to Codex…');
     const ids = idsFor(claude);
-    expect(ids.indexOf(SESSION_ACTION_IDS.convert)).toBe(ids.indexOf(SESSION_ACTION_IDS.migrate) + 1);
+    expect(ids.indexOf(SESSION_ACTION_IDS.convert)).toBe(ids.indexOf(SESSION_ACTION_IDS.move) + 1);
     const entry = sessionActionSections(CORE_SESSION_ACTIONS, claude)
       .flatMap(section => section.entries)
       .find(found => found.id === SESSION_ACTION_IDS.convert);

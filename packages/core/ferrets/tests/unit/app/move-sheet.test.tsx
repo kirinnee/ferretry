@@ -7,11 +7,11 @@ import type { ReactElement } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
   askToStopJobsWithDaemon,
-  type MigrateSession,
-  MigrateSheet,
-  type MigrateSheetProps,
-  migrateSessionWithDaemon,
-  migrationRequestKey,
+  type MoveSession,
+  MoveSheet,
+  type MoveSheetProps,
+  moveSessionWithDaemon,
+  moveRequestKey,
 } from '../../../app/components/move-sheet.tsx';
 import type { PickerAccount } from '../../../../../plugins/accounts/app/lib/account-picker-catalog.ts';
 import { type DaemonAccountPickerPort, DaemonAccountPickerStore } from '../../../../../plugins/accounts/app/lib/account-picker-store.ts';
@@ -76,7 +76,7 @@ const fields = (root: ReactTestInstance): ReactTestInstance[] =>
 
 const field = (root: ReactTestInstance, index: number): ReactTestInstance => {
   const match = fields(root)[index];
-  if (match === undefined) throw new Error(`missing migration field ${index}`);
+  if (match === undefined) throw new Error(`missing move field ${index}`);
   return match;
 };
 
@@ -94,22 +94,22 @@ const press = async (root: ReactTestInstance, label: string): Promise<void> => {
   });
 };
 
-const props = (overrides: Partial<MigrateSheetProps> = {}): MigrateSheetProps => ({
+const props = (overrides: Partial<MoveSheetProps> = {}): MoveSheetProps => ({
   canMutate: true,
   connection: daemonA,
-  migrateSession: async () => source(),
+  moveSession: async () => source(),
   onClose: () => undefined,
-  onMigrated: () => undefined,
+  onMoved: () => undefined,
   open: true,
   scope: scopeA,
   view: source(),
   ...overrides,
 });
 
-describe('migrateSessionWithDaemon', () => {
+describe('moveSessionWithDaemon', () => {
   it('rejects a cross-daemon scope before constructing a typed client', async () => {
     await expect(
-      migrateSessionWithDaemon(
+      moveSessionWithDaemon(
         daemonA,
         scopeB,
         {
@@ -121,12 +121,12 @@ describe('migrateSessionWithDaemon', () => {
           throw new Error('no client may be built for a crossed scope');
         },
       ),
-    ).rejects.toThrow('migration scope must belong to the requested daemon');
+    ).rejects.toThrow('move scope must belong to the requested daemon');
   });
 
   it('forwards the whole target and the request id to the paired daemon client', async () => {
     const calls: unknown[][] = [];
-    const migrated = await migrateSessionWithDaemon(
+    const moved = await moveSessionWithDaemon(
       daemonA,
       scopeA,
       { agent: 'codex-auto-atomi', model: 'gpt-5.6-sol[1m]', allowContextDowngrade: true },
@@ -134,7 +134,7 @@ describe('migrateSessionWithDaemon', () => {
       async connection => {
         calls.push(['client', connection.daemonId]);
         return {
-          migrate: async (...args: unknown[]) => {
+          move: async (...args: unknown[]) => {
             calls.push(args);
             return source();
           },
@@ -142,7 +142,7 @@ describe('migrateSessionWithDaemon', () => {
       },
     );
 
-    expect(migrated.config.id).toBe('same-session');
+    expect(moved.config.id).toBe('same-session');
     expect(calls).toEqual([
       ['client', 'daemon-a'],
       ['same-session', 'codex-auto-atomi', 'gpt-5.6-sol[1m]', true, 'request-7'],
@@ -161,7 +161,7 @@ describe('askToStopJobsWithDaemon', () => {
 
   it('asks the paired daemon about the scoped session', async () => {
     const calls: unknown[] = [];
-    const answer = { messageId: 'migrate-jobs-1', jobs: [{ pid: 1, command: 'sleep 9' }], alreadyAsked: false };
+    const answer = { messageId: 'move-jobs-1', jobs: [{ pid: 1, command: 'sleep 9' }], alreadyAsked: false };
 
     const result = await askToStopJobsWithDaemon(daemonA, scopeA, async connection => {
       calls.push(connection.daemonId);
@@ -178,59 +178,59 @@ describe('askToStopJobsWithDaemon', () => {
   });
 });
 
-describe('migrationRequestKey', () => {
+describe('moveRequestKey', () => {
   it('is stable for one target and distinct for every field a reader can change', () => {
     const target = { agent: 'codex-auto-atomi', model: 'gpt-5.6-sol', allowContextDowngrade: false } as const;
-    expect(migrationRequestKey(scopeA, target)).toBe(migrationRequestKey(scopeA, { ...target }));
-    expect(migrationRequestKey(scopeA, target)).not.toBe(
-      migrationRequestKey(scopeA, { ...target, agent: 'codex-auto-loge' }),
+    expect(moveRequestKey(scopeA, target)).toBe(moveRequestKey(scopeA, { ...target }));
+    expect(moveRequestKey(scopeA, target)).not.toBe(
+      moveRequestKey(scopeA, { ...target, agent: 'codex-auto-loge' }),
     );
-    expect(migrationRequestKey(scopeA, target)).not.toBe(migrationRequestKey(scopeA, { ...target, model: 'other' }));
-    expect(migrationRequestKey(scopeA, target)).not.toBe(
-      migrationRequestKey(scopeA, { ...target, allowContextDowngrade: true }),
+    expect(moveRequestKey(scopeA, target)).not.toBe(moveRequestKey(scopeA, { ...target, model: 'other' }));
+    expect(moveRequestKey(scopeA, target)).not.toBe(
+      moveRequestKey(scopeA, { ...target, allowContextDowngrade: true }),
     );
     // The account default is a real target, and must not collide with a named model.
-    expect(migrationRequestKey(scopeA, { agent: target.agent, allowContextDowngrade: false })).not.toBe(
-      migrationRequestKey(scopeA, target),
+    expect(moveRequestKey(scopeA, { agent: target.agent, allowContextDowngrade: false })).not.toBe(
+      moveRequestKey(scopeA, target),
     );
-    // Same session id on another paired daemon is a different migration.
-    expect(migrationRequestKey(scopeA, target)).not.toBe(migrationRequestKey(scopeB, target));
+    // Same session id on another paired daemon is a different move.
+    expect(moveRequestKey(scopeA, target)).not.toBe(moveRequestKey(scopeB, target));
   });
 });
 
-describe('MigrateSheet', () => {
+describe('MoveSheet', () => {
   it('is inert while closed or read-only, and renders the daemon-owned safety contract when editable', () => {
-    const view = renderSheet(<MigrateSheet {...props({ open: false })} />);
+    const view = renderSheet(<MoveSheet {...props({ open: false })} />);
     expect(view.toJSON()).toBeNull();
 
-    run(() => view.update(<MigrateSheet {...props({ canMutate: false })} />));
+    run(() => view.update(<MoveSheet {...props({ canMutate: false })} />));
     expect(view.toJSON()).toBeNull();
 
-    run(() => view.update(<MigrateSheet {...props()} />));
+    run(() => view.update(<MoveSheet {...props()} />));
     expect(view.root.findByProps({ children: 'Change model or account' })).toBeDefined();
     expect(fields(view.root).map(input => input.props.value)).toEqual(['codex-auto-loge', 'gpt-5.6-sol[1m]']);
     expect(JSON.stringify(view.toJSON())).toContain('This public route has no force switch');
-    expect(JSON.stringify(view.toJSON())).not.toContain('Force migration');
-    expect(button(view.root, 'Review migration').props.disabled).toBe(true);
+    expect(JSON.stringify(view.toJSON())).not.toContain('Force move');
+    expect(button(view.root, 'Review move').props.disabled).toBe(true);
   });
 
   it('submits one normalised target through the exact connection and scope, then reports the authoritative view', async () => {
-    const migrated = source('stopped');
+    const moved = source('stopped');
     const calls: unknown[][] = [];
     const updates: unknown[][] = [];
     let closes = 0;
-    const migrateSession: MigrateSession = async (...args) => {
+    const moveSession: MoveSession = async (...args) => {
       calls.push(args);
-      return migrated;
+      return moved;
     };
     const view = renderSheet(
-      <MigrateSheet
+      <MoveSheet
         {...props({
-          migrateSession,
+          moveSession,
           onClose: () => {
             closes += 1;
           },
-          onMigrated: (...args) => updates.push(args),
+          onMoved: (...args) => updates.push(args),
           view: source('stopped'),
         })}
       />,
@@ -246,16 +246,16 @@ describe('MigrateSheet', () => {
       [daemonA, scopeA, { agent: 'codex-auto-atomi', allowContextDowngrade: false }],
     ]);
     expect(typeof calls[0]?.[3]).toBe('string');
-    expect(updates).toEqual([[daemonA, scopeA, migrated]]);
+    expect(updates).toEqual([[daemonA, scopeA, moved]]);
     expect(closes).toBe(1);
   });
 
   it('allows an explicitly selected model to be cleared for the same account default', async () => {
     const calls: unknown[][] = [];
     const view = renderSheet(
-      <MigrateSheet
+      <MoveSheet
         {...props({
-          migrateSession: async (...args) => {
+          moveSession: async (...args) => {
             calls.push(args);
             return source('stopped');
           },
@@ -265,7 +265,7 @@ describe('MigrateSheet', () => {
     );
 
     change(field(view.root, 1), '   ');
-    expect(button(view.root, 'Review migration').props.disabled).toBe(false);
+    expect(button(view.root, 'Review move').props.disabled).toBe(false);
     review(view.root);
     await press(view.root, 'Relaunch on selected runtime');
 
@@ -276,15 +276,15 @@ describe('MigrateSheet', () => {
 
   it('blocks an oversized conversation and a mismatched daemon/session scope before the RPC', () => {
     let calls = 0;
-    const migrateSession: MigrateSession = async () => {
+    const moveSession: MoveSession = async () => {
       calls += 1;
       return source();
     };
     const oversized = source();
     const view = renderSheet(
-      <MigrateSheet
+      <MoveSheet
         {...props({
-          migrateSession,
+          moveSession,
           view: {
             ...oversized,
             state: { ...oversized.state, contextTokens: 300_000 },
@@ -296,27 +296,27 @@ describe('MigrateSheet', () => {
     change(field(view.root, 1), 'gpt-5.6-terra');
 
     expect(view.root.findByProps({ role: 'alert' })).toBeDefined();
-    expect(button(view.root, 'Review migration').props.disabled).toBe(true);
+    expect(button(view.root, 'Review move').props.disabled).toBe(true);
 
-    run(() => view.update(<MigrateSheet {...props({ migrateSession, scope: scopeB })} />));
+    run(() => view.update(<MoveSheet {...props({ moveSession, scope: scopeB })} />));
     change(field(view.root, 0), 'codex-auto-atomi');
     expect(text(view.root.findByProps({ role: 'alert' }))).toContain('does not belong to the selected daemon');
-    expect(button(view.root, 'Review migration').props.disabled).toBe(true);
+    expect(button(view.root, 'Review move').props.disabled).toBe(true);
     expect(calls).toBe(0);
   });
 
-  it('migrates through the routed client of the app store when no migration is handed in', async () => {
+  it('moves through the routed client of the app store when no move is handed in', async () => {
     // Outside an app store there is no session to route through, so the routed client refuses — and the
     // sheet reports it rather than reaching for the plain network.
-    const { migrateSession: _injected, ...routed } = props();
+    const { moveSession: _injected, ...routed } = props();
     const updates: SessionView[] = [];
     const view = renderSheet(
-      <MigrateSheet {...routed} onMigrated={(_connection, _scope, next) => updates.push(next)} />,
+      <MoveSheet {...routed} onMoved={(_connection, _scope, next) => updates.push(next)} />,
     );
     change(field(view.root, 0), 'codex-auto-atomi');
     change(field(view.root, 1), 'gpt-5.6-terra');
     review(view.root);
-    await press(view.root, 'Migrate and relaunch');
+    await press(view.root, 'Move and relaunch');
 
     expect(text(view.root)).toContain('no daemon client exists outside the app store');
     expect(updates).toEqual([]);
@@ -324,8 +324,8 @@ describe('MigrateSheet', () => {
 
   it('requires a second explicit action before accepting a daemon-confirmed context downgrade', async () => {
     const calls: unknown[][] = [];
-    const migrated = source();
-    const migrateSession: MigrateSession = async (...args) => {
+    const moved = source();
+    const moveSession: MoveSession = async (...args) => {
       calls.push(args);
       if (calls.length === 1) {
         throw new FyHttpError(
@@ -334,37 +334,37 @@ describe('MigrateSheet', () => {
           'context_downgrade_refused',
         );
       }
-      return migrated;
+      return moved;
     };
     const updates: SessionView[] = [];
     const view = renderSheet(
-      <MigrateSheet {...props({ migrateSession, onMigrated: (_connection, _scope, next) => updates.push(next) })} />,
+      <MoveSheet {...props({ moveSession, onMoved: (_connection, _scope, next) => updates.push(next) })} />,
     );
     change(field(view.root, 0), 'codex-auto-atomi');
     change(field(view.root, 1), 'gpt-5.6-terra');
     review(view.root);
-    await press(view.root, 'Migrate and relaunch');
+    await press(view.root, 'Move and relaunch');
 
     expect(view.root.findByProps({ children: 'The daemon refused a smaller context window' })).toBeDefined();
-    expect(button(view.root, 'Migrate with smaller window').props.disabled).toBe(true);
-    await press(view.root, 'Migrate with smaller window');
+    expect(button(view.root, 'Move with smaller window').props.disabled).toBe(true);
+    await press(view.root, 'Move with smaller window');
     expect(calls).toHaveLength(1);
 
     run(() => view.root.findByProps({ type: 'checkbox' }).props.onChange({ target: { checked: true } }));
-    await press(view.root, 'Migrate with smaller window');
+    await press(view.root, 'Move with smaller window');
 
     expect(calls.map(call => call[2])).toEqual([
       { agent: 'codex-auto-atomi', model: 'gpt-5.6-terra', allowContextDowngrade: false },
       { agent: 'codex-auto-atomi', model: 'gpt-5.6-terra', allowContextDowngrade: true },
     ]);
-    expect(updates).toEqual([migrated]);
+    expect(updates).toEqual([moved]);
   });
 
   it('offers the daemon-suggested 1M model without silently accepting a downgrade', async () => {
     const view = renderSheet(
-      <MigrateSheet
+      <MoveSheet
         {...props({
-          migrateSession: async () => {
+          moveSession: async () => {
             throw new FyHttpError(
               'codex-auto-atomi serves gpt-5.6-terra with a 200000-token window',
               409,
@@ -377,7 +377,7 @@ describe('MigrateSheet', () => {
     change(field(view.root, 0), 'codex-auto-atomi');
     change(field(view.root, 1), 'gpt-5.6-terra');
     review(view.root);
-    await press(view.root, 'Migrate and relaunch');
+    await press(view.root, 'Move and relaunch');
     await press(view.root, 'Use gpt-5.6-terra[1m] instead');
 
     expect(field(view.root, 1).props.value).toBe('gpt-5.6-terra[1m]');
@@ -389,11 +389,11 @@ describe('MigrateSheet', () => {
     const message =
       'open tool work is not safe to interrupt\nin-flight inventory — status tool_running, turn 4, worst: UNKNOWN\n  blind [UNKNOWN] open tool call-7 has no transcript';
     const view = renderSheet(
-      <MigrateSheet
+      <MoveSheet
         {...props({
-          migrateSession: async () => {
+          moveSession: async () => {
             attempts += 1;
-            if (attempts === 1) throw new FyHttpError(message, 409, 'migration_refused');
+            if (attempts === 1) throw new FyHttpError(message, 409, 'move_refused');
             return source();
           },
         })}
@@ -401,20 +401,20 @@ describe('MigrateSheet', () => {
     );
     change(field(view.root, 0), 'codex-auto-atomi');
     review(view.root);
-    await press(view.root, 'Migrate and relaunch');
+    await press(view.root, 'Move and relaunch');
 
     expect(text(view.root.findByType('pre'))).toBe(message);
     expect(JSON.stringify(view.toJSON())).toContain('There is no force control');
-    expect(JSON.stringify(view.toJSON())).not.toContain('Force migration');
+    expect(JSON.stringify(view.toJSON())).not.toContain('Force move');
     await press(view.root, 'Retry safety check');
     expect(attempts).toBe(2);
   });
 
   it('keeps an actionable typed failure in confirmation and lets the reader return to edit', async () => {
     const view = renderSheet(
-      <MigrateSheet
+      <MoveSheet
         {...props({
-          migrateSession: async () => {
+          moveSession: async () => {
             throw new FyHttpError('no account named missing', 404, 'unknown_agent');
           },
         })}
@@ -422,7 +422,7 @@ describe('MigrateSheet', () => {
     );
     change(field(view.root, 0), 'missing');
     review(view.root);
-    await press(view.root, 'Migrate and relaunch');
+    await press(view.root, 'Move and relaunch');
 
     expect(view.root.findByProps({ children: 'Unknown target account' })).toBeDefined();
     expect(JSON.stringify(view.toJSON())).toContain('no account named missing');
@@ -438,21 +438,21 @@ describe('MigrateSheet', () => {
     const calls: string[] = [];
     const updates: string[] = [];
     const closes: string[] = [];
-    const migrateSession: MigrateSession = async connection => {
+    const moveSession: MoveSession = async connection => {
       calls.push(connection.daemonId);
       return connection.daemonId === daemonA.daemonId ? pendingA : source();
     };
-    const make = (overrides: Partial<MigrateSheetProps> = {}): MigrateSheetProps =>
+    const make = (overrides: Partial<MoveSheetProps> = {}): MoveSheetProps =>
       props({
-        migrateSession,
+        moveSession,
         onClose: () => closes.push('closed'),
-        onMigrated: connection => updates.push(connection.daemonId),
+        onMoved: connection => updates.push(connection.daemonId),
         ...overrides,
       });
-    const view = renderSheet(<MigrateSheet {...make()} />);
+    const view = renderSheet(<MoveSheet {...make()} />);
     change(field(view.root, 0), 'codex-auto-atomi');
     review(view.root);
-    const action = button(view.root, 'Migrate and relaunch');
+    const action = button(view.root, 'Move and relaunch');
 
     run(() => {
       void action.props.onClick();
@@ -466,7 +466,7 @@ describe('MigrateSheet', () => {
     run(() => view.root.findAllByProps({ 'aria-label': 'Close change model or account' })[0]?.props.onClick());
     expect(closes).toEqual([]);
 
-    run(() => view.update(<MigrateSheet {...make({ connection: daemonB, scope: scopeB })} />));
+    run(() => view.update(<MoveSheet {...make({ connection: daemonB, scope: scopeB })} />));
     expect(fields(view.root).map(input => input.props.value)).toEqual(['codex-auto-loge', 'gpt-5.6-sol[1m]']);
     await runAsync(async () => {
       resolveA?.(source());
@@ -477,7 +477,7 @@ describe('MigrateSheet', () => {
 
     change(field(view.root, 0), 'codex-auto-atomi');
     review(view.root);
-    await press(view.root, 'Migrate and relaunch');
+    await press(view.root, 'Move and relaunch');
     expect(calls).toEqual(['daemon-a', 'daemon-b']);
     expect(updates).toEqual(['daemon-b']);
     expect(closes).toEqual(['closed']);
@@ -495,10 +495,10 @@ describe('MigrateSheet', () => {
         modelHint: 'claude-opus-5',
       },
     } as SessionView;
-    const mounted = await mount(<MigrateSheet {...props({ open: false })} />);
+    const mounted = await mount(<MoveSheet {...props({ open: false })} />);
 
     await mounted.render(
-      <MigrateSheet {...props({ connection: daemonB, open: true, scope: scopeB, view: daemonBView })} />,
+      <MoveSheet {...props({ connection: daemonB, open: true, scope: scopeB, view: daemonBView })} />,
     );
 
     expect(
@@ -510,7 +510,7 @@ describe('MigrateSheet', () => {
   });
 
   it('marks the safety statements as a real list, so they do not read as one paragraph', () => {
-    const view = renderSheet(<MigrateSheet {...props()} />);
+    const view = renderSheet(<MoveSheet {...props()} />);
     // The CSS preflight clears `list-style` on every `ul`, so the class has to be explicit.
     expect(view.root.findByType('ul').props.className).toContain('list-disc');
   });
@@ -519,27 +519,27 @@ describe('MigrateSheet', () => {
     // A runtime is named by its owner; a name that happens to contain a model family says nothing.
     const named = source();
     const view = renderSheet(
-      <MigrateSheet {...props({ view: { ...named, config: { ...named.config, agent: 'claude-glm52' } } })} />,
+      <MoveSheet {...props({ view: { ...named, config: { ...named.config, agent: 'claude-glm52' } } })} />,
     );
     expect(JSON.stringify(view.toJSON())).not.toContain('Restricted tier');
   });
 
   it('reuses one request id for a repeated confirmation of the same target, and mints a new one when it changes', async () => {
-    // A migration is destructive and the typed client retries its POST, so a second confirmation of
+    // A move is destructive and the typed client retries its POST, so a second confirmation of
     // the SAME target must be the same operation to the daemon — while a changed target must not be.
     const seen: Array<{ agent: string; requestId: string }> = [];
-    const migrateSession: MigrateSession = async (_connection, _scope, input, requestId) => {
+    const moveSession: MoveSession = async (_connection, _scope, input, requestId) => {
       seen.push({ agent: input.agent, requestId });
-      throw new FyHttpError('in-flight work refuses this migration', 409, 'migration_refused');
+      throw new FyHttpError('in-flight work refuses this move', 409, 'move_refused');
     };
-    const view = renderSheet(<MigrateSheet {...props({ migrateSession })} />);
+    const view = renderSheet(<MoveSheet {...props({ moveSession })} />);
 
     change(field(view.root, 0), 'codex-auto-atomi');
     review(view.root);
-    await press(view.root, 'Migrate and relaunch');
+    await press(view.root, 'Move and relaunch');
     await press(view.root, 'Retry safety check');
 
-    // Same target, so the retry is the same logical migration.
+    // Same target, so the retry is the same logical move.
     expect(seen).toHaveLength(2);
     expect(seen[0]?.requestId).toBe(seen[1]?.requestId);
 
@@ -547,7 +547,7 @@ describe('MigrateSheet', () => {
     await press(view.root, 'Back');
     change(field(view.root, 0), 'codex-auto-other');
     review(view.root);
-    await press(view.root, 'Migrate and relaunch');
+    await press(view.root, 'Move and relaunch');
     expect(seen).toHaveLength(3);
     expect(seen[2]?.agent).toBe('codex-auto-other');
     expect(seen[2]?.requestId).not.toBe(seen[0]?.requestId);
@@ -661,7 +661,7 @@ const quotaStore = (feed: unknown = QUOTA_FEED): DaemonUsageStore =>
   // second read mid-assertion; the sheet's own first read is unconditional.
   new DaemonUsageStore({ usage: async () => feed }, { isHidden: () => true });
 
-describe('MigrateSheet account picker', () => {
+describe('MoveSheet account picker', () => {
   let live: Mounted | undefined;
 
   afterEach(async () => {
@@ -673,7 +673,7 @@ describe('MigrateSheet account picker', () => {
     live = await mount(element);
   };
 
-  const container = (): HTMLElement => must(live, 'a mounted migrate sheet').container;
+  const container = (): HTMLElement => must(live, 'a mounted move sheet').container;
 
   const combobox = (): HTMLInputElement => {
     const node = container().querySelector('input[role="combobox"]');
@@ -734,15 +734,15 @@ describe('MigrateSheet account picker', () => {
   };
 
   const submitForm = async (): Promise<void> => {
-    const form = must(container().querySelector('form'), 'the migration form');
+    const form = must(container().querySelector('form'), 'the move form');
     await interact(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
   };
 
-  const recorder = (): { readonly calls: unknown[][]; readonly migrateSession: MigrateSession } => {
+  const recorder = (): { readonly calls: unknown[][]; readonly moveSession: MoveSession } => {
     const calls: unknown[][] = [];
     return {
       calls,
-      migrateSession: async (...args) => {
+      moveSession: async (...args) => {
         calls.push(args);
         return source('stopped');
       },
@@ -751,7 +751,7 @@ describe('MigrateSheet account picker', () => {
 
   it('sanitizes the useId-derived picker id so a CSS selector against it never throws', async () => {
     await showSheet(
-      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
+      <MoveSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
     );
 
     const id = combobox().id;
@@ -762,7 +762,7 @@ describe('MigrateSheet account picker', () => {
 
   it('names the current and requested accounts by the fleet’s name, as the box beside them does', async () => {
     await showSheet(
-      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
+      <MoveSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
     );
     await interact(() => undefined);
 
@@ -781,7 +781,7 @@ describe('MigrateSheet account picker', () => {
 
   it('gives a wrapper the roster never published no name in the review', async () => {
     await showSheet(
-      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
+      <MoveSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
     );
     await openRoster();
     await typeWrapper('codex-auto-elsewhere');
@@ -792,7 +792,7 @@ describe('MigrateSheet account picker', () => {
   });
 
   it('prints the current account as its id when the sheet holds no roster', async () => {
-    await showSheet(<MigrateSheet {...props()} />);
+    await showSheet(<MoveSheet {...props()} />);
 
     const help = [...container().querySelectorAll('[data-account-name]')].map(name => name.textContent);
     expect(help[0]).toBe('codex-auto-loge');
@@ -800,7 +800,7 @@ describe('MigrateSheet account picker', () => {
 
   it('offers only this daemon’s same-CLI accounts, and never a row from the other one', async () => {
     await showSheet(
-      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
+      <MoveSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
     );
     await openRoster();
     // The typed value doubles as the query, so clearing it is what asks for the
@@ -817,13 +817,13 @@ describe('MigrateSheet account picker', () => {
     expect(container().textContent).not.toContain('claude-auto-loge');
   });
 
-  it('carries a chosen account through review into the migration, and pins no model of its own', async () => {
-    const { calls, migrateSession } = recorder();
+  it('carries a chosen account through review into the move, and pins no model of its own', async () => {
+    const { calls, moveSession } = recorder();
     await showSheet(
-      <MigrateSheet
+      <MoveSheet
         {...props({
           accountPicker: new DaemonAccountPickerStore(roster().port),
-          migrateSession,
+          moveSession,
           usage: quotaStore(),
           view: source('stopped'),
         })}
@@ -846,17 +846,17 @@ describe('MigrateSheet account picker', () => {
     ]);
   });
 
-  it('keeps migrating a typed wrapper when the roster read fails outright', async () => {
-    const { calls, migrateSession } = recorder();
+  it('keeps moving a typed wrapper when the roster read fails outright', async () => {
+    const { calls, moveSession } = recorder();
     await showSheet(
-      <MigrateSheet
+      <MoveSheet
         {...props({
           accountPicker: new DaemonAccountPickerStore(
             roster(async () => {
               throw new Error('the account manifest could not be read');
             }).port,
           ),
-          migrateSession,
+          moveSession,
           usage: quotaStore(),
           view: source('stopped'),
         })}
@@ -878,12 +878,12 @@ describe('MigrateSheet account picker', () => {
   });
 
   it('refuses to select an unavailable account while leaving its wrapper typeable', async () => {
-    const { calls, migrateSession } = recorder();
+    const { calls, moveSession } = recorder();
     await showSheet(
-      <MigrateSheet
+      <MoveSheet
         {...props({
           accountPicker: new DaemonAccountPickerStore(roster().port),
-          migrateSession,
+          moveSession,
           usage: quotaStore(),
           view: source('stopped'),
         })}
@@ -911,24 +911,24 @@ describe('MigrateSheet account picker', () => {
 
   it('leaves Review disabled when the account chosen is the one already running', async () => {
     await showSheet(
-      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
+      <MoveSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
     );
     await openRoster();
     await typeWrapper('');
     await chooseRow(0);
 
     expect(combobox().value).toBe('codex-auto-loge');
-    expect(control('Review migration').disabled).toBeTrue();
+    expect(control('Review move').disabled).toBeTrue();
   });
 
   it('offers the chosen account’s available models as suggestions without writing one', async () => {
-    const { calls, migrateSession } = recorder();
+    const { calls, moveSession } = recorder();
     const blank = source('stopped');
     await showSheet(
-      <MigrateSheet
+      <MoveSheet
         {...props({
           accountPicker: new DaemonAccountPickerStore(roster().port),
-          migrateSession,
+          moveSession,
           usage: quotaStore(),
           view: { ...blank, config: { ...blank.config, model: '', modelHint: '' } } as SessionView,
         })}
@@ -951,7 +951,7 @@ describe('MigrateSheet account picker', () => {
   it('drops the previous account’s suggestions as soon as the wrapper is typed over', async () => {
     const blank = source('stopped');
     await showSheet(
-      <MigrateSheet
+      <MoveSheet
         {...props({
           accountPicker: new DaemonAccountPickerStore(roster().port),
           usage: quotaStore(),
@@ -977,7 +977,7 @@ describe('MigrateSheet account picker', () => {
     const view = { ...blank, config: { ...blank.config, model: '', modelHint: '' } } as SessionView;
     const store = new DaemonAccountPickerStore(roster().port);
     const usage = quotaStore();
-    await showSheet(<MigrateSheet {...props({ accountPicker: store, usage, view })} />);
+    await showSheet(<MoveSheet {...props({ accountPicker: store, usage, view })} />);
     await openRoster();
     await typeWrapper('atomi');
     await chooseRow(0);
@@ -989,8 +989,8 @@ describe('MigrateSheet account picker', () => {
       baseUrl: daemonA.baseUrl,
       deviceId: 'token-a-rotated',
     });
-    await must(live, 'a mounted migrate sheet').render(
-      <MigrateSheet {...props({ accountPicker: store, connection: rotated, usage, view })} />,
+    await must(live, 'a mounted move sheet').render(
+      <MoveSheet {...props({ accountPicker: store, connection: rotated, usage, view })} />,
     );
 
     // Nothing else moved: same session, same typed wrapper, no new choice made.
@@ -1012,7 +1012,7 @@ describe('MigrateSheet account picker', () => {
   it('shows the stored verdicts on open and collects only when the check is pressed', async () => {
     const probe = roster();
     await showSheet(
-      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(probe.port), usage: quotaStore() })} />,
+      <MoveSheet {...props({ accountPicker: new DaemonAccountPickerStore(probe.port), usage: quotaStore() })} />,
     );
     await openRoster();
     await typeWrapper('');
@@ -1030,7 +1030,7 @@ describe('MigrateSheet account picker', () => {
 
   it('renders a wrapper with no cached reading as unknown rather than as zero percent', async () => {
     await showSheet(
-      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
+      <MoveSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
     );
     await openRoster();
     await typeWrapper('');
@@ -1042,7 +1042,7 @@ describe('MigrateSheet account picker', () => {
 
   it('says the quota feed failed beside the rows instead of failing the roster with it', async () => {
     await showSheet(
-      <MigrateSheet
+      <MoveSheet
         {...props({
           accountPicker: new DaemonAccountPickerStore(roster().port),
           usage: quotaStore({ stale: 'not a feed' }),
@@ -1071,14 +1071,14 @@ describe('MigrateSheet account picker', () => {
       }).port,
     );
     const usage = quotaStore();
-    await showSheet(<MigrateSheet {...props({ accountPicker: store, usage })} />);
+    await showSheet(<MoveSheet {...props({ accountPicker: store, usage })} />);
     await openRoster();
     await typeWrapper('');
     expect(rowText(1)).toContain('Atomi Codex');
 
     const remote = source();
-    await must(live, 'a mounted migrate sheet').render(
-      <MigrateSheet
+    await must(live, 'a mounted move sheet').render(
+      <MoveSheet
         {...props({
           accountPicker: store,
           connection: daemonB,
@@ -1102,7 +1102,7 @@ describe('MigrateSheet account picker', () => {
   });
 });
 
-describe('MigrateSheet asking the agent to stop its background jobs', () => {
+describe('MoveSheet asking the agent to stop its background jobs', () => {
   const job = (pid: number, detail: string) => ({
     kind: 'process',
     verdict: 'unknown',
@@ -1114,21 +1114,21 @@ describe('MigrateSheet asking the agent to stop its background jobs', () => {
     pid,
   });
   const refusedBy = (items: readonly object[]) =>
-    new FyHttpError('refused: A program Ferretry doesn’t recognise is running', 409, 'migration_refused', {
+    new FyHttpError('refused: A program Ferretry doesn’t recognise is running', 409, 'move_refused', {
       error: 'refused',
-      code: 'migration_refused',
+      code: 'move_refused',
       inflight: { status: 'waiting', turn: 3, blockedBy: 'unknown', items, restartsWithCli: 1 },
     });
   const SHELL_JOB = job(5100, '/usr/bin/zsh -c source …/shell-snapshots/snapshot-zsh.sh');
   const SCRIPT_JOB = job(5101, 'bash /tmp/merge-all.sh 765');
   const OWNER_CASE = [SHELL_JOB, SCRIPT_JOB];
-  const asked = { messageId: 'migrate-jobs-5100-5101', jobs: [{ pid: 5100, command: 'zsh' }], alreadyAsked: false };
+  const asked = { messageId: 'move-jobs-5100-5101', jobs: [{ pid: 5100, command: 'zsh' }], alreadyAsked: false };
 
-  const refuse = async (sheet: Partial<MigrateSheetProps>) => {
-    const view = renderSheet(<MigrateSheet {...props(sheet)} />);
+  const refuse = async (sheet: Partial<MoveSheetProps>) => {
+    const view = renderSheet(<MoveSheet {...props(sheet)} />);
     change(field(view.root, 0), 'codex-auto-atomi');
     review(view.root);
-    await press(view.root, 'Migrate and relaunch');
+    await press(view.root, 'Move and relaunch');
     return view;
   };
 
@@ -1136,7 +1136,7 @@ describe('MigrateSheet asking the agent to stop its background jobs', () => {
     const asks: unknown[][] = [];
     let attempts = 0;
     const view = await refuse({
-      migrateSession: async () => {
+      moveSession: async () => {
         attempts += 1;
         throw refusedBy(OWNER_CASE);
       },
@@ -1153,7 +1153,7 @@ describe('MigrateSheet asking the agent to stop its background jobs', () => {
     await press(view.root, 'Ask the agent to stop its background jobs');
 
     expect(asks).toEqual([['daemon-a', 'same-session']]);
-    // The ask moves nothing: the migration was attempted once, and only the reader's retry tries again.
+    // The ask moves nothing: the move was attempted once, and only the reader's retry tries again.
     expect(attempts).toBe(1);
     expect(text(view.root.findByProps({ role: 'status' }))).toContain('Asked.');
     expect(view.root.findAll(node => node.props['data-agent-jobs-ask-button'] === '')).toHaveLength(0);
@@ -1174,7 +1174,7 @@ describe('MigrateSheet asking the agent to stop its background jobs', () => {
       blocks: true,
     };
     const view = await refuse({
-      migrateSession: async () => {
+      moveSession: async () => {
         throw refusedBy([SCRIPT_JOB, stranger]);
       },
       askToStopJobs: async () => {
@@ -1187,7 +1187,7 @@ describe('MigrateSheet asking the agent to stop its background jobs', () => {
 
   it('says so when the agent was already asked about the same jobs', async () => {
     const view = await refuse({
-      migrateSession: async () => {
+      moveSession: async () => {
         throw refusedBy(OWNER_CASE);
       },
       askToStopJobs: async () => ({ ...asked, alreadyAsked: true }),
@@ -1200,7 +1200,7 @@ describe('MigrateSheet asking the agent to stop its background jobs', () => {
 
   it('sends nothing and says to retry when the jobs have already stopped', async () => {
     const view = await refuse({
-      migrateSession: async () => {
+      moveSession: async () => {
         throw refusedBy([SCRIPT_JOB]);
       },
       askToStopJobs: async () => {
@@ -1225,7 +1225,7 @@ describe('MigrateSheet asking the agent to stop its background jobs', () => {
       release = resolve;
     });
     const view = await refuse({
-      migrateSession: async () => {
+      moveSession: async () => {
         throw refusedBy(OWNER_CASE);
       },
       askToStopJobs: async () => {
@@ -1252,14 +1252,14 @@ describe('MigrateSheet asking the agent to stop its background jobs', () => {
   it('names the daemon update when an older daemon refused on processes it could not mark', async () => {
     const unmarked = { ...SCRIPT_JOB, backgroundJob: undefined, pid: undefined };
     const view = await refuse({
-      migrateSession: async () => {
+      moveSession: async () => {
         throw new FyHttpError(
           'refused',
           409,
-          'migration_refused',
+          'move_refused',
           {
             error: 'refused',
-            code: 'migration_refused',
+            code: 'move_refused',
             inflight: { status: 'waiting', turn: 3, blockedBy: 'unknown', items: [unmarked], restartsWithCli: 1 },
           },
           '4.152.0',
@@ -1277,14 +1277,14 @@ describe('MigrateSheet asking the agent to stop its background jobs', () => {
 
   it('does not name an update when the refusing daemon already has the ask', async () => {
     const view = await refuse({
-      migrateSession: async () => {
+      moveSession: async () => {
         throw new FyHttpError(
           'refused',
           409,
-          'migration_refused',
+          'move_refused',
           {
             error: 'refused',
-            code: 'migration_refused',
+            code: 'move_refused',
             inflight: {
               status: 'waiting',
               turn: 3,
@@ -1303,7 +1303,7 @@ describe('MigrateSheet asking the agent to stop its background jobs', () => {
 
   it('reports a failed ask and keeps the button to try again', async () => {
     const view = await refuse({
-      migrateSession: async () => {
+      moveSession: async () => {
         throw refusedBy(OWNER_CASE);
       },
       askToStopJobs: async () => {

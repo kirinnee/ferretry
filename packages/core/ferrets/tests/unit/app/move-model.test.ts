@@ -5,11 +5,11 @@ import {
   askNeedsDaemonUpdate,
   contextWindowForModel,
   LARGE_CONTEXT_WINDOW,
-  migrationContextDecision,
-  migrationFailure,
-  migrationHasRuntimeChange,
-  migrationModelSuggestions,
-  migrationTarget,
+  moveContextDecision,
+  moveFailure,
+  moveHasRuntimeChange,
+  moveModelSuggestions,
+  moveTarget,
   modelFromDowngradeError,
   oneMillionVariant,
   onlyAgentJobsBlock,
@@ -17,7 +17,7 @@ import {
   withoutOneMillionVariant,
 } from '../../../app/components/move-model.ts';
 
-describe('migration model selection', () => {
+describe('move model selection', () => {
   it('uses the daemon model suffix rule for context windows and variants', () => {
     expect(contextWindowForModel('claude-opus-5')).toBe(SMALL_CONTEXT_WINDOW);
     expect(contextWindowForModel(' CLAUDE-OPUS-5[1M] ')).toBe(LARGE_CONTEXT_WINDOW);
@@ -29,27 +29,27 @@ describe('migration model selection', () => {
   });
 
   it('offers stable, de-duplicated suggestions around the current model', () => {
-    expect(migrationModelSuggestions('claude-opus-5')).toEqual(['claude-opus-5', 'claude-opus-5[1m]']);
-    expect(migrationModelSuggestions(' claude-opus-5[1m] ')).toEqual(['claude-opus-5[1m]', 'claude-opus-5']);
-    expect(migrationModelSuggestions('')).toEqual([]);
+    expect(moveModelSuggestions('claude-opus-5')).toEqual(['claude-opus-5', 'claude-opus-5[1m]']);
+    expect(moveModelSuggestions(' claude-opus-5[1m] ')).toEqual(['claude-opus-5[1m]', 'claude-opus-5']);
+    expect(moveModelSuggestions('')).toEqual([]);
   });
 
   it('normalises a target and refuses to invent one from a blank account', () => {
-    expect(migrationTarget('  codex-auto-atomi  ', '  gpt-5.6-terra  ')).toEqual({
+    expect(moveTarget('  codex-auto-atomi  ', '  gpt-5.6-terra  ')).toEqual({
       agent: 'codex-auto-atomi',
       model: 'gpt-5.6-terra',
       allowContextDowngrade: false,
     });
-    expect(migrationTarget('codex-auto-atomi', ' ', true)).toEqual({
+    expect(moveTarget('codex-auto-atomi', ' ', true)).toEqual({
       agent: 'codex-auto-atomi',
       allowContextDowngrade: true,
     });
-    expect(migrationTarget(' ', 'gpt-5.6-terra')).toBeNull();
+    expect(moveTarget(' ', 'gpt-5.6-terra')).toBeNull();
   });
 
   it('detects a static downgrade and a conversation that cannot fit, while tolerating unknown defaults', () => {
     expect(
-      migrationContextDecision({
+      moveContextDecision({
         currentModel: 'claude-opus-5[1m]',
         contextTokens: 260_000,
         targetModel: 'claude-opus-5',
@@ -61,7 +61,7 @@ describe('migration model selection', () => {
       conversationTooLarge: true,
     });
     expect(
-      migrationContextDecision({
+      moveContextDecision({
         currentModel: 'unknown',
         currentWindow: 400_000,
         contextTokens: 20_000,
@@ -71,41 +71,41 @@ describe('migration model selection', () => {
   });
 
   it('requires an actual account or model change and warns on restricted routing tiers', () => {
-    expect(migrationHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', '', null)).toBe(false);
+    expect(moveHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', '', null)).toBe(false);
     expect(
-      migrationHasRuntimeChange(
+      moveHasRuntimeChange(
         'codex-auto-loge',
         'gpt-5.6-sol',
         'gpt-5.6-sol',
-        migrationTarget('codex-auto-loge', 'gpt-5.6-sol'),
+        moveTarget('codex-auto-loge', 'gpt-5.6-sol'),
       ),
     ).toBe(false);
     expect(
-      migrationHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', '', migrationTarget('codex-auto-loge', '')),
+      moveHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', '', moveTarget('codex-auto-loge', '')),
     ).toBe(false);
     expect(
-      migrationHasRuntimeChange(
+      moveHasRuntimeChange(
         'codex-auto-loge',
         'gpt-5.6-sol',
         'gpt-5.6-sol',
-        migrationTarget('codex-auto-loge', ''),
+        moveTarget('codex-auto-loge', ''),
       ),
     ).toBe(true);
     expect(
-      migrationHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', '', migrationTarget('codex-auto-atomi', '')),
+      moveHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', '', moveTarget('codex-auto-atomi', '')),
     ).toBe(true);
     expect(
-      migrationHasRuntimeChange(
+      moveHasRuntimeChange(
         'codex-auto-loge',
         'gpt-5.6-sol',
         'gpt-5.6-sol',
-        migrationTarget('codex-auto-loge', 'gpt-5.6-terra'),
+        moveTarget('codex-auto-loge', 'gpt-5.6-terra'),
       ),
     ).toBe(true);
   });
 });
 
-describe('migration refusal classification', () => {
+describe('move refusal classification', () => {
   it('extracts a larger model from both historical and current downgrade messages', () => {
     expect(modelFromDowngradeError('refusing; use --model claude-opus-5[1m] instead')).toBe('claude-opus-5[1m]');
     expect(
@@ -118,18 +118,18 @@ describe('migration refusal classification', () => {
 
   it.each([
     ['context_downgrade_refused', 'context-downgrade'],
-    ['migration_refused', 'preflight-refused'],
+    ['move_refused', 'preflight-refused'],
     ['conversation_unresumable', 'conversation-unresumable'],
     ['unknown_agent', 'unknown-agent'],
     ['agent_unavailable', 'unavailable'],
     ['session_unusable', 'unusable'],
     ['not-found', 'not-found'],
     ['invalid_session_id', 'invalid'],
-    ['session_migrate_failed', 'failed'],
+    ['session_move_failed', 'failed'],
     ['unknown_route', 'unsupported'],
     ['unexpected_code', 'other'],
   ] as const)('maps daemon code %s to %s', (code, kind) => {
-    const failure = migrationFailure(new FyHttpError(`failure for ${code}`, 409, code));
+    const failure = moveFailure(new FyHttpError(`failure for ${code}`, 409, code));
 
     expect(failure.kind).toBe(kind);
     expect(failure.code).toBe(code);
@@ -139,7 +139,7 @@ describe('migration refusal classification', () => {
 
   it('keeps an extracted downgrade suggestion and leaves generic failures untyped', () => {
     expect(
-      migrationFailure(
+      moveFailure(
         new FyHttpError(
           'codex-auto-atomi serves gpt-5.6-terra with a 200000-token window',
           409,
@@ -147,19 +147,19 @@ describe('migration refusal classification', () => {
         ),
       ).suggestedModel,
     ).toBe('gpt-5.6-terra[1m]');
-    const generic = migrationFailure(new Error('network gone'));
+    const generic = moveFailure(new Error('network gone'));
     expect(generic).toMatchObject({
       kind: 'other',
       message: 'network gone',
     });
     expect(generic.code).toBeUndefined();
-    expect(migrationFailure('socket closed')).toMatchObject({ kind: 'other', message: 'socket closed' });
+    expect(moveFailure('socket closed')).toMatchObject({ kind: 'other', message: 'socket closed' });
   });
 });
 
 describe('a refused downgrade, in plain words', () => {
   it('replaces the daemon’s sentence, which names an API field, with the two windows', () => {
-    const failure = migrationFailure(
+    const failure = moveFailure(
       new FyHttpError(
         'claude-default serves claude-opus-5-5 with a 200000-token window and this session is running in 1000000. Send allowContextDowngrade to accept that.',
         409,
@@ -194,8 +194,8 @@ describe('a refusal the agent can clear by itself', () => {
   });
 
   it('reads the inventory off a typed refusal and says when only the agent’s own jobs block', () => {
-    const body = { error: 'refused', code: 'migration_refused', inflight: refusal([job(5100), job(5101)]) };
-    const failure = migrationFailure(new FyHttpError('refused', 409, 'migration_refused', body));
+    const body = { error: 'refused', code: 'move_refused', inflight: refusal([job(5100), job(5101)]) };
+    const failure = moveFailure(new FyHttpError('refused', 409, 'move_refused', body));
 
     expect(failure.kind).toBe('preflight-refused');
     expect(failure.inflight?.items.map(item => item.pid)).toEqual([5100, 5101]);
@@ -203,16 +203,16 @@ describe('a refusal the agent can clear by itself', () => {
   });
 
   it('keeps the offer away when anything else blocks, nothing does, or the daemon sent no inventory', () => {
-    const mixed = migrationFailure(
-      new FyHttpError('refused', 409, 'migration_refused', { error: 'x', inflight: refusal([job(1), stranger]) }),
+    const mixed = moveFailure(
+      new FyHttpError('refused', 409, 'move_refused', { error: 'x', inflight: refusal([job(1), stranger]) }),
     );
-    const nonBlocking = migrationFailure(
-      new FyHttpError('refused', 409, 'migration_refused', {
+    const nonBlocking = moveFailure(
+      new FyHttpError('refused', 409, 'move_refused', {
         error: 'x',
         inflight: refusal([{ ...job(2), blocks: false }, stranger]),
       }),
     );
-    const older = migrationFailure(new FyHttpError('refused', 409, 'migration_refused'));
+    const older = moveFailure(new FyHttpError('refused', 409, 'move_refused'));
 
     expect(onlyAgentJobsBlock(mixed.inflight)).toBe(false);
     expect(onlyAgentJobsBlock(nonBlocking.inflight)).toBe(false);
@@ -232,14 +232,14 @@ describe('a refusal an older daemon could not offer the ask on', () => {
   };
   const tool = { kind: 'tool' as const, verdict: 'unknown' as const, title: 'A Bash call', blocks: true };
   const refused = (items: readonly object[], daemonVersion?: string) =>
-    migrationFailure(
+    moveFailure(
       new FyHttpError(
         'refused',
         409,
-        'migration_refused',
+        'move_refused',
         {
           error: 'refused',
-          code: 'migration_refused',
+          code: 'move_refused',
           inflight: { status: 'waiting', turn: 3, blockedBy: 'unknown', items, restartsWithCli: 1 },
         },
         daemonVersion,
@@ -261,7 +261,7 @@ describe('a refusal an older daemon could not offer the ask on', () => {
     expect(askNeedsDaemonUpdate(refused([process]))).toBe(false);
     expect(askNeedsDaemonUpdate(refused([process], 'not-a-version'))).toBe(false);
     expect(
-      askNeedsDaemonUpdate(migrationFailure(new FyHttpError('x', 404, 'unknown_agent', undefined, '4.152.0'))),
+      askNeedsDaemonUpdate(moveFailure(new FyHttpError('x', 404, 'unknown_agent', undefined, '4.152.0'))),
     ).toBe(false);
   });
 });

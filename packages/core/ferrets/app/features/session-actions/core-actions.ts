@@ -40,7 +40,7 @@ export interface CoreActionContext {
   /** This connection may change the ferret. Without it only Copy session id is offered. */
   readonly canControl: boolean;
   readonly copyId: () => void;
-  readonly openMigrate: () => void;
+  readonly openMove: () => void;
   /**
    * Opens "Move to Codex… / Move to Claude…". Absent where this host cannot offer it, or when the machine
    * has no account of the other harness to move onto; the menu then has no such row.
@@ -71,7 +71,7 @@ export const SESSION_ACTION_IDS = {
   fork: 'fork',
   copyId: 'copy-id',
   pin: 'pin',
-  migrate: 'move-login',
+  move: 'move-login',
   convert: 'move-harness',
   machine: 'move-machine',
   addMcp: 'add-mcp',
@@ -149,11 +149,11 @@ export const CORE_SESSION_ACTIONS: readonly SessionActionContribution<CoreAction
       context.canControl
         ? {
             kind: 'run',
-            id: SESSION_ACTION_IDS.migrate,
+            id: SESSION_ACTION_IDS.move,
             label: 'Move to another login…',
             icon: KeyRound,
             detail: context.view.config.agent,
-            run: context.openMigrate,
+            run: context.openMove,
           }
         : null,
   },

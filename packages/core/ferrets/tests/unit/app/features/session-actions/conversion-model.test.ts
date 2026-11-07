@@ -139,7 +139,7 @@ describe('conversionFailure', () => {
   };
   it('holds an in-flight refusal that names something to look at', () => {
     const said = conversionFailure(
-      new FyHttpError('refused', 409, 'migration_refused', { error: 'refused', code: 'migration_refused', inflight }),
+      new FyHttpError('refused', 409, 'move_refused', { error: 'refused', code: 'move_refused', inflight }),
     );
     expect(said.kind).toBe('inflight');
   });
@@ -149,12 +149,12 @@ describe('conversionFailure', () => {
       text: 'no good',
     });
     expect(
-      conversionFailure(new FyHttpError('refused', 409, 'migration_refused', { inflight: { ...inflight, items: [] } })),
+      conversionFailure(new FyHttpError('refused', 409, 'move_refused', { inflight: { ...inflight, items: [] } })),
     ).toEqual({
       kind: 'message',
       text: 'refused',
     });
-    expect(conversionFailure(new FyHttpError('refused', 409, 'migration_refused', { nothing: true }))).toEqual({
+    expect(conversionFailure(new FyHttpError('refused', 409, 'move_refused', { nothing: true }))).toEqual({
       kind: 'message',
       text: 'refused',
     });

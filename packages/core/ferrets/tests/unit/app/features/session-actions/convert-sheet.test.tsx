@@ -52,7 +52,7 @@ const ready = (over: Partial<Extract<ConversionPreview, { kind: 'ready' }>['summ
 
 const inflight = {
   error: 'refused',
-  code: 'migration_refused',
+  code: 'move_refused',
   inflight: {
     status: 'running',
     turn: 2,
@@ -336,7 +336,7 @@ describe('ConvertSheet — a move the daemon refuses', () => {
     const { root, seen } = await show({
       mover: async () => {
         attempts += 1;
-        if (attempts === 1) throw new FyHttpError('refused', 409, 'migration_refused', inflight);
+        if (attempts === 1) throw new FyHttpError('refused', 409, 'move_refused', inflight);
         return sessionView('s1');
       },
     });
@@ -357,7 +357,7 @@ describe('ConvertSheet — a move the daemon refuses', () => {
   it('keeps the pause when forcing past it is refused again, and Cancel closes', async () => {
     const { root, seen } = await show({
       mover: async () => {
-        throw new FyHttpError('refused', 409, 'migration_refused', inflight);
+        throw new FyHttpError('refused', 409, 'move_refused', inflight);
       },
     });
     await press(root, 'data-convert-confirm');

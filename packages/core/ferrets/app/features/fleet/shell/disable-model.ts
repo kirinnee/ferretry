@@ -93,7 +93,7 @@ export const disabledDetail = (disabled: FleetDisabled): string => {
 
 /** Said wherever a switch-off is offered or shown: what it does NOT do. */
 export const KEEPS_RUNNING =
-  'Nothing is stopped. Ferrets already on it keep going; move one with fy migrate <id> -a <other runtime>.';
+  'Nothing is stopped. Ferrets already on it keep going; move one with fy move <id> -a <other runtime>.';
 
 /** What a switch-off does to new starts. */
 export const BLOCKS_STARTS = 'New starts, recommendations and failover skip it while it is off.';

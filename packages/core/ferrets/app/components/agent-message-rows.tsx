@@ -385,7 +385,7 @@ const FEATURE_ICONS: Readonly<Record<string, LucideIcon>> = {
   Agenda: ClipboardList,
   Monitor: Activity,
   Lessons: BookOpen,
-  Migrate: ArrowRightLeft,
+  Move: ArrowRightLeft,
   Restart: RotateCw,
   Delivery: Send,
 };

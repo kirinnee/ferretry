@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "lib": ["ESNext", "DOM", "DOM.Iterable"], "types": ["bun"] },
+  "include": ["packages/core/ferrets/app", "packages/core/ferrets/tests/unit/app", "packages/core/ferrets/tests/integration/app", "packages/core/ferrets/tests/support/app", "packages/core/ferrets/tests/fixtures/app"],
+  "exclude": ["**/node_modules"]
+}

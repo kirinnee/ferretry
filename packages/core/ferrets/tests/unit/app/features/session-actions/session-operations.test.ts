@@ -49,7 +49,7 @@ const OUTCOME: ForkSessionOutcome = {
 };
 
 interface Call {
-  readonly name: 'messages' | 'fork' | 'rename' | 'migrate';
+  readonly name: 'messages' | 'fork' | 'rename' | 'move';
   readonly args: readonly unknown[];
 }
 
@@ -58,7 +58,7 @@ interface Scripted {
   pages: SessionTranscriptPage[];
   outcome: ForkSessionOutcome | Error;
   renamed: SessionView;
-  /** A refusal the first, unforced migrate throws. */
+  /** A refusal the first, unforced move throws. */
   refuse?: Error;
 }
 
@@ -88,7 +88,7 @@ const client = (state: Scripted) => {
       state.calls.push({ name: 'rename', args: [id, name, teammate] });
       return state.renamed;
     },
-    migrate: async (
+    move: async (
       id: string,
       agent: string,
       model: string | undefined,
@@ -96,7 +96,7 @@ const client = (state: Scripted) => {
       requestId: string | undefined,
       forceInflight: boolean | undefined,
     ) => {
-      state.calls.push({ name: 'migrate', args: [id, agent, model, allowContextDowngrade, requestId, forceInflight] });
+      state.calls.push({ name: 'move', args: [id, agent, model, allowContextDowngrade, requestId, forceInflight] });
       if (state.refuse !== undefined && forceInflight !== true) throw state.refuse;
       return state.renamed;
     },
@@ -218,19 +218,19 @@ describe('forkThroughLatest', () => {
 });
 
 describe('restartWithResume', () => {
-  it('migrates the ferret on its own login, with no model change and no context downgrade', async () => {
+  it('moves the ferret on its own login, with no model change and no context downgrade', async () => {
     const state = scripted();
     const fake = client(state);
     const result = await restartWithResume(fake, view, 'req-2');
     expect(result).toEqual(state.renamed);
-    expect(state.calls).toEqual([{ name: 'migrate', args: ['a1', 'nero', undefined, false, 'req-2', undefined] }]);
+    expect(state.calls).toEqual([{ name: 'move', args: ['a1', 'nero', undefined, false, 'req-2', undefined] }]);
   });
 });
 
 describe('restartWithResume — a refusal because ps failed', () => {
-  const refusal = (message: string, code = 'migration_refused'): FyHttpError => new FyHttpError(message, 409, code);
-  const failing = (error: Error): Pick<IFyApiClient, 'migrate'> => ({
-    migrate: async () => {
+  const refusal = (message: string, code = 'move_refused'): FyHttpError => new FyHttpError(message, 409, code);
+  const failing = (error: Error): Pick<IFyApiClient, 'move'> => ({
+    move: async () => {
       throw error;
     },
   });
@@ -248,7 +248,7 @@ describe('restartWithResume — a refusal because ps failed', () => {
 
   it('leaves a refusal about real in-flight work, and every other failure, exactly as the daemon said it', async () => {
     const inflight = refusal('refused: in-flight work is destructive_to_interrupt');
-    const other = refusal(raw, 'session_migrate_failed');
+    const other = refusal(raw, 'session_move_failed');
     const plain = new Error('socket closed');
     for (const error of [inflight, other, plain])
       expect(await restartWithResume(failing(error), view, 'req-4').catch((reason: unknown) => reason)).toBe(error);
@@ -258,7 +258,7 @@ describe('restartWithResume — a refusal because ps failed', () => {
 describe('restartWithResume — a refusal that names what is running', () => {
   const body = (blockedBy: 'unknown' | 'destructive' | 'unreadable', blocks = true) => ({
     error: 'refused: raw daemon words',
-    code: 'migration_refused',
+    code: 'move_refused',
     inflight: {
       status: 'running',
       turn: 13,
@@ -269,7 +269,7 @@ describe('restartWithResume — a refusal that names what is running', () => {
       ],
     },
   });
-  const paused = (payload: unknown) => new FyHttpError('refused: raw daemon words', 409, 'migration_refused', payload);
+  const paused = (payload: unknown) => new FyHttpError('refused: raw daemon words', 409, 'move_refused', payload);
 
   it('throws RestartRefused carrying the refusal, in a sentence that says nothing was restarted', async () => {
     const state = scripted({ refuse: paused(body('unknown')) });
@@ -305,7 +305,7 @@ describe('restartWithResume — a refusal that names what is running', () => {
 
   it('keeps the older paths for a refusal with nothing to point at', async () => {
     const noBlockers = paused(body('unknown', false));
-    const noInflight = paused({ error: 'refused: raw daemon words', code: 'migration_refused' });
+    const noInflight = paused({ error: 'refused: raw daemon words', code: 'move_refused' });
     for (const error of [noBlockers, noInflight]) {
       const state = scripted({ refuse: error });
       expect(await restartWithResume(client(state), view, 'req-7').catch((reason: unknown) => reason)).toBe(error);
@@ -317,9 +317,9 @@ describe('restartWithResume — a refusal because the window would shrink', () =
   const downgrade = { model: 'claude-opus-5-5', targetWindow: 200_000, currentWindow: 1_000_000 };
   const smaller = (payload: unknown, message = 'refused: raw words') =>
     new FyHttpError(message, 409, 'context_downgrade_refused', payload);
-  const inflight = new FyHttpError('refused: raw words', 409, 'migration_refused', {
+  const inflight = new FyHttpError('refused: raw words', 409, 'move_refused', {
     error: 'refused: raw words',
-    code: 'migration_refused',
+    code: 'move_refused',
     inflight: {
       status: 'running',
       turn: 1,
@@ -329,16 +329,16 @@ describe('restartWithResume — a refusal because the window would shrink', () =
     },
   });
 
-  /** Answers each migrate with the next scripted outcome, and records what it was asked. */
+  /** Answers each move with the next scripted outcome, and records what it was asked. */
   const sequence = (...outcomes: Array<Error | 'ok'>) => {
     const asked: Array<readonly unknown[]> = [];
-    const migrate = async (...args: unknown[]) => {
+    const move = async (...args: unknown[]) => {
       asked.push(args);
       const next = outcomes[asked.length - 1];
       if (next instanceof Error) throw next;
       return sessionView('done');
     };
-    return { asked, client: { migrate } as unknown as Pick<IFyApiClient, 'migrate'> };
+    return { asked, client: { move } as unknown as Pick<IFyApiClient, 'move'> };
   };
 
   it('throws RestartDowngradeRefused with the numbers, in plain words and without the API field', async () => {
@@ -421,13 +421,13 @@ describe('restartWithResume — a refusal because the conversation cannot be res
   );
   const sequence = (...outcomes: Array<Error | 'ok'>) => {
     const asked: Array<readonly unknown[]> = [];
-    const migrate = async (...args: unknown[]) => {
+    const move = async (...args: unknown[]) => {
       asked.push(args);
       const next = outcomes[asked.length - 1];
       if (next instanceof Error) throw next;
       return sessionView('done');
     };
-    return { asked, client: { migrate } as unknown as Pick<IFyApiClient, 'migrate'> };
+    return { asked, client: { move } as unknown as Pick<IFyApiClient, 'move'> };
   };
 
   it('never starts fresh on its own: it pauses with the daemon’s reason, and Start fresh asks again', async () => {

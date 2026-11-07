@@ -1,32 +1,32 @@
 import { compareProtocolVersions } from '@ferretry/protocol';
-import { type MigrationRefusal, MigrationRefusedBodySchema } from '../../contract/index.ts';
+import { type MoveRefusal, MoveRefusedBodySchema } from '../../contract/index.ts';
 import { FyHttpError } from '@ferretry/app';
 import { downgradeOf, downgradeSentence } from '../features/session-actions/context-downgrade.ts';
 
 export const SMALL_CONTEXT_WINDOW = 200_000;
 export const LARGE_CONTEXT_WINDOW = 1_000_000;
 
-export interface MigrationTarget {
+export interface MoveTarget {
   readonly agent: string;
   readonly model?: string;
   readonly allowContextDowngrade: boolean;
 }
 
-export interface MigrationContextInput {
+export interface MoveContextInput {
   readonly currentModel: string;
   readonly currentWindow?: number;
   readonly contextTokens?: number;
   readonly targetModel: string;
 }
 
-export interface MigrationContextDecision {
+export interface MoveContextDecision {
   readonly currentWindow?: number;
   readonly targetWindow?: number;
   readonly isDowngrade: boolean;
   readonly conversationTooLarge: boolean;
 }
 
-type MigrationFailureKind =
+type MoveFailureKind =
   | 'context-downgrade'
   | 'preflight-refused'
   | 'conversation-unresumable'
@@ -39,15 +39,15 @@ type MigrationFailureKind =
   | 'unsupported'
   | 'other';
 
-export interface MigrationFailure {
-  readonly kind: MigrationFailureKind;
+export interface MoveFailure {
+  readonly kind: MoveFailureKind;
   readonly message: string;
   readonly title: string;
   readonly guidance: string;
   readonly code?: string;
   readonly suggestedModel?: string;
   /** What the preflight saw, on a refusal from a daemon that attaches it. */
-  readonly inflight?: MigrationRefusal;
+  readonly inflight?: MoveRefusal;
   /** The version the refusing daemon stamped on its answer, when it did. */
   readonly daemonVersion?: string;
 }
@@ -62,7 +62,7 @@ export const AGENT_JOBS_ASK_SINCE = '4.153.0';
  * update would not offer the ask there and the sheet does not promise it. A daemon that did not say its
  * version is not guessed at.
  */
-export const askNeedsDaemonUpdate = (failure: MigrationFailure): boolean => {
+export const askNeedsDaemonUpdate = (failure: MoveFailure): boolean => {
   if (failure.kind !== 'preflight-refused' || failure.daemonVersion === undefined) return false;
   if (compareProtocolVersions(failure.daemonVersion, AGENT_JOBS_ASK_SINCE) !== -1) return false;
   const blockers = failure.inflight?.items.filter(item => item.blocks) ?? [];
@@ -75,7 +75,7 @@ export const askNeedsDaemonUpdate = (failure: MigrationFailure): boolean => {
  * open tool call, a program Ferretry can't place, a blind spot) keeps the offer away: asking the agent
  * would not be the remedy there.
  */
-export const onlyAgentJobsBlock = (refusal: MigrationRefusal | undefined): boolean => {
+export const onlyAgentJobsBlock = (refusal: MoveRefusal | undefined): boolean => {
   const blockers = refusal?.items.filter(item => item.blocks) ?? [];
   return blockers.length > 0 && blockers.every(item => item.backgroundJob === true);
 };
@@ -96,16 +96,16 @@ export const oneMillionVariant = (model: string): string => {
 export const withoutOneMillionVariant = (model: string): string => model.replace(/\[1m\]/giu, '').trim();
 
 /** The no-catalog fallback preserved from kteam: current, larger and smaller variants. */
-export const migrationModelSuggestions = (currentModel: string): readonly string[] =>
+export const moveModelSuggestions = (currentModel: string): readonly string[] =>
   [...new Set([currentModel.trim(), oneMillionVariant(currentModel), withoutOneMillionVariant(currentModel)])].filter(
     value => value !== '',
   );
 
-export const migrationTarget = (
+export const moveTarget = (
   agent: string,
   model: string,
   allowContextDowngrade = false,
-): MigrationTarget | null => {
+): MoveTarget | null => {
   const normalizedAgent = agent.trim();
   if (normalizedAgent === '') return null;
   const normalizedModel = model.trim();
@@ -116,12 +116,12 @@ export const migrationTarget = (
   };
 };
 
-export const migrationContextDecision = ({
+export const moveContextDecision = ({
   currentModel,
   currentWindow,
   contextTokens,
   targetModel,
-}: MigrationContextInput): MigrationContextDecision => {
+}: MoveContextInput): MoveContextDecision => {
   const resolvedCurrentWindow = currentWindow ?? contextWindowForModel(currentModel);
   const targetWindow = contextWindowForModel(targetModel);
   return {
@@ -138,11 +138,11 @@ export const migrationContextDecision = ({
  * asks the account planner for its default. That can be a real runtime change
  * even when the account name is unchanged, so it must reach the daemon gate.
  */
-export const migrationHasRuntimeChange = (
+export const moveHasRuntimeChange = (
   currentAgent: string,
   currentModel: string,
   currentModelHint: string,
-  target: MigrationTarget | null,
+  target: MoveTarget | null,
 ): boolean =>
   target !== null &&
   (target.agent !== currentAgent ||
@@ -156,13 +156,13 @@ export const modelFromDowngradeError = (message: string): string | null => {
   return served === undefined ? null : oneMillionVariant(served);
 };
 
-const FAILURE_COPY: Readonly<Record<MigrationFailureKind, readonly [title: string, guidance: string]>> = {
+const FAILURE_COPY: Readonly<Record<MoveFailureKind, readonly [title: string, guidance: string]>> = {
   'context-downgrade': [
     'The daemon refused a smaller context window',
     'Use a larger model, or explicitly accept that this conversation may outgrow the target window.',
   ],
   'preflight-refused': [
-    'The daemon refused this migration',
+    'The daemon refused this move',
     'Nothing changed. Let the work finish or stop the session deliberately, then run the safety check again.',
   ],
   'conversation-unresumable': [
@@ -174,19 +174,19 @@ const FAILURE_COPY: Readonly<Record<MigrationFailureKind, readonly [title: strin
     'Target account unavailable',
     'Choose an account with headroom and an executable wrapper on this host.',
   ],
-  unusable: ['Session cannot be migrated safely', 'Repair or recover the session documents before trying again.'],
+  unusable: ['Session cannot be moved safely', 'Repair or recover the session documents before trying again.'],
   'not-found': ['Session not found', 'Refresh this daemon’s fleet; the session may have been removed.'],
   invalid: ['Invalid session identity', 'Return to this daemon’s session list and reopen the session.'],
-  failed: ['Migration did not complete', 'Inspect the session and its migration report before retrying.'],
-  unsupported: ['Daemon upgrade required', 'This paired daemon does not expose the migration route yet.'],
-  other: ['Migration failed', 'Review the daemon response, then retry when its cause is resolved.'],
+  failed: ['Move did not complete', 'Inspect the session and its move report before retrying.'],
+  unsupported: ['Daemon upgrade required', 'This paired daemon does not expose the move route yet.'],
+  other: ['Move failed', 'Review the daemon response, then retry when its cause is resolved.'],
 };
 
-const kindForCode = (code: string | undefined): MigrationFailureKind => {
+const kindForCode = (code: string | undefined): MoveFailureKind => {
   switch (code) {
     case 'context_downgrade_refused':
       return 'context-downgrade';
-    case 'migration_refused':
+    case 'move_refused':
       return 'preflight-refused';
     case 'conversation_unresumable':
       return 'conversation-unresumable';
@@ -200,7 +200,7 @@ const kindForCode = (code: string | undefined): MigrationFailureKind => {
       return 'not-found';
     case 'invalid_session_id':
       return 'invalid';
-    case 'session_migrate_failed':
+    case 'session_move_failed':
       return 'failed';
     case 'unknown_route':
       return 'unsupported';
@@ -210,13 +210,13 @@ const kindForCode = (code: string | undefined): MigrationFailureKind => {
 };
 
 /** Classifies only typed daemon codes; transport and unexpected errors remain generic. */
-export const migrationFailure = (error: unknown): MigrationFailure => {
+export const moveFailure = (error: unknown): MoveFailure => {
   const http = error instanceof FyHttpError ? error : null;
   const message = error instanceof Error ? error.message : String(error);
   const kind = kindForCode(http?.code);
   const [title, guidance] = FAILURE_COPY[kind];
   const suggestedModel = kind === 'context-downgrade' ? modelFromDowngradeError(message) : null;
-  const refused = kind === 'preflight-refused' ? MigrationRefusedBodySchema.safeParse(http?.body) : undefined;
+  const refused = kind === 'preflight-refused' ? MoveRefusedBodySchema.safeParse(http?.body) : undefined;
   const inflight = refused?.success === true ? refused.data.inflight : undefined;
   // The daemon's sentence names an API field and a CLI flag, neither of which a person can use here, so a
   // downgrade is said from its numbers in plain words.

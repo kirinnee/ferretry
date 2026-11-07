@@ -402,7 +402,7 @@ describe('OnboardingHarnessStep: Claude Code on one screen', () => {
   });
 
   it('a change the daemon refuses shows its sentence and stays on the form', async () => {
-    const sentence = 'Import is not available while a migration is running.';
+    const sentence = 'Import is not available while a move is running.';
     const calls: Call[] = [];
     const s = await start(daemon({ [CHANGES_PATH]: new FyHttpError(sentence, 409, 'fleet_change_refused') }, calls));
     try {

@@ -676,7 +676,7 @@ interface RuntimeFieldProps extends ConnectedFieldProps {
  *
  * NO "CHECK NOW" HERE. Every button already carries the host's stored health verdict, so a re-check
  * added nothing a person needs to START a session and pushed the form a screen down on a phone. The
- * control stays on the migrate sheet, where re-proving the target is the job. Mounting this field
+ * control stays on the move sheet, where re-proving the target is the job. Mounting this field
  * starts no check of either kind beyond the free stored-snapshot read the roster store makes itself.
  */
 function RuntimeField({ store, usage, usageError, ...field }: RuntimeFieldProps) {

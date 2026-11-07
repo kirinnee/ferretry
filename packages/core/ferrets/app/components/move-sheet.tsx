@@ -38,38 +38,38 @@ import { AccountName, DaemonAccountName, DaemonAccountPicker } from './daemon-pi
 import {
   AGENT_JOBS_ASK_SINCE,
   askNeedsDaemonUpdate,
-  type MigrationFailure,
-  type MigrationTarget,
-  migrationContextDecision,
-  migrationFailure,
-  migrationHasRuntimeChange,
-  migrationModelSuggestions,
-  migrationTarget,
+  type MoveFailure,
+  type MoveTarget,
+  moveContextDecision,
+  moveFailure,
+  moveHasRuntimeChange,
+  moveModelSuggestions,
+  moveTarget,
   oneMillionVariant,
   onlyAgentJobsBlock,
 } from './move-model.ts';
 
-export type MigrateSession = (
+export type MoveSession = (
   connection: DaemonConnection,
   scope: DaemonSessionScope,
-  input: MigrationTarget,
+  input: MoveTarget,
   requestId: string,
 ) => Promise<SessionView>;
 
-type MigrateClient = Pick<IFyApiClient, 'migrate'>;
-export type MigrateClientFactory = (connection: DaemonConnection) => Promise<MigrateClient>;
+type MoveClient = Pick<IFyApiClient, 'move'>;
+export type MoveClientFactory = (connection: DaemonConnection) => Promise<MoveClient>;
 
 /** The production adapter: one typed client, bound to one runtime-paired daemon. */
-export const migrateSessionWithDaemon = async (
+export const moveSessionWithDaemon = async (
   connection: DaemonConnection,
   scope: DaemonSessionScope,
-  input: MigrationTarget,
+  input: MoveTarget,
   requestId: string,
-  createClient: MigrateClientFactory,
+  createClient: MoveClientFactory,
 ): Promise<SessionView> => {
-  if (connection.daemonId !== scope.daemonId) throw new Error('migration scope must belong to the requested daemon');
+  if (connection.daemonId !== scope.daemonId) throw new Error('move scope must belong to the requested daemon');
   const client = await createClient(connection);
-  return await client.migrate(scope.sessionId, input.agent, input.model, input.allowContextDowngrade, requestId);
+  return await client.move(scope.sessionId, input.agent, input.model, input.allowContextDowngrade, requestId);
 };
 
 type AskToStopJobs = (connection: DaemonConnection, scope: DaemonSessionScope) => Promise<AskToStopJobsResult>;
@@ -99,26 +99,26 @@ type JobsAsk =
 const JOBS_IDLE: JobsAsk = { state: 'idle' };
 
 /**
- * The stable identity of ONE logical migration.
+ * The stable identity of ONE logical move.
  *
- * A migration is destructive and the typed client retries its POST on transport failure, so the id
+ * A move is destructive and the typed client retries its POST on transport failure, so the id
  * has to outlive a single call: every attempt at the same target must be the same operation to the
  * daemon. It must equally NOT outlive the target — once the reader picks a different account, model
  * or downgrade answer, that is a new decision, and reusing the previous id would have the daemon
- * answer with the migration the reader just changed their mind about.
+ * answer with the move the reader just changed their mind about.
  */
-export const migrationRequestKey = (scope: DaemonSessionScope, input: MigrationTarget): string =>
+export const moveRequestKey = (scope: DaemonSessionScope, input: MoveTarget): string =>
   JSON.stringify([daemonSessionKey(scope), input.agent, input.model ?? null, input.allowContextDowngrade]);
 
-export interface MigrateSheetProps {
+export interface MoveSheetProps {
   readonly connection: DaemonConnection;
   readonly scope: DaemonSessionScope;
   readonly view: SessionView;
   readonly canMutate: boolean;
   readonly open: boolean;
   readonly onClose: () => void;
-  readonly onMigrated: (connection: DaemonConnection, scope: DaemonSessionScope, view: SessionView) => void;
-  readonly migrateSession?: MigrateSession;
+  readonly onMoved: (connection: DaemonConnection, scope: DaemonSessionScope, view: SessionView) => void;
+  readonly moveSession?: MoveSession;
   /** Asks the agent to stop its own background jobs; injected by tests, the paired client otherwise. */
   readonly askToStopJobs?: AskToStopJobs;
   /**
@@ -140,7 +140,7 @@ export interface MigrateSheetProps {
   readonly usage?: DaemonUsageStore;
 }
 
-type MigrationPhase = 'form' | 'confirm' | 'submitting' | 'downgrade' | 'refused';
+type MovePhase = 'form' | 'confirm' | 'submitting' | 'downgrade' | 'refused';
 
 const readableNumber = (value: number): string => new Intl.NumberFormat().format(value);
 
@@ -231,31 +231,31 @@ const useCachedAccountUsage = (
 };
 
 /**
- * Destructive account/model migration, guarded by the daemon's in-operation
+ * Destructive account/model move, guarded by the daemon's in-operation
  * preflight. There is deliberately no browser-side classifier or force path:
  * the mounted RPC inspects immediately before it writes and refuses every
  * destructive or unknown in-flight item without mutating the session.
  */
-export function MigrateSheet({
+export function MoveSheet({
   connection,
   scope,
   view,
   canMutate,
   open,
   onClose,
-  onMigrated,
-  migrateSession: injectedMigrate,
+  onMoved,
+  moveSession: injectedMove,
   askToStopJobs: injectedAsk,
   accountPicker,
   usage,
-}: MigrateSheetProps) {
+}: MoveSheetProps) {
   // Through the carrier-routed client unless a test hands one in: a plain-network client reaches no
   // daemon at all, because a paired browser is answered only inside its own session.
   const routedClient = useDaemonClient();
-  const migrateSession: MigrateSession =
-    injectedMigrate ??
+  const moveSession: MoveSession =
+    injectedMove ??
     ((target, sessionScope, input, requestId) =>
-      migrateSessionWithDaemon(target, sessionScope, input, requestId, routedClient));
+      moveSessionWithDaemon(target, sessionScope, input, requestId, routedClient));
   const askToStopJobs: AskToStopJobs =
     injectedAsk ?? ((target, sessionScope) => askToStopJobsWithDaemon(target, sessionScope, routedClient));
   const { config, state } = view;
@@ -279,8 +279,8 @@ export function MigrateSheet({
    * What it is allowed to affect is `chosenAccountModels` and nothing else.
    */
   const [chosenAccount, setChosenAccount] = useState<ChosenAccount | null>(null);
-  const [phase, setPhase] = useState<MigrationPhase>('form');
-  const [failure, setFailure] = useState<MigrationFailure | null>(null);
+  const [phase, setPhase] = useState<MovePhase>('form');
+  const [failure, setFailure] = useState<MoveFailure | null>(null);
   const [downgradeAcknowledged, setDowngradeAcknowledged] = useState(false);
   // Belongs to the refusal it answered: a retried safety check starts it over, and asking about the same
   // jobs again is answered with the message already queued rather than a second one.
@@ -289,7 +289,7 @@ export function MigrateSheet({
   const scopedIdentity = JSON.stringify([connection.daemonId, daemonSessionKey(scope), config.id]);
   const liveIdentity = useRef(scopedIdentity);
   liveIdentity.current = scopedIdentity;
-  // The request identity of the migration currently on offer. Held in a ref, not
+  // The request identity of the move currently on offer. Held in a ref, not
   // state, because minting it must not re-render, and because a repeated submit
   // has to observe the SAME id the first submit used.
   const requestIdentity = useRef<{ key: string; id: string } | null>(null);
@@ -310,24 +310,24 @@ export function MigrateSheet({
     requestIdentity.current = null;
   }, [open, connection.daemonId, scope.daemonId, scope.sessionId, config.id]);
 
-  const target = useMemo(() => migrationTarget(agent, model), [agent, model]);
-  const context = migrationContextDecision({
+  const target = useMemo(() => moveTarget(agent, model), [agent, model]);
+  const context = moveContextDecision({
     currentModel,
     ...(state.contextWindow === undefined ? {} : { currentWindow: state.contextWindow }),
     ...(state.contextTokens === undefined ? {} : { contextTokens: state.contextTokens }),
     targetModel: model,
   });
   const scopeMismatch = connection.daemonId !== scope.daemonId || scope.sessionId !== config.id;
-  const hasRuntimeChange = migrationHasRuntimeChange(config.agent, currentModel, config.modelHint, target);
+  const hasRuntimeChange = moveHasRuntimeChange(config.agent, currentModel, config.modelHint, target);
   const canReview = canMutate && !scopeMismatch && target !== null && hasRuntimeChange && !context.conversationTooLarge;
   // The chosen account's models lead, because they are the ones the reader has
   // just given this daemon's word for; the current model's own variants stay,
-  // because moving account and keeping the window is the common migration.
+  // because moving account and keeping the window is the common move.
   const suggestions = useMemo(
     () => [
       ...new Set([
         ...chosenAccountModels(chosenAccount, connection, agent),
-        ...migrationModelSuggestions(currentModel),
+        ...moveModelSuggestions(currentModel),
       ]),
     ],
     [chosenAccount, connection, agent, currentModel],
@@ -384,7 +384,7 @@ export function MigrateSheet({
     setPhase('confirm');
   };
 
-  const performMigration = async (allowContextDowngrade: boolean): Promise<void> => {
+  const performMove = async (allowContextDowngrade: boolean): Promise<void> => {
     if (
       submitLock.current ||
       scopeMismatch ||
@@ -396,11 +396,11 @@ export function MigrateSheet({
       return;
 
     const submittedIdentity = scopedIdentity;
-    const input: MigrationTarget = { ...target, allowContextDowngrade };
+    const input: MoveTarget = { ...target, allowContextDowngrade };
     // One id per logical target. A repeated confirmation of the SAME target reuses
     // it, so the daemon recognises the second ask as the first one rather than
     // relaunching twice; changing the target mints a new one.
-    const key = migrationRequestKey(scope, input);
+    const key = moveRequestKey(scope, input);
     const identity = requestIdentity.current?.key === key ? requestIdentity.current : { key, id: crypto.randomUUID() };
     requestIdentity.current = identity;
     submitLock.current = true;
@@ -408,13 +408,13 @@ export function MigrateSheet({
     setJobsAsk(JOBS_IDLE);
     setPhase('submitting');
     try {
-      const migrated = await migrateSession(connection, scope, input, identity.id);
+      const moved = await moveSession(connection, scope, input, identity.id);
       if (liveIdentity.current !== submittedIdentity) return;
-      onMigrated(connection, scope, migrated);
+      onMoved(connection, scope, moved);
       onClose();
     } catch (error) {
       if (liveIdentity.current !== submittedIdentity) return;
-      const nextFailure = migrationFailure(error);
+      const nextFailure = moveFailure(error);
       setFailure(nextFailure);
       if (nextFailure.kind === 'context-downgrade' && !allowContextDowngrade) setPhase('downgrade');
       else if (nextFailure.kind === 'preflight-refused') setPhase('refused');
@@ -446,14 +446,14 @@ export function MigrateSheet({
     );
   const agentHelp = (
     <span id={agentHelpId} className="text-meta leading-base text-muted">
-      Current account: {accountName(config.agent)}. Cross-CLI migration is not offered: Claude and Codex cannot resume
+      Current account: {accountName(config.agent)}. Cross-CLI move is not offered: Claude and Codex cannot resume
       each other’s conversation format.
     </span>
   );
 
   return (
     <BottomSheet
-      id={`migrate-${config.id}`}
+      id={`move-${config.id}`}
       open={open}
       onClose={phase === 'submitting' ? () => undefined : onClose}
       labelledBy={headingId}
@@ -481,7 +481,7 @@ export function MigrateSheet({
         >
           <LoaderCircle aria-hidden="true" className="animate-spin text-accent" size={28} />
           <p className="m-0 text-title font-semibold text-fg">
-            Migrating — running the safety gate, stopping the old pane and relaunching…
+            Moving — running the safety gate, stopping the old pane and relaunching…
           </p>
           <p className="m-0 max-w-xl text-ui leading-base text-muted">
             Keep this sheet open. A large conversation can take tens of seconds to resume.
@@ -608,17 +608,17 @@ export function MigrateSheet({
 
             <section aria-labelledby={`${headingId}-safety-heading`}>
               <h2 id={`${headingId}-safety-heading`} className="m-0 text-ui font-semibold text-fg">
-                Migration safety
+                Move safety
               </h2>
               <p className="mt-1 text-meta leading-base text-muted">
-                The daemon inspects the pane and process tree inside the migration request, immediately before any
+                The daemon inspects the pane and process tree inside the move request, immediately before any
                 write. A preview here would already be stale by the time the pane is replaced.
               </p>
               {/* `list-disc` is explicit: the preflight resets `list-style` on every
                   `ul`, and these three statements are the sheet's whole account of
                   the safety model — unmarked they read as one run-on paragraph. */}
               <ul className="mt-2 grid list-disc gap-2 pl-5 text-ui leading-base text-muted">
-                <li>Destructive or unknown in-flight work refuses the migration without changing the session.</li>
+                <li>Destructive or unknown in-flight work refuses the move without changing the session.</li>
                 <li>This public route has no force switch, and this sheet does not invent one.</li>
                 <li>On success, the daemon writes the forensic report and hands it to the replacement agent.</li>
               </ul>
@@ -626,7 +626,7 @@ export function MigrateSheet({
 
             {scopeMismatch ? (
               <p className="m-0 text-ui leading-base text-err" role="alert">
-                This session does not belong to the selected daemon. Return to the fleet and reopen it before migrating.
+                This session does not belong to the selected daemon. Return to the fleet and reopen it before moving.
               </p>
             ) : !hasRuntimeChange && target !== null ? (
               <p className="m-0 text-ui leading-base text-warn" role="status">
@@ -640,7 +640,7 @@ export function MigrateSheet({
                 Cancel
               </Button>
               <Button className="min-h-[44px]" disabled={!canReview} type="submit" variant="primary">
-                Review migration <ArrowRight aria-hidden="true" size={15} />
+                Review move <ArrowRight aria-hidden="true" size={15} />
               </Button>
             </div>
           </div>
@@ -680,7 +680,7 @@ export function MigrateSheet({
                   <AgentJobsNeedUpdate daemonVersion={failure.daemonVersion ?? ''} />
                 ) : null}
                 <p className="mt-3 text-ui font-semibold text-err">
-                  There is no force control. A refused preflight cannot start a migration.
+                  There is no force control. A refused preflight cannot start a move.
                 </p>
               </section>
             ) : phase === 'downgrade' && failure ? (
@@ -735,7 +735,7 @@ export function MigrateSheet({
                     <p className="mt-1 text-ui leading-base text-muted">
                       {terminal
                         ? `This will relaunch the stopped session under ${target?.agent ?? agent}.`
-                        : `Migrating relaunches this session under ${target?.agent ?? agent}. The daemon will refuse if the current turn cannot be interrupted safely.`}
+                        : `Moving relaunches this session under ${target?.agent ?? agent}. The daemon will refuse if the current turn cannot be interrupted safely.`}
                     </p>
                   </div>
                 </div>
@@ -787,17 +787,17 @@ export function MigrateSheet({
               <Button
                 className="min-h-[44px]"
                 disabled={phase === 'downgrade' && !downgradeAcknowledged}
-                onClick={() => void performMigration(phase === 'downgrade')}
+                onClick={() => void performMove(phase === 'downgrade')}
                 type="button"
                 variant="danger"
               >
                 {phase === 'downgrade'
-                  ? 'Migrate with smaller window'
+                  ? 'Move with smaller window'
                   : phase === 'refused'
                     ? 'Retry safety check'
                     : terminal
                       ? 'Relaunch on selected runtime'
-                      : 'Migrate and relaunch'}
+                      : 'Move and relaunch'}
               </Button>
             </div>
           </div>
@@ -809,8 +809,8 @@ export function MigrateSheet({
 
 /**
  * The refusal's one remedy when everything in the way is the agent's own: ask it. One queued message —
- * from Ferretry · Migrate, the words naming each pid — and nothing is stopped by Ferretry. The person
- * then runs the safety check again, which stays the only way a migration starts.
+ * from Ferretry · Move, the words naming each pid — and nothing is stopped by Ferretry. The person
+ * then runs the safety check again, which stays the only way a move starts.
  */
 function AgentJobsAsk({
   ask,

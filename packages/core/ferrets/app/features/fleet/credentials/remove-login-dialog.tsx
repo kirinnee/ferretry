@@ -127,7 +127,7 @@ export function RemoveLoginDialog({
   useEffect(() => {
     let live = true;
     void createClient(connection)
-      .then(client => typeof client.migrate === 'function')
+      .then(client => typeof client.move === 'function')
       .catch(() => false)
       .then(offered => {
         if (live) setCanMove(offered);
@@ -160,8 +160,8 @@ export function RemoveLoginDialog({
     const missed: MoveFailure[] = [];
     for (const session of toMove) {
       try {
-        if (client.migrate === undefined) throw new Error('This app cannot move a ferret on this machine.');
-        await client.migrate(
+        if (client.move === undefined) throw new Error('This app cannot move a ferret on this machine.');
+        await client.move(
           session.id,
           destination.name,
           undefined,

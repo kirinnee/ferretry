@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { MigrationRefusal, SessionView } from '../../../../../contract/index.ts';
+import type { MoveRefusal, SessionView } from '../../../../../contract/index.ts';
 import { useRestartRefusal } from '../../../../../app/features/session-actions/restart-refusal.tsx';
 import {
   RestartDowngradeRefused,
@@ -15,7 +15,7 @@ afterEach(async () => {
   mounted = undefined;
 });
 
-const refusal = (overrides: Partial<MigrationRefusal> = {}): MigrationRefusal => ({
+const refusal = (overrides: Partial<MoveRefusal> = {}): MoveRefusal => ({
   status: 'running',
   turn: 13,
   blockedBy: 'unknown',
@@ -51,7 +51,7 @@ const show = async (publish: (view: SessionView) => void = () => undefined) => {
   mounted = await mount(<Probe publish={publish} />);
   return mounted.container;
 };
-const hold = async (restartAnyway: () => Promise<SessionView>, over: Partial<MigrationRefusal> = {}) => {
+const hold = async (restartAnyway: () => Promise<SessionView>, over: Partial<MoveRefusal> = {}) => {
   let answer = false;
   await interact(() => {
     answer = must(held, 'capture')(new RestartRefused(refusal(over), restartAnyway));

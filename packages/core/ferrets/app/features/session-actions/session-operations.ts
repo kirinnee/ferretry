@@ -4,7 +4,7 @@
  * test hands in a fake and the page hands in the carrier-routed one.
  */
 
-import { type ForkSessionOutcome, type ContextDowngrade, type MigrationConversation, MigrationRefusedBodySchema, type MigrationRefusal, type SessionView } from '../../../contract/index.ts';
+import { type ForkSessionOutcome, type ContextDowngrade, type MoveConversation, MoveRefusedBodySchema, type MoveRefusal, type SessionView } from '../../../contract/index.ts';
 import { type IFyApiClient } from '@ferretry/app';
 import { FyHttpError } from '@ferretry/app';
 import { staleMessageEvidence, withFreshMessageCursor } from '../../../../../plugins/conversation/app/lib/message-cursor.ts';
@@ -87,32 +87,32 @@ export const forkThroughLatest = async (
  */
 export class RestartRefused extends Error {
   constructor(
-    readonly refusal: MigrationRefusal,
+    readonly refusal: MoveRefusal,
     readonly restartAnyway: () => Promise<SessionView>,
   ) {
     super(restartRefusedSentence(refusal));
   }
 }
 
-const REFUSED_CAUSE: Readonly<Record<MigrationRefusal['blockedBy'], string>> = {
+const REFUSED_CAUSE: Readonly<Record<MoveRefusal['blockedBy'], string>> = {
   unknown: 'Ferretry can’t tell if what the agent is running is safe to stop',
   destructive: 'the agent is running something that could be left half-done if it is stopped',
   unreadable: 'Ferretry couldn’t check what the agent is running',
 };
 
 /** Why the daemon would not stop what the agent is running, as a clause. */
-export const refusedCause = (refusal: MigrationRefusal): string => REFUSED_CAUSE[refusal.blockedBy];
+export const refusedCause = (refusal: MoveRefusal): string => REFUSED_CAUSE[refusal.blockedBy];
 
 /** One sentence for an alert: why nothing happened, and that nothing did. */
-export const restartRefusedSentence = (refusal: MigrationRefusal): string =>
+export const restartRefusedSentence = (refusal: MoveRefusal): string =>
   `Restart paused — ${REFUSED_CAUSE[refusal.blockedBy]}. Nothing was restarted.`;
 
 /**
  * The refusal the daemon attached, when it attached one that names something to look at. An older
  * daemon sends the sentence alone; that case keeps its own handling.
  */
-const refusalOf = (reason: FyHttpError): MigrationRefusal | null => {
-  const body = MigrationRefusedBodySchema.safeParse(reason.body);
+const refusalOf = (reason: FyHttpError): MoveRefusal | null => {
+  const body = MoveRefusedBodySchema.safeParse(reason.body);
   const refusal = body.success ? body.data.inflight : undefined;
   return refusal?.items.some(item => item.blocks) === true ? refusal : null;
 };
@@ -152,13 +152,13 @@ export type PausedRestart = RestartRefused | RestartDowngradeRefused | RestartUn
 interface RestartConsent {
   readonly forceInflight?: boolean;
   readonly allowContextDowngrade?: boolean;
-  /** Absent, the daemon resumes the conversation or refuses; see `MigrationConversation`. */
-  readonly conversation?: MigrationConversation;
+  /** Absent, the daemon resumes the conversation or refuses; see `MoveConversation`. */
+  readonly conversation?: MoveConversation;
 }
 
 /**
  * Restarts the ferret's CLI on the login it is already on, with its conversation: the daemon's
- * same-login migration, which snapshots the pane, refuses if in-flight work would be lost, and
+ * same-login move, which snapshots the pane, refuses if in-flight work would be lost, and
  * relaunches with resume. It is how a ferret picks up a newly added MCP server.
  *
  * A refusal that names what is running is thrown as {@link RestartRefused}, and one about a smaller
@@ -167,7 +167,7 @@ interface RestartConsent {
  * an id with the body it first saw, and the same id with a different body is a 409 `request_id_reused`.
  */
 export const restartWithResume = async (
-  client: Pick<IFyApiClient, 'migrate'>,
+  client: Pick<IFyApiClient, 'move'>,
   view: SessionView,
   requestId: string,
   consent: RestartConsent = {},
@@ -175,7 +175,7 @@ export const restartWithResume = async (
   const again = async (more: RestartConsent): Promise<SessionView> =>
     await restartWithResume(client, view, `${requestId}-anyway-${Date.now()}`, { ...consent, ...more });
   try {
-    return await client.migrate(
+    return await client.move(
       view.config.id,
       view.config.agent,
       undefined,
@@ -190,7 +190,7 @@ export const restartWithResume = async (
       throw new RestartUnresumable(reason.message, async () => await again({ conversation: 'fresh' }));
     if (reason.code === 'context_downgrade_refused')
       throw new RestartDowngradeRefused(downgradeOf(reason), async () => await again({ allowContextDowngrade: true }));
-    if (reason.code !== 'migration_refused') throw reason;
+    if (reason.code !== 'move_refused') throw reason;
     const refusal = refusalOf(reason);
     if (refusal !== null) throw new RestartRefused(refusal, async () => await again({ forceInflight: true }));
     if (reason.message.includes(PS_BLIND_SPOT)) throw new DetailedFailure(RESTART_PS_FAILED, reason.message);
@@ -204,7 +204,7 @@ export const restartWithResume = async (
  * the Restart's own, so the same panel answers them.
  */
 export const restartOnEarlierConversation = async (
-  client: Pick<IFyApiClient, 'migrate'>,
+  client: Pick<IFyApiClient, 'move'>,
   view: SessionView,
   requestId: string,
 ): Promise<SessionView> => await restartWithResume(client, view, requestId, { conversation: 'previous' });

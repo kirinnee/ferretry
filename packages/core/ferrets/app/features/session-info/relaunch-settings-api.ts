@@ -1,7 +1,7 @@
 /**
  * The dial behind Info › Runtime's "Running with older settings — Restart to apply": whether a Restart
  * would relaunch this ferret on different settings (`GET /v1/sessions/:id/relaunch-settings`; the
- * daemon side is `mounts/session-migrate.ts`, because a Restart is a migration onto the same login).
+ * daemon side is `mounts/session-move.ts`, because a Restart is a move onto the same login).
  *
  * The answer is PARSED through the shared schema, so a body this page cannot read is a failed read
  * rather than a claim about the ferret.

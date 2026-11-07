@@ -96,10 +96,10 @@ describe('readConversionPreview', () => {
 });
 
 describe('moveToOtherHarness', () => {
-  it('migrates with conversation convert and the request id, forcing only when told to', async () => {
+  it('moves with conversation convert and the request id, forcing only when told to', async () => {
     const calls: unknown[][] = [];
     const client = {
-      migrate: async (...args: unknown[]) => {
+      move: async (...args: unknown[]) => {
         calls.push(args);
         return sessionView('s1');
       },

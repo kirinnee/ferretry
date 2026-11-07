@@ -58,7 +58,7 @@ export interface SessionsPageProps {
   readonly projects: DaemonProjectsStore;
   readonly usage: DaemonUsageStore;
   /**
-   * The same daemon-scoped roster the new-session page and migrate sheet read,
+   * The same daemon-scoped roster the new-session page and move sheet read,
    * so a full-density row can name a session's account the way the pickers do.
    * Absent, the rows name no account.
    */
