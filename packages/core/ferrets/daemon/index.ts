@@ -127,7 +127,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   /** The ferret a path names: an exact id, or a name (a live holder wins; two on one footing are refused). */
   const pathFerret = async (call: CallContext): Promise<FerretId> => {
     await ready();
-    const raw = decodeParameter(call.params.get('sessionId') ?? '');
+    const raw = decodeParameter(call.params.get('ferretId') ?? '');
     if (raw === undefined || raw === '')
       throw new ApiError(400, 'the ferret id in the path is not usable', 'invalid_session_id');
     const resolution = resolveAgentAddress(
@@ -193,7 +193,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         await ready();
         return fleetList.answer(registry.list(), headerValue(call.request, 'if-none-match'));
       },
-      'GET /v1/ferrets/:sessionId': async call => {
+      'GET /v1/ferrets/:ferretId': async call => {
         const id = await pathFerret(call);
         return jsonResponse(registry.summary(id));
       },
@@ -210,28 +210,28 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         if (!started.ok) return startFailure(started.error);
         return jsonResponse({ id: started.value }, 201);
       },
-      'POST /v1/ferrets/:sessionId/stop': async call => {
+      'POST /v1/ferrets/:ferretId/stop': async call => {
         const id = await pathFerret(call);
         mayAct(call, id);
         const how = queryValue(call.request, 'how') === 'now' ? 'now' : 'polite';
         await service.stop(id, how);
         return jsonResponse({ id, state: registry.get(id)?.state });
       },
-      'POST /v1/ferrets/:sessionId/resume': async call => {
+      'POST /v1/ferrets/:ferretId/resume': async call => {
         const id = await pathFerret(call);
         mayAct(call, id);
         const resumed = await service.resume(id);
         if (!resumed.ok) return startFailure(resumed.error);
         return jsonResponse({ id: resumed.value });
       },
-      'POST /v1/ferrets/:sessionId/rename': async call => {
+      'POST /v1/ferrets/:ferretId/rename': async call => {
         const id = await pathFerret(call);
         mayAct(call, id);
         const renamed = await service.rename(id, parseRenameBody(await body(call)).name);
         if (!renamed.ok) throw new ApiError(409, renamed.error, 'name_taken');
         return jsonResponse(renamed.value);
       },
-      'POST /v1/ferrets/:sessionId/revoke-credential': async call => {
+      'POST /v1/ferrets/:ferretId/revoke-credential': async call => {
         const id = await pathFerret(call);
         return jsonResponse({ id, revoked: await service.revokeToken(id) });
       },
@@ -249,7 +249,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         const start = Math.floor(nowMs / 1000) % DEFAULT_CALLSIGN_POOL.length;
         return jsonResponse([...suggestCallsigns(DEFAULT_CALLSIGN_POOL, claims, nowMs, count, start)]);
       },
-      'GET /v1/ferrets/:sessionId/fs/file': async call => {
+      'GET /v1/ferrets/:ferretId/fs/file': async call => {
         const id = await pathFerret(call);
         agentMayReach(call, id);
         const relative = normalizeRelativePath(queryValue(call.request, 'path'));

@@ -67,7 +67,7 @@ export default definePlugin({
         guard: { none: 'ferret identity records: names, lineage, folders and states, no pane or vault text' },
       }),
       // R-0135
-      route('GET /v1/ferrets/:sessionId', {
+      route('GET /v1/ferrets/:ferretId', {
         minimum: 'operator',
         caller: 'any',
         noStore: true,
@@ -82,14 +82,14 @@ export default definePlugin({
         guard: { none: 'answers the new ferret id only' },
       }),
       // R-0372
-      route('POST /v1/ferrets/:sessionId/stop', {
+      route('POST /v1/ferrets/:ferretId/stop', {
         minimum: 'operator',
         caller: 'any',
         audit: { skip: 'a stop is recorded in the ferret history, as today' },
         guard: { none: 'answers the new state only' },
       }),
       // R-0363
-      route('POST /v1/ferrets/:sessionId/resume', {
+      route('POST /v1/ferrets/:ferretId/resume', {
         minimum: 'operator',
         caller: 'any',
         consultsGrants: true,
@@ -97,14 +97,14 @@ export default definePlugin({
         guard: { none: 'answers the ferret id only' },
       }),
       // R-0362
-      route('POST /v1/ferrets/:sessionId/rename', {
+      route('POST /v1/ferrets/:ferretId/rename', {
         minimum: 'operator',
         caller: 'any',
         audit: { skip: 'a rename records nothing, as today' },
         guard: { none: 'one ferret identity record' },
       }),
       // R-0364
-      route('POST /v1/ferrets/:sessionId/revoke-credential', {
+      route('POST /v1/ferrets/:ferretId/revoke-credential', {
         minimum: 'operator',
         caller: 'person',
         audit: { record: AUDIT_KINDS['ferret.credential-revoked'] },
@@ -119,7 +119,7 @@ export default definePlugin({
         guard: { none: 'names from the callsign pool' },
       }),
       // R-0151 (S47)
-      route('GET /v1/ferrets/:sessionId/fs/file', {
+      route('GET /v1/ferrets/:ferretId/fs/file', {
         minimum: 'operator',
         caller: 'any',
         noStore: true,
