@@ -727,7 +727,7 @@ export function agendaVersionRecoveryContract() {
       }
     }, 20_000);
 
-    it.each(['versions', 'legacy', 'pending', 'carried', 'human', 'daemon', 'missing'] as const)(
+    it.each(['versions', 'history', 'pending', 'carried', 'human', 'daemon', 'missing'] as const)(
       'cleans an earlier orphan using its %s snapshot without losing words',
       async source => {
         const w = await world();
@@ -775,10 +775,10 @@ export function agendaVersionRecoveryContract() {
                 ? { carriedEntries: { A1: { ...entry, item: { ...entry.item, body: 'Original carried report' } } } }
                 : {}),
               ...(source === 'pending' ? { archivePending: [snapshot] } : {}),
-              ...(source === 'legacy' ? { archive: { bytes: Buffer.byteLength(line), count: 1 } } : {}),
+              ...(source === 'history' ? { archive: { bytes: Buffer.byteLength(line), count: 1 } } : {}),
             }),
           );
-          if (source === 'legacy') await w.files.writeAtomic(SESSION, AGENDA_ARCHIVE_FILE, line);
+          if (source === 'history') await w.files.writeAtomic(SESSION, AGENDA_ARCHIVE_FILE, line);
           if (source === 'missing') {
             await should(w.raise('New topic')).be.rejectedWith('missing cold agenda snapshot');
             return;

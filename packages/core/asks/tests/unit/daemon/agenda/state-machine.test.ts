@@ -3766,7 +3766,7 @@ describe('Agenda state machine: one unreadable entry', () => {
     const second = succeeded(
       applyAgendaCommand(
         first.ledger,
-        raiseCommand(WARDEN, { sourceRef: 'warden-auto-migrate', ask: undefined, kind: 'info' }, SECOND),
+        raiseCommand(WARDEN, { sourceRef: 'warden-auto-move', ask: undefined, kind: 'info' }, SECOND),
       ),
     );
     const third = succeeded(
@@ -3984,7 +3984,7 @@ describe('Agenda state machine: one unreadable entry', () => {
     const notice = succeeded(
       applyAgendaCommand(
         ledger,
-        raiseCommand(WARDEN, { sourceRef: 'warden-auto-migrate', ask: undefined, kind: 'info' }, LATER),
+        raiseCommand(WARDEN, { sourceRef: 'warden-auto-move', ask: undefined, kind: 'info' }, LATER),
       ),
     );
     const again = succeeded(
@@ -4028,7 +4028,7 @@ describe('Agenda state machine: one unreadable entry', () => {
     const refused = failed(
       applyAgendaCommand(
         ledger,
-        raiseCommand(WARDEN, { sourceRef: 'warden-auto-migrate', subject: LONG, ask: undefined, kind: 'info' }),
+        raiseCommand(WARDEN, { sourceRef: 'warden-auto-move', subject: LONG, ask: undefined, kind: 'info' }),
       ),
     );
 

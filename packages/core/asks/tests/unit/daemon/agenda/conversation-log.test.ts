@@ -581,7 +581,7 @@ it('keeps unrelated active items unchanged when another thread splits', () => {
   should(itemOf(split.ledger, 'A2')).deepEqual(before);
 });
 
-it('keeps an unreadable legacy closed item closed when delivery retry cannot safely reopen it', () => {
+it('keeps an oversized closed item closed when delivery retry cannot safely reopen it', () => {
   const closed = run(raise(null).ledger, { action: 'dismiss', actor: HUMAN, id: 'A1', at: T(1) });
   const corrupted: AgendaLedger = {
     ...closed.ledger,

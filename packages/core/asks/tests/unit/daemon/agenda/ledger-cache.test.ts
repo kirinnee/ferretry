@@ -303,7 +303,7 @@ describe('the agenda repository cache limit', () => {
 
 const MARK = `${SESSION}/${AGENDA_ARCHIVE_FILE}.pending`;
 
-/** A transaction that changes nothing: what a read-only command leaves, so only a migration writes. */
+/** A transaction that changes nothing: what a read-only command leaves, so nothing writes. */
 const unchanged = (current: AgendaLedger | null) => {
   if (current === null) throw new Error('no board');
   return {
