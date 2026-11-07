@@ -14,6 +14,7 @@ import { type ReactNode, useState } from 'react';
 import { cn } from '../../../ui.ts';
 import { Button, useNow } from '../../../ui.ts';
 import { runtimeActionRefusal } from '../runtimes/runtime-actions-model.ts';
+import { followInApp } from './machine-route.ts';
 import { type AccountChanges, ChangeApplyPanel } from './apply-change-panel.tsx';
 import {
   BLOCKS_STARTS,
@@ -175,7 +176,12 @@ export function DisableSwitch({
       {lockedToLogin && login !== undefined ? (
         <p className="m-0 text-meta leading-base text-muted" data-disable-owner="login">
           Turn it back on from the login:{' '}
-          <a href={login.href} className="font-semibold text-accent underline" data-disable-login-link="">
+          <a
+            href={login.href}
+            onClick={followInApp}
+            className="font-semibold text-accent underline"
+            data-disable-login-link=""
+          >
             {login.id}
           </a>
           .

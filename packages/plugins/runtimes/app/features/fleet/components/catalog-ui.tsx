@@ -8,6 +8,7 @@ import { ChevronRight, Lock, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '../../../ui.ts';
 import { Badge } from '../../../ui.ts';
+import { followInApp } from '../shell/machine-route.ts';
 import type { ComponentBadge } from './component-model.ts';
 
 export function Section({ title, children, spot }: { title: string; children: ReactNode; spot?: string }) {
@@ -210,7 +211,12 @@ export function LinkRow({
 }) {
   return (
     <li className="min-w-0">
-      <a href={href} className={cn(ROW, 'no-underline transition-colors hover:bg-surface-2')} data-catalog-link={href}>
+      <a
+        href={href}
+        onClick={followInApp}
+        className={cn(ROW, 'no-underline transition-colors hover:bg-surface-2')}
+        data-catalog-link={href}
+      >
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className={cn('break-words text-row font-semibold text-fg', mono && 'font-mono')}>{title}</span>
           {sub === undefined ? null : <span className="break-words text-cell text-muted">{sub}</span>}

@@ -10,7 +10,7 @@
 import { daemonHomeHref } from '@ferretry/app';
 import type { MachineView, RuntimeView } from '../../../../contract/index.ts';
 import { ChevronLeft, ChevronRight, Lock, Plus, TriangleAlert } from 'lucide-react';
-import { type MouseEvent, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { cn } from '../../../ui.ts';
 import { Badge, Button } from '../../../ui.ts';
 import { HARNESS_NAMES } from '../components/component-model.ts';
@@ -18,6 +18,7 @@ import { credentialEmail } from '../../../lib/logins-view.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { type AccountChanges, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { DisableSwitch, type DisableSwitchParts } from '../shell/disable-switch.tsx';
+import { currentDaemon, followInApp, harnessHref, tabHref } from '../shell/machine-route.ts';
 import type { MachineTabProps } from '../shell/machine-tab.ts';
 import { skippedItems } from '../shell/skipped-model.ts';
 import { AddRuntime } from './add-runtime.tsx';
@@ -52,35 +53,25 @@ const loginLine = (runtime: RuntimeView, data: MachineData): string => {
   return runtime.credential.label === undefined ? email : `${email} (${runtime.credential.label})`;
 };
 
-/** The link to the New session form with this runtime picked, by its wrapper. A hint only: the form decides. */
+/**
+ * The link to the New session form with this runtime picked, by its wrapper. A hint only: the form decides.
+ *
+ * GAP(ferrets): no manifest declares the new-ferret page (`/new`) yet, so this link opens nothing until Ferrets' app
+ * half draws it; the launch button stays, because the address is the contract the page will read.
+ */
 export const launchHref = (daemon: string | null, wrapper: string): string =>
   `${daemon === null ? '' : daemonHomeHref(daemon)}/new?agent=${encodeURIComponent(wrapper)}`;
 
-/** The daemon this page is for: the app serves one daemon's screens under `/d/<daemon>`. */
-export const currentDaemon = (browser: Window = window): string | null => {
-  const match = /^\/d\/([^/]+)/u.exec(browser.location.pathname);
-  if (match?.[1] === undefined) return null;
-  try {
-    return decodeURIComponent(match[1]);
-  } catch {
-    return null;
-  }
-};
-
-/** Moves inside the app without a reload: the app's router follows the browser's history. */
-const followInApp = (event: MouseEvent<HTMLAnchorElement>, browser: Window = window): void => {
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
-  event.preventDefault();
-  browser.history.pushState({}, '', event.currentTarget.getAttribute('href') ?? '');
-  browser.dispatchEvent(new PopStateEvent('popstate'));
-};
-
-function MissingHarness({ runtime, machineName }: { readonly runtime: RuntimeView; readonly machineName: string }) {
+function MissingHarness({ runtime }: { readonly runtime: RuntimeView }) {
   return (
     <p className="m-0 flex flex-wrap items-center gap-1 text-cell text-warn" data-runtime-missing-harness="">
       <TriangleAlert size={14} aria-hidden="true" />
       <span>{HARNESS_NAMES[runtime.harness]} isn’t installed here</span> ·{' '}
-      <a href={machineDetailHash(machineName, 'machine')} className="font-semibold text-accent underline">
+      <a
+        href={harnessHref(currentDaemon(), runtime.harness)}
+        onClick={followInApp}
+        className="font-semibold text-accent underline"
+      >
         Install
       </a>
     </p>
@@ -140,7 +131,10 @@ function RuntimeSwitch({
       {...(children === undefined ? {} : { children })}
       target={{ kind: 'runtime', name: runtime.name }}
       disabled={runtime.disabled}
-      login={{ id: runtime.credential.id, href: machineDetailHash(machineName, 'sign-ins', runtime.credential.id) }}
+      login={{
+        id: runtime.credential.id,
+        href: tabHref(currentDaemon(), machineName, 'sign-ins', runtime.credential.id),
+      }}
       machineName={machineName}
       online={online}
       changes={changes}
@@ -209,7 +203,11 @@ function RuntimePage({
         <div role="status" className="kt-panel flex flex-col gap-1 p-panel" data-runtime-note="missing">
           <p className="m-0 text-row font-semibold text-fg">{HARNESS_NAMES[runtime.harness]} isn’t installed here</p>
           <p className="m-0 text-cell text-muted">Install it on {machineName} to launch this runtime.</p>
-          <a href={machineDetailHash(machineName, 'machine')} className="text-cell font-semibold text-accent underline">
+          <a
+            href={harnessHref(currentDaemon(), runtime.harness)}
+            onClick={followInApp}
+            className="text-cell font-semibold text-accent underline"
+          >
             Install {HARNESS_NAMES[runtime.harness]}
           </a>
         </div>
@@ -221,7 +219,8 @@ function RuntimePage({
           </p>
           <p className="m-0 text-cell text-muted">Sign in once and every runtime that uses it can launch.</p>
           <a
-            href={machineDetailHash(machineName, 'sign-ins', runtime.credential.id)}
+            href={tabHref(currentDaemon(), machineName, 'sign-ins', runtime.credential.id)}
+            onClick={followInApp}
             className="text-cell font-semibold text-accent underline"
             data-runtime-sign-in=""
           >
@@ -240,7 +239,8 @@ function RuntimePage({
 
       <Section title="Credential">
         <a
-          href={machineDetailHash(machineName, 'sign-ins', runtime.credential.id)}
+          href={tabHref(currentDaemon(), machineName, 'sign-ins', runtime.credential.id)}
+          onClick={followInApp}
           className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel no-underline hover:border-accent hover:no-underline"
           data-runtime-credential={runtime.credential.id}
         >
@@ -255,7 +255,8 @@ function RuntimePage({
 
       <Section title="Profile">
         <a
-          href={machineDetailHash(machineName, 'profiles', runtime.profile)}
+          href={tabHref(currentDaemon(), machineName, 'profiles', runtime.profile)}
+          onClick={followInApp}
           className="kt-panel flex min-h-control min-w-0 items-center gap-3 p-panel no-underline hover:border-accent hover:no-underline"
           data-runtime-profile={runtime.profile}
         >
@@ -487,9 +488,7 @@ function RuntimeRow({
         </RuntimeSwitch>
         <SkippedLine name={runtime.name} items={skippedItems(runtime)} className={ROW_INDENT} />
       </div>
-      {harnessInstalled(machine, runtime.harness) ? null : (
-        <MissingHarness runtime={runtime} machineName={machineName} />
-      )}
+      {harnessInstalled(machine, runtime.harness) ? null : <MissingHarness runtime={runtime} />}
     </div>
   );
 }

@@ -27,7 +27,7 @@ import {
 import { LoginScopeChip } from '../../../components/login-scope-chip.tsx';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
-import { machineHash } from '../shell/machine-route.ts';
+import { currentDaemon, followInApp, tabHref } from '../shell/machine-route.ts';
 import type { MachineData } from './machine-data.ts';
 import {
   harnessInstalled,
@@ -264,10 +264,13 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
             );
           })
         )}
-        {/* GAP(logins): the in-place sign-in and the provider grid are Logins' screens; until they are offered here a new
-            login is added from Sign-ins and comes back in this list. */}
+        {/* GAP(logins): today's in-place sign-in (NewLogin, CredentialSignIn) and the provider grid are Logins' screens
+            and are not ported into Runtimes: a new login is added from Logins' Sign-ins tab and comes back in this list,
+            and a login that "needs sign-in" is signed in there. Until Logins' app half draws that tab there is no
+            working sign-in from these screens. */}
         <a
-          href={machineHash(machineName, 'sign-ins')}
+          href={tabHref(currentDaemon(), machineName, 'sign-ins')}
+          onClick={followInApp}
           data-add-row="login"
           className="kt-panel flex min-h-control w-full min-w-0 items-center gap-3 p-panel text-left text-row font-semibold text-fg no-underline hover:border-accent hover:no-underline"
         >
@@ -279,7 +282,8 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
           <p className="m-0 text-cell leading-base text-muted" data-add-runtime-needs-sign-in="">
             This login needs sign-in before you launch.{' '}
             <a
-              href={machineHash(machineName, 'sign-ins')}
+              href={tabHref(currentDaemon(), machineName, 'sign-ins')}
+              onClick={followInApp}
               className="font-semibold text-accent underline"
               data-add-runtime-sign-in=""
             >
@@ -359,7 +363,8 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
               ))
             )}
             <a
-              href={machineHash(machineName, 'profiles')}
+              href={tabHref(currentDaemon(), machineName, 'profiles')}
+              onClick={followInApp}
               className="inline-flex min-h-control items-center gap-1 self-start text-cell font-semibold text-accent underline"
               data-add-runtime-profiles-link=""
             >
