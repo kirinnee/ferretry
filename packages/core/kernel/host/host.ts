@@ -497,7 +497,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     }),
     spawn: restrictSpawn(
       manifest.id,
-      effectivePermissions(manifest.core, manifest.permissions?.spawn ?? []),
+      effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
       openChildEnvironments(adapters.spawn, () => bound.childEnvironments),
       items,
       pins,
@@ -505,14 +505,14 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
     scratch: adapters.scratch ?? NO_SCRATCH,
     fetch: restrictFetch(
       manifest.id,
-      effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+      effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
       adapters.fetch,
       items,
       resolversOf(manifest.id),
     ),
     websocket: restrictWebSocket(
       manifest.id,
-      effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+      effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
       websockets,
       items,
       resolversOf(manifest.id),

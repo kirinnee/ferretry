@@ -1,5 +1,6 @@
 import type { ChildEnvironmentOpener, FencedPath } from '../contract/bound.ts';
 import type { StateFileDef } from '../contract/define.ts';
+import { CORE_IDS } from '../contract/ids.ts';
 import type { FetchPort, SpawnOptions, SpawnPort, WebSocketPort, WorkersPort } from '../contract/ports.ts';
 import { WORKER_STATE_KEY } from '../worker.ts';
 import type { ItemKind, PermissionEntry } from '../manifest/types.ts';
@@ -100,8 +101,8 @@ export function hostPermitted(
 export const WILDCARD = '*';
 
 /** What the host hands the restrict wrappers: a non-core manifest's `'*'` is dropped, so it grants nothing. */
-export function effectivePermissions(core: boolean, declared: readonly PermissionEntry[]): readonly PermissionEntry[] {
-  return core ? declared : declared.filter(entry => entry !== WILDCARD);
+export function effectivePermissions(plugin: string, declared: readonly PermissionEntry[]): readonly PermissionEntry[] {
+  return (CORE_IDS as readonly string[]).includes(plugin) ? declared : declared.filter(entry => entry !== WILDCARD);
 }
 
 /** Only programs the manifest declared in `permissions.spawn` (§3.7); refused before anything starts. */

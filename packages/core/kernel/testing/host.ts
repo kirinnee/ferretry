@@ -684,7 +684,7 @@ async function start(world: World): Promise<TestHost> {
         async run(program, args, spawnOptions) {
           if (
             !spawnPermitted(
-              effectivePermissions(manifest.core, manifest.permissions?.spawn ?? []),
+              effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
               options.items ?? NO_ITEMS,
               program,
             )
@@ -717,7 +717,7 @@ async function start(world: World): Promise<TestHost> {
           const parsed = new URL(url);
           if (
             !hostPermitted(
-              effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+              effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
               options.items ?? NO_ITEMS,
               parsed.hostname,
               name =>
@@ -742,7 +742,7 @@ async function start(world: World): Promise<TestHost> {
             throw new Error(`${manifest.id}: ${parsed.protocol} is not a WebSocket address`);
           if (
             !hostPermitted(
-              effectivePermissions(manifest.core, manifest.permissions?.network ?? []),
+              effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
               options.items ?? NO_ITEMS,
               parsed.hostname,
               name =>
