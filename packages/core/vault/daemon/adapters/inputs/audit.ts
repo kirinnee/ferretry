@@ -24,7 +24,7 @@ const detailOf = (detail: Readonly<Record<string, string | number | boolean | un
  * `by: 'agent'` saying which. The daemon's own act (an expiry) is `cause: 'daemon'`, carried as a detail: Gate's
  * record has no `cause` field.
  */
-export class InputAuditAdapter implements InputAudit {
+export class InputGateAudit implements InputAudit {
   constructor(private readonly gate: Pick<GateApi, 'audit'>) {}
 
   async record(entry: InputAuditEntry): Promise<void> {

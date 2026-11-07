@@ -1,273 +1,144 @@
-import { hostname } from 'node:os';
-import { InputEventSchema, InputQuarantineEventSchema, type InputEvent, type InputQuarantineEvent } from './lib/inputs/wire.ts';
-import { DAEMON_FEATURES, daemonFeatureList, SessionStateSchema } from '@ferretry/protocol';
-import { asActivity } from '../../src/adapters/index.ts';
-import { runProgram } from '../../src/adapters/terminal/index.ts';
-import { ExecutableCodePrograms } from '../../src/adapters/system/executable-code-programs.ts';
-import { KernelProgramProof } from '../../src/adapters/system/kernel-program-proof.ts';
-import type { DaemonStorage } from '../../src/adapters/storage/session-storage.ts';
-import {
-  type ActivityLedger,
-  type AgendaReplyBatcher,
-  type AgendaService,
-  type AuditLog,
-  type EphemeralValues,
-  INPUT_ENDED_SESSION_STATUSES,
-  INPUT_REQUEST_SWEEP_MS,
-  InputAgendaAdapter,
-  InputAgentNotifierAdapter,
-  InputAuditAdapter,
-  type InputClosestAgenda,
-  InputLoginAdapter,
-  InputLoginProbe,
-  type InputPasteRules,
-  InputRequestService,
-  type InputSealedPort,
-  InputTargetRouter,
-  type LoginDirectory,
-  type LoginFactSink,
-  LoginObserver,
-  PageInputTarget,
-  type PageInputHost,
-  PhoneApprovalAgendaAdapter,
-  PhoneApprovalAuditAdapter,
-  type PhoneApprovalPushPort,
-  PhoneApprovalService,
-  type QuarantineRegistry,
-  SecretStoreTarget,
-  type SecretStoreDirectory,
-  type SignInChoicePort,
-  type SignInGrantSource,
-  SttyTerminalModes,
-  TmuxInputTarget,
-  tryParseSessionId,
-  TypedIdentities,
-  type TerminalRuntimePort,
-  type TmuxCommandPort,
-} from '../../src/lib/index.ts';
-import type { AccountVault } from '../../src/lib/secrets/accounts.ts';
-import type { DaemonModule } from '../../src/lib/runtime/modules.ts';
-import { inputRequestsContribution } from '../../src/lib/runtime/mounts/input-requests.ts';
+import { type AsksApi, EntryIdSchema } from '@ferretry/core-asks/contract';
+import type { GateApi } from '@ferretry/core-gate/contract';
+import type { FerretId, KernelPorts } from '@ferretry/kernel/contract';
+import type { HookInvoker } from '@ferretry/kernel/manifest';
+import { milliseconds } from '@ferretry/std';
+import { type InputTargetAdapter, InputRequestFiles, InputTargets } from '../contract/index.ts';
+import { InputAgentNotifierAdapter, InputAsksAdapter } from './adapters/inputs/asks.ts';
+import { InputGateAudit } from './adapters/inputs/audit.ts';
+import { InputStateJournal } from './adapters/inputs/journal.ts';
+import { PageTargetThroughHook, TerminalTargetThroughHook } from './adapters/inputs/targets.ts';
+import type { SignInGrantSource } from './lib/inputs/borrowed-grants.ts';
+import type { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
+import type { LoginFactSink, LoginObserver } from './lib/inputs/login-observer.ts';
+import type {
+  InputChoicePort,
+  InputLoginPort,
+  InputPasteRules,
+  InputSealedPort,
+} from './lib/inputs/ports.ts';
+import type { QuarantineRegistry } from './lib/inputs/quarantine.ts';
+import { type SecretStoreDirectory, SecretStoreTarget } from './lib/inputs/secret-store-target.ts';
+import { InputRequestService } from './lib/inputs/service.ts';
+import { INPUT_REQUEST_SWEEP_MS } from './lib/inputs/sweep.ts';
+import { InputTargetRouter } from './lib/inputs/target-router.ts';
+import { TypedIdentities } from './lib/inputs/typed-identities.ts';
+import { INPUT_ASK_SOURCE } from './adapters/inputs/asks.ts';
 
 /**
- * The input bridge: an agent stuck at a password prompt, a code or a question asks the owner through an agenda card
- * (`/v1/input-requests`, docs/input-requests.md), and a sign-in that needs the owner's phone is approved there
- * (`/v1/phone-approvals`, "Approve on your phone").
+ * THE INPUT BRIDGE (today's `bin/modules/input-requests.ts`): a ferret stuck at a password prompt, a code or a
+ * question asks the owner through an input card (an ask of source `input`), and the Vault types the owner's value into
+ * the terminal or page through that tool's `input.targets` adapter (§4.7), then holds the target and masks the value.
  *
- * See `./learning.ts` for what a module file owns. This module has no `Seams` (it replaces no production adapter that
- * `DaemonWorld` carries: the dictation and browser seams are other modules'), no jobs armed by `start()` and no
- * releases: its phone-approvals restore starts while it is built, and its sweep and input-requests restore start from
- * `startInputHousekeeping`, which the host calls at the point they always ran (after the secure-copies interval); its
- * timer is unreferenced and never cleared.
- *
- * Nothing built here stores a value except the service's own in-memory map of values to scrub.
+ * Built synchronously inside the Vault's `build(ctx)`; the restore and the sweep are jobs (they ran from
+ * `startInputHousekeeping` today). Nothing built here stores a value except the service's own in-memory map of values
+ * to mask.
  */
 
-/** What the input-requests module is built from. */
-export interface InputRequestsNeeds {
-  readonly storage: DaemonStorage;
-  readonly terminals: TerminalRuntimePort;
-  readonly tmux: TmuxCommandPort;
-  readonly agenda: AgendaService;
-  /** The open agenda an input card belongs with, so it links its topic instead of reading as a fresh one. */
-  readonly closestAgenda?: InputClosestAgenda;
-  readonly agentReplies: AgendaReplyBatcher;
-  readonly audit: AuditLog;
+/** What Vault's own build hands the input bridge (vault-a's half owns the redactor and the secret store). */
+export interface InputsDeps {
+  /** The redaction window: the one retained copy of a typed value (I9), shared with the output redactor. */
   readonly values: EphemeralValues;
+  /** The live holds (`InputHolds`): the same registry the kernel-bound hold decision reads. */
   readonly quarantine: QuarantineRegistry;
+  /** Masks every known secret in a line before the card shows it. */
   readonly redact: (text: string) => Promise<string>;
-  /** The directory and the vault the saved logins are read from and typed from: what the card offers, what "Use" types. */
-  readonly loginDirectory: LoginDirectory;
-  readonly loginVault: Pick<AccountVault, 'fill'>;
-  /** The session's project, folder and the owner's defaults, which order the saved logins a card offers. */
-  readonly choice: SignInChoicePort;
-  /** The agent browser's pages, for a request on a page: looked at, pictured and typed into in each page's own queue. */
-  readonly pages: PageInputHost;
-  /** Secure copies a paste types from, and the owner's rules that approve pastes in advance. */
-  readonly sealed: InputSealedPort;
-  readonly rules: InputPasteRules;
-  /** Where a paste "as the secret NAME" is kept. */
-  readonly secretStore: SecretStoreDirectory;
-  /** Where a sign-in's observed facts go: the account directory, under its store lock. */
-  readonly loginFacts: LoginFactSink;
-  /** An approve-on-phone card's buzz: at the raise and for each new number, inside the high-priority caps. */
-  readonly approvalPush: PhoneApprovalPushPort;
+  /** Where a paste "as the secret NAME" is kept; absent: such a paste is unsupported. */
+  readonly secretStore?: SecretStoreDirectory;
   /**
-   * Sign-ins the owner approved in advance, on a task plan or with a standing rule: filled only while `task-plan.1` (or
-   * `sign-in-rules.1`) is advertised.
+   * Saved logins, sign-ins, secure copies, paste rules and approved sign-ins: Accounts' (the proposed `input.saved`
+   * hook). Each is optional exactly as today; absent, the card offers nothing saved and every value is typed.
    */
-  readonly grants?: SignInGrantSource;
-  /** A card raised quiet that a standing rule did not fill buzzes again, with no edit to its words. */
-  readonly rebuzz?: (sessionId: string) => Promise<void>;
-  /** The housekeeping ledger the sweep and the restores run inside, or none. */
-  readonly activities: ActivityLedger | undefined;
+  readonly accounts?: {
+    readonly logins?: InputLoginPort;
+    readonly choice?: InputChoicePort;
+    readonly sealed?: InputSealedPort;
+    readonly rules?: InputPasteRules;
+    readonly grants?: SignInGrantSource;
+    readonly loginFacts?: LoginFactSink;
+  };
+  /** Tells a ferret its request ended (today's agent reply outbox); absent, the ferret reads its state instead. */
+  readonly tellFerret?: (ferret: FerretId, key: string, message: string) => Promise<unknown>;
+  /** Whether a ferret has finished, so what it was given is no longer held for it; absent, none has. */
+  readonly ferretEnded?: (ferret: FerretId) => Promise<boolean>;
+  readonly hostName?: string;
 }
 
-/** What other code uses of the input-requests module. */
-export interface InputRequestsProvides {
+/** What the rest of the Vault uses of the input bridge. */
+export interface Inputs {
   readonly service: InputRequestService;
-  readonly observer: LoginObserver;
-  readonly approvals: PhoneApprovalService;
   readonly identities: TypedIdentities;
-  /**
-   * The input-requests sweep: `input-requests-restore`, then the unreferenced interval. A CONSTRUCTION-time step the host
-   * calls once, immediately after the secure-copies interval (the old position), never from `start()`.
-   */
-  readonly startInputHousekeeping: () => void;
+  readonly observer?: LoginObserver;
 }
 
-export const inputRequestsModule: DaemonModule<void, InputRequestsNeeds, InputRequestsProvides> = {
-  id: 'inputRequests',
-  build: needs => {
-    const clock = { now: () => Date.now() };
-    const terminalTarget = new TmuxInputTarget(
-      needs.tmux,
-      {
-        locate: async (sessionId, key) =>
-          (await needs.terminals.list()).find(
-            record => record.ownerId === sessionId && (record.name === key || record.id === key),
-          ),
-      },
-      new SttyTerminalModes(process.platform, runProgram),
-      runProgram,
-      // An echo-off code prompt stays a code only from a code program this account cannot replace (never the ps name).
-      ExecutableCodePrograms.forPlatform(process.platform),
-      // Who can read the TTY, proved by the kernel for EVERY process of the foreground group, never by the name ps shows:
-      // without it a card is unverified, never green, and keeps the full lock.
-      KernelProgramProof.forPlatform(process.platform, runProgram, process.getuid?.()),
-    );
-    const pageTarget = new PageInputTarget(needs.pages);
-    // What a saved login's sign-in looked like, from the daemon's own looks at the target (docs/input-requests.md,
-    // "Login recipes"); the ferret's acts are reported to it, so a fact it could have steered is not kept.
-    const observer = new LoginObserver({
-      sink: needs.loginFacts,
-      probe: new InputLoginProbe(pageTarget, terminalTarget),
-      now: () => Date.now(),
-      sleep: async milliseconds => await Bun.sleep(milliseconds),
-    });
-    // Who a page is signing in, as the ferret typed it: plain text it held already, for the owner's card only.
-    const identities = new TypedIdentities(() => Date.now());
-    // One of the two holders of the LoginVault (docs/secrets.md; the other is the redactor): the input bridge
-    // types a saved login into the target the owner tapped "Use" for, and answers only what happened.
-    const logins = new InputLoginAdapter(needs.loginDirectory, needs.loginVault);
-    const service = new InputRequestService({
-      observer,
-      identities,
-      target: new InputTargetRouter(
-        terminalTarget,
-        pageTarget,
-        // A secure copy pasted "as the secret NAME" (docs/secure-copy.md): the vault's management surface, which
-        // replaces a value and lists names, never returns one.
-        new SecretStoreTarget(needs.secretStore),
-      ),
-      agenda: new InputAgendaAdapter(needs.agenda, needs.closestAgenda),
-      notifier: new InputAgentNotifierAdapter(
-        async (sessionId, key, message) => await needs.agentReplies.add(sessionId, key, message),
-      ),
-      journal: {
-        publish: async (sessionId, event) => {
-          const id = tryParseSessionId(sessionId);
-          if (id !== undefined) await needs.storage.append(id, event.type, { ...event });
-        },
-        quarantine: async (sessionId, event) => {
-          const id = tryParseSessionId(sessionId);
-          if (id !== undefined) await needs.storage.append(id, event.type, { ...event });
-        },
-        quarantines: async sessionId => {
-          const id = tryParseSessionId(sessionId);
-          const events: InputQuarantineEvent[] = [];
-          if (id === undefined || needs.storage.findSession(id) === undefined) return events;
-          for (let after = 0; ; ) {
-            const page = await needs.storage.replay(id, after, 10_000);
-            for (const recorded of page.events) {
-              const parsed = recorded.type.startsWith('surface.input_quarantine')
-                ? InputQuarantineEventSchema.safeParse(recorded.data)
-                : undefined;
-              if (parsed?.success === true) events.push(parsed.data);
-            }
-            if (!page.hasMore || page.nextSequence === undefined) return events;
-            after = page.nextSequence;
-          }
-        },
-        history: async sessionId => {
-          const id = tryParseSessionId(sessionId);
-          const events: InputEvent[] = [];
-          if (id === undefined || needs.storage.findSession(id) === undefined) return events;
-          for (let after = 0; ; ) {
-            const page = await needs.storage.replay(id, after, 10_000);
-            for (const recorded of page.events) {
-              const parsed = recorded.type.startsWith('surface.input_')
-                ? InputEventSchema.safeParse(recorded.data)
-                : undefined;
-              if (parsed?.success === true) events.push(parsed.data);
-            }
-            if (!page.hasMore || page.nextSequence === undefined) return events;
-            after = page.nextSequence;
-          }
-        },
-      },
-      audit: new InputAuditAdapter(needs.audit),
-      clock,
-      ids: { requestId: () => crypto.randomUUID().replaceAll('-', '') },
-      timers: { after: async milliseconds => await Bun.sleep(milliseconds) },
-      sessions: {
-        ended: async sessionId => {
-          const id = tryParseSessionId(sessionId);
-          if (id === undefined || needs.storage.findSession(id) === undefined) return true;
-          const state = SessionStateSchema.safeParse(await needs.storage.readState(id));
-          return state.success && INPUT_ENDED_SESSION_STATUSES.has(state.data.status);
-        },
-        all: async () => needs.storage.listSessions().map(session => session.id),
-      },
-      values: needs.values,
-      quarantine: needs.quarantine,
-      redact: needs.redact,
-      logins,
-      choice: needs.choice,
-      sealed: needs.sealed,
-      rules: needs.rules,
-      ...(needs.grants === undefined ? {} : { grants: needs.grants }),
-      ...(needs.rebuzz === undefined ? {} : { rebuzz: needs.rebuzz }),
-      hostName: hostname(),
-    });
-    // Approve on your phone (docs/input-requests.md): the number is read by the browser from the page only, and the card
-    // settles only on the daemon's own look at the page or terminal; the ferret's acts are the observer's to weigh.
-    const approvals = new PhoneApprovalService({
-      pages: { look: async (sessionId, key) => await pageTarget.pushNumber(sessionId, key) },
-      terminals: terminalTarget,
-      agenda: new PhoneApprovalAgendaAdapter(needs.agenda),
-      push: needs.approvalPush,
-      notifier: new InputAgentNotifierAdapter(
-        async (sessionId, key, message) => await needs.agentReplies.add(sessionId, key, message),
-      ),
-      audit: new PhoneApprovalAuditAdapter(needs.audit),
-      clock,
-      timers: { after: async milliseconds => await Bun.sleep(milliseconds) },
-      ids: () => `pa_${crypto.randomUUID().replaceAll('-', '').slice(0, 24)}`,
-      observer,
-      logins,
-      facts: needs.loginFacts,
-      hostName: hostname(),
-      // Offered only while the daemon reports it: the app draws the card, so DAEMON_FEATURES.phoneApproval is reported.
-      enabled: () => daemonFeatureList().includes(DAEMON_FEATURES.phoneApproval),
-    });
-    void asActivity(
-      needs.activities,
-      'phone-approvals-restore',
-      async () => await approvals.restore(needs.storage.listSessions().map(session => session.id)),
-    )();
-    // Not started here: the secure-copies sweep, which `fyd.ts` builds after this module, has always been created BEFORE
-    // this one, and the two share the agenda and the audit log, so the host calls this at that old point.
-    const startInputHousekeeping = (): void => {
-      const sweepInputRequests = asActivity(needs.activities, 'input-requests', async () => await service.sweep());
-      void asActivity(needs.activities, 'input-requests-restore', async () => await service.restore())();
-      setInterval(sweepInputRequests, INPUT_REQUEST_SWEEP_MS).unref();
-    };
-    return {
-      id: 'inputRequests',
-      provides: { service, observer, approvals, identities, startInputHousekeeping },
-      jobs: {},
-      contributes: inputRequestsContribution(service, approvals),
-    };
-  },
-};
+/** The part of `build(ctx)` the input bridge reads. */
+export interface InputsContext {
+  readonly kernel: Pick<KernelPorts, 'clock' | 'state' | 'jobs'>;
+  readonly needs: { readonly asks: AsksApi; readonly gate: Pick<GateApi, 'audit'> };
+  readonly hooks: Pick<HookInvoker, 'provider'>;
+}
+
+export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
+  const { clock, state, jobs } = ctx.kernel;
+  const provider = (kind: 'terminal' | 'page'): InputTargetAdapter | undefined => {
+    const found = ctx.hooks.provider(InputTargets, kind);
+    return found === 'unavailable' ? undefined : found;
+  };
+  const cardOf = async (requestId: string) => {
+    const [open] = await ctx.needs.asks.open({ source: INPUT_ASK_SOURCE, entry: EntryIdSchema.parse(requestId), state: 'open' });
+    return open?.id as string | undefined;
+  };
+  const journal = new InputStateJournal(state, cardOf, () => clock.now());
+  // Who a page is signing in, as the ferret typed it: plain text it held already, for the owner's card only.
+  const identities = new TypedIdentities(() => clock.nowMs());
+  const accounts = deps.accounts ?? {};
+  const service = new InputRequestService({
+    identities,
+    target: new InputTargetRouter(
+      new TerminalTargetThroughHook(provider),
+      new PageTargetThroughHook(provider),
+      // A secure copy pasted "as the secret NAME": the vault's management surface, which replaces a value and lists
+      // names, never returns one.
+      deps.secretStore === undefined ? undefined : new SecretStoreTarget(deps.secretStore),
+    ),
+    agenda: new InputAsksAdapter(ctx.needs.asks, journal),
+    notifier: new InputAgentNotifierAdapter(deps.tellFerret ?? (async () => undefined)),
+    journal,
+    audit: new InputGateAudit(ctx.needs.gate),
+    clock: { now: () => clock.nowMs() },
+    ids: { requestId: () => crypto.randomUUID().replaceAll('-', '') },
+    timers: { after: async ms => await clock.sleep(milliseconds(ms)) },
+    sessions: {
+      ended: async ferret => (await deps.ferretEnded?.(ferret as FerretId)) ?? false,
+      all: async () => [...new Set(await ferretsWithRequests(state))],
+    },
+    values: deps.values,
+    quarantine: deps.quarantine,
+    redact: deps.redact,
+    ...(accounts.logins === undefined ? {} : { logins: accounts.logins }),
+    ...(accounts.choice === undefined ? {} : { choice: accounts.choice }),
+    ...(accounts.sealed === undefined ? {} : { sealed: accounts.sealed }),
+    ...(accounts.rules === undefined ? {} : { rules: accounts.rules }),
+    ...(accounts.grants === undefined ? {} : { grants: accounts.grants }),
+    ...(deps.hostName === undefined ? {} : { hostName: deps.hostName }),
+  });
+  // Every hold comes back before any request does (I82); then the sweep runs on its own interval.
+  jobs.add({ id: 'inputs-restore', schedule: { onceAfterStart: true }, run: async () => await service.restore() });
+  jobs.add({
+    id: 'inputs-sweep',
+    schedule: { every: milliseconds(INPUT_REQUEST_SWEEP_MS) },
+    after: ['inputs-restore'],
+    run: async () => await service.sweep(),
+  });
+  return { service, identities };
+}
+
+async function ferretsWithRequests(state: InputsContext['kernel']['state']): Promise<readonly string[]> {
+
+  const ferrets: string[] = [];
+  for (const name of await state.list(InputRequestFiles)) {
+    const read = await state.read(InputRequestFiles, name);
+    if (read.ok && read.value !== undefined) ferrets.push(read.value.ferret);
+  }
+  return ferrets;
+}
