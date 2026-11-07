@@ -1,4 +1,11 @@
-import { type AskId, AskIdSchema, type AsksApi, type EntryId, EntryIdSchema, type SourceKey } from '@ferretry/core-asks/contract';
+import {
+  type AskId,
+  AskIdSchema,
+  type AsksApi,
+  type EntryId,
+  EntryIdSchema,
+  type SourceKey,
+} from '@ferretry/core-asks/contract';
 import type { FerretId } from '@ferretry/kernel/contract';
 import type { InputAgendaPort, InputAgentNotifier, InputCard, InputCardResult } from '../../lib/inputs/ports.ts';
 import { type AgendaId, INPUT_PROMPT_MARKER } from '../../lib/inputs/wire.ts';
@@ -43,7 +50,7 @@ export class InputAsksAdapter implements InputAgendaPort {
 
   async raise(sessionId: string, card: InputCard): Promise<InputCardResult> {
     try {
-      const id = await this.asks.raise({
+      const ask = await this.asks.raise({
         source: INPUT_ASK_SOURCE,
         ref: { request: card.requestId },
         entry: entryOf(card.requestId),
@@ -56,21 +63,21 @@ export class InputAsksAdapter implements InputAgendaPort {
         ferret: sessionId,
         ...(card.blocking ? { blocking: true } : {}),
       });
-      return { ok: true, id: id as string as AgendaId };
+      return { ok: true, id: ask.id as string as AgendaId };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : 'Asks kept no card for this request' };
     }
   }
 
-  async close(_sessionId: string, id: AgendaId, _note: string): Promise<void> {
+  async close(sessionId: string, id: AgendaId, _note: string): Promise<void> {
     const ask = askOf(id);
-    if (ask !== undefined) await this.asks.close(ask, 'withdrawn').catch(() => undefined);
+    if (ask !== undefined) await this.asks.close({ ferret: sessionId, id: ask }, 'withdrawn').catch(() => undefined);
   }
 
-  async promptOf(_sessionId: string, id: AgendaId): Promise<string | undefined> {
+  async promptOf(sessionId: string, id: AgendaId): Promise<string | undefined> {
     const ask = askOf(id);
     if (ask === undefined) return undefined;
-    const summary = await this.asks.get(ask).catch(() => undefined);
+    const summary = await this.asks.get({ ferret: sessionId, id: ask }).catch(() => undefined);
     if (summary === undefined || summary.source !== INPUT_ASK_SOURCE || summary.state !== 'open') return undefined;
     return await this.records.promptOf(summary.entry);
   }
