@@ -38,3 +38,46 @@ export async function readLocalFile(read: (path: string) => Promise<string>, pat
     throw new MachineCommandError(`Could not read ${path}.`);
   }
 }
+
+/**
+ * Refuses a word the verb has no place for, BEFORE anything is read or sent. The shell reads one value per `--name`, so
+ * the old variadic form `--skip a b` leaves `b` behind as a positional; dropping it silently would apply the rest of the
+ * command without it. `expected` is how many positionals the verb takes.
+ */
+export function refuseLeftoverWords(
+  invocation: VerbInvocation,
+  expected: number,
+  verb: string,
+  binaryName: string,
+): void {
+  const left = invocation.args.slice(expected);
+  if (left.length === 0) return;
+  throw new MachineCommandError(
+    `${binaryName} ${verb} has no place for ${left.map(word => `"${word}"`).join(', ')}. Nothing was applied. ` +
+      `A list option is repeated, one value each time (--skip a --skip b), not given several values (--skip a b).`,
+  );
+}
+
+/**
+ * Refuses a switch that took the word after it as its value (`--yes claude`): the shell cannot tell a switch from an
+ * option with a value, so the word would be lost and the switch left off. Nothing is run.
+ */
+export function refuseSwallowingSwitches(
+  invocation: VerbInvocation,
+  switches: readonly string[],
+  binaryName: string,
+): void {
+  for (const name of switches) {
+    const value = invocation.options[name];
+    const text = typeof value === 'string' ? value : Array.isArray(value) ? (value[0] as string) : undefined;
+    if (text === undefined || text === 'true' || text === 'false') continue;
+    throw new MachineCommandError(
+      `--${name} is a switch and took "${text}" as its value, so it is not on and "${text}" was not read as an ` +
+        `argument. Nothing was applied. Write the arguments first (${binaryName} machine … ${text} --${name}), or end ` +
+        `the switches with --.`,
+    );
+  }
+}
+
+/** The switches every machine write takes. */
+export const WRITE_SWITCHES = ['dry-run', 'yes', 'y', 'json'] as const;

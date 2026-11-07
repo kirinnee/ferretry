@@ -20,7 +20,15 @@ import { optionOn } from '../argv.ts';
 import { EXIT } from '../errors.ts';
 import { confirmStep, requireMayApply, runChange } from '../machine/change.ts';
 import { type CloneOptions, runClone } from '../machine/clone-command.ts';
-import { optionList, parseHarness, readLocalFile, writeFlags } from '../machine/flags.ts';
+import {
+  optionList,
+  parseHarness,
+  readLocalFile,
+  refuseLeftoverWords,
+  refuseSwallowingSwitches,
+  WRITE_SWITCHES,
+  writeFlags,
+} from '../machine/flags.ts';
 import { ClientMachineGateway } from '../machine/gateway.ts';
 import { type MachineDeps, MachineCommandError, type MachineHarness } from '../machine/ports.ts';
 import { HARNESS_LABEL, indent } from '../machine/render.ts';
@@ -270,9 +278,21 @@ export const machineShowVerb = withMachine(async (deps, ctx) => {
   );
 });
 
+/** How many values each machine setting takes after its name. */
+const VALUES_TAKEN: Readonly<Record<string, number>> = {
+  'agent-permissions': 1,
+  'default-runtime': 1,
+  'agent-control': 2,
+  'auto-resume': 1,
+  'agenda-mode': 1,
+};
+
 /** V-0316: change one machine setting. */
 export const machineSetVerb = withMachine(async (deps, ctx) => {
+  refuseSwallowingSwitches(ctx.invocation, WRITE_SWITCHES, deps.binaryName);
   const [setting, ...value] = ctx.invocation.args;
+  const takes = setting !== undefined && Object.hasOwn(VALUES_TAKEN, setting) ? VALUES_TAKEN[setting] : undefined;
+  if (takes !== undefined) refuseLeftoverWords(ctx.invocation, 1 + takes, 'machine set', deps.binaryName);
   if (setting === undefined)
     throw new MachineCommandError(
       `Name the setting: ${deps.binaryName} machine set <setting> <value...> (agent-permissions, default-runtime, agent-control, auto-resume, agenda-mode).`,
@@ -284,6 +304,7 @@ export const machineSetVerb = withMachine(async (deps, ctx) => {
 
 /** V-0315: install Claude Code or Codex. */
 export const machineInstallVerb = withMachine(async (deps, ctx) => {
+  refuseSwallowingSwitches(ctx.invocation, WRITE_SWITCHES, deps.binaryName);
   const tools = ctx.invocation.args;
   if (tools.length === 0)
     throw new MachineCommandError(`Name a tool: ${deps.binaryName} machine install claude, codex, or both.`);
@@ -298,6 +319,8 @@ export const machineExportVerb = withMachine(async deps => {
 
 /** V-0313: copy a setup exported from another machine, or update an earlier copy. */
 export const machineCloneVerb = withMachine(async (deps, ctx) => {
+  refuseSwallowingSwitches(ctx.invocation, [...WRITE_SWITCHES, 'replace', 'alongside'], deps.binaryName);
+  refuseLeftoverWords(ctx.invocation, 1, 'machine clone', deps.binaryName);
   const [file] = ctx.invocation.args;
   const options = cloneOptions(ctx.invocation);
   const bundle =

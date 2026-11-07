@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { definePlugin, route } from '@ferretry/kernel/manifest';
 import {
   type AccountChange,
@@ -12,6 +15,8 @@ import {
   type SetupScan,
 } from '@ferretry/plugin-runtimes/contract';
 import should from 'should';
+import { parseArgs } from '../../src/lib/argv.ts';
+import { optionList } from '../../src/lib/machine/flags.ts';
 import { renderMachine, installTools, machineSettingsEdit, parseCloneBundle } from '../../src/lib/commands/machine.ts';
 import { MACHINE_ROUTES } from '../../src/lib/machine/gateway.ts';
 import { runClone } from '../../src/lib/machine/clone-command.ts';
@@ -534,5 +539,134 @@ describe('fy machine clone (V-0313)', () => {
     await runClone(deps, 'f', bundle(), {});
     should(text()).containEql('Everything from desktop is already here. Nothing to copy.');
     should(calls.staged).deepEqual([]);
+  });
+});
+
+describe('the machine verbs through the router, by row', () => {
+  const allRoutes = () =>
+    skeletonEntry(
+      definePlugin({
+        id: 'runtimes',
+        title: 'Runtimes',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: ['command'],
+        actions: {
+          routes: Object.values(MACHINE_ROUTES).map(key =>
+            route(key, { minimum: 'operator', audit: { skip: 't' }, guard: { none: 't' }, caller: 'any' }),
+          ),
+        },
+      }),
+      'h-runtimes',
+    );
+
+  const wired = (replies: unknown[]) => {
+    const made = fakeWorld({
+      registry: registryOf(allRoutes()),
+      inventory: inventoryOf({ id: 'runtimes', contract: 'h-runtimes' }),
+    });
+    for (const body of replies) made.transport.replies.push({ status: 200, body });
+    return {
+      ...made,
+      world: {
+        ...made.world,
+        prompt: { ask: async () => 'y' },
+        readText: async (path: string) => Bun.file(path).text(),
+      },
+    };
+  };
+
+  const paths = (sent: readonly { method: string; path: string }[]) => sent.map(request => request.path);
+
+  it('V-0316 fy machine set stages the one named field through the Runtimes routes (fails without the verb)', async () => {
+    // The daemon's answers are not what is under test (the Runtimes tests own their shape): the verb must read the
+    // machine and then STAGE exactly the one field named, through the declared route. Without the verb nothing is sent.
+    const { world, transport } = wired([machineView(), machineView()]);
+    await runFy(['machine', 'set', 'agent-permissions', 'skip', '--dry-run'], world);
+    should(paths(transport.sent)).containEql('/v1/runtimes/proposals');
+    const staged = transport.sent.find(request => request.path === '/v1/runtimes/proposals')?.body as {
+      change: AccountChange;
+    };
+    should(staged.change).containEql({ kind: 'machine.settings', agentPermissions: 'skip', autoResume: true });
+  });
+
+  it('V-0316 fy machine set refuses a value the setting does not take, and sends nothing', async () => {
+    const { world, io, transport } = wired([machineView()]);
+    should(await runFy(['machine', 'set', 'agent-permissions', 'auto', 'skip'], world)).equal(1);
+    should(io.stderr()).containEql('has no place for "skip"');
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('V-0316 a switch that took the next word as its value is refused, not read as off', async () => {
+    const { world, io, transport } = wired([machineView()]);
+    should(await runFy(['machine', 'set', 'auto-resume', '--yes', 'off'], world)).equal(1);
+    should(io.stderr()).containEql('--yes is a switch and took "off" as its value');
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('V-0315 fy machine install shows the command and, with --dry-run, runs nothing (fails without the verb)', async () => {
+    const scan = {
+      machine: 'laptop',
+      format: 'present',
+      harnesses: [],
+      runtimes: [],
+      updates: [],
+      duplicates: [],
+      notes: [],
+      importing: { available: true },
+      tools: [
+        {
+          harness: 'codex',
+          label: 'Codex',
+          installed: false,
+          install: { kind: 'runnable', command: 'npm install -g @openai/codex' },
+        },
+      ],
+    };
+    const { world, io, transport } = wired([machineView(), scan]);
+    should(await runFy(['machine', 'install', 'codex', '--dry-run'], world)).equal(0);
+    should(io.stdout()).containEql('Codex will be installed with: npm install -g @openai/codex');
+    should(paths(transport.sent)).deepEqual(['/v1/runtimes/machine', '/v1/runtimes/setup/scan']);
+  });
+
+  it('V-0315 fy machine install --yes claude is refused: the switch would have swallowed the tool', async () => {
+    const { world, io, transport } = wired([machineView()]);
+    should(await runFy(['machine', 'install', '--yes', 'claude'], world)).equal(1);
+    should(io.stderr()).containEql('--yes is a switch and took "claude"');
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('V-0313 the old variadic form --skip a b is refused whole: b is not silently applied, and nothing is sent', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'fy-clone-'));
+    try {
+      const file = join(dir, 'setup.json');
+      await writeFile(file, JSON.stringify(bundle()));
+      const { world, io, transport } = wired([machineView()]);
+      should(await runFy(['machine', 'clone', file, '--skip', 'mcp/notes', 'hooks/guard', '--yes'], world)).equal(1);
+      should(io.stderr()).containEql('has no place for "hooks/guard"');
+      should(io.stderr()).containEql('--skip a --skip b');
+      should(transport.sent).deepEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('V-0313 the repeated form --skip a --skip b is read as two items', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'fy-clone-'));
+    try {
+      const file = join(dir, 'setup.json');
+      await writeFile(file, JSON.stringify(bundle()));
+      const { world, io, transport } = wired([machineView()]);
+      await runFy(['machine', 'clone', file, '--skip', 'mcp/notes', '--skip', 'hooks/guard', '--dry-run'], world);
+      should(io.stderr()).not.containEql('has no place');
+      should(paths(transport.sent)).containEql('/v1/runtimes/clone/review');
+      should(optionList(parseArgs(['--skip', 'mcp/notes', '--skip', 'hooks/guard']), 'skip')).deepEqual([
+        'mcp/notes',
+        'hooks/guard',
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
