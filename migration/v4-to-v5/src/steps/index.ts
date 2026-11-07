@@ -11,6 +11,7 @@ import type { V5Writer } from '../v5/write.ts';
 import type { NotCarried, StepReport } from '../report.ts';
 import { accessStep } from './access.ts';
 import { agendaStep } from './agenda.ts';
+import { boardStep } from './board.ts';
 import { ferretsStep } from './ferrets.ts';
 import { harnessHomesStep } from './harness-homes.ts';
 import { terminalsStep } from './terminals.ts';
@@ -76,21 +77,7 @@ export const STEPS: readonly Step[] = [
   ),
   terminalsStep,
   harnessHomesStep,
-  pending(
-    {
-      id: 'board',
-      title: 'Board (cards, lanes, links, dependencies, history)',
-      owner: ['plugin-board'],
-      reads: [
-        'state/board/tasks/<id>.json',
-        'state/board/counters.json',
-        'board/ (lanes and switch, at the home root)',
-      ],
-      sealed: [],
-      notCarried: [CACHE],
-    },
-    'the Board state schema (@ferretry/plugin-board/contract)',
-  ),
+  boardStep,
   agendaStep,
   pending(
     {
