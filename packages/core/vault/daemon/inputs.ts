@@ -1,17 +1,17 @@
 import { type AskSourceSpec, type AsksApi, EntryIdSchema } from '@ferretry/core-asks/contract';
 import type { GateApi } from '@ferretry/core-gate/contract';
-import type { FerretId, InputHolds, KernelPorts } from '@ferretry/kernel/contract';
+import type { FerretId, KernelPorts } from '@ferretry/kernel/contract';
 import type { HookInvoker, ToolHandler } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
 import { InputAskRefSchema, type InputTargetAdapter, InputRequestFiles, InputTargets } from '../contract/index.ts';
 import { INPUT_ASK_SOURCE, InputAgentNotifierAdapter, InputAsksAdapter } from './adapters/inputs/asks.ts';
 import { InputGateAudit } from './adapters/inputs/audit.ts';
-import { InputHoldsOverService } from './adapters/inputs/holds.ts';
+import { type BoundInputHolds, HeardActs, InputHoldsOverService } from './adapters/inputs/holds.ts';
 import { InputStateJournal } from './adapters/inputs/journal.ts';
 import { PageTargetThroughHook, TerminalTargetThroughHook } from './adapters/inputs/targets.ts';
 import type { SignInGrantSource } from './lib/inputs/borrowed-grants.ts';
 import type { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
-import type { LoginFactSink, LoginObserver } from './lib/inputs/login-observer.ts';
+import { type LoginFactSink, LoginObserver, type LoginProbePort } from './lib/inputs/login-observer.ts';
 import type { InputChoicePort, InputLoginPort, InputPasteRules, InputSealedPort } from './lib/inputs/ports.ts';
 import type { QuarantineRegistry } from './lib/inputs/quarantine.ts';
 import { type SecretStoreDirectory, SecretStoreTarget } from './lib/inputs/secret-store-target.ts';
@@ -71,7 +71,7 @@ export interface Inputs {
   /** The agent tools, by the names `manifest.ts` declares (`input_wait`): spread into Vault's `tools`. */
   readonly tools: { readonly input_wait: ToolHandler };
   /** The kernel-bound `InputHolds` Vault provides as `inputHolds`. */
-  readonly holds: InputHolds;
+  readonly holds: BoundInputHolds;
   /** Vault's `ask.sources` provider for the key `input`: the input card's ref and title. */
   readonly askSource: AskSourceSpec;
 }
@@ -89,6 +89,12 @@ export interface InputsContext {
   readonly needs: { readonly asks: AsksApi; readonly gate: Pick<GateApi, 'audit'> };
   readonly hooks: Pick<HookInvoker, 'provider'>;
 }
+
+/** The login observer's looks, where nothing can be told yet: every answer is "cannot tell". */
+const UNTOLD: LoginProbePort = {
+  where: async () => undefined,
+  shows: async () => undefined,
+};
 
 export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
   const { clock, state, jobs } = ctx.kernel;
@@ -108,7 +114,18 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
   // Who a page is signing in, as the ferret typed it: plain text it held already, for the owner's card only.
   const identities = new TypedIdentities(() => clock.nowMs());
   const accounts = deps.accounts ?? {};
-  const service = new InputRequestService({
+  // The sign-in lock's ears: the acts the kernel tells `InputHolds.observed` after each completed act (HeardActs).
+  // Its own looks after a submit need the page's host and text, which `input.targets` does not carry: each answers
+  // "cannot tell", so no sign-in fact is kept until a target can say them.
+  const observer = new LoginObserver({
+    sink: accounts.loginFacts ?? { observeSignIn: async () => undefined },
+    probe: UNTOLD,
+    now: () => clock.nowMs(),
+    sleep: async ms => await clock.sleep(milliseconds(ms)),
+  });
+  const acts = new HeardActs(observer, () => [...service.openSessions(), ...deps.quarantine.sessions()]);
+  const service: InputRequestService = new InputRequestService({
+    observer: acts.view(observer),
     identities,
     target: new InputTargetRouter(
       new TerminalTargetThroughHook(provider),
@@ -149,9 +166,10 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
   return {
     service,
     identities,
+    observer,
     routes: inputRequestRoutes(service),
     tools: inputTools(service),
-    holds: new InputHoldsOverService(service, deps.quarantine, () => clock.nowMs()),
+    holds: new InputHoldsOverService(service, deps.quarantine, () => clock.nowMs(), acts),
     askSource: INPUT_ASK_SOURCE_SPEC,
   };
 }

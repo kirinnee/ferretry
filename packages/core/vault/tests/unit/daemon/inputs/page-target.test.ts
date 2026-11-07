@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import type { InputTargetFacts } from '../../../../contract/index.ts';
+import type { FerretId } from '@ferretry/kernel/contract';
+import type { InputTargetAdapter, InputTargetFacts } from '../../../../contract/index.ts';
 import should from 'should';
 import type {
   BrowserInputFacts,
@@ -321,6 +322,19 @@ describe('PageInputTarget.pushNumber', () => {
     // Assert
     should(read).eql({ pageId: 'page-7', read: READ });
     should(asked).eql(['page-7']);
+  });
+
+  it('should be the look phone approval reaches through input.targets, as the contract names it', async () => {
+    // Arrange
+    const adapter: Pick<InputTargetAdapter, 'pushNumber'> = new PageInputTarget(
+      pages({ pushNumberRead: async () => READ }),
+    );
+
+    // Act
+    const read = await adapter.pushNumber?.('s1' as FerretId, 'app');
+
+    // Assert
+    should(read).eql({ pageId: 'page-7', read: READ });
   });
 
   it('should answer nothing from a browser that cannot read one, a page that is not the session’s, or a failed read', async () => {

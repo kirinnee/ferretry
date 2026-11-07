@@ -12,7 +12,9 @@ import {
   type TargetRef,
 } from '@ferretry/kernel/contract';
 import should from 'should';
-import { InputHoldsOverService } from '../../../../daemon/adapters/inputs/holds.ts';
+import { closeAck } from '../../../../contract/index.ts';
+import { HeardActs, InputHoldsOverService } from '../../../../daemon/adapters/inputs/holds.ts';
+import { LoginObserver } from '../../../../daemon/lib/inputs/login-observer.ts';
 import { QuarantineRegistry } from '../../../../daemon/lib/inputs/quarantine.ts';
 import { inputTools } from '../../../../daemon/lib/runtime/tools/input-wait.ts';
 import { digestLine } from '../../../../daemon/lib/inputs/digest.ts';
@@ -155,7 +157,12 @@ const HOST = { kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' } as 
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');
 const revealOf = (target: TargetRef, untilMs: number): RevealGrant =>
   ({ target, until: new Date(untilMs).toISOString() }) as unknown as RevealGrant;
-const noCards = { openSessions: () => [], pendingOn: () => undefined, pageHeld: () => undefined };
+const noCards = {
+  openSessions: () => [],
+  pendingOn: () => undefined,
+  pageHeld: () => undefined,
+  pageDocument: async () => undefined,
+};
 
 describe('InputHolds, as the act runner asks it', () => {
   it('I72 should refuse every read of a quarantined terminal to the ferret and the owner’s tools, and let the ferret send keys', () => {
@@ -229,5 +236,102 @@ describe('the input_wait tool', () => {
     should(answer.data).have.property('state', 'cancelled');
     should(answer.data).not.have.property('observed');
     should(owner.isError).be.true();
+  });
+});
+
+const PAGE: TargetRef = { kind: 'page' as TargetKind, key: 'page-1' };
+
+/** A page held after a secret went into its document `loader-1`, and the document the page shows now. */
+function heldPage(now: string | undefined, documentsOnly = false) {
+  const held = {
+    until: NOW + 120_000,
+    documents: ['loader-1'],
+    ...(documentsOnly ? { documentsOnly: true as const } : {}),
+  };
+  return new InputHoldsOverService(
+    {
+      openSessions: () => [SESSION],
+      pendingOn: () => undefined,
+      pageHeld: (_session, names) => (names.includes('page-1') ? held : undefined),
+      pageDocument: async () => now,
+    },
+    { sessions: () => [], until: () => undefined },
+    () => NOW,
+  );
+}
+
+describe('InputHolds on a held page, with the document prepare read', () => {
+  it('I117 should refuse every read while the page shows the value’s document, and mask reads once it moved on', async () => {
+    const same = heldPage('loader-1');
+    const moved = heldPage('loader-2');
+    const untold = heldPage(undefined);
+
+    await same.prepare(PAGE, 'read', 'ferret');
+    should(same.decide(PAGE, 'read', 'ferret')).deepEqual({ refused: 'held' });
+    await moved.prepare(PAGE, 'read', 'ferret');
+    should(moved.decide(PAGE, 'read', 'ferret')).equal('allow-masked');
+    await moved.prepare(PAGE, 'script', 'ferret');
+    should(moved.decide(PAGE, 'script', 'ferret')).equal('allow-masked');
+    await untold.prepare(PAGE, 'read', 'ferret');
+    should(untold.decide(PAGE, 'read', 'ferret')).deepEqual({ refused: 'held' });
+    // A decide with no prepare before it knows no document: still showing it.
+    should(moved.decide(PAGE, 'read', 'ferret')).deepEqual({ refused: 'held' });
+  });
+
+  it('I116 should refuse pictures for the whole window, except a hold that follows its document once it moved on', async () => {
+    const plain = heldPage('loader-2');
+    const follows = heldPage('loader-2', true);
+    const followsHere = heldPage('loader-1', true);
+
+    await plain.prepare(PAGE, 'picture', 'ferret');
+    should(plain.decide(PAGE, 'picture', 'ferret')).deepEqual({ refused: 'held' });
+    await follows.prepare(PAGE, 'picture', 'ferret');
+    should(follows.decide(PAGE, 'picture', 'ferret')).equal('allow');
+    await followsHere.prepare(PAGE, 'stream', 'owner-viewer');
+    should(followsHere.decide(PAGE, 'stream', 'owner-viewer')).deepEqual({ refused: 'held' });
+  });
+});
+
+describe('InputHolds.observed, the acts the sign-in lock hears', () => {
+  const observerAt = (): LoginObserver =>
+    new LoginObserver({
+      sink: { observeSignIn: async () => undefined },
+      probe: { where: async () => undefined, shows: async () => undefined },
+      now: () => NOW,
+      sleep: async () => undefined,
+    });
+
+  it('I93 should void a page’s short lock for a ferret’s act on it after the raise, and for good for a script run before', () => {
+    const observer = observerAt();
+    const sessions: string[] = [];
+    const acts = new HeardActs(observer, () => sessions);
+    const holds = new InputHoldsOverService(noCards, { sessions: () => [], until: () => undefined }, () => NOW, acts);
+    const steer = acts.view(observer);
+
+    // A script before the ferret holds anything: no session to file it under, so the page itself is kept.
+    holds.observed(PAGE, 'script', 'ferret');
+    should(steer.pageSteer?.(SESSION, { id: 'page-1', host: 'accounts.example.test' }, NOW)).equal('scripted');
+    should(steer.pageSteer?.(SESSION, { id: 'page-2', host: 'other.example.test' }, NOW)).be.undefined();
+
+    // After the raise the session is known: an act on the card's page counts from then.
+    sessions.push(SESSION);
+    holds.observed({ ...PAGE, key: 'page-3' }, 'read', 'ferret');
+    holds.observed({ ...PAGE, key: 'page-3' }, 'type', 'owner-tools');
+    should(steer.pageSteer?.(SESSION, { id: 'page-3', host: 'accounts.example.test' }, NOW)).be.undefined();
+    holds.observed({ ...PAGE, key: 'page-3' }, 'type', 'ferret');
+    should(steer.pageSteer?.(SESSION, { id: 'page-3', host: 'accounts.example.test' }, NOW)).equal('acted');
+  });
+});
+
+describe('a write-only op’s answer', () => {
+  it('should be a strict Ack and nothing else: no bit about a password field reaches the ferret', () => {
+    const minted = {
+      has: () => false,
+      get: () => {
+        throw new Error('no ids');
+      },
+    } as never;
+
+    should(closeAck({ status: 'done', passwordField: true, typed: 'secret' }, minted)).deepEqual({ status: 'done' });
   });
 });

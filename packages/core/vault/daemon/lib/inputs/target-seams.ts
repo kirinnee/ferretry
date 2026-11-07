@@ -1,4 +1,8 @@
-import type { InputTargetFacts } from '../../../contract/index.ts';
+import type {
+  InputTargetFacts,
+  PushNumberProvider as ContractPushNumberProvider,
+  PushNumberRead,
+} from '../../../contract/index.ts';
 import type { BrowserElementTarget } from './borrowed.ts';
 
 /**
@@ -208,27 +212,9 @@ export interface BrowserInputClearJob {
 /** `cleared`: a field still held a value and is empty now; `moved`: none holds one; `unknown`: it can't be told. */
 export type BrowserInputClearOutcome = 'cleared' | 'moved' | 'unknown';
 
-/** A provider whose own sign-in page shows a push number (push-number.ts). */
-export type PushNumberProvider = 'okta' | 'microsoft' | 'google' | 'duo';
-
-/**
- * One look at a page for the number a push approval shows (docs/input-requests.md, "Approve on your phone"), as the
- * BROWSER answers it: where the page is (its origin and document, read before and after the look), which provider's
- * challenge the document is when one's document test held, and the number when one was found. The daemon decides
- * whether to believe it (the origin and the session's scripts); the browser only reads.
- */
-export interface BrowserPushNumberRead {
-  /** `scheme://host[:port]` of the page, from the browser. */
-  readonly origin: string;
-  /** The document the look was made in, read before it; a different one after is `missing: 'changed'`. */
-  readonly navigationId: string;
-  /** The provider whose challenge this document is, when its document test held (with or without a number). */
-  readonly provider?: PushNumberProvider;
-  /** The number: 1 to 6 digits, from the provider's own view, visible and no one can type into, in the main frame. */
-  readonly number?: { readonly value: string; readonly from: PushNumberProvider; readonly frameOrigin: string };
-  /** Why there is no number: none recognised, or the page changed meanwhile. */
-  readonly missing?: 'none-found' | 'changed';
-}
+/** The push number look is the Vault contract's now (`PushNumberRead`): one shape for every taker. */
+export type PushNumberProvider = ContractPushNumberProvider;
+export type BrowserPushNumberRead = PushNumberRead;
 
 export interface BrowserInputFieldsPort {
   /** The page's current document, cheaply: no field is looked at. */
@@ -283,4 +269,3 @@ export interface BrowserInputFieldsPort {
    */
   inputClear?(pageId: string, job: BrowserInputClearJob): Promise<BrowserInputClearOutcome>;
 }
-
