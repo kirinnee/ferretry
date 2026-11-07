@@ -150,7 +150,7 @@ export function resolveSpecifier(
 let oxcParseSync: typeof ParseSync | undefined;
 
 /** oxc-parser, loaded on first use (see the module comment). */
-function parser(): typeof ParseSync {
+export function parser(): typeof ParseSync {
   oxcParseSync ??= (createRequire(import.meta.url)('oxc-parser') as { parseSync: typeof ParseSync }).parseSync;
   return oxcParseSync;
 }

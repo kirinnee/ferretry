@@ -127,7 +127,7 @@ export {
 export { FRAME_SLOTS, isFrameSlot, isSlotName, PANEL_SLOTS, SHELL_ITEMS } from './layout/slots.ts';
 /** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2). */
 export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
-/** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar. */
+/** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar (§5.1). */
 export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
 export {
   COLOUR_TOKENS,
