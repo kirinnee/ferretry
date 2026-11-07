@@ -1,11 +1,15 @@
 /**
  * The logins a machine can run a Warden investigation on, and the models each offers: Runtimes' catalog
- * (`GET /v1/runtimes`), one row per runtime, projected to the fields the Warden's login and model fields read.
- * Missing evidence stays missing: a runtime with no model set offers no models and no default.
+ * (`GET /v1/runtimes`), one row per runtime, parsed with Runtimes' own schema and projected to the fields the Warden's
+ * login and model fields read. Missing evidence stays missing: a runtime with no model set offers no models and no
+ * default. Runtimes is an optional use of the Warden: with Runtimes off the read answers `off` and the model field
+ * is a plain text box.
  */
 
 import type { LocalModelsSnapshot, ModelChoice } from '@ferretry/app/ui';
-import { z } from 'zod';
+import type { PluginClient } from '@ferretry/kernel/manifest';
+import { RuntimeCatalogSchema, type RuntimeView } from '@ferretry/plugin-runtimes/contract';
+import { isPluginOff } from './plugin-off.ts';
 
 /** One model a login offers, as the model field lists it. */
 export type PickerModel = ModelChoice;
@@ -34,59 +38,8 @@ export interface PickerAccount {
   readonly unavailableReason: string | null;
 }
 
-const TierSchema = z.enum(['best', 'balanced', 'fast']);
-
-const LocalModelsSchema = z.object({
-  state: z.enum(['found', 'none-pulled', 'not-running', 'unreadable', 'refused', 'disabled']),
-  message: z.string(),
-  pullCommand: z.string(),
-});
-
-const RuntimeSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  wrapper: z.string(),
-  harness: z.string(),
-  agent: z.boolean(),
-  credential: z.object({ id: z.string() }),
-  modelSet: z.discriminatedUnion('source', [
-    z.object({ source: z.literal('harness-default') }),
-    z.object({
-      source: z.literal('model-set'),
-      models: z.array(z.object({ id: z.string(), available: z.boolean() })),
-      default: z.string().optional(),
-    }),
-  ]),
-  models: z
-    .object({
-      default: z.string().optional(),
-      catalog: z.object({ id: z.string(), label: z.string(), customIds: z.boolean() }),
-      local: LocalModelsSchema.optional(),
-      choices: z.array(
-        z.object({
-          id: z.string(),
-          available: z.boolean(),
-          label: z.string().optional(),
-          tier: TierSchema.optional(),
-          context: z.number().optional(),
-          efforts: z.array(z.string()),
-          defaultEffort: z.string().optional(),
-          fast: z.boolean().optional(),
-          local: z.literal(true).optional(),
-        }),
-      ),
-    })
-    .optional(),
-  launch: z.discriminatedUnion('available', [
-    z.object({ available: z.literal(true) }),
-    z.object({ available: z.literal(false), reason: z.string() }),
-  ]),
-});
-type Runtime = z.infer<typeof RuntimeSchema>;
-
-const CatalogSchema = z.object({ runtimes: z.array(RuntimeSchema) });
-
-const pickerAccount = (runtime: Runtime): PickerAccount => ({
+/** One runtime as the picker reads it. A model set's models are offered; the harness default offers none. */
+export const pickerAccount = (runtime: RuntimeView): PickerAccount => ({
   id: runtime.id,
   wrapper: runtime.wrapper,
   displayName: runtime.name,
@@ -103,7 +56,7 @@ const pickerAccount = (runtime: Runtime): PickerAccount => ({
         models: runtime.models.choices.map(choice => ({
           id: choice.id,
           available: choice.available,
-          ...(choice.label === undefined ? {} : { label: choice.label }),
+          label: choice.label,
           ...(choice.tier === undefined ? {} : { tier: choice.tier }),
           ...(choice.context === undefined ? {} : { context: choice.context }),
           efforts: choice.efforts,
@@ -122,16 +75,16 @@ const pickerAccount = (runtime: Runtime): PickerAccount => ({
   unavailableReason: runtime.launch.available ? null : runtime.launch.reason,
 });
 
-/** Runtimes' catalog, parsed and projected. Throws when the body is not one. */
-export const parseAccountPickerCatalog = (body: unknown): { readonly accounts: readonly PickerAccount[] } => ({
-  accounts: CatalogSchema.parse(body).runtimes.map(pickerAccount),
-});
-
-/**
- * GAP(plugin-edge): the read itself (`GET /v1/runtimes`, owned by Runtimes) waits for the Warden manifest to declare it
- * uses Runtimes; until then no route of another plugin is called and the model field is a plain text box. The swap is
- * this one function: call Runtimes' route through the client and `parseAccountPickerCatalog`.
- */
-export const readAccountPickerCatalog = async (): Promise<{ readonly accounts: readonly PickerAccount[] }> => {
-  throw new Error('The Warden does not read the runtime list yet.');
+/** This machine's runtimes, or `off` when Runtimes is not running on it. */
+export const readAccountPickerCatalog = async (
+  client: Pick<PluginClient, 'call'>,
+): Promise<{ readonly accounts: readonly PickerAccount[] } | 'off'> => {
+  try {
+    return {
+      accounts: RuntimeCatalogSchema.parse(await client.call<unknown>('GET /v1/runtimes')).runtimes.map(pickerAccount),
+    };
+  } catch (cause) {
+    if (isPluginOff(cause)) return 'off';
+    throw cause;
+  }
 };

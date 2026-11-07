@@ -30,7 +30,20 @@ const view = (config: WardenConfig = wardenConfig(), warnings: string[] = []): W
 
 const speedups = (set: boolean, vault: SpeedupsView['vault'] = 'ok'): SpeedupsView => ({
   vault,
-  providers: [{ provider: 'jev', keyUrl: 'https://keys.example.test/', set }],
+  providers: [
+    {
+      provider: 'jev',
+      label: 'Jev',
+      purpose: 'Triage.',
+      costNote: 'Cheap.',
+      privacyNote: 'A summary.',
+      keyUrl: 'https://keys.example.test/',
+      testNote: 'One decision.',
+      secretName: 'JEV_API_KEY',
+      set,
+      testStale: false,
+    },
+  ],
 });
 
 const json = (renderer: ReactTestRenderer): string => JSON.stringify(renderer.toJSON());

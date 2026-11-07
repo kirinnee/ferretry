@@ -1,7 +1,9 @@
 import { BoardPort } from '@ferretry/plugin-board/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
+import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import { TerminalsPort } from '@ferretry/plugin-terminals/contract';
+import { VoicePort } from '@ferretry/plugin-voice/contract';
 import { appAction, definePlugin, panel, route, screen, settingsTab } from '@ferretry/kernel/manifest';
 import { AsksPort } from '@ferretry/core-asks/contract';
 import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
@@ -55,9 +57,19 @@ export default definePlugin({
   /**
    * Optional (D2 #19): Usage and Board as before; Terminals for the liveness look at each ferret's own pane (off:
    * `dead_monitor`, `sus_*` and `agent_frozen` do not run), Browsers to close the browsers left under it (off: that
-   * check does not run). Neither Terminals nor Browsers uses the Warden, so no cycle.
+   * check does not run).
+   * Runtimes and Voice are read by the settings tab only (britnee, optional uses): the runtime list for the
+   * investigation login and model field (off: the model field is a plain text box) and whether the Jev key is set
+   * (off: the key line is hidden). None of Terminals, Browsers, Runtimes and Voice uses the Warden, so no cycle.
    */
-  uses: { usage: UsagePort, board: BoardPort, terminals: TerminalsPort, browsers: BrowsersPort },
+  uses: {
+    usage: UsagePort,
+    board: BoardPort,
+    terminals: TerminalsPort,
+    browsers: BrowsersPort,
+    runtimes: RuntimesPort,
+    voice: VoicePort,
+  },
   provides: { warden: WardenPort },
 
   actions: {

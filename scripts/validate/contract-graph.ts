@@ -14,6 +14,9 @@ export const ALLOWED_PLUGIN_EDGES: ReadonlySet<string> = new Set([
   'access→connections',
   // Lead-approved optional use: Catalogs shares pairing's advertised address and directory facts (P80).
   'catalogs→connections',
+  // Warden settings read the runtime list and whether the Jev key is set (britnee, optional uses).
+  'warden→runtimes', // read-only fact for Warden settings (britnee, optional uses)
+  'warden→voice', // read-only fact for Warden settings (britnee, optional uses)
 ]);
 
 export function contractEdges(edges: readonly ImportEdge[]): Map<string, Set<string>> {

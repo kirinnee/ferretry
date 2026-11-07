@@ -1,35 +1,21 @@
 /**
- * Whether the machine's Jev key is set, read from Speed-ups (`GET /v1/speedups`): names, booleans and instants, never
- * a key. The Warden settings form shows the answer beside the Jev layer and links to where a key is entered.
+ * Whether the machine's Jev key is set, read from Voice's Speed-ups (`GET /v1/speedups`): names, booleans and instants,
+ * never a key. The Warden settings form shows the answer beside the Jev layer and links to where a key is entered.
+ * Voice is an optional use of the Warden: with Voice off the read answers `off` and the form shows no key line.
  */
 
-import { z } from 'zod';
+import { isPluginOff } from './plugin-off.ts';
+import { SpeedupsViewSchema, type SpeedupsView } from '@ferretry/plugin-voice/contract';
+import type { PluginClient } from '@ferretry/kernel/manifest';
 
-export interface SpeedupStatus {
-  readonly provider: string;
-  readonly keyUrl: string;
-  readonly set: boolean;
-}
+export type { SpeedupsView };
 
-/** The Speed-ups description of a machine, as far as the Warden reads it. */
-export interface SpeedupsView {
-  readonly providers: readonly SpeedupStatus[];
-  readonly vault: 'ok' | 'damaged';
-}
-
-const SpeedupsViewSchema = z.object({
-  providers: z.array(z.object({ provider: z.string(), keyUrl: z.string(), set: z.boolean() })),
-  vault: z.enum(['ok', 'damaged']),
-});
-
-/** Speed-ups' answer, parsed. Throws when the body is not one. */
-export const parseSpeedups = (body: unknown): SpeedupsView => SpeedupsViewSchema.parse(body);
-
-/**
- * GAP(plugin-edge): the read itself ('Speed-ups' description of the machine, owned by Voice) waits for the Warden
- * manifest to declare it uses Voice; until then no route of another plugin is called and the card says the key
- * could not be checked. The swap is this one function: call Voice's route through the client and `parseSpeedups`.
- */
-export const readSpeedups = async (): Promise<SpeedupsView> => {
-  throw new Error('The Warden does not read Speed-ups yet.');
+/** The Speed-ups description of a machine, or `off` when Voice is not running on it. */
+export const readSpeedups = async (client: Pick<PluginClient, 'call'>): Promise<SpeedupsView | 'off'> => {
+  try {
+    return SpeedupsViewSchema.parse(await client.call<unknown>('GET /v1/speedups'));
+  } catch (cause) {
+    if (isPluginOff(cause)) return 'off';
+    throw cause;
+  }
 };

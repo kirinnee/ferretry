@@ -1,15 +1,16 @@
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
+import { DaemonCallError } from '@ferretry/app';
 import { interact, mount, must, RouterProvider } from '@ferretry/app/testing';
 import type { AppHalf, PluginClient } from '@ferretry/kernel/manifest';
 import { describe, expect, it } from 'bun:test';
 import { type ReactNode, Suspense, useState } from 'react';
+import { RuntimeCatalogSchema } from '@ferretry/plugin-runtimes/contract';
+import { SpeedupsViewSchema } from '@ferretry/plugin-voice/contract';
 import app from '../../../app/index.ts';
 import { useConfigChangeEffect } from '../../../app/hooks/use-config-change-effect.ts';
 import { useFerretsOf } from '../../../app/hooks/use-ferrets-of.ts';
-import { parseAccountPickerCatalog, readAccountPickerCatalog } from '../../../app/lib/account-picker.ts';
 import { readGrants } from '../../../app/lib/grants.ts';
 import { daemonConnection } from '../../../app/lib/machine.ts';
-import { parseSpeedups, readSpeedups } from '../../../app/lib/speedups.ts';
 import { DaemonReachContext } from '../../../app/lib/warden-client-context.tsx';
 import manifest from '../../../manifest.ts';
 import { wardenConfig, wardenStatus } from '../../support/app/warden.ts';
@@ -31,7 +32,9 @@ const fakeClient = (answers: Readonly<Record<string, unknown>>): Fake => {
     call: async (route: string) => {
       calls.push(route);
       if (!(route in answers)) throw new Error(`no answer for ${route}`);
-      return answers[route];
+      const answer = answers[route];
+      if (answer instanceof Error) throw answer;
+      return answer;
     },
     subscribe: (event: { readonly name: string }, listener: (payload: unknown) => void) => {
       const set = listeners.get(event.name) ?? new Set();
@@ -52,6 +55,75 @@ const WARDEN = {
   'GET /v1/warden/verdicts': [],
   'GET /v1/warden/config': { config: wardenConfig(), accounts: [], warnings: [] },
 };
+
+/** The Jev and LLM layers on, so the card draws the key line and the login and model fields. */
+const LAYERS_ON = {
+  'GET /v1/warden/config': {
+    config: wardenConfig({ layers: { jev: true, llm: true } }),
+    accounts: [],
+    warnings: [],
+  },
+};
+
+/** Voice's Speed-ups answer with the Jev key not set, and Runtimes' catalog with one login that reads a model catalog. */
+const OPTIONAL_ON = {
+  'GET /v1/speedups': SpeedupsViewSchema.parse({
+    vault: 'ok',
+    providers: [
+      {
+        provider: 'jev',
+        label: 'Jev',
+        purpose: 'Triage.',
+        costNote: 'Cheap.',
+        privacyNote: 'A summary.',
+        keyUrl: 'https://keys.example.test/',
+        testNote: 'One decision.',
+        secretName: 'JEV_API_KEY',
+        set: false,
+        testStale: false,
+      },
+    ],
+  }),
+  'GET /v1/runtimes': RuntimeCatalogSchema.parse({
+    format: 'present',
+    runtimes: [
+      {
+        id: 'rt-claude-default',
+        name: 'Claude',
+        wrapper: 'claude-default',
+        harness: 'claude-code',
+        credential: { id: 'login-claude', store: 'host', status: 'ready' },
+        profile: 'Default',
+        agent: true,
+        stack: {
+          harness: 'claude-code',
+          available: { available: true },
+          applied: [],
+          skipped: [],
+          conflicts: [],
+          partial: [],
+        },
+        modelSet: { source: 'harness-default' },
+        models: {
+          catalog: {
+            id: 'anthropic',
+            label: 'Anthropic',
+            origin: 'built-in',
+            customIds: false,
+            docs: 'docs/model-catalog.md',
+          },
+          choices: [{ id: 'opus', label: 'Opus', available: true, efforts: ['low', 'high'], tier: 'best' }],
+          default: 'opus',
+        },
+        launch: { available: true },
+        sameAs: [],
+      },
+    ],
+  }),
+};
+
+/** What a route of a plugin that is off on the daemon answers. */
+const PAUSED = new DaemonCallError(0, 'plugin_paused', 'voice is paused on this daemon (off).');
 
 describe('the Warden half, bound to the shell', () => {
   it('builds its screen, its dashboard panels and its settings tab over the one client it is handed', async () => {
@@ -93,8 +165,8 @@ describe('the Warden half, bound to the shell', () => {
     await view.unmount();
   });
 
-  it('draws the settings tab from the Warden’s own reads, and calls no route of a plugin it does not use', async () => {
-    const client = fakeClient({ ...WARDEN });
+  it('draws the settings tab from the Warden’s reads and the two optional ones: Voice’s key status and Runtimes’ list', async () => {
+    const client = fakeClient({ ...WARDEN, ...LAYERS_ON, ...OPTIONAL_ON });
     const half = app.build?.({ manifest, client }) as AppHalf<typeof manifest>;
     const Settings = half.settings.warden as () => ReactNode;
     const view = await mount(
@@ -107,7 +179,54 @@ describe('the Warden half, bound to the shell', () => {
     await settle();
     expect(must(view.container.querySelector('[data-testid="warden-config-card"]'), 'the settings card')).toBeDefined();
     expect(client.calls).toContain('GET /v1/warden/config');
-    expect(client.calls.filter(route => !route.startsWith('GET /v1/warden/'))).toEqual([]);
+    expect(client.calls).toContain('GET /v1/speedups');
+    expect(client.calls).toContain('GET /v1/runtimes');
+    expect(view.container.textContent).toContain('No Jev key yet.');
+    expect(view.container.querySelector('select[id$="-model"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  const settingsTab = async (answers: Record<string, unknown>) => {
+    const client = fakeClient(answers);
+    const half = app.build?.({ manifest, client }) as AppHalf<typeof manifest>;
+    const Settings = half.settings.warden as () => ReactNode;
+    const view = await mount(
+      <RouterProvider>
+        <Suspense fallback={null}>
+          <Settings />
+        </Suspense>
+      </RouterProvider>,
+    );
+    await settle();
+    return view;
+  };
+
+  it('hides the Jev key line when Voice is off, and keeps the rest of the card', async () => {
+    const view = await settingsTab({ ...WARDEN, ...LAYERS_ON, ...OPTIONAL_ON, 'GET /v1/speedups': PAUSED });
+    const text = view.container.textContent ?? '';
+    for (const line of [
+      'No Jev key yet.',
+      'Could not check the Jev key.',
+      'needs Jev key',
+      'key set',
+      'key status unknown',
+    ])
+      expect(text).not.toContain(line);
+    expect(view.container.querySelector('[data-testid="warden-config-card"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('hides the model list when Runtimes is off: the model field is a plain text box', async () => {
+    const view = await settingsTab({ ...WARDEN, ...LAYERS_ON, ...OPTIONAL_ON, 'GET /v1/runtimes': PAUSED });
+    expect(view.container.querySelector('select[id$="-model"]')).toBeNull();
+    expect(view.container.querySelector('input[placeholder="the login’s default"]')).not.toBeNull();
+    expect(view.container.textContent).toContain('No Jev key yet.');
+    await view.unmount();
+  });
+
+  it('says the key could not be checked, not that it is off, when Voice fails for any other reason', async () => {
+    const view = await settingsTab({ ...WARDEN, ...LAYERS_ON, ...OPTIONAL_ON, 'GET /v1/speedups': new Error('boom') });
+    expect(view.container.textContent).toContain('Could not check the Jev key.');
     await view.unmount();
   });
 });
@@ -129,78 +248,6 @@ describe('what the Warden reads of other plugins', () => {
         { capability: 'fleet', use: true },
       ],
     });
-  });
-
-  it('reads the Speed-ups answer as names and booleans', async () => {
-    const body = {
-      providers: [
-        { provider: 'jev', keyUrl: 'https://keys.example.test/', set: true, label: 'Jev', secretName: 'JEV' },
-      ],
-      vault: 'ok',
-    };
-    expect(parseSpeedups(body)).toEqual({
-      providers: [{ provider: 'jev', keyUrl: 'https://keys.example.test/', set: true }],
-      vault: 'ok',
-    });
-  });
-
-  it('projects each runtime to a login the Warden can investigate on, with its models', async () => {
-    const credential = { id: 'login-a', store: 'host' };
-    const body = {
-      runtimes: [
-        {
-          id: 'rt-a',
-          name: 'Claude',
-          wrapper: 'claude-default',
-          harness: 'claude-code',
-          credential,
-          agent: true,
-          modelSet: { source: 'harness-default' },
-          models: {
-            default: 'opus',
-            catalog: { id: 'anthropic', label: 'Anthropic', customIds: false },
-            choices: [{ id: 'opus', available: true, label: 'Opus', tier: 'best', efforts: ['low', 'high'] }],
-          },
-          launch: { available: true },
-        },
-        {
-          id: 'rt-b',
-          name: 'Bare',
-          wrapper: 'bare',
-          harness: 'codex',
-          credential,
-          agent: true,
-          modelSet: { source: 'model-set', models: [{ id: 'm1', available: true }], default: 'm1' },
-          launch: { available: false, reason: 'Sign in to launch' },
-        },
-      ],
-    };
-    const { accounts } = parseAccountPickerCatalog(body);
-    expect(accounts[0]).toMatchObject({
-      wrapper: 'claude-default',
-      defaultModel: 'opus',
-      available: true,
-      unavailableReason: null,
-      modelCatalog: { customIds: false },
-      models: [{ id: 'opus', tier: 'best', efforts: ['low', 'high'] }],
-    });
-    expect(accounts[1]).toMatchObject({
-      wrapper: 'bare',
-      defaultModel: 'm1',
-      available: false,
-      unavailableReason: 'Sign in to launch',
-      models: [{ id: 'm1', available: true }],
-    });
-    expect(accounts[1]?.modelCatalog).toBeUndefined();
-  });
-
-  it('refuses a roster it cannot read instead of passing it on as an empty one', () => {
-    expect(() => parseAccountPickerCatalog({ runtimes: 'none' })).toThrow();
-  });
-
-  it('does not call a plugin the Warden does not use: those two reads refuse until its manifest declares them', async () => {
-    await expect(readSpeedups()).rejects.toThrow('does not read Speed-ups yet');
-    await expect(readAccountPickerCatalog()).rejects.toThrow('does not read the runtime list yet');
   });
 });
 

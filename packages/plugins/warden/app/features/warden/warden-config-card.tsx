@@ -11,14 +11,14 @@
  */
 
 import type { WardenAccount, WardenConfig, WardenConfigPatch, WardenConfigView } from '../../wire.ts';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { daemonSettingsHref } from '@ferretry/app';
 import { useConfigChangeEffect } from '../../hooks/use-config-change-effect.ts';
 import { type PickerAccount, readAccountPickerCatalog } from '../../lib/account-picker.ts';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { readSpeedups, type SpeedupsView } from '../../lib/speedups.ts';
-import { useWardenClientFactory, type WardenClientFactory } from '../../lib/warden-client-context.tsx';
+import { useDaemonReach, useWardenClientFactory, type WardenClientFactory } from '../../lib/warden-client-context.tsx';
 import type { WardenClient } from '../../lib/warden-client.ts';
 import { WardenSettingsForm } from './warden-settings-form.tsx';
 import {
@@ -30,7 +30,8 @@ import {
 } from './warden-settings-model.ts';
 
 /** What the Speed-ups read says about the Jev key. A read that failed is `unknown`, never "missing". */
-export const jevKeyStatus = (view: SpeedupsView | null): JevKeyStatus => {
+export const jevKeyStatus = (view: SpeedupsView | 'off' | null): JevKeyStatus => {
+  if (view === 'off') return { state: 'off' };
   const jev = view?.providers.find((provider: { readonly provider: string }) => provider.provider === 'jev');
   if (view === null || jev === undefined) return { state: 'unknown' };
   const keyUrl = { keyUrl: jev.keyUrl };
@@ -134,9 +135,9 @@ export function WardenConfigCard({
  */
 export interface WardenConfigDeps {
   /** The Speed-ups description of a machine: whether its Jev key is set. */
-  readonly speedups: (connection: DaemonConnection) => Promise<SpeedupsView>;
+  readonly speedups: (connection: DaemonConnection) => Promise<SpeedupsView | 'off'>;
   /** The logins the machine has and the models each offers. */
-  readonly catalog: (connection: DaemonConnection) => Promise<{ readonly accounts: readonly PickerAccount[] }>;
+  readonly catalog: (connection: DaemonConnection) => Promise<{ readonly accounts: readonly PickerAccount[] } | 'off'>;
   /** Runs `onChange` whenever one of `kinds` moves on the daemon. */
   readonly useConfigChange: (
     daemonId: DaemonConnection['daemonId'],
@@ -145,11 +146,17 @@ export interface WardenConfigDeps {
   ) => void;
 }
 
-/** What the card reads besides the Warden's own routes (see the GAP in `../../lib/speedups.ts` and `account-picker.ts`). */
-const ROUTED_DEPS: WardenConfigDeps = {
-  speedups: async () => await readSpeedups(),
-  catalog: async () => await readAccountPickerCatalog(),
-  useConfigChange: useConfigChangeEffect,
+/** The reads of Voice and Runtimes through the Warden's own client of the daemon, and the hook that hears the machine change. */
+const useRoutedDeps = (): WardenConfigDeps => {
+  const reach = useDaemonReach();
+  return useMemo(
+    () => ({
+      speedups: async connection => await readSpeedups(await reach(connection)),
+      catalog: async connection => await readAccountPickerCatalog(await reach(connection)),
+      useConfigChange: useConfigChangeEffect,
+    }),
+    [reach],
+  );
 };
 
 /** The card shows the Warden's settings and whether its Jev key is set in Speed-ups. */
@@ -194,7 +201,8 @@ export function WardenConfigSurface({
   // The plugin client of the daemon unless a test or the harness hands one in.
   const routedClient = useWardenClientFactory();
   const createClient = injectedClient ?? routedClient;
-  const deps = injectedDeps ?? ROUTED_DEPS;
+  const routedDeps = useRoutedDeps();
+  const deps = injectedDeps ?? routedDeps;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -216,7 +224,7 @@ export function WardenConfigSurface({
           deps.speedups(connection).catch(() => null),
           // The model field lists the chosen login's catalog; without the list it is a plain text box.
           deps.catalog(connection).then(
-            (catalog: { readonly accounts: readonly PickerAccount[] }) => catalog.accounts,
+            catalog => (catalog === 'off' ? [] : catalog.accounts),
             () => [],
           ),
         ]);
@@ -253,7 +261,7 @@ export function WardenConfigSurface({
       before.client.config(),
       deps.speedups(connection).catch(() => null),
       deps.catalog(connection).then(
-        (catalog: { readonly accounts: readonly PickerAccount[] }) => catalog.accounts,
+        catalog => (catalog === 'off' ? [] : catalog.accounts),
         () => null,
       ),
     ])

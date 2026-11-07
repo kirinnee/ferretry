@@ -119,7 +119,7 @@ export const wardenPrivacyNote = (layers: WardenLayers, login: string): string =
 };
 
 const KEY_PILL: Readonly<
-  Record<JevKeyStatus['state'], { readonly label: string; readonly tone: 'ok' | 'warn' | 'pend' }>
+  Record<Exclude<JevKeyStatus['state'], 'off'>, { readonly label: string; readonly tone: 'ok' | 'warn' | 'pend' }>
 > = {
   set: { label: 'key set', tone: 'ok' },
   missing: { label: 'needs Jev key', tone: 'warn' },
@@ -519,7 +519,7 @@ export function WardenSettingsForm({
     ...value.accounts,
     ...loginOptions.filter(option => !value.accounts.some(account => account.agent === option.agent)),
   ];
-  const keyPill = KEY_PILL[jevKey.state];
+  const keyPill = jevKey.state === 'off' ? undefined : KEY_PILL[jevKey.state];
   const set = (patch: Partial<WardenConfig>) => onChange({ ...value, ...patch });
   // The chosen login's runtime, for its model catalog (docs/model-catalog.md).
   const runtime = runtimes.find(candidate => candidate.wrapper === base?.agent);
@@ -552,11 +552,13 @@ export function WardenSettingsForm({
           <LayerRow
             title="Jev"
             detail="A fast typed decision model looks at each flag first. It clears the ones it is sure are healthy and, when it is very sure, does the simple fix itself."
-            badges={value.layers.jev ? <Badge tone={keyPill.tone}>{keyPill.label}</Badge> : undefined}
+            badges={
+              value.layers.jev && keyPill !== undefined ? <Badge tone={keyPill.tone}>{keyPill.label}</Badge> : undefined
+            }
             on={value.layers.jev}
             onToggle={jev => set({ layers: { ...value.layers, jev } })}
           >
-            {jevKey.state !== 'set' && (
+            {jevKey.state !== 'set' && jevKey.state !== 'off' && (
               <div className="rounded-control border border-warn-border bg-warn-bg px-cell-x py-2 text-meta leading-base text-warn">
                 <p className="m-0 font-semibold">
                   {jevKey.state === 'missing' ? 'No Jev key yet.' : 'Could not check the Jev key.'}
