@@ -4,7 +4,7 @@ import type { ComponentType } from 'react';
 import { RouterProvider } from '@ferretry/app/testing';
 import { ActionsPanel } from '../../../../app/features/header/actions-panel.tsx';
 import { movePath } from '../../../../app/features/header/header-paths.ts';
-import { createNamePanel, createStatusPanel } from '../../../../app/views/header.tsx';
+import { createActionsPanel, createNamePanel, createStatusPanel } from '../../../../app/views/header.tsx';
 import type { LiveFerretsClient } from '../../../../app/lib/client.ts';
 import type { FerretSummary } from '../../../../contract/index.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
@@ -239,5 +239,35 @@ describe('the actions panel', () => {
     await click(root, '[data-ferret-action-item="move-login"]');
     expect(window.location.pathname).toBe('/');
     expect(must(root.querySelector('[data-ferret-alert]'), 'the alert').textContent).toContain('no daemon');
+  });
+});
+
+describe('the actions panel as ferret.toolbar mounts it', () => {
+  // The panel keeps the rows other plugins offered (each `run` closes over the ferret it was offered for), the open
+  // form and the last alert in one state, and a slot hands the same mounted panel a new `subject` when the ferret
+  // changes: keying the panel by the ferret is what drops all of it. An alert is the state this can show without a shell.
+  it('starts afresh on another ferret, so nothing opened or offered for the last one stays', async () => {
+    const h = harness(ferretSummary('a1', { name: 'hadi' }));
+    h.refuse.set('POST /v1/ferrets/:ferretId/stop', new Refused('only the owner may stop a ferret', 403, 'forbidden'));
+    const Panel = createActionsPanel(h.client) as ComponentType<PanelProps>;
+    const view = (subject: string) => (
+      <RouterProvider>
+        <Panel subject={subject} />
+      </RouterProvider>
+    );
+    mounted = await mount(view('a1'));
+    await settle();
+    const root = mounted.container;
+    await click(root, '[data-ferret-actions-trigger]');
+    await click(root, '[data-ferret-action-item="stop"]');
+    await click(root, '[data-menu-confirm-yes]');
+    expect(root.querySelector('[data-ferret-alert]')).not.toBeNull();
+
+    h.refuse.clear();
+    h.ferret = ferretSummary('a2', { name: 'nero' });
+    await mounted.render(view('a2'));
+    await settle();
+    expect(root.querySelector('[data-ferret-alert]')).toBeNull();
+    expect(root.querySelector('[data-ferret-actions-trigger]')).not.toBeNull();
   });
 });
