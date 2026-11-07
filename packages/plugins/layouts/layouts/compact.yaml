@@ -1,0 +1,10 @@
+# A denser layout: `fy layout use compact` (design §5.3).
+id: compact
+nav: { side: left, style: rail, items: [agenda, ferrets, board, insights, settings] }
+side: { show: none, holds: ferret }
+top: [daemon-picker, search]
+composer.tools: [mic, attach]
+panels:
+  ferret.side: [sitrep]
+density: compact
+phone: { nav: { side: bottom, items: [agenda, ferrets, board] } }

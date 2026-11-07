@@ -150,6 +150,8 @@
       "name": "@ferretry/plugin-claude-code",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -159,6 +161,8 @@
       "name": "@ferretry/plugin-codex",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -186,6 +190,7 @@
       "name": "@ferretry/plugin-layouts",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -204,6 +209,9 @@
       "name": "@ferretry/plugin-logins",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
+        "@ferretry/core-vault": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -213,6 +221,8 @@
       "name": "@ferretry/plugin-mcp",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -222,6 +232,7 @@
       "name": "@ferretry/plugin-onboarding",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -249,6 +260,8 @@
       "name": "@ferretry/plugin-runtimes",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -258,6 +271,8 @@
       "name": "@ferretry/plugin-shells",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -267,6 +282,8 @@
       "name": "@ferretry/plugin-skills",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
