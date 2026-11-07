@@ -2,7 +2,7 @@ import { defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 
 /**
- * The sealed store (spine D16): BYTE-COMPATIBLE with today's. The sealing is today's, copied as-is from
+ * The sealed store (spine D16): BYTE FOR BYTE today's. The sealing is today's, copied as-is from
  * `packages/daemon/src/lib/secrets` and `adapters/secrets/webcrypto-secret-cipher.ts`: AES-256-GCM, a random 96-bit
  * IV per seal, the secret's NAME as additional authenticated data, `iv` and `ciphertext` base64. The key is today's
  * `vault.key` exactly: 32 random bytes, base64, one trailing newline, mode `0600`.

@@ -48,7 +48,7 @@ inputTargetConformance('goneTargetAdapter (page)', () => ({
 
 const b64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
 
-describe('the sealed store is byte-compatible (spine D16)', () => {
+describe('the sealed store moves byte for byte (spine D16)', () => {
   test('an entry sealed exactly as today (AES-256-GCM, name as AAD) parses and opens unchanged', async () => {
     const keyBytes = crypto.getRandomValues(new Uint8Array(32));
     const keyText = `${b64(keyBytes)}\n`;

@@ -1,5 +1,5 @@
 /**
- * `@ferretry/core-vault/contract` (§2.2, §4.7, §7.3): secrets by name (no getter), the byte-compatible sealed store
+ * `@ferretry/core-vault/contract` (§2.2, §4.7, §7.3): secrets by name (no getter), the sealed store kept byte for byte
  * (spine D16), the `input.targets` kind, input requests and hold evidence, the Vault port. Re-exports the act-runner
  * vocabulary and the kernel-bound ports Vault provides (`OutputGuard`, `InputHolds`, `Redaction`; spine D3, D4).
  */
