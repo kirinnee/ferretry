@@ -135,6 +135,8 @@ export function realAdapters(
   options: {
     readonly binary: string;
     readonly childEnv?: Readonly<Record<string, string>>;
+    /** The allow-listed non-secret names `git` and `gh` children get (see `toolEnvironment`). */
+    readonly toolEnv?: Readonly<Record<string, string>>;
     /** The release this build carries, for `kernel.updateHost`; absent, no plugin can launch an update. */
     readonly release?: string;
   },
@@ -149,7 +151,7 @@ export function realAdapters(
     random,
     state: stateOpener(home, stateFs, clock, log.child('state')),
     config: configService(home, stateFs, clock, log.child('config'), options.binary),
-    spawn: bunSpawn(options.childEnv ?? {}),
+    spawn: bunSpawn(options.childEnv ?? {}, undefined, options.toolEnv ?? {}),
     fetch: globalFetch(),
     workers: bunWorkers(),
     websocket: bunWebSockets(),

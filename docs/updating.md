@@ -88,16 +88,15 @@ as a switch, not as an update.
 - **Failure**: the check never fails a boot and never retries in a loop. A failed check is reported
   as such ("could not reach GitHub"), and the last good answer, if any, stays on screen with its age.
 - **Off**: a development build run from source never asks (it has no release to compare with), and
-  `FY_UPDATE_CHECK=off` in the daemon's environment is meant to switch the check off — which is also how a
-  suite that boots a real daemon stays off the network. **Declared GAP:** the Updates plugin does not read that
-  variable on 5.0 yet (honouring it is a kernel item), so today it keeps the check off only for the Claude Code
-  update service that reads it; do not rely on it to silence the daemon's own release check.
+  `FY_UPDATE_CHECK=off` in the daemon's environment switches the check off — which is also how a
+  suite that boots a real daemon stays off the network. The kernel reads the switch and folds it into
+  `kernel.updateHost.checks` (a compiled build AND not `off`), so the Updates plugin never reads the environment.
 
 ## Applying an update
 
 `fy update` is the one implementation. The app's **Update** button asks the daemon, which
-starts `fy update --yes --to <version> --report <file>` (the `fy` beside the daemon
-executable) as a detached process and answers at once. Both service managers let that process
+starts `fy update --run --to <version> --report <file>` (the `fy` beside the daemon
+executable; `<file>` is the path Updates declares for its `report` state file) as a detached process and answers at once. Both service managers let that process
 survive the daemon's own restart: the systemd unit uses `KillMode=process` and the launchd agent
 `AbandonProcessGroup`, for the same reason the session panes do.
 

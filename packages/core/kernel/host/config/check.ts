@@ -8,7 +8,7 @@
  */
 import type { z } from 'zod';
 import type { AnyConfigDef as ConfigDef } from './claims.ts';
-import { findRawSecrets, RAW_SECRET_MESSAGE, rawSecretFix } from './secrets.ts';
+import { findRawSecrets, RAW_SECRET_KEY_MESSAGE, RAW_SECRET_MESSAGE, rawSecretFix } from './secrets.ts';
 import { readConfigText, type TextPosition } from './yaml-text.ts';
 
 /** A located finding. */
@@ -110,10 +110,14 @@ export function checkConfigText(
       reason: 'raw_secret',
       issues: secrets.map(finding => ({
         path,
-        ...at(read.read.locate(finding.path)),
+        ...at(read.read.locate(finding.atKey ?? finding.path)),
         severity: 'error' as const,
         // The path to the value, never the value: a secret pasted by mistake travels no further than its file.
-        message: `${describePath(finding.path)}: ${RAW_SECRET_MESSAGE}`,
+        // For a secret-shaped NAME the path stops at the object that holds it, so the name is never repeated.
+        message:
+          finding.atKey === undefined
+            ? `${describePath(finding.path)}: ${RAW_SECRET_MESSAGE}`
+            : `${describePath(finding.path) || 'the top of the file'}: ${RAW_SECRET_KEY_MESSAGE}`,
         fix: rawSecretFix(binary),
       })),
     };
