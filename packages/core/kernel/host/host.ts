@@ -77,7 +77,7 @@ import { openHome } from './home.ts';
 import { rootsPortFor } from './roots.ts';
 import { PinRegistry } from './pins.ts';
 import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
-import type { ScratchPort } from '../contract/ports.ts';
+import type { PathsPort, ScratchPort } from '../contract/ports.ts';
 
 const NO_PINNER: SessionRootPinner = {
   pin: async () => {
@@ -143,6 +143,8 @@ export interface HostAdapters {
   readonly websocket?: WebSocketPort;
   /** The machine's host name, for the daemon name. Absent: `Ferretry daemon`. */
   readonly hostname?: () => string;
+  /** The owner's home directory (`homedir()`), for `kernel.paths.home()`. Absent: the process's `HOME`, else `/`. */
+  readonly ownerHome?: () => string;
   /** Holds a folder open for `RootHandle.pin`. Absent: every pin is refused (`unsupported`). */
   readonly pinner?: SessionRootPinner;
   /** Private scratch folders. Absent: every open is refused. */
@@ -393,6 +395,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
   };
 
   const pins = new PinRegistry(() => adapters.pinner ?? NO_PINNER);
+  const ownerPaths: PathsPort = Object.freeze({ home: () => adapters.ownerHome?.() ?? process.env.HOME ?? '/' });
   /** A plugin's own `resolvers` section, read at each call (unset during build: nothing resolves yet). */
   const resolversOf =
     (id: string): ResolverOf =>
@@ -441,6 +444,7 @@ export async function bootHost(options: HostOptions): Promise<BootOutcome> {
       resolversOf(manifest.id),
     ),
     identity: identityPort,
+    paths: ownerPaths,
     signer: signerFor(manifest.id, sessionSigner),
     ...(manifest.id === 'gate' && configWriter !== undefined ? { configFiles: configWriter } : {}),
     act,

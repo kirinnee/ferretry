@@ -1,7 +1,7 @@
 import type { Manifest } from '../manifest/types.ts';
 import { systemClock } from './adapters/clock.ts';
 import { nodeFs } from './adapters/node-fs.ts';
-import { hostname } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { platformRootPinner } from './adapters/pinned/index.ts';
 import { bunSpawn, bunWebSockets, bunWorkers, globalFetch } from './adapters/process.ts';
 import { scratchPort } from './scratch.ts';
@@ -110,6 +110,7 @@ export function realAdapters(
     workers: bunWorkers(),
     websocket: bunWebSockets(),
     hostname: () => hostname(),
+    ownerHome: () => homedir(),
     pinner: platformRootPinner(),
     scratch: scratchPort(),
   };

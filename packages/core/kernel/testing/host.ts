@@ -93,6 +93,8 @@ export interface TestHostOptions {
   readonly websocket?: (url: URL) => WebSocketClient;
   /** Answers `RootHandle.pin` (with the path the test root resolved). Without it a pin is refused. */
   readonly pinner?: SessionRootPinner;
+  /** What `kernel.paths.home()` answers. Default: `/home/owner`. */
+  readonly ownerHome?: string;
   /** `kernel.scratch`. Default: real private temp folders, as the daemon's. */
   readonly scratch?: ScratchPort;
   /** What the owner's installed items name, for `permissions.spawn`/`network` `{ items }` entries. Default: none. */
@@ -707,6 +709,7 @@ async function start(world: World): Promise<TestHost> {
         },
       },
       identity,
+      paths: Object.freeze({ home: () => options.ownerHome ?? '/home/owner' }),
       signer: signerFor(manifest.id, identitySigner),
       act: testActRunner({
         holds: () => holds,

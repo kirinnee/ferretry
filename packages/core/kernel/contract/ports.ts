@@ -28,6 +28,8 @@ export interface KernelPorts {
   readonly websocket: WebSocketPort;
   /** Who this daemon is, read-only: its id and name, never its key. */
   readonly identity: IdentityPort;
+  /** Read-only facts about where things are on this machine (daemon halves only; never on the app or CLI contexts). */
+  readonly paths: PathsPort;
   /**
    * The daemon identity's fixed-label signatures (claim, tunnel, catalog), each refused unless this plugin is the
    * one allowed it (`sign`/`signTunnel`: Connections; `signCatalog`: Catalogs). No key export, no raw signing.
@@ -505,6 +507,15 @@ export interface WebSocketPort {
 }
 
 // identity ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Where the owner's files are, read-only (today's `homedir()`). A name, never a capability: nothing here opens,
+ * resolves or reaches a path; reaching one goes through a declared root.
+ */
+export interface PathsPort {
+  /** The owner's home directory as the OS reports it (Accounts orders sign-ins by work folders under it, I184). */
+  home(): string;
+}
 
 /**
  * The daemon's identity as any plugin may read it (§2.2): the id the pairing QR and the rendezvous path carry, and
