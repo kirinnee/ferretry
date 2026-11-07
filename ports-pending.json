@@ -49,7 +49,7 @@
       "input_stuck and inbox_stuck never occur: Conversation’s send-path acts (resubmit, mark stalled, tracker and delivery looks) are not on 5.0",
       "an orphaned card is told by a notice on one ferret’s own board (an ask), not on today’s single machine item that listed every orphan: needs Asks’ machine-wide item",
       "a sub-ferret overdue on a report is flagged but never nudged, nor its parent told: overdue-report nudges need Ferrets’ waiting/done on FerretSummary and its signal route (today skipped a ferret that declared a wait or signalled done)",
-      "an owner's own save is refused while another edit is held, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write and Gate's judgeConfigWrite lands"
+      "an owner's own save is refused while another edit is held, instead of today's both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write (Gate's judgeConfigWrite judges the whole patched file, so an owner's plain save over a held edit could otherwise put that edit into effect)"
     ],
     "claude-code": [
       "GAP(skills): selected skill parts are not materialized into the ferret home; copyTree takes only this plugin's own root handles, and no root the manifest declares reaches a skill source",

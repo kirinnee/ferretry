@@ -40,8 +40,8 @@ const BINARY_NAME = 'fy';
  *    board keep working.
  *  - A transcript carries no tool results or interrupts, so a digest counts neither.
  *  - An owner's own save of `lessons.yaml` is refused (409 `config_held`) while another edit is held, instead of today's
- *    both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged write
- *    and Gate's judgeConfigWrite lands.
+ *    both-versions write (docs/config-files.md rule 3), until the kernel ConfigPort offers an owner-acknowledged
+ *    write.
  *  - A miner's `runtime` is not resolved: Ferrets' start on 5.0 does not resolve `runtime` to its harness or login, nor
  *    refuse an unknown one (today: `unknown_agent`), so a miner would launch on the first registered harness. Inert
  *    while no miner can start (the work-folder gap above); it must close before that one does.

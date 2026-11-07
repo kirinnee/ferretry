@@ -16,9 +16,10 @@ export class WardenConfigRefused extends Error {
  *
  * DECLARED GAP: today the owner's own save is made to BOTH versions (the one in effect and the held one), so a
  * tightening applies at once and a held edit is neither lost nor put into effect (docs/config-files.md rule 3). The
- * kernel's ConfigPort offers no owner-acknowledged write and Gate's judgeConfigWrite is not on 5.0, so a save over a
- * held edit would either hold the owner's tightening too or rewrite the section from the version in effect and drop
- * the held edit without a word. Refusing is the fail-safe until both land.
+ * kernel's ConfigPort offers no owner-acknowledged write, so a plain write over a held edit patches the disk text: Gate's
+ * judgeConfigWrite then judges the WHOLE patched file, so it would either hold the owner's tightening too or, where the
+ * judge lets the owner's call apply, put the held edit into effect with it; and a section rewritten from the version in
+ * effect would drop the held edit without a word. Refusing is the fail-safe until the kernel offers that write.
  */
 export class WardenConfigHeld extends Error {
   constructor() {

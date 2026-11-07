@@ -13,10 +13,13 @@ const quiet: Log = { debug: () => {}, info: () => {}, warn: () => {}, error: () 
 
 /**
  * The kernel's REAL config writer (`createConfigFiles`, the one the daemon hands every plugin) over an in-memory home
- * that declares `warden.yaml`, with no judge: a loosening is HELD for the owner, as it is for any call Gate's judge does
- * not let put one into effect. `handEdit` is the owner editing the file outside Ferretry, then the watcher's reload.
+ * that declares `warden.yaml`. With no judge a loosening is HELD for the owner, as it is for any call Gate's judge does
+ * not let put one into effect. `judge: 'owner-at-machine'` answers what Gate's `judgeConfigWrite` answers the host
+ * owner (`governance.governed === false` → apply, `packages/core/gate/daemon/lib/policy/config-judge.ts`); the real one
+ * is in Gate's daemon half, which a Warden test may not import (context-imports). `handEdit` is the owner editing the
+ * file outside Ferretry, then the watcher's reload — a hand edit is never judged, only compared with what is in effect.
  */
-export function realWardenConfig() {
+export function realWardenConfig(options: { readonly judge?: 'owner-at-machine' } = {}) {
   const fs = hostState.createMemoryHostFs();
   const path = `${HOME}/config/${WARDEN_CONFIG.file}`;
   const files = hostConfig.createConfigFiles({
@@ -26,6 +29,7 @@ export function realWardenConfig() {
     log: quiet,
     binary: 'fy',
     defs: [{ plugin: 'warden', def: WARDEN_CONFIG }],
+    ...(options.judge === undefined ? {} : { judge: () => true }),
   });
   return {
     port: files.port('warden'),

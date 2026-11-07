@@ -428,8 +428,9 @@ function configWritten(outcome: ConfigWriteOutcome, inEffect: LessonsConfig): Ap
  * `lessons.yaml` already holds an edit waiting for the owner, so the save is refused before anything is written.
  *
  * DECLARED GAP: today the owner's own save is made to both versions and is in effect at once, the held edit kept
- * (docs/config-files.md rule 3). The kernel's ConfigPort offers no owner-acknowledged write and Gate's judgeConfigWrite
- * is not on 5.0, so the save would only wait behind the held edit; refusing says so instead.
+ * (docs/config-files.md rule 3). The kernel's ConfigPort offers no owner-acknowledged write, so a plain write would
+ * patch the held disk text and wait behind it (or, were the held edit one a judge could confirm, put it into effect
+ * with the owner's save); refusing says so instead, until the kernel offers that write.
  */
 export const LESSONS_CONFIG_HELD =
   'lessons.yaml has a change waiting for your approval; confirm or discard it first, then save again.';

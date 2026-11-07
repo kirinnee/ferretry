@@ -30,7 +30,7 @@ The **only** thing the passive switch controls is whether a ferret is _instructe
   refused (`409 config_held`, nothing written, the held edit kept) while a hand edit of `lessons.yaml` is
   held — for example one naming a secret the owner has not confirmed — instead of being made to both
   versions and in effect at once (docs/config-files.md rule 3; GAP until the kernel offers an
-  owner-acknowledged write and Gate's judge lands).
+  owner-acknowledged write).
   A miner or a warden is never instructed.
 - `PATCH /v1/ferrets/:ferretId/lessons {passive}` switches one ferret.
 - The teaching is a per-ferret part of the launch, contributed through the `launch.parts` hook: Lessons
