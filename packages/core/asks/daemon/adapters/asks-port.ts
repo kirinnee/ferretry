@@ -224,6 +224,7 @@ export function asksPort(
   agenda: Pick<AgendaService, 'list' | 'raise' | 'resolve' | 'dismiss' | 'snooze' | 'unsnooze' | 'raisedObligation'>,
   boards: AskBoards,
   sources: (key: SourceKey) => AskSourceSpec | 'unavailable',
+  tell?: NonNullable<AsksApi['tell']>,
 ): AsksApi {
   const raises = new SerialQueue();
   const checkSource = (draft: { readonly source: string; readonly ref: unknown }): void => {
@@ -301,6 +302,7 @@ export function asksPort(
       if (!mutation.ok) throw new AskOwnerActionError(mutation.error.code, mutation.error.message);
       return mutation.snapshot;
     },
+    ...(tell === undefined ? {} : { tell }),
     raise: async draft => await raises.run(() => raise(draft, false)),
     notify: async notice => await raises.run(() => raise({ ...notice, kind: 'notice' }, true)),
     answers: async (filter, since) =>

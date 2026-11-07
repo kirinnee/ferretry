@@ -61,9 +61,11 @@ const MAX_DELIVERED_IDS = 256;
  * What the outbox remembers a delivery by: the item's id for an answer (`A3`), the id plus the request
  * counter for a request for more information or to discuss (`A3~2`), and `instructions~<digest>` for the
  * note that the always-on instructions changed — which belongs to no item. An item is answered once, but
- * may be asked about again after the ferret replied, and each ask is its own delivery.
+ * may be asked about again after the ferret replied, and each ask is its own delivery. `tell~<digest>` is a message
+ * the daemon owes the ferret (`AsksApi.tell`): it joins the batch like an answer, keyed by its caller's send id, and
+ * belongs to no item either, so a tell that never arrived is dropped, not turned into a card.
  */
-const ReplyKeySchema = z.string().regex(/^(A[1-9][0-9]*(~[1-9][0-9]*)?|instructions~[0-9a-f]{14})$/u);
+const ReplyKeySchema = z.string().regex(/^(A[1-9][0-9]*(~[1-9][0-9]*)?|(instructions|tell)~[0-9a-f]{14})$/u);
 export type ReplyKey = z.infer<typeof ReplyKeySchema>;
 
 /** The key of one request for more information, or to discuss, on an item. */
@@ -71,6 +73,9 @@ export const needsInfoReplyKey = (id: AgendaId, request: number): ReplyKey => `$
 
 /** The key of the note that the instructions changed to the words with this digest. */
 export const instructionsReplyKey = (digest: string): ReplyKey => `instructions~${digest}`;
+
+/** The key of a message the daemon owes the ferret, from the digest (14 hex digits) of its caller's send id. */
+export const tellReplyKey = (digest: string): ReplyKey => ReplyKeySchema.parse(`tell~${digest}`);
 
 /** The item a key belongs to, or `undefined` for a key that is not about one. */
 export const itemOfKey = (key: ReplyKey): AgendaId | undefined => AgendaIdSchema.safeParse(key.split('~')[0]).data;
@@ -262,9 +267,12 @@ export interface AgendaReplyTimers {
   cancel(key: string): void;
 }
 
+/** What adding to a ferret's batch did: it joined the batch, or that key was already queued, sending or delivered. */
+export type AgendaAdded = 'queued' | 'known';
+
 /** Where an answer to a ferret's item is handed to be delivered. */
 export interface AgendaReplyQueue {
-  add(sessionId: string, key: ReplyKey, message: string): Promise<void>;
+  add(sessionId: string, key: ReplyKey, message: string): Promise<AgendaAdded | void>;
 }
 
 /** Whether a ferret is mid-turn, so a batch is not dropped into the turn it would be re-read on. */
@@ -340,18 +348,19 @@ export class AgendaReplyBatcher implements AgendaReplyQueue, AgendaRepliesSubsys
     private readonly ports: AgendaDeliveryPorts = TRUSTING_DELIVERY,
   ) {}
 
-  async add(sessionId: string, key: ReplyKey, message: string): Promise<void> {
-    const { due, full } = await this.locked(sessionId, async current => {
+  async add(sessionId: string, key: ReplyKey, message: string): Promise<AgendaAdded> {
+    const { due, full, known } = await this.locked(sessionId, async current => {
       // A full outbox is sent first, so the answer that would overflow it is never the one lost.
       const begun =
         current.pending.length >= MAX_AGENDA_PENDING_REPLIES ? beginAgendaBatch(current, this.clock.now()) : undefined;
       const outbox = begun?.outbox ?? current;
       const next = withPendingReply(outbox, { id: key, message, at: this.clock.now() });
       if (next !== null || begun !== undefined) await this.outboxes.write(next ?? outbox);
-      return { due: this.dueAt(next ?? outbox), full: begun?.batch };
+      return { due: this.dueAt(next ?? outbox), full: begun?.batch, known: next === null };
     });
     if (full !== undefined) void this.deliver(sessionId, full);
     this.schedule(sessionId, due);
+    return known ? 'known' : 'queued';
   }
 
   async pending(sessionId: string): Promise<AgendaReplies | undefined> {
