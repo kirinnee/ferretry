@@ -943,7 +943,7 @@ export class BoardService {
       visibilitySource,
       ...(facts.approval === undefined ? {} : { approval: facts.approval }),
     });
-    const store = async (ready: Card): Promise<Card> => {
+    const persist = async (ready: Card): Promise<Card> => {
       await this.ports.store.write(id, async current => {
         if (current !== undefined)
           throw new BoardUnavailableError(`the counter issued ${id}, which a card already holds`);
@@ -951,7 +951,7 @@ export class BoardService {
       });
       return ready;
     };
-    if (card.files.length === 0) return await store(card);
+    if (card.files.length === 0) return await persist(card);
     // A card born with claims is queued behind the open cards whose claims clash (docs/design/clash-queue.md). The
     // board is read again inside the dependency section, so a claim landing meanwhile is seen.
     return await this.ports.serial.run(DEPENDENCY_SECTION, async () => {
@@ -963,7 +963,7 @@ export class BoardService {
         now: card.createdAt,
         actor: actorOf(facts.caller),
       });
-      return await store(requireValidCard(queued));
+      return await persist(requireValidCard(queued));
     });
   }
 

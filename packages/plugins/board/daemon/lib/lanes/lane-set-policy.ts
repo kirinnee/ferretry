@@ -98,7 +98,7 @@ export const decideLaneChange = (
       const built = proposeLaneSet(projectId, current, request.template, request.renames, actorName(actor));
       if (!built.ok) return built;
       return actor.kind === 'ferret' && current !== null
-        ? waitForOwner(current, built.value, {}, actor.ferretId)
+        ? holdForOwner(current, built.value, {}, actor.ferretId)
         : ok({ next: built.value, change: 'live', relocate: {} });
     }
     case 'edit': {
@@ -106,7 +106,7 @@ export const decideLaneChange = (
       if (!built.ok) return built;
       const relocate = definedMoves(request.relocate);
       return actor.kind === 'ferret' && current !== null
-        ? waitForOwner(current, built.value, relocate, actor.ferretId)
+        ? holdForOwner(current, built.value, relocate, actor.ferretId)
         : ok({ next: built.value, change: 'live', relocate });
     }
     case 'confirm': {
@@ -124,7 +124,7 @@ const definedMoves = (relocate: Partial<Record<string, string>>): Record<string,
   Object.fromEntries(Object.entries(relocate).filter((entry): entry is [string, string] => entry[1] !== undefined));
 
 /** A ferret's change, kept beside the live set for the owner: the live set itself is untouched. */
-const waitForOwner = (
+const holdForOwner = (
   current: LaneSet,
   built: LaneSet,
   relocate: Readonly<Record<string, string>>,
