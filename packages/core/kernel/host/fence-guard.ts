@@ -30,6 +30,12 @@ export const same = (a: { readonly device: bigint; readonly inode: bigint }, b: 
 export interface Fence {
   readonly named: string;
   readonly real: string;
+  /**
+   * The real paths of the home's `state` and `config` folders that are there: today's homes are
+   * `[home, state, config]`, each by its real path, so a folder linked out of the home is fenced by name wherever it
+   * lives.
+   */
+  readonly places: readonly string[];
   readonly identities: readonly { readonly device: bigint; readonly inode: bigint }[];
 }
 
@@ -51,11 +57,23 @@ export const PINNED_KEY_PATHS: readonly string[] = [
   'state/sessions',
 ];
 
+/** The folders of the home that today's fence holds beside the home itself (`NodeStateHomes([home, state, config])`). */
+const HOME_FOLDERS: readonly string[] = ['state', 'config'];
+
+/** A fence's absent entry: nothing there, or nothing a folder could be under. Anything else is a doubt. */
+const isAbsent = (error: unknown): boolean => {
+  const code = (error as { code?: string }).code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+};
+
 /**
- * The fence of `home`: its real path, and the identity of the home, of every `<home>-before-*` and
- * `state/<id>-before-*` folder, and of each pinned key file and folder ({@link PINNED_KEY_PATHS}) that is there — the
- * entry itself, never followed, as today's `resolveStateHomes` takes it. A home that cannot be resolved, or a key
- * path that cannot be looked at, fails closed (throws).
+ * The fence of `home`: its real path, the real path and identity of its `state` and `config` folders (today's homes
+ * `[home, state, config]`, each resolved to where it really is, so one linked or bind-mounted out of the home is held
+ * wherever it lives), and the identity of the home, of every `<home>-before-*` and `state/<id>-before-*` folder, and of
+ * each pinned key file and folder ({@link PINNED_KEY_PATHS}) that is there — the entry itself, never followed, as
+ * today's `resolveStateHomes` takes it. A home that cannot be resolved, a `state` or `config` that is there but cannot
+ * be resolved or is not a folder, or a key path that cannot be looked at, fails closed (throws); one that is absent is
+ * left out.
  */
 export async function fenceOf(fs: HostFs, home: string): Promise<Fence> {
   const named = absolute(home, 'the home');
@@ -73,17 +91,37 @@ export async function fenceOf(fs: HostFs, home: string): Promise<Fence> {
     if (folder === real && identity?.kind !== 'directory') throw new Error('the home cannot be identified');
     if (identity !== undefined) identities.push(identity);
   }
+  const places: string[] = [];
+  for (const folder of HOME_FOLDERS) {
+    const place = await fs.realpath(join(real, folder)).catch((error: unknown) => {
+      if (isAbsent(error)) return undefined;
+      throw error;
+    });
+    if (place === undefined) continue;
+    // The folder itself, followed: a link's target is what holds the files, so its identity is the target's.
+    const identity = await fs.identity(place);
+    if (identity?.kind !== 'directory') throw new Error(`the home's ${folder} cannot be identified`);
+    places.push(place);
+    identities.push(identity);
+  }
   for (const key of PINNED_KEY_PATHS) {
     const identity = await fs.identity(join(real, key));
     if (identity !== undefined) identities.push(identity);
   }
-  return { named, real, identities };
+  return { named, real, places, identities };
 }
 
-/** Inside the fence by NAME: the configured home or its real path (`insideFence` covers every `-before-` folder). */
+/**
+ * Inside the fence by NAME: the configured home or its real path (`insideFence` covers every `-before-` folder), or
+ * the real path of its `state` or `config` folder (today's `stateHomeByName`: each home as configured and as resolved).
+ */
 export function fencedByName(fence: Fence, path: string): boolean {
   const target = absolute(path, 'the path');
-  return insideFence(fence.named, target) || insideFence(fence.real, target);
+  return (
+    insideFence(fence.named, target) ||
+    insideFence(fence.real, target) ||
+    fence.places.some(place => within(place, target))
+  );
 }
 
 /**

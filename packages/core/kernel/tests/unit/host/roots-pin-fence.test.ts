@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { link, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { err, ok } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
@@ -377,5 +377,173 @@ describe("S47 S40 the fence holds the home's pinned key files and folders by ide
       await probe.close();
       await pinned.close();
     }
+  });
+});
+
+/**
+ * The home's `state` and `config` are folders of their own in today's fence (`NodeStateHomes([home, state, config])`):
+ * each by its real path and its device and inode. So one linked or bind-mounted out of the home is still the home's.
+ * `<parent>/home/state` and `<parent>/home/config` are links to `<parent>/elsewhere/state` and `.../config`, and the
+ * work folder is `<parent>/elsewhere`.
+ */
+async function linkedOut() {
+  const parent = await realpath(await mkdtemp(`${tmpdir()}/fy-pin-fence-out-`));
+  parents.push(parent);
+  const home = `${parent}/home`;
+  const elsewhere = `${parent}/elsewhere`;
+  await mkdir(home);
+  await mkdir(`${elsewhere}/state`, { recursive: true });
+  await mkdir(`${elsewhere}/config`);
+  await mkdir(`${elsewhere}/project`);
+  await writeFile(`${elsewhere}/state/grants.json`, 'GRANTS-FIXTURE');
+  await writeFile(`${elsewhere}/config/daemon.json`, 'CONFIG-FIXTURE');
+  await writeFile(`${elsewhere}/project/a.ts`, 'project-bytes');
+  await writeFile(`${elsewhere}/notes.txt`, 'notes-bytes');
+  await symlink(`${elsewhere}/state`, `${home}/state`);
+  await symlink(`${elsewhere}/config`, `${home}/config`);
+  return { parent, home, elsewhere };
+}
+
+describe("S40 S47 the home's state and config folders are fenced wherever they really are", () => {
+  test('S40 S47 an agent reads nothing of a state or config folder linked out of the home, and the rest of its work folder is served', async () => {
+    const { home, elsewhere } = await linkedOut();
+    const pinned = await pinOf(home, elsewhere);
+    try {
+      expect(await outcome(read(pinned, 'state/grants.json'))).toBe('refused:fenced');
+      expect(await outcome(read(pinned, 'config/daemon.json'))).toBe('refused:fenced');
+      expect(await outcome(listing(pinned, 'state'))).toBe('refused:fenced');
+      expect(await outcome(listing(pinned, 'config'))).toBe('refused:fenced');
+      expect(await outcome(read(pinned, 'notes.txt'))).toBe('notes-bytes');
+      expect(await outcome(read(pinned, 'project/a.ts'))).toBe('project-bytes');
+    } finally {
+      await pinned.close();
+    }
+  });
+
+  test('S40 S47 the verdict and the probe fence a name in a state or config folder linked out of the home, present or not', async () => {
+    const { home, elsewhere } = await linkedOut();
+    const pinned = await pinOf(home, elsewhere);
+    const probe = pinned.probe();
+    try {
+      expect(
+        await pinned.fenced([
+          'state',
+          'state/grants.json',
+          'state/never-made.json',
+          'config/daemon.json',
+          'config/deeper/never-made.json',
+          'notes.txt',
+          'project/a.ts',
+        ]),
+      ).toEqual([true, true, true, true, true, false, false]);
+      expect(await probe.classify(['notes.txt', 'state/grants.json', 'config/daemon.json'])).toEqual([
+        'file',
+        'unsupported',
+        'unsupported',
+      ]);
+    } finally {
+      await probe.close();
+      await pinned.close();
+    }
+  });
+
+  test('S40 S47 a work folder AT or inside the real state or config folder is refused at the pin, by name and through a link', async () => {
+    const { parent, home, elsewhere } = await linkedOut();
+    await mkdir(`${elsewhere}/state/work`);
+    await symlink(`${elsewhere}/config`, `${parent}/via-link`);
+    for (const work of [
+      `${elsewhere}/state`,
+      `${elsewhere}/config`,
+      `${elsewhere}/state/work`,
+      `${home}/state`,
+      `${parent}/via-link`,
+    ])
+      for (const options of [undefined, { fence: 'agent' as const }, { fence: 'none' as const }])
+        expect(
+          await outcome(async () => {
+            await (await pinOf(home, work, platformRootPinner(), options)).close();
+            return 'pinned';
+          }),
+        ).toMatch(/fenced$/);
+  });
+
+  test('S40 S47 a folder that IS the state or config folder by device and inode fences its names though its own is innocent', async () => {
+    const { home, elsewhere } = await linkedOut();
+    for (const folder of ['state', 'config']) {
+      const identity = await fs.identity(`${elsewhere}/${folder}`);
+      if (identity === undefined) throw new Error(`the fixture ${folder} has no identity`);
+      // A walk that met the folder under another name (a bind mount of it): only its device and inode tell.
+      const pinned = await pinOf(home, elsewhere, aliasingPinner('project', identity));
+      const probe = pinned.probe();
+      try {
+        expect(await outcome(read(pinned, 'project/a.ts'))).toBe('refused:fenced');
+        expect(await outcome(read(pinned, 'notes.txt'))).toBe('notes-bytes');
+        expect(await pinned.fenced(['project/a.ts', 'project/not-there.ts', 'notes.txt'])).toEqual([true, true, false]);
+        expect(await probe.classify(['project/a.ts', 'notes.txt'])).toEqual(['unsupported', 'file']);
+      } finally {
+        await probe.close();
+        await pinned.close();
+      }
+    }
+  });
+
+  test("S40 S47 a person's pin is unaffected beneath its root as today: the folders are served, the root check still applies", async () => {
+    const { home, elsewhere } = await linkedOut();
+    const pinned = await pinOf(home, elsewhere, platformRootPinner(), { fence: 'none' });
+    try {
+      expect(await outcome(read(pinned, 'state/grants.json'))).toBe('GRANTS-FIXTURE');
+      expect(await outcome(read(pinned, 'config/daemon.json'))).toBe('CONFIG-FIXTURE');
+      expect(await outcome(listing(pinned, 'state'))).toBe('grants.json');
+      expect(await pinned.fenced(['state/grants.json', 'config/daemon.json', 'notes.txt'])).toEqual([
+        true,
+        true,
+        false,
+      ]);
+    } finally {
+      await pinned.close();
+    }
+  });
+
+  test('S40 S47 the fence holds the real path and the device and inode of state and config, linked out of the home or in it', async () => {
+    const out = await linkedOut();
+    const linked = await fenceOf(fs, out.home);
+    expect(linked.places).toEqual([`${out.elsewhere}/state`, `${out.elsewhere}/config`]);
+    const inside = await layout();
+    await mkdir(`${inside.home}/config`);
+    const here = await fenceOf(fs, inside.home);
+    expect(here.places).toEqual([`${inside.home}/state`, `${inside.home}/config`]);
+    for (const [fence, root] of [
+      [linked, out.elsewhere],
+      [here, inside.home],
+    ] as const)
+      for (const folder of ['state', 'config']) {
+        const identity = await fs.identity(`${root}/${folder}`);
+        expect(fence.identities.some(held => held.device === identity?.device && held.inode === identity.inode)).toBe(
+          true,
+        );
+      }
+  });
+
+  test('S40 S47 a state or config folder that is not there is left out, and one that is there but unreadable or not a folder fails closed', async () => {
+    const { parent, home } = await layout();
+    expect((await fenceOf(fs, home)).places).toEqual([`${home}/state`]);
+    await symlink(`${parent}/nowhere`, `${home}/config`);
+    expect((await fenceOf(fs, home)).places).toEqual([`${home}/state`]);
+    // Anything but "not there" is a doubt: the fence cannot be made, so every owner's root and every name refuses.
+    const denied: typeof fs = {
+      ...fs,
+      realpath: async path => {
+        if (path === `${home}/config`) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+        return await fs.realpath(path);
+      },
+    };
+    await rm(`${home}/config`);
+    await mkdir(`${home}/config`);
+    await expect(fenceOf(denied, home)).rejects.toThrow('denied');
+    await rm(`${home}/config`, { recursive: true });
+    await writeFile(`${home}/config`, 'a file');
+    await expect(fenceOf(fs, home)).rejects.toThrow('cannot be identified');
+    const pinned = await pinOf(home, parent).catch((error: unknown) => error);
+    expect(pinned instanceof RootError ? pinned.refusal : 'pinned').toBe('fenced');
   });
 });
