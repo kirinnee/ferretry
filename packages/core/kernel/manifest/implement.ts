@@ -246,9 +246,16 @@ export interface PluginClient {
   subscribe<Name extends string, Payload>(event: EventDef<Name, Payload>, listener: (payload: Payload) => void): Cancel;
   /**
    * A guarded duplex socket route (F2): `key` is a socket the manifest (or a contract it imports) declares, opened
-   * through the same contract-hash guard as `call`. Optional until the app shell and the CLI fill it in.
+   * through the same contract-hash guard as `call`. `params` fill only the path's `:placeholders`; `query` (optional,
+   * last) is URL-encoded onto the opened path, for a socket that reads its scope from the query string. Optional
+   * until the app shell and the CLI fill it in.
    */
-  socket?(key: string, params: Readonly<Record<string, string>>, listeners: PluginSocketListeners): PluginSocket;
+  socket?(
+    key: string,
+    params: Readonly<Record<string, string>>,
+    listeners: PluginSocketListeners,
+    query?: Readonly<Record<string, string>>,
+  ): PluginSocket;
   /**
    * Whether the daemon's event feed (what `subscribe` hears) is live, and when that changes. A screen that polls
    * beside the feed polls slowly while it is live and at its own pace when it is not. Optional until the app shell

@@ -208,7 +208,7 @@ daemon/tests/unit/step-up/registry.test.ts   -> access
 daemon/tests/unit/step-up/service.test.ts   -> access
 ```
 
-## Keep (tests required): 126 rows owned (121 kept, 5 split)
+## Keep (tests required): 125 rows owned (120 kept, 5 split)
 
 Every row below gets a test whose name contains the row id, e.g. `test('G1 …', …)`; `ports-pending.json` loses this plugin's line in the same PR (§10.4).
 
@@ -322,7 +322,6 @@ Every row below gets a test whose name contains the row id, e.g. `test('G1 …',
 - **G157** kept (grants) — `step-up-required` is the only refusal a caller can clear alone. A remote warden meets it as final. · enforcer: behaviour as written · test name: `G157`
 - **G159** kept (grants) — `fy daemon config set` writes the document and the in-memory answer in the same call, with no restart. A hand edit needs a restart, and the command says so. · enforcer: behaviour as written · test name: `G159`
 - **G160** kept (grants) — The grant audit read is `admin` scope, bounded to 64 KiB and the newest 50 records. Unparseable lines are counted and reported, never dropped. · enforcer: `GET /v1/grants/audit`, `fy daemon config history` · test name: `G160`
-- **G161** kept (grants) — `/v1/events` `live` frames widen nothing (`operator` minimum, the same data as snapshot and logs). · enforcer: behaviour as written · test name: `G161`
 - **G169** kept (grants) — `pairing.configure` gates reading `GET /v1/audit`, and `filesystem.configure` gates `POST /v1/projects`. · enforcer: behaviour as written · test name: `G169`
 - **P20** kept (pairing) — The `operator` minimum is met by any credential except a warden's, including a paired device's session; it is not an admin-token minimum · enforcer: behaviour as written · test name: `P20`
 - **P90** kept (pairing) — `FY_URL` wins outright, and a genuinely remote daemon still requires its own `FY_TOKEN` · enforcer: `FY_URL`, `FY_TOKEN` · with: fy-shell · note: integration fixture across the packages named · test name: `P90`

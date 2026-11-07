@@ -15,7 +15,13 @@ export interface CallInit {
   readonly body?: unknown;
 }
 
-/** `GET /v1/cards/:id` with `{ id: 'c 1' }` becomes `GET /v1/cards/c%201`. A missing or unused parameter is a bug. */
+/**
+ * A parameter fills one path segment, so one that is `.` or `..` (a dot segment the URL parser would resolve to a
+ * different route) or that holds a `/` is refused rather than filled.
+ */
+const isSafePathParam = (value: string): boolean => value !== '.' && value !== '..' && !value.includes('/');
+
+/** `GET /v1/cards/:id` with `{ id: 'c 1' }` becomes `GET /v1/cards/c%201`. A missing, unused or unsafe parameter is a bug. */
 export function buildRequest(routeKey: string, init: CallInit = {}): DaemonRequest {
   const { method, path } = parseRouteKey(routeKey);
   const params = init.params ?? {};
@@ -23,6 +29,8 @@ export function buildRequest(routeKey: string, init: CallInit = {}): DaemonReque
   const filled = path.replace(/:([A-Za-z][A-Za-z0-9_]*)/gu, (_match, name: string) => {
     const value = params[name];
     if (value === undefined) throw new ShellError(`${routeKey} needs the parameter "${name}"`, EXIT.usage);
+    if (!isSafePathParam(value))
+      throw new ShellError(`${routeKey}: the parameter "${name}" cannot be "." or ".." or hold a "/"`, EXIT.usage);
     used.add(name);
     return encodeURIComponent(value);
   });

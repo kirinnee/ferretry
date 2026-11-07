@@ -16,7 +16,7 @@
  * remaining window is the moment between that check and the connect, which no user-space client can close.
  */
 import { type Cancel, type EventDef, type PluginInventory, PluginsChanged } from '@ferretry/kernel/contract';
-import type { Manifest, PluginClient } from '@ferretry/kernel/manifest';
+import type { Manifest, PluginClient, PluginSocket, PluginSocketListeners } from '@ferretry/kernel/manifest';
 import { DaemonRefusal, EXIT, ShellError } from './errors.ts';
 import { type CompiledContracts, judgeCall, PluginPausedError, pausedSentence } from './guard.ts';
 import { PERSON_ONLY_REFUSAL } from './credential.ts';
@@ -45,6 +45,12 @@ export interface DaemonTransport {
    * Returns the cancel. Absent where a transport cannot hold a feed open.
    */
   events?(listener: (event: RawEvent) => void, onClose: (reason: string) => void): Cancel;
+  /**
+   * Opens one declared socket route at `path` (its path with the query already encoded), through the same address and
+   * credential rules as `send`: the credential is a header, never part of the URL. Absent where a transport cannot
+   * hold a stream open.
+   */
+  socket?(path: string, listeners: PluginSocketListeners): PluginSocket;
 }
 
 /**
@@ -104,6 +110,7 @@ interface RouteFacts {
 export interface Surfaces {
   readonly routes: ReadonlyMap<string, RouteFacts>;
   readonly tools: ReadonlyMap<string, RouteFacts>;
+  readonly sockets: ReadonlyMap<string, RouteFacts>;
   readonly titles: Readonly<Record<string, string>>;
   readonly compiled: CompiledContracts;
 }
@@ -113,6 +120,7 @@ export const toolKey = (plugin: string, name: string): string => `${plugin}/${na
 export function surfacesOf(registry: CommandRegistry): Surfaces {
   const routes = new Map<string, RouteFacts>();
   const tools = new Map<string, RouteFacts>();
+  const sockets = new Map<string, RouteFacts>();
   const titles: Record<string, string> = {};
   const compiled: Record<string, string> = {};
   for (const plugin of [{ id: registry.kernel.manifest.id, ...registry.kernel }, ...registry.plugins]) {
@@ -120,10 +128,12 @@ export function surfacesOf(registry: CommandRegistry): Surfaces {
     compiled[plugin.id] = plugin.contract;
     for (const route of plugin.manifest.actions?.routes ?? [])
       if (!routes.has(route.key)) routes.set(route.key, { owner: plugin.id, caller: route.caller });
+    for (const declared of plugin.manifest.actions?.sockets ?? [])
+      if (!sockets.has(declared.key)) sockets.set(declared.key, { owner: plugin.id, caller: declared.caller });
     for (const tool of plugin.manifest.actions?.agentTools ?? [])
       tools.set(toolKey(plugin.id, tool.name), { owner: plugin.id, caller: tool.caller });
   }
-  return { routes, tools, titles, compiled };
+  return { routes, tools, sockets, titles, compiled };
 }
 
 /**
@@ -222,8 +232,34 @@ export function toolFactsBeforeContact(surfaces: Surfaces, inPane: boolean, name
   return first[1];
 }
 
+/**
+ * What a socket route needs before anything is opened: the key is declared as a socket, and a person-only socket is
+ * not opened from a ferret's pane. Asked before the connection exists, like a route's.
+ */
+export function socketFactsBeforeContact(surfaces: Surfaces, inPane: boolean, key: string): RouteFacts {
+  const facts = surfaces.sockets.get(key);
+  if (facts === undefined) throw new ShellError(`no plugin declares the socket ${key}`, EXIT.failure);
+  if (inPane && facts.caller === 'person') throw new ShellError(PERSON_ONLY_REFUSAL, EXIT.failure);
+  return facts;
+}
+
+/** The transport's stream opener; a transport that cannot hold a stream open is refused here, before anything is checked. */
+function socketOf(deps: ClientDeps): NonNullable<DaemonTransport['socket']> {
+  const open = deps.transport.socket;
+  if (open === undefined)
+    throw new ShellError(`${deps.binary} does not open streams on this connection`, EXIT.unavailable);
+  return open;
+}
+
 /** A client that can also be told when its feed ends, which a verb that follows events until interrupted needs. */
 export interface FollowingClient extends PluginClient {
+  /** Opens a declared socket route: guarded like `call`, then through `DaemonTransport.socket`. */
+  socket(
+    key: string,
+    params: Readonly<Record<string, string>>,
+    listeners: PluginSocketListeners,
+    query?: Readonly<Record<string, string>>,
+  ): PluginSocket;
   /**
    * Runs a declared agent tool: guarded exactly like `call` (the caller and the tool's owner must be present, on and
    * carry this fy's contract hashes), then `POST /v1/agent/tools`. The answer is the tool's result, text already masked.
@@ -366,12 +402,83 @@ export function pluginClient(deps: ClientDeps, caller: Manifest['id']): Followin
     },
     async tool(name: string, input?: unknown): Promise<unknown> {
       const facts = toolFactsBeforeContact(deps.surfaces, deps.inPane, name);
-      const request = buildRequest(AGENT_TOOLS_ROUTE, { body: { tool: name, ...(input === undefined ? {} : { input }) } });
+      const request = buildRequest(AGENT_TOOLS_ROUTE, {
+        body: { tool: name, ...(input === undefined ? {} : { input }) },
+      });
       const ids = [caller, facts.owner];
       await ensureAllAllowed(deps, ids);
       return await sendChecked(deps, request, ids);
     },
     subscribe: (event, listener) => follow(event, listener, () => undefined),
     follow,
+    socket(key, params, listeners, query) {
+      const facts = socketFactsBeforeContact(deps.surfaces, deps.inPane, key);
+      const open = socketOf(deps);
+      // Built before the guard, so a missing or unused parameter fails the caller, not a frame later.
+      const path = buildRequest(key, { params, ...(query === undefined ? {} : { query }) }).path;
+      const ids = [caller, facts.owner];
+      let closing = false;
+      let ended = false;
+      let socket: PluginSocket | undefined;
+      const end = (reason: string, code?: number): void => {
+        if (closing || ended) return;
+        ended = true;
+        socket?.close();
+        if (code === undefined) listeners.onClose(reason);
+        else listeners.onClose(reason, code);
+      };
+      // One chain, so frames reach the listener in the order they arrived although each is checked asynchronously.
+      let chain: Promise<void> = Promise.resolve();
+      void ensureAllAllowed(deps, ids).then(
+        () => {
+          if (closing) return;
+          try {
+            socket = open.call(deps.transport, path, {
+              ...(listeners.onOpen === undefined ? {} : { onOpen: listeners.onOpen }),
+              onFrame: frame => {
+                chain = chain.then(async () => {
+                  if (closing || ended) return;
+                  // A package that stopped being allowed mid-stream ends it, saying why, instead of dropping frames.
+                  const allowed = await allowedNow(deps, ids).catch(() => false);
+                  if (closing || ended) return;
+                  if (allowed) {
+                    listeners.onFrame(frame);
+                    return;
+                  }
+                  try {
+                    await ensureAllAllowed(deps, ids);
+                    listeners.onFrame(frame);
+                  } catch (error) {
+                    end(error instanceof Error ? error.message : String(error));
+                  }
+                });
+              },
+              onClose: (reason, code) => {
+                chain = chain.then(() => {
+                  if (!closing && !ended) {
+                    ended = true;
+                    if (code === undefined) listeners.onClose(reason);
+                    else listeners.onClose(reason, code);
+                  }
+                });
+              },
+            });
+          } catch (error) {
+            end(error instanceof Error ? error.message : String(error));
+          }
+        },
+        (error: unknown) => end(error instanceof Error ? error.message : String(error)),
+      );
+      return {
+        send: frame => {
+          if (!closing && !ended) socket?.send(frame);
+        },
+        close: (code, reason) => {
+          if (closing) return;
+          closing = true;
+          socket?.close(code, reason);
+        },
+      };
+    },
   };
 }

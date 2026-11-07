@@ -12,6 +12,9 @@ import {
   HistoryEventSource,
 } from '../../../../daemon/modules/fleet-events.ts';
 import { FyEventStreamFrameSchema } from '../../../../daemon/lib/protocol/session.ts';
+import { journalEventToFyEvent } from '../../../../daemon/lib/session/peers/reads.ts';
+import { FerretLiveActivitySchema } from '../../../../contract/index.ts';
+import ferretsManifest from '../../../../manifest.ts';
 import { createSessionEvent, encodeSessionEvent } from '../../../../daemon/lib/storage/journal.ts';
 import type { SessionId } from '../../../../daemon/lib/session-id.ts';
 
@@ -36,8 +39,7 @@ function world() {
 
 const call = (query: [string, string][]): CallContext =>
   ({ request: { query: queryFrom(query) }, params: new Map() }) as unknown as CallContext;
-const scope = (query: [string, string][], known = ['wren']) =>
-  eventStreamScope(call(query), id => known.includes(id));
+const scope = (query: [string, string][], known = ['wren']) => eventStreamScope(call(query), id => known.includes(id));
 const refusal = (query: [string, string][]): { status: number; code: string } | undefined => {
   try {
     scope(query);
@@ -198,22 +200,44 @@ describe('R537 the query rules are today’s', () => {
   });
 
   test('one ferret: its own cursor, live and transcript flags, and its refusals', () => {
-    expect(scope([['sessionId', 'wren'], ['after', '4'], ['live', '1'], ['transcript', '1']])).toEqual({
+    expect(
+      scope([
+        ['sessionId', 'wren'],
+        ['after', '4'],
+        ['live', '1'],
+        ['transcript', '1'],
+      ]),
+    ).toEqual({
       kind: 'session',
       sessionId: 'wren',
       after: 4,
       live: true,
       transcript: true,
     });
-    expect(refusal([['sessionId', 'wren'], ['tail', '3']])).toEqual({ status: 400, code: 'tail_needs_fleet' });
+    expect(
+      refusal([
+        ['sessionId', 'wren'],
+        ['tail', '3'],
+      ]),
+    ).toEqual({ status: 400, code: 'tail_needs_fleet' });
     expect(refusal([['sessionId', 'nobody']])).toEqual({ status: 404, code: 'not-found' });
     expect(refusal([['sessionId', '../etc']])).toEqual({ status: 400, code: 'invalid_session_id' });
-    expect(refusal([['sessionId', 'wren'], ['live', '2']])).toEqual({ status: 400, code: 'invalid_query' });
+    expect(
+      refusal([
+        ['sessionId', 'wren'],
+        ['live', '2'],
+      ]),
+    ).toEqual({ status: 400, code: 'invalid_query' });
   });
 
   test('an unknown parameter, a repeated one and a token in the URL are refused; a leftover ticket is tolerated', () => {
     expect(refusal([['token', 'abc']])).toEqual({ status: 400, code: 'invalid_query' });
-    expect(refusal([['after', '1'], ['after', '2']])).toEqual({ status: 400, code: 'invalid_query' });
+    expect(
+      refusal([
+        ['after', '1'],
+        ['after', '2'],
+      ]),
+    ).toEqual({ status: 400, code: 'invalid_query' });
     expect(refusal([['after', '-1']])).toEqual({ status: 400, code: 'invalid_query' });
     expect(scope([['ticket', 'old']])).toEqual({ kind: 'fleet' });
   });
@@ -229,7 +253,12 @@ describe('G161 R520 the socket: replay, then the idle proof, then live appends',
       { after: (_ms, action) => (timers.push(action), { cancel: () => undefined }) },
       id => id === 'wren',
     );
-    const attach = await accept(call([['sessionId', 'wren'], ['after', '1']]));
+    const attach = await accept(
+      call([
+        ['sessionId', 'wren'],
+        ['after', '1'],
+      ]),
+    );
     const feed = downstream();
     const handler = await attach(feed.port);
     await handler.open();
@@ -254,6 +283,124 @@ describe('G161 R520 the socket: replay, then the idle proof, then live appends',
     await handler.open();
     handler.fromClient('hello');
     expect(feed.closed).toEqual([{ code: 1008, reason: 'event stream is server-only' }]);
+  });
+});
+
+describe('journal events on the stream', () => {
+  test('a live-tailed event carries only the envelope fields a replayed event carries, nothing the journal line did not', async () => {
+    const { append, source } = world();
+    await append('wren', 1);
+    const accept = fleetEventsAccept(source, { after: () => ({ cancel: () => undefined }) }, id => id === 'wren');
+    const attach = await accept(
+      call([
+        ['sessionId', 'wren'],
+        ['after', '0'],
+      ]),
+    );
+    const feed = downstream();
+    const handler = await attach(feed.port);
+    await handler.open();
+    // A journal line that somehow carried a field beyond the stored envelope: it must not reach the wire.
+    source.publish({
+      sequence: 2,
+      sessionId: 'wren',
+      time: NOW,
+      type: 'session.turn',
+      data: { n: 2 },
+      token: 'must-not-travel',
+    } as never);
+    const events = feed.frames
+      .map(frame => FyEventStreamFrameSchema.parse(frame))
+      .flatMap(frame => (frame.kind === 'event' ? [frame.event] : []));
+    expect(events).toHaveLength(2);
+    const [replayed, live] = events;
+    expect(Object.keys(live ?? {}).sort()).toEqual(Object.keys(replayed ?? {}).sort());
+    expect(Object.keys(live ?? {}).sort()).toEqual(
+      Object.keys(journalEventToFyEvent({ sequence: 0, sessionId: 'x', time: NOW, type: 't', data: null })).sort(),
+    );
+    expect(JSON.stringify(feed.frames).includes('must-not-travel')).toBe(false);
+  });
+});
+
+describe('G161 live frames widen nothing', () => {
+  /** The socket the way a `?live=1` reader opens it, with `sample` as the live readout behind it. */
+  async function openLive(sample: () => unknown) {
+    const { source } = world();
+    const timers: (() => void)[] = [];
+    const accept = fleetEventsAccept(
+      source,
+      { after: (_ms, action) => (timers.push(action), { cancel: () => undefined }) },
+      id => id === 'wren',
+      { live: { sample: async () => sample() as never } },
+    );
+    const attach = await accept(
+      call([
+        ['sessionId', 'wren'],
+        ['live', '1'],
+      ]),
+    );
+    const feed = downstream();
+    const handler = await attach(feed.port);
+    await handler.open();
+    // Run every timer armed so far (the live sampler is armed at once after the replay), then let its sample settle.
+    for (const run of timers.splice(0)) run();
+    await Bun.sleep(5);
+    const live = () =>
+      feed.frames
+        .map(frame => FyEventStreamFrameSchema.parse(frame))
+        .flatMap(frame => (frame.kind === 'live' ? [frame.live] : []));
+    return { live, feed };
+  }
+
+  const FULL_READING = {
+    sessionId: 'wren',
+    at: NOW,
+    turnStartedAt: NOW,
+    verb: 'Pontificating…',
+    outputTokens: 12,
+    inputTokens: 34,
+    outputSource: 'transcript',
+    compaction: { phase: 'done', endedAt: NOW },
+  };
+
+  test('G161 the socket descriptor’s minimum is operator, the same as the ferret read Gate admits at', () => {
+    const declared = ferretsManifest.actions?.sockets?.find(entry => entry.key === 'GET /v1/events');
+    const read = ferretsManifest.actions?.routes?.find(entry => entry.key === 'GET /v1/ferrets/:ferretId');
+    expect(declared?.minimum).toBe('operator');
+    expect(declared?.minimum).toBe(read?.minimum);
+  });
+
+  test('G161 a ?live=1 stream sends live frames whose fields are exactly the live-activity fields the readout serves', async () => {
+    const { live } = await openLive(() => FULL_READING);
+    const frames = live();
+    expect(frames).toHaveLength(1);
+    const allowed = Object.keys(FerretLiveActivitySchema.shape).sort();
+    expect(Object.keys(frames[0] ?? {}).sort()).toEqual(allowed);
+    expect(frames[0]).toEqual(FULL_READING as never);
+  });
+
+  test('G161 a reading that carries a field beyond those is refused by the frame schema, so it never travels', async () => {
+    const { live, feed } = await openLive(() => ({ ...FULL_READING, secret: 'must-not-travel' }));
+    expect(live()).toEqual([]);
+    expect(JSON.stringify(feed.frames).includes('must-not-travel')).toBe(false);
+  });
+
+  test('G161 a stream that did not ask for ?live=1 sends no live frame even when a readout is wired', async () => {
+    const { source } = world();
+    const timers: (() => void)[] = [];
+    const accept = fleetEventsAccept(
+      source,
+      { after: (_ms, action) => (timers.push(action), { cancel: () => undefined }) },
+      id => id === 'wren',
+      { live: { sample: async () => FULL_READING as never } },
+    );
+    const attach = await accept(call([['sessionId', 'wren']]));
+    const feed = downstream();
+    const handler = await attach(feed.port);
+    await handler.open();
+    for (const run of timers.splice(0)) run();
+    await Bun.sleep(5);
+    expect(feed.frames.map(frame => FyEventStreamFrameSchema.parse(frame).kind)).not.toContain('live');
   });
 });
 

@@ -70,7 +70,12 @@ export interface DaemonClientOptions {
 
 /** The shell's widening of the leaf's `PluginClient`: the same guard over sockets. */
 export interface ShellPluginClient extends PluginClient {
-  socket(key: string, params: Readonly<Record<string, string>>, listeners: SocketListeners): TransportSocket;
+  socket(
+    key: string,
+    params: Readonly<Record<string, string>>,
+    listeners: SocketListeners,
+    query?: Readonly<Record<string, string>>,
+  ): TransportSocket;
 }
 
 interface Subscription {
@@ -85,11 +90,13 @@ interface OpenSocket {
   readonly listeners: SocketListeners;
 }
 
-/** `/v1/board/:id` + `{ id: 'F 1' }` → `/v1/board/F%201`. A missing parameter is a programming error. */
+/** `/v1/board/:id` + `{ id: 'F 1' }` → `/v1/board/F%201`. A missing parameter, `.`, `..` or one holding a `/` is refused. */
 export function fillPath(template: string, params: Readonly<Record<string, string>> = {}): string {
   return template.replace(/:([A-Za-z][A-Za-z0-9_]*)/gu, (_, name: string) => {
     const value = params[name];
     if (value === undefined) throw new TypeError(`route ${template} needs the parameter "${name}"`);
+    if (value === '.' || value === '..' || value.includes('/'))
+      throw new TypeError(`route ${template}: the parameter "${name}" cannot be "." or ".." or hold a "/"`);
     return encodeURIComponent(value);
   });
 }
@@ -194,7 +201,7 @@ export class DaemonClient {
     return {
       call: (route, init) => this.#call(caller, route, init),
       subscribe: (event, listener) => this.#subscribe(caller, event, listener),
-      socket: (key, params, listeners) => this.#socket(caller, key, params, listeners),
+      socket: (key, params, listeners, query) => this.#socket(caller, key, params, listeners, query),
       feed: {
         isLive: () => this.#feedLive,
         subscribeLive: listener => {
@@ -385,6 +392,7 @@ export class DaemonClient {
     key: string,
     params: Readonly<Record<string, string>>,
     listeners: SocketListeners,
+    query?: Readonly<Record<string, string>>,
   ): TransportSocket {
     const owner = this.#socketOwner.get(key);
     if (owner === undefined) throw new TypeError(`${caller} opened ${key}, which no compiled manifest declares`);
@@ -392,7 +400,9 @@ export class DaemonClient {
     for (const id of new Set([caller, owner])) if (!this.#allowed(id)) throw paused(id, this.standing(id));
     const { path } = parseRouteKey(key);
     const entry: { open?: OpenSocket } = {};
-    const socket = this.#transport.socket(fillPath(path, params), {
+    const queryString = new URLSearchParams(query ?? {}).toString();
+    const opened = fillPath(path, params);
+    const socket = this.#transport.socket(queryString === '' ? opened : `${opened}?${queryString}`, {
       ...(listeners.onOpen === undefined ? {} : { onOpen: listeners.onOpen }),
       onFrame: listeners.onFrame,
       onClose: (reason, code) => {

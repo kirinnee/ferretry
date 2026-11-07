@@ -147,18 +147,61 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
   R244: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
   R245: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
   R247: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
-  R518: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R520: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R521: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R522: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R523: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R524: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R525: { owner: 'ferrets', reason: "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's" },
-  R36: { owner: 'connections', reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)" },
-  R37: { owner: 'connections', reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)" },
-  R38: { owner: 'connections', reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)" },
-  R39: { owner: 'connections', reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)" },
-  R86: { owner: 'connections', reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)" },
+  R518: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R520: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R521: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R522: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R523: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R524: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R525: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` stream (`fleet-events.ts` and its frame service); R519 stays the app client's",
+  },
+  R36: {
+    owner: 'connections',
+    reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)",
+  },
+  R37: {
+    owner: 'connections',
+    reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)",
+  },
+  R38: {
+    owner: 'connections',
+    reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)",
+  },
+  R39: {
+    owner: 'connections',
+    reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)",
+  },
+  R86: {
+    owner: 'connections',
+    reason: "enforced by Connections' direct carrier (admission, per-address bounds, caps, reservation, heartbeat)",
+  },
   R88: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
   R89: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
   R506: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
@@ -171,11 +214,31 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
   R568: { owner: 'app-shell', reason: "enforced by the app's browser session client (packages/app/src/session)" },
   R112: { owner: 'conversation', reason: "enforced by Conversation's send ledger (app/chat/send-ledger.ts)" },
   S67: { owner: 'catalogs', reason: "the missing-secret judgement against a published fleet is Catalogs'" },
-  I14: { owner: 'asks', reason: "enforced by the Asks agenda state machine (the agenda refuses an input-form answer: 400 `use_input_form`)" },
-  I118: { owner: 'browsers', reason: "enforced by Browsers' page holds (the page tools refuse while a request is pending)" },
-  I119: { owner: 'browsers', reason: "enforced by Browsers' page queue (the hold decided inside the queue, before the act)" },
-  I120: { owner: 'browsers', reason: "enforced by Browsers' page holds (a failed call under a hold answers with the hold)" },
-  I121: { owner: 'browsers', reason: "enforced by Browsers' page holds (own names, not journalled, interrupted on restart)" },
+  G161: {
+    owner: 'ferrets',
+    reason:
+      "enforced by Ferrets' `GET /v1/events` socket descriptor (`operator` minimum) under Gate's admission; a `live` frame is the frame schema's live-activity readout, the same fields the pane and transcript reads serve",
+  },
+  I14: {
+    owner: 'asks',
+    reason: 'enforced by the Asks agenda state machine (the agenda refuses an input-form answer: 400 `use_input_form`)',
+  },
+  I118: {
+    owner: 'browsers',
+    reason: "enforced by Browsers' page holds (the page tools refuse while a request is pending)",
+  },
+  I119: {
+    owner: 'browsers',
+    reason: "enforced by Browsers' page queue (the hold decided inside the queue, before the act)",
+  },
+  I120: {
+    owner: 'browsers',
+    reason: "enforced by Browsers' page holds (a failed call under a hold answers with the hold)",
+  },
+  I121: {
+    owner: 'browsers',
+    reason: "enforced by Browsers' page holds (own names, not journalled, interrupted on restart)",
+  },
   R540: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
   R572: { owner: 'kernel', reason: 'enforced by the kernel session layer' },
   P24: { owner: 'connections', reason: 'enforced by the Connections relay client (browser carrier walk)' },

@@ -5,11 +5,35 @@ import { buildRequest, isRepeatable, refusalText } from '../../src/lib/request.t
 describe('buildRequest', () => {
   it('should encode parameters and the query', () => {
     should(
-      buildRequest('GET /v1/cards/:id/notes/:note', { params: { id: 'a/b', note: 'x' }, query: { q: 'a b' } }),
+      buildRequest('GET /v1/cards/:id/notes/:note', { params: { id: 'a b', note: 'é' }, query: { q: 'a b' } }),
     ).deepEqual({
       method: 'GET',
-      path: '/v1/cards/a%2Fb/notes/x?q=a+b',
+      path: '/v1/cards/a%20b/notes/%C3%A9?q=a+b',
     });
+  });
+
+  it('should keep ?, #, &, = and non-ASCII in keys and values inside the query', () => {
+    const { path } = buildRequest('GET /v1/x/:id', {
+      params: { id: 'a' },
+      query: { 'k&x=y?z#w': 'a?b#c/d&e=f', kéy: 'välue ✓' },
+    });
+    const url = new URL(path, 'http://daemon.test');
+    should(url.pathname).equal('/v1/x/a');
+    should(url.hash).equal('');
+    should([...url.searchParams.entries()]).deepEqual([
+      ['k&x=y?z#w', 'a?b#c/d&e=f'],
+      ['kéy', 'välue ✓'],
+    ]);
+    for (const encoded of ['%3F', '%23', '%26', '%3D', '%2F', '%C3%A9', '%E2%9C%93']) should(path).containEql(encoded);
+    should(path.match(/\?/gu)).have.length(1);
+  });
+
+  it('should refuse a parameter that is "." or ".." or holds a "/", which would reach another route', () => {
+    for (const id of ['.', '..', 'a/b', '../stream'])
+      should(() => buildRequest('GET /v1/cards/:id/stream', { params: { id } })).throw(
+        /cannot be "\." or "\.\." or hold a "\/"/u,
+      );
+    should(buildRequest('GET /v1/cards/:id/stream', { params: { id: '..a' } }).path).equal('/v1/cards/..a/stream');
   });
 
   it('should carry the body only when there is one', () => {

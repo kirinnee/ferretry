@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import { defineEvent } from '@ferretry/kernel/contract';
-import { definePlugin, implementCli, type PluginClient, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, implementCli, type PluginClient, socket, verb } from '@ferretry/kernel/manifest';
 import should from 'should';
 import { z } from 'zod';
 import { runFy } from '../../src/lib/run.ts';
@@ -15,6 +15,8 @@ import {
   registryOf,
   skeletonEntry,
 } from './fakes.ts';
+
+const SCOPE = { minimum: 'authenticated', audit: { skip: 'test' }, guard: { none: 'test' } } as const;
 
 describe('runFy', () => {
   it('should print the version and exit 0', async () => {
@@ -85,6 +87,53 @@ describe('runFy', () => {
     // Assert
     should(connects.length).equal(1);
     should(heard).deepEqual(['c1']);
+  });
+
+  it('a socket with a missing or dot-segment parameter fails the caller at once, before the daemon is reached', async () => {
+    // Arrange
+    const manifest = definePlugin({
+      ...boardManifest,
+      actions: { ...boardManifest.actions, sockets: [socket('GET /v1/cards/:id/stream', { ...SCOPE, caller: 'any' })] },
+    });
+    const refusals: string[] = [];
+    const closes: string[] = [];
+    const half = implementCli(manifest, {
+      build: ctx => ({
+        verbs: {
+          board: async () => 0,
+          'card move': async () => 0,
+          'card show': async () => {
+            for (const params of [{} as Record<string, string>, { id: '..' }, { id: '.' }]) {
+              try {
+                ctx.client.socket?.('GET /v1/cards/:id/stream', params, {
+                  onFrame: () => {},
+                  onClose: reason => closes.push(reason),
+                });
+              } catch (error) {
+                refusals.push(error instanceof Error ? error.message : String(error));
+              }
+            }
+            return 0;
+          },
+        },
+      }),
+    });
+    const { world, connects } = fakeWorld({
+      registry: registryOf(entry(manifest, 'h-board', half)),
+      inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
+    });
+
+    // Act
+    const code = await runFy(['card', 'show'], world);
+    await Bun.sleep(20);
+
+    // Assert
+    should(code).equal(0);
+    should(refusals).have.length(3);
+    should(refusals[0]).match(/needs the parameter "id"/u);
+    should(refusals[1]).match(/cannot be/u);
+    should(closes).deepEqual([]);
+    should(connects).deepEqual([]);
   });
 
   it('should not open a connection for a verb that never calls the daemon', async () => {

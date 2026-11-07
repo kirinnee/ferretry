@@ -180,7 +180,12 @@ export interface TestHost {
   tool(name: string, input: unknown, init?: { readonly as?: TestCaller }): Promise<ToolResult>;
   socket(
     path: string,
-    init?: { readonly as?: TestCaller; readonly method?: string; readonly query?: RequestInit2['query'] },
+    init?: {
+      readonly as?: TestCaller;
+      readonly method?: string;
+      /** The query the upgrade request carries, as `request` takes it. */
+      readonly query?: RequestInit2['query'];
+    },
   ): Promise<OpenSocket>;
   /** Delivers an event to every loaded subscriber (a wake-up from a fake). */
   emit<Payload>(event: EventDef<string, Payload>, payload: Payload): void;
@@ -1289,4 +1294,3 @@ async function start(world: World): Promise<TestHost> {
   };
   return host;
 }
-
