@@ -34,6 +34,7 @@ export interface LaunchSpec {
   readonly parts: readonly LaunchPart[];
   /** The first message, when the owner gave one. */
   readonly prompt?: string;
+  readonly harnessConversation?: string;
   /**
    * The start's options as they were given (today's start fields: harness flags, fast, remote control, the supervision
    * timers, …), kept in `details.json` so every resume launches with the same ones. `model` and `effort` are also

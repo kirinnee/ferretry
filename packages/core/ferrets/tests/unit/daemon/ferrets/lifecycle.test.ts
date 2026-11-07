@@ -215,3 +215,18 @@ test('V-0450 start label survives summary and stop label selects it independentl
   expect(buildStopPlan(list, { kind: 'label', label: 'mine' }).targets.map(t => t.id)).toEqual([f.id]);
   expect(buildStopPlan(list, { kind: 'label', label: 'different-pack' }).targets).toEqual([]);
 });
+
+test('Y a start bound to a harness conversation resumes it and carries it in the launch spec', async () => {
+  const f = fixture();
+  f.registry.remove(f.id);
+  const answer = await f.service.start({ folder: '/work', by: 'owner', harnessConversation: 'conversation-1' });
+  expect(answer.ok).toBe(true);
+  expect(f.registry.get(f.id)?.harnessConversation).toBe('conversation-1');
+  expect(f.harness.launched[0]?.harnessConversation).toBe('conversation-1');
+  for (const value of ['', 'x'.repeat(257)]) {
+    const bad = fixture();
+    bad.registry.remove(bad.id);
+    expect((await bad.service.start({ folder: '/work', by: 'owner', harnessConversation: value })).ok).toBe(false);
+    expect(bad.runner.starts).toBe(0);
+  }
+});
