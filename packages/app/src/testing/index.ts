@@ -16,3 +16,19 @@ export { render, run, runAsync, runUntil } from './react.ts';
 export { settleUntil } from './settle.ts';
 export { RouterProvider } from './router.tsx';
 export { manualScheduler } from './live-scheduler.ts';
+export {
+  LEASE_ENDS,
+  newDaemonIdentity,
+  readyFrame,
+  relayCrypto,
+  ScriptedDaemon,
+  settle as settleRelay,
+  testDevice,
+  testSessionId,
+} from './relay.ts';
+export {
+  type RotatingDaemonOptions,
+  type RotatingDial,
+  type RotatingRequest,
+  rotatingDial,
+} from './rotating-daemon.ts';

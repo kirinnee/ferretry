@@ -2,7 +2,7 @@ import type { AppImplementation, Manifest } from '@ferretry/kernel/manifest';
 import type { PluginCommandSource } from '../shell/command-sources.ts';
 import type { DaemonList, PairedDaemon } from '../daemons/daemon-list.ts';
 import type { RelayPairingOutcome, SessionDeviceClaim } from '../session/session-client.ts';
-import type { CarrierDial } from '../session/session-transport.ts';
+import type { CarrierDial, SessionKeyRotation } from '../session/session-transport.ts';
 import type { SocketLike } from '../session/direct-dial.ts';
 import type { WebCryptoRelayCrypto } from '../session/webcrypto.ts';
 import type { OwnerPayload, PrivateKeyHandle, RelayCrypto } from '../session/wire/index.ts';
@@ -55,6 +55,12 @@ export interface DeviceClaims {
   pairingKey(daemonId: string): Promise<PairingKey>;
   /** The pairing was removed: the key that proved it goes with it. */
   forget(daemonId: string): Promise<void>;
+  /**
+   * Replacing the key inside the next passkey ceremony once the daemon says it is due (R248), and the one retry with
+   * the pending key that keeps a device whose answer was lost from being stranded (R252). Access's `KeyRotation` over
+   * the same key store; absent, the shell never rotates (and a due device's unlock is refused).
+   */
+  readonly rotation?: SessionKeyRotation;
 }
 
 /**

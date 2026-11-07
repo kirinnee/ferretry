@@ -29,6 +29,7 @@ export { daemonOfClient } from './connect/daemon-of.ts';
 export { directDial, type DirectDialOptions, directSessionUrl, type SocketLike } from './session/direct-dial.ts';
 export {
   PAIRING_REFUSED_REASON,
+  type DeviceKeyRotation,
   type RelayClientSocket,
   RelayPairingRefusedError,
   type RelayPairingOutcome,
@@ -37,10 +38,15 @@ export {
   type SessionDeviceClaim,
 } from './session/session-client.ts';
 export {
+  type AmendedRotation,
   type CarrierDial,
   type CarrierSocketEvents,
   type CarrierWalkSocket,
   fromBase64Url,
+  NO_DEVICE_KEY,
+  type RotatingSession,
+  type RotationRequest,
+  type SessionKeyRotation,
   toBase64Url,
 } from './session/session-transport.ts';
 export { RelayKeyHandleError } from './session/webcrypto.ts';
