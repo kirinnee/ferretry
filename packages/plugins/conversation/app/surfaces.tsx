@@ -14,7 +14,6 @@ import type {
   ScreenProps,
   SettingsProps,
 } from '@ferretry/kernel/manifest';
-import { skeletonSentence } from '@ferretry/kernel/contract';
 import type { ReactNode } from 'react';
 import { ChatWidthPanel } from './chat-width-control.tsx';
 import { ChatScreen } from './chat/chat-screen.tsx';
@@ -26,15 +25,6 @@ import { LinksScreen } from './links/links-screen.tsx';
 import { QuestionRenderer } from './questions/question-renderer.tsx';
 import { QueuePanel } from './queue/queue-page.tsx';
 import { HypermediaPanel } from './toolbar/hypermedia-panel.tsx';
-
-const TITLE = 'Conversation';
-
-/** The `chat-width` panel until its porter (C2, lead ruling Q11) lands ChatWidthControl. */
-const Pending = (): ReactNode => (
-  <p className="fy-shell-line fy-shell-line--info" role="status">
-    {skeletonSentence(TITLE)}
-  </p>
-);
 
 /** A surface body inside the client context. */
 const scoped =

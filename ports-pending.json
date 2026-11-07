@@ -67,7 +67,7 @@
       "GAP(parity): the J-, S- and V-0245 rows still point at tests/unit/parity files that are not written"
     ],
     "conversation": [
-      "conversation app half: C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app) and C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel) have landed; the chat and transcript screen and the queue, compact-at, questions, search and links bodies are still the one-line Pending surface until C3 and C4 land",
+      "conversation app half: all four ports have landed — C1 (client context, lazy surfaces, fy-render blocks and sandbox build, the Markdown/prose kit in @ferretry/app), C2 (the composer, its menus over reference.catalog, attachments, drafts, the send outbox, Conversation Settings, the attachments panel and the chat-width panel), C3 (the chat screen and transcript) and C4 (the queue, compact-at and hypermedia panels, the question renderer, work search in the command bar, the Conversations screen)",
       "GAP(C3): ConversationOutbox is mounted nowhere yet (C3 mounts it around the chat screen), so a message the device kept unsent is not retried until the chat screen draws it; today's boot drain of every machine's saved messages stays a named GAP unless the shell offers a hook for it",
       "GAP(C3): the Composer takes the ferret's harness as a prop (a Codex ferret's picked skill inserts $name); the chat screen passes it from the Ferrets read",
       "GAP(app-shell): the carrier outage mark, the Agenda item draft stream, the 'machine recovered' moment and clearing drafts on unpair have no hook in the 5.0 client yet (app/composer/NEEDS-APP-SHELL.txt)",
@@ -76,7 +76,10 @@
       "GAP(board): a card or board fence draws each card through the Board reference:& renderer; the mini board and the lane view of today are Board views",
       "GAP(browsers): ExternalLink and useLinkBehaviour keep the default (open in the reader's browser); the \"Open links in\" policy is the Browsers plugin's",
       "GAP(ferrets): StatusMark reads a structural view; SessionView is not in Ferrets' contract yet (plan Q0, C3 adds it)",
-      "live updates run on the polling fallback until the kernel serves /v1/bus and /v1/events (plan Q12)"
+      "live updates run on the polling fallback until the kernel serves /v1/bus and /v1/events (plan Q12)",
+      "GAP(ferrets): the in-ferret search (app/search/session-search.tsx) is mounted nowhere yet — its host is Ferrets' ferret header and files view; the hypermedia switch reads the mode default until Ferrets serves PATCH /v1/ferrets/:ferretId/hypermedia and the ferret view with its config",
+      "GAP(app): today's All queues view is dropped (no screen lists every ferret's queue); the queue is a toolbar panel with the full page reachable from it",
+      "Runtimes is not a need of Conversation: Continue and the picker mount Ferrets' ferrets.move-account slot for the runtime and fall back to a typed runtime name where no panel is placed"
     ],
     "browsers": [
       "GAP(kernel): the link opener (POST /v1/system/open-url) is not detached from the daemon, as today's was (detached, unref'd): kernel SpawnOptions has no `detached`, so stopping the daemon's process group can take the opener, and a browser it started directly, down with it; needs the kernel's additive detached spawn",
@@ -104,7 +107,6 @@
   },
   "pendingHalves": {
     "agenda": ["app"],
-    "conversation": ["app"],
     "terminals": ["app"],
     "warden": ["app"]
   },
