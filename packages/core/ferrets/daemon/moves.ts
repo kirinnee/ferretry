@@ -10,7 +10,6 @@ import {
 } from './modules/session-handover.ts';
 import { type SessionMoveNeeds, type SessionMoveProvides, sessionMoveModule } from './modules/session-move.ts';
 import { transferPorts } from './modules/transfer.ts';
-import type { ModuleLifecycle } from '../../src/lib/runtime/modules.ts';
 
 /**
  * Moves and forks (ferrets-c): the bodies of today's `session-fork`, `session-handover` and `session-migrate` modules
@@ -43,7 +42,6 @@ export interface MovesDeps {
   /** The handover's needs; `every` is the kernel clock's and is filled here. */
   readonly handover: Omit<SessionHandoverNeeds, 'every'>;
   readonly move: SessionMoveNeeds;
-  readonly lifecycle: ModuleLifecycle;
 }
 
 export interface BuiltMoves {
@@ -75,16 +73,22 @@ function keyed(routes: readonly { readonly method: string; readonly path: string
 }
 
 export function buildMoves(ctx: DaemonContext<typeof manifest>, deps: MovesDeps): BuiltMoves {
-  const fork = sessionForkModule.build({ ...deps.fork, transferPorts }, undefined, deps.lifecycle);
+  // Today's module lifecycle, over the kernel's: a release runs when the daemon stops. None of the three modules
+  // registers one today; it is handed on so a module that does keeps today's shape.
+  const lifecycle: Parameters<(typeof sessionForkModule)['build']>[2] = {
+    onRelease: (_label: string, release: () => void | Promise<void>) => ctx.kernel.lifecycle.onStop(release),
+    releasing: () => ctx.kernel.lifecycle.stopping(),
+  };
+  const fork = sessionForkModule.build({ ...deps.fork, transferPorts }, undefined, lifecycle);
   const handover = sessionHandoverModule.build(
     {
       ...deps.handover,
-      every: (intervalMs, tick) => ctx.kernel.clock.every(milliseconds(intervalMs), tick),
+      every: (intervalMs: number, tick: () => void) => ctx.kernel.clock.every(milliseconds(intervalMs), tick),
     },
     undefined,
-    deps.lifecycle,
+    lifecycle,
   );
-  const move = sessionMoveModule.build(deps.move, undefined, deps.lifecycle);
+  const move = sessionMoveModule.build(deps.move, undefined, lifecycle);
   return {
     routes: keyed([
       ...(fork.contributes.routes ?? []),

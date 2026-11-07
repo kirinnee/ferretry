@@ -1,36 +1,29 @@
 import { describe, it } from 'bun:test';
-import { Command } from 'commander';
+import type { VerbInvocation } from '@ferretry/kernel/manifest';
 import should from 'should';
-import { registerMoveCommands } from '../../../../cli/lib/move/commands.ts';
+import { moveVerb } from '../../../../cli/lib/move/commands.ts';
 import { MoveController } from '../../../../cli/lib/move/controller.ts';
 import { moveHarness } from './fixtures.ts';
 
-function run(argv: string[]) {
+/** What the fy shell hands the verb after `fy ferret move` (see packages/cli/src/lib/argv.ts). */
+function run(args: string[], options: VerbInvocation['options']) {
   const { gateway, io, presenter } = moveHarness();
-  const program = new Command().name('fy').exitOverride();
-  program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  registerMoveCommands(program, new MoveController(gateway, presenter));
-  return { parsed: program.parseAsync(['node', 'fy', ...argv]), gateway, io };
+  const handler = moveVerb(new MoveController(gateway, presenter));
+  return { parsed: handler({ args, options }), gateway, io };
 }
 
-describe('move command surface', () => {
+describe('fy ferret move verb', () => {
   it('should map every daemon-supported move option', async () => {
     // Arrange + Act
-    const { parsed, gateway, io } = run([
-      'move',
-      'Fable',
-      '--agent',
-      'codex-secondary',
-      '--model',
-      'gpt-5.6-sol',
-      '--allow-context-downgrade',
-      '--conversation',
-      'fresh',
-      '--request-id',
-      'move-1',
-      '--json',
-    ]);
-    await parsed;
+    const { parsed, gateway, io } = run(['Fable'], {
+      agent: 'codex-secondary',
+      model: 'gpt-5.6-sol',
+      'allow-context-downgrade': true,
+      conversation: 'fresh',
+      'request-id': 'move-1',
+      json: true,
+    });
+    should(await parsed).equal(0);
 
     // Assert
     should(gateway.calls[0]).deepEqual({
@@ -47,14 +40,20 @@ describe('move command surface', () => {
 
   it('should require the target account', async () => {
     // Arrange + Act + Assert
-    await should(run(['move', 'Fable']).parsed).be.rejected();
+    await should(run(['Fable'], {}).parsed).be.rejected();
+  });
+
+  it('should take -a as --agent, as today', async () => {
+    const { parsed, gateway } = run(['Fable'], { a: 'codex-secondary' });
+    await parsed;
+    should(gateway.calls[0]).have.property('agent', 'codex-secondary');
   });
 
   it('should pass an explicit force past the in-flight check, and never force by default', async () => {
     // Arrange + Act
-    const forced = run(['move', 'Fable', '--agent', 'codex-secondary', '--force-inflight']);
+    const forced = run(['Fable'], { agent: 'codex-secondary', 'force-inflight': true });
     await forced.parsed;
-    const plain = run(['move', 'Fable', '--agent', 'codex-secondary']);
+    const plain = run(['Fable'], { agent: 'codex-secondary' });
     await plain.parsed;
 
     // Assert
@@ -64,9 +63,9 @@ describe('move command surface', () => {
 
   it('should send --convert as the convert conversation, and --preview as a read that moves nothing', async () => {
     // Arrange + Act
-    const moved = run(['move', 'Fable', '--agent', 'codex-secondary', '--convert']);
+    const moved = run(['Fable'], { agent: 'codex-secondary', convert: true });
     await moved.parsed;
-    const previewed = run(['move', 'Fable', '--agent', 'codex-secondary', '--convert', '--preview']);
+    const previewed = run(['Fable'], { agent: 'codex-secondary', convert: true, preview: true });
     await previewed.parsed;
 
     // Assert

@@ -1,34 +1,60 @@
-import type { Command } from 'commander';
+import type { VerbHandler, VerbInvocation } from '@ferretry/kernel/manifest';
 import type { MoveCommandOptions, MoveController } from './controller.ts';
 
-/** Mounts the daemon-gated session move as `fy move`. */
-export function registerMoveCommands(program: Command, controller: MoveController): void {
-  program
-    .command('move')
-    .description('continue a session on another runtime (another harness only with --convert)')
-    .argument('<id>', 'session id or callsign')
-    .requiredOption('-a, --agent <agent>', 'the runtime to move the session onto')
-    .option('--model <model>', "override the model; defaults to the target account's configured model")
-    .option(
-      '--allow-context-downgrade',
-      'accept a target context window smaller than the current one (the daemon otherwise refuses)',
-    )
-    .option(
-      '--force-inflight',
-      'go ahead even though the daemon could not show that what the agent is running is safe to stop (the daemon otherwise refuses; the move is journalled)',
-    )
-    .option(
-      '--conversation <choice>',
-      'resume (default) continues the conversation the session is on; fresh starts a new one; previous goes back to the one an earlier Restart left behind; convert rewrites it for the other harness',
-    )
-    .option(
-      '--convert',
-      'move onto a runtime of the OTHER harness (Claude ↔ Codex) by converting the conversation; same as --conversation convert',
-    )
-    .option('--preview', 'with --convert: show what the conversion would carry and change nothing')
-    .option('--request-id <id>', 'stable idempotency key for an explicit retry of this move')
-    .option('--json', 'print the moved session as JSON')
-    .action(async (id: string, options: MoveCommandOptions) => {
-      await controller.execute(id, options);
-    });
+/**
+ * `fy ferret move <id>` (today's `fy migrate`, §1.4): continue a ferret on another runtime (another harness only with
+ * `--convert`). Today's options, same spellings:
+ *
+ *   -a, --agent <agent>          the runtime to move the ferret onto (required)
+ *   --model <model>              override the model; defaults to the target account's configured model
+ *   --allow-context-downgrade    accept a target context window smaller than the current one
+ *   --force-inflight             go ahead although the daemon could not show that what the agent runs is safe to stop
+ *   --conversation <choice>      resume (default), fresh, previous or convert
+ *   --convert                    move onto a runtime of the OTHER harness by converting the conversation
+ *   --preview                    with --convert: show what the conversion would carry and change nothing
+ *   --request-id <id>            stable idempotency key for an explicit retry of this move
+ *   --json                       print the moved ferret as JSON
+ */
+export function moveVerb(controller: MoveController): VerbHandler {
+  return async invocation => {
+    const id = invocation.args[0];
+    if (id === undefined) throw new Error('fy ferret move needs a ferret id or callsign');
+    await controller.execute(id, moveOptions(invocation));
+    return 0;
+  };
+}
+
+/** The shell's parsed options as today's `MoveCommandOptions`. `--agent` is required, as today. */
+export function moveOptions(invocation: VerbInvocation): MoveCommandOptions {
+  const agent = text(invocation, 'agent') ?? text(invocation, 'a');
+  if (agent === undefined) throw new Error("required option '-a, --agent <agent>' not specified");
+  const optional = (name: string, key: keyof MoveCommandOptions): Partial<MoveCommandOptions> => {
+    const value = text(invocation, name);
+    return value === undefined ? {} : { [key]: value };
+  };
+  const flag = (name: string, key: keyof MoveCommandOptions): Partial<MoveCommandOptions> =>
+    on(invocation, name) ? { [key]: true } : {};
+  return {
+    agent,
+    ...optional('model', 'model'),
+    ...flag('allow-context-downgrade', 'allowContextDowngrade'),
+    ...flag('force-inflight', 'forceInflight'),
+    ...optional('conversation', 'conversation'),
+    ...flag('convert', 'convert'),
+    ...flag('preview', 'preview'),
+    ...optional('request-id', 'requestId'),
+    ...flag('json', 'json'),
+  };
+}
+
+function text(invocation: VerbInvocation, name: string): string | undefined {
+  const value = invocation.options[name];
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value[value.length - 1] as string | undefined;
+  return undefined;
+}
+
+function on(invocation: VerbInvocation, name: string): boolean {
+  const value = invocation.options[name];
+  return value === true || value === 'true';
 }

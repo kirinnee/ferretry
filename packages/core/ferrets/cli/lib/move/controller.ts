@@ -7,7 +7,7 @@ import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
 import type { SessionPresenter } from '../session/presenter.ts';
 import type { IMoveGateway } from './ports.ts';
 
-/** Flags accepted by `fy move`. */
+/** Flags accepted by `fy ferret move`. */
 export interface MoveCommandOptions {
   readonly agent: string;
   readonly model?: string;
