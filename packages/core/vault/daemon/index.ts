@@ -173,6 +173,11 @@ export default implementDaemon(manifest, {
       },
       cancelInput: async (ferret, id) => await inputs.service.cancelForFerret(ferret, id),
       inputState: async id => await inputs.service.requestState(id),
+      // What a ferret did to a page and where page scripts ran, told by Browsers (lead DECISIONS-2 #5, I98–I100):
+      // the login observer's act notes and the machine-wide script taint a page card's lock reads.
+      pageActed: (ferret, script) => inputs.observer?.acted(ferret, 'browser', script) ?? { placed: () => undefined },
+      scriptRunning: () => inputs.scripts.running(),
+      scriptedOn: host => inputs.scripts.scriptedOn(host),
     };
 
     return {

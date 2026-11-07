@@ -411,7 +411,7 @@ I94	kept	vault	-	`until-moved-on`	input-requests	I94
 I95	kept	vault	-	behaviour as written	input-requests	I95
 I96	kept	browsers	vault	dummy probe, `aborted`	input-requests	I96
 I97	kept	browsers	vault	`siteOf`	input-requests	I97
-I98	kept	browsers	vault	`LoginObserver.pageSteer`, `steerOf`	input-requests	I98
+I98	kept	vault	browsers	`LoginObserver.pageSteer`, `steerOf`	input-requests	I98
 I99	kept	browsers	vault	behaviour as written	input-requests	I99
 I100	kept	browsers	vault	behaviour as written	input-requests	I100
 I101	kept	vault	-	`[redacted:input !A7]`	input-requests	I101

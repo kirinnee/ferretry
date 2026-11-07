@@ -193,13 +193,19 @@ let
     postInstall = ''
       wrapProgram "$out/bin/fyd" --set-default FY_CLOUDFLARED ${lib.getExe pkgs.cloudflared}
     '';
-    # The daemon host is the kernel package's (docs/rebuild/spine.md D1): its first `bin` entry.
+    # The daemon host is the kernel package's (docs/rebuild/spine.md D1): its first `bin` entry. Every
+    # `bin` entry of the Browsers package ships beside it: the browser worker the daemon runs from its
+    # own directory (the kernel never points into a plugin, so the worker's bin is the plugin's).
     executables = [
       {
         name = "fyd";
         entry = "packages/core/kernel/${(lib.importJSON "${src}/packages/core/kernel/package.json").bin.fyd}";
       }
-    ];
+    ]
+    ++ lib.mapAttrsToList (name: entry: {
+      inherit name;
+      entry = "packages/plugins/browsers/${entry}";
+    }) (lib.importJSON "${src}/packages/plugins/browsers/package.json").bin;
   };
 in
 {

@@ -107,8 +107,14 @@ export function bannedIn(file: string, where = file): Finding[] {
   return findings;
 }
 
-// Decision 17: these standalone Workers and the native engine run outside the kernel host.
-const OUTSIDE_KERNEL_TREES = ['packages/plugins/connections/worker/', 'packages/plugins/catalogs/worker/'];
+// Decision 17: these standalone Workers and the native engine run outside the kernel host. Browsers' agent-browser
+// worker is its own process (Node for source, the compiled worker for a build; lead decision, port-browsers r1), so
+// what runs inside it lives under `daemon/worker/adapters/`.
+const OUTSIDE_KERNEL_TREES = [
+  'packages/plugins/connections/worker/',
+  'packages/plugins/catalogs/worker/',
+  'packages/plugins/browsers/daemon/worker/adapters/',
+];
 const OUTSIDE_KERNEL_FILES = ['packages/plugins/connections/adapters/webrtc/node-datachannel-engine.ts'];
 
 export function bannedScope(pkg: WorkspacePackage, file: string): boolean {

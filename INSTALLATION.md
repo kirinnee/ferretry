@@ -168,11 +168,14 @@ locations, `/snap/bin`, and on its own `PATH`; when there is none, the browser r
 install command for this machine, for example:
 
 ```text
-Chrome is not installed on this machine: install it with `brew install --cask google-chrome`, or set FY_CHROME_BIN to its path.
+Chrome is not installed on this machine: install it with `brew install --cask google-chrome`, or set FY_CHROME_BIN to the path of a Chrome or Chromium program named one of "chrome", "chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "Google Chrome", "Chromium".
 ```
 
-`FY_CHROME_BIN` in the daemon's environment points it at any other Chrome; otherwise a real Google
-Chrome is preferred over Chromium. The agent browser runs headless by default, so no display server is
+`FY_CHROME_BIN` in the daemon's environment points it at another Chrome or Chromium install; otherwise a
+real Google Chrome is preferred over Chromium. The program it names must be called one of `chrome`,
+`chromium`, `chromium-browser`, `google-chrome`, `google-chrome-stable`, `Google Chrome` or `Chromium`:
+those are the only browser names the Browsers plugin may start, so any other name (`brave-browser`, a
+wrapper script such as `chrome-wrapper`) is refused with a sentence that lists them. The agent browser runs headless by default, so no display server is
 required. Browser mode "Real window" ([docs/browser-mode.md](docs/browser-mode.md)) runs it as a real
 window instead — for an owner who browses and signs in through it — and on Linux that needs **Xvfb**
 (`sudo apt-get install -y xvfb`), which the daemon starts privately on first use.
