@@ -80,6 +80,8 @@ export interface FerretsPorts {
   /** The folder fenced by the kernel's `work` root, or why not. */
   folder(path: string): Result<FencedPath, string>;
   changed(payload: FerretChangedPayload): void;
+  /** A stop of this ferret is being attempted (`ferret.stopping`), before anything in it can fail. */
+  stopping?(ferret: FerretId): void;
   /** `ferret.started` (additive, D2 #12): told once a start's record is written, before its launch. */
   started?(payload: FerretStartedPayload): void;
   /** Writes a ferret's `details.json` (its start options and title). */
@@ -249,6 +251,7 @@ export class FerretsService implements FerretsApi {
     await this.ports.ready?.();
     const record = this.registry.get(ferret);
     if (record === undefined || record.state === 'stopped') return;
+    this.ports.stopping?.(ferret);
     const harness = this.ports.harness(record.harness);
     const runner = this.ports.runner();
     if (record.handle !== undefined && (harness === undefined || runner === undefined))

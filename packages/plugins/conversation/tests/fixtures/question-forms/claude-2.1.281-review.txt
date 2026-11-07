@@ -1,0 +1,24 @@
+  use?", multiSelect false, options: "Red" / "Warm and loud.", "Blue" / "Calm
+  and quiet.". Q2 header "Extras", question "Which extras should ship with the
+  banner?", multiSelect true, options: "Shadow" / "Adds a drop shadow.",
+  "Border" / "Adds a thin border.", "Icon" / "Adds a leading icon.". After I
+  answer, reply with exactly what I chose and stop.
+
+────────────────────────────────────────────────────────────────────────────────
+←  ☒ Colour  ☒ Extras  ✔ Submit  →
+
+Review your answers
+
+ ● Which colour should the banner use?
+   → Blue
+ ● Which extras should ship with the banner?
+   → Shadow, Icon
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel
+
+
+
+

@@ -101,6 +101,34 @@ test('R-0372 unavailable stop keeps its live handle and token and answers 503', 
   }
 });
 
+test('a stop says ferret.stopping before it can fail: a missing harness or runner, or a harness stop that throws', async () => {
+  for (const failure of ['harness', 'runner', 'throws'] as const) {
+    const f = fixture();
+    await f.service.resume(f.id);
+    const heard: string[] = [];
+    f.ports.stopping = ferret => heard.push(ferret);
+    if (failure === 'throws')
+      f.harness.stop = async () => {
+        throw new Error('the pane would not close');
+      };
+    else f.ports[failure] = () => undefined;
+    await expect(f.service.stop(f.id, 'now')).rejects.toBeDefined();
+    expect(heard).toEqual([f.id]);
+  }
+});
+
+test('a stop that succeeds says ferret.stopping once, before ferret.changed; a stopped ferret says nothing', async () => {
+  const f = fixture();
+  await f.service.resume(f.id);
+  const heard: string[] = [];
+  f.ports.stopping = () => heard.push('stopping');
+  f.ports.changed = payload => heard.push(payload.change);
+  await f.service.stop(f.id, 'now');
+  expect(heard).toEqual(['stopping', 'stopped']);
+  await f.service.stop(f.id, 'now');
+  expect(heard).toEqual(['stopping', 'stopped']);
+});
+
 test('R-0332 thrown launch ports revoke the token and allow a later resume', async () => {
   for (const port of ['environment', 'harness', 'save'] as const) {
     const f = fixture();
