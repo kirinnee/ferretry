@@ -2,39 +2,37 @@
  * Boots v5 on the CONVERTED fixture home and proves it took the home whole (CI-only, like the fixture builder: it
  * starts a daemon, and the daemon may start a tmux server).
  *
- * 1. Starts this repository's v5 `fyd` from source on the converted home (`FY_HOME=<home> bun …/fyd.ts --port 0`), with
- *    a disposable `HOME`, and waits for its "ready" line and a 200 from `/healthz`.
+ * 1. Starts this repository's v5 `fyd` from source on the converter's real output (`FY_HOME=<home> bun …/fyd.ts --port
+ *    0`), with a disposable `HOME`, and waits for its "ready" line and a 200 from `/healthz`. The home must be complete
+ *    (report `complete: true`, `home.json` written) and carry the tree v5 makes for a new home (`config`, `state`,
+ *    `state/kernel`, `run`, `logs`): v5 makes it only for a NEW home, and without `logs/` it writes no log at all.
  * 2. Proves every plugin came up. The kernel says a plugin is down in four places, all read here: the doctor lines `fyd`
- *    prints before "ready" (a refused state file is named `state/<plugin>/<file>`), `GET /v1/plugins` (`on: false` for a
- *    failed plugin), `logs/fyd.log` (a plugin that failed to build, a file refused when first read, a folder in an
- *    older format MOVED ASIDE so the plugin starts empty) and any `state/<id>-before-*` folder left behind.
+ *    prints before "ready" (a refused state file is named `state/<plugin>/<file>`; a plugin that failed, was refused or
+ *    needs one that is down is named by its title), `GET /v1/plugins` (`on: false`), `logs/fyd.log` (a plugin that
+ *    failed to build, a file refused when first read, a folder in an older format MOVED ASIDE so the plugin starts
+ *    empty) and any `state/<id>-before-*` folder left behind. Every down plugin fails the run: it is a converter bug.
  * 3. Proves the data is there through v5's own HTTP routes, with the admin token the home carries (read from the file,
  *    sent only to the daemon this script started, never printed): the ferrets, projects, board cards and agenda items
- *    `made.json` records, by id, with the names, lanes, dependencies and states it records.
+ *    `made.json` records, by id, with the names, lanes, dependencies and states it records. While v5's Gate is still a
+ *    skeleton, every authenticated route answers `503 admission_unavailable`: the inventory and data checks are then
+ *    skipped with a warning, and run by themselves once Gate lands.
  * 4. Stops the daemon with SIGTERM and kills the tmux server on the home's own socket.
- *
- * WHILE A STEP IS PENDING the converter writes no `home.json` (v5 refuses such a home, by design). Then this boots a
- * COPY of the converted home with a `home.json` written here from the kernel contract — labelled "boot probe on an
- * incomplete home" — and a plugin owned by a PENDING step may be down (a warning); any other down plugin fails. Once
- * the conversion is complete (report `complete: true`, `home.json` written), the real output is booted, no copy, and
- * every down plugin fails.
  *
  * Imports product code only through `@ferretry/<x>/contract`; runs the product's daemon as a process.
  *
  *   bun boot-v5.ts --fixture <FIXTURE_OUT>     (reads made.json, report.json, v5/; writes boot/)
  */
 import { FerretSummarySchema } from '@ferretry/core-ferrets/contract';
-import { DAEMON_RUN_FILE, DaemonRunSchema, HOME_FORMAT, HomeJsonSchema } from '@ferretry/kernel/contract';
+import { DAEMON_RUN_FILE, DaemonRunSchema } from '@ferretry/kernel/contract';
 import { CardResponseSchema } from '@ferretry/plugin-board/contract';
 import { ProjectListSchema } from '@ferretry/plugin-projects/contract';
 import { spawn, type Subprocess } from 'bun';
 import { appendFileSync, existsSync } from 'node:fs';
-import { cp, lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
-import { STEPS } from '../src/steps/index.ts';
 
 const REPO = resolve(import.meta.dir, '../../..');
 const FYD = join(REPO, 'packages/core/kernel/host/fyd.ts');
@@ -126,58 +124,30 @@ const Report = z.object({
 
 const made: Made = Made.parse(JSON.parse(await readFile(join(fixture, 'made.json'), 'utf8')));
 const report = Report.parse(JSON.parse(await readFile(join(fixture, 'report.json'), 'utf8')));
-const converted = join(fixture, 'v5');
+const home = join(fixture, 'v5');
 
-/** `core-ferrets` → `ferrets`, `plugin-catalogs` → `catalogs`: the plugin id a step's owner names. */
-const pluginOf = (owner: string): string => owner.replace(/^(core|plugin)-/u, '');
-const pendingSteps = report.steps.filter(step => step.status === 'pending').map(step => step.id);
-const pendingPlugins = new Set(
-  STEPS.filter(step => pendingSteps.includes(step.id)).flatMap(step => step.owner.map(pluginOf)),
+// ─── the home: the converter's real output, complete ─────────────────────────────────────────────────────────────
+
+if (!report.complete) {
+  const open = report.steps.filter(step => step.status !== 'converted' && step.status !== 'not-carried');
+  fail(
+    `the conversion is not complete (${open.map(step => `${step.id}: ${step.status}`).join(', ') || 'no step named'}): there is no home to boot`,
+  );
+  process.exit(1);
+}
+if (!existsSync(join(home, 'home.json'))) {
+  fail('the report says complete, but the converted home has no home.json');
+  process.exit(1);
+}
+// The tree `openHome` makes for a NEW home (packages/core/kernel/host/home.ts); on an existing home v5 assumes it.
+const missingFolders = ['config', 'state', 'state/kernel', 'run', 'logs'].filter(
+  folder => !existsSync(join(home, folder)),
 );
-
-// ─── which home is booted ────────────────────────────────────────────────────────────────────────────────────────
-
-const homeJsonExists = existsSync(join(converted, 'home.json'));
-let home: string;
-if (report.complete) {
-  if (!homeJsonExists) {
-    fail('the report says complete, but the converted home has no home.json');
-    process.exit(1);
-  }
-  home = converted;
-  say(`booting v5 on the converted home itself: ${home}`);
-} else {
-  if (homeJsonExists) {
-    fail('the conversion is incomplete, yet home.json was written: v5 would start on a half-converted home');
-    process.exit(1);
-  }
-  // A short name: the home's Unix socket path must stay under the platform limit.
-  home = join(fixture, 'v5-probe');
-  // A socket (a stopped tmux server's stale `tmux.sock`) cannot be copied and holds no data: it is left out.
-  await cp(converted, home, {
-    recursive: true,
-    preserveTimestamps: true,
-    verbatimSymlinks: true,
-    filter: async source => !(await lstat(source)).isSocket(),
-  });
-  const document = HomeJsonSchema.parse({
-    format: HOME_FORMAT,
-    createdBy: 'boot-probe-incomplete-home',
-    createdAt: new Date().toISOString(),
-  });
-  await writeFile(join(home, 'home.json'), `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-  say('==================================================================================================');
-  say('BOOT PROBE ON AN INCOMPLETE HOME');
-  say(`  The converter left steps pending (${pendingSteps.join(', ') || 'none'}), so it wrote no home.json.`);
-  say(`  This boots a COPY (${home}) with a home.json written by the CI script, not by the converter.`);
-  say(`  Plugins owned by a pending step may be down: ${[...pendingPlugins].join(', ') || 'none'}.`);
-  say('==================================================================================================');
-}
-if (!existsSync(join(home, 'logs'))) {
-  warn('the converted home has no logs/ folder: v5 makes it only for a NEW home, so fyd would write no log');
-  // Only on the probe copy: the real output is booted exactly as converted.
-  if (!report.complete) await mkdir(join(home, 'logs'), { mode: 0o700 });
-}
+for (const folder of missingFolders)
+  fail(
+    `the converted home has no ${folder}/: v5 makes it only for a NEW home${folder === 'logs' ? ', so fyd writes no log at all' : ''}`,
+  );
+say(`booting v5 on the converted home itself: ${home}`);
 
 // ─── start fyd ───────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -337,33 +307,21 @@ await findMovedAside(home);
 
 // ─── verdict ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
+// Every down plugin is a converter bug. A plugin down only because one it needs is down is still listed, so the
+// whole effect shows; the root is the one without `blockedBy`.
 const seen = new Set<string>();
 for (const entry of down) {
   const key = `${entry.plugin}|${entry.file ?? ''}|${entry.why}`;
   if (seen.has(key)) continue;
   seen.add(key);
-  const where = entry.file === undefined ? '' : ` (${entry.file})`;
-  if (pendingPlugins.has(entry.plugin))
-    warn(`plugin ${entry.plugin} is down${where}: ${entry.why} — its conversion step is pending, so this is expected`);
-  else if (entry.blockedBy !== undefined && pendingPlugins.has(entry.blockedBy))
-    warn(`plugin ${entry.plugin} is down: ${entry.why} — ${entry.blockedBy}'s conversion step is pending`);
-  else fail(`plugin ${entry.plugin} is down${where}: ${entry.why}`);
+  fail(`plugin ${entry.plugin} is down${entry.file === undefined ? '' : ` (${entry.file})`}: ${entry.why}`);
 }
 const downIds = new Set(down.map(entry => entry.plugin));
 say(`plugins down: ${[...downIds].join(', ') || 'none'}`);
 say(
-  `${errors.length === 0 ? 'PASS' : 'FAIL'}: ${String(errors.length)} error(s), ${String(warnings.length)} warning(s)${
-    report.complete ? '' : ' (boot probe on an incomplete home)'
-  }`,
+  `${errors.length === 0 ? 'PASS' : 'FAIL'}: ${String(errors.length)} error(s), ${String(warnings.length)} warning(s)`,
 );
-await writeFile(
-  join(bootDir, 'summary.json'),
-  `${JSON.stringify(
-    { probe: !report.complete, home, pendingPlugins: [...pendingPlugins], down, errors, warnings },
-    null,
-    2,
-  )}\n`,
-);
+await writeFile(join(bootDir, 'summary.json'), `${JSON.stringify({ home, down, errors, warnings }, null, 2)}\n`);
 process.exit(errors.length === 0 ? 0 : 1);
 
 // ─── helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────

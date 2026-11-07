@@ -34,6 +34,16 @@ bun ../src/main.ts --from "$out/home" --to "$out/v5" --dry-run
 `fetch-v4.sh` caches under `${XDG_CACHE_HOME:-~/.cache}/ferretry-v4-fixtures/4.291.5/`; it uses `gh` when signed in and
 the public URL otherwise.
 
+## Boot v5 on the converted home
+
+`boot-v5.ts --fixture <out>` starts this repository's v5 `fyd` (from source, `--port 0`, a disposable `HOME`) on the
+converter's real output `<out>/v5`, which must be complete. It fails for any plugin v5 reports down — a state file it
+refuses (named `state/<plugin>/<file>`), a plugin that failed or needs one that did, a folder moved aside — and checks
+through v5's own routes that the ferrets, project, cards and agenda items in `made.json` are there. While v5's Gate is a
+skeleton every authenticated route answers `503 admission_unavailable`, so those data checks are skipped with a warning
+until it lands. It stops the daemon with SIGTERM and kills the tmux server on the home's own socket, and writes
+`<out>/boot/` (`summary.json`, `fyd.stderr`, `fyd.log`). It starts a daemon: CI only.
+
 ## CI only on shared boxes
 
 The builder runs a daemon and a tmux server. On a shared developer box, do not run it: the workflow
