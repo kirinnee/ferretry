@@ -11,6 +11,20 @@ import {
 import type { InstallHost } from '../lib/host.ts';
 import type { InstallFactsSource } from '../lib/ports.ts';
 
+/**
+ * An absolute path with its `.` and `..` segments folded away and its repeated slashes joined, lexically (as
+ * `path.resolve` does, and as `symlinkHops` walks): `..` above the root stays at the root.
+ */
+const foldSegments = (path: string): string => {
+  const folded: string[] = [];
+  for (const segment of path.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') folded.pop();
+    else folded.push(segment);
+  }
+  return `/${folded.join('/')}`;
+};
+
 /** How long one fact-finding command may take before its answer is "no". */
 const FACT_COMMAND_TIMEOUT = milliseconds(10_000);
 
@@ -110,8 +124,7 @@ export class HostInstallFacts implements InstallFactsSource {
   private launchedPath(executable: ExecutableFacts): string {
     const argv0 = executable.argv0;
     if (argv0.startsWith('/')) return argv0;
-    if (argv0.includes('/'))
-      return `${executable.workingDirectory.replace(/\/+$/u, '')}/${argv0.replace(/^\.\//u, '')}`;
+    if (argv0.includes('/')) return foldSegments(`${executable.workingDirectory}/${argv0}`);
     return this.host.which(argv0) ?? executable.execPath;
   }
 

@@ -79,7 +79,9 @@ describe('homeText', () => {
       for (const target of [file, undefined, join(folder, 'missing/question.json')]) {
         const child = Bun.spawn(['sh', '-c', CLAUDE_QUESTION_HOOK_COMMAND], {
           env: { PATH: '/usr/bin:/bin', ...(target === undefined ? {} : { FY_QUESTION_FILE: target }) },
-          stdin: new Blob([body]),
+          // A `Buffer`, not a `Blob`: once a DOM suite has registered happy-dom in this process (the unit tier runs every
+          // package in one), the global `Blob` is happy-dom's and `Bun.spawn` refuses it as stdio.
+          stdin: Buffer.from(body),
           stdout: 'pipe',
           stderr: 'pipe',
         });
