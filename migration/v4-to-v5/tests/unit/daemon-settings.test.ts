@@ -5,6 +5,7 @@ import { AgendaConfigSchema } from '@ferretry/plugin-agenda/contract';
 import { ConnectionsConfigSchema } from '@ferretry/plugin-connections/contract';
 import { CatalogsConfigSchema } from '@ferretry/plugin-catalogs/contract';
 import { VaultConfigSchema } from '@ferretry/core-vault/contract';
+import { AsksConfigFile } from '@ferretry/core-asks/contract';
 import { CAPABILITY_NAMES, DEFAULT_SECURITY_SETTINGS, GateConfigSchema } from '@ferretry/core-gate/contract';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -267,6 +268,16 @@ test('a recipe holding a raw secret fails the step by key, never by value, and w
   expect(report.note).toContain('secretEnvironment.AUTH_HEADER');
   expect(JSON.stringify(report)).not.toContain(fake);
   expect(await readdir(f.to).catch(() => [])).toEqual([]);
+});
+
+test('agenda resurfaceAfterMinutes carries into asks.yaml; absent stays absent', async () => {
+  await daemon({ agenda: { resurfaceAfterMinutes: 45 } });
+  const report = await daemonSettingsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(await read('asks.yaml', AsksConfigFile.schema as z.ZodType<{ resurfaceAfterMinutes?: number }>)).toEqual({
+    resurfaceAfterMinutes: 45,
+  });
+  expect(report.notCarried.map(item => item.what).join('\n')).not.toContain('resurfaceAfterMinutes');
 });
 
 test('a shorter member unlock carries into gate.yaml security', async () => {

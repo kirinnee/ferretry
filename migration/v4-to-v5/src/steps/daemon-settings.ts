@@ -7,6 +7,7 @@
  * | ---------------------------------------------------- | ----------------------------------------------------------------- |
  * | `daemon.json` `grants`                               | `gate.yaml` `grants`: all eight capabilities, both axes, EXPLICIT |
  * | `state/security.json` `settings`                     | `gate.yaml` `security`, explicit (v4's default or strictest)      |
+ * | `daemon.json` `agenda` (else `attention`) resurface  | `asks.yaml` `resurfaceAfterMinutes`                                |
  * | `daemon.json` `secretEnvironment`                    | `vault.yaml` `secretEnvironment` (key for key)                     |
  * | `daemon.json` `catalogs`                             | `catalogs.yaml` `linkStore`, `memberUnlockDays` (also in `gate.yaml`) |
  * | `daemon.json` `carriers` bind, else `host` + `port`  | `connections.yaml` `direct`                                       |
@@ -36,6 +37,7 @@ import { CLAUDE_CODE_CONFIG } from '@ferretry/plugin-claude-code/contract';
 import { AGENDA_CONFIG } from '@ferretry/plugin-agenda/contract';
 import { ConnectionsConfigSchema } from '@ferretry/plugin-connections/contract';
 import { VaultConfigFile } from '@ferretry/core-vault/contract';
+import { AsksConfigFile } from '@ferretry/core-asks/contract';
 import { CatalogsConfigFile, CatalogsConfigSchema, catalogConfigLoosens } from '@ferretry/plugin-catalogs/contract';
 import {
   CAPABILITY_NAMES,
@@ -79,6 +81,7 @@ export const CONNECTIONS_CONFIG: V5ConfigTarget = {
 const GATE_CONFIG = GateConfigFile as V5ConfigTarget;
 const CATALOGS_CONFIG = CatalogsConfigFile as V5ConfigTarget;
 const VAULT_CONFIG = VaultConfigFile as V5ConfigTarget;
+const ASKS_CONFIG = AsksConfigFile as V5ConfigTarget;
 
 /** `daemon.json` keys v5 declares no field for, and why (listed only when the document wrote them). */
 const KEY_NOT_CARRIED: Readonly<Record<string, string>> = {
@@ -98,17 +101,11 @@ const KEY_NOT_CARRIED: Readonly<Record<string, string>> = {
 
 const AGENDA_NOT_CARRIED =
   'v5 declares no reply-window setting (the settle, wait, composer and receipt windows are the Asks engine’s own)';
-const RESURFACE_NOT_CARRIED =
-  'v5 Asks declares asks.yaml only in its manifest, not its contract, so this tool cannot check a value against it; the owner sets it again in v5';
 
 const STATIC_NOT_CARRIED: readonly NotCarried[] = [
   {
     what: 'config/daemon.json as a file',
     why: 'v5 has no daemon document (§9.2); each key goes to its owner or is listed here',
-  },
-  {
-    what: 'state/config-accepted.json (for gate.yaml and connections.yaml)',
-    why: 'v5 keeps the accepted record in host-private kernel state; until the kernel exports it (lead decision 2026-11-07: carry it), a v4 grant or carrier that v5 reads as a loosening against its defaults is held until the owner confirms it in v5 (it is never applied wider)',
   },
 ];
 
@@ -276,8 +273,11 @@ function planAgenda(plan: Plan, document: V4DaemonDocument): void {
     add(plan, AGENDA_CONFIG, 'deadlineWarnHours', window.deadlineWarnHours, `${V4_DAEMON_JSON} ${spelled}`);
     count(plan, 'agenda settings');
   }
-  if (window.resurfaceAfterMinutes !== undefined)
-    plan.dropped.push({ what: `${V4_DAEMON_JSON} ${spelled}.resurfaceAfterMinutes`, why: RESURFACE_NOT_CARRIED });
+  // Asks' one setting (`asks.yaml`): absent stays absent (off), as in v4.
+  if (window.resurfaceAfterMinutes !== undefined) {
+    add(plan, ASKS_CONFIG, 'resurfaceAfterMinutes', window.resurfaceAfterMinutes, `${V4_DAEMON_JSON} ${spelled}`);
+    count(plan, 'agenda settings');
+  }
   const windows = (
     ['replySettleSeconds', 'replyMaxWaitSeconds', 'replyComposerWaitSeconds', 'replyReceiptSeconds'] as const
   ).filter(key => window[key] !== undefined);

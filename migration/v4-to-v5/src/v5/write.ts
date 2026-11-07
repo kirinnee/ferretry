@@ -81,6 +81,8 @@ export interface V5Writer {
    * and agenda files) merge through this instead of the later one overwriting the earlier one.
    */
   written(target: V5ConfigTarget, name: string | undefined): string | undefined;
+  /** Every config file THIS run gave {@link V5Writer.config} (also in a dry run): its `config/…` path and text. */
+  writtenConfigs(): ReadonlyMap<string, string>;
   /** Where a byte-for-byte file lands (sealed blobs, a harness's own folder). */
   resolve(relativePath: string): string;
 }
@@ -141,6 +143,9 @@ export function v5Writer(home: string, options: { readonly dryRun: boolean }): V
     },
     written(target, name) {
       return configs.get(configPath(target, name));
+    },
+    writtenConfigs() {
+      return new Map(configs);
     },
     resolve(relativePath) {
       return join(home, relativePath);

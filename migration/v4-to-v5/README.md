@@ -238,6 +238,13 @@ every ferret's launch, where v4 gave it only to ferrets whose profile included `
 step drops that component and removes the layer from every profile (lead decision 2026-11-07), and no ferret gets the
 rules twice.
 
+Confirmed settings (`src/steps/accepted-config.ts`, last): v4's `state/config-accepted.json` holds what v4 put into
+effect per config file. When every v4 config file was in effect as written (its entry's etag is the SHA-256 of its text),
+each v5 config file this run wrote is recorded as accepted (`state/kernel/accepted-config/`, the kernel's
+`acceptedConfigFile`), so a loosening the owner confirmed in v4 is not asked about again. When any was not (a held
+edit, an invalid file, one never accepted, a held deletion), nothing is recorded, the report names those files, and v5
+holds any loosening until the owner confirms it again. Texts are hashed and written, never reported.
+
 ## Tests
 
 `bun test tests` (unit; temp folders only, never a real home).

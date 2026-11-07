@@ -13,6 +13,7 @@ import { accessStep } from './access.ts';
 import { accountsStep } from './accounts.ts';
 import { agendaStep } from './agenda.ts';
 import { boardStep } from './board.ts';
+import { acceptedConfigStep } from './accepted-config.ts';
 import { catalogsStep } from './catalogs.ts';
 import { skillFoldersStep } from './skill-folders.ts';
 import { conversationStep } from './conversation.ts';
@@ -93,4 +94,6 @@ export const STEPS: readonly Step[] = [
   accountsStep,
   accessStep,
   gateStep,
+  // Last: it records as accepted every config file the steps above wrote.
+  acceptedConfigStep,
 ];

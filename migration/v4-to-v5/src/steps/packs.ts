@@ -78,10 +78,6 @@ const V5_COLLECTION_NAME = /^[A-Za-z0-9_][A-Za-z0-9._%~-]{0,200}$/u;
 const v5Run = (id: string, file: string): string => join(STATE, 'runs', `${id}.${file}`);
 
 const STATIC_NOT_CARRIED: readonly NotCarried[] = [
-  {
-    what: 'state/config-accepted.json (for packs.yaml)',
-    why: 'v5 keeps the accepted record in host-private kernel state; a v4-confirmed loosening (Pack mode on, Jev deciding, a raised limit or cap) is held until the owner confirms it in v5, never applied wider',
-  },
   { what: "v4's # yaml-language-server modeline", why: 'it points at v4 schema ids; v5 adds its own on the next edit' },
 ];
 

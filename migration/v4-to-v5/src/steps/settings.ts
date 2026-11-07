@@ -105,10 +105,6 @@ const MACHINE_NOT_CARRIED: Readonly<Record<string, string>> = {
 
 const STATIC_NOT_CARRIED: readonly NotCarried[] = [
   { what: 'config/.schema/*.json', why: 'generated editor schemas; v5 writes its own' },
-  {
-    what: 'state/config-accepted.json',
-    why: 'v5 keeps its accepted record in host-private kernel state with no contract to write it; a v4-confirmed loosening (agentPermissions: skip, publicUsageFeed, a raised cap) is held again until the owner confirms it in v5',
-  },
   { what: "v4's # yaml-language-server modeline", why: 'it points at v4 schema ids; v5 adds its own on the next edit' },
   { what: 'config/learning.yaml', why: 'read by the Lessons step, not this one' },
   { what: 'config/pack.yaml, config/models-guide.yaml', why: 'read by the Packs step, not this one' },
