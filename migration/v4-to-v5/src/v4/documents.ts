@@ -4,7 +4,7 @@
  * message can carry the text it choked on, so it is never passed through.
  */
 import { lstat, readFile } from 'node:fs/promises';
-import { relative } from 'node:path';
+import { join, relative } from 'node:path';
 
 export class V4InputError extends Error {
   override readonly name = 'V4InputError';
@@ -37,5 +37,23 @@ export async function readV4Json(home: string, path: string): Promise<unknown> {
     return JSON.parse(text) as unknown;
   } catch {
     throw new V4InputError(`${name}: is not valid JSON`);
+  }
+}
+
+/**
+ * A v4 JSONL file's non-empty lines, or `undefined` when it is absent. A link or a folder in its place is refused,
+ * never followed. `path` is relative to the v4 home and is the only thing an error names.
+ */
+export async function readV4Lines(home: string, path: string): Promise<string[] | undefined> {
+  const facts = await lstat(join(home, path)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw new V4InputError(`${path}: cannot be inspected`);
+  });
+  if (facts === undefined) return undefined;
+  if (!facts.isFile()) throw new V4InputError(`${path}: is not a regular file`);
+  try {
+    return (await readFile(join(home, path), 'utf8')).split('\n').filter(line => line.trim() !== '');
+  } catch {
+    throw new V4InputError(`${path}: cannot be read`);
   }
 }
