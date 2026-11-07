@@ -7,7 +7,7 @@
  */
 
 import { describe, it } from 'bun:test';
-import { DeviceKeyRotationSchema } from '@ferretry/core-gate/contract';
+import { DeviceKeyRotationSchema } from '../../../contract/index.ts';
 import should from 'should';
 import { KeyRotation, type RotatingSession } from '../../../app/lib/key-rotation.ts';
 import { toBase64Url } from '../../../app/shell-pairing.ts';
@@ -190,4 +190,3 @@ describe('settling the pending key from the daemon’s answer', () => {
     should(store.keys.size).equal(1);
   });
 });
-

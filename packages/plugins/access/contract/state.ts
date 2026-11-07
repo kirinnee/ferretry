@@ -7,8 +7,9 @@
 import { defineState } from '@ferretry/kernel/contract';
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { AppOriginSchema, CapabilityGrantsSchema } from '@ferretry/core-gate/contract';
+import { CapabilityGrantsSchema } from '@ferretry/core-gate/contract';
 import { DaemonIdSchema, PairedDeviceIdSchema, PairingDeviceNameSchema } from './pairing.ts';
+import { AppOriginSchema } from './step-up.ts';
 import { BrowserPushSubscriptionSchema, PushDeviceViewSchema, RegisterPushDeviceRequestSchema } from './push.ts';
 
 const Base64Url = z.string().regex(/^[A-Za-z0-9_-]+$/u);
