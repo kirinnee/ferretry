@@ -370,10 +370,52 @@ export class FerretsService implements FerretsApi {
     prompt: string | undefined,
     conversation: string | undefined,
   ): Promise<Result<FerretId, StartFailure>> {
+    const created = new Set<RunnerHandle>();
+    let runner: Runner | undefined;
+    let failure: StartFailure;
+    try {
+      runner = this.ports.runner();
+      if (runner === undefined) return await this.abandon(record, 'runner_unavailable', 'no runner plugin is on');
+      const tracked = new Proxy(runner, {
+        get(target, property) {
+          if (property === 'start' || property === 'resume')
+            return async (...args: Parameters<Runner['resume']>) => {
+              const result = property === 'start' ? await target.start(args[0]) : await target.resume(...args);
+              if (result.ok) created.add(result.value.handle);
+              return result;
+            };
+          const value = Reflect.get(target, property);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const result = await this.launchAttempt(record, prompt, conversation, tracked);
+      if (result.ok) return result;
+      failure = result.error;
+    } catch {
+      // Port errors can contain launch environment values: never return their text to a caller.
+      failure = { code: 'failed', reason: 'a launch dependency failed before the ferret could start' };
+    }
+    if (this.tokens.revoke(record.id)) await this.ports.saveTokens(this.tokens.snapshot());
+    for (const handle of created) {
+      try {
+        await runner!.stop(handle, 'now');
+      } catch {
+        // Keep the handle recoverable by stop; a failed cleanup never claims the process stopped.
+        await this.write({ ...record, handle }, record.state, 'state');
+        return failed('runner_unavailable', 'the failed launch still has a process that could not be stopped');
+      }
+    }
+    return await this.abandon(record, failure.code, failure.reason);
+  }
+
+  private async launchAttempt(
+    record: FerretRecord,
+    prompt: string | undefined,
+    conversation: string | undefined,
+    runner: Runner,
+  ): Promise<Result<FerretId, StartFailure>> {
     const harness = this.ports.harness(record.harness);
-    if (harness === undefined) return await this.abandon(record, 'harness_unavailable', `${record.harness} is off`);
-    const runner = this.ports.runner();
-    if (runner === undefined) return await this.abandon(record, 'runner_unavailable', 'no runner plugin is on');
+    if (harness === undefined) return failed('harness_unavailable', `${record.harness} is off`);
     const issued = issueToken(record.id, this.ports.now());
     this.tokens.add(issued.entry);
     await this.ports.saveTokens(this.tokens.snapshot());
@@ -405,14 +447,14 @@ export class FerretsService implements FerretsApi {
     ).flat();
     const spec: LaunchSpec = { ...base, parts };
     const env = await this.environment(record.id, issued.token, parts);
-    if (!env.ok) return await this.abandon(record, 'login_unavailable', env.error);
+    if (!env.ok) return failed('login_unavailable', env.error);
     const started =
       conversation === undefined
         ? await harness.start(spec, runner, env.value)
         : await harness.resume(spec, runner, env.value, conversation);
     if (!started.ok) {
       const code = started.error === 'unavailable' ? 'runner_unavailable' : 'failed';
-      return await this.abandon(record, code, `the harness could not start: ${started.error}`);
+      return failed(code, `the harness could not start: ${started.error}`);
     }
     const working: FerretRecord = {
       ...record,

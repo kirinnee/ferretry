@@ -99,3 +99,44 @@ test('R-0372 unavailable stop keeps its live handle and token and answers 503', 
     expect(await f.runner.alive(handle!)).toBe(true);
   }
 });
+
+test('R-0332 thrown launch ports revoke the token and allow a later resume', async () => {
+  for (const port of ['environment', 'harness', 'save'] as const) {
+    const f = fixture();
+    const originalStart = f.harness.start.bind(f.harness);
+    if (port === 'environment')
+      f.ports.vault.childEnvironment = async () => {
+        throw new Error('unavailable');
+      };
+    if (port === 'harness')
+      f.harness.start = async () => {
+        throw new Error('unavailable');
+      };
+    if (port === 'save')
+      f.ports.save = async record => {
+        if (record.state === 'working') throw new Error('unavailable');
+      };
+    const answer = await f.service.resume(f.id).catch(() => undefined);
+    expect(answer?.ok).toBe(false);
+    expect(f.registry.get(f.id)?.state).toBe('stopped');
+    expect(f.tokens.holds(f.id)).toBe(false);
+    expect(await f.runner.alive('%1' as never)).toBe(false);
+    f.ports.vault.childEnvironment = async () => ok(emptyChildEnvironment());
+    f.harness.start = originalStart;
+    f.ports.save = async () => {};
+    expect((await f.service.resume(f.id)).ok).toBe(true);
+  }
+});
+test('R-0332 a harness throwing after runner.start cleans up the created process', async () => {
+  const f = fixture();
+  const start = f.harness.start.bind(f.harness);
+  f.harness.start = async (...args) => {
+    await start(...args);
+    throw new Error('harness failed after spawn');
+  };
+  const answer = await f.service.resume(f.id).catch(() => undefined);
+  expect(answer?.ok).toBe(false);
+  expect(await f.runner.alive('%1' as never)).toBe(false);
+  expect(f.tokens.holds(f.id)).toBe(false);
+  expect(f.registry.get(f.id)?.state).toBe('stopped');
+});
