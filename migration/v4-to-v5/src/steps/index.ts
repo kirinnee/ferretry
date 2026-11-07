@@ -13,6 +13,7 @@ import { accessStep } from './access.ts';
 import { agendaStep } from './agenda.ts';
 import { boardStep } from './board.ts';
 import { conversationStep } from './conversation.ts';
+import { daemonSettingsStep } from './daemon-settings.ts';
 import { ferretsStep } from './ferrets.ts';
 import { gateStep } from './gate.ts';
 import { harnessHomesStep } from './harness-homes.ts';
@@ -95,6 +96,7 @@ export const STEPS: readonly Step[] = [
     'the Catalogs and Skills state schemas',
   ),
   settingsStep,
+  daemonSettingsStep,
   loginsStep,
   vaultStep,
   identityStep,

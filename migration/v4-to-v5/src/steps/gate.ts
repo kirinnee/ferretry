@@ -129,7 +129,7 @@ export const gateStep: Step = {
     },
     {
       what: 'state/operator-password.json, the daemon-wide grants and security settings',
-      why: 'not Gate state: grants and security settings are gate.yaml configuration (the Layouts and settings step); the operator password has no v5 file',
+      why: 'not Gate state: grants and security settings are gate.yaml configuration, written by the Daemon settings step; the operator password was retired by v4 4.291.5 and has no v5 file',
     },
   ],
   async run(ctx): Promise<StepReport> {
