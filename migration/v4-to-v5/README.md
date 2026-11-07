@@ -43,7 +43,7 @@ The report (`<to>.conversion-report.json`, beside the new home, never inside it)
 ## State (Phase B)
 
 The preflight, sealed mover, report and ordered step table (`src/steps/index.ts`) exist. Vault, identity, ferrets,
-terminals, harness-homes, conversation, board, asks/agenda, projects, lessons, usage, warden, MCP, logins, Gate, Access, settings and daemon settings have real conversions. The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
+terminals, harness-homes, conversation, board, asks/agenda, projects, lessons, usage, warden, MCP, logins, Gate, Access, settings, daemon settings and Packs have real conversions. The other steps remain `pending`, so the default conversion still exits 3. Each step names what it waits for.
 Fixture homes built from the real 4.291.5 release are in
 `fixtures/` (CI-only on shared boxes).
 
@@ -112,6 +112,14 @@ runtime-owned files; `_shared` holds each shared transcript pool (including Code
 opaque files are preserved. Links are omitted, never followed or re-made: the contracts do not yet declare a link
 policy or a runtime-to-ferret home mapping. Those are explicit gaps; these copies alone do not make resume ready.
 Sign-in files and `fleet/credentials/` belong to the Logins step.
+
+Packs (`src/steps/packs.ts`) folds `config/pack.yaml` and `config/models-guide.yaml` into one `config/packs.yaml`
+(the guide's `prompt`/`suggested` nested under `routing`, comments kept), turns each `state/pack-guide/<id>/` into
+flat `state/packs/runs/<id>.<file>` names (`run.json` with `job.session` → `job.ferret`, the inventory's harness
+`claude` → `claude-code`), keeps the one undo as `state/packs/replaced.json` (the replaced PROMPT, where v4 kept the
+whole file) and each session's `pack` switch as `state/packs/switches.json`. `config/routing.json` has no v5 home and
+is listed, its accounts named by runtime name (M7); a builder's `draft.json`, Jev's spend ledger and the
+routing-migration backups are not carried.
 
 Projects keep every id exactly; v4's bare array gains the `{format: 1, projects}` envelope. Warden carries its sweep
 memory under `format: 1` (v5's schema is still the condensed `looseObject`, so the sections keep v4's names), moves

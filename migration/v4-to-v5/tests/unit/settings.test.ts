@@ -297,13 +297,14 @@ test('files with no v5 config schema yet leave the step pending, and everything 
   expect(report.status).toBe('pending');
   for (const file of [
     'config/voice.yaml',
-    'config/pack.yaml',
     'config/components/settings/quiet.yaml',
     'config/components/hooks/mine.yaml',
     'config/components/instructions/outside.yaml',
   ])
     expect(report.note).toContain(file);
   expect(report.note).not.toContain('learning');
+  // pack.yaml is the Packs step's.
+  expect(report.note).not.toContain('pack.yaml');
   expect(await exists('skills/mine.yaml')).toBe(true);
 });
 
