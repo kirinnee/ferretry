@@ -667,6 +667,11 @@ export class FleetCredentialsService {
         'this daemon cannot say whether this caller may check this machine’s logins',
       );
     }
+    return await this.checkForLaunch(id);
+  }
+
+  /** Inside Logins only: the trusted Ferrets launch hook shares Check now's work, never its caller standing. */
+  async checkForLaunch(id: string): Promise<LoginView> {
     const { entries } = await this.deps.catalog.entries();
     const entry = entries.find(candidate => candidate.id === id);
     if (entry === undefined) {

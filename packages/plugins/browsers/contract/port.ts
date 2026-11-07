@@ -14,6 +14,11 @@ export interface BrowserPageRef {
 
 export interface BrowsersApi {
   state(): Promise<BrowserStateView>;
+  /**
+   * Today's machine.browserPorts fact for Codex sign-in: shared is setting !== 'random' (per-user or explicit).
+   * Optional until the provider is ported; a consumer without this fact must treat host ports as shared.
+   */
+  browserPorts?(): Promise<{ readonly shared: boolean }>;
   /** The pages one ferret holds, by id and name only. */
   pagesOf(ferret: FerretId): Promise<readonly BrowserPageRef[]>;
 }

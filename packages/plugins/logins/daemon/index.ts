@@ -51,7 +51,7 @@ const PROGRAMS: Readonly<Record<HarnessKind, string>> = { claude: 'claude', code
 /** Composition seam pending the kernel's approved internal credentials root; it grants no host-home access. */
 export function buildLoginsDaemon(ownedRoot?: OwnedLoginRoot) {
   return implementDaemon(manifest, {
-    build({ needs, kernel }) {
+    build({ needs, uses, kernel }) {
       const { clock, config, events, jobs, lifecycle, log, state } = kernel;
       const files = () => loginFiles(config);
 
@@ -163,9 +163,15 @@ export function buildLoginsDaemon(ownedRoot?: OwnedLoginRoot) {
         deliverCallback: deliverCodexCallback(kernel.fetch, clock),
         environment: sanitizeHarnessEnv({}),
         timer: harnessLoginTimer(clock),
-        // ConfigPort exposes only this plugin's files, not machine.browserPorts. Unknown means shared:
-        // refuse the automatic localhost fallback until a person explicitly chooses the link.
-        sharedHost: async () => true,
+        // Browsers owns machine.browserPorts (decision 19). Only an explicit non-shared fact enables automatic
+        // localhost fallback; no provider, no method, or a failed read all retain the shared-host refusal.
+        sharedHost: async () => {
+          try {
+            return (await uses.browsers.current()?.browserPorts?.())?.shared !== false;
+          } catch {
+            return true;
+          }
+        },
         portHolders: systemPortHolders(kernel.spawn, clock),
         clientName: 'ferretry',
         onSignedIn: loginId => {
@@ -214,8 +220,10 @@ export function buildLoginsDaemon(ownedRoot?: OwnedLoginRoot) {
         clock,
         files,
         view: id => api.get(id as LoginId),
-        check: id => credentials.check(id, undefined),
-        startSignIn: id => harnessLogin.start({ loginId: id as LoginId }, undefined),
+        // The hook is Ferrets' trusted launch path (decision 19). Person operations stay on admitted Logins
+        // routes; the private orchestration grants no caller standing and is not exported through LoginsApi.
+        check: id => credentials.checkForLaunch(id),
+        startSignIn: id => harnessLogin.startForLaunch({ loginId: id as LoginId }),
         signInStatus: flowId => harnessLogin.status(flowId),
       });
 

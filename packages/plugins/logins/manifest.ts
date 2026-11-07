@@ -2,6 +2,7 @@ import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferre
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { Logins } from '@ferretry/core-ferrets/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
+import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
 import {
   ENDPOINTS_CONFIG,
   LOGIN_KINDS,
@@ -38,6 +39,7 @@ export default definePlugin({
   words: LOGINS_WORDS,
 
   needs: { vault: VaultPort },
+  uses: { browsers: BrowsersPort },
   provides: { logins: LoginsPort },
 
   actions: {

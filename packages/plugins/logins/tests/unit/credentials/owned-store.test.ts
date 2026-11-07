@@ -4,6 +4,8 @@ import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'n
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { ChildHandle, FencedPath } from '@ferretry/kernel/contract';
+import type { LoginKind } from '@ferretry/core-ferrets/contract';
+import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
 import { lexicalInRoot, nodeFs, resolveInRoot } from '@ferretry/kernel/host';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { fixedClock, owner, standInAdmission, testHost } from '@ferretry/kernel/testing';
@@ -287,10 +289,11 @@ test('owned passive usage supplies measured windows; a list never rotates Codex,
   await f.put('claude/usage.json', { version: 1, source: 'claude-statusline', at: NOW, fiveHour: { usedPercent: 24 } });
   const daemon = buildLoginsDaemon(f.root);
   const starts: { program: string; args: readonly string[]; env: unknown }[] = [];
+  let launchKind: LoginKind | undefined;
   const wired = implementDaemon(daemon.manifest, {
     build: context => {
       if (daemon.build === undefined) throw new Error('missing build');
-      return daemon.build({
+      const half = daemon.build({
         ...context,
         kernel: {
           ...context.kernel,
@@ -325,7 +328,7 @@ test('owned passive usage supplies measured windows; a list never rotates Codex,
                   });
                   writeFileSync(
                     join(f.base, 'codex/auth.json'),
-                    JSON.stringify({ ...codex(), last_refresh: new Date(NOW + 1).toISOString() }),
+                    JSON.stringify({ ...codex(), last_refresh: new Date(NOW + starts.length).toISOString() }),
                     { mode: 0o600 },
                   );
                 },
@@ -338,6 +341,8 @@ test('owned passive usage supplies measured windows; a list never rotates Codex,
           },
         },
       });
+      launchKind = half.hooks['logins:openai'];
+      return half;
     },
   });
   const host = await testHost({
@@ -362,68 +367,140 @@ test('owned passive usage supplies measured windows; a list never rotates Codex,
     expect(starts).toEqual([{ program: 'codex', args: ['app-server'], env: { CODEX_HOME: join(f.base, 'codex') } }]);
     expect(checked.json<{ status: { word: string } }>().status.word).toBe('ready');
     expect(checked.body.includes(REFRESH)).toBe(false);
+    if (launchKind?.refresh === undefined) throw new Error('missing actual launch refresh hook');
+    expect(await launchKind.refresh('codex')).toEqual({ state: 'signed-in' });
+    expect(starts).toHaveLength(2);
   } finally {
     await host.stop();
   }
 });
 
-test('unknown machine browserPorts fails closed in real composition: no automatic localhost fallback', async () => {
-  const f = await fixture();
-  const daemon = buildLoginsDaemon(f.root);
-  const calls: string[][] = [];
-  const wired = implementDaemon(daemon.manifest, {
-    build: context => {
-      if (daemon.build === undefined) throw new Error('missing build');
-      return daemon.build({
-        ...context,
-        kernel: {
-          ...context.kernel,
-          spawn: {
-            ...context.kernel.spawn,
-            start: (program, args): ChildHandle => {
-              calls.push([program, ...args]);
-              return {
-                pid: 7,
-                stdout: new ReadableStream({
-                  start(controller) {
-                    controller.enqueue(
-                      new TextEncoder().encode(
-                        'Error logging in with device code: device code login is not enabled for this Codex server. Use the browser login or verify the server URL.\n',
-                      ),
-                    );
-                    controller.close();
+const browserFacts = (shared?: boolean): BrowsersApi => ({
+  state: async () => ({ state: 'stopped' }),
+  pagesOf: async () => [],
+  ...(shared === undefined ? {} : { browserPorts: async () => ({ shared }) }),
+});
+const sharingCases: readonly { name: string; browsers?: BrowsersApi; automatic?: true }[] = [
+  { name: 'absent Browsers' },
+  { name: 'missing browserPorts method', browsers: browserFacts() },
+  { name: 'shared browserPorts', browsers: browserFacts(true) },
+  {
+    name: 'throwing browserPorts',
+    browsers: {
+      ...browserFacts(),
+      browserPorts: async () => {
+        throw new Error('unavailable');
+      },
+    },
+  },
+  { name: 'non-shared browserPorts', browsers: browserFacts(false), automatic: true },
+];
+
+for (const scenario of sharingCases) {
+  test(`${scenario.name} in real composition selects the safe Codex fallback and explicit-choice sentence`, async () => {
+    const f = await fixture();
+    const daemon = buildLoginsDaemon(f.root);
+    const calls: string[][] = [];
+    let launchKind: LoginKind | undefined;
+    const wired = implementDaemon(daemon.manifest, {
+      build: context => {
+        if (daemon.build === undefined) throw new Error('missing build');
+        const half = daemon.build({
+          ...context,
+          kernel: {
+            ...context.kernel,
+            spawn: {
+              ...context.kernel.spawn,
+              start: (program, args): ChildHandle => {
+                calls.push([program, ...args]);
+                const device = args.includes('--device-auth');
+                let end: ((code: number) => void) | undefined;
+                const exited = device
+                  ? Promise.resolve(1)
+                  : new Promise<number>(resolve => {
+                      end = resolve;
+                    });
+                return {
+                  pid: 7,
+                  stdout: new ReadableStream({
+                    start(controller) {
+                      controller.enqueue(
+                        new TextEncoder().encode(
+                          device
+                            ? 'Error logging in with device code: device code login is not enabled for this Codex server. Use the browser login or verify the server URL.\n'
+                            : 'Starting local login server on http://localhost:1455.\nhttps://auth.openai.com/oauth/authorize?response_type=code&client_id=app_TESTONLY&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&code_challenge=challenge&code_challenge_method=S256&state=STATE-TESTONLY_abc&originator=codex_cli_rs\n',
+                        ),
+                      );
+                      controller.close();
+                    },
+                  }),
+                  stderr: new ReadableStream({
+                    start(controller) {
+                      controller.close();
+                    },
+                  }),
+                  write: () => {},
+                  kill: () => {
+                    end?.(1);
                   },
-                }),
-                stderr: new ReadableStream({
-                  start(controller) {
-                    controller.close();
-                  },
-                }),
-                write: () => {},
-                kill: () => {},
-                exited: Promise.resolve(1),
-              };
+                  exited,
+                };
+              },
             },
           },
-        },
-      });
-    },
-  });
-  const host = await testHost({ plugins: [wired], fakes: { vault: emptyVault() }, config, gate });
-  try {
-    const started = await host.request('POST', '/v1/logins/sign-in', { body: { loginId: 'codex' as LoginId } });
-    expect(started.status).toBe(200);
-    const { flowId } = started.json<{ flowId: string }>();
-    let flow: { state?: string; reason?: string; remedy?: string } = {};
-    for (let attempt = 0; attempt < 1_000 && flow.state !== 'failed'; attempt += 1) {
-      flow = (await host.request('GET', `/v1/logins/sign-in/${flowId}`)).json();
-      if (flow.state !== 'failed') await Bun.sleep(1);
+        });
+        launchKind = half.hooks['logins:openai'];
+        return half;
+      },
+    });
+    const host = await testHost({
+      plugins: [wired],
+      fakes: { vault: emptyVault() },
+      config,
+      gate,
+      uses: scenario.browsers === undefined ? {} : { browsers: scenario.browsers },
+    });
+    try {
+      const started = await host.request('POST', '/v1/logins/sign-in', { body: { loginId: 'codex' as LoginId } });
+      expect(started.status).toBe(200);
+      const { flowId } = started.json<{ flowId: string }>();
+      let flow: { state?: string; reason?: string; remedy?: string } = {};
+      const expectedState = scenario.automatic ? 'awaiting-callback' : 'failed';
+      for (let attempt = 0; attempt < 1_000 && flow.state !== expectedState; attempt += 1) {
+        flow = (await host.request('GET', `/v1/logins/sign-in/${flowId}`)).json();
+        if (flow.state !== expectedState) await Bun.sleep(1);
+      }
+      if (scenario.automatic) {
+        expect(flow.state).toBe('awaiting-callback');
+        expect(calls).toHaveLength(2);
+        expect(calls[1]?.at(-1)).toBe('login');
+        if (launchKind === undefined) throw new Error('missing actual launch sign-in hook');
+        // Ferrets' trusted hook can resume this sign-in, without fabricated governance or another child.
+        expect(await launchKind.signIn('codex')).toMatchObject({ kind: 'browser' });
+        expect(calls).toHaveLength(2);
+      } else {
+        const ending = codexSharedHostEnding();
+        expect(flow).toMatchObject({ state: 'failed', reason: ending.reason, remedy: ending.remedy });
+        expect(flow.remedy).toContain('choose the link sign-in yourself');
+        expect(calls).toHaveLength(1);
+      }
+      expect(calls[0]?.at(-1)).toBe('--device-auth');
+    } finally {
+      await host.stop();
     }
-    const ending = codexSharedHostEnding();
-    expect(flow).toMatchObject({ state: 'failed', reason: ending.reason, remedy: ending.remedy });
-    expect(flow.remedy).toContain('choose the link sign-in yourself');
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.at(-1)).toBe('--device-auth');
+  });
+}
+
+test('external entrypoints still refuse missing governance after private launch orchestration is wired', async () => {
+  const f = await fixture();
+  const host = await testHost({ plugins: [buildLoginsDaemon(f.root)], fakes: { vault: emptyVault() }, config });
+  try {
+    const signIn = await host.request('POST', '/v1/logins/sign-in', { body: { loginId: 'codex' } });
+    const refresh = await host.request('POST', '/v1/logins/codex/check', { body: {} });
+    expect(signIn.status).toBe(409);
+    expect(signIn.body).toContain('fleet_login_unauthorized');
+    expect(refresh.status).toBe(409);
+    expect(refresh.body).toContain('fleet_credential_unauthorized');
   } finally {
     await host.stop();
   }

@@ -294,6 +294,14 @@ export class HarnessLoginService {
         'this daemon cannot say whether this caller may sign this machine in',
       );
     }
+    return await this.startForLaunch(request);
+  }
+
+  /**
+   * Private Logins orchestration for Ferrets' trusted launch hook (decision 19). This is not a route or a port;
+   * external callers use start(), whose governance check above remains mandatory. No standing is fabricated.
+   */
+  async startForLaunch(request: HarnessLoginStartRequest): Promise<HarnessLoginFlow> {
     const loginId = request.loginId;
     let target: CredentialSignInTarget;
     try {
