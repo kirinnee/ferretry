@@ -16,7 +16,7 @@
  * above both.
  */
 import { z } from 'zod';
-import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
+import { InstantSchema, NonNegativeIntegerSchema } from './view/common.ts';
 
 const Text = z.string().min(1);
 

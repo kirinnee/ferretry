@@ -28,14 +28,14 @@ import type { AnswerOperationRecord } from '../../../../../daemon/lib/session/pe
 import type { TmuxCommandResult } from '../../../../../daemon/lib/session/peers/tmux.ts';
 import type { TranscriptSource } from '../../../../../daemon/lib/session/peers/transcript.ts';
 import {
-  UNWIRED_PANE_FRAMES,
-  UNWIRED_PANE_PARSERS,
-  UNWIRED_QUESTIONS,
-  UNWIRED_SEND_EVIDENCE,
-  UNWIRED_TAIL,
-  unwiredReadAskedQuestion as readAskedQuestion,
-  unwiredTranscriptSource,
-} from '../../../../support/daemon/observer-peers.ts';
+  SCRIPTED_PANE_FRAMES,
+  SCRIPTED_PANE_PARSERS,
+  SCRIPTED_QUESTIONS,
+  SCRIPTED_SEND_EVIDENCE,
+  SCRIPTED_TAIL,
+  scriptedReadAskedQuestion as readAskedQuestion,
+  scriptedTranscriptSource,
+} from '../../../../support/daemon/observer-stand-ins.ts';
 import { waitFor } from '../../support/wait-for.ts';
 
 const NOW = '2026-10-22T08:00:00.000Z';
@@ -193,8 +193,8 @@ async function rig() {
       }) as WorkerTmuxClient;
     },
     transcripts: {
-      claude: readingThrough(unwiredTranscriptSource('claude')),
-      codex: readingThrough(unwiredTranscriptSource('codex')),
+      claude: readingThrough(scriptedTranscriptSource('claude')),
+      codex: readingThrough(scriptedTranscriptSource('codex')),
     },
     stat: async file =>
       await counted(async () => {
@@ -213,11 +213,11 @@ async function rig() {
       };
     },
     children: () => [],
-    observer: new SessionObserver(text => `digest(${text})`, UNWIRED_QUESTIONS),
-    frames: UNWIRED_PANE_FRAMES,
-    tail: UNWIRED_TAIL,
-    sendEvidence: UNWIRED_SEND_EVIDENCE,
-    paneParsers: UNWIRED_PANE_PARSERS,
+    observer: new SessionObserver(text => `digest(${text})`, SCRIPTED_QUESTIONS),
+    frames: SCRIPTED_PANE_FRAMES,
+    tail: SCRIPTED_TAIL,
+    sendEvidence: SCRIPTED_SEND_EVIDENCE,
+    paneParsers: SCRIPTED_PANE_PARSERS,
   });
   const binding: SessionBinding = {
     tmux: { executable: '/usr/bin/tmux', socket: '/tmp/s', target: 'fy-a' },
@@ -292,7 +292,7 @@ describe('SessionWorkerRuntime — when it looks', () => {
     should(posted).deepEqual([{ probe: true }]);
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should look once at attach, subscribe to the pane, and then nothing while nothing happens', async () => {
+  it('should look once at attach, subscribe to the pane, and then nothing while nothing happens', async () => {
     // Arrange
     const { attach, advance, looks, pane, transcript } = await rig();
     await appendFile(transcript, claudeUser('go'));
@@ -311,7 +311,7 @@ describe('SessionWorkerRuntime — when it looks', () => {
     should(looks().length).equal(1);
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should look after the pane drew, settled and throttled, and once on the backstop', async () => {
+  it('should look after the pane drew, settled and throttled, and once on the backstop', async () => {
     // Arrange
     const { attach, advance, looks, pane, stats } = await rig();
     await attach();
@@ -334,7 +334,7 @@ describe('SessionWorkerRuntime — when it looks', () => {
     should(stats.length).equal(1);
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should look 150 ms after a draw once the throttle is long past, and coalesce a burst into one look', async () => {
+  it('should look 150 ms after a draw once the throttle is long past, and coalesce a burst into one look', async () => {
     // Arrange
     const { attach, advance, looks, pane } = await rig();
     await attach();
@@ -353,7 +353,7 @@ describe('SessionWorkerRuntime — when it looks', () => {
     should(looks().length).equal(2);
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should look again 2 s after an unconfirmed turn end, and record it on that second frame', async () => {
+  it('should look again 2 s after an unconfirmed turn end, and record it on that second frame', async () => {
     // Arrange — the transcript still says working; the pane is idle: one frame is not enough.
     const { attach, advance, looks, transcript } = await rig();
     await appendFile(transcript, claudeUser('go'));
@@ -369,7 +369,7 @@ describe('SessionWorkerRuntime — when it looks', () => {
     should(looks().at(-1)?.patches).deepEqual([{ kind: 'turn', change: { from: 'working', to: 'your-turn' } }]);
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should re-read the transcript only after the hub said it changed', async () => {
+  it('should re-read the transcript only after the hub said it changed', async () => {
     // Arrange
     const { attach, advance, send, stats, transcript, looks } = await rig();
     await attach();
@@ -390,7 +390,7 @@ describe('SessionWorkerRuntime — when it looks', () => {
     ).deepEqual(['question', 'turn']);
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should say a dead pane once, and look on the old 2 s cadence while its client is down', async () => {
+  it('should say a dead pane once, and look on the old 2 s cadence while its client is down', async () => {
     // Arrange
     const { attach, advance, looks, pane, posted } = await rig();
     pane.connected = false;
@@ -420,7 +420,7 @@ describe('SessionWorkerRuntime — what it pushes unasked', () => {
   const livenessOf = (posted: readonly FromSessionWorker[]) =>
     posted.flatMap(message => ('kind' in message && message.kind === 'liveness' ? [message.liveness.screen] : []));
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should stop vouching for a pane only after three looks in a row with its client down', async () => {
+  it('should stop vouching for a pane only after three looks in a row with its client down', async () => {
     // Arrange
     const { attach, advance, pane, posted } = await rig();
     pane.connected = false;
@@ -437,7 +437,7 @@ describe('SessionWorkerRuntime — what it pushes unasked', () => {
     should(exitedOf(posted)).deepEqual([{ kind: 'exited', session: 'a', generation: 1 }]);
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should not count a client that was down only while it connected at attach', async () => {
+  it('should not count a client that was down only while it connected at attach', async () => {
     // Arrange
     const { attach, advance, pane, posted } = await rig();
     pane.connected = false;
@@ -455,7 +455,7 @@ describe('SessionWorkerRuntime — what it pushes unasked', () => {
     should(exitedOf(posted)).deepEqual([]);
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should push the Warden’s look when the screen moved, and not again while it has not', async () => {
+  it('should push the Warden’s look when the screen moved, and not again while it has not', async () => {
     // Arrange
     const { attach, advance, pane, posted } = await rig();
     pane.screen = WORKING;
@@ -477,7 +477,7 @@ describe('SessionWorkerRuntime — what it pushes unasked', () => {
 });
 
 describe('SessionWorkerRuntime — the question part', () => {
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should decide the question again, without a read, when the facts or the receipts change, and not repeat itself', async () => {
+  it('should decide the question again, without a read, when the facts or the receipts change, and not repeat itself', async () => {
     // Arrange
     const { attach, advance, send, looks, transcript, stats } = await rig();
     await appendFile(transcript, ASK);
@@ -510,7 +510,7 @@ describe('SessionWorkerRuntime — the question part', () => {
     should(stats).deepEqual([]);
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should project the question Claude’s hook recorded while the transcript still holds it back', async () => {
+  it('should project the question Claude’s hook recorded while the transcript still holds it back', async () => {
     // Arrange — Claude 2.1.281 writes the call only once the form is answered; its hook wrote it as asked.
     const { attach, advance, looks, transcript, binding, root } = await rig();
     await appendFile(transcript, claudeUser('ship it?'));
@@ -540,7 +540,7 @@ describe('SessionWorkerRuntime — the question part', () => {
     });
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should not read a question file for a Codex session', async () => {
+  it('should not read a question file for a Codex session', async () => {
     // Arrange — Codex writes its question to the rollout as it asks it; the file is Claude's alone.
     const { attach, advance, looks, transcript, binding, root } = await rig();
     await appendFile(transcript, '');
@@ -571,7 +571,7 @@ describe('SessionWorkerRuntime — the question part', () => {
     ).be.false();
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should say nothing about a question while no transcript is bound', async () => {
+  it('should say nothing about a question while no transcript is bound', async () => {
     // Arrange
     const { attach, advance, looks, binding, send } = await rig();
     await attach({ status: 'running', turn: 1 }, { tmux: binding.tmux });
@@ -587,7 +587,7 @@ describe('SessionWorkerRuntime — the question part', () => {
 });
 
 describe('SessionWorkerRuntime — what it answers', () => {
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should look now for a barrier, and answer the pane, the liveness look and the send evidence', async () => {
+  it('should look now for a barrier, and answer the pane, the liveness look and the send evidence', async () => {
     // Arrange
     const { attach, advance, ask, looks, transcript, pane, stats } = await rig();
     await appendFile(transcript, claudeUser('go'));
@@ -613,7 +613,7 @@ describe('SessionWorkerRuntime — what it answers', () => {
     should((evidence.value as { inputs: unknown[] }).inputs.length).equal(1);
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should answer a dead pane with nothing, a request for another generation with a failure, and say why a request failed', async () => {
+  it('should answer a dead pane with nothing, a request for another generation with a failure, and say why a request failed', async () => {
     // Arrange
     const { attach, advance, ask, pane, binding, send } = await rig();
     await attach();
@@ -634,7 +634,7 @@ describe('SessionWorkerRuntime — what it answers', () => {
     should(unbound.value).deepEqual({ readable: false, inputs: [] });
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should answer a request whose work threw with that failure', async () => {
+  it('should answer a request whose work threw with that failure', async () => {
     // Arrange
     const { attach, advance, ask, pane } = await rig();
     await attach();
@@ -650,7 +650,7 @@ describe('SessionWorkerRuntime — what it answers', () => {
 });
 
 describe('SessionWorkerRuntime — hosting', () => {
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should rebind a moved pane to a new client, forget a replaced transcript, and stop everything on detach', async () => {
+  it('should rebind a moved pane to a new client, forget a replaced transcript, and stop everything on detach', async () => {
     // Arrange
     const { attach, advance, send, pane, binding, root, stats, looks } = await rig();
     await attach();
@@ -681,7 +681,7 @@ describe('SessionWorkerRuntime — hosting', () => {
     should(looks().length).equal(lookedAfterBind);
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should ignore every message for a generation it does not hold, and drop a look that a detach overtook', async () => {
+  it('should ignore every message for a generation it does not hold, and drop a look that a detach overtook', async () => {
     // Arrange
     const { attach, send, subject, advance, looks } = await rig();
     await attach();
@@ -713,7 +713,7 @@ describe('SessionWorkerRuntime — hosting', () => {
     subject.close();
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should run a look asked for while one runs once more after it', async () => {
+  it('should run a look asked for while one runs once more after it', async () => {
     // Arrange
     const { attach, advance, looks, pane, ask } = await rig();
     await attach();
@@ -728,7 +728,7 @@ describe('SessionWorkerRuntime — hosting', () => {
     should(looks().length).be.aboveOrEqual(2);
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should say why a request failed when the transcript it was bound to has no reader', async () => {
+  it('should say why a request failed when the transcript it was bound to has no reader', async () => {
     // Arrange
     const { attach, advance, ask, send, binding } = await rig();
     await attach();
@@ -749,7 +749,7 @@ describe('SessionWorkerRuntime — hosting', () => {
     should(answer).not.have.property('value');
   });
 
-  it.skip('pending port: conversation IncrementalTranscriptTail, TranscriptSendEvidence, readAskedQuestion and question policy; terminals PaneFrames over TmuxController and pane parsers — should look once more after a look that another look interrupted, and not before it finished', async () => {
+  it('should look once more after a look that another look interrupted, and not before it finished', async () => {
     // Arrange
     const { attach, advance, ask, looks } = await rig();
     await attach();

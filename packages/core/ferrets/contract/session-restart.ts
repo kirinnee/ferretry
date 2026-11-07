@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
-import { LaunchInstructionSectionIdSchema } from './session.ts';
+import { InstantSchema, NonNegativeIntegerSchema } from './view/common.ts';
+import { LaunchInstructionSectionIdSchema } from './view/ferret-view.ts';
 
 /**
  * Restarting ferrets that run on out-of-date instructions (docs/launch-settings.md, "Restarting ferrets

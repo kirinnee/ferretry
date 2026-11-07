@@ -1,13 +1,16 @@
 import { ApiError } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
-import type { FerretId, FerretState, FerretWaiting, StartFailure } from '../../../contract/index.ts';
-import type {
-  RestartCancelResult,
-  RestartQueueEntry,
-  RestartRequest,
-  RestartResult,
-  RestartStatus,
-} from '../protocol/session-restart.ts';
+import {
+  type FerretId,
+  type FerretState,
+  type FerretWaiting,
+  type StartFailure,
+  type RestartCancelResult,
+  type RestartQueueEntry,
+  type RestartRequest,
+  type RestartResult,
+  type RestartStatus,
+} from '../../../contract/index.ts';
 import type { SessionRestartSubsystem } from '../runtime/mounts/session-restart.ts';
 import { type RestartPorts, RestartService, type RestartSubject } from '../session/restart/service.ts';
 

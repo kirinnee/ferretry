@@ -46,7 +46,7 @@ import { StateSqliteIndex } from './sqlite-index.ts';
  *
  * Today's `DaemonStorage`, with the same public surface, moved off the confined filesystem onto the kernel's
  * `StatePort` (§9.2). A session is three declared files under `state/ferrets/<session>/`: `config.json` and
- * `state.json` (`lib/state.ts`) and the journal `history.jsonl` (the contract's `FerretHistoryFiles`). The index is
+ * `state.json` (the contract's `FerretStateFile`) and the journal `history.jsonl` (the contract's `FerretHistoryFiles`). The index is
  * the contract's `FerretIndexFile` and the archive registry its `ArchiveFile`.
  *
  * WHAT WENT WITH THE FILESYSTEM. The session-version marker and every path that upgraded or refused an older

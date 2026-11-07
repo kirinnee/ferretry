@@ -1,14 +1,14 @@
-import type {
-  BranchDeletionConfirmation,
-  CreatedWorktree,
-  CreateWorktreeRequest,
-  ManagedWorktreeView,
-  RemovedWorktree,
-  WorktreeListResponse,
-  WorktreeRemovalDecision,
-  WorktreeRemovalRequest,
-} from '../protocol/worktrees.ts';
-import type { ManagedWorktreeSummary } from '../../../contract/index.ts';
+import {
+  type BranchDeletionConfirmation,
+  type CreatedWorktree,
+  type CreateWorktreeRequest,
+  type ManagedWorktreeView,
+  type RemovedWorktree,
+  type WorktreeListResponse,
+  type WorktreeRemovalDecision,
+  type WorktreeRemovalRequest,
+  type ManagedWorktreeSummary,
+} from '../../../contract/index.ts';
 import type { SessionStatus } from '../protocol/session-base.ts';
 import { WorktreeError, WorktreeRemovalRefusal } from './errors.ts';
 import { isWithinDirectory, sharingSessionIds } from './policy.ts';

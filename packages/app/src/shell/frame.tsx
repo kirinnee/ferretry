@@ -19,6 +19,7 @@ import {
   NotFoundPage,
 } from './pages.tsx';
 import { PageScrollRegion } from '../scroll/page-scroll-region.tsx';
+import { PasskeyMount } from './passkey-mount.tsx';
 import { ScreenView, ShellLine } from './views.tsx';
 
 /**
@@ -262,6 +263,9 @@ export function Frame() {
         focusSignal={bar.signal}
         onClose={closeBar}
       />
+      {/* One passkey prompt for the whole app (Access's): any daemon call refused for want of an unlock or a step-up
+      raises it, and only the machine on screen may raise a background one (G95, G105). */}
+      <PasskeyMount onScreen={daemon ?? runtime.daemons.snapshot().selected} />
     </div>
   );
 }

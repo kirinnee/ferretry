@@ -16,11 +16,11 @@ import { type QuestionPatch, stepQuestion } from '../../../../../daemon/lib/sess
 import type { AnswerOperationRecord } from '../../../../../daemon/lib/session/peers/question.ts';
 import type { TranscriptEvent } from '../../../../../daemon/lib/session/peers/transcript.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
+import { MemoryAnswerLedger } from '../../../../support/daemon/observer-peers.ts';
 import {
-  MemoryAnswerLedger,
-  UNWIRED_QUESTIONS,
-  unwiredPaneLimits as storagePaneLimits,
-} from '../../../../support/daemon/observer-peers.ts';
+  SCRIPTED_QUESTIONS,
+  scriptedPaneLimits as storagePaneLimits,
+} from '../../../../support/daemon/observer-stand-ins.ts';
 import { memoryStorage } from '../../../../support/daemon/storage.ts';
 
 const NOW = '2026-10-22T08:00:00.000Z';
@@ -74,7 +74,7 @@ const patchFor = (
       events,
       answers,
     },
-    UNWIRED_QUESTIONS,
+    SCRIPTED_QUESTIONS,
   );
   if (patch === undefined) throw new Error('the look implied nothing');
   return patch;
@@ -94,7 +94,7 @@ function ledgerFor(_storage: DaemonStorage) {
 const noReceipts = async () => new Map<string, AnswerOperationRecord>();
 
 describe('SessionObservationApplier', () => {
-  it.skip('pending port: conversation question policy (withAskedQuestion) and storagePaneLimits — should apply one session’s patches in the order handed in: the question before the turn', async () => {
+  it('should apply one session’s patches in the order handed in: the question before the turn', async () => {
     // Arrange
     const storage = await openStorage();
     await storage.writeState(ID, { id: ID, status: 'running', turn: 1 });
@@ -103,7 +103,7 @@ describe('SessionObservationApplier', () => {
       storage,
       { all: noReceipts, append: async (_id, record) => void appended.push(record) },
       new KeyedSerialExecutor(),
-      UNWIRED_QUESTIONS,
+      SCRIPTED_QUESTIONS,
     );
 
     // Act — both handed in at once; the turn's compare-and-set would refuse if it ran first, because the
@@ -121,7 +121,7 @@ describe('SessionObservationApplier', () => {
     should((await storage.replay(ID)).events.map(event => event.type)).deepEqual(['turn.state']);
   });
 
-  it.skip('pending port: conversation question policy (withAskedQuestion) and storagePaneLimits — should append the receipts it settled without rewriting a document that needs no change', async () => {
+  it('should append the receipts it settled without rewriting a document that needs no change', async () => {
     // Arrange
     const storage = await openStorage();
     await storage.writeState(ID, { id: ID, status: 'running', turn: 1, lastAnsweredQuestionToolUseId: 'tool-1' });
@@ -133,7 +133,7 @@ describe('SessionObservationApplier', () => {
         append: async (_id, record) => void appended.push(record),
       },
       new KeyedSerialExecutor(),
-      UNWIRED_QUESTIONS,
+      SCRIPTED_QUESTIONS,
     );
     const patch = patchFor(
       { lastAnsweredQuestionToolUseId: 'tool-1' },
@@ -153,7 +153,7 @@ describe('SessionObservationApplier', () => {
     should(writes).deepEqual([]);
   });
 
-  it.skip('pending port: conversation question policy (withAskedQuestion) and storagePaneLimits — should re-decide under the lock: nothing to write once the document holds it, nothing over a damaged one', async () => {
+  it('should re-decide under the lock: nothing to write once the document holds it, nothing over a damaged one', async () => {
     // Arrange — the look saw an open question nobody had recorded; by the time the patch is applied a
     // writer has recorded that picker already. Later the document is damaged.
     const storage = await openStorage();
@@ -161,7 +161,7 @@ describe('SessionObservationApplier', () => {
       storage,
       { all: noReceipts, append: async () => undefined },
       new KeyedSerialExecutor(),
-      UNWIRED_QUESTIONS,
+      SCRIPTED_QUESTIONS,
     );
     const patch = patchFor({}, [question]);
     await storage.writeState(ID, {
@@ -182,7 +182,7 @@ describe('SessionObservationApplier', () => {
     should(await storage.readState(ID)).deepEqual({ id: ID, status: 'not-a-status' });
   });
 
-  it.skip('pending port: conversation question policy (withAskedQuestion) and storagePaneLimits — should not settle again a receipt the answer drive settled after the look', async () => {
+  it('should not settle again a receipt the answer drive settled after the look', async () => {
     // Arrange — a worker looked between the drive stamping the document and the drive appending its own
     // `confirmed`: its copy of the ledger still said `accepted`, so it settled the receipt itself.
     const storage = await openStorage();
@@ -192,7 +192,7 @@ describe('SessionObservationApplier', () => {
     const patch = patchFor({ lastAnsweredQuestionToolUseId: 'tool-1' }, [question], new Map([['request-1', accepted]]));
     should(patch.settlements.map(record => record.outcome)).deepEqual(['confirmed']);
     await ledger.append(ID, { ...accepted, outcome: 'confirmed' });
-    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor(), UNWIRED_QUESTIONS);
+    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor(), SCRIPTED_QUESTIONS);
 
     // Act — the patch reaches the writer only now, with the answer key idle again.
     const written = await subject.apply(ID, patch, NOW);
@@ -203,7 +203,7 @@ describe('SessionObservationApplier', () => {
     should(await ledger.read(ID, 'request-1')).deepEqual({ ...accepted, outcome: 'confirmed' });
   });
 
-  it.skip('pending port: conversation question policy (withAskedQuestion) and storagePaneLimits — should not lay a stale quarantine over the answer the drive confirmed, nor raise its advisory', async () => {
+  it('should not lay a stale quarantine over the answer the drive confirmed, nor raise its advisory', async () => {
     // Arrange — mid-drive, the transcript showed the form advance before the document was stamped, so the
     // look quarantined the receipt and decided a released advisory. Then the drive confirmed the answer.
     const storage = await openStorage();
@@ -220,7 +220,7 @@ describe('SessionObservationApplier', () => {
     const answered = { id: ID, status: 'running', turn: 1, lastAnsweredQuestionToolUseId: 'tool-1' } as const;
     await storage.writeState(ID, answered);
     await ledger.append(ID, { ...accepted, outcome: 'confirmed' });
-    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor(), UNWIRED_QUESTIONS);
+    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor(), SCRIPTED_QUESTIONS);
 
     // Act
     const written = await subject.apply(ID, patch, NOW);
@@ -233,14 +233,14 @@ describe('SessionObservationApplier', () => {
     should(await storage.readState(ID)).deepEqual(answered);
   });
 
-  it.skip('pending port: conversation question policy (withAskedQuestion) and storagePaneLimits — should settle a receipt the ledger still holds open, and decide the document from it', async () => {
+  it('should settle a receipt the ledger still holds open, and decide the document from it', async () => {
     // Arrange — nothing settled the receipt since the look, so the monitor's settlement is the repair.
     const storage = await openStorage();
     await storage.writeState(ID, { id: ID, status: 'awaiting_question', turn: 1 });
     const { ledger, outcomes } = ledgerFor(storage);
     await ledger.append(ID, accepted);
     const patch = patchFor({}, [question, released], new Map([['request-1', accepted]]));
-    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor(), UNWIRED_QUESTIONS);
+    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor(), SCRIPTED_QUESTIONS);
 
     // Act
     const written = await subject.apply(ID, patch, NOW);
@@ -293,7 +293,7 @@ describe('a session parked on the usage-limit dialog, over real storage', () => 
     retry: { transientAttempts: 2, stalledAttempts: 1, waitForQuotaReset: true, allowAccountFailover: false },
   };
 
-  it.skip('pending port: conversation question policy (withAskedQuestion) and storagePaneLimits — should record rate_limited, prove the login spent, then release it when the dialog closes', async () => {
+  it('should record rate_limited, prove the login spent, then release it when the dialog closes', async () => {
     // Arrange
     const storage = await openStorage();
     await storage.writeConfig(ID, config);
@@ -302,7 +302,7 @@ describe('a session parked on the usage-limit dialog, over real storage', () => 
       storage,
       { all: noReceipts, append: async () => {} },
       new KeyedSerialExecutor(),
-      UNWIRED_QUESTIONS,
+      SCRIPTED_QUESTIONS,
     );
     const nowMs = Date.parse(NOW);
 
@@ -319,7 +319,7 @@ describe('a session parked on the usage-limit dialog, over real storage', () => 
     should(((await storage.readState(ID)) as { status: string }).status).equal('running');
   });
 
-  it.skip('pending port: conversation question policy (withAskedQuestion) and storagePaneLimits — should skip a limited session whose documents cannot be read', async () => {
+  it('should skip a limited session whose documents cannot be read', async () => {
     // Arrange
     const storage = await openStorage();
     await storage.writeConfig(ID, { id: ID });

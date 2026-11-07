@@ -4,7 +4,7 @@
  * Ferrets is core and cannot import a plugin's code (§2.1), so the question projection and answer reconciliation
  * (conversation), the observed-runtime projection (claude-code, codex), the pane parsers (terminals), the pane work
  * classifier (warden) and the transcript parsers (conversation) are handed in by the host. A core test has none of
- * them, so this file offers two kinds of stand-in:
+ * them, so this file offers two kinds of stand-in (the scripted ones that answer real scenarios are in `observer-stand-ins.ts`):
  *
  * - INERT: answers nothing — no question, no runtime, no pane signal, no work under the pane. For a test whose
  *   subject only passes through that behaviour.
@@ -13,7 +13,7 @@
  */
 import type { QuestionStepPolicy } from '../../../daemon/lib/session/observer/question.ts';
 import { stepTurn, type TurnLook, type TurnStateChange } from '../../../daemon/lib/session/observer/turn.ts';
-import type { AnswerLedger, AnswerOperationRecord, AskedQuestion } from '../../../daemon/lib/session/peers/question.ts';
+import type { AnswerLedger, AnswerOperationRecord } from '../../../daemon/lib/session/peers/question.ts';
 import type { TranscriptSendEvidenceFactory } from '../../../daemon/lib/session/peers/send.ts';
 import type { PaneParsers } from '../../../daemon/lib/session/peers/tmux.ts';
 import type {
@@ -23,7 +23,6 @@ import type {
 } from '../../../daemon/lib/session/peers/transcript.ts';
 import {
   isTurnStatus,
-  type PaneFramesFactory,
   type SessionTurnPorts,
   type SessionTurnWatcher,
   type SessionTurnWatcherFactory,
@@ -31,13 +30,12 @@ import {
   type TurnObservation,
   type TurnWatchReport,
   type TurnWatchSession,
-  type UsageLimit,
 } from '../../../daemon/lib/session/peers/turn.ts';
 import type { PaneWorkSummarizer } from '../../../daemon/lib/session/peers/warden.ts';
 import type { SessionId } from '../../../daemon/lib/session-id.ts';
 
 /** The error an UNWIRED peer throws. */
-export class UnwiredPeer extends Error {
+class UnwiredPeer extends Error {
   constructor(peer: string) {
     super(`host peer not wired in core: ${peer}`);
     this.name = 'UnwiredPeer';
@@ -79,25 +77,8 @@ export const INERT_PANE_PARSERS: PaneParsers = Object.freeze({
   parseHarnessDialog: () => undefined,
 });
 
-/** The terminals plugin's pane parsers: not available in core. */
-export const UNWIRED_PANE_PARSERS: PaneParsers = Object.freeze({
-  parsePermissionPrompt: unwired('parsePermissionPrompt (terminals)'),
-  paneActiveWork: unwired('paneActiveWork (terminals)'),
-  paneShowsPermissionPrompt: unwired('paneShowsPermissionPrompt (terminals)'),
-  paneBlockingPrompt: unwired('paneBlockingPrompt (terminals)'),
-  parseHarnessDialog: unwired('parseHarnessDialog (terminals)'),
-});
-
 /** No tool command, no leftover browser, whatever runs under the pane. */
 export const INERT_PANE_WORK: PaneWorkSummarizer = () => ({ toolCommand: false, leftoverBrowser: false });
-
-/** The warden plugin's `paneWorkSummary`: not available in core. */
-export const UNWIRED_PANE_WORK: PaneWorkSummarizer = unwired('paneWorkSummary (warden)');
-
-/** Today's `storagePaneLimits(storage, nowMs)` (conversation `adapters/session/turn/storage-pane-limits.ts`). */
-export async function unwiredPaneLimits(_storage: unknown, _nowMs: number): Promise<ReadonlyMap<string, UsageLimit>> {
-  throw new UnwiredPeer('storagePaneLimits (conversation)');
-}
 
 /**
  * An answer ledger in memory, in place of today's `FileAnswerLedger` (conversation): every appended row is kept in
@@ -191,20 +172,6 @@ export function unwiredTranscriptSource(harness: TranscriptHarness): TranscriptS
     window: unwired(peer),
   };
 }
-
-/** Today's `readAskedQuestion(file, transcript)` (conversation `adapters/session/question/asked-question-file.ts`). */
-export async function unwiredReadAskedQuestion(
-  _file: string,
-  _transcript: string | undefined,
-): Promise<AskedQuestion | undefined> {
-  throw new UnwiredPeer('readAskedQuestion (conversation)');
-}
-
-/** Today's `new PaneFrames(new TmuxController(port), clock)` (conversation over terminals): reading a frame throws. */
-export const UNWIRED_PANE_FRAMES: PaneFramesFactory = () => ({
-  state: unwired('PaneFrames over TmuxController (conversation, terminals)'),
-  forget: () => undefined,
-});
 
 /** Today's `new IncrementalTranscriptTail(source, file, sessionId, limit)` (conversation): reading it throws. */
 export const UNWIRED_TAIL: IncrementalTranscriptTailFactory = (_source, file) => ({
