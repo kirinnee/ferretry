@@ -168,7 +168,9 @@ export interface StatePort {
   sqlite(file: StateFileDef, name?: string): SqliteHandle;
   /**
    * The absolute path of one of THIS plugin's own declared `opaque` state files (today's `tmux.sock` under
-   * `state/terminals/`), for a child that makes or opens the file itself. Any other store, or an undeclared file,
+   * `state/terminals/`), for a child that makes or opens the file itself. An opaque def whose path ends `/*` is a
+   * NAMED TREE: its name may be path-safe segments (`F12/turns/turn-001.md`, today's Conversation files), written
+   * with `write` and handed on by this path. Any other store, or an undeclared file,
    * throws: a path is never handed out for a file the port reads and writes, nor for another plugin's.
    */
   pathOf(file: StateFileDef, name?: string): string;

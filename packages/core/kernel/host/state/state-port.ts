@@ -94,6 +94,20 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
   const damaged = new Map<string, StateDamage>((options.initialDamage ?? []).map(damage => [damage.file, damage]));
   const narrowed = new Map<string, StateDamage>();
 
+  /**
+   * A plain name, or, for an opaque NAMED TREE (a def whose path ends `/*`, today's Conversation files under
+   * `state/conversation/<ferret>/`), path-safe segments such as `F12/turns/turn-001.md`: each segment a plain
+   * name, none `.` or `..`, and the tree's folder claimed by no other declared file.
+   */
+  const nameAllowed = (def: StateFileDef, name: string): boolean => {
+    const plain = (segment: string): boolean => COLLECTION_NAME.test(segment) && segment !== '.' && segment !== '..';
+    if (!name.includes('/')) return plain(name);
+    if (def.store !== 'opaque' || !def.path.endsWith('/*')) return false;
+    const folder = def.path.slice(0, -1);
+    if ([...declared.values()].some(other => other.name !== def.name && other.path.startsWith(folder))) return false;
+    return name.split('/').every(plain);
+  };
+
   const locate = (def: StateFileDef, name: string | undefined): Located => {
     const known = declared.get(def.name);
     if (known === undefined || known.path !== def.path || known.store !== def.store || known.format !== def.format)
@@ -105,7 +119,7 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
           ? `state ${def.name} is a collection: it needs a name`
           : `state ${def.name} is one file: it takes no name`,
       );
-    if (name !== undefined && (!COLLECTION_NAME.test(name) || name === '.' || name === '..'))
+    if (name !== undefined && !nameAllowed(def, name))
       throw new UndeclaredStateFileError(`state ${def.name}: "${name}" is not a valid name`);
     const relative = name === undefined ? def.path : def.path.replace('*', name);
     return { path: `${root}/${relative}`, relative, label: stateLabel(pluginId, relative) };

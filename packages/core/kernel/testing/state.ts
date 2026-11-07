@@ -76,7 +76,10 @@ export class MemoryStateFolder {
 
 function pathOf(file: StateFileDef, name?: string): string {
   if (!file.path.includes('*')) return file.path;
-  if (name === undefined || name.includes('/') || name === '..' || name === '.')
+  const plain = (segment: string): boolean => segment !== '' && segment !== '..' && segment !== '.';
+  // as the real port: an opaque named tree (path ending `/*`) takes path-safe segments
+  const tree = file.store === 'opaque' && file.path.endsWith('/*');
+  if (name === undefined || (name.includes('/') && !tree) || !name.split('/').every(plain))
     throw new TypeError(`state ${file.name}: a collection file needs a plain name`);
   return file.path.replace('*', name);
 }
