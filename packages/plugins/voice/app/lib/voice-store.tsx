@@ -191,7 +191,8 @@ export function useOnDeviceVoices(): OnDeviceVoices | null {
 
 /**
  * The `fetch` a screen reads the daemon through: the store's carrier when a suite or harness names one, else the plugin
- * client's, else the plain network. ONE identity per source, because effects list it as a dependency.
+ * client's. ONE identity per source, because effects list it as a dependency. Outside both there is no daemon to reach,
+ * so it refuses: a daemon request never falls back to the plain network (`fetch-binding`; it would skip the client).
  */
 export function useDaemonFetch(): DaemonFetch {
   const store = useContext(StoreContext);
@@ -205,9 +206,14 @@ export function useDaemonFetch(): DaemonFetch {
       const routed = pluginFetch(client);
       return async (input, init) => await routed(String(input), init ?? {});
     }
-    return browserFetch;
+    return noDaemonFetch;
   }, [store, client]);
 }
+
+/** Outside the voice app half there is no daemon client: refuse as the network refuses, never send. */
+const noDaemonFetch: DaemonFetch = async () => {
+  throw new TypeError('no daemon client is open here, so the request was not sent');
+};
 
 // ─── the daemon client ────────────────────────────────────────────────────────────────────────────────────────────
 
