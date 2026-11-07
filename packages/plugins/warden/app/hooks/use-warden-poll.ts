@@ -16,11 +16,11 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { DaemonConnection, DaemonId } from '../shell.ts';
+import { type DaemonConnection, type DaemonId, shellClock } from '../shell.ts';
 
 /**
  * The Warden page's own beat: a person on it is watching the sweep, so it keeps the thirty seconds
- * the pack page's strip (`WARDEN_POLL_MS`) no longer spends.
+ * the ferret page's strip (`WARDEN_POLL_MS`) no longer spends.
  */
 const WARDEN_PAGE_POLL_MS = 30_000;
 
@@ -46,6 +46,8 @@ export interface WardenPollOptions {
   readonly isHidden?: () => boolean;
   /** Bump to read again now. */
   readonly revision?: number;
+  /** Runs a callback every `ms` until cancelled; the shell's clock unless a test drives it by hand. */
+  readonly every?: (run: () => void, ms: number) => () => void;
 }
 
 const documentHidden = (): boolean => typeof document !== 'undefined' && document.hidden;
@@ -63,7 +65,7 @@ export function useWardenPoll<T>(
   read: (daemon: DaemonConnection) => Promise<T>,
   options: WardenPollOptions = {},
 ): WardenReadState<T> {
-  const { pollMs = WARDEN_PAGE_POLL_MS, isHidden = documentHidden, revision = 0 } = options;
+  const { pollMs = WARDEN_PAGE_POLL_MS, isHidden = documentHidden, revision = 0, every = shellClock.every } = options;
   const [held, setHeld] = useState<Held<T>>({ daemonId: daemon.daemonId, state: { status: 'loading' } });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision is the deliberate "read again now" trigger
@@ -86,12 +88,12 @@ export function useWardenPoll<T>(
       }
     };
     void poll();
-    const timer = setInterval(() => void poll(), pollMs);
+    const stop = every(() => void poll(), pollMs);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      stop();
     };
-  }, [daemon, read, pollMs, isHidden, revision]);
+  }, [daemon, read, pollMs, isHidden, revision, every]);
 
   return held.daemonId === daemon.daemonId ? held.state : { status: 'loading' };
 }

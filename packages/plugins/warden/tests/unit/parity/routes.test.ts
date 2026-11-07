@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { entryId, sourceKey } from '@ferretry/core-asks/contract/testing';
 import { ferretId, T0 } from '@ferretry/core-ferrets/contract/testing';
 import { ferret, owner } from '@ferretry/kernel/testing';
-import manifest from '../../manifest.ts';
+import manifest from '../../../manifest.ts';
 import { wardenHost } from './host.ts';
 
 const route = (key: string) => manifest.actions.routes.find(candidate => candidate.key === key);

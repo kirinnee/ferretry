@@ -1,16 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import {
-  type CapabilityGrantView,
-  DAEMON_CAPABILITIES,
-  type GrantRefusal,
-  type GrantsView,
-  type WardenInvestigateRequest,
-  type WardenInvestigateView,
-  type WardenStatusView,
-} from '../../../app/wire.ts';
-import { ACTION_TOAST_MS, ActionToast } from '../../../app/shell.ts';
-import type { CoreActionContext } from '../../../app/shell.ts';
-import type { FerretActionFormHost } from '../../../app/shell.ts';
+import type { WardenInvestigateRequest, WardenInvestigateView, WardenStatusView } from '../../../app/wire.ts';
+import type { CoreActionContext, FerretActionFormHost, GrantsView } from '../../../app/shell.ts';
+import { fakeWardenClient } from '../../support/app/clients.ts';
 import {
   ASK_WARDEN_ACTION_ID,
   AskWardenForm,
@@ -20,9 +11,8 @@ import {
   useAskWardenActions,
 } from '../../../app/features/warden/ask-warden.tsx';
 import { type DaemonConnection, daemonConnection } from '../../../app/shell.ts';
-import { DaemonClientProvider } from '../../../app/shell.ts';
-import { interact, type Mounted, mount, must } from '../../support/app/dom.ts';
-import { sessionView } from '../../support/app/ferrets.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { ferretView } from '../../support/app/ferrets.ts';
 import { wardenConfig, wardenStatus } from '../../support/app/warden.ts';
 
 const ALPHA = `fy_daemon_${'a'.repeat(43)}`;
@@ -42,21 +32,13 @@ const settle = async (): Promise<void> => {
   });
 };
 
-const entry = (capability: CapabilityGrantView['capability'], useRefusal: GrantRefusal): CapabilityGrantView => ({
-  capability,
-  use: useRefusal === 'granted',
-  configure: false,
-  granted: { use: useRefusal !== 'not-granted', configure: false },
-  mayGrant: false,
-  useRefusal,
-  configureRefusal: 'not-granted',
-  origin: 'default',
-});
+type GrantRefusal = 'granted' | 'not-granted' | 'device-not-granted' | 'step-up-required' | 'undetermined';
+const CAPABILITIES = ['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing'] as const;
 const grants = (warden: GrantRefusal): GrantsView => ({
-  capabilities: DAEMON_CAPABILITIES.map(capability => entry(capability, capability === 'warden' ? warden : 'granted')),
-  governed: true,
-  hostLocal: false,
-  steppedUp: false,
+  capabilities: CAPABILITIES.map(capability => {
+    const useRefusal = capability === 'warden' ? warden : 'granted';
+    return { capability, use: useRefusal === 'granted', useRefusal };
+  }),
 });
 
 interface Recorder {
@@ -68,7 +50,7 @@ interface Recorder {
 const hostFor = (recorder: Recorder): FerretActionFormHost => ({
   close: () => recorder.closes.push(1),
   open: () => undefined,
-  notify: sentence => recorder.notices.push(sentence),
+  notify: (sentence: string) => recorder.notices.push(sentence),
   compact: false,
 });
 
@@ -271,7 +253,7 @@ describe('AskWardenForm', () => {
 });
 
 const context = (canControl: boolean): CoreActionContext => ({
-  view: sessionView('sess-1'),
+  view: ferretView('sess-1'),
   name: 'hadi',
   canControl,
   copyId: () => undefined,
@@ -308,11 +290,13 @@ describe('askWardenContribution', () => {
 function ActionsProbe({
   target,
   createClient,
+  grantsOf,
 }: {
   readonly target: DaemonConnection;
   readonly createClient?: AskWardenClientFactory;
+  readonly grantsOf: (connection: DaemonConnection) => Promise<GrantsView>;
 }) {
-  const actions = useAskWardenActions(target, createClient);
+  const actions = useAskWardenActions(target, createClient, grantsOf);
   const entry = actions[0]?.build(context(true));
   return (
     <div>
@@ -330,103 +314,59 @@ describe('useAskWardenActions', () => {
     const asked: string[] = [];
     const answers: Record<string, GrantsView> = { [ALPHA]: grants('granted'), [BETA]: grants('not-granted') };
     const calls: string[] = [];
-    const factory: AskWardenClientFactory = async target => {
+    const grantsOf = async (target: DaemonConnection): Promise<GrantsView> => {
       asked.push(`${target.daemonId}`);
-      return {
-        request: (async (path: string) => {
-          expect(path).toBe('/v1/grants');
-          return answers[`${target.daemonId}`];
-        }) as never,
-        wardenStatus: async () => {
+      return answers[`${target.daemonId}`] as GrantsView;
+    };
+    const factory: AskWardenClientFactory = async target =>
+      fakeWardenClient({
+        status: async () => {
           calls.push(`status:${target.daemonId}`);
           return wardenStatus();
         },
-        wardenInvestigate: async request => {
+        investigate: async request => {
           calls.push(`investigate:${target.daemonId}:${request.ferret}`);
           return { ferret: request.ferret, state: 'queued', message: 'Queued.' };
         },
-      };
-    };
-    view = await mount(<ActionsProbe createClient={factory} target={connection(ALPHA)} />);
+      });
+    view = await mount(<ActionsProbe createClient={factory} grantsOf={grantsOf} target={connection(ALPHA)} />);
     await settle();
     expect(count()).toBe('1');
     await submit(view.container);
     expect(calls).toEqual([`status:${ALPHA}`, `investigate:${ALPHA}:sess-1`]);
 
     // A re-created connection object for the same machine is not asked again.
-    await view.render(<ActionsProbe createClient={factory} target={connection(ALPHA)} />);
+    await view.render(<ActionsProbe createClient={factory} grantsOf={grantsOf} target={connection(ALPHA)} />);
     await settle();
     expect(asked.filter(id => id === ALPHA).length).toBeGreaterThan(0);
     const alphaGrantReads = asked.length;
 
     // Another machine answers for itself: its no is not overridden by the first machine's yes.
-    await view.render(<ActionsProbe createClient={factory} target={connection(BETA)} />);
+    await view.render(<ActionsProbe createClient={factory} grantsOf={grantsOf} target={connection(BETA)} />);
     await settle();
     expect(count()).toBe('0');
     expect(asked.length).toBeGreaterThan(alphaGrantReads);
   });
 
   it('offers nothing when the grants cannot be read', async () => {
-    const factory: AskWardenClientFactory = async () => {
+    const grantsOf = async (): Promise<GrantsView> => {
       throw new Error('offline');
     };
-    view = await mount(<ActionsProbe createClient={factory} target={connection(ALPHA)} />);
+    view = await mount(<ActionsProbe grantsOf={grantsOf} target={connection(ALPHA)} />);
     await settle();
     expect(count()).toBe('0');
   });
 
   it('drops a grants answer that arrives after unmount', async () => {
     let release: () => void = () => undefined;
-    const factory: AskWardenClientFactory = () =>
+    const grantsOf = (): Promise<GrantsView> =>
       new Promise(resolve => {
-        release = () =>
-          resolve({
-            request: (async () => grants('granted')) as never,
-            wardenStatus: async () => wardenStatus(),
-            wardenInvestigate: async () => ({ ferret: 'sess-1', state: 'queued', message: 'Queued.' }),
-          });
+        release = () => resolve(grants('granted'));
       });
-    view = await mount(<ActionsProbe createClient={factory} target={connection(ALPHA)} />);
+    view = await mount(<ActionsProbe grantsOf={grantsOf} target={connection(ALPHA)} />);
     await view.unmount();
     view = null;
     release();
     await settle();
-  });
-
-  it('reads through the app’s routed client when none is injected', async () => {
-    const factory: AskWardenClientFactory = async () => ({
-      request: (async () => grants('granted')) as never,
-      wardenStatus: async () => wardenStatus(),
-      wardenInvestigate: async () => ({ ferret: 'sess-1', state: 'queued', message: 'Queued.' }),
-    });
-    view = await mount(
-      <DaemonClientProvider client={factory as never}>
-        <ActionsProbe target={connection(ALPHA)} />
-      </DaemonClientProvider>,
-    );
-    await settle();
-    expect(count()).toBe('1');
-  });
-});
-
-describe('ActionToast', () => {
-  it('keeps an empty live region mounted, shows a notice, and dismisses on ✕', async () => {
-    const dismissed: number[] = [];
-    view = await mount(<ActionToast notice={null} onDismiss={() => dismissed.push(1)} />);
-    const region = must(view.container.querySelector('[role="status"]'), 'region');
-    expect(region.textContent).toBe('');
-    expect(view.container.querySelector('button')).toBeNull();
-    await view.render(<ActionToast notice="Queued." onDismiss={() => dismissed.push(1)} />);
-    expect(must(view.container.querySelector('[role="status"]'), 'region').textContent).toBe('Queued.');
-    await interact(() => must(view?.container.querySelector<HTMLButtonElement>('button'), 'dismiss').click());
-    expect(dismissed).toEqual([1]);
-    expect(ACTION_TOAST_MS).toBe(6_000);
-  });
-
-  it('dismisses itself after its time', async () => {
-    const dismissed: number[] = [];
-    view = await mount(<ActionToast dismissMs={5} notice="Queued." onDismiss={() => dismissed.push(1)} />);
-    await interact(async () => await new Promise(resolve => setTimeout(resolve, 20)));
-    expect(dismissed).toEqual([1]);
   });
 });

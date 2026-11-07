@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { WardenCombinedTotals } from '../../../app/features/warden/warden-combined-totals.tsx';
-import type { WardenOverviewClient } from '../../../app/features/warden/warden-overview-surface.tsx';
+import { fakeWardenClient } from '../../support/app/clients.ts';
 import { combinedTodayTotals } from '../../../app/features/warden/warden-stats-model.ts';
 import { WardenTotalsSurface } from '../../../app/features/warden/warden-totals-surface.tsx';
 import { daemonConnection } from '../../../app/shell.ts';
-import { interact, mount } from '../../support/app/dom.ts';
+import { interact, mount } from '@ferretry/app/testing';
 import { wardenStatus } from '../../support/app/warden.ts';
 
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
@@ -67,12 +67,12 @@ describe('WardenTotalsSurface', () => {
         now={() => NOW}
         pollOptions={{ isHidden: () => false, pollMs: 3_600_000 }}
         createClient={async connection =>
-          ({
-            wardenStatus: async () => {
+          fakeWardenClient({
+            status: async () => {
               asked.push(connection.daemonId);
               return answers.get(connection.daemonId) as ReturnType<typeof today>;
             },
-          }) as unknown as WardenOverviewClient
+          })
         }
       />,
     );

@@ -9,17 +9,18 @@
  * The page is quiet by design: stats first, then flat one-line lists — no card per row.
  */
 
-import type { FerretView, WardenAgendaView, WardenLeaveDuration, WardenStatusView } from '../../wire.ts';
+import type { WardenAgendaView, WardenLeaveDuration, WardenStatusView } from '../../wire.ts';
 import { AlertTriangle, LoaderCircle, RefreshCw, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 
 import type { WardenReadState } from '../../hooks/use-warden-poll.ts';
 import { readView } from '../../hooks/use-warden-poll.ts';
-import { cn } from '../../shell.ts';
+import { cn } from '../../ui.ts';
 import type { DaemonConnection } from '../../shell.ts';
+import type { FerretView } from '../../shell.ts';
 import { daemonAgendaPath } from '../../shell.ts';
 import { INSIGHTS_COLUMN_CLASS } from '../../shell.ts';
-import { Badge } from '../../shell.ts';
-import { RouteLink } from '../../shell.ts';
+import { Badge } from '../../ui.ts';
+import { RouteLink } from '../../ui.ts';
 import { RecentTriggers } from './warden-trigger-rows.tsx';
 import { WardenChipBadge } from './warden-chips.tsx';
 import {

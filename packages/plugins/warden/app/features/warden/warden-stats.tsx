@@ -5,13 +5,12 @@
 
 import type { WardenStatusView } from '../../wire.ts';
 import { useState } from 'react';
-import { cn } from '../../shell.ts';
+import { cn } from '../../ui.ts';
 import { AnalyticsMetricChart } from '../../shell.ts';
 import { WardenActionStats } from './warden-action-stats.tsx';
 import { ActorMark } from './warden-chips.tsx';
 import {
   CHART_SERIES,
-  hasHistory,
   layerLines,
   PERIOD_LABEL,
   spendTotals,
@@ -27,10 +26,7 @@ const PERIODS: readonly WardenPeriod[] = ['today', 'week'];
 function Tile({ tile }: { readonly tile: StatTile }) {
   return (
     <div className="flex min-w-0 flex-col gap-xs px-cell-x py-row-y" data-stat={tile.key}>
-      <span className="text-meta text-muted">
-        {tile.label}
-        {tile.qualifier === 'recent' && <span className="text-faint"> (recent)</span>}
-      </span>
+      <span className="text-meta text-muted">{tile.label}</span>
       <span
         className="text-title font-semibold leading-none text-fg [font-variant-numeric:tabular-nums]"
         role="img"
@@ -53,40 +49,35 @@ function Tile({ tile }: { readonly tile: StatTile }) {
 
 export function WardenStatsPanel({ status, now }: { readonly status: WardenStatusView; readonly now: number }) {
   const [period, setPeriod] = useState<WardenPeriod>('today');
-  const history = hasHistory(status);
-  const stats = wardenStats(status, history ? period : 'today', now);
+  const stats = wardenStats(status, period, now);
   const lines = layerLines(status);
   const totals = spendTotals(status);
   const chart = wardenDayChart(status, now);
   return (
     <section aria-label="Warden stats" className="flex min-w-0 flex-col gap-md">
       <div className="flex flex-wrap items-center justify-between gap-sm">
-        {history ? (
-          <div
-            aria-label="Stats period"
-            role="toolbar"
-            className="flex rounded-control border border-border bg-surface p-0.5"
-          >
-            {PERIODS.map(key => (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={period === key}
-                className="kt-tab !px-sm !min-h-8 !min-w-0 sm:!min-h-0"
-                onClick={() => setPeriod(key)}
-              >
-                {PERIOD_LABEL[key]}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <span className="text-meta text-muted">Recent activity</span>
-        )}
+        <div
+          aria-label="Stats period"
+          role="toolbar"
+          className="flex rounded-control border border-border bg-surface p-0.5"
+        >
+          {PERIODS.map(key => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={period === key}
+              className="kt-tab !px-sm !min-h-8 !min-w-0 sm:!min-h-0"
+              onClick={() => setPeriod(key)}
+            >
+              {PERIOD_LABEL[key]}
+            </button>
+          ))}
+        </div>
         {stats.coverage !== undefined && <span className="text-meta text-faint">{stats.coverage}</span>}
       </div>
       <div
         className="grid grid-cols-2 divide-border-soft rounded-control bg-surface-2 sm:grid-cols-5 sm:divide-x"
-        data-warden-tiles={stats.source}
+        data-warden-tiles=""
       >
         {stats.tiles.map(tile => (
           <Tile key={tile.key} tile={tile} />
@@ -131,7 +122,7 @@ export function WardenStatsPanel({ status, now }: { readonly status: WardenStatu
             title={chart.title}
             series={CHART_SERIES}
             points={chart.points}
-            format={value => String(value)}
+            format={(value: number) => String(value)}
             axisTicks={wholeNumberTicks}
             emptyText="No actions this week."
             plotClassName="h-28 sm:h-32"

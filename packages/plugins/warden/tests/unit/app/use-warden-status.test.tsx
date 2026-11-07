@@ -2,9 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import type { WardenStatusView } from '../../../app/wire.ts';
 import { useWardenStatus } from '../../../app/hooks/use-warden-status.ts';
 import { type DaemonConnection, daemonConnection } from '../../../app/shell.ts';
-import { interact, mount } from '../../support/app/dom.ts';
-import { manualInterval } from '../../support/app/manual-interval.ts';
-import { wardenStatus } from '../support/warden.ts';
+import { interact, mount } from '@ferretry/app/testing';
+import { type ManualEvery, manualEvery } from '../../support/app/manual-every.ts';
+import { wardenStatus } from '../../support/app/warden.ts';
 
 const alpha = daemonConnection({
   daemonId: 'daemon-alpha',
@@ -18,12 +18,14 @@ interface Probe {
   readonly read: (daemon: DaemonConnection) => Promise<WardenStatusView>;
   readonly hidden?: () => boolean;
   readonly pollMs?: number;
+  readonly every?: ManualEvery['every'];
 }
 
-function Probe({ daemon, read, hidden, pollMs }: Probe) {
+function Probe({ daemon, read, hidden, pollMs, every }: Probe) {
   const status = useWardenStatus(daemon, read, {
     ...(pollMs === undefined ? {} : { pollMs }),
     ...(hidden === undefined ? {} : { isHidden: hidden }),
+    ...(every === undefined ? {} : { every }),
   });
   return <output>{status === null ? 'unknown' : status.fingerprint}</output>;
 }
@@ -45,7 +47,7 @@ describe('useWardenStatus', () => {
     expect(container.textContent).toBe('alpha-1');
   });
 
-  it('stays unknown when the daemon is too old to serve the route', async () => {
+  it('stays unknown when the read fails', async () => {
     const { container } = await mount(
       <Probe
         daemon={alpha}
@@ -114,13 +116,14 @@ describe('useWardenStatus', () => {
   });
 
   it('keeps polling on its cadence and stops on unmount', async () => {
-    const interval = manualInterval(5);
-    try {
+    const interval = manualEvery();
+    {
       let reads = 0;
       const view = await mount(
         <Probe
           daemon={alpha}
           pollMs={5}
+          every={interval.every}
           read={async () => {
             reads += 1;
             return wardenStatus({ fingerprint: `fp-${reads}` });
@@ -144,8 +147,6 @@ describe('useWardenStatus', () => {
       await settle();
 
       expect(reads).toBe(3);
-    } finally {
-      interval.restore();
     }
   });
 });

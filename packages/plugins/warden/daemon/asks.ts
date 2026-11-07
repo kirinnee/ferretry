@@ -128,7 +128,7 @@ export class AsksWardenAgenda implements WardenAgendaPort {
     try {
       const entry = this.entries.entryOf(sourceRef);
       const standing = await this.asks.open({ source: DAEMON, entry, ferret: sessionId as FerretId, state: 'open' });
-      for (const ask of standing) await this.asks.close(ask.id, 'source-gone');
+      for (const ask of standing) await this.asks.close({ ferret: sessionId, id: ask.id }, 'source-gone');
       return standing.length > 0;
     } catch {
       return false;

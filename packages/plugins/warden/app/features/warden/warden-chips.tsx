@@ -3,16 +3,17 @@
  * Render-only; the words and colours come from the vocabulary and the models.
  */
 
-import type { FerretView, WardenActor } from '../../wire.ts';
+import type { WardenActor } from '../../wire.ts';
 import { FileText, LoaderCircle } from 'lucide-react';
 
 import { ferretDisplayName } from '../../shell.ts';
+import type { FerretView } from '../../shell.ts';
 import { displayCallsign, shortFerretId } from '../../shell.ts';
-import { cn } from '../../shell.ts';
+import { cn } from '../../ui.ts';
 import type { DaemonConnection } from '../../shell.ts';
 import { daemonFerretPath } from '../../shell.ts';
-import { Badge } from '../../shell.ts';
-import { RouteLink } from '../../shell.ts';
+import { Badge } from '../../ui.ts';
+import { RouteLink } from '../../ui.ts';
 import { ACTOR_DOT, type WardenChip } from './warden-vocabulary.ts';
 
 export function WardenChipBadge({

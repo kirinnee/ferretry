@@ -12,9 +12,11 @@ export type WardenClientFactory = (connection: DaemonConnection) => Promise<Ward
 
 export const WardenClientContext = createContext<WardenClientFactory | null>(null);
 
-/** The factory the surrounding view provided; a surface rendered outside the views of this half is a bug. */
+const OUTSIDE: WardenClientFactory = async () => {
+  throw new Error('A Warden surface was rendered outside the Warden views, so it has no daemon to read.');
+};
+
+/** The factory the surrounding view provided. Outside the views every read fails, saying why. */
 export function useWardenClientFactory(): WardenClientFactory {
-  const factory = useContext(WardenClientContext);
-  if (factory === null) throw new Error('A Warden surface was rendered outside the Warden views.');
-  return factory;
+  return useContext(WardenClientContext) ?? OUTSIDE;
 }

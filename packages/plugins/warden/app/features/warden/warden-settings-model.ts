@@ -199,8 +199,7 @@ const layerSummary = (config: WardenConfig, hasJevKey: boolean, machineDefault?:
   const jevCap = errors.jevUsdPerDay === undefined ? money(config.caps.jevUsdPerDay) : '(fix)';
   const bless = errors.blessMinutes === undefined ? `${config.blessMinutes} min` : '(fix)';
   const quiet = `A cleared flag is left alone for ${bless}, twice as long each time it is cleared again, up to 4 h.`;
-  if (!jev)
-    return `${every}, and every flag gets ${investigation}. ${quiet} Cap: ${invCap}/day. ${acts}${stop}.`;
+  if (!jev) return `${every}, and every flag gets ${investigation}. ${quiet} Cap: ${invCap}/day. ${acts}${stop}.`;
   const clears = `Jev clears a flag it is at least ${pct(config.guard.threshold)} sure is healthy`;
   if (!llm) {
     const summary = `${every}. ${clears}; every other flag is shown to you, and no investigation runs. ${quiet} Cap: ${jevCap}/day for Jev.`;

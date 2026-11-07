@@ -184,20 +184,3 @@ describe('a sweep counts the owner being asked', () => {
     should(today?.asked).match({ auto: 0, jev: 1, llm: 0 });
   });
 });
-
-describe('the items escalations wrote before notifications', () => {
-  it('should resolve an old Warden item with a note on the first sweep, and notify instead', async () => {
-    // Arrange
-    const subject = harness({ config: jevOnly(), fleet: [triageable('s1')], guard: [JEV_INVESTIGATE] });
-    subject.seedBoard('s1', [{ source: 'agent-raised', sourceRef: 'warden:quota_reset_passed', raisedBy: 'daemon' }]);
-
-    // Act
-    await subject.service.run({ force: false });
-
-    // Assert
-    should(subject.resolved).match([
-      { sessionId: 's1', sourceRef: 'warden:quota_reset_passed', note: /notification from "Warden"/u },
-    ]);
-    should(subject.board('s1')).deepEqual([escalated('quota_reset_passed')]);
-  });
-});

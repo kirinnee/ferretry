@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { useWardenStatuses } from '../../../app/hooks/use-warden-statuses.ts';
 import { daemonConnection } from '../../../app/shell.ts';
-import { interact, type Mounted, mount } from '../../support/app/dom.ts';
-import { wardenStatus } from '../support/warden.ts';
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
+import { wardenStatus } from '../../support/app/warden.ts';
 
 let view: Mounted | null = null;
 afterEach(async () => {

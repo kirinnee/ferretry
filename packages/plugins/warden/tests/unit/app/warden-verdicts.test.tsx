@@ -6,7 +6,7 @@ import {
   type WardenVerdictView,
 } from '../../../app/features/warden/warden-verdicts.tsx';
 import { daemonConnection } from '../../../app/shell.ts';
-import { render, run } from '../../support/app/react.ts';
+import { render, run } from '@ferretry/app/testing';
 
 const connection = daemonConnection({
   daemonId: 'daemon-a',

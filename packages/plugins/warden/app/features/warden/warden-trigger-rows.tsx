@@ -7,12 +7,13 @@
  * timeline — flag, Jev's check, the investigation, the act — and nothing else.
  */
 
-import type { FerretView, WardenStatusView } from '../../wire.ts';
+import type { WardenStatusView } from '../../wire.ts';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 
-import { cn } from '../../shell.ts';
+import { cn } from '../../ui.ts';
 import type { DaemonConnection } from '../../shell.ts';
+import type { FerretView } from '../../shell.ts';
 import { ferretTitles } from '../../shell.ts';
 import { FerretLink, ferretName, ReportButton, SectionTitle, WardenChipBadge } from './warden-chips.tsx';
 import type { WardenReportTarget } from './warden-overview-model.ts';

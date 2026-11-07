@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import { type WardenLeaveRequest, type WardenStatusView, WARDEN_AGENDA_PATH } from '../../../app/wire.ts';
+import type { WardenLeaveRequest, WardenStatusView } from '../../../app/wire.ts';
 
-import {
-  type WardenOverviewClient,
-  WardenOverviewSurface,
-  wardenSettingsHref,
-} from '../../../app/features/warden/warden-overview-surface.tsx';
+import { WardenOverviewSurface, wardenSettingsHref } from '../../../app/features/warden/warden-overview-surface.tsx';
 import { daemonConnection } from '../../../app/shell.ts';
-import { interact, mount, must } from '../../support/app/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
+import type { WardenClient } from '../../../app/lib/warden-client.ts';
+import { fakeWardenClient } from '../../support/app/clients.ts';
+import '../../support/app/shell-parts.ts';
 import { agendaItem, wardenFlag, wardenAgenda, wardenInvestigation, wardenStatus } from '../../support/app/warden.ts';
 
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
@@ -24,8 +23,8 @@ const settle = async (): Promise<void> => {
 
 interface FakeOptions {
   readonly status?: WardenStatusView;
-  readonly run?: WardenOverviewClient['wardenRun'];
-  readonly leave?: WardenOverviewClient['wardenLeave'];
+  readonly run?: WardenClient['run'];
+  readonly leave?: WardenClient['leave'];
 }
 
 const fake = (options: FakeOptions = {}) => {
@@ -35,8 +34,8 @@ const fake = (options: FakeOptions = {}) => {
     leaves: [] as WardenLeaveRequest[],
     requests: [] as string[],
   };
-  const client: WardenOverviewClient = {
-    wardenStatus: async () => {
+  const client: WardenClient = fakeWardenClient({
+    status: async () => {
       calls.status += 1;
       return (
         options.status ??
@@ -55,20 +54,18 @@ const fake = (options: FakeOptions = {}) => {
         })
       );
     },
-    request: (async (path: string, schema: { parse: (value: unknown) => unknown }) => {
-      calls.requests.push(path);
-      return schema.parse(
-        wardenAgenda({
-          outcome: 'items',
-          items: [agendaItem({ ferret: 'sess-flag', source: 'warden-flag', anomalyKind: 'dead_monitor' })],
-        }),
-      );
-    }) as WardenOverviewClient['request'],
-    wardenRun: async spawn => {
+    agenda: async () => {
+      calls.requests.push('agenda');
+      return wardenAgenda({
+        outcome: 'items',
+        items: [agendaItem({ ferret: 'sess-flag', source: 'warden-flag', anomalyKind: 'dead_monitor' })],
+      });
+    },
+    run: async spawn => {
       calls.runs.push(spawn);
       return await (options.run ?? (async () => ({ sweptAt: '2026-07-31T12:00:00.000Z', flags: [] })))(spawn);
     },
-    wardenLeave: async request => {
+    leave: async request => {
       calls.leaves.push(request);
       if (options.leave !== undefined) return await options.leave(request);
       return {
@@ -81,8 +78,8 @@ const fake = (options: FakeOptions = {}) => {
         message: 'Left alone for 1 h.',
       };
     },
-    wardenReport: async path => `# Evidence from ${path}`,
-  };
+    report: async path => `# Evidence from ${path}`,
+  });
   return { client, calls };
 };
 
@@ -318,7 +315,7 @@ describe('WardenOverviewSurface', () => {
       // Assert
       expect(onA).toContain('only-a');
       expect(view.container.textContent).not.toContain('only-a');
-      expect(view.container.textContent).toContain('no daemon client exists outside the app store');
+      expect(view.container.textContent).toContain('rendered outside the Warden views');
     } finally {
       await view.unmount();
     }
@@ -342,7 +339,7 @@ describe('WardenOverviewSurface agenda route', () => {
       await settle();
 
       // Assert
-      expect(calls.requests).toEqual([WARDEN_AGENDA_PATH]);
+      expect(calls.requests).toEqual(['agenda']);
     } finally {
       await view.unmount();
     }

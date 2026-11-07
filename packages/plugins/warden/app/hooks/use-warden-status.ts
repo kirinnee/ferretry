@@ -1,31 +1,24 @@
 /**
  * Polls one paired daemon's warden status.
  *
- * Ported from the effect inside kteam `ui/src/components/WardenStrip.tsx`, with
- * the single-daemon assumption removed. kteam polled an ambient `api` singleton
- * and kept the last successful status in component state; with several paired
- * daemons that state is a cache that outlives its daemon, and a reader who
- * switches connection would be shown the previous daemon's sweep as though it
- * were this one's. Two rules fix it, and both are tested:
+ * The state is keyed by `daemonId`, with two rules, both tested:
  *
- *   1. The state is keyed by `daemonId`. Changing daemon resets to `null`
- *      (unknown), never to the other daemon's last known good value.
- *   2. Every in-flight read remembers which daemon asked. A response that
- *      arrives after a switch is DISCARDED, not applied.
+ *   1. Changing daemon resets to `null` (unknown), never to the other daemon's last known good value: with several
+ *      paired daemons a cache that outlives its daemon would show the previous daemon's sweep as this one's.
+ *   2. Every in-flight read remembers which daemon asked. A response that arrives after a switch is DISCARDED, not
+ *      applied.
  *
- * Kept from the original: the skip while the tab is hidden
- * (the perf budget), and self-hiding rather than erroring on a daemon too old
- * to serve the route — a failed first read leaves the status `null` and the
- * strip renders nothing.
+ * It skips a read while the tab is hidden (the perf budget) and hides rather than errors: a failed first read leaves
+ * the status `null` and the strip renders nothing.
  */
 
 import { useEffect, useState } from 'react';
 import type { WardenStatusView } from '../wire.ts';
-import type { DaemonConnection, DaemonId } from '../shell.ts';
+import { type DaemonConnection, type DaemonId, shellClock } from '../shell.ts';
 
 /**
  * A sweep result changes on the warden's own schedule, minutes apart, and its configuration arrives on
- * the config stream; kteam's thirty seconds re-read an unchanged strip twice a minute on an idle page.
+ * the config stream; a minute between reads keeps an idle page quiet.
  */
 const WARDEN_POLL_MS = 60_000;
 
@@ -40,6 +33,8 @@ export interface WardenStatusOptions {
   readonly pollMs?: number;
   /** Defaults to the document's own visibility; injected for tests. */
   readonly isHidden?: () => boolean;
+  /** Runs a callback every `ms` until cancelled; the shell's clock unless a test drives it by hand. */
+  readonly every?: (run: () => void, ms: number) => () => void;
 }
 
 interface Held {
@@ -54,7 +49,7 @@ export function useWardenStatus(
   read: WardenStatusReader,
   options: WardenStatusOptions = {},
 ): WardenStatusView | null {
-  const { pollMs = WARDEN_POLL_MS, isHidden = documentHidden } = options;
+  const { pollMs = WARDEN_POLL_MS, isHidden = documentHidden, every = shellClock.every } = options;
   const [held, setHeld] = useState<Held>({ daemonId: daemon.daemonId, status: null });
 
   useEffect(() => {
@@ -67,17 +62,16 @@ export function useWardenStatus(
         // switching connection while this request was still in flight.
         if (!cancelled) setHeld({ daemonId: daemon.daemonId, status });
       } catch {
-        // Deliberately silent: an absent route on an older daemon is not an
-        // error the reader can act on, and the strip self-hides.
+        // Deliberately silent: a failed read is not an error the reader can act on, and the strip self-hides.
       }
     };
     void poll();
-    const timer = setInterval(() => void poll(), pollMs);
+    const stop = every(() => void poll(), pollMs);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      stop();
     };
-  }, [daemon, read, pollMs, isHidden]);
+  }, [daemon, read, pollMs, isHidden, every]);
 
   return held.daemonId === daemon.daemonId ? held.status : null;
 }

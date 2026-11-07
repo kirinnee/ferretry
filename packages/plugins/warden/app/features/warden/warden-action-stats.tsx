@@ -94,7 +94,7 @@ export function WardenActionStats({ status, now }: { readonly status: WardenStat
           title={chart.title}
           series={CHART_SERIES}
           points={chart.points}
-          format={value => String(value)}
+          format={(value: number) => String(value)}
           axisTicks={wholeNumberTicks}
           emptyText={`Nothing done in ${ACTION_CHART_DAYS} days.`}
           plotClassName="h-28 sm:h-32"

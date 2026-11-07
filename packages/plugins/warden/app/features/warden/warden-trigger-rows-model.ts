@@ -329,8 +329,7 @@ const joinRecords = (status: WardenStatusView): readonly Group[] => {
   }
 
   // 4. Every act left is a trigger of its own.
-  for (const action of actions)
-    if (!usedActions.has(action)) groups.push({ ferret: action.ferret, actions: [action] });
+  for (const action of actions) if (!usedActions.has(action)) groups.push({ ferret: action.ferret, actions: [action] });
   return groups;
 };
 

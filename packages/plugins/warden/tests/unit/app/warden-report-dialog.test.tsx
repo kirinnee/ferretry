@@ -1,9 +1,10 @@
+import '../../support/app/shell-parts.ts';
 import { describe, expect, it } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { WardenReportDialogRequest } from '../../../app/features/warden/warden-report-dialog.tsx';
 import { WardenReportDialog } from '../../../app/features/warden/warden-report-dialog.tsx';
 import { daemonConnection } from '../../../app/shell.ts';
-import { interact, mount } from '../../support/app/dom.ts';
+import { interact, mount } from '@ferretry/app/testing';
 
 const connection = daemonConnection({
   daemonId: 'daemon-a',

@@ -101,13 +101,10 @@ export const wardenFlagDigest = (flags: readonly WardenFlag[]): WardenFlagDigest
  * reads the full "who needs you" feed; the strip only has the status, so this is its honest subset.
  */
 export const wardenNeedsYouCount = (status: WardenStatusView): number => {
-  const watched = new Set(
-    status.investigations.filter(entry => entry.state !== 'done').map(entry => entry.target),
-  );
+  const watched = new Set(status.investigations.filter(entry => entry.state !== 'done').map(entry => entry.target));
   const blessed = new Set(status.blessings.map(blessing => blessing.ferret));
   const ferrets = new Set(status.actions.filter(entry => entry.outcome === 'held').map(entry => entry.ferret));
-  for (const flag of status.flags)
-    if (!watched.has(flag.ferret) && !blessed.has(flag.ferret)) ferrets.add(flag.ferret);
+  for (const flag of status.flags) if (!watched.has(flag.ferret) && !blessed.has(flag.ferret)) ferrets.add(flag.ferret);
   return ferrets.size;
 };
 

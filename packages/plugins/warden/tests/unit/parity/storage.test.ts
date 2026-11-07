@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { owner } from '@ferretry/kernel/testing';
-import { WARDEN_CONFIG, WARDEN_JEV_CHECKS, WARDEN_REPORTS, WARDEN_STATE } from '../../contract/index.ts';
-import { StateAutoMoveLedger } from '../../daemon/adapters/state-store.ts';
-import { FileWardenArtifacts } from '../../daemon/adapters/artifacts.ts';
-import { StateWardenReportFiles } from '../../daemon/adapters/report-files.ts';
-import { WardenReportReader } from '../../daemon/adapters/report-reader.ts';
-import manifest from '../../manifest.ts';
-import { wardenState } from '../support/kernel.ts';
+import { WARDEN_CONFIG, WARDEN_JEV_CHECKS, WARDEN_REPORTS, WARDEN_STATE } from '../../../contract/index.ts';
+import { StateAutoMoveLedger } from '../../../daemon/adapters/state-store.ts';
+import { FileWardenArtifacts } from '../../../daemon/adapters/artifacts.ts';
+import { StateWardenReportFiles } from '../../../daemon/adapters/report-files.ts';
+import { WardenReportReader } from '../../../daemon/adapters/report-reader.ts';
+import manifest from '../../../manifest.ts';
+import { wardenState } from '../../support/kernel.ts';
 import { wardenHost } from './host.ts';
 
 describe('storage parity', () => {

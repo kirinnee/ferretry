@@ -1,10 +1,8 @@
 /**
  * The pack-health "checks" strip on the ferrets dashboard — quiet by default.
  *
- * Ported from kteam `ui/src/components/WardenStrip.tsx`, and since restyled to the Warden page's
- * vocabulary: the triage actually in effect, how many ferrets need the owner, and plain chips instead
- * of raw flag codes. Its old byte-identical pin to kteam's markup was retired by the owner with the
- * Warden redesign.
+ * Restyled to the Warden page's vocabulary: the triage actually in effect, how many ferrets need the owner, and plain
+ * chips instead of raw flag codes.
  *
  * IT DOES NOT POLL. Fetching lives in `useWardenStatus`, keyed by daemon, which discards a response
  * that arrives after the reader switched daemon. This component renders the status it is handed.
@@ -17,8 +15,8 @@
 
 import type { WardenStatusView } from '../../wire.ts';
 import { ShieldAlert, ShieldCheck } from 'lucide-react';
-import { cn } from '../../shell.ts';
-import { relativeTime } from '../../shell.ts';
+import { cn } from '../../ui.ts';
+import { relativeTime, shellClock } from '../../shell.ts';
 import {
   wardenAccountLabel,
   wardenAccountTitle,
@@ -29,7 +27,7 @@ import {
 } from './warden-status-model.ts';
 
 export interface WardenStripProps {
-  /** `null` means "not known" — an older daemon, or a failed read. */
+  /** `null` means "not known" — a failed read. */
   readonly status: WardenStatusView | null;
   readonly now?: number;
 }
@@ -43,7 +41,7 @@ function Dot() {
   );
 }
 
-export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
+export function WardenStrip({ status, now = shellClock.nowMs() }: WardenStripProps) {
   if (status === null) return null;
 
   const digest = wardenFlagDigest(status.flags);

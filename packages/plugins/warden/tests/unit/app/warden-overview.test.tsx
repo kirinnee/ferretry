@@ -9,8 +9,9 @@ import {
 import type { WardenReportTarget } from '../../../app/features/warden/warden-overview-model.ts';
 import type { WardenReadState } from '../../../app/hooks/use-warden-poll.ts';
 import { daemonConnection } from '../../../app/shell.ts';
-import { interact, mount, must } from '../../support/app/dom.ts';
-import { sessionView } from '../../support/app/ferrets.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { ferretView } from '../../support/app/ferrets.ts';
+import '../../support/app/shell-parts.ts';
 import {
   agendaItem,
   wardenAction,
@@ -117,9 +118,9 @@ const rows = (container: HTMLElement): HTMLElement[] => [
 ];
 
 const known = [
-  sessionView('sess-a', { config: { name: 'maryah' } }),
-  sessionView('sess-b', { config: { name: 'marin' } }),
-  sessionView('sess-c', { config: { name: 'kamila' } }),
+  ferretView('sess-a', { config: { name: 'maryah' } }),
+  ferretView('sess-b', { config: { name: 'marin' } }),
+  ferretView('sess-c', { config: { name: 'kamila' } }),
 ];
 
 const actionsStatus = (): WardenStatusView =>
@@ -541,29 +542,6 @@ describe('WardenOverview stats', () => {
     }
   });
 
-  it('should fall back to recent figures, with no period switch and no chart, on a daemon without history', async () => {
-    // Arrange
-    const old = wardenStatus({
-      savings: { day: '2026-07-31', flags: 5, jevDecisions: 4, jevSkips: 0, investigations: 1 },
-      actions: [wardenAction({ ferret: 'sess-a', at: '2026-07-31T11:00:00.000Z', detail: 'Asked it.' })],
-    });
-    const view = await render({ status: ready(old) });
-    try {
-      // Act
-      const text = view.container.textContent ?? '';
-
-      // Assert
-      expect(view.container.querySelector('[role="toolbar"][aria-label="Stats period"]')).toBeNull();
-      expect(text).toContain('Recent activity');
-      expect(tileText(view.container, 'flagged')).toContain('5');
-      expect(tileText(view.container, 'moved')).toContain('(recent)');
-      expect(tileText(view.container, 'moved')).toContain('1');
-      expect(view.container.querySelector('[data-analytics-chart]')).toBeNull();
-    } finally {
-      await view.unmount();
-    }
-  });
-
   it('should say which login an automatic move left and which it went to', async () => {
     // Arrange
     const moved = wardenStatus({
@@ -675,7 +653,7 @@ describe('WardenOverview recent triggers', () => {
       await interact(() => must(must(rows(view.container)[0], 'row').querySelector<HTMLElement>('a'), 'link').click());
 
       // Assert
-      expect(view.calls.navigations).toEqual(['/d/daemon-a/ferret/sess-a']);
+      expect(view.calls.navigations).toEqual(['/d/daemon-a/ferrets/sess-a/chat']);
     } finally {
       await view.unmount();
     }
@@ -741,9 +719,7 @@ describe('WardenOverview investigations and watching', () => {
         'Jev: skipped — daily cap spent → investigated',
       );
       expect(view.calls.reports[0]?.jev).toBe('Jev: skipped — daily cap spent → investigated');
-      expect(unnamed.querySelector('[data-warden-jev]')?.textContent).toBe(
-        'Jev: no record — from before Jev’s results were kept',
-      );
+      expect(unnamed.querySelector('[data-warden-jev]')?.textContent).toBe('Jev: no record of what it did');
     } finally {
       await view.unmount();
     }
@@ -811,7 +787,7 @@ describe('WardenOverview investigations and watching', () => {
 
   it('should show a system callsign as warden-00002A, never title-cased', async () => {
     // Arrange
-    const system = sessionView('sess-sys', { config: { name: 'warden-00002a' } });
+    const system = ferretView('sess-sys', { config: { name: 'warden-00002a' } });
     const view = await render({
       status: ready(wardenStatus({ flags: [wardenFlag({ ferret: 'sess-sys', name: 'warden-00002a' })] })),
       ferrets: [system],

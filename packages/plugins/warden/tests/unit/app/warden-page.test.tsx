@@ -1,10 +1,11 @@
+import '../../support/app/shell-parts.ts';
 import { describe, expect, it } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 
 import { type DaemonConnection, daemonConnection } from '../../../app/shell.ts';
 import { WardenPage, type WardenSurfaceProps } from '../../../app/lib/warden-page.tsx';
-import { interact, type Mounted, mount } from '../../support/app/dom.ts';
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
 
 describe('WardenPage', () => {
   it('should mount the daemon-bound overview inside one labelled scroll region', () => {

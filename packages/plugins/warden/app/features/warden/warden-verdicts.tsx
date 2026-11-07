@@ -1,5 +1,5 @@
 /**
- * Recent Warden outcomes, ported from kteam's WardenVerdicts row surface.
+ * Recent Warden outcomes, as a row surface.
  *
  * The PWA deliberately receives verdicts from a daemon-bound host rather than
  * polling an ambient client.  That makes the source of every report explicit:
@@ -9,14 +9,14 @@
 import { ChevronRight, Gavel, Skull, HeartPulse, Bell, Check, UserRound } from 'lucide-react';
 import { useState } from 'react';
 
-import { cn } from '../../shell.ts';
+import { cn } from '../../ui.ts';
 import type { DaemonConnection } from '../../shell.ts';
-import { relativeTime } from '../../shell.ts';
+import { relativeTime, shellClock } from '../../shell.ts';
 import { displayCallsign } from '../../shell.ts';
 
 type WardenVerdictKind = 'killed' | 'revived' | 'nudged' | 'cleared' | 'needs_human' | 'unknown';
 
-/** Provenance is optional for reports written by an older daemon. */
+/** Provenance is optional: a report may not record who ran it. */
 export interface WardenVerdictSpawnInfo {
   readonly agent?: string;
   readonly model?: string;
@@ -95,7 +95,7 @@ export interface WardenVerdictsProps {
  * histories, but arriving at a closed accordion would make the reader tap to
  * see the content they explicitly navigated to.
  */
-export function WardenVerdicts({ connection, verdicts, now = Date.now(), onOpenReport }: WardenVerdictsProps) {
+export function WardenVerdicts({ connection, verdicts, now = shellClock.nowMs(), onOpenReport }: WardenVerdictsProps) {
   const [open, setOpen] = useState(true);
 
   // Old daemons and a clean history stay quiet, matching the source surface.
@@ -123,7 +123,12 @@ export function WardenVerdicts({ connection, verdicts, now = Date.now(), onOpenR
 }
 
 /** Pure rows; the daemon-bound host owns fetching and rendering a full report. */
-function VerdictRows({ connection, verdicts, now = Date.now(), onOpenReport }: WardenVerdictsProps): React.JSX.Element {
+function VerdictRows({
+  connection,
+  verdicts,
+  now = shellClock.nowMs(),
+  onOpenReport,
+}: WardenVerdictsProps): React.JSX.Element {
   return (
     <ul className="m-0 list-none divide-y divide-border-soft border-t border-border-soft p-0">
       {verdicts.map(verdict => {

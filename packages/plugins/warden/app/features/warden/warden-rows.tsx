@@ -5,15 +5,11 @@
  * the row), so a row is two short lines and never a card. The 44px touch floor is the row, not each line.
  */
 
-import {
-  type FerretView,
-  WARDEN_LEAVE_DURATIONS,
-  type WardenLeaveDuration,
-  type WardenStatusView,
-} from '../../wire.ts';
+import { WARDEN_LEAVE_DURATIONS, type WardenLeaveDuration, type WardenStatusView } from '../../wire.ts';
 import { useId, useState } from 'react';
 
 import type { DaemonConnection } from '../../shell.ts';
+import type { FerretView } from '../../shell.ts';
 import { FerretLink, ferretName, ReportButton, SectionTitle, WardenChipBadge } from './warden-chips.tsx';
 import {
   compactAgo,

@@ -10,21 +10,14 @@
  * unknown — and those are shown verbatim, because the daemon is the one that knows.
  */
 
-import type {
-  WardenAccount,
-  WardenConfig,
-  WardenConfigPatch,
-  WardenConfigView,
-} from '../../wire.ts';
+import type { WardenAccount, WardenConfig, WardenConfigPatch, WardenConfigView } from '../../wire.ts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useWardenClientFactory, type WardenClientFactory } from '../../lib/warden-client-context.tsx';
 import type { WardenClient } from '../../lib/warden-client.ts';
 import {
   type DaemonConnection,
-  daemonDisplayName,
   daemonSettingsPath,
-  machineHash,
   type PickerAccount,
   readAccountPickerCatalog,
   readSpeedups,
@@ -42,7 +35,7 @@ import {
 
 /** What the Speed-ups read says about the Jev key. A read that failed is `unknown`, never "missing". */
 export const jevKeyStatus = (view: SpeedupsView | null): JevKeyStatus => {
-  const jev = view?.providers.find(provider => provider.provider === 'jev');
+  const jev = view?.providers.find((provider: { readonly provider: string }) => provider.provider === 'jev');
   if (view === null || jev === undefined) return { state: 'unknown' };
   const keyUrl = { keyUrl: jev.keyUrl };
   if (view.vault === 'damaged') return { state: 'unknown', ...keyUrl };
@@ -139,6 +132,29 @@ export function WardenConfigCard({
   );
 }
 
+/**
+ * What the surface reads besides the Warden's own routes. Each is another plugin's fact, so the shell supplies it
+ * (`../../shell.ts`); a test hands its own.
+ */
+export interface WardenConfigDeps {
+  /** The Speed-ups description of a machine: whether its Jev key is set. */
+  readonly speedups: (connection: DaemonConnection) => Promise<SpeedupsView>;
+  /** The logins the machine has and the models each offers. */
+  readonly catalog: (connection: DaemonConnection) => Promise<{ readonly accounts: readonly PickerAccount[] }>;
+  /** Runs `onChange` whenever one of `kinds` moves on the daemon. */
+  readonly useConfigChange: (
+    daemonId: DaemonConnection['daemonId'],
+    kinds: readonly string[],
+    onChange: () => void,
+  ) => void;
+}
+
+const SHELL_DEPS: WardenConfigDeps = {
+  speedups: readSpeedups,
+  catalog: readAccountPickerCatalog,
+  useConfigChange: useConfigChangeEffect,
+};
+
 /** The card shows the Warden's settings and whether its Jev key is set in Speed-ups. */
 // A runtime or the machine default moving changes which login the Warden resolves, so they refresh it too.
 const WARDEN_CARD_KINDS = ['warden', 'speedups', 'machine', 'runtimes', 'credentials'] as const;
@@ -168,11 +184,14 @@ export function WardenConfigSurface({
   createClient: injectedClient,
   unavailable = 'hide',
   onNavigate,
+  deps = SHELL_DEPS,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: WardenClientFactory;
   /** Settings needs an explicit unavailable state, so a failed read never looks like a default policy. */
   readonly unavailable?: 'hide' | 'message';
+  /** Test and harness seam; production reads through the shell. */
+  readonly deps?: WardenConfigDeps;
   readonly onNavigate?: (to: string) => void;
 }) {
   // The plugin client of the daemon unless a test or the harness hands one in.
@@ -195,10 +214,10 @@ export function WardenConfigSurface({
         const [view, status, speedups, runtimes] = await Promise.all([
           client.config(),
           client.status().catch(() => null),
-          readSpeedups(connection).catch(() => null),
+          deps.speedups(connection).catch(() => null),
           // The model field lists the chosen login's catalog; without the list it is a plain text box.
-          readAccountPickerCatalog(connection).then(
-            catalog => catalog.accounts,
+          deps.catalog(connection).then(
+            (catalog: { readonly accounts: readonly PickerAccount[] }) => catalog.accounts,
             () => [],
           ),
         ]);
@@ -228,14 +247,14 @@ export function WardenConfigSurface({
   // still matches what was on screen follows the machine's new settings.
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
-  useConfigChangeEffect(connection.daemonId, WARDEN_CARD_KINDS, () => {
+  deps.useConfigChange(connection.daemonId, WARDEN_CARD_KINDS, () => {
     const before = loadedRef.current;
     if (before === null || before.daemonId !== connection.daemonId) return;
     void Promise.all([
       before.client.config(),
-      readSpeedups(connection).catch(() => null),
-      readAccountPickerCatalog(connection).then(
-        catalog => catalog.accounts,
+      deps.speedups(connection).catch(() => null),
+      deps.catalog(connection).then(
+        (catalog: { readonly accounts: readonly PickerAccount[] }) => catalog.accounts,
         () => null,
       ),
     ])
@@ -269,7 +288,10 @@ export function WardenConfigSurface({
       // An edit that loosens what the warden may do or spend waits for the owner; the daemon names each one.
       const view = {
         ...answer,
-        warnings: [...answer.warnings, ...(answer.held ?? []).map(sentence => `Waiting for your approval: ${sentence}`)],
+        warnings: [
+          ...answer.warnings,
+          ...(answer.held ?? []).map(sentence => `Waiting for your approval: ${sentence}`),
+        ],
       };
       if (showing.current !== state.daemonId) return;
       setLoaded({ ...state, view, draft: view.config });
@@ -306,7 +328,7 @@ export function WardenConfigSurface({
       loginOptions={loaded.loginOptions}
       runtimes={loaded.runtimes}
       speedupsHref={`${daemonSettingsPath(connection.daemonId)}#speedups`}
-      browserHref={`${daemonSettingsPath(connection.daemonId)}${machineHash(daemonDisplayName(connection), 'browser')}`}
+      browserHref={`${daemonSettingsPath(connection.daemonId)}/browser`}
       {...(onNavigate === undefined ? {} : { onNavigate })}
       saving={saving}
       error={error}

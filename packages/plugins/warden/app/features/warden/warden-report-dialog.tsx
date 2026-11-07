@@ -3,7 +3,7 @@
 import { Gavel, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Markdown } from '../../shell.ts';
-import { useDialogFocus } from '../../shell.ts';
+import { useDialogFocus } from '../../ui.ts';
 import type { DaemonConnection } from '../../shell.ts';
 import type { WardenVerdictView } from './warden-verdicts.tsx';
 

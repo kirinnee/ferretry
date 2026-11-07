@@ -16,15 +16,13 @@ import type { WardenInvestigateRequest, WardenInvestigateView, WardenStatusView 
 import { Shield } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useWardenClientFactory, type WardenClientFactory } from '../../lib/warden-client-context.tsx';
+import { failureMessage, FormFailure, FormField, FormFoot } from '../../lib/form-parts.tsx';
 import {
   type CoreActionContext,
   type DaemonConnection,
   type FerretActionContribution,
   type FerretActionFormHost,
-  failureMessage,
-  FormFailure,
-  FormField,
-  FormFoot,
+  type GrantsView,
   readGrants,
 } from '../../shell.ts';
 import {
@@ -168,7 +166,7 @@ export const askWardenContribution = (ports: AskWardenPorts): FerretActionContri
           label: 'Ask the Warden to investigate now…',
           title: `Ask the Warden to investigate ${context.name}`,
           icon: Shield,
-          render: host => (
+          render: (host: FerretActionFormHost) => (
             <AskWardenForm host={host} name={context.name} ports={ports} ferret={context.view.config.id} />
           ),
         }
@@ -190,6 +188,7 @@ const NONE: readonly FerretActionContribution<CoreActionContext>[] = [];
 export function useAskWardenActions(
   connection: DaemonConnection,
   createClient?: AskWardenClientFactory,
+  grantsOf: (connection: DaemonConnection) => Promise<GrantsView> = readGrants,
 ): readonly FerretActionContribution<CoreActionContext>[] {
   const routedClient = useWardenClientFactory();
   const factory: AskWardenClientFactory = createClient ?? routedClient;
@@ -200,16 +199,16 @@ export function useAskWardenActions(
   const [answer, setAnswer] = useState<{ readonly daemonId: string; readonly allowed: boolean } | null>(null);
   useEffect(() => {
     let live = true;
-    void readGrants(latest.current)
-      .then((grants: Parameters<typeof mayAskWarden>[0]) => mayAskWarden(grants))
+    void grantsOf(latest.current)
+      .then(grants => mayAskWarden(grants))
       .catch(() => false)
-      .then(allowed => {
+      .then((allowed: boolean) => {
         if (live) setAnswer({ daemonId, allowed });
       });
     return () => {
       live = false;
     };
-  }, [daemonId, factory]);
+  }, [daemonId, factory, grantsOf]);
   const allowed = answer !== null && answer.daemonId === daemonId && answer.allowed;
   return useMemo(
     () =>

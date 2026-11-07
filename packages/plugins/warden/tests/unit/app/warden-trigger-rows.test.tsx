@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import type { FerretView, WardenJevBefore, WardenStatusView } from '../../../app/wire.ts';
+import type { WardenJevBefore, WardenStatusView } from '../../../app/wire.ts';
+import type { FerretView } from '../../../app/shell.ts';
 
 import type { WardenReportTarget } from '../../../app/features/warden/warden-overview-model.ts';
 import { RecentTriggers } from '../../../app/features/warden/warden-trigger-rows.tsx';
 import { daemonConnection } from '../../../app/shell.ts';
-import { interact, mount, must } from '../../support/app/dom.ts';
-import { sessionView } from '../../support/app/ferrets.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
+import { ferretView } from '../../support/app/ferrets.ts';
+import '../../support/app/shell-parts.ts';
 import { wardenAction, wardenInvestigation, wardenStatus } from '../../support/app/warden.ts';
 
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
@@ -13,9 +15,9 @@ const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOStri
 const connection = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'tok' });
 
 const known: readonly FerretView[] = [
-  sessionView('sess-a', { config: { name: 'maryah' } }),
-  sessionView('sess-b', { config: { name: 'marin' } }),
-  sessionView('sess-c', { config: { name: 'kamila' } }),
+  ferretView('sess-a', { config: { name: 'maryah' } }),
+  ferretView('sess-b', { config: { name: 'marin' } }),
+  ferretView('sess-c', { config: { name: 'kamila' } }),
 ];
 
 const render = async (status: WardenStatusView, ferrets: readonly FerretView[] = known) => {
@@ -149,7 +151,7 @@ describe('RecentTriggers', () => {
 
   it('should show the task title next to the callsign when the ferret has one', async () => {
     // Arrange
-    const titled = sessionView('sess-a', { config: { name: 'maryah', name: 'Fix the login bug' } });
+    const titled = ferretView('sess-a', { config: { name: 'maryah', task: 'Fix the login bug' } });
     const view = await render(mixed(), [titled]);
     try {
       // Act
@@ -203,7 +205,7 @@ describe('RecentTriggers', () => {
       await interact(() => must(moved.querySelector<HTMLElement>('a'), 'link').click());
 
       // Assert
-      expect(view.navigations).toEqual(['/d/daemon-a/ferret/sess-a']);
+      expect(view.navigations).toEqual(['/d/daemon-a/ferrets/sess-a/chat']);
       expect(toggle(moved).getAttribute('aria-expanded')).toBe('false');
     } finally {
       await view.unmount();
@@ -307,9 +309,7 @@ describe('RecentTriggers', () => {
         actions: [
           wardenAction({ ferret: 'sess-a', at: at(5), action: 'stop', outcome: 'held', detail: 'Waiting for you.' }),
         ],
-        investigations: [
-          wardenInvestigation({ id: 'run', state: 'running', target: 'sess-b', startedAt: at(2) }),
-        ],
+        investigations: [wardenInvestigation({ id: 'run', state: 'running', target: 'sess-b', startedAt: at(2) })],
       }),
     );
     try {

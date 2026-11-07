@@ -88,8 +88,7 @@ const notAskedCause = (jev: WardenJevBefore): string => {
  * triage whose flags Jev answered differently says so.
  */
 export function jevBeforeLine(jev: WardenJevBefore | undefined, scope: 'ferret' | 'pack' = 'ferret'): string {
-  if (jev === undefined)
-    return scope === 'pack' ? 'Jev: differs per flag' : 'Jev: no record of what it did';
+  if (jev === undefined) return scope === 'pack' ? 'Jev: differs per flag' : 'Jev: no record of what it did';
   switch (jev.verdict) {
     case 'off':
       return 'Jev: off';

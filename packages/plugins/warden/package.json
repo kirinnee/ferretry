@@ -22,7 +22,18 @@
     "zod": "4.4.3",
     "@ferretry/plugin-conversation": "workspace:*",
     "@ferretry/core-asks": "workspace:*",
-    "@ferretry/core-ferrets": "workspace:*"
+    "@ferretry/core-ferrets": "workspace:*",
+    "@ferretry/app": "workspace:*",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "react-test-renderer": "^19.0.0"
+  }
 }

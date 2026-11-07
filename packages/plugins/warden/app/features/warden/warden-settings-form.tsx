@@ -25,7 +25,6 @@ import {
   type WardenConfig,
   type WardenEventTrigger,
   type WardenFailoverPolicy,
-  type WardenJevAct,
   type WardenLayers,
   type WardenLogin,
   type WardenMayActAlone,
@@ -35,9 +34,9 @@ import { type ReactNode, useId } from 'react';
 
 import { ModelSelect } from '../../shell.ts';
 import type { PickerAccount } from '../../shell.ts';
-import { cn } from '../../shell.ts';
-import { Badge } from '../../shell.ts';
-import { RouteLink } from '../../shell.ts';
+import { cn } from '../../ui.ts';
+import { Badge } from '../../ui.ts';
+import { RouteLink } from '../../ui.ts';
 import {
   type JevKeyStatus,
   movedAccount,
@@ -94,7 +93,7 @@ const ACT_ALONE: readonly { readonly id: keyof WardenMayActAlone; readonly label
   ];
 
 /** The acts Jev may do alone, in the order the rows run: gentlest first. Each is also one of the may-act-alone switches. */
-const JEV_ACTS: readonly { readonly id: WardenJevAct; readonly label: string }[] = [
+const JEV_ACTS: readonly { readonly id: keyof WardenConfig['jevActs']; readonly label: string }[] = [
   { id: 'nudge', label: 'Nudge' },
   { id: 'resume', label: 'Resume or revive' },
   { id: 'restart', label: 'Restart' },

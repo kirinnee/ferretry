@@ -319,8 +319,7 @@ export const watchingRows = (
   const rows = new Map<string, WardenRow>();
   const blessings = new Map(status.blessings.map(blessing => [blessing.ferret, blessing]));
   const grouped = new Map<string, WardenFlag[]>();
-  for (const flag of status.flags)
-    grouped.set(flag.ferret, [...(grouped.get(flag.ferret) ?? []), flag]);
+  for (const flag of status.flags) grouped.set(flag.ferret, [...(grouped.get(flag.ferret) ?? []), flag]);
   for (const [ferret, group] of grouped) {
     const [first] = group as [WardenFlag, ...WardenFlag[]];
     const running = investigationFor(status, ferret);

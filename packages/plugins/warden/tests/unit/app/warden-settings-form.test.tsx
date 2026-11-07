@@ -9,8 +9,9 @@ import {
   wardenFormErrors,
 } from '../../../app/features/warden/warden-settings-model.ts';
 import type { PickerAccount } from '../../../app/shell.ts';
-import { render, run } from '../../support/app/react.ts';
+import { render, run } from '@ferretry/app/testing';
 import { wardenConfig } from '../../support/app/warden.ts';
+import '../../support/app/shell-parts.ts';
 
 interface HarnessProps {
   readonly initial: WardenConfig;
@@ -384,7 +385,7 @@ describe('WardenSettingsForm', () => {
     expect(value.events).toEqual({ turnEnd: true, question: true, paneDied: false });
     expect(value.mayActAlone.stop).toBe(true);
     expect(text(renderer)).not.toContain('stopping always asks you first');
-    expect(text(renderer)).toContain('Every 10 min the rules flag flags');
+    expect(text(renderer)).toContain('Every 10 min the rules flag trouble');
     run(() => renderer.unmount());
   });
 });

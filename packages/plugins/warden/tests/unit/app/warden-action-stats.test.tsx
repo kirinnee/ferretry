@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import type { WardenDayStats } from '../../../app/wire.ts';
 import { WardenActionStats } from '../../../app/features/warden/warden-action-stats.tsx';
-import { interact, mount, must } from '../../support/app/dom.ts';
+import { interact, mount, must } from '@ferretry/app/testing';
 import { wardenStatus } from '../../support/app/warden.ts';
+import '../../support/app/shell-parts.ts';
 
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
 const NONE = { auto: 0, jev: 0, llm: 0 };

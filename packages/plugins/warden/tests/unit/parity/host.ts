@@ -2,7 +2,7 @@ import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
 import { fixedClock, testHost } from '@ferretry/kernel/testing';
-import daemon from '../../daemon/index.ts';
+import daemon from '../../../daemon/index.ts';
 
 /** The real daemon half over the contract fakes of what it needs, on the kernel's test host. */
 export async function wardenHost(options: { readonly config?: unknown } = {}) {

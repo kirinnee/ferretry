@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import { nextStateOnFailure, readView, useWardenPoll, type WardenReadState } from '../../../app/hooks/use-warden-poll.ts';
+import {
+  nextStateOnFailure,
+  readView,
+  useWardenPoll,
+  type WardenReadState,
+} from '../../../app/hooks/use-warden-poll.ts';
 import { type DaemonConnection, daemonConnection } from '../../../app/shell.ts';
-import { interact, mount } from '../../support/app/dom.ts';
+import { interact, mount } from '@ferretry/app/testing';
 
 const alpha = daemonConnection({ daemonId: 'daemon-alpha', baseUrl: 'https://alpha.invalid', deviceId: 'alpha-token' });
 const beta = daemonConnection({ daemonId: 'daemon-beta', baseUrl: 'https://beta.invalid', deviceId: 'beta-token' });

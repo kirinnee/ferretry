@@ -150,7 +150,12 @@ export interface WardenJudgement {
   readonly state: 'judged' | 'pending' | 'queued' | 'failed' | 'none';
   readonly verdict?: WardenVerdictKind;
   readonly reason: string;
-  readonly judgedBy?: { readonly warden?: string; readonly agent?: string; readonly model?: string; readonly harness?: string };
+  readonly judgedBy?: {
+    readonly warden?: string;
+    readonly agent?: string;
+    readonly model?: string;
+    readonly harness?: string;
+  };
   readonly at?: string;
   readonly reportPath?: string;
   readonly recommendation?: WardenRecommendation;

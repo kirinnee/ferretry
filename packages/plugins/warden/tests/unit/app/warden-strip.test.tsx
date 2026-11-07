@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { WardenStrip } from '../../../app/features/warden/warden-strip.tsx';
-import { mount } from '../../support/app/dom.ts';
+import { mount } from '@ferretry/app/testing';
 import {
   wardenAccount,
   wardenAction,

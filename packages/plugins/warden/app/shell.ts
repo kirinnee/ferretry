@@ -7,6 +7,8 @@
  * The shell fills it by re-exporting, and nothing else in this half changes.
  */
 
+import { displaySystemCallsign } from './wire.ts';
+
 type Primitive = (...args: Opaque[]) => Opaque;
 
 /**
@@ -16,10 +18,22 @@ type Primitive = (...args: Opaque[]) => Opaque;
 // biome-ignore lint/suspicious/noExplicitAny: a placeholder for a shell-owned type, replaced when the shell exposes it
 export type Opaque = any;
 
+/**
+ * What the shell has not lent this half yet. A name below is a stand-in that delegates to the part the shell hands
+ * over through `provideShell` (the shell, or a test with a simple stand-in), and says so when it was handed none.
+ */
+const provided = new Map<string, Primitive>();
+
+export const provideShell = (parts: Readonly<Record<string, Primitive>>): void => {
+  for (const [name, part] of Object.entries(parts)) provided.set(name, part);
+};
+
 const missing =
   (name: string): Primitive =>
-  () => {
-    throw new Error(`The app shell does not provide ${name} to plugin halves yet.`);
+  (...args) => {
+    const part = provided.get(name);
+    if (part === undefined) throw new Error(`The app shell does not provide ${name} to plugin halves yet.`);
+    return part(...args);
   };
 
 // ─── the clock ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -69,15 +83,8 @@ export const shellClock: ShellClock = {
 // ─── UI primitives, components and hooks ──────────────────────────────────────────────────────────────────────────
 
 export const AnalyticsMetricChart: Primitive = missing('AnalyticsMetricChart');
-export const Badge: Primitive = missing('Badge');
 export const Markdown: Primitive = missing('Markdown');
 export const ModelSelect: Primitive = missing('ModelSelect');
-export const RouteLink: Primitive = missing('RouteLink');
-export const useDialogFocus: Primitive = missing('useDialogFocus');
-export const FormFailure: Primitive = missing('FormFailure');
-export const FormField: Primitive = missing('FormField');
-export const FormFoot: Primitive = missing('FormFoot');
-export const failureMessage: Primitive = missing('failureMessage');
 
 /** The width of the Insights column the Warden page shares with Analytics and Learning. */
 export const INSIGHTS_COLUMN_CLASS = 'w-full max-w-[1080px]';
@@ -118,7 +125,10 @@ export const daemonConnection = (input: DaemonConnectionInput): DaemonConnection
     baseUrl,
     deviceId: requireNonEmpty(input.deviceId, 'deviceId'),
     ...(name === undefined ? {} : { daemonName: name }),
-    carriers: input.carriers === undefined || input.carriers.length === 0 ? [{ kind: 'direct', daemonUrl: baseUrl }] : input.carriers,
+    carriers:
+      input.carriers === undefined || input.carriers.length === 0
+        ? [{ kind: 'direct', daemonUrl: baseUrl }]
+        : input.carriers,
   };
 };
 
@@ -133,7 +143,11 @@ export type SpeedupsView = Opaque;
 /** The context a ferret action runs in. */
 export type CoreActionContext = Opaque;
 /** An action offered on a ferret, and the host its form opens in. */
-export type FerretActionContribution<Context = Opaque> = Opaque & { readonly context?: Context };
+export interface FerretActionContribution<Context = Opaque> {
+  readonly group: string;
+  readonly order: number;
+  readonly build: (context: Context) => Opaque | null;
+}
 export type FerretActionFormHost = Opaque;
 export type MetricChartTone = 'accent' | 'ok' | 'pend' | 'info';
 export interface MetricChartSeries {
@@ -176,67 +190,59 @@ export const readAccountPickerCatalog: Primitive = missing('readAccountPickerCat
 export const useConfigChangeEffect: Primitive = missing('useConfigChangeEffect');
 /** The plugin client of another paired daemon, or the one this half was handed for the daemon on screen. */
 export const pluginClientFor: Primitive = missing('pluginClientFor');
-export const ferretDisplayName: Primitive = missing('ferretDisplayName');
-export const ferretTitles: Primitive = missing('ferretTitles');
 
-/** The name a daemon is shown under: the owner's label, else the name it announced, else its address. */
-export const daemonDisplayName = (connection: DaemonConnection & { readonly label?: string }): string =>
-  connection.label?.trim() || connection.daemonName || connection.baseUrl;
+// ─── how a ferret is named ────────────────────────────────────────────────────────────────────────────────────────
+
+/** What a ferret config carries that the Warden names it by: its callsign, the task it was given, its folder. */
+export interface TitledConfig {
+  readonly id: string;
+  readonly name?: string | null;
+  readonly task?: string | null;
+  readonly cwd?: string | null;
+}
+
+/** The ferret's one-line name: its callsign, else its task, else its id. */
+export const ferretDisplayName = (ferret: { readonly config: TitledConfig }): string => {
+  const { config } = ferret;
+  const named = displayCallsign(config.name) || (config.task ?? '').trim() || config.id;
+  return displaySystemCallsign(named);
+};
+
+const baseName = (path: string): string => path.replace(/\/+$/u, '').split('/').pop() ?? '';
+
+/** The title a row shows (what the ferret is doing, else its folder, else its callsign) and the callsign beside it. */
+export const ferretTitles = (config: TitledConfig): { readonly title: string; readonly ferret: string | null } => {
+  const callsign = displayCallsign(config.name);
+  const task = (config.task ?? '').trim();
+  if (task !== '' && task !== callsign) return { title: task, ferret: callsign === '' ? null : callsign };
+  const folder = config.cwd ? baseName(config.cwd) : '';
+  if (folder !== '') return { title: folder, ferret: callsign === '' ? null : callsign };
+  return { title: callsign || config.id, ferret: null };
+};
 
 // ─── paths ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 export const daemonHomePath = (id: DaemonId): string => `/d/${encodeURIComponent(id)}`;
 export const daemonSettingsPath = (id: DaemonId): string => `${daemonHomePath(id)}/settings`;
-export const daemonAgendaPath = (id: DaemonId): string => `${daemonHomePath(id)}/inbox`;
+export const daemonAgendaPath = (id: DaemonId): string => `${daemonHomePath(id)}/agenda`;
 export const daemonFerretPath = (id: DaemonId, ferret: string): string =>
-  `${daemonHomePath(id)}/ferret/${encodeURIComponent(ferret)}`;
-/** The Settings › Machines address of one machine's tab: `#machines/<machine>/<tab>`. */
-export const machineHash = (machine: string, tab: string): string =>
-  `#machines/${encodeURIComponent(machine)}/${tab}`;
+  `${daemonHomePath(id)}/ferrets/${encodeURIComponent(ferret)}/chat`;
 
-// ─── router and stores ───────────────────────────────────────────────────────────────────────────────────────────
+// ─── the daemon on screen and the paired daemons ──────────────────────────────────────────────────────────────────
 
-export const useRouter: Primitive = missing('useRouter');
-export const useAppStore: Primitive = missing('useAppStore');
-export const useConnectionSnapshot: Primitive = missing('useConnectionSnapshot');
-export const useFerretFleetOf: Primitive = missing('useFerretFleetOf');
-export const machineDisplayOrder: Primitive = missing('machineDisplayOrder');
-export const distinctDaemonName: Primitive = missing('distinctDaemonName');
-export const useMachineOrder: Primitive = missing('useMachineOrder');
+/** The daemon the screen or settings tab is on. */
+export const useCurrentDaemon: () => DaemonConnection = missing('useCurrentDaemon') as () => DaemonConnection;
+/** Every paired daemon, in the order and under the names the ferrets bar shows them (a twin is told apart). */
+export const useWardenMachines: () => readonly { readonly connection: DaemonConnection; readonly name: string }[] =
+  missing('useWardenMachines') as () => readonly { readonly connection: DaemonConnection; readonly name: string }[];
+/** The ferrets of one paired daemon, or `null` while they are not read. */
+export const useFerretsOf: (daemonId: DaemonId) => readonly FerretView[] | null = missing('useFerretsOf') as (
+  daemonId: DaemonId,
+) => readonly FerretView[] | null;
+/** This device's remembered choices (the daemon the Warden page is narrowed to). */
+export const useDeviceControls: () => DaemonControlsStore = missing('useDeviceControls') as () => DaemonControlsStore;
 
 // ─── pure helpers, copied unchanged from the app shell so this half runs and tests on its own ─────────────────────
-
-export type ClassValue = string | number | bigint | null | undefined | boolean | ClassValue[] | ClassDictionary;
-
-interface ClassDictionary {
-  readonly [key: string]: unknown;
-}
-
-const appendTo = (parts: string[], value: ClassValue): void => {
-  if (value === null || value === undefined || value === false || value === true || value === '') return;
-  if (typeof value === 'string') {
-    parts.push(value);
-    return;
-  }
-  if (typeof value === 'number' || typeof value === 'bigint') {
-    parts.push(String(value));
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const entry of value) appendTo(parts, entry);
-    return;
-  }
-  for (const [key, enabled] of Object.entries(value)) {
-    if (enabled) parts.push(key);
-  }
-};
-
-/** Joins every truthy class expression with a single space. */
-export function cn(...values: readonly ClassValue[]): string {
-  const parts: string[] = [];
-  for (const value of values) appendTo(parts, value);
-  return parts.join(' ');
-}
 
 const SYSTEM_CALLSIGN_PATTERN = /^(warden|learning|pack)-([0-9a-f]{6})$/iu;
 

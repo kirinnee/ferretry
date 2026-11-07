@@ -2,8 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import { useWardenDaemonScope } from '../../../app/hooks/use-warden-daemon-scope.ts';
-import { CONTROLS_VERSION, DaemonControlsStore } from '../../../app/shell.ts';
-import { interact, type Mounted, mount } from '../../support/app/dom.ts';
+import { interact, type Mounted, mount } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -11,12 +10,29 @@ afterEach(async () => {
   view = null;
 });
 
-const store = () => {
-  const writes: string[] = [];
-  return {
-    writes,
-    controls: new DaemonControlsStore({ getItem: () => null, setItem: (_key, value) => writes.push(value) }),
+/** The shell's device controls, as far as the hook reads them: a record with a subscription and one setter. */
+class FakeControls {
+  readonly writes: string[] = [];
+  #listeners = new Set<() => void>();
+  #device: { wardenDaemon: string | null };
+  constructor(wardenDaemon: string | null = null) {
+    this.#device = { wardenDaemon };
+  }
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
   };
+  readonly snapshot = () => ({ device: this.#device });
+  readonly setDeviceControls = (change: { wardenDaemon: string | null }): void => {
+    this.#device = { ...this.#device, ...change };
+    this.writes.push(JSON.stringify(this.#device));
+    for (const listener of this.#listeners) listener();
+  };
+}
+
+const store = () => {
+  const controls = new FakeControls();
+  return { writes: controls.writes, controls };
 };
 
 describe('useWardenDaemonScope', () => {
@@ -44,10 +60,7 @@ describe('useWardenDaemonScope', () => {
   });
 
   test('renders the remembered daemon on the server, where there is no subscription', () => {
-    const controls = new DaemonControlsStore({
-      getItem: () => JSON.stringify({ v: CONTROLS_VERSION, device: { wardenDaemon: 'daemon-ec2' } }),
-      setItem: () => {},
-    });
+    const controls = new FakeControls('daemon-ec2');
     const Probe = () => <p>{useWardenDaemonScope(controls).remembered ?? 'all'}</p>;
     expect(renderToStaticMarkup(<Probe />)).toBe('<p>daemon-ec2</p>');
   });

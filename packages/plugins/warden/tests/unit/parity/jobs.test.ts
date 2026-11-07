@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { owner } from '@ferretry/kernel/testing';
-import { WARDEN_STATE } from '../../contract/index.ts';
-import { createWardenSubsystem } from '../../daemon/subsystem.ts';
+import { WARDEN_STATE } from '../../../contract/index.ts';
+import { createWardenSubsystem } from '../../../daemon/subsystem.ts';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
-import { fakeKernel } from '../support/kernel.ts';
-import { waitFor } from '../support/wait-for.ts';
+import { fakeKernel } from '../../support/kernel.ts';
+import { waitFor } from '../../support/wait-for.ts';
 import { wardenHost } from './host.ts';
 
 const MINUTE = 60_000;
