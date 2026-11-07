@@ -26,17 +26,17 @@ import {
   scriptedClient,
 } from './setup-support.ts';
 
-const SCAN_PATH = '/v1/fleet/setup/scan';
-const RUNTIMES_PATH = '/v1/fleet/runtimes';
-const CHANGES_PATH = '/v1/fleet/proposals';
-const INSTALL_PATH = '/v1/fleet/machine/tools/install';
-const CREDENTIALS_PATH = '/v1/fleet/credentials';
-const PROFILES_PATH = '/v1/fleet/profiles';
-const COMPONENTS_PATH = '/v1/fleet/components';
-const PRESETS_PATH = '/v1/fleet/presets';
+const SCAN_PATH = '/v1/runtimes/setup/scan';
+const RUNTIMES_PATH = '/v1/runtimes';
+const CHANGES_PATH = '/v1/runtimes/proposals';
+const INSTALL_PATH = '/v1/runtimes/machine/tools/install';
+const CREDENTIALS_PATH = '/v1/logins';
+const PROFILES_PATH = '/v1/runtimes/profiles';
+const COMPONENTS_PATH = '/v1/runtimes/components';
+const PRESETS_PATH = '/v1/logins/presets';
 const SECRETS_PATH = '/v1/secrets';
-const LOGIN_PATH = '/v1/fleet/login';
-const FLOW_PATH = '/v1/fleet/login/flow-1';
+const LOGIN_PATH = '/v1/logins/sign-in';
+const FLOW_PATH = '/v1/logins/sign-in/flow-1';
 
 const stagedFrom = (call: Call) => ({
   id: 'fy_fprop_abcdefghijklmnopqrstuv',
@@ -182,7 +182,7 @@ const start = async (client: FleetClient, options: Partial<Options> = {}): Promi
 const daemon = (routes: Record<string, unknown> = {}, calls: Call[] = []): FleetClient =>
   scriptedClient(
     {
-      '/v1/fleet/machine': machineAnswer(),
+      '/v1/runtimes/machine': machineAnswer(),
       [SCAN_PATH]: scan(),
       [RUNTIMES_PATH]: runtimes([]),
       [CREDENTIALS_PATH]: credentials([]),

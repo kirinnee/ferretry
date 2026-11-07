@@ -10,7 +10,7 @@ import { interact, mount, must } from '@ferretry/app/testing';
 import { type Call, STUDIO, scripted } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { ENVIRONMENT } from './environment-support.ts';
 
-const TEST = 'POST /v1/fleet/credentials/zai-glm/test';
+const TEST = 'POST /v1/logins/zai-glm/test';
 
 const passed = (spent: 'nothing' | 'one-token' = 'nothing') => ({
   credentialId: 'zai-glm',

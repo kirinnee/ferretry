@@ -72,7 +72,7 @@ const SLOTS = credentials([
 
 type Answers = Record<string, unknown>;
 
-const REVIEW_PATH = '/v1/fleet/clone/review';
+const REVIEW_PATH = '/v1/runtimes/clone/review';
 
 /** A machine that predates the review: it has no such route, which is the one thing that lets settings copy whole. */
 const NO_REVIEW_ROUTE = new FyHttpError(`no route POST ${REVIEW_PATH}`, 404, 'unknown_route');
@@ -95,8 +95,8 @@ const daemons = ({ target = {}, work = {}, empty = {}, workGate }: Daemons) => {
   const clients: Record<string, FleetClient> = {
     studio: scriptedClient(
       {
-        '/v1/fleet/machine': machineAnswer(),
-        '/v1/fleet/profiles': stacks(0),
+        '/v1/runtimes/machine': machineAnswer(),
+        '/v1/runtimes/profiles': stacks(0),
         [REVIEW_PATH]: NO_REVIEW_ROUTE,
         ...target,
       },
@@ -104,13 +104,13 @@ const daemons = ({ target = {}, work = {}, empty = {}, workGate }: Daemons) => {
     ),
     work: scriptedClient(
       {
-        '/v1/fleet/machine': WORK_MACHINE,
-        '/v1/fleet/export': bundle(),
+        '/v1/runtimes/machine': WORK_MACHINE,
+        '/v1/runtimes/export': bundle(),
         ...work,
       },
       calls.work,
     ),
-    empty: scriptedClient({ '/v1/fleet/machine': EMPTY_MACHINE, ...empty }),
+    empty: scriptedClient({ '/v1/runtimes/machine': EMPTY_MACHINE, ...empty }),
     // Asleep answers nothing: every path fails like an unreachable machine.
     asleep: scriptedClient({}),
   };
@@ -191,7 +191,7 @@ const toPreview = async (screen: Awaited<ReturnType<typeof render>>) => {
 };
 
 const changeBodies = (calls: readonly Call[]) =>
-  calls.filter(call => call.path === '/v1/fleet/proposals').map(call => call.body as { change: unknown });
+  calls.filter(call => call.path === '/v1/runtimes/proposals').map(call => call.body as { change: unknown });
 
 // ── Tests ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -320,8 +320,8 @@ describe('CloneMachine · Source', () => {
       const next = must(screen.q('[data-step-next]'), 'Next') as HTMLButtonElement;
       expect(next.disabled).toBe(false);
       await click(next, 'Next');
-      expect(calls.work.some(call => call.path === '/v1/fleet/export')).toBe(true);
-      expect(calls.target.some(call => call.path === '/v1/fleet/export')).toBe(false);
+      expect(calls.work.some(call => call.path === '/v1/runtimes/export')).toBe(true);
+      expect(calls.target.some(call => call.path === '/v1/runtimes/export')).toBe(false);
       expect(screen.step()).toBe('preview');
     } finally {
       await screen.view.unmount();
@@ -332,7 +332,7 @@ describe('CloneMachine · Source', () => {
     let refuse = true;
     const { createClient } = daemons({
       work: {
-        '/v1/fleet/export': () =>
+        '/v1/runtimes/export': () =>
           refuse
             ? new FyHttpError('work-linux would not share its setup with this device.', 403, 'forbidden')
             : bundle(),
@@ -358,7 +358,7 @@ describe('CloneMachine · Source', () => {
 
   it('reads a source that wants a passkey with no extra field: the carrier asks for it', async () => {
     const { calls, createClient } = daemons({
-      work: { '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }) },
+      work: { '/v1/runtimes/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }) },
     });
     const screen = await render({ createClient });
     try {
@@ -366,7 +366,7 @@ describe('CloneMachine · Source', () => {
       expect(screen.q('[data-change-password]')).toBeNull();
       await click(screen.q('[data-step-next]'), 'Next');
 
-      expect(calls.work.some(call => call.path === '/v1/fleet/export')).toBe(true);
+      expect(calls.work.some(call => call.path === '/v1/runtimes/export')).toBe(true);
       expect(screen.step()).toBe('preview');
     } finally {
       await screen.view.unmount();
@@ -378,7 +378,7 @@ describe('CloneMachine · Preview', () => {
   it('says what copies, what does not, which paths to check (E30), the missing tool (E29) and files not copied', async () => {
     const { createClient } = daemons({
       work: {
-        '/v1/fleet/export': bundle({ notCopied: [{ path: 'skills/huge/model.bin', reason: 'Too large to copy' }] }),
+        '/v1/runtimes/export': bundle({ notCopied: [{ path: 'skills/huge/model.bin', reason: 'Too large to copy' }] }),
       },
     });
     const screen = await render({ createClient });
@@ -431,7 +431,7 @@ describe('CloneMachine · Preview', () => {
   it('draws no check, missing-tool or not-copied notes when there is nothing to say', async () => {
     const { createClient } = daemons({
       work: {
-        '/v1/fleet/export': bundle({
+        '/v1/runtimes/export': bundle({
           credentials: [{ id: 'claude-work', harness: 'claude', email: 'me@work.example' }],
           components: { modelSets: { claude: { models: ['opus'], default: 'opus' } } },
           runtimes: { 'claude-default': { credential: 'claude-work', profile: 'default' } },
@@ -457,12 +457,12 @@ describe('CloneMachine · Preview', () => {
     let retried = 0;
     const { calls, createClient } = daemons({
       target: {
-        '/v1/fleet/proposals': STAGED,
+        '/v1/runtimes/proposals': STAGED,
         [APPLY_PATH]: () => {
           imported = true;
           return EXECUTED;
         },
-        '/v1/fleet/credentials': () => (imported ? SLOTS : credentials([])),
+        '/v1/logins': () => (imported ? SLOTS : credentials([])),
       },
     });
     const screen = await render({
@@ -486,7 +486,7 @@ describe('CloneMachine · Preview', () => {
         source: { daemonId: 'work' },
         names: { source: 'work-linux', target: 'studio-mac' },
       });
-      expect(calls.work.some(call => call.path === '/v1/fleet/proposals')).toBe(false);
+      expect(calls.work.some(call => call.path === '/v1/runtimes/proposals')).toBe(false);
       expect(retried).toBe(1);
 
       expect(screen.step()).toBe('done');
@@ -533,7 +533,7 @@ describe('CloneMachine · Preview', () => {
   it('stays on the preview when this machine refuses the copy', async () => {
     const { createClient } = daemons({
       target: {
-        '/v1/fleet/proposals': new FyHttpError('Clone is switched off on studio-mac.', 409, 'fleet_change_refused'),
+        '/v1/runtimes/proposals': new FyHttpError('Clone is switched off on studio-mac.', 409, 'fleet_change_refused'),
       },
     });
     const screen = await render({ createClient });
@@ -552,8 +552,8 @@ describe('CloneMachine · Existing setup (E28)', () => {
   it('asks what to do with the runtimes already here, and copies alongside by default', async () => {
     const { calls, createClient } = daemons({
       target: {
-        '/v1/fleet/profiles': stacks(2),
-        '/v1/fleet/proposals': STAGED,
+        '/v1/runtimes/profiles': stacks(2),
+        '/v1/runtimes/proposals': STAGED,
         [APPLY_PATH]: { outcome: 'executed', executor: 'setup', summary: 'Copied the setup' },
       },
     });
@@ -591,7 +591,7 @@ describe('CloneMachine · Existing setup (E28)', () => {
 
   it('replaces with a danger button when the person picks Replace', async () => {
     const { calls, createClient } = daemons({
-      target: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: EXECUTED, '/v1/fleet/credentials': SLOTS },
+      target: { '/v1/runtimes/proposals': STAGED, [APPLY_PATH]: EXECUTED, '/v1/logins': SLOTS },
     });
     const screen = await render({ machine: machineView({ runtimeCount: 1 }), createClient });
     try {
@@ -615,11 +615,11 @@ describe('CloneMachine · Existing setup (E28)', () => {
     }
   });
 
-  it('counts profiles alone as existing setup, from GET /v1/fleet/profiles', async () => {
-    const { calls, createClient } = daemons({ target: { '/v1/fleet/profiles': stacks(1) } });
+  it('counts profiles alone as existing setup, from GET /v1/runtimes/profiles', async () => {
+    const { calls, createClient } = daemons({ target: { '/v1/runtimes/profiles': stacks(1) } });
     const screen = await render({ createClient });
     try {
-      expect(calls.target.some(call => call.path === '/v1/fleet/profiles')).toBe(true);
+      expect(calls.target.some(call => call.path === '/v1/runtimes/profiles')).toBe(true);
       expect(screen.text('[data-stepper-position]')).toBe('Step 1 of 3 · Source');
       await toPreview(screen);
       expect(screen.text('[data-clone-step="preview"] [data-step-next]')).toBe('Next');
@@ -661,8 +661,8 @@ describe('CloneMachine · what a copy runs here (cross-machine §3a, §3c, §3d)
       ],
     });
     const { calls, createClient } = daemons({
-      work: { '/v1/fleet/export': hostile },
-      target: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: EXECUTED, '/v1/fleet/credentials': SLOTS },
+      work: { '/v1/runtimes/export': hostile },
+      target: { '/v1/runtimes/proposals': STAGED, [APPLY_PATH]: EXECUTED, '/v1/logins': SLOTS },
     });
     const screen = await render({ createClient });
     try {
@@ -699,7 +699,7 @@ describe('CloneMachine · what a copy runs here (cross-machine §3a, §3c, §3d)
 
   it('shows the refusal and offers no Copy for a bundle that would write a file it does not list', async () => {
     const orphan = bundle({ files: [...bundle().files, { path: 'components/hooks/mine.json', content: '{}' }] });
-    const { calls, createClient } = daemons({ work: { '/v1/fleet/export': orphan } });
+    const { calls, createClient } = daemons({ work: { '/v1/runtimes/export': orphan } });
     const screen = await render({ createClient });
     try {
       await toPreview(screen);
@@ -838,7 +838,7 @@ const copying = (before: ReturnType<typeof credentials>, after: ReturnType<typeo
       copied = true;
       return EXECUTED;
     },
-    '/v1/fleet/credentials': () => (copied ? after : before),
+    '/v1/logins': () => (copied ? after : before),
   };
 };
 
@@ -853,7 +853,7 @@ const configStatus = (pending: { path: string; etag: string; changes: string[] }
 
 const fullTarget = (extra: Answers = {}): Answers => ({
   '/v1/config/status': configStatus(),
-  '/v1/fleet/proposals': STAGED,
+  '/v1/runtimes/proposals': STAGED,
   ...copying(credentials([]), SLOTS),
   '/v1/speedups': SPEEDUPS,
   '/v1/secrets': secretsRoute().answer,
@@ -875,7 +875,7 @@ describe('CloneMachine · What to copy', () => {
       await toPreview(screen);
       expect(calls.work.map(call => call.path)).toEqual(
         expect.arrayContaining([
-          '/v1/fleet/export',
+          '/v1/runtimes/export',
           fileKey('warden.yaml'),
           fileKey('learning.yaml'),
           fileKey('voice.yaml'),
@@ -942,7 +942,7 @@ describe('CloneMachine · What to copy', () => {
   it('hides the fleet sections and skips the Existing step when fleet is unticked, and brings them back', async () => {
     const { createClient } = daemons({
       work: sourceFiles(),
-      target: fullTarget({ '/v1/fleet/profiles': stacks(2) }),
+      target: fullTarget({ '/v1/runtimes/profiles': stacks(2) }),
     });
     const screen = await render({ machine: machineView({ runtimeCount: 3 }), createClient });
     try {
@@ -1082,7 +1082,7 @@ describe('CloneMachine · what the copy needs here', () => {
         [fileKey('warden.yaml')]: configFile('warden.yaml', 'enabled: false\n'),
         [fileKey('learning.yaml')]: configFile('learning.yaml', 'passive: true\n'),
         [fileKey('voice.yaml')]: configFile('voice.yaml', 'provider: none\n'),
-        '/v1/fleet/export': bundle({ credentials: [], runtimes: {} }),
+        '/v1/runtimes/export': bundle({ credentials: [], runtimes: {} }),
       }),
       target: fullTarget(),
     });
@@ -1183,7 +1183,7 @@ describe('CloneMachine · the copy', () => {
       expect(puts.map(call => call.headers['if-match'])).toEqual(['here-warden', 'here-voice']);
       // The source is only ever read from.
       expect(calls.work.some(call => call.path === '/v1/config/file')).toBe(false);
-      expect(calls.work.some(call => call.path === '/v1/fleet/proposals')).toBe(false);
+      expect(calls.work.some(call => call.path === '/v1/runtimes/proposals')).toBe(false);
       expect(changeBodies(calls.target)[1]?.change).toEqual({
         kind: 'machine.settings',
         agentPermissions: 'auto',
@@ -1219,7 +1219,7 @@ describe('CloneMachine · the copy', () => {
       await click(screen.q('[data-change-submit]'), 'Copy');
 
       expect(changeKinds(calls.target)).toEqual(['machine.settings']);
-      expect(calls.target.some(call => call.path === '/v1/fleet/credentials')).toBe(false);
+      expect(calls.target.some(call => call.path === '/v1/logins')).toBe(false);
       expect(putCalls(calls.target)).toHaveLength(3);
 
       expect(screen.step()).toBe('done');
@@ -1242,7 +1242,7 @@ describe('CloneMachine · the copy', () => {
     const { calls, createClient } = daemons({
       work: sourceFiles(),
       target: fullTarget({
-        '/v1/fleet/proposals': new FyHttpError('Clone is switched off on studio-mac.', 409, 'fleet_change_refused'),
+        '/v1/runtimes/proposals': new FyHttpError('Clone is switched off on studio-mac.', 409, 'fleet_change_refused'),
       }),
     });
     const screen = await render({
@@ -1271,7 +1271,7 @@ describe('CloneMachine · the copy', () => {
     const { createClient } = daemons({
       work: sourceFiles(),
       target: fullTarget({
-        '/v1/fleet/proposals': (call: Call) =>
+        '/v1/runtimes/proposals': (call: Call) =>
           (call.body as { change: { kind: string } }).change.kind === 'machine.settings'
             ? new FyHttpError('Agent controls are locked on studio-mac.', 409, 'fleet_change_refused')
             : STAGED,
@@ -1469,7 +1469,7 @@ describe('CloneMachine · Done: held, refused and sign-in', () => {
   it('links a login need to its cloned slot, and leaves one with no slot to sign in after', async () => {
     const { createClient } = daemons({
       work: sourceFiles({
-        '/v1/fleet/export': bundle({
+        '/v1/runtimes/export': bundle({
           credentials: [
             { id: 'claude-work', harness: 'claude', email: 'me@work.example' },
             { id: 'codex-work', harness: 'codex', label: 'Work' },
@@ -1505,7 +1505,7 @@ describe('CloneMachine · Done: held, refused and sign-in', () => {
   it('does not ask to sign in to a login this machine already had and reused', async () => {
     const { createClient } = daemons({
       work: sourceFiles({
-        '/v1/fleet/export': bundle({
+        '/v1/runtimes/export': bundle({
           credentials: [
             { id: 'claude-you', harness: 'claude', email: 'Me@Work.Example' },
             { id: 'codex-work', harness: 'codex', label: 'Work' },
@@ -1513,7 +1513,7 @@ describe('CloneMachine · Done: held, refused and sign-in', () => {
         }),
       }),
       target: fullTarget({
-        '/v1/fleet/credentials': credentials([
+        '/v1/logins': credentials([
           credentialView('claude-mine', {
             email: 'me@work.example',
             usedBy: ['claude-default'],
@@ -1539,12 +1539,12 @@ describe('CloneMachine · Done: held, refused and sign-in', () => {
   it('keeps the sign-in of a reused login that still needs one, pointing at that login', async () => {
     const { createClient } = daemons({
       work: sourceFiles({
-        '/v1/fleet/export': bundle({
+        '/v1/runtimes/export': bundle({
           credentials: [{ id: 'codex-you', harness: 'codex', label: 'Work' }],
         }),
       }),
       target: fullTarget({
-        '/v1/fleet/credentials': credentials([
+        '/v1/logins': credentials([
           credentialView('codex-mine', { harness: 'codex', email: undefined, label: 'Work' }),
         ]),
       }),
@@ -1566,10 +1566,10 @@ describe('CloneMachine · Done: held, refused and sign-in', () => {
   it('keeps the sign-in of a reused login that is still checking: it is not signed in yet', async () => {
     const { createClient } = daemons({
       work: sourceFiles({
-        '/v1/fleet/export': bundle({ credentials: [{ id: 'codex-you', harness: 'codex', label: 'Work' }] }),
+        '/v1/runtimes/export': bundle({ credentials: [{ id: 'codex-you', harness: 'codex', label: 'Work' }] }),
       }),
       target: fullTarget({
-        '/v1/fleet/credentials': credentials([
+        '/v1/logins': credentials([
           credentialView('codex-mine', {
             harness: 'codex',
             email: undefined,
@@ -1595,7 +1595,7 @@ describe('CloneMachine · Done: held, refused and sign-in', () => {
     const work = { harness: 'codex' as const, email: undefined, label: 'Work' };
     const { createClient } = daemons({
       work: sourceFiles({
-        '/v1/fleet/export': bundle({ credentials: [{ id: 'codex-you', harness: 'codex', label: 'Work' }] }),
+        '/v1/runtimes/export': bundle({ credentials: [{ id: 'codex-you', harness: 'codex', label: 'Work' }] }),
       }),
       target: fullTarget(
         copying(
@@ -1704,7 +1704,7 @@ const sealedCopy = (over: { readonly exportAnswer?: unknown; readonly sourceName
   return {
     held,
     work: {
-      '/v1/fleet/export': MIXED_LOGINS(),
+      '/v1/runtimes/export': MIXED_LOGINS(),
       '/v1/secrets': secretList(over.sourceNames ?? ['ZAI_API_KEY']),
       [`/v1/secrets/exports/${IMPORT_ID}`]: over.exportAnswer ?? { bundle: SEALED, names: ['ZAI_API_KEY'] },
     },
@@ -1836,17 +1836,17 @@ describe('CloneMachine · API keys and sign-ins', () => {
         recorded,
         reviews,
         work: {
-          '/v1/fleet/export': MIXED_LOGINS(),
+          '/v1/runtimes/export': MIXED_LOGINS(),
           '/v1/secrets': stamped(['ZAI_API_KEY'], NEWER),
           [`/v1/secrets/exports/${IMPORT_ID}`]: { bundle: SEALED, names: ['ZAI_API_KEY'] },
         },
         target: fullTarget({
           '/v1/secrets': held ? stamped(['ZAI_API_KEY'], OLDER) : secretList([]),
-          '/v1/fleet/clone/review': (call: Call) => {
+          '/v1/runtimes/clone/review': (call: Call) => {
             reviews.push(call);
             return review(outcome);
           },
-          '/v1/fleet/clone/keys': (call: Call) => {
+          '/v1/runtimes/clone/keys': (call: Call) => {
             recorded.push(call);
             return { recorded: 1 };
           },
@@ -1908,7 +1908,7 @@ describe('CloneMachine · API keys and sign-ins', () => {
         work: sourceFiles(w.work),
         target: {
           ...w.target,
-          '/v1/fleet/clone/review': (call: Call) => {
+          '/v1/runtimes/clone/review': (call: Call) => {
             w.reviews.push(call);
             return 'settings' in (call.body as object) ? new Error('network down') : review('newer');
           },
@@ -1982,7 +1982,7 @@ describe('CloneMachine · API keys and sign-ins', () => {
         await toPreview(screen);
         await click(screen.q('[data-change-submit]'), 'Copy');
         const sent = JSON.stringify(
-          calls.target.filter(call => call.path === '/v1/fleet/clone/review' || call.path === '/v1/fleet/clone/keys'),
+          calls.target.filter(call => call.path === '/v1/runtimes/clone/review' || call.path === '/v1/runtimes/clone/keys'),
         );
         expect(sent).not.toMatch(/sk-|value|digest/u);
       } finally {
@@ -2068,8 +2068,8 @@ describe('CloneMachine · default runtime for new agents', () => {
 
   it('offers the copied agent runtimes and says what a Replace does to this machine’s own default', async () => {
     const { createClient } = daemons({
-      work: sourceFiles({ '/v1/fleet/export': AGENTS }),
-      target: fullTarget({ '/v1/fleet/profiles': stacks(1) }),
+      work: sourceFiles({ '/v1/runtimes/export': AGENTS }),
+      target: fullTarget({ '/v1/runtimes/profiles': stacks(1) }),
     });
     const screen = await render({ createClient, machine: OWN });
     try {
@@ -2101,8 +2101,8 @@ describe('CloneMachine · default runtime for new agents', () => {
 
   it('sends the proposed runtime on a Replace so the copy never leaves a default that is gone', async () => {
     const { calls, createClient } = daemons({
-      work: sourceFiles({ '/v1/fleet/export': AGENTS }),
-      target: fullTarget({ '/v1/fleet/profiles': stacks(1) }),
+      work: sourceFiles({ '/v1/runtimes/export': AGENTS }),
+      target: fullTarget({ '/v1/runtimes/profiles': stacks(1) }),
     });
     const screen = await render({ createClient, machine: OWN });
     try {
@@ -2124,8 +2124,8 @@ describe('CloneMachine · default runtime for new agents', () => {
 
   it('sends the runtime the person picked, and null for none', async () => {
     const { calls, createClient } = daemons({
-      work: sourceFiles({ '/v1/fleet/export': AGENTS }),
-      target: fullTarget({ '/v1/fleet/profiles': stacks(1) }),
+      work: sourceFiles({ '/v1/runtimes/export': AGENTS }),
+      target: fullTarget({ '/v1/runtimes/profiles': stacks(1) }),
     });
     const screen = await render({ createClient, machine: OWN });
     try {
@@ -2146,12 +2146,12 @@ describe('CloneMachine · default runtime for new agents', () => {
   it('carries the source’s own default when its runtime is copied, and does not undo it with the controls', async () => {
     const { calls, createClient } = daemons({
       work: sourceFiles({
-        '/v1/fleet/export': AGENTS,
-        '/v1/fleet/machine': machineView({ name: 'work-linux', defaultRuntime: 'claude-review' }),
+        '/v1/runtimes/export': AGENTS,
+        '/v1/runtimes/machine': machineView({ name: 'work-linux', defaultRuntime: 'claude-review' }),
       }),
       target: fullTarget({
-        '/v1/fleet/profiles': stacks(1),
-        '/v1/fleet/machine': machineView({ defaultRuntime: 'claude-review' }),
+        '/v1/runtimes/profiles': stacks(1),
+        '/v1/runtimes/machine': machineView({ defaultRuntime: 'claude-review' }),
       }),
     });
     const screen = await render({ createClient, machine: OWN });
@@ -2358,7 +2358,7 @@ describe('CloneMachine · settings merged key by key', () => {
       work: sourceFiles(),
       target: fullTarget({
         [REVIEW_PATH]: reviewing(),
-        '/v1/fleet/proposals': new FyHttpError(
+        '/v1/runtimes/proposals': new FyHttpError(
           'warden.yaml changed on this machine after it was reviewed; review it again',
           409,
           'fleet_change_stale',

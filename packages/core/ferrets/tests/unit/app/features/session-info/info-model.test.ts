@@ -28,8 +28,8 @@ import { sessionView } from '@ferretry/app/testing';
 
 describe('INFO_TABS', () => {
   it('orders the seven tabs, names each one, and drops Tasks for a host with no board', () => {
-    expect(INFO_TABS).toEqual(['overview', 'agenda', 'tasks', 'runtime', 'usage', 'folder', 'surfaces']);
-    expect(INFO_TABS_WITHOUT_BOARD).toEqual(['overview', 'agenda', 'runtime', 'usage', 'folder', 'surfaces']);
+    expect(INFO_TABS).toEqual(['overview', 'agenda', 'tasks', 'runtime', 'usage', 'folder']);
+    expect(INFO_TABS_WITHOUT_BOARD).toEqual(['overview', 'agenda', 'runtime', 'usage', 'folder']);
     expect(INFO_TAB_LABEL.agenda).toBe('Agenda');
     expect(INFO_TAB_LABEL.tasks).toBe('Tasks');
     expect(INFO_TAB_LABEL.overview).toBe('Overview');

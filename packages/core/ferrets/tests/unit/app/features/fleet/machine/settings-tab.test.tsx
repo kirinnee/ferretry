@@ -60,7 +60,7 @@ const props = (
   calls: Call[],
   retried: { count: number },
 ): MachineSettingsTabProps & { readonly browser: Window } => {
-  const client = scriptedClient({ '/v1/fleet/machine': machineAnswer(), ...setup.answers }, calls);
+  const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer(), ...setup.answers }, calls);
   return {
     connection: STUDIO,
     machineName: 'studio-mac',
@@ -181,7 +181,7 @@ describe('MachineSettingsTab', () => {
       ],
     });
     await withTab(
-      { machine, answers: { '/v1/fleet/setup/scan': NOTHING_INSTALLED } },
+      { machine, answers: { '/v1/runtimes/setup/scan': NOTHING_INSTALLED } },
       async ({ q, browser, container }) => {
         await click(q('[data-tool-install="claude"]'), 'install claude');
         expect(browser.location.hash).toBe('#machines/studio-mac/machine/install-claude');
@@ -216,7 +216,7 @@ describe('MachineSettingsTab', () => {
   });
 
   it('keeps New machine setup one tap away, and Import again, once the machine is set up', async () => {
-    await withTab({ answers: { '/v1/fleet/setup/scan': scan() } }, async ({ q, browser }) => {
+    await withTab({ answers: { '/v1/runtimes/setup/scan': scan() } }, async ({ q, browser }) => {
       const setup = must(q('[data-setup-section="setup"]'), 'setup section');
       expect(setup.querySelector('[data-settings-action="setup"]')?.textContent).toContain('New machine setup');
       expect(setup.querySelector('[data-settings-action="setup"]')?.textContent).not.toContain('Set up studio-mac');
@@ -261,7 +261,7 @@ describe('MachineSettingsTab', () => {
   });
 
   it('New machine setup shows the full-screen note, with no Open, when the shell offers no full screen', async () => {
-    await withTab({ answers: { '/v1/fleet/setup/scan': scan() } }, async ({ q, browser }) => {
+    await withTab({ answers: { '/v1/runtimes/setup/scan': scan() } }, async ({ q, browser }) => {
       await click(q('[data-settings-action="setup"]'), 'new machine setup');
       expect(browser.location.hash).toBe('#machines/studio-mac/machine/setup');
       expect(q('[data-setup-note="setup-moved"]')?.textContent).toContain('New machine setup is');
@@ -312,7 +312,7 @@ describe('MachineSettingsTab', () => {
   });
 
   it('Set up opens the full-screen note when the shell offers no full screen', async () => {
-    await withTab({ machine: FRESH_MACHINE, answers: { '/v1/fleet/setup/scan': scan() } }, async ({ q, browser }) => {
+    await withTab({ machine: FRESH_MACHINE, answers: { '/v1/runtimes/setup/scan': scan() } }, async ({ q, browser }) => {
       await click(q('[data-settings-action="setup"]'), 'set up');
       expect(browser.location.hash).toBe('#machines/studio-mac/machine/setup');
       expect(q('[data-setup-note="setup-moved"]')).not.toBeNull();
@@ -437,7 +437,7 @@ describe('MachineSettingsTab', () => {
   });
 
   it('gives every row the tab draws itself an icon, the same size and slot', async () => {
-    await withTab({ answers: { '/v1/fleet/setup/scan': scan() } }, async ({ q }) => {
+    await withTab({ answers: { '/v1/runtimes/setup/scan': scan() } }, async ({ q }) => {
       const rows = [
         ...(q('[data-setup-section="setup"]')?.querySelectorAll('[data-settings-action]') ?? []),
         ...(q('[data-setup-section="tools"]')?.querySelectorAll('[data-setup-row]') ?? []),
@@ -464,8 +464,8 @@ describe('MachineSettingsTab', () => {
 
   it('renders each flow the address names, and leaving one returns to the tab', async () => {
     const answers = {
-      '/v1/fleet/setup/scan': NOTHING_INSTALLED,
-      '/v1/fleet/runtimes': runtimes([runtimeView('claude-default')]),
+      '/v1/runtimes/setup/scan': NOTHING_INSTALLED,
+      '/v1/runtimes': runtimes([runtimeView('claude-default')]),
     };
     const flows: readonly [string, string][] = [
       ['setup', '[data-setup-note="setup-moved"]'],
@@ -492,7 +492,7 @@ describe('MachineSettingsSurface', () => {
       selectedDaemonId: STUDIO.daemonId,
     });
     const store = { connections } as unknown as AppStore;
-    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
+    const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer() });
     const saved = window.location.hash;
     window.location.hash = '#machines/studio-mac/machine/clone';
     const view = await mount(
@@ -527,7 +527,7 @@ describe('MachineSettingsSurface', () => {
       selectedDaemonId: STUDIO.daemonId,
     });
     const store = { connections } as unknown as AppStore;
-    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
+    const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer() });
     const saved = window.location.hash;
     window.location.hash = '#machines/studio-mac/machine';
     const view = await mount(

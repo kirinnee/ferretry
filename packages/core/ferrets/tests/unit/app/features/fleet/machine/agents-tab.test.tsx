@@ -55,7 +55,7 @@ const withTab = async (setup: Setup, run: (ctx: Context) => Promise<void>): Prom
   const calls: Call[] = [];
   const retried = { count: 0 };
   const browser = fakeWindow(setup.hash ?? '#machines/studio-mac/agents');
-  const client = scriptedClient({ '/v1/fleet/machine': machineAnswer(), ...setup.answers }, calls);
+  const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer(), ...setup.answers }, calls);
   const view = await mount(
     <AgentsTab
       connection={STUDIO}
@@ -98,9 +98,9 @@ const withTab = async (setup: Setup, run: (ctx: Context) => Promise<void>): Prom
 };
 
 const staged = (calls: readonly Call[]): Call =>
-  must(calls.find(call => call.path === '/v1/fleet/proposals') ?? null, 'the staged change call');
+  must(calls.find(call => call.path === '/v1/runtimes/proposals') ?? null, 'the staged change call');
 
-const SAVES = { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME };
+const SAVES = { '/v1/runtimes/proposals': STAGED, [APPLY_PATH]: OUTCOME };
 
 describe('AgentsTab', () => {
   it('holds what agents may do, who supervises them and how they come back, in that order', async () => {
@@ -244,7 +244,7 @@ describe('AgentsTab', () => {
     });
 
     it('a refused Save says why and does not ask the shell to check again', async () => {
-      await withTab({ answers: { '/v1/fleet/proposals': new Error('unreachable') } }, async ({ q, retried }) => {
+      await withTab({ answers: { '/v1/runtimes/proposals': new Error('unreachable') } }, async ({ q, retried }) => {
         await click(q('[data-segment="skip"]'), 'skip segment');
         await click(q('[data-change-submit]'), 'save');
         expect(q('[data-change-refusal]')?.textContent).toContain('didn’t answer');
@@ -438,7 +438,7 @@ describe('AgentsTab', () => {
           skipped: [{ sessionId: 'abc', reason: 'its runtime is signed out' }],
         },
       });
-      await withTab({ machine, answers: { '/v1/fleet/proposals': new Error('unreachable') } }, async ({ q, sw }) => {
+      await withTab({ machine, answers: { '/v1/runtimes/proposals': new Error('unreachable') } }, async ({ q, sw }) => {
         expect(sw('Resume ferrets after a restart').getAttribute('aria-checked')).toBe('false');
         expect(q('[data-auto-resume-summary]')?.textContent).toContain('Resumed 5 ferrets after restart');
         expect(q('[data-auto-resume-skipped]')?.textContent).toBe(
@@ -493,7 +493,7 @@ describe('AgentsTab', () => {
       await withTab(
         {
           machine: machineView({ agendaMode: false }),
-          answers: { '/v1/fleet/proposals': new Error('unreachable') },
+          answers: { '/v1/runtimes/proposals': new Error('unreachable') },
         },
         async ({ q, sw }) => {
           expect(sw('Agenda mode for new ferrets').getAttribute('aria-checked')).toBe('false');

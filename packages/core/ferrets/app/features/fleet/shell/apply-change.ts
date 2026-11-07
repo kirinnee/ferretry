@@ -2,8 +2,8 @@
  * One account-model change, from a click to the machine (docs/design/account-model.md §7).
  *
  * Every write on the Machines surface is the same three moves: stage ONE change
- * (`POST /v1/fleet/proposals`), which writes nothing and answers with its preview, then apply exactly
- * that change (`POST /v1/fleet/proposals/:id/apply`). A caller off the machine confirms with a passkey
+ * (`POST /v1/runtimes/proposals`), which writes nothing and answers with its preview, then apply exactly
+ * that change (`POST /v1/runtimes/proposals/:id/apply`). A caller off the machine confirms with a passkey
  * step-up: the daemon refuses the request with `403 grant_step_up_required`, the carrier asks for the
  * passkey and sends the same request once more, so neither call needs anything extra from this module.
  *

@@ -1,6 +1,6 @@
 /**
  * The dial behind Info › Runtime's "Running with older settings — Restart to apply": whether a Restart
- * would relaunch this ferret on different settings (`GET /v1/sessions/:id/relaunch-settings`; the
+ * would relaunch this ferret on different settings (`GET /v1/ferrets/:id/relaunch-settings`; the
  * daemon side is `mounts/session-move.ts`, because a Restart is a move onto the same login).
  *
  * The answer is PARSED through the shared schema, so a body this page cannot read is a failed read
@@ -20,7 +20,7 @@ export const readRelaunchSettings = async (
   signal?: AbortSignal,
 ): Promise<SessionRelaunchSettings> => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('the connection does not own this session scope');
-  const target = daemonRequest(daemon, `/v1/sessions/${encodeURIComponent(scope.sessionId)}/relaunch-settings`, {
+  const target = daemonRequest(daemon, `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/relaunch-settings`, {
     method: 'GET',
     cache: 'no-store',
     ...(signal === undefined ? {} : { signal }),

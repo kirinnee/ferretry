@@ -22,9 +22,9 @@ import {
 } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { DEEPSEEK, DEEPSEEK_MIRROR, ENVIRONMENT, FOUNDRY, OLLAMA, PROVIDERS } from './environment-support.ts';
 
-const CHANGES = 'POST /v1/fleet/proposals';
-const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
-const PRESETS_READ = 'GET /v1/fleet/presets';
+const CHANGES = 'POST /v1/runtimes/proposals';
+const APPLY = `POST /v1/runtimes/proposals/${CHANGE_ID}/apply`;
+const PRESETS_READ = 'GET /v1/logins/presets';
 const SECRETS = 'GET /v1/secrets';
 const STORE = 'POST /v1/secrets';
 
@@ -86,7 +86,7 @@ const open = async (routes: Record<string, unknown> = {}, harness?: 'claude' | '
   const client = scripted(
     {
       ...READS(),
-      'GET /v1/fleet/credentials': () => ({ ...CREDENTIALS, credentials: [...CREDENTIALS.credentials, ...made] }),
+      'GET /v1/logins': () => ({ ...CREDENTIALS, credentials: [...CREDENTIALS.credentials, ...made] }),
       [PRESETS_READ]: PROVIDERS,
       [SECRETS]: secretList([]),
       [STORE]: (call: Call) => ({

@@ -18,7 +18,7 @@ import {
   stagedFrom,
 } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
-const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
+const APPLY = `POST /v1/runtimes/proposals/${CHANGE_ID}/apply`;
 
 afterEach(() => {
   window.location.hash = '';
@@ -217,8 +217,8 @@ describe('Add runtime from the tab', () => {
       calls,
       routes: {
         ...reads(),
-        'GET /v1/fleet/runtimes': () => catalog(created ? [...RUNTIMES.runtimes, made] : RUNTIMES.runtimes),
-        'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call),
+        'GET /v1/runtimes': () => catalog(created ? [...RUNTIMES.runtimes, made] : RUNTIMES.runtimes),
+        'POST /v1/runtimes/proposals': (call: Call) => stagedFrom(call),
         [APPLY]: () => {
           created = true;
           return APPLIED;
@@ -238,11 +238,11 @@ describe('Add runtime from the tab', () => {
     const view = await open({
       routes: {
         ...reads(),
-        'GET /v1/fleet/runtimes': () => {
+        'GET /v1/runtimes': () => {
           reads_ += 1;
           return reads_ === 1 ? RUNTIMES : new Error('gone');
         },
-        'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call),
+        'POST /v1/runtimes/proposals': (call: Call) => stagedFrom(call),
         [APPLY]: APPLIED,
       },
     });

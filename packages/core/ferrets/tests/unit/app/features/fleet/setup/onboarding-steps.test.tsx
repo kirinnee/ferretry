@@ -110,7 +110,7 @@ const tabFor = (
 ): Tab => {
   const calls: Call[] = [];
   const retried = { count: 0 };
-  const inner: FleetClient = scriptedClient({ '/v1/fleet/machine': machineAnswer(), ...answers }, calls);
+  const inner: FleetClient = scriptedClient({ '/v1/runtimes/machine': machineAnswer(), ...answers }, calls);
   const { hold } = overrides;
   const client: FleetClient =
     hold === undefined
@@ -220,7 +220,7 @@ describe('OnboardingPairStep', () => {
 describe('OnboardingStartStep', () => {
   const startStep = (start: 'fresh' | 'clone', started: string[], extra: Partial<Tab> = {}) => {
     const { tab } =
-      extra.tab === undefined ? tabFor({ '/v1/fleet/profiles': { format: 'version-2', profiles: [] } }) : extra;
+      extra.tab === undefined ? tabFor({ '/v1/runtimes/profiles': { format: 'version-2', profiles: [] } }) : extra;
     return (
       <OnboardingStartStep
         start={start}
@@ -627,7 +627,7 @@ describe('OnboardingControlsStep', () => {
 
   it('renders the agent controls and the default runtime of a machine that answered', async () => {
     const { tab } = tabFor({
-      '/v1/fleet/runtimes': runtimes([runtimeView('claude-default'), runtimeView('claude-review')]),
+      '/v1/runtimes': runtimes([runtimeView('claude-default'), runtimeView('claude-review')]),
     });
     await show(<OnboardingControlsStep tab={tab} />);
     expect(text('[data-onboarding-step-body="controls"]')).toContain('What ferrets on studio-mac may control');

@@ -11,7 +11,7 @@ import { sessionView } from '@ferretry/app/testing';
 import { RUNTIMES, runtime, STUDIO } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { conversation, listing, NOW, settle, type } from './conversation-support.ts';
 
-const RUNTIMES_PATH = '/v1/fleet/runtimes';
+const RUNTIMES_PATH = '/v1/runtimes';
 const ALL = `${CONVERSATION_IMPORT_PATH}?source=synced&limit=50`;
 const KEPT = `${CONVERSATION_IMPORT_PATH}?source=ferretry&limit=1000`;
 const HOUR = 3_600_000;

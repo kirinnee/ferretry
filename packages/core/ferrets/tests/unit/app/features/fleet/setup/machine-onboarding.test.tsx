@@ -94,7 +94,7 @@ const daemon = (routes: Routes, calls: Call[] = []): FleetClient => ({
     calls.push(call);
     const key = `${method} ${path}` in routes ? `${method} ${path}` : path;
     // A machine with no review route: the one thing that lets a clone copy its settings whole.
-    if (!(key in routes) && path === '/v1/fleet/clone/review') {
+    if (!(key in routes) && path === '/v1/runtimes/clone/review') {
       throw new FyHttpError(`no route ${method} ${path}`, 404, 'unknown_route');
     }
     if (!(key in routes)) throw new Error(`no route ${method} ${path}`);
@@ -110,10 +110,10 @@ const CLAUDE_RUNTIME = runtimes([runtimeView('claude-default')]);
 const CODEX_RUNTIME = runtimes([runtimeView('codex-default', { harness: 'codex' })]);
 
 const CREDENTIAL_READS: Routes = {
-  'GET /v1/fleet/credentials': CREDENTIALS,
-  'GET /v1/fleet/runtimes': NO_RUNTIMES,
-  'GET /v1/fleet/profiles': PROFILES,
-  '/v1/fleet/setup/scan': scan(),
+  'GET /v1/logins': CREDENTIALS,
+  'GET /v1/runtimes': NO_RUNTIMES,
+  'GET /v1/runtimes/profiles': PROFILES,
+  '/v1/runtimes/setup/scan': scan(),
 };
 
 const SET_UP_READS: Routes = {
@@ -162,8 +162,8 @@ const render = async ({
   const went: string[] = [];
   const target = daemon(routes, calls);
   const source = daemon({
-    '/v1/fleet/machine': machineView({ name: 'work-linux', runtimeCount: 3 }),
-    '/v1/fleet/export': bundle(),
+    '/v1/runtimes/machine': machineView({ name: 'work-linux', runtimeCount: 3 }),
+    '/v1/runtimes/export': bundle(),
     ...work,
   });
   const factory: FleetClientFactory =
@@ -371,7 +371,7 @@ describe('MachineOnboarding · Done', () => {
     const screen = await render({
       routes: {
         ...SET_UP_READS,
-        'GET /v1/fleet/runtimes': runtimes([runtimeView('claude-default'), runtimeView('claude-glm')]),
+        'GET /v1/runtimes': runtimes([runtimeView('claude-default'), runtimeView('claude-glm')]),
       },
     });
     await screen.click('[data-onboarding-next]');
@@ -391,7 +391,7 @@ describe('MachineOnboarding · Done', () => {
   });
 
   it('says nothing of the runtimes when the machine will not list them', async () => {
-    const screen = await render({ routes: { ...SET_UP_READS, 'GET /v1/fleet/runtimes': new Error('unreachable') } });
+    const screen = await render({ routes: { ...SET_UP_READS, 'GET /v1/runtimes': new Error('unreachable') } });
     await finished(screen);
     expect(screen.q('[data-onboarding-summary-row="claude"]')?.textContent).not.toContain('claude-default');
     expect(screen.q('[data-onboarding-summary-row="speedups"]')?.textContent).toContain('Jev ✓ · Groq not set');
@@ -550,8 +550,8 @@ describe('MachineOnboarding · steps that save through their own surface', () =>
 describe('MachineOnboarding · Claude Code and Codex', () => {
   const freshRoutes = (catalog: Route = NO_RUNTIMES): Routes => ({
     ...SET_UP_READS,
-    '/v1/fleet/machine': FRESH_MACHINE,
-    'GET /v1/fleet/runtimes': catalog,
+    '/v1/runtimes/machine': FRESH_MACHINE,
+    'GET /v1/runtimes': catalog,
   });
   const fresh = (catalog: Route = NO_RUNTIMES, props: Partial<MachineOnboardingProps> = {}, extra: Routes = {}) =>
     render({ routes: { ...freshRoutes(catalog), ...extra }, machine: FRESH_MACHINE, props });
@@ -596,14 +596,14 @@ describe('MachineOnboarding · Claude Code and Codex', () => {
     const screen = await fresh(
       () => (imported ? CLAUDE_RUNTIME : NO_RUNTIMES),
       {},
-      { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: { outcome: 'executed', executor: 'setup', summary: 'Imported' } },
+      { '/v1/runtimes/proposals': STAGED, [APPLY_PATH]: { outcome: 'executed', executor: 'setup', summary: 'Imported' } },
     );
     await screen.rail('claude');
     expect(stateOf(screen, 'claude')).toBe('todo');
     expect((screen.q('[data-harness-name="claude"]') as HTMLInputElement).value).toBe('claude-default');
     imported = true;
     await screen.click('[data-change-submit]');
-    const proposed = screen.calls.find(call => call.path === '/v1/fleet/proposals');
+    const proposed = screen.calls.find(call => call.path === '/v1/runtimes/proposals');
     expect(proposed?.body).toMatchObject({ change: { kind: 'setup.import', include: ['claude'] } });
     expect(stateOf(screen, 'claude')).toBe('done');
     expect(screen.at()).toBe('claude');
@@ -701,14 +701,14 @@ describe('MachineOnboarding · Start from › Clone', () => {
       machine: FRESH_MACHINE,
       routes: {
         ...SET_UP_READS,
-        '/v1/fleet/machine': machineAnswer(),
-        'GET /v1/fleet/profiles': { format: 'version-2', profiles: [] },
-        '/v1/fleet/proposals': STAGED,
+        '/v1/runtimes/machine': machineAnswer(),
+        'GET /v1/runtimes/profiles': { format: 'version-2', profiles: [] },
+        '/v1/runtimes/proposals': STAGED,
         [APPLY_PATH]: () => {
           copied = true;
           return EXECUTED;
         },
-        'GET /v1/fleet/credentials': () => (copied ? SLOTS : credentials([])),
+        'GET /v1/logins': () => (copied ? SLOTS : credentials([])),
       },
     });
     await screen.click('[data-setup-choice="clone"] input');
@@ -778,7 +778,7 @@ describe('MachineOnboarding · focus and the phone strip', () => {
 
 describe('MachineOnboarding · Agent controls', () => {
   it('opens the Machine tab’s own controls once the machine has answered', async () => {
-    const screen = await render({ routes: { ...SET_UP_READS, '/v1/fleet/machine': machineView() } });
+    const screen = await render({ routes: { ...SET_UP_READS, '/v1/runtimes/machine': machineView() } });
     await screen.rail('controls');
     expect(screen.q('[data-onboarding-step-body="controls"]')).not.toBeNull();
   });

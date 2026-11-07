@@ -19,7 +19,7 @@
 import { type HarnessLoginFlow, HarnessLoginFlowSchema, type HarnessLoginStartRequest, HarnessLoginStartRequestSchema, type HarnessLoginSubmission, HarnessLoginSubmissionSchema, HarnessLoginSubmitRequestSchema } from '@ferretry/plugin-logins/contract';
 import type { FleetClient } from './fleet-client.ts';
 
-export const FLEET_LOGIN_PATH = '/v1/fleet/login';
+export const FLEET_LOGIN_PATH = '/v1/logins/sign-in';
 
 const flowPath = (flowId: string): string => `${FLEET_LOGIN_PATH}/${encodeURIComponent(flowId)}`;
 

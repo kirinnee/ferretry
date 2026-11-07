@@ -15,8 +15,8 @@ import {
 } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { chooseRuntimeAction, menuButton, openRuntimeMenu } from '../../../../../../../../plugins/runtimes/tests/unit/app/features/fleet/runtimes/runtime-menu-support.ts';
 
-const PROPOSE = 'POST /v1/fleet/proposals';
-const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
+const PROPOSE = 'POST /v1/runtimes/proposals';
+const APPLY = `POST /v1/runtimes/proposals/${CHANGE_ID}/apply`;
 const COMMITTED = {
   outcome: 'applied',
   apply: {
@@ -90,8 +90,8 @@ const open = async (options: Options = {}) => {
   const client = scripted(
     {
       ...READS(),
-      'GET /v1/fleet/runtimes': options.runtimes ?? AGENTS,
-      ...(shown === null ? {} : { 'GET /v1/fleet/machine': shown }),
+      'GET /v1/runtimes': options.runtimes ?? AGENTS,
+      ...(shown === null ? {} : { 'GET /v1/runtimes/machine': shown }),
       [PROPOSE]: stagedFrom,
       [APPLY]: COMMITTED,
       ...options.routes,
@@ -123,7 +123,7 @@ const optionTexts = (container: ParentNode): string[] =>
   [...select(container).options].map(option => option.textContent ?? '');
 
 const machineChanges = (calls: readonly Call[]): unknown[] =>
-  calls.filter(call => call.path === '/v1/fleet/proposals').map(call => (call.body as { change: unknown }).change);
+  calls.filter(call => call.path === '/v1/runtimes/proposals').map(call => (call.body as { change: unknown }).change);
 
 describe('Default for new agents on the Runtimes tab', () => {
   it('is one labelled row: a select of the agent runtimes, each with its state in words, and the hint', async () => {

@@ -9,9 +9,9 @@
  * RUNTIMES. `accountPickerOptions` takes the machine's runtimes, the cached
  * quota feed and the login health map as THREE SEPARATE inputs, because
  * they are three independent reads with three independent failure modes:
- * the runtimes are `GET /v1/fleet/runtimes`, quota rides the existing cached
+ * the runtimes are `GET /v1/runtimes`, quota rides the existing cached
  * `/v1/usage` feed (keyed by wrapper — `UsageAccountView.agent`), and health
- * is each login's status word from `GET /v1/fleet/credentials`. Options are
+ * is each login's status word from `GET /v1/logins`. Options are
  * joined onto each runtime: quota by `wrapper`, health by `credentialId`. A
  * missing quota or health row stays missing on the option (`null`), never a
  * zero or a healthy guess. An unreadable roster projects to `null`; a

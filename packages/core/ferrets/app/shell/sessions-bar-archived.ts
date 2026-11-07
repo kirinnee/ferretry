@@ -7,7 +7,7 @@
  * them again. It names the sessions FINISHED and ARCHIVED because that is what happened to them: a
  * reader whose ferret vanished from the list finds it named here rather than wondering.
  *
- * The rows the footer lists are the archive's OWN read (`GET /v1/archived-sessions?limit=100`), never
+ * The rows the footer lists are the archive's OWN read (`GET /v1/ferrets/archived?limit=100`), never
  * part of the live list: the filters' counts, "Needs you", the bulk stop and the hidden-stopped tally
  * all stay answers about the live set, because that is what they ask.
  */

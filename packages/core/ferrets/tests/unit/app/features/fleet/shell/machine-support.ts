@@ -19,7 +19,7 @@ export const machineView = (overrides: Partial<FleetMachineView> = {}): FleetMac
   ...overrides,
 });
 
-/** A client that answers `GET /v1/fleet/machine` through the real schema, or fails as told. */
+/** A client that answers `GET /v1/runtimes/machine` through the real schema, or fails as told. */
 export const machineClient = (answer: FleetMachineView | Error, paths: string[] = []): FleetClient => ({
   request: async (path, schema) => {
     paths.push(path);

@@ -83,12 +83,12 @@ const daemons = (target: Answers = {}, work: Answers = {}) => {
   const clients: Record<string, FleetClient> = {
     studio: scriptedClient(
       {
-        '/v1/fleet/machine': machineAnswer(),
-        '/v1/fleet/profiles': STACKS,
-        '/v1/fleet/clone/review': FULL_REVIEW,
-        '/v1/fleet/export': HERE_BUNDLE,
-        '/v1/fleet/credentials': HERE_LOGINS,
-        '/v1/fleet/proposals': STAGED,
+        '/v1/runtimes/machine': machineAnswer(),
+        '/v1/runtimes/profiles': STACKS,
+        '/v1/runtimes/clone/review': FULL_REVIEW,
+        '/v1/runtimes/export': HERE_BUNDLE,
+        '/v1/logins': HERE_LOGINS,
+        '/v1/runtimes/proposals': STAGED,
         [APPLY_PATH]: EXECUTED,
         ...target,
       },
@@ -96,8 +96,8 @@ const daemons = (target: Answers = {}, work: Answers = {}) => {
     ),
     work: scriptedClient(
       {
-        '/v1/fleet/machine': machineView({ name: 'work-linux', runtimeCount: 3 }),
-        '/v1/fleet/export': UPDATE_BUNDLE,
+        '/v1/runtimes/machine': machineView({ name: 'work-linux', runtimeCount: 3 }),
+        '/v1/runtimes/export': UPDATE_BUNDLE,
         ...work,
       },
       calls.work,
@@ -162,7 +162,7 @@ const toChanges = async (screen: Screen) => {
 
 const changeBodies = (calls: readonly Call[]) =>
   calls
-    .filter(call => call.path === '/v1/fleet/proposals')
+    .filter(call => call.path === '/v1/runtimes/proposals')
     .map(call => call.body as { change: Record<string, unknown> });
 
 // ── Tests ────────────────────────────────────────────────────────────────────────────────────────
@@ -176,7 +176,7 @@ describe('CloneMachine · Update · Existing setup', () => {
       await click(screen.q('[data-step-next]'), 'Next');
       expect(screen.step()).toBe('existing');
       // The review was asked of THIS machine, with the source's export and the names the person uses.
-      const asked = calls.target.find(call => call.path === '/v1/fleet/clone/review');
+      const asked = calls.target.find(call => call.path === '/v1/runtimes/clone/review');
       expect(asked?.body).toMatchObject({
         source: { daemonId: 'work' },
         names: { source: 'work-linux', target: 'studio-mac' },
@@ -203,7 +203,7 @@ describe('CloneMachine · Update · Existing setup', () => {
   });
 
   it('keeps Add alongside after an earlier copy: it shows the full preview and copies everything, as before', async () => {
-    const { createClient, calls } = daemons({ '/v1/fleet/clone/review': FULL_REVIEW });
+    const { createClient, calls } = daemons({ '/v1/runtimes/clone/review': FULL_REVIEW });
     const screen = await render(createClient);
     try {
       await screen.choose('work');
@@ -223,7 +223,7 @@ describe('CloneMachine · Update · Existing setup', () => {
   });
 
   it('asks nothing new of a first copy: the first-copy preview, in its own order, with no review', async () => {
-    const { createClient } = daemons({ '/v1/fleet/clone/review': FIRST_REVIEW });
+    const { createClient } = daemons({ '/v1/runtimes/clone/review': FIRST_REVIEW });
     const screen = await render(createClient);
     try {
       await screen.choose('work');
@@ -237,7 +237,7 @@ describe('CloneMachine · Update · Existing setup', () => {
   });
 
   it('falls back to the first-copy preview when this machine cannot review (an older Ferretry)', async () => {
-    const { createClient } = daemons({ '/v1/fleet/clone/review': new FyHttpError('not found', 404, undefined) });
+    const { createClient } = daemons({ '/v1/runtimes/clone/review': new FyHttpError('not found', 404, undefined) });
     const screen = await render(createClient);
     try {
       await screen.choose('work');
@@ -317,7 +317,7 @@ describe('CloneMachine · Update · Changes', () => {
 
   it('says where a relocated item lands, and why', async () => {
     const { createClient } = daemons({
-      '/v1/fleet/clone/review': review({ items: [ITEMS.relocated], same: { count: 10, probable: 0 } }),
+      '/v1/runtimes/clone/review': review({ items: [ITEMS.relocated], same: { count: 10, probable: 0 } }),
     });
     const screen = await render(createClient);
     try {
@@ -364,7 +364,7 @@ describe('CloneMachine · Update · Changes', () => {
 
   it('counts what will be written on the button, and says Nothing to copy when the choices write nothing', async () => {
     const { createClient } = daemons({
-      '/v1/fleet/clone/review': review({
+      '/v1/runtimes/clone/review': review({
         items: [ITEMS.newMcp, ITEMS.theirsHooks, ITEMS.bothSettings],
         same: { count: 8, probable: 0 },
       }),
@@ -456,7 +456,7 @@ describe('CloneMachine · Update · Changes', () => {
 
   it('shows one note and a Done button when nothing differs, with no empty section and nothing to apply', async () => {
     const { createClient, calls } = daemons({
-      '/v1/fleet/clone/review': review({ same: { count: 12, probable: 0 } }),
+      '/v1/runtimes/clone/review': review({ same: { count: 12, probable: 0 } }),
     });
     let done = 0;
     const screen = await render(createClient, () => {
@@ -481,11 +481,11 @@ describe('CloneMachine · Update · Changes', () => {
   it('refuses a stale review in words, changes nothing, and offers Review again', async () => {
     let reviews = 0;
     const { createClient, calls } = daemons({
-      '/v1/fleet/clone/review': () => {
+      '/v1/runtimes/clone/review': () => {
         reviews += 1;
         return review({ ...FULL_REVIEW, fingerprint: `fingerprint-${String(reviews)}` });
       },
-      '/v1/fleet/proposals': new FyHttpError(CLONE_REVIEW_STALE, 409, 'fleet_change_refused'),
+      '/v1/runtimes/proposals': new FyHttpError(CLONE_REVIEW_STALE, 409, 'fleet_change_refused'),
     });
     const screen = await render(createClient);
     try {
@@ -504,7 +504,7 @@ describe('CloneMachine · Update · Changes', () => {
 
       await click(screen.q('[data-review-again]'), 'Review again');
       expect(reviews).toBe(4);
-      expect(calls.target.filter(call => call.path === '/v1/fleet/clone/review')).toHaveLength(4);
+      expect(calls.target.filter(call => call.path === '/v1/runtimes/clone/review')).toHaveLength(4);
       // A fresh review is a fresh start: the stale note is gone and nothing is chosen for the both-changed item.
       expect(screen.q('[data-setup-note="stale-review"]')).toBeNull();
       expect(screen.submit()?.disabled).toBe(true);
@@ -515,7 +515,7 @@ describe('CloneMachine · Update · Changes', () => {
 
   it('words any other refusal as the daemon did, with no Review again', async () => {
     const { createClient } = daemons({
-      '/v1/fleet/proposals': new FyHttpError(
+      '/v1/runtimes/proposals': new FyHttpError(
         'settings/shared is still used by profile/review.',
         409,
         'fleet_change_refused',
@@ -590,7 +590,7 @@ describe('CloneMachine · Update · Logins', () => {
 
 describe('CloneMachine · Update · An identical copy made before origin links existed', () => {
   it('finishes by linking the names it matched, writes nothing else, and says so', async () => {
-    const { createClient, calls } = daemons({ '/v1/fleet/clone/review': NOTHING_REVIEW });
+    const { createClient, calls } = daemons({ '/v1/runtimes/clone/review': NOTHING_REVIEW });
     const screen = await render(createClient);
     try {
       await toChanges(screen);
@@ -620,7 +620,7 @@ describe('CloneMachine · Update · An identical copy made before origin links e
       expect(bodies[0]?.change).not.toHaveProperty('logins');
       expect(bodies[0]?.change).not.toHaveProperty('defaultRuntime');
       // Nothing was written but that one reviewed change: no settings file, no key, no login.
-      const allowed = new Set(['/v1/fleet/clone/review', '/v1/fleet/proposals', APPLY_PATH]);
+      const allowed = new Set(['/v1/runtimes/clone/review', '/v1/runtimes/proposals', APPLY_PATH]);
       const sent = calls.target.filter(call => call.body !== undefined).map(call => call.path);
       expect(sent.filter(path => !allowed.has(path))).toEqual([]);
       expect(screen.step()).toBe('done');
@@ -639,8 +639,8 @@ describe('CloneMachine · Update · An identical copy made before origin links e
       },
     };
     const { createClient, calls } = daemons(
-      { '/v1/fleet/clone/review': NOTHING_REVIEW, '/v1/secrets': secretNames([]) },
-      { '/v1/fleet/export': named, '/v1/secrets': secretNames(['NOTES_TOKEN']) },
+      { '/v1/runtimes/clone/review': NOTHING_REVIEW, '/v1/secrets': secretNames([]) },
+      { '/v1/runtimes/export': named, '/v1/secrets': secretNames(['NOTES_TOKEN']) },
     );
     const screen = await render(createClient);
     try {
@@ -659,11 +659,11 @@ describe('CloneMachine · Update · An identical copy made before origin links e
   it('refuses a stale link in words with Review again, and words any other refusal as the daemon did', async () => {
     let reviews = 0;
     const stale = daemons({
-      '/v1/fleet/clone/review': () => {
+      '/v1/runtimes/clone/review': () => {
         reviews += 1;
         return review({ ...NOTHING_REVIEW, fingerprint: `fingerprint-${String(reviews)}` });
       },
-      '/v1/fleet/proposals': new FyHttpError(CLONE_REVIEW_STALE, 409, 'fleet_change_refused'),
+      '/v1/runtimes/proposals': new FyHttpError(CLONE_REVIEW_STALE, 409, 'fleet_change_refused'),
     });
     const screen = await render(stale.createClient);
     try {
@@ -680,8 +680,8 @@ describe('CloneMachine · Update · An identical copy made before origin links e
     }
 
     const other = daemons({
-      '/v1/fleet/clone/review': NOTHING_REVIEW,
-      '/v1/fleet/proposals': new FyHttpError('The names changed.', 409, 'fleet_change_refused'),
+      '/v1/runtimes/clone/review': NOTHING_REVIEW,
+      '/v1/runtimes/proposals': new FyHttpError('The names changed.', 409, 'fleet_change_refused'),
     });
     const again = await render(other.createClient);
     try {
@@ -723,7 +723,7 @@ const secretNames = (names: readonly string[]) => ({
 const WARDEN = `enabled: true\nlabel: \${secret:JEV_API_KEY}\n`;
 const settingsAnswers = (): { target: Answers; work: Answers } => ({
   target: {
-    '/v1/fleet/clone/review': KEPT_ONLY,
+    '/v1/runtimes/clone/review': KEPT_ONLY,
     '/v1/secrets': secretNames([]),
     '/v1/speedups': { vault: 'ok', providers: [] },
     [fileRoute('warden.yaml')]: sourceFile('warden.yaml', '# here\n'),
@@ -805,7 +805,7 @@ const writesOf = (calls: readonly Call[]) => calls.filter(call => call.body !== 
 describe('CloneMachine · Update · A mode submits only what its own screen shows', () => {
   const identical = () => {
     const { target, work } = settingsAnswers();
-    return daemons({ ...target, '/v1/fleet/clone/review': NOTHING_REVIEW }, work);
+    return daemons({ ...target, '/v1/runtimes/clone/review': NOTHING_REVIEW }, work);
   };
 
   it('starts Add alongside with everything it can copy ticked, and an Update with the fleet alone', async () => {
@@ -878,7 +878,7 @@ describe('CloneMachine · Update · A mode submits only what its own screen show
 
   it('applies the reviewed Update after Add alongside left the fleet out, and writes no file it does not show', async () => {
     const { target, work } = settingsAnswers();
-    const { createClient, calls } = daemons({ ...target, '/v1/fleet/clone/review': FULL_REVIEW }, work);
+    const { createClient, calls } = daemons({ ...target, '/v1/runtimes/clone/review': FULL_REVIEW }, work);
     const screen = await render(createClient);
     try {
       await screen.choose('work');
@@ -951,7 +951,7 @@ describe('CloneMachine · Update · The writes it makes, in order', () => {
     const { createClient, calls } = daemons(
       {
         ...target,
-        '/v1/fleet/clone/review': FULL_REVIEW,
+        '/v1/runtimes/clone/review': FULL_REVIEW,
         '/v1/secrets': secretNames(['HELD_ONE']),
         '/v1/secrets/imports': OFFER,
         [`/v1/secrets/imports/${IMPORT_ID}`]: {
@@ -982,10 +982,10 @@ describe('CloneMachine · Update · The writes it makes, in order', () => {
       expect(screen.step()).toBe('done');
       const describeWrite = (call: Call): string => {
         const body = call.body as { change?: { kind?: string } } | undefined;
-        return call.path === '/v1/fleet/proposals' ? `propose ${body?.change?.kind ?? '?'}` : call.path;
+        return call.path === '/v1/runtimes/proposals' ? `propose ${body?.change?.kind ?? '?'}` : call.path;
       };
       // The review is a question, not a write: it carries a body but changes nothing.
-      const writes = writesOf(calls.target).filter(call => call.path !== '/v1/fleet/clone/review');
+      const writes = writesOf(calls.target).filter(call => call.path !== '/v1/runtimes/clone/review');
       expect(writes.map(describeWrite)).toEqual([
         'propose clone.import',
         APPLY_PATH,
@@ -1029,7 +1029,7 @@ const signInNeeds = (screen: Screen) =>
 
 describe('CloneMachine · Update · The login the person chose', () => {
   it('asks for no sign-in the review already settled, before the update and on Done', async () => {
-    const { createClient, calls } = daemons({ '/v1/fleet/credentials': SIGNED_IN });
+    const { createClient, calls } = daemons({ '/v1/logins': SIGNED_IN });
     const screen = await render(createClient);
     try {
       await toChanges(screen);
@@ -1052,7 +1052,7 @@ describe('CloneMachine · Update · The login the person chose', () => {
   });
 
   it('keeps the sign-in of a login that is not signed in, and links it to the login the person picked', async () => {
-    const { createClient } = daemons({ '/v1/fleet/credentials': SPARE_NOT_SIGNED_IN });
+    const { createClient } = daemons({ '/v1/logins': SPARE_NOT_SIGNED_IN });
     const screen = await render(createClient);
     try {
       await toChanges(screen);
@@ -1081,7 +1081,7 @@ describe('CloneMachine · Update · The login the person chose', () => {
         applied = true;
         return EXECUTED;
       },
-      '/v1/fleet/credentials': () => (applied ? credentials([...SIGNED_IN.credentials, slot]) : SIGNED_IN),
+      '/v1/logins': () => (applied ? credentials([...SIGNED_IN.credentials, slot]) : SIGNED_IN),
     });
     const screen = await render(createClient);
     try {
@@ -1103,7 +1103,7 @@ describe('CloneMachine · Update · The login the person chose', () => {
 
 describe('CloneMachine · Update · A login and its keys are never touched', () => {
   it('sends only the reviewed change: no sign-out, no secret write and no credential route, whatever was chosen', async () => {
-    const { createClient, calls } = daemons({ '/v1/fleet/credentials': SIGNED_IN });
+    const { createClient, calls } = daemons({ '/v1/logins': SIGNED_IN });
     const screen = await render(createClient);
     try {
       await toChanges(screen);
@@ -1117,7 +1117,7 @@ describe('CloneMachine · Update · A login and its keys are never touched', () 
       const sent = [...calls.target, ...calls.work].filter(call => call.body !== undefined).map(call => call.path);
       // The review is asked twice per read (see the stale test): once with a first copy's settings, once for the Update.
       expect(sent.toSorted()).toEqual(
-        ['/v1/fleet/clone/review', '/v1/fleet/clone/review', '/v1/fleet/proposals', APPLY_PATH].toSorted(),
+        ['/v1/runtimes/clone/review', '/v1/runtimes/clone/review', '/v1/runtimes/proposals', APPLY_PATH].toSorted(),
       );
       // The one change names the existing login to use; it carries no login to remove and no secret.
       const [body] = changeBodies(calls.target);
@@ -1137,7 +1137,7 @@ const BOTH_FLAGS_ONLY = review({ items: [ITEMS.bothSettings, ITEMS.bothProfile],
 
 describe('CloneMachine · Update · A change both machines made shows both values', () => {
   it('shows this machine’s launch flags beside the source’s, and which line differs', async () => {
-    const { createClient } = daemons({ '/v1/fleet/clone/review': BOTH_FLAGS_ONLY });
+    const { createClient } = daemons({ '/v1/runtimes/clone/review': BOTH_FLAGS_ONLY });
     const screen = await render(createClient);
     try {
       await toChanges(screen);
@@ -1161,7 +1161,7 @@ describe('CloneMachine · Update · A change both machines made shows both value
   });
 
   it('compares the fields of an item with nothing to run, and a side the item does not have as not set', async () => {
-    const { createClient } = daemons({ '/v1/fleet/clone/review': BOTH_FLAGS_ONLY });
+    const { createClient } = daemons({ '/v1/runtimes/clone/review': BOTH_FLAGS_ONLY });
     const screen = await render(createClient);
     try {
       await toChanges(screen);
@@ -1178,8 +1178,8 @@ describe('CloneMachine · Update · A change both machines made shows both value
 
   it('says so when this machine’s own setup could not be read, and still shows the source’s side', async () => {
     const { createClient } = daemons({
-      '/v1/fleet/clone/review': BOTH_FLAGS_ONLY,
-      '/v1/fleet/export': new FyHttpError('unreadable', 500, undefined),
+      '/v1/runtimes/clone/review': BOTH_FLAGS_ONLY,
+      '/v1/runtimes/export': new FyHttpError('unreadable', 500, undefined),
     });
     const screen = await render(createClient);
     try {
@@ -1197,7 +1197,7 @@ describe('CloneMachine · Update · A change both machines made shows both value
 
   it('shows no comparison for an item that is not both-changed, or one whose only change is a document', async () => {
     const { createClient } = daemons({
-      '/v1/fleet/clone/review': review({ items: [ITEMS.newMcp, ITEMS.bothHooks], same: { count: 4, probable: 0 } }),
+      '/v1/runtimes/clone/review': review({ items: [ITEMS.newMcp, ITEMS.bothHooks], same: { count: 4, probable: 0 } }),
     });
     const screen = await render(createClient);
     try {
@@ -1248,7 +1248,7 @@ describe('CloneMachine · Update · Logins and keys, in every state', () => {
   });
 
   it('says a login matched under another name is already here as that login, an API-key login copies as new, and a sign-in is an empty slot', async () => {
-    const { createClient } = daemons({ '/v1/fleet/clone/review': KEYS_REVIEW });
+    const { createClient } = daemons({ '/v1/runtimes/clone/review': KEYS_REVIEW });
     const screen = await render(createClient);
     try {
       await toChanges(screen);
@@ -1265,7 +1265,7 @@ describe('CloneMachine · Update · Logins and keys, in every state', () => {
   });
 
   it('names each key that differs by what happens to it, hides the ones that are the same, and lists the settings keys that differ', async () => {
-    const { createClient } = daemons({ '/v1/fleet/clone/review': KEYS_REVIEW });
+    const { createClient } = daemons({ '/v1/runtimes/clone/review': KEYS_REVIEW });
     const screen = await render(createClient);
     try {
       await toChanges(screen);
@@ -1306,7 +1306,7 @@ describe('CloneMachine · Update · Logins and keys, in every state', () => {
       });
     const keysSetup = (outcome: 'newer' | 'both' | 'same') =>
       daemons(
-        { '/v1/fleet/clone/review': keyed(outcome), '/v1/secrets': stampedSecrets(['DEMO_API_KEY'], HERE_AT) },
+        { '/v1/runtimes/clone/review': keyed(outcome), '/v1/secrets': stampedSecrets(['DEMO_API_KEY'], HERE_AT) },
         { '/v1/secrets': stampedSecrets(['DEMO_API_KEY', 'DEMO_SERVICE_TOKEN'], SOURCE_AT) },
       );
 
@@ -1315,7 +1315,7 @@ describe('CloneMachine · Update · Logins and keys, in every state', () => {
       const screen = await render(createClient);
       try {
         await toChanges(screen);
-        const reviews = calls.target.filter(call => call.path === '/v1/fleet/clone/review');
+        const reviews = calls.target.filter(call => call.path === '/v1/runtimes/clone/review');
         expect(reviews.length).toBeGreaterThan(0);
         // Every review the Update stands on carries the keys (names and instants), so it can report a newer one.
         for (const asked of reviews) {
@@ -1336,13 +1336,13 @@ describe('CloneMachine · Update · Logins and keys, in every state', () => {
     it('sends no key list a review cannot take (more than the route allows) and still makes the review', async () => {
       const many = Array.from({ length: CLONE_SOURCE_SECRETS_LIMIT + 1 }, (_, index) => `MANY_KEY_${String(index)}`);
       const { createClient, calls } = daemons(
-        { '/v1/fleet/clone/review': keyed('same'), '/v1/secrets': stampedSecrets([], HERE_AT) },
+        { '/v1/runtimes/clone/review': keyed('same'), '/v1/secrets': stampedSecrets([], HERE_AT) },
         { '/v1/secrets': stampedSecrets(many, SOURCE_AT) },
       );
       const screen = await render(createClient);
       try {
         await toChanges(screen);
-        const reviews = calls.target.filter(call => call.path === '/v1/fleet/clone/review');
+        const reviews = calls.target.filter(call => call.path === '/v1/runtimes/clone/review');
         expect(reviews.length).toBeGreaterThan(0);
         for (const asked of reviews) expect(asked.body).not.toHaveProperty('sourceSecrets');
         expect(screen.submit()?.textContent).toContain('Update 1 thing');
@@ -1371,7 +1371,7 @@ describe('CloneMachine · Update · Logins and keys, in every state', () => {
           expect(screen.step()).toBe('done');
           expect(calls.work.some(call => call.path.startsWith('/v1/secrets/exports/'))).toBe(false);
           expect(calls.target.some(call => call.path.startsWith('/v1/secrets/imports'))).toBe(false);
-          expect(calls.target.some(call => call.path === '/v1/fleet/clone/keys')).toBe(false);
+          expect(calls.target.some(call => call.path === '/v1/runtimes/clone/keys')).toBe(false);
           expect(calls.target.filter(call => call.path === '/v1/secrets' && call.body !== undefined)).toEqual([]);
         } finally {
           await screen.view.unmount();
@@ -1414,7 +1414,7 @@ describe('CloneMachine · Update · Logins and keys, in every state', () => {
 describe('CloneMachine · Update · Other states of the sheet', () => {
   it('words the Existing setup step without a date when the copy has no record of when it was made', async () => {
     const { createClient } = daemons({
-      '/v1/fleet/clone/review': review({ ...FULL_REVIEW, source: { name: 'work-linux', verified: 'browser' } }),
+      '/v1/runtimes/clone/review': review({ ...FULL_REVIEW, source: { name: 'work-linux', verified: 'browser' } }),
     });
     const screen = await render(createClient);
     try {
@@ -1430,7 +1430,7 @@ describe('CloneMachine · Update · Other states of the sheet', () => {
 
   it('lists no Logins and keys group when the review has no login, key or settings key to say anything about', async () => {
     const { createClient } = daemons({
-      '/v1/fleet/clone/review': review({ items: [ITEMS.newMcp], logins: [], same: { count: 3, probable: 0 } }),
+      '/v1/runtimes/clone/review': review({ items: [ITEMS.newMcp], logins: [], same: { count: 3, probable: 0 } }),
     });
     const screen = await render(createClient);
     try {
@@ -1444,7 +1444,7 @@ describe('CloneMachine · Update · Other states of the sheet', () => {
 
   it('offers no Update for a setup this machine would refuse, and says why', async () => {
     const orphan = { ...UPDATE_BUNDLE, files: [...UPDATE_BUNDLE.files, { path: 'components/lost.md', content: 'x' }] };
-    const { createClient, calls } = daemons({}, { '/v1/fleet/export': orphan });
+    const { createClient, calls } = daemons({}, { '/v1/runtimes/export': orphan });
     const screen = await render(createClient);
     try {
       await toChanges(screen);
@@ -1459,7 +1459,7 @@ describe('CloneMachine · Update · Other states of the sheet', () => {
   });
 
   it('starts over only when asked, with no reviewed fingerprint and no login named, and keeps every login', async () => {
-    const { createClient, calls } = daemons({ '/v1/fleet/credentials': SIGNED_IN });
+    const { createClient, calls } = daemons({ '/v1/logins': SIGNED_IN });
     const screen = await render(createClient);
     try {
       await screen.choose('work');
@@ -1521,12 +1521,12 @@ describe('CloneMachine · Update · Settings compared key by key', () => {
     screen.all(`[data-clone-key="${name}"] input[type="radio"]`) as HTMLInputElement[];
   /** Every review this machine was asked for: each one also carries the source's keys (`sourceSecrets`). */
   const reviewBodies = (calls: readonly Call[]) =>
-    calls.filter(call => call.path === '/v1/fleet/clone/review').map(call => call.body as { settings?: unknown[] });
+    calls.filter(call => call.path === '/v1/runtimes/clone/review').map(call => call.body as { settings?: unknown[] });
 
   const setup = (target: Answers = {}) => {
     const { target: here, work } = settingsAnswers();
     return daemons(
-      { ...here, '/v1/config/status': configStatus([HELD]), '/v1/fleet/clone/review': answering(), ...target },
+      { ...here, '/v1/config/status': configStatus([HELD]), '/v1/runtimes/clone/review': answering(), ...target },
       work,
     );
   };
@@ -1598,7 +1598,7 @@ describe('CloneMachine · Update · Settings compared key by key', () => {
 
   it('shows the default runtime as a row of its own, since an Update has no picker for it', async () => {
     const { createClient, calls } = setup({
-      '/v1/fleet/clone/review': answering({ controls: [DEFAULT_ROW] }),
+      '/v1/runtimes/clone/review': answering({ controls: [DEFAULT_ROW] }),
     });
     const screen = await render(createClient);
     try {
@@ -1620,7 +1620,7 @@ describe('CloneMachine · Update · Settings compared key by key', () => {
     let asked = 0;
     const plain = answering();
     const { createClient, calls } = setup({
-      '/v1/fleet/clone/review': (call: Call) => {
+      '/v1/runtimes/clone/review': (call: Call) => {
         // The third review: the one the tick asks for (the Update's own review already carries the keys).
         asked += 1;
         return asked === 3 ? new Error('network down') : plain(call);
@@ -1694,7 +1694,7 @@ describe('CloneMachine · Update · Settings compared key by key', () => {
         });
       };
     const only = (rows?: Partial<Record<CloneSettingsDoc, Rows>>, probable = 0) =>
-      setup({ '/v1/fleet/clone/review': settingsOnly(rows, probable) });
+      setup({ '/v1/runtimes/clone/review': settingsOnly(rows, probable) });
 
     it('keeps the settings files on screen and says nothing to copy only until one is ticked', async () => {
       const { createClient, calls } = only();
@@ -1834,7 +1834,7 @@ describe('CloneMachine · Update · Settings compared key by key', () => {
       sent === undefined || sent.length === 0 ? 'fleet' : `fleet+${analysed(sent).fingerprint}`;
     const daemon = (items: FleetCloneReview['items'] = []) =>
       setup({
-        '/v1/fleet/clone/review': (call: Call): unknown => {
+        '/v1/runtimes/clone/review': (call: Call): unknown => {
           const sent = (call.body as { settings?: { path: CloneSettingsDoc; text: string }[] }).settings;
           return review({
             items,
@@ -1843,7 +1843,7 @@ describe('CloneMachine · Update · Settings compared key by key', () => {
             fingerprint: bound(sent),
           });
         },
-        '/v1/fleet/proposals': (call: Call): unknown => {
+        '/v1/runtimes/proposals': (call: Call): unknown => {
           const change = FleetAccountChangeSchema.parse((call.body as { change: unknown }).change);
           if (change.kind === 'clone.import' && change.reviewed !== bound(change.settings)) {
             return new FyHttpError(CLONE_REVIEW_STALE, 409, 'fleet_change_refused');

@@ -45,7 +45,7 @@ describe('the compact-at dials', () => {
     const { fetcher, calls } = recording(200, READ);
     expect(await getSessionCompactAt(daemon, 'ses/1', fetcher)).toEqual(READ);
     expect(calls.map(call => [call.url, call.method ?? 'GET'])).toEqual([
-      ['https://a.example.test/v1/sessions/ses%2F1/compact-at', 'GET'],
+      ['https://a.example.test/v1/ferrets/ses%2F1/compact-at', 'GET'],
     ]);
   });
 
@@ -60,7 +60,7 @@ describe('the compact-at dials', () => {
     const answer = await patchSessionCompactAt(daemon, 'ses/1', 300_000, fetcher);
     expect(answer.note).toBe('Saved.');
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/ses%2F1/compact-at');
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/ferrets/ses%2F1/compact-at');
     expect(calls[0]?.method).toBe('PATCH');
     expect(calls[0]?.body).toEqual({ compactAt: 300_000 });
     expect(calls[0]?.headers.get('content-type')).toBe('application/json');

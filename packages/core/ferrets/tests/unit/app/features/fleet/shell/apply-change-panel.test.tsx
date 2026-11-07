@@ -162,7 +162,7 @@ describe('useAccountChanges', () => {
   it('reads authority, applies a change and keeps nothing to show when it worked', async () => {
     const calls: Call[] = [];
     const client = scriptedClient(
-      { '/v1/fleet/machine': machineAnswer(), '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME },
+      { '/v1/runtimes/machine': machineAnswer(), '/v1/runtimes/proposals': STAGED, [APPLY_PATH]: OUTCOME },
       calls,
     );
     const { view, hooks } = await hookView(async () => client);
@@ -185,8 +185,8 @@ describe('useAccountChanges', () => {
     );
     let stageAnswer: unknown = off;
     const client = scriptedClient({
-      '/v1/fleet/machine': machineAnswer(),
-      '/v1/fleet/proposals': () => stageAnswer,
+      '/v1/runtimes/machine': machineAnswer(),
+      '/v1/runtimes/proposals': () => stageAnswer,
       [APPLY_PATH]: OUTCOME,
     });
     const { view, hooks } = await hookView(async () => client);
@@ -214,8 +214,8 @@ describe('useAccountChanges', () => {
 
   it('reads a step-up-required machine as the step-up authority and still applies', async () => {
     const client = scriptedClient({
-      '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
-      '/v1/fleet/proposals': STAGED,
+      '/v1/runtimes/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
+      '/v1/runtimes/proposals': STAGED,
       [APPLY_PATH]: OUTCOME,
     });
     const { view, hooks } = await hookView(async () => client);
@@ -229,7 +229,7 @@ describe('useAccountChanges', () => {
   });
 
   it('shows a sentence the caller worded where a refusal shows', async () => {
-    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
+    const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer() });
     const { view, hooks } = await hookView(async () => client);
     await interact(() => hooks().refuse('Claude didn’t accept that code.'));
     expect(view.container.querySelector('p')?.textContent).toBe('Claude didn’t accept that code.');
@@ -255,8 +255,8 @@ describe('useAccountChanges', () => {
       release = resolve;
     });
     const client = scriptedClient({
-      '/v1/fleet/machine': machineAnswer(),
-      '/v1/fleet/proposals': STAGED,
+      '/v1/runtimes/machine': machineAnswer(),
+      '/v1/runtimes/proposals': STAGED,
       [APPLY_PATH]: OUTCOME,
     });
     const view = await mount(<HookHost connection={STUDIO} factory={() => slow} probe={probe} />);

@@ -17,7 +17,7 @@ const CHANGE = {
   defaultRuntime: 'claude-default',
   agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
 } as const;
-const ROUTES = { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME };
+const ROUTES = { '/v1/runtimes/proposals': STAGED, [APPLY_PATH]: OUTCOME };
 
 const paths = (calls: readonly Call[]): string[] => calls.map(call => call.path);
 
@@ -38,19 +38,19 @@ describe('fleetApplyAuthority', () => {
 
 describe('readChangeAuthority', () => {
   it('reads what this browser may change, and calls a failed read unreadable', async () => {
-    expect(await readChangeAuthority(scriptedClient({ '/v1/fleet/machine': machineAnswer() }))).toEqual({
+    expect(await readChangeAuthority(scriptedClient({ '/v1/runtimes/machine': machineAnswer() }))).toEqual({
       kind: 'open',
     });
     expect(
       await readChangeAuthority(
         scriptedClient({
-          '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
+          '/v1/runtimes/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
         }),
       ),
     ).toEqual({ kind: 'step-up' });
     expect(
       await readChangeAuthority(
-        scriptedClient({ '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'not-granted' }) }),
+        scriptedClient({ '/v1/runtimes/machine': machineAnswer({ mayApply: false, applyRefusal: 'not-granted' }) }),
       ),
     ).toEqual({ kind: 'refused', refusal: 'not-granted' });
     expect(await readChangeAuthority(scriptedClient({}))).toEqual({ kind: 'unreadable' });
@@ -62,7 +62,7 @@ describe('applyAccountChange', () => {
     const calls: Call[] = [];
     const result = await applyAccountChange(scriptedClient(ROUTES, calls), CHANGE);
     expect(result).toEqual({ kind: 'applied', staged: STAGED, outcome: OUTCOME });
-    expect(paths(calls)).toEqual(['/v1/fleet/proposals', APPLY_PATH]);
+    expect(paths(calls)).toEqual(['/v1/runtimes/proposals', APPLY_PATH]);
     expect(calls[0]?.body).toEqual({ change: CHANGE });
     expect(calls[1]?.body).toEqual({});
     expect(calls.every(call => Object.keys(call.headers).every(name => name === 'content-type'))).toBe(true);
@@ -71,12 +71,12 @@ describe('applyAccountChange', () => {
   it('a refused stage stops there, in the daemon’s own words, with its code', async () => {
     const calls: Call[] = [];
     const off = new FyHttpError('This change conflicts with the setup on this machine.', 409, 'fleet_change_conflict');
-    expect(await applyAccountChange(scriptedClient({ '/v1/fleet/proposals': off }, calls), CHANGE)).toEqual({
+    expect(await applyAccountChange(scriptedClient({ '/v1/runtimes/proposals': off }, calls), CHANGE)).toEqual({
       kind: 'refused',
       sentence: 'This change conflicts with the setup on this machine.',
       code: 'fleet_change_conflict',
     });
-    expect(paths(calls)).toEqual(['/v1/fleet/proposals']);
+    expect(paths(calls)).toEqual(['/v1/runtimes/proposals']);
   });
 
   it('a failed apply is one sentence too', async () => {
@@ -95,13 +95,13 @@ describe('stage then apply, separately', () => {
     const client = scriptedClient(ROUTES, calls);
     expect(await stageAccountChange(client, CHANGE)).toEqual({ kind: 'staged', staged: STAGED });
     expect(await applyStagedChange(client, STAGED)).toMatchObject({ kind: 'applied', outcome: OUTCOME });
-    expect(paths(calls)).toEqual(['/v1/fleet/proposals', APPLY_PATH]);
+    expect(paths(calls)).toEqual(['/v1/runtimes/proposals', APPLY_PATH]);
   });
 
   it('an unreachable machine is a sentence too', async () => {
     expect(await stageAccountChange(scriptedClient({}), CHANGE)).toMatchObject({
       kind: 'refused',
-      sentence: 'This machine didn’t answer (no route /v1/fleet/proposals). Check it is awake and try again.',
+      sentence: 'This machine didn’t answer (no route /v1/runtimes/proposals). Check it is awake and try again.',
     });
   });
 });
@@ -126,14 +126,14 @@ describe('changeRefusalSentence', () => {
   const named = (name: string, message: string): Error => Object.assign(new Error(message), { name });
 
   it('says a request that timed out may still have been applied', () => {
-    const late = new FyTransportError('fyd did not answer', '/v1/fleet/login', true, new Error('TimeoutError'));
+    const late = new FyTransportError('fyd did not answer', '/v1/logins/sign-in', true, new Error('TimeoutError'));
     expect(changeRefusalSentence(late)).toBe(
       'This machine didn’t answer in time, so this browser stopped waiting. It may still have made the change — check before trying again.',
     );
   });
 
   it('names why a machine could not be reached, and says less when nothing says why', () => {
-    const refused = new FyTransportError('could not reach fyd', '/v1/fleet/login', false, new Error('Load failed.'));
+    const refused = new FyTransportError('could not reach fyd', '/v1/logins/sign-in', false, new Error('Load failed.'));
     expect(changeRefusalSentence(refused)).toBe(
       'This browser couldn’t reach this machine (Load failed). Check it is awake and online, then try again.',
     );

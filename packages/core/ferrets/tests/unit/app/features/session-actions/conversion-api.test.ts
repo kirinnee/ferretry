@@ -46,7 +46,7 @@ describe('readConversionPreview', () => {
       'codex-a',
     );
     expect(answer).toEqual(ready);
-    expect(seen[0]?.url).toBe('https://a.invalid/v1/sessions/s%2F1/conversion-preview');
+    expect(seen[0]?.url).toBe('https://a.invalid/v1/ferrets/s%2F1/conversion-preview');
     expect(seen[0]?.init?.method).toBe('POST');
     expect(seen[0]?.init?.body).toBe(JSON.stringify({ agent: 'codex-a' }));
   });

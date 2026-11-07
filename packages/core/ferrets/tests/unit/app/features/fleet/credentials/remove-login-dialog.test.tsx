@@ -23,9 +23,9 @@ import {
   stagedFrom,
 } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
-const CHANGES = 'POST /v1/fleet/proposals';
-const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
-const LIST = 'GET /v1/fleet/credentials';
+const CHANGES = 'POST /v1/runtimes/proposals';
+const APPLY = `POST /v1/runtimes/proposals/${CHANGE_ID}/apply`;
+const LIST = 'GET /v1/logins';
 const HASH = '#machines/studio-mac/sign-ins';
 
 afterEach(() => {
@@ -208,13 +208,13 @@ describe('Remove a login · the buttons', () => {
 
   it('disables Remove, with the reason, when this device may not change the fleet', async () => {
     const refused = machineWith({ mayApply: false, applyRefusal: 'not-granted' });
-    const list = await open(HASH, { machine: refused, routes: { 'GET /v1/fleet/machine': refused } });
+    const list = await open(HASH, { machine: refused, routes: { 'GET /v1/runtimes/machine': refused } });
     const remove = must(list.view.container.querySelector<HTMLButtonElement>('[data-credential-remove]'), 'remove');
     expect(remove.disabled).toBe(true);
     expect(remove.title.length).toBeGreaterThan(0);
     await list.view.unmount();
 
-    const detail = await open(`${HASH}/kirin-old`, { machine: refused, routes: { 'GET /v1/fleet/machine': refused } });
+    const detail = await open(`${HASH}/kirin-old`, { machine: refused, routes: { 'GET /v1/runtimes/machine': refused } });
     expect(text(detail.view.container, '[data-credential-remove-refused]')).toStartWith('Remove is off here: ');
     await detail.view.unmount();
   });

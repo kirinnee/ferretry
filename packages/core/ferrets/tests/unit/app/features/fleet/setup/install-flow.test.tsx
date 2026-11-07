@@ -57,9 +57,9 @@ describe('InstallTool', () => {
     const watch = spies();
     const client = scriptedClient(
       {
-        '/v1/fleet/machine': machineAnswer(),
-        '/v1/fleet/setup/scan': NOTHING_INSTALLED,
-        '/v1/fleet/machine/tools/install': {
+        '/v1/runtimes/machine': machineAnswer(),
+        '/v1/runtimes/setup/scan': NOTHING_INSTALLED,
+        '/v1/runtimes/machine/tools/install': {
           outcomes: [{ harness: 'claude', outcome: 'installed', command: 'npm install -g @anthropic-ai/claude-code' }],
         },
       },
@@ -80,7 +80,7 @@ describe('InstallTool', () => {
 
       await click(view.container.querySelector('[data-change-submit]'), 'install');
       const install = must(
-        calls.find(call => call.path === '/v1/fleet/machine/tools/install'),
+        calls.find(call => call.path === '/v1/runtimes/machine/tools/install'),
         'install call',
       );
       expect(install.body).toEqual({ harnesses: ['claude'] });
@@ -105,12 +105,12 @@ describe('InstallTool', () => {
       release = resolve;
     });
     const client = scriptedClient({
-      '/v1/fleet/machine': machineAnswer(),
-      '/v1/fleet/setup/scan': NOTHING_INSTALLED,
+      '/v1/runtimes/machine': machineAnswer(),
+      '/v1/runtimes/setup/scan': NOTHING_INSTALLED,
     });
     const slow: FleetClient = {
       request: async (path, schema, init) => {
-        if (path === '/v1/fleet/setup/scan') await gate;
+        if (path === '/v1/runtimes/setup/scan') await gate;
         return await client.request(path, schema, init);
       },
     };
@@ -146,7 +146,7 @@ describe('InstallTool', () => {
 
   it('says it is already installed and only offers Done', async () => {
     const watch = spies();
-    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer(), '/v1/fleet/setup/scan': scan() });
+    const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer(), '/v1/runtimes/setup/scan': scan() });
     const view = await mount(element(client, watch, { harness: 'codex' }));
     try {
       await settle();
@@ -165,15 +165,15 @@ describe('InstallTool', () => {
     const calls: Call[] = [];
     const client = scriptedClient(
       {
-        '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
-        '/v1/fleet/setup/scan': NOTHING_INSTALLED,
+        '/v1/runtimes/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
+        '/v1/runtimes/setup/scan': NOTHING_INSTALLED,
       },
       calls,
     );
     const view = await mount(element(client, spies()));
     try {
       await settle();
-      expect(calls.some(call => call.path === '/v1/fleet/setup/scan')).toBe(true);
+      expect(calls.some(call => call.path === '/v1/runtimes/setup/scan')).toBe(true);
       expect(view.container.querySelector('[data-change-step-up]')?.textContent).toBe(
         'studio-mac will ask you to confirm with your passkey when you save.',
       );
@@ -186,14 +186,14 @@ describe('InstallTool', () => {
   });
 
   it('says it could not look when the scan cannot be read', async () => {
-    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
+    const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer() });
     const view = await mount(element(client, spies()));
     try {
       await settle();
       const note = must(view.container.querySelector('[data-setup-note="scan-failed"]'), 'scan failure');
       expect(note.textContent).toContain('Couldn’t look at studio-mac');
       expect(note.textContent).toContain(
-        'This machine didn’t answer (no route /v1/fleet/setup/scan). Check it is awake and try again.',
+        'This machine didn’t answer (no route /v1/runtimes/setup/scan). Check it is awake and try again.',
       );
       expect(view.container.querySelector('[data-install-flow]')).toBeNull();
     } finally {
@@ -204,8 +204,8 @@ describe('InstallTool', () => {
   it('pauses on an offline machine and Retry asks again', async () => {
     const watch = spies();
     const client = scriptedClient({
-      '/v1/fleet/machine': machineAnswer(),
-      '/v1/fleet/setup/scan': NOTHING_INSTALLED,
+      '/v1/runtimes/machine': machineAnswer(),
+      '/v1/runtimes/setup/scan': NOTHING_INSTALLED,
     });
     const view = await mount(element(client, watch, { online: false }));
     try {
@@ -224,8 +224,8 @@ describe('InstallTool', () => {
   it('asks before leaving from Cancel and leaves straight away from Back', async () => {
     const watch = spies();
     const client = scriptedClient({
-      '/v1/fleet/machine': machineAnswer(),
-      '/v1/fleet/setup/scan': NOTHING_INSTALLED,
+      '/v1/runtimes/machine': machineAnswer(),
+      '/v1/runtimes/setup/scan': NOTHING_INSTALLED,
     });
     const view = await mount(element(client, watch));
     try {

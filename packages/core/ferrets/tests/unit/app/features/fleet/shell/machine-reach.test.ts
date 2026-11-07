@@ -15,7 +15,7 @@ describe('machine reach', () => {
     const paths: string[] = [];
     const reach = await readMachineReach(async () => machineClient(machineView(), paths));
     expect(reach).toEqual({ kind: 'online', machine: machineView() });
-    expect(paths).toEqual(['/v1/fleet/machine']);
+    expect(paths).toEqual(['/v1/runtimes/machine']);
   });
 
   it('calls a refusal reachable, with a reason, and anything else offline', async () => {

@@ -1,7 +1,7 @@
 /**
  * The Update review (docs/design/account-model.md §3.8 L8–L16, §4.7), as data.
  *
- * `POST /v1/fleet/clone/review` answers every item that DIFFERS from the copy of the other machine, why,
+ * `POST /v1/runtimes/clone/review` answers every item that DIFFERS from the copy of the other machine, why,
  * and what is chosen for it. This module groups that answer for the screen, holds the person's choices,
  * and counts what the button will write. It is pure: the sheet (`clone-review.tsx`) draws it.
  *

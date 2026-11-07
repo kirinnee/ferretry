@@ -65,8 +65,8 @@ describe('the session MCP dials', () => {
     // Assert
     expect(answer).toEqual(listing);
     expect(calls.map(call => [call.url, call.method])).toEqual([
-      ['https://a.example.test/v1/sessions/ses%2F1/mcp', 'GET'],
-      ['https://a.example.test/v1/sessions/ses%2F1/mcp', 'GET'],
+      ['https://a.example.test/v1/ferrets/ses%2F1/mcp', 'GET'],
+      ['https://a.example.test/v1/ferrets/ses%2F1/mcp', 'GET'],
     ]);
     expect(calls[0]?.signal).toBe(signal);
     expect(calls[1]?.signal).toBeUndefined();
@@ -86,8 +86,8 @@ describe('the session MCP dials', () => {
     expect(projectPreview.scope).toBe('project');
     expect(loginPreview).toEqual({ scope: 'login', runtime: 'r', profile: 'p', replaces: false, ferrets: 2 });
     expect([...project.calls, ...login.calls].map(call => [call.url, call.method, call.body])).toEqual([
-      ['https://a.example.test/v1/sessions/ses%2F1/mcp/project/preview', 'POST', REQUEST],
-      ['https://a.example.test/v1/sessions/ses%2F1/mcp/login/preview', 'POST', REQUEST],
+      ['https://a.example.test/v1/ferrets/ses%2F1/mcp/project/preview', 'POST', REQUEST],
+      ['https://a.example.test/v1/ferrets/ses%2F1/mcp/login/preview', 'POST', REQUEST],
     ]);
     expect(project.calls[0]?.signal).toBe(signal);
   });
@@ -105,8 +105,8 @@ describe('the session MCP dials', () => {
     expect(projectAdded).toEqual({ scope: 'project', name: 'acme', path: '/r/.mcp.json', etag: ETAG });
     expect(loginAdded.scope).toBe('login');
     expect([...project.calls, ...login.calls].map(call => [call.url, call.method, call.body])).toEqual([
-      ['https://a.example.test/v1/sessions/ses%2F1/mcp/project', 'POST', { ...REQUEST, etag: null }],
-      ['https://a.example.test/v1/sessions/ses%2F1/mcp/login', 'POST', REQUEST],
+      ['https://a.example.test/v1/ferrets/ses%2F1/mcp/project', 'POST', { ...REQUEST, etag: null }],
+      ['https://a.example.test/v1/ferrets/ses%2F1/mcp/login', 'POST', REQUEST],
     ]);
   });
 

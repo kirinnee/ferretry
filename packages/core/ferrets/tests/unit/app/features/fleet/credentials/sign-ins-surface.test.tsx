@@ -26,7 +26,7 @@ const open = async (hash: string, withPanels = true) => {
   window.location.hash = hash;
   const calls: Call[] = [];
   const client = scripted(
-    { ...READS(), 'POST /v1/fleet/proposals': stagedFrom, 'POST /v1/fleet/proposals/change-1/apply': APPLIED },
+    { ...READS(), 'POST /v1/runtimes/proposals': stagedFrom, 'POST /v1/runtimes/proposals/change-1/apply': APPLIED },
     calls,
   );
   const asked: Asked = { groups: [], panels: [] };

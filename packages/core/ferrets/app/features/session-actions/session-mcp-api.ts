@@ -62,7 +62,7 @@ const ofScope = <Value extends { readonly scope: SessionMcpScope }>(which: Sessi
   return value;
 };
 
-/** `GET /v1/sessions/:id/mcp`: the project file's servers, or why this ferret has no project scope. */
+/** `GET /v1/ferrets/:id/mcp`: the project file's servers, or why this ferret has no project scope. */
 export const readSessionMcp = (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
@@ -72,7 +72,7 @@ export const readSessionMcp = (
   assertScopeDaemon(daemon, scope);
   return answer(
     daemon,
-    `/v1/sessions/${encodeURIComponent(scope.sessionId)}/mcp`,
+    `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/mcp`,
     { method: 'GET', cache: 'no-store', ...(signal === undefined ? {} : { signal }) },
     SessionMcpListingSchema,
     fetcher,
@@ -94,14 +94,14 @@ export const previewSessionMcp = async (
     which === 'project'
       ? await answer(
           daemon,
-          `/v1/sessions/${encodeURIComponent(scope.sessionId)}/mcp/project/preview`,
+          `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/mcp/project/preview`,
           jsonPost(body, signal),
           SessionMcpPreviewSchema,
           fetcher,
         )
       : await answer(
           daemon,
-          `/v1/sessions/${encodeURIComponent(scope.sessionId)}/mcp/login/preview`,
+          `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/mcp/login/preview`,
           jsonPost(body, signal),
           SessionMcpPreviewSchema,
           fetcher,
@@ -125,14 +125,14 @@ export const addSessionMcp = async (
     which === 'project'
       ? await answer(
           daemon,
-          `/v1/sessions/${encodeURIComponent(scope.sessionId)}/mcp/project`,
+          `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/mcp/project`,
           jsonPost(request),
           SessionMcpAddedSchema,
           fetcher,
         )
       : await answer(
           daemon,
-          `/v1/sessions/${encodeURIComponent(scope.sessionId)}/mcp/login`,
+          `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/mcp/login`,
           jsonPost({ name: request.name, server: request.server }),
           SessionMcpAddedSchema,
           fetcher,

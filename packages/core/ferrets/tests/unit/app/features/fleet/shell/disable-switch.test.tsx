@@ -20,8 +20,8 @@ import {
   stagedFrom,
 } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
-const PROPOSE = 'POST /v1/fleet/proposals';
-const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
+const PROPOSE = 'POST /v1/runtimes/proposals';
+const APPLY = `POST /v1/runtimes/proposals/${CHANGE_ID}/apply`;
 
 const mounted: Mounted[] = [];
 afterEach(async () => {
@@ -50,7 +50,7 @@ const fill = async (field: HTMLInputElement | HTMLSelectElement, value: string):
 };
 
 const proposed = (calls: readonly Call[]): unknown[] =>
-  calls.filter(call => call.path === '/v1/fleet/proposals').map(call => (call.body as { change: unknown }).change);
+  calls.filter(call => call.path === '/v1/runtimes/proposals').map(call => (call.body as { change: unknown }).change);
 
 const OFF = { reason: 'Spend limit reached', until: '2026-11-01T00:00:00.000Z' } as const;
 
@@ -154,14 +154,14 @@ describe('the switch on a login', () => {
     );
     await fill(must(view.container.querySelector<HTMLSelectElement>('[data-disable-until]'), 'until'), 'date');
     await fill(must(view.container.querySelector<HTMLInputElement>('[data-disable-date]'), 'date'), '2026-11-01');
-    const reads = calls.filter(call => call.path === '/v1/fleet/credentials').length;
+    const reads = calls.filter(call => call.path === '/v1/logins').length;
     await click(view.container.querySelector('[data-disable-form] [data-change-submit]'), 'submit');
 
     // Assert
     expect(proposed(calls)).toEqual([
       { kind: 'credential.disable', id: 'codex', reason: 'Out of credit', until: '2026-11-01T00:00:00.000Z' },
     ]);
-    expect(calls.filter(call => call.path === '/v1/fleet/credentials').length).toBeGreaterThan(reads);
+    expect(calls.filter(call => call.path === '/v1/logins').length).toBeGreaterThan(reads);
     expect(view.container.querySelector('[data-disable-form]')).toBeNull();
   });
 
@@ -203,7 +203,7 @@ describe('the switch on a login', () => {
     const calls: Call[] = [];
     const view = await openCredentials(
       '#machines/studio-mac/sign-ins',
-      { 'GET /v1/fleet/credentials': credentialsWith('codex') },
+      { 'GET /v1/logins': credentialsWith('codex') },
       calls,
     );
     const toggle = switchOf(view.container, 'codex');
@@ -236,7 +236,7 @@ describe('the switch on a login', () => {
   it('should lock the switch, with the reason, when this device may not change the fleet', async () => {
     // Act
     const view = await openCredentials('#machines/studio-mac/sign-ins/claude-work', {
-      'GET /v1/fleet/machine': machineWith({ mayApply: false, applyRefusal: 'not-granted' }),
+      'GET /v1/runtimes/machine': machineWith({ mayApply: false, applyRefusal: 'not-granted' }),
     });
 
     // Assert
@@ -249,7 +249,7 @@ describe('the switch on a login', () => {
   it('should say why when a switch-on is refused', async () => {
     // Arrange
     const view = await openCredentials('#machines/studio-mac/sign-ins', {
-      'GET /v1/fleet/credentials': credentialsWith('codex'),
+      'GET /v1/logins': credentialsWith('codex'),
       [PROPOSE]: new Error('nope'),
     });
 
@@ -280,7 +280,7 @@ describe('the inline switch in a card header', () => {
   it('should word an off runtime as a small muted note, and name the state in the label', async () => {
     // Act
     const view = await openRuntimes('#machines/studio-mac/runtimes', {
-      'GET /v1/fleet/runtimes': runtimesWith({ 'claude-review': 'runtime' }),
+      'GET /v1/runtimes': runtimesWith({ 'claude-review': 'runtime' }),
     });
 
     // Assert
@@ -299,7 +299,7 @@ describe('the switch on a runtime', () => {
     const calls: Call[] = [];
     const view = await openRuntimes(
       '#machines/studio-mac/runtimes',
-      { 'GET /v1/fleet/runtimes': runtimesWith({ 'claude-review': 'runtime' }) },
+      { 'GET /v1/runtimes': runtimesWith({ 'claude-review': 'runtime' }) },
       calls,
     );
     expect(switchOf(view.container, 'claude-review').getAttribute('aria-checked')).toBe('false');
@@ -336,7 +336,7 @@ describe('the switch on a runtime', () => {
     const calls: Call[] = [];
     const view = await openRuntimes(
       '#machines/studio-mac/runtimes/claude-default',
-      { 'GET /v1/fleet/runtimes': runtimesWith({ 'claude-default': 'login' }) },
+      { 'GET /v1/runtimes': runtimesWith({ 'claude-default': 'login' }) },
       calls,
     );
     const toggle = switchOf(view.container, 'claude-default');
@@ -355,7 +355,7 @@ describe('the switch on a runtime', () => {
   it('should show the launch button off, with the daemon’s own reason, while disabled', async () => {
     // Act
     const view = await openRuntimes('#machines/studio-mac/runtimes/claude-review', {
-      'GET /v1/fleet/runtimes': runtimesWith({ 'claude-review': 'runtime' }),
+      'GET /v1/runtimes': runtimesWith({ 'claude-review': 'runtime' }),
     });
 
     // Assert

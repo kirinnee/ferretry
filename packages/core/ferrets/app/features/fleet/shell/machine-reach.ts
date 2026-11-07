@@ -2,7 +2,7 @@
  * Whether a paired machine answers, and what it says about itself (docs/design/account-model.md §4.2).
  *
  * The switcher's "Online / Offline" and "n runtimes / Not set up yet" come from ONE read,
- * `GET /v1/fleet/machine`, made through the app's client pool so it rides the same carrier as every
+ * `GET /v1/runtimes/machine`, made through the app's client pool so it rides the same carrier as every
  * other call. There is no separate ping: an answer is the proof it is awake. A machine that answers
  * with a refusal (an older daemon with no account model, a limit on this device) is reachable, and is
  * shown as such with the reason, rather than being called offline.

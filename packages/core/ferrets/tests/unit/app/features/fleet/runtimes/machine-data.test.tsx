@@ -25,7 +25,7 @@ const settle = async (): Promise<void> => {
 
 const OLD: MachineData = { ...DATA, credentials: { ...CREDENTIALS, machine: 'old-mac' } };
 
-const FAILING = (error: Error) => ({ ...READS(), 'GET /v1/fleet/runtimes': error });
+const FAILING = (error: Error) => ({ ...READS(), 'GET /v1/runtimes': error });
 
 /** A client that holds every request until released, then answers from `routes`. */
 const gated = (routes: Record<string, unknown>) => {
@@ -68,7 +68,7 @@ describe('readMachineData', () => {
 
   it('keeps the other three answers when only the parts catalog fails, with no parts', async () => {
     const data = await readMachineData(
-      async () => scripted({ ...READS(), 'GET /v1/fleet/components': new FyHttpError('No parts.', 500, undefined) }),
+      async () => scripted({ ...READS(), 'GET /v1/runtimes/components': new FyHttpError('No parts.', 500, undefined) }),
       STUDIO,
     );
     expect(data.components).toBeNull();
@@ -87,7 +87,7 @@ describe('readMachineData', () => {
     await expect(
       readMachineData(
         async () =>
-          scripted({ ...READS(), 'GET /v1/fleet/profiles': boom, 'GET /v1/fleet/components': new Error('x') }),
+          scripted({ ...READS(), 'GET /v1/runtimes/profiles': boom, 'GET /v1/runtimes/components': new Error('x') }),
         STUDIO,
       ),
     ).rejects.toBe(boom);

@@ -144,7 +144,7 @@ describe('ProfilesTab — the profile page', () => {
       'overrides Main instructions · permissions.defaultMode',
     );
     expect(text(root, '[data-profile-item="settings/Claude settings"] [data-item-scope]')).toBe('Claude only');
-    expect(machine.calls.find(call => call.path === '/v1/fleet/profiles/preview')?.body).toEqual({
+    expect(machine.calls.find(call => call.path === '/v1/runtimes/profiles/preview')?.body).toEqual({
       layers: ['instructions/Main instructions', 'mcp/github', 'settings/Claude settings', 'modelSets/Claude models'],
       editing: 'Default',
     });
@@ -175,7 +175,7 @@ describe('ProfilesTab — the profile page', () => {
     expect(rows(root).at(-1)).toBe('mcp/notes');
     expect(text(root, '[data-profile-said]')).toBe('Added notes at position 5 of 5.');
     expect(text(root, '[data-library-add="mcp/notes"]')).toBe('In profile');
-    expect(machine.calls.filter(call => call.path === '/v1/fleet/profiles/preview')).toHaveLength(2);
+    expect(machine.calls.filter(call => call.path === '/v1/runtimes/profiles/preview')).toHaveLength(2);
 
     await click(root, '[data-profile-item="mcp/notes"] [data-item-move="up"]');
     expect(rows(root).indexOf('mcp/notes')).toBe(3);
@@ -218,7 +218,7 @@ describe('ProfilesTab — the profile page', () => {
           return {
             ...client,
             request: async (path, schema, init) => {
-              if (hold !== undefined && path === '/v1/fleet/profiles/preview') await hold;
+              if (hold !== undefined && path === '/v1/runtimes/profiles/preview') await hold;
               return client.request(path, schema, init);
             },
           };
@@ -237,7 +237,7 @@ describe('ProfilesTab — the profile page', () => {
     release?.();
     await settle();
     expect(root.querySelector('[data-resolved-row="permissions.defaultMode"]')).not.toBeNull();
-    expect(machine.calls.filter(call => call.path === '/v1/fleet/profiles/preview')).toHaveLength(3);
+    expect(machine.calls.filter(call => call.path === '/v1/runtimes/profiles/preview')).toHaveLength(3);
   });
 
   it('discards an edit back to the saved contents', async () => {

@@ -40,8 +40,8 @@ describe('files API', () => {
       });
     });
     expect(listing.entries).toEqual([]);
-    expect(listUrl(scopeA, 'src')).toBe('/v1/sessions/same%2Fsession/fs?path=src');
-    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/same%2Fsession/fs?path=src');
+    expect(listUrl(scopeA, 'src')).toBe('/v1/ferrets/same%2Fsession/fs?path=src');
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/ferrets/same%2Fsession/fs?path=src');
     expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
     expect(() => fsApi.list(daemonA, scopeB, '', undefined, browserFetch)).toThrow('file scope must belong');
   });
@@ -76,11 +76,11 @@ describe('files API', () => {
     });
 
     expect(index).toEqual(document);
-    expect(indexUrl(scopeA)).toBe('/v1/sessions/same%2Fsession/fs/index');
+    expect(indexUrl(scopeA)).toBe('/v1/ferrets/same%2Fsession/fs/index');
     // No `?path=`, and it is NOT the listing route with a suffix.
     expect(indexUrl(scopeA)).not.toContain('?');
     expect(indexUrl(scopeA).endsWith('/fs')).toBe(false);
-    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/same%2Fsession/fs/index');
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/ferrets/same%2Fsession/fs/index');
     expect(new Headers(calls[0]?.init?.headers).has('authorization')).toBe(false);
     // The reader's own question is never answered from a cache: the daemon walks
     // the tree inside the request, so a stale index is a wrong answer.
@@ -124,8 +124,8 @@ describe('files API', () => {
       expect(a.get('src/a.ts')).toBe('src/a.ts');
       expect(b.get('src/a.ts')).toBe('src/a.ts');
       expect(seen).toEqual([
-        'https://a.example.test/v1/sessions/same%2Fsession/fs?path=src',
-        'https://b.example.test/v1/sessions/same%2Fsession/fs?path=src',
+        'https://a.example.test/v1/ferrets/same%2Fsession/fs?path=src',
+        'https://b.example.test/v1/ferrets/same%2Fsession/fs?path=src',
       ]);
     } finally {
       globalThis.fetch = original;

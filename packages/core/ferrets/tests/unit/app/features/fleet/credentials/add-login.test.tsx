@@ -25,10 +25,10 @@ import {
 } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { OLLAMA, PROVIDERS } from './environment-support.ts';
 
-const CHANGES = 'POST /v1/fleet/proposals';
-const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
-const LOGIN = 'POST /v1/fleet/login';
-const FLOW = '/v1/fleet/login/flow-1';
+const CHANGES = 'POST /v1/runtimes/proposals';
+const APPLY = `POST /v1/runtimes/proposals/${CHANGE_ID}/apply`;
+const LOGIN = 'POST /v1/logins/sign-in';
+const FLOW = '/v1/logins/sign-in/flow-1';
 const STORE = 'POST /v1/secrets';
 
 /**
@@ -141,8 +141,8 @@ const open = async (world: World = {}, props: Opened = {}) => {
         runtimes: world.runtimes ?? CODEX_ONLY,
         ...(world.profiles === undefined ? {} : { profiles: world.profiles }),
       }),
-      'GET /v1/fleet/credentials': () => listOf([...existing, ...made]),
-      'GET /v1/fleet/presets': PROVIDERS,
+      'GET /v1/logins': () => listOf([...existing, ...made]),
+      'GET /v1/logins/presets': PROVIDERS,
       'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
       [STORE]: (call: Call) => ({
         name: (call.body as { name: string }).name,
@@ -172,7 +172,7 @@ const open = async (world: World = {}, props: Opened = {}) => {
         typeof init?.body === 'string'
           ? (JSON.parse(init.body) as { change?: { kind?: string } }).change?.kind
           : undefined;
-      if (world.hold !== undefined && path === '/v1/fleet/proposals' && kind === 'runtime.put') await world.hold;
+      if (world.hold !== undefined && path === '/v1/runtimes/proposals' && kind === 'runtime.put') await world.hold;
       return base.request(path, schema, init);
     },
   };
@@ -245,13 +245,13 @@ describe('AddLogin · one screen', () => {
   });
 
   it('says so when the providers cannot be read, and still offers the sign-ins', async () => {
-    const failed = await open({ routes: { 'GET /v1/fleet/presets': new FyHttpError('No presets here.', 500, 'x') } });
+    const failed = await open({ routes: { 'GET /v1/logins/presets': new FyHttpError('No presets here.', 500, 'x') } });
     await until(() => failed.view.container.querySelector('[data-env-login="failed"]') !== null, 'the failure');
     expect(text(failed.view.container, '[data-env-login="failed"]')).toBe('No presets here.');
     expect(failed.view.container.querySelector('[data-add-login-choice="claude"]')).not.toBeNull();
     await failed.view.unmount();
 
-    const none = await open({ routes: { 'GET /v1/fleet/presets': { presets: [] } } });
+    const none = await open({ routes: { 'GET /v1/logins/presets': { presets: [] } } });
     expect(none.view.container.querySelector('[data-add-login-choice="claude"]')).not.toBeNull();
     expect(none.view.container.querySelector('[data-provider-grid]')).toBeNull();
     await none.view.unmount();
@@ -262,11 +262,11 @@ describe('AddLogin · one screen', () => {
     const pending = new Promise(resolve => {
       answer = resolve;
     });
-    const base = scripted({ ...READS(), 'GET /v1/fleet/presets': { presets: [] } });
+    const base = scripted({ ...READS(), 'GET /v1/logins/presets': { presets: [] } });
     // The providers answer only when the test says so; everything else answers at once.
     const client: FleetClient = {
       request: (path, schema, init) =>
-        path === '/v1/fleet/presets' ? pending.then(value => schema.parse(value)) : base.request(path, schema, init),
+        path === '/v1/logins/presets' ? pending.then(value => schema.parse(value)) : base.request(path, schema, init),
     };
     const events: string[] = [];
     const view = await mount(
@@ -751,7 +751,7 @@ describe('AddLogin · progress', () => {
 
 describe('AddLogin · Ollama on this machine', () => {
   const REFRESH = 'POST /v1/models/local/refresh';
-  const withOllama = { 'GET /v1/fleet/presets': { presets: [...PROVIDERS.presets, OLLAMA] } };
+  const withOllama = { 'GET /v1/logins/presets': { presets: [...PROVIDERS.presets, OLLAMA] } };
 
   it('reads Ollama once, says what it found on the tile, and shows the panel on the Ollama form only', async () => {
     const { view, calls } = await open({ routes: { ...withOllama, [REFRESH]: localModelsFixture('found') } });

@@ -19,7 +19,7 @@ export type FsFile = SessionFsFile;
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('file scope must belong to the requested daemon');
 };
-const root = (scope: DaemonSessionScope) => `/v1/sessions/${encodeURIComponent(scope.sessionId)}/fs`;
+const root = (scope: DaemonSessionScope) => `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/fs`;
 const query = (path: string, extra?: Record<string, string>): string => {
   const params = new URLSearchParams(extra);
   if (path) params.set('path', path);

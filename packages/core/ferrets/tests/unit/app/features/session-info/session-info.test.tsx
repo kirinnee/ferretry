@@ -5,7 +5,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { AnalyticsResponse, BrowserStatus, ManagedWorktreeView, TerminalListView, WardenVerdict } from '@ferretry/protocol';
+import type { AnalyticsResponse, ManagedWorktreeView, WardenVerdict } from '@ferretry/protocol';
 import type { McpInventory } from '@ferretry/plugin-mcp/contract';
 import type { SessionRelaunchSettings } from '../../../../../contract/index.ts';
 import {
@@ -14,7 +14,6 @@ import {
   type SessionInfoProps,
 } from '../../../../../app/features/session-info/session-info.tsx';
 import { type InfoPlacement, useInfoPlacement } from '../../../../../app/features/session-info/use-info-placement.ts';
-import { NO_SURFACE_DRIVING } from '../../../../../../../plugins/layouts/app/features/workspace/use-surface-driving.ts';
 import { interact, type Mounted, must } from '@ferretry/app/testing';
 import { sessionView } from '@ferretry/app/testing';
 import { DOCS, MCP, mcpServer, SKILLS } from '../../../../../../../plugins/conversation/tests/unit/app/features/context-rail/context-rail-fixtures.ts';
@@ -86,16 +85,11 @@ function Harness({ initial, ...rest }: HarnessProps) {
 const show = async (overrides: Partial<HarnessProps> = {}) => {
   mounted = await mountSettled(
     <Harness
-      browser={null}
-      driving={NO_SURFACE_DRIVING}
       name="Hadi"
-      onOpenPage={() => undefined}
-      onOpenTerminal={() => undefined}
       ports={portsOf()}
       presentation="panel"
       project={null}
       quota={null}
-      terminals={null}
       titleId="info-title"
       view={sessionView('session-a')}
       write={async () => undefined}
@@ -146,12 +140,10 @@ describe('SessionInfo — reading each port only when its tab is shown', () => {
     expect((ports.verdicts as ReturnType<typeof counted>).calls).toBe(1);
   });
 
-  it('reads nothing extra for Folder or Surfaces — they draw from their own loaders and the driving hook directly', async () => {
+  it('reads nothing extra for Folder — it draws from its own loaders', async () => {
     const ports = portsOf();
     await show({ ports });
     await interact(() => placement?.setTab('folder'));
-    await settle();
-    await interact(() => placement?.setTab('surfaces'));
     await settle();
     expect((ports.worktrees as ReturnType<typeof counted>).calls).toBe(1);
     expect((ports.verdicts as ReturnType<typeof counted>).calls).toBe(1);
@@ -244,17 +236,6 @@ describe('SessionInfo — Warden in Overview', () => {
     await settle();
     expect(root.querySelector('[data-info-warden]')).not.toBeNull();
     expect(root.textContent).toContain('Left it alone — healthy');
-  });
-});
-
-describe('SessionInfo — Surfaces', () => {
-  it('hands Surfaces the terminals, the browser status and the driving hook', async () => {
-    const terminals = { sessionId: 'session-a', terminals: [], limits: {} } as unknown as TerminalListView;
-    const browser = { sessionId: 'session-a', state: 'running', pages: [] } as unknown as BrowserStatus;
-    const root = await show({ terminals, browser });
-    await interact(() => placement?.setTab('surfaces'));
-    await settle();
-    expect(root.textContent).toContain('No terminals or browser pages yet.');
   });
 });
 

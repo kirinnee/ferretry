@@ -12,7 +12,7 @@
  * one is refused rather than read untagged.
  */
 
-/** What one `GET /v1/sessions` exchange answered; `body` is absent on a `304`. */
+/** What one `GET /v1/ferrets` exchange answered; `body` is absent on a `304`. */
 export interface SessionListAnswer {
   readonly status: number;
   readonly etag: string | null;

@@ -62,10 +62,10 @@ describe('pin transport', () => {
     await fetchPinSnapshot(daemonA, scopeA, fetcher);
     await applyPinAction(daemonA, scopeA, action, fetcher);
 
-    expect(pinPath(scopeA)).toBe('/v1/sessions/same%2Fsession/pins');
+    expect(pinPath(scopeA)).toBe('/v1/ferrets/same%2Fsession/pins');
     expect(calls.map(call => call.url)).toEqual([
-      'https://a.example.test/v1/sessions/same%2Fsession/pins',
-      'https://a.example.test/v1/sessions/same%2Fsession/pins',
+      'https://a.example.test/v1/ferrets/same%2Fsession/pins',
+      'https://a.example.test/v1/ferrets/same%2Fsession/pins',
     ]);
     expect(new Headers(calls[0]?.init.headers).has('authorization')).toBe(false);
     expect(new Headers(calls[0]?.init.headers).get(FY_REQUEST_ID_HEADER)).toBeNull();

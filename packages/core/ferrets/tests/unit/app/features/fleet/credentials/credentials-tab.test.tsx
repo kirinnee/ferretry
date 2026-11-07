@@ -25,11 +25,11 @@ import {
 } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { ENVIRONMENT } from './environment-support.ts';
 
-const CHANGES = 'POST /v1/fleet/proposals';
-const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
-const LOGIN = 'POST /v1/fleet/login';
-const FLOW = '/v1/fleet/login/flow-1';
-const LIST = 'GET /v1/fleet/credentials';
+const CHANGES = 'POST /v1/runtimes/proposals';
+const APPLY = `POST /v1/runtimes/proposals/${CHANGE_ID}/apply`;
+const LOGIN = 'POST /v1/logins/sign-in';
+const FLOW = '/v1/logins/sign-in/flow-1';
+const LIST = 'GET /v1/logins';
 const HASH = '#machines/studio-mac/sign-ins';
 
 afterEach(() => {
@@ -393,7 +393,7 @@ describe('CredentialsTab · Check now', () => {
       release = resolve;
     });
     const { view, calls } = await open(
-      { 'POST /v1/fleet/credentials/claude-work/check': credential({ id: 'claude-work', label: 'work' }) },
+      { 'POST /v1/logins/claude-work/check': credential({ id: 'claude-work', label: 'work' }) },
       { hash: `${HASH}/claude-work`, wrap: client => gated(client, '/check', gate) },
     );
     const c = view.container;
@@ -409,7 +409,7 @@ describe('CredentialsTab · Check now', () => {
       release();
     });
     await settle();
-    expect(only(calls, 'POST /v1/fleet/credentials/claude-work/check')[0]?.body).toEqual({});
+    expect(only(calls, 'POST /v1/logins/claude-work/check')[0]?.body).toEqual({});
     expect(only(calls, CHANGES)).toHaveLength(0);
     expect(text(c, '[data-credential-notice]')).toBe('Checked. The login works.');
     expect(c.querySelector('[data-credential-status]')?.getAttribute('data-credential-status')).toBe('refresh_due');
@@ -419,7 +419,7 @@ describe('CredentialsTab · Check now', () => {
   it('a check that finds the login not ready says what the daemon said', async () => {
     const { view } = await open(
       {
-        'POST /v1/fleet/credentials/claude-work/check': credential({
+        'POST /v1/logins/claude-work/check': credential({
           id: 'claude-work',
           label: 'work',
           ...withStatus('needs_sign_in'),
@@ -438,7 +438,7 @@ describe('CredentialsTab · Check now', () => {
     let reads = 0;
     const { view } = await open(
       {
-        'POST /v1/fleet/credentials/claude-work/check': new FyHttpError(
+        'POST /v1/logins/claude-work/check': new FyHttpError(
           'Anthropic did not answer in time.',
           502,
           'fleet_credential_check_failed',
@@ -468,8 +468,8 @@ describe('CredentialsTab · Check now', () => {
   it('checks with an empty body when this browser will be asked for its passkey', async () => {
     const { view, calls } = await open(
       {
-        'GET /v1/fleet/machine': machineWith({ mayApply: false, applyRefusal: 'step-up-required' }),
-        'POST /v1/fleet/credentials/claude-work/check': credential({ id: 'claude-work', label: 'work' }),
+        'GET /v1/runtimes/machine': machineWith({ mayApply: false, applyRefusal: 'step-up-required' }),
+        'POST /v1/logins/claude-work/check': credential({ id: 'claude-work', label: 'work' }),
       },
       { hash: `${HASH}/claude-work` },
     );
@@ -482,7 +482,7 @@ describe('CredentialsTab · Check now', () => {
     );
     expect(submit.disabled).toBe(false);
     await click(submit, 'Check now');
-    expect(only(calls, 'POST /v1/fleet/credentials/claude-work/check')[0]?.body).toEqual({});
+    expect(only(calls, 'POST /v1/logins/claude-work/check')[0]?.body).toEqual({});
     expect(text(view.container, '[data-credential-notice]')).toBe('Checked. The login works.');
     await view.unmount();
   });

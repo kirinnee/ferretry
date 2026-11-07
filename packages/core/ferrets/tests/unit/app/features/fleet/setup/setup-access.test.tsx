@@ -37,7 +37,7 @@ const hookView = async (client: FleetClient) => {
 
 describe('useSetupAccess', () => {
   it('runs a read with the connection’s client and reports it done', async () => {
-    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
+    const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer() });
     const { view, access, authority } = await hookView(client);
     try {
       expect(authority()).toBe('open');
@@ -58,7 +58,7 @@ describe('useSetupAccess', () => {
 
   it('reads on a machine that wants a passkey: the carrier asks for it, so nothing is held back here', async () => {
     const client = scriptedClient({
-      '/v1/fleet/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
+      '/v1/runtimes/machine': machineAnswer({ mayApply: false, applyRefusal: 'step-up-required' }),
     });
     const { view, access, authority } = await hookView(client);
     try {
@@ -74,7 +74,7 @@ describe('useSetupAccess', () => {
   });
 
   it('words a read that throws a non-HTTP error as the machine not answering', async () => {
-    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
+    const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer() });
     const { view, access } = await hookView(client);
     try {
       let result: unknown;
@@ -93,7 +93,7 @@ describe('useSetupAccess', () => {
   });
 
   it('words a read the daemon refused with the daemon’s own sentence', async () => {
-    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
+    const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer() });
     const { view, access } = await hookView(client);
     try {
       let result: unknown;
@@ -109,7 +109,7 @@ describe('useSetupAccess', () => {
   });
 
   it('runs an act and shows nothing when it worked', async () => {
-    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
+    const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer() });
     const { view, access, refusal } = await hookView(client);
     try {
       let result: unknown;
@@ -124,7 +124,7 @@ describe('useSetupAccess', () => {
   });
 
   it('shows the refusal of an act’s own work through changes.refusal', async () => {
-    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
+    const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer() });
     const { view, access, refusal } = await hookView(client);
     try {
       let result: unknown;
@@ -141,7 +141,7 @@ describe('useSetupAccess', () => {
   });
 
   it('shows the machine not answering when an act throws a non-HTTP error', async () => {
-    const client = scriptedClient({ '/v1/fleet/machine': machineAnswer() });
+    const client = scriptedClient({ '/v1/runtimes/machine': machineAnswer() });
     const { view, access, refusal } = await hookView(client);
     try {
       await interact(async () => {

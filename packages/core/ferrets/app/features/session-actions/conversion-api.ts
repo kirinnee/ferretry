@@ -21,7 +21,7 @@ export const readConversionPreview = async (
   signal?: AbortSignal,
 ): Promise<ConversionPreview> => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('the connection does not own this session scope');
-  const target = daemonRequest(daemon, `/v1/sessions/${encodeURIComponent(scope.sessionId)}/conversion-preview`, {
+  const target = daemonRequest(daemon, `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/conversion-preview`, {
     method: 'POST',
     cache: 'no-store',
     headers: { 'content-type': 'application/json' },

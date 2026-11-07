@@ -8,8 +8,8 @@ import { useAccountChanges } from '../../../../../../app/features/fleet/shell/ap
 import { interact, mount, must } from '@ferretry/app/testing';
 import { type Call, claudeFlow, credential, machineWith, READS, STUDIO, scripted } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
-const LOGIN = 'POST /v1/fleet/login';
-const FLOW = '/v1/fleet/login/flow-1';
+const LOGIN = 'POST /v1/logins/sign-in';
+const FLOW = '/v1/logins/sign-in/flow-1';
 
 const WORK = credential({ id: 'claude-work', label: 'work', usedBy: ['claude-work'] });
 const CODEX = credential({ id: 'codex', harness: 'codex', usedBy: ['codex-default'] });
@@ -384,7 +384,7 @@ describe('CredentialSignIn', () => {
 
   it('says the passkey will be asked for, then starts the sign-in and carries it through to the end', async () => {
     const { view, calls, signedIn } = await open({
-      'GET /v1/fleet/machine': machineWith({ mayApply: false, applyRefusal: 'step-up-required' }),
+      'GET /v1/runtimes/machine': machineWith({ mayApply: false, applyRefusal: 'step-up-required' }),
       [LOGIN]: claudeFlow('awaiting-code'),
       [`POST ${FLOW}`]: { outcome: 'accepted', flow: claudeFlow('complete') },
     });

@@ -34,19 +34,19 @@ const settle = async (): Promise<void> => {
 
 /** The reads the Claude Code and Codex steps make, on top of the machine itself: no runtime yet. */
 const stepReads = {
-  '/v1/fleet/credentials': CREDENTIALS,
-  '/v1/fleet/runtimes': runtimes([]),
-  '/v1/fleet/profiles': PROFILES,
+  '/v1/logins': CREDENTIALS,
+  '/v1/runtimes': runtimes([]),
+  '/v1/runtimes/profiles': PROFILES,
 };
 
 const freshClient = (): FleetClient =>
   scriptedClient({
-    '/v1/fleet/machine': FRESH_MACHINE,
-    '/v1/fleet/setup/scan': scan({ tools: scan().tools }),
+    '/v1/runtimes/machine': FRESH_MACHINE,
+    '/v1/runtimes/setup/scan': scan({ tools: scan().tools }),
     ...stepReads,
   });
 
-const setUpClient = (): FleetClient => scriptedClient({ '/v1/fleet/machine': machineView(), ...stepReads });
+const setUpClient = (): FleetClient => scriptedClient({ '/v1/runtimes/machine': machineView(), ...stepReads });
 
 interface Screen {
   readonly view: Mounted;
@@ -225,7 +225,7 @@ describe('MachineSetupScreen', () => {
 
   it('says why it cannot set up a machine that would not share its setup, and Open in Settings goes to it', async () => {
     const screen = await open(
-      scriptedClient({ '/v1/fleet/machine': new FyHttpError('older daemon', 404, 'not_found') }),
+      scriptedClient({ '/v1/runtimes/machine': new FyHttpError('older daemon', 404, 'not_found') }),
     );
     expect(screen.q('[data-setup-message] h1')?.textContent).toBe('Can’t set up studio mac here');
     expect(screen.q('[data-setup-message] p')?.textContent).toContain('older Ferretry');
@@ -260,8 +260,8 @@ describe('MachineSetupScreen', () => {
       release = resolve;
     });
     const client = scriptedClient({
-      '/v1/fleet/machine': () => (imported ? machineView() : FRESH_MACHINE),
-      '/v1/fleet/setup/scan': scan({ tools: scan().tools }),
+      '/v1/runtimes/machine': () => (imported ? machineView() : FRESH_MACHINE),
+      '/v1/runtimes/setup/scan': scan({ tools: scan().tools }),
       ...stepReads,
     });
     let held = false;

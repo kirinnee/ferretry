@@ -94,9 +94,9 @@ export const machineSetupAnswer = (machine: string, source: boolean, path: strin
   const url = new URL(path, 'http://harness.invalid');
   const method = init?.method ?? 'GET';
   switch (url.pathname) {
-    case '/v1/fleet/runtimes':
+    case '/v1/runtimes':
       return source ? undefined : { format: 'version-2', runtimes: state.runtimes };
-    case '/v1/fleet/proposals': {
+    case '/v1/runtimes/proposals': {
       // A machine that is not set up makes its runtimes as it is set up; staging is the catalogue's answer.
       if (source || method !== 'POST') return undefined;
       const change = body(init).change as

@@ -25,7 +25,7 @@ export interface Machine {
   preview?: unknown;
   /** Answers the staging of a change; default is the staged change. */
   stage?: unknown;
-  /** Answers `GET /v1/fleet/mcp-auth`; absent answers that nothing is signed in. */
+  /** Answers `GET /v1/mcp/auth`; absent answers that nothing is signed in. */
   mcpSignIns?: unknown;
   /** Answers `GET /v1/mcp`, the machine's MCP inventory; absent answers that no runtime has a server. */
   mcpServers?: unknown;
@@ -49,15 +49,15 @@ const machineFactory =
     const catalog = (answer: () => unknown) => () => machine.readFails ?? answer();
     return scriptedClient(
       {
-        '/v1/fleet/components': catalog(() => machine.catalog.components),
-        '/v1/fleet/profiles': catalog(() => machine.catalog.profiles),
-        '/v1/fleet/runtimes': catalog(() => machine.catalog.runtimes),
-        '/v1/fleet/profiles/preview': () => machine.preview ?? new Error('unreachable'),
-        '/v1/fleet/machine': machineAnswer(),
-        '/v1/fleet/mcp-auth': () => machine.mcpSignIns ?? { connections: [] },
+        '/v1/runtimes/components': catalog(() => machine.catalog.components),
+        '/v1/runtimes/profiles': catalog(() => machine.catalog.profiles),
+        '/v1/runtimes': catalog(() => machine.catalog.runtimes),
+        '/v1/runtimes/profiles/preview': () => machine.preview ?? new Error('unreachable'),
+        '/v1/runtimes/machine': machineAnswer(),
+        '/v1/mcp/auth': () => machine.mcpSignIns ?? { connections: [] },
         '/v1/mcp': () => machine.mcpServers ?? { servers: [], problems: [] },
         '/v1/mcp/check': () => machine.mcpCheck ?? new Error('could not reach fyd at 127.0.0.1:7777'),
-        '/v1/fleet/proposals': (call: Call) =>
+        '/v1/runtimes/proposals': (call: Call) =>
           machine.stage ?? { ...STAGED, change: (call.body as { change: unknown }).change },
         [APPLY_PATH]: () => {
           machine.onApply?.(machine);
@@ -71,7 +71,7 @@ const machineFactory =
 /** The changes the tab staged, in order. */
 export const stagedChanges = (machine: Machine): unknown[] =>
   machine.calls
-    .filter(call => call.path === '/v1/fleet/proposals')
+    .filter(call => call.path === '/v1/runtimes/proposals')
     .map(call => (call.body as { change: unknown }).change);
 
 export const tabProps = (machine: Machine, overrides: Partial<MachineTabProps> = {}): MachineTabProps => ({

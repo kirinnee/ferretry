@@ -12,10 +12,10 @@
 import { FLEET_CLONE_KEYS_PATH, type FleetCloneBundle, FleetCloneBundleSchema, type FleetCloneKeysRecordRequest, FleetCloneKeysRecordRequestSchema, type FleetCloneKeysRecordResult, FleetCloneKeysRecordResultSchema, type FleetCloneReview, type FleetCloneReviewRequest, FleetCloneReviewRequestSchema, FleetCloneReviewSchema, type FleetSetupScan, FleetSetupScanSchema, type FleetToolInstallRequest, FleetToolInstallRequestSchema, type FleetToolInstallResult, FleetToolInstallResultSchema } from '@ferretry/protocol';
 import type { FleetClient } from './fleet-client.ts';
 
-export const FLEET_SETUP_SCAN_PATH = '/v1/fleet/setup/scan';
-export const FLEET_TOOLS_INSTALL_PATH = '/v1/fleet/machine/tools/install';
-export const FLEET_EXPORT_PATH = '/v1/fleet/export';
-export const FLEET_CLONE_REVIEW_PATH = '/v1/fleet/clone/review';
+export const FLEET_SETUP_SCAN_PATH = '/v1/runtimes/setup/scan';
+export const FLEET_TOOLS_INSTALL_PATH = '/v1/runtimes/machine/tools/install';
+export const FLEET_EXPORT_PATH = '/v1/runtimes/export';
+export const FLEET_CLONE_REVIEW_PATH = '/v1/runtimes/clone/review';
 
 /** What the first run (and Import again) would find on this machine. Names only, never a value. */
 export const readFleetSetupScan = async (client: FleetClient): Promise<FleetSetupScan> =>

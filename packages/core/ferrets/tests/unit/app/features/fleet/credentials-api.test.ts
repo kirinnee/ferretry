@@ -88,7 +88,7 @@ describe('the environment-login wire client', () => {
     const catalog = await readFleetPresets(client);
 
     expect(catalog.presets).toEqual([]);
-    expect(calls[0]?.path).toBe('/v1/fleet/presets');
+    expect(calls[0]?.path).toBe('/v1/logins/presets');
     expect(calls[0]?.init).toBeUndefined();
   });
 

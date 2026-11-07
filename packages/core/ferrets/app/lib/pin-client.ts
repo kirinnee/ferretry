@@ -11,7 +11,7 @@ const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope):
 };
 
 export const pinPath = (scope: DaemonSessionScope): string =>
-  `/v1/sessions/${encodeURIComponent(scope.sessionId)}/pins`;
+  `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/pins`;
 
 const responseError = async (response: Response): Promise<DaemonResponseError> => {
   const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };

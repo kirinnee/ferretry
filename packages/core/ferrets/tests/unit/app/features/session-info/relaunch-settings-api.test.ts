@@ -44,8 +44,8 @@ describe('the relaunch-settings dial', () => {
     // Assert
     expect(answer).toEqual({ current: false, reasons: ['settings'] });
     expect(urls).toEqual([
-      'GET https://a.example.test/v1/sessions/ses%2F1/relaunch-settings',
-      'GET https://a.example.test/v1/sessions/ses%2F1/relaunch-settings',
+      'GET https://a.example.test/v1/ferrets/ses%2F1/relaunch-settings',
+      'GET https://a.example.test/v1/ferrets/ses%2F1/relaunch-settings',
     ]);
     expect(signals[0]).toBe(signal);
     expect(signals[1]).toBeUndefined();

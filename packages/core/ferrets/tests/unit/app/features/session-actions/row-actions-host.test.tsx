@@ -375,7 +375,7 @@ describe('the sessions bar row actions', () => {
     expect(ids(root).indexOf('move-harness')).toBe(ids(root).indexOf('move-login') + 1);
     expect(item(root, 'move-harness').textContent).toContain('Move to Codex…');
     await choose(root, 'move-harness');
-    expect(calls.fetches.some(url => url.endsWith('/v1/sessions/s-run/conversion-preview'))).toBe(true);
+    expect(calls.fetches.some(url => url.endsWith('/v1/ferrets/s-run/conversion-preview'))).toBe(true);
     const sheet = must(document.body.querySelector<HTMLElement>('[data-convert-preview]'), 'preview');
     expect(sheet.textContent).toContain('All 4 turns will move.');
     await interact(() => must(document.body.querySelector<HTMLElement>('[data-convert-confirm]'), 'confirm').click());

@@ -44,7 +44,7 @@ const open = async (answers: Answers, props: Partial<McpSignInSectionProps> = {}
   const calls: Call[] = [];
   const channels = fakeChannels();
   // The same object the client reads, so a test can change what the machine answers next.
-  answers['GET /v1/fleet/machine'] ??= machineAnswer();
+  answers['GET /v1/runtimes/machine'] ??= machineAnswer();
   mounted = await mountSettled(
     <McpSignInSection
       component={LINEAR}

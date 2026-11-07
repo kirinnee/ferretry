@@ -6,7 +6,7 @@
  * is kept while the panel stays open, so moving between tabs neither re-reads nor blanks what is there.
  */
 
-import type { AnalyticsResponse, BrowserPageSummary, BrowserStatus, LimitsView, ManagedWorktreeView, TerminalListView, WardenVerdict } from '@ferretry/protocol';
+import type { AnalyticsResponse, LimitsView, ManagedWorktreeView, WardenVerdict } from '@ferretry/protocol';
 import type { SessionRelaunchSettings, SessionView } from '../../../contract/index.ts';
 import type { ReactNode } from 'react';
 import type { ResolvedQuota } from '../../../../../plugins/usage/app/lib/usage.ts';
@@ -15,14 +15,12 @@ import { FOLDER_TABS, loadedSkillCount } from '../../../../../plugins/conversati
 import { useContextRead } from '../../../../../plugins/conversation/app/features/context-rail/context-rail-parts.tsx';
 import type { ContextLoader } from '../../../../../plugins/conversation/app/features/context-rail/context-rail-ports.ts';
 import type { ClipboardWriter } from '../../../../../plugins/onboarding/app/features/onboarding/copy-button.tsx';
-import type { SurfaceDriving } from '../../../../../plugins/layouts/app/features/workspace/use-surface-driving.ts';
 import type { InfoAboutProps } from './info-about.tsx';
 import { INFO_TABS, INFO_TABS_WITHOUT_BOARD } from './info-model.ts';
 import { InfoOverview } from './info-overview.tsx';
 import { InfoPanel } from './info-panel.tsx';
 import type { InfoRelaunchRead } from './info-relaunch.tsx';
 import { type InfoListRead, InfoRuntime } from './info-runtime.tsx';
-import { InfoSurfaces } from './info-surfaces.tsx';
 import { type InfoAnalyticsRead, InfoUsage } from './info-usage.tsx';
 import { type InfoVerdictsRead, InfoWarden } from './info-warden.tsx';
 import { memoryNote } from './memory-note.ts';
@@ -54,11 +52,6 @@ export interface SessionInfoProps {
   readonly ports: SessionInfoPorts;
   readonly quota: ResolvedQuota | null;
   readonly write: ClipboardWriter;
-  readonly driving: SurfaceDriving;
-  readonly terminals: TerminalListView | null;
-  readonly browser: BrowserStatus | null;
-  readonly onOpenTerminal: (terminalId: string, label: string) => void;
-  readonly onOpenPage: (page: BrowserPageSummary) => void;
   readonly onRename?: () => void;
   readonly onOpenSession?: (sessionId: string) => void;
   /** This ferret's card, when the host has a board: the Overview's Card row and the Tasks tab. */
@@ -114,11 +107,6 @@ export function SessionInfo({
   ports,
   quota,
   write,
-  driving,
-  terminals,
-  browser,
-  onOpenTerminal,
-  onOpenPage,
   onRename,
   onOpenSession,
   card,
@@ -235,16 +223,6 @@ export function SessionInfo({
             onTabChange={placement.setFolderTab}
             tab={placement.folderTab}
             tabs={FOLDER_TABS}
-          />
-        ),
-        surfaces: () => (
-          <InfoSurfaces
-            agentName={name}
-            browser={browser}
-            driving={driving}
-            onOpenPage={onOpenPage}
-            onOpenTerminal={onOpenTerminal}
-            terminals={terminals}
           />
         ),
       }}

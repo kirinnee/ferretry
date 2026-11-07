@@ -12,7 +12,7 @@ describe('landingAfterPairing', () => {
       machineClient(machineView({ setUp: false, runtimeCount: 0 }), paths),
     );
     expect(landing).toBe('/d/studio/setup');
-    expect(paths).toEqual(['/v1/fleet/machine']);
+    expect(paths).toEqual(['/v1/runtimes/machine']);
   });
 
   it('goes to the sessions of a machine that is set up', async () => {

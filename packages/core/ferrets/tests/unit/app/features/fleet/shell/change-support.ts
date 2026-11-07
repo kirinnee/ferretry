@@ -6,14 +6,14 @@ import type { FleetClient } from '../../../../../../app/features/fleet/fleet-cli
 
 const CHANGE_ID = 'fy_fprop_abcdefghijklmnopqrstuv';
 
-/** What this caller may do, as `GET /v1/fleet/machine` carries it. */
+/** What this caller may do, as `GET /v1/runtimes/machine` carries it. */
 const authority = (overrides: Partial<FleetMachineAuthority> = {}): FleetMachineAuthority => ({
   mayApply: true,
   applyRefusal: 'granted',
   ...overrides,
 });
 
-/** `GET /v1/fleet/machine` with the given authority: where every change suite reads what it may do. */
+/** `GET /v1/runtimes/machine` with the given authority: where every change suite reads what it may do. */
 export const machineAnswer = (overrides: Partial<FleetMachineAuthority> = {}): FleetMachineView => ({
   name: 'studio-mac',
   format: 'version-2',
@@ -58,8 +58,8 @@ export interface Call {
 export type Answer = unknown | Error | ((call: Call) => unknown);
 
 /**
- * Answers by path: `/v1/fleet/machine`, `/v1/fleet/proposals`,
- * `/v1/fleet/proposals/<id>/apply`. A path with no answer fails like an unreachable machine.
+ * Answers by path: `/v1/runtimes/machine`, `/v1/runtimes/proposals`,
+ * `/v1/runtimes/proposals/<id>/apply`. A path with no answer fails like an unreachable machine.
  */
 export const scriptedClient = (answers: Readonly<Record<string, Answer>>, calls: Call[] = []): FleetClient => ({
   request: async <T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> => {
@@ -77,4 +77,4 @@ export const scriptedClient = (answers: Readonly<Record<string, Answer>>, calls:
   },
 });
 
-export const APPLY_PATH = `/v1/fleet/proposals/${CHANGE_ID}/apply`;
+export const APPLY_PATH = `/v1/runtimes/proposals/${CHANGE_ID}/apply`;

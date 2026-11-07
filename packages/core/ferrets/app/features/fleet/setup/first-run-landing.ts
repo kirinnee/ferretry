@@ -8,7 +8,7 @@
  * a machine that is already set up skips it, and Settings keeps a "Finish setting up" banner for a
  * machine whose setup was left for later.
  *
- * ONE READ, AND IT FAILS OPEN. The machine's own `GET /v1/fleet/machine` decides; a machine that could
+ * ONE READ, AND IT FAILS OPEN. The machine's own `GET /v1/runtimes/machine` decides; a machine that could
  * not answer, or answered with a refusal, lands where it always did — its sessions — because a guess
  * that sent a working machine into setup would be worse than a first run Settings still offers.
  */

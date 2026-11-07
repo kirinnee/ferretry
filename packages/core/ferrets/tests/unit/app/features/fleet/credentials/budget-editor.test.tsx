@@ -9,7 +9,7 @@ import { interact, mount, must } from '@ferretry/app/testing';
 import { httpError } from '../../../../../../../kernel/tests/unit/app/features/config-files/config-files-support.ts';
 import { type Call, CREDENTIALS, credential, NOW, READS, STUDIO, scripted, withStatus } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 
-const LIST = 'GET /v1/fleet/credentials';
+const LIST = 'GET /v1/logins';
 const GET_MACHINE_FILE = 'GET /v1/config/file?path=machine.yaml';
 const GET_LOGIN_FILE = 'GET /v1/config/file?path=logins%2Fclaude-personal.yaml';
 const PUT = 'PUT /v1/config/file';

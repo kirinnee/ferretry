@@ -28,9 +28,9 @@ import {
 } from '../../../../../../../../plugins/accounts/tests/unit/app/features/fleet/account-support.ts';
 import { DEEPSEEK, PROVIDERS } from '../credentials/environment-support.ts';
 
-const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
-const PROPOSE = 'POST /v1/fleet/proposals';
-const LOGIN = 'POST /v1/fleet/login';
+const APPLY = `POST /v1/runtimes/proposals/${CHANGE_ID}/apply`;
+const PROPOSE = 'POST /v1/runtimes/proposals';
+const LOGIN = 'POST /v1/logins/sign-in';
 
 const credentialsOf = (...items: ReturnType<typeof credential>[]): FleetCredentialList =>
   FleetCredentialListSchema.parse({ format: 2, machine: 'studio-mac', credentials: items });
@@ -144,7 +144,7 @@ const STAGED_ROUTES = (data: MachineData = DATA) => ({
 });
 
 const proposed = (calls: readonly Call[]): unknown[] =>
-  calls.filter(call => call.path === '/v1/fleet/proposals').map(call => call.body);
+  calls.filter(call => call.path === '/v1/runtimes/proposals').map(call => call.body);
 
 const nameInput = (container: ParentNode): HTMLInputElement =>
   must(container.querySelector<HTMLInputElement>('#add-runtime-name'), 'name input');
@@ -244,7 +244,7 @@ describe('Add runtime: Login', () => {
       routes: {
         ...READS(SIGN_IN_NEEDED),
         [LOGIN]: claudeFlow('awaiting-code', 'claude-work'),
-        'GET /v1/fleet/login/flow-1': claudeFlow('complete', 'claude-work'),
+        'GET /v1/logins/sign-in/flow-1': claudeFlow('complete', 'claude-work'),
       },
     });
     expect(view.container.querySelector('[data-credential-sign-in]')).toBeNull();
@@ -267,7 +267,7 @@ describe('Add runtime: Add a new login', () => {
   });
   const newLoginRoutes = (after: MachineData, extra: Record<string, unknown> = {}) => ({
     ...STAGED_ROUTES(after),
-    'GET /v1/fleet/presets': PROVIDERS,
+    'GET /v1/logins/presets': PROVIDERS,
     'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
     'POST /v1/secrets': (call: Call) => ({
       name: (call.body as { name: string }).name,
@@ -314,7 +314,7 @@ describe('Add runtime: Add a new login', () => {
       // "didn't answer" refusal is the alert this test says is not there.
       routes: newLoginRoutes(after, {
         [LOGIN]: claudeFlow('awaiting-code', 'claude'),
-        'GET /v1/fleet/login/flow-1': claudeFlow('awaiting-code', 'claude'),
+        'GET /v1/logins/sign-in/flow-1': claudeFlow('awaiting-code', 'claude'),
       }),
     });
     await click(view.container, '[data-add-row="login"]');
@@ -322,7 +322,7 @@ describe('Add runtime: Add a new login', () => {
     await waitFor(view.container, '[data-credential-sign-in="awaiting-code"]');
     expect(proposed(calls)).toEqual([{ change: { kind: 'credential.add', id: 'claude', harness: 'claude' } }]);
     expect(reloads).toEqual(['reload']);
-    expect(calls.find(call => call.path === '/v1/fleet/login')?.body).toEqual({ credentialId: 'claude' });
+    expect(calls.find(call => call.path === '/v1/logins/sign-in')?.body).toEqual({ credentialId: 'claude' });
     expect(view.container.querySelector('[role="alert"]')).toBeNull();
 
     await click(view.container, '[data-add-runtime-sign-in-later]');
@@ -345,7 +345,7 @@ describe('Add runtime: Add a new login', () => {
       after,
       routes: newLoginRoutes(after, {
         [LOGIN]: claudeFlow('awaiting-code', 'claude'),
-        'GET /v1/fleet/login/flow-1': claudeFlow('complete', 'claude'),
+        'GET /v1/logins/sign-in/flow-1': claudeFlow('complete', 'claude'),
       }),
     });
     await click(view.container, '[data-add-row="login"]');
@@ -418,7 +418,7 @@ describe('Add runtime: Add a new login', () => {
     const view = await mountHost({
       calls,
       after,
-      routes: newLoginRoutes(after, { 'GET /v1/fleet/presets': { presets: [...PROVIDERS.presets, DEEPSEEK] } }),
+      routes: newLoginRoutes(after, { 'GET /v1/logins/presets': { presets: [...PROVIDERS.presets, DEEPSEEK] } }),
     });
     await click(view.container, '[data-add-row="login"]');
     await click(view.container, '[data-add-login-kind-option="environment"] input');
