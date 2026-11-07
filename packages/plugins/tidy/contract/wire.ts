@@ -17,12 +17,7 @@ export const TidyCardIdSchema = z.string().regex(/^[BFIC][1-9][0-9]{0,8}$/u);
 export type TidyCardId = z.infer<typeof TidyCardIdSchema>;
 
 /** Why a card is kept. */
-export const TidyCardKeepCodeSchema = z.enum([
-  'owner-asked',
-  'board-on',
-  'assigned-to-live-ferret',
-  'waiting-at-gate',
-]);
+export const TidyCardKeepCodeSchema = z.enum(['owner-asked', 'board-on', 'assigned-to-live-ferret', 'waiting-at-gate']);
 export type TidyCardKeepCode = z.infer<typeof TidyCardKeepCodeSchema>;
 
 /** Why an ask is kept. */

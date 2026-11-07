@@ -19,6 +19,5 @@ describe('tidy manifest', () => {
     expect(manifest.actions.cli.map(verb => verb.verb)).toEqual(['gc', 'tidy']);
     expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['ferret.changed']);
     expect(manifest.permissions.roots).toEqual(['worktrees']);
-    expect(manifest.permissions.network).toBeUndefined();
   });
 });

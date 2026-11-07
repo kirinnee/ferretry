@@ -11,7 +11,8 @@ import {
 
 tidyConformance('fakeTidy', () => fakeTidy({ reclaimedFerrets: 2, reclaimedBytes: 4096 }));
 
-const config = (scratch: Partial<typeof SCRATCH_DEFAULTS>) => TidyConfigSchema.parse({ scratch });
+const config = (scratch: { enabled?: boolean; ttlHours?: number; perSweep?: number }) =>
+  TidyConfigSchema.parse({ scratch });
 
 describe('tidy wire', () => {
   test('an empty tidy.yaml reads as today’s defaults', () => {
