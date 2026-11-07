@@ -18,6 +18,8 @@ import type {
 } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
 import { ConversationClientProvider } from './client.ts';
+import { ComposerAttachPanel } from './composer/composer-attach.tsx';
+import { ConversationSettings } from './composer/conversation-settings.tsx';
 
 const TITLE = 'Conversation';
 
@@ -55,11 +57,11 @@ export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
     links: scoped<ScreenProps>(client, Pending),
   },
   panels: {
-    attachments: scoped<PanelProps>(client, Pending),
+    attachments: scoped<PanelProps>(client, ComposerAttachPanel),
     queue: scoped<PanelProps>(client, Pending),
     'compact-at': scoped<PanelProps>(client, Pending),
     'chat-width': scoped<PanelProps>(client, Pending),
   },
-  settings: { conversation: scoped<SettingsProps>(client, Pending) },
+  settings: { conversation: scoped<SettingsProps>(client, ConversationSettings) },
   renderers: { 'ask:question': scoped<RendererProps>(client, Pending) },
 });

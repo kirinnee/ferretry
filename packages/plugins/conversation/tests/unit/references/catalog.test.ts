@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { ApiError, type CallContext, queryFrom } from '@ferretry/kernel/contract';
+import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 import {
   ReferenceCatalogAnswerSchema,
   type ReferenceCatalogPrefix,
@@ -7,7 +8,7 @@ import {
 } from '../../../contract/index.ts';
 import { referenceCatalogRoute } from '../../../daemon/references/catalog.ts';
 
-const FERRET = 'mvuc7tsf-0c3d50df';
+const FERRET = FerretIdSchema.parse('mvuc7tsf-0c3d50df');
 
 const call = (ferretId: string, query: Record<string, string>): CallContext =>
   ({

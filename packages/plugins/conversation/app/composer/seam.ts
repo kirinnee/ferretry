@@ -11,10 +11,8 @@
  *     `DaemonFetch` / `browserFetch` / `daemonRequest`; a refusal is `DaemonCallError` (status, code, sentence).
  *   - carrierDelivery ....................................... GAP(app-shell): today's `relay-carrier.ts` walk; the 5.0
  *     client does not classify an outage yet, so this reads a `delivery` mark off the error chain and finds none.
- *   - devicePreference ...................................... copy of today's `lib/device-preference.ts` (Access's
- *     placement): a reader preference on this device; the key is a `localKey('conversation', …)` name.
- *   - foregroundPinScope .................................... GAP(ferrets): the pinned pane in front (Ferrets' pin
- *     bridge). Nothing is pinned until Ferrets' app half sets it.
+ *   - devicePreference, the foreground pin scope ......... re-exports of `@ferretry/app` (GAP(ferrets): nothing sets
+ *     the pinned pane in front until Ferrets' app half does).
  *   - withReferences / referencesOf / withReferencePrefix ... copies of Agenda's "re:" chip helpers (today's
  *     `agenda-reply.ts`, `answer-chip.ts`): the composer stores the chips beside an unsent message.
  *   - FerretContext ......................................... GAP(C3, Q0): today's `SessionContext`, until the Ferrets
@@ -25,8 +23,15 @@
  */
 
 import { DaemonCallError } from '@ferretry/app';
+
+export {
+  clearForegroundPinScope,
+  type DevicePreference,
+  devicePreference,
+  getForegroundPinScope,
+  setForegroundPinScope,
+} from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { useSyncExternalStore } from 'react';
 import type { WorkSearchQuery, WorkSearchResponse } from '../../contract/index.ts';
 
 // ─── the daemon this half talks to ────────────────────────────────────────────────────────────────────────────────
@@ -120,100 +125,6 @@ export const carrierDelivery = (reason: unknown): CarrierDelivery | undefined =>
   return undefined;
 };
 
-// ─── a reader preference kept on this device (copy of today's lib/device-preference.ts) ───────────────────────────
-
-export interface DevicePreference<T extends string> {
-  readonly key: string;
-  readonly fallback: T;
-  readonly parse: (raw: string | null) => T;
-  readonly read: () => T;
-  readonly write: (value: T) => void;
-  /** The live value, with the default for static rendering. */
-  readonly use: () => T;
-}
-
-/** Browser privacy settings may make even accessing localStorage throw. */
-const browserStorage = (): Storage | null => {
-  try {
-    return typeof globalThis.localStorage === 'undefined' ? null : globalThis.localStorage;
-  } catch {
-    return null;
-  }
-};
-
-/** A preference stored under `key`, one of `values`, `fallback` whenever it is anything else. */
-export const devicePreference = <T extends string>(
-  key: string,
-  values: readonly T[],
-  fallback: T,
-): DevicePreference<T> => {
-  /** Same-tab change signal; the browser storage event only reaches other tabs. */
-  const changeEvent = `ferretry:preference-change:${key}`;
-  /** Falls back to this value when storage is unavailable or refuses a write. */
-  let volatile: T | null = null;
-  const parse = (raw: string | null): T => (values.find(value => value === raw) ?? fallback) as T;
-  const read = (): T => {
-    if (volatile !== null) return volatile;
-    const storage = browserStorage();
-    if (storage === null) return fallback;
-    try {
-      return parse(storage.getItem(key));
-    } catch {
-      return fallback;
-    }
-  };
-  const write = (value: T): void => {
-    volatile = value;
-    const storage = browserStorage();
-    if (storage !== null) {
-      try {
-        storage.setItem(key, value);
-      } catch {
-        // The in-page setting stays effective even if it cannot survive reload.
-      }
-    }
-    try {
-      if (typeof window !== 'undefined') window.dispatchEvent(new Event(changeEvent));
-    } catch {
-      // An event shim must not make the setting itself fail.
-    }
-  };
-  const subscribe = (onChange: () => void): (() => void) => {
-    const target = typeof window === 'undefined' ? undefined : window;
-    if (target === undefined) return () => {};
-    const onStorage = (event: StorageEvent) => {
-      if (event.key !== null && event.key !== key) return;
-      volatile = null;
-      onChange();
-    };
-    target.addEventListener(changeEvent, onChange);
-    target.addEventListener('storage', onStorage);
-    return () => {
-      target.removeEventListener(changeEvent, onChange);
-      target.removeEventListener('storage', onStorage);
-    };
-  };
-  const use = (): T => useSyncExternalStore(subscribe, read, () => fallback);
-  return { key, fallback, parse, read, write, use };
-};
-
-// ─── the pinned pane in front (GAP(ferrets)) ──────────────────────────────────────────────────────────────────────
-
-let foreground: DaemonFerretScope | null = null;
-
-/** Declares the complete identity of the pane currently in front of the reader (Ferrets' pinned panes). */
-export const setForegroundPinScope = (scope: DaemonFerretScope | null): void => {
-  if (foreground !== null && scope !== null && daemonFerretKey(foreground) === daemonFerretKey(scope)) return;
-  foreground = scope;
-};
-
-/** Clears a departing pane only when it is still the foreground pane. */
-export const clearForegroundPinScope = (scope: DaemonFerretScope): void => {
-  if (foreground !== null && daemonFerretKey(foreground) === daemonFerretKey(scope)) setForegroundPinScope(null);
-};
-
-export const getForegroundPinScope = (): DaemonFerretScope | null => foreground;
-
 // ─── Agenda's "re:" chips (copies of today's agenda-reply.ts / answer-chip.ts) ────────────────────────────────────
 
 /** An Agenda item id (`A5`). */
@@ -259,17 +170,8 @@ export const withReferencePrefix = <T extends { readonly send: (...args: never[]
 
 // ─── shapes owned elsewhere (GAPs) ────────────────────────────────────────────────────────────────────────────────
 
-/** GAP(C3, Q0): today's `SessionContext` — how much of the context window the ferret has used. */
-export interface FerretContext {
-  /** Tokens the newest model call carried: input plus cache reads and writes. */
-  readonly usedTokens: number;
-  /** The model's context window in tokens. */
-  readonly windowTokens: number;
-  /** `usedTokens` over `windowTokens`, one decimal, never above 100. */
-  readonly percent: number;
-  /** When the usage record was written. */
-  readonly at: string;
-}
+/** GAP(ferrets, Q0): today's `SessionContext` — `@ferretry/app`'s `ContextUsage` until the Ferrets contract exports it. */
+export type { ContextUsage as FerretContext } from '@ferretry/app';
 
 /** GAP(C4): the work search port, until `app/search/work-search.ts` lands. */
 export interface WorkSearchPort {
@@ -279,3 +181,16 @@ export interface WorkSearchPort {
 /** Copy of today's `session-screens.ts` `canSubmitComposer` (C3 ports the rest of that file). */
 export const canSubmitComposer = (draft: string, disabled: boolean, sending: boolean): boolean =>
   draft.trim().length > 0 && !disabled && !sending;
+
+// ─── words put back from Voice's transcription log (copy of the receiving half of Voice's reinsert-transcription.ts) ─
+
+/** The window event Voice's transcription log announces; a composer that takes the words cancels it. */
+export const REINSERT_TRANSCRIPTION_EVENT = 'ferretry:reinsert-transcription';
+
+/** The words a reinsert event carries; undefined for any other event or a detail that is not words. */
+export function reinsertTranscriptionText(event: Event): string | undefined {
+  const detail: unknown = event instanceof CustomEvent ? event.detail : undefined;
+  if (typeof detail !== 'object' || detail === null) return undefined;
+  const text = (detail as { readonly text?: unknown }).text;
+  return typeof text === 'string' && text.length > 0 ? text : undefined;
+}

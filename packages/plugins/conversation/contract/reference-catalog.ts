@@ -20,9 +20,14 @@ export const REFERENCE_CATALOG_MAX_ENTRIES = 200;
 
 /**
  * One entry a menu can offer. `token` is what the composer inserts after the prefix (`F12` for `&F12`, a skill name,
- * a terminal key, a session-root-relative path); `label` and `detail` are what the row prints. `aliases` are other
- * words the entry is found by. `closed` marks an entry that is offered but no longer open (a done card, a closed
- * terminal); a proof treats it as known.
+ * a terminal key, a ferret-root-relative path); `label` and `detail` are what the row prints. `aliases` are other
+ * words the entry is found by.
+ *
+ * The conventions every provider follows, because the composer's menus read them:
+ *   - `closed` means known but not on offer: done or dropped work, a finished ferret, a closed terminal, a file that is
+ *     listed but not served (its `detail` says why). A proof still treats it as known.
+ *   - `@` (files) is asked one directory at a time: the query `q` is the directory, and a folder's token ends in `/`.
+ *   - `/` and `$` (skills) answer the skill's name; the composer writes the harness's own invocation from it.
  */
 export const ReferenceCatalogEntrySchema = z.strictObject({
   token: z.string().min(1).max(512),
