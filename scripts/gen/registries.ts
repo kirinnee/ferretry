@@ -27,6 +27,7 @@ import {
   consumedBy,
   effectiveHashes,
   loadToJsonSchema,
+  memberSurfaceOf,
   sha256,
   surfaceOf,
 } from './lib/hashes.ts';
@@ -93,9 +94,12 @@ export async function buildModel(root: string, precise = true): Promise<Model> {
   const consumed = consumedBy(graph, scanned);
   const toJsonSchema = await loadToJsonSchema();
   const canonical = new Map<string, string>();
+  const member = new Map<string, string>();
   const hashFailures: string[] = [];
   for (const subsystem of loaded) {
     try {
+      const surface = memberSurfaceOf(subsystem, toJsonSchema);
+      if (surface !== undefined) member.set(subsystem.id, sha256(canonicalJson(surface)));
       canonical.set(subsystem.id, sha256(canonicalJson(await surfaceOf(ws, subsystem, toJsonSchema))));
     } catch (error) {
       // A contract that does not load has no hash anyone can match: its clients stay paused (§9.6).
@@ -111,7 +115,7 @@ export async function buildModel(root: string, precise = true): Promise<Model> {
     graph,
     edges: precise ? edges : scanned,
     consumed,
-    hashes: effectiveHashes(canonical, consumed),
+    hashes: effectiveHashes(canonical, consumed, member),
   };
 }
 
@@ -127,7 +131,8 @@ function hashesLiteral(model: Model, ids: readonly string[]): string {
     .filter(id => model.hashes.has(id))
     .map(id => {
       const hash = model.hashes.get(id) as ContractHashes;
-      return `  ${JSON.stringify(id)}: { canonical: ${JSON.stringify(hash.canonical)}, effective: ${JSON.stringify(hash.effective)} },`;
+      const member = hash.member === undefined ? '' : `, member: ${JSON.stringify(hash.member)}`;
+      return `  ${JSON.stringify(id)}: { canonical: ${JSON.stringify(hash.canonical)}, effective: ${JSON.stringify(hash.effective)}${member} },`;
     });
   return `{\n${lines.join('\n')}\n}`;
 }
@@ -172,8 +177,8 @@ function halfRegistry(
     '/** Start order: needs and taken hooks first, then kernel, core, and id (§7.6). */',
     `export const startOrder: readonly string[] = ${JSON.stringify(startOrder(model))};`,
     '',
-    '/** Canonical and effective contract hash per package (§9.6). */',
-    `export const contractHashes: Readonly<Record<string, { readonly canonical: string; readonly effective: string }>> = ${hashesLiteral(model, startOrder(model))};`,
+    '/** Canonical and effective contract hash per package, and the member-surface hash where it has member routes (§9.6). */',
+    `export const contractHashes: Readonly<Record<string, { readonly canonical: string; readonly effective: string; readonly member?: string }>> = ${hashesLiteral(model, startOrder(model))};`,
     '',
     '/** One value for the whole build: changes when any effective hash or the start order changes. */',
     `export const generation = ${JSON.stringify(generation)};`,

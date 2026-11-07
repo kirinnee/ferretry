@@ -2,9 +2,10 @@ import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { failureResponse } from '../host/responses.ts';
-import type { HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import type { ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
 import { undeclaredUpdateHost } from '../host/adapters/update-host.ts';
+import { PRODUCT_BINARIES } from '../host/binaries.ts';
 import { NO_HOST_FACTS } from '../host/no-host-facts.ts';
 import type { DaemonTimings } from '../contract/ports.ts';
 import { DEFAULT_DAEMON_TIMINGS } from '../host/session/timings.ts';
@@ -132,8 +133,8 @@ export interface TestHostOptions {
   readonly timings?: DaemonTimings;
   /** The Vault stand-in for `kernel.secrets.resolve`: name to value. Absent, every declared and configured name is `unknown`. */
   readonly vault?: Readonly<Record<string, string>>;
-  /** The effective contract hash per package, as `kernel.contract.hash()` answers its own plugin. Default: `unhashed`. */
-  readonly contractHash?: (id: string) => string;
+  /** The contract hash per package, as `kernel.contract.hash()` answers its own plugin (`surface` is `'member'` for the member-surface hash). Default: `unhashed`. */
+  readonly contractHash?: (id: string, surface?: ContractSurface) => string;
 }
 
 export interface TestResponse {
@@ -266,7 +267,8 @@ interface Built {
 export async function testHost(options: TestHostOptions): Promise<TestHost> {
   const throwaway = await testIdentity();
   const identity: IdentityPort =
-    options.identity ?? Object.freeze({ daemonId: throwaway.daemonId, daemonName: 'test-daemon' });
+    options.identity ??
+    Object.freeze({ daemonId: throwaway.daemonId, daemonName: 'test-daemon', binaries: PRODUCT_BINARIES });
   const identitySigner = createIdentitySigner(throwaway.key);
   const world: World = {
     options,
@@ -886,7 +888,13 @@ async function start(world: World): Promise<TestHost> {
         stopping: () => stopController.signal.aborted,
         signal: stopController.signal,
       },
-      contract: { hash: () => options.contractHash?.(manifest.id) ?? 'unhashed' },
+      contract: {
+        hash: surface => {
+          if (surface === 'member' && (manifest.actions?.memberRoutes ?? []).length === 0)
+            throw new TypeError(`${manifest.id} declares no member routes, so it has no member-surface hash`);
+          return options.contractHash?.(manifest.id, surface) ?? 'unhashed';
+        },
+      },
     };
   };
 

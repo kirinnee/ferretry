@@ -44,16 +44,15 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useLinkBehaviour } from '../../../browsers/app/features/browser/external-link.tsx';
-import { useDocumentVisible } from '@ferretry/app';
-import { useFullscreen } from '@ferretry/app';
-import { RECONNECTING_GRACE_MS } from '../../../connections/app/lib/connection-health.ts';
-import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
-import type { DaemonSessionScope } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { grantRefusalNotice } from '../../../access/app/lib/grants.ts';
-import { KEYBOARD_CAPTURE_ATTRIBUTE } from '../../../conversation/app/lib/keyboard-capture.ts';
-import type { DaemonFetch } from '../../../runtimes/app/lib/runtime-models.ts';
-import { describeSurfaceOwnership, type SurfaceOwnership } from '@ferretry/app';
+import {
+  describeSurfaceOwnership,
+  RECONNECTING_GRACE_MS,
+  type SurfaceOwnership,
+  useDocumentVisible,
+  useFullscreen,
+} from '@ferretry/app';
+import { Button, FullscreenToggle, KEYBOARD_CAPTURE_ATTRIBUTE, useLinkBehaviour } from '@ferretry/app/ui';
+import { type DaemonConnection, type DaemonSessionScope, grantRefusalNotice } from '../shell.ts';
 import {
   describeCoControl,
   shouldReopenTerminalStream,
@@ -69,22 +68,12 @@ import {
   terminalLinkProvider,
 } from '../lib/terminal-links.ts';
 import {
-  browserTerminalStreamAttach,
-  closeSessionTerminal,
-  createSessionTerminal,
-  endSessionQuarantine,
-  listSessionQuarantines,
-  listSessionTerminals,
-  renameSessionTerminal,
   type TerminalAttachOptions,
   type TerminalStream,
   type TerminalStreamHandlers,
-  type TerminalStreamOpener,
   TerminalStreamRefused,
   terminalLimitLabel,
 } from '../lib/web-terminals.ts';
-import { Button } from '@ferretry/app';
-import { FullscreenToggle } from '@ferretry/app';
 import { loadTerminalFont } from './terminal-font-loader.ts';
 
 type XtermModules = {
@@ -140,30 +129,6 @@ export interface TerminalDeckDependencies {
    */
   onRecovered?(daemon: DaemonConnection, listener: () => void): () => void;
 }
-
-/**
- * The browser's real dependencies, bound to the carrier this daemon's traffic is on.
- *
- * THE FETCHER IS THREADED THROUGH EVERY HTTP CALL. `list`, `create`, `rename` and `close` used to
- * default to `browserFetch` — the raw network — which a paired device cannot use at all now: it holds
- * no bearer value, so every daemon call rides a session the device key opened. The control plane and
- * the stream travel the same carrier as every other daemon call.
- */
-export const browserTerminalDeckDependencies = (
-  fetcher: DaemonFetch,
-  openStream: TerminalStreamOpener,
-  onRecovered?: TerminalDeckDependencies['onRecovered'],
-): TerminalDeckDependencies => ({
-  ...(onRecovered === undefined ? {} : { onRecovered }),
-  list: (daemon, scope) => listSessionTerminals(daemon, scope, fetcher),
-  create: (daemon, scope) => createSessionTerminal(daemon, scope, {}, fetcher),
-  rename: (daemon, scope, id, title) => renameSessionTerminal(daemon, scope, id, title, fetcher),
-  close: (daemon, scope, id) => closeSessionTerminal(daemon, scope, id, fetcher),
-  attach: browserTerminalStreamAttach(openStream),
-  quarantines: (daemon, scope) => listSessionQuarantines(daemon, scope, fetcher),
-  endQuarantine: (daemon, scope, key) => endSessionQuarantine(daemon, scope, key, fetcher),
-  ...browserTerminalDeckHost(),
-});
 
 /** The parts of a deck's dependencies that are this browser's, not the daemon's: emulator, theme, dialogs, clipboard. */
 export type TerminalDeckHost = Pick<
@@ -416,8 +381,11 @@ function TerminalCanvas({
           columns: (): number => screen?.cols ?? 0,
         };
         const linkSink = {
-          open: (click: Parameters<typeof linksRef.current.open>[0], href: string): void =>
-            linksRef.current.open(click, { href, element: host }),
+          // A click something else already took (a handler above the pane called preventDefault) opens nothing.
+          open: (click: Parameters<typeof linksRef.current.open>[0], href: string): void => {
+            if (click.defaultPrevented) return;
+            linksRef.current.open(click, { href, element: host });
+          },
           confirm: (visible: string, href: string): boolean => dependencies.confirmLink(visible, href),
         };
         const xterm = new Terminal({

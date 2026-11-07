@@ -61,3 +61,4 @@ export * from './hooks/use-settled-busy.ts';
 export * from './hooks/use-touch-affected.ts';
 export * from './change-apply-panel.tsx';
 export * from './change-authority.ts';
+export * from './jump-to-latest.tsx';

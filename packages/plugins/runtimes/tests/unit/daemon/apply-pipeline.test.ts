@@ -5,7 +5,7 @@
  * pipeline against a fake one: the documents land first (they are the source of truth), the plan follows with no documents
  * of its own, a refusing writer fails the apply in a sentence, and a configuration that moved after the preview is refused.
  */
-import { fakeLogins } from '@ferretry/plugin-logins/contract/testing';
+import { fakeLoginChanges, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
@@ -68,7 +68,7 @@ function world(
       written.push(documents.map(document => ({ path: document.path, content: document.content })));
     },
   };
-  const base = unavailableCatalogDeps(() => 1_794_052_800_000, fakeLogins());
+  const base = unavailableCatalogDeps(() => 1_794_052_800_000, fakeLogins(), fakeLoginChanges());
   const deps: FleetCatalogServiceDeps = {
     ...base,
     document: async () => ({
@@ -230,7 +230,7 @@ describe('the apply pipeline over a fake config writer', () => {
   it('should answer a read in a sentence when the daemon has no host seam wired', async () => {
     // Arrange
     const service = assembleServices(
-      unavailableCatalogDeps(() => 0, fakeLogins()),
+      unavailableCatalogDeps(() => 0, fakeLogins(), fakeLoginChanges()),
       unavailableSetupDeps,
     ).catalog;
 

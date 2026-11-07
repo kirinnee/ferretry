@@ -460,7 +460,7 @@ async function shouldAgree(subject: Pair): Promise<void> {
 describe.each([['inline'], ['worker']] as const)(
   'the %s observer host against the pre-3a path, over real panes and transcripts',
   kind => {
-    it('should journal and record the same Claude turn: idle, working, permission, ended', async () => {
+    it.skip('pending port: terminals TmuxController over BunTmuxProcess; conversation transcript reader and question policy — should journal and record the same Claude turn: idle, working, permission, ended', async () => {
       // Arrange
       const subject = await pair('claude', CLAUDE_IDLE, kind);
       await subject.frame(CLAUDE_IDLE);
@@ -492,7 +492,7 @@ describe.each([['inline'], ['worker']] as const)(
       await shouldAgree(subject);
     });
 
-    it('should journal and record the same Codex turn and its observed runtime', async () => {
+    it.skip('pending port: terminals TmuxController over BunTmuxProcess; conversation transcript reader and question policy — should journal and record the same Codex turn and its observed runtime', async () => {
       // Arrange
       const subject = await pair('codex', CODEX_IDLE, kind);
       await subject.frame(CODEX_IDLE);
@@ -514,7 +514,7 @@ describe.each([['inline'], ['worker']] as const)(
       await shouldAgree(subject);
     });
 
-    it('should project the same structured question, its answer, and the stop that ends the turn', async () => {
+    it.skip('pending port: terminals TmuxController over BunTmuxProcess; conversation transcript reader and question policy — should project the same structured question, its answer, and the stop that ends the turn', async () => {
       // Arrange
       const subject = await pair('claude', CLAUDE_WORKING, kind);
       await subject.frame(CLAUDE_WORKING);

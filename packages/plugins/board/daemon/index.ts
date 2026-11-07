@@ -18,6 +18,7 @@ import {
 import type { BoardConfig } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { CARD_SOURCE } from './adapters/asks.ts';
+import { BoardReferenceCatalog } from './adapters/reference-catalog.ts';
 import { assemble, type BoardDefs } from './wiring.ts';
 import { type BoardCaller, BoardError, BOARD_SWEEP_INTERVAL_MS } from './lib/board/index.ts';
 import { boardRoutes } from './routes/board.ts';
@@ -166,6 +167,8 @@ export default implementDaemon(manifest, {
         // Board's cards are work Conversation's search finds (`fy search`, `search_work`).
         // read-scoped: none — Board hands over its cards raw; Conversation scrubs every text through the read-scoped redaction before it indexes or shows it
         'search.sources': () => [{ id: 'board', item: world.workSource }],
+        // The `&` menu of a ferret's composer (reference.catalog): the ferret's cards. Read-scoped: none — Conversation masks the answer.
+        'reference.catalog:&': new BoardReferenceCatalog(service),
         // A turn ended (Conversation): the turn-end and gate checks of today (fyd.ts:10727-10783).
         'turn.ended': async payload => {
           await world.turnEnded(payload.ferret);

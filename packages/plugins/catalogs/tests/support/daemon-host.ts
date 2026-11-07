@@ -221,7 +221,7 @@ export interface CatalogsFixtureOptions {
   /** The sealed-documents port Catalogs is given; absent = Vault's fake. */
   readonly sealed?: SealedDocumentsApi;
   /** The effective contract hash the host answers each package; absent = `unhashed`. */
-  readonly contractHash?: (id: string) => string;
+  readonly contractHash?: (id: string, surface?: 'member') => string;
 }
 
 /**
@@ -350,7 +350,7 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
         ...ctx,
         kernel: {
           ...ctx.kernel,
-          identity: { daemonId: wireIdentity.daemonId, daemonName: 'Publisher' },
+          identity: { ...ctx.kernel.identity, daemonId: wireIdentity.daemonId, daemonName: 'Publisher' },
           signer,
         } as typeof ctx.kernel,
       });

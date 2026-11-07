@@ -9,11 +9,12 @@
  * pair and refuses a scope that belongs to a different daemon.
  */
 
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { SnapshotScope } from '../lib/protocol/holds.ts';
-import type { DaemonConnection } from '../../../../core/ferrets/app/lib/daemon-connection.ts';
-import type { DaemonSessionScope } from '../../../../core/ferrets/app/lib/daemon-scope.ts';
-import { daemonRequest } from '../../../connections/app/lib/daemon-transport.ts';
-import { browserFetch, type DaemonFetch, DaemonResponseError } from '../../../runtimes/app/lib/runtime-models.ts';
+import { assertScopeDaemon, type DaemonConnection, type DaemonSessionScope } from '../shell.ts';
+
+/** The pane snapshot's route, by manifest key. */
+export const SNAPSHOT_ROUTE = 'GET /v1/ferrets/:ferretId/snapshot';
 
 /**
  * `live=false` is the original's choice and the reason the header says
@@ -22,38 +23,37 @@ import { browserFetch, type DaemonFetch, DaemonResponseError } from '../../../ru
  *
  * `extent` is the daemon's `scope` query: `screen` asks a live capture for the visible frame only,
  * which is all the activity line reads, instead of the whole scrollback every poll would otherwise
- * carry over the relay. It is omitted for `history`, so the default URL is the one it always was.
+ * carry over the relay. It is omitted for `history`, so the default query is the one it always was.
  */
-export const snapshotUrl = (scope: DaemonSessionScope, live = false, extent: SnapshotScope = 'history'): string =>
-  `/v1/ferrets/${encodeURIComponent(scope.sessionId)}/snapshot?live=${live ? 'true' : 'false'}${
-    extent === 'screen' ? '&scope=screen' : ''
-  }`;
+export const snapshotQuery = (live = false, extent: SnapshotScope = 'history'): Record<string, string> => ({
+  live: live ? 'true' : 'false',
+  ...(extent === 'screen' ? { scope: 'screen' } : {}),
+});
 
-const failure = async (response: Response): Promise<DaemonResponseError> => {
-  const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
-  return new DaemonResponseError(
-    response.status,
-    typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
-    typeof body.code === 'string' ? body.code : undefined,
-  );
+/** A read that was cancelled while it was in flight answers as the cancel, not as the pane. */
+const settled = <T>(value: T, signal: AbortSignal | undefined): T => {
+  signal?.throwIfAborted();
+  return value;
 };
 
 /** Reads one pane snapshot from the daemon that owns the session. */
 export const readPaneSnapshot = async (
+  client: Pick<PluginClient, 'call'>,
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   signal?: AbortSignal,
-  fetcher: DaemonFetch = browserFetch,
   /** Capture the pane now rather than answer with the stored final frame — the activity line's read. */
   live = false,
   /** How much of a live pane to return; `screen` is the visible frame. */
   extent: SnapshotScope = 'history',
 ): Promise<string> => {
-  if (daemon.daemonId !== scope.daemonId) throw new Error('terminal scope must belong to the requested daemon');
-  const target = daemonRequest(daemon, snapshotUrl(scope, live, extent), { signal });
-  const response = await fetcher(target.url, target.init);
-  if (!response.ok) throw await failure(response);
-  return await response.text();
+  assertScopeDaemon(daemon, scope);
+  signal?.throwIfAborted();
+  const answer = await client.call<unknown>(SNAPSHOT_ROUTE, {
+    params: { ferretId: scope.sessionId },
+    query: snapshotQuery(live, extent),
+  });
+  return settled(typeof answer === 'string' ? answer : String(answer ?? ''), signal);
 };
 
 /** How the daemon's unreachability is worded when the last good text is kept. */
