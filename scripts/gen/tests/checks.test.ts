@@ -589,3 +589,37 @@ describe('registry generator', () => {
     expect(messages(await run(registriesFresh, f))).toContain('generated/hooks.md: differs');
   });
 });
+
+describe('fy check package scope and the release hash compare', () => {
+  test('a whole-graph finding counts for a package only when it names that package', async () => {
+    const { namesPackage } = await import('../check.ts');
+    expect(
+      namesPackage(
+        { check: 'plugin-graph', where: 'gate', message: 'kernel-bound port "admission" has 0 providers' },
+        'projects',
+      ),
+    ).toBe(false);
+    expect(namesPackage({ check: 'plugin-graph', where: 'a, projects', message: 'two takers' }, 'projects')).toBe(true);
+    expect(
+      namesPackage(
+        { check: 'plugin-graph', where: 'board', message: 'start-order cycle: board → projects → board' },
+        'projects',
+      ),
+    ).toBe(true);
+    expect(namesPackage({ check: 'plugin-graph', where: 'x', message: 'needs projects-extra' }, 'projects')).toBe(
+      false,
+    );
+  });
+  test('the release notes name every changed, new and removed contract', async () => {
+    const { releaseNotes } = await import('../hash-compare.ts');
+    const { compareHashes } = await import('../lib/hashes.ts');
+    const h = (effective: string) => ({ canonical: 'c', effective });
+    const diff = compareHashes(
+      { board: h('1'), tidy: h('1'), gone: h('1') },
+      { board: h('2'), tidy: h('1'), fresh: h('1') },
+    );
+    expect(diff).toEqual({ changed: ['board'], added: ['fresh'], removed: ['gone'] });
+    expect(releaseNotes(diff)).toContain('**board** changed');
+    expect(releaseNotes({ changed: [], added: [], removed: [] })).toContain("No plugin's contract changed.");
+  });
+});

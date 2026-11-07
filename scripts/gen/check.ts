@@ -77,6 +77,12 @@ const SCOPED = new Set([
 ]);
 const GRAPH = new Set(['plugin-graph', 'core-closed', 'contract-graph']);
 
+/** Whether a finding is about this package: it is `where`, or a whole word of the message. */
+export function namesPackage(finding: Finding, id: string): boolean {
+  if (finding.where.split(/,\s*/).includes(id)) return true;
+  return new RegExp(`(^|[^a-z0-9-])${id.replace(/-/g, '\\-')}($|[^a-z0-9-])`).test(finding.message);
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const args = parseArgs(argv.filter(arg => arg !== '--tests' && arg !== '--list'));
   if (argv.includes('--list')) {
@@ -103,7 +109,12 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   const findings: Finding[] = [];
   for (const c of selected) {
-    const found = await c.run(ctx);
+    const all = await c.run(ctx);
+    // In package mode a whole-graph check reports only what names this package (its edges, its cycle, its takes).
+    const found =
+      args.packageId !== undefined && GRAPH.has(c.name)
+        ? all.filter(f => namesPackage(f, args.packageId as string))
+        : all;
     findings.push(...found);
     if (found.length === 0) console.log(`✅ ${c.name}`);
   }
