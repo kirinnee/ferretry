@@ -1,13 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { defaultSessionHealthSettings } from '../../../../../daemon/lib/session/health/settings.ts';
+import { emptySelfCheckLedger } from '../../../../../daemon/lib/session/health/wedge.ts';
 import {
-  defaultSessionHealthSettings,
-  emptySelfCheckLedger,
   launchingRecently,
   planSelfCheck,
   type SelfCheckInput,
-  type SessionHealthObservation,
-} from '../../../../../daemon/lib/session/health/index.ts';
+} from '../../../../../daemon/lib/session/health/self-check.ts';
+import { type SessionHealthObservation } from '../../../../../daemon/lib/session/health/types.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
 const AT = '2026-07-31T10:00:00.000Z';

@@ -40,7 +40,7 @@ const ArchivedSessionSchema = z.strictObject({
   journal: JournalFingerprintSchema.nullable(),
 });
 
-export const ArchiveRegistryDocumentSchema = z.strictObject({
+const ArchiveRegistryDocumentSchema = z.strictObject({
   version: z.literal(1),
   sessions: z.record(z.string(), ArchivedSessionSchema),
 });

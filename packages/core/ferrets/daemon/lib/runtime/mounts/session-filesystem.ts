@@ -214,7 +214,7 @@ export interface FileBrowserDeps {
 }
 
 /** The four route keys, as `manifest.ts` declares them (today's `/v1/sessions/:sessionId/fs…`, renamed). */
-export const FILE_BROWSER_ROUTE_KEYS = [
+const FILE_BROWSER_ROUTE_KEYS = [
   'GET /v1/ferrets/:ferretId/fs/file',
   'GET /v1/ferrets/:ferretId/fs/index',
   'GET /v1/ferrets/:ferretId/fs/changes',

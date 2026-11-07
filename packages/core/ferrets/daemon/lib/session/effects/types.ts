@@ -47,7 +47,6 @@ export interface SessionEffectKey {
 /** The two durable states of an effect that exists at all. */
 export const SESSION_EFFECT_PHASES = ['begun', 'settled'] as const;
 const SessionEffectPhaseSchema = z.enum(SESSION_EFFECT_PHASES);
-export type SessionEffectPhase = z.infer<typeof SessionEffectPhaseSchema>;
 
 /**
  * The whole durable value, parsed rather than asserted.

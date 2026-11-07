@@ -28,7 +28,7 @@ export type CodexCatalogProbe = (binary: string, cwd: string) => Promise<readonl
 /** Milliseconds since the epoch. Injected so an expiry can be reached without waiting for one. */
 export type CatalogClock = () => number;
 
-export const CODEX_CATALOG_TTL_MS = 300_000;
+const CODEX_CATALOG_TTL_MS = 300_000;
 
 interface CacheEntry {
   readonly expiresAt: number;

@@ -67,7 +67,7 @@ export interface SelfCheckTick {
  * daemon has NOT been shown to be current, and treating that as `fresh` is how a wedged fleet
  * reports all-clear — the defect the warden unit already found in this codebase's ancestor.
  */
-export type SelfCheckFreshness = 'first-tick' | 'fresh' | 'unknown' | 'wedged';
+type SelfCheckFreshness = 'first-tick' | 'fresh' | 'unknown' | 'wedged';
 
 export interface SelfCheckVerdict {
   readonly freshness: SelfCheckFreshness;
@@ -126,7 +126,7 @@ export interface WardenSweepObservation {
   readonly intervalMs: number;
 }
 
-export type WardenSweepState = 'fresh' | 'within-grace' | 'stale' | 'timer-dead' | 'unknown';
+type WardenSweepState = 'fresh' | 'within-grace' | 'stale' | 'timer-dead' | 'unknown';
 
 export interface WardenSweepVerdict {
   readonly state: WardenSweepState;
@@ -172,7 +172,7 @@ export interface IncoherencePass {
   readonly unhealable: readonly string[];
 }
 
-export const SelfRestartStampSchema = z.object({
+const SelfRestartStampSchema = z.object({
   at: z.iso.datetime({ offset: true }),
   sessions: z.array(z.string().min(1)).default([]),
 });

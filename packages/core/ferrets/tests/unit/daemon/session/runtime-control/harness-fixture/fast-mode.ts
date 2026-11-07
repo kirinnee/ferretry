@@ -35,7 +35,7 @@ import type {
   RuntimeModelChoice,
   SessionView,
 } from '../../../../../../daemon/lib/protocol/session.ts';
-import type { HarnessKind } from '../../../../../../daemon/lib/session/peers/core.ts';
+
 import type { FastModeFacts } from './runtime-switch.ts';
 
 /** A model id as a harness reports it carries no `[1m]` context-window selector, so strip both before comparing. */
@@ -51,42 +51,24 @@ export function claudeFastSupport(model: string): boolean {
 }
 
 /** The catalog entry for a model, ignoring the selector a harness drops. */
-export function catalogChoice(catalog: RuntimeModelCatalog, model: string | undefined): RuntimeModelChoice | undefined {
+function catalogChoice(catalog: RuntimeModelCatalog, model: string | undefined): RuntimeModelChoice | undefined {
   if (model === undefined) return undefined;
   const wanted = withoutSelector(model);
   return catalog.choices.find(choice => withoutSelector(choice.value) === wanted);
 }
 
 /** The model a session is running: what the harness reported, else what it was launched on. */
-export const modelInForce = (view: SessionView): string | undefined => view.state.observedModel ?? view.config.model;
+const modelInForce = (view: SessionView): string | undefined => view.state.observedModel ?? view.config.model;
 
 /**
  * Whether fast mode is on for a session right now, as best the documents say. Absent when the model is
  * unknown to the catalog and nothing else says.
  */
-export function fastInForce(view: SessionView, choice: RuntimeModelChoice | undefined): boolean | undefined {
+function fastInForce(view: SessionView, choice: RuntimeModelChoice | undefined): boolean | undefined {
   const known = view.state.observedFast ?? view.config.launchFast;
   if (known !== undefined) return known;
   if (choice === undefined) return undefined;
   return choice.fast === true ? choice.fastDefault === true : false;
-}
-
-/**
- * Why a START that asks for fast mode cannot have it on the model it resolved, or nothing.
- *
- * Only an explicit "no" refuses. Claude's answer is the name rule. Codex's is the live catalog's, which
- * a start reads only when it asked for fast mode; a model the catalog does not list, or a catalog that
- * could not be read, is let through — the session then runs on the tier it was given and its chip
- * reports what the harness says.
- */
-export function fastStartRefusal(
-  harness: HarnessKind,
-  model: string,
-  choices: readonly RuntimeModelChoice[],
-): string | undefined {
-  if (harness === 'claude') return claudeFastSupport(model) ? undefined : `${model} has no fast mode`;
-  const choice = catalogChoice({ harness, source: 'codex-app-server', choices: [...choices] }, model);
-  return choice?.fast === false ? `${choice.label} has no fast mode` : undefined;
 }
 
 /** The facts the planner needs for a fast switch on this session. */

@@ -18,9 +18,9 @@ import type { EventPointer, JournalFingerprint, JournalProblem, SessionEvent } f
  *
  * The encoder enforces the bound so `append` can never write a record that a later rebuild would reject.
  */
-export const MAX_JOURNAL_RECORD_BYTES = 1 << 20; // 1 MiB
+const MAX_JOURNAL_RECORD_BYTES = 1 << 20; // 1 MiB
 
-export class JournalRecordTooLargeError extends Error {
+class JournalRecordTooLargeError extends Error {
   constructor(
     readonly byteLength: number,
     readonly maxBytes: number,
@@ -31,13 +31,13 @@ export class JournalRecordTooLargeError extends Error {
 }
 
 /** Throw when an encoded journal record exceeds the byte cap. Defaults to the production cap. */
-export function assertJournalRecordSize(encoded: string, maxBytes: number = MAX_JOURNAL_RECORD_BYTES): void {
+function assertJournalRecordSize(encoded: string, maxBytes: number = MAX_JOURNAL_RECORD_BYTES): void {
   const byteLength = new TextEncoder().encode(encoded).byteLength;
   if (byteLength > maxBytes) throw new JournalRecordTooLargeError(byteLength, maxBytes);
 }
 
 /** Today's stored event record; the contract owns it as `FerretHistoryFiles`' schema. */
-export const SessionEventSchema = FerretHistoryEventSchema;
+const SessionEventSchema = FerretHistoryEventSchema;
 
 /** One line of a journal as the state port gave it: the parsed entry, or why that line could not be read. */
 export type JournalLine = { readonly value: unknown } | { readonly damaged: string };

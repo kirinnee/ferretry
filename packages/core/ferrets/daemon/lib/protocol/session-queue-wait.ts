@@ -26,4 +26,3 @@ export const QueueWaitReasonSchema = z.enum([
   /** The session is not running; it is delivered when it is revived. */
   'stopped',
 ]);
-export type QueueWaitReason = z.infer<typeof QueueWaitReasonSchema>;

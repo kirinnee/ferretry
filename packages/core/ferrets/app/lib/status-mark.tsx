@@ -27,7 +27,7 @@ type StatusTone = 'ok' | 'warn' | 'err' | 'pend' | 'accent';
 export type MarkedFerret = Pick<FerretSummary, 'state'> & Partial<Pick<FerretSummary, 'waiting' | 'finishedAt'>>;
 
 /** A ferret that is over: a stopped one can resume, but nothing is moving it now. */
-export const isFerretOver = (state: FerretState): boolean => state === 'stopped';
+const isFerretOver = (state: FerretState): boolean => state === 'stopped';
 
 export interface StatusMarkInfo {
   readonly shape: StatusShape;
@@ -40,7 +40,7 @@ export interface StatusMarkInfo {
 }
 
 /** The state in words, for every surface that shows one. */
-export const ferretStateLabel = (state: FerretState): string => state;
+const ferretStateLabel = (state: FerretState): string => state;
 
 /** At its prompt: launched, nothing asked of it yet, or its last turn over. Calm `ok`, a diamond, parked on the person. */
 const YOUR_TURN_MARK: StatusMarkInfo = Object.freeze({

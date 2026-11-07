@@ -7,7 +7,6 @@
  * Ferrets is core and cannot import a plugin's code (§2.1); this is the part the session code reads, injected by the
  * host.
  */
-import { isAbsolute, normalize, relative, sep } from 'node:path';
 import type { SessionLaunchInstructions } from '../../protocol/session.ts';
 
 // --- packages/fleet/src/lib/manifest.ts -------------------------------------------------------------------------
@@ -78,55 +77,7 @@ export type LaunchInstructionsPort = (fy: string, env: Readonly<Record<string, s
 
 // --- packages/fleet/src/lib/state-home-guard.ts -----------------------------------------------------------------
 
-interface KnownDirectory {
-  readonly named: string;
-  readonly real: string;
-  readonly device: bigint;
-  readonly inode: bigint;
-}
-
 declare const stateHomesBrand: unique symbol;
-
-/** The resolved homes and the openings inside them; made only by the plugin's `resolveStateHomes`. */
-export interface StateHomes {
-  readonly homes: readonly KnownDirectory[];
-  /** Folders inside a home that ARE reachable (e.g. the fleet's assets), by name and identity. */
-  readonly openings: readonly KnownDirectory[];
-  /**
-   * The home's key files and folders by identity, so a bind mount of one of them alone is still seen — and by
-   * `place`, the real path of where each one is, which is the one place a folder walk may meet it.
-   */
-  readonly pinned: readonly { readonly device: bigint; readonly inode: bigint; readonly place: string }[];
-  readonly [stateHomesBrand]: true;
-}
-
-/** Whether a path is inside a home — `home` names it when so. */
-export type HomeVerdict = { readonly inside: false } | { readonly inside: true; readonly home: string };
-
-const OUTSIDE: HomeVerdict = { inside: false };
-
-function absolute(path: string, what: string): string {
-  if (!isAbsolute(path)) throw new TypeError(`${what} must be an absolute path: ${path}`);
-  return normalize(path);
-}
-
-const within = (directory: string, path: string): boolean => {
-  const from = relative(directory, path);
-  // '..' as a whole first segment only: a child named '..cache' is inside, and must not read as outside.
-  return from === '' || (from !== '..' && !from.startsWith(`..${sep}`) && !isAbsolute(from));
-};
-
-/**
- * The home holding `path`, judged by its NAME alone: as configured and as resolved, less any opening. Pure — for
- * a caller that reaches its bytes some other safe way (a descriptor walk) and needs only the rule.
- */
-export function stateHomeByName(homes: StateHomes, path: string): HomeVerdict {
-  const target = absolute(path, 'the path');
-  const names = (directory: KnownDirectory): readonly string[] => [directory.named, directory.real];
-  if (homes.openings.some(opening => names(opening).some(name => within(name, target)))) return OUTSIDE;
-  const home = homes.homes.find(directory => names(directory).some(name => within(name, target)));
-  return home === undefined ? OUTSIDE : { inside: true, home: home.named };
-}
 
 // --- packages/daemon/src/lib/fleet/launch-environment.ts --------------------------------------------------------
 
@@ -182,29 +133,3 @@ export interface AccountLaunchRenewal {
 }
 
 // --- packages/daemon/src/lib/fleet/codex-runtime.ts -------------------------------------------------------------
-
-/** The sentence a launch failure starts with when Codex could not reach the network while starting. */
-export const CODEX_OFFLINE_LAUNCH_ERROR = 'Codex needs a network connection to start';
-
-/**
- * What Codex prints when its startup network call fails. Matched loosely enough to survive the
- * JSON-RPC code changing, and narrowly enough that no other failure reads as "offline".
- */
-const OFFLINE_SIGNATURES: readonly RegExp[] = [/workspace routing discovery failed/iu];
-
-/**
- * The launch error for a Codex pane that died while starting, or `undefined` when its screen does not
- * show the offline failure. `paneText` is what the dead pane last showed.
- */
-export function codexLaunchFailure(paneText: string): string | undefined {
-  if (!OFFLINE_SIGNATURES.some(signature => signature.test(paneText))) return undefined;
-  return `${CODEX_OFFLINE_LAUNCH_ERROR}. It could not reach OpenAI while starting, so the session ended before it could take any work. Check this machine's network connection, then start the session again.`;
-}
-
-/** What one call decided, as a value a test can assert on. */
-export type CodexAppServerOutcome =
-  | { readonly kind: 'not-a-codex-runtime' }
-  | { readonly kind: 'in-use'; readonly home: string }
-  | { readonly kind: 'not-running'; readonly home: string }
-  | { readonly kind: 'stopped'; readonly home: string; readonly pids: readonly number[] }
-  | { readonly kind: 'undecided'; readonly reason: string };

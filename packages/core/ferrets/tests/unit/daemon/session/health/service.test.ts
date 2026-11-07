@@ -3,22 +3,26 @@ import should from 'should';
 import {
   type ConsistencyPassPort,
   type DaemonHealthSnapshot,
-  defaultSessionHealthSettings,
+  type SelfCheckOutcome,
+  type SessionHealthPorts,
+  SessionHealthService,
+} from '../../../../../daemon/lib/session/health/service.ts';
+import { defaultSessionHealthSettings } from '../../../../../daemon/lib/session/health/settings.ts';
+import {
   type ExitedSessionTransition,
+  type SessionExitObservation,
+} from '../../../../../daemon/lib/session/health/exit.ts';
+import {
   type ExitObserveOptions,
   type IncoherencePass,
-  type SelfCheckOutcome,
-  SelfRestartCoordinator,
   type SelfRestartHandler,
   type SelfRestartStamp,
   type SelfCheckActivityPort,
   type SelfRestartStampStore,
-  type SessionExitObservation,
   type SessionHealthEvent,
-  type SessionHealthPorts,
-  SessionHealthService,
   type SurveyedSession,
-} from '../../../../../daemon/lib/session/health/index.ts';
+} from '../../../../../daemon/lib/session/health/types.ts';
+import { SelfRestartCoordinator } from '../../../../../daemon/lib/session/health/self-restart.ts';
 import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 
 /**

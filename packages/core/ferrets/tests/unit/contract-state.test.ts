@@ -7,7 +7,6 @@ import {
   FerretRecordSchema,
   FerretSummarySchema,
   ForkFiles,
-  NamesFile,
   SessionProvenanceSchema,
   SessionTransferEdgeSchema,
   TranscriptProvenanceSchema,
@@ -22,7 +21,7 @@ import {
 const AT = '2026-08-06T07:00:00.000Z';
 const folder = () => new MemoryStateFolder();
 const port = (state: MemoryStateFolder) =>
-  state.port([FerretFiles, FerretHistoryFiles, NamesFile, ArchiveFile, WorktreesFile, ForkFiles]);
+  state.port([FerretFiles, FerretHistoryFiles, ArchiveFile, WorktreesFile, ForkFiles]);
 const stamped = (body: object) => JSON.stringify({ format: 1, ...body });
 
 const PROVENANCE = {
@@ -71,32 +70,6 @@ describe('history.jsonl', () => {
       expect(read.unreadable).toBe(1);
       expect([...read.records] as unknown[]).toEqual([event]);
     }
-  });
-});
-
-describe('names.json', () => {
-  const claim = { callsign: 'hadi', ownerId: 'mi4abc-1a2b3c4d', claimedAtMs: 1_000, expiresAtMs: 2_000 };
-
-  test('today’s claim ledger, under `claims`, reads back', async () => {
-    const state = folder();
-    state.plant(NamesFile, stamped({ claims: [claim] }));
-    expect(await port(state).read(NamesFile)).toEqual({ ok: true, value: { claims: [claim] } });
-  });
-
-  test('a callsign not in its stored spelling, an expiry before its claim, an unknown field or a bare array is damage', async () => {
-    for (const body of [
-      { claims: [{ ...claim, callsign: 'Hadi' }] },
-      { claims: [{ ...claim, expiresAtMs: 1_000 }] },
-      { claims: [{ ...claim, note: 'x' }] },
-      { claims: 'hadi' },
-    ]) {
-      const state = folder();
-      state.plant(NamesFile, stamped(body));
-      expect((await port(state).read(NamesFile)).ok).toBe(false);
-    }
-    const bare = folder();
-    bare.plant(NamesFile, JSON.stringify([claim]));
-    expect((await port(bare).read(NamesFile)).ok).toBe(false);
   });
 });
 

@@ -30,7 +30,7 @@ const hasUnsupportedNameChar = (value: string): boolean => {
 };
 export const UNOPENABLE_NAME_REASON =
   'name cannot be opened by this viewer — it uses a character the daemon’s path grammar refuses';
-export const isOpenableName = (name: string | null | undefined): boolean => {
+const isOpenableName = (name: string | null | undefined): boolean => {
   const value = name ?? '';
   return value !== '' && value !== '.' && value !== '..' && !value.includes('/') && !hasUnsupportedNameChar(value);
 };

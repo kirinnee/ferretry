@@ -36,7 +36,7 @@ export interface SessionArchiveSettings {
   readonly passLimit: number;
 }
 
-export const SESSION_ARCHIVE_SETTINGS_DEFAULT: SessionArchiveSettings = {
+const SESSION_ARCHIVE_SETTINGS_DEFAULT: SessionArchiveSettings = {
   afterMs: ARCHIVE_AFTER_MS_DEFAULT,
   passLimit: ARCHIVE_PASS_LIMIT_DEFAULT,
 };

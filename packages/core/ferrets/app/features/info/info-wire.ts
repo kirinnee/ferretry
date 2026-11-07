@@ -19,7 +19,7 @@ const WorktreeStatusSchema = z.object({
   conflicted: z.boolean(),
 });
 
-export const ManagedWorktreeSchema = z.object({
+const ManagedWorktreeSchema = z.object({
   path: z.string().min(1),
   branch: z.string().min(1),
   removedAt: z.string().optional(),
@@ -35,10 +35,10 @@ export type ManagedWorktree = z.infer<typeof ManagedWorktreeSchema>;
 const WorktreeListSchema = z.object({ worktrees: z.array(ManagedWorktreeSchema) });
 
 /** Whether a running ferret is on the settings a relaunch would give it, and if not, why. */
-export const RELAUNCH_DRIFTS = ['arguments', 'settings'] as const;
+const RELAUNCH_DRIFTS = ['arguments', 'settings'] as const;
 export type RelaunchDrift = (typeof RELAUNCH_DRIFTS)[number];
 
-export const RelaunchSettingsSchema = z.object({
+const RelaunchSettingsSchema = z.object({
   current: z.boolean(),
   reasons: z.array(z.enum(RELAUNCH_DRIFTS)),
 });
@@ -57,7 +57,7 @@ export class InfoReadError extends Error {
 }
 
 /** Turns whatever a client threw into a readable error (the daemon's message when it said one). */
-export const readError = (failure: unknown): InfoReadError => {
+const readError = (failure: unknown): InfoReadError => {
   const fields = callFailure(failure);
   const message =
     typeof fields?.message === 'string' && fields.message !== ''

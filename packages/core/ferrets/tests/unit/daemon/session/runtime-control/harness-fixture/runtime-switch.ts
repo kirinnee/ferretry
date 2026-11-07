@@ -21,7 +21,7 @@ import type { HarnessKind } from '../../../../../../daemon/lib/session/peers/cor
 import { harnessQuirks } from './quirks.ts';
 
 /** Reasoning levels a harness with a native effort command accepts. */
-export const RUNTIME_EFFORT_LEVELS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+const RUNTIME_EFFORT_LEVELS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 /**
  * A model id a person typed ("Custom id…"), as one word the pane can take after `/model`: no
@@ -42,12 +42,12 @@ const CUSTOM_MODEL_ID = /^[A-Za-z0-9~][A-Za-z0-9._:~/@+-]{0,159}(?:\[[a-z0-9]{1,
  */
 export const ADVANCED_EFFORTS: readonly string[] = ['max', 'ultra'];
 
-export interface CodexReasoningChoice {
+interface CodexReasoningChoice {
   readonly value: string;
 }
 
 /** One model as the live Codex account advertises it. */
-export interface CodexModelChoice {
+interface CodexModelChoice {
   readonly value: string;
   /** The name Codex's own picker renders the model under — its `displayName`, which is not its id. */
   readonly label?: string;
@@ -57,7 +57,7 @@ export interface CodexModelChoice {
   readonly defaultReasoningEffort?: string;
 }
 
-export interface CodexModelCatalog {
+interface CodexModelCatalog {
   readonly choices: readonly CodexModelChoice[];
 }
 

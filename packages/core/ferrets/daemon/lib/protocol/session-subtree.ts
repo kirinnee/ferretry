@@ -12,12 +12,9 @@
  */
 import { z } from 'zod';
 import { PrChecksSchema, PrStateSchema } from './board.ts';
-import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
+import { InstantSchema, PositiveIntegerSchema } from './common.ts';
 import type { SessionConfig, SessionState, SessionView } from './session.ts';
 import { SessionStatusSchema } from './session-base.ts';
-
-/** How long after it ended a descendant still has a row, marked `ended`: long enough to read a result. */
-export const SUBTREE_ENDED_WINDOW_MS = 2 * 60 * 60_000;
 
 /** The longest a row's last line may be, in characters (code points, so an emoji is one), ellipsis included. */
 export const SUBTREE_LAST_LINE_MAX = 100;
@@ -29,11 +26,10 @@ export const lastLineLength = (text: string): number => [...text].length;
 export const SESSION_ENDED_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
 
 /** How a row's session is doing, in a lead's words. */
-export const SubtreeStateSchema = z.enum(['running', 'waiting', 'needs-you', 'ended']);
-export type SubtreeState = z.infer<typeof SubtreeStateSchema>;
+const SubtreeStateSchema = z.enum(['running', 'waiting', 'needs-you', 'ended']);
 
 /** Where a row's last line came from: a note on its card, or a message it sent to the asking lead. */
-export const SubtreeLastSourceSchema = z.enum(['note', 'message']);
+const SubtreeLastSourceSchema = z.enum(['note', 'message']);
 
 export const SubtreeRowSchema = z.strictObject({
   id: z.string().min(1),
@@ -74,18 +70,6 @@ export const SubtreeRowSchema = z.strictObject({
   /** When it ended; present exactly on an `ended` row. */
   endedAt: InstantSchema.optional(),
 });
-export type SubtreeRow = z.infer<typeof SubtreeRowSchema>;
-
-export const SubtreeViewSchema = z.strictObject({
-  root: z.strictObject({ id: z.string().min(1), callsign: z.string().min(1) }),
-  /** When the daemon read the rows. */
-  at: InstantSchema,
-  /** The window an ended descendant stays listed for. */
-  endedWindowMs: NonNegativeIntegerSchema,
-  /** Tree order: a ferret, then its own sub-ferrets, then the next sibling. */
-  rows: z.array(SubtreeRowSchema),
-});
-export type SubtreeView = z.infer<typeof SubtreeViewSchema>;
 
 // ── The walk ─────────────────────────────────────────────────────────────────────────────────────
 

@@ -30,14 +30,7 @@ export class SessionStopPending extends Error {
   }
 }
 
-export const LifecycleSessionStatusSchema = z.enum([
-  'created',
-  'starting',
-  'running',
-  'failed',
-  'kill_failed',
-  'stopped',
-]);
+const LifecycleSessionStatusSchema = z.enum(['created', 'starting', 'running', 'failed', 'kill_failed', 'stopped']);
 export type LifecycleSessionStatus = z.infer<typeof LifecycleSessionStatusSchema>;
 
 /**
@@ -49,7 +42,7 @@ export type LifecycleSessionStatus = z.infer<typeof LifecycleSessionStatusSchema
  * that accepts only the lifecycle's six declares every such session unusable, and a session nobody can
  * stop, revive or fork is exactly what a person pressing Stop on an interrupted turn met.
  */
-export const RecordedSessionStatusSchema = SessionStatusSchema;
+const RecordedSessionStatusSchema = SessionStatusSchema;
 export type RecordedSessionStatus = z.infer<typeof RecordedSessionStatusSchema>;
 
 /**
@@ -59,7 +52,7 @@ export type RecordedSessionStatus = z.infer<typeof RecordedSessionStatusSchema>;
  * transition.
  */
 // The two limits are the contract's: the config file's schema bounds `prompt` and `tmuxSession` by them.
-export { MAX_ASSIGNED_TASK_LENGTH, MAX_TMUX_SESSION_NAME_LENGTH };
+export { MAX_ASSIGNED_TASK_LENGTH };
 
 /** A relative or unresolved cwd would start the agent in the daemon's own directory. */
 const AbsolutePathSchema = z
@@ -103,9 +96,8 @@ export const SessionLifecycleConfigSchema = z.object({
     .regex(/^[0-9a-f]{64}$/u)
     .optional(),
 });
-export type SessionLifecycleConfig = z.infer<typeof SessionLifecycleConfigSchema>;
 
-export const SessionLifecycleStateSchema = z.object({
+const SessionLifecycleStateSchema = z.object({
   id: SessionIdSchema,
   status: RecordedSessionStatusSchema,
   startedAt: z.iso.datetime({ offset: true }).optional(),
@@ -124,7 +116,6 @@ export const SessionLifecycleStateSchema = z.object({
    */
   harnessNotReadyAfterMs: NonNegativeIntegerSchema.optional(),
 });
-export type SessionLifecycleState = z.infer<typeof SessionLifecycleStateSchema>;
 
 export const SessionLifecycleRecordSchema = z.object({
   config: SessionLifecycleConfigSchema,
