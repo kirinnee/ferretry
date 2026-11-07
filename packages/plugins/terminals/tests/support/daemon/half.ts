@@ -130,6 +130,7 @@ export function fakeFerrets(known: readonly FerretSummary[] = [ferretSummary()])
     },
     agentControl: async id => (known.some(ferret => ferret.id === id) ? DEFAULT_AGENT_CONTROL : NO_AGENT_CONTROL),
     sitrep: async () => undefined,
+    summary: async () => undefined,
   };
 }
 

@@ -16,7 +16,6 @@
     "conversation",
     "agenda",
     "board",
-    "packs",
     "warden",
     "usage",
     "lessons",
@@ -88,6 +87,16 @@
       "plugin": "agenda",
       "path": "packages/plugins/agenda/tests/support/app",
       "reason": "app-shell-fill React runtime and app test harness"
+    },
+    {
+      "plugin": "packs",
+      "path": "packages/plugins/packs/app/components/pack-call.tsx",
+      "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"
+    },
+    {
+      "plugin": "packs",
+      "path": "packages/plugins/packs/tests/unit/app/pack-call.test.tsx",
+      "reason": "the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card"
     }
   ]
 }

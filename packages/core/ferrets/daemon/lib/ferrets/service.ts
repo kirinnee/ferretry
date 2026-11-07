@@ -97,6 +97,8 @@ export interface FerretsPorts {
   limits?(): LimitsFile | undefined;
   /** Ferret id → the instant the owner pinned it (`agent-pins.json`). */
   pinnedAt?(): Promise<ReadonlyMap<string, string>>;
+  /** A ferret's `summary.md` (what its `signal done` wrote), or `undefined` when it has none. */
+  summaryText?(ferret: FerretId): Promise<string | undefined>;
   vault: Pick<VaultApi, 'childEnvironment'>;
   asks: Pick<AsksApi, 'open'>;
 }
@@ -150,6 +152,16 @@ export class FerretsService implements FerretsApi {
     if (record === undefined || this.ports.realPath === undefined) return undefined;
     const folder = await this.ports.realPath(record.folder).catch(() => undefined);
     return folder === undefined || folder !== record.folder ? undefined : { folder };
+  }
+
+  /**
+   * Today's `pack.result` read of `summary.md` (fyd.ts): a ferret this daemon does not know has none, and neither has
+   * one that has not finished — a revived ferret's previous `summary.md` is not its report while it works on.
+   */
+  async summary(ferret: FerretId): Promise<string | undefined> {
+    await this.ports.ready?.();
+    if (this.registry.get(ferret)?.state !== 'stopped' || this.ports.summaryText === undefined) return undefined;
+    return await this.ports.summaryText(ferret);
   }
 
   mayTouch(caller: FerretId, target: FerretId): boolean {

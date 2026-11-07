@@ -46,6 +46,10 @@
     // pending app port: terminals shell daemon-client, grants and browser-link facilities
     "packages/plugins/terminals/tests/unit/app",
     // pending app port: terminals shell daemon-client, grants and browser-link facilities
-    "packages/plugins/terminals/tests/support/app"
+    "packages/plugins/terminals/tests/support/app",
+    // pending app port: packs the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card
+    "packages/plugins/packs/app/components/pack-call.tsx",
+    // pending app port: packs the chat's reference-proved Markdown, PeerName, MessageFooter and ToolGroup, and Conversation's transcript row hosting the card
+    "packages/plugins/packs/tests/unit/app/pack-call.test.tsx"
   ]
 }
