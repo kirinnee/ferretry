@@ -1,16 +1,39 @@
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import { daemonHomeHref, daemonSettingsHref, DEVICE_SETTINGS_HREF, HOME_HREF } from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
-import { TEXT_SCALES, THEME_FAMILIES, THEME_MODES, type TextScale, type ThemeFamilyId, type ThemeMode } from '../theme/preferences.ts';
+import {
+  TEXT_SCALES,
+  THEME_FAMILIES,
+  THEME_MODES,
+  type TextScale,
+  type ThemeFamilyId,
+  type ThemeMode,
+} from '../theme/preferences.ts';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import { PanelSlot, PluginView, ShellLine } from './views.tsx';
 import { useSyncExternalStore, type MouseEvent } from 'react';
 
 /** An in-app link: a plain click navigates in place; a modifier or middle click is the browser's (a new tab). */
-export function Link({ to, children, className }: { readonly to: string; readonly children: React.ReactNode; readonly className?: string }) {
+export function Link({
+  to,
+  children,
+  className,
+}: {
+  readonly to: string;
+  readonly children: React.ReactNode;
+  readonly className?: string;
+}) {
   const router = useRouter();
   const onClick = (event: MouseEvent<HTMLAnchorElement>): void => {
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
     event.preventDefault();
     router.navigate(to);
   };
@@ -30,7 +53,9 @@ export function DaemonListPage() {
     return (
       <section className="fy-page">
         <h1>No daemons yet</h1>
-        <ShellLine>Pair this device with a daemon: run `fy pair` on that machine and open the link it prints here.</ShellLine>
+        <ShellLine>
+          Pair this device with a daemon: run `fy pair` on that machine and open the link it prints here.
+        </ShellLine>
       </section>
     );
   }
@@ -140,7 +165,9 @@ export function DeviceSettingsPage() {
       </label>
       <p>
         Layout: <code>{layout.layout.id}</code>
-        {layout.kind === 'refused' ? ` (the layout "${layout.refused}" was refused: ${layout.issues[0]?.message ?? ''})` : ''}
+        {layout.kind === 'refused'
+          ? ` (the layout "${layout.refused}" was refused: ${layout.issues[0]?.message ?? ''})`
+          : ''}
       </p>
     </section>
   );

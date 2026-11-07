@@ -1268,10 +1268,7 @@ export class RelayClientSession {
       case 'error':
         // The rendezvous closes the socket immediately after this, so closing from
         // here as well would race its own close frame. The reason is what matters.
-        this.#quietly(
-          message.code,
-          `the rendezvous refused this browser: ${message.code} ${message.reason}`,
-        );
+        this.#quietly(message.code, `the rendezvous refused this browser: ${message.code} ${message.reason}`);
         return;
       default:
         // The client control union has no daemon-role message (`challenge`, `claim`, `open`): one fails the parse

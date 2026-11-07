@@ -68,7 +68,10 @@ describe('DaemonList', () => {
     const storage = memoryStore({
       [APP_STORAGE.daemons]: JSON.stringify({
         format: 1,
-        value: { selected: 'd9', daemons: [{ daemon: 'bad' }, { ...pairing('d1'), carriers: [], pairedAt: 1, lastSelectedAt: 1 }] },
+        value: {
+          selected: 'd9',
+          daemons: [{ daemon: 'bad' }, { ...pairing('d1'), carriers: [], pairedAt: 1, lastSelectedAt: 1 }],
+        },
       }),
       'fy-connections-v2': JSON.stringify({ v: 2, connections: [pairing('old')] }),
     });
