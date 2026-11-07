@@ -218,6 +218,13 @@ export interface OverdueTold {
   readonly asked: string;
   readonly nudgedAt?: string;
   readonly toldParentAt?: string;
+  /**
+   * The nudge was tried and refused (it could not be typed). It is not tried again this episode, so a refusal that
+   * repeats on every attempt costs one attempt, not one per sweep; the parent is told at once instead.
+   */
+  readonly nudgeFailedAt?: string;
+  /** The parent's message was tried and refused: not tried again this episode (the next unanswered message is a new one). */
+  readonly parentFailedAt?: string;
 }
 
 /** Every live sub-ferret the Warden acted on, keyed by its session id. */
@@ -314,7 +321,7 @@ export function planOverdueReports(input: OverduePlanInput): OverduePlan {
     if (child === undefined || parent === undefined || asked === undefined) continue;
     const told = memory[anomaly.sessionId];
     const episode = told?.asked === asked ? told : undefined;
-    if (!input.enabled || episode?.toldParentAt !== undefined) continue;
+    if (!input.enabled || episode?.toldParentAt !== undefined || episode?.parentFailedAt !== undefined) continue;
     const limited = child.state.status === 'rate_limited';
     if (episode === undefined && input.mayNudge && !limited) {
       tell.push({

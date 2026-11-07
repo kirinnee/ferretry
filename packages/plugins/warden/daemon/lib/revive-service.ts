@@ -51,7 +51,13 @@ export interface WardenReviveEvents {
   emit(sessionId: string, type: string, data: Readonly<Record<string, unknown>>): Promise<void>;
 }
 
-export type WardenResumeOutcome = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+/**
+ * What a resume came to. `ok` means the ferret was started, OR that it cannot be told whether it was (fail closed:
+ * both count as a revive). `caveat` is then one sentence for the record where it differs from the plain story.
+ */
+export type WardenResumeOutcome =
+  | { readonly ok: true; readonly caveat?: string }
+  | { readonly ok: false; readonly reason: string };
 
 export interface WardenReviveNotice {
   readonly sessionId: string;
@@ -320,7 +326,7 @@ export class WardenReviveService {
       action: {
         ...base,
         outcome: 'done',
-        detail: `Started it again: ${causeText(planned.cause)}. ${planned.mode === 'interactive' ? 'Told it so, nothing more.' : 'Told it why, and to re-read its last turn and continue.'}`,
+        detail: `Started it again: ${causeText(planned.cause)}. ${outcome.caveat ?? (planned.mode === 'interactive' ? 'Told it so, nothing more.' : 'Told it why, and to re-read its last turn and continue.')}`,
       },
       revived: true,
     };
