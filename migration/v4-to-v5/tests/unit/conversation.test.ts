@@ -122,7 +122,7 @@ describe('conversation step', () => {
     expect(report.note).toContain('1 link(s) in turns omitted');
   });
 
-  test('writes the chat draft through the v5 snapshot schema; agenda reply drafts are read, not written', async () => {
+  test('writes the chat draft and agenda reply drafts (same ask ids) through the v5 snapshot schema', async () => {
     await f.session('f1');
     await f.put('state/shared-drafts/f1.json', draft('f1'));
     await f.put('state/shared-drafts/f1.items/A3.json', draft('f1', { slot: 'A3' }));
@@ -131,14 +131,16 @@ describe('conversation step', () => {
 
     const document = DraftsDocumentSchema.parse(JSON.parse(await readFile(join(f.to, v5DraftsFile('f1')), 'utf8')));
     expect(v5DraftsFile('f1')).toBe('state/conversation/f1/drafts');
-    expect(document.items).toEqual({});
+    expect(Object.keys(document.items)).toEqual(['A3']);
+    expect(document.items.A3).toMatchObject({ v: 1, ferret: 'f1', slot: 'A3', text: 'FAKE draft text' });
+    expect(document.items.A3).not.toHaveProperty('sessionId');
     expect(DraftSnapshotSchema.parse(document.chat)).toEqual(document.chat!);
     expect(document.chat).toMatchObject({ v: 1, ferret: 'f1', generation: 'g1', rev: 3, text: 'FAKE draft text' });
     expect(document.chat).not.toHaveProperty('sessionId');
     expect(document.chat).not.toHaveProperty('slot');
     expect((await stat(join(f.to, v5DraftsFile('f1')))).mode & 0o777).toBe(0o600);
     expect(report.kept).toContainEqual({ what: 'chat drafts', count: 1 });
-    expect(report.note).toContain('agenda reply drafts 1');
+    expect(report.kept).toContainEqual({ what: 'agenda reply drafts', count: 1 });
     expect(report.note).toContain('1 orphan draft(s) omitted');
     expect(await stat(join(f.to, v5DraftsFile('gone'))).catch(() => undefined)).toBeUndefined();
   });
