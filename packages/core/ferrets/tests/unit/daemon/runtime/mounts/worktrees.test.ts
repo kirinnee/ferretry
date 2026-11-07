@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { ApiError, type ApiResponse } from '@ferretry/kernel/contract';
 import type {
   CreatedWorktree,
   CreateWorktreeRequest,
@@ -9,11 +10,15 @@ import type {
   WorktreeRemovalRequest,
 } from '../../../../../daemon/lib/protocol/worktrees.ts';
 import should from 'should';
-import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
-import { type WorktreeSubsystem, worktreeRoutes } from '../../../../../daemon/lib/runtime/mounts/worktrees.ts';
+import {
+  WORKTREE_ROUTE_KEYS,
+  type WorktreeRouteKey,
+  type WorktreeSubsystem,
+  worktreeRoutes,
+} from '../../../../../daemon/lib/runtime/mounts/worktrees.ts';
 import { WorktreeError, type WorktreeErrorCode } from '../../../../../daemon/lib/worktrees/index.ts';
-import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, GRANTED, human } from './support.ts';
+import { type RequestOf, jsonOf, requestOf } from '../../support/requests.ts';
+import { refusalOf } from '../../support/calls.ts';
 
 const PATH = '/managed/repo/feat-one';
 
@@ -72,38 +77,45 @@ class FakeWorktrees implements WorktreeSubsystem {
   }
 }
 
-const dispatcher = (worktrees: WorktreeSubsystem): ApiDispatcher =>
-  new ApiDispatcher(new ApiRouter(worktreeRoutes(worktrees)), CREDENTIALS, GRANTED);
+/** Calls one handler directly; the route spine (operator, capability, no-store) is the kernel's. */
+const call = async (
+  worktrees: WorktreeSubsystem,
+  key: WorktreeRouteKey,
+  spec: Omit<RequestOf, 'method' | 'path'> = {},
+): Promise<ApiResponse> => {
+  const [method = 'GET', path = '/'] = key.split(' ');
+  return await worktreeRoutes(worktrees)[key](requestOf({ method, path, ...spec }));
+};
+
+/** The ApiError a handler threw, with its message. */
+const thrownBy = async (work: Promise<unknown>): Promise<unknown> =>
+  await work.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
 
 describe('the managed-worktree mount', () => {
-  it('should govern every route by the filesystem capability, reading with use and writing with configure', () => {
+  it('should key the four handlers exactly as the manifest declares them', () => {
     // Act
     const routes = worktreeRoutes(new FakeWorktrees());
 
-    // Assert — a single axis would trade the power to list for the power to destroy, in one direction
-    // or the other.
-    should(routes.map(route => `${route.method} ${route.path}`)).eql([
+    // Assert
+    should(Object.keys(routes)).eql([...WORKTREE_ROUTE_KEYS]);
+    should(Object.keys(routes)).eql([
       'GET /v1/worktrees/removal',
       'POST /v1/worktrees/remove',
       'GET /v1/worktrees',
       'POST /v1/worktrees',
     ]);
-    should(routes.map(route => route.capability?.axis)).eql(['use', 'configure', 'use', 'configure']);
-    should(routes.every(route => route.capability?.capability === 'filesystem')).be.true();
-    should(routes.every(route => route.minimum === 'operator')).be.true();
-    should(routes.every(route => route.noStore === true)).be.true();
   });
 
-  it('should serve the list uncacheable, because a stale row is how a removal destroys work', async () => {
+  it('should serve the list', async () => {
     // Act
-    const response = await dispatcher(new FakeWorktrees()).dispatch(
-      request({ method: 'GET', path: '/v1/worktrees', headers: human }),
-    );
+    const response = await call(new FakeWorktrees(), 'GET /v1/worktrees');
 
     // Assert
     should(response.status).equal(200);
-    should(response.headers.get('cache-control')).equal('no-store');
-    should(jsonBody(response)).match({ managedRoot: '/managed' });
+    should(jsonOf(response)).match({ managedRoot: '/managed' });
   });
 
   it('should read the checkout and the caller directory from the query string', async () => {
@@ -111,17 +123,9 @@ describe('the managed-worktree mount', () => {
     const worktrees = new FakeWorktrees();
 
     // Act
-    const response = await dispatcher(worktrees).dispatch(
-      request({
-        method: 'GET',
-        path: '/v1/worktrees/removal',
-        query: [
-          ['path', ` ${PATH} `],
-          ['cwd', ' /work/ferretry '],
-        ],
-        headers: human,
-      }),
-    );
+    const response = await call(worktrees, 'GET /v1/worktrees/removal', {
+      query: { path: ` ${PATH} `, cwd: ' /work/ferretry ' },
+    });
 
     // Assert
     should(response.status).equal(200);
@@ -133,17 +137,7 @@ describe('the managed-worktree mount', () => {
     const worktrees = new FakeWorktrees();
 
     // Act
-    await dispatcher(worktrees).dispatch(
-      request({
-        method: 'GET',
-        path: '/v1/worktrees/removal',
-        query: [
-          ['path', PATH],
-          ['cwd', '   '],
-        ],
-        headers: human,
-      }),
-    );
+    await call(worktrees, 'GET /v1/worktrees/removal', { query: { path: PATH, cwd: '   ' } });
 
     // Assert
     should(worktrees.checks).eql([{ path: PATH }]);
@@ -154,16 +148,12 @@ describe('the managed-worktree mount', () => {
     const worktrees = new FakeWorktrees();
 
     // Act
-    const blank = await dispatcher(worktrees).dispatch(
-      request({ method: 'GET', path: '/v1/worktrees/removal', query: [['path', '  ']], headers: human }),
-    );
-    const absent = await dispatcher(worktrees).dispatch(
-      request({ method: 'GET', path: '/v1/worktrees/removal', headers: human }),
-    );
+    const blank = await refusalOf(call(worktrees, 'GET /v1/worktrees/removal', { query: { path: '  ' } }));
+    const absent = await refusalOf(call(worktrees, 'GET /v1/worktrees/removal'));
 
     // Assert
-    should([blank.status, absent.status]).eql([400, 400]);
-    should(jsonBody(blank)).match({ code: 'invalid_path' });
+    should([blank?.status, absent?.status]).eql([400, 400]);
+    should(blank).match({ code: 'invalid_path' });
     should(worktrees.checks).be.empty();
   });
 
@@ -172,20 +162,15 @@ describe('the managed-worktree mount', () => {
     const worktrees = new FakeWorktrees();
 
     // Act
-    const response = await dispatcher(worktrees).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/worktrees/remove',
-        headers: human,
-        body: JSON.stringify({
-          path: PATH,
-          overrides: ['discard_worktree_changes'],
-          deleteBranch: true,
-          confirmations: ['delete_unmerged_branch'],
-          currentWorkingDirectory: '/work/ferretry',
-        }),
-      }),
-    );
+    const response = await call(worktrees, 'POST /v1/worktrees/remove', {
+      body: {
+        path: PATH,
+        overrides: ['discard_worktree_changes'],
+        deleteBranch: true,
+        confirmations: ['delete_unmerged_branch'],
+        currentWorkingDirectory: '/work/ferretry',
+      },
+    });
 
     // Assert
     should(response.status).equal(200);
@@ -202,17 +187,14 @@ describe('the managed-worktree mount', () => {
     const worktrees = new FakeWorktrees();
 
     // Act
-    const response = await dispatcher(worktrees).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/worktrees/remove',
-        headers: human,
-        body: JSON.stringify({ path: PATH, overrides: [], deleteBranch: false, confirmations: [], force: true }),
+    const refusal = await refusalOf(
+      call(worktrees, 'POST /v1/worktrees/remove', {
+        body: { path: PATH, overrides: [], deleteBranch: false, confirmations: [], force: true },
       }),
     );
 
     // Assert
-    should(response.status).equal(400);
+    should(refusal?.status).equal(400);
     should(worktrees.removals).be.empty();
   });
 
@@ -221,18 +203,13 @@ describe('the managed-worktree mount', () => {
     const worktrees = new FakeWorktrees();
 
     // Act
-    const response = await dispatcher(worktrees).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/worktrees',
-        headers: human,
-        body: JSON.stringify({ sourcePath: '/work/ferretry', branch: 'feat/one', base: { kind: 'head' } }),
-      }),
-    );
+    const response = await call(worktrees, 'POST /v1/worktrees', {
+      body: { sourcePath: '/work/ferretry', branch: 'feat/one', base: { kind: 'head' } },
+    });
 
     // Assert
     should(response.status).equal(200);
-    should(jsonBody(response)).match({ cwd: `${PATH}/packages/cli` });
+    should(jsonOf(response)).match({ cwd: `${PATH}/packages/cli` });
     should(worktrees.creations[0]).match({ base: { kind: 'head' } });
   });
 
@@ -241,17 +218,14 @@ describe('the managed-worktree mount', () => {
     const worktrees = new FakeWorktrees();
 
     // Act
-    const response = await dispatcher(worktrees).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/worktrees',
-        headers: human,
-        body: JSON.stringify({ sourcePath: '/work/ferretry', branch: 'feat/one', base: { kind: 'yesterday' } }),
+    const refusal = await refusalOf(
+      call(worktrees, 'POST /v1/worktrees', {
+        body: { sourcePath: '/work/ferretry', branch: 'feat/one', base: { kind: 'yesterday' } },
       }),
     );
 
     // Assert
-    should(response.status).equal(400);
+    should(refusal?.status).equal(400);
     should(worktrees.creations).be.empty();
   });
 
@@ -260,17 +234,12 @@ describe('the managed-worktree mount', () => {
     const worktrees = new FakeWorktrees();
 
     // Act
-    const response = await dispatcher(worktrees).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/worktrees',
-        headers: human,
-        body: JSON.stringify({ sourcePath: 'packages/cli', branch: 'feat/one' }),
-      }),
+    const refusal = await refusalOf(
+      call(worktrees, 'POST /v1/worktrees', { body: { sourcePath: 'packages/cli', branch: 'feat/one' } }),
     );
 
     // Assert
-    should(response.status).equal(400);
+    should(refusal?.status).equal(400);
     should(worktrees.creations).be.empty();
   });
 
@@ -294,12 +263,12 @@ describe('the managed-worktree mount', () => {
     ];
 
     // Act
-    const actual: [WorktreeErrorCode, number][] = [];
+    const actual: [WorktreeErrorCode, number | undefined][] = [];
     for (const [code] of expected) {
-      const response = await dispatcher(new FakeWorktrees(new WorktreeError(code, `refused: ${code}`))).dispatch(
-        request({ method: 'GET', path: '/v1/worktrees', headers: human }),
+      const refusal = await refusalOf(
+        call(new FakeWorktrees(new WorktreeError(code, `refused: ${code}`)), 'GET /v1/worktrees'),
       );
-      actual.push([code, response.status]);
+      actual.push([code, refusal?.status]);
     }
 
     // Assert
@@ -313,18 +282,15 @@ describe('the managed-worktree mount', () => {
     ]);
 
     // Act
-    const response = await dispatcher(new FakeWorktrees(failure)).dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/worktrees/remove',
-        headers: human,
-        body: JSON.stringify({ path: PATH, overrides: [], deleteBranch: false, confirmations: [] }),
+    const thrown = await thrownBy(
+      call(new FakeWorktrees(failure), 'POST /v1/worktrees/remove', {
+        body: { path: PATH, overrides: [], deleteBranch: false, confirmations: [] },
       }),
     );
 
     // Assert
-    should(response.status).equal(409);
-    should(jsonBody(response)).match({ code: 'unsafe_remove', error: /staged_changes: it has edits/u });
+    should(thrown).be.instanceOf(ApiError);
+    should(thrown).match({ status: 409, code: 'unsafe_remove', message: /staged_changes: it has edits/u });
   });
 
   it('should let an error that is not this domain answer as the defect it is', async () => {
@@ -339,22 +305,10 @@ describe('the managed-worktree mount', () => {
     };
 
     // Act
-    const response = await dispatcher(worktrees).dispatch(
-      request({ method: 'GET', path: '/v1/worktrees', headers: human }),
-    );
+    const thrown = await thrownBy(call(worktrees, 'GET /v1/worktrees'));
 
-    // Assert — the dispatcher answers 500 with a fixed message rather than leaking the thrown text
-    should(response.status).equal(500);
-    should(JSON.stringify(jsonBody(response))).not.containEql('the disk fell off');
-  });
-
-  it('should refuse a fork or a removal from a caller below operator', async () => {
-    // Act
-    const response = await dispatcher(new FakeWorktrees()).dispatch(
-      request({ method: 'POST', path: '/v1/worktrees', body: JSON.stringify({ sourcePath: '/x', branch: 'b' }) }),
-    );
-
-    // Assert
-    should(response.status).equal(401);
+    // Assert — not restated as a domain refusal; the kernel answers 500 with a fixed message
+    should(thrown).be.instanceOf(Error);
+    should(thrown).not.be.instanceOf(ApiError);
   });
 });

@@ -1,10 +1,15 @@
 import { describe, it } from 'bun:test';
+import { ApiError, type ApiResponse } from '@ferretry/kernel/contract';
 import { SessionFileIndexResponseSchema } from '../../../../../daemon/lib/protocol/session-search.ts';
 import should from 'should';
-import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
-import { sessionFilesystemRoutes } from '../../../../src/lib/runtime/index.ts';
+import {
+  type FileBrowserDeps,
+  type FileBrowserRouteKey,
+  sessionFilesystemRoutes,
+} from '../../../../../daemon/lib/runtime/mounts/session-filesystem.ts';
 import { FsError, SessionFilesystem } from '../../../../../daemon/lib/session/filesystem/index.ts';
-import { jsonBody, request } from '../../api/support.ts';
+import { type RequestOf, jsonOf, requestOf } from '../../support/requests.ts';
+import { refusalOf } from '../../support/calls.ts';
 import {
   directory,
   type FakeRootOptions,
@@ -14,229 +19,91 @@ import {
   textFile,
   treeOf,
 } from '../../session/filesystem/support.ts';
-import { CREDENTIALS, GRANTED, human, sessionDirectory, sessionView } from './support.ts';
 
 /**
  * The HTTP shape of the working-tree read.
  *
- * Three things are asserted that the domain cannot assert for itself: the cwd comes from the session
- * DOCUMENT rather than from anything a caller sent, every refusal arrives as a status a client can act on,
- * and no response is cacheable.
+ * Two things are asserted that the domain cannot assert for itself: the cwd comes from the ferret the host's
+ * `reach` resolves rather than from anything a caller sent, and every refusal arrives as a status a client can act
+ * on. Which ferret a caller may reach, and the no-store spine, are the host's and the kernel's.
  */
 
 const SESSION_CWD = '/work/ferretry';
 
-/** The warden-scoped token, which must never reach this surface. */
-const wardenToken = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' } as const;
+/** The host's reach as a person sees it: the path's ferret, in its working folder, behind no fence. */
+const person: FileBrowserDeps['reach'] = async context => ({
+  id: context.params.get('ferretId') ?? '',
+  cwd: SESSION_CWD,
+});
 
-function fixture(root: FakeRootOptions = {}, git: SessionGitScript = {}) {
-  const filesystem = new SessionFilesystem(new FakeRootPinner(root), new FakeSessionGit(git));
-  const routes = sessionFilesystemRoutes(filesystem, sessionDirectory([sessionView('s1')]));
-  const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, GRANTED);
-  return async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
-    await dispatcher.dispatch(request(overrides));
+type Ask = Omit<RequestOf, 'method' | 'path' | 'params'> & { readonly ferretId?: string };
+
+function fixture(root: FakeRootOptions = {}, git: SessionGitScript = {}, reach: FileBrowserDeps['reach'] = person) {
+  const pinner = new FakeRootPinner(root);
+  const routes = sessionFilesystemRoutes({
+    filesystem: new SessionFilesystem(pinner, new FakeSessionGit(git)),
+    reach,
+  });
+  const ask = async (key: FileBrowserRouteKey, { ferretId = 's1', ...spec }: Ask = {}): Promise<ApiResponse> =>
+    await routes[key](requestOf({ ...spec, params: { ferretId } }));
+  return { pinner, ask };
 }
 
 const tree = () => treeOf(['', directory([{ name: 'a.ts', type: 'file' }])], ['a.ts', textFile('body\n')]);
 
+const LIST = 'GET /v1/ferrets/:ferretId/fs';
+const INDEX = 'GET /v1/ferrets/:ferretId/fs/index';
+const CHANGES = 'GET /v1/ferrets/:ferretId/fs/changes';
+const DIFF = 'GET /v1/ferrets/:ferretId/fs/diff';
+const ALL: readonly FileBrowserRouteKey[] = [INDEX, CHANGES, DIFF, LIST];
+
 describe('the working-tree listing route', () => {
-  it('should list the session root from the cwd the session document names', async () => {
+  it('should list the session root from the cwd the host resolves', async () => {
     // Arrange
-    const pinner = new FakeRootPinner({ tree: tree() });
-    const routes = sessionFilesystemRoutes(
-      new SessionFilesystem(pinner, new FakeSessionGit()),
-      sessionDirectory([sessionView('s1')]),
-    );
-    const dispatch = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, GRANTED);
+    const { pinner, ask } = fixture({ tree: tree() });
 
     // Act
-    const response = await dispatch.dispatch(request({ path: '/v1/sessions/s1/fs', headers: human }));
+    const response = await ask(LIST);
 
     // Assert
     should(response.status).eql(200);
     should(pinner.pinnedCwds).eql([SESSION_CWD]);
-    should(jsonBody(response)).have.property('entries');
-    should(response.headers.get('cache-control')).eql('no-store');
+    should(jsonOf(response)).have.property('entries');
   });
 
   it('should list a subdirectory named by the path parameter', async () => {
     // Arrange
-    const dispatch = fixture({ tree: treeOf(['src', directory([{ name: 'b.ts', type: 'file' }])]) });
+    const { ask } = fixture({ tree: treeOf(['src', directory([{ name: 'b.ts', type: 'file' }])]) });
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs', query: [['path', 'src']], headers: human });
+    const response = await ask(LIST, { query: { path: 'src' } });
 
     // Assert
     should(response.status).eql(200);
-    should(jsonBody(response)).have.property('path', 'src');
-  });
-
-  it('should refuse a session the daemon does not hold', async () => {
-    // Arrange
-    const dispatch = fixture({ tree: tree() });
-
-    // Act
-    const response = await dispatch({ path: '/v1/sessions/absent/fs', headers: human });
-
-    // Assert
-    should(response.status).eql(404);
-    should(jsonBody(response)).have.property('code', 'not-found');
-  });
-
-  it('should refuse a path session id that decodes to a traversal step', async () => {
-    // Arrange
-    const dispatch = fixture({ tree: tree() });
-
-    // Act
-    const response = await dispatch({ path: '/v1/sessions/%2e%2e/fs', headers: human });
-
-    // Assert
-    should(response.status).eql(400);
-    should(jsonBody(response)).have.property('code', 'invalid_session_id');
+    should(jsonOf(response)).have.property('path', 'src');
   });
 
   it('should refuse to enumerate a denied directory with a 403', async () => {
     // Arrange
-    const dispatch = fixture({ tree: treeOf(['.git', directory([])]) });
+    const { ask } = fixture({ tree: treeOf(['.git', directory([])]) });
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs', query: [['path', '.git']], headers: human });
+    const refusal = await refusalOf(ask(LIST, { query: { path: '.git' } }));
 
     // Assert
-    should(response.status).eql(403);
-    should(jsonBody(response)).have.property('code', 'denied');
+    should(refusal).eql({ status: 403, code: 'denied' });
   });
 
   it('should report a failure that is NOT a domain refusal as a server fault', async () => {
     // Arrange: a genuine bug must not be reported as the client's mistake.
-    const dispatch = fixture({ pinError: new TypeError('a genuine bug') });
+    const { ask } = fixture({ pinError: new TypeError('a genuine bug') });
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs', headers: human });
+    const thrown = await ask(LIST).catch((error: unknown) => error);
 
-    // Assert
-    should(response.status).eql(500);
-  });
-
-  it('should never be readable by the warden, which has no business in the human source tree', async () => {
-    // Arrange
-    const dispatch = fixture({ tree: tree() });
-
-    // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs', headers: wardenToken });
-
-    // Assert
-    should(response.status).eql(403);
-  });
-});
-
-describe('the file route', () => {
-  it('should serve a file view with its content', async () => {
-    // Arrange
-    const dispatch = fixture({ tree: tree() });
-
-    // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/file', query: [['path', 'a.ts']], headers: human });
-
-    // Assert
-    should(response.status).eql(200);
-    should(jsonBody(response)).have.property('content', 'body\n');
-  });
-
-  it('should serve the committed bytes when asked for the head revision', async () => {
-    // Arrange
-    const dispatch = fixture(
-      { tree: tree() },
-      { readHeadBlob: () => ({ size: 4, bytes: new TextEncoder().encode('old\n') }) },
-    );
-
-    // Act
-    const response = await dispatch({
-      path: '/v1/sessions/s1/fs/file',
-      query: [
-        ['path', 'a.ts'],
-        ['rev', 'head'],
-      ],
-      headers: human,
-    });
-
-    // Assert
-    should(jsonBody(response)).match({ content: 'old\n', rev: 'head' });
-  });
-
-  it('serves a bounded, policy-gated base64 representation only when explicitly requested', async () => {
-    const dispatch = fixture({ tree: treeOf(['photo.png', textFile('\u0000\u0001png')]) });
-
-    const response = await dispatch({
-      path: '/v1/sessions/s1/fs/file',
-      query: [
-        ['path', 'photo.png'],
-        ['format', 'base64'],
-      ],
-      headers: human,
-    });
-
-    should(response.status).eql(200);
-    should(jsonBody(response)).match({ path: 'photo.png', base64: 'AAFwbmc=' });
-    should(response.headers.get('cache-control')).eql('no-store');
-  });
-
-  it('refuses an unknown file representation rather than quietly serving another one', async () => {
-    const dispatch = fixture({ tree: tree() });
-    const response = await dispatch({
-      path: '/v1/sessions/s1/fs/file',
-      query: [
-        ['path', 'a.ts'],
-        ['format', 'raw'],
-      ],
-      headers: human,
-    });
-
-    should(response.status).eql(400);
-    should(jsonBody(response)).have.property('code', 'invalid_format');
-  });
-
-  it('should require the path parameter rather than defaulting to the root', async () => {
-    // Arrange
-    const dispatch = fixture({ tree: tree() });
-
-    // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/file', headers: human });
-
-    // Assert
-    should(response.status).eql(400);
-    should(jsonBody(response)).have.property('code', 'invalid_path');
-  });
-
-  it('should refuse an unknown revision rather than quietly serving the working tree', async () => {
-    // Arrange
-    const dispatch = fixture({ tree: tree() });
-
-    // Act
-    const response = await dispatch({
-      path: '/v1/sessions/s1/fs/file',
-      query: [
-        ['path', 'a.ts'],
-        ['rev', 'main'],
-      ],
-      headers: human,
-    });
-
-    // Assert
-    should(response.status).eql(400);
-    should(jsonBody(response)).have.property('code', 'invalid_rev');
-  });
-
-  it('should answer a denied path with a 200 and a badge, because that IS the view', async () => {
-    // Arrange
-    const dispatch = fixture({ tree: treeOf(['.env', textFile('TOKEN=1')]) });
-
-    // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/file', query: [['path', '.env']], headers: human });
-
-    // Assert
-    should(response.status).eql(200);
-    should(jsonBody(response)).match({ denied: true, reason: 'denylist' });
+    // Assert: not restated as a refusal; the kernel answers it as a 500.
+    should(thrown).be.instanceOf(TypeError);
+    should(thrown).not.be.instanceOf(ApiError);
   });
 
   it('should map each refusal code onto the status a client can act on', async () => {
@@ -255,143 +122,162 @@ describe('the file route', () => {
 
     // Act / Assert
     for (const [error, status] of cases) {
-      const dispatch = fixture({ tree: treeOf(['a.ts', { error }]) });
-      const response = await dispatch({ path: '/v1/sessions/s1/fs/file', query: [['path', 'a.ts']], headers: human });
-      should(response.status).eql(status);
-      should(jsonBody(response)).have.property('code', error.code);
+      const { ask } = fixture({ pinError: error });
+      should(await refusalOf(ask(LIST))).eql({ status, code: error.code });
     }
   });
+});
 
-  it('should let a non-domain failure become a server error rather than the client’s fault', async () => {
-    // Arrange
-    const dispatch = fixture(
-      { tree: tree() },
-      {
-        ignoredPaths: () => {
-          throw new TypeError('a genuine bug');
-        },
-      },
-    );
+describe('the host reach', () => {
+  it('should answer the refusal the host raises, on every route, before anything is pinned', async () => {
+    // Arrange: the host refuses an absent ferret and an id that decodes to a traversal step.
+    const reach: FileBrowserDeps['reach'] = async context => {
+      const id = context.params.get('ferretId');
+      if (id === '%2e%2e') throw new ApiError(400, 'the session id in the path is not usable', 'invalid_session_id');
+      throw new ApiError(404, `no session ${String(id)}`, 'not-found');
+    };
+    const { pinner, ask } = fixture({ tree: tree() }, {}, reach);
 
-    // Act: the domain fails CLOSED on a Git failure, so this reaches the route as an ignore refusal.
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/file', query: [['path', 'a.ts']], headers: human });
+    // Act
+    const absent = await Promise.all(ALL.map(async key => await refusalOf(ask(key, { ferretId: 'absent' }))));
+    const traversal = await Promise.all(ALL.map(async key => await refusalOf(ask(key, { ferretId: '%2e%2e' }))));
 
     // Assert
-    should(response.status).eql(200);
-    should(jsonBody(response)).have.property('ignored', true);
+    should(absent).eql(ALL.map(() => ({ status: 404, code: 'not-found' })));
+    should(traversal).eql(ALL.map(() => ({ status: 400, code: 'invalid_session_id' })));
+    should(pinner.pinnedCwds).eql([]);
+  });
+});
+
+describe('a daemon whose file browser is not built', () => {
+  it('should answer 503 on every route, after the host has decided who may ask', async () => {
+    // Arrange
+    const reached: string[] = [];
+    const routes = sessionFilesystemRoutes({
+      filesystem: undefined,
+      reach: async context => {
+        const id = context.params.get('ferretId') ?? '';
+        reached.push(id);
+        if (id === 'other') throw new ApiError(403, 'not your ferret', 'not_own_session');
+        return { id, cwd: SESSION_CWD };
+      },
+    });
+    const at = (ferretId: string) => requestOf({ params: { ferretId }, query: { path: 'a.ts' } });
+
+    // Act
+    const unbuilt = await Promise.all(ALL.map(async key => await refusalOf(routes[key](at('s1')))));
+    const refused = await refusalOf(routes[LIST](at('other')));
+
+    // Assert
+    should(unbuilt).eql(ALL.map(() => ({ status: 503, code: 'plugin_unavailable' })));
+    should(refused).eql({ status: 403, code: 'not_own_session' });
+    should(reached).eql(['s1', 's1', 's1', 's1', 'other']);
   });
 });
 
 describe('the changes route', () => {
   it('should serve the change list', async () => {
     // Arrange
-    const dispatch = fixture(
+    const { ask } = fixture(
       { tree: tree() },
       { changes: () => ({ repo: true, branch: 'main', changes: [{ path: 'a.ts', status: ' M' }] }) },
     );
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/changes', headers: human });
+    const response = await ask(CHANGES);
 
     // Assert
     should(response.status).eql(200);
-    should(jsonBody(response)).match({ repo: true, branch: 'main' });
-    should(response.headers.get('cache-control')).eql('no-store');
+    should(jsonOf(response)).match({ repo: true, branch: 'main' });
   });
 
   it('should surface a pinner refusal as its own status', async () => {
     // Arrange
-    const dispatch = fixture({ pinError: new FsError('denied', 'session cwd is not served') });
+    const { ask } = fixture({ pinError: new FsError('denied', 'session cwd is not served') });
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/changes', headers: human });
+    const refusal = await refusalOf(ask(CHANGES));
 
     // Assert
-    should(response.status).eql(403);
-    should(jsonBody(response)).have.property('code', 'denied');
+    should(refusal).eql({ status: 403, code: 'denied' });
   });
 });
 
 describe('the diff route', () => {
   it('should serve the diff as plain text', async () => {
     // Arrange
-    const dispatch = fixture(
+    const { ask } = fixture(
       { tree: tree() },
       { isTracked: () => true, diffSnapshots: () => ({ diff: 'DIFF BODY', truncated: false }) },
     );
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/diff', query: [['path', 'a.ts']], headers: human });
+    const response = await ask(DIFF, { query: { path: 'a.ts' } });
 
     // Assert
     should(response.status).eql(200);
     should(response.body).eql('DIFF BODY');
     should(response.headers.get('content-type')).match(/text\/plain/);
-    should(response.headers.get('cache-control')).eql('no-store');
   });
 
   it('should require the path parameter', async () => {
     // Arrange
-    const dispatch = fixture({ tree: tree() });
+    const { ask } = fixture({ tree: tree() });
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/diff', headers: human });
+    const refusal = await refusalOf(ask(DIFF));
 
     // Assert
-    should(response.status).eql(400);
+    should(refusal).eql({ status: 400, code: 'invalid_path' });
   });
 
   it('should refuse a denied diff with a 403, since the body has nowhere to carry a badge', async () => {
     // Arrange
-    const dispatch = fixture({ tree: treeOf(['.env', textFile('TOKEN=1')]) }, { isTracked: () => true });
+    const { ask } = fixture({ tree: treeOf(['.env', textFile('TOKEN=1')]) }, { isTracked: () => true });
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/diff', query: [['path', '.env']], headers: human });
+    const refusal = await refusalOf(ask(DIFF, { query: { path: '.env' } }));
 
     // Assert
-    should(response.status).eql(403);
-    should(jsonBody(response)).have.property('code', 'denied');
+    should(refusal).eql({ status: 403, code: 'denied' });
   });
 
   it('should refuse an ignored diff with a 403 and its own code', async () => {
     // Arrange
-    const dispatch = fixture({ tree: treeOf(['out.js', textFile('x')]) }, { ignoredPaths: () => new Set(['out.js']) });
+    const { ask } = fixture({ tree: treeOf(['out.js', textFile('x')]) }, { ignoredPaths: () => new Set(['out.js']) });
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/diff', query: [['path', 'out.js']], headers: human });
+    const refusal = await refusalOf(ask(DIFF, { query: { path: 'out.js' } }));
 
     // Assert
-    should(response.status).eql(403);
-    should(jsonBody(response)).have.property('code', 'ignored');
+    should(refusal).eql({ status: 403, code: 'ignored' });
   });
 
   it('should refuse a TRUNCATED diff, because a partial one misleads a reviewer', async () => {
     // Arrange
-    const dispatch = fixture(
+    const { ask } = fixture(
       { tree: treeOf(['a.ts', textFile('x')]) },
       { isTracked: () => true, diffSnapshots: () => ({ diff: 'PARTIAL', truncated: true }) },
     );
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/diff', query: [['path', 'a.ts']], headers: human });
+    const refusal = await refusalOf(ask(DIFF, { query: { path: 'a.ts' } }));
 
     // Assert
-    should(response.status).eql(413);
-    should(jsonBody(response)).have.property('code', 'too_large');
+    should(refusal).eql({ status: 413, code: 'too_large' });
   });
 
   it('should surface a containment refusal as a 403', async () => {
     // Arrange
-    const dispatch = fixture({
+    const { ask } = fixture({
       tree: treeOf(['link', { error: new FsError('escapes_root', 'path escapes the session root: link') }]),
     });
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/diff', query: [['path', 'link']], headers: human });
+    const refusal = await refusalOf(ask(DIFF, { query: { path: 'link' } }));
 
     // Assert
-    should(response.status).eql(403);
-    should(jsonBody(response)).have.property('code', 'escapes_root');
+    should(refusal).eql({ status: 403, code: 'escapes_root' });
   });
 });
 
@@ -423,21 +309,25 @@ describe('the working-tree index route', () => {
 
   const notARepo: SessionGitScript = { repoInfo: () => ({ repo: false, prefix: '', hasHead: false }) };
 
+  type Listing = { entries: { name: string; type: string }[] };
+
   it('should answer a checkout the per-directory crawl could never get past', async () => {
     // Arrange: one fixture, both readings.
-    const dispatch = fixture({ tree: checkout() }, notARepo);
+    const { ask } = fixture({ tree: checkout() }, notARepo);
 
     // Act: what a recursive client crawl did — root plus one request per directory, never per file.
     let crawlRequests = 0;
-    const crawl = async (path: string | undefined) => {
+    const crawl = async (path: string | undefined): Promise<{ status: number; body?: Listing }> => {
       crawlRequests += 1;
-      return await dispatch({
-        path: '/v1/sessions/s1/fs',
-        ...(path === undefined ? {} : { query: [['path', path]] as const }),
-        headers: human,
-      });
+      try {
+        const response = await ask(LIST, path === undefined ? {} : { query: { path } });
+        return { status: response.status, body: jsonOf<Listing>(response) };
+      } catch (error) {
+        if (error instanceof ApiError) return { status: error.status };
+        throw error;
+      }
     };
-    const root = jsonBody(await crawl(undefined)) as { entries: { name: string; type: string }[] };
+    const root = (await crawl(undefined)).body ?? { entries: [] };
     const queue = root.entries.filter(entry => entry.type === 'dir').map(entry => entry.name);
     const crawled = [];
     while (queue.length > 0) {
@@ -445,13 +335,12 @@ describe('the working-tree index route', () => {
       if (path === undefined) break;
       const response = await crawl(path);
       crawled.push(response);
-      if (response.status !== 200) continue;
-      const body = jsonBody(response) as { entries: { name: string; type: string }[] };
-      queue.push(...body.entries.filter(entry => entry.type === 'dir').map(entry => `${path}/${entry.name}`));
+      if (response.status !== 200 || response.body === undefined) continue;
+      queue.push(...response.body.entries.filter(entry => entry.type === 'dir').map(entry => `${path}/${entry.name}`));
     }
     let indexRequests = 0;
     indexRequests += 1;
-    const indexed = await dispatch({ path: '/v1/sessions/s1/fs/index', headers: human });
+    const indexed = await ask(INDEX);
 
     // Assert: the crawl meets a 403 it cannot tell from a failure, and it takes one request per
     // directory to get there. The index is ONE request and returns the files with the refusal counted.
@@ -459,7 +348,7 @@ describe('the working-tree index route', () => {
     should(crawlRequests).eql(4);
     should(indexRequests).eql(1);
     should(indexed.status).eql(200);
-    should(jsonBody(indexed)).match({
+    should(jsonOf(indexed)).match({
       v: 1,
       sessionId: 's1',
       files: [
@@ -473,76 +362,37 @@ describe('the working-tree index route', () => {
 
   it('should produce a document its own protocol schema accepts', async () => {
     // Arrange
-    const dispatch = fixture({ tree: checkout() }, notARepo);
+    const { ask } = fixture({ tree: checkout() }, notARepo);
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/index', headers: human });
+    const response = await ask(INDEX);
 
     // Assert
-    should(SessionFileIndexResponseSchema.safeParse(jsonBody(response)).success).be.true();
+    should(SessionFileIndexResponseSchema.safeParse(jsonOf(response)).success).be.true();
+    should(jsonOf(response)).have.property('files');
+    should(jsonOf(response)).not.have.property('entries');
   });
 
-  it('should take the root from the session document and never cache the answer', async () => {
+  it('should take the root from the ferret the host resolves', async () => {
     // Arrange
-    const pinner = new FakeRootPinner({ tree: checkout() });
-    const routes = sessionFilesystemRoutes(
-      new SessionFilesystem(pinner, new FakeSessionGit(notARepo)),
-      sessionDirectory([sessionView('s1')]),
-    );
-    const dispatch = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, GRANTED);
+    const { pinner, ask } = fixture({ tree: checkout() }, notARepo);
 
     // Act
-    const response = await dispatch.dispatch(request({ path: '/v1/sessions/s1/fs/index', headers: human }));
+    await ask(INDEX);
 
     // Assert
     should(pinner.pinnedCwds).eql([SESSION_CWD]);
-    should(response.headers.get('cache-control')).eql('no-store');
-  });
-
-  it('should be reachable behind the one-segment fs pattern rather than shadowed by it', async () => {
-    // Arrange
-    const dispatch = fixture({ tree: checkout() }, notARepo);
-
-    // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/index', headers: human });
-
-    // Assert: a shadowed route would have been served by `list`, whose body has `entries`.
-    should(jsonBody(response)).have.property('files');
-    should(jsonBody(response)).not.have.property('entries');
-  });
-
-  it('should refuse a session the daemon does not hold', async () => {
-    // Arrange
-    const dispatch = fixture({ tree: checkout() }, notARepo);
-
-    // Act
-    const response = await dispatch({ path: '/v1/sessions/absent/fs/index', headers: human });
-
-    // Assert
-    should(response.status).eql(404);
-  });
-
-  it('should keep the warden away from a map of the human’s working tree', async () => {
-    // Arrange
-    const dispatch = fixture({ tree: checkout() }, notARepo);
-
-    // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/index', headers: wardenToken });
-
-    // Assert
-    should(response.status).be.aboveOrEqual(400);
   });
 
   it('should restate a domain refusal as the status a client can act on', async () => {
     // Arrange
-    const dispatch = fixture({ pinError: new FsError('unsupported', 'no pinning here') }, notARepo);
+    const { ask } = fixture({ pinError: new FsError('unsupported', 'no pinning here') }, notARepo);
 
     // Act
-    const response = await dispatch({ path: '/v1/sessions/s1/fs/index', headers: human });
+    const refusal = await refusalOf(ask(INDEX));
 
     // Assert
-    should(response.status).eql(501);
-    should(jsonBody(response)).have.property('code', 'unsupported');
+    should(refusal).eql({ status: 501, code: 'unsupported' });
   });
 
   it('should carry a hung-up caller through to the walk instead of finishing for nobody', async () => {
@@ -550,88 +400,18 @@ describe('the working-tree index route', () => {
     // Arrange
     const controller = new AbortController();
     controller.abort();
-    const pinner = new FakeRootPinner({ tree: checkout() });
-    const routes = sessionFilesystemRoutes(
-      new SessionFilesystem(pinner, new FakeSessionGit(notARepo)),
-      sessionDirectory([sessionView('s1')]),
-    );
-    const dispatch = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, GRANTED);
+    const { pinner, ask } = fixture({ tree: checkout() }, notARepo);
 
     // Act
-    const response = await dispatch.dispatch(
-      request({ path: '/v1/sessions/s1/fs/index', headers: human, signal: controller.signal }),
-    );
+    const response = await ask(INDEX, { signal: controller.signal });
 
     // Assert: a partial answer the schema accepts, and not one directory opened to produce it.
     should(response.status).eql(200);
-    const body = jsonBody(response) as unknown as { coverage: string; files: unknown[] };
+    const body = jsonOf<{ coverage: string; files: unknown[] }>(response);
     should(SessionFileIndexResponseSchema.safeParse(body).success).be.true();
     should(body.coverage).eql('partial');
     should(body.files).be.empty();
     should(pinner.lastRoot.opens).be.empty();
     should(pinner.lastRoot.closed).be.true();
-  });
-});
-
-describe('the media-folder read', () => {
-  const MEDIA = '/fy-home/state/sessions/s1/media';
-
-  const media = (mediaRoot?: (id: string) => string) => {
-    const pinner = new FakeRootPinner({ tree: treeOf(['card.png', textFile('png')]) });
-    const routes = sessionFilesystemRoutes(
-      new SessionFilesystem(pinner, new FakeSessionGit()),
-      sessionDirectory([sessionView('s1')]),
-      mediaRoot,
-    );
-    const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, GRANTED);
-    return {
-      dispatch: async (query: [string, string][]) =>
-        await dispatcher.dispatch(request({ path: '/v1/sessions/s1/fs/file', query, headers: human })),
-      pinner,
-    };
-  };
-
-  it('should read from the session media folder the daemon names, not from the working tree', async () => {
-    // Arrange
-    const { dispatch, pinner } = media(id => `/fy-home/state/sessions/${id}/media`);
-
-    // Act
-    const response = await dispatch([
-      ['path', 'card.png'],
-      ['scope', 'media'],
-      ['format', 'base64'],
-    ]);
-
-    // Assert — the caller chose a scope, never a directory.
-    should(response.status).eql(200);
-    should(pinner.pinnedCwds).eql([MEDIA]);
-    should(jsonBody(response)).have.property('base64');
-  });
-
-  it('should refuse an unknown scope, a history read of the media folder, and a daemon that keeps none', async () => {
-    // Arrange
-    const wired = media(() => MEDIA);
-    const unwired = media();
-
-    // Act
-    const unknown = await wired.dispatch([
-      ['path', 'card.png'],
-      ['scope', 'home'],
-    ]);
-    const history = await wired.dispatch([
-      ['path', 'card.png'],
-      ['scope', 'media'],
-      ['rev', 'head'],
-    ]);
-    const none = await unwired.dispatch([
-      ['path', 'card.png'],
-      ['scope', 'media'],
-    ]);
-
-    // Assert
-    should(unknown.status).eql(400);
-    should(history.status).eql(400);
-    should(none.status).eql(404);
-    should(wired.pinner.pinnedCwds).eql([]);
   });
 });

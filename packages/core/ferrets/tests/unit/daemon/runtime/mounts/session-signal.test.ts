@@ -1,46 +1,70 @@
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
-import { SessionViewSchema } from '../../../../../daemon/lib/protocol/session.ts';
+import { ApiError } from '@ferretry/kernel/contract';
+import {
+  SessionViewSchema,
+  type SessionView,
+  type SignalSessionRequest,
+} from '../../../../../daemon/lib/protocol/session.ts';
 import should from 'should';
-import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { SessionSignalError, sessionSignalRoutes } from '../../../../../daemon/lib/runtime/mounts/session-signal.ts';
-import { request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, FakeSessionSignal, human } from './support.ts';
+import {
+  SessionSignalError,
+  type SessionSignalSubsystem,
+  sessionSignalRoutes,
+} from '../../../../../daemon/lib/runtime/mounts/session-signal.ts';
+import { sessionView } from '../../../../support/daemon/session-view.ts';
+import { jsonOf, requestOf } from '../../support/requests.ts';
+import { refusalOf } from '../../support/calls.ts';
 
 /**
  * The surface a session speaks about itself through.
  *
- * Every case goes through the real dispatcher and the real credentials, because what this mount owes
- * the domain is a validated request from an authorized caller — and the authorization is the part that
- * cannot be checked by calling the route function directly.
+ * The handler is called directly: what this mount owes the domain is a validated request. Who may call it (the
+ * route spine: minimum, caller, noStore) is the kernel's, tested over a real host in
+ * tests/integration/daemon/ferrets/routes.test.ts.
  */
 
-function dispatcher(subsystem = new FakeSessionSignal()): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(sessionSignalRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+/** A signal surface that records instead of acting (today's `FakeSessionSignal` from the mount support file). */
+class FakeSessionSignal implements SessionSignalSubsystem {
+  /** Every signal that reached the subsystem, as the session and the request it carried. */
+  readonly signals: Array<readonly [string, SignalSessionRequest]> = [];
+
+  constructor(
+    /** Sessions that exist, so a signal has something to speak for. */
+    private readonly known: readonly string[] = ['s1'],
+    /** Session ids mapped to the refusal asking about them raises. */
+    private readonly refusals: Readonly<Record<string, SessionSignalError>> = {},
+  ) {}
+
+  async signal(sessionId: string, request: SignalSessionRequest): Promise<SessionView> {
+    this.signals.push([sessionId, request]);
+    const refusal = this.refusals[sessionId];
+    if (refusal !== undefined) throw refusal;
+    if (!this.known.includes(sessionId)) throw new SessionSignalError('not_found', `no session ${sessionId}`);
+    // The status each kind produces, because a view still reporting `running` would not distinguish a
+    // completion from a read.
+    const status = request.kind === 'done' ? 'completed' : request.kind === 'working' ? 'running' : 'waiting';
+    return sessionView(sessionId, {}, { status });
+  }
 }
 
-function signalRequest(
-  sessionId: string,
-  body: string,
-  headers: Readonly<Record<string, string>> = human,
-): Parameters<ApiDispatcher['dispatch']>[0] {
-  return request({ method: 'POST', path: `/v1/sessions/${sessionId}/signal`, headers, body });
+const SIGNAL = 'POST /v1/ferrets/:ferretId/signal';
+
+function send(subsystem: SessionSignalSubsystem, ferretId: string, body: string) {
+  return sessionSignalRoutes(subsystem)[SIGNAL](requestOf({ method: 'POST', params: { ferretId }, body }));
 }
 
 describe('the session signal mount', () => {
   it('should record a completion and answer with the view the read surface serves', async () => {
     // Arrange
     const sessions = new FakeSessionSignal();
-    const subject = dispatcher(sessions);
 
     // Act
-    const response = await subject.dispatch(signalRequest('s1', JSON.stringify({ kind: 'done', message: 'shipped' })));
+    const response = await send(sessions, 's1', JSON.stringify({ kind: 'done', message: 'shipped' }));
 
     // Assert
     should(response.status).equal(200);
     // Parsed with the protocol's own schema: a body the client would refuse is a signal that failed.
-    const view = SessionViewSchema.parse(JSON.parse(response.body));
+    const view = SessionViewSchema.parse(jsonOf(response));
     should(view.config.id).equal('s1');
     // The status moved to the one only this surface can write.
     should(view.state.status).equal('completed');
@@ -53,11 +77,12 @@ describe('the session signal mount', () => {
     // the first silently into the second.
     // Arrange
     const sessions = new FakeSessionSignal();
-    const subject = dispatcher(sessions);
 
     // Act
-    const response = await subject.dispatch(
-      signalRequest('s1', JSON.stringify({ kind: 'waiting', until: '45m', condition: 'CI run', peer: 'hayden' })),
+    const response = await send(
+      sessions,
+      's1',
+      JSON.stringify({ kind: 'waiting', until: '45m', condition: 'CI run', peer: 'hayden' }),
     );
 
     // Assert
@@ -71,17 +96,16 @@ describe('the session signal mount', () => {
     // `help` is the one kind whose message IS the request: a question with no text is nothing to ask.
     // Arrange
     const sessions = new FakeSessionSignal();
-    const subject = dispatcher(sessions);
 
     // Act
-    const done = await subject.dispatch(signalRequest('s1', JSON.stringify({ kind: 'done' })));
-    const waiting = await subject.dispatch(signalRequest('s1', JSON.stringify({ kind: 'waiting' })));
-    const working = await subject.dispatch(signalRequest('s1', JSON.stringify({ kind: 'working' })));
-    const help = await subject.dispatch(signalRequest('s1', JSON.stringify({ kind: 'help' })));
+    const done = await send(sessions, 's1', JSON.stringify({ kind: 'done' }));
+    const waiting = await send(sessions, 's1', JSON.stringify({ kind: 'waiting' }));
+    const working = await send(sessions, 's1', JSON.stringify({ kind: 'working' }));
+    const help = await refusalOf(send(sessions, 's1', JSON.stringify({ kind: 'help' })));
 
     // Assert
     should([done.status, waiting.status, working.status]).deepEqual([200, 200, 200]);
-    should(help.status).equal(400);
+    should(help?.status).equal(400);
     should(sessions.signals.map(([, sent]) => sent.kind)).deepEqual(['done', 'waiting', 'working']);
   });
 
@@ -90,72 +114,33 @@ describe('the session signal mount', () => {
     // meaning, and "finish", "ask a human", "park" and "carry on" have no common default.
     // Arrange
     const sessions = new FakeSessionSignal();
-    const subject = dispatcher(sessions);
 
     // Act
-    const empty = await subject.dispatch(signalRequest('s1', ''));
-    const braces = await subject.dispatch(signalRequest('s1', '{}'));
-    const malformed = await subject.dispatch(signalRequest('s1', '{'));
+    const empty = await refusalOf(send(sessions, 's1', ''));
+    const braces = await refusalOf(send(sessions, 's1', '{}'));
+    const malformed = await refusalOf(send(sessions, 's1', '{'));
 
     // Assert
-    should(empty.status).equal(400);
-    should(braces.status).equal(400);
-    should((JSON.parse(malformed.body) as { code: string }).code).equal('invalid_json');
+    should(empty?.status).equal(400);
+    should(braces?.status).equal(400);
+    should(malformed?.code).equal('invalid_json');
     should(sessions.signals).be.empty();
   });
 
   it('should refuse a kind the protocol does not name and a field it does not declare', async () => {
     // Arrange
     const sessions = new FakeSessionSignal();
-    const subject = dispatcher(sessions);
 
     // Act
-    const invented = await subject.dispatch(signalRequest('s1', JSON.stringify({ kind: 'finished' })));
+    const invented = await refusalOf(send(sessions, 's1', JSON.stringify({ kind: 'finished' })));
     // `until` on a `working` signal: the strict object refuses it rather than ignoring it, so a
     // teammate that meant to park cannot be told its unbounded wait was accepted.
-    const misplaced = await subject.dispatch(signalRequest('s1', JSON.stringify({ kind: 'working', until: '45m' })));
+    const misplaced = await refusalOf(send(sessions, 's1', JSON.stringify({ kind: 'working', until: '45m' })));
 
     // Assert
-    should(invented.status).equal(400);
-    should(misplaced.status).equal(400);
+    should(invented?.status).equal(400);
+    should(misplaced?.status).equal(400);
     should(sessions.signals).be.empty();
-  });
-
-  it('should refuse anonymously and refuse a warden token, because a signal retires panes', async () => {
-    // Arrange
-    const sessions = new FakeSessionSignal();
-    const subject = dispatcher(sessions);
-
-    // Act
-    const anonymous = await subject.dispatch(signalRequest('s1', JSON.stringify({ kind: 'done' }), {}));
-    const warden = await subject.dispatch(
-      signalRequest('s1', JSON.stringify({ kind: 'done' }), {
-        authorization: `Bearer ${CREDENTIALS.warden}`,
-      }),
-    );
-
-    // Assert
-    should(anonymous.status).equal(401);
-    // `admin` scope, matching the stop and the revive: a warden TOKEN does not get to complete a session.
-    should(warden.status).equal(403);
-    // Neither request reached the subsystem at all, which is what "fails closed" has to mean.
-    should(sessions.signals).be.empty();
-  });
-
-  it('should serve a teammate calling from inside its own pane, which is the ordinary caller here', async () => {
-    // Unlike the revive, this route reads no actor: what a session says about ITSELF does not depend
-    // on which token class asked, only on whether the caller is authorized at all. A peer token holds
-    // admin scope in this daemon, and `kteam signal done` is exactly that call.
-    // Arrange
-    const sessions = new FakeSessionSignal();
-    const subject = dispatcher(sessions);
-
-    // Act
-    const response = await subject.dispatch(signalRequest('s1', JSON.stringify({ kind: 'working' }), agentIn('s1')));
-
-    // Assert
-    should(response.status).equal(200);
-    should(sessions.signals).deepEqual([['s1', { kind: 'working' }]]);
   });
 
   it('should answer each refusal the signal domain raises with its own status and code', async () => {
@@ -163,24 +148,22 @@ describe('the session signal mount', () => {
     // the request, revive the session, name a peer that exists — and one status would make a client
     // guess which.
     // Arrange
-    const subject = dispatcher(
-      new FakeSessionSignal(['s1'], {
-        parked: new SessionSignalError('refused', 'session parked is stopped; resume it before declaring a wait'),
-        typo: new SessionSignalError('unknown_peer', 'unknown session "haydn"'),
-        clumsy: new SessionSignalError('invalid', 'until must be a positive duration'),
-        broken: new SessionSignalError('failed', 'the pane could not be retired'),
-      }),
-    );
+    const sessions = new FakeSessionSignal(['s1'], {
+      parked: new SessionSignalError('refused', 'session parked is stopped; resume it before declaring a wait'),
+      typo: new SessionSignalError('unknown_peer', 'unknown session "haydn"'),
+      clumsy: new SessionSignalError('invalid', 'until must be a positive duration'),
+      broken: new SessionSignalError('failed', 'the pane could not be retired'),
+    });
 
     // Act
     const answers = await Promise.all(
       ['parked', 'typo', 'clumsy', 'broken', 'absent'].map(
-        async id => await subject.dispatch(signalRequest(id, JSON.stringify({ kind: 'waiting' }))),
+        async id => await refusalOf(send(sessions, id, JSON.stringify({ kind: 'waiting' }))),
       ),
     );
 
     // Assert
-    should(answers.map(response => [response.status, (JSON.parse(response.body) as { code: string }).code])).deepEqual([
+    should(answers.map(refusal => [refusal?.status, refusal?.code])).deepEqual([
       [409, 'signal_refused'],
       // 404, not 400: the request is well formed and the thing it names is simply not here.
       [404, 'unknown_peer'],
@@ -195,14 +178,12 @@ describe('the session signal mount', () => {
     // must never reach the service.
     // Arrange
     const sessions = new FakeSessionSignal();
-    const subject = dispatcher(sessions);
 
     // Act
-    const traversal = await subject.dispatch(signalRequest('%2e%2e%2fetc', JSON.stringify({ kind: 'done' })));
+    const traversal = await refusalOf(send(sessions, '%2e%2e%2fetc', JSON.stringify({ kind: 'done' })));
 
     // Assert
-    should(traversal.status).equal(400);
-    should((JSON.parse(traversal.body) as { code: string }).code).equal('invalid_session_id');
+    should(traversal).deepEqual({ status: 400, code: 'invalid_session_id' });
     should(sessions.signals).be.empty();
   });
 
@@ -210,28 +191,16 @@ describe('the session signal mount', () => {
     // A defect must not be dressed up as a refusal the caller could act on: the taxonomy covers what
     // the signal domain decides, and anything else is this daemon being broken.
     // Arrange
-    const subject = dispatcher(
-      new FakeSessionSignal(['s1'], {
-        // Not a SessionSignalError: the cast is the point of the case.
-        s1: new Error('the storage index was closed') as SessionSignalError,
-      }),
-    );
+    const sessions = new FakeSessionSignal(['s1'], {
+      // Not a SessionSignalError: the cast is the point of the case.
+      s1: new Error('the storage index was closed') as SessionSignalError,
+    });
 
     // Act
-    const response = await subject.dispatch(signalRequest('s1', JSON.stringify({ kind: 'done' })));
+    const thrown = await send(sessions, 's1', JSON.stringify({ kind: 'done' })).catch((error: unknown) => error);
 
     // Assert
-    should(response.status).equal(500);
-    should(response.body).not.match(/storage index/u);
-  });
-
-  it('should answer with no-store, because the status is exactly what this call changed', async () => {
-    // Arrange / Act
-    const routes = sessionSignalRoutes(new FakeSessionSignal());
-
-    // Assert
-    should(routes).have.length(1);
-    should(routes[0]?.noStore).be.true();
-    should(routes[0]?.minimum).equal('operator');
+    should(thrown).be.instanceOf(Error);
+    should(thrown).not.be.instanceOf(ApiError);
   });
 });

@@ -1,4 +1,6 @@
 import { describe, it } from 'bun:test';
+import { ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
+import type { CallStanding } from '@ferretry/kernel/contract';
 import { FY_REQUEST_ID_HEADER } from '../../../../../daemon/lib/protocol/headers.ts';
 import {
   RestartCancelResultSchema,
@@ -7,15 +9,13 @@ import {
   type RestartRequest,
 } from '../../../../../daemon/lib/protocol/session-restart.ts';
 import should from 'should';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
-import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
-import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import {
   type SessionRestartSubsystem,
   sessionRestartRoutes,
 } from '../../../../../daemon/lib/runtime/mounts/session-restart.ts';
-import { request } from '../../api/support.ts';
-import { CREDENTIALS, agentIn, human } from './support.ts';
+import { ferretId } from '../../../../../contract/testing/index.ts';
+import { jsonOf, requestOf } from '../../support/requests.ts';
+import { refusalOf } from '../../support/calls.ts';
 
 class FakeRestart implements SessionRestartSubsystem {
   readonly calls: Array<readonly [RestartRequest, string | undefined]> = [];
@@ -34,58 +34,57 @@ class FakeRestart implements SessionRestartSubsystem {
   async drain() {}
 }
 
-const dispatch = (
+const human = ownerStanding();
+
+const dispatch = async (
   subsystem: SessionRestartSubsystem,
   method: 'GET' | 'POST' | 'DELETE',
-  headers: Record<string, string> = human,
+  standing: CallStanding = human,
   body?: string,
+  headers: Readonly<Record<string, string>> = {},
 ) =>
-  new ApiDispatcher(new ApiRouter(sessionRestartRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD).dispatch(
-    request({ method, path: '/v1/restarts', headers, ...(body === undefined ? {} : { body }) }),
+  await sessionRestartRoutes(subsystem)[`${method} /v1/restarts`](
+    requestOf({ method, path: '/v1/restarts', headers, standing, ...(body === undefined ? {} : { body }) }),
   );
 
 describe('the restart mount', () => {
-  it('should mount three operator-only, uncached routes', () => {
+  it('should mount the three restart routes', () => {
     const routes = sessionRestartRoutes(new FakeRestart());
-    should(routes.map(route => route.method)).deepEqual(['POST', 'GET', 'DELETE']);
-    should(routes.every(route => route.minimum === 'operator' && route.noStore === true)).be.true();
+    should(Object.keys(routes)).deepEqual(['POST /v1/restarts', 'GET /v1/restarts', 'DELETE /v1/restarts']);
   });
 
   it('should restart by the parsed request and pass the request id along', async () => {
     const subsystem = new FakeRestart();
-    const answer = await dispatch(
-      subsystem,
-      'POST',
-      { ...human, [FY_REQUEST_ID_HEADER]: ' r-1 ' },
-      '{"scope":"outdated"}',
-    );
+    const answer = await dispatch(subsystem, 'POST', human, '{"scope":"outdated"}', {
+      [FY_REQUEST_ID_HEADER]: ' r-1 ',
+    });
     should(answer.status).equal(200);
-    should(RestartResultSchema.parse(JSON.parse(answer.body)).queued).have.length(1);
+    should(RestartResultSchema.parse(jsonOf(answer)).queued).have.length(1);
     should(subsystem.calls).eql([[{ scope: 'outdated' }, 'r-1']]);
   });
 
   it('should name who asked: the owner from a person, the session from an agent in its pane', async () => {
     const subsystem = new FakeRestart();
     await dispatch(subsystem, 'POST', human, '{"scope":"all"}');
-    await dispatch(subsystem, 'POST', agentIn('s-7'), '{"scope":"all"}');
+    await dispatch(subsystem, 'POST', ferretStanding(ferretId('s-7')), '{"scope":"all"}');
     should(subsystem.movers).eql(['owner', 'session:s-7']);
   });
 
   it('should run without a request id', async () => {
     const subsystem = new FakeRestart();
     await dispatch(subsystem, 'POST', human, '{"scope":"all"}');
-    await dispatch(subsystem, 'POST', { ...human, [FY_REQUEST_ID_HEADER]: '  ' }, '{"scope":"all"}');
+    await dispatch(subsystem, 'POST', human, '{"scope":"all"}', { [FY_REQUEST_ID_HEADER]: '  ' });
     should(subsystem.calls.map(call => call[1])).eql([undefined, undefined]);
   });
 
   it('should refuse a request that does not parse', async () => {
-    const answer = await dispatch(new FakeRestart(), 'POST', human, '{"scope":"ids"}');
-    should(answer.status).equal(400);
+    const refusal = await refusalOf(dispatch(new FakeRestart(), 'POST', human, '{"scope":"ids"}'));
+    should(refusal?.status).equal(400);
   });
 
   it('should read the status and clear the queue', async () => {
     const subsystem = new FakeRestart();
-    should(RestartStatusSchema.parse(JSON.parse((await dispatch(subsystem, 'GET')).body)).outdated).have.length(1);
-    should(RestartCancelResultSchema.parse(JSON.parse((await dispatch(subsystem, 'DELETE')).body)).cancelled).equal(2);
+    should(RestartStatusSchema.parse(jsonOf(await dispatch(subsystem, 'GET'))).outdated).have.length(1);
+    should(RestartCancelResultSchema.parse(jsonOf(await dispatch(subsystem, 'DELETE'))).cancelled).equal(2);
   });
 });
