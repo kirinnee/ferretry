@@ -25,6 +25,21 @@ async function subject(get: ReturnType<typeof fakeFerrets>['get']) {
 }
 
 describe('Ferrets terminal owner directory', () => {
+  for (const malformed of [
+    {},
+    { name: 'still here' },
+    { ...ferretSummary(), role: 'helper', state: 'unknown-state' },
+  ]) {
+    it(`a malformed owner result (${Object.keys(malformed).join(',') || 'empty'}) is live/unknown and the sweep never kills`, async () => {
+      const { owners, runtime, kill, service } = await subject(async () => malformed as never);
+
+      expect(await owners.standing(FERRET)).toEqual({ standing: 'live', status: 'unknown', label: FERRET });
+      expect((await service.closeFinished('sweep')).closed).toBe(0);
+      expect(kill).not.toHaveBeenCalled();
+      expect(runtime.records).toHaveLength(1);
+    });
+  }
+
   for (const synchronous of [false, true]) {
     it(`a ${synchronous ? 'throwing' : 'rejecting'} get is live/unknown and closeFinished never kills its terminals`, async () => {
       const { owners, runtime, kill, service } = await subject(() => {
@@ -50,7 +65,7 @@ describe('Ferrets terminal owner directory', () => {
   });
 
   it('a known live owner keeps its name and state', async () => {
-    const { owners, kill, service } = await subject(async () => ferretSummary());
+    const { owners, kill, service } = await subject(async () => ({ ...ferretSummary(), role: 'helper' }));
 
     expect(await owners.standing(FERRET)).toEqual({ standing: 'live', status: 'working', label: 'Hadi' });
     expect((await service.closeFinished('sweep')).closed).toBe(0);

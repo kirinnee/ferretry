@@ -86,6 +86,7 @@ const GUARD = /#\{==:#\{(\w+)\},([^}]*)\}/gu;
 /** tmux evaluating an `if-shell -F` condition in its own server: every comparison must hold of the world NOW. */
 function holds(condition: string, w: World): boolean {
   const live: Record<string, string> = {
+    pane_id: w.proof.split('|')[0] ?? '',
     pane_pid: w.proof.split('|')[1] ?? '',
     pane_current_command: w.command,
     cursor_y: String(w.cursor),

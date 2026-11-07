@@ -17,10 +17,11 @@ import { killSessionArguments, remainOnExitArguments } from '../../lib/tmux/comm
 import type { TmuxCommandPort, TmuxCommandResult } from '../../lib/tmux/contracts.ts';
 import { TmuxController } from '../../lib/tmux/controller.ts';
 import { scriptLine } from '../../lib/tmux/script.ts';
+import { guardedWriteArguments, GUARD_REFUSED } from '../../lib/tmux/write-guard.ts';
 import { TERMINAL_TMUX_PREFIX } from '../../lib/terminal/runtime-policy.ts';
 import { TMUX_PROGRAM } from './kernel-tmux-process.ts';
-import type { DeliverySleep } from './composer-fill.ts';
-import { PaneDeliveryError, PaneNotReadyError, TmuxPaneDelivery } from './pane-delivery.ts';
+import { ComposerUnconfirmedError, type DeliverySleep } from './composer-fill.ts';
+import { PaneDeliveryError, PaneNotReadyError, PaneStrandedError, TmuxPaneDelivery } from './pane-delivery.ts';
 
 /**
  * The `runners:tmux` provider (§2.3): a ferret's harness runs in its own tmux session, `fy-<ferret>`, on Terminals'
@@ -49,6 +50,7 @@ const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 
 /** What tmux is asked about a pane: id, process, dead, the session holding it, and when that session began. */
 const PANE_FACTS = '#{pane_id}|#{pane_pid}|#{pane_dead}|#{session_name}|#{session_created}';
+const DELIVERY_FACTS = `${PANE_FACTS}|#{pane_current_command}|#{cursor_y}`;
 
 export function ferretTmuxSession(ferret: string): string {
   return sessionTarget(`${FERRET_TMUX_PREFIX}${ferret}`.slice(0, MAX_TMUX_SESSION_NAME_LENGTH));
@@ -60,10 +62,12 @@ interface PaneFacts {
   readonly dead: boolean;
   readonly session: string;
   readonly created: number;
+  readonly command?: string;
+  readonly cursorRow?: number;
 }
 
 export function parsePaneFacts(line: string): PaneFacts | undefined {
-  const [paneId = '', pid = '', dead = '', session = '', created = ''] = line.trim().split('|');
+  const [paneId = '', pid = '', dead = '', session = '', created = '', command, cursorRow] = line.trim().split('|');
   if (!PANE_ID.test(paneId) || session === '') return undefined;
   const process = Number(pid);
   const began = Number(created);
@@ -73,6 +77,8 @@ export function parsePaneFacts(line: string): PaneFacts | undefined {
     dead: dead === '1',
     session,
     created: Number.isInteger(began) && began > 0 ? began : 0,
+    ...(command === undefined ? {} : { command }),
+    ...(cursorRow !== undefined && /^(?:0|[1-9][0-9]*)$/u.test(cursorRow) ? { cursorRow: Number(cursorRow) } : {}),
   };
 }
 
@@ -137,33 +143,72 @@ export class TmuxRunner implements Runner {
   async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
     const gone = (): PaneNotReadyError => new PaneNotReadyError('the ferret pane is no longer live', 'exited');
     if (!PANE_ID.test(handle)) throw gone();
-    const original = await this.facts(handle);
-    if (original === undefined || original.dead || !isFerretSession(original.session)) throw gone();
+    const original = await this.facts(handle, true);
+    if (
+      original === undefined ||
+      original.dead ||
+      !isFerretSession(original.session) ||
+      original.command === undefined ||
+      original.cursorRow === undefined
+    )
+      throw gone();
     const guard = this.options.delivery;
     if (guard === undefined) throw new PaneDeliveryError('terminal delivery is not configured');
+    const command = original.command;
+    let observed = original;
+    let typings = 0;
     // Reuse today's delivery unchanged. Its commands use a validated session name, but every target is rebound to
     // this exact live handle, so a changed active pane or a replacement session cannot receive the message.
     const bound: TmuxCommandPort = {
       execute: async (args, stdin) => {
+        const writing = ['load-buffer', 'paste-buffer', 'send-keys'].includes(args[0] ?? '');
         const run = async (): Promise<TmuxCommandResult> => {
           // Cleanup must still work after a disappearing pane or a refused paste.
           if (args[0] === 'delete-buffer') return await this.options.tmux.execute(args, stdin);
-          const current = await this.facts(handle);
+          const current = await this.facts(handle, true);
           if (
             current === undefined ||
             current.dead ||
             current.session !== original.session ||
             current.pid !== original.pid ||
-            current.created !== original.created
+            current.created !== original.created ||
+            current.command !== original.command ||
+            current.cursorRow === undefined
           )
             return { code: 1, stdout: '', stderr: 'the ferret pane is no longer live' };
           if (args[0] === 'has-session') return { code: 0, stdout: '', stderr: '' };
-          return await this.options.tmux.execute(
-            args.map((arg, i) => (args[i - 1] === '-t' ? handle : arg)),
-            stdin,
+          const rebound = args.map((arg, i) => (args[i - 1] === '-t' ? handle : arg));
+          if (!writing) {
+            observed = current;
+            return await this.options.tmux.execute(rebound, stdin);
+          }
+          // Keep the row from the frame delivery validated, including across load and paste. The server compares
+          // it again with the foreground and ownership IN the write, closing the final observation/write gap.
+          const guarded = guardedWriteArguments(
+            handle,
+            {
+              panePid: original.pid,
+              command,
+              cursorRow: observed.cursorRow ?? -1,
+              session: original.session,
+              sessionCreated: original.created,
+            },
+            scriptLine(
+              args[0] === 'load-buffer'
+                ? // if-shell's stdin belongs to its script. Carry the buffer value in that script too, never in argv.
+                  ['set-buffer', '-b', args[2] ?? '', '--', stdin ?? '']
+                : rebound,
+            ),
           );
+          if (guarded === undefined) return { code: 1, stdout: '', stderr: 'the ferret pane binding changed' };
+          const result = await this.options.tmux.execute(guarded);
+          if (result.stdout.includes(GUARD_REFUSED))
+            return { code: 1, stdout: '', stderr: 'the ferret pane binding changed' };
+          if (result.code === 0 && (args[0] === 'paste-buffer' || (args[0] === 'send-keys' && args.includes('-l'))))
+            typings++;
+          return result;
         };
-        if (!['load-buffer', 'paste-buffer', 'send-keys'].includes(args[0] ?? '')) return await run();
+        if (!writing) return await run();
         let result: TmuxCommandResult | undefined;
         const acted = await guard.act(targetRef('terminal', handle), 'keys', async () => {
           result = await run();
@@ -175,12 +220,18 @@ export class TmuxRunner implements Runner {
       },
     };
     // In particular, ComposerUnconfirmedError and PaneStrandedError propagate without a retry: typed is not lost.
-    return await new TmuxPaneDelivery(new TmuxController(bound), guard.sleep).deliver(
-      original.session,
-      delivery.text,
-      { resumeMenuChoice: delivery.resumeMenuChoice },
-      delivery.beforeWrite,
-    );
+    try {
+      return await new TmuxPaneDelivery(new TmuxController(bound), guard.sleep).deliver(
+        original.session,
+        delivery.text,
+        { resumeMenuChoice: delivery.resumeMenuChoice },
+        delivery.beforeWrite,
+      );
+    } catch (error) {
+      if (typings > 0 && !(error instanceof ComposerUnconfirmedError) && !(error instanceof PaneStrandedError))
+        throw new ComposerUnconfirmedError('the payload was typed but delivery could not be confirmed', typings);
+      throw error;
+    }
   }
 
   async stop(handle: RunnerHandle, how: 'polite' | 'now'): Promise<void> {
@@ -204,8 +255,14 @@ export class TmuxRunner implements Runner {
     else await this.options.tmux.execute(killSessionArguments(facts.session));
   }
 
-  private async facts(paneId: string): Promise<PaneFacts | undefined> {
-    const result = await this.options.tmux.execute(['display-message', '-p', '-t', paneId, PANE_FACTS]);
+  private async facts(paneId: string, delivery = false): Promise<PaneFacts | undefined> {
+    const result = await this.options.tmux.execute([
+      'display-message',
+      '-p',
+      '-t',
+      paneId,
+      delivery ? DELIVERY_FACTS : PANE_FACTS,
+    ]);
     if (result.code !== 0) return undefined;
     const facts = parsePaneFacts(result.stdout);
     // tmux answers `-t %n` for a pane that is gone with the CURRENT pane; only the exact id is an answer.

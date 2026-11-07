@@ -6,6 +6,7 @@ import type { InputTarget, InputTargetFacts } from '@ferretry/core-vault/contrac
 import { hexInputChunks, terminalPaneTarget } from '../terminal/runtime-policy.ts';
 import type { TmuxCommandPort } from '../tmux/contracts.ts';
 import { PANE_PROOF_FORMAT, parsePaneSighting } from '../tmux/pane-proof.ts';
+import { guardedWriteArguments, GUARD_REFUSED, type WriteGuard } from '../tmux/write-guard.ts';
 import { digestFacts, digestLine } from './digest.ts';
 import type {
   CodeProgramPort,
@@ -38,20 +39,10 @@ const CARRIAGE_RETURN = 0x0d;
  * what may be shown, because cutting first can leave a prefix of a value that no longer matches it.
  */
 const RAW_TEXT_LIMIT = 4096;
-/** A program name tmux may be asked to compare. Anything else cannot be pinned safely in a format string. */
-const PINNABLE_COMMAND = /^[A-Za-z0-9._:+@ -]+$/u;
-const GUARD_REFUSED = 'fy-input-guard-refused';
 /** VKILL in line mode: erases a line typed without Enter, so a reader that changed is not handed it on a later Enter. */
 const KILL_LINE = 0x15;
 
 const plain = (text: string, limit: number = RAW_TEXT_LIMIT): string => text.replaceAll(CONTROL, '').slice(0, limit);
-
-/** What tmux can compare in the very command that writes. Echo and the process group are not formats tmux has. */
-interface WriteGuard {
-  readonly panePid: number;
-  readonly command: string;
-  readonly cursorRow: number;
-}
 
 type Sight =
   | {
@@ -365,29 +356,17 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     )
       return 'target_changed';
     const { guard } = fresh;
-    if (!PINNABLE_COMMAND.test(guard.command)) return 'target_changed';
     const paneId = fresh.facts.paneProof.paneId;
+    if (guardedWriteArguments(paneId, guard, '') === undefined) return 'target_changed';
     const bytes = new TextEncoder().encode(text);
     // A grant fill types only while its line is still held: asked after the last look, as the last thing before the write.
     if (options?.proceed?.() === false) return 'target_changed';
-    const condition = [
-      `#{==:#{pane_pid},${guard.panePid}}`,
-      `#{==:#{pane_current_command},${guard.command}}`,
-      `#{==:#{cursor_y},${guard.cursorRow}}`,
-      '#{==:#{pane_dead},0}',
-    ].reduce((left, right) => `#{&&:${left},${right}}`);
     const write = async (keys: Uint8Array): Promise<'typed' | 'refused' | 'uncertain'> => {
       const [chunk = []] = hexInputChunks(keys, keys.byteLength);
+      const args = guardedWriteArguments(paneId, guard, ['send-keys', '-H', '-t', paneId, ...chunk].join(' '));
+      if (args === undefined) return 'refused';
       try {
-        const written = await this.tmux.execute([
-          'if-shell',
-          '-F',
-          '-t',
-          paneId,
-          condition,
-          ['send-keys', '-H', '-t', paneId, ...chunk].join(' '),
-          `display-message -p ${GUARD_REFUSED}`,
-        ]);
+        const written = await this.tmux.execute(args);
         if (written.code !== 0) return 'uncertain';
         return written.stdout.includes(GUARD_REFUSED) ? 'refused' : 'typed';
       } catch {

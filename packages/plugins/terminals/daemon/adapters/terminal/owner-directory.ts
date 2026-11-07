@@ -1,4 +1,4 @@
-import type { FerretsApi } from '@ferretry/core-ferrets/contract';
+import { type FerretsApi, FerretSummarySchema } from '@ferretry/core-ferrets/contract';
 import type { FerretId } from '@ferretry/kernel/contract';
 import type { TerminalOwnerDirectory, TerminalOwnerStanding } from '../../lib/terminal/contracts.ts';
 import { standingOfSessionStatus } from '../../lib/terminal/holders.ts';
@@ -15,7 +15,9 @@ export class FerretTerminalOwnerDirectory implements TerminalOwnerDirectory {
     try {
       const ferret = await this.ferrets.get(ownerId as FerretId);
       if (ferret === undefined) return { ...standingOfSessionStatus(undefined), label: ownerId };
-      return { ...standingOfSessionStatus(ferret.state), label: ferret.name };
+      const parsed = FerretSummarySchema.safeParse(ferret);
+      if (!parsed.success) return { standing: 'live', status: 'unknown', label: ownerId };
+      return { ...standingOfSessionStatus(parsed.data.state), label: parsed.data.name };
     } catch {
       return { standing: 'live', status: 'unknown', label: ownerId };
     }

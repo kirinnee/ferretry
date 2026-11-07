@@ -7,14 +7,53 @@ import { ComposerUnconfirmedError } from '../../../../daemon/adapters/tmux/compo
 import { PaneNotReadyError, PaneStrandedError } from '../../../../daemon/adapters/tmux/pane-delivery.ts';
 import { FakeTmuxServer } from '../../../integration/daemon/support/fake-tmux-server.ts';
 
+/** Decode the quoted arguments of scriptLine for the in-memory server; never run a shell or tmux. */
+function scriptWords(script: string): string[] {
+  const words: string[] = [];
+  let word = '';
+  let quote = '';
+  let started = false;
+  for (let i = 0; i < script.length; i++) {
+    const char = script[i] ?? '';
+    if (quote !== '') {
+      if (char === quote) quote = '';
+      else if (quote === '"' && char === '\\') {
+        const next = script[++i];
+        word += next === 'n' ? '\n' : next === 'r' ? '\r' : next;
+      } else word += char;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+      started = true;
+    } else if (/\s/u.test(char)) {
+      if (started) words.push(word);
+      word = '';
+      started = false;
+    } else {
+      word += char;
+      started = true;
+    }
+  }
+  if (started) words.push(word);
+  return words;
+}
+
 // This fixture is an in-memory composer; no tmux process or real sleep is used.
 function subject() {
   const server = new FakeTmuxServer();
   const acts: ActRecord[] = [];
   const handle = '%7' as RunnerHandle;
-  let pane = { id: '%7', pid: 4242, session: 'fy-f-hadi', created: 1000 };
+  let pane = { id: '%7', pid: 4242, session: 'fy-f-hadi', created: 1000, command: 'harness' };
   let held = false;
   let holdAfterBuffer = false;
+  let holdAfterPayload = false;
+  let beforeGuard: ((write: readonly string[]) => void) | undefined;
+  const guards: Array<readonly string[]> = [];
+  const cursorRow = () =>
+    server.transcript.split('\n').length +
+    (server.modal?.split('\n').length ?? 0) +
+    (server.working ? 1 : 0) +
+    server.composer.split('\n').length -
+    1;
   const holds: InputHolds = {
     decide: () => (held ? { refused: 'input_pending' } : 'allow'),
   };
@@ -25,13 +64,40 @@ function subject() {
           return server.alive
             ? {
                 code: 0,
-                stdout: `${pane.id}|${pane.pid}|${server.dead ? '1' : '0'}|${pane.session}|${pane.created}`,
+                stdout: `${pane.id}|${pane.pid}|${server.dead ? '1' : '0'}|${pane.session}|${pane.created}|${pane.command}|${cursorRow()}`,
                 stderr: '',
               }
             : { code: 1, stdout: '', stderr: 'no such pane' };
         }
+        if (args[0] === 'if-shell') {
+          guards.push(args);
+          const write = scriptWords(args[5] ?? '');
+          beforeGuard?.(write);
+          const live: Record<string, string> = {
+            pane_id: pane.id,
+            pane_pid: String(pane.pid),
+            pane_dead: server.dead ? '1' : '0',
+            pane_current_command: pane.command,
+            cursor_y: String(cursorRow()),
+            session_name: pane.session,
+            session_created: String(pane.created),
+          };
+          const comparisons = [...(args[4] ?? '').matchAll(/#\{==:#\{(\w+)\},([^}]*)\}/gu)];
+          if (comparisons.length === 0 || !comparisons.every(([, key = '', value]) => live[key] === value))
+            return { code: 0, stdout: 'fy-input-guard-refused\n', stderr: '' };
+          if (write[0] === 'set-buffer') {
+            return await server.execute(['load-buffer', '-b', write[2] ?? '', '-'], write.at(-1)).then(result => {
+              if (holdAfterBuffer) held = true;
+              return result;
+            });
+          }
+          const result = await server.execute(write);
+          if (holdAfterPayload && (write.includes('-l') || write[0] === 'paste-buffer')) held = true;
+          return result;
+        }
+        if (['send-keys', 'paste-buffer', 'load-buffer'].includes(args[0] ?? ''))
+          throw new Error('delivery writes must be conditional');
         const result = await server.execute(args, stdin);
-        if (holdAfterBuffer && args[0] === 'load-buffer') held = true;
         return result;
       },
     },
@@ -60,12 +126,19 @@ function subject() {
     runner,
     server,
     acts,
+    guards,
     handle,
     hold: () => {
       held = true;
     },
     holdAfterBuffer: () => {
       holdAfterBuffer = true;
+    },
+    holdAfterPayload: () => {
+      holdAfterPayload = true;
+    },
+    beforeGuard: (fn: (write: readonly string[]) => void) => {
+      beforeGuard = fn;
     },
     replace: (change: Partial<typeof pane>) => {
       pane = { ...pane, ...change };
@@ -74,6 +147,57 @@ function subject() {
 }
 
 describe('tmux runner message delivery', () => {
+  for (const stage of ['literal', 'buffer', 'paste', 'Enter'] as const) {
+    for (const change of ['foreground', 'prompt', 'owner', 'pid', 'dead', 'created'] as const) {
+      it(`refuses ${change} changes after the lookup before ${stage}, preserving any typed payload`, async () => {
+        const world = subject();
+        const text = stage === 'buffer' || stage === 'paste' ? 'first line\nsecond line' : 'one send';
+        world.beforeGuard(write => {
+          const here =
+            stage === 'literal'
+              ? write.includes('-l')
+              : stage === 'buffer'
+                ? write[0] === 'set-buffer'
+                : stage === 'paste'
+                  ? write[0] === 'paste-buffer'
+                  : write.at(-1) === 'Enter';
+          if (!here) return;
+          if (change === 'foreground') world.replace({ command: 'shell' });
+          if (change === 'prompt') world.server.modal = 'Do you want to proceed?';
+          if (change === 'owner') world.replace({ session: 'fy-webterm-person' });
+          if (change === 'pid') world.replace({ pid: 9999 });
+          if (change === 'dead') world.server.dead = true;
+          if (change === 'created') world.replace({ created: 2000 });
+        });
+
+        const delivery = world.runner.deliver(world.handle, { text });
+        if (stage === 'Enter') await expect(delivery).rejects.toBeInstanceOf(ComposerUnconfirmedError);
+        else await expect(delivery).rejects.toThrow();
+        expect(world.server.submitted).toEqual([]);
+        expect(world.server.heldBuffers()).toEqual([]);
+        const writes = world.server.calls.filter(call => call[0] === 'send-keys' || call[0] === 'paste-buffer');
+        expect(writes).toHaveLength(stage === 'Enter' ? 1 : 0);
+        expect(world.server.composer).toBe(stage === 'Enter' ? text : '');
+      });
+    }
+  }
+
+  for (const text of ['one send', 'first line\nsecond line']) {
+    it(`B153 a hold after ${text.includes('\n') ? 'paste' : 'literal payload'} preserves typed-but-unconfirmed without Enter or retyping`, async () => {
+      const world = subject();
+      world.holdAfterPayload();
+
+      await expect(world.runner.deliver(world.handle, { text })).rejects.toMatchObject({
+        name: 'ComposerUnconfirmedError',
+        typings: 1,
+      });
+      expect(world.server.calls.filter(call => call.includes('-l') || call[0] === 'paste-buffer')).toHaveLength(1);
+      expect(world.server.calls.some(call => call.at(-1) === 'Enter' || call.at(-1) === 'C-u')).toBe(false);
+      expect(world.server.composer).not.toBe('');
+      expect(world.server.submitted).toEqual([]);
+    });
+  }
+
   it('delivers one multiline turn by guarded paste to the exact pane handle', async () => {
     const { runner, server, acts, handle } = subject();
     let before = 0;
